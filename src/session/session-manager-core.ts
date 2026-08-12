@@ -5,8 +5,9 @@
 import { EventEmitter } from 'events';
 import {
   SessionState, SessionLifecycleState, DebugLanguage, DebugSessionInfo, mapLegacyState,
-  AdapterPolicy, SessionOutputEntry
+  AdapterPolicy, SessionOutputEntry, redactSecretsInString
 } from '@debugmcp/shared';
+import { isRedactionEnabled } from '../utils/redaction-mode.js';
 import { SessionStore, ManagedSession } from './session-store.js';
 import { OutputRingBuffer } from './output-buffer.js';
 import { DebugProtocol } from '@vscode/debugprotocol'; 
@@ -113,6 +114,15 @@ export abstract class SessionManagerCore extends EventEmitter {
     
     this.fileSystem.ensureDirSync(this.logDirBase);
     this.logger.info(`[SessionManager] Initialized. Session logs will be stored in: ${this.logDirBase}`);
+  }
+
+  /**
+   * Secret redaction of tool-facing values (issue #237): on unless the
+   * environment opts out via DEBUG_MCP_NO_REDACT. Read per call — cheap, and
+   * keeps construction order irrelevant.
+   */
+  protected redactionEnabled(): boolean {
+    return isRedactionEnabled(this.environment);
   }
 
   async createSession(params: { language: DebugLanguage; name?: string; executablePath?: string; }): Promise<DebugSessionInfo> {
@@ -877,7 +887,24 @@ export abstract class SessionManagerCore extends EventEmitter {
       if (category === 'telemetry') {
         return;
       }
-      const entry: SessionOutputEntry | undefined = session.outputBuffer?.push(category, body.output);
+      // Redact-at-write (issue #237): one hook covers both buffer readers —
+      // the get_output tool and the debug:// output resource. The original
+      // text is deliberately not retained.
+      let text = body.output;
+      let redacted = false;
+      if (this.redactionEnabled()) {
+        const result = redactSecretsInString(text);
+        if (result.redacted) {
+          text = result.value;
+          redacted = true;
+        }
+      }
+      const entry: SessionOutputEntry | undefined = session.outputBuffer?.push(
+        category,
+        text,
+        undefined,
+        redacted ? { redacted: true } : undefined
+      );
       if (entry) {
         this.emit('output-captured', sessionId, entry);
       }

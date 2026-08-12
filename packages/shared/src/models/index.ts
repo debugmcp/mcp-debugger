@@ -368,6 +368,8 @@ export interface SessionOutputEntry {
   timestamp: number;
   /** Present and true when the entry exceeded the per-entry size cap and was cut */
   truncated?: boolean;
+  /** Present and true when secret-shaped values were masked in this entry (issue #237) */
+  redacted?: boolean;
 }
 
 export interface DebugSessionInfo {
@@ -403,6 +405,8 @@ export interface Variable {
   expandable: boolean;
   /** Variable children (for complex objects) */
   children?: Variable[];
+  /** Present and true when the value was masked as a secret (issue #237) */
+  redacted?: boolean;
 }
 
 /**

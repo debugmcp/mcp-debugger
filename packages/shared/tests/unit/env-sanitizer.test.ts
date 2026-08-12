@@ -205,6 +205,22 @@ describe('sanitizePayloadForLogging', () => {
     expect(result.token).toBe(42);
     expect(result.nested.token).toEqual({ kind: 'parser-token' });
   });
+
+  it('masks secret-shaped string values at any depth (issue #237 — DAP variable bodies in proxy logs)', () => {
+    const payload = {
+      type: 'dapResponse',
+      body: {
+        variables: [
+          { name: 'gh_token', value: "'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef0123'" },
+          { name: 'count', value: '42' }
+        ]
+      }
+    };
+    const result = sanitizePayloadForLogging(payload) as any;
+    expect(result.body.variables[0].value).toBe("'<redacted:github-pat>'");
+    expect(result.body.variables[1].value).toBe('42');
+    expect(JSON.stringify(result)).not.toContain('ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef0123');
+  });
 });
 
 describe('sanitizeStderr', () => {
@@ -255,6 +271,23 @@ describe('sanitizeStderr', () => {
 
   it('handles empty array', () => {
     expect(sanitizeStderr([])).toEqual([]);
+  });
+
+  it('redacts lines containing #237 corpus shapes (value regex derived from secret-redaction)', () => {
+    // Tokens are concatenated so GitHub push protection doesn't flag the
+    // fixtures as live keys.
+    const lines = [
+      'google key AIza' + 'SyA1234567890abcdefghijklmnopqrstuv',
+      'gitlab token glpat-' + 'ABCDEFGHIJKLMNOPQRST',
+      'hf_' + 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefgh loaded',
+      'published with npm_' + 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+      'stripe sk_live_' + '4eC39HqLyjWDarjtT1zdp7dc',
+      'db at postgres://admin:s3cretpw@db.example.com:5432/app'
+    ];
+    const result = sanitizeStderr(lines);
+    for (const line of result) {
+      expect(line).toBe('[REDACTED — line contained sensitive data]');
+    }
   });
 });
 

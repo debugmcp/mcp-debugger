@@ -10,7 +10,8 @@ import {
   getPolicyForLanguage,
   DebugLanguage,
   Breakpoint,
-  FunctionBreakpoint
+  FunctionBreakpoint,
+  redactVariableValue
 } from '@debugmcp/shared';
 import { SessionManagerCore } from './session-manager-core.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
@@ -69,15 +70,26 @@ export abstract class SessionManagerData extends SessionManagerCore {
     try {
       this.logger.info(`[SM getVariables ${sessionId}] Sending DAP 'variables' for variablesReference ${variablesReference}.`);
       const response = await session.proxyManager.sendDapRequest<DebugProtocol.VariablesResponse>('variables', { variablesReference });
-      this.logger.info(`[SM getVariables ${sessionId}] DAP 'variables' response received. Body:`, response?.body);
+      // Count only — the raw body carries unredacted values (issue #237); the
+      // parsed (post-redaction) values are logged below.
+      this.logger.info(`[SM getVariables ${sessionId}] DAP 'variables' response received. ${response?.body?.variables?.length ?? 0} variable(s).`);
 
       if (response && response.body && response.body.variables) {
-        const vars = response.body.variables.map((v: DebugProtocol.Variable) => ({ 
-            name: v.name, value: v.value, type: v.type || "<unknown_type>", 
+        let vars = response.body.variables.map((v: DebugProtocol.Variable) => ({
+            name: v.name, value: v.value, type: v.type || "<unknown_type>",
             variablesReference: v.variablesReference,
-            expandable: v.variablesReference > 0 
+            expandable: v.variablesReference > 0
         }));
-        this.logger.info(`[SM getVariables ${sessionId}] Parsed variables:`, vars.map(v => ({name: v.name, value: v.value, type: v.type}))); 
+        // Redaction hook (issue #237): this is the single DAP→Variable
+        // mapping point, so get_variables, get_local_variables and child
+        // expansion are all covered here, upstream of every log line.
+        if (this.redactionEnabled()) {
+          vars = vars.map(v => {
+            const result = redactVariableValue(v.name, v.value);
+            return result.redacted ? { ...v, value: result.value, redacted: true } : v;
+          });
+        }
+        this.logger.info(`[SM getVariables ${sessionId}] Parsed variables:`, vars.map(v => ({name: v.name, value: v.value, type: v.type})));
         return vars;
       }
       this.logger.warn(`[SM getVariables ${sessionId}] No variables in response body for reference ${variablesReference}. Response:`, response);

@@ -4,6 +4,7 @@
  * Prevents sensitive values (API keys, tokens, passwords) from leaking
  * into log files, stderr captures, or MCP tool responses.
  */
+import { SECRET_VALUE_ALTERNATION, redactSecretsInString } from './secret-redaction.js';
 
 const SENSITIVE_PATTERNS = [
   /api[_-]?key/i,
@@ -79,6 +80,11 @@ export function sanitizePayloadForLogging(payload: unknown): unknown {
 }
 
 function redactEnvDeep(value: unknown, ancestors: WeakSet<object>): unknown {
+  // Value-shape masking on string leaves (issue #237): DAP response payloads
+  // (variables/evaluate bodies) flow through here on their way to proxy debug
+  // logs and the DAP trace file, and key-name rules cannot see a secret held
+  // in a debuggee variable's *value*.
+  if (typeof value === 'string') return redactSecretsInString(value).value;
   if (!value || typeof value !== 'object') return value;
   if (ancestors.has(value)) return '[circular]';
   ancestors.add(value);
@@ -112,10 +118,11 @@ const STDERR_SENSITIVE_LINE = /(?:api[_-]?key|secret|token|password|passwd|pwd|c
 
 /**
  * Well-known secret value shapes, for secrets whose key name never appears
- * on the line: GitHub tokens (ghp_/gho_/... and github_pat_), sk- API keys,
- * Slack xox tokens, AWS access key ids, JWTs, PEM private key headers.
+ * on the line. Derived from the secret-redaction rule table (issue #237) so
+ * the line-scoped stderr sanitizer and the per-token tool-result redactor
+ * share one corpus and cannot drift apart.
  */
-const STDERR_SENSITIVE_VALUE = /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{10,}\.eyJ)|-----BEGIN[A-Z ]*PRIVATE KEY-----/;
+const STDERR_SENSITIVE_VALUE = SECRET_VALUE_ALTERNATION;
 
 /**
  * Sanitize stderr lines to redact any that appear to contain sensitive env var assignments.

@@ -16,47 +16,15 @@ import {
   sanitizeStderrTail
 } from '../../src/utils/env-sanitizer.js';
 
+import {
+  ALNUM,
+  UPPER,
+  stringOf,
+  filler,
+  mixedLines
+} from './helpers/secret-arbitraries.js';
+
 const REDACTED_LINE = '[REDACTED — line contained sensitive data]';
-
-const ALNUM = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-const UPPER = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-
-const charFrom = (chars: string) => fc.constantFrom(...chars.split(''));
-const stringOf = (chars: string, minLength: number, maxLength: number) =>
-  fc.string({ unit: charFrom(chars), minLength, maxLength });
-
-/** Well-known secret value shapes (mirrors STDERR_SENSITIVE_VALUE coverage). */
-const secretValue = fc.oneof(
-  fc.tuple(fc.constantFrom('ghp_', 'gho_', 'ghu_', 'ghs_', 'ghr_'), stringOf(ALNUM, 20, 40))
-    .map(([prefix, rest]) => prefix + rest),
-  stringOf(ALNUM + '_', 20, 40).map(rest => `github_pat_${rest}`),
-  stringOf(ALNUM + '_-', 20, 40).map(rest => `sk-${rest}`),
-  fc.tuple(fc.constantFrom('xoxb-', 'xoxa-', 'xoxp-', 'xoxr-', 'xoxs-'), stringOf(ALNUM + '-', 10, 30))
-    .map(([prefix, rest]) => prefix + rest),
-  stringOf('0123456789' + UPPER, 16, 16).map(rest => `AKIA${rest}`),
-  fc.constant('-----BEGIN RSA PRIVATE KEY-----'),
-  fc.constant('-----BEGIN PRIVATE KEY-----')
-);
-
-/** Newline-free filler that cannot span lines. May coincidentally look sensitive — that's fine. */
-const filler = fc.string({ unit: charFrom(ALNUM + ' .,()[]/'), maxLength: 20 });
-
-/**
- * A line embedding a secret. The prefix always ends at a word boundary
- * (space, '=', ':' or nothing), matching how secrets actually appear in
- * stderr: bare, or as `SOME_KEY=<secret>` assignments.
- */
-const lineWithSecret = fc
-  .tuple(
-    fc.oneof(fc.constant(''), filler.map(s => `${s} `), filler.map(s => `${s}=`), filler.map(s => `${s}:`)),
-    secretValue,
-    filler
-  )
-  .map(([prefix, secret, suffix]) => ({ line: prefix + secret + suffix, secret: secret as string | null }));
-
-const benignLine = filler.map(line => ({ line, secret: null as string | null }));
-
-const mixedLines = fc.array(fc.oneof(benignLine, lineWithSecret), { maxLength: 15 });
 
 describe('sanitizeStderr properties', () => {
   it('preserves line count and only ever substitutes the redaction marker', () => {

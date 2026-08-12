@@ -22,6 +22,7 @@ This document provides a complete reference for all tools available in mcp-debug
    - [continue_execution](#continue_execution)
    - [pause_execution](#pause_execution)
 4. [State Inspection](#state-inspection)
+   - [Secret redaction](#secret-redaction)
    - [get_stack_trace](#get_stack_trace)
    - [get_scopes](#get_scopes)
    - [get_variables](#get_variables)
@@ -501,6 +502,27 @@ Pauses a running program. The debugger sends a DAP pause request and returns imm
 
 ## State Inspection
 
+### Secret redaction
+
+Debuggers see everything in scope — including credentials — and when the debugging driver is an AI agent, variable values flow into model context and transcripts. By default, mcp-debugger masks credential-shaped values in every value-bearing surface: `get_variables`, `get_local_variables`, `evaluate_expression` results, and captured output (`get_output` and the `debug://sessions/{id}/output` resource).
+
+Masking is per-token and labeled, so the rest of the value stays legible:
+
+```json
+{ "name": "gh_token", "value": "<redacted:github-pat>", "type": "str", "redacted": true }
+```
+
+Two detection layers apply:
+
+- **Value shapes** — well-known token formats (GitHub/GitLab PATs, OpenAI/Anthropic-style `sk-` keys, Slack, Stripe, AWS access key IDs, Google API keys, npm/PyPI/Hugging Face tokens, SendGrid, JWTs, PEM private-key blocks, `Bearer` credentials, connection-string passwords, URL userinfo passwords). Patterns are adapted from the MIT-licensed [gitleaks](https://github.com/gitleaks/gitleaks) corpus.
+- **Sensitive names** — a variable whose *name* exactly matches a known sensitive name (`password`, `api_key`, `client_secret`, ...) has its whole value masked as `<redacted:sensitive-name>`, unless the value is trivial (`None`, `''`, `0`, ...) so "why is my token empty?" stays debuggable. Matching is exact after normalization, never substring — `tokenCount`, `PATH`, and `patience` are untouched. `evaluate_expression` treats the expression's final dot-segment as the name, so `config.password` is masked like the variable `password`.
+
+Results that had values masked carry a `redaction` field (`{ masked, notice }` on variable/output tools; `{ rules, notice }` on evaluate results) explaining that only the display is masked, not program state. Redacted variables and output entries are flagged `redacted: true`.
+
+**Opting out**: start the server with `DEBUG_MCP_NO_REDACT=1` to disable redaction entirely (e.g. when debugging credential-handling code itself). Adapter stderr sanitization (unconditional, whole-line) is unaffected by this flag.
+
+**Limitations**: redaction is display-level protection against credentials leaking into transcripts, not a security boundary against a hostile agent — an agent can still compute over secrets via `evaluate_expression` side effects. Secrets split across separate output chunks, and generic high-entropy strings with no recognizable shape or name, are not detected. The [`expose_session`](#expose_session) IDE mirror shows **raw, unredacted** values — it serves a human's IDE, not the agent.
+
 ### get_stack_trace
 
 Gets the current call stack.
@@ -969,6 +991,8 @@ Starts a per-session DAP server endpoint on `127.0.0.1` (ephemeral port) inside 
 ```
 
 The endpoint closes on `unexpose_session`, `close_debug_session`, `restart_debugging`, or debuggee exit. `list_debug_sessions` shows `exposure: {host, port}` for exposed sessions (never the token).
+
+Note: the mirror serves a human's IDE and proxies DAP responses directly, so it shows **raw variable values** — [secret redaction](#secret-redaction) does not apply to this surface.
 
 **Connecting VS Code:**
 
