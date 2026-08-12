@@ -170,3 +170,21 @@ export async function waitForHealthEndpoint(port: number, timeout: number = 1000
   console.error(`[Smoke Test] Timeout waiting for SSE server on port ${port}`);
   return false;
 }
+
+/**
+ * Poll until fn resolves to a defined value or the timeout elapses.
+ * Returns undefined on timeout so callers can assert with a clear message.
+ */
+export async function pollUntil<T>(
+  fn: () => Promise<T | undefined>,
+  timeoutMs: number,
+  intervalMs = 250
+): Promise<T | undefined> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = await fn();
+    if (value !== undefined) return value;
+    if (Date.now() > deadline) return undefined;
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+  }
+}

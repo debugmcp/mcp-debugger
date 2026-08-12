@@ -18,7 +18,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
+import { parseSdkToolResult, callToolSafely, pollUntil } from './smoke-test-utils.js';
 import { findRubyExecutable, findRdbgExecutable } from '@debugmcp/adapter-ruby';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -214,4 +214,58 @@ describe('MCP Server Ruby Debugging Smoke Test @requires-ruby', () => {
     // rdbg's own banners must stay out of the output buffer
     expect(outputEntries.some(e => e.output.startsWith('DEBUGGER:'))).toBe(false);
   }, 90000); // Ruby interpreter startup under rdbg takes several seconds
+
+  it('streams debuggee stdout while paused at a breakpoint (issue #317)', async () => {
+    if (!(await rubyToolchainAvailable())) {
+      console.log('[Ruby Smoke Test] Ruby/rdbg not available, skipping mid-run output test');
+      return;
+    }
+
+    const testRubyFile = path.resolve(ROOT, 'examples', 'ruby', 'fizzbuzz.rb');
+
+    const createResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: { language: 'ruby', name: 'ruby-midrun-output-test' }
+    }));
+    expect(createResponse.sessionId).toBeDefined();
+    sessionId = createResponse.sessionId as string;
+
+    // Unconditional breakpoint inside the loop: fires at iteration 1 BEFORE
+    // that iteration's puts runs.
+    const bpResponse = await callToolSafely(mcpClient!, 'set_breakpoint', {
+      sessionId,
+      file: testRubyFile,
+      line: 15 // value = fizzbuzz_for(i)
+    });
+    expect(bpResponse.success).toBe(true);
+
+    const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'start_debugging',
+      arguments: { sessionId, scriptPath: testRubyFile }
+    })) as { state?: string };
+    expect(startResponse.state).toBe('paused');
+
+    // Continue: iteration 1 executes `puts "1: 1"`, then the re-armed
+    // breakpoint stops iteration 2 — the process stays alive and paused.
+    await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+
+    // Ruby block-buffers $stdout on pipes; without the injected sync prelude
+    // this line would only flush at process exit and the poll would time out.
+    const marker = await pollUntil(async () => {
+      const out = await callToolSafely(mcpClient!, 'get_output', { sessionId });
+      const entries = (out.entries ?? []) as Array<{ category: string; output: string }>;
+      return entries.find(e => e.output.includes('1: 1'));
+    }, 15000);
+
+    expect(marker).toBeDefined();
+    expect(marker!.category).toBe('stdout');
+
+    // Prove mid-run capture: the session must still be paused (iteration 2's
+    // stop), so the marker cannot have arrived via the exit-flush drain.
+    const listResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'list_debug_sessions',
+      arguments: {}
+    })) as { sessions?: Array<{ id: string; state: string }> };
+    expect(listResponse.sessions?.find(s => s.id === sessionId)?.state).toBe('paused');
+  }, 90000);
 });

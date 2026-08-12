@@ -74,6 +74,15 @@ events. The proxy forwards those lines as synthesized `stdout`/`stderr` entries,
 output as usual; rdbg's own `DEBUGGER:` stderr banners are excluded and only appear in
 the session log.
 
+Because Ruby block-buffers `$stdout` when it is a pipe, launch mode also injects a small
+prelude (via `ruby -r`) that sets `$stdout.sync = true` and `$stderr.sync = true` before
+the script runs. Without it, `puts` output would only appear in `get_output` after the
+process exits; with it, output streams in near-real-time — including while the session is
+paused at a breakpoint (issue #317). A script that genuinely needs buffered stdout can
+set `$stdout.sync = false` itself. Attach mode connects to a process the server did not
+start, so no prelude is injected there — set `$stdout.sync = true` in your program if you
+need mid-run output while attached.
+
 ### Bundler projects
 
 Pass `useBundler` through the launch configuration to run the target via `bundle exec`:

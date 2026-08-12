@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import type { AdapterDependencies } from '@debugmcp/shared';
@@ -39,20 +41,24 @@ describe('Ruby adapter - session smoke (integration)', () => {
   const adapterPort = 48767;
   const sessionId = 'session-ruby-smoke';
   const adapterHost = '127.0.0.1';
-  const fakeLogDir = path.join(process.cwd(), 'logs', 'tests');
   const sampleScriptPath = path.join(process.cwd(), 'examples', 'ruby', 'fizzbuzz.rb');
   // A real existing executable path so invocation construction is exercised
   // without requiring an actual Ruby toolchain.
   const fakeRdbgPath = process.execPath;
 
+  // buildAdapterCommand writes the stdout-sync prelude (#317) into the log
+  // dir, so use a throwaway temp dir to keep the test hermetic.
+  let logDir: string;
   let originalRdbgPath: string | undefined;
 
   beforeEach(() => {
+    logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ruby-smoke-logs-'));
     originalRdbgPath = process.env.RDBG_PATH;
     process.env.RDBG_PATH = fakeRdbgPath;
   });
 
   afterEach(() => {
+    fs.rmSync(logDir, { recursive: true, force: true });
     if (typeof originalRdbgPath === 'string') {
       process.env.RDBG_PATH = originalRdbgPath;
     } else {
@@ -69,7 +75,7 @@ describe('Ruby adapter - session smoke (integration)', () => {
       executablePath: 'ruby',
       adapterHost,
       adapterPort,
-      logDir: fakeLogDir,
+      logDir,
       scriptPath: sampleScriptPath,
       scriptArgs: [],
       launchConfig: {}
@@ -83,10 +89,17 @@ describe('Ruby adapter - session smoke (integration)', () => {
     expect(command.args).not.toContain('--nonstop');
     // Never the vscode frontend mode, which tries to launch an editor.
     expect(command.args.every(arg => !arg.includes('vscode'))).toBe(true);
-    // Command mode: rdbg runs `ruby <script>` under the debugger.
+    // Command mode: rdbg runs `ruby <script>` under the debugger, with the
+    // stdout-sync prelude injected so puts output streams mid-run (#317).
     const dashC = command.args.indexOf('-c');
     expect(dashC).toBeGreaterThan(-1);
-    expect(command.args.slice(dashC)).toEqual(['-c', '--', 'ruby', sampleScriptPath]);
+    expect(command.args.slice(dashC)).toEqual([
+      '-c',
+      '--',
+      'ruby',
+      expect.stringMatching(/^-r.*mcp_stdout_sync\.rb$/),
+      sampleScriptPath
+    ]);
   });
 
   it('normalizes launch config for Ruby scripts', async () => {

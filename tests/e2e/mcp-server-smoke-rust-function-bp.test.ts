@@ -16,7 +16,7 @@ import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
+import { parseSdkToolResult, callToolSafely, pollUntil } from './smoke-test-utils.js';
 import { prepareRustExample } from './rust-example-utils.js';
 import { skipIfSpawnBlocked } from '../test-utils/helpers/adapter-spawn.js';
 
@@ -67,16 +67,6 @@ describe.skipIf(SKIP_RUST)('Rust function breakpoints (CodeLLDB) @requires-rust'
     const res = parseSdkToolResult(await mcpClient!.callTool({ name: 'list_debug_sessions', arguments: {} }));
     const sessions = (res.sessions ?? []) as Array<{ id: string; state?: string; lastStop?: { reason?: string; rawReason?: string } }>;
     return sessions.find(s => s.id === sid);
-  }
-
-  async function pollUntil<T>(fn: () => Promise<T | undefined>, timeoutMs: number): Promise<T | undefined> {
-    const deadline = Date.now() + timeoutMs;
-    for (;;) {
-      const value = await fn();
-      if (value !== undefined) return value;
-      if (Date.now() > deadline) return undefined;
-      await new Promise(r => setTimeout(r, 250));
-    }
   }
 
   it('stops at a crate-qualified function breakpoint with reason "function breakpoint" (#302)', async (ctx) => {
