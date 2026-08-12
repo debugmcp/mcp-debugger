@@ -34,6 +34,9 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
   // js-debug's live supportsFunctionBreakpoints: false.
   supportsFunctionBreakpoints: true,
   functionBreakpointsVia: 'cdp',
+  // Names in late-loaded modules stay verified:false by design and bind at
+  // the next pause — unverified-at-launch is not a failure here (issue #308).
+  functionBreakpointsBindLate: true,
   supportsReverseStartDebugging: true,
   childSessionStrategy: 'launchWithPendingTarget',
   buildChildStartArgs: (pendingId: string, parentConfig: Record<string, unknown>) => {

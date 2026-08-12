@@ -108,6 +108,25 @@ export interface AdapterPolicy {
   functionBreakpointsVia?: 'dap' | 'cdp';
 
   /**
+   * High-signal advisory for a function-breakpoint name the adapter is known
+   * to mis-resolve or never bind (issues #303/#308) — e.g. Go needs
+   * package-qualified names ('main.main'); a bare 'main' on Rust resolves to
+   * the C runtime's entry point. The returned text joins the set_breakpoint
+   * response warning and the launch-time unbound warning; it never blocks
+   * the request. Return undefined for names with no known hazard.
+   */
+  functionBreakpointNameHint?(name: string): string | undefined;
+
+  /**
+   * True when the adapter binds function breakpoints lazily by design
+   * (js-debug: CDP re-resolve at pauses for late-loaded modules; Java:
+   * ClassPrepareRequest deferral), so verified:false at launch is normal and
+   * the launch-time "not bound" warning is suppressed (issue #308). The
+   * never-bound-at-exit note applies regardless.
+   */
+  functionBreakpointsBindLate?: boolean;
+
+  /**
    * Strategy for how to create/attach to the child session when reverse startDebugging occurs
    */
   childSessionStrategy: ChildSessionStrategy;

@@ -21,6 +21,9 @@ export const JavaAdapterPolicy: AdapterPolicy = {
   // at each concrete overload's entry location, with ClassPrepareRequest
   // deferral for classes not yet loaded (issue #292)
   supportsFunctionBreakpoints: true,
+  // Classes not yet loaded bind via ClassPrepareRequest deferral —
+  // unverified-at-launch is not a failure here (issue #308).
+  functionBreakpointsBindLate: true,
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
   buildChildStartArgs: () => {

@@ -14,6 +14,19 @@ export const RustAdapterPolicy: AdapterPolicy = {
   name: 'rust',
   supportsLogPoints: true,
   supportsFunctionBreakpoints: true,
+  /**
+   * A bare 'main' resolves to the C runtime's main trampoline, not the
+   * crate's fn main() (issue #303): LLDB finds the CRT symbol first, the
+   * session "successfully" pauses at a source-less frame (@main), and
+   * CodeLLDB reports no binding location we could check after the fact —
+   * so warn at set time. Other bare names resolve fine via LLDB.
+   */
+  functionBreakpointNameHint: (name: string): string | undefined => {
+    if (name === 'main') {
+      return "On Rust targets a bare 'main' usually binds to the C runtime's entry point, not your fn main() — the debugger would pause in startup code with no source. Use the crate-qualified name, e.g. 'my_crate::main'";
+    }
+    return undefined;
+  },
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
   buildChildStartArgs: () => {

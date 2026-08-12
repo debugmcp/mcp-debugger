@@ -614,7 +614,7 @@ export abstract class SessionManagerCore extends EventEmitter {
     const handleTerminated = () => {
       this.logger.debug(`[SessionManager] handleTerminated: session=${sessionId} currentState=${session.state}`);
       this.logger.info(`[ProxyManager ${sessionId}] Terminated event`);
-      
+
       // Log debug state change with structured logging
       this.logger.info('debug:state', {
         event: 'stopped',
@@ -622,7 +622,8 @@ export abstract class SessionManagerCore extends EventEmitter {
         sessionName: session.name,
         timestamp: Date.now()
       });
-      
+
+      this.noteUnboundFunctionBreakpoints(session);
       this._updateSessionState(session, SessionState.STOPPED);
 
       // Clean up listeners since proxy is gone
@@ -652,6 +653,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       if (typeof exitCode === 'number') {
         session.exitCode = exitCode;
       }
+      this.noteUnboundFunctionBreakpoints(session);
       this._updateSessionState(session, SessionState.STOPPED);
 
       // Clean up listeners since proxy is gone
@@ -886,6 +888,43 @@ export abstract class SessionManagerCore extends EventEmitter {
     // Store handlers in WeakMap
     this.sessionEventHandlers.set(session, handlers);
     this.logger.debug(`[SessionManager] Attached ${handlers.size} event handlers for session ${sessionId}`);
+  }
+
+  /**
+   * Terminal-time note for function breakpoints that never bound (issue
+   * #308): stamp bp.message (only when empty — an adapter message wins) and
+   * append one warning entry to the session output buffer, so both
+   * list_breakpoints and get_output explain the silent no-stop after the
+   * program has exited. Idempotent via the empty-message check — the
+   * terminated and exited handlers can both fire. Applies to bind-late
+   * adapters too: never-bound at exit is a real signal even where
+   * unverified-at-launch is by design.
+   */
+  protected noteUnboundFunctionBreakpoints(session: ManagedSession): void {
+    const neverBound: string[] = [];
+    for (const bp of session.functionBreakpoints?.values() ?? []) {
+      if (bp.verified || bp.message) {
+        continue;
+      }
+      let hint: string | undefined;
+      try {
+        hint = this.sessionStore.selectPolicy(session.language).functionBreakpointNameHint?.(bp.functionName);
+      } catch {
+        hint = undefined;
+      }
+      bp.message = `Never bound during this run — the debugger never resolved '${bp.functionName}', so the program never stopped there. Check the symbol name${hint ? ` (${hint})` : ''}`;
+      neverBound.push(bp.functionName);
+    }
+    if (neverBound.length > 0) {
+      const names = neverBound.map((n) => `'${n}'`).join(', ');
+      const entry = session.outputBuffer?.push(
+        'console',
+        `[mcp-debugger] Warning: function breakpoint(s) never bound during this run: ${names}. The program never stopped there — check the symbol name(s).\n`
+      );
+      if (entry) {
+        this.emit('output-captured', session.id, entry);
+      }
+    }
   }
 
   protected cleanupProxyEventHandlers(session: ManagedSession, proxyManager: IProxyManager): void {

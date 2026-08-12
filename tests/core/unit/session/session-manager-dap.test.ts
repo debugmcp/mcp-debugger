@@ -1695,6 +1695,92 @@ describe('SessionManager - DAP Operations', () => {
       );
     });
 
+    it('warns at launch about unbound function breakpoints on eager adapters (#308)', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+      await sessionManager.setFunctionBreakpoint(session.id, { functionName: 'main' });
+
+      const result = await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+
+      // The mock's default DAP response carries no breakpoints body, so the
+      // re-sync leaves the fn bp unverified — the eager-policy warning fires.
+      const warning = (result.data as { warning?: string } | undefined)?.warning;
+      expect(warning).toMatch(/not bound at launch/);
+      expect(warning).toContain("'main'");
+    });
+
+    it('suppresses the launch warning for bind-late policies (#308)', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+      await sessionManager.setFunctionBreakpoint(session.id, { functionName: 'main' });
+
+      const store = (sessionManager as unknown as { sessionStore: { selectPolicy: (lang: string) => Record<string, unknown> } }).sessionStore;
+      const original = store.selectPolicy.bind(store);
+      vi.spyOn(store, 'selectPolicy').mockImplementation((lang: string) => ({
+        ...original(lang),
+        functionBreakpointsBindLate: true
+      }));
+
+      const result = await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+
+      expect((result.data as { warning?: string } | undefined)?.warning).toBeUndefined();
+    });
+
+    it('does not warn when the adapter verifies the function breakpoint', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+      await sessionManager.setFunctionBreakpoint(session.id, { functionName: 'main' });
+      dependencies.mockProxyManager.setDapRequestHandler(async (command) =>
+        command === 'setFunctionBreakpoints'
+          ? { success: true, body: { breakpoints: [{ id: 3, verified: true }] } }
+          : { success: true }
+      );
+
+      const result = await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+
+      expect((result.data as { warning?: string } | undefined)?.warning).toBeUndefined();
+    });
+
+    it('stamps never-bound function breakpoints and writes an output warning at exit (#308)', async () => {
+      const session = await createPausedSession();
+      const managed = sessionManager.getSession(session.id)!;
+      managed.functionBreakpoints.set('f1', { id: 'f1', functionName: 'main', verified: false });
+      managed.functionBreakpoints.set('f2', { id: 'f2', functionName: 'main.main', verified: true });
+
+      const captured: unknown[] = [];
+      sessionManager.on('output-captured', (_sid: string, entry: unknown) => captured.push(entry));
+
+      dependencies.mockProxyManager.simulateEvent('exited', 0);
+      await vi.runAllTimersAsync();
+
+      const stamped = managed.functionBreakpoints.get('f1')!;
+      expect(stamped.message).toMatch(/Never bound during this run/);
+      expect(stamped.message).toContain("'main'");
+      // The verified one stays untouched.
+      expect(managed.functionBreakpoints.get('f2')!.message).toBeUndefined();
+
+      const entries = managed.outputBuffer!.read(0, 10).entries;
+      const warningEntry = entries.find(e => e.output.includes('never bound during this run'));
+      expect(warningEntry).toBeDefined();
+      expect(warningEntry!.category).toBe('console');
+      expect(captured.length).toBeGreaterThan(0);
+
+      // Idempotent: a second terminal signal must not stamp or emit again.
+      const before = managed.outputBuffer!.read(0, 20).entries.length;
+      (sessionManager as unknown as { noteUnboundFunctionBreakpoints: (s: unknown) => void })
+        .noteUnboundFunctionBreakpoints(managed);
+      expect(managed.outputBuffer!.read(0, 20).entries.length).toBe(before);
+    });
+
     it('stamps adapter ids from the pre-launch function-breakpoints-synced event', async () => {
       const session = await createPausedSession();
       const managed = sessionManager.getSession(session.id)!;

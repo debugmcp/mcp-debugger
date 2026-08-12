@@ -11,6 +11,7 @@ import {
   sanitizePayloadForLogging,
   toSourceBreakpoint,
   toFunctionBreakpoint,
+  type AdapterPolicy,
   type ExceptionBreakMode
 } from '@debugmcp/shared';
 import { ManagedSession, ToolchainValidationState } from './session-store.js';
@@ -773,6 +774,13 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         await this.syncFunctionBreakpoints(finalSession);
       }
 
+      // Unbound-at-launch warning (issue #308): the verified state is fresh
+      // after the re-sync above, so a name the adapter could not resolve is
+      // reported here instead of failing silently at "the program never
+      // stopped". Suppressed for bind-late adapters (js/java), where
+      // unverified-at-launch is the designed deferral path.
+      const fnBpWarning = this.buildFunctionBreakpointLaunchWarning(finalSession);
+
       this.logger.info(
         `[SessionManager] Debugging started for session ${sessionId}. State: ${finalState}`
       );
@@ -781,6 +789,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         success: true,
         state: finalState,
         data: {
+          ...(fnBpWarning ? { warning: fnBpWarning } : {}),
           message: `Debugging started for ${scriptPath}. Current state: ${finalState}`,
           // Prefer the actual DAP stop reason (issue #214) — the first stop is
           // not always a breakpoint (e.g. an uncaught exception before any
@@ -980,6 +989,13 @@ export abstract class SessionManagerOperations extends SessionManagerData {
             }
           }
         }
+        // Join rather than clobber: startDebugging may already have set a
+        // warning (unbound function breakpoints, issue #308).
+        const priorWarning = (result.data as { warning?: string } | undefined)?.warning;
+        const staleWarning = staleCount > 0
+          ? `${staleCount} statement anchor(s) no longer match the current file; those breakpoints kept their previous lines — re-set them if the target moved.`
+          : undefined;
+        const warnings = [priorWarning, staleWarning].filter(Boolean);
         result.data = {
           ...((result.data as object) ?? {}),
           breakpointsReapplied: this._getSessionById(sessionId).breakpoints.size,
@@ -987,11 +1003,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
           // reset its get_output cursor to since=0.
           outputReset: true,
           ...(anchorResolution ? { anchorResolution } : {}),
-          ...(staleCount > 0
-            ? {
-                warning: `${staleCount} statement anchor(s) no longer match the current file; those breakpoints kept their previous lines — re-set them if the target moved.`,
-              }
-            : {}),
+          ...(warnings.length > 0 ? { warning: warnings.join('; ') } : {}),
         };
       }
       return result;
@@ -1349,6 +1361,43 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       const message = error instanceof Error ? error.message : String(error);
       return { synced: false, warning: `Breakpoint state updated, but live sync failed: ${message}` };
     }
+  }
+
+  /**
+   * Launch-time unbound-function-breakpoint warning (issue #308). Called
+   * after the post-launch re-sync, when verified state is fresh. Returns
+   * undefined for bind-late policies (js/java) — unverified-at-launch is
+   * their designed deferral, not a failure.
+   */
+  protected buildFunctionBreakpointLaunchWarning(session: ManagedSession): string | undefined {
+    if ((session.functionBreakpoints?.size ?? 0) === 0) {
+      return undefined;
+    }
+    let policy: AdapterPolicy | undefined;
+    try {
+      policy = this.sessionStore.selectPolicy(session.language);
+    } catch {
+      policy = undefined;
+    }
+    if (policy?.functionBreakpointsBindLate === true) {
+      return undefined;
+    }
+    const parts: string[] = [];
+    for (const bp of session.functionBreakpoints.values()) {
+      if (bp.verified) {
+        continue;
+      }
+      const hint = policy?.functionBreakpointNameHint?.(bp.functionName) ?? bp.message;
+      parts.push(`'${bp.functionName}'${hint ? ` (${hint})` : ''}`);
+    }
+    if (parts.length === 0) {
+      return undefined;
+    }
+    return (
+      `Function breakpoint(s) not bound at launch: ${parts.join('; ')}. ` +
+      `The adapter could not resolve the name, so the program will not stop there — ` +
+      `check the symbol name; list_breakpoints shows the current state`
+    );
   }
 
   /**

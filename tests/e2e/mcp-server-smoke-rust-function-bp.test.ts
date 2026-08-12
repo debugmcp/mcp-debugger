@@ -139,4 +139,21 @@ describe.skipIf(SKIP_RUST)('Rust function breakpoints (CodeLLDB) @requires-rust'
     }, 20000);
     expect(stopped, 'program should run to completion after continue').toBeDefined();
   }, 120000);
+
+  it("warns at set time that a bare 'main' binds to the C runtime entry (#303)", async () => {
+    const createRes = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: { language: 'rust', name: 'rust-fnbp-bare-main' }
+    }));
+    sessionId = createRes.sessionId as string;
+
+    const bpRes = await callToolSafely(mcpClient!, 'set_breakpoint', {
+      sessionId,
+      function: 'main'
+    });
+    // Advisory, not blocking: the breakpoint is still set.
+    expect(bpRes.success).toBe(true);
+    expect((bpRes as { warning?: string }).warning).toMatch(/C runtime/);
+    expect((bpRes as { warning?: string }).warning).toContain('my_crate::main');
+  }, 30000);
 }, 180000);

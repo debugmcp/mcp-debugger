@@ -65,6 +65,23 @@ describe('RustAdapterPolicy', () => {
     });
   });
 
+  // A bare 'main' resolves to the C runtime's entry point on rust targets
+  // (issue #303); the hint fires only for that exact name.
+  describe('functionBreakpointNameHint', () => {
+    const hint = RustAdapterPolicy.functionBreakpointNameHint!;
+
+    it("warns for the exact bare name 'main'", () => {
+      expect(hint('main')).toMatch(/C runtime/);
+      expect(hint('main')).toContain('my_crate::main');
+    });
+
+    it('stays silent for qualified and other bare names', () => {
+      expect(hint('hello_world::main')).toBeUndefined();
+      expect(hint('compute')).toBeUndefined();
+      expect(hint('MyStruct::new')).toBeUndefined();
+    });
+  });
+
   describe('normalizeStopReason', () => {
     const normalize = RustAdapterPolicy.normalizeStopReason!;
     const ctx = (partial: Partial<StopReasonContext> = {}): StopReasonContext => ({

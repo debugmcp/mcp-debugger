@@ -473,6 +473,24 @@ describe('GoAdapterPolicy', () => {
 
   // ===== validateExecutable =====
 
+  // ===== Function-breakpoint name hints (issue #308) =====
+
+  describe('functionBreakpointNameHint', () => {
+    const hint = GoAdapterPolicy.functionBreakpointNameHint!;
+
+    it('warns for a bare identifier (never binds in Delve)', () => {
+      expect(hint('main')).toMatch(/package-qualified/);
+      expect(hint('main')).toContain("'main.main'");
+      expect(hint('helper')).toMatch(/will never bind/);
+    });
+
+    it('accepts package-qualified names silently', () => {
+      expect(hint('main.main')).toBeUndefined();
+      expect(hint('mypkg.Process')).toBeUndefined();
+      expect(hint('(*mypkg.T).Method')).toBeUndefined();
+    });
+  });
+
   describe('validateExecutable', () => {
     it('resolves true when the command produces output and exits 0', async () => {
       mockSpawnChild((child) => {
