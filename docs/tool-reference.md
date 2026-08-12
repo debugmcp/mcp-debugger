@@ -140,7 +140,7 @@ Sets a breakpoint in a source file.
 - `file` (string, required): Path to the source file (absolute or relative to project root).
 - `line` (number, required): Line number where to set breakpoint (1-indexed).
 - `statement` (string, optional): **Content addressing** — instead of `line`, pass the exact text of the target line (leading/trailing whitespace ignored), like an Edit-tool match. Cannot land on the wrong line; if the text appears on multiple lines the error lists every match; anchors re-resolve across `restart_debugging` after file edits. Provide `statement` OR `line`, not both. See [Statement anchors](#statement-anchors).
-- `function` (string, optional): **Symbol addressing** — break on entry to a function/method by name (DAP function breakpoint). Session-global: no `file` or `line` at all, and names survive edits better than both. Composes with `condition` only. Supported by Python, Go, Rust, .NET, and Java; JavaScript rejects it with a clear error (see [Function breakpoints](#function-breakpoints)).
+- `function` (string, optional): **Symbol addressing** — break on entry to a function/method by name (DAP function breakpoint). Session-global: no `file` or `line` at all, and names survive edits better than both. Composes with `condition` only. Supported by Python, Go, Rust, .NET, Java, and JavaScript (JavaScript names are dotted runtime paths delivered over the CDP bridge — see [Function breakpoints](#function-breakpoints)); Ruby is accepted with a warning and validated at launch.
 - `nearLine` (number, optional): With `statement` only — when the statement text appears on multiple lines, bind to the match closest to this line (ties go to the lower line).
 - `expectedContent` (string, optional): With `line` only — assert the exact text of the target line (leading/trailing whitespace ignored) before setting. On a mismatch the breakpoint is **not** set and the error shows the actual content of that line and its neighbors — a fast, self-explanatory failure instead of a breakpoint that silently lands on the wrong line. See [Content assertions and loud snapping](#content-assertions-and-loud-snapping).
 - `condition` (string, optional): Conditional expression — only break (or log) when it evaluates truthy.
@@ -996,12 +996,12 @@ The endpoint closes on `unexpose_session`, `close_debug_session`, `restart_debug
 Other DAP clients (nvim-dap, etc.): connect a TCP DAP client to the host/port and include `mirrorToken` in the `attach` request arguments.
 
 **What the mirror serves:**
-- Answered locally: `initialize` (from the adapter's real capabilities, with control affordances masked off), `attach`/`launch` (token check), `configurationDone`, `disconnect` (that client only), `cancel`.
+- Answered locally: `initialize` (from the adapter's real capabilities, with control affordances masked off), `attach`/`launch` (token check), `configurationDone` (also the trigger for the late-join stopped replay below), `disconnect` (that client only), `cancel`.
 - Forwarded to the live adapter: `threads`, `stackTrace`, `scopes`, `variables`, `source`, `evaluate`, `exceptionInfo`, `loadedSources`, `modules`.
 - Soft-succeeded so IDE attach flows survive: `setBreakpoints`/`setFunctionBreakpoints` (reported unverified — breakpoints stay agent-owned), `setExceptionBreakpoints`.
 - Rejected with a quiet error: `continue`, `next`, `stepIn`, `stepOut`, `pause`, `setVariable`, `restart`, `terminate`, and every other control or mutation request.
 
-On attach while the session is paused, the mirror replays the last stop as a `stopped` event, so the IDE lands directly on the paused frame.
+On attach while the session is paused, the mirror replays the last stop as a `stopped` event, so the IDE lands directly on the paused frame. The replay is delivered when the client sends `configurationDone` (standard DAP handshake order); clients that skip `configurationDone` receive it after a short (~200ms) fallback. Live events, by contrast, are broadcast to every attached client immediately.
 
 **Security:** the endpoint binds loopback only and every client must present the per-expose token. Treat the token as a **debuggee-execution capability**, not a view-only credential — `evaluate` is forwarded, and DAP evaluate can run arbitrary code in the debuggee. The token appears only in the `expose_session` result and is redacted from logs. "Read-only" means execution control and breakpoint changes are rejected, not that the debuggee is immutable.
 
