@@ -5,7 +5,7 @@
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import * as path from 'path';
-import type { AdapterPolicy, AdapterSpecificState, CommandHandling } from './adapter-policy.js';
+import type { AdapterPolicy, AdapterSpecificState, CommandHandling, StopReasonContext } from './adapter-policy.js';
 import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
@@ -45,11 +45,17 @@ export const RustAdapterPolicy: AdapterPolicy = {
    *    (incomplete bookkeeping) means keep the raw reason. The asymmetry is
    *    deliberate — a missed panic merely keeps the cosmetic 'breakpoint'
    *    label, while a false 'exception' would mislead callers.
+   *
+   * 3. A function-breakpoint hit is also reported as plain 'breakpoint'
+   *    (issue #302): CodeLLDB does not distinguish. When every hit id is a
+   *    known function-breakpoint id, relabel to 'function breakpoint' —
+   *    matching debugpy/delve, which send it natively. Mixed line+function
+   *    hits keep 'breakpoint' (DAP convention: the plain reason wins).
    */
   normalizeStopReason: (
     reason: string,
     body: DebugProtocol.StoppedEvent['body'] | undefined,
-    context: { pausePending: boolean; userBreakpointIds?: ReadonlySet<number> }
+    context: StopReasonContext
   ): string | undefined => {
     if (reason === 'breakpoint') {
       const hitIds = body?.hitBreakpointIds;
@@ -57,7 +63,16 @@ export const RustAdapterPolicy: AdapterPolicy = {
         return undefined;
       }
       const hitsUserBreakpoint = hitIds.some((id) => context.userBreakpointIds!.has(id));
-      return hitsUserBreakpoint ? undefined : 'exception';
+      if (!hitsUserBreakpoint) {
+        return 'exception';
+      }
+      if (
+        context.functionBreakpointIds &&
+        hitIds.every((id) => context.functionBreakpointIds!.has(id))
+      ) {
+        return 'function breakpoint';
+      }
+      return undefined;
     }
     if (reason !== 'exception') {
       return undefined;

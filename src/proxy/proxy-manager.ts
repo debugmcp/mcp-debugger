@@ -28,6 +28,7 @@ import type {
 } from '../dap-core/types.js';
 import { ErrorMessages } from '../utils/error-messages.js';
 import { ProxyConfig } from './proxy-config.js';
+import type { FunctionBreakpointSyncResult } from './dap-proxy-interfaces.js';
 import {
   IDebugAdapter,
   AdapterLaunchBarrier,
@@ -66,6 +67,8 @@ export interface ProxyManagerEvents {
   'adapter-configured': () => void;
   /** Adapter initialize response body captured by the worker (issue #243) */
   'adapter-capabilities': (capabilities: DebugProtocol.Capabilities) => void;
+  /** Pre-launch setFunctionBreakpoints results from the worker (issue #302) */
+  'function-breakpoints-synced': (results: FunctionBreakpointSyncResult[]) => void;
   'dap-event': (event: string, body: unknown) => void;
 }
 
@@ -1088,6 +1091,13 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         // it is not double-processed (issue #243).
         this.logger.info(`[ProxyManager] Adapter capabilities received`);
         this.emit('adapter-capabilities', message.capabilities);
+        break;
+
+      case 'function_breakpoints_synced':
+        // Like adapter_capabilities: emitted here only, no dap-core case, so
+        // never double-processed (issue #302).
+        this.logger.info(`[ProxyManager] Pre-launch function-breakpoint sync results received`);
+        this.emit('function-breakpoints-synced', message.functionBreakpoints ?? []);
         break;
       
       case 'adapter_exited':

@@ -859,10 +859,24 @@ export class DapProxyWorker {
       return;
     }
     try {
-      await this.dapClient.sendRequest('setFunctionBreakpoints', {
+      const response = (await this.dapClient.sendRequest('setFunctionBreakpoints', {
         breakpoints: this.currentInitPayload.initialFunctionBreakpoints.map((bp) => ({
           name: bp.name,
           ...(bp.condition !== undefined ? { condition: bp.condition } : {})
+        }))
+      })) as { body?: { breakpoints?: DebugProtocol.Breakpoint[] } } | undefined;
+      // Forward the adapter-assigned ids to the parent (issue #302): the
+      // parent's store otherwise learns them only from the post-launch
+      // re-sync, which loses the race against a stop that hits a function
+      // breakpoint immediately at launch (e.g. a breakpoint on main).
+      const results = response?.body?.breakpoints ?? [];
+      this.sendStatus('function_breakpoints_synced', {
+        functionBreakpoints: this.currentInitPayload.initialFunctionBreakpoints.map((bp, i) => ({
+          name: bp.name,
+          verified: results[i]?.verified === true,
+          ...(typeof results[i]?.id === 'number' ? { id: results[i].id } : {}),
+          ...(typeof results[i]?.line === 'number' ? { line: results[i].line } : {}),
+          ...(results[i]?.source?.path ? { source: results[i].source.path } : {})
         }))
       });
     } catch (err) {

@@ -34,7 +34,7 @@
  * terminateDebuggee is always false when detaching from attached processes.
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import type { AdapterPolicy, AdapterSpecificState, CommandHandling } from './adapter-policy.js';
+import type { AdapterPolicy, AdapterSpecificState, CommandHandling, StopReasonContext } from './adapter-policy.js';
 import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
@@ -50,6 +50,42 @@ export const DotnetAdapterPolicy: AdapterPolicy = {
   },
   isChildReadyEvent: (evt: DebugProtocol.Event): boolean => {
     return evt?.event === 'initialized';
+  },
+
+  /**
+   * netcoredbg reports a function-breakpoint hit as plain reason
+   * 'breakpoint' (issue #302). Relabel to 'function breakpoint' — matching
+   * debugpy/delve, which send it natively — when the hit is attributable to
+   * function breakpoints:
+   * - Preferred: body.hitBreakpointIds all match known fn-bp ids.
+   * - Fallback (netcoredbg omits hitBreakpointIds): when the session's only
+   *   user breakpoints are function breakpoints, a 'breakpoint' stop can
+   *   only be a fn-bp hit. Count-based, so it never touches hit ids.
+   *   Caveat: a Debugger.Break() in user code during a fn-bp-only session
+   *   would also be relabeled; acceptable, the stop position is honest.
+   */
+  normalizeStopReason: (
+    reason: string,
+    body: DebugProtocol.StoppedEvent['body'] | undefined,
+    context: StopReasonContext
+  ): string | undefined => {
+    if (reason !== 'breakpoint') {
+      return undefined;
+    }
+    const hitIds = body?.hitBreakpointIds;
+    if (Array.isArray(hitIds) && hitIds.length > 0) {
+      if (
+        context.functionBreakpointIds &&
+        hitIds.every((id) => context.functionBreakpointIds!.has(id))
+      ) {
+        return 'function breakpoint';
+      }
+      return undefined;
+    }
+    if (context.functionBreakpointCount > 0 && context.lineBreakpointCount === 0) {
+      return 'function breakpoint';
+    }
+    return undefined;
   },
 
   /**

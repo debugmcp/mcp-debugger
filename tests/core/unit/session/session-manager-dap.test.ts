@@ -1599,4 +1599,123 @@ describe('SessionManager - DAP Operations', () => {
       expect(info?.lastStop?.exceptionInfo?.exceptionId).toBe('MockError');
     });
   });
+
+  describe('stop-reason normalization context (issue #302)', () => {
+    // The context handed to policy.normalizeStopReason: id sets are present
+    // only when the respective bookkeeping is complete; counts always are.
+    function installPolicySpy() {
+      const normalizeStopReason = vi.fn().mockReturnValue(undefined);
+      const store = (sessionManager as unknown as { sessionStore: { selectPolicy: unknown } }).sessionStore;
+      const original = store.selectPolicy;
+      vi.spyOn(store as { selectPolicy: (lang: string) => unknown }, 'selectPolicy').mockImplementation(
+        function (this: unknown, lang: string) {
+          const policy = (original as (lang: string) => Record<string, unknown>).call(store, lang);
+          return { ...policy, normalizeStopReason };
+        }
+      );
+      return normalizeStopReason;
+    }
+
+    it('passes the line+function union, fn-bp set, and counts when bookkeeping is complete', async () => {
+      const session = await createPausedSession();
+      const managed = sessionManager.getSession(session.id)!;
+      managed.breakpoints.set('b1', { id: 'b1', file: '/a.rs', line: 3, verified: true, adapterId: 1 });
+      managed.functionBreakpoints.set('f1', { id: 'f1', functionName: 'main', verified: true, adapterId: 5 });
+
+      const normalizeStopReason = installPolicySpy();
+      normalizeStopReason.mockReturnValue('function breakpoint');
+      dependencies.mockProxyManager.simulateStopped(1, 'breakpoint', {
+        reason: 'breakpoint',
+        threadId: 1,
+        hitBreakpointIds: [5]
+      });
+
+      expect(normalizeStopReason).toHaveBeenCalledWith(
+        'breakpoint',
+        expect.objectContaining({ hitBreakpointIds: [5] }),
+        {
+          pausePending: false,
+          userBreakpointIds: new Set([1, 5]),
+          functionBreakpointIds: new Set([5]),
+          lineBreakpointCount: 1,
+          functionBreakpointCount: 1
+        }
+      );
+      expect(managed.lastStop?.reason).toBe('function breakpoint');
+      expect(managed.lastStop?.rawReason).toBe('breakpoint');
+    });
+
+    it('omits both id sets when a line breakpoint lacks an adapterId', async () => {
+      const session = await createPausedSession();
+      const managed = sessionManager.getSession(session.id)!;
+      managed.breakpoints.set('b1', { id: 'b1', file: '/a.rs', line: 3, verified: false });
+      managed.functionBreakpoints.set('f1', { id: 'f1', functionName: 'main', verified: true, adapterId: 5 });
+
+      const normalizeStopReason = installPolicySpy();
+      dependencies.mockProxyManager.simulateStopped(1, 'breakpoint', {
+        reason: 'breakpoint',
+        threadId: 1
+      });
+
+      expect(normalizeStopReason).toHaveBeenCalledWith(
+        'breakpoint',
+        expect.anything(),
+        {
+          pausePending: false,
+          userBreakpointIds: undefined,
+          functionBreakpointIds: new Set([5]),
+          lineBreakpointCount: 1,
+          functionBreakpointCount: 1
+        }
+      );
+    });
+
+    it('omits the union and the fn-bp set when a function breakpoint lacks an adapterId', async () => {
+      const session = await createPausedSession();
+      const managed = sessionManager.getSession(session.id)!;
+      managed.breakpoints.set('b1', { id: 'b1', file: '/a.rs', line: 3, verified: true, adapterId: 1 });
+      managed.functionBreakpoints.set('f1', { id: 'f1', functionName: 'main', verified: false });
+
+      const normalizeStopReason = installPolicySpy();
+      dependencies.mockProxyManager.simulateStopped(1, 'breakpoint', {
+        reason: 'breakpoint',
+        threadId: 1
+      });
+
+      expect(normalizeStopReason).toHaveBeenCalledWith(
+        'breakpoint',
+        expect.anything(),
+        {
+          pausePending: false,
+          userBreakpointIds: undefined,
+          functionBreakpointIds: undefined,
+          lineBreakpointCount: 1,
+          functionBreakpointCount: 1
+        }
+      );
+    });
+
+    it('stamps adapter ids from the pre-launch function-breakpoints-synced event', async () => {
+      const session = await createPausedSession();
+      const managed = sessionManager.getSession(session.id)!;
+      managed.functionBreakpoints.set('f1', { id: 'f1', functionName: 'main', verified: false });
+      managed.functionBreakpoints.set('f2', { id: 'f2', functionName: 'main', verified: false });
+
+      dependencies.mockProxyManager.simulateEvent('function-breakpoints-synced', [
+        { name: 'main', verified: true, id: 7, line: 3, source: '/src/main.rs' },
+        { name: 'main', verified: false },
+        { name: 'unknown_name', verified: true, id: 9 }
+      ]);
+
+      const first = managed.functionBreakpoints.get('f1')!;
+      expect(first.adapterId).toBe(7);
+      expect(first.verified).toBe(true);
+      expect(first.boundLine).toBe(3);
+      expect(first.boundFile).toBe('/src/main.rs');
+      // Duplicate names consume distinct entries in order.
+      const second = managed.functionBreakpoints.get('f2')!;
+      expect(second.adapterId).toBeUndefined();
+      expect(second.verified).toBe(false);
+    });
+  });
 });

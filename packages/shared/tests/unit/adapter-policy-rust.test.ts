@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import { EventEmitter } from 'events';
 import { RustAdapterPolicy } from '../../src/interfaces/adapter-policy-rust.js';
+import type { StopReasonContext } from '../../src/interfaces/adapter-policy.js';
 import { SessionState } from '@debugmcp/shared';
 
 const accessMock = vi.fn<[], Promise<void>>();
@@ -66,32 +67,38 @@ describe('RustAdapterPolicy', () => {
 
   describe('normalizeStopReason', () => {
     const normalize = RustAdapterPolicy.normalizeStopReason!;
+    const ctx = (partial: Partial<StopReasonContext> = {}): StopReasonContext => ({
+      pausePending: false,
+      lineBreakpointCount: 0,
+      functionBreakpointCount: 0,
+      ...partial
+    });
 
     it('maps SIGSTOP exception in description to pause', () => {
       expect(
-        normalize('exception', { reason: 'exception', description: 'signal SIGSTOP' }, { pausePending: false })
+        normalize('exception', { reason: 'exception', description: 'signal SIGSTOP' }, ctx())
       ).toBe('pause');
     });
 
     it('maps SIGSTOP exception in text to pause', () => {
       expect(
-        normalize('exception', { reason: 'exception', text: 'Process stopped by SIGSTOP' }, { pausePending: false })
+        normalize('exception', { reason: 'exception', text: 'Process stopped by SIGSTOP' }, ctx())
       ).toBe('pause');
     });
 
     it('leaves real exceptions untouched even while a pause is pending', () => {
       expect(
-        normalize('exception', { reason: 'exception', description: 'signal SIGSEGV' }, { pausePending: true })
+        normalize('exception', { reason: 'exception', description: 'signal SIGSEGV' }, ctx({ pausePending: true }))
       ).toBeUndefined();
       expect(
-        normalize('exception', { reason: 'exception', text: 'panicked at src/main.rs:3' }, { pausePending: true })
+        normalize('exception', { reason: 'exception', text: 'panicked at src/main.rs:3' }, ctx({ pausePending: true }))
       ).toBeUndefined();
     });
 
     it('maps a detail-less exception to pause only when a pause is pending', () => {
-      expect(normalize('exception', { reason: 'exception' }, { pausePending: true })).toBe('pause');
-      expect(normalize('exception', undefined, { pausePending: true })).toBe('pause');
-      expect(normalize('exception', { reason: 'exception' }, { pausePending: false })).toBeUndefined();
+      expect(normalize('exception', { reason: 'exception' }, ctx({ pausePending: true }))).toBe('pause');
+      expect(normalize('exception', undefined, ctx({ pausePending: true }))).toBe('pause');
+      expect(normalize('exception', { reason: 'exception' }, ctx())).toBeUndefined();
     });
 
     // Windows delivers a user-initiated pause via DebugBreakProcess: the
@@ -102,7 +109,7 @@ describe('RustAdapterPolicy', () => {
         normalize(
           'exception',
           { reason: 'exception', description: 'Exception 0x80000003 encountered at address 0x7ffe8b4dd7bd' },
-          { pausePending: true }
+          ctx({ pausePending: true })
         )
       ).toBe('pause');
     });
@@ -112,14 +119,14 @@ describe('RustAdapterPolicy', () => {
         normalize(
           'exception',
           { reason: 'exception', description: 'Exception 0x80000003 encountered at address 0x7ffe8b4dd7bd' },
-          { pausePending: false }
+          ctx()
         )
       ).toBeUndefined();
     });
 
     it('never touches step or pause reasons', () => {
-      expect(normalize('step', { reason: 'step' }, { pausePending: false })).toBeUndefined();
-      expect(normalize('pause', { reason: 'pause' }, { pausePending: true })).toBeUndefined();
+      expect(normalize('step', { reason: 'step' }, ctx())).toBeUndefined();
+      expect(normalize('pause', { reason: 'pause' }, ctx({ pausePending: true }))).toBeUndefined();
     });
 
     // Panic stops arrive as reason 'breakpoint' because CodeLLDB implements
@@ -134,7 +141,7 @@ describe('RustAdapterPolicy', () => {
           normalize(
             'breakpoint',
             { reason: 'breakpoint', hitBreakpointIds: [1] },
-            { pausePending: false, userBreakpointIds: new Set<number>() }
+            ctx({ userBreakpointIds: new Set<number>() })
           )
         ).toBe('exception');
       });
@@ -144,7 +151,7 @@ describe('RustAdapterPolicy', () => {
           normalize(
             'breakpoint',
             { reason: 'breakpoint', hitBreakpointIds: [2] },
-            { pausePending: false, userBreakpointIds: new Set([1]) }
+            ctx({ userBreakpointIds: new Set([1]) })
           )
         ).toBe('exception');
       });
@@ -154,7 +161,7 @@ describe('RustAdapterPolicy', () => {
           normalize(
             'breakpoint',
             { reason: 'breakpoint', hitBreakpointIds: [1] },
-            { pausePending: false, userBreakpointIds: new Set([1]) }
+            ctx({ userBreakpointIds: new Set([1]) })
           )
         ).toBeUndefined();
       });
@@ -164,7 +171,7 @@ describe('RustAdapterPolicy', () => {
           normalize(
             'breakpoint',
             { reason: 'breakpoint', hitBreakpointIds: [2, 1] },
-            { pausePending: false, userBreakpointIds: new Set([1]) }
+            ctx({ userBreakpointIds: new Set([1]) })
           )
         ).toBeUndefined();
       });
@@ -174,24 +181,102 @@ describe('RustAdapterPolicy', () => {
           normalize(
             'breakpoint',
             { reason: 'breakpoint' },
-            { pausePending: false, userBreakpointIds: new Set<number>() }
+            ctx({ userBreakpointIds: new Set<number>() })
           )
         ).toBeUndefined();
         expect(
           normalize(
             'breakpoint',
             { reason: 'breakpoint', hitBreakpointIds: [] },
-            { pausePending: false, userBreakpointIds: new Set<number>() }
+            ctx({ userBreakpointIds: new Set<number>() })
           )
         ).toBeUndefined();
-        expect(normalize('breakpoint', undefined, { pausePending: false, userBreakpointIds: new Set<number>() })).toBeUndefined();
+        expect(normalize('breakpoint', undefined, ctx({ userBreakpointIds: new Set<number>() }))).toBeUndefined();
       });
 
       it('keeps breakpoint stops when user breakpoint ids are unknown', () => {
         // No userBreakpointIds in context = the session's breakpoint
         // bookkeeping is incomplete; the disjoint inference is unsafe.
         expect(
-          normalize('breakpoint', { reason: 'breakpoint', hitBreakpointIds: [2] }, { pausePending: false })
+          normalize('breakpoint', { reason: 'breakpoint', hitBreakpointIds: [2] }, ctx())
+        ).toBeUndefined();
+      });
+    });
+
+    // CodeLLDB reports function-breakpoint hits as plain 'breakpoint'
+    // (issue #302); relabel when the hit ids are all known fn-bp ids.
+    describe('function breakpoint stops (issue #302)', () => {
+      it('relabels a pure function-breakpoint hit', () => {
+        expect(
+          normalize(
+            'breakpoint',
+            { reason: 'breakpoint', hitBreakpointIds: [5] },
+            ctx({
+              userBreakpointIds: new Set([1, 5]),
+              functionBreakpointIds: new Set([5]),
+              lineBreakpointCount: 1,
+              functionBreakpointCount: 1
+            })
+          )
+        ).toBe('function breakpoint');
+      });
+
+      it('still maps a panic to exception when fn-bp ids are in the user union', () => {
+        // The union including fn-bp ids must not weaken the panic
+        // discriminator: hit id 9 belongs to neither kind.
+        expect(
+          normalize(
+            'breakpoint',
+            { reason: 'breakpoint', hitBreakpointIds: [9] },
+            ctx({
+              userBreakpointIds: new Set([1, 5]),
+              functionBreakpointIds: new Set([5]),
+              lineBreakpointCount: 1,
+              functionBreakpointCount: 1
+            })
+          )
+        ).toBe('exception');
+      });
+
+      it('keeps a mixed line+function hit as breakpoint', () => {
+        expect(
+          normalize(
+            'breakpoint',
+            { reason: 'breakpoint', hitBreakpointIds: [1, 5] },
+            ctx({
+              userBreakpointIds: new Set([1, 5]),
+              functionBreakpointIds: new Set([5]),
+              lineBreakpointCount: 1,
+              functionBreakpointCount: 1
+            })
+          )
+        ).toBeUndefined();
+      });
+
+      it('does not relabel when fn-bp id bookkeeping is incomplete', () => {
+        expect(
+          normalize(
+            'breakpoint',
+            { reason: 'breakpoint', hitBreakpointIds: [5] },
+            ctx({
+              userBreakpointIds: new Set([5]),
+              functionBreakpointCount: 1
+            })
+          )
+        ).toBeUndefined();
+      });
+
+      it('keeps a plain line-breakpoint hit as breakpoint', () => {
+        expect(
+          normalize(
+            'breakpoint',
+            { reason: 'breakpoint', hitBreakpointIds: [1] },
+            ctx({
+              userBreakpointIds: new Set([1]),
+              functionBreakpointIds: new Set<number>(),
+              lineBreakpointCount: 1
+            })
+          )
         ).toBeUndefined();
       });
     });

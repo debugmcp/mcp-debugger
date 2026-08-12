@@ -6,7 +6,7 @@
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import * as path from 'path';
-import type { AdapterPolicy, AdapterSpecificState, CommandHandling } from './adapter-policy.js';
+import type { AdapterPolicy, AdapterSpecificState, CommandHandling, StopReasonContext } from './adapter-policy.js';
 import { resolveExceptionFilters } from './adapter-policy.js';
 import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
@@ -64,7 +64,7 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
   normalizeStopReason: (
     reason: string,
     _body: DebugProtocol.StoppedEvent['body'] | undefined,
-    context: { pausePending: boolean }
+    context: StopReasonContext
   ): string | undefined => {
     if (reason === 'step' && context.pausePending) {
       return 'pause';
