@@ -38,6 +38,7 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 import { installShutdownHandlers, killChildGracefully } from './shutdown.mjs';
 import { createBackendLogger, sanitizeStderrTail, sharedUtilsLoaded } from './backend-logger.mjs';
+import { isBackendUnavailableError, dedupeMcpErrorPrefix, assertBackendAvailable } from './tool-error.mjs';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -744,20 +745,15 @@ async function main() {
       const result = await backend.callTool(name, args || {});
       return result;
     } catch (err) {
+      // A well-formed JSON-RPC error from a running backend (e.g. -32602
+      // InvalidParams) proves the backend is alive — pass it through without
+      // the restart hint, which would send agents on a false detour (#304).
+      const body = { error: dedupeMcpErrorPrefix(err.message) };
+      if (isBackendUnavailableError(err, backend.state)) {
+        body.hint = `The mcp-debugger backend is not reachable (state: ${backend.state}). Use dev_server_status to check, or dev_restart_debugger to restart it.`;
+      }
       return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                error: err.message,
-                hint: 'The mcp-debugger backend may be down. Use dev_server_status to check, or dev_restart_debugger to restart it.',
-              },
-              null,
-              2
-            ),
-          },
-        ],
+        content: [{ type: 'text', text: JSON.stringify(body, null, 2) }],
         isError: true,
       };
     }
@@ -778,14 +774,17 @@ async function main() {
   });
 
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    assertBackendAvailable(backend);
     return await backend.mcpClient.readResource(request.params);
   });
 
   server.setRequestHandler(SubscribeRequestSchema, async (request) => {
+    assertBackendAvailable(backend);
     return await backend.mcpClient.subscribeResource(request.params);
   });
 
   server.setRequestHandler(UnsubscribeRequestSchema, async (request) => {
+    assertBackendAvailable(backend);
     return await backend.mcpClient.unsubscribeResource(request.params);
   });
 
