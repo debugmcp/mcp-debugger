@@ -36,7 +36,8 @@ import {
     FunctionBreakpoint,
     SessionLifecycleState,
     IEnvironment,
-    ExceptionBreakMode
+    ExceptionBreakMode,
+    REDACTION_NOTICE
 } from '@debugmcp/shared';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';
@@ -51,6 +52,7 @@ import {
   supportsStatementAnchors,
   supportsLoudSnapping
 } from './utils/bp-addressing.js';
+import { isRedactionEnabled } from './utils/redaction-mode.js';
 import { assertLineContent, resolveStatement } from './utils/breakpoint-resolver.js';
 
 const DEFAULT_LANGUAGES = Object.freeze([DebugLanguage.PYTHON, DebugLanguage.MOCK] as const);
@@ -876,7 +878,11 @@ export class DebugMcpServer {
         capabilities: { tools: {}, resources: { subscribe: true, listChanged: true }, prompts: {} },
         // Mode-gated (issue #271): the handshake must not teach restricted
         // addressing features. Env is process-stable, so constructor-time is fine.
-        instructions: buildServerInstructions(getBpAddressingMode(this.environment))
+        // Redaction state rides along (issue #237) so agents aren't surprised
+        // by <redacted:...> placeholders.
+        instructions: buildServerInstructions(getBpAddressingMode(this.environment), {
+          redactionEnabled: isRedactionEnabled(this.environment)
+        })
       }
     );
 
@@ -1852,7 +1858,8 @@ export class DebugMcpServer {
                   timestamp: Date.now()
                 });
                 
-                result = { content: [{ type: 'text', text: JSON.stringify({ success: true, variables, count: variables.length, variablesReference: args.scope }) }] };
+                const redaction = this.redactionSummary(variables);
+                result = { content: [{ type: 'text', text: JSON.stringify({ success: true, variables, count: variables.length, variablesReference: args.scope, ...(redaction ? { redaction } : {}) }) }] };
               } catch (error) {
                 // Handle validation errors specifically
                 if (error instanceof SessionTerminatedError ||
@@ -2150,6 +2157,16 @@ export class DebugMcpServer {
     }
   }
 
+  /**
+   * Top-level `redaction` notice object for tool results (issue #237):
+   * present when any returned item carries the session layer's `redacted`
+   * flag, so the agent learns why values changed and how to opt out.
+   */
+  private redactionSummary(items: Array<{ redacted?: boolean }>): { masked: number; notice: string } | undefined {
+    const masked = items.filter(item => item.redacted).length;
+    return masked > 0 ? { masked, notice: REDACTION_NOTICE } : undefined;
+  }
+
   private async handleGetOutput(args: { sessionId: string; since?: number; limit?: number }): Promise<ServerResult> {
     // Deliberately no validateSession(): that rejects TERMINATED sessions, but
     // reading output after the program finished is the primary use case.
@@ -2163,13 +2180,15 @@ export class DebugMcpServer {
     const read = session.outputBuffer
       ? session.outputBuffer.read(since, limit)
       : { entries: [], nextSince: since, hasMore: false, dropped: 0 }; // session created but never launched
+    const redaction = this.redactionSummary(read.entries);
     return { content: [{ type: 'text', text: JSON.stringify({
       success: true,
       sessionId: args.sessionId,
       entries: read.entries,
       nextSince: read.nextSince,
       hasMore: read.hasMore,
-      dropped: read.dropped
+      dropped: read.dropped,
+      ...(redaction ? { redaction } : {})
     }) }] };
   }
 
@@ -2442,7 +2461,12 @@ export class DebugMcpServer {
         variables: result.variables,
         count: result.variables.length
       };
-      
+
+      const redaction = this.redactionSummary(result.variables);
+      if (redaction) {
+        response.redaction = redaction;
+      }
+
       // Include frame information if available
       if (result.frame) {
         response.frame = result.frame;

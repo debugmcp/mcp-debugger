@@ -11,6 +11,10 @@ import {
   sanitizePayloadForLogging,
   toSourceBreakpoint,
   toFunctionBreakpoint,
+  isSensitiveName,
+  redactVariableValue,
+  redactSecretsDeep,
+  buildRedactionNotice,
   type AdapterPolicy,
   type ExceptionBreakMode
 } from '@debugmcp/shared';
@@ -49,6 +53,8 @@ export interface EvaluateResult {
   indexedVariables?: number;
   presentationHint?: DebugProtocol.VariablePresentationHint;
   error?: string;
+  /** Present when secret-shaped content was masked in `result` (issue #237) */
+  redaction?: { rules: string[]; notice: string };
 }
 
 export interface RedefineClassesResult {
@@ -2065,6 +2071,21 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     return value.length > maxLength ? value.substring(0, maxLength) + '... (truncated)' : value;
   }
 
+  /**
+   * The "variable name" an evaluate expression stands for, for name-based
+   * redaction (issue #237): the whole expression when it is itself a
+   * sensitive name, otherwise its final dot-segment — so `config.password`
+   * is treated like the variable `password`.
+   */
+  protected static expressionNameForRedaction(expression: string): string {
+    const trimmed = expression.trim();
+    if (isSensitiveName(trimmed)) {
+      return trimmed;
+    }
+    const lastDot = trimmed.lastIndexOf('.');
+    return lastDot >= 0 ? trimmed.slice(lastDot + 1) : trimmed;
+  }
+
   /** Upper bound for caller-supplied per-request DAP timeouts (10 minutes). */
   private static readonly MAX_DAP_TIMEOUT_MS = 600000;
 
@@ -2229,8 +2250,12 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         : await session.proxyManager.sendDapRequest<DebugProtocol.EvaluateResponse>(
             'evaluate', evaluateArgs);
 
-      // Log raw response in debug mode
-      this.logger.debug(`[SM evaluateExpression ${sessionId}] DAP evaluate raw response:`, response);
+      // Log raw response in debug mode — scrubbed, the raw body carries
+      // unredacted values (issue #237)
+      this.logger.debug(
+        `[SM evaluateExpression ${sessionId}] DAP evaluate raw response:`,
+        this.redactionEnabled() ? redactSecretsDeep(response).value : response
+      );
 
       // Process response
       if (response && response.body) {
@@ -2246,6 +2271,24 @@ export abstract class SessionManagerOperations extends SessionManagerData {
           indexedVariables: body.indexedVariables,
           presentationHint: body.presentationHint,
         };
+
+        // Redaction hook (issue #237), placed above the logs below so they
+        // only ever see masked values. The expression's final dot-segment
+        // counts as the "variable name" so `config.password` is treated like
+        // the variable `password` would be.
+        if (this.redactionEnabled() && result.result) {
+          const redacted = redactVariableValue(
+            SessionManagerOperations.expressionNameForRedaction(expression),
+            result.result
+          );
+          if (redacted.redacted) {
+            result.result = redacted.value;
+            result.redaction = {
+              rules: redacted.hits.map(hit => hit.ruleId),
+              notice: buildRedactionNotice(redacted.hits)
+            };
+          }
+        }
 
         // Log the evaluation result with structured logging
         this.logger.info('debug:evaluate', {

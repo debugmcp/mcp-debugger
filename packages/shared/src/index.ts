@@ -215,5 +215,19 @@ export {
   sanitizeStderr,
   sanitizeStderrTail
 } from './utils/env-sanitizer.js';
+// Per-token labeled secret redaction for tool results (issue #237). The
+// stderr sanitizer above derives its value corpus from this rule table.
+export {
+  SECRET_VALUE_RULES,
+  SECRET_VALUE_ALTERNATION,
+  REDACTION_NOTICE,
+  redactSecretsInString,
+  isSensitiveName,
+  isTrivialValue,
+  redactVariableValue,
+  redactSecretsDeep,
+  buildRedactionNotice
+} from './utils/secret-redaction.js';
+export type { SecretRule, RedactionHit, RedactionResult } from './utils/secret-redaction.js';
 export { LineBuffer } from './utils/line-buffer.js';
 export { toSourceBreakpoint, type BreakpointFields, toFunctionBreakpoint, type FunctionBreakpointFields } from './utils/to-source-breakpoint.js';

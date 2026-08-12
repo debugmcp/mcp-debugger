@@ -29,14 +29,20 @@ export class OutputRingBuffer {
 
   constructor(private readonly cap: number = OUTPUT_BUFFER_CAP) {}
 
-  push(category: string, output: string, timestamp: number = Date.now()): SessionOutputEntry {
+  push(
+    category: string,
+    output: string,
+    timestamp: number = Date.now(),
+    flags?: { redacted?: boolean }
+  ): SessionOutputEntry {
     const truncated = output.length > MAX_OUTPUT_ENTRY_CHARS;
     const entry: SessionOutputEntry = {
       seq: this.nextSeq++,
       category,
       output: truncated ? output.slice(0, MAX_OUTPUT_ENTRY_CHARS) : output,
       timestamp,
-      ...(truncated ? { truncated: true } : {})
+      ...(truncated ? { truncated: true } : {}),
+      ...(flags?.redacted ? { redacted: true } : {})
     };
     this.entries.push(entry);
     if (this.entries.length > this.cap) {

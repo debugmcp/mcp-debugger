@@ -40,6 +40,7 @@ Rules that prevent 90% of failed sessions:
 - **Expand variable containers.** If a variable entry carries a `variablesReference`, call `get_variables` again with that reference to see children (Python's "special variables", object fields, array elements).
 - **Respect session state.** Stepping, evaluation, and variable reads require `PAUSED`. After `continue_execution` the session is `RUNNING`; after a step or breakpoint hit it returns to `PAUSED` with a persisted stop reason telling you why it stopped (`breakpoint`, `step`, `entry`, `exception`, ...).
 - **Breakpoints may verify late.** Some adapters (debugpy, JDI) report breakpoints unverified until the module/class loads; that is normal, not an error.
+- **`<redacted:...>` placeholders are masking, not program state.** Credential-shaped values and values of sensitive variable names (`password`, `api_key`, ...) are masked by default in variable/evaluate/output results; a `redaction` field reports what was hidden. The real value is intact in the debuggee — don't "fix" it, and don't retry the read. The user can disable masking by restarting the server with `DEBUG_MCP_NO_REDACT=1`.
 - **Always `close_debug_session`** when done — it tears down the debuggee process tree.
 
 ## Root-cause discipline

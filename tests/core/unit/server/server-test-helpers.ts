@@ -102,6 +102,7 @@ export function createMockSessionManager(mockAdapterRegistry: any) {
     stepOut: vi.fn(),
     continue: vi.fn(),
     getVariables: vi.fn(),
+    getLocalVariables: vi.fn(),
     getStackTrace: vi.fn(),
     getScopes: vi.fn(),
     evaluateExpression: vi.fn(),

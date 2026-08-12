@@ -58,6 +58,7 @@ If your agent runs in a terminal, a pipeline, or a cloud sandbox — or needs to
 - ⚡ **npx ready** – Run directly with `npx @debugmcp/mcp-debugger` - no installation needed
 - 🐳 **Docker and npm packages** – Deploy anywhere
 - 🤖 **Built for AI agents** – Structured JSON responses for easy parsing
+- 🔒 **Secret redaction on by default** – Credential-shaped values (API keys, tokens, private keys) are masked as labeled placeholders in variable, evaluate, and output results before they reach the agent ([details](./docs/tool-reference.md#secret-redaction); opt out with `DEBUG_MCP_NO_REDACT=1`)
 - 🛡️ **Path validation** – Prevents crashes from non-existent files
 - 📝 **AI-aware line context** – Intelligent breakpoint placement with code context
 - ✅ **Comprehensive test suite** – unit, integration, and end-to-end coverage across every adapter ([CI status](https://github.com/debugmcp/mcp-debugger/actions/workflows/ci.yml))
