@@ -118,6 +118,21 @@ describe('RubyAdapterPolicy.getAdapterSpawnConfig', () => {
     expect(pattern!.test('log: DEBUGGER: mentioned mid-line')).toBe(false);
   });
 
+  it('routes the adapter command cwd into the spawn config (issue #320)', () => {
+    const config = RubyAdapterPolicy.getAdapterSpawnConfig!({
+      ...basePayload,
+      launchConfig: { request: 'launch' },
+      adapterCommand: {
+        command: '/usr/bin/rdbg',
+        args: ['--open'],
+        cwd: '/workspace/subdir'
+      }
+    });
+
+    expect(config.mode).toBe('spawn');
+    expect((config as { cwd?: string }).cwd).toBe('/workspace/subdir');
+  });
+
   it('does not enable stdio forwarding for attach (no adapter process exists)', () => {
     const config = RubyAdapterPolicy.getAdapterSpawnConfig!({
       ...basePayload,

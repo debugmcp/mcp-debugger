@@ -478,7 +478,7 @@ export interface AdapterSpawnPayload {
   logDir: string;
   scriptPath: string;
   launchConfig?: LanguageSpecificLaunchConfig;
-  adapterCommand?: { command: string; args: string[]; env?: Record<string, string> };
+  adapterCommand?: { command: string; args: string[]; env?: Record<string, string>; cwd?: string };
 }
 
 /**

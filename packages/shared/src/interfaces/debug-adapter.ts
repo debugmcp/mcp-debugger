@@ -293,6 +293,12 @@ export interface AdapterCommand {
   command: string;
   args: string[];
   env?: Record<string, string>;
+  /**
+   * Working directory for the adapter process. Needed by adapters whose
+   * debuggee starts at spawn time (rdbg -c), where the DAP launch request's
+   * cwd can no longer be applied (issue #320).
+   */
+  cwd?: string;
 }
 
 /**

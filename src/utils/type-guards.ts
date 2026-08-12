@@ -61,7 +61,8 @@ export function validateAdapterCommand(obj: unknown, source: string): AdapterCom
       requiredStructure: {
         command: 'string (required)',
         args: 'string[] (required)',
-        env: 'Record<string, string> (optional)'
+        env: 'Record<string, string> (optional)',
+        cwd: 'string (optional)'
       }
     };
     
