@@ -290,4 +290,55 @@ describe.skipIf(SKIP_DOTNET)('.NET Adapter Smoke Test', () => {
 
     console.log('[.NET Smoke Test] All checks passed');
   }, 60000);
+
+  it('labels a function-breakpoint stop "function breakpoint" (#302)', async (ctx) => {
+    const dllPath = ensureDotnetBuild();
+
+    const createResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: { language: 'dotnet', name: 'dotnet-fnbp' }
+    }));
+    sessionId = createResponse.sessionId as string;
+
+    const bpResponse = await callToolSafely(mcpClient!, 'set_breakpoint', {
+      sessionId,
+      function: 'Main'
+    });
+    expect(bpResponse.success).toBe(true);
+
+    const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'start_debugging',
+      arguments: {
+        sessionId,
+        scriptPath: dllPath,
+        args: [],
+        dapLaunchArgs: { stopOnEntry: false, justMyCode: true }
+      }
+    }));
+    if (!startResponse.success) {
+      skipIfSpawnBlocked(ctx, startResponse, '.NET');
+    }
+
+    // netcoredbg omits hitBreakpointIds; the policy's count fallback labels
+    // the fn-bp-only stop. Poll for the pause.
+    const deadline = Date.now() + 30000;
+    let snap: { state?: string; lastStop?: { reason?: string; rawReason?: string } } | undefined;
+    while (Date.now() < deadline) {
+      const res = parseSdkToolResult(await mcpClient!.callTool({ name: 'list_debug_sessions', arguments: {} }));
+      snap = ((res.sessions ?? []) as Array<{ id: string; state?: string; lastStop?: { reason?: string; rawReason?: string } }>)
+        .find(s => s.id === sessionId);
+      if (snap?.state === 'paused') break;
+      await new Promise(r => setTimeout(r, 500));
+    }
+    expect(snap?.state, 'session should pause at the function breakpoint').toBe('paused');
+    expect(snap!.lastStop?.reason).toBe('function breakpoint');
+    expect(snap!.lastStop?.rawReason).toBe('breakpoint');
+
+    const stackResult = await callToolSafely(mcpClient!, 'get_stack_trace', { sessionId });
+    expect(stackResult.stopReason).toBe('function breakpoint');
+    const top = (stackResult.stackFrames as Array<{ name?: string }> | undefined)?.[0];
+    expect(top?.name).toContain('Main');
+
+    await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+  }, 90000);
 });

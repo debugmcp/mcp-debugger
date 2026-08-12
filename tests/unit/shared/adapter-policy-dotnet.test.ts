@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { DotnetAdapterPolicy } from '../../../packages/shared/src/interfaces/adapter-policy-dotnet.js';
+import type { StopReasonContext } from '../../../packages/shared/src/interfaces/adapter-policy.js';
 import { SessionState } from '@debugmcp/shared';
 
 describe('DotnetAdapterPolicy', () => {
@@ -414,6 +415,79 @@ describe('DotnetAdapterPolicy', () => {
   });
 
   // ===== validateExecutable =====
+
+  // ===== Stop-reason normalization (issue #302) =====
+
+  describe('normalizeStopReason', () => {
+    const normalize = DotnetAdapterPolicy.normalizeStopReason!;
+    const ctx = (partial: Partial<StopReasonContext> = {}): StopReasonContext => ({
+      pausePending: false,
+      lineBreakpointCount: 0,
+      functionBreakpointCount: 0,
+      ...partial
+    });
+
+    it('relabels a hit-id-attributed function-breakpoint stop', () => {
+      expect(
+        normalize(
+          'breakpoint',
+          { reason: 'breakpoint', hitBreakpointIds: [3] },
+          ctx({
+            functionBreakpointIds: new Set([3]),
+            lineBreakpointCount: 1,
+            functionBreakpointCount: 1
+          })
+        )
+      ).toBe('function breakpoint');
+    });
+
+    it('keeps a mixed line+function hit as breakpoint', () => {
+      expect(
+        normalize(
+          'breakpoint',
+          { reason: 'breakpoint', hitBreakpointIds: [1, 3] },
+          ctx({
+            functionBreakpointIds: new Set([3]),
+            lineBreakpointCount: 1,
+            functionBreakpointCount: 1
+          })
+        )
+      ).toBeUndefined();
+    });
+
+    // Live capture (netcoredbg 3.x, 2026-08-12): the stopped body is only
+    // {allThreadsStopped, reason, threadId} — no hitBreakpointIds — so a
+    // fn-bp-only session infers by counts.
+    it('relabels via the count fallback when hitBreakpointIds is absent', () => {
+      expect(
+        normalize(
+          'breakpoint',
+          { reason: 'breakpoint', threadId: 1, allThreadsStopped: true },
+          ctx({ functionBreakpointCount: 1 })
+        )
+      ).toBe('function breakpoint');
+    });
+
+    it('does not use the count fallback when line breakpoints exist', () => {
+      expect(
+        normalize(
+          'breakpoint',
+          { reason: 'breakpoint' },
+          ctx({ functionBreakpointCount: 1, lineBreakpointCount: 2 })
+        )
+      ).toBeUndefined();
+    });
+
+    it('does not use the count fallback with no function breakpoints', () => {
+      expect(normalize('breakpoint', { reason: 'breakpoint' }, ctx())).toBeUndefined();
+    });
+
+    it('never touches non-breakpoint reasons', () => {
+      expect(normalize('step', { reason: 'step' }, ctx({ functionBreakpointCount: 1 }))).toBeUndefined();
+      expect(normalize('exception', { reason: 'exception' }, ctx({ functionBreakpointCount: 1 }))).toBeUndefined();
+      expect(normalize('entry', undefined, ctx({ functionBreakpointCount: 1 }))).toBeUndefined();
+    });
+  });
 
   describe('validateExecutable', () => {
     it('resolves true for a command that exists and exits 0', async () => {

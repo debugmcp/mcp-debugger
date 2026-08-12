@@ -77,6 +77,23 @@ export interface StatusMessage extends ProxyMessage {
   /** Adapter initialize response body, on 'adapter_capabilities' (issue #243) */
   capabilities?: DebugProtocol.Capabilities;
   /**
+   * Pre-launch setFunctionBreakpoints results in request order, on
+   * 'function_breakpoints_synced' (issue #302). Carries the adapter-assigned
+   * ids to the parent, whose store otherwise learns them only from the
+   * post-launch re-sync — too late for a stop that hits a function
+   * breakpoint immediately at launch.
+   */
+  functionBreakpoints?: FunctionBreakpointSyncResult[];
+}
+
+/** One entry of StatusMessage.functionBreakpoints (issue #302). */
+export interface FunctionBreakpointSyncResult {
+  name: string;
+  verified: boolean;
+  id?: number;
+  line?: number;
+  source?: string;
+  /**
    * On terminal statuses (issue #258): true when the worker had already seen
    * orderly debuggee termination (a terminated/exited DAP event was forwarded
    * or shutdown was underway), so the parent can distinguish a normal

@@ -276,5 +276,82 @@ describe('MCP Server Go Debugging Smoke Test @requires-go', () => {
       }
     }
   }, 60000); // Go build + Delve startup needs more than the default 30s timeout
+
+  it('labels a main.main function-breakpoint stop natively (#302 regression)', async (ctx) => {
+    // Delve sends reason "function breakpoint" itself — no policy relabel
+    // involved. Guards that the go path stays label-correct while rust/.NET
+    // gained policy normalization.
+    const { execSync } = await import('child_process');
+    try {
+      execSync('go version', { stdio: 'ignore' });
+      execSync('dlv version', { stdio: 'ignore' });
+    } catch {
+      console.log('[Go Smoke Test] Go/Delve not installed, skipping fn-bp labeling test');
+      return;
+    }
+
+    const testGoFile = path.resolve(ROOT, 'examples', 'go', 'hello_world.go');
+    const testBinary = path.resolve(ROOT, 'examples', 'go', 'hello_world_fnbp_test');
+    try {
+      execSync(`go build -gcflags="all=-N -l" -o "${testBinary}" "${testGoFile}"`, {
+        cwd: path.dirname(testGoFile),
+        stdio: 'pipe'
+      });
+    } catch {
+      console.log('[Go Smoke Test] Failed to compile test binary, skipping fn-bp labeling test');
+      return;
+    }
+
+    try {
+      const createResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'create_debug_session',
+        arguments: { language: 'go', name: 'go-fnbp-label' }
+      }));
+      sessionId = createResponse.sessionId as string;
+
+      const bpResponse = await callToolSafely(mcpClient!, 'set_breakpoint', {
+        sessionId,
+        function: 'main.main'
+      });
+      expect(bpResponse.success).toBe(true);
+
+      const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: testBinary,
+          args: [],
+          dapLaunchArgs: { stopOnEntry: false }
+        }
+      }));
+      if (!startResponse.success) {
+        skipIfSpawnBlocked(ctx, startResponse, 'Go');
+      }
+
+      const deadline = Date.now() + 20000;
+      let snap: { state?: string; lastStop?: { reason?: string } } | undefined;
+      while (Date.now() < deadline) {
+        const res = parseSdkToolResult(await mcpClient!.callTool({ name: 'list_debug_sessions', arguments: {} }));
+        snap = ((res.sessions ?? []) as Array<{ id: string; state?: string; lastStop?: { reason?: string } }>)
+          .find(s => s.id === sessionId);
+        if (snap?.state === 'paused') break;
+        await new Promise(r => setTimeout(r, 500));
+      }
+      expect(snap?.state, 'session should pause at main.main').toBe('paused');
+      expect(snap!.lastStop?.reason).toBe('function breakpoint');
+
+      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+      await new Promise(r => setTimeout(r, 1000));
+    } finally {
+      try {
+        const fs = await import('fs');
+        if (fs.existsSync(testBinary)) {
+          fs.unlinkSync(testBinary);
+        }
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+  }, 60000);
 });
 

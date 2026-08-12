@@ -21,6 +21,7 @@ import {
 import { ISessionStoreFactory } from '../factories/session-store-factory.js';
 import { IProxyManager } from '../proxy/proxy-manager.js';
 import { IProxyManagerFactory } from '../factories/proxy-manager-factory.js';
+import type { FunctionBreakpointSyncResult } from '../proxy/dap-proxy-interfaces.js';
 import { IAdapterRegistry } from '@debugmcp/shared';
 
 // Custom launch arguments interface extending DebugProtocol.LaunchRequestArguments
@@ -305,28 +306,38 @@ export abstract class SessionManagerCore extends EventEmitter {
         const policy = this.sessionStore.selectPolicy(session.language);
         // Collect the adapter-assigned ids of all user breakpoints so the
         // policy can distinguish internal adapter breakpoints (e.g.
-        // CodeLLDB's rust_panic filter, issue #260) from user ones. Only
-        // pass the set when the bookkeeping is complete — a breakpoint with
+        // CodeLLDB's rust_panic filter, issue #260) from user ones, and
+        // label function-breakpoint hits (issue #302). Each kind's set is
+        // only usable when its bookkeeping is complete — a breakpoint with
         // an unknown id makes the disjointness inference unsafe.
-        let userBreakpointIds: ReadonlySet<number> | undefined;
-        {
-          const ids = new Set<number>();
-          let complete = true;
-          for (const bp of session.breakpoints.values()) {
-            if (typeof bp.adapterId === 'number') {
-              ids.add(bp.adapterId);
-            } else {
-              complete = false;
-              break;
-            }
-          }
-          if (complete) {
-            userBreakpointIds = ids;
+        const lineIds = new Set<number>();
+        let lineComplete = true;
+        for (const bp of session.breakpoints.values()) {
+          if (typeof bp.adapterId === 'number') {
+            lineIds.add(bp.adapterId);
+          } else {
+            lineComplete = false;
+            break;
           }
         }
+        const fnIds = new Set<number>();
+        let fnComplete = true;
+        for (const bp of session.functionBreakpoints.values()) {
+          if (typeof bp.adapterId === 'number') {
+            fnIds.add(bp.adapterId);
+          } else {
+            fnComplete = false;
+            break;
+          }
+        }
+        const userBreakpointIds: ReadonlySet<number> | undefined =
+          lineComplete && fnComplete ? new Set([...lineIds, ...fnIds]) : undefined;
         const normalized = policy.normalizeStopReason?.(rawReason, body, {
           pausePending: session.pausePending === true,
-          userBreakpointIds
+          userBreakpointIds,
+          functionBreakpointIds: fnComplete ? fnIds : undefined,
+          lineBreakpointCount: session.breakpoints.size,
+          functionBreakpointCount: session.functionBreakpoints.size
         });
         if (normalized && normalized !== rawReason) {
           this.logger.info(
@@ -743,6 +754,38 @@ export abstract class SessionManagerCore extends EventEmitter {
     };
     proxyManager.on('adapter-capabilities', handleAdapterCapabilities);
     handlers.set('adapter-capabilities', handleAdapterCapabilities);
+
+    // Pre-launch function-breakpoint sync results from the worker (issue
+    // #302): stamp the adapter-assigned ids into the store immediately so a
+    // stop that hits a function breakpoint right at launch (e.g. a
+    // breakpoint on main) can be labeled — the post-launch re-sync loses
+    // that race. Match by name (payload order mirrors the launch snapshot,
+    // but the map may have changed mid-launch); consume each store entry at
+    // most once so duplicate names update distinct entries.
+    const handleFunctionBreakpointsSynced = (results: FunctionBreakpointSyncResult[]) => {
+      const consumed = new Set<string>();
+      for (const result of results) {
+        const target = Array.from(session.functionBreakpoints.values()).find(
+          (bp) => bp.functionName === result.name && !consumed.has(bp.id)
+        );
+        if (!target) {
+          continue;
+        }
+        consumed.add(target.id);
+        target.verified = result.verified;
+        if (typeof result.id === 'number') {
+          target.adapterId = result.id;
+        }
+        if (typeof result.line === 'number') {
+          target.boundLine = result.line;
+        }
+        if (result.source) {
+          target.boundFile = result.source;
+        }
+      }
+    };
+    proxyManager.on('function-breakpoints-synced', handleFunctionBreakpointsSynced);
+    handlers.set('function-breakpoints-synced', handleFunctionBreakpointsSynced);
 
     // Named function for dry run complete event
     const handleDryRunComplete = (command: string, script: string) => {

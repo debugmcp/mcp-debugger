@@ -42,6 +42,29 @@ export interface AdapterSpecificState {
   [key: string]: unknown;
 }
 
+/**
+ * Context passed to AdapterPolicy.normalizeStopReason (issues #260/#302).
+ * See that method's doc comment for the completeness rules.
+ */
+export interface StopReasonContext {
+  /** True while a user-initiated pause request is in flight. */
+  pausePending: boolean;
+  /**
+   * Adapter-assigned ids of ALL user breakpoints (line + function).
+   * Present only when both bookkeepings are complete.
+   */
+  userBreakpointIds?: ReadonlySet<number>;
+  /**
+   * Adapter-assigned ids of function breakpoints only. Present only when
+   * function-breakpoint id bookkeeping is complete.
+   */
+  functionBreakpointIds?: ReadonlySet<number>;
+  /** Line-breakpoint count from the session store — always present. */
+  lineBreakpointCount: number;
+  /** Function-breakpoint count from the session store — always present. */
+  functionBreakpointCount: number;
+}
+
 export interface AdapterPolicy {
   /**
    * Identifying name for diagnostics (e.g., 'default', 'js-debug')
@@ -139,16 +162,23 @@ export interface AdapterPolicy {
    * @param body The full stopped-event body, if available
    * @param context context.pausePending is true while a user-initiated
    *   pause request is in flight for this session. context.userBreakpointIds
-   *   holds the adapter-assigned ids of every user-set breakpoint, and is
-   *   only present when that bookkeeping is complete (every breakpoint has a
-   *   known id) — policies must not infer anything from hitBreakpointIds
-   *   when it is absent.
+   *   holds the adapter-assigned ids of every user-set breakpoint (line and
+   *   function breakpoints combined), and is only present when that
+   *   bookkeeping is complete (every breakpoint of both kinds has a known
+   *   id) — policies must not infer anything from hitBreakpointIds when it
+   *   is absent. context.functionBreakpointIds holds the function-breakpoint
+   *   subset under the same completeness rule for its own kind.
+   *   context.lineBreakpointCount / functionBreakpointCount come from the
+   *   session's own store and are always present — count-based inference
+   *   (e.g. "the only user breakpoints are function breakpoints") does not
+   *   touch hitBreakpointIds and is legitimate even when the id sets are
+   *   absent.
    * @returns The canonical reason, or undefined to keep the raw reason
    */
   normalizeStopReason?(
     reason: string,
     body: DebugProtocol.StoppedEvent['body'] | undefined,
-    context: { pausePending: boolean; userBreakpointIds?: ReadonlySet<number> }
+    context: StopReasonContext
   ): string | undefined;
 
   /**
