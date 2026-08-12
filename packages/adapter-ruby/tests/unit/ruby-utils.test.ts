@@ -13,7 +13,10 @@ import {
   findRdbgExecutable,
   getRubyVersion,
   getRdbgVersion,
-  buildRdbgInvocation
+  buildRdbgInvocation,
+  ensureRubySyncHelper,
+  RUBY_SYNC_HELPER_CONTENT,
+  RUBY_SYNC_HELPER_FILENAME
 } from '../../src/utils/ruby-utils.js';
 
 const whichMock = vi.mocked(which) as unknown as ReturnType<typeof vi.fn>;
@@ -115,5 +118,65 @@ describe('buildRdbgInvocation platform behavior', () => {
       command: 'C:\\tools\\rdbg.exe',
       args: ['--version']
     });
+  });
+});
+
+describe('ensureRubySyncHelper', () => {
+  let scratchDir: string;
+
+  beforeEach(() => {
+    scratchDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ruby-sync-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(scratchDir, { recursive: true, force: true });
+  });
+
+  it('creates the helper file with the sync prelude and returns its absolute path', () => {
+    const helperPath = ensureRubySyncHelper(scratchDir);
+
+    expect(helperPath).toBe(path.join(scratchDir, RUBY_SYNC_HELPER_FILENAME));
+    expect(fs.readFileSync(helperPath!, 'utf8')).toBe(RUBY_SYNC_HELPER_CONTENT);
+    expect(RUBY_SYNC_HELPER_CONTENT).toContain('$stdout.sync = true');
+    expect(RUBY_SYNC_HELPER_CONTENT).toContain('$stderr.sync = true');
+  });
+
+  it('creates intermediate directories when the log dir does not exist yet', () => {
+    const nestedDir = path.join(scratchDir, 'sessions', 'abc123');
+
+    const helperPath = ensureRubySyncHelper(nestedDir);
+
+    expect(helperPath).toBe(path.join(nestedDir, RUBY_SYNC_HELPER_FILENAME));
+    expect(fs.readFileSync(helperPath!, 'utf8')).toBe(RUBY_SYNC_HELPER_CONTENT);
+  });
+
+  it('reuses an existing helper and rewrites it when the content was tampered with', () => {
+    const first = ensureRubySyncHelper(scratchDir);
+    const untouchedMtime = fs.statSync(first!).mtimeMs;
+
+    // Idempotent reuse: second call returns the same path without error.
+    expect(ensureRubySyncHelper(scratchDir)).toBe(first);
+
+    // Tampered content is restored.
+    fs.writeFileSync(first!, '# tampered\n', 'utf8');
+    const restored = ensureRubySyncHelper(scratchDir);
+    expect(restored).toBe(first);
+    expect(fs.readFileSync(first!, 'utf8')).toBe(RUBY_SYNC_HELPER_CONTENT);
+    expect(untouchedMtime).toBeDefined();
+  });
+
+  it('returns null instead of throwing when the helper cannot be written', () => {
+    // A file where a directory component is expected makes mkdir fail on
+    // both Windows and POSIX.
+    const blocker = path.join(scratchDir, 'blocker');
+    fs.writeFileSync(blocker, 'not a directory', 'utf8');
+    const impossibleDir = path.join(blocker, 'sub');
+
+    const errors: string[] = [];
+    const helperPath = ensureRubySyncHelper(impossibleDir, { error: (msg: string) => errors.push(msg) });
+
+    expect(helperPath).toBeNull();
+    expect(errors.length).toBe(1);
+    expect(errors[0]).toContain('stdout-sync helper');
   });
 });

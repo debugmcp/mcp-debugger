@@ -66,7 +66,7 @@ const LANGUAGES: LangDef[] = [
   { language: 'rust', script: RUST_SCRIPT, bpLine: RUST_BP_LINE, available: hasRust, skipReason: hasRust ? undefined : 'Rust toolchain not installed',
     outputMarker: 'Hello, MCP Debugger!' },
   { language: 'ruby', script: RUBY_SCRIPT, bpLine: RUBY_BP_LINE, available: hasRuby, skipReason: hasRuby ? undefined : 'Ruby/rdbg not installed',
-    outputMarker: '1: 1' },  // iteration 1's puts — the loop breakpoint re-arms, so later output isn't guaranteed
+    outputMarker: '1: 1' },  // iteration 1's puts, streamed mid-run via the sync prelude (#317); the loop breakpoint re-arms, so later output isn't guaranteed
   { language: 'go', script: GO_SCRIPT, bpLine: GO_BP_LINE, available: hasGo, skipReason: hasGo ? undefined : 'Go/Delve not installed',
     dapLaunchArgs: { mode: 'exec' }, outputMarker: 'Hello, World!' },  // launchScript set in beforeAll after build
   { language: 'dotnet', script: DOTNET_SCRIPT, bpLine: DOTNET_BP_LINE, available: hasDotnet, skipReason: hasDotnet ? undefined : '.NET/netcoredbg not installed',
@@ -578,9 +578,9 @@ describe(`Comprehensive MCP Debugger Test — ${ALL_TOOLS.length} Tools × ${LAN
 
           /* ---- Tool 16: get_output (issue #218) ---- */
           // Languages with an outputMarker must capture the script's own
-          // output (issues #223/#225). Others stay lenient: entries may
-          // legitimately be empty (e.g. Ruby routes debuggee stdio to the
-          // adapter process) — only the tool contract is asserted.
+          // output (issues #223/#225, #317). Others stay lenient: entries may
+          // legitimately be empty (adapters differ in how debuggee output is
+          // routed) — only the tool contract is asserted.
           t0 = Date.now();
           try {
             const outRes = await callToolSafely(mcpClient!, 'get_output', { sessionId: currentSessionId });

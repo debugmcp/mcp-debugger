@@ -28,7 +28,8 @@ import {
   getRubyVersion,
   getRdbgVersion,
   getRubySearchPaths,
-  buildRdbgInvocation
+  buildRdbgInvocation,
+  ensureRubySyncHelper
 } from './utils/ruby-utils.js';
 
 interface RubyPathCacheEntry {
@@ -267,11 +268,22 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
   }
 
   private buildTargetCommand(config: AdapterConfig, launchConfig: RubyLaunchConfig): string[] {
+    // Ruby block-buffers $stdout when it is a pipe, and rdbg -c hands the
+    // debuggee the adapter process's piped stdio — without intervention,
+    // puts output only reaches the proxy's stdio scraper at process exit
+    // (issue #317). Inject a tiny -r prelude enabling sync mode. A single
+    // argv element is space-safe (spawn argv array; rdbg execs the command
+    // after `--` verbatim), unlike RUBYOPT which splits on whitespace. On
+    // failure, launch proceeds with exit-only flushing.
+    const syncHelper = ensureRubySyncHelper(config.logDir, this.dependencies.logger);
+    const rubyArgs = syncHelper ? [`-r${syncHelper}`] : [];
+
     if (launchConfig.useBundler) {
       return [
         launchConfig.bundlePath || 'bundle',
         'exec',
         config.executablePath,
+        ...rubyArgs,
         config.scriptPath,
         ...(config.scriptArgs || [])
       ];
@@ -279,6 +291,7 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
 
     return [
       config.executablePath,
+      ...rubyArgs,
       config.scriptPath,
       ...(config.scriptArgs || [])
     ];

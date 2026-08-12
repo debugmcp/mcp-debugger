@@ -195,6 +195,46 @@ export function buildRdbgInvocation(
   return { command: rdbgPath, args };
 }
 
+/**
+ * Prelude injected into the debuggee via `ruby -r` (issue #317). Ruby
+ * block-buffers $stdout on pipes, and rdbg -c hands the debuggee the adapter
+ * process's piped stdio — without sync mode, puts output only reaches the
+ * proxy's stdio scraper when the process exits.
+ */
+export const RUBY_SYNC_HELPER_CONTENT = '$stdout.sync = true\n$stderr.sync = true\n';
+export const RUBY_SYNC_HELPER_FILENAME = 'mcp_stdout_sync.rb';
+
+/**
+ * Materialize the stdout-sync prelude in `dir` (the session log dir — a path
+ * the server owns; never a shared world-writable location, since this file is
+ * `require`d into the debuggee). Idempotent: rewrites only on content
+ * mismatch. Returns null on any failure so the launch degrades to exit-only
+ * output flushing instead of failing.
+ */
+export function ensureRubySyncHelper(dir: string, logger: Logger = noopLogger): string | null {
+  const helperPath = path.join(dir, RUBY_SYNC_HELPER_FILENAME);
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    let existing: string | null = null;
+    try {
+      existing = fs.readFileSync(helperPath, 'utf8');
+    } catch {
+      // Not there yet.
+    }
+    if (existing !== RUBY_SYNC_HELPER_CONTENT) {
+      fs.writeFileSync(helperPath, RUBY_SYNC_HELPER_CONTENT, 'utf8');
+    }
+    return helperPath;
+  } catch (error) {
+    logger.error?.(
+      `[ruby-utils] Cannot materialize stdout-sync helper at ${helperPath}: ` +
+      `${error instanceof Error ? error.message : String(error)}. ` +
+      `Debuggee stdout will only flush at process exit.`
+    );
+    return null;
+  }
+}
+
 export async function getRubyVersion(rubyPath: string): Promise<string | null> {
   return new Promise((resolve) => {
     const child = spawn(rubyPath, ['--version'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });

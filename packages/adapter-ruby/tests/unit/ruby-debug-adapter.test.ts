@@ -10,11 +10,12 @@ vi.mock('../../src/utils/ruby-utils.js', async (importOriginal) => {
     getRubyVersion: vi.fn(),
     findRdbgExecutable: vi.fn(),
     getRdbgVersion: vi.fn(),
-    getRubySearchPaths: vi.fn().mockReturnValue(['/usr/bin'])
+    getRubySearchPaths: vi.fn().mockReturnValue(['/usr/bin']),
+    ensureRubySyncHelper: vi.fn()
   };
 });
 
-const { findRubyExecutable, getRubyVersion, findRdbgExecutable, getRdbgVersion, getRubySearchPaths } = await import('../../src/utils/ruby-utils.js');
+const { findRubyExecutable, getRubyVersion, findRdbgExecutable, getRdbgVersion, getRubySearchPaths, ensureRubySyncHelper } = await import('../../src/utils/ruby-utils.js');
 
 const createDependencies = () => ({
   fileSystem: {} as unknown,
@@ -70,7 +71,8 @@ describe('RubyDebugAdapter', () => {
     expect(result.errors.map((entry) => entry.code)).toContain('RDBG_NOT_FOUND');
   });
 
-  it('builds an rdbg adapter command', () => {
+  it('builds an rdbg adapter command with the stdout-sync prelude', () => {
+    vi.mocked(ensureRubySyncHelper).mockReturnValue('/tmp/logs/mcp_stdout_sync.rb');
     const adapter = new RubyDebugAdapter(createDependencies());
     (adapter as unknown as { rdbgPathCache: Map<string, { path: string; timestamp: number }> })
       .rdbgPathCache.set('default', { path: '/usr/bin/rdbg', timestamp: Date.now() });
@@ -87,6 +89,67 @@ describe('RubyDebugAdapter', () => {
     });
 
     expect(command.command).toBe('/usr/bin/rdbg');
+    expect(command.args).toEqual([
+      '--open',
+      '--host', '127.0.0.1',
+      '--port', '8123',
+      '-c',
+      '--',
+      '/usr/bin/ruby',
+      '-r/tmp/logs/mcp_stdout_sync.rb',
+      '/workspace/app.rb',
+      'one',
+      'two'
+    ]);
+    expect(ensureRubySyncHelper).toHaveBeenCalledWith('/tmp/logs', expect.anything());
+  });
+
+  it('injects the stdout-sync prelude in the bundler branch', () => {
+    vi.mocked(ensureRubySyncHelper).mockReturnValue('/tmp/logs/mcp_stdout_sync.rb');
+    const adapter = new RubyDebugAdapter(createDependencies());
+    (adapter as unknown as { rdbgPathCache: Map<string, { path: string; timestamp: number }> })
+      .rdbgPathCache.set('default', { path: '/usr/bin/rdbg', timestamp: Date.now() });
+
+    const command = adapter.buildAdapterCommand({
+      sessionId: 'ruby-session',
+      executablePath: '/usr/bin/ruby',
+      adapterHost: '127.0.0.1',
+      adapterPort: 8123,
+      logDir: '/tmp/logs',
+      scriptPath: '/workspace/app.rb',
+      scriptArgs: [],
+      launchConfig: { useBundler: true, bundlePath: '/usr/local/bin/bundle' }
+    });
+
+    const dashC = command.args.indexOf('-c');
+    expect(command.args.slice(dashC)).toEqual([
+      '-c',
+      '--',
+      '/usr/local/bin/bundle',
+      'exec',
+      '/usr/bin/ruby',
+      '-r/tmp/logs/mcp_stdout_sync.rb',
+      '/workspace/app.rb'
+    ]);
+  });
+
+  it('launches without the prelude when the sync helper cannot be materialized', () => {
+    vi.mocked(ensureRubySyncHelper).mockReturnValue(null);
+    const adapter = new RubyDebugAdapter(createDependencies());
+    (adapter as unknown as { rdbgPathCache: Map<string, { path: string; timestamp: number }> })
+      .rdbgPathCache.set('default', { path: '/usr/bin/rdbg', timestamp: Date.now() });
+
+    const command = adapter.buildAdapterCommand({
+      sessionId: 'ruby-session',
+      executablePath: '/usr/bin/ruby',
+      adapterHost: '127.0.0.1',
+      adapterPort: 8123,
+      logDir: '/tmp/logs',
+      scriptPath: '/workspace/app.rb',
+      scriptArgs: ['one', 'two'],
+      launchConfig: {}
+    });
+
     expect(command.args).toEqual([
       '--open',
       '--host', '127.0.0.1',

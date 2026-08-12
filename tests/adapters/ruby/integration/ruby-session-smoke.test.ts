@@ -83,10 +83,17 @@ describe('Ruby adapter - session smoke (integration)', () => {
     expect(command.args).not.toContain('--nonstop');
     // Never the vscode frontend mode, which tries to launch an editor.
     expect(command.args.every(arg => !arg.includes('vscode'))).toBe(true);
-    // Command mode: rdbg runs `ruby <script>` under the debugger.
+    // Command mode: rdbg runs `ruby <script>` under the debugger, with the
+    // stdout-sync prelude injected so puts output streams mid-run (#317).
     const dashC = command.args.indexOf('-c');
     expect(dashC).toBeGreaterThan(-1);
-    expect(command.args.slice(dashC)).toEqual(['-c', '--', 'ruby', sampleScriptPath]);
+    expect(command.args.slice(dashC)).toEqual([
+      '-c',
+      '--',
+      'ruby',
+      expect.stringMatching(/^-r.*mcp_stdout_sync\.rb$/),
+      sampleScriptPath
+    ]);
   });
 
   it('normalizes launch config for Ruby scripts', async () => {
