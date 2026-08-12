@@ -18,7 +18,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
+import { parseSdkToolResult, callToolSafely, pollUntil } from './smoke-test-utils.js';
 import { findRubyExecutable, findRdbgExecutable } from '@debugmcp/adapter-ruby';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -269,18 +269,3 @@ describe('MCP Server Ruby Debugging Smoke Test @requires-ruby', () => {
     expect(listResponse.sessions?.find(s => s.id === sessionId)?.state).toBe('paused');
   }, 90000);
 });
-
-/** Poll until fn resolves to a defined value or the timeout elapses. */
-async function pollUntil<T>(
-  fn: () => Promise<T | undefined>,
-  timeoutMs: number,
-  intervalMs = 250
-): Promise<T | undefined> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const value = await fn();
-    if (value !== undefined) return value;
-    if (Date.now() > deadline) return undefined;
-    await new Promise(resolve => setTimeout(resolve, intervalMs));
-  }
-}
