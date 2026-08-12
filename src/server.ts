@@ -1303,7 +1303,7 @@ export class DebugMcpServer {
                   success: true,
                   breakpoints,
                   count: breakpoints.length,
-                  ...(functionBreakpoints.length > 0
+                  ...(args.file === undefined
                     ? { functionBreakpoints, functionCount: functionBreakpoints.length }
                     : {})
                 }) }] };

@@ -242,7 +242,10 @@ describe('Breakpoint addressing e2e (#271, mock adapter)', () => {
     });
     expect(removeRes.success).toBe(true);
     const finalList = await callToolSafely(mcpClient!, 'list_breakpoints', { sessionId });
-    expect((finalList as { functionBreakpoints?: unknown[] }).functionBreakpoints).toBeUndefined();
+    // Stable response shape (#306): the unfiltered list always carries the
+    // function-breakpoint fields, empty after the last one is removed.
+    expect((finalList as { functionBreakpoints?: unknown[] }).functionBreakpoints).toEqual([]);
+    expect((finalList as { functionCount?: number }).functionCount).toBe(0);
   }, 45_000);
 
   it('accepts statement with a matching expectedContent (#280)', async () => {
