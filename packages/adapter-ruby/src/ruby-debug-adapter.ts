@@ -260,9 +260,14 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
     return {
       command: invocation.command,
       args: invocation.args,
+      // rdbg -c starts the debuggee at spawn time, so the spawn env is the
+      // only channel for launchConfig.env — the later DAP launch request is
+      // an ack (issue #318). User env last: an explicit value wins over both
+      // inherited process.env and adapter defaults.
       env: {
         ...process.env,
-        RUBY_DEBUG_DAP_SHOW_PROTOCOL: process.env.DEBUG ? '1' : '0'
+        RUBY_DEBUG_DAP_SHOW_PROTOCOL: process.env.DEBUG ? '1' : '0',
+        ...(launchConfig.env ?? {})
       }
     };
   }

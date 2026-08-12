@@ -83,6 +83,14 @@ set `$stdout.sync = false` itself. Attach mode connects to a process the server 
 start, so no prelude is injected there — set `$stdout.sync = true` in your program if you
 need mid-run output while attached.
 
+### Environment variables
+
+Launch mode applies `dapLaunchArgs.env` to the debuggee's process environment at spawn
+time (because `rdbg -c` starts the script immediately, the later DAP launch request
+cannot carry it). An explicit value there wins over the server's inherited environment.
+Attach mode cannot set env — the target process is already running; set variables before
+starting it.
+
 ### Bundler projects
 
 Pass `useBundler` through the launch configuration to run the target via `bundle exec`:

@@ -268,4 +268,46 @@ describe('MCP Server Ruby Debugging Smoke Test @requires-ruby', () => {
     })) as { sessions?: Array<{ id: string; state: string }> };
     expect(listResponse.sessions?.find(s => s.id === sessionId)?.state).toBe('paused');
   }, 90000);
+
+  it('applies dapLaunchArgs.env to the debuggee (issue #318)', async () => {
+    if (!(await rubyToolchainAvailable())) {
+      console.log('[Ruby Smoke Test] Ruby/rdbg not available, skipping launch env test');
+      return;
+    }
+
+    const testRubyFile = path.resolve(ROOT, 'examples', 'ruby', 'fizzbuzz.rb');
+
+    const createResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: { language: 'ruby', name: 'ruby-launch-env-test' }
+    }));
+    expect(createResponse.sessionId).toBeDefined();
+    sessionId = createResponse.sessionId as string;
+
+    const bpResponse = await callToolSafely(mcpClient!, 'set_breakpoint', {
+      sessionId,
+      file: testRubyFile,
+      line: 15
+    });
+    expect(bpResponse.success).toBe(true);
+
+    // rdbg -c starts the debuggee at spawn time, so env can only reach it
+    // through the spawn environment — the DAP launch request is an ack.
+    const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'start_debugging',
+      arguments: {
+        sessionId,
+        scriptPath: testRubyFile,
+        dapLaunchArgs: { env: { MCP_TEST_ENV_318: 'hello-318' } }
+      }
+    })) as { state?: string };
+    expect(startResponse.state).toBe('paused');
+
+    const evalResult = await callToolSafely(mcpClient!, 'evaluate_expression', {
+      sessionId,
+      expression: "ENV['MCP_TEST_ENV_318']"
+    });
+    // rdbg inspects results, so a String comes back quoted.
+    expect(String(evalResult.result)).toContain('hello-318');
+  }, 90000);
 });
