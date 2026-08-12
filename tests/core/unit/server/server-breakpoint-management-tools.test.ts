@@ -89,6 +89,67 @@ describe('Server Breakpoint Management Tools', () => {
       expect(mockSessionManager.listBreakpoints).toHaveBeenCalledWith('test-session', undefined);
     });
 
+    it('always includes empty function-breakpoint fields in the unfiltered response (#306)', async () => {
+      mockSessionManager.listBreakpoints.mockReturnValue([]);
+      mockSessionManager.listFunctionBreakpoints.mockReturnValue([]);
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'list_breakpoints',
+          arguments: { sessionId: 'test-session' }
+        }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.functionBreakpoints).toEqual([]);
+      expect(content.functionCount).toBe(0);
+    });
+
+    it('includes function breakpoints in the unfiltered response', async () => {
+      mockSessionManager.listBreakpoints.mockReturnValue([]);
+      mockSessionManager.listFunctionBreakpoints.mockReturnValue([
+        { id: 'fn-1', functionName: 'main', verified: false }
+      ]);
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'list_breakpoints',
+          arguments: { sessionId: 'test-session' }
+        }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.functionBreakpoints).toHaveLength(1);
+      expect(content.functionBreakpoints[0]).toMatchObject({ functionName: 'main', verified: false });
+      expect(content.functionCount).toBe(1);
+    });
+
+    it('omits function-breakpoint fields when filtering by file', async () => {
+      mockSessionManager.listBreakpoints.mockReturnValue([
+        { id: 'bp-1', file: '/a.py', line: 10, verified: true }
+      ]);
+      mockSessionManager.listFunctionBreakpoints.mockReturnValue([
+        { id: 'fn-1', functionName: 'main', verified: true }
+      ]);
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'list_breakpoints',
+          arguments: { sessionId: 'test-session', file: '/a.py' }
+        }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      // Function breakpoints are session-global; a file filter deliberately
+      // excludes them (issue #271 phase 3), so the keys stay absent.
+      expect(content.functionBreakpoints).toBeUndefined();
+      expect(content.functionCount).toBeUndefined();
+      expect(mockSessionManager.listFunctionBreakpoints).not.toHaveBeenCalled();
+    });
+
     it('works for a terminated session', async () => {
       mockSessionManager.getSession.mockReturnValue({
         id: 'test-session',

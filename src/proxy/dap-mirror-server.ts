@@ -85,6 +85,17 @@ export interface IDapMirrorServerFactory {
   create(host: DapMirrorHost, options: DapMirrorServerOptions): IDapMirrorServer;
 }
 
+/**
+ * Late-join stopped replay has two triggers: the client's configurationDone
+ * (standard DAP handshake order — fires the replay immediately, real IDEs
+ * always take this path) and this fallback for minimal scripted clients that
+ * skip configurationDone. Short enough that a script attaching and reading
+ * events sees the replay promptly (issue #307); an immediate-at-join replay
+ * is deliberately avoided so protocol-following IDEs never receive a stopped
+ * event before their configuration phase completes.
+ */
+export const CONFIGURATION_DONE_FALLBACK_MS = 200;
+
 // ===== Request dispatch tables (default-deny) =====
 
 /** Read-only requests forwarded to the real adapter connection. */
@@ -315,7 +326,7 @@ export class MirrorClientConnection {
         this.phase = 'ready';
         this.synthesizeStoppedIfPaused();
       }
-    }, 1000);
+    }, CONFIGURATION_DONE_FALLBACK_MS);
   }
 
   private buildCapabilityMask(): DebugProtocol.Capabilities {
