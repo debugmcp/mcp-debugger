@@ -90,7 +90,7 @@ describe('Server Inspection Tools Tests', () => {
         }
       });
       
-      expect(mockSessionManager.getVariables).toHaveBeenCalledWith('test-session', 100);
+      expect(mockSessionManager.getVariables).toHaveBeenCalledWith('test-session', 100, undefined);
       
       const content = JSON.parse(result.content[0].text);
       expect(content.success).toBe(true);

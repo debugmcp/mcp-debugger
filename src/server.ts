@@ -53,6 +53,7 @@ import {
   supportsLoudSnapping
 } from './utils/bp-addressing.js';
 import { isRedactionEnabled } from './utils/redaction-mode.js';
+import { getVariableAccessMode, requiresExplicitNames } from './utils/variable-access.js';
 import { assertLineContent, resolveStatement } from './utils/breakpoint-resolver.js';
 
 const DEFAULT_LANGUAGES = Object.freeze([DebugLanguage.PYTHON, DebugLanguage.MOCK] as const);
@@ -116,6 +117,7 @@ interface ToolArguments {
   linesContext?: number;
   includeInternals?: boolean;
   includeSpecial?: boolean;
+  names?: string[];
   // Attach-related parameters
   port?: number;
   host?: string;
@@ -176,7 +178,7 @@ const TOOL_ARG_EXPECTED_TYPES: Record<string, 'number' | 'boolean' | 'object' | 
   // objects
   dapLaunchArgs: 'object', adapterLaunchConfig: 'object',
   // arrays
-  args: 'array', sourcePaths: 'array',
+  args: 'array', sourcePaths: 'array', names: 'array',
 };
 
 export function coerceToolArguments(args: Record<string, unknown>): Record<string, unknown> {
@@ -765,9 +767,9 @@ export class DebugMcpServer {
     return this.sessionManager.clearBreakpoints(sessionId, effectiveFile);
   }
 
-  public async getVariables(sessionId: string, variablesReference: number): Promise<Variable[]> {
+  public async getVariables(sessionId: string, variablesReference: number, names?: string[]): Promise<Variable[]> {
     this.validateSession(sessionId);
-    return this.sessionManager.getVariables(sessionId, variablesReference);
+    return this.sessionManager.getVariables(sessionId, variablesReference, names);
   }
 
   public async getStackTrace(sessionId: string, includeInternals: boolean = false): Promise<StackFrame[]> {
@@ -801,13 +803,13 @@ export class DebugMcpServer {
     return this.sessionManager.getScopes(sessionId, frameId);
   }
 
-  public async getLocalVariables(sessionId: string, includeSpecial: boolean = false): Promise<{
+  public async getLocalVariables(sessionId: string, includeSpecial: boolean = false, names?: string[]): Promise<{
     variables: Variable[];
     frame: { name: string; file: string; line: number } | null;
     scopeName: string | null;
   }> {
     this.validateSession(sessionId);
-    return this.sessionManager.getLocalVariables(sessionId, includeSpecial);
+    return this.sessionManager.getLocalVariables(sessionId, includeSpecial, names);
   }
 
   public async continueExecution(sessionId: string): Promise<boolean> {
@@ -881,7 +883,8 @@ export class DebugMcpServer {
         // Redaction state rides along (issue #237) so agents aren't surprised
         // by <redacted:...> placeholders.
         instructions: buildServerInstructions(getBpAddressingMode(this.environment), {
-          redactionEnabled: isRedactionEnabled(this.environment)
+          redactionEnabled: isRedactionEnabled(this.environment),
+          variableAccessMode: getVariableAccessMode(this.environment)
         })
       }
     );
@@ -985,6 +988,18 @@ export class DebugMcpServer {
         setBreakpointRequired = ['sessionId'];
       }
 
+      // Least-privilege gating (issue #237): in explicit mode the names
+      // filter is required, and the schema must say so.
+      const varAccessExplicit = requiresExplicitNames(getVariableAccessMode(this.environment));
+      const namesProp = {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Only return variables with these exact names (case-sensitive). Requested names missing from the scope are listed in the response\'s notFound.' +
+          (varAccessExplicit ? ' Required: this server runs in least-privilege mode (DEBUG_MCP_VARIABLE_ACCESS=explicit) — unfiltered scope dumps are disabled.' : '')
+      };
+      const getVariablesRequired = varAccessExplicit ? ['sessionId', 'scope', 'names'] : ['sessionId', 'scope'];
+      const getLocalVariablesRequired = varAccessExplicit ? ['sessionId', 'names'] : ['sessionId'];
+
       return {
         tools: [
           { name: 'create_debug_session', description: 'Create a new debugging session. Provide host and port to attach to a running process; omit them for launch mode', inputSchema: { type: 'object', properties: { language: { type: 'string', enum: supportedLanguages, description: 'Programming language for debugging' }, name: { type: 'string', description: 'Optional session name' }, executablePath: {type: 'string', description: 'Path to language executable (optional, will auto-detect if not provided)'}, host: { type: 'string', description: 'Host to attach to for remote debugging (optional, triggers attach mode)' }, port: { type: 'number', description: 'Debug port to attach to for remote debugging (optional, triggers attach mode)' }, timeout: { type: 'number', description: 'Connection timeout in milliseconds for attach mode (default: 30000)' }, verifyTimeout: { type: 'number', description: 'Attach mode only: how long to wait (ms) for the debugger to report at least one thread after attaching before failing the attach (default: 5000, max: 600000)' } }, required: ['language'] } },
@@ -1055,8 +1070,8 @@ export class DebugMcpServer {
           { name: 'continue_execution', description: 'Continue execution. Returns immediately after the adapter acknowledges; does not wait for the next stop. When the program stops again the session state becomes "paused" — check list_debug_sessions or get_stack_trace, whose lastStop/stopReason tells you why it stopped (e.g. "breakpoint" vs "exception"). Use get_output to read the program\'s stdout/stderr', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
           { name: 'pause_execution', description: 'Pause a running program. Waits briefly for the stop; if the program cannot stop within ~5s (e.g. blocked in native code), returns success with pending:true and the session reports "paused" once the stop lands', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, threadId: { type: 'number', description: 'Thread ID to pause. If omitted or 0, pauses all threads.' } }, required: ['sessionId'] } },
           { name: 'list_threads', description: 'List all threads in the debugged process', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
-          { name: 'get_variables', description: 'Get variables (scope is variablesReference: number)', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, scope: { type: 'number', description: "The variablesReference number from a StackFrame or Variable" } }, required: ['sessionId', 'scope'] } },
-          { name: 'get_local_variables', description: 'Get local variables for the current stack frame. This is a convenience tool that returns just the local variables without needing to traverse stack->scopes->variables manually', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, includeSpecial: { type: 'boolean', description: 'Include special/internal variables like this, __proto__, __builtins__, etc. Default: false' } }, required: ['sessionId'] } },
+          { name: 'get_variables', description: 'Get variables (scope is variablesReference: number)', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, scope: { type: 'number', description: "The variablesReference number from a StackFrame or Variable" }, names: namesProp }, required: getVariablesRequired } },
+          { name: 'get_local_variables', description: 'Get local variables for the current stack frame. This is a convenience tool that returns just the local variables without needing to traverse stack->scopes->variables manually', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, includeSpecial: { type: 'boolean', description: 'Include special/internal variables like this, __proto__, __builtins__, etc. Default: false' }, names: namesProp }, required: getLocalVariablesRequired } },
           { name: 'get_stack_trace', description: 'Get stack trace. The response includes stopReason — why the session is paused (e.g. "breakpoint" vs "exception")', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, includeInternals: { type: 'boolean', description: 'Include internal/framework frames (e.g., Node.js internals). Default: false for cleaner output.' } }, required: ['sessionId'] } },
           { name: 'get_scopes', description: 'Get scopes for a stack frame', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, frameId: { type: 'number', description: "The ID of the stack frame from a stackTrace response" } }, required: ['sessionId', 'frameId'] } },
           { name: 'evaluate_expression', description: 'Evaluate expression in the current debug context. Expressions can read and modify program state. Waits up to 30s for the result by default; pass timeout for long-running expressions', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, expression: { type: 'string' }, frameId: { type: 'number', description: 'Optional stack frame ID for evaluation context. Must be a frame ID from a get_stack_trace response. If not provided, uses the current (top) frame automatically' }, timeout: { type: 'number', description: 'Max time (ms) to wait for the evaluation to complete (default: 30000, max: 600000). On expiry the request fails but the expression may keep executing in the debuggee. Note: your MCP client may enforce its own overall request timeout' } }, required: ['sessionId', 'expression'] } },
@@ -1838,9 +1853,10 @@ export class DebugMcpServer {
               if (!args.sessionId || args.scope === undefined) {
                 throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameters');
               }
-              
+              this.enforceExplicitNames('get_variables', args.names);
+
               try {
-                const variables = await this.getVariables(args.sessionId, args.scope);
+                const variables = await this.getVariables(args.sessionId, args.scope, args.names);
                 
                 // Log variable inspection (truncate large values)
                 const truncatedVars = variables.map(v => ({
@@ -1859,7 +1875,10 @@ export class DebugMcpServer {
                 });
                 
                 const redaction = this.redactionSummary(variables);
-                result = { content: [{ type: 'text', text: JSON.stringify({ success: true, variables, count: variables.length, variablesReference: args.scope, ...(redaction ? { redaction } : {}) }) }] };
+                const notFound = args.names
+                  ? args.names.filter(name => !variables.some(v => v.name === name))
+                  : undefined;
+                result = { content: [{ type: 'text', text: JSON.stringify({ success: true, variables, count: variables.length, variablesReference: args.scope, ...(notFound !== undefined ? { notFound } : {}), ...(redaction ? { redaction } : {}) }) }] };
               } catch (error) {
                 // Handle validation errors specifically
                 if (error instanceof SessionTerminatedError ||
@@ -1932,7 +1951,7 @@ export class DebugMcpServer {
               break;
             }
             case 'get_local_variables': {
-              result = await this.handleGetLocalVariables(args as { sessionId: string; includeSpecial?: boolean });
+              result = await this.handleGetLocalVariables(args as { sessionId: string; includeSpecial?: boolean; names?: string[] });
               break;
             }
             case 'get_output': {
@@ -2154,6 +2173,25 @@ export class DebugMcpServer {
     } catch (error) {
       this.logger.error('Failed to list debug sessions', { error });
       throw new McpError(McpErrorCode.InternalError, `Failed to list debug sessions: ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * Least-privilege enforcement (issue #237): in explicit mode, bulk scope
+   * dumps are disabled — the tools require a non-empty names filter, and the
+   * error teaches the correct call shape.
+   */
+  private enforceExplicitNames(toolName: string, names: string[] | undefined): void {
+    if (!requiresExplicitNames(getVariableAccessMode(this.environment))) {
+      return;
+    }
+    if (!names || names.length === 0) {
+      throw new McpError(
+        McpErrorCode.InvalidParams,
+        `${toolName} requires "names" in least-privilege mode (DEBUG_MCP_VARIABLE_ACCESS=explicit): ` +
+        `pass the exact variable names you need, e.g. names:["user","order_total"]. ` +
+        `Unfiltered scope dumps are disabled by this server's configuration.`
+      );
     }
   }
 
@@ -2433,15 +2471,17 @@ export class DebugMcpServer {
     }
   }
 
-  private async handleGetLocalVariables(args: { sessionId: string; includeSpecial?: boolean }): Promise<ServerResult> {
+  private async handleGetLocalVariables(args: { sessionId: string; includeSpecial?: boolean; names?: string[] }): Promise<ServerResult> {
+    this.enforceExplicitNames('get_local_variables', args.names);
     try {
       // Validate session
       this.validateSession(args.sessionId);
-      
+
       // Get local variables using the new convenience method
       const result = await this.getLocalVariables(
         args.sessionId,
-        args.includeSpecial ?? false
+        args.includeSpecial ?? false,
+        args.names
       );
       
       // Log for debugging
@@ -2465,6 +2505,12 @@ export class DebugMcpServer {
       const redaction = this.redactionSummary(result.variables);
       if (redaction) {
         response.redaction = redaction;
+      }
+
+      if (args.names) {
+        response.notFound = args.names.filter(
+          name => !result.variables.some(v => v.name === name)
+        );
       }
 
       // Include frame information if available
