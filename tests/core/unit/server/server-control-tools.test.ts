@@ -291,6 +291,185 @@ describe('Server Control Tools Tests', () => {
       expect(mockSessionManager.startDebugging).not.toHaveBeenCalled();
     });
 
+    it('honors breakOnExceptions nested inside dapLaunchArgs with a warning (#305)', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: 'ACTIVE'
+      });
+      mockSessionManager.startDebugging.mockResolvedValue({
+        success: true,
+        state: 'running',
+        data: { message: 'Debugging started' }
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'start_debugging',
+          arguments: {
+            sessionId: 'test-session',
+            scriptPath: '/path/to/test.py',
+            dapLaunchArgs: { stopOnEntry: false, breakOnExceptions: 'none' }
+          }
+        }
+      });
+
+      // The nested value is honored and stripped from the forwarded launch args.
+      expect(mockSessionManager.startDebugging).toHaveBeenCalledWith(
+        'test-session',
+        expect.stringContaining('/path/to/test.py'),
+        undefined,
+        { stopOnEntry: false },
+        undefined,
+        undefined,
+        'none'
+      );
+      const content = JSON.parse(result.content[0].text);
+      expect(content.warning).toMatch(/breakOnExceptions is a top-level start_debugging parameter/);
+      expect(content.warning).toContain("'none'");
+    });
+
+    it('prefers the top-level breakOnExceptions when both placements are given', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: 'ACTIVE'
+      });
+      mockSessionManager.startDebugging.mockResolvedValue({
+        success: true,
+        state: 'running',
+        data: { message: 'Debugging started' }
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'start_debugging',
+          arguments: {
+            sessionId: 'test-session',
+            scriptPath: '/path/to/test.py',
+            breakOnExceptions: 'all',
+            dapLaunchArgs: { breakOnExceptions: 'none' }
+          }
+        }
+      });
+
+      expect(mockSessionManager.startDebugging).toHaveBeenCalledWith(
+        'test-session',
+        expect.stringContaining('/path/to/test.py'),
+        undefined,
+        {},
+        undefined,
+        undefined,
+        'all'
+      );
+      const content = JSON.parse(result.content[0].text);
+      expect(content.warning).toMatch(/top-level value wins/);
+      expect(content.warning).toContain("'all'");
+      expect(content.warning).toContain("'none'");
+    });
+
+    it('rejects an invalid nested breakOnExceptions like an invalid top-level one', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: 'ACTIVE'
+      });
+
+      await expect(callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'start_debugging',
+          arguments: {
+            sessionId: 'test-session',
+            scriptPath: '/path/to/test.py',
+            dapLaunchArgs: { breakOnExceptions: 'sometimes' }
+          }
+        }
+      })).rejects.toThrow(/breakOnExceptions must be one of/);
+
+      expect(mockSessionManager.startDebugging).not.toHaveBeenCalled();
+    });
+
+    it('strips other misplaced top-level keys from dapLaunchArgs with a warning', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: 'ACTIVE'
+      });
+      mockSessionManager.startDebugging.mockResolvedValue({
+        success: true,
+        state: 'running',
+        data: { message: 'Debugging started' }
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'start_debugging',
+          arguments: {
+            sessionId: 'test-session',
+            scriptPath: '/path/to/test.py',
+            dapLaunchArgs: { stopOnEntry: true, dryRunSpawn: true, scriptPath: '/elsewhere.py' }
+          }
+        }
+      });
+
+      expect(mockSessionManager.startDebugging).toHaveBeenCalledWith(
+        'test-session',
+        expect.stringContaining('/path/to/test.py'),
+        undefined,
+        { stopOnEntry: true },
+        undefined,
+        undefined,
+        undefined
+      );
+      const content = JSON.parse(result.content[0].text);
+      expect(content.warning).toMatch(/'dryRunSpawn' is a top-level start_debugging parameter/);
+      expect(content.warning).toMatch(/'scriptPath' is a top-level start_debugging parameter/);
+    });
+
+    it('passes legitimate DAP launch keys through untouched with no warning', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: 'ACTIVE'
+      });
+      mockSessionManager.startDebugging.mockResolvedValue({
+        success: true,
+        state: 'running',
+        data: { message: 'Debugging started' }
+      });
+
+      const dapLaunchArgs = {
+        stopOnEntry: true,
+        justMyCode: false,
+        program: '/target/debug/app',
+        cwd: '/work',
+        args: ['--flag'],
+        env: { RUST_LOG: 'debug' }
+      };
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'start_debugging',
+          arguments: {
+            sessionId: 'test-session',
+            scriptPath: '/path/to/test.py',
+            dapLaunchArgs
+          }
+        }
+      });
+
+      expect(mockSessionManager.startDebugging).toHaveBeenCalledWith(
+        'test-session',
+        expect.stringContaining('/path/to/test.py'),
+        undefined,
+        dapLaunchArgs,
+        undefined,
+        undefined,
+        undefined
+      );
+      const content = JSON.parse(result.content[0].text);
+      expect(content.warning).toBeUndefined();
+    });
+
     it('should handle dry run mode', async () => {
       // Mock session validation
       mockSessionManager.getSession.mockReturnValue({
