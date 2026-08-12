@@ -91,7 +91,7 @@ Here's the recommended configuration for your MCP settings file:
 - The `:rw` suffix allows read-write access (required for debugging)
 - The Docker entrypoint (`scripts/docker-entry.sh`) runs `dist/bundle.cjs` and passes through command-line arguments (e.g., `stdio`). It does not hardcode `--log-level` or `--log-file`
 - When using the debugger, provide paths relative to the project root (e.g., `examples/test.py` not `/workspace/examples/test.py`)
-- Optional env flags pass through with `-e`, e.g. `-e DEBUG_MCP_BP_ADDRESSING=line` restricts breakpoint addressing features (default: all enabled; see the set_breakpoint section of the tool reference), or `-e DEBUG_MCP_NO_REDACT=1` to disable the default masking of credential-shaped values in variable/evaluate/output results (see the Secret redaction section of the tool reference)
+- Optional env flags pass through with `-e`, e.g. `-e DEBUG_MCP_BP_ADDRESSING=line` restricts breakpoint addressing features (default: all enabled; see the set_breakpoint section of the tool reference), `-e DEBUG_MCP_NO_REDACT=1` to disable the default masking of credential-shaped values in variable/evaluate/output results, or `-e DEBUG_MCP_VARIABLE_ACCESS=explicit` to require explicit variable names on get_variables/get_local_variables (see the Secret redaction and Least-privilege mode sections of the tool reference)
 
 ## Rust support in Docker
 

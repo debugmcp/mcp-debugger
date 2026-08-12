@@ -54,7 +54,12 @@ export abstract class SessionManagerData extends SessionManagerCore {
       .sort((a, b) => a.functionName.localeCompare(b.functionName));
   }
 
-  async getVariables(sessionId: string, variablesReference: number): Promise<Variable[]> {
+  /**
+   * @param names Optional exact-match, case-sensitive filter (issue #237,
+   * least-privilege mode): only variables with these names are returned,
+   * redacted, or logged.
+   */
+  async getVariables(sessionId: string, variablesReference: number, names?: string[]): Promise<Variable[]> {
     const session = this._getSessionById(sessionId);
     this.logger.info(`[SM getVariables ${sessionId}] Entered. variablesReference: ${variablesReference}, Current state: ${session.state}`);
     
@@ -80,6 +85,11 @@ export abstract class SessionManagerData extends SessionManagerCore {
             variablesReference: v.variablesReference,
             expandable: v.variablesReference > 0
         }));
+        // Names filter before redaction/logging: unrequested values never
+        // leave the raw response object.
+        if (names) {
+          vars = vars.filter(v => names.includes(v.name));
+        }
         // Redaction hook (issue #237): this is the single DAP→Variable
         // mapping point, so get_variables, get_local_variables and child
         // expansion are all covered here, upstream of every log line.
@@ -194,7 +204,12 @@ export abstract class SessionManagerData extends SessionManagerCore {
    * scopes, and variables, then delegates to the adapter policy to extract
    * just the local variables.
    */
-  async getLocalVariables(sessionId: string, includeSpecial: boolean = false): Promise<{
+  /**
+   * @param names Optional exact-match, case-sensitive filter (issue #237),
+   * applied to the final extracted locals — the policy's scope traversal
+   * still sees everything it needs to pick the right scopes.
+   */
+  async getLocalVariables(sessionId: string, includeSpecial: boolean = false, names?: string[]): Promise<{
     variables: Variable[];
     frame: { name: string; file: string; line: number } | null;
     scopeName: string | null;
@@ -278,8 +293,12 @@ export abstract class SessionManagerData extends SessionManagerCore {
         }
       }
       
+      if (names) {
+        localVars = localVars.filter(v => names.includes(v.name));
+      }
+
       this.logger.info(`[SM getLocalVariables ${sessionId}] Found ${localVars.length} local variables.`);
-      
+
       return {
         variables: localVars,
         frame: {

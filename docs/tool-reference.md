@@ -23,6 +23,7 @@ This document provides a complete reference for all tools available in mcp-debug
    - [pause_execution](#pause_execution)
 4. [State Inspection](#state-inspection)
    - [Secret redaction](#secret-redaction)
+   - [Least-privilege mode](#least-privilege-mode)
    - [get_stack_trace](#get_stack_trace)
    - [get_scopes](#get_scopes)
    - [get_variables](#get_variables)
@@ -523,6 +524,18 @@ Results that had values masked carry a `redaction` field (`{ masked, notice }` o
 
 **Limitations**: redaction is display-level protection against credentials leaking into transcripts, not a security boundary against a hostile agent — an agent can still compute over secrets via `evaluate_expression` side effects. Secrets split across separate output chunks, and generic high-entropy strings with no recognizable shape or name, are not detected. The [`expose_session`](#expose_session) IDE mirror shows **raw, unredacted** values — it serves a human's IDE, not the agent.
 
+### Least-privilege mode
+
+For security-sensitive deployments, `DEBUG_MCP_VARIABLE_ACCESS=explicit` disables bulk scope dumps: `get_variables` and `get_local_variables` **require** a `names` filter, so the agent must ask for specific variables instead of sweeping every value in scope into its context. An unfiltered call is rejected with a clear `InvalidParams` error that teaches the correct call shape; the tool schemas and the initialize instructions advertise the requirement.
+
+The `names` parameter works in the default (`open`) mode too, as an ordinary filter:
+
+- Exact-match and **case-sensitive** against variable names (DAP names are language identifiers).
+- The response's `notFound` array lists requested names absent from the scope, so "filtered out" is distinguishable from "doesn't exist".
+- Unrequested values are dropped in the session layer, before redaction and logging.
+
+`evaluate_expression` is deliberately **not** restricted in explicit mode: least-privilege guards against indiscriminate bulk exposure, not against a determined agent — evaluate is already explicit-by-name, per-request, and audit-logged, which is exactly the access discipline the mode enforces, and removing the core debugging primitive would make the mode unusable. [Secret redaction](#secret-redaction) still applies to evaluate results.
+
 ### get_stack_trace
 
 Gets the current call stack.
@@ -610,6 +623,7 @@ Gets variables within a scope.
 **Parameters:**
 - `sessionId` (string, required): The ID of the debug session.
 - `scope` (number, required): The `variablesReference` number from a scope or variable.
+- `names` (string[], optional): Only return variables with these exact names (case-sensitive). Requested names missing from the scope are listed in the response's `notFound`. Required in [least-privilege mode](#least-privilege-mode).
 
 **Response:**
 ```json
@@ -650,6 +664,7 @@ Gets local variables by traversing all stack frames and their scopes, then using
 **Parameters:**
 - `sessionId` (string, required): The ID of the debug session.
 - `includeSpecial` (boolean, optional): Include special/internal variables like `this`, `__proto__`, `__builtins__`, etc. Default: false.
+- `names` (string[], optional): Only return variables with these exact names (case-sensitive). Requested names missing from the extracted locals are listed in the response's `notFound`. Required in [least-privilege mode](#least-privilege-mode).
 
 **Response:**
 ```json
