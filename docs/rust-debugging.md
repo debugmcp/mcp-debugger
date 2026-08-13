@@ -19,11 +19,11 @@ npm run build:adapter  # Downloads and extracts CodeLLDB
 
 ## CodeLLDB Vendoring
 
-The Rust adapter bundles the CodeLLDB binaries into `packages/adapter-rust/vendor/codelldb`. Vendoring runs automatically when you install or build the workspace. To keep the published npm package within registry limits, the pre-built CLI ships only the Linux x64 CodeLLDB runtime. If you are on macOS or Windows, set the `CODELLDB_PATH` environment variable to your local CodeLLDB installation (for example from the VSCode extension) or run `pnpm --filter @debugmcp/adapter-rust run build:adapter` from a cloned repository to download your platform binaries.
+The Rust adapter bundles the CodeLLDB binaries into `packages/codelldb-common/vendor/codelldb`. Vendoring runs automatically when you install or build the workspace. To keep the published npm package within registry limits, the pre-built CLI ships only the Linux x64 CodeLLDB runtime. If you are on macOS or Windows, set the `CODELLDB_PATH` environment variable to your local CodeLLDB installation (for example from the VSCode extension) or run `pnpm --filter @debugmcp/codelldb-common run build:adapter` from a cloned repository to download your platform binaries.
 
 - `pnpm install` (postinstall hook)
 - `pnpm vendor` or `pnpm vendor:adapters`
-- `pnpm --filter @debugmcp/adapter-rust run build:adapter`
+- `pnpm --filter @debugmcp/codelldb-common run build:adapter`
 - `node packages/adapter-rust/scripts/vendor-codelldb.js`
 
 > **Default behavior:** Locally, the vendoring script downloads **all supported platforms** (win32-x64, linux-x64, linux-arm64, darwin-x64, darwin-arm64) so Docker builds can reuse the same artifacts. Set `CODELLDB_VENDOR_ALL=false` to vendor only the current host platform. In CI environments, the script vendors only the current platform unless `CODELLDB_VENDOR_ALL=true` is explicitly set.
@@ -51,10 +51,10 @@ SKIP_ADAPTER_VENDOR=true pnpm install
 ### Troubleshooting vendoring
 
 1. Run `pnpm vendor:status` to see which adapters are ready for the current machine.
-2. Re-run `pnpm --filter @debugmcp/adapter-rust run build:adapter` and check the `[CodeLLDB vendor]` logs:
+2. Re-run `pnpm --filter @debugmcp/codelldb-common run build:adapter` and check the `[CodeLLDB vendor]` logs:
    - `HTTP response: ...` confirms GitHub access.
    - `Artifact magic header: 504b0304 (PK..)` verifies a valid VSIX download.
-3. If you see `Failed to vendor`, re-run with `CODELLDB_KEEP_TEMP=true` to inspect the downloaded file under `packages/adapter-rust/vendor/codelldb/temp`.
+3. If you see `Failed to vendor`, re-run with `CODELLDB_KEEP_TEMP=true` to inspect the downloaded file under `packages/codelldb-common/vendor/codelldb/temp`.
 4. Network errors or 404 responses usually indicate a typo in `CODELLDB_VERSION` or a transient GitHub outage—try again with `pnpm vendor:force`.
 5. On Windows, ensure PowerShell is allowed to create executables in the workspace (no antivirus quarantine).
 

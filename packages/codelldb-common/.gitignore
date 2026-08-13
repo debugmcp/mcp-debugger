@@ -1,0 +1,15 @@
+# Build outputs
+dist/
+*.tsbuildinfo
+
+# Vendored binaries
+vendor/codelldb/
+
+# Dependencies
+node_modules/
+
+# Test coverage
+coverage/
+
+# Logs
+*.log

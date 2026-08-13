@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { detectBinaryFormat } from '../src/utils/binary-detector.js';
+import { detectBinaryFormat } from '../src/binary-detector.js';
 
 const TEMP_PREFIX = 'binary-detector-test-';
 

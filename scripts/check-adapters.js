@@ -23,8 +23,8 @@ const adapters = [
     required: ['vendor/js-debug/bootloader.js', 'vendor/js-debug/hash.js']
   },
   {
-    name: 'Rust (CodeLLDB)',
-    package: 'packages/adapter-rust',
+    name: 'Rust/C++ (CodeLLDB, shared)',
+    package: 'packages/codelldb-common',
     vendorPath: 'vendor/codelldb',
     versionFile: null, // Check multiple platform version files
     platforms: ['win32-x64', 'darwin-x64', 'darwin-arm64', 'linux-x64', 'linux-arm64']

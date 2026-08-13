@@ -186,7 +186,7 @@ if "variablesReference" in vars:
 
 ## Rust Debugging
 
-**Prerequisites**: Rust toolchain (rustc, cargo) installed. CodeLLDB debug adapter is vendored via the `build:adapter` script (run `pnpm -w -F @debugmcp/adapter-rust run build:adapter`), not during `pnpm install`.
+**Prerequisites**: Rust toolchain (rustc, cargo) installed. CodeLLDB debug adapter is vendored via the `build:adapter` script (run `pnpm -w -F @debugmcp/codelldb-common run build:adapter`), not during `pnpm install`.
 
 **Testing sequence:**
 ```python

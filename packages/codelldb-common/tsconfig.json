@@ -5,20 +5,11 @@
     "tsBuildInfoFile": "./dist/tsconfig.tsbuildinfo",
     "outDir": "dist",
     "rootDir": "src",
-    "paths": {
-      "@debugmcp/shared": ["../shared/dist"],
-      "@debugmcp/shared/*": ["../shared/dist/*"],
-      "@debugmcp/codelldb-common": ["../codelldb-common/dist"]
-    },
     "declaration": true,
     "declarationMap": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true
   },
-  "references": [
-    { "path": "../shared" },
-    { "path": "../codelldb-common" }
-  ],
   "include": ["src/**/*"],
   "exclude": ["dist", "node_modules", "**/*.test.ts", "**/*.spec.ts"]
 }
