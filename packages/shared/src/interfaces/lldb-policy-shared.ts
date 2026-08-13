@@ -1,0 +1,322 @@
+/**
+ * CodeLLDB-generic policy helpers shared by every LLDB-backed adapter policy
+ * (rust, cpp). These encode engine-level quirks — they are identical for any
+ * language debugged through CodeLLDB, so both policies compose them instead
+ * of copy-pasting (issue #325).
+ */
+import type { DebugProtocol } from '@vscode/debugprotocol';
+import * as path from 'path';
+import type {
+  AdapterSpawnConfig,
+  AdapterSpawnPayload,
+  AdapterSpecificState,
+  CommandHandling,
+  StopReasonContext
+} from './adapter-policy.js';
+import type { StackFrame, Variable } from '../models/index.js';
+import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
+
+/** CodeLLDB names the locals scope "Local" or "Locals" depending on version. */
+export const LLDB_LOCAL_SCOPE_NAMES = ['Local', 'Locals'] as const;
+
+/**
+ * Three CodeLLDB stop-reason quirks are normalized here:
+ *
+ * 1. A user-initiated pause is reported as reason 'exception': POSIX
+ *    delivers it via SIGSTOP; Windows via DebugBreakProcess, whose
+ *    injected break-in thread raises EXCEPTION_BREAKPOINT 0x80000003
+ *    (issue #275). Map both back to 'pause' — the Windows form only
+ *    while a pause request is actually in flight. Real exceptions
+ *    (SIGSEGV, panics) carry other descriptions and are left untouched,
+ *    even while a pause request is in flight.
+ *
+ * 2. An exception-filter hit (rust_panic, cpp_throw) is reported as reason
+ *    'breakpoint' because CodeLLDB implements filters as internal
+ *    breakpoints (issue #260). Live capture (CodeLLDB 1.11.8): the stopped
+ *    body is only {allThreadsStopped, hitBreakpointIds, reason, threadId} —
+ *    no description/text to match on — so the discriminator is that the hit
+ *    ids are disjoint from every user-set breakpoint id. Both sides must
+ *    be known: no hitBreakpointIds (e.g. a step completion mislabeled as
+ *    'breakpoint', the issue #255 trace) or no userBreakpointIds
+ *    (incomplete bookkeeping) means keep the raw reason. The asymmetry is
+ *    deliberate — a missed filter hit merely keeps the cosmetic
+ *    'breakpoint' label, while a false 'exception' would mislead callers.
+ *
+ * 3. A function-breakpoint hit is also reported as plain 'breakpoint'
+ *    (issue #302): CodeLLDB does not distinguish. When every hit id is a
+ *    known function-breakpoint id, relabel to 'function breakpoint' —
+ *    matching debugpy/delve, which send it natively. Mixed line+function
+ *    hits keep 'breakpoint' (DAP convention: the plain reason wins).
+ */
+export function normalizeLldbStopReason(
+  reason: string,
+  body: DebugProtocol.StoppedEvent['body'] | undefined,
+  context: StopReasonContext
+): string | undefined {
+  if (reason === 'breakpoint') {
+    const hitIds = body?.hitBreakpointIds;
+    if (!Array.isArray(hitIds) || hitIds.length === 0 || !context.userBreakpointIds) {
+      return undefined;
+    }
+    const hitsUserBreakpoint = hitIds.some((id) => context.userBreakpointIds!.has(id));
+    if (!hitsUserBreakpoint) {
+      return 'exception';
+    }
+    if (
+      context.functionBreakpointIds &&
+      hitIds.every((id) => context.functionBreakpointIds!.has(id))
+    ) {
+      return 'function breakpoint';
+    }
+    return undefined;
+  }
+  if (reason !== 'exception') {
+    return undefined;
+  }
+  const detail = `${body?.description ?? ''} ${body?.text ?? ''}`;
+  if (/SIGSTOP/i.test(detail)) {
+    return 'pause';
+  }
+  // Windows delivers a user-initiated pause via DebugBreakProcess: the
+  // injected break-in thread raises EXCEPTION_BREAKPOINT (0x80000003),
+  // which CodeLLDB reports as an exception stop (issue #275; captured
+  // description: "Exception 0x80000003 encountered at address 0x…").
+  // Gated on pausePending so a genuine __debugbreak()/int3 in user code
+  // with no pause in flight stays an exception stop.
+  if (context.pausePending && /0x80000003/i.test(detail)) {
+    return 'pause';
+  }
+  if (context.pausePending && detail.trim() === '') {
+    return 'pause';
+  }
+  return undefined;
+}
+
+/**
+ * Extract local variables from the LLDB "Local"/"Locals" scope of the top
+ * frame, filtering LLDB-internal names ($…, __…, _lldb…, _debug…) unless
+ * includeSpecial is set.
+ */
+export function extractLldbLocalVariables(
+  stackFrames: StackFrame[],
+  scopes: Record<number, DebugProtocol.Scope[]>,
+  variables: Record<number, Variable[]>,
+  includeSpecial: boolean = false
+): Variable[] {
+  if (!stackFrames || stackFrames.length === 0) {
+    return [];
+  }
+
+  const topFrame = stackFrames[0];
+  const frameScopes = scopes[topFrame.id];
+
+  if (!frameScopes || frameScopes.length === 0) {
+    return [];
+  }
+
+  const localScope = frameScopes.find((scope) =>
+    (LLDB_LOCAL_SCOPE_NAMES as readonly string[]).includes(scope.name)
+  );
+
+  if (!localScope) {
+    return [];
+  }
+
+  let localVars = variables[localScope.variablesReference] || [];
+
+  if (!includeSpecial) {
+    localVars = localVars.filter((v) => {
+      const name = v.name;
+
+      // Skip LLDB internal variables
+      if (name.startsWith('$') || name.startsWith('__')) {
+        return false;
+      }
+
+      // Skip debugger internal variables
+      if (name.startsWith('_lldb') || name.startsWith('_debug')) {
+        return false;
+      }
+
+      return true;
+    });
+  }
+
+  return localVars;
+}
+
+/**
+ * Validate that a CodeLLDB binary exists and answers --version with output
+ * containing 'codelldb'.
+ */
+export async function validateCodeLLDBExecutable(codelldbPath: string): Promise<boolean> {
+  // Import fs/spawn dynamically to avoid issues in browser environments
+  const fs = await import('fs/promises');
+  const { spawn } = await import('child_process');
+
+  try {
+    await fs.access(codelldbPath, fs.constants.F_OK);
+
+    return new Promise((resolve) => {
+      const child = spawn(codelldbPath, ['--version'], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+
+      let output = '';
+      child.stdout?.on('data', (data) => {
+        output += data.toString();
+      });
+
+      child.on('error', () => resolve(false));
+      child.on('exit', (code) => {
+        resolve(code === 0 && output.includes('codelldb'));
+      });
+    });
+  } catch {
+    return false;
+  }
+}
+
+/** Command-shape match for CodeLLDB spawns (legacy language-less fallback). */
+export function matchesLldbAdapterCommand(adapterCommand: { command: string; args: string[] }): boolean {
+  const commandStr = adapterCommand.command.toLowerCase();
+  const argsStr = adapterCommand.args.join(' ').toLowerCase();
+
+  return commandStr.includes('codelldb') ||
+         commandStr.includes('lldb-server') ||
+         argsStr.includes('codelldb') ||
+         argsStr.includes('lldb');
+}
+
+/**
+ * Spawn configuration for CodeLLDB: use the adapter-built command verbatim
+ * when present, otherwise fall back to the shared vendored tree in
+ * @debugmcp/codelldb-common. Windows only (issue #223): CodeLLDB's console
+ * mode performs no stdio redirection, and unlike POSIX (where LLDB holds the
+ * debuggee's stdio pipes and CodeLLDB emits DAP output events from the
+ * STDOUT/STDERR process broadcasts), LLDB on Windows lets the debuggee
+ * inherit the adapter process's pipes. Forward those as output events there;
+ * on POSIX the channels are exclusive, so this stays off to avoid noise.
+ */
+export function buildLldbSpawnConfig(
+  payload: AdapterSpawnPayload,
+  platform: NodeJS.Platform = process.platform,
+  arch: NodeJS.Architecture = process.arch
+): AdapterSpawnConfig {
+  const forwardStdio = platform === 'win32' ? {} : undefined;
+
+  // If a custom adapter command was provided, use it directly
+  if (payload.adapterCommand) {
+    return {
+      mode: 'spawn',
+      command: payload.adapterCommand.command,
+      args: payload.adapterCommand.args,
+      host: payload.adapterHost,
+      port: payload.adapterPort,
+      logDir: payload.logDir,
+      env: payload.adapterCommand.env,
+      forwardStdio
+    };
+  }
+
+  // Otherwise, use the vendored CodeLLDB
+  let platformDir = '';
+  if (platform === 'win32') {
+    platformDir = arch === 'arm64' ? 'win32-arm64' : 'win32-x64';
+  } else if (platform === 'darwin') {
+    platformDir = arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
+  } else if (platform === 'linux') {
+    platformDir = arch === 'arm64' ? 'linux-arm64' : 'linux-x64';
+  } else {
+    throw new Error(`Unsupported platform: ${platform}`);
+  }
+
+  const codelldbPath = payload.executablePath ||
+    path.resolve(
+      process.cwd(),
+      'packages',
+      'codelldb-common',
+      'vendor',
+      'codelldb',
+      platformDir,
+      'adapter',
+      `codelldb${platform === 'win32' ? '.exe' : ''}`
+    );
+
+  // CodeLLDB is spawned with TCP port for DAP communication
+  return {
+    mode: 'spawn',
+    command: codelldbPath,
+    args: [
+      '--port', String(payload.adapterPort)
+    ],
+    host: payload.adapterHost,
+    port: payload.adapterPort,
+    logDir: payload.logDir,
+    env: {
+      ...process.env,
+      // Windows specific: enable native PDB reader
+      ...(platform === 'win32' ? { LLDB_USE_NATIVE_PDB_READER: '1' } : {})
+    },
+    forwardStdio
+  };
+}
+
+/** CodeLLDB processes commands immediately — no queueing. */
+export function lldbCommandHandling(reason: string): CommandHandling {
+  return {
+    shouldQueue: false,
+    shouldDefer: false,
+    reason
+  };
+}
+
+export function createLldbInitialState(): AdapterSpecificState {
+  return {
+    initialized: false,
+    configurationDone: false
+  };
+}
+
+export function updateLldbStateOnCommand(command: string, _args: unknown, state: AdapterSpecificState): void {
+  if (command === 'configurationDone') {
+    state.configurationDone = true;
+  }
+}
+
+export function updateLldbStateOnEvent(event: string, _body: unknown, state: AdapterSpecificState): void {
+  if (event === 'initialized') {
+    state.initialized = true;
+  }
+}
+
+export function isLldbInitialized(state: AdapterSpecificState): boolean {
+  return state.initialized;
+}
+
+export function isLldbConnected(state: AdapterSpecificState): boolean {
+  // LLDB adapters are connected once initialized
+  return state.initialized;
+}
+
+/** Minimal DAP client behavior — CodeLLDB uses no child sessions. */
+export function getLldbDapClientBehavior(): DapClientBehavior {
+  return {
+    // No reverse requests expected; acknowledge runInTerminal defensively
+    handleReverseRequest: async (request: DebugProtocol.Request, context: DapClientContext): Promise<ReverseRequestResult> => {
+      if (request.command === 'runInTerminal') {
+        context.sendResponse(request, {});
+        return { handled: true };
+      }
+      return { handled: false };
+    },
+
+    childRoutedCommands: undefined,
+    mirrorBreakpointsToChild: false,
+    pauseAfterChildAttach: false,
+    normalizeAdapterId: undefined,
+    childInitTimeout: 5000,
+    suppressPostAttachConfigDone: false
+  };
+}
