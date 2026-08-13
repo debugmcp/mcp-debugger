@@ -306,7 +306,7 @@ async function downloadFile(url, destPath, maxRetries = 3) {
       const response = await fetch(url, {
         signal: controller.signal,
         headers: {
-          'User-Agent': 'debugmcp/adapter-rust'
+          'User-Agent': 'debugmcp/codelldb-common'
         }
       });
       clearTimeout(timeout);
@@ -532,7 +532,7 @@ async function downloadAndExtract(platform) {
         platformInfo.targetDir
       )}`
     );
-    logWarn('Run "pnpm --filter @debugmcp/adapter-rust run build:adapter" locally to download them before building Docker images.');
+    logWarn('Run "pnpm --filter @debugmcp/codelldb-common run build:adapter" locally to download them before building Docker images.');
     return false;
   }
   

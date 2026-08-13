@@ -15,6 +15,7 @@ const disabledLanguages = new Set(
 );
 const packages = [
   '@debugmcp/shared',
+  '@debugmcp/codelldb-common',
   '@debugmcp/adapter-mock',
   '@debugmcp/adapter-python',
   '@debugmcp/adapter-ruby',

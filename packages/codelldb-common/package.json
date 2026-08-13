@@ -1,7 +1,7 @@
 {
-  "name": "@debugmcp/adapter-rust",
+  "name": "@debugmcp/codelldb-common",
   "version": "0.22.0",
-  "description": "Rust debug adapter for MCP Debugger using CodeLLDB",
+  "description": "Shared CodeLLDB vendoring, resolution, and spawn glue for CodeLLDB-backed MCP Debugger adapters",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -12,24 +12,22 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "vendor"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "build:ci": "tsc -p tsconfig.json",
-    "clean": "rimraf dist",
+    "build:adapter": "node scripts/vendor-codelldb.js",
+    "clean": "rimraf dist vendor",
+    "clean:vendor": "rimraf vendor",
     "test": "vitest run",
     "test:watch": "vitest watch"
   },
-  "dependencies": {
-    "@debugmcp/codelldb-common": "workspace:*",
-    "@debugmcp/shared": "workspace:*",
-    "@vscode/debugprotocol": "^1.68.0",
-    "which": "^7.0.0"
-  },
   "devDependencies": {
     "@types/node": "^26.2.0",
-    "@types/which": "^3.0.4",
+    "extract-zip": "^2.0.1",
+    "progress": "^2.0.3",
     "rimraf": "^6.1.3",
     "typescript": "^5.9.3",
     "vitest": "^4.1.10"

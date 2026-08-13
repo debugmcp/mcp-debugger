@@ -25,7 +25,7 @@ import {
   SUPPORTED_CODELLDB_PLATFORM_DIRS,
   buildVendorCandidatePaths,
   resolveCodeLLDBExecutableSyncImpl
-} from '../src/utils/codelldb-resolver.js';
+} from '../src/codelldb-resolver.js';
 
 const realProcess = process;
 
@@ -215,14 +215,14 @@ describe('codelldb-resolver', () => {
 
   describe('buildVendorCandidatePaths', () => {
     it('produces the four vendored candidates in precedence order', () => {
-      const pkgRoot = path.resolve('/repo/packages/adapter-rust');
+      const pkgRoot = path.resolve('/repo/packages/codelldb-common');
       const candidates = buildVendorCandidatePaths(pkgRoot, 'linux-x64', 'adapter', 'codelldb');
 
       expect(candidates).toEqual([
         path.join(pkgRoot, 'vendor', 'codelldb', 'linux-x64', 'adapter', 'codelldb'),
         path.join(pkgRoot, 'dist', 'vendor', 'codelldb', 'linux-x64', 'adapter', 'codelldb'),
-        path.resolve(pkgRoot, '..', '..', 'packages', 'adapter-rust', 'vendor', 'codelldb', 'linux-x64', 'adapter', 'codelldb'),
-        path.resolve(process.cwd(), 'packages', 'adapter-rust', 'vendor', 'codelldb', 'linux-x64', 'adapter', 'codelldb')
+        path.resolve(pkgRoot, '..', '..', 'packages', 'codelldb-common', 'vendor', 'codelldb', 'linux-x64', 'adapter', 'codelldb'),
+        path.resolve(process.cwd(), 'packages', 'codelldb-common', 'vendor', 'codelldb', 'linux-x64', 'adapter', 'codelldb')
       ]);
     });
 

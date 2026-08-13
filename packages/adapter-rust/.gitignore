@@ -5,9 +5,6 @@ dist/
 # Dependencies
 node_modules/
 
-# Vendored binaries
-vendor/codelldb/
-
 # Test coverage
 coverage/
 

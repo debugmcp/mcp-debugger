@@ -170,7 +170,7 @@ async function bundleCLI() {
     console.warn('Run: pnpm -w -F @debugmcp/adapter-javascript run build:adapter');
   }
 
-  const rustVendorSrc = path.join(repoRoot, 'packages/adapter-rust/vendor/codelldb');
+  const rustVendorSrc = path.join(repoRoot, 'packages/codelldb-common/vendor/codelldb');
   if (fs.existsSync(rustVendorSrc)) {
     const rawPlatforms = process.env.CODELLDB_PACKAGE_PLATFORMS ?? 'linux-x64';
     const requestedPlatforms = rawPlatforms
@@ -192,7 +192,7 @@ async function bundleCLI() {
         const srcDir = path.join(rustVendorSrc, platform);
         if (!fs.existsSync(srcDir)) {
           console.warn(`[CodeLLDB bundler] Requested platform "${platform}" not found in vendor directory.`);
-          console.warn('Run: pnpm -w -F @debugmcp/adapter-rust run build:adapter');
+          console.warn('Run: pnpm -w -F @debugmcp/codelldb-common run build:adapter');
           continue;
         }
 
@@ -208,7 +208,7 @@ async function bundleCLI() {
     }
   } else {
     console.warn('Warning: CodeLLDB vendor directory not found; Rust debugging may fail.');
-    console.warn('Run: pnpm -w -F @debugmcp/adapter-rust run build:adapter');
+    console.warn('Run: pnpm -w -F @debugmcp/codelldb-common run build:adapter');
   }
 
   // Copy .NET adapter runtime utils. The bridge entry imports ./netcoredbg-bridge-core.js

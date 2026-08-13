@@ -402,7 +402,7 @@ export const RustAdapterPolicy: AdapterPolicy = {
       path.resolve(
         process.cwd(),
         'packages',
-        'adapter-rust',
+        'codelldb-common',
         'vendor',
         'codelldb',
         platformDir,

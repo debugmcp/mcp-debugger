@@ -23,6 +23,7 @@ ARG CACHEBUST=1
 # 1) Copy ONLY manifests for dependency install (preserves cache)
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/shared/package.json ./packages/shared/package.json
+COPY packages/codelldb-common/package.json ./packages/codelldb-common/package.json
 COPY packages/adapter-mock/package.json ./packages/adapter-mock/package.json
 COPY packages/adapter-python/package.json ./packages/adapter-python/package.json
 COPY packages/adapter-javascript/package.json ./packages/adapter-javascript/package.json
@@ -48,6 +49,7 @@ RUN pnpm --version && pnpm install --frozen-lockfile --ignore-scripts
 # 3) Copy the rest of the sources and build configs
 COPY tsconfig*.json ./
 COPY packages/shared/tsconfig*.json ./packages/shared/
+COPY packages/codelldb-common/tsconfig*.json ./packages/codelldb-common/
 COPY packages/adapter-mock/tsconfig*.json ./packages/adapter-mock/
 COPY packages/adapter-python/tsconfig*.json ./packages/adapter-python/
 COPY packages/adapter-javascript/tsconfig*.json ./packages/adapter-javascript/
