@@ -34,8 +34,9 @@ Microsoft's [DebugMCP](https://github.com/microsoft/DebugMCP) exposes VS Code's 
 | Java hot-swap (`redefine_classes`) | ✅ | ❌ |
 | Debuggee output as subscribable MCP resource | ✅ | ❌ |
 | In-IDE debugging UX alongside the agent | ✅ read-only IDE mirror (`expose_session`, [#217](https://github.com/debugmcp/mcp-debugger/issues/217)) | ✅ native |
-| C/C++, PHP | ❌ | ✅ via VS Code extensions |
-| Languages | Python, JS/TS, Ruby, Rust, Go, Java, .NET | Python, JS/TS, Ruby, Rust, Go, Java, .NET, C/C++, PHP |
+| C/C++ | ✅ via CodeLLDB (launch + attach-by-PID) | ✅ via VS Code extensions |
+| PHP | ❌ | ✅ via VS Code extensions |
+| Languages | Python, JS/TS, Ruby, Rust, Go, Java, .NET, C/C++ | Python, JS/TS, Ruby, Rust, Go, Java, .NET, C/C++, PHP |
 
 If your agent runs in a terminal, a pipeline, or a cloud sandbox — or needs to attach to a process on another machine — you want mcp-debugger.
 
@@ -51,6 +52,7 @@ If your agent runs in a terminal, a pipeline, or a cloud sandbox — or needs to
 - 🐹 **Go debugging via Delve** – Full DAP support for Go programs
 - ☕ **Java debugging via JDI bridge** – Launch and attach modes with JDK 21+
 - 🔷 **.NET/C# debugging via netcoredbg** – Debug .NET applications with full DAP support
+- ⚙️ **C/C++ debugging via CodeLLDB** – Launch prebuilt binaries or lone source files (auto-compiled), attach by PID; core dumps and gdbserver/rr targets via config pass-through
 - 🧪 **Mock adapter for testing** – Test without external dependencies
 - 🛰️ **Out-of-IDE & remote attach** – Attach over host/port to a process on another machine or inside a container (Python via debugpy, Ruby via rdbg, Java via JDWP), with source-path mapping
 - 🔌 **STDIO and Streamable HTTP transports** – Works with any MCP client (legacy SSE transport is deprecated)
@@ -78,7 +80,7 @@ The server also serves condensed guidance in-band: MCP `instructions` on connect
 
 ## 🚀 Quick Start
 
-> **Requirements:** Node.js 22+ for the server. Each language you debug also needs its own toolchain installed (Python + debugpy, Ruby + the `debug` gem / `rdbg`, Node.js, Go + Delve, JDK 21+, .NET SDK, or the Rust toolchain).
+> **Requirements:** Node.js 22+ for the server. Each language you debug also needs its own toolchain installed (Python + debugpy, Ruby + the `debug` gem / `rdbg`, Node.js, Go + Delve, JDK 21+, .NET SDK, the Rust toolchain, or a C/C++ compiler — g++/clang++, only needed for source-file launch).
 
 ### For MCP Clients (Claude Desktop, etc.)
 
@@ -123,7 +125,7 @@ claude mcp list
 docker run -v $(pwd):/workspace debugmcp/mcp-debugger:latest
 ```
 
-> ⚠️ The Docker image bundles the toolchains for **Python, JavaScript, and Java** debugging (Rust, Go, and .NET are disabled inside the container image, and the image does not include a Ruby runtime). For those languages, run the server via npm/npx next to your local toolchain — or, for Ruby, use remote attach to a `rdbg --open` process inside the container (see the [Ruby guide](./docs/ruby/README.md)). Adapters load dynamically at runtime — `list_supported_languages` reports only those whose toolchain is detected.
+> ⚠️ The Docker image bundles the toolchains for **Python, JavaScript, and Java** debugging (Rust, Go, .NET, and C/C++ are disabled inside the container image, and the image does not include a Ruby runtime). For those languages, run the server via npm/npx next to your local toolchain — or, for Ruby, use remote attach to a `rdbg --open` process inside the container (see the [Ruby guide](./docs/ruby/README.md)). Adapters load dynamically at runtime — `list_supported_languages` reports only those whose toolchain is detected.
 
 ### Using npm
 
@@ -145,7 +147,7 @@ mcp-debugger exposes debugging operations as MCP tools that can be called with s
 // Tool: create_debug_session
 // Request:
 {
-  "language": "python",  // or "ruby", "javascript", "rust", "go", "java", "dotnet", or "mock" for testing
+  "language": "python",  // or "ruby", "javascript", "rust", "go", "java", "dotnet", "cpp", or "mock" for testing
   "name": "My Debug Session"
 }
 // Response:
@@ -421,10 +423,11 @@ See [tests/README.md](./tests/README.md) for detailed testing instructions.
 
 ## 📊 Project Status
 
-- ✅ **Production Ready**: v0.22.0 with seven language adapters and polished multi-language distribution
+- ✅ **Production Ready**: v0.22.0 with eight language adapters and polished multi-language distribution
 - ✅ **Clean architecture** with a dynamic adapter pattern
 - ✅ **Python · Ruby · JavaScript/TypeScript · Go · Java · .NET/C#**: Full step-through debugging
 - 🦀 **Rust**: Full support on Linux/macOS/Windows (Windows requires the GNU toolchain; MSVC is not supported by CodeLLDB)
+- ⚙️ **C/C++**: Full step-through debugging via CodeLLDB (launch + attach-by-PID; on Windows prefer MinGW/DWARF — MSVC PDB fidelity is partial)
 - 🟢 **Runtime**: Node.js 22+
 - 📈 **Active Development**: Regular updates and improvements
 

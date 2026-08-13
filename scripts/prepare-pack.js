@@ -29,7 +29,7 @@ function getWorkspaceVersions() {
   const packagesDir = path.resolve(__dirname, '../packages');
   
   // Read each workspace package
-  const workspaces = ['shared', 'codelldb-common', 'adapter-dotnet', 'adapter-go', 'adapter-java', 'adapter-javascript', 'adapter-python', 'adapter-mock', 'adapter-ruby', 'adapter-rust'];
+  const workspaces = ['shared', 'codelldb-common', 'adapter-cpp', 'adapter-dotnet', 'adapter-go', 'adapter-java', 'adapter-javascript', 'adapter-python', 'adapter-mock', 'adapter-ruby', 'adapter-rust'];
   
   for (const ws of workspaces) {
     const pkgPath = path.join(packagesDir, ws, 'package.json');

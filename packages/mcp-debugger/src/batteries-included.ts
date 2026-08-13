@@ -15,10 +15,11 @@ import { GoAdapterFactory } from '@debugmcp/adapter-go';
 import { RustAdapterFactory } from '@debugmcp/adapter-rust';
 import { JavaAdapterFactory } from '@debugmcp/adapter-java';
 import { DotnetAdapterFactory } from '@debugmcp/adapter-dotnet';
+import { CppAdapterFactory } from '@debugmcp/adapter-cpp';
 import type { IAdapterFactory } from '@debugmcp/shared';
 
 interface BundledAdapterEntry {
-  language: 'javascript' | 'python' | 'mock' | 'ruby' | 'go' | 'rust' | 'java' | 'dotnet';
+  language: 'javascript' | 'python' | 'mock' | 'ruby' | 'go' | 'rust' | 'java' | 'dotnet' | 'cpp';
   factoryCtor: new () => IAdapterFactory;
 }
 
@@ -33,6 +34,7 @@ const adapters: BundledAdapterEntry[] = [
   { language: 'rust', factoryCtor: RustAdapterFactory },
   { language: 'java', factoryCtor: JavaAdapterFactory },
   { language: 'dotnet', factoryCtor: DotnetAdapterFactory },
+  { language: 'cpp', factoryCtor: CppAdapterFactory },
 ];
 
 const globalAdapters = (globalThis as unknown as Record<string, BundledAdapterEntry[] | undefined>)[GLOBAL_KEY];

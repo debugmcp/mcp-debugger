@@ -105,3 +105,4 @@ Read the matching reference before your first session in a language — each has
 | Go | references/go.md | Delve native DAP; stdout capture gap (#225) |
 | Java | references/java.md | javac -g required; FQCN breakpoints; redefine_classes hot-swap |
 | .NET/C# | references/dotnet.md | scriptPath = compiled .dll; Portable PDB required |
+| C/C++ | references/cpp.md | scriptPath = binary (-gdwarf-4 -O0) or lone .c/.cpp (auto-compiled); attach by PID; MinGW/DWARF on Windows |

@@ -4,11 +4,23 @@
  * Encodes CodeLLDB specific behaviors and variable handling logic.
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import * as path from 'path';
-import type { AdapterPolicy, AdapterSpecificState, CommandHandling, StopReasonContext } from './adapter-policy.js';
+import type { AdapterPolicy } from './adapter-policy.js';
 import { SessionState } from '@debugmcp/shared';
-import type { StackFrame, Variable } from '../models/index.js';
-import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
+import {
+  normalizeLldbStopReason,
+  extractLldbLocalVariables,
+  LLDB_LOCAL_SCOPE_NAMES,
+  validateCodeLLDBExecutable,
+  matchesLldbAdapterCommand,
+  buildLldbSpawnConfig,
+  lldbCommandHandling,
+  createLldbInitialState,
+  updateLldbStateOnCommand,
+  updateLldbStateOnEvent,
+  isLldbInitialized,
+  isLldbConnected,
+  getLldbDapClientBehavior
+} from './lldb-policy-shared.js';
 
 export const RustAdapterPolicy: AdapterPolicy = {
   name: 'rust',
@@ -37,140 +49,21 @@ export const RustAdapterPolicy: AdapterPolicy = {
   },
 
   /**
-   * Two CodeLLDB quirks are normalized here:
-   *
-   * 1. A user-initiated pause is reported as reason 'exception': POSIX
-   *    delivers it via SIGSTOP; Windows via DebugBreakProcess, whose
-   *    injected break-in thread raises EXCEPTION_BREAKPOINT 0x80000003
-   *    (issue #275). Map both back to 'pause' — the Windows form only
-   *    while a pause request is actually in flight. Real exceptions
-   *    (SIGSEGV, panics) carry other descriptions and are left untouched,
-   *    even while a pause request is in flight.
-   *
-   * 2. A rust_panic filter hit is reported as reason 'breakpoint' because
-   *    CodeLLDB implements the filter as an internal breakpoint (issue
-   *    #260). Live capture (CodeLLDB 1.11.8): the stopped body is only
-   *    {allThreadsStopped, hitBreakpointIds, reason, threadId} — no
-   *    description/text to match on — so the discriminator is that the hit
-   *    ids are disjoint from every user-set breakpoint id. Both sides must
-   *    be known: no hitBreakpointIds (e.g. a step completion mislabeled as
-   *    'breakpoint', the issue #255 trace) or no userBreakpointIds
-   *    (incomplete bookkeeping) means keep the raw reason. The asymmetry is
-   *    deliberate — a missed panic merely keeps the cosmetic 'breakpoint'
-   *    label, while a false 'exception' would mislead callers.
-   *
-   * 3. A function-breakpoint hit is also reported as plain 'breakpoint'
-   *    (issue #302): CodeLLDB does not distinguish. When every hit id is a
-   *    known function-breakpoint id, relabel to 'function breakpoint' —
-   *    matching debugpy/delve, which send it natively. Mixed line+function
-   *    hits keep 'breakpoint' (DAP convention: the plain reason wins).
+   * CodeLLDB stop-reason quirks (issues #260/#275/#302) — shared with every
+   * LLDB-backed policy; see normalizeLldbStopReason for the full rules.
    */
-  normalizeStopReason: (
-    reason: string,
-    body: DebugProtocol.StoppedEvent['body'] | undefined,
-    context: StopReasonContext
-  ): string | undefined => {
-    if (reason === 'breakpoint') {
-      const hitIds = body?.hitBreakpointIds;
-      if (!Array.isArray(hitIds) || hitIds.length === 0 || !context.userBreakpointIds) {
-        return undefined;
-      }
-      const hitsUserBreakpoint = hitIds.some((id) => context.userBreakpointIds!.has(id));
-      if (!hitsUserBreakpoint) {
-        return 'exception';
-      }
-      if (
-        context.functionBreakpointIds &&
-        hitIds.every((id) => context.functionBreakpointIds!.has(id))
-      ) {
-        return 'function breakpoint';
-      }
-      return undefined;
-    }
-    if (reason !== 'exception') {
-      return undefined;
-    }
-    const detail = `${body?.description ?? ''} ${body?.text ?? ''}`;
-    if (/SIGSTOP/i.test(detail)) {
-      return 'pause';
-    }
-    // Windows delivers a user-initiated pause via DebugBreakProcess: the
-    // injected break-in thread raises EXCEPTION_BREAKPOINT (0x80000003),
-    // which CodeLLDB reports as an exception stop (issue #275; captured
-    // description: "Exception 0x80000003 encountered at address 0x…").
-    // Gated on pausePending so a genuine __debugbreak()/int3 in user code
-    // with no pause in flight stays an exception stop.
-    if (context.pausePending && /0x80000003/i.test(detail)) {
-      return 'pause';
-    }
-    if (context.pausePending && detail.trim() === '') {
-      return 'pause';
-    }
-    return undefined;
-  },
+  normalizeStopReason: normalizeLldbStopReason,
 
   /**
    * Extract local variables for Rust, filtering out special variables by default
    */
-  extractLocalVariables: (
-    stackFrames: StackFrame[],
-    scopes: Record<number, DebugProtocol.Scope[]>,
-    variables: Record<number, Variable[]>,
-    includeSpecial: boolean = false
-  ): Variable[] => {
-    // Get the top frame
-    if (!stackFrames || stackFrames.length === 0) {
-      return [];
-    }
-    
-    const topFrame = stackFrames[0];
-    const frameScopes = scopes[topFrame.id];
-    
-    if (!frameScopes || frameScopes.length === 0) {
-      return [];
-    }
-    
-    // Find the "Local" scope (CodeLLDB uses "Local" or "Locals")
-    const localScope = frameScopes.find(scope => 
-      scope.name === 'Local' || scope.name === 'Locals'
-    );
-    
-    if (!localScope) {
-      return [];
-    }
-    
-    // Get the variables for this scope
-    let localVars = variables[localScope.variablesReference] || [];
-    
-    // Filter out special variables unless requested
-    if (!includeSpecial) {
-      localVars = localVars.filter(v => {
-        const name = v.name;
-        
-        // Skip LLDB internal variables
-        if (name.startsWith('$') || name.startsWith('__')) {
-          return false;
-        }
-        
-        // Skip debugger internal variables
-        if (name.startsWith('_lldb') || name.startsWith('_debug')) {
-          return false;
-        }
-        
-        return true;
-      });
-    }
-    
-    return localVars;
-  },
-  
+  extractLocalVariables: extractLldbLocalVariables,
+
   /**
    * Rust/CodeLLDB uses "Local" or "Locals" for local variables scope
    */
-  getLocalScopeName: (): string[] => {
-    return ['Local', 'Locals'];
-  },
-  
+  getLocalScopeName: (): string[] => [...LLDB_LOCAL_SCOPE_NAMES],
+
   getDapAdapterConfiguration: () => {
     return {
       type: 'lldb'  // CodeLLDB adapter type
@@ -203,37 +96,7 @@ export const RustAdapterPolicy: AdapterPolicy = {
   /**
    * Validate that the CodeLLDB adapter is available and executable
    */
-  validateExecutable: async (codelldbPath: string): Promise<boolean> => {
-    // Import fs/spawn dynamically to avoid issues in browser environments
-    const fs = await import('fs/promises');
-    const { spawn } = await import('child_process');
-    
-    try {
-      // First check if the file exists
-      await fs.access(codelldbPath, fs.constants.F_OK);
-      
-      // Try to execute with version flag
-      return new Promise((resolve) => {
-        const child = spawn(codelldbPath, ['--version'], {
-          stdio: ['ignore', 'pipe', 'pipe'],
-          windowsHide: true,
-        });
-
-        let output = '';
-        child.stdout?.on('data', (data) => {
-          output += data.toString();
-        });
-
-        child.on('error', () => resolve(false));
-        child.on('exit', (code) => {
-          // CodeLLDB should return 0 and output version info
-          resolve(code === 0 && output.includes('codelldb'));
-        });
-      });
-    } catch {
-      return false;
-    }
-  },
+  validateExecutable: validateCodeLLDBExecutable,
 
   /**
    * Rust adapter doesn't require command queueing
@@ -243,71 +106,18 @@ export const RustAdapterPolicy: AdapterPolicy = {
   /**
    * Rust doesn't need to queue commands
    */
-  shouldQueueCommand: (): CommandHandling => {
-    // CodeLLDB adapter processes commands immediately
-    return {
-      shouldQueue: false,
-      shouldDefer: false,
-      reason: 'Rust/CodeLLDB adapter does not queue commands'
-    };
-  },
+  shouldQueueCommand: () => lldbCommandHandling('Rust/CodeLLDB adapter does not queue commands'),
 
-  /**
-   * Create initial state for Rust adapter
-   */
-  createInitialState: (): AdapterSpecificState => {
-    return {
-      initialized: false,
-      configurationDone: false
-    };
-  },
-
-  /**
-   * Update state when a command is sent
-   */
-  updateStateOnCommand: (command: string, _args: unknown, state: AdapterSpecificState): void => {
-    if (command === 'configurationDone') {
-      state.configurationDone = true;
-    }
-  },
-
-  /**
-   * Update state when an event is received
-   */
-  updateStateOnEvent: (event: string, _body: unknown, state: AdapterSpecificState): void => {
-    if (event === 'initialized') {
-      state.initialized = true;
-    }
-  },
-
-  /**
-   * Check if Rust adapter is initialized
-   */
-  isInitialized: (state: AdapterSpecificState): boolean => {
-    return state.initialized;
-  },
-
-  /**
-   * Check if Rust adapter is connected
-   */
-  isConnected: (state: AdapterSpecificState): boolean => {
-    // Rust adapter is connected once initialized
-    return state.initialized;
-  },
+  createInitialState: createLldbInitialState,
+  updateStateOnCommand: updateLldbStateOnCommand,
+  updateStateOnEvent: updateLldbStateOnEvent,
+  isInitialized: isLldbInitialized,
+  isConnected: isLldbConnected,
 
   /**
    * Check if this policy applies to the given adapter command
    */
-  matchesAdapter: (adapterCommand: { command: string; args: string[] }): boolean => {
-    // Check for CodeLLDB in command or arguments
-    const commandStr = adapterCommand.command.toLowerCase();
-    const argsStr = adapterCommand.args.join(' ').toLowerCase();
-    
-    return commandStr.includes('codelldb') || 
-           commandStr.includes('lldb-server') ||
-           argsStr.includes('codelldb') || 
-           argsStr.includes('lldb');
-  },
+  matchesAdapter: matchesLldbAdapterCommand,
 
   /**
    * Rust adapter has no special initialization requirements
@@ -332,100 +142,13 @@ export const RustAdapterPolicy: AdapterPolicy = {
   /**
    * Rust DAP client behaviors - minimal since Rust doesn't use child sessions
    */
-  getDapClientBehavior: (): DapClientBehavior => {
-    return {
-      // Rust doesn't handle reverse requests
-      handleReverseRequest: async (request: DebugProtocol.Request, context: DapClientContext): Promise<ReverseRequestResult> => {
-        // Just acknowledge any reverse requests (shouldn't receive any)
-        if (request.command === 'runInTerminal') {
-          context.sendResponse(request, {});
-          return { handled: true };
-        }
-        return { handled: false };
-      },
-      
-      // No child session routing needed
-      childRoutedCommands: undefined,
-      
-      // Rust-specific behaviors
-      mirrorBreakpointsToChild: false,
-      pauseAfterChildAttach: false,
-      
-      // No adapter ID normalization needed
-      normalizeAdapterId: undefined,
-      
-      // Standard timeouts
-      childInitTimeout: 5000,
-      suppressPostAttachConfigDone: false
-    };
-  },
+  getDapClientBehavior: getLldbDapClientBehavior,
 
   /**
-   * Get the configuration for spawning the Rust debug adapter (CodeLLDB)
+   * Get the configuration for spawning the Rust debug adapter (CodeLLDB).
+   * Shared with every LLDB-backed policy — see buildLldbSpawnConfig for the
+   * win32 forwardStdio rationale (issue #223) and the vendor fallback path.
    */
-  getAdapterSpawnConfig: (payload, platform: NodeJS.Platform = process.platform, arch: NodeJS.Architecture = process.arch) => {
-    // Windows only (issue #223): CodeLLDB's console mode performs no stdio
-    // redirection, and unlike POSIX (where LLDB holds the debuggee's stdio
-    // pipes and CodeLLDB emits DAP output events from the STDOUT/STDERR
-    // process broadcasts), LLDB on Windows lets the debuggee inherit the
-    // adapter process's pipes. Forward those as output events there; on
-    // POSIX the channels are exclusive, so this stays off to avoid noise.
-    const forwardStdio = platform === 'win32' ? {} : undefined;
-
-    // If a custom adapter command was provided, use it directly
-    if (payload.adapterCommand) {
-      return {
-        mode: 'spawn',
-        command: payload.adapterCommand.command,
-        args: payload.adapterCommand.args,
-        host: payload.adapterHost,
-        port: payload.adapterPort,
-        logDir: payload.logDir,
-        env: payload.adapterCommand.env,
-        forwardStdio
-      };
-    }
-
-    // Otherwise, use the vendored CodeLLDB
-    let platformDir = '';
-    if (platform === 'win32') {
-      platformDir = arch === 'arm64' ? 'win32-arm64' : 'win32-x64';
-    } else if (platform === 'darwin') {
-      platformDir = arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
-    } else if (platform === 'linux') {
-      platformDir = arch === 'arm64' ? 'linux-arm64' : 'linux-x64';
-    } else {
-      throw new Error(`Unsupported platform: ${platform}`);
-    }
-    
-    const codelldbPath = payload.executablePath ||
-      path.resolve(
-        process.cwd(),
-        'packages',
-        'codelldb-common',
-        'vendor',
-        'codelldb',
-        platformDir,
-        'adapter',
-        `codelldb${platform === 'win32' ? '.exe' : ''}`
-      );
-    
-    // CodeLLDB is spawned with TCP port for DAP communication
-    return {
-      mode: 'spawn',
-      command: codelldbPath,
-      args: [
-        '--port', String(payload.adapterPort)
-      ],
-      host: payload.adapterHost,
-      port: payload.adapterPort,
-      logDir: payload.logDir,
-      env: {
-        ...process.env,
-        // Windows specific: enable native PDB reader
-        ...(platform === 'win32' ? { LLDB_USE_NATIVE_PDB_READER: '1' } : {})
-      },
-      forwardStdio
-    };
-  }
+  getAdapterSpawnConfig: (payload, platform: NodeJS.Platform = process.platform, arch: NodeJS.Architecture = process.arch) =>
+    buildLldbSpawnConfig(payload, platform, arch)
 };

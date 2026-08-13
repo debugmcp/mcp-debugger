@@ -97,7 +97,7 @@ RUN rm -rf /app/node_modules/@debugmcp && \
 # Stage 2: Create runtime image with full LLDB dependencies
 FROM ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03
 # Disable Go at runtime too — Delve isn't installed in the container
-ENV DEBUG_MCP_DISABLE_LANGUAGES=rust,go,dotnet
+ENV DEBUG_MCP_DISABLE_LANGUAGES=rust,go,dotnet,cpp
 
 # Set application directory
 WORKDIR /app

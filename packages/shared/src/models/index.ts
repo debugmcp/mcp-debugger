@@ -86,6 +86,7 @@ export enum DebugLanguage {
   GO = 'go',
   JAVA = 'java',
   DOTNET = 'dotnet',
+  CPP = 'cpp',    // C and C++ share one adapter (CodeLLDB), like dotnet covers C#
   MOCK = 'mock',  // Mock adapter for testing
 }
 

@@ -1,0 +1,39 @@
+{
+  "name": "@debugmcp/adapter-cpp",
+  "version": "0.1.0",
+  "description": "C/C++ debug adapter for MCP Debugger using CodeLLDB",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:ci": "tsc -p tsconfig.json",
+    "clean": "rimraf dist",
+    "test": "vitest run",
+    "test:watch": "vitest watch"
+  },
+  "dependencies": {
+    "@debugmcp/codelldb-common": "workspace:*",
+    "@debugmcp/shared": "workspace:*",
+    "@vscode/debugprotocol": "^1.68.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "rimraf": "^6.1.3",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "author": "Sycamore LLC <debug@sycamore.llc> (https://github.com/debugmcp)"
+}

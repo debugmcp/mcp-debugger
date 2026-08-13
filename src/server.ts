@@ -318,6 +318,14 @@ export class DebugMcpServer {
             requiresExecutable: true,
             defaultExecutable: 'node'
           };
+        case DebugLanguage.CPP:
+          return {
+            id: DebugLanguage.CPP,
+            displayName: 'C/C++',
+            version: '1.0.0',
+            requiresExecutable: true,
+            defaultExecutable: 'g++'
+          };
         default:
           return {
             id: lang,

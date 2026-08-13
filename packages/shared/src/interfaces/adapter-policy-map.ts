@@ -4,6 +4,7 @@ import { PythonAdapterPolicy } from './adapter-policy-python.js';
 import { JsDebugAdapterPolicy } from './adapter-policy-js.js';
 import { RubyAdapterPolicy } from './adapter-policy-ruby.js';
 import { RustAdapterPolicy } from './adapter-policy-rust.js';
+import { CppAdapterPolicy } from './adapter-policy-cpp.js';
 import { GoAdapterPolicy } from './adapter-policy-go.js';
 import { JavaAdapterPolicy } from './adapter-policy-java.js';
 import { DotnetAdapterPolicy } from './adapter-policy-dotnet.js';
@@ -25,6 +26,8 @@ export function getPolicyForLanguage(language: string | DebugLanguage): AdapterP
       return RubyAdapterPolicy;
     case DebugLanguage.RUST:
       return RustAdapterPolicy;
+    case DebugLanguage.CPP:
+      return CppAdapterPolicy;
     case DebugLanguage.GO:
       return GoAdapterPolicy;
     case DebugLanguage.JAVA:
