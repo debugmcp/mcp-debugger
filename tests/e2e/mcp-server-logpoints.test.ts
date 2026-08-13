@@ -1,7 +1,7 @@
 /**
  * E2E: logpoints (set_breakpoint logMessage) — issue #235.
  *
- * Supported adapters (python, javascript, go, rust, mock): a logpoint on a
+ * Supported adapters (python, javascript, go, rust, cpp, mock): a logpoint on a
  * hot line does NOT pause execution; the interpolated message arrives as
  * output readable via get_output.
  *
@@ -26,6 +26,7 @@ const EXPECTATION: Record<string, 'logs' | 'error' | 'warning'> = {
   javascript: 'logs',
   go: 'logs',
   rust: 'logs',
+  cpp: 'logs',
   mock: 'logs',
   java: 'error',
   dotnet: 'error',

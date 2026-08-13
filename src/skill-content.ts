@@ -115,6 +115,7 @@ When a human wants to look around in their IDE, expose_session {sessionId} opens
 - Go: Delve native DAP; stdout capture gap (#225) — verify via evaluate_expression.
 - Java: compile with javac -g; FQCN accepted as breakpoint "file"; redefine_classes hot-swaps changed classes.
 - .NET: scriptPath is the compiled .dll; PDBs must be Portable format.
+- C/C++: scriptPath is a compiled executable (build with -gdwarf-4 -O0; MinGW's default DWARF-5 breaks LLDB line breakpoints on Windows) or a lone .c/.cpp file (auto-compiled); attach by PID supported; MSVC PDB support is partial.
 
 ## Crash diagnosis
 - Launch sessions pause at uncaught exceptions by default with stack + locals live ("none" opts out; "all" also stops on caught raises; Ruby has no uncaught filter so its crashes still terminate). Attach applies no default.

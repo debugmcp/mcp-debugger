@@ -292,7 +292,7 @@ describe('AdapterLoader', () => {
 
       const adapters = await adapterLoader.listAvailableAdapters();
 
-      expect(adapters).toHaveLength(8);
+      expect(adapters).toHaveLength(9);
 
       const pythonAdapter = adapters.find(a => a.name === 'python');
       expect(pythonAdapter).toEqual({
@@ -355,6 +355,14 @@ describe('AdapterLoader', () => {
         name: 'dotnet',
         packageName: '@debugmcp/adapter-dotnet',
         description: '.NET/C# debugger using netcoredbg',
+        installed: false
+      });
+
+      const cppAdapter = adapters.find(a => a.name === 'cpp');
+      expect(cppAdapter).toEqual({
+        name: 'cpp',
+        packageName: '@debugmcp/adapter-cpp',
+        description: 'C/C++ debugger using CodeLLDB',
         installed: false
       });
     });

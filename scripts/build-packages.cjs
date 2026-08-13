@@ -24,6 +24,7 @@ const packages = [
   ...(!disabledLanguages.has('go') ? ['@debugmcp/adapter-go'] : []),
   ...(!disabledLanguages.has('java') ? ['@debugmcp/adapter-java'] : []),
   ...(!disabledLanguages.has('dotnet') ? ['@debugmcp/adapter-dotnet'] : []),
+  ...(!disabledLanguages.has('cpp') ? ['@debugmcp/adapter-cpp'] : []),
 ];
 
 for (const pkg of packages) {

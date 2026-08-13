@@ -144,6 +144,7 @@ export class AdapterLoader {
       { name: 'go', packageName: '@debugmcp/adapter-go', description: 'Go debugger using Delve' },
       { name: 'java', packageName: '@debugmcp/adapter-java', description: 'Java debugger using JDI bridge' },
       { name: 'dotnet', packageName: '@debugmcp/adapter-dotnet', description: '.NET/C# debugger using netcoredbg' },
+      { name: 'cpp', packageName: '@debugmcp/adapter-cpp', description: 'C/C++ debugger using CodeLLDB' },
     ];
 
     const results: AdapterMetadata[] = [];

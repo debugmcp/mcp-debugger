@@ -16,10 +16,10 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
 import {
   ROOT,
-  PYTHON_SCRIPT, JS_SCRIPT, RUST_SCRIPT, GO_SCRIPT, DOTNET_SCRIPT, JAVA_SCRIPT, JAVA_CLASS_DIR, RUBY_SCRIPT,
-  PYTHON_BP_LINE, JS_BP_LINE, RUST_BP_LINE, GO_BP_LINE, DOTNET_BP_LINE, JAVA_BP_LINE, RUBY_BP_LINE,
-  hasRust, hasGo, hasRuby, hasDotnet, hasJava,
-  ensureGoBuild, ensureDotnetBuild, ensureJavaBuild
+  PYTHON_SCRIPT, JS_SCRIPT, RUST_SCRIPT, GO_SCRIPT, DOTNET_SCRIPT, JAVA_SCRIPT, JAVA_CLASS_DIR, RUBY_SCRIPT, CPP_SCRIPT,
+  PYTHON_BP_LINE, JS_BP_LINE, RUST_BP_LINE, GO_BP_LINE, DOTNET_BP_LINE, JAVA_BP_LINE, RUBY_BP_LINE, CPP_BP_LINE,
+  hasRust, hasGo, hasRuby, hasDotnet, hasJava, hasCpp,
+  ensureGoBuild, ensureDotnetBuild, ensureJavaBuild, ensureCppBuild
 } from './language-matrix-utils.js';
 
 /* ---------- result tracking ---------- */
@@ -73,6 +73,8 @@ const LANGUAGES: LangDef[] = [
     dapLaunchArgs: { justMyCode: true } },  // launchScript set in beforeAll after build
   { language: 'java', script: JAVA_SCRIPT, bpLine: JAVA_BP_LINE, available: hasJava, skipReason: hasJava ? undefined : 'JDK not installed',
     dapLaunchArgs: { mainClass: 'HelloWorld', classpath: JAVA_CLASS_DIR, cwd: JAVA_CLASS_DIR } },
+  { language: 'cpp', script: CPP_SCRIPT, bpLine: CPP_BP_LINE, available: hasCpp, skipReason: hasCpp ? undefined : 'C/C++ compiler not installed',
+    outputMarker: 'CPP_DEBUG_MARKER' },  // launchScript set in beforeAll after build; same output tier as rust (#223)
 ];
 
 /* ---------- all 25 tools ---------- */
@@ -171,6 +173,18 @@ describe(`Comprehensive MCP Debugger Test — ${ALL_TOOLS.length} Tools × ${LAN
         console.log(`[Setup] Java build failed: ${err}`);
         javaLang.available = false;
         javaLang.skipReason = 'Java build failed';
+      }
+    }
+
+    const cppLang = LANGUAGES.find(l => l.language === 'cpp');
+    if (cppLang?.available) {
+      try {
+        cppLang.launchScript = ensureCppBuild();
+        console.log(`[Setup] C++ binary compiled: ${cppLang.launchScript}`);
+      } catch (err) {
+        console.log(`[Setup] C++ build failed: ${err}`);
+        cppLang.available = false;
+        cppLang.skipReason = 'C++ build failed';
       }
     }
 

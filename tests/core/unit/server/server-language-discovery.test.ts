@@ -137,6 +137,46 @@ describe('Server Language Discovery Tests', () => {
     });
   });
 
+  describe('C/C++ availability and metadata', () => {
+    it('should report cpp metadata when dynamically discovered', async () => {
+      debugServer = new DebugMcpServer();
+      const { callToolHandler } = getToolHandlers(mockServer);
+
+      mockAdapterRegistry.listLanguages = vi.fn().mockResolvedValue(['python', 'mock', 'cpp']);
+      mockAdapterRegistry.listAvailableAdapters = vi.fn().mockResolvedValue([
+        { name: 'python', packageName: '@debugmcp/adapter-python', installed: true, description: 'Python debugger using debugpy' },
+        { name: 'mock', packageName: '@debugmcp/adapter-mock', installed: true, description: 'Mock adapter for testing' },
+        { name: 'cpp', packageName: '@debugmcp/adapter-cpp', installed: true, description: 'C/C++ debugger using CodeLLDB' }
+      ]);
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'list_supported_languages',
+          arguments: {}
+        }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      const cppAvail = content.available.find((adapter: any) => adapter.language === 'cpp');
+      const cppMeta = content.languages.find((meta: any) => meta.id === 'cpp');
+
+      expect(cppAvail).toEqual({
+        language: 'cpp',
+        package: '@debugmcp/adapter-cpp',
+        installed: true,
+        description: 'C/C++ debugger using CodeLLDB'
+      });
+      expect(cppMeta).toEqual({
+        id: 'cpp',
+        displayName: 'C/C++',
+        version: '1.0.0',
+        requiresExecutable: true,
+        defaultExecutable: 'g++'
+      });
+    });
+  });
+
   describe('getSupportedLanguagesAsync', () => {
     it('should return languages from dynamic discovery when available', async () => {
       debugServer = new DebugMcpServer();

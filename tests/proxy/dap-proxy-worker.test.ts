@@ -332,6 +332,23 @@ describe('DapProxyWorker', () => {
       expect((worker as any).selectAdapterPolicy('ruby').name).toBe('ruby');
     });
 
+    it('should select Cpp policy by language; the codelldb command shape alone stays rust', () => {
+      // cpp is deliberately NOT in the legacy command-shape fallback chain:
+      // rust matches the same CodeLLDB shapes and the chain cannot tell two
+      // CodeLLDB consumers apart. Every real session carries a language.
+      const policy = (worker as any).selectAdapterPolicy('cpp', {
+        command: '/path/to/codelldb',
+        args: ['--port', '12345']
+      });
+      expect(policy.name).toBe('cpp');
+
+      const languageless = (worker as any).selectAdapterPolicy(undefined, {
+        command: '/path/to/codelldb',
+        args: ['--port', '12345']
+      });
+      expect(languageless.name).toBe('rust');
+    });
+
     it('should fall back to command sniffing for unknown languages', () => {
       const policy = (worker as any).selectAdapterPolicy('fortran', {
         command: 'dlv',
