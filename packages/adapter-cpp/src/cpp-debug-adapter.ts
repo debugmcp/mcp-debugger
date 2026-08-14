@@ -734,9 +734,10 @@ export class CppDebugAdapter extends EventEmitter implements IDebugAdapter {
    npm run build:adapter
 
 3. Compile your program with debug info:
-   g++ -g -O0 -o myapp myapp.cpp
-   (clang++ works identically; on Windows prefer DWARF-emitting toolchains —
-   MSVC PDB support is partial)
+   g++ -gdwarf-4 -O0 -o myapp myapp.cpp
+   (clang++ works identically; -gdwarf-4 explicitly — MinGW gcc's default
+   DWARF-5 line tables are unreadable by LLDB in PE-COFF, and MSVC PDB
+   support is partial)
 
 4. Verify installation:
    g++ --version`;

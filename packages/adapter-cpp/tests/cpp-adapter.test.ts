@@ -339,6 +339,23 @@ describe('CppAdapterFactory', () => {
     expect(adapter.language).toBe(DebugLanguage.CPP);
   });
 
+  it('validate reports the discovered compiler in details when everything is present', async () => {
+    const factory = new CppAdapterFactory();
+    vi.mocked(resolveCodeLLDBExecutable).mockResolvedValue('/vendor/codelldb');
+    vi.mocked(getCodeLLDBVersion).mockResolvedValue('1.11.8');
+    vi.mocked(findAnyCompiler).mockResolvedValue('clang++');
+
+    const result = await factory.validate();
+
+    expect(result.valid).toBe(true);
+    expect(result.warnings).toHaveLength(0);
+    expect(result.details).toMatchObject({
+      codelldbPath: '/vendor/codelldb',
+      codelldbVersion: '1.11.8',
+      compiler: 'clang++'
+    });
+  });
+
   it('validate errors without CodeLLDB and warns without a compiler', async () => {
     const factory = new CppAdapterFactory();
 

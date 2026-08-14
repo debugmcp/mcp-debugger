@@ -93,6 +93,15 @@ describe('compile-utils', () => {
       await expect(findCompiler('cpp')).resolves.toBeNull();
     });
 
+    it('treats a synchronously-throwing spawn as a missing candidate', async () => {
+      spawnMock.mockImplementationOnce(() => {
+        throw new Error('spawn EPERM');
+      });
+      spawnMock.mockImplementationOnce(() => fakeProcess(0));
+
+      await expect(findCompiler('cpp')).resolves.toBe('clang++');
+    });
+
     it('treats spawn errors (ENOENT) as a missing candidate', async () => {
       spawnMock.mockImplementationOnce(() => {
         // A real ENOENT spawn emits 'error' and never 'exit'
@@ -224,6 +233,29 @@ describe('compile-utils', () => {
       expect(result.success).toBe(false);
       expect(result.error).toContain('error line 79'); // tail survives
       expect(result.error).not.toContain('error line 0'); // head capped
+    });
+
+    it('fails when the compiler process itself errors (ENOENT mid-compile)', async () => {
+      spawnMock.mockImplementationOnce(() => fakeProcess(0)); // probe
+      spawnMock.mockImplementationOnce(() => {
+        // Compile spawn emits 'error' and never 'exit'
+        const proc = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter };
+        proc.stdout = new EventEmitter();
+        proc.stderr = new EventEmitter();
+        setImmediate(() => proc.emit('error', new Error('ENOENT')));
+        return proc;
+      });
+
+      const src = path.join(tmpDir, 'y.cpp');
+      await fs.writeFile(src, 'int main(){}');
+
+      const result = await compileSourceFile({
+        sourcePath: src,
+        outputPath: path.join(tmpDir, '.debug-mcp', 'y')
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/Failed to run g\+\+/);
     });
 
     it('fails cleanly when no compiler is available', async () => {
