@@ -462,6 +462,60 @@ describe('HTTP Command Handler', () => {
       expect(mockExitProcess).toHaveBeenCalledWith(0);
     });
 
+    it('proceeds past a hung session stop after the guard and still exits 0 (issue #337)', async () => {
+      const listen = vi.fn((_port: number, cb: Function) => {
+        cb();
+        return mockHttpServer;
+      });
+      mockApp.listen = listen;
+
+      await handleHttpCommand(
+        { port: '3001' },
+        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+      );
+
+      const sigintHandler = fakeProc.lastListener('SIGINT');
+      const sessions = (mockApp as any).httpSessions as Map<string, any>;
+      // A wedged proxy makes stop() hang — shutdown must not hang with it.
+      sessions.set('wedged', {
+        transport: { close: vi.fn() },
+        server: { stop: vi.fn().mockReturnValue(new Promise(() => {})) }
+      });
+
+      vi.useFakeTimers();
+      const shutdownPromise = sigintHandler();
+      await vi.advanceTimersByTimeAsync(10_000);
+      await shutdownPromise;
+
+      expect(mockHttpServer.close).toHaveBeenCalled();
+      expect(mockExitProcess).toHaveBeenCalledWith(0);
+    });
+
+    it('hard-exits 1 when even the HTTP listener refuses to close (issue #337)', async () => {
+      // server.close() waits on open sockets — a stuck keep-alive connection
+      // must not park the process forever once shutdown has begun.
+      mockHttpServer.close = vi.fn();
+      const listen = vi.fn((_port: number, cb: Function) => {
+        cb();
+        return mockHttpServer;
+      });
+      mockApp.listen = listen;
+
+      await handleHttpCommand(
+        { port: '3001' },
+        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+      );
+
+      const sigintHandler = fakeProc.lastListener('SIGINT');
+
+      vi.useFakeTimers();
+      const shutdownPromise = sigintHandler();
+      await vi.advanceTimersByTimeAsync(15_000);
+      await shutdownPromise;
+
+      expect(mockExitProcess).toHaveBeenCalledWith(1);
+    });
+
     describe('stdin watchdog (MCP_EXIT_ON_STDIN_CLOSE, issue #122)', () => {
       function makeFakeStdin() {
         const stdin = new EventEmitter() as unknown as NodeJS.ReadStream & {

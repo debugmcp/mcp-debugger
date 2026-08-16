@@ -791,6 +791,49 @@ describe('SSE Command Handler', () => {
       expect(mockExitProcess).toHaveBeenCalledWith(0);
     });
 
+    it('proceeds past a hung shared-server stop after the guard and still exits 0 (issue #337)', async () => {
+      const options = { port: '3001' };
+
+      const mockApp = {
+        use: vi.fn(),
+        get: vi.fn(),
+        post: vi.fn(),
+        listen: vi.fn((port: number, callback: Function) => {
+          callback();
+          return mockServer;
+        }),
+        sseTransports: new Map(),
+        sharedDebugServer: null as any
+      };
+      vi.mocked(express).mockReturnValue(mockApp as any);
+
+      await handleSSECommand(options, {
+        logger: mockLogger,
+        serverFactory: mockServerFactory,
+        exitProcess: mockExitProcess,
+        proc: fakeProc
+      });
+
+      const sigintHandler = fakeProc.lastListener('SIGINT');
+      // A wedged proxy makes stop() hang — shutdown must not hang with it.
+      mockApp.sharedDebugServer = { stop: vi.fn().mockReturnValue(new Promise(() => {})) };
+      mockServer.close.mockImplementation((callback: Function) => {
+        callback();
+      });
+
+      vi.useFakeTimers();
+      try {
+        const shutdownPromise = sigintHandler();
+        await vi.advanceTimersByTimeAsync(10_000);
+        await shutdownPromise;
+
+        expect(mockServer.close).toHaveBeenCalled();
+        expect(mockExitProcess).toHaveBeenCalledWith(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('should fall back to proc.exit if exitProcess is not provided', async () => {
       const error = new Error('Server start failed');
 
