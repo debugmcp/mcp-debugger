@@ -5,7 +5,7 @@
 - **Nothing, for prebuilt binaries** — CodeLLDB is vendored automatically at install/build time (shared with the Rust adapter in `packages/codelldb-common`; `pnpm --filter @debugmcp/codelldb-common run build:adapter` to re-vendor, or set `CODELLDB_PATH`).
 - A compiler (`g++`/`clang++`, or `gcc`/`clang` for C) only for source-file launch or building targets yourself. Always compile with `-gdwarf-4 -O0` (`-gdwarf-4` explicitly — MinGW gcc defaults to DWARF-5, whose line tables LLDB cannot read from PE-COFF, so line breakpoints never bind).
 - **Windows: prefer DWARF toolchains** (MSYS2/MinGW-w64 g++, clang). MSVC-built binaries carry PDB symbols, which LLDB reads only partially (variables can show `<unavailable>`); the adapter warns when it detects one (`CPP_MSVC_BEHAVIOR=warn|error|continue`).
-- C/C++ debugging is **disabled in the Docker image** by default (`DEBUG_MCP_DISABLE_LANGUAGES`). Use a host (stdio/http) deployment.
+- C/C++ debugging **works in the Docker image**: linux-x64 CodeLLDB is vendored and `g++` is installed, so source-file launch compiles in-container and attach-by-PID works (`--cap-add=SYS_PTRACE` for non-descendant processes). Prebuilt binaries must be Linux-compiled — host-compiled (Windows/macOS) binaries mounted in are not debuggable by container LLDB.
 
 ## Launch quickstart
 

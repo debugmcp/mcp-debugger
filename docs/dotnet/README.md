@@ -254,7 +254,7 @@ dotnet build
 
 ## Docker Support
 
-.NET debugging is **disabled in Docker** (`DEBUG_MCP_DISABLE_LANGUAGES=rust,go,dotnet`). Host-compiled Windows .NET binaries (with Windows PDB symbols) cannot be debugged inside a Linux container. The container would need the program recompiled for Linux with Portable PDB symbols, which isn't practical for the typical workflow.
+.NET debugging is **disabled in Docker** (`DEBUG_MCP_DISABLE_LANGUAGES=go,dotnet`). Host-compiled Windows .NET binaries (with Windows PDB symbols) cannot be debugged inside a Linux container. The container would need the program recompiled for Linux with Portable PDB symbols, which isn't practical for the typical workflow.
 
 ## Troubleshooting
 

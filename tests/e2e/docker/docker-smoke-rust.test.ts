@@ -15,11 +15,16 @@ import {
 import { parseSdkToolResult } from '../smoke-test-utils.js';
 import { prepareRustExample } from '../rust-example-utils.js';
 
-const DOCKER_RUST_ENABLED = process.env.DOCKER_ENABLE_RUST === 'true';
+// Rust is enabled in the container image (issue #328), so this suite runs by
+// default under the standard docker gate. DOCKER_DISABLE_RUST=true opts out
+// (the Linux cross-compile of the fixtures is the slow part).
+const DOCKER_RUST_ENABLED =
+  process.env.SKIP_DOCKER_TESTS !== 'true' &&
+  process.env.DOCKER_DISABLE_RUST !== 'true';
 
 if (!DOCKER_RUST_ENABLED) {
   console.warn(
-    '[Docker Rust Tests] Skipping docker rust smoke tests (set DOCKER_ENABLE_RUST=true to re-enable).',
+    '[Docker Rust Tests] Skipping docker rust smoke tests (SKIP_DOCKER_TESTS or DOCKER_DISABLE_RUST is set).',
   );
 }
 
@@ -175,6 +180,31 @@ describeDockerRust.sequential('Docker: Rust Debugging Smoke Tests', () => {
         arguments: { sessionId }
       });
       ensureSuccess(parseSdkToolResult(continueResult0), 'continue_execution (to breakpoint)');
+
+      // continue_execution returns as soon as the resume is dispatched; the
+      // breakpoint stop lands asynchronously — wait for it before continuing
+      // again (issuing continue while still running fails with "Not paused").
+      let pausedAtBreakpoint = false;
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const sessions = parseSdkToolResult(await mcpClient!.callTool({
+          name: 'list_debug_sessions',
+          arguments: {}
+        }));
+        const current = ((sessions.sessions ?? []) as Array<{ id: string; state?: string }>)
+          .find(s => s.id === sessionId);
+        if (current?.state === 'paused') {
+          pausedAtBreakpoint = true;
+          break;
+        }
+        await wait(250);
+      }
+      expect(pausedAtBreakpoint, 'session should pause at the line-26 breakpoint').toBe(true);
+      const bpFrame = await waitForStackFrame(
+        sessionId,
+        frame => (frame as { line?: number }).line === 26,
+        'breakpoint stop'
+      );
+      expect((bpFrame as { line?: number }).line).toBe(26);
 
       const continueResult1 = await mcpClient!.callTool({
         name: 'continue_execution',

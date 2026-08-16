@@ -1,5 +1,7 @@
 # Stage 1: Build and bundle the TypeScript application
-ARG DISABLE_LANGUAGES=rust
+# All adapters build; runtime availability is governed by the stage-2
+# DEBUG_MCP_DISABLE_LANGUAGES value (issue #328).
+ARG DISABLE_LANGUAGES=
 
 FROM node:26-slim@sha256:deae974a69e140f44f434ab29cb519fb5f8fe250fd364b8ca446bd0761acdc6a AS builder
 ARG DISABLE_LANGUAGES
@@ -30,6 +32,9 @@ COPY packages/adapter-javascript/package.json ./packages/adapter-javascript/pack
 COPY packages/adapter-rust/package.json ./packages/adapter-rust/package.json
 COPY packages/adapter-go/package.json ./packages/adapter-go/package.json
 COPY packages/adapter-java/package.json ./packages/adapter-java/package.json
+COPY packages/adapter-ruby/package.json ./packages/adapter-ruby/package.json
+COPY packages/adapter-dotnet/package.json ./packages/adapter-dotnet/package.json
+COPY packages/adapter-cpp/package.json ./packages/adapter-cpp/package.json
 
 # 2) Install dependencies with workspace support using the lockfile
 #    If lockfile is stale, this will fail (good signal to refresh it locally).
@@ -56,6 +61,9 @@ COPY packages/adapter-javascript/tsconfig*.json ./packages/adapter-javascript/
 COPY packages/adapter-rust/tsconfig*.json ./packages/adapter-rust/
 COPY packages/adapter-go/tsconfig*.json ./packages/adapter-go/
 COPY packages/adapter-java/tsconfig*.json ./packages/adapter-java/
+COPY packages/adapter-ruby/tsconfig*.json ./packages/adapter-ruby/
+COPY packages/adapter-dotnet/tsconfig*.json ./packages/adapter-dotnet/
+COPY packages/adapter-cpp/tsconfig*.json ./packages/adapter-cpp/
 
 COPY src ./src
 COPY scripts ./scripts/
@@ -95,15 +103,27 @@ RUN rm -rf /app/node_modules/@debugmcp && \
     cp /app/packages/adapter-java/package.json /app/node_modules/@debugmcp/adapter-java/ && \
     mkdir -p /app/node_modules/@debugmcp/adapter-ruby && \
     cp -r /app/packages/adapter-ruby/dist /app/node_modules/@debugmcp/adapter-ruby/ && \
-    cp /app/packages/adapter-ruby/package.json /app/node_modules/@debugmcp/adapter-ruby/
+    cp /app/packages/adapter-ruby/package.json /app/node_modules/@debugmcp/adapter-ruby/ && \
+    mkdir -p /app/node_modules/@debugmcp/codelldb-common && \
+    cp -r /app/packages/codelldb-common/dist /app/node_modules/@debugmcp/codelldb-common/ && \
+    cp -r /app/packages/codelldb-common/vendor /app/node_modules/@debugmcp/codelldb-common/ && \
+    cp /app/packages/codelldb-common/package.json /app/node_modules/@debugmcp/codelldb-common/ && \
+    mkdir -p /app/node_modules/@debugmcp/adapter-cpp && \
+    cp -r /app/packages/adapter-cpp/dist /app/node_modules/@debugmcp/adapter-cpp/ && \
+    cp /app/packages/adapter-cpp/package.json /app/node_modules/@debugmcp/adapter-cpp/ && \
+    mkdir -p /app/node_modules/@debugmcp/adapter-rust && \
+    cp -r /app/packages/adapter-rust/dist /app/node_modules/@debugmcp/adapter-rust/ && \
+    cp /app/packages/adapter-rust/package.json /app/node_modules/@debugmcp/adapter-rust/
 
 # Stage 2: Create runtime image with full LLDB dependencies
 FROM ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03
-# Disabled languages: rust/cpp wait on CodeLLDB staging (#328), go has no attach
-# implementation and no Delve here, dotnet has no netcoredbg here. Ruby is
-# intentionally present but attach-only (adapter shipped, no Ruby runtime —
-# attach connects directly to a remote rdbg socket, issue #331).
-ENV DEBUG_MCP_DISABLE_LANGUAGES=rust,go,dotnet,cpp
+# Disabled languages: go has no attach implementation and no Delve here,
+# dotnet has no netcoredbg here. Ruby is intentionally present but attach-only
+# (adapter shipped, no Ruby runtime — attach connects directly to a remote
+# rdbg socket, issue #331). rust and cpp are enabled with vendored CodeLLDB
+# (#328) — sound for Linux-compiled binaries; host-compiled (Windows/macOS)
+# binaries mounted into the container are not debuggable by container LLDB.
+ENV DEBUG_MCP_DISABLE_LANGUAGES=go,dotnet
 
 # Set application directory
 WORKDIR /app
@@ -130,6 +150,7 @@ RUN apt-get update && \
       libatomic1 \
       lldb \
       python3-lldb \
+      g++ \
       openjdk-21-jdk-headless && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
@@ -150,6 +171,12 @@ COPY --from=builder /app/dist/proxy/utils /app/dist/proxy/utils
 # Copy ONLY the runtime adapter packages (not entire node_modules)
 # These are loaded dynamically at runtime via import()
 COPY --from=builder /app/node_modules/@debugmcp /app/node_modules/@debugmcp
+
+# Single shared CodeLLDB copy for the rust and cpp adapters (issue #328).
+# Both adapters probe their own package roots first (dead in this image) and
+# fall back to CODELLDB_PATH; the sibling lldb/ tree next to the binary
+# supplies liblldb and the Python support files.
+ENV CODELLDB_PATH=/app/node_modules/@debugmcp/codelldb-common/vendor/codelldb/linux-x64/adapter/codelldb
 
 # Pre-compile JDI bridge for instant Java debugging (no on-demand compilation at runtime)
 RUN mkdir -p /app/node_modules/@debugmcp/adapter-java/java/out && \
