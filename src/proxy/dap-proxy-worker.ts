@@ -4,6 +4,7 @@
  */
 
 import { ChildProcess } from 'child_process';
+import { existsSync } from 'fs';
 import path from 'path';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import {
@@ -407,8 +408,15 @@ export class DapProxyWorker {
     if (spawnConfig.mode === 'spawn') {
       // In container mode, default adapter cwd to workspace root so that
       // relative paths in DAP launch args (classpath, cwd, etc.) resolve
-      // against the mounted project directory rather than /app.
-      if (process.env.MCP_WORKSPACE_ROOT && !spawnConfig.cwd) {
+      // against the mounted project directory rather than /app. Only when the
+      // directory actually exists: in a kubectl-debug ephemeral container
+      // nothing mounts /workspace, and spawning with a nonexistent cwd fails
+      // with an opaque ENOENT (issue #332).
+      if (
+        process.env.MCP_WORKSPACE_ROOT &&
+        !spawnConfig.cwd &&
+        existsSync(process.env.MCP_WORKSPACE_ROOT)
+      ) {
         spawnConfig.cwd = process.env.MCP_WORKSPACE_ROOT;
       }
 
