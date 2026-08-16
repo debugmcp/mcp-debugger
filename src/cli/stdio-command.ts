@@ -51,13 +51,35 @@ export async function handleStdioCommand(
     await debugMcpServer.server.connect(transport);
     logger.info('[MCP] Server connected to stdio transport successfully');
 
+    // Every exit path must tear down the debug sessions first (issue #337):
+    // exiting without DebugMcpServer.stop() → closeAllSessions() leaves the
+    // proxy chains — and, for attach sessions, lldb-server's ptrace claim on
+    // the target — running with no owner. Bounded so a wedged proxy cannot
+    // block exit (ProxyManager.stop() is internally bounded but runs
+    // serially per session).
+    let shutdownStarted = false;
+    const shutdownAndExit = (code: number, why: string) => {
+      if (shutdownStarted) return;
+      shutdownStarted = true;
+      try { clearInterval(keepAlive); } catch { /* already cleared */ }
+      logger.warn(`[MCP] ${why} — stopping debug server and exiting.`);
+      const guard = new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 5000);
+        timer.unref?.();
+      });
+      void Promise.race([
+        debugMcpServer.stop().catch((err) => {
+          logger.error('[MCP] Error stopping debug server during exit:', { err });
+        }),
+        guard
+      ]).finally(() => exitProcess(code));
+    };
+
     // Ensure deterministic shutdown on transport close
     // NOTE: `onclose` relies on an undocumented MCP SDK property
     const transportWithClose = transport as unknown as { onclose?: () => void };
     transportWithClose.onclose = () => {
-      logger.warn('[MCP] Transport closed; exiting.');
-      try { clearInterval(keepAlive); } catch {}
-      exitProcess(0);
+      shutdownAndExit(0, 'Transport closed');
     };
     
     // Start the debug server
@@ -84,21 +106,15 @@ export async function handleStdioCommand(
         logger.warn('[MCP] Stdin ended; ignoring in container mode and waiting for transport close or signal.');
         return;
       }
-      logger.warn('[MCP] Stdin ended; MCP client disconnected — exiting.');
-      try { clearInterval(keepAlive); } catch { /* already cleared */ }
-      exitProcess(0);
+      shutdownAndExit(0, 'Stdin ended; MCP client disconnected');
     });
 
     // Add robust exit/signal diagnostics (logged to file; console output is silenced for protocol safety)
     proc.on('SIGTERM', () => {
-      logger.warn('[MCP] SIGTERM received, exiting.');
-      try { clearInterval(keepAlive); } catch {}
-      exitProcess(0);
+      shutdownAndExit(0, 'SIGTERM received');
     });
     proc.on('SIGINT', () => {
-      logger.warn('[MCP] SIGINT received, exiting.');
-      try { clearInterval(keepAlive); } catch {}
-      exitProcess(0);
+      shutdownAndExit(0, 'SIGINT received');
     });
     proc.on('exit', (code) => {
       logger.error('[MCP] Process exiting', {

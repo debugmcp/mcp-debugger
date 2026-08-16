@@ -239,6 +239,15 @@ export async function handleSSECommand(
       shutdownStarted = true;
       logger.info('Shutting down SSE server...');
 
+      // Hard-exit fallback (issue #337): a wedged proxy can stall stop() and
+      // server.close() waits on open sockets — once shutdown has begun, the
+      // process must not park forever holding live proxy chains.
+      const hardExit = setTimeout(() => {
+        logger.error('Graceful shutdown timed out; forcing exit.');
+        exitProcess(1);
+      }, 15000);
+      hardExit.unref?.();
+
       // Close all SSE connections
       const sseTransports = (app as any).sseTransports as Map<string, SessionData> | undefined; // eslint-disable-line @typescript-eslint/no-explicit-any
       if (sseTransports) {
@@ -247,18 +256,23 @@ export async function handleSSECommand(
         });
       }
 
-      // Stop the shared debug server
+      // Stop the shared debug server, bounded so it cannot stall shutdown
       const sharedDebugServer = (app as any).sharedDebugServer as DebugMcpServer | undefined; // eslint-disable-line @typescript-eslint/no-explicit-any
       if (sharedDebugServer) {
         logger.info('Stopping shared Debug MCP Server...');
+        const guard = new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, 10000);
+          timer.unref?.();
+        });
         try {
-          await sharedDebugServer.stop();
+          await Promise.race([sharedDebugServer.stop(), guard]);
         } catch (error) {
           logger.error('Error stopping shared Debug MCP Server:', error);
         }
       }
 
       server.close(() => {
+        clearTimeout(hardExit);
         exitProcess(0);
       });
     };

@@ -209,22 +209,40 @@ export async function handleHttpCommand(
       shutdownStarted = true;
       logger.info('Shutting down HTTP server...');
 
-      // Close every active transport and stop its DebugMcpServer
-      for (const { transport, server: debugServer } of httpSessions.values()) {
-        try {
-          await transport.close();
-        } catch (err) {
-          logger.error('Error closing transport during shutdown', { error: err });
+      // Hard-exit fallback (issue #337): server.close() waits on open
+      // sockets and a wedged proxy can stall stop() — once shutdown has
+      // begun, the process must not park forever holding live proxy chains.
+      const hardExit = setTimeout(() => {
+        logger.error('Graceful shutdown timed out; forcing exit.');
+        exitProcess(1);
+      }, 15000);
+      hardExit.unref?.();
+
+      // Close every active transport and stop its DebugMcpServer, bounded
+      // so one wedged session cannot stall the whole shutdown.
+      const stopWork = (async () => {
+        for (const { transport, server: debugServer } of httpSessions.values()) {
+          try {
+            await transport.close();
+          } catch (err) {
+            logger.error('Error closing transport during shutdown', { error: err });
+          }
+          try {
+            await debugServer.stop();
+          } catch (err) {
+            logger.error('Error stopping debug server during shutdown', { error: err });
+          }
         }
-        try {
-          await debugServer.stop();
-        } catch (err) {
-          logger.error('Error stopping debug server during shutdown', { error: err });
-        }
-      }
+      })();
+      const guard = new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 10000);
+        timer.unref?.();
+      });
+      await Promise.race([stopWork, guard]);
       httpSessions.clear();
 
       server.close(() => {
+        clearTimeout(hardExit);
         exitProcess(0);
       });
     };
