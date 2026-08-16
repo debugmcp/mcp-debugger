@@ -22,6 +22,7 @@ export interface ProxyConfig {
   dryRunSpawn?: boolean;
   breakOnExceptions?: ExceptionBreakMode;
   launchConfig?: LanguageSpecificLaunchConfig;
+  attachMode?: boolean;           // True for attach sessions; direct-connect attach skips local toolchain probing
   
   // Adapter spawn command info - needed for proxy to spawn the correct adapter
   adapterCommand?: {

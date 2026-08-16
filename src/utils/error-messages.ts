@@ -94,4 +94,40 @@ export const ErrorMessages = {
     `Timed out waiting for debug adapter to be ready after ${timeout}s. ` +
     `The adapter may have failed to start properly. ` +
     `Check the debug logs for more details.`,
+
+  /**
+   * Error message for attach on a language whose adapter has no attach implementation
+   * Occurs when: attach_to_process is called for a language whose adapter declares
+   * modes.attach === 'none' (e.g. rust, go, mock)
+   * Used in: src/session/session-manager-operations.ts
+   * @param language - The session's language
+   */
+  attachModeNotSupported: (language: string) =>
+    `Attach mode is not implemented for '${language}'. ` +
+    `Use start_debugging to launch the program instead. ` +
+    `See list_supported_languages for per-mode availability.`,
+
+  /**
+   * Hint appended to launch-toolchain failures on attach-capable languages
+   * Occurs when: resolving the language executable for a launch fails, but the
+   * adapter supports attach (which may not need the local toolchain at all)
+   * Used in: src/session/session-manager-operations.ts
+   * @param language - The session's language
+   */
+  attachMayStillWork: (language: string) =>
+    `Attach mode may still be available for '${language}': start the target under its ` +
+    `debug server (e.g. rdbg --open, python -m debugpy --listen) and use attach_to_process.`,
+
+  /**
+   * Reason strings for per-mode availability reporting in list_supported_languages
+   * Used in: src/utils/language-availability.ts and tests
+   */
+  modeUnavailableReason: {
+    disabled: (language: string) =>
+      `Language '${language}' is disabled in this runtime via DEBUG_MCP_DISABLE_LANGUAGES.`,
+    notInstalled: (packageName: string) =>
+      `Adapter package ${packageName} is not installed.`,
+    attachNotImplemented: (language: string) =>
+      `The '${language}' adapter does not implement attach mode.`,
+  },
 };

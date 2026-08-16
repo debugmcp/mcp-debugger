@@ -36,6 +36,8 @@ export class GoAdapterFactory implements IAdapterFactory {
       documentationUrl: 'https://github.com/debugmcp/mcp-debugger/docs/go',
       minimumDebuggerVersion: '0.17.0',
       fileExtensions: ['.go'],
+      // Attach is not implemented for Go yet
+      modes: { launch: true, attach: 'none' },
       // Go gopher icon in SVG format (base64 encoded)
       icon: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjggMTI4Ij48cGF0aCBmaWxsPSIjMDBBREQ4IiBkPSJNNjQgMUM0MC44IDEgMTkgMTEuNyAxOSAyNS40YzAgNC4xIDIuNCA3LjggNy4xIDExLjFDMTUuNCAgNDAgNiA0Ny42IDYgNTYuNGMwIDEyLjUgMTguOCAyMS4xIDQzLjMgMjJWMTA5YzAgNC40IDYuNyA4IDE0LjcgOHMxNC43LTMuNiAxNC43LTh2LTMwLjZDMTAzLjIgNzcuNSAxMjIgNjguOSAxMjIgNTYuNGMwLTguOC05LjQtMTYuNC0yMC4xLTE5LjkgNC43LTMuMyA3LjEtNyA3LjEtMTEuMUMxMDkgMTEuNyA4Ny4yIDEgNjQgMXptMCAzYzIxLjIgMCA0MiA5LjUgNDIgMjEuNFM4NS4yIDQ2LjggNjQgNDYuOCAyMiAzNy4zIDIyIDI1LjRTNDIuOCA0IDY0IDR6Ii8+PC9zdmc+'
     };

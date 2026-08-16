@@ -47,7 +47,7 @@ This document provides a complete reference for all tools available in mcp-debug
 Creates a new debugging session.
 
 **Parameters:**
-- `language` (string, required): The programming language to debug. Languages are discovered dynamically from installed adapters. The default fallback languages (when dynamic discovery is unavailable) are `"python"` and `"mock"`. When all adapters are available, the full list is: `"python"`, `"ruby"`, `"javascript"`, `"rust"`, `"go"`, `"java"`, `"dotnet"`, `"cpp"`, `"mock"`. The actual list depends on which `@debugmcp/adapter-*` packages are discoverable at runtime.
+- `language` (string, required): The programming language to debug. Languages are discovered dynamically from installed adapters. The default fallback languages (when dynamic discovery is unavailable) are `"python"` and `"mock"`. When all adapters are available, the full list is: `"python"`, `"ruby"`, `"javascript"`, `"rust"`, `"go"`, `"java"`, `"dotnet"`, `"cpp"`, `"mock"`. The actual list depends on which `@debugmcp/adapter-*` packages are discoverable at runtime. A language may be usable in one mode only — e.g. in the Docker container Ruby is attach-only (the adapter ships without a Ruby runtime; attach connects directly to a remote rdbg socket). Check `list_supported_languages` `modes` for per-mode availability; creating a session for an attach-only language is allowed, and only `start_debugging` will fail.
 - `name` (string, optional): A descriptive name for the debug session. Defaults to `"<language>-debug-<timestamp>"` (e.g., `"python-debug-1711500000000"`), built from the session language and `Date.now()`.
 - `executablePath` (string, optional): Path to the language interpreter/executable (e.g., Python interpreter path).
 
@@ -975,8 +975,22 @@ Each session also exposes its captured output as an MCP resource:
 
 The following tools are also available but are not fully documented with examples here:
 
-- **list_supported_languages**: Lists all supported debugging languages with metadata (installed status, display name, default executable). Takes no parameters.
-- **attach_to_process**: Attaches the debugger to a running process. Parameters include `sessionId`, `processId` or connection details, adapter-specific attach configuration, and optionally `breakOnExceptions` (same mode semantics as on `start_debugging`, but attach never applies a language default — it stays `"none"` unless requested).
+- **list_supported_languages**: Lists all supported debugging languages with metadata (installed status, display name, default executable). Takes no parameters. Each entry in `available[]` carries per-mode availability (issue #331):
+
+  ```json
+  {
+    "language": "ruby",
+    "package": "@debugmcp/adapter-ruby",
+    "installed": true,
+    "modes": {
+      "launch": { "supported": true, "available": false, "reason": "Ruby executable not found..." },
+      "attach": { "supported": true, "available": true }
+    }
+  }
+  ```
+
+  `supported` says whether the adapter implements the mode at all; `available` says whether it is usable in this runtime right now (with a `reason` when it isn't). Attach for Python and Ruby is a direct connection to a debugpy/rdbg DAP socket, so it stays available even when the local toolchain is missing — the container image uses exactly this to offer Ruby attach without a Ruby runtime. Disabled languages (`DEBUG_MCP_DISABLE_LANGUAGES`) stay listed with a disabled reason on both modes. `installed[]` keeps its historical meaning: adapter package loadable and not disabled.
+- **attach_to_process**: Attaches the debugger to a running process. Parameters include `sessionId`, `processId` or connection details, adapter-specific attach configuration, and optionally `breakOnExceptions` (same mode semantics as on `start_debugging`, but attach never applies a language default — it stays `"none"` unless requested). Languages whose adapter has no attach implementation (`rust`, `go`, `mock`) fail fast with a clear error.
 - **detach_from_process**: Detaches the debugger from an attached process. Parameters include `sessionId` and optional `terminateProcess` flag.
 - **list_threads**: Lists all threads in the debug session. Parameters include `sessionId`.
 

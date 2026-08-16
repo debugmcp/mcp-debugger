@@ -63,6 +63,8 @@ export type {
   // Configuration and metadata
   AdapterDependencies,
   AdapterMetadata,
+  AdapterModes,
+  AttachMechanism,
   AdapterInfo,
   AdapterRegistryConfig,
   

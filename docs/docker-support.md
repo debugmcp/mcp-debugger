@@ -101,6 +101,12 @@ Why? CodeLLDB inside the container could not reliably interpret DWARF data for b
 
 If you need Rust debugging from a container, keep the host-based deployments and mount your compiled Linux binary directly; the Docker image intentionally refuses to start Rust sessions to avoid inconsistent experiences.
 
+## Ruby attach in Docker (attach-only)
+
+The image ships the Ruby adapter **without a Ruby runtime**. Launching Ruby scripts in the container is therefore unavailable, but **attach works**: Ruby attach is a direct TCP connection to a running `rdbg --open` DAP socket, so no local Ruby is needed. `list_supported_languages` reports this per-mode (`ruby.modes.launch.available: false`, `ruby.modes.attach.available: true`).
+
+To attach from the container, the rdbg target's socket must be reachable from inside it — e.g. run both on one docker network and attach by container name, or add `--add-host=host.docker.internal:host-gateway` and attach to a port on the host. See `docs/ruby/README.md` (Remote attach) for the full flow.
+
 ## Using Both Debug MCP Server and GitHub MCP Server with Docker
 
 To use both servers together, configure them in your MCP settings:

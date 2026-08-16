@@ -26,6 +26,8 @@ const metadata: AdapterMetadata = {
   description: 'Debug JavaScript and TypeScript applications using Node.js',
   minimumDebuggerVersion: '2.0.0',
   fileExtensions: ['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts'],
+  // Attach spawns the bundled js-debug adapter locally (needs Node, which the server itself runs on)
+  modes: { launch: true, attach: 'spawn' },
   // Placeholder icon (base64-encoded empty SVG)
   icon: 'data:image/svg+xml;base64,PHN2Zy8+'
 };

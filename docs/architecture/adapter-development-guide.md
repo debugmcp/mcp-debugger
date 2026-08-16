@@ -475,6 +475,7 @@ The loader:
 
 - [ ] Package created under `packages/adapter-<language>/`
 - [ ] `IAdapterFactory` implemented with `createAdapter()`, `getMetadata()`, `validate()`
+- [ ] `getMetadata().modes` declared (`{ launch, attach: 'none' | 'direct-connect' | 'spawn' }`) and mirrored in the known-adapters list in `src/adapters/adapter-loader.ts` — this drives per-mode availability in `list_supported_languages` and the attach gate (issue #331)
 - [ ] `IDebugAdapter` fully implemented
 - [ ] `index.ts` exports the named factory class
 - [ ] `DebugLanguage` enum updated in `packages/shared/src/models/index.ts`

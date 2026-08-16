@@ -524,7 +524,12 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   }> {
     let executablePath = config.executablePath;
 
-    if (this.adapter) {
+    // Direct-connect attach spawns no local adapter or debuggee process, so the
+    // local toolchain is not required — skip environment probing (issue #331).
+    const isDirectConnectAttach =
+      config.attachMode === true && this.adapter?.usesDirectConnectForAttach?.() === true;
+
+    if (this.adapter && !isDirectConnectAttach) {
       // Validate the interpreter the user configured (if any) rather than an auto-detected one,
       // so a venv that has debugpy is not rejected because the system Python lacks it (issue #106).
       const validation = await this.adapter.validateEnvironment(executablePath);
@@ -538,6 +543,9 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         executablePath = await this.adapter.resolveExecutablePath();
         this.logger.info(`[ProxyManager] Adapter resolved executable path: ${executablePath}`);
       }
+    } else if (isDirectConnectAttach && !executablePath) {
+      // Nominal, unverified name — connect mode never spawns it
+      executablePath = this.adapter?.getDefaultExecutableName?.() ?? config.language;
     } else if (!executablePath) {
       throw new Error('No executable path provided and no adapter available to resolve it');
     }

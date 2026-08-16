@@ -37,6 +37,8 @@ describe('RubyAdapterFactory', () => {
     expect(metadata.language).toBe(DebugLanguage.RUBY);
     expect(metadata.displayName).toBe('Ruby');
     expect(metadata.fileExtensions).toEqual(expect.arrayContaining(['.rb', '.rake', '.gemspec']));
+    // Attach connects directly to a running rdbg DAP socket — no local Ruby needed (issue #331)
+    expect(metadata.modes).toEqual({ launch: true, attach: 'direct-connect' });
   });
 
   it('validates a healthy toolchain', async () => {

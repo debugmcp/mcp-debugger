@@ -35,6 +35,8 @@ export class CppAdapterFactory implements IAdapterFactory {
       documentationUrl: 'https://github.com/debugmcp/mcp-debugger/docs/cpp',
       minimumDebuggerVersion: '1.0.0',
       fileExtensions: ['.c', '.cpp', '.cc', '.cxx', '.h', '.hpp'],
+      // Attach-by-PID spawns vendored CodeLLDB locally (no compiler needed)
+      modes: { launch: true, attach: 'spawn' },
       icon: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjggMTI4Ij48cGF0aCBmaWxsPSIjNjU5YWQyIiBkPSJNMTE1LjQgMzAuN2wtNDgtMjcuOWMtMS0uNS0yLjItLjgtMy40LS44cy0yLjQuMy0zLjQuOGwtNDggMjhjLTEuOSAxLjEtMy40IDMuNy0zLjQgNS45djU1LjdjMCAxLjEuMiAyLjMuOSAzLjRsLTEwNi42LTYyeiIvPjxwYXRoIGZpbGw9IiMwMDU5OWMiIGQ9Ik0xMC43IDk1LjNjLjUuOCAxLjIgMS41IDEuOSAxLjlsNDcuOSAyNy45YzEgLjUgMi4yLjggMy40LjhzMi40LS4zIDMuNC0uOGw0OC0yNy45YzEuOS0xLjEgMy40LTMuNyAzLjQtNS45di01NS43YzAtMS4xLS4yLTIuMy0uOS0zLjRsLTEwNy4xIDYzLjF6Ii8+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTg1LjMgNzYuMWMtNC4yIDcuNC0xMi4yIDEyLjQtMjEuMyAxMi40LTEzLjUgMC0yNC41LTExLTI0LjUtMjQuNXMxMS0yNC41IDI0LjUtMjQuNWM5LjEgMCAxNy4xIDUgMjEuMyAxMi41bDEzLTcuNWMtNi44LTExLjktMTkuNi0yMC0zNC4zLTIwLTIxLjggMC0zOS41IDE3LjctMzkuNSAzOS41czE3LjcgMzkuNSAzOS41IDM5LjVjMTQuNiAwIDI3LjQtOCAzNC4yLTE5LjhsLTEyLjktNy42eiIvPjwvc3ZnPg=='
     };
   }

@@ -111,6 +111,38 @@ describe('AdapterRegistry', () => {
     expect(adapterStub.dispose).toHaveBeenCalled();
   });
 
+  it('skips environment initialization for direct-connect attach sessions (issue #331)', async () => {
+    const registry = new AdapterRegistry();
+    const adapterStub = createAdapterStub();
+    const factory = createFactory({
+      createAdapter: vi.fn().mockReturnValue(adapterStub),
+      getMetadata: vi.fn().mockReturnValue({
+        name: 'ruby',
+        version: '1.0.0',
+        modes: { launch: true, attach: 'direct-connect' }
+      })
+    });
+
+    await registry.register('ruby', factory as any);
+
+    const baseConfig = {
+      sessionId: 's1',
+      adapterHost: '127.0.0.1',
+      adapterPort: 9000,
+      logDir: '/tmp/logs',
+      scriptPath: 'attach://remote',
+      executablePath: '',
+      launchConfig: {}
+    };
+
+    await registry.create('ruby', { ...baseConfig, attachMode: true });
+    expect(adapterStub.initialize).not.toHaveBeenCalled();
+
+    // Launch (or attach on non-direct-connect adapters) still initializes
+    await registry.create('ruby', { ...baseConfig, attachMode: false });
+    expect(adapterStub.initialize).toHaveBeenCalledTimes(1);
+  });
+
   it('dynamically loads adapters when enabled and initial lookup fails', async () => {
     const loadedAdapter = createAdapterStub();
     const loadedFactory = createFactory({
@@ -291,7 +323,8 @@ describe('AdapterRegistry', () => {
         name: 'mock',
         packageName: '@debugmcp/adapter-mock',
         description: undefined,
-        installed: true
+        installed: true,
+        attach: 'none'
       }]);
     });
 

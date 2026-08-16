@@ -56,6 +56,7 @@ describe('Server Language Discovery Tests', () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
   });
 
   describe('JavaScript availability and metadata', () => {
@@ -104,9 +105,9 @@ describe('Server Language Discovery Tests', () => {
 
       mockAdapterRegistry.listLanguages = vi.fn().mockResolvedValue(['python', 'mock', 'ruby']);
       mockAdapterRegistry.listAvailableAdapters = vi.fn().mockResolvedValue([
-        { name: 'python', packageName: '@debugmcp/adapter-python', installed: true, description: 'Python debugger using debugpy' },
-        { name: 'mock', packageName: '@debugmcp/adapter-mock', installed: true, description: 'Mock adapter for testing' },
-        { name: 'ruby', packageName: '@debugmcp/adapter-ruby', installed: true, description: 'Ruby debugger using rdbg' }
+        { name: 'python', packageName: '@debugmcp/adapter-python', installed: true, description: 'Python debugger using debugpy', attach: 'direct-connect' },
+        { name: 'mock', packageName: '@debugmcp/adapter-mock', installed: true, description: 'Mock adapter for testing', attach: 'none' },
+        { name: 'ruby', packageName: '@debugmcp/adapter-ruby', installed: true, description: 'Ruby debugger using rdbg', attach: 'direct-connect' }
       ]);
 
       const result = await callToolHandler({
@@ -125,7 +126,11 @@ describe('Server Language Discovery Tests', () => {
         language: 'ruby',
         package: '@debugmcp/adapter-ruby',
         installed: true,
-        description: 'Ruby debugger using rdbg'
+        description: 'Ruby debugger using rdbg',
+        modes: {
+          launch: { supported: true, available: true },
+          attach: { supported: true, available: true }
+        }
       });
       expect(rubyMeta).toEqual({
         id: 'ruby',
@@ -144,9 +149,9 @@ describe('Server Language Discovery Tests', () => {
 
       mockAdapterRegistry.listLanguages = vi.fn().mockResolvedValue(['python', 'mock', 'cpp']);
       mockAdapterRegistry.listAvailableAdapters = vi.fn().mockResolvedValue([
-        { name: 'python', packageName: '@debugmcp/adapter-python', installed: true, description: 'Python debugger using debugpy' },
-        { name: 'mock', packageName: '@debugmcp/adapter-mock', installed: true, description: 'Mock adapter for testing' },
-        { name: 'cpp', packageName: '@debugmcp/adapter-cpp', installed: true, description: 'C/C++ debugger using CodeLLDB' }
+        { name: 'python', packageName: '@debugmcp/adapter-python', installed: true, description: 'Python debugger using debugpy', attach: 'direct-connect' },
+        { name: 'mock', packageName: '@debugmcp/adapter-mock', installed: true, description: 'Mock adapter for testing', attach: 'none' },
+        { name: 'cpp', packageName: '@debugmcp/adapter-cpp', installed: true, description: 'C/C++ debugger using CodeLLDB', attach: 'spawn' }
       ]);
 
       const result = await callToolHandler({
@@ -165,7 +170,11 @@ describe('Server Language Discovery Tests', () => {
         language: 'cpp',
         package: '@debugmcp/adapter-cpp',
         installed: true,
-        description: 'C/C++ debugger using CodeLLDB'
+        description: 'C/C++ debugger using CodeLLDB',
+        modes: {
+          launch: { supported: true, available: true },
+          attach: { supported: true, available: true }
+        }
       });
       expect(cppMeta).toEqual({
         id: 'cpp',
@@ -174,6 +183,135 @@ describe('Server Language Discovery Tests', () => {
         requiresExecutable: true,
         defaultExecutable: 'g++'
       });
+    });
+  });
+
+  describe('per-mode availability (issue #331)', () => {
+    it('reports attach-only availability when the launch toolchain is missing on a direct-connect adapter', async () => {
+      debugServer = new DebugMcpServer();
+      const { callToolHandler } = getToolHandlers(mockServer);
+
+      mockAdapterRegistry.listAvailableAdapters = vi.fn().mockResolvedValue([
+        { name: 'ruby', packageName: '@debugmcp/adapter-ruby', installed: true, description: 'Ruby debugger using rdbg', attach: 'direct-connect' }
+      ]);
+      // Ruby-in-container shape: adapter package loadable, toolchain probe fails
+      mockAdapterRegistry.getFactory = vi.fn().mockResolvedValue({
+        getMetadata: () => ({ modes: { launch: true, attach: 'direct-connect' } }),
+        validate: vi.fn().mockResolvedValue({ valid: false, errors: ['Ruby executable not found'], warnings: [] })
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'list_supported_languages', arguments: {} }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      const ruby = content.available.find((a: any) => a.language === 'ruby');
+      expect(ruby.modes).toEqual({
+        launch: { supported: true, available: false, reason: 'Ruby executable not found' },
+        attach: { supported: true, available: true }
+      });
+    });
+
+    it('reports attach unsupported for adapters that declare no attach implementation', async () => {
+      debugServer = new DebugMcpServer();
+      const { callToolHandler } = getToolHandlers(mockServer);
+
+      mockAdapterRegistry.listAvailableAdapters = vi.fn().mockResolvedValue([
+        { name: 'rust', packageName: '@debugmcp/adapter-rust', installed: true, attach: 'none' }
+      ]);
+      mockAdapterRegistry.getFactory = vi.fn().mockResolvedValue({
+        getMetadata: () => ({ modes: { launch: true, attach: 'none' } }),
+        validate: vi.fn().mockResolvedValue({ valid: true, errors: [], warnings: [] })
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'list_supported_languages', arguments: {} }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      const rust = content.available.find((a: any) => a.language === 'rust');
+      expect(rust.modes.attach.supported).toBe(false);
+      expect(rust.modes.attach.available).toBe(false);
+      expect(rust.modes.attach.reason).toContain('does not implement attach');
+      expect(rust.modes.launch).toEqual({ supported: true, available: true });
+    });
+
+    it('keeps disabled languages in available[] with a disabled reason for both modes', async () => {
+      vi.stubEnv('DEBUG_MCP_DISABLE_LANGUAGES', 'go');
+
+      debugServer = new DebugMcpServer();
+      const { callToolHandler } = getToolHandlers(mockServer);
+
+      mockAdapterRegistry.listAvailableAdapters = vi.fn().mockResolvedValue([
+        { name: 'go', packageName: '@debugmcp/adapter-go', installed: true, attach: 'none' }
+      ]);
+      mockAdapterRegistry.getFactory = vi.fn();
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'list_supported_languages', arguments: {} }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      const go = content.available.find((a: any) => a.language === 'go');
+      expect(go).toBeDefined();
+      expect(go.modes.launch.available).toBe(false);
+      expect(go.modes.launch.reason).toContain('disabled in this runtime');
+      expect(go.modes.attach.available).toBe(false);
+      expect(go.modes.attach.reason).toContain('disabled in this runtime');
+      // Disabled adapters must not be toolchain-probed
+      expect(mockAdapterRegistry.getFactory).not.toHaveBeenCalled();
+      // installed[] keeps its disabled-filtered semantics
+      expect(content.installed).not.toContain('go');
+    });
+
+    it('reports uninstalled adapters as unavailable in both modes with a not-installed reason', async () => {
+      debugServer = new DebugMcpServer();
+      const { callToolHandler } = getToolHandlers(mockServer);
+
+      mockAdapterRegistry.listAvailableAdapters = vi.fn().mockResolvedValue([
+        { name: 'dotnet', packageName: '@debugmcp/adapter-dotnet', installed: false, attach: 'spawn' }
+      ]);
+      mockAdapterRegistry.getFactory = vi.fn();
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'list_supported_languages', arguments: {} }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      const dotnet = content.available.find((a: any) => a.language === 'dotnet');
+      expect(dotnet.modes.launch.available).toBe(false);
+      expect(dotnet.modes.launch.reason).toContain('not installed');
+      expect(dotnet.modes.attach).toEqual(
+        expect.objectContaining({ supported: true, available: false })
+      );
+      expect(mockAdapterRegistry.getFactory).not.toHaveBeenCalled();
+    });
+
+    it('fails open (reports available) when the toolchain probe throws', async () => {
+      debugServer = new DebugMcpServer();
+      const { callToolHandler } = getToolHandlers(mockServer);
+
+      mockAdapterRegistry.listAvailableAdapters = vi.fn().mockResolvedValue([
+        { name: 'python', packageName: '@debugmcp/adapter-python', installed: true, attach: 'direct-connect' }
+      ]);
+      mockAdapterRegistry.getFactory = vi.fn().mockResolvedValue({
+        getMetadata: () => ({ modes: { launch: true, attach: 'direct-connect' } }),
+        validate: vi.fn().mockRejectedValue(new Error('probe exploded'))
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'list_supported_languages', arguments: {} }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      const python = content.available.find((a: any) => a.language === 'python');
+      expect(python.modes.launch).toEqual({ supported: true, available: true });
+      expect(python.modes.attach).toEqual({ supported: true, available: true });
     });
   });
 

@@ -299,7 +299,8 @@ describe('AdapterLoader', () => {
         name: 'python',
         packageName: '@debugmcp/adapter-python',
         description: 'Python debugger using debugpy',
-        installed: true
+        installed: true,
+        attach: 'direct-connect'
       });
 
       const mockAdapter = adapters.find(a => a.name === 'mock');
@@ -307,7 +308,8 @@ describe('AdapterLoader', () => {
         name: 'mock',
         packageName: '@debugmcp/adapter-mock',
         description: 'Mock adapter for testing',
-        installed: false
+        installed: false,
+        attach: 'none'
       });
 
       const jsAdapter = adapters.find(a => a.name === 'javascript');
@@ -315,7 +317,8 @@ describe('AdapterLoader', () => {
         name: 'javascript',
         packageName: '@debugmcp/adapter-javascript',
         description: 'JavaScript/TypeScript debugger using js-debug',
-        installed: false
+        installed: false,
+        attach: 'spawn'
       });
 
       const rubyAdapter = adapters.find(a => a.name === 'ruby');
@@ -323,7 +326,8 @@ describe('AdapterLoader', () => {
         name: 'ruby',
         packageName: '@debugmcp/adapter-ruby',
         description: 'Ruby debugger using rdbg',
-        installed: false
+        installed: false,
+        attach: 'direct-connect'
       });
 
       const rustAdapter = adapters.find(a => a.name === 'rust');
@@ -331,7 +335,8 @@ describe('AdapterLoader', () => {
         name: 'rust',
         packageName: '@debugmcp/adapter-rust',
         description: 'Rust debugger using CodeLLDB',
-        installed: false
+        installed: false,
+        attach: 'none'
       });
 
       const goAdapter = adapters.find(a => a.name === 'go');
@@ -339,7 +344,8 @@ describe('AdapterLoader', () => {
         name: 'go',
         packageName: '@debugmcp/adapter-go',
         description: 'Go debugger using Delve',
-        installed: false
+        installed: false,
+        attach: 'none'
       });
 
       const javaAdapter = adapters.find(a => a.name === 'java');
@@ -347,7 +353,8 @@ describe('AdapterLoader', () => {
         name: 'java',
         packageName: '@debugmcp/adapter-java',
         description: 'Java debugger using JDI bridge',
-        installed: false
+        installed: false,
+        attach: 'spawn'
       });
 
       const dotnetAdapter = adapters.find(a => a.name === 'dotnet');
@@ -355,7 +362,8 @@ describe('AdapterLoader', () => {
         name: 'dotnet',
         packageName: '@debugmcp/adapter-dotnet',
         description: '.NET/C# debugger using netcoredbg',
-        installed: false
+        installed: false,
+        attach: 'spawn'
       });
 
       const cppAdapter = adapters.find(a => a.name === 'cpp');
@@ -363,7 +371,8 @@ describe('AdapterLoader', () => {
         name: 'cpp',
         packageName: '@debugmcp/adapter-cpp',
         description: 'C/C++ debugger using CodeLLDB',
-        installed: false
+        installed: false,
+        attach: 'spawn'
       });
     });
 
@@ -378,7 +387,8 @@ describe('AdapterLoader', () => {
         name: 'javascript',
         packageName: '@debugmcp/adapter-javascript',
         description: 'JavaScript/TypeScript debugger using js-debug',
-        installed: true
+        installed: true,
+        attach: 'spawn'
       });
     });
   });
@@ -413,7 +423,8 @@ describe('AdapterLoader', () => {
       name: 'javascript',
       packageName: '@debugmcp/adapter-javascript',
       description: 'JavaScript/TypeScript debugger using js-debug',
-      installed: true
+      installed: true,
+      attach: 'spawn'
     });
     // And factory constructor should have been invoked via fallback
     expect(mockFactoryClass).toHaveBeenCalled();

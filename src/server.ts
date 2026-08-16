@@ -44,6 +44,11 @@ import path from 'path';
 import { SimpleFileChecker, createSimpleFileChecker, FileExistenceResult } from './utils/simple-file-checker.js';
 import { LineReader, createLineReader } from './utils/line-reader.js';
 import { getDisabledLanguages, isLanguageDisabled } from './utils/language-config.js';
+import {
+  computeModeAvailability,
+  ValidationResultCache,
+  LanguageModes
+} from './utils/language-availability.js';
 import { isContainerMode, getWorkspaceRoot } from './utils/container-path-utils.js';
 import {
   BP_ADDRESSING_ENV_KEY,
@@ -86,6 +91,19 @@ interface LanguageMetadata {
   version: string;
   requiresExecutable: boolean;
   defaultExecutable?: string;
+}
+
+/**
+ * Entry in the list_supported_languages 'available' array.
+ * 'installed' keeps its historical meaning (adapter package loadable);
+ * 'modes' carries per-mode availability with reasons (issue #331).
+ */
+interface AvailableLanguage {
+  language: string;
+  package: string;
+  installed: boolean;
+  description?: string;
+  modes: LanguageModes;
 }
 
 /**
@@ -236,6 +254,7 @@ export class DebugMcpServer {
   private static readonly OUTPUT_UPDATE_DEBOUNCE_MS = 150;
   private subscribedUris = new Set<string>();
   private outputUpdateTimers = new Map<string, NodeJS.Timeout>();
+  private validationCache = new ValidationResultCache();
   private handleOutputCaptured = (sessionId: string): void => {
     this.scheduleOutputResourceUpdated(sessionId);
   };
@@ -2602,27 +2621,58 @@ export class DebugMcpServer {
       const installed = await this.getSupportedLanguagesAsync();
 
       // Also surface known adapters with install status if available from registry
-      let available: Array<{ language: string; package: string; installed: boolean; description?: string }> = installed.map(lang => ({
-        language: lang,
-        package: `@debugmcp/adapter-${lang}`,
-        installed: true
-      }));
+      let baseEntries: Array<{ language: string; package: string; installed: boolean; description?: string; attach: 'none' | 'direct-connect' | 'spawn' }> =
+        installed.map(lang => ({
+          language: lang,
+          package: `@debugmcp/adapter-${lang}`,
+          installed: true,
+          attach: 'none' as const
+        }));
 
-      if (adapterRegistry) {
-        const dyn = adapterRegistry as unknown as { listAvailableAdapters?: () => Promise<Array<{ name: string; packageName: string; description?: string; installed: boolean }>> };
-        if (typeof dyn.listAvailableAdapters === 'function') {
+      const dyn = adapterRegistry as unknown as {
+        listAvailableAdapters?: () => Promise<Array<{ name: string; packageName: string; description?: string; installed: boolean; attach?: 'none' | 'direct-connect' | 'spawn' }>>;
+        getFactory?: (language: string) => Promise<{ validate: () => Promise<{ valid: boolean; errors: string[]; warnings: string[] }>; getMetadata: () => { modes?: { attach: 'none' | 'direct-connect' | 'spawn' } } } | undefined>;
+      } | undefined;
+
+      if (adapterRegistry && typeof dyn?.listAvailableAdapters === 'function') {
         try {
           const meta = await dyn.listAvailableAdapters!();
-          available = meta.map(m => ({
+          baseEntries = meta.map(m => ({
             language: m.name,
             package: m.packageName,
             installed: m.installed,
-            description: m.description
+            description: m.description,
+            attach: m.attach ?? 'none'
           }));
         } catch (e) {
           this.logger.warn('Failed to query detailed adapter metadata; returning installed list only', { error: (e as Error)?.message });
         }
       }
+
+      const disabledSet = getDisabledLanguages();
+      const available: AvailableLanguage[] = [];
+      for (const entry of baseEntries) {
+        const disabled = disabledSet.has(entry.language);
+        // Only probe toolchains for installed, enabled adapters
+        const factory = !disabled && entry.installed && typeof dyn?.getFactory === 'function'
+          ? await dyn.getFactory(entry.language).catch(() => undefined)
+          : undefined;
+        const modes = await computeModeAvailability({
+          language: entry.language,
+          packageName: entry.package,
+          installed: entry.installed,
+          disabled,
+          attach: factory?.getMetadata().modes?.attach ?? entry.attach,
+          validate: factory ? () => this.validationCache.get(entry.language, () => factory.validate()) : undefined,
+          logger: this.logger
+        });
+        available.push({
+          language: entry.language,
+          package: entry.package,
+          installed: entry.installed,
+          description: entry.description,
+          modes
+        });
       }
 
       // Also build simple metadata array for backward compatibility with previous payload shape

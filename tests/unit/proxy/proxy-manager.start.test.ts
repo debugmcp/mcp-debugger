@@ -361,6 +361,66 @@ describe('ProxyManager.start', () => {
     expect(resolveExecutablePath).not.toHaveBeenCalled();
   });
 
+  it('skips environment probing for direct-connect attach sessions (issue #331)', async () => {
+    const adapter = {
+      language: DebugLanguage.RUBY,
+      validateEnvironment: vi.fn().mockRejectedValue(new Error('should not be called')),
+      resolveExecutablePath: vi.fn().mockRejectedValue(new Error('should not be called')),
+      usesDirectConnectForAttach: vi.fn().mockReturnValue(true),
+      getDefaultExecutableName: vi.fn().mockReturnValue('ruby')
+    } as unknown as IDebugAdapter;
+
+    proxyManager = new ProxyManager(
+      adapter,
+      proxyProcessLauncher,
+      fileSystem,
+      logger
+    );
+
+    const config: ProxyConfig = {
+      ...baseConfig,
+      language: DebugLanguage.RUBY,
+      executablePath: undefined,
+      attachMode: true
+    };
+
+    await proxyManager.start(config);
+
+    expect(adapter.validateEnvironment).not.toHaveBeenCalled();
+    expect(adapter.resolveExecutablePath).not.toHaveBeenCalled();
+    // Nominal, unverified name fills the init payload — connect mode never spawns it
+    expect(fakeProcess.sendCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ cmd: 'init', executablePath: 'ruby' })
+    );
+  });
+
+  it('still probes the environment for attach sessions on spawn-mode adapters', async () => {
+    const adapter = {
+      language: DebugLanguage.PYTHON,
+      validateEnvironment: vi.fn().mockResolvedValue({ valid: true, errors: [], warnings: [] }),
+      resolveExecutablePath: vi.fn(),
+      usesDirectConnectForAttach: vi.fn().mockReturnValue(false)
+    } as unknown as IDebugAdapter;
+
+    proxyManager = new ProxyManager(
+      adapter,
+      proxyProcessLauncher,
+      fileSystem,
+      logger
+    );
+
+    const config: ProxyConfig = {
+      ...baseConfig,
+      language: DebugLanguage.PYTHON,
+      executablePath: '/usr/bin/python3',
+      attachMode: true
+    };
+
+    await proxyManager.start(config);
+
+    expect(adapter.validateEnvironment).toHaveBeenCalledWith('/usr/bin/python3');
+  });
+
   describe('init retry handling', () => {
     beforeEach(() => {
       vi.useFakeTimers();

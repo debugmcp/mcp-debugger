@@ -45,6 +45,7 @@ export class MockAdapterFactory implements IAdapterFactory {
       documentationUrl: 'https://github.com/debugmcp/mcp-debugger/docs/mock-adapter',
       minimumDebuggerVersion: '2.0.0',
       fileExtensions: ['.mock', '.test'],
+      modes: { launch: true, attach: 'none' },
       icon: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTEyIDJDNi40OCAyIDIgNi40OCAyIDEyUzYuNDggMjIgMTIgMjJTMjIgMTcuNTIgMjIgMTJTMTcuNTIgMiAxMiAyWk0xMiAyMEM4LjEzIDIwIDUgMTYuODcgNSAxMlM4LjEzIDQgMTIgNFMxOSA3LjEzIDE5IDEyUzE1Ljg3IDIwIDEyIDIwWk0xMiA2QzkuNzkgNiA4IDcuNzkgOCAxMFM5Ljc5IDE0IDEyIDE0UzE2IDEyLjIxIDE2IDEwUzE0LjIxIDYgMTIgNloiIGZpbGw9IiMwMDAwMDAiLz4KPC9zdmc+'
     };
   }
