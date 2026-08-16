@@ -49,8 +49,9 @@ Runs before each test file:
 3. Computes `__dirname` for ESM context with Windows path normalization.
 4. Makes `portManager` globally available as `globalThis.testPortManager`.
 5. **`beforeAll`**: resets port manager allocations.
-6. **`afterEach`**: calls `vi.resetAllMocks()` and `vi.restoreAllMocks()` to guarantee a clean slate per test.
-7. **`afterAll`**: resets port manager.
+6. **`afterEach`**: calls `vi.resetAllMocks()`, `vi.restoreAllMocks()`, and `vi.unstubAllEnvs()` to guarantee a clean slate per test.
+7. **`afterEach` (process-listener leak guard)**: compares `process.rawListeners` for guarded process events against a baseline captured at setup, removing and reporting any listeners a test leaked (throws instead when `LEAK_GUARD_STRICT` is set).
+8. **`afterAll`**: resets port manager.
 
 ### Port Allocation
 
@@ -148,7 +149,7 @@ Cleanup: `afterAll` closes the MCP client and kills the server process. `afterEa
 
 ### STDIO Smoke Test Matrix
 
-Sixteen per-language STDIO smoke tests: Python, Python (attach), JavaScript, JavaScript (attach), Rust, Go, Java (launch), Java (attach), Java (evaluate), Java (inner class), Java (pause), Java (event race), Java (redefine), .NET, Ruby, Ruby (attach). Each follows the standard lifecycle:
+Twenty-one per-language STDIO smoke tests: Python, Python (attach), JavaScript, JavaScript (attach), JavaScript (function breakpoints), Rust, Rust (function breakpoints), Go, Java (launch), Java (attach), Java (evaluate), Java (inner class), Java (pause), Java (event race), Java (redefine), Java (function breakpoints), .NET, Ruby, Ruby (attach), C++, C++ (attach). Each follows the standard lifecycle:
 
 1. Create session → set breakpoint → start debugging
 2. Inspect: stack trace, scopes, variables
@@ -165,7 +166,7 @@ Two SSE test files test the SSE HTTP transport: Python over SSE (`mcp-server-smo
 
 **File:** `tests/e2e/comprehensive-mcp-tools.test.ts`
 
-Tests all 20 MCP tools across 8 languages (Python, JavaScript, Mock, Rust, Go, Java, Dotnet, Ruby) where the toolchain is available. Produces a PASS/FAIL/SKIP matrix report with per-tool per-language status and timing. Toolchain detection uses `hasCommand()` checks (e.g., `rustc --version`, `go version`).
+Tests all 25 MCP tools across 9 languages (Python, JavaScript, Mock, Rust, Ruby, Go, Java, Dotnet, C++) where the toolchain is available. Produces a PASS/FAIL/SKIP matrix report with per-tool per-language status and timing. Toolchain detection uses `hasCommand()` checks (e.g., `rustc --version`, `go version`).
 
 ### Docker E2E
 

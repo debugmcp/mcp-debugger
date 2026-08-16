@@ -66,8 +66,8 @@ The utility function `findNetcoredbgExecutable` in `dotnet-utils.ts` uses a more
 2. `NETCOREDBG_PATH` environment variable
 3. Caller-provided preferred path
 4. `which netcoredbg` (searches PATH) — only when no target architecture is requested
-5. Hardcoded platform-specific candidate paths (architecture-aware)
-6. Common installation directories (e.g., `/usr/local/netcoredbg`, `C:\netcoredbg`)
+5. Common platform-specific installation directories (architecture-aware), e.g., `/usr/local/netcoredbg`, `C:\netcoredbg`
+6. If the architecture-specific search found nothing, the search is retried without the architecture constraint
 
 ## DAP Protocol Details
 

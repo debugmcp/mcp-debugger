@@ -177,9 +177,9 @@ When developing adapters for other debug protocols:
    - Does it support TCP?
    - What is the command-line syntax?
 
-2. **Use localhost for networking:**
-   - Don't hard-code `127.0.0.1`
-   - Let the OS resolve to appropriate address family
+2. **Be deliberate about the loopback host:**
+   - The project-standard default is `127.0.0.1` (overridable via the `adapterHost` config)
+   - Use `localhost` only where the adapter may bind IPv6 (`::1`) — e.g. js-debug — so the OS resolves the right address family
 
 3. **Test with actual debug adapter:**
    - Don't assume based on documentation

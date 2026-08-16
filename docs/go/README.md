@@ -256,7 +256,7 @@ Note: The MCP tools do not expose goroutine-specific commands (listing goroutine
 
 ### Exception Breakpoints
 
-The Go adapter supports exception breakpoints with two built-in filters: `unrecovered-panic` (break on unrecovered panics, enabled by default) and `runtime-fatal-throw` (break on fatal runtime errors, enabled by default). These are declared in the adapter's capabilities and sent to Delve during session configuration. Custom exception breakpoint configuration can also be provided via `dapLaunchArgs`.
+The Go adapter supports exception breakpoints with two built-in filters: `unrecovered-panic` (break on unrecovered panics) and `runtime-fatal-throw` (break on fatal runtime errors). Delve has no caught/uncaught distinction, so both the `uncaught` and `all` exception break modes arm the same two filters; launch sessions default to `breakOnExceptions: "uncaught"`, which arms both (attach sessions apply no default). These are declared in the adapter's capabilities and sent to Delve during session configuration. Custom exception breakpoint configuration can also be provided via `dapLaunchArgs`.
 
 ## Debugging Tips
 

@@ -42,7 +42,7 @@ packages/adapter-<language>/
 Naming conventions:
 - Package name: `@debugmcp/adapter-<language>`
 - Factory class: `<Language>AdapterFactory` (e.g., `GoAdapterFactory`)
-- File names: kebab-case is the recommended convention for new adapters (used by 7 of the 8 shipped adapters), e.g. `go-debug-adapter.ts`. The .NET adapter uses PascalCase (`DotnetAdapterFactory.ts`, `DotnetDebugAdapter.ts`) for historical reasons.
+- File names: kebab-case is the recommended convention for new adapters (used by 8 of the 9 shipped adapters), e.g. `go-debug-adapter.ts`. The .NET adapter uses PascalCase (`DotnetAdapterFactory.ts`, `DotnetDebugAdapter.ts`) for historical reasons.
 
 ---
 
@@ -85,10 +85,10 @@ Based on `packages/adapter-go/package.json`:
     "@vscode/debugprotocol": "^1.68.0"
   },
   "devDependencies": {
-    "@types/node": "^25.5.0",
+    "@types/node": "^26.2.0",
     "rimraf": "^6.1.3",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.0"
+    "vitest": "^4.1.10"
   },
   "keywords": ["mcp", "debugger", "<language>", "dap"],
   "author": "mcp-debugger team",
@@ -262,7 +262,7 @@ export class GoDebugAdapter extends EventEmitter implements IDebugAdapter {
 
 **State machine**: `UNINITIALIZED` → `INITIALIZING` → `READY` → `CONNECTED` ⇄ `DEBUGGING` → `DISCONNECTED` | `ERROR`
 
-See `packages/adapter-go/src/go-debug-adapter.ts` for the complete ~500-line implementation.
+See `packages/adapter-go/src/go-debug-adapter.ts` for the complete implementation.
 
 ### 6. Package entry point (`index.ts`)
 

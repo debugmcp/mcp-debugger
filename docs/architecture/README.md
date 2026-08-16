@@ -55,6 +55,7 @@ Each supported language implements the IDebugAdapter interface:
 - **[GoDebugAdapter](../../packages/adapter-go/)** - Go/Delve support
 - **[JavaDebugAdapter](../../packages/adapter-java/)** - Java/JDI support
 - **[DotnetDebugAdapter](../../packages/adapter-dotnet/)** - .NET/netcoredbg support
+- **[CppDebugAdapter](../../packages/adapter-cpp/)** - C/C++/CodeLLDB support
 
 ### 4. Adapter Registry
 
@@ -262,7 +263,8 @@ async endSession(exitCode: number) {
 
 ## Version History
 
-- **v0.21.0** - Ruby adapter, 8 adapters total
+- **Unreleased** - C/C++ adapter, 9 adapters total
+- **v0.22.0** - Ruby adapter, 8 adapters total
 - **v0.19.0** - .NET/C# adapter, 7 language adapters total
 - **v0.18.0** - Go adapter, Java adapter
 - **v0.17.0** - Rust adapter

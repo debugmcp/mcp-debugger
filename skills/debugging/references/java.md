@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- JDK 21+ recommended (`java` and `javac` on PATH, or `JAVA_HOME` set). Versions below 21 log a warning but may work.
+- JDK 21+ required in practice (`java` and `javac` on PATH, or `JAVA_HOME` set): the JDI bridge is compiled on first use with `javac --release 21`, which an older javac cannot do. Version checks warn at two thresholds — the factory's pre-session validation warns below 21, while the adapter's runtime environment check warns only below 11.
 - No external adapter: a single-file JDI bridge (`JdiDapServer.java`, using `com.sun.jdi.*` from the JDK) is **compiled on first use via `javac`** — expect the first session to take a little longer.
 - **Compile target code with `javac -g`.** Without `-g` there is no `LocalVariableTable` and variable inspection returns empty lists even at a valid breakpoint. Gradle and Maven include debug info by default.
 

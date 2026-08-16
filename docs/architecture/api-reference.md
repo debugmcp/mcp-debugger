@@ -420,9 +420,9 @@ Returns whether the proxy process is running.
 ### Events
 
 ProxyManager forwards DAP events from the adapter:
-- Individually typed and re-emitted: `stopped`, `continued`, `terminated`, `exited`, `initialized`
-- All other DAP events (including `thread`, `output`, `breakpoint`, `module`, etc.) are forwarded as the generic `dap-event` event with `(event: string, body: unknown)` signature
-- Plus adapter lifecycle events: `error`, `exit`, `dry-run-complete`, `adapter-configured`
+- Individually typed and re-emitted with extracted arguments (not the raw DAP event object): `stopped` as `(threadId: number | undefined, reason: string, data?: StoppedEvent['body'])`, `continued`, `terminated`, `exited` as `(exitCode?: number)`, `output`, `breakpoint`
+- All other DAP events (including `thread`, `module`, etc.) are forwarded as the generic `dap-event` event with `(event: string, body: unknown)` signature
+- Plus proxy lifecycle and status events: `initialized`, `init-received`, `error`, `exit` as `(code, signal?, expected?)`, `dry-run-complete`, `adapter-configured`, `adapter-capabilities`, `function-breakpoints-synced`
 
 ## AdapterRegistry API
 

@@ -6,16 +6,17 @@ A lightweight MCP proxy that sits between Claude Code and mcp-debugger, allowing
 
 When developing mcp-debugger, code changes require rebuilding and restarting the server. Claude Code spawns MCP servers as child processes with no restart/reconnect capability — the only option is restarting Claude Code entirely, losing conversation context.
 
-This proxy solves that by maintaining a stable stdio connection to Claude Code while managing the mcp-debugger backend as a restartable SSE child process.
+This proxy solves that by maintaining a stable stdio connection to Claude Code while managing the mcp-debugger backend as a restartable Streamable HTTP child process (the default; legacy SSE and stdio backends are also supported via `DEV_PROXY_BACKEND_TRANSPORT`).
 
 ## Architecture
 
 ```
 Claude Code <--stdio--> dev-proxy.mjs (stable, never restarts)
                               |
-                         HTTP/SSE (MCP protocol)
+                  Streamable HTTP (MCP protocol)
+            (or legacy SSE / stdio, per DEV_PROXY_BACKEND_TRANSPORT)
                               |
-                        mcp-debugger (SSE mode, restartable)
+                        mcp-debugger (http mode, restartable)
 ```
 
 ## Setup
@@ -54,9 +55,10 @@ Environment variables (all optional):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DEV_PROXY_PORT` | `3001` | Port for the backend SSE server |
+| `DEV_PROXY_PORT` | `3001` | Port for the backend server (`http` and `sse` modes) |
 | `DEV_PROXY_BUILD_CMD` | `npm run build` | Build command to run |
 | `DEV_PROXY_ROOT` | Auto-detected | Project root directory |
+| `DEV_PROXY_BACKEND_TRANSPORT` | `http` | Backend transport: `http` (default), `sse` (legacy/deprecated), or `stdio` |
 
 ## Workflow
 

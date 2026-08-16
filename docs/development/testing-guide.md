@@ -342,6 +342,8 @@ export function createMockFileSystem(): IFileSystem {
 }
 ```
 
+Note: two `createMockFileSystem` implementations exist. The version shown above is the one in `test-dependencies.ts` — all bare `vi.fn()` calls, so configure return values per test. The `test-utils.ts` version instead pre-configures defaults (`pathExists`/`exists` resolve `true`, `readFile` resolves `''`, `stat` resolves a mock stat object) and also stubs `createWriteStream`/`createReadStream`. Pick the import that matches the behavior your test expects.
+
 ### Test Fixtures
 
 Python script fixtures are defined as TypeScript string constants in `tests/test-utils/fixtures/python-scripts.ts`. Actual script files live in `tests/fixtures/` organized by language:

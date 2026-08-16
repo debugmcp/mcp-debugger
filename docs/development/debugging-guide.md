@@ -81,7 +81,8 @@ import fs from 'fs';
 fs.appendFileSync('/tmp/mcp-debug-startup.log',
   `[DEBUG] Starting server with args: ${process.argv.join(' ')}\n`);
 
-// Transport startup is managed in src/cli/stdio-command.ts or src/cli/sse-command.ts,
+// Transport startup is managed in src/cli/stdio-command.ts, src/cli/http-command.ts
+// (the recommended transport), or src/cli/sse-command.ts (deprecated),
 // not in DebugMcpServer.start() (which only logs startup/build info).
 // To debug transport binding, add logger calls to the CLI command handlers.
 ```
@@ -150,13 +151,16 @@ this.logger.debug('[DEBUG Proxy] Sending test message:', testMsg);
 **Debug Steps**:
 
 ```typescript
-// Log all DAP traffic — use this.logger, not console (console is silenced)
-this.dapClient.on('send', (message) => {
-  this.logger.debug('[DAP send]', JSON.stringify(message, null, 2));
+// Log incoming DAP events — use this.logger, not console (console is silenced).
+// MinimalDapClient emits each DAP event under its own name ('stopped',
+// 'initialized', ...) plus a generic 'event' wrapper; there are no 'send'/'receive'
+// events. To trace outgoing requests, add logging inside sendRequest() itself.
+this.dapClient.on('event', (evt) => {
+  this.logger.debug('[DAP event]', JSON.stringify(evt, null, 2));
 });
 
-this.dapClient.on('receive', (message) => {
-  this.logger.debug('[DAP recv]', JSON.stringify(message, null, 2));
+this.dapClient.on('stopped', (body) => {
+  this.logger.debug('[DAP stopped]', JSON.stringify(body, null, 2));
 });
 
 // Track request lifecycle

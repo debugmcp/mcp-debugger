@@ -290,7 +290,6 @@ describe('SessionManager', () => {
       logger: createMockLogger(),
       proxyManagerFactory: createMockProxyManagerFactory(),
       sessionStoreFactory: createMockSessionStoreFactory(),
-      debugTargetLauncher: createMockDebugTargetLauncher(),
       environment: createMockEnvironment(),
       adapterRegistry: createMockAdapterRegistry()
     };

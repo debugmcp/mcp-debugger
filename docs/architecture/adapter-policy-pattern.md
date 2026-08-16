@@ -20,7 +20,7 @@ This document explains the AdapterPolicy pattern and how it relates to the main 
 - **Purpose**: Language-specific policies for session management
 - **Scope**: Lightweight behaviors used by SessionManager and DAP proxy layer
 - **Location**: `packages/shared/src/interfaces/adapter-policy-*.ts`
-- **All policies**: `DefaultAdapterPolicy`, `PythonAdapterPolicy`, `JsDebugAdapterPolicy`, `RubyAdapterPolicy`, `RustAdapterPolicy`, `GoAdapterPolicy`, `JavaAdapterPolicy`, `DotnetAdapterPolicy`, `MockAdapterPolicy`
+- **All policies**: `DefaultAdapterPolicy`, `PythonAdapterPolicy`, `JsDebugAdapterPolicy`, `RubyAdapterPolicy`, `RustAdapterPolicy`, `CppAdapterPolicy`, `GoAdapterPolicy`, `JavaAdapterPolicy`, `DotnetAdapterPolicy`, `MockAdapterPolicy`
 
 ## AdapterPolicy Interface
 
@@ -139,6 +139,7 @@ Client Request → Server → SessionManager
 | `JsDebugAdapterPolicy` | `adapter-policy-js.ts` | `'js-debug'` | `'pwa-node'` | Yes | Yes |
 | `RubyAdapterPolicy` | `adapter-policy-ruby.ts` | `'ruby'` | `'rdbg'` | No | No |
 | `RustAdapterPolicy` | `adapter-policy-rust.ts` | `'rust'` | `'lldb'` | No | No |
+| `CppAdapterPolicy` | `adapter-policy-cpp.ts` | `'cpp'` | `'lldb'` | No | No |
 | `GoAdapterPolicy` | `adapter-policy-go.ts` | `'go'` | `'dlv-dap'` | No | No |
 | `JavaAdapterPolicy` | `adapter-policy-java.ts` | `'java'` | `'java'` | No | No |
 | `DotnetAdapterPolicy` | `adapter-policy-dotnet.ts` | `'dotnet'` | `'coreclr'` | No | No |
@@ -179,13 +180,13 @@ Client Request → Server → SessionManager
 - `resolveExecutablePath()` constructs `$JAVA_HOME/bin/java(.exe)` when `JAVA_HOME` is set, otherwise falls back to `'java'`
 - `isNonFileSourceIdentifier()` detects Java FQCNs (no path separators, does not end with `.java`) so the server skips file existence checks
 - `getInitializationBehavior()` returns `{ sendLaunchBeforeConfig: true }` because JdiDapServer sends `'initialized'` during initialize
-- `filterStackFrames()` removes JDK internal frames (`java.*`, `javax.*`, `sun.*`) and frames with file paths containing `/jdk/` or `/rt.jar/`
+- `filterStackFrames()` removes JDK internal frames (`java.*`, `javax.*`, `sun.*`, `jdk.*`, `com.sun.*`) and frames with file paths containing `/jdk/` or `/rt.jar/`
 
 **DotnetAdapterPolicy**:
 - `resolveExecutablePath()` checks `NETCOREDBG_PATH` env var, defaults to `'netcoredbg'`
 - `getDapAdapterConfiguration()` returns `{ type: 'coreclr' }`
 - `getInitializationBehavior()` returns `{ sendLaunchBeforeConfig: true, sendAttachBeforeInitialized: false }` (netcoredbg requires launch before configurationDone)
-- `extractLocalVariables()` filters out C# compiler-generated variables (`<>`, `CS$<>`, `$VB$`, `<>t__`, `<>s__`) unless `includeSpecial` is true
+- `extractLocalVariables()` filters out compiler-generated variables whose names start with `<>` (C# async/closure artifacts), `CS$<>` (closure captures), or `$VB$` (VB.NET) unless `includeSpecial` is true
 - `getLocalScopeName()` returns `['Locals']`
 - `filterStackFrames()` removes frames with no source file and `System.*`/`Microsoft.*` frames
 - Supports TCP-to-stdio bridge launches when upstream provides `adapterCommand`; falls back to direct `netcoredbg --interpreter=vscode --server=<port>` mode otherwise. The policy itself does not create the bridge command; it trusts upstream code (`DotnetDebugAdapter.buildAdapterCommand`) to supply `adapterCommand` when bridge mode is required.

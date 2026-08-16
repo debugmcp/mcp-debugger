@@ -5,7 +5,7 @@ This package provides a fully functional JavaScript/TypeScript debug adapter for
 Key points
 - ESM TypeScript project with dist/ output and type declarations
 - Exports `JavascriptAdapterFactory` as the entry point for dynamic loading
-- Full `JavascriptDebugAdapter` implementation (~760 lines) with comprehensive DAP integration
+- Full `JavascriptDebugAdapter` implementation (~820 lines) with comprehensive DAP integration
 - Real utilities: `detectTsRunners`, `determineOutFiles`, `isESMProject`, `hasTsConfigPaths`, TypeScript detection
 - Vendor folder for js-debug (bundled `vsDebugServer.js` with `.cjs` twin and sidecars)
 - Uses .js suffix on relative TS imports to match ESM resolution
@@ -13,7 +13,7 @@ Key points
 Status and scope
 - This is a fully implemented adapter supporting JavaScript and TypeScript debugging
 - Environment validation includes Node.js detection, vendor file verification, and optional TypeScript runner detection
-- `DebugLanguage.JAVASCRIPT` is a full member of the enum (8 languages: Python, JavaScript, Ruby, Rust, Go, Java, Dotnet, Mock)
+- `DebugLanguage.JAVASCRIPT` is a full member of the enum (9 languages: Python, JavaScript, Ruby, Rust, Cpp, Go, Java, Dotnet, Mock)
 
 Build and test
 - Build: pnpm -w -F @debugmcp/adapter-javascript run build
@@ -30,7 +30,7 @@ Validation
 Structure
 - src/index.ts exports the factory by name: `JavascriptAdapterFactory`
 - src/javascript-adapter-factory.ts extends the shared BaseAdapterFactory
-- src/javascript-debug-adapter.ts provides full DAP integration (~760 lines)
+- src/javascript-debug-adapter.ts provides full DAP integration (~820 lines)
 - src/utils/typescript-detector.ts — TypeScript detection and runner discovery (`detectTsRunners`)
 - src/utils/config-transformer.ts — Launch configuration helpers (`determineOutFiles`, `isESMProject`, `hasTsConfigPaths`)
 - src/types/* — TypeScript types for adapter configuration
@@ -44,7 +44,7 @@ Notes
 Populate the Microsoft js-debug adapter into this package so that validation passes and later tasks can spawn it via TCP (positional port argument).
 
 Prereqs
-- Node 22+ for the vendoring script (uses global `fetch` and AbortController)
+- Node 18+ for the vendoring script itself (uses global `fetch`); the monorepo toolchain requires Node 22+ regardless
 - Optional: `GH_TOKEN` environment variable to avoid GitHub API rate limits (recommended behind corporate proxies)
 
 Commands

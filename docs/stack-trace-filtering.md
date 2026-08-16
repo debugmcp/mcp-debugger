@@ -68,7 +68,7 @@ The filtering is implemented using the existing `AdapterPolicy` system:
    - Any language whose AdapterPolicy implements `filterStackFrames` will have filtering applied (including JavaScript, Go, .NET, and any other adapter policies that define this method)
 
 ### Edge Cases Handled
-- **All frames internal**: At least the first frame is retained (this safety behavior applies to the JS and Go adapter policies)
+- **All frames internal**: The fallback differs by policy — JS and Go retain at least the first frame; Java returns the full unfiltered array (never hides the entire stack, e.g. a thread parked deep in JDK code); .NET has no such fallback and may return an empty array
 - **No frames**: Returns empty array as before
 - **Python**: No filtering applied (Python's AdapterPolicy does not implement `filterStackFrames`)
 - **Other languages**: .NET and Java DO implement filtering via their AdapterPolicy. Any language whose AdapterPolicy implements `filterStackFrames` will have filtering applied
