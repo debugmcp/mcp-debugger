@@ -17,6 +17,7 @@ import {
   ActiveAdapterMap
 } from '@debugmcp/shared';
 import { IDebugAdapter, AdapterConfig } from '@debugmcp/shared';
+import type { AdapterMetadata as SharedAdapterMetadata } from '@debugmcp/shared';
 import { AdapterLoader } from './adapter-loader.js';
 import type { AdapterMetadata } from './adapter-loader.js';
 
@@ -146,9 +147,16 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
 
     // Create the adapter
     const adapter = factory.createAdapter(dependencies);
-    
-    // Initialize the adapter
-    await adapter.initialize();
+
+    // Initialize the adapter. initialize() gates on the local toolchain, which
+    // direct-connect attach (a plain TCP connection to a remote DAP socket)
+    // does not need — skip it so attach works on toolchain-less hosts (issue #331).
+    const skipEnvironmentInit =
+      config.attachMode === true &&
+      factory.getMetadata().modes?.attach === 'direct-connect';
+    if (!skipEnvironmentInit) {
+      await adapter.initialize();
+    }
 
     // Track the active adapter
     if (!this.activeAdapters.has(language)) {
@@ -271,7 +279,8 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
       name: language,
       packageName: `@debugmcp/adapter-${language}`,
       description: undefined,
-      installed: true
+      installed: true,
+      attach: this.factories.get(language)?.getMetadata().modes?.attach ?? 'none'
     });
 
     if (!this.dynamicEnabled) {
@@ -296,6 +305,39 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
     }
 
     return Array.from(results.values());
+  }
+
+  /**
+   * Get the factory for a language without creating an adapter instance.
+   * Checks registered factories first, then the loader cache, then attempts
+   * a dynamic load (when enabled). Returns undefined if unavailable.
+   */
+  async getFactory(language: string): Promise<IAdapterFactory | undefined> {
+    const registered = this.factories.get(language);
+    if (registered) {
+      return registered;
+    }
+    const cached = this.loader.getCachedFactory(language);
+    if (cached) {
+      return cached;
+    }
+    if (this.dynamicEnabled) {
+      try {
+        return await this.loader.loadAdapter(language);
+      } catch {
+        return undefined;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Get a language's factory-declared metadata (including per-mode capabilities)
+   * without creating an adapter instance.
+   */
+  async getFactoryMetadata(language: string): Promise<SharedAdapterMetadata | undefined> {
+    const factory = await this.getFactory(language);
+    return factory?.getMetadata();
   }
 
   /**

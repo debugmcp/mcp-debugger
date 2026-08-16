@@ -28,7 +28,9 @@ export class RubyAdapterFactory implements IAdapterFactory {
       description: 'Debug Ruby applications using rdbg',
       documentationUrl: 'https://github.com/debugmcp/mcp-debugger/tree/main/docs/ruby',
       minimumDebuggerVersion: '1.7.0',
-      fileExtensions: ['.rb', '.rake', '.gemspec']
+      fileExtensions: ['.rb', '.rake', '.gemspec'],
+      // Attach connects straight to a running rdbg --open DAP socket (no local Ruby needed)
+      modes: { launch: true, attach: 'direct-connect' }
     };
   }
 

@@ -224,6 +224,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       scriptPath,
       scriptArgs,
       launchConfig: genericLaunchConfig as GenericLaunchConfig,
+      attachMode: isAttachMode,
     };
 
     const adapter = await this.adapterRegistry.create(session.language, adapterConfig);
@@ -269,27 +270,47 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       this.sessionStore.update(sessionId, { toolchainValidation: undefined });
     }
 
-    // Use the adapter to resolve the executable path
+    // Use the adapter to resolve the executable path. Direct-connect attach
+    // sessions (e.g. Ruby/rdbg, Python/debugpy) spawn no local process, so no
+    // toolchain lookup runs — a nominal, unverified name keeps the proxy init
+    // payload (which requires a non-empty string) satisfied (issue #331).
+    const isDirectConnectAttach = isAttachMode && adapter.usesDirectConnectForAttach?.() === true;
+
     let resolvedExecutablePath: string;
-    try {
-      resolvedExecutablePath = await adapter.resolveExecutablePath(session.executablePath);
-      this.logger.info(`[SessionManager] Adapter resolved executable path: ${resolvedExecutablePath}`);
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      this.logger.error(
-        `[SessionManager] Failed to resolve executable for ${session.language}:`,
-        msg
+    if (isDirectConnectAttach) {
+      resolvedExecutablePath =
+        session.executablePath || adapter.getDefaultExecutableName?.() || session.language;
+      this.logger.info(
+        `[SessionManager] Direct-connect attach for ${session.language}; skipping executable resolution`
       );
+    } else {
+      try {
+        resolvedExecutablePath = await adapter.resolveExecutablePath(session.executablePath);
+        this.logger.info(`[SessionManager] Adapter resolved executable path: ${resolvedExecutablePath}`);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        this.logger.error(
+          `[SessionManager] Failed to resolve executable for ${session.language}:`,
+          msg
+        );
 
-      // Convert to appropriate error type based on language
-      if (session.language === 'python' && msg.includes('not found')) {
-        throw new PythonNotFoundError(session.executablePath || 'python');
+        // Convert to appropriate error type based on language
+        if (session.language === 'python' && msg.includes('not found')) {
+          throw new PythonNotFoundError(session.executablePath || 'python');
+        }
+
+        // On launch, adapters with an attach mode may still work without the
+        // local toolchain — point the user at attach_to_process (issue #331)
+        const attachHint =
+          !isAttachMode && adapter.supportsAttach?.()
+            ? ` ${ErrorMessages.attachMayStillWork(session.language)}`
+            : '';
+
+        throw new DebugSessionCreationError(
+          `Failed to resolve ${session.language} executable: ${msg}${attachHint}`,
+          error instanceof Error ? error : undefined
+        );
       }
-
-      throw new DebugSessionCreationError(
-        `Failed to resolve ${session.language} executable: ${msg}`,
-        error instanceof Error ? error : undefined
-      );
     }
 
     // Update adapter config with resolved executable path
@@ -376,6 +397,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       breakOnExceptions,
       launchConfig: launchConfigData,
       adapterCommand, // Pass the adapter command
+      attachMode: isAttachMode,
     };
 
     // Create and start ProxyManager with the adapter
@@ -2399,6 +2421,24 @@ export abstract class SessionManagerOperations extends SessionManagerData {
           `[SessionManager] verifyTimeout ${verifyTimeoutOverride}ms exceeds the maximum; clamping to ${maxVerifyTimeoutMs}ms`
         );
         verifyTimeoutOverride = maxVerifyTimeoutMs;
+      }
+    }
+
+    // Languages whose adapter declares no attach implementation fail fast,
+    // before any state mutation (issue #331). Only an explicit 'none'
+    // declaration is enforced — absent metadata falls through to the
+    // adapter's natural behavior.
+    const registryWithMeta = this.adapterRegistry as unknown as {
+      getFactoryMetadata?: (language: string) => Promise<{ modes?: { attach?: string } } | undefined>;
+    };
+    if (typeof registryWithMeta.getFactoryMetadata === 'function') {
+      const factoryMeta = await registryWithMeta.getFactoryMetadata(session.language).catch(() => undefined);
+      if (factoryMeta?.modes?.attach === 'none') {
+        return {
+          success: false,
+          state: session.state,
+          error: ErrorMessages.attachModeNotSupported(session.language)
+        };
       }
     }
 

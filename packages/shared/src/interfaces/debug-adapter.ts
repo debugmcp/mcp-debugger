@@ -313,6 +313,12 @@ export interface AdapterConfig {
   scriptPath: string;
   scriptArgs?: string[];
   launchConfig: GenericLaunchConfig;
+  /**
+   * True when the session is attaching rather than launching. Direct-connect
+   * attach (e.g. Ruby/rdbg, Python/debugpy) involves no local toolchain, so
+   * environment initialization is skipped for it (issue #331).
+   */
+  attachMode?: boolean;
 }
 
 /**

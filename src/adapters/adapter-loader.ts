@@ -1,4 +1,4 @@
-import { IAdapterFactory } from '@debugmcp/shared';
+import { IAdapterFactory, AttachMechanism } from '@debugmcp/shared';
 import type { Logger as WinstonLogger } from 'winston';
 import { createLogger } from '../utils/logger.js';
 import { createRequire } from 'module';
@@ -13,6 +13,8 @@ export interface AdapterMetadata {
   packageName: string;
   description?: string;
   installed: boolean;
+  /** How the adapter implements attach mode (static knowledge; kept in sync with each factory's declaration) */
+  attach: AttachMechanism;
 }
 
 export class AdapterLoader {
@@ -135,16 +137,16 @@ export class AdapterLoader {
    * List all potentially available adapters (known list for now)
    */
   async listAvailableAdapters(): Promise<AdapterMetadata[]> {
-    const known = [
-      { name: 'mock', packageName: '@debugmcp/adapter-mock', description: 'Mock adapter for testing' },
-      { name: 'python', packageName: '@debugmcp/adapter-python', description: 'Python debugger using debugpy' },
-      { name: 'javascript', packageName: '@debugmcp/adapter-javascript', description: 'JavaScript/TypeScript debugger using js-debug' },
-      { name: 'ruby', packageName: '@debugmcp/adapter-ruby', description: 'Ruby debugger using rdbg' },
-      { name: 'rust', packageName: '@debugmcp/adapter-rust', description: 'Rust debugger using CodeLLDB' },
-      { name: 'go', packageName: '@debugmcp/adapter-go', description: 'Go debugger using Delve' },
-      { name: 'java', packageName: '@debugmcp/adapter-java', description: 'Java debugger using JDI bridge' },
-      { name: 'dotnet', packageName: '@debugmcp/adapter-dotnet', description: '.NET/C# debugger using netcoredbg' },
-      { name: 'cpp', packageName: '@debugmcp/adapter-cpp', description: 'C/C++ debugger using CodeLLDB' },
+    const known: Array<Omit<AdapterMetadata, 'installed'>> = [
+      { name: 'mock', packageName: '@debugmcp/adapter-mock', description: 'Mock adapter for testing', attach: 'none' },
+      { name: 'python', packageName: '@debugmcp/adapter-python', description: 'Python debugger using debugpy', attach: 'direct-connect' },
+      { name: 'javascript', packageName: '@debugmcp/adapter-javascript', description: 'JavaScript/TypeScript debugger using js-debug', attach: 'spawn' },
+      { name: 'ruby', packageName: '@debugmcp/adapter-ruby', description: 'Ruby debugger using rdbg', attach: 'direct-connect' },
+      { name: 'rust', packageName: '@debugmcp/adapter-rust', description: 'Rust debugger using CodeLLDB', attach: 'none' },
+      { name: 'go', packageName: '@debugmcp/adapter-go', description: 'Go debugger using Delve', attach: 'none' },
+      { name: 'java', packageName: '@debugmcp/adapter-java', description: 'Java debugger using JDI bridge', attach: 'spawn' },
+      { name: 'dotnet', packageName: '@debugmcp/adapter-dotnet', description: '.NET/C# debugger using netcoredbg', attach: 'spawn' },
+      { name: 'cpp', packageName: '@debugmcp/adapter-cpp', description: 'C/C++ debugger using CodeLLDB', attach: 'spawn' },
     ];
 
     const results: AdapterMetadata[] = [];
@@ -152,9 +154,18 @@ export class AdapterLoader {
       // Check if adapter is currently loadable; don't fail if not — adapters are loaded
       // on-demand, so unavailability here just means installed=false in the metadata
       const installed = await this.isAdapterAvailable(a.name);
-      results.push({ ...a, installed });
+      // Prefer the loaded factory's own declaration over the static known-list value
+      const factoryAttach = installed ? this.cache.get(a.name)?.getMetadata().modes?.attach : undefined;
+      results.push({ ...a, installed, attach: factoryAttach ?? a.attach });
     }
     return results;
+  }
+
+  /**
+   * Get an already-loaded factory without triggering a load
+   */
+  getCachedFactory(language: string): IAdapterFactory | undefined {
+    return this.cache.get(language);
   }
 
   private getPackageName(language: string): string {

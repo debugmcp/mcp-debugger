@@ -117,6 +117,26 @@ export interface AdapterDependencies {
 }
 
 /**
+ * How an adapter implements attach mode.
+ * - 'none': attach is not implemented
+ * - 'direct-connect': attach connects straight to a DAP socket exposed by the
+ *   debuggee (e.g. debugpy --listen, rdbg --open) — no local toolchain needed
+ * - 'spawn': attach spawns a local debug adapter process (needs its toolchain)
+ */
+export type AttachMechanism = 'none' | 'direct-connect' | 'spawn';
+
+/**
+ * Per-mode capability declaration for an adapter.
+ */
+export interface AdapterModes {
+  /** Whether the adapter implements launch mode */
+  launch: boolean;
+
+  /** How the adapter implements attach mode */
+  attach: AttachMechanism;
+}
+
+/**
  * Metadata about an adapter
  */
 export interface AdapterMetadata {
@@ -146,6 +166,12 @@ export interface AdapterMetadata {
   
   /** Icon for UI (base64 or URL) */
   icon?: string;
+
+  /**
+   * Per-mode capability declaration.
+   * Absent means { launch: true, attach: 'none' }.
+   */
+  modes?: AdapterModes;
 }
 
 /**

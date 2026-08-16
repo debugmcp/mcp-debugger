@@ -36,6 +36,8 @@ export class DotnetAdapterFactory implements IAdapterFactory {
       documentationUrl: 'https://github.com/debugmcp/mcp-debugger/docs/dotnet',
       minimumDebuggerVersion: '1.0.0',
       fileExtensions: ['.cs', '.vb', '.fs'],
+      // Attach spawns netcoredbg locally
+      modes: { launch: true, attach: 'spawn' },
       icon: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iIzY3MzhCNyIgZD0iTTI0IDRDMTIuOTU0IDQgNCA1LjgxOCA0IDguNTc0VjM5LjQyNkM0IDQyLjE4MiAxMi45NTQgNDQgMjQgNDRzMjAtMS44MTggMjAtNC41NzRWOC41NzRDNDQgNS44MTggMzUuMDQ2IDQgMjQgNHptMCA2YzguMjg0IDAgMTUgMS43OTEgMTUgNHMtNi43MTYgNC0xNSA0UzkgMTYuMjA5IDkgMTRzNi43MTYtNCAxNS00eiIvPjx0ZXh0IHg9IjI0IiB5PSIzMiIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjE2IiBmb250LXdlaWdodD0iYm9sZCIgZmlsbD0id2hpdGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiPi5ORVQ8L3RleHQ+PC9zdmc+'
     };
   }

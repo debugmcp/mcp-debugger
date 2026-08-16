@@ -92,11 +92,17 @@ RUN rm -rf /app/node_modules/@debugmcp && \
     mkdir -p /app/node_modules/@debugmcp/adapter-java && \
     cp -r /app/packages/adapter-java/dist /app/node_modules/@debugmcp/adapter-java/ && \
     cp -r /app/packages/adapter-java/java /app/node_modules/@debugmcp/adapter-java/ && \
-    cp /app/packages/adapter-java/package.json /app/node_modules/@debugmcp/adapter-java/
+    cp /app/packages/adapter-java/package.json /app/node_modules/@debugmcp/adapter-java/ && \
+    mkdir -p /app/node_modules/@debugmcp/adapter-ruby && \
+    cp -r /app/packages/adapter-ruby/dist /app/node_modules/@debugmcp/adapter-ruby/ && \
+    cp /app/packages/adapter-ruby/package.json /app/node_modules/@debugmcp/adapter-ruby/
 
 # Stage 2: Create runtime image with full LLDB dependencies
 FROM ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03
-# Disable Go at runtime too — Delve isn't installed in the container
+# Disabled languages: rust/cpp wait on CodeLLDB staging (#328), go has no attach
+# implementation and no Delve here, dotnet has no netcoredbg here. Ruby is
+# intentionally present but attach-only (adapter shipped, no Ruby runtime —
+# attach connects directly to a remote rdbg socket, issue #331).
 ENV DEBUG_MCP_DISABLE_LANGUAGES=rust,go,dotnet,cpp
 
 # Set application directory
