@@ -264,7 +264,7 @@ export const DotnetAdapterPolicy: AdapterPolicy = {
   getInitializationBehavior: () => {
     return {
       // netcoredbg sends the `initialized` event immediately after the
-      // `initialize` response â€” before any launch/attach request.
+      // `initialize` response — before any launch/attach request.
       // We must defer configurationDone handling and send launch first,
       // because netcoredbg requires launch before configurationDone.
       sendLaunchBeforeConfig: true,

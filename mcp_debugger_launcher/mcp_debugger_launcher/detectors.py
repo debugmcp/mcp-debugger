@@ -2,7 +2,6 @@
 
 import subprocess
 import shutil
-import os
 from typing import Tuple, Optional
 
 class RuntimeDetector:
@@ -70,15 +69,16 @@ class RuntimeDetector:
                 
             version = result.stdout.strip()
             
-            # Check if Docker daemon is running
+            # Check if Docker daemon is running ("docker version" with a server
+            # field fails when the daemon is unreachable)
             ping_result = subprocess.run(
-                ["docker", "ping"],
+                ["docker", "version", "--format", "{{.Server.Version}}"],
                 capture_output=True,
                 text=True,
                 timeout=5
             )
-            
-            # If ping doesn't work, try listing containers
+
+            # If the daemon probe doesn't work, try listing containers
             if ping_result.returncode != 0:
                 list_result = subprocess.run(
                     ["docker", "ps"],

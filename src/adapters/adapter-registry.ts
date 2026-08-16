@@ -166,7 +166,7 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
 
     // Set up auto-dispose if configured
     if (this.config.autoDispose) {
-      this.setupAutoDispose(language, adapter);
+      this.setupAutoDispose(adapter);
     }
 
     // Listen for adapter disposal
@@ -408,7 +408,7 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
   /**
    * Set up auto-dispose for an adapter
    */
-  private setupAutoDispose(_language: string, adapter: IDebugAdapter): void {
+  private setupAutoDispose(adapter: IDebugAdapter): void {
     this.clearDisposeTimer(adapter);
 
     // Listen for adapter state changes

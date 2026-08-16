@@ -298,9 +298,6 @@ export interface DebugSession {
 }
 
 /**
- * Subset of DebugSession for list operations (if needed, otherwise use DebugSession)
- */
-/**
  * Details of the most recent user-visible stop (issue #214).
  * Auto-continued entry stops are not recorded.
  */
@@ -373,6 +370,9 @@ export interface SessionOutputEntry {
   redacted?: boolean;
 }
 
+/**
+ * Subset of DebugSession for list operations (if needed, otherwise use DebugSession)
+ */
 export interface DebugSessionInfo {
   id: string;
   language: DebugLanguage;

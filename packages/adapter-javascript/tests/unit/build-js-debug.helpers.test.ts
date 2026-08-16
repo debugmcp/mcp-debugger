@@ -8,7 +8,7 @@ describe('js-debug helpers: normalizePath', () => {
     expect(normalizePath('C:\\\\temp\\\\file.txt')).toBe('C:/temp/file.txt');
     expect(normalizePath('/tmp/file.txt')).toBe('/tmp/file.txt');
     expect(normalizePath('')).toBe('');
-    // @ts-expect-no-error runtime accepts any but returns empty string for non-string
+    // cast to any to exercise runtime null-handling — normalizePath returns '' for non-string input
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(normalizePath(null as any)).toBe('');
   });

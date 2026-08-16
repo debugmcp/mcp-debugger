@@ -925,8 +925,10 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
           case 'sendToProxy':
             this.sendCommand(command.command);
             break;
-            
-          // Note: sendToClient is not used in ProxyManager context
+
+          case 'sendToClient':
+            // sendToClient is not used in ProxyManager context
+            break;
         }
       }
       

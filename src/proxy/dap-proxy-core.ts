@@ -103,6 +103,7 @@ export class ProxyRunner {
             this.logger.debug(
               `[ProxyRunner] Heartbeat tick #${this.heartbeatTickCounter} send attempt (process.connected=${this.proc.connected})`
             );
+            // Type string is matched verbatim by proxy-manager.ts -- keep in sync.
             this.proc.send?.({
               type: 'ipc-heartbeat-tick',
               timestamp: Date.now(),
@@ -273,6 +274,7 @@ export class ProxyRunner {
       this.logger.debug(`[ProxyRunner] IPC channel status on receive: connected=${this.proc.connected}`);
       if (typeof this.proc.send === 'function') {
         try {
+          // Type string is matched verbatim by proxy-manager.ts -- keep in sync.
           this.proc.send({
             type: 'ipc-heartbeat',
             counter: this.ipcMessageCounter,

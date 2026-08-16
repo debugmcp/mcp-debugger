@@ -85,7 +85,7 @@ describe('utils/config-transformer.edge2: branch-padding cases', () => {
     expect(isESMProject(path.join(programDir, 'app.ts'), projDir)).toBe(false);
   });
 
-  it('hasTsConfigPaths: non-object paths (string/array) treated as false', () => {
+  it('hasTsConfigPaths: string paths treated as false; arrays are object-like and count as truthy', () => {
     const tc = path.join(projDir, 'tsconfig.json');
 
     // Case 1: string

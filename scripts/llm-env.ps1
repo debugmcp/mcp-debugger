@@ -6,7 +6,8 @@
 # Usage: 
 #   . ./scripts/llm-env.ps1
 #
-# This will override 'npm test' commands to show only failures and coverage.
+# This will override 'npm test' commands (failures + coverage only), 'docker build'
+# (plain progress output), and define 'git-clone' (quiet clone).
 # Original commands are still accessible via their .cmd/.exe versions.
 #
 # WARNING: Avoid smart quotes in PowerShell scripts! Use regular apostrophes (')

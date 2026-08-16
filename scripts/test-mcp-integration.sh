@@ -88,6 +88,9 @@ if $CLAUDE_CLI mcp list 2>/dev/null | grep -q "mcp-debugger"; then
         TESTS_PASSED=$((TESTS_PASSED + 1))
     else
         echo -e "${YELLOW}⚠ WARNING${NC} (Configured but not connected - restart Claude Code)"
+        # Not connected means the integration isn't working yet — count it as a
+        # failure so all 5 tests are reflected in the summary totals.
+        TESTS_FAILED=$((TESTS_FAILED + 1))
     fi
 else
     echo -e "${RED}✗ FAILED${NC} (Not configured)"

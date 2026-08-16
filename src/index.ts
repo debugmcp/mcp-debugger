@@ -56,6 +56,7 @@ import { handleCheckRustBinaryCommand } from './cli/commands/check-rust-binary.j
 import { getVersion } from './cli/version.js';
 import fs from 'fs';
 import path from 'path';
+import { pathToFileURL } from 'url';
 
 export interface ServerOptions {
   logLevel?: string;
@@ -148,7 +149,16 @@ if (typeof require !== 'undefined' && typeof module !== 'undefined' && require.m
   if (typeof import.meta !== 'undefined' && import.meta.url && process.argv[1]) {
     const scriptPath = process.argv[1].replace(/\\/g, '/');
     const moduleUrl = import.meta.url.replace(/\\/g, '/');
-    return moduleUrl === `file://${scriptPath}` || 
+    // pathToFileURL produces a well-formed file URL on every platform
+    // (Windows paths need file:/// with three slashes and percent-encoding,
+    // which naive string composition gets wrong)
+    let argvUrl: string | undefined;
+    try {
+      argvUrl = pathToFileURL(process.argv[1]).href;
+    } catch {
+      argvUrl = undefined;
+    }
+    return (argvUrl !== undefined && moduleUrl === argvUrl) ||
            moduleUrl.endsWith(scriptPath) ||
            scriptPath.endsWith('dist/index.js');
   }

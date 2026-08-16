@@ -82,7 +82,7 @@ try {
   console.log('INSIGHTS:');
   console.log('─'.repeat(80));
   
-  const top5 = files.slice(0, 5);
+  const top5 = files.filter(f => f.uncovered > 0).slice(0, 5);
   const top5Impact = top5.reduce((sum, f) => sum + f.impact, 0);
   console.log(`• Top 5 files contain ${top5.reduce((sum, f) => sum + f.uncovered, 0)} uncovered lines`);
   console.log(`• Fixing top 5 files would improve coverage by ${top5Impact.toFixed(1)} percentage points`);
