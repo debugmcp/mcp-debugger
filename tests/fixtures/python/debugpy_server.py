@@ -132,6 +132,8 @@ def main():
     server.listen(5)
     
     print(f"Debugpy test server listening on port {port}...")
+    # Readiness sentinel: tests/e2e/debugpy-connection.test.ts waits for this
+    # exact string on stdout -- keep the two in sync.
     print("Debugpy server is listening!")
     
     try:

@@ -15,8 +15,8 @@ public class RedefineTarget {
         System.out.println("RedefineTarget starting...");
         Thread.sleep(2000);  // wait for breakpoint setup
 
-        int val1 = getValue();              // line 19 — first breakpoint target
-        System.out.println("val1 = " + val1);
+        int val1 = getValue();
+        System.out.println("val1 = " + val1);  // line 19 — first breakpoint target (val1 already assigned when paused here)
 
         // After hot-reload, getValue() should return 99
         int val2 = getValue();              // line 22 — second breakpoint target

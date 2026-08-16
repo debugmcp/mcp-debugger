@@ -4,5 +4,5 @@ y = 20
 def broken_function(  # Line 4: Missing closing parenthesis
     print("This won't work")
 
-# Line 7: Code after the error
+# Line 7: Intentionally unreachable code after the syntax error (never parsed by Python)
 z = x + y

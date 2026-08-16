@@ -407,7 +407,7 @@ export async function verifyPackageContents(tarballPath: string): Promise<{
   hasJavaScript: boolean;
   hasPython: boolean;
   hasMock: boolean;
-  bundleSize: number;
+  tarballSize: number;
 }> {
   console.log('[NPX Test] Verifying package contents...');
   
@@ -421,22 +421,23 @@ export async function verifyPackageContents(tarballPath: string): Promise<{
     const hasPython = contents.includes('python') || contents.includes('debugpy');
     const hasMock = contents.includes('mock');
     
-    // Get bundle size
+    // Get the total tarball size (cli.mjs presence confirms the CLI bundle
+    // was included; the size measured is the whole tarball, not cli.mjs)
     const cliMatch = stdout.match(/package\/dist\/cli\.mjs/);
-    let bundleSize = 0;
+    let tarballSize = 0;
     if (cliMatch) {
       const stats = await fs.stat(tarballPath);
-      bundleSize = stats.size;
+      tarballSize = stats.size;
     }
-    
+
     console.log('[NPX Test] Package verification:', {
       hasJavaScript,
       hasPython,
       hasMock,
-      bundleSize
+      tarballSize
     });
-    
-    return { hasJavaScript, hasPython, hasMock, bundleSize };
+
+    return { hasJavaScript, hasPython, hasMock, tarballSize };
   } catch (error) {
     console.error('[NPX Test] Package verification failed:', error);
     throw error;

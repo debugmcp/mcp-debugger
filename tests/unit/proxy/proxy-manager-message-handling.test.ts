@@ -237,7 +237,10 @@ describe('ProxyManager Message Handling', () => {
 
       proxyManager.on('exited', () => {
         exitedEmitted = true;
-        capturedCode = 0; // ProxyManager emits 'exited' without args; exit code is in the DAP body
+        // ProxyManager emits 'exited' without args (the exit code lives in the
+        // DAP message body, not in the event args); this manual assignment only
+        // confirms the handler ran -- it does not read the code from anywhere.
+        capturedCode = 0;
       });
 
       proxyManager.simulateMessage(exitedMessage);

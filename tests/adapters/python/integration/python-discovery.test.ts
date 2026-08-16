@@ -107,7 +107,10 @@ describe('Python Discovery - Real Implementation Test @requires-python', () => {
     console.log(`[Test] Created session: ${sessionId}`);
 
     // Try to start debugging - this will trigger Python discovery
-    const scriptPath = path.resolve('examples/python/fibonacci.py');
+    const scriptPath = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      '../../../../examples/python/fibonacci.py'
+    );
     const startResult = parseToolResult(
       await client.callTool({
         name: 'start_debugging',

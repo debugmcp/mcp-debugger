@@ -52,8 +52,8 @@ describe('DapConnectionManager', () => {
       connect: vi.fn(),
       disconnect: vi.fn(),
       shutdown: vi.fn().mockImplementation((reason?: string) => {
-        // Mock implementation that mimics the real shutdown behavior
-        // In a real implementation, this would reject pending requests
+        // Intentional no-op: these tests don't exercise pending-request
+        // rejection (which the real shutdown performs)
       }),
       sendRequest: vi.fn(),
       on: vi.fn(),

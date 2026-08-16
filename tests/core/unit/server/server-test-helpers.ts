@@ -48,7 +48,9 @@ export function createMockDependencies() {
         }
       }),
       resolve: vi.fn((...args: string[]) => {
-        // Simple mock implementation
+        // Simple mock: joins segments with '/' and collapses duplicate slashes.
+        // Does NOT implement real resolve() semantics (absolute-path override,
+        // '.'/'..' normalization, Windows separators) -- simple cases only.
         return args.join('/').replace(/\/+/g, '/');
       }),
       join: vi.fn((...args: string[]) => args.join('/')),

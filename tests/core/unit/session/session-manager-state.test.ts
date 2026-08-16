@@ -54,7 +54,8 @@ describe('SessionManager - State Machine Integrity', () => {
     dependencies.mockProxyManager.simulateEvent('continued');
     expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.RUNNING);
     
-    // RUNNING → STOPPED (session removed from store after close)
+    // RUNNING → removed (closeSession removes the session from the store rather
+    // than leaving it queryable in a STOPPED state)
     await sessionManager.closeSession(session.id);
     expect(sessionManager.getSession(session.id)).toBeUndefined();
   });

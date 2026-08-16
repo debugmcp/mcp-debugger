@@ -55,9 +55,9 @@ class MockLLM:
             # We'll use the swap_vars.py from the other example.
             {"tool": "set_breakpoint", "args": {"file": os.path.abspath("examples/python_simple_swap/swap_vars.py"), "line": 9}},
             {"tool": "start_debugging", "args": {"scriptPath": os.path.abspath("examples/python_simple_swap/swap_vars.py")}},
-            {"tool": "get_stack_trace", "args": {}}, # Will need sessionId filled in
+            {"tool": "get_stack_trace", "args": {}}, # sessionId auto-injected by think()
             # Add more steps if desired, e.g., get_scopes, get_variables, step_over
-            {"tool": "close_debug_session", "args": {}}, # Will need sessionId
+            {"tool": "close_debug_session", "args": {}}, # sessionId auto-injected by think()
         ]
         self.current_step = 0
         self.debug_session_id: str | None = None

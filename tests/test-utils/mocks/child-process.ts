@@ -80,8 +80,8 @@ export class MockChildProcess extends EventEmitter {
    */
   reset(): void {
     this.removeAllListeners();
-    this.stdout.removeAllListeners();
-    this.stderr.removeAllListeners();
+    this.stdout?.removeAllListeners();
+    this.stderr?.removeAllListeners();
     this.kill.mockClear();
     this.send.mockClear();
     this.killed = false;

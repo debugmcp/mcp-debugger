@@ -36,6 +36,8 @@ export class MockProxyManager extends EventEmitter implements IProxyManager {
     this.startCalls.push(config);
 
     if (this.shouldFailStart) {
+      // This exact message is asserted in tests (e.g. session-manager-error-recovery.test.ts);
+      // keep the two in sync if it is ever reworded.
       throw new Error('Mock start failure');
     }
 

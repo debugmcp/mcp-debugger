@@ -12,7 +12,7 @@ int compute_answer(int base, int factor) {
 
 int main() {
     int count = 10;
-    std::string greeting = "Hello from C++";
+    std::string greeting = "Hello from C++";  // asserted verbatim by tests/e2e/mcp-server-smoke-cpp.test.ts; line numbers here are breakpoint targets -- do not shift
     std::vector<int> values = {1, 2, 3};
     int answer = compute_answer(count, 4);
     std::cout << "CPP_DEBUG_MARKER: " << greeting << " answer=" << answer << std::endl;

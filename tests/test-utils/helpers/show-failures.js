@@ -17,7 +17,7 @@ async function showFailures() {
     shell: true
   });
   
-  await new Promise((resolve) => {
+  const childExitCode = await new Promise((resolve) => {
     testProcess.on('close', resolve);
   });
   
@@ -75,7 +75,13 @@ async function showFailures() {
     
     // Clean up
     fs.unlinkSync(jsonFile);
-    
+
+    // Propagate failure to the caller (e.g. CI): non-zero when Vitest exited
+    // non-zero or any test failed, instead of always exiting 0.
+    if (hasFailures || childExitCode !== 0) {
+      process.exit(1);
+    }
+
   } catch (error) {
     console.error('Error reading test results:', error.message);
     console.error('Make sure tests completed successfully.');

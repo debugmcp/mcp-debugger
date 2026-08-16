@@ -222,7 +222,7 @@ describe('Server Inspection Tools Tests', () => {
         }
       });
       
-      // The server now returns a success response with error message
+      // The server returns a structured failure result (success: false) with an error message
       const content = JSON.parse(result.content[0].text);
       expect(content.success).toBe(false);
       expect(content.error).toContain('no active proxy for session test-session');
@@ -245,7 +245,7 @@ describe('Server Inspection Tools Tests', () => {
         }
       });
       
-      // The server now returns a success response with error message
+      // The server returns a structured failure result (success: false) with an error message
       const content = JSON.parse(result.content[0].text);
       expect(content.success).toBe(false);
       expect(content.error).toContain('no active proxy for session test-session');
@@ -335,7 +335,8 @@ describe('Server Inspection Tools Tests', () => {
         };
       }
 
-      // The server now returns a success response with error message instead of throwing
+      // The server returns a structured failure result (success: false) with an error message;
+      // the catch above normalizes a thrown error into the same shape.
       const content = JSON.parse(result.content[0].text);
       expect(content.success).toBe(false);
       expect(content.error).toContain('Session not found: test-session');

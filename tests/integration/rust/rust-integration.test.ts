@@ -78,6 +78,7 @@ describe('Rust Adapter Integration', () => {
   });
   
   it('should close the Rust session', async () => {
+    expect(sessionId).toBeDefined(); // guard: depends on the create test having run
     const closed = await sessionManager.closeSession(sessionId);
     expect(closed).toBe(true);
     

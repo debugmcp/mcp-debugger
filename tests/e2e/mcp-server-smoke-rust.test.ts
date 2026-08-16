@@ -339,7 +339,9 @@ describe('MCP Server Rust Debugging Smoke Test', () => {
   );
 
   // Shared driver for the continue-to-completion tests below: sets one
-  // breakpoint, launches, and returns once the user frame at `line` is live.
+  // breakpoint, launches, and issues bounded continues (up to 10) until the
+  // user frame at `line` is live. Returns `reached: false` if the breakpoint
+  // was not hit within the limit -- callers must assert on `reached`.
   async function launchAndReachBreakpoint(
     ctx: Parameters<Parameters<typeof it>[1]>[0],
     line: number,

@@ -118,16 +118,13 @@ class TestResultsAnalyzer {
           test.failureMessages.forEach(message => {
             // Extract the most relevant error information
             const lines = message.split('\n');
-            let inStackTrace = false;
-            
-            lines.forEach(line => {
-              if (line.includes('at ') || line.includes('node_modules')) {
-                inStackTrace = true;
-              } else {
-                inStackTrace = false;
-              }
 
-              if (!inStackTrace && line.trim()) {
+            // Per-line filter: drop stack-frame lines ('at ...' / node_modules)
+            // and blanks. (No cross-line state -- a frame's continuation lines
+            // that lack these markers are still printed.)
+            lines.forEach(line => {
+              const isStackFrame = line.includes('at ') || line.includes('node_modules');
+              if (!isStackFrame && line.trim()) {
                 console.log(`   ${line}`);
               }
             });

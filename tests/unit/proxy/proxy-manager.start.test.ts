@@ -557,7 +557,8 @@ describe('ProxyManager.start', () => {
       });
 
       const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
-      // Drive the real-time init-retry backoff (~15.5s) via fake timers.
+      // Drive the init-retry backoff via fake timers: 35s covers the ~15.5s
+      // backoff schedule plus timeout margins.
       await vi.advanceTimersByTimeAsync(35000);
       await expect(startPromise).rejects.toThrow(
         /Proxy exit details -> code=2 signal=SIGTERM stderr:\nboot failure/
@@ -779,7 +780,8 @@ describe('ProxyManager.start', () => {
       });
 
       const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
-      // Drive the real-time init-retry backoff (~15.5s) via fake timers.
+      // Drive the init-retry backoff via fake timers: 35s covers the ~15.5s
+      // backoff schedule plus timeout margins.
       await vi.advanceTimersByTimeAsync(35000);
       await expect(startPromise).rejects.toThrow(
         /Proxy exit details -> code=2 signal=SIGTERM stderr:\nlate boot failure/
@@ -1351,7 +1353,8 @@ describe('ProxyManager.start', () => {
 
       const startPromise = proxyManager.start(config);
 
-      // Drive the real-time init-retry backoff (~15.5s) via fake timers.
+      // Drive the init-retry backoff via fake timers: 35s covers the ~15.5s
+      // backoff schedule plus timeout margins.
       await vi.advanceTimersByTimeAsync(35000);
 
       // With retry logic, error message is different
@@ -1378,7 +1381,8 @@ describe('ProxyManager.start', () => {
 
       const startPromise = proxyManager.start(config);
 
-      // Drive the real-time init-retry backoff (~15.5s) via fake timers.
+      // Drive the init-retry backoff via fake timers: 35s covers the ~15.5s
+      // backoff schedule plus timeout margins.
       await vi.advanceTimersByTimeAsync(35000);
 
       // With retry logic, error message is different
@@ -1429,7 +1433,8 @@ describe('ProxyManager.start', () => {
         fakeProcess.emit('exit', 0, null);
       });
 
-      // Drive the real-time init-retry backoff (~15.5s) via fake timers.
+      // Drive the init-retry backoff via fake timers: 35s covers the ~15.5s
+      // backoff schedule plus timeout margins.
       await vi.advanceTimersByTimeAsync(35000);
 
       await expect(stopPromise).resolves.toBeUndefined();

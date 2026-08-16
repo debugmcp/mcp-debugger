@@ -165,7 +165,7 @@ describe('Session Models', () => {
       expect(roundTrip).toBe(original);
     });
 
-    it('should maintain consistency for READY state (legacy → new → legacy)', () => {
+    it('should lose READY state fidelity in round-trip (READY → INITIALIZING)', () => {
       const original = SessionState.READY;
       const mapped = mapLegacyState(original);
       const roundTrip = mapToLegacyState(mapped.lifecycle, mapped.execution);

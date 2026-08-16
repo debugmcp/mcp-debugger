@@ -8,7 +8,7 @@ def compute(a, b):
     return result
 
 
-print("ATTACH_LOOP_READY", flush=True)
+print("ATTACH_LOOP_READY", flush=True)  # readiness sentinel awaited verbatim by tests/e2e/mcp-server-smoke-python-attach.test.ts -- keep in sync
 while True:
     total = compute(42, 58)
     time.sleep(0.5)

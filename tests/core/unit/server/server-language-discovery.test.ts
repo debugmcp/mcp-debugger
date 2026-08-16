@@ -365,7 +365,8 @@ describe('Server Language Discovery Tests', () => {
       // languages is an array of metadata objects
       const languageIds = content.languages.map((lang: any) => lang.id);
       expect(languageIds).toEqual(['python', 'mock']);
-      // Since dynamic discovery fails, the server uses its static fallback list
+      // Since dynamic discovery fails (listLanguages rejects), the server falls back
+      // to the registry's getSupportedLanguages()
     });
 
     it('should handle undefined adapter registry gracefully', async () => {

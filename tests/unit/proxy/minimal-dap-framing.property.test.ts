@@ -44,7 +44,8 @@ function chunkBuffer(buffer: Buffer, cuts: number[]): Buffer[] {
 }
 
 // 'grapheme' strings include multi-byte UTF-8, so byte-level cuts can land
-// mid-character — the case Content-Length (bytes) exists to make safe.
+// mid-character. Content-Length counts bytes (not characters), so the framing
+// parser must handle splits at arbitrary byte positions, including mid-codepoint.
 const leaf = fc.oneof(
   fc.string({ unit: 'grapheme', maxLength: 15 }),
   fc.integer(),
