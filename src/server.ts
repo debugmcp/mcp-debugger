@@ -145,6 +145,7 @@ interface ToolArguments {
   sourcePaths?: string[];
   stopOnEntry?: boolean;
   justMyCode?: boolean;
+  adapterConfig?: Record<string, unknown>;
   terminateProcess?: boolean;
   suspendPolicy?: 'all' | 'thread';
   threadId?: number;
@@ -194,7 +195,7 @@ const TOOL_ARG_EXPECTED_TYPES: Record<string, 'number' | 'boolean' | 'object' | 
   stopOnEntry: 'boolean', justMyCode: 'boolean',
   dryRunSpawn: 'boolean', terminateProcess: 'boolean',
   // objects
-  dapLaunchArgs: 'object', adapterLaunchConfig: 'object',
+  dapLaunchArgs: 'object', adapterLaunchConfig: 'object', adapterConfig: 'object',
   // arrays
   args: 'array', sourcePaths: 'array', names: 'array',
 };
@@ -1029,7 +1030,7 @@ export class DebugMcpServer {
 
       return {
         tools: [
-          { name: 'create_debug_session', description: 'Create a new debugging session. Provide host and port to attach to a running process; omit them for launch mode', inputSchema: { type: 'object', properties: { language: { type: 'string', enum: supportedLanguages, description: 'Programming language for debugging' }, name: { type: 'string', description: 'Optional session name' }, executablePath: {type: 'string', description: 'Path to language executable (optional, will auto-detect if not provided)'}, host: { type: 'string', description: 'Host to attach to for remote debugging (optional, triggers attach mode)' }, port: { type: 'number', description: 'Debug port to attach to for remote debugging (optional, triggers attach mode)' }, timeout: { type: 'number', description: 'Connection timeout in milliseconds for attach mode (default: 30000)' }, verifyTimeout: { type: 'number', description: 'Attach mode only: how long to wait (ms) for the debugger to report at least one thread after attaching before failing the attach (default: 5000, max: 600000)' } }, required: ['language'] } },
+          { name: 'create_debug_session', description: 'Create a new debugging session. Provide host and port to attach to a running process; omit them for launch mode', inputSchema: { type: 'object', properties: { language: { type: 'string', enum: supportedLanguages, description: 'Programming language for debugging' }, name: { type: 'string', description: 'Optional session name' }, executablePath: {type: 'string', description: 'Path to language executable (optional, will auto-detect if not provided)'}, host: { type: 'string', description: 'Host to attach to for remote debugging (optional, triggers attach mode)' }, port: { type: 'number', description: 'Debug port to attach to for remote debugging (optional, triggers attach mode)' }, timeout: { type: 'number', description: 'Connection timeout in milliseconds for attach mode (default: 30000)' }, verifyTimeout: { type: 'number', description: 'Attach mode only: how long to wait (ms) for the debugger to report at least one thread after attaching before failing the attach (default: 5000, max: 600000)' }, adapterConfig: { type: 'object', description: 'Attach mode only: adapter-specific attach configuration merged into the attach config (see attach_to_process)', additionalProperties: true } }, required: ['language'] } },
           { name: 'list_supported_languages', description: 'List all supported debugging languages with metadata', inputSchema: { type: 'object', properties: {} } },
           { name: 'list_debug_sessions', description: 'List all active debugging sessions. Paused sessions include lastStop with the reason for the most recent stop (e.g. "breakpoint" vs "exception")', inputSchema: { type: 'object', properties: {} } },
           { name: 'set_breakpoint', description: 'Set a breakpoint. Setting breakpoints on non-executable lines (structural, declarative) may lead to unexpected behavior', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: 'Path to the source file or Java FQCN. For Java, passing a fully-qualified class name (e.g. "com.example.MyClass" or "com.example.Outer$Inner") is preferred — it works reliably with all classloaders including custom classloaders. Alternatively, use absolute file paths.' }, line: { type: 'number', description: 'Line number where to set breakpoint. Executable statements (assignments, function calls, conditionals, returns) work best. Structural lines (function/class definitions), declarative lines (imports), or non-executable lines (comments, blank lines) may cause unexpected stepping behavior' }, ...setBreakpointExtraProps, condition: { type: 'string', description: 'Optional expression: only break (or log) when it evaluates truthy' }, logMessage: { type: 'string', description: 'Create a logpoint: instead of pausing, log this message when the line is hit. Expressions in {curly braces} are interpolated (e.g. "order={orderId} total={total}"). Messages arrive in get_output while the program runs at full speed. Supported by Python, JavaScript, Go, and Rust adapters; not by Java or .NET' }, suspendPolicy: { type: 'string', enum: ['all', 'thread'], description: 'Suspend policy when breakpoint is hit: "all" suspends all threads (default), "thread" only suspends the event thread. Only supported by the Java/JDI adapter.' } }, required: setBreakpointRequired } },
@@ -1074,7 +1075,8 @@ export class DebugMcpServer {
                 sourcePaths: { type: 'array', items: { type: 'string' }, description: 'Source paths for code mapping' },
                 stopOnEntry: { type: 'boolean', description: 'Stop on entry after attaching' },
                 justMyCode: { type: 'boolean', description: 'Only debug user code (skip library code)' },
-                breakOnExceptions: { type: 'string', enum: ['uncaught', 'all', 'none'], description: 'Break when exceptions are thrown: "uncaught" pauses at uncaught exceptions at the crash site; "all" also pauses on caught/raised exceptions (language-dependent). Default "none" — attach sessions never apply a language default (unlike launch)' }
+                breakOnExceptions: { type: 'string', enum: ['uncaught', 'all', 'none'], description: 'Break when exceptions are thrown: "uncaught" pauses at uncaught exceptions at the crash site; "all" also pauses on caught/raised exceptions (language-dependent). Default "none" — attach sessions never apply a language default (unlike launch)' },
+                adapterConfig: { type: 'object', description: 'Adapter-specific attach configuration merged into the attach config before the adapter transforms it (e.g. C/C++/LLDB: program — the binary path for symbol resolution when /proc/<pid>/maps paths are not openable, as in a kubectl-debug ephemeral container — or initCommands like "settings set target.exec-search-paths /proc/<pid>/root"). Reserved keys request/__attachMode are ignored; set stopOnEntry via the top-level parameter. Not applied to js-debug attach, which builds its own attach request', additionalProperties: true }
               },
               required: ['sessionId']
             }
@@ -1129,6 +1131,15 @@ export class DebugMcpServer {
           
           switch (toolName) {
             case 'create_debug_session': {
+              // Validate before creating the session so a bad argument does
+              // not leave an orphan session behind (issue #336).
+              if (args.adapterConfig !== undefined) {
+                const cfg = args.adapterConfig;
+                if (cfg === null || typeof cfg !== 'object' || Array.isArray(cfg)) {
+                  throw new McpError(McpErrorCode.InvalidParams, 'adapterConfig must be an object when provided');
+                }
+              }
+
               // Ensure requested language is among dynamically supported ones
               const supported = await this.getSupportedLanguagesAsync();
               const lang = (args.language || DebugLanguage.PYTHON) as DebugLanguage;
@@ -1176,6 +1187,7 @@ export class DebugMcpServer {
                     timeout: (args.timeout as number) || 30000,
                     stopOnEntry: args.stopOnEntry,
                     verifyTimeout: args.verifyTimeout,
+                    adapterConfig: args.adapterConfig,
                   });
 
                   result = { content: [{ type: 'text', text: JSON.stringify({
@@ -1624,6 +1636,13 @@ export class DebugMcpServer {
               }
 
               try {
+                if (args.adapterConfig !== undefined) {
+                  const cfg = args.adapterConfig;
+                  if (cfg === null || typeof cfg !== 'object' || Array.isArray(cfg)) {
+                    throw new McpError(McpErrorCode.InvalidParams, 'adapterConfig must be an object when provided');
+                  }
+                }
+
                 this.logger.info('Attach to process requested', {
                   sessionId: args.sessionId,
                   port: args.port,
@@ -1640,7 +1659,8 @@ export class DebugMcpServer {
                   sourcePaths: args.sourcePaths,
                   stopOnEntry: args.stopOnEntry,
                   justMyCode: args.justMyCode,
-                  breakOnExceptions: this.validateBreakOnExceptions(args.breakOnExceptions)
+                  breakOnExceptions: this.validateBreakOnExceptions(args.breakOnExceptions),
+                  adapterConfig: args.adapterConfig
                 });
 
                 const responsePayload: Record<string, unknown> = {

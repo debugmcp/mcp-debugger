@@ -64,7 +64,7 @@ Rules that prevent 90% of failed sessions:
 For an already-running process (including remote machines, containers, and Kubernetes pods via port-forward):
 
 ```text
-attach_to_process {sessionId, host: "localhost", port: 5678, localRoot: "<local src>", remoteRoot: "<remote src>"}
+attach_to_process {sessionId, host: "localhost", port: 5678, sourcePaths: ["<local src>"], adapterConfig: {...}}
 ```
 
 - **Python**: target ran `python -m debugpy --listen <host>:<port> ...`

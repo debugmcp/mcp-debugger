@@ -196,6 +196,102 @@ describe('SessionManagerOperations attach modes', () => {
     expect(result.error).not.toContain('Attach mode is not implemented');
   });
 
+  describe('adapterConfig passthrough (issue #336)', () => {
+    function makeDirectConnectAdapter() {
+      return {
+        resolveExecutablePath: vi.fn(),
+        buildAdapterCommand: vi.fn(),
+        usesDirectConnectForAttach: vi.fn().mockReturnValue(true),
+        supportsAttach: vi.fn().mockReturnValue(true),
+        transformAttachConfig: vi.fn().mockImplementation((cfg: unknown) => cfg),
+        getDefaultExecutableName: vi.fn().mockReturnValue('ruby')
+      };
+    }
+
+    it('attachToProcess merges adapterConfig into the config handed to transformAttachConfig', async () => {
+      mockDependencies.adapterRegistry.getFactoryMetadata = vi
+        .fn()
+        .mockResolvedValue({ modes: { launch: true, attach: 'direct-connect' } });
+      const adapterStub = makeDirectConnectAdapter();
+      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+
+      const result = await operations.attachToProcess('test-session', {
+        host: '127.0.0.1',
+        port: 12345,
+        stopOnEntry: false, // skip the post-attach thread-verify poll
+        adapterConfig: {
+          program: '/proc/1/root/pricer',
+          initCommands: ['settings set target.exec-search-paths /proc/1/root']
+        }
+      });
+
+      expect(result.success).toBe(true);
+      const cfg = adapterStub.transformAttachConfig.mock.calls[0][0];
+      expect(cfg.program).toBe('/proc/1/root/pricer');
+      expect(cfg.initCommands).toEqual(['settings set target.exec-search-paths /proc/1/root']);
+      expect(cfg.request).toBe('attach');
+      expect(cfg.__attachMode).toBe(true);
+      // The wrapper key itself must not leak into the DAP attach arguments.
+      expect(cfg.adapterConfig).toBeUndefined();
+      expect(mockProxyManager.start).toHaveBeenCalledWith(
+        expect.objectContaining({
+          attachMode: true,
+          launchConfig: expect.objectContaining({ program: '/proc/1/root/pricer' })
+        })
+      );
+    });
+
+    it('reserved keys in adapterConfig cannot flip the attach request', async () => {
+      // The proxy worker re-reads request/__attachMode from the merged config
+      // to choose the DAP sequence AND shutdown semantics (attach must detach
+      // with terminateDebuggee=false) — extras must never rewrite them.
+      mockDependencies.adapterRegistry.getFactoryMetadata = vi
+        .fn()
+        .mockResolvedValue({ modes: { launch: true, attach: 'direct-connect' } });
+      const adapterStub = makeDirectConnectAdapter();
+      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+
+      await operations.attachToProcess('test-session', {
+        host: '127.0.0.1',
+        port: 12345,
+        stopOnEntry: false,
+        adapterConfig: { request: 'launch', __attachMode: false, program: '/x' }
+      });
+
+      const cfg = adapterStub.transformAttachConfig.mock.calls[0][0];
+      expect(cfg.request).toBe('attach');
+      expect(cfg.__attachMode).toBe(true);
+      expect(cfg.program).toBe('/x');
+    });
+
+    it('strips request/__attachMode from launch-path adapterLaunchConfig too', async () => {
+      const adapterStub = {
+        resolveExecutablePath: vi.fn().mockResolvedValue('ruby'),
+        buildAdapterCommand: vi.fn().mockReturnValue({ command: 'rdbg', args: [] }),
+        supportsAttach: vi.fn().mockReturnValue(false),
+        transformLaunchConfig: vi.fn().mockImplementation(async (cfg: unknown) => cfg)
+      };
+      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+
+      await (operations as any).startProxyManager(
+        mockSession,
+        'script.rb',
+        undefined,
+        {},
+        false,
+        { request: 'attach', __attachMode: true, foo: 1 }
+      );
+
+      const cfg = adapterStub.transformLaunchConfig.mock.calls[0][0];
+      expect(cfg.foo).toBe(1);
+      expect(cfg.request).not.toBe('attach');
+      expect(cfg.__attachMode).toBeUndefined();
+      expect(mockProxyManager.start).toHaveBeenCalledWith(
+        expect.objectContaining({ attachMode: false })
+      );
+    });
+  });
+
   it('appends an attach hint when launch executable resolution fails on an attach-capable adapter', async () => {
     const adapterStub = {
       resolveExecutablePath: vi.fn().mockRejectedValue(new Error('ruby not found')),
