@@ -371,7 +371,9 @@ export interface SessionOutputEntry {
 }
 
 /**
- * Subset of DebugSession for list operations (if needed, otherwise use DebugSession)
+ * Public session snapshot returned by create/list operations. Unlike the
+ * internal DebugSession, it carries no live handles and adds observed
+ * runtime facts (lastStop, exitCode, exposure).
  */
 export interface DebugSessionInfo {
   id: string;

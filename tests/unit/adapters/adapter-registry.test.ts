@@ -280,7 +280,7 @@ describe('AdapterRegistry', () => {
     });
 
     it('merges registered and dynamically discovered installed languages', async () => {
-      const registry = new AdapterRegistry({ enableDynamicLoading: true } as any);
+      const registry = new AdapterRegistry({ enableDynamicLoading: true });
       const factory = createFactory();
       await registry.register('mock', factory as any);
 
@@ -299,7 +299,7 @@ describe('AdapterRegistry', () => {
     });
 
     it('falls back to registered languages when loader throws', async () => {
-      const registry = new AdapterRegistry({ enableDynamicLoading: true } as any);
+      const registry = new AdapterRegistry({ enableDynamicLoading: true });
       const factory = createFactory();
       await registry.register('mock', factory as any);
 
@@ -329,7 +329,7 @@ describe('AdapterRegistry', () => {
     });
 
     it('merges loader metadata with registered, overriding installed status', async () => {
-      const registry = new AdapterRegistry({ enableDynamicLoading: true } as any);
+      const registry = new AdapterRegistry({ enableDynamicLoading: true });
       const factory = createFactory();
       await registry.register('mock', factory as any);
 
@@ -350,7 +350,7 @@ describe('AdapterRegistry', () => {
     });
 
     it('falls back to registered adapters when loader throws', async () => {
-      const registry = new AdapterRegistry({ enableDynamicLoading: true } as any);
+      const registry = new AdapterRegistry({ enableDynamicLoading: true });
       const factory = createFactory();
       await registry.register('mock', factory as any);
 

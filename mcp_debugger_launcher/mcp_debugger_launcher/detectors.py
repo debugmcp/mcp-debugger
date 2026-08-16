@@ -78,17 +78,9 @@ class RuntimeDetector:
                 timeout=5
             )
 
-            # If the daemon probe doesn't work, try listing containers
             if ping_result.returncode != 0:
-                list_result = subprocess.run(
-                    ["docker", "ps"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-                if list_result.returncode != 0:
-                    return True, f"{version} (daemon not running)"
-                    
+                return True, f"{version} (daemon not running)"
+
             return True, version
             
         except (subprocess.TimeoutExpired, Exception):

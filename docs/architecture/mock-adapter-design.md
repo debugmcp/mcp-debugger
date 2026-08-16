@@ -105,7 +105,7 @@ enum MockErrorScenario {
 
 Error scenarios are controlled at runtime via `setErrorScenario()` on the `MockDebugAdapter` instance (which accepts a single `MockErrorScenario` value). `MockAdapterConfig` does not have an `errorScenarios` field; error scenarios are set exclusively via the runtime method:
 
-- **EXECUTABLE_NOT_FOUND**: Causes `validateEnvironment()` to return `{ valid: false }` with a `MOCK_NOT_FOUND` error code. `initialize()` transitions the adapter to the `ERROR` state and constructs an `AdapterError` with `ENVIRONMENT_INVALID` — but the error that actually escapes to the caller is an `AdapterError` reading `Invalid state transition: error → error` (code `UNKNOWN_ERROR`), because the catch path re-attempts the already-completed `ERROR` transition. The adapter is left in the `ERROR` state.
+- **EXECUTABLE_NOT_FOUND**: Causes `validateEnvironment()` to return `{ valid: false }` with a `MOCK_NOT_FOUND` error code. `initialize()` transitions the adapter to the `ERROR` state and throws an `AdapterError` with `ENVIRONMENT_INVALID` (the `ERROR` state allows an idempotent self-transition, so the catch path's re-transition does not mask the original error). The adapter is left in the `ERROR` state.
 - **CONNECTION_TIMEOUT**: Causes `connect()` to throw an `AdapterError` with `CONNECTION_TIMEOUT` (recoverable).
 
 ```typescript

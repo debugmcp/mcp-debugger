@@ -61,14 +61,14 @@ The filtering is implemented using the existing `AdapterPolicy` system:
 3. **GoAdapterPolicy** (`packages/shared/src/interfaces/adapter-policy-go.ts`)
    - Implements filtering for Go
    - Identifies internal frames by checking for `/runtime/` and `/testing/` in the file path
-   - Always keeps at least one frame if all are filtered
+   - No fallback when every frame is internal — the result may be empty
 
 4. **SessionManagerData** (`src/session/session-manager-data.ts`)
    - Applies filtering based on session language via `selectPolicy()`
    - Any language whose AdapterPolicy implements `filterStackFrames` will have filtering applied (including JavaScript, Go, .NET, and any other adapter policies that define this method)
 
 ### Edge Cases Handled
-- **All frames internal**: The fallback differs by policy — JS and Go retain at least the first frame; Java returns the full unfiltered array (never hides the entire stack, e.g. a thread parked deep in JDK code); .NET has no such fallback and may return an empty array
+- **All frames internal**: The fallback differs by policy — JS retains at least the first frame; Java returns the full unfiltered array (never hides the entire stack, e.g. a thread parked deep in JDK code); Go and .NET have no such fallback and may return an empty array
 - **No frames**: Returns empty array as before
 - **Python**: No filtering applied (Python's AdapterPolicy does not implement `filterStackFrames`)
 - **Other languages**: .NET and Java DO implement filtering via their AdapterPolicy. Any language whose AdapterPolicy implements `filterStackFrames` will have filtering applied

@@ -98,6 +98,9 @@ const VALID_TRANSITIONS: { [key in AdapterState]?: AdapterState[] } = {
     AdapterState.ERROR
   ],
   [AdapterState.ERROR]: [
+    AdapterState.ERROR,         // Allow staying in error (idempotent) so a
+                                // catch-path re-transition never masks the
+                                // original error with UNKNOWN_ERROR
     AdapterState.UNINITIALIZED,
     AdapterState.READY,         // Allow recovery to ready
     AdapterState.DISCONNECTED   // Allow recovery to disconnected

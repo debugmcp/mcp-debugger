@@ -1,6 +1,6 @@
 # Adapter API Reference
 
-Status: v0.23.0
+Status: Unreleased (post-v0.23.0 main)
 Audience: Adapter authors and maintainers  
 Source of truth: `@debugmcp/shared` interfaces and current implementation in `src/adapters/*`
 
@@ -242,8 +242,7 @@ Purpose: Manage adapter factories and active adapter instances; optionally lazy-
 
 Key runtime behavior
 - Constructor accepts config; dynamic loading enabled in containers by default:
-  - `enableDynamicLoading?: boolean` OR `process.env.MCP_CONTAINER === 'true'`
-  - Note: `enableDynamicLoading` is not part of the typed `AdapterRegistryConfig` interface — the constructor reads it via a cast, so callers must widen the type (e.g. `AdapterRegistryConfig & { enableDynamicLoading?: boolean }`, as `src/container/dependencies.ts` does)
+  - `enableDynamicLoading?: boolean` (a typed `AdapterRegistryConfig` field) OR `process.env.MCP_CONTAINER === 'true'`
 - `register(language, factory)` with optional validation and override rules
 - `unregister(language)` disposes active adapters, removes timers, unregisters factory
 - `create(language, config): Promise<IDebugAdapter>`

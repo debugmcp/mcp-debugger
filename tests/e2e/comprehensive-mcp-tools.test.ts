@@ -339,31 +339,31 @@ describe(`Comprehensive MCP Debugger Test — ${ALL_TOOLS.length} Tools × ${LAN
           file: lang.script,
           line: lang.bpLine,
         });
-        const t0 = Date.now();
-
-        // Track which sub-tool is in flight so a failure is attributed to the
-        // right tool in the results matrix (not always list_breakpoints).
+        // Track which sub-tool is in flight (and when it started) so a failure
+        // is attributed to the right tool in the results matrix with its own
+        // duration, not the elapsed time since the first stage.
         let stage = 'list_breakpoints';
+        let stageStart = Date.now();
         try {
           const listRes = await callToolSafely(mcpClient!, 'list_breakpoints', { sessionId: currentSessionId });
           const bps = (listRes as any).breakpoints as Array<{ id: string; file: string; line: number }>;
           expect((listRes as any).success).toBe(true);
           expect((listRes as any).count).toBeGreaterThanOrEqual(1);
-          record('list_breakpoints', lang.language, 'PASS', `count=${(listRes as any).count}`, Date.now() - t0);
+          record('list_breakpoints', lang.language, 'PASS', `count=${(listRes as any).count}`, Date.now() - stageStart);
 
           // remove by id
           stage = 'remove_breakpoint';
-          const t1 = Date.now();
+          stageStart = Date.now();
           const removeRes = await callToolSafely(mcpClient!, 'remove_breakpoint', {
             sessionId: currentSessionId,
             breakpointId: bps[0].id,
           });
           expect((removeRes as any).success).toBe(true);
-          record('remove_breakpoint', lang.language, 'PASS', `removed=${(removeRes as any).removed?.length}`, Date.now() - t1);
+          record('remove_breakpoint', lang.language, 'PASS', `removed=${(removeRes as any).removed?.length}`, Date.now() - stageStart);
 
           // set again, then clear all and verify empty
           stage = 'clear_breakpoints';
-          const t2 = Date.now();
+          stageStart = Date.now();
           await callToolSafely(mcpClient!, 'set_breakpoint', {
             sessionId: currentSessionId,
             file: lang.script,
@@ -374,9 +374,9 @@ describe(`Comprehensive MCP Debugger Test — ${ALL_TOOLS.length} Tools × ${LAN
           expect((clearRes as any).cleared).toBeGreaterThanOrEqual(1);
           const finalList = await callToolSafely(mcpClient!, 'list_breakpoints', { sessionId: currentSessionId });
           expect((finalList as any).count).toBe(0);
-          record('clear_breakpoints', lang.language, 'PASS', `cleared=${(clearRes as any).cleared}`, Date.now() - t2);
+          record('clear_breakpoints', lang.language, 'PASS', `cleared=${(clearRes as any).cleared}`, Date.now() - stageStart);
         } catch (err: any) {
-          record(stage, lang.language, 'FAIL', err.message, Date.now() - t0);
+          record(stage, lang.language, 'FAIL', err.message, Date.now() - stageStart);
           throw err;
         }
       }, 15_000);

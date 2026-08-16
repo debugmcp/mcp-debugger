@@ -18,7 +18,7 @@ MCP Client → MCP Server → SessionManager → ProxyManager → ProxyWorker
 
 The adapter uses a TCP-to-stdio bridge on all platforms to work around a netcoredbg `--server=PORT` bug (originally discovered on Windows) where the TCP connection drops after the DAP initialize sequence. The bridge spawns netcoredbg in stdio mode (which works reliably) and exposes a TCP socket for the proxy to connect to.
 
-The proxy worker selects the `DotnetAdapterPolicy` via `DapProxyWorker.selectAdapterPolicy()`, which dispatches primarily on the session's `language` field in the init payload (through `getPolicyForLanguage()`) and only falls back to matching the adapter command shape when no language hint is provided. The policy determines .NET-specific DAP handshake behavior.
+The proxy worker selects the `DotnetAdapterPolicy` via `DapProxyWorker.selectAdapterPolicy()`, which dispatches primarily on the session's `language` field in the init payload (through `getPolicyForLanguage()`) and only falls back to matching the adapter command shape when no language hint is provided or the language is not in the map. The policy determines .NET-specific DAP handshake behavior.
 
 ## Prerequisites
 

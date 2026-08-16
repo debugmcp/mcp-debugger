@@ -33,6 +33,11 @@ async function showFailures() {
     if (!results.testResults || results.testResults.length === 0) {
       console.log('No test results to analyze.');
       fs.unlinkSync(jsonFile);
+      // A broken run (e.g. a collection error) can produce empty testResults
+      // while Vitest exits non-zero — propagate that instead of exiting 0.
+      if (childExitCode !== 0) {
+        process.exit(1);
+      }
       return;
     }
     
