@@ -1569,6 +1569,29 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(mockSession.proxyManager).toBeUndefined();
     });
 
+    it('tears down the proxy when attach fails after the proxy was spawned (issue #337)', async () => {
+      // ProxyManager.start()'s init-timeout reject (and any other throw out of
+      // startProxyManager after the proxy process exists) used to land in a
+      // catch that only marked the session ERROR — leaving a live proxy chain
+      // ptrace-attached to the target with no tool able to reach it.
+      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+        throw new Error('Timeout waiting for proxy initialization');
+      });
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 5005,
+        host: 'localhost',
+        stopOnEntry: true
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.state).toBe(SessionState.ERROR);
+      expect(result.error).toContain('Timeout waiting for proxy initialization');
+      expect(mockProxyManager.stop).toHaveBeenCalled();
+      expect(mockSession.proxyManager).toBeUndefined();
+    });
+
     it('should fail the attach when the threads request keeps failing for the whole verification window', async () => {
       mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
         if (command === 'threads') {
