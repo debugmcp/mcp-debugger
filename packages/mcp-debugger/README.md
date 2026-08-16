@@ -1,6 +1,6 @@
 # @debugmcp/mcp-debugger
 
-Step-through debugging MCP server for LLMs across seven languages
+Step-through debugging MCP server for LLMs across eight languages
 
 ## Installation
 
@@ -47,6 +47,7 @@ All language adapters are bundled into the CLI package. No separate installation
 - **Go** (`@debugmcp/adapter-go`) - Go debugging via Delve
 - **Java** (`@debugmcp/adapter-java`) - Java debugging via JDI bridge
 - **.NET** (`@debugmcp/adapter-dotnet`) - .NET debugging via netcoredbg
+- **C/C++** (`@debugmcp/adapter-cpp`) - C/C++ debugging via CodeLLDB
 - **Mock** (`@debugmcp/adapter-mock`) - Mock adapter for testing
 
 **System Requirements:** Node.js 22+ is required to run mcp-debugger. You also need the language runtimes and debug tools installed on your system (e.g., Python + debugpy, Ruby + the `debug` gem / `rdbg`, Go + Delve, JDK 21+, netcoredbg with a compatible .NET runtime).

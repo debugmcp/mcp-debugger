@@ -1,20 +1,22 @@
 # mcp-debugger Migration Guide
 
 > **📌 UPDATED DOCUMENTATION**
-> This migration guide covers changes through v0.19.0, including dynamic adapter loading and major UX improvements.
+> This migration guide covers changes through v0.23.x, including dynamic adapter loading and major UX improvements.
 
 ## What's New in v0.15.0
 
 ### ✅ Dynamic Adapter Loading (No Breaking Changes)
 This release introduces dynamic discovery and loading of language adapters at runtime. The core no longer statically imports adapters; instead, it uses a loader/registry to import packages by convention.
 
-- Adapters live in separate packages:
+- Adapters live in separate packages (9 adapters):
   - `@debugmcp/adapter-python`
+  - `@debugmcp/adapter-ruby`
   - `@debugmcp/adapter-javascript`
   - `@debugmcp/adapter-rust`
   - `@debugmcp/adapter-go`
   - `@debugmcp/adapter-java`
   - `@debugmcp/adapter-dotnet`
+  - `@debugmcp/adapter-cpp`
   - `@debugmcp/adapter-mock`
 - Adapters are bundled at build time into the `@debugmcp/mcp-debugger` CLI package (not optional npm dependencies that consumers install separately)
 - The core discovers and loads adapters on demand:
@@ -22,13 +24,13 @@ This release introduces dynamic discovery and loading of language adapters at ru
   - Factory class export: `<CapitalizedLanguage>AdapterFactory` (named export; the loader looks up this class name via convention)
 
 ### 🔧 User Guidance
-- Install the package (adapter packages are bundled as optional dependencies):
+- Install the package (all adapters are bundled into the CLI at build time; the published package has zero runtime dependencies):
   ```bash
   npm install @debugmcp/mcp-debugger
   ```
 - Verify availability:
   - Call the `list_supported_languages` tool (from your MCP client) to see which adapters are discoverable
-  - All adapter packages are included as optional dependencies of `@debugmcp/mcp-debugger` and are installed automatically when available
+  - All adapter packages are bundled into `@debugmcp/mcp-debugger` at build time -- nothing extra is installed at runtime
 
 ### 🐳 Container Notes
 - Stdout in stdio mode must be NDJSON-only; the runtime preloads a silencer that mirrors logs to `/app/logs` without altering protocol
@@ -238,11 +240,13 @@ If you want to add support for a new language:
    ```typescript
    enum DebugLanguage {
      PYTHON = 'python',
+     RUBY = 'ruby',
      JAVASCRIPT = 'javascript',
      RUST = 'rust',
      GO = 'go',
      JAVA = 'java',
      DOTNET = 'dotnet',
+     CPP = 'cpp',
      MOCK = 'mock',
      MYLANG = 'mylang'  // Add your language
    }
@@ -392,7 +396,7 @@ await mcp.startDebugging({
 ```typescript
 // Verify adapter is being used
 const languages = await mcp.getSupportedLanguages();
-console.log('Supported:', languages);  // Should include 'python', 'javascript', 'rust', 'go', 'java', 'dotnet', 'mock'
+console.log('Supported:', languages);  // Should include 'python', 'ruby', 'javascript', 'rust', 'go', 'java', 'dotnet', 'cpp', 'mock'
 ```
 
 ### 3. Event Handling Test

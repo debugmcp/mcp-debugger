@@ -16,7 +16,9 @@ function referenceSplit(input: string): { lines: string[]; flushed: string[] } {
   const parts = input.split('\n');
   const pending = parts.pop() ?? '';
   const lines = parts.map(line => (line.endsWith('\r') ? line.slice(0, -1) : line));
-  return { lines, flushed: pending === '' ? [] : [pending] };
+  // flush() strips a trailing \r the same way append() does for complete lines.
+  const flushedLine = pending.endsWith('\r') ? pending.slice(0, -1) : pending;
+  return { lines, flushed: pending === '' ? [] : [flushedLine] };
 }
 
 /** Cut a string into contiguous chunks at arbitrary positions (mod length). */
@@ -73,9 +75,12 @@ describe('LineBuffer properties', () => {
   });
 
   it('newline-free streams lose no data and never hold more than maxPendingLength', () => {
+    // CR-free content: a trailing \r on a force-emitted or flushed piece is
+    // stripped by design (consistent with append()'s CRLF handling), so exact
+    // byte conservation holds only for streams without carriage returns.
     fc.assert(
       fc.property(
-        fc.array(fc.string({ maxLength: 30 }).map(s => s.replace(/\n/g, ' ')), { maxLength: 30 }),
+        fc.array(fc.string({ maxLength: 30 }).map(s => s.replace(/[\n\r]/g, ' ')), { maxLength: 30 }),
         fc.integer({ min: 1, max: 16 }),
         (chunks, maxPendingLength) => {
           const buffer = new LineBuffer(maxPendingLength);

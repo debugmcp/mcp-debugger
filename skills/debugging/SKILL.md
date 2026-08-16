@@ -1,6 +1,6 @@
 ---
 name: mcp-debugger
-description: Use when investigating a bug, failing test, or unexpected runtime behavior and the mcp-debugger MCP server is available — drives real step-through debuggers (breakpoints, stack traces, variable inspection, expression evaluation) for Python, JavaScript/TypeScript, Ruby, Rust, Go, Java, and .NET/C#, locally or attached to remote processes.
+description: Use when investigating a bug, failing test, or unexpected runtime behavior and the mcp-debugger MCP server is available — drives real step-through debuggers (breakpoints, stack traces, variable inspection, expression evaluation) for Python, JavaScript/TypeScript, Ruby, Rust, Go, Java, .NET/C#, and C/C++, locally or attached to remote processes.
 ---
 
 # Debugging with mcp-debugger

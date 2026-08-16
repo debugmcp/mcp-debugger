@@ -35,6 +35,18 @@ describe('LineBuffer', () => {
     expect(new LineBuffer().flush()).toEqual([]);
   });
 
+  it('flush strips a trailing carriage return like append does', () => {
+    const buf = new LineBuffer();
+    buf.append('ends with cr\r');
+    expect(buf.flush()).toEqual(['ends with cr']);
+  });
+
+  it('force-emitted oversized pending strips a trailing carriage return', () => {
+    const buf = new LineBuffer(8);
+    expect(buf.append('x'.repeat(12) + '\r')).toEqual(['x'.repeat(12)]);
+    expect(buf.flush()).toEqual([]);
+  });
+
   it('force-emits an oversized pending line to bound memory', () => {
     const buf = new LineBuffer(16);
     expect(buf.append('x'.repeat(20))).toEqual(['x'.repeat(20)]);

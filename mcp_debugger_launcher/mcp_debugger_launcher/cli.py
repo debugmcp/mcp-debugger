@@ -39,7 +39,7 @@ def print_runtime_status(runtimes: dict, verbose: bool = False):
     if runtimes["docker"]["available"]:
         print(f"✅ Docker: {runtimes['docker']['version']}")
         if verbose:
-            if "daemon not running" in runtimes["docker"]["version"]:
+            if "daemon not running" in (runtimes["docker"]["version"] or ""):
                 print("   └─ Docker daemon is not running")
             elif runtimes["docker"]["image_exists"]:
                 print("   └─ debugmcp/mcp-debugger:latest: Found locally")

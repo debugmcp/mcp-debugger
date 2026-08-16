@@ -4,7 +4,7 @@ mcp-debugger is a Model Context Protocol (MCP) server that bridges MCP clients (
 
 ## Monorepo Structure
 
-The project uses pnpm workspaces with 10 packages:
+The project uses pnpm workspaces with 13 packages (the root workspace plus 12 under `packages/`):
 
 ```
 packages/
@@ -16,11 +16,13 @@ packages/
   adapter-go/         Go debugging via Delve
   adapter-java/       Java debugging via JDI bridge
   adapter-dotnet/     .NET/C# debugging via netcoredbg
+  adapter-cpp/        C/C++ debugging via CodeLLDB
+  codelldb-common/    Shared CodeLLDB infrastructure (vendoring, transport) for the Rust and C/C++ adapters
   adapter-mock/       Mock adapter for testing
   mcp-debugger/       Self-contained CLI bundle (npx distribution)
 ```
 
-Build order: `shared` -> adapters -> `mcp-debugger` CLI bundle.
+Build order: `shared` -> `codelldb-common` -> adapters -> `mcp-debugger` CLI bundle.
 
 ## Data Flow
 
@@ -50,7 +52,7 @@ Each debug session runs in a **separate process** for isolation. The ProxyManage
 
 ## Key Components
 
-- **MCP Server** (`src/server.ts`): Registers 21 MCP tools, handles STDIO and SSE transports, dynamically discovers available language adapters
+- **MCP Server** (`src/server.ts`): Registers 28 MCP tools, handles STDIO and SSE transports, dynamically discovers available language adapters
 - **SessionManager** (`src/session/`): 4-class inheritance hierarchy managing session lifecycle (`CREATED` -> `INITIALIZING` -> `READY` -> `RUNNING` <-> `PAUSED` -> `STOPPED`)
 - **Adapter Registry** (`src/adapters/`): Dynamic loading of adapters on-demand via ES module imports
 - **Adapter Policies** (`src/proxy/`): Language-specific DAP behavior via the policy pattern (e.g., `PythonAdapterPolicy`, `JsDebugAdapterPolicy`)

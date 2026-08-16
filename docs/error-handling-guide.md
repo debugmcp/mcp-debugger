@@ -36,6 +36,7 @@ export class SessionNotFoundError extends McpError {
 | `LanguageRuntimeNotFoundError` | Language runtime not found (generic) | `InvalidParams` |
 | `DebugSessionCreationError` | Failed to create session | `InternalError` |
 | `UnsupportedLanguageError` | Language not supported or adapter not found | `InvalidParams` |
+| `UnsupportedFeatureError` | Feature not supported by the session's adapter (e.g. logpoints) | `InvalidParams` |
 
 ## Implementation Patterns
 
@@ -192,9 +193,15 @@ describe('ProxyManager - Integration', () => {
 Some operations return empty data instead of throwing errors for better UX:
 
 ```typescript
-// getVariables, getStackTrace, getScopes:
+// getVariables, getScopes:
 // - Unknown session ID → throws SessionNotFoundError
 // - Valid session but not paused, no active proxy, or DAP request fails → returns []
+//
+// getStackTrace, getLocalVariables:
+// - Unknown session ID → throws SessionNotFoundError
+// - Valid session but not paused or no active proxy → returns empty data
+// - DAP request fails → THROWS (a failed DAP response must not be flattened
+//   into an empty-but-successful result; see issue #124)
 
 async getVariables(sessionId: string, ref: number): Promise<Variable[]> {
   const session = this._getSessionById(sessionId); // throws SessionNotFoundError if not found

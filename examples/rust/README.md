@@ -7,7 +7,7 @@ This directory contains example Rust projects for testing and demonstrating the 
 1. **Rust toolchain**: Install Rust from [rustup.rs](https://rustup.rs/)
 2. **CodeLLDB**: The Rust adapter will automatically download CodeLLDB when you run:
    ```bash
-   cd packages/adapter-rust
+   cd packages/codelldb-common
    npm run build:adapter
    ```
 
