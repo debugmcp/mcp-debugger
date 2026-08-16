@@ -1,8 +1,8 @@
 # Known Issues
 
-## Rust debugging inside Docker is disabled
+## Native debugging inside Docker requires Linux-compiled binaries
 
-The `mcp-debugger-docker` image disables Rust by default via `DEBUG_MCP_DISABLE_LANGUAGES`. CodeLLDB had chronic DWARF/symbol issues with binaries compiled outside the container. Rust Docker debugging is supported behind the `DOCKER_ENABLE_RUST=true` gate in tests, but is not enabled by default in the production image. Use the local stdio, SSE, or packed deployments for Rust debugging where the adapter runs on the same host as the toolchain.
+The Docker image ships CodeLLDB and enables Rust and C/C++ (issue #328), but container LLDB can only debug **Linux-compiled** binaries. Binaries compiled on the host (Windows/macOS, or a mismatched glibc) and mounted into the container have DWARF/symbol data the container's LLDB cannot use — breakpoints won't bind or symbols won't resolve. Either compile inside the container (the image ships `g++`; the cpp adapter's source-file launch does this automatically) or cross-compile for linux-x64. For host-compiled binaries, use a host (stdio/http) deployment where the debugger runs next to the toolchain that produced them.
 
 ## Test Failures in Act Environment
 

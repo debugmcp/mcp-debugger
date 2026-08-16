@@ -93,13 +93,14 @@ Here's the recommended configuration for your MCP settings file:
 - When using the debugger, provide paths relative to the project root (e.g., `examples/test.py` not `/workspace/examples/test.py`)
 - Optional env flags pass through with `-e`, e.g. `-e DEBUG_MCP_BP_ADDRESSING=line` restricts breakpoint addressing features (default: all enabled; see the set_breakpoint section of the tool reference), `-e DEBUG_MCP_NO_REDACT=1` to disable the default masking of credential-shaped values in variable/evaluate/output results, or `-e DEBUG_MCP_VARIABLE_ACCESS=explicit` to require explicit variable names on get_variables/get_local_variables (see the Secret redaction and Least-privilege mode sections of the tool reference)
 
-## Rust support in Docker
+## Native (Rust / C / C++) support in Docker
 
-> ⚠️ **Rust debugging is not supported inside the Docker image by default.** The container uses `DEBUG_MCP_DISABLE_LANGUAGES` to disable the Rust adapter, so the MCP tools will not advertise `rust` as an available language.
+The image vendors linux-x64 CodeLLDB (one shared copy under `@debugmcp/codelldb-common`, resolved via `CODELLDB_PATH`) and ships `g++`, so Rust and C/C++ debugging work inside the container (issue #328):
 
-Why? CodeLLDB inside the container could not reliably interpret DWARF data for binaries compiled on the host (Windows/WSL/macOS). Rather than forcing every user to rebuild their projects with a matching Linux toolchain, we recommend running Rust sessions via the local/stdio, SSE, or packed deployments—where the debugger runs next to the toolchain that produced the binary. The Docker variant remains the best choice for Python and JavaScript debugging and now ships a slimmer image (no CodeLLDB payload).
-
-If you need Rust debugging from a container, keep the host-based deployments and mount your compiled Linux binary directly; the Docker image intentionally refuses to start Rust sessions to avoid inconsistent experiences.
+- **C/C++ source-file launch**: pass a lone `.c`/`.cpp` as the program and the adapter compiles it in-container with `-gdwarf-4 -O0` into `.debug-mcp/` next to the source.
+- **Prebuilt binaries**: must be **Linux-compiled** (linux-x64). Binaries compiled on a Windows/macOS host and mounted into the container are not debuggable by container LLDB — that's a binary-format fact, not a packaging gap. Cross-compile for Linux or compile in-container.
+- **Attach by PID**: works for native processes inside the container. Attaching to a non-descendant process needs `--cap-add=SYS_PTRACE` when the host kernel sets `kernel.yama.ptrace_scope >= 1` (Kubernetes `kubectl debug` profiles grant the equivalent).
+- Rust remains **launch-only** (the rust adapter has no attach implementation).
 
 ## Ruby attach in Docker (attach-only)
 

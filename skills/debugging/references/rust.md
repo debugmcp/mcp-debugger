@@ -9,7 +9,7 @@
   rustup target add x86_64-pc-windows-gnu
   cargo +stable-gnu build --target x86_64-pc-windows-gnu
   ```
-- Rust debugging is **disabled in the Docker image** by default (`DEBUG_MCP_DISABLE_LANGUAGES`). Use a host (stdio/http) deployment.
+- Rust debugging **works in the Docker image** for **Linux-compiled** binaries (linux-x64 CodeLLDB is vendored; launch-only — the rust adapter has no attach). Host-compiled (Windows/macOS) binaries mounted into the container are not debuggable by container LLDB — cross-compile for Linux or use a host deployment.
 
 ## Launch quickstart
 
