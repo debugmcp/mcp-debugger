@@ -127,13 +127,15 @@ Facts that will save you an afternoon (all observed, not assumed):
 - **`--target` shares only the PID namespace.** The app process is visible — typically as **PID 1** of the shared namespace (`kubectl exec "$POD" -c debugger -- ps -eo pid,comm`; the image ships `procps`).
 - **Ephemeral containers cannot be removed or restarted** — each retry needs a fresh `--container` name; a pod restart clears them all.
 
-### 2.3 One symlink for symbols
+### 2.3 Symbols across the mount-namespace boundary
 
-PID namespaces are shared; **mount namespaces are not**. LLDB reads the target's module list from `/proc/1/maps`, whose paths (`/pricer`) don't exist in the debugger container's filesystem — attach still works, but frames show raw addresses and function breakpoints resolve 0 locations. The target's entire filesystem is visible at `/proc/<pid>/root/` (ptrace privilege grants this), so mirror the binary's path before attaching:
+PID namespaces are shared; **mount namespaces are not**. LLDB reads the target's module list from `/proc/1/maps`, whose paths (`/pricer`) don't exist in the debugger container's filesystem — attach still works, but frames show raw addresses and function breakpoints resolve 0 locations. The target's entire filesystem is visible at `/proc/<pid>/root/` (ptrace privilege grants this), so point CodeLLDB at the binary through it, right in the attach call ([#336](https://github.com/debugmcp/mcp-debugger/issues/336)):
 
-```bash
-kubectl exec "$POD" -c debugger -- ln -sf /proc/1/root/pricer /pricer
+```text
+attach_to_process {sessionId, processId: 1, adapterConfig: {program: "/proc/1/root/pricer"}}
 ```
+
+(The pre-#336 workaround — `kubectl exec "$POD" -c debugger -- ln -sf /proc/1/root/pricer /pricer` before attaching — still works, but the `adapterConfig` form keeps the flow self-contained: no exec step, nothing to clean up.)
 
 With that in place CodeLLDB loads the DWARF from the live target's binary: frames symbolize, locals resolve, function breakpoints bind.
 
@@ -143,7 +145,8 @@ The sidecar has no source files and doesn't need them: **function breakpoints** 
 
 ```text
 create_debug_session  {language: "cpp", name: "sick-pod-native"}
-attach_to_process     {sessionId, processId: 1, stopOnEntry: true}
+attach_to_process     {sessionId, processId: 1, stopOnEntry: true,
+                       adapterConfig: {program: "/proc/1/root/pricer"}}
 set_breakpoint        {sessionId, function: "apply_bulk_discount"}
                       # -> verified: true, "Resolved locations: 1"
 continue_execution    {sessionId}

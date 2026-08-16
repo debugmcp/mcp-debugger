@@ -429,4 +429,110 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
       );
     });
   });
+
+  describe('adapterConfig passthrough (issue #336)', () => {
+    beforeEach(() => {
+      mockSessionManager.attachToProcess.mockResolvedValue({
+        success: true,
+        state: 'paused',
+      });
+    });
+
+    it('forwards adapterConfig to the session manager', async () => {
+      await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'attach_to_process',
+          arguments: {
+            sessionId: 'test-session',
+            processId: 1,
+            adapterConfig: {
+              program: '/proc/1/root/pricer',
+              initCommands: ['settings set target.exec-search-paths /proc/1/root'],
+            },
+          },
+        },
+      });
+
+      expect(mockSessionManager.attachToProcess).toHaveBeenCalledWith(
+        'test-session',
+        expect.objectContaining({
+          adapterConfig: expect.objectContaining({ program: '/proc/1/root/pricer' }),
+        })
+      );
+    });
+
+    it('rejects a non-object adapterConfig', async () => {
+      await expect(callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'attach_to_process',
+          arguments: {
+            sessionId: 'test-session',
+            processId: 1,
+            adapterConfig: [1, 2],
+          },
+        },
+      })).rejects.toThrow(/adapterConfig must be an object/);
+
+      expect(mockSessionManager.attachToProcess).not.toHaveBeenCalled();
+    });
+
+    it('is advertised in the attach_to_process and create_debug_session schemas', async () => {
+      const result = await listToolsHandler({ method: 'tools/list', params: {} });
+
+      const attach = result.tools.find((t: any) => t.name === 'attach_to_process');
+      expect(attach.inputSchema.properties.adapterConfig?.type).toBe('object');
+
+      const create = result.tools.find((t: any) => t.name === 'create_debug_session');
+      expect(create.inputSchema.properties.adapterConfig?.type).toBe('object');
+    });
+
+    it('create_debug_session auto-attach forwards adapterConfig', async () => {
+      mockSessionManager.createSession.mockResolvedValue({
+        id: 'attach-session-1',
+        name: 'Attach Test',
+        language: 'python' as DebugLanguage,
+        state: 'created' as SessionState,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'create_debug_session',
+          arguments: {
+            language: 'python',
+            port: 5009,
+            adapterConfig: { program: '/proc/1/root/pricer' },
+          },
+        },
+      });
+
+      expect(mockSessionManager.attachToProcess).toHaveBeenCalledWith(
+        'attach-session-1',
+        expect.objectContaining({
+          adapterConfig: expect.objectContaining({ program: '/proc/1/root/pricer' }),
+        })
+      );
+    });
+
+    it('create_debug_session rejects a non-object adapterConfig before creating the session', async () => {
+      await expect(callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'create_debug_session',
+          arguments: {
+            language: 'python',
+            port: 5009,
+            adapterConfig: 'not-an-object-and-not-json',
+          },
+        },
+      })).rejects.toThrow(/adapterConfig must be an object/);
+
+      expect(mockSessionManager.createSession).not.toHaveBeenCalled();
+      expect(mockSessionManager.attachToProcess).not.toHaveBeenCalled();
+    });
+  });
 });

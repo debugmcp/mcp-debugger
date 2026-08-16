@@ -98,7 +98,7 @@ ${setBreakpointStep}
 - Breakpoints may verify late (debugpy, JDI defer until load) — not an error.
 
 ## Attach / remote
-attach_to_process {sessionId, host, port, localRoot, remoteRoot}
+attach_to_process {sessionId, host, port, sourcePaths, adapterConfig}
 - Python: target started with "python -m debugpy --listen host:port ..."
 - Ruby: target started with "rdbg --open --port N ..." (works via kubectl port-forward)
 - Java: JVM flag -agentlib:jdwp=transport=dt_socket,server=y,address=*:PORT (breakpoints defer until class load)

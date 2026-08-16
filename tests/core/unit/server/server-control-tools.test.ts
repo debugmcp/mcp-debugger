@@ -270,6 +270,27 @@ describe('Server Control Tools Tests', () => {
       );
     });
 
+    it('should reject a non-object adapterLaunchConfig', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: 'ACTIVE'
+      });
+
+      await expect(callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'start_debugging',
+          arguments: {
+            sessionId: 'test-session',
+            scriptPath: '/path/to/test.py',
+            adapterLaunchConfig: [1, 2]
+          }
+        }
+      })).rejects.toThrow(/adapterLaunchConfig must be an object/);
+
+      expect(mockSessionManager.startDebugging).not.toHaveBeenCalled();
+    });
+
     it('should reject an invalid breakOnExceptions value', async () => {
       mockSessionManager.getSession.mockReturnValue({
         id: 'test-session',
