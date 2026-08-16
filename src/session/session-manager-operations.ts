@@ -2669,6 +2669,11 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       };
     } catch (error) {
       this.logger.error(`[SessionManager] Failed to attach to process for session ${sessionId}:`, error);
+      // Never leave a live proxy chain behind a failed attach — e.g.
+      // ProxyManager.start()'s init timeout rejects after the worker was
+      // spawned (issue #337). Idempotent with the verify-failure teardown
+      // above, which already nulled session.proxyManager.
+      await this.stopProxyPreservingSession(session);
       this._updateSessionState(session, SessionState.ERROR);
 
       const message = error instanceof Error ? error.message : String(error);
