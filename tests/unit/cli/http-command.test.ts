@@ -381,6 +381,126 @@ describe('HTTP Command Handler', () => {
     });
   });
 
+  describe('stale session reaping (issue #337)', () => {
+    // A client that crashes without DELETE leaves its session (and its live
+    // DebugMcpServer + proxy chains) in httpSessions forever — invisible to
+    // the reconnecting client, which gets a fresh server with an empty store.
+    // The sweep closes sessions that are idle with no open SSE stream, which
+    // cascades transport.onclose → server.stop() → closeAllSessions().
+    const INIT_BODY = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'c', version: '1' } },
+    };
+
+    function makeStreamRes() {
+      const res = new EventEmitter() as any;
+      res.status = vi.fn().mockReturnThis();
+      res.json = vi.fn();
+      res.end = vi.fn();
+      res.headersSent = false;
+      return res;
+    }
+
+    function createAppAndHandler(staleMsEnv?: string) {
+      if (staleMsEnv !== undefined) {
+        fakeProc.env.MCP_HTTP_STALE_SESSION_MS = staleMsEnv;
+      }
+      const app = createHttpApp(
+        { port: '3001' },
+        { logger: mockLogger, serverFactory: mockServerFactory, proc: fakeProc }
+      );
+      const postCall = mockApp.post.mock.calls.find((c: any) => c[0] === '/mcp');
+      return { app, handler: postCall![1] as (req: any, res: any) => Promise<void> };
+    }
+
+    async function initSession(handler: (req: any, res: any) => Promise<void>) {
+      await handler({ method: 'POST', headers: {}, body: INIT_BODY }, makeStreamRes());
+      mockTransport.triggerSessionInit();
+      return mockTransport;
+    }
+
+    it('reaps an idle session with no open stream after the staleness window', async () => {
+      vi.useFakeTimers();
+      const { app, handler } = createAppAndHandler('5000');
+      const transport = await initSession(handler);
+      expect((app as any).httpSessions.size).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(61_000);
+
+      expect(transport.close).toHaveBeenCalled();
+      // The SDK fires onclose from close(); simulate it and confirm the
+      // existing cleanup path runs: server stopped, session forgotten.
+      transport.triggerClose();
+      expect(mockServer.stop).toHaveBeenCalled();
+      expect((app as any).httpSessions.size).toBe(0);
+    });
+
+    it('never reaps a session holding an open stream; reaps after the stream closes and goes idle', async () => {
+      vi.useFakeTimers();
+      const { handler } = createAppAndHandler('5000');
+      const transport = await initSession(handler);
+
+      const streamRes = makeStreamRes();
+      await handler(
+        { method: 'GET', headers: { 'mcp-session-id': transport.sessionId }, body: undefined },
+        streamRes
+      );
+
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(transport.close).not.toHaveBeenCalled();
+
+      // Client crash: the socket closes without a DELETE.
+      streamRes.emit('close');
+      await vi.advanceTimersByTimeAsync(61_000);
+
+      expect(transport.close).toHaveBeenCalled();
+    });
+
+    it('request activity resets the idle window', async () => {
+      vi.useFakeTimers();
+      const { handler } = createAppAndHandler('90000');
+      const transport = await initSession(handler);
+
+      await vi.advanceTimersByTimeAsync(59_000);
+      await handler(
+        { method: 'POST', headers: { 'mcp-session-id': transport.sessionId }, body: { jsonrpc: '2.0', id: 2, method: 'tools/list' } },
+        makeStreamRes()
+      );
+
+      // Sweep ticks at 60s and 120s see idle 1s and 61s — both under 90s.
+      await vi.advanceTimersByTimeAsync(61_000);
+      expect(transport.close).not.toHaveBeenCalled();
+
+      // Tick at 180s sees idle 121s — over the window.
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(transport.close).toHaveBeenCalled();
+    });
+
+    it('MCP_HTTP_STALE_SESSION_MS=0 disables reaping', async () => {
+      vi.useFakeTimers();
+      const { handler } = createAppAndHandler('0');
+      const transport = await initSession(handler);
+
+      await vi.advanceTimersByTimeAsync(3_600_000);
+
+      expect(transport.close).not.toHaveBeenCalled();
+    });
+
+    it('defaults to a 30-minute window', async () => {
+      vi.useFakeTimers();
+      const { handler } = createAppAndHandler();
+      const transport = await initSession(handler);
+
+      await vi.advanceTimersByTimeAsync(29 * 60_000);
+      expect(transport.close).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(3 * 60_000);
+      expect(transport.close).toHaveBeenCalled();
+    });
+  });
+
   describe('handleHttpCommand', () => {
     let mockHttpServer: any;
 
@@ -460,6 +580,60 @@ describe('HTTP Command Handler', () => {
       expect(s2.stop).toHaveBeenCalled();
       expect(mockHttpServer.close).toHaveBeenCalled();
       expect(mockExitProcess).toHaveBeenCalledWith(0);
+    });
+
+    it('proceeds past a hung session stop after the guard and still exits 0 (issue #337)', async () => {
+      const listen = vi.fn((_port: number, cb: Function) => {
+        cb();
+        return mockHttpServer;
+      });
+      mockApp.listen = listen;
+
+      await handleHttpCommand(
+        { port: '3001' },
+        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+      );
+
+      const sigintHandler = fakeProc.lastListener('SIGINT');
+      const sessions = (mockApp as any).httpSessions as Map<string, any>;
+      // A wedged proxy makes stop() hang — shutdown must not hang with it.
+      sessions.set('wedged', {
+        transport: { close: vi.fn() },
+        server: { stop: vi.fn().mockReturnValue(new Promise(() => {})) }
+      });
+
+      vi.useFakeTimers();
+      const shutdownPromise = sigintHandler();
+      await vi.advanceTimersByTimeAsync(10_000);
+      await shutdownPromise;
+
+      expect(mockHttpServer.close).toHaveBeenCalled();
+      expect(mockExitProcess).toHaveBeenCalledWith(0);
+    });
+
+    it('hard-exits 1 when even the HTTP listener refuses to close (issue #337)', async () => {
+      // server.close() waits on open sockets — a stuck keep-alive connection
+      // must not park the process forever once shutdown has begun.
+      mockHttpServer.close = vi.fn();
+      const listen = vi.fn((_port: number, cb: Function) => {
+        cb();
+        return mockHttpServer;
+      });
+      mockApp.listen = listen;
+
+      await handleHttpCommand(
+        { port: '3001' },
+        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+      );
+
+      const sigintHandler = fakeProc.lastListener('SIGINT');
+
+      vi.useFakeTimers();
+      const shutdownPromise = sigintHandler();
+      await vi.advanceTimersByTimeAsync(15_000);
+      await shutdownPromise;
+
+      expect(mockExitProcess).toHaveBeenCalledWith(1);
     });
 
     describe('stdin watchdog (MCP_EXIT_ON_STDIN_CLOSE, issue #122)', () => {

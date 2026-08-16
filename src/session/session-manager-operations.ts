@@ -209,7 +209,25 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     }
 
     if (adapterLaunchConfig && typeof adapterLaunchConfig === 'object') {
-      Object.assign(genericLaunchConfig, adapterLaunchConfig);
+      // request/__attachMode select the DAP sequence and shutdown semantics —
+      // the proxy worker re-reads them from the merged config (attach must
+      // detach with terminateDebuggee=false) — so adapter extras must never
+      // flip launch<->attach (issue #336).
+      const {
+        request: droppedRequest,
+        __attachMode: droppedAttachMode,
+        ...adapterExtras
+      } = adapterLaunchConfig as Record<string, unknown>;
+      if (droppedRequest !== undefined || droppedAttachMode !== undefined) {
+        const droppedKeys = [
+          droppedRequest !== undefined && 'request',
+          droppedAttachMode !== undefined && '__attachMode'
+        ].filter(Boolean).join(', ');
+        this.logger.warn(
+          `[SessionManager] Ignoring reserved adapter-config key(s) for session ${session.id}: ${droppedKeys}`
+        );
+      }
+      Object.assign(genericLaunchConfig, adapterExtras);
     }
 
     let transformedLaunchConfig: LanguageSpecificLaunchConfig | undefined;
@@ -2388,6 +2406,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       justMyCode?: boolean;
       verifyTimeout?: number;
       breakOnExceptions?: ExceptionBreakMode;
+      adapterConfig?: Record<string, unknown>;
     }
   ): Promise<DebugResult> {
     const session = this._getSessionById(sessionId);
@@ -2401,7 +2420,15 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     // the DAP attach arguments. Validate before any state mutation.
     // breakOnExceptions maps to setExceptionBreakpoints, not attach args —
     // strip it too and thread it through the proxy config instead.
-    const { verifyTimeout, breakOnExceptions, ...adapterAttachConfig } = attachConfig;
+    // adapterConfig is merged by startProxyManager (the same slot launch uses
+    // for adapterLaunchConfig, issue #336) — strip it here so the wrapper key
+    // itself cannot leak into the DAP attach arguments.
+    const { verifyTimeout, breakOnExceptions, adapterConfig, ...adapterAttachConfig } = attachConfig;
+    if (adapterConfig && adapterConfig.stopOnEntry !== undefined) {
+      this.logger.warn(
+        '[SessionManager] adapterConfig.stopOnEntry reaches the adapter but does not affect post-attach pause verification; prefer the top-level stopOnEntry parameter'
+      );
+    }
     let verifyTimeoutOverride = verifyTimeout;
     if (verifyTimeoutOverride !== undefined) {
       if (
@@ -2479,7 +2506,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         undefined,
         attachLaunchArgs as Partial<CustomLaunchRequestArguments>,
         false,
-        undefined,
+        adapterConfig,  // merged over the attach config before transformAttachConfig (issue #336)
         breakOnExceptions
       );
 
@@ -2669,6 +2696,11 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       };
     } catch (error) {
       this.logger.error(`[SessionManager] Failed to attach to process for session ${sessionId}:`, error);
+      // Never leave a live proxy chain behind a failed attach — e.g.
+      // ProxyManager.start()'s init timeout rejects after the worker was
+      // spawned (issue #337). Idempotent with the verify-failure teardown
+      // above, which already nulled session.proxyManager.
+      await this.stopProxyPreservingSession(session);
       this._updateSessionState(session, SessionState.ERROR);
 
       const message = error instanceof Error ? error.message : String(error);

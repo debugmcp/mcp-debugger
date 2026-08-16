@@ -52,7 +52,15 @@ attach_to_process sessionId=... processId=<pid>
 - `detach_from_process` leaves the target running.
 - **Linux**: `kernel.yama.ptrace_scope=1` (the default on many distros) only allows attaching to child processes. For arbitrary processes: `sudo sysctl kernel.yama.ptrace_scope=0` (temporary) or run the server with `CAP_SYS_PTRACE`.
 - **Windows**: attach requires same-or-higher privilege than the target.
-- Passing `program` alongside `processId` helps LLDB resolve symbols for stripped targets.
+- Adapter-specific attach extras go in `adapterConfig` (issue #336): `program` is CodeLLDB's explicit-binary hint for symbol resolution, and `initCommands` runs LLDB commands before the attach. Both matter when the module paths in `/proc/<pid>/maps` are not openable from the debugger's mount namespace (e.g. a kubectl-debug ephemeral container):
+
+  ```text
+  attach_to_process {sessionId, processId: 1,
+                     adapterConfig: {program: "/proc/1/root/pricer"}}
+  # or equivalently:
+  attach_to_process {sessionId, processId: 1,
+                     adapterConfig: {initCommands: ["settings set target.exec-search-paths /proc/1/root"]}}
+  ```
 
 ## Advanced CodeLLDB Features (pass-through)
 

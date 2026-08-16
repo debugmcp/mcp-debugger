@@ -29,6 +29,26 @@ export interface HttpCommandDependencies {
 interface SessionData {
   transport: StreamableHTTPServerTransport;
   server: DebugMcpServer;
+  /** Timestamp of the last routed request (or stream close) for this session. */
+  lastActivity: number;
+  /** Open SSE (GET) streams; a session with a live stream is never idle. */
+  openStreams: number;
+}
+
+/** Idle window before a streamless HTTP session is reaped (issue #337). */
+const DEFAULT_STALE_SESSION_MS = 30 * 60 * 1000;
+const STALE_SWEEP_INTERVAL_MS = 60 * 1000;
+
+function parseStaleSessionMs(raw: string | undefined, logger: WinstonLoggerType): number {
+  if (raw === undefined || raw === '') {
+    return DEFAULT_STALE_SESSION_MS;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    logger.warn(`Ignoring invalid MCP_HTTP_STALE_SESSION_MS value "${raw}"; using default ${DEFAULT_STALE_SESSION_MS}ms.`);
+    return DEFAULT_STALE_SESSION_MS;
+  }
+  return parsed;
 }
 
 export function createHttpApp(
@@ -36,11 +56,41 @@ export function createHttpApp(
   dependencies: HttpCommandDependencies
 ): Express {
   const { logger, serverFactory } = dependencies;
+  const proc = dependencies.proc ?? process;
 
   // createMcpExpressApp wires hostHeaderValidation for localhost binds
   const app = createMcpExpressApp();
 
   const httpSessions = new Map<string, SessionData>();
+
+  // Reap crash-abandoned sessions (issue #337): a client that dies without
+  // DELETE leaves its transport registered forever — transport.onclose only
+  // fires on explicit close — so its DebugMcpServer and every proxy chain
+  // (including lldb-server's ptrace claim on an attach target) stay alive,
+  // invisible to the reconnecting client's fresh session. Sessions holding a
+  // live SSE stream are never reaped; a pure-POST client idle longer than
+  // MCP_HTTP_STALE_SESSION_MS (default 30 min; 0 disables) is closed through
+  // the normal onclose path, which stops its server and debug sessions.
+  const staleSessionMs = parseStaleSessionMs(proc.env.MCP_HTTP_STALE_SESSION_MS, logger);
+  let staleSweepTimer: NodeJS.Timeout | undefined;
+  if (staleSessionMs > 0) {
+    staleSweepTimer = setInterval(() => {
+      const now = Date.now();
+      for (const [sid, session] of httpSessions) {
+        if (session.openStreams === 0 && now - session.lastActivity > staleSessionMs) {
+          logger.warn(`Reaping stale HTTP session ${sid} (idle ${Math.round((now - session.lastActivity) / 1000)}s, no open streams).`);
+          try {
+            void session.transport.close();
+          } catch (err) {
+            logger.error(`Error closing stale HTTP session ${sid}`, { error: err });
+          }
+        }
+      }
+    }, STALE_SWEEP_INTERVAL_MS);
+    staleSweepTimer.unref?.();
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (app as any).staleSweepTimer = staleSweepTimer;
 
   // CORS — Mcp-Session-Id and last-event-id must be exposed for the MCP Inspector
   // and for clients to read the session ID from the Initialize response.
@@ -73,7 +123,18 @@ export function createHttpApp(
 
       if (sessionId && httpSessions.has(sessionId)) {
         // Existing session — route to its transport
-        transport = httpSessions.get(sessionId)!.transport;
+        const session = httpSessions.get(sessionId)!;
+        session.lastActivity = Date.now();
+        if (req.method === 'GET') {
+          // A live SSE stream marks the session as attended; the socket
+          // closing (client crash included) is observed immediately.
+          session.openStreams++;
+          res.on('close', () => {
+            session.openStreams = Math.max(0, session.openStreams - 1);
+            session.lastActivity = Date.now();
+          });
+        }
+        transport = session.transport;
       } else if (!sessionId && req.method === 'POST' && isInitializeRequest(req.body)) {
         // New session — spin up an isolated DebugMcpServer + transport
         const newDebugServer = serverFactory({
@@ -90,7 +151,12 @@ export function createHttpApp(
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (sid: string) => {
             if (createdTransport) {
-              httpSessions.set(sid, { transport: createdTransport, server: newDebugServer });
+              httpSessions.set(sid, {
+                transport: createdTransport,
+                server: newDebugServer,
+                lastActivity: Date.now(),
+                openStreams: 0,
+              });
               logger.info(`HTTP session initialized: ${sid}`);
             }
           },
@@ -209,22 +275,46 @@ export async function handleHttpCommand(
       shutdownStarted = true;
       logger.info('Shutting down HTTP server...');
 
-      // Close every active transport and stop its DebugMcpServer
-      for (const { transport, server: debugServer } of httpSessions.values()) {
-        try {
-          await transport.close();
-        } catch (err) {
-          logger.error('Error closing transport during shutdown', { error: err });
-        }
-        try {
-          await debugServer.stop();
-        } catch (err) {
-          logger.error('Error stopping debug server during shutdown', { error: err });
-        }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const staleSweepTimer = (app as any).staleSweepTimer as NodeJS.Timeout | undefined;
+      if (staleSweepTimer) {
+        clearInterval(staleSweepTimer);
       }
+
+      // Hard-exit fallback (issue #337): server.close() waits on open
+      // sockets and a wedged proxy can stall stop() — once shutdown has
+      // begun, the process must not park forever holding live proxy chains.
+      const hardExit = setTimeout(() => {
+        logger.error('Graceful shutdown timed out; forcing exit.');
+        exitProcess(1);
+      }, 15000);
+      hardExit.unref?.();
+
+      // Close every active transport and stop its DebugMcpServer, bounded
+      // so one wedged session cannot stall the whole shutdown.
+      const stopWork = (async () => {
+        for (const { transport, server: debugServer } of httpSessions.values()) {
+          try {
+            await transport.close();
+          } catch (err) {
+            logger.error('Error closing transport during shutdown', { error: err });
+          }
+          try {
+            await debugServer.stop();
+          } catch (err) {
+            logger.error('Error stopping debug server during shutdown', { error: err });
+          }
+        }
+      })();
+      const guard = new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 10000);
+        timer.unref?.();
+      });
+      await Promise.race([stopWork, guard]);
       httpSessions.clear();
 
       server.close(() => {
+        clearTimeout(hardExit);
         exitProcess(0);
       });
     };

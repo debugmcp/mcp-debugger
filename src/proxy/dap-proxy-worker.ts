@@ -1261,13 +1261,17 @@ export class DapProxyWorker {
       await new Promise(resolve => setTimeout(resolve, 500));
     }
 
-    // Terminate adapter process. Launch mode owns the debuggee, which may be
-    // a grandchild of the adapter (e.g. rdbg -c), so request a process-tree
-    // kill; attach mode must never tree-kill (the guard is explicit so a
-    // future attach flow that proxies through a spawned process cannot take
-    // a pre-existing debuggee down with it — see #156).
+    // Terminate the adapter process and its descendants. Launch mode owns the
+    // debuggee, which may be a grandchild of the adapter (e.g. rdbg -c). In
+    // attach mode the debuggee is NOT a descendant of the adapter — so a
+    // tree/group kill cannot take it down (the #156 invariant, preserved
+    // structurally) — but the adapter's own helpers ARE descendants, and
+    // sparing them leaked lldb-server with its ptrace claim on the target
+    // after every attach teardown (issue #337). The DAP disconnect with
+    // terminateDebuggee=false plus the grace wait above already ran, so the
+    // adapter had its chance to detach cleanly.
     if (this.processManager && this.adapterProcess) {
-      await this.processManager.shutdown(this.adapterProcess, { killProcessTree: !this.isAttachMode });
+      await this.processManager.shutdown(this.adapterProcess, { killProcessTree: true });
     }
     this.adapterProcess = null;
 

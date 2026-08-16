@@ -463,11 +463,113 @@ describe('GenericAdapterManager', () => {
       expect(spawner.spawn).not.toHaveBeenCalled();
     });
 
-    it('keeps the SIGTERM-first path on non-win32 even with killProcessTree', async () => {
+  });
+
+  describe('shutdown group-kill on POSIX (issue #337)', () => {
+    // The adapter is spawned detached:true, so on POSIX its process group
+    // contains exactly the adapter and its helpers (codelldb + lldb-server).
+    // The attach target is never in that group, so signalling -pid can never
+    // take a pre-existing debuggee down (the #156 invariant, preserved).
+    let signalPid: ReturnType<typeof vi.fn>;
+
+    const makeManager = (platform: NodeJS.Platform) => {
+      signalPid = vi.fn();
+      return new GenericAdapterManager(spawner, logger, fileSystem, platform, signalPid as any);
+    };
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('signals the process group with SIGTERM then SIGKILL when the adapter does not exit', async () => {
       manager = makeManager('linux');
       vi.useFakeTimers();
 
       const proc = createMockProcess(999);
+      // Adapter never exits
+
+      const shutdownPromise = manager.shutdown(proc, { killProcessTree: true });
+      await vi.advanceTimersByTimeAsync(300);
+      await shutdownPromise;
+
+      expect(signalPid).toHaveBeenCalledWith(-999, 'SIGTERM');
+      expect(signalPid).toHaveBeenCalledWith(-999, 'SIGKILL');
+      expect(proc.kill).not.toHaveBeenCalledWith('SIGTERM');
+      expect(spawner.spawn).not.toHaveBeenCalled();
+    });
+
+    it('sweeps the group with SIGKILL even when the leader exits after SIGTERM', async () => {
+      manager = makeManager('linux');
+      vi.useFakeTimers();
+
+      const proc = createMockProcess(999);
+      signalPid.mockImplementation((pid: number, sig: string) => {
+        if (sig === 'SIGTERM') {
+          process.nextTick(() => proc.emit('exit', 0, null));
+        }
+      });
+
+      const shutdownPromise = manager.shutdown(proc, { killProcessTree: true });
+      await vi.advanceTimersByTimeAsync(300);
+      await shutdownPromise;
+
+      // Leader exiting does not mean the group is empty — lldb-server may
+      // survive codelldb. The group sweep is the point of the fix.
+      expect(signalPid).toHaveBeenCalledWith(-999, 'SIGKILL');
+    });
+
+    it('sweeps the group when the leader already exited (the k8s lldb-server leak)', async () => {
+      manager = makeManager('linux');
+      vi.useFakeTimers();
+
+      const proc = createMockProcess(999);
+      // codelldb honored the DAP disconnect and exited during the grace wait;
+      // lldb-server (its child, the ptrace holder) is still alive. A pgid
+      // cannot be recycled while any member lives, so -pid is safe to signal.
+      proc.exitCode = 0;
+
+      const shutdownPromise = manager.shutdown(proc, { killProcessTree: true });
+      await vi.advanceTimersByTimeAsync(300);
+      await shutdownPromise;
+
+      expect(signalPid).toHaveBeenCalledWith(-999, 'SIGTERM');
+      expect(signalPid).toHaveBeenCalledWith(-999, 'SIGKILL');
+      expect(proc.kill).not.toHaveBeenCalled();
+    });
+
+    it('keeps the early return for an already-exited adapter without killProcessTree', async () => {
+      manager = makeManager('linux');
+
+      const proc = createMockProcess(999);
+      proc.exitCode = 0;
+
+      await manager.shutdown(proc);
+
+      expect(signalPid).not.toHaveBeenCalled();
+      expect(proc.kill).not.toHaveBeenCalled();
+    });
+
+    it('keeps the early return for an already-exited adapter on win32 (PID reuse hazard)', async () => {
+      manager = makeManager('win32');
+
+      const proc = createMockProcess(999);
+      proc.exitCode = 1;
+
+      await manager.shutdown(proc, { killProcessTree: true });
+
+      expect(signalPid).not.toHaveBeenCalled();
+      expect(spawner.spawn).not.toHaveBeenCalled();
+      expect(proc.kill).not.toHaveBeenCalled();
+    });
+
+    it('falls back to a direct SIGTERM when the group signal fails', async () => {
+      manager = makeManager('linux');
+      vi.useFakeTimers();
+
+      const proc = createMockProcess(999);
+      signalPid.mockImplementation((pid: number, sig: string) => {
+        if (sig === 'SIGTERM') throw Object.assign(new Error('kill ESRCH'), { code: 'ESRCH' });
+      });
       proc.kill.mockImplementation(() => {
         process.nextTick(() => proc.emit('exit', 0, null));
       });
@@ -477,7 +579,21 @@ describe('GenericAdapterManager', () => {
       await shutdownPromise;
 
       expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
-      expect(spawner.spawn).not.toHaveBeenCalled();
+    });
+
+    it('swallows ESRCH from the SIGKILL sweep (group already empty)', async () => {
+      manager = makeManager('linux');
+      vi.useFakeTimers();
+
+      const proc = createMockProcess(999);
+      proc.exitCode = 0;
+      signalPid.mockImplementation((pid: number, sig: string) => {
+        if (sig === 'SIGKILL') throw Object.assign(new Error('kill ESRCH'), { code: 'ESRCH' });
+      });
+
+      const shutdownPromise = manager.shutdown(proc, { killProcessTree: true });
+      await vi.advanceTimersByTimeAsync(300);
+      await expect(shutdownPromise).resolves.toBeUndefined();
     });
   });
 });

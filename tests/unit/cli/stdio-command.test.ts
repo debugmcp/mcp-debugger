@@ -108,9 +108,9 @@ describe('STDIO Command Handler', () => {
     expect(fakeProc.listenerCount('SIGINT')).toBe(1);
     expect(fakeProc.listenerCount('exit')).toBe(1);
 
-    // SIGINT exits 0 through the injected exitProcess
+    // SIGINT exits 0 through the injected exitProcess (after awaiting server stop)
     fakeProc.emit('SIGINT');
-    expect(mockExitProcess).toHaveBeenCalledWith(0);
+    await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
 
     // 'exit' diagnostics read argv/env/uptime from the handle
     fakeProc.emit('exit', 0);
@@ -216,7 +216,7 @@ describe('STDIO Command Handler', () => {
 
       stdin.emit('end');
 
-      expect(mockExitProcess).toHaveBeenCalledWith(0);
+      await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
       expect(mockLogger.warn).toHaveBeenCalledWith(
         expect.stringContaining('MCP client disconnected')
       );
@@ -237,9 +237,84 @@ describe('STDIO Command Handler', () => {
       stdin.emit('end');
 
       expect(mockExitProcess).not.toHaveBeenCalled();
+      expect(mockServer.stop).not.toHaveBeenCalled();
       expect(mockLogger.warn).toHaveBeenCalledWith(
         expect.stringContaining('ignoring in container mode')
       );
+    });
+  });
+
+  describe('server teardown on exit paths (issue #337)', () => {
+    // Every exit path must run DebugMcpServer.stop() → closeAllSessions()
+    // before exiting — otherwise the proxy chains (and lldb-server's ptrace
+    // claim on an attach target) outlive the server.
+    async function startWithStdin() {
+      const stdin = makeFakeStdin();
+      await handleStdioCommand({}, {
+        logger: mockLogger,
+        serverFactory: mockServerFactory,
+        exitProcess: mockExitProcess,
+        stdin,
+        proc: fakeProc
+      });
+      return stdin;
+    }
+
+    it('stops the debug server before exiting when stdin ends', async () => {
+      const stdin = await startWithStdin();
+
+      stdin.emit('end');
+
+      await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
+      expect(mockServer.stop).toHaveBeenCalled();
+      expect((mockServer.stop as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0])
+        .toBeLessThan(mockExitProcess.mock.invocationCallOrder[0]);
+    });
+
+    it('stops the debug server before exiting on SIGTERM', async () => {
+      await startWithStdin();
+
+      fakeProc.emit('SIGTERM');
+
+      await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
+      expect(mockServer.stop).toHaveBeenCalled();
+    });
+
+    it('exits after the guard delay when stop hangs', async () => {
+      mockServer.stop = vi.fn().mockReturnValue(new Promise(() => {}));
+      const stdin = await startWithStdin();
+      vi.useFakeTimers();
+      try {
+        stdin.emit('end');
+        expect(mockExitProcess).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(5000);
+
+        expect(mockExitProcess).toHaveBeenCalledWith(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('still exits when stop rejects', async () => {
+      mockServer.stop = vi.fn().mockRejectedValue(new Error('stop failed'));
+      const stdin = await startWithStdin();
+
+      stdin.emit('end');
+
+      await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
+    });
+
+    it('runs the teardown only once when several exit triggers fire', async () => {
+      const stdin = await startWithStdin();
+
+      stdin.emit('end');
+      fakeProc.emit('SIGTERM');
+      fakeProc.emit('SIGINT');
+
+      await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalled());
+      expect(mockServer.stop).toHaveBeenCalledTimes(1);
+      expect(mockExitProcess).toHaveBeenCalledTimes(1);
     });
   });
 });

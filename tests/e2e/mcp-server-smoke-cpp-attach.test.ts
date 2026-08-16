@@ -104,7 +104,11 @@ describe.skipIf(SKIP_CPP)('MCP Server C/C++ Attach Smoke Test @requires-cpp', ()
         arguments: {
           sessionId,
           processId: pid,
-          stopOnEntry: true
+          stopOnEntry: true,
+          // Exercises the #336 adapterConfig passthrough end-to-end: program
+          // is CodeLLDB's explicit-binary hint for symbol resolution (harmless
+          // here, load-bearing when /proc/<pid>/maps paths are not openable).
+          adapterConfig: { program: binaryPath }
         }
       }));
       if (!attachResponse.success) {
