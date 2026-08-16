@@ -3,18 +3,18 @@
 
 def test_variables():
     # Different data types
-    number = 42  # Line 5
-    text = "Hello, debugger!"  # Line 6
-    items = [1, 2, 3, 4, 5]  # Line 7
-    data = {"name": "test", "value": 100}  # Line 8
-    
+    number = 42  # Line 6
+    text = "Hello, debugger!"  # Line 7
+    items = [1, 2, 3, 4, 5]  # Line 8
+    data = {"name": "test", "value": 100}  # Line 9
+
     # Nested function to test scopes
     def inner():
-        local_var = "inner scope"  # Line 12
-        return local_var  # Line 13
-    
-    result = inner()  # Line 15: Breakpoint here
-    return result  # Line 16
+        local_var = "inner scope"  # Line 13
+        return local_var  # Line 14
+
+    result = inner()  # Line 16: Breakpoint here
+    return result  # Line 17
 
 if __name__ == "__main__":
     test_variables()

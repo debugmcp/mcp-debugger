@@ -13,7 +13,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ### 2. CodeLLDB (Automatic)
 The Rust adapter automatically downloads CodeLLDB when you build it:
 ```bash
-cd packages/adapter-rust
+cd packages/codelldb-common
 npm run build:adapter  # Downloads and extracts CodeLLDB
 ```
 
@@ -24,7 +24,7 @@ The Rust adapter bundles the CodeLLDB binaries into `packages/codelldb-common/ve
 - `pnpm install` (postinstall hook)
 - `pnpm vendor` or `pnpm vendor:adapters`
 - `pnpm --filter @debugmcp/codelldb-common run build:adapter`
-- `node packages/adapter-rust/scripts/vendor-codelldb.js`
+- `node packages/codelldb-common/scripts/vendor-codelldb.js`
 
 > **Default behavior:** Locally, the vendoring script downloads **all supported platforms** (win32-x64, linux-x64, linux-arm64, darwin-x64, darwin-arm64) so Docker builds can reuse the same artifacts. Set `CODELLDB_VENDOR_ALL=false` to vendor only the current host platform. In CI environments, the script vendors only the current platform unless `CODELLDB_VENDOR_ALL=true` is explicitly set.
 
@@ -324,7 +324,7 @@ opt-level = 0  # No optimization for better debugging
 If CodeLLDB is not found:
 ```bash
 # Re-run the vendor script
-cd packages/adapter-rust
+cd packages/codelldb-common
 npm run build:adapter
 
 # Check if it was downloaded (fixed layout under vendor/codelldb/ with per-platform subdirectories)

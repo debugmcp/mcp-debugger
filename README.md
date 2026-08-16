@@ -4,7 +4,7 @@
   <img src="assets/logo.png" alt="MCP Debugger Logo - A stylized circuit board with debug breakpoints" width="400" height="400">
 </div>
 
-**A headless, agentic debugger over MCP — let your AI agents debug running programs in seven languages.**
+**A headless, agentic debugger over MCP — let your AI agents debug running programs in eight languages.**
 
 [![CI](https://github.com/debugmcp/mcp-debugger/actions/workflows/ci.yml/badge.svg)](https://github.com/debugmcp/mcp-debugger/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/debugmcp/mcp-debugger/branch/main/graph/badge.svg)](https://codecov.io/gh/debugmcp/mcp-debugger)
@@ -16,7 +16,7 @@
 
 ## 🎯 Overview
 
-mcp-debugger is a Model Context Protocol (MCP) server that exposes step-through debugging as structured tool calls. It lets AI agents set breakpoints, inspect variables, evaluate expressions, and step through running programs across seven languages — driving real language debuggers through the Debug Adapter Protocol (DAP).
+mcp-debugger is a Model Context Protocol (MCP) server that exposes step-through debugging as structured tool calls. It lets AI agents set breakpoints, inspect variables, evaluate expressions, and step through running programs across eight languages — driving real language debuggers through the Debug Adapter Protocol (DAP).
 
 **No IDE required.** mcp-debugger runs anywhere Node.js runs: CI runners, Docker containers, Kubernetes pods, SSH boxes, and the sandboxes that cloud coding agents live in. It's the debugger for where IDEs can't go.
 

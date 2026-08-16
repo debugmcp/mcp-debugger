@@ -287,6 +287,8 @@ mcp-debugger/
 │   ├── adapter-go/        # Go adapter (Delve)
 │   ├── adapter-java/      # Java adapter (JDI bridge)
 │   ├── adapter-dotnet/    # .NET/C# adapter (netcoredbg)
+│   ├── adapter-cpp/       # C/C++ adapter (CodeLLDB)
+│   ├── codelldb-common/   # Shared CodeLLDB infrastructure (Rust + C/C++ adapters)
 │   ├── adapter-mock/      # Mock adapter for testing
 │   └── mcp-debugger/      # Self-contained CLI bundle (npx distribution)
 ├── src/                    # Core server source code
@@ -313,7 +315,7 @@ mcp-debugger/
 - **DAP Proxy**: Handles communication with debug adapters via DAP protocol
 - **Adapter Registry**: Dynamically loads and manages language-specific adapters
 - **Adapter Policies**: Language-specific behavior via policy pattern
-- **MCP Tools**: Implements the 21 MCP protocol tools
+- **MCP Tools**: Implements the 28 MCP protocol tools
 
 ## 🏃 Running the Demo
 

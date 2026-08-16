@@ -25,7 +25,8 @@ export class LineBuffer {
     this.pending = parts.pop() ?? '';
     const lines = parts.map(line => (line.endsWith('\r') ? line.slice(0, -1) : line));
     if (this.pending.length > this.maxPendingLength) {
-      lines.push(this.pending);
+      const overflow = this.pending;
+      lines.push(overflow.endsWith('\r') ? overflow.slice(0, -1) : overflow);
       this.pending = '';
     }
     return lines;
@@ -38,6 +39,6 @@ export class LineBuffer {
     }
     const line = this.pending;
     this.pending = '';
-    return [line];
+    return [line.endsWith('\r') ? line.slice(0, -1) : line];
   }
 }

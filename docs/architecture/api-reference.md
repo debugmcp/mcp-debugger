@@ -524,6 +524,7 @@ enum DebugLanguage {
   GO = 'go',
   JAVA = 'java',
   DOTNET = 'dotnet',
+  CPP = 'cpp',
   MOCK = 'mock',
 }
 
@@ -547,6 +548,7 @@ interface AdapterCommand {
   command: string;
   args: string[];
   env?: Record<string, string>;
+  cwd?: string;  // Working directory for the adapter process (issue #320)
 }
 ```
 
@@ -595,8 +597,8 @@ const sessionInfo = await sessionManager.createSession({
 });
 
 // 2. Set breakpoints (one call per breakpoint)
-await sessionManager.setBreakpoint(sessionInfo.sessionId, 'app.py', 10);
-await sessionManager.setBreakpoint(sessionInfo.sessionId, 'app.py', 20);
+await sessionManager.setBreakpoint(sessionInfo.sessionId, { file: 'app.py', line: 10 });
+await sessionManager.setBreakpoint(sessionInfo.sessionId, { file: 'app.py', line: 20 });
 
 // 3. Start debugging
 await sessionManager.startDebugging({

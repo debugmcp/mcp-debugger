@@ -2355,12 +2355,13 @@ export class DebugMcpServer {
         throw new McpError(McpErrorCode.InvalidParams, 'Expression too long (max 10KB)');
       }
 
-      // Call SessionManager's evaluateExpression method (uses 'watch' context by default for variable access)
+      // Call SessionManager's evaluateExpression method (no context is passed here;
+      // the adapter policy chooses the DAP evaluate context)
       const result = await this.sessionManager.evaluateExpression(
         args.sessionId,
         args.expression,
         args.frameId,
-        // Let SessionManager use its default context ('watch') for proper variable access
+        // Context is chosen by the adapter policy inside SessionManager
         args.timeout
       );
       

@@ -15,7 +15,7 @@ The JavaScript adapter was experiencing consistent `ECONNREFUSED` errors when at
 - **Result**: Connection attempts failed because IPv4 and IPv6 addresses are not interchangeable
 
 ### The Solution
-The fix involves two distinct layers. For child-session creation (e.g., the `JavascriptDebugAdapter.buildAdapterCommand` host default), `'localhost'` is used so that Node.js can resolve to both IPv4 and IPv6 automatically. For DAP attach requests within child sessions, `JsDebugAdapterPolicy` uses `'127.0.0.1'` explicitly to match the address family expected by the child debug target. The session manager (`session-manager-operations.ts`) also uses `'127.0.0.1'` as the `adapterHost` for all adapters.
+The fix involves two distinct layers. For child-session creation, the `JavascriptDebugAdapter.buildAdapterCommand` host default is `'127.0.0.1'` (overridable via the `adapterHost` config), so the spawn address family is pinned explicitly to IPv4. For DAP attach requests within child sessions, `JsDebugAdapterPolicy` uses `'127.0.0.1'` explicitly to match the address family expected by the child debug target. The session manager (`session-manager-operations.ts`) also uses `'127.0.0.1'` as the `adapterHost` for all adapters.
 
 **Key Files:**
 - `src/session/session-manager-operations.ts` - General adapter host configuration
@@ -33,7 +33,7 @@ Created `tests/manual/test-jsdebug-transport.js` to verify:
 - ✅ TCP mode works with IPv6
 
 ### Key Takeaway
-**Use `'localhost'` for adapter spawn commands** (e.g., `buildAdapterCommand` host default) so Node.js can resolve to both IPv4 and IPv6. However, the session manager (`session-manager-operations.ts`) uses `'127.0.0.1'` as the `adapterHost` for all adapters, and `JsDebugAdapterPolicy` uses `'127.0.0.1'` for DAP attach requests within child sessions. The choice depends on the layer and what the target expects.
+**The `buildAdapterCommand` host default is `'127.0.0.1'`** (overridable via the `adapterHost` config). Likewise, the session manager (`session-manager-operations.ts`) uses `'127.0.0.1'` as the `adapterHost` for all adapters, and `JsDebugAdapterPolicy` uses `'127.0.0.1'` for DAP attach requests within child sessions. The choice depends on the layer and what the target expects.
 
 ---
 
@@ -142,7 +142,7 @@ If experiencing connection failures:
 
 1. **Check the host configuration:**
    ```typescript
-   // For adapter spawn commands (buildAdapterCommand), prefer 'localhost'
+   // buildAdapterCommand defaults the spawn host to '127.0.0.1' ('adapterHost' config overrides)
    // For session-manager adapterHost and child-session attach, '127.0.0.1' is used
    adapterHost: '127.0.0.1'  // Used in session-manager-operations.ts
    ```

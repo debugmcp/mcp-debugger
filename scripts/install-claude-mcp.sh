@@ -44,7 +44,7 @@ if $CLAUDE_CLI mcp list | grep -q "mcp-debugger.*✓ Connected"; then
     echo "  - JavaScript/TypeScript (requires: Node.js 22+)"
     echo "  - Rust (requires: Rust toolchain)"
     echo "  - Go (requires: Go 1.18+ and Delve)"
-    echo "  - Java (requires: JDK 11+)"
+    echo "  - Java (requires: JDK 21+ recommended)"
     echo "  - .NET/C# (requires: .NET 6+ SDK and netcoredbg)"
     echo "  - Mock (for testing)"
     echo ""

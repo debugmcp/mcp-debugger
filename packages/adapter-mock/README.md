@@ -27,7 +27,7 @@ npm run build -w @debugmcp/adapter-mock
 
 ## Exports
 
-import { MockAdapterFactory, MockDebugAdapter, MockErrorScenario, createMockAdapterFactory } from '@debugmcp/adapter-mock';
+import { MockAdapterFactory, MockDebugAdapter, MockErrorScenario } from '@debugmcp/adapter-mock';
 import type { MockAdapterConfig } from '@debugmcp/adapter-mock';
 
 ## Notes

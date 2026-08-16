@@ -49,7 +49,7 @@ Not supported. The Go adapter implements launch mode only — `attach_to_process
 - **Debuggee output is captured:** the adapter launches with Delve's `outputMode: 'remote'`, so the program's stdout/stderr arrives as `get_output` entries (categories `stdout`/`stderr`).
 - **`stopOnEntry` is forced to `false`** by the Go adapter policy (unless you explicitly set it) to dodge Delve's "unknown goroutine 1" quirk. If you force `stopOnEntry: true` and see that error, it is harmless — execution continues. Set a breakpoint on the first line of `main` if you need an entry stop.
 - Goroutine-aware, with limits: stack traces show the current goroutine's frames; Go runtime and testing frames (paths with `/runtime/` or `/testing/`) are filtered out by default — pass `includeInternals: true` to `get_stack_trace` to see them. There are no MCP tools to list or switch goroutines.
-- Exception breakpoints `panic` and `fatal` are enabled by default — panics stop the debugger without any setup (`get_stack_trace` reports `stopReason`).
+- Exception breakpoints `unrecovered-panic` and `runtime-fatal-throw` are enabled by default — panics stop the debugger without any setup (`get_stack_trace` reports `stopReason`).
 - Delve's variable rendering auto-dereferences pointers, shows slices with len/cap, and maps as key-value pairs.
 - Use absolute paths for `file` and `scriptPath`; breakpoints must be on executable statements.
 - Logpoints work: `set_breakpoint` with `logMessage: "x={x}"` logs interpolated values to `get_output` without pausing (Delve).
