@@ -118,6 +118,8 @@ kubectl port-forward "pod/$POD" 3001:3001 &
 
 Register the endpoint with your agent (e.g. `claude mcp add-json sick-pod '{"type":"http","url":"http://127.0.0.1:3001/mcp"}'`).
 
+The HTTP server reaps MCP sessions abandoned by a crashed client (idle, with no open SSE stream) after 30 minutes, closing their debug sessions and releasing any ptrace claim on the target. For a short-lived diagnostic sidecar a tighter window is safer — add `--env=MCP_HTTP_STALE_SESSION_MS=300000` (5 minutes; `0` disables) to the `kubectl debug` command.
+
 Facts that will save you an afternoon (all observed, not assumed):
 
 - **`--profile=general` is what makes attach possible.** It injects `SYS_PTRACE` into the ephemeral container's securityContext (`kubectl get pod -o jsonpath='{.spec.ephemeralContainers[*].securityContext}'` shows `{"capabilities":{"add":["SYS_PTRACE"]}}`). Kubernetes nodes commonly run `kernel.yama.ptrace_scope=1` (the kind node does), which blocks ptrace of non-descendant processes without that capability — the legacy default profile fails there. `--profile=sysadmin` also works but grants far more than needed.
@@ -187,7 +189,7 @@ Diagnosis: `build_cart` returns a **reference to the cached vector**, and `apply
 - Target **staging, canaries, or quarantined sick pods** — pausing a pod that's in a live serving rotation stops its traffic for the duration of the pause. For non-breaking inspection, pass `logMessage` to `set_breakpoint` (a logpoint, [#235](https://github.com/debugmcp/mcp-debugger/issues/235)): the pod keeps serving at full speed while interpolated values stream into `get_output`.
 - The same Part-1 flow works for **Ruby** (`rdbg --open --port`) — see [docs/ruby/README.md](../ruby/README.md) — and **Java** (JDWP agent), covering three of the most common backend runtimes. The containerized server itself can be the attach client for those too: it reports per-mode availability (`ruby` is attach-only in the image — no Ruby runtime needed for a direct rdbg connection).
 - **The ephemeral container's MCP HTTP port is unauthenticated** — reach it via `kubectl port-forward` only, never a Service. Whoever can call it controls a ptrace-capable debugger inside your pod.
-- If an attach session is abandoned uncleanly, an orphaned `lldb-server` can keep tracing the target (check `grep TracerPid /proc/1/status` from the debug container); kill the leftover chain or restart the pod.
+- An uncleanly abandoned attach session no longer leaves an orphaned `lldb-server` tracing the target ([#337](https://github.com/debugmcp/mcp-debugger/issues/337)): teardown kills the adapter's whole process group, and the HTTP server reaps crash-abandoned MCP sessions after the stale window. If you suspect a leftover tracer anyway (e.g. after a hard kill of the debug container's server), check `grep TracerPid /proc/1/status` from the debug container and kill the reported PID.
 
 ## Cleanup
 
