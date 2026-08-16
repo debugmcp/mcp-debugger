@@ -2052,7 +2052,12 @@ describe('DapProxyWorker', () => {
       }
     });
 
-    it('shutdown must not request a tree-kill in attach mode', async () => {
+    it('shutdown tree-kills the adapter chain in attach mode too (issue #337)', async () => {
+      // The attach target is never a descendant of the adapter, so a tree/group
+      // kill of the adapter's own chain cannot take the debuggee down — that is
+      // the #156 invariant, preserved structurally. What the old
+      // never-tree-kill-on-attach guard actually did was leak lldb-server
+      // (codelldb's child, the ptrace holder) on every attach teardown.
       vi.useFakeTimers();
       try {
         const processStub = { shutdown: vi.fn().mockResolvedValue(undefined) };
@@ -2069,7 +2074,10 @@ describe('DapProxyWorker', () => {
         await vi.advanceTimersByTimeAsync(500);
         await terminatePromise;
 
-        expect(processStub.shutdown).toHaveBeenCalledWith(adapterProc, { killProcessTree: false });
+        // The DAP disconnect with terminateDebuggee=false has already run by
+        // this point (asserted by the auto-detach test below) — the tree-kill
+        // only reaps the adapter's own helper processes.
+        expect(processStub.shutdown).toHaveBeenCalledWith(adapterProc, { killProcessTree: true });
       } finally {
         vi.useRealTimers();
       }

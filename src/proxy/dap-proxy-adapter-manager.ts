@@ -45,7 +45,14 @@ export class GenericAdapterManager {
     private logger: ILogger,
     private fileSystem: IFileSystem,
     /** Platform override for tests (issue #183); defaults to the real platform. */
-    private platform: NodeJS.Platform = globalThis.process.platform
+    private platform: NodeJS.Platform = globalThis.process.platform,
+    /**
+     * Signal seam for tests (issue #183 pattern). A negative pid targets the
+     * POSIX process group — sound only because spawn() below uses
+     * detached:true, which puts the adapter in its own group.
+     */
+    private signalPid: (pid: number, signal: NodeJS.Signals) => void =
+      (pid, signal) => globalThis.process.kill(pid, signal)
   ) {}
 
   /**
@@ -221,12 +228,23 @@ export class GenericAdapterManager {
   /**
    * Gracefully shutdown an adapter process.
    *
-   * killProcessTree (launch mode only): on Windows the debuggee may be a
-   * grandchild of the adapter (e.g. rdbg -c spawns the target as a child),
-   * and a bare kill of the adapter is TerminateProcess — near-instant —
-   * which orphans the grandchild. taskkill /T can only discover children
+   * killProcessTree: the debuggee may be a grandchild of the adapter in
+   * launch mode (e.g. rdbg -c spawns the target as a child), and helper
+   * processes are children of the adapter in both modes (codelldb spawns
+   * lldb-server, which holds the ptrace claim in attach mode — issue #337).
+   * An attach TARGET is never a descendant of the adapter, so tree/group
+   * kill cannot take a pre-existing debuggee down (the issue #156
+   * invariant, preserved structurally).
+   *
+   * win32: a bare kill of the adapter is TerminateProcess — near-instant —
+   * which orphans grandchildren, and taskkill /T can only discover children
    * while the parent is alive, so the tree-kill must be the FIRST strike,
-   * not a fallback (issue #156). Callers must never set it for attach mode.
+   * not a fallback (issue #156).
+   *
+   * POSIX: the adapter is spawned detached:true (its own process group), so
+   * signalling -pid reaches exactly the adapter and its descendants — and a
+   * pgid cannot be recycled while any member is alive, so the group is safe
+   * to signal even after the leader exited (unlike a bare PID).
    */
   async shutdown(process: ChildProcess | null, options: { killProcessTree?: boolean } = {}): Promise<void> {
     if (!process || !process.pid) {
@@ -234,15 +252,28 @@ export class GenericAdapterManager {
       return;
     }
 
+    const pid = process.pid;
+    const posixGroupKill = options.killProcessTree === true && this.platform !== 'win32';
+
     // An adapter that honored the DAP disconnect exits on its own during the
     // worker's grace wait — by now its PID may already belong to an unrelated
     // process, so signalling it (let alone taskkill /T /F) is a PID-reuse hazard.
     if (process.exitCode !== null || process.signalCode !== null) {
-      this.logger.info(`[AdapterManager] Adapter process PID: ${process.pid} already exited (code=${process.exitCode}, signal=${process.signalCode}). Nothing to terminate.`);
+      if (posixGroupKill) {
+        // The leader exiting does not mean its helpers did: codelldb honors
+        // the disconnect and exits while lldb-server — its child, the actual
+        // ptrace holder — survives (issue #337). Sweep the group.
+        this.logger.info(`[AdapterManager] Adapter PID ${pid} already exited — sweeping its process group for surviving helpers.`);
+        try { this.signalPid(-pid, 'SIGTERM'); } catch { /* ESRCH: group already empty */ }
+        await new Promise(resolve => setTimeout(resolve, 300));
+        try { this.signalPid(-pid, 'SIGKILL'); } catch { /* ESRCH: group already empty */ }
+      } else {
+        this.logger.info(`[AdapterManager] Adapter process PID: ${pid} already exited (code=${process.exitCode}, signal=${process.signalCode}). Nothing to terminate.`);
+      }
       return;
     }
 
-    this.logger.info(`[AdapterManager] Attempting to terminate adapter process PID: ${process.pid}`);
+    this.logger.info(`[AdapterManager] Attempting to terminate adapter process PID: ${pid}`);
 
     const treeKillFirst = options.killProcessTree === true && this.platform === 'win32';
 
@@ -254,17 +285,26 @@ export class GenericAdapterManager {
         process.once('exit', onExit);
 
         if (treeKillFirst) {
-          this.logger.info(`[AdapterManager] Killing adapter process tree via taskkill /T /F for PID: ${process.pid}`);
+          this.logger.info(`[AdapterManager] Killing adapter process tree via taskkill /T /F for PID: ${pid}`);
           try {
-            this.processSpawner.spawn('taskkill', ['/PID', String(process.pid), '/T', '/F'], {
+            this.processSpawner.spawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
               stdio: 'ignore',
               windowsHide: true
             });
           } catch (tkErr) {
             this.logger.error('[AdapterManager] taskkill tree-kill failed to spawn:', tkErr as Error);
           }
+        } else if (posixGroupKill) {
+          this.logger.info(`[AdapterManager] Sending SIGTERM to adapter process group -${pid}`);
+          try {
+            this.signalPid(-pid, 'SIGTERM');
+          } catch (groupErr) {
+            const message = groupErr instanceof Error ? groupErr.message : String(groupErr);
+            this.logger.warn(`[AdapterManager] Group SIGTERM for -${pid} failed (${message}); falling back to direct SIGTERM.`);
+            process.kill('SIGTERM');
+          }
         } else {
-          this.logger.info(`[AdapterManager] Sending SIGTERM to adapter process PID: ${process.pid}`);
+          this.logger.info(`[AdapterManager] Sending SIGTERM to adapter process PID: ${pid}`);
           process.kill('SIGTERM');
         }
 
@@ -272,21 +312,29 @@ export class GenericAdapterManager {
         await new Promise(resolve => setTimeout(resolve, 300));
 
         if (!exited) {
-          this.logger.warn(`[AdapterManager] Adapter process PID: ${process.pid} did not exit after ${treeKillFirst ? 'taskkill' : 'SIGTERM'}. Sending SIGKILL.`);
-          try {
-            process.kill('SIGKILL');
-          } catch {
-            // ignore SIGKILL errors
+          this.logger.warn(`[AdapterManager] Adapter process PID: ${pid} did not exit after ${treeKillFirst ? 'taskkill' : 'SIGTERM'}. Sending SIGKILL.`);
+          if (posixGroupKill) {
+            try { this.signalPid(-pid, 'SIGKILL'); } catch { /* ESRCH: group already empty */ }
+          } else {
+            try {
+              process.kill('SIGKILL');
+            } catch {
+              // ignore SIGKILL errors
+            }
           }
         } else {
-          this.logger.info(`[AdapterManager] Adapter process PID: ${process.pid} exited after ${treeKillFirst ? 'taskkill' : 'SIGTERM'}.`);
+          this.logger.info(`[AdapterManager] Adapter process PID: ${pid} exited after ${treeKillFirst ? 'taskkill' : 'SIGTERM'}.`);
+          if (posixGroupKill) {
+            // Leader exited on SIGTERM — helpers may remain; sweep the group.
+            try { this.signalPid(-pid, 'SIGKILL'); } catch { /* ESRCH: group already empty */ }
+          }
         }
       } else {
-        this.logger.info(`[AdapterManager] Adapter process PID: ${process.pid} was already marked as killed.`);
+        this.logger.info(`[AdapterManager] Adapter process PID: ${pid} was already marked as killed.`);
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      this.logger.error(`[AdapterManager] Error during adapter process termination (PID: ${process.pid}): ${message}`, e);
+      this.logger.error(`[AdapterManager] Error during adapter process termination (PID: ${pid}): ${message}`, e);
     }
   }
 }
