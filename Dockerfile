@@ -196,8 +196,10 @@ EXPOSE 3000 5679
 # Copy stdio silencer preloader into runtime image
 COPY --from=builder /app/scripts/stdio-silencer.cjs /app/scripts/stdio-silencer.cjs
 
-# Create logs directory with proper permissions for any user
-RUN mkdir -p /app/logs && chmod 777 /app/logs
+# Create logs directory with proper permissions for any user, and an empty
+# workspace mount point so volume-less runs (e.g. kubectl debug ephemeral
+# containers, issue #332) have a valid MCP_WORKSPACE_ROOT directory.
+RUN mkdir -p /app/logs /workspace && chmod 777 /app/logs
 
 # Copy entrypoint wrapper (version-controlled script avoids shell quoting pitfalls)
 COPY scripts/docker-entry.sh /app/entry.sh

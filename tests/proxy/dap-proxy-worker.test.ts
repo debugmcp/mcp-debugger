@@ -775,6 +775,70 @@ describe('DapProxyWorker', () => {
       expect(worker.getState()).toBe(ProxyState.CONNECTED);
     });
 
+    it('startAdapterAndConnect defaults adapter cwd to MCP_WORKSPACE_ROOT only when it exists (issue #332)', async () => {
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'cwd-session',
+        executablePath: 'node',
+        adapterHost: 'localhost',
+        adapterPort: 9229,
+        logDir: '/logs',
+        scriptPath: '/path/to/script.js',
+        adapterCommand: {
+          command: 'node',
+          args: ['adapter.js']
+        }
+      };
+
+      const runWithWorkspaceRoot = async (workspaceRoot: string) => {
+        const processStub = {
+          spawn: vi.fn().mockResolvedValue({
+            process: new EventEmitter() as unknown as ChildProcess,
+            pid: 111
+          }),
+          shutdown: vi.fn().mockResolvedValue(undefined)
+        };
+        const connectionStub = {
+          connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+          setAdapterPolicy: vi.fn(),
+          setupEventHandlers: vi.fn(),
+          initializeSession: vi.fn(),
+          sendLaunchRequest: vi.fn(),
+          setBreakpoints: vi.fn(),
+          sendConfigurationDone: vi.fn(),
+          disconnect: vi.fn()
+        };
+        vi.stubEnv('MCP_WORKSPACE_ROOT', workspaceRoot);
+        try {
+          const cwdWorker = new DapProxyWorker(dependencies, { exit: vi.fn() });
+          (cwdWorker as any).logger = mockLogger;
+          (cwdWorker as any).processManager = processStub;
+          (cwdWorker as any).connectionManager = connectionStub;
+          (cwdWorker as any).adapterPolicy = JsDebugAdapterPolicy;
+          (cwdWorker as any).adapterState = JsDebugAdapterPolicy.createInitialState();
+          (cwdWorker as any).currentInitPayload = payload;
+          (cwdWorker as any).state = ProxyState.INITIALIZING;
+          await (cwdWorker as any).startAdapterAndConnect(payload);
+        } finally {
+          vi.unstubAllEnvs();
+        }
+        return processStub.spawn.mock.calls[0][0] as { cwd?: string };
+      };
+
+      // Existing directory: used as the adapter cwd (container behavior)
+      const existingRoot = process.cwd();
+      const spawnConfigWithRoot = await runWithWorkspaceRoot(existingRoot);
+      expect(spawnConfigWithRoot.cwd).toBe(existingRoot);
+
+      // Nonexistent directory (e.g. a kubectl-debug ephemeral container with
+      // no /workspace mount): must NOT be set — spawning with a missing cwd
+      // fails with an opaque ENOENT
+      const spawnConfigWithoutRoot = await runWithWorkspaceRoot(
+        path.join(process.cwd(), 'definitely-missing-workspace-root')
+      );
+      expect(spawnConfigWithoutRoot.cwd).toBeUndefined();
+    });
+
     it('startAdapterAndConnect should initialize session for non-queue policy', async () => {
       const payload: ProxyInitPayload = {
         cmd: 'init',

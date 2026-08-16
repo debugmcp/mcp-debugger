@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pricer
+  labels: { app: pricer }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: pricer }
+  template:
+    metadata:
+      labels: { app: pricer }
+    spec:
+      containers:
+        - name: app # kubectl debug --target=app
+          image: sick-pod-pricer:tutorial
+          imagePullPolicy: Never # kind: image is side-loaded, never pulled
+          ports:
+            - containerPort: 8080 # service traffic — no debug port exists
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pricer
+spec:
+  selector: { app: pricer }
+  ports:
+    - name: tcp
+      port: 8080
+      targetPort: 8080
