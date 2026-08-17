@@ -492,4 +492,98 @@ describe('MCP Server Java Attach-Mode Smoke Test @requires-java', () => {
       }
     }
   }, 60000);
+
+  it('pause_execution after attach reports a thread with usable frames (issue #352)', async () => {
+    // Skip if java/javac not available
+    try {
+      execSync('java -version', { stdio: 'ignore' });
+      execSync('javac -version', { stdio: 'ignore' });
+    } catch {
+      console.log('[Attach Pause #352] Skipping — JDK not installed');
+      return;
+    }
+
+    const { classDir: testClassDir, mainClass } = prepareJavaExample('PauseTest');
+
+    try {
+      // Spawn a free-running JVM (suspend=n) — PauseTest loops forever
+      const jdwpPort = await getFreePort();
+      console.log(`[Attach Pause #352] Using JDWP port: ${jdwpPort}`);
+
+      jvmProcess = spawn('java', [
+        `-agentlib:jdwp=transport=dt_socket,server=y,address=${jdwpPort},suspend=n`,
+        '-cp', testClassDir,
+        mainClass
+      ], {
+        cwd: testClassDir,
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+
+      // Wait for JDWP agent to be ready
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Timeout waiting for JDWP agent')), 15000);
+        let outputData = '';
+        let resolved = false;
+
+        const checkOutput = (chunk: Buffer) => {
+          if (resolved) return;
+          outputData += chunk.toString();
+          if (outputData.includes('Listening for transport')) {
+            resolved = true;
+            clearTimeout(timeout);
+            resolve();
+          }
+        };
+
+        jvmProcess!.stdout!.on('data', checkOutput);
+        jvmProcess!.stderr!.on('data', checkOutput);
+        jvmProcess!.on('error', (err) => { if (!resolved) { clearTimeout(timeout); reject(err); } });
+        jvmProcess!.on('exit', (code) => { if (!resolved) { clearTimeout(timeout); reject(new Error(`JVM exited ${code}`)); } });
+      });
+
+      // 1. Create session and attach to the RUNNING (not suspended) JVM
+      const createResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'create_debug_session',
+        arguments: { language: 'java', name: 'java-attach-pause-352' }
+      }));
+      expect(createResponse.sessionId).toBeDefined();
+      sessionId = createResponse.sessionId as string;
+
+      // stopOnEntry: false — the target was started with suspend=n, so the
+      // session must report RUNNING (not the suspend=y default of PAUSED)
+      // for pause_execution to actually send a DAP pause.
+      console.log(`[Attach Pause #352] Attaching to JVM on port ${jdwpPort}...`);
+      const attachResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'attach_to_process',
+        arguments: { sessionId, port: jdwpPort, host: '127.0.0.1', sourcePaths: [testClassDir], stopOnEntry: false }
+      }));
+      expect(attachResponse.success).toBe(true);
+      expect(attachResponse.state).toBe('running');
+
+      // 2. Pause all threads. Issue #352: the bridge previously announced
+      //    vm.allThreads().get(0) — typically a JVM system thread like
+      //    "Reference Handler" — so the follow-up stackTrace was empty.
+      console.log('[Attach Pause #352] Pausing execution...');
+      const pauseResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'pause_execution',
+        arguments: { sessionId }
+      }));
+      expect(pauseResponse.success).toBe(true);
+
+      // 3. Stack trace must be non-empty and contain the user's main frame
+      const stack = await waitForPausedState(mcpClient!, sessionId, 20, 500);
+      expect(stack).not.toBeNull();
+      const frames = stack!.stackFrames!;
+      expect(frames.length).toBeGreaterThan(0);
+      console.log('[Attach Pause #352] Frames:', frames.map(f => f.name));
+      expect(frames.some(f => (f.name ?? '').includes('PauseTest.main'))).toBe(true);
+
+      console.log('[Attach Pause #352] TEST PASSED — pause after attach reported a usable thread');
+    } finally {
+      if (jvmProcess && !jvmProcess.killed) {
+        jvmProcess.kill('SIGKILL');
+        jvmProcess = null;
+      }
+    }
+  }, 60000);
 });

@@ -67,6 +67,8 @@ export interface RedefineClassesResult {
   failed?: Array<{ fqcn: string; error: string }>;
   scannedFiles?: number;
   newestTimestamp?: number;
+  /** Breakpoints re-planted after redefine (issue #370). */
+  replantedBreakpoints?: number;
   error?: string;
 }
 
@@ -2906,6 +2908,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         failed: body.failed,
         scannedFiles: body.scannedFiles,
         newestTimestamp: body.newestTimestamp,
+        replantedBreakpoints: body.replantedBreakpoints,
       };
     } catch (error) {
       this.logger.error(`[SM redefineClasses ${sessionId}] Error: ${error}`);
