@@ -31,10 +31,10 @@ export function buildServerInstructions(
     ? `\n- This server runs in least-privilege variable access mode (DEBUG_MCP_VARIABLE_ACCESS=explicit): get_variables and get_local_variables require names:["..."] — request only the variables you need (names are exact and case-sensitive; missing ones are listed in notFound). evaluate_expression remains available for targeted reads.`
     : '';
   const expectedContentRule = supportsExpectedContent(mode)
-    ? `\n- set_breakpoint accepts expectedContent — pass the exact text of the target line (whitespace-trimmed); a mismatch fails fast and shows the actual nearby lines, catching off-by-one line numbers before they cause a confusing session. A response reporting "requested line N, bound to line M" means the adapter moved your breakpoint — trust the bound line.`
+    ? `\n- set_breakpoint accepts expectedContent — pass the text of the target line or a distinctive substring of it (whitespace-trimmed, trailing //- or #-comments ignored); a mismatch fails fast and shows the actual nearby lines, catching off-by-one line numbers before they cause a confusing session. A response reporting "requested line N, bound to line M" means the adapter moved your breakpoint — trust the bound line.`
     : '';
   const statementRule = supportsStatementAnchors(mode)
-    ? `\n- Prefer set_breakpoint {statement: "<exact line text>"} over line numbers: it matches like an Edit-tool old_string (whole line, whitespace-trimmed), cannot land on the wrong line, lists every occurrence on ambiguity (disambiguate with nearLine), and re-resolves across restart_debugging after you edit the file.\n- set_breakpoint {function: "name"} breaks on entry to a symbol with no file or line at all — names survive edits best (Python/Go/Rust/.NET/Java/JavaScript; JS names are dotted runtime paths and functions in lazily-loaded modules bind at the next pause).`
+    ? `\n- Prefer set_breakpoint {statement: "<line text>"} over line numbers: it matches like an Edit-tool old_string (whole line or a distinctive substring — whitespace-trimmed, trailing comments ignored, exact matches win), cannot land on the wrong line, lists every occurrence on ambiguity (disambiguate with nearLine), and re-resolves across restart_debugging after you edit the file.\n- set_breakpoint {function: "name"} breaks on entry to a symbol with no file or line at all — names survive edits best (Python/Go/Rust/.NET/Java/JavaScript; JS names are dotted runtime paths and functions in lazily-loaded modules bind at the next pause).`
     : '';
 
   return `mcp-debugger drives real step-through debuggers (Python, JavaScript/TypeScript, Ruby, Rust, Go, Java, .NET) as MCP tools.
@@ -62,9 +62,9 @@ export function buildDebuggingWorkflowPrompt(
   mode: BpAddressingMode = DEFAULT_BP_ADDRESSING
 ): string {
   const setBreakpointStep = supportsStatementAnchors(mode)
-    ? '2. set_breakpoint {sessionId, file: ABSOLUTE path, statement: "<exact line text>"} — content addressing beats line numbers (cannot land on the wrong line; nearLine disambiguates repeats; anchors re-resolve across restart_debugging). Line + expectedContent works too'
+    ? '2. set_breakpoint {sessionId, file: ABSOLUTE path, statement: "<line text or distinctive substring>"} — content addressing beats line numbers (cannot land on the wrong line; nearLine disambiguates repeats; anchors re-resolve across restart_debugging). Line + expectedContent works too'
     : supportsExpectedContent(mode)
-      ? '2. set_breakpoint {sessionId, file: ABSOLUTE path, line} — add expectedContent: "<exact line text>" so a stale or off-by-one line number fails fast instead of binding somewhere surprising'
+      ? '2. set_breakpoint {sessionId, file: ABSOLUTE path, line} — add expectedContent: "<line text or distinctive substring>" so a stale or off-by-one line number fails fast instead of binding somewhere surprising'
       : '2. set_breakpoint {sessionId, file: ABSOLUTE path, line}';
 
   return `# Debugging workflow (mcp-debugger)

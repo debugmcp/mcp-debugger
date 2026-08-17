@@ -84,7 +84,7 @@ export function createMockServer() {
 }
 
 export function createMockSessionManager(mockAdapterRegistry: any) {
-  return {
+  const manager: any = {
     createSession: vi.fn(),
     getAllSessions: vi.fn(),
     getSession: vi.fn(),
@@ -104,6 +104,12 @@ export function createMockSessionManager(mockAdapterRegistry: any) {
     stepOut: vi.fn(),
     continue: vi.fn(),
     getVariables: vi.fn(),
+    // Delegates to getVariables so existing tests that stub/assert on
+    // getVariables keep working now that the tool handler calls the
+    // detailed variant (issues #356/#359).
+    getVariablesDetailed: vi.fn(async (...args: unknown[]) => ({
+      variables: (await manager.getVariables(...(args as [string, number, string[]?]))) ?? []
+    })),
     getLocalVariables: vi.fn(),
     getStackTrace: vi.fn(),
     getStackTraceDetailed: vi.fn().mockResolvedValue({
@@ -128,6 +134,7 @@ export function createMockSessionManager(mockAdapterRegistry: any) {
     on: vi.fn(),
     removeListener: vi.fn()
   };
+  return manager;
 }
 
 export function createMockStdioTransport() {

@@ -470,4 +470,59 @@ describe('RustAdapterPolicy', () => {
   it('throws when building child session args', () => {
     expect(() => RustAdapterPolicy.buildChildStartArgs!()).toThrow();
   });
+
+  describe('stack frame filtering (issue #369)', () => {
+    const frame = (name: string, file: string, id = 1) =>
+      ({ id, name, file, line: 1, column: 1 });
+
+    const cases: Array<{ desc: string; name: string; file: string; internal: boolean }> = [
+      { desc: 'LLDB-synthesized unnamed symbol', name: '___lldb_unnamed_symbol123', file: '<unknown_source>', internal: true },
+      { desc: 'unnamed symbol with leading @ sigil', name: '@___lldb_unnamed_symbol3688', file: '<unknown_source>', internal: true },
+      { desc: 'glibc __GI_ alias', name: '__GI___clock_nanosleep', file: '../sysdeps/unix/sysv/linux/clock_nanosleep.c', internal: true },
+      { desc: 'glibc __GI_ alias without source', name: '__GI___clock_nanosleep', file: '<unknown_source>', internal: true },
+      { desc: 'syscall wrapper without source', name: 'clock_nanosleep', file: '<unknown_source>', internal: true },
+      { desc: 'syscall wrapper with empty source', name: 'nanosleep', file: '', internal: true },
+      { desc: 'syscall wrapper under system path', name: 'poll', file: '/usr/lib/debug/libc.so.6', internal: true },
+      { desc: 'libc start under glibc build path', name: '__libc_start_main', file: './nptl/libc_start_call_main.c', internal: true },
+      { desc: 'CRT entry point without source', name: '_start', file: '<unknown_source>', internal: true },
+      { desc: 'clone3 without source', name: 'clone3', file: '<unknown_source>', internal: true },
+      { desc: 'user function NAMED nanosleep with workspace source', name: 'nanosleep', file: '/home/user/project/src/timing.rs', internal: false },
+      { desc: 'user function named read with workspace source', name: 'read', file: '/home/user/project/src/io.rs', internal: false },
+      { desc: 'normal user frame', name: 'app::run', file: '/home/user/project/src/main.rs', internal: false },
+      { desc: 'rust std frame with /rustc/ source but non-wrapper name', name: 'std::thread::sleep', file: '/rustc/abc123/library/std/src/thread/mod.rs', internal: false },
+      { desc: 'user frame with no source but non-matching name', name: 'stripped_user_fn', file: '<unknown_source>', internal: false },
+    ];
+
+    it.each(cases)('isInternalFrame: $desc -> $internal', ({ name, file, internal }) => {
+      expect(RustAdapterPolicy.isInternalFrame!(frame(name, file))).toBe(internal);
+    });
+
+    it('filterStackFrames hides internal frames and keeps user frames in order', () => {
+      const frames = [
+        frame('app::run', '/home/user/project/src/main.rs', 1),
+        frame('__GI___clock_nanosleep', '../sysdeps/unix/sysv/linux/clock_nanosleep.c', 2),
+        frame('main', '/home/user/project/src/main.rs', 3),
+        frame('__libc_start_main', '<unknown_source>', 4),
+        frame('_start', '<unknown_source>', 5),
+      ];
+      const filtered = RustAdapterPolicy.filterStackFrames!(frames, false);
+      expect(filtered.map((f) => f.id)).toEqual([1, 3]);
+    });
+
+    it('filterStackFrames returns every frame when includeInternals is set', () => {
+      const frames = [
+        frame('@___lldb_unnamed_symbol3688', '<unknown_source>', 1),
+        frame('__libc_start_main', '<unknown_source>', 2),
+      ];
+      expect(RustAdapterPolicy.filterStackFrames!(frames, true)).toEqual(frames);
+    });
+
+    it('filterStackFrames has no empty-result fallback of its own (central #346 guarantee)', () => {
+      const frames = [
+        frame('@___lldb_unnamed_symbol3688', '<unknown_source>', 1),
+        frame('__libc_start_main', '<unknown_source>', 2),
+      ];
+      expect(RustAdapterPolicy.filterStackFrames!(frames, false)).toEqual([]);
+    });
+  });
 });

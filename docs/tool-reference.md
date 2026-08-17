@@ -141,10 +141,10 @@ Sets a breakpoint in a source file.
 - `sessionId` (string, required): The ID of the debug session.
 - `file` (string, required): Path to the source file (absolute or relative to project root).
 - `line` (number, required): Line number where to set breakpoint (1-indexed).
-- `statement` (string, optional): **Content addressing** — instead of `line`, pass the exact text of the target line (leading/trailing whitespace ignored), like an Edit-tool match. Cannot land on the wrong line; if the text appears on multiple lines the error lists every match; anchors re-resolve across `restart_debugging` after file edits. Provide `statement` OR `line`, not both. See [Statement anchors](#statement-anchors).
+- `statement` (string, optional): **Content addressing** — instead of `line`, pass the text of the target line, like an Edit-tool match — a distinctive substring is enough (leading/trailing whitespace and trailing `//`/`#` comments are ignored; an exact whole-line match always wins over substring matches). Cannot land on the wrong line; if the text appears on multiple lines the error lists every match; anchors re-resolve across `restart_debugging` after file edits. Provide `statement` OR `line`, not both. See [Statement anchors](#statement-anchors).
 - `function` (string, optional): **Symbol addressing** — break on entry to a function/method by name (DAP function breakpoint). Session-global: no `file` or `line` at all, and names survive edits better than both. Composes with `condition` only. Supported by Python, Go, Rust, C/C++, .NET, Java, and JavaScript (JavaScript names are dotted runtime paths delivered over the CDP bridge — see [Function breakpoints](#function-breakpoints)); Ruby is accepted with a warning and validated at launch.
 - `nearLine` (number, optional): With `statement` only — when the statement text appears on multiple lines, bind to the match closest to this line (ties go to the lower line).
-- `expectedContent` (string, optional): With `line` only — assert the exact text of the target line (leading/trailing whitespace ignored) before setting. On a mismatch the breakpoint is **not** set and the error shows the actual content of that line and its neighbors — a fast, self-explanatory failure instead of a breakpoint that silently lands on the wrong line. See [Content assertions and loud snapping](#content-assertions-and-loud-snapping).
+- `expectedContent` (string, optional): With `line` only — assert the text of the target line before setting; a distinctive substring is enough (leading/trailing whitespace and trailing `//`/`#` comments are ignored). On a mismatch the breakpoint is **not** set and the error shows the actual content of that line and its neighbors — a fast, self-explanatory failure instead of a breakpoint that silently lands on the wrong line. See [Content assertions and loud snapping](#content-assertions-and-loud-snapping).
 - `condition` (string, optional): Conditional expression — only break (or log) when it evaluates truthy.
 - `logMessage` (string, optional): Create a **logpoint** instead of a pausing breakpoint — see [Logpoints](#logpoints) below.
 - `suspendPolicy` (string, optional): Suspend policy when the breakpoint is hit — `"all"` suspends all threads (default), `"thread"` suspends only the event thread. Only supported by the Java/JDI adapter.
@@ -657,6 +657,8 @@ Gets variables within a scope.
 - `expandable`: Whether the variable has child properties
 - Values are always returned as strings
 
+**Size guards (issues #356/#359):** responses are capped so an enormous scope (e.g. a JS internal frame reaching `process`/`global`) can't exceed an MCP client's per-result size limit. Per variable, values longer than 1024 chars are cut and flagged `truncated: true`; per call, at most 300 variables (256KB total) are returned. When anything was cut, the response carries a top-level `truncation` object — `{ omittedCount, valueTruncatedCount, notice }` — and the `names` filter is the escape hatch to fetch specific variables in full. Limits are env-overridable: `DEBUG_MCP_MAX_VARIABLE_VALUE_CHARS`, `DEBUG_MCP_MAX_VARIABLES`, `DEBUG_MCP_MAX_VARIABLES_TOTAL_CHARS`.
+
 ---
 
 ### get_local_variables
@@ -697,6 +699,8 @@ Gets local variables by traversing all stack frames and their scopes, then using
   "scopeName": "Locals"
 }
 ```
+
+**Size guards:** same caps and `truncation` advisory as [get_variables](#get_variables); additionally, the multi-frame scope fan-out stops issuing DAP requests once the per-call variable budget is spent (`truncation.scopesSkipped` reports scopes never fetched). Top-frame scopes are fetched first, so the locals that matter are unaffected.
 
 **Example - Python:**
 ```json

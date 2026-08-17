@@ -570,6 +570,111 @@ describe('Server Language Discovery Tests', () => {
         }
       })).rejects.toThrow();
     });
+
+    it('fails fast with the availability reason when the toolchain probe reports unavailable (issue #360)', async () => {
+      debugServer = new DebugMcpServer();
+      const { callToolHandler } = getToolHandlers(mockServer);
+
+      mockAdapterRegistry.getFactory = vi.fn().mockResolvedValue({
+        validate: vi.fn().mockResolvedValue({
+          valid: false,
+          errors: ['js-debug adapter not found. Run build script to vendor js-debug'],
+          warnings: []
+        }),
+        getMetadata: () => ({ modes: { launch: true, attach: 'spawn' } })
+      });
+      mockSessionManager.createSession = vi.fn();
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'create_debug_session',
+          arguments: { language: 'python', name: 'test-session' }
+        }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(false);
+      expect(content.error).toContain('js-debug adapter not found');
+      expect(content.error).toContain("Cannot start a 'python' debug session");
+      expect(mockSessionManager.createSession).not.toHaveBeenCalled();
+    });
+
+    it('fails open (creates the session) when the toolchain probe throws (issue #360)', async () => {
+      debugServer = new DebugMcpServer();
+      const { callToolHandler } = getToolHandlers(mockServer);
+
+      mockAdapterRegistry.getFactory = vi.fn().mockResolvedValue({
+        validate: vi.fn().mockRejectedValue(new Error('probe exploded')),
+        getMetadata: () => ({ modes: { launch: true, attach: 'spawn' } })
+      });
+      mockSessionManager.createSession = vi.fn().mockResolvedValue({
+        id: 'session-360-open', name: 'test-session', language: 'python'
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'create_debug_session',
+          arguments: { language: 'python', name: 'test-session' }
+        }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      expect(mockSessionManager.createSession).toHaveBeenCalled();
+    });
+
+    it('allows session creation despite a failed launch probe when direct-connect attach is usable (issue #360)', async () => {
+      debugServer = new DebugMcpServer();
+      const { callToolHandler } = getToolHandlers(mockServer);
+
+      const validate = vi.fn().mockResolvedValue({ valid: false, errors: ['no toolchain'], warnings: [] });
+      mockAdapterRegistry.getFactory = vi.fn().mockResolvedValue({
+        validate,
+        getMetadata: () => ({ modes: { launch: true, attach: 'direct-connect' } })
+      });
+      mockSessionManager.createSession = vi.fn().mockResolvedValue({
+        id: 'session-360-attach', name: 'test-session', language: 'python'
+      });
+
+      // No port at create time — the caller may attach later, and
+      // direct-connect attach does not need the launch toolchain.
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'create_debug_session',
+          arguments: { language: 'python', name: 'test-session' }
+        }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      expect(mockSessionManager.createSession).toHaveBeenCalled();
+    });
+
+    it('still fails creation when launch is unavailable and attach is spawn-based (issue #360)', async () => {
+      debugServer = new DebugMcpServer();
+      const { callToolHandler } = getToolHandlers(mockServer);
+
+      mockAdapterRegistry.getFactory = vi.fn().mockResolvedValue({
+        validate: vi.fn().mockResolvedValue({ valid: false, errors: ['no toolchain'], warnings: [] }),
+        getMetadata: () => ({ modes: { launch: true, attach: 'spawn' } })
+      });
+      mockSessionManager.createSession = vi.fn();
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'create_debug_session',
+          arguments: { language: 'python', name: 'test-session' }
+        }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(false);
+      expect(mockSessionManager.createSession).not.toHaveBeenCalled();
+    });
   });
 
   describe('start_debugging with language support validation', () => {

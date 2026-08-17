@@ -14,6 +14,7 @@ import {
   type FactoryValidationResult
 } from '@debugmcp/shared';
 import { JavascriptDebugAdapter } from './javascript-debug-adapter.js';
+import { resolveJsDebugServer } from './utils/js-debug-resolver.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -62,19 +63,14 @@ export class JavascriptAdapterFactory extends BaseAdapterFactory {
       errors.push(`Node.js 14+ required. Current: ${nodeVersion}`);
     }
 
-    // Resolve vendor js-debug vsDebugServer.js relative to compiled/dist location
-    // Works for both src (unit tests) and dist (production) since vendor is sibling of both.
+    // Resolve the vendored js-debug entry point across all deployment layouts
+    // (package dist, bundled npx CLI, container) — issue #354/#364: probing a
+    // single layout here made list_supported_languages report javascript as
+    // unavailable on the npx bundle even though the payload was present.
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);
-    const vendorPath = path.resolve(__dirname, '../vendor/js-debug/vsDebugServer.js');
-
-    // Bundled js-debug presence
-    try {
-      if (!fs.existsSync(vendorPath)) {
-        errors.push('js-debug adapter not found. Run build script to vendor js-debug');
-      }
-    } catch {
-      // If fs throws for any reason, treat as missing to be safe
+    const vendorPath = resolveJsDebugServer((p) => fs.existsSync(p), __dirname);
+    if (vendorPath === null) {
       errors.push('js-debug adapter not found. Run build script to vendor js-debug');
     }
 

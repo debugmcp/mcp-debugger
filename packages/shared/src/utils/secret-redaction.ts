@@ -188,6 +188,11 @@ export const SECRET_VALUE_ALTERNATION: RegExp = new RegExp(
  * substring: `tokenCount`, `PATH`, `patience` must stay debuggable. This is
  * deliberately stricter than env-sanitizer's substring key patterns: env-key
  * logging can afford aggressive matching, live variable inspection cannot.
+ * 'pwd' is deliberately absent (issue #365): in real code it overwhelmingly
+ * means working directory (Dir.pwd, process.env.PWD, shell pwd) and the
+ * expression fallback reduces `Dir.pwd` to `pwd`, redacting harmless paths;
+ * password-shaped names stay covered by 'passwd'/'password'/'dbpassword'
+ * plus the value-shape rules.
  * Adapted from microsoft/DebugMCP (MIT).
  */
 const SENSITIVE_NAME_SET = new Set([
@@ -196,7 +201,7 @@ const SENSITIVE_NAME_SET = new Set([
   'appsecret', 'connectionstring', 'connstr', 'credential', 'credentials',
   'dbpassword', 'encryptionkey', 'githubtoken', 'githubpat', 'gitlabtoken',
   'idtoken', 'masterkey', 'oauthtoken', 'passphrase', 'passwd', 'password',
-  'pat', 'privatekey', 'pwd', 'refreshtoken', 'secret', 'secretkey',
+  'pat', 'privatekey', 'refreshtoken', 'secret', 'secretkey',
   'sessiontoken', 'signingkey', 'slacktoken', 'token', 'awsaccesskeyid',
   'awssecretaccesskey', 'awssessiontoken'
 ]);

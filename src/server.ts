@@ -26,6 +26,7 @@ import {
 } from './errors/debug-errors.js';
 import { SessionManager, SessionManagerConfig } from './session/session-manager.js';
 import { StackTraceResult } from './session/session-manager-data.js';
+import { buildTruncationNotice, VariableTruncationSummary } from './session/variable-caps.js';
 import { createProductionDependencies } from './container/dependencies.js';
 import { ContainerConfig } from './container/types.js';
 import {
@@ -44,8 +45,10 @@ import path from 'path';
 import { SimpleFileChecker, createSimpleFileChecker, FileExistenceResult } from './utils/simple-file-checker.js';
 import { LineReader, createLineReader } from './utils/line-reader.js';
 import { getDisabledLanguages, isLanguageDisabled } from './utils/language-config.js';
+import { ErrorMessages } from './utils/error-messages.js';
 import {
   computeModeAvailability,
+  checkLaunchToolchain,
   ValidationResultCache,
   LanguageModes
 } from './utils/language-availability.js';
@@ -801,6 +804,14 @@ export class DebugMcpServer {
     return this.sessionManager.getVariables(sessionId, variablesReference, names);
   }
 
+  public async getVariablesDetailed(sessionId: string, variablesReference: number, names?: string[]): Promise<{
+    variables: Variable[];
+    truncation?: VariableTruncationSummary;
+  }> {
+    this.validateSession(sessionId);
+    return this.sessionManager.getVariablesDetailed(sessionId, variablesReference, names);
+  }
+
   public async getStackTrace(sessionId: string, includeInternals: boolean = false): Promise<StackTraceResult> {
     this.validateSession(sessionId);
     const session = this.sessionManager.getSession(sessionId);
@@ -836,6 +847,7 @@ export class DebugMcpServer {
     variables: Variable[];
     frame: { name: string; file: string; line: number } | null;
     scopeName: string | null;
+    truncation?: VariableTruncationSummary;
   }> {
     this.validateSession(sessionId);
     return this.sessionManager.getLocalVariables(sessionId, includeSpecial, names);
@@ -998,13 +1010,13 @@ export class DebugMcpServer {
       if (supportsExpectedContent(bpMode)) {
         setBreakpointExtraProps.expectedContent = {
           type: 'string',
-          description: 'Optional assertion: the exact text you expect on the target line (leading/trailing whitespace ignored). If it does not match, the breakpoint is NOT set and the error shows the actual content of that line and its neighbors — use this to catch stale or off-by-one line numbers before they cause confusing behavior'
+          description: 'Optional assertion: text you expect on the target line — a distinctive substring is enough (leading/trailing whitespace and trailing //- or #-comments are ignored). If it does not match, the breakpoint is NOT set and the error shows the actual content of that line and its neighbors — use this to catch stale or off-by-one line numbers before they cause confusing behavior'
         };
       }
       if (supportsStatementAnchors(bpMode)) {
         setBreakpointExtraProps.statement = {
           type: 'string',
-          description: 'Address by content instead of line number: the exact text of the target line (leading/trailing whitespace ignored), like an Edit-tool match. Preferred over line — it cannot land on the wrong line and survives file edits across restart_debugging. If the text appears on multiple lines, the error lists every match; add nearLine to pick one. Provide statement OR line, not both'
+          description: 'Address by content instead of line number: the text of the target line, like an Edit-tool match — a distinctive substring is enough (leading/trailing whitespace and trailing //- or #-comments are ignored; an exact whole-line match always wins over substring matches). Preferred over line — it cannot land on the wrong line and survives file edits across restart_debugging. If the text appears on multiple lines, the error lists every match; add nearLine to pick one. Provide statement OR line, not both'
         };
         setBreakpointExtraProps.nearLine = {
           type: 'number',
@@ -1100,8 +1112,8 @@ export class DebugMcpServer {
           { name: 'continue_execution', description: 'Continue execution. Returns immediately after the adapter acknowledges; does not wait for the next stop. When the program stops again the session state becomes "paused" — check list_debug_sessions or get_stack_trace, whose lastStop/stopReason tells you why it stopped (e.g. "breakpoint" vs "exception"). Use get_output to read the program\'s stdout/stderr', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
           { name: 'pause_execution', description: 'Pause a running program. Waits briefly for the stop; if the program cannot stop within ~5s (e.g. blocked in native code), returns success with pending:true and the session reports "paused" once the stop lands', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, threadId: { type: 'number', description: 'Thread ID to pause. If omitted or 0, pauses all threads.' } }, required: ['sessionId'] } },
           { name: 'list_threads', description: 'List all threads in the debugged process', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
-          { name: 'get_variables', description: 'Get variables (scope is variablesReference: number)', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, scope: { type: 'number', description: "The variablesReference number from a StackFrame or Variable" }, names: namesProp }, required: getVariablesRequired } },
-          { name: 'get_local_variables', description: 'Get local variables for the current stack frame. This is a convenience tool that returns just the local variables without needing to traverse stack->scopes->variables manually', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, includeSpecial: { type: 'boolean', description: 'Include special/internal variables like this, __proto__, __builtins__, etc. Default: false' }, names: namesProp }, required: getLocalVariablesRequired } },
+          { name: 'get_variables', description: 'Get variables (scope is variablesReference: number). Responses are size-guarded: oversized values are cut (truncated:true) and very large scopes return a capped list with a truncation notice — pass names:[...] to fetch specific variables in full', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, scope: { type: 'number', description: "The variablesReference number from a StackFrame or Variable" }, names: namesProp }, required: getVariablesRequired } },
+          { name: 'get_local_variables', description: 'Get local variables for the current stack frame. This is a convenience tool that returns just the local variables without needing to traverse stack->scopes->variables manually. Responses are size-guarded: oversized values are cut (truncated:true) and very large scopes return a capped list with a truncation notice — pass names:[...] to fetch specific variables in full', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, includeSpecial: { type: 'boolean', description: 'Include special/internal variables like this, __proto__, __builtins__, etc. Default: false' }, names: namesProp }, required: getLocalVariablesRequired } },
           { name: 'get_stack_trace', description: 'Get stack trace. The response includes stopReason — why the session is paused (e.g. "breakpoint" vs "exception"). Internal/runtime frames are filtered by default; when any are hidden the response carries hiddenFrames and a note (the top frame is always kept even if internal, so frameId anchors keep working)', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, includeInternals: { type: 'boolean', description: 'Include internal/framework frames (e.g., Node.js internals). Default: false for cleaner output.' } }, required: ['sessionId'] } },
           { name: 'get_scopes', description: 'Get scopes for a stack frame', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, frameId: { type: 'number', description: "The ID of the stack frame from a stackTrace response" } }, required: ['sessionId', 'frameId'] } },
           { name: 'evaluate_expression', description: 'Evaluate expression in the current debug context. Expressions can read and modify program state. Waits up to 30s for the result by default; pass timeout for long-running expressions', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, expression: { type: 'string' }, frameId: { type: 'number', description: 'Optional stack frame ID for evaluation context. Must be a frame ID from a get_stack_trace response. If not provided, uses the current (top) frame automatically' }, timeout: { type: 'number', description: 'Max time (ms) to wait for the evaluation to complete (default: 30000, max: 600000). On expiry the request fails but the expression may keep executing in the debuggee. Note: your MCP client may enforce its own overall request timeout' } }, required: ['sessionId', 'expression'] } },
@@ -1149,6 +1161,51 @@ export class DebugMcpServer {
               const allowInContainer = isContainer && requested === DebugLanguage.PYTHON;
               if (!allowInContainer && !supported.includes(lang)) {
                 throw new UnsupportedLanguageError(lang, supported);
+              }
+
+              // Fail fast when the adapter can't do ANYTHING here (issue
+              // #360). A failed launch-toolchain probe alone must not block
+              // session creation: the caller may intend to attach (with or
+              // without a port at create time), and direct-connect attach
+              // needs no local toolchain — e.g. ruby attach works in the
+              // container image without a launch toolchain. Launch itself is
+              // still gated at start_debugging.
+              {
+                const launchGate = await checkLaunchToolchain(
+                  requested,
+                  this.getAdapterRegistry(),
+                  this.validationCache,
+                  this.logger
+                );
+                if (!launchGate.available) {
+                  const registry = this.getAdapterRegistry() as unknown as {
+                    getFactory?: (language: string) => Promise<{ getMetadata?: () => { modes?: { attach?: string } } } | undefined>;
+                  } | undefined;
+                  const attachMechanism = await (async () => {
+                    try {
+                      const factory = typeof registry?.getFactory === 'function'
+                        ? await registry.getFactory(requested)
+                        : undefined;
+                      return factory?.getMetadata?.().modes?.attach ?? 'none';
+                    } catch {
+                      return 'none';
+                    }
+                  })();
+                  // 'direct-connect' attach runs inside the debuggee — usable
+                  // even when the local toolchain probe failed. 'spawn' attach
+                  // shares the failing toolchain; 'none' has no attach at all.
+                  if (attachMechanism !== 'direct-connect') {
+                    result = { content: [{ type: 'text', text: JSON.stringify({
+                      success: false,
+                      error: ErrorMessages.launchUnavailable(requested, launchGate.reason)
+                    }) }] };
+                    break;
+                  }
+                  this.logger.warn(
+                    `[Server] create_debug_session(${requested}): launch toolchain unavailable (${launchGate.reason}); ` +
+                      `allowing session creation because direct-connect attach remains usable.`
+                  );
+                }
               }
 
               const sessionInfo = await this.createDebugSession({
@@ -1904,8 +1961,8 @@ export class DebugMcpServer {
               this.enforceExplicitNames('get_variables', args.names);
 
               try {
-                const variables = await this.getVariables(args.sessionId, args.scope, args.names);
-                
+                const { variables, truncation } = await this.getVariablesDetailed(args.sessionId, args.scope, args.names);
+
                 // Log variable inspection (truncate large values)
                 const truncatedVars = variables.map(v => ({
                   name: v.name,
@@ -1926,7 +1983,10 @@ export class DebugMcpServer {
                 const notFound = args.names
                   ? args.names.filter(name => !variables.some(v => v.name === name))
                   : undefined;
-                result = { content: [{ type: 'text', text: JSON.stringify({ success: true, variables, count: variables.length, variablesReference: args.scope, ...(notFound !== undefined ? { notFound } : {}), ...(redaction ? { redaction } : {}) }) }] };
+                const truncationInfo = truncation
+                  ? { ...truncation, notice: buildTruncationNotice(truncation) }
+                  : undefined;
+                result = { content: [{ type: 'text', text: JSON.stringify({ success: true, variables, count: variables.length, variablesReference: args.scope, ...(notFound !== undefined ? { notFound } : {}), ...(redaction ? { redaction } : {}), ...(truncationInfo ? { truncation: truncationInfo } : {}) }) }] };
               } catch (error) {
                 // Handle validation errors specifically
                 if (error instanceof SessionTerminatedError ||
@@ -2570,6 +2630,15 @@ export class DebugMcpServer {
       const redaction = this.redactionSummary(result.variables);
       if (redaction) {
         response.redaction = redaction;
+      }
+
+      // Size-guard advisory (issues #356/#359): say explicitly that data was
+      // cut and how to fetch the rest, instead of silently dropping it.
+      if (result.truncation) {
+        response.truncation = {
+          ...result.truncation,
+          notice: buildTruncationNotice(result.truncation)
+        };
       }
 
       if (args.names) {

@@ -231,6 +231,39 @@ async function bundleCLI() {
     console.warn('Warning: packages/adapter-dotnet/dist/utils/ not found; .NET debugging will fail in NPX distribution.');
   }
 
+  // Copy the Java JDI bridge (source + compiled class). The bundled CLI has no
+  // node_modules, so without this the jdi-resolver only finds the bridge via a
+  // process.cwd() fallback that happens to work inside a repo checkout (#354).
+  const javaBridgeSrc = path.join(repoRoot, 'packages/adapter-java/java');
+  if (fs.existsSync(path.join(javaBridgeSrc, 'JdiDapServer.java'))) {
+    const javaBridgeDest = path.join(distDir, 'packages', 'adapter-java', 'java');
+    fs.rmSync(javaBridgeDest, { recursive: true, force: true });
+    fs.cpSync(javaBridgeSrc, javaBridgeDest, {
+      recursive: true,
+      filter: (src) => {
+        const stat = fs.statSync(src);
+        if (stat.isDirectory()) return true;
+        return src.endsWith('.java') || src.endsWith('.class');
+      }
+    });
+    console.log('Copied Java JDI bridge (JdiDapServer.java + compiled classes).');
+  } else {
+    console.warn('Warning: packages/adapter-java/java/JdiDapServer.java not found; Java debugging will fail in NPX distribution.');
+  }
+
+  // Copy the js-debug exit-code shim; it is preloaded into the debuggee via
+  // NODE_OPTIONS at runtime, so it must exist on disk (dist/assets is one of
+  // the adapter's probe locations).
+  const exitShimSrc = path.join(repoRoot, 'packages/adapter-javascript/assets/exitcode-shim.cjs');
+  if (fs.existsSync(exitShimSrc)) {
+    const assetsDest = path.join(distDir, 'assets');
+    fs.mkdirSync(assetsDest, { recursive: true });
+    fs.copyFileSync(exitShimSrc, path.join(assetsDest, 'exitcode-shim.cjs'));
+    console.log('Copied exitcode-shim.cjs.');
+  } else {
+    console.warn('Warning: exitcode-shim.cjs not found; JS debuggee exit codes will not be captured in NPX distribution.');
+  }
+
   // Mirror dist into the package/ directory used by npm pack artifacts.
   const packageDir = path.join(packageRoot, 'package');
   const packageDistDir = path.join(packageDir, 'dist');

@@ -15,6 +15,12 @@ import {
 } from '@debugmcp/shared';
 import { SessionManagerCore } from './session-manager-core.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
+import {
+  applyVariableCaps,
+  mergeTruncationSummaries,
+  maxVariablesPerCall,
+  VariableTruncationSummary
+} from './variable-caps.js';
 
 /**
  * Stack trace frames plus filtering metadata (issue #346): how many frames the
@@ -76,16 +82,29 @@ export abstract class SessionManagerData extends SessionManagerCore {
    * redacted, or logged.
    */
   async getVariables(sessionId: string, variablesReference: number, names?: string[]): Promise<Variable[]> {
+    return (await this.getVariablesDetailed(sessionId, variablesReference, names)).variables;
+  }
+
+  /**
+   * getVariables plus size-guard metadata (issues #356/#359): the returned
+   * list is capped (variable count, per-value length, total size) and
+   * `truncation` reports what was cut, so the tool layer can annotate the
+   * response instead of blowing a client's per-result size limit.
+   */
+  async getVariablesDetailed(sessionId: string, variablesReference: number, names?: string[]): Promise<{
+    variables: Variable[];
+    truncation?: VariableTruncationSummary;
+  }> {
     const session = this._getSessionById(sessionId);
     this.logger.info(`[SM getVariables ${sessionId}] Entered. variablesReference: ${variablesReference}, Current state: ${session.state}`);
     
-    if (!session.proxyManager || !session.proxyManager.isRunning()) { 
-      this.logger.warn(`[SM getVariables ${sessionId}] No active proxy.`); 
-      return []; 
+    if (!session.proxyManager || !session.proxyManager.isRunning()) {
+      this.logger.warn(`[SM getVariables ${sessionId}] No active proxy.`);
+      return { variables: [] };
     }
-    if (session.state !== SessionState.PAUSED) { 
-      this.logger.warn(`[SM getVariables ${sessionId}] Session not paused. State: ${session.state}.`); 
-      return []; 
+    if (session.state !== SessionState.PAUSED) {
+      this.logger.warn(`[SM getVariables ${sessionId}] Session not paused. State: ${session.state}.`);
+      return { variables: [] };
     }
     
     try {
@@ -115,14 +134,24 @@ export abstract class SessionManagerData extends SessionManagerCore {
             return result.redacted ? { ...v, value: result.value, redacted: true } : v;
           });
         }
-        this.logger.info(`[SM getVariables ${sessionId}] Parsed variables:`, vars.map(v => ({name: v.name, value: v.value, type: v.type})));
-        return vars;
+        // Size guards LAST (issues #356/#359): after the names filter (an
+        // explicit request is never starved by unrelated variables) and
+        // after redaction (a cut value can't leak a secret prefix).
+        const capped = applyVariableCaps(vars);
+        if (capped.truncation) {
+          this.logger.info(
+            `[SM getVariables ${sessionId}] Truncated response: ` +
+              `${capped.truncation.omittedCount} omitted, ${capped.truncation.valueTruncatedCount} values cut.`
+          );
+        }
+        this.logger.info(`[SM getVariables ${sessionId}] Parsed variables:`, capped.variables.map(v => ({name: v.name, value: v.value, type: v.type})));
+        return capped;
       }
       this.logger.warn(`[SM getVariables ${sessionId}] No variables in response body for reference ${variablesReference}. Response:`, response);
-      return [];
+      return { variables: [] };
     } catch (error) {
       this.logger.error(`[SM getVariables ${sessionId}] Error getting variables:`, error);
-      return [];
+      return { variables: [] };
     }
   }
 
@@ -251,6 +280,7 @@ export abstract class SessionManagerData extends SessionManagerCore {
     variables: Variable[];
     frame: { name: string; file: string; line: number } | null;
     scopeName: string | null;
+    truncation?: VariableTruncationSummary;
   }> {
     const session = this._getSessionById(sessionId);
     this.logger.info(`[SM getLocalVariables ${sessionId}] Entered. includeSpecial: ${includeSpecial}, Current state: ${session.state}`);
@@ -285,18 +315,39 @@ export abstract class SessionManagerData extends SessionManagerCore {
         }
       }
       
-      // Step 3: Collect variables for all scopes
+      // Step 3: Collect variables for all scopes — budget-aware (issue
+      // #356): a JS attach's internal pause frame can expose scopes walking
+      // into process/global, so stop issuing DAP requests once the per-call
+      // variable budget is spent. Frames iterate top-first, so the frames
+      // that matter (whose Local scope extractLocalVariables reads) are
+      // fetched before the budget can run out. The `names` filter is pushed
+      // down so an explicit request is never starved by the budget.
       const variablesMap: Record<number, Variable[]> = {};
-      for (const frameId in scopesMap) {
-        const scopes = scopesMap[frameId];
+      const truncationSummaries: Array<VariableTruncationSummary | undefined> = [];
+      let fetchedCount = 0;
+      let scopeFetchesSkipped = 0;
+      const fetchBudget = maxVariablesPerCall();
+      for (const frame of stackFrames) {
+        const scopes = scopesMap[frame.id];
+        if (!scopes) continue;
         for (const scope of scopes) {
-          if (scope.variablesReference > 0) {
-            const variables = await this.getVariables(sessionId, scope.variablesReference);
-            if (variables && variables.length > 0) {
-              variablesMap[scope.variablesReference] = variables;
-            }
+          if (scope.variablesReference <= 0) continue;
+          if (fetchedCount >= fetchBudget) {
+            scopeFetchesSkipped++;
+            continue;
+          }
+          const detailed = await this.getVariablesDetailed(sessionId, scope.variablesReference, names);
+          truncationSummaries.push(detailed.truncation);
+          fetchedCount += detailed.variables.length;
+          if (detailed.variables.length > 0) {
+            variablesMap[scope.variablesReference] = detailed.variables;
           }
         }
+      }
+      if (scopeFetchesSkipped > 0) {
+        this.logger.info(
+          `[SM getLocalVariables ${sessionId}] Skipped ${scopeFetchesSkipped} scope fetch(es) after hitting the ${fetchBudget}-variable budget.`
+        );
       }
       
       // Step 4: Get the appropriate adapter policy
@@ -337,14 +388,26 @@ export abstract class SessionManagerData extends SessionManagerCore {
 
       this.logger.info(`[SM getLocalVariables ${sessionId}] Found ${localVars.length} local variables.`);
 
+      // Cap the final extracted list too (policies may merge several scopes)
+      // and surface every truncation that happened along the way.
+      const cappedLocals = applyVariableCaps(localVars);
+      const truncation = mergeTruncationSummaries([
+        ...truncationSummaries,
+        cappedLocals.truncation,
+        scopeFetchesSkipped > 0
+          ? { omittedCount: 0, valueTruncatedCount: 0, scopesSkipped: scopeFetchesSkipped }
+          : undefined
+      ]);
+
       return {
-        variables: localVars,
+        variables: cappedLocals.variables,
         frame: {
           name: topFrame.name,
           file: topFrame.file,
           line: topFrame.line
         },
-        scopeName
+        scopeName,
+        ...(truncation ? { truncation } : {})
       };
       
     } catch (error) {
