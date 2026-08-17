@@ -733,6 +733,7 @@ export class DapProxyWorker {
         this.exitedEventSeen = true;
         return this.enqueueTerminalSignal('exited', async () => {
           await this.waitForAdapterStdioDrain();
+          await this.waitForChildEventFlush();
           this.terminalDapEventForwarded = true;
           this.sendDapEvent('exited', body);
         });
@@ -746,6 +747,7 @@ export class DapProxyWorker {
         // until the streams have drained so the output wins the race.
         return this.enqueueTerminalSignal('terminated', async () => {
           await this.waitForAdapterStdioDrain();
+          await this.waitForChildEventFlush();
           // Must complete before terminated is forwarded: whichever of
           // exited/terminated reaches the SessionManager first strips the
           // other's handler, and shutdown() below tears down the client
@@ -768,6 +770,7 @@ export class DapProxyWorker {
         // hold this path behind the same drain barrier (issue #222).
         return this.enqueueTerminalSignal('dap_connection_closed', async () => {
           await this.waitForAdapterStdioDrain();
+          await this.waitForChildEventFlush();
           this.sendStatus('dap_connection_closed', { expected: this.isTerminationExpected() });
           this.shutdown();
         });
@@ -1591,6 +1594,46 @@ export class DapProxyWorker {
         clearTimeout(timer);
       }
     }
+  }
+
+  /**
+   * Drain the DAP client's child-session event chain before forwarding a
+   * terminal signal (issue #366): js-debug delivers debuggee output as CHILD
+   * session events, which are microtask-deferred through the CDP-bridge
+   * serialization chain. Forwarding terminated/exited ahead of that chain
+   * lets the SessionManager tear down its listeners while output is still
+   * queued — silently losing it (reliably so under Docker's slower
+   * scheduling). Bounded by the same 2s backstop as the stdio drain so a
+   * wedged chain cannot hang shutdown.
+   */
+  private async waitForChildEventFlush(): Promise<void> {
+    if (typeof this.dapClient?.flushChildEvents !== 'function') {
+      return;
+    }
+    const boundedFlush = async (): Promise<void> => {
+      const flush = this.dapClient?.flushChildEvents?.();
+      if (!flush) {
+        return;
+      }
+      let timer: NodeJS.Timeout | undefined;
+      const backstop = new Promise<void>(resolve => {
+        timer = setTimeout(resolve, 2000);
+      });
+      try {
+        await Promise.race([flush, backstop]);
+      } finally {
+        if (timer) {
+          clearTimeout(timer);
+        }
+      }
+    };
+    // Two rounds with a short settle: the parent session's terminated can
+    // arrive while child output is still UNREAD in the child socket (not on
+    // the chain yet). The settle lets those bytes be read and enqueued; the
+    // second flush drains them. Only paid by child-session adapters.
+    await boundedFlush();
+    await new Promise(resolve => setTimeout(resolve, 150));
+    await boundedFlush();
   }
 
   /**

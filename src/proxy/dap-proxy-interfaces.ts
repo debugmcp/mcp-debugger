@@ -173,6 +173,12 @@ export interface IDapClient {
    * MinimalDapClient (js-debug child sessions) implements it.
    */
   setExceptionBreakMode?(mode: 'uncaught' | 'all' | 'none'): void;
+  /**
+   * Resolves once all child-session events enqueued so far (output included)
+   * have been forwarded (issue #366). Optional: only MinimalDapClient
+   * (js-debug child sessions) implements it; absent means nothing to flush.
+   */
+  flushChildEvents?(): Promise<void>;
 }
 
 /**

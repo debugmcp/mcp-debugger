@@ -26,7 +26,8 @@ import {
   updateLldbStateOnEvent,
   isLldbInitialized,
   isLldbConnected,
-  getLldbDapClientBehavior
+  getLldbDapClientBehavior,
+  lldbShouldSuppressOutputEvent
 } from './lldb-policy-shared.js';
 
 export const CppAdapterPolicy: AdapterPolicy = {
@@ -45,6 +46,7 @@ export const CppAdapterPolicy: AdapterPolicy = {
   },
 
   normalizeStopReason: normalizeLldbStopReason,
+  shouldSuppressOutputEvent: lldbShouldSuppressOutputEvent,
 
   extractLocalVariables: extractLldbLocalVariables,
 

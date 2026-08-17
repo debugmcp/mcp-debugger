@@ -19,7 +19,8 @@ import {
   updateLldbStateOnEvent,
   isLldbInitialized,
   isLldbConnected,
-  getLldbDapClientBehavior
+  getLldbDapClientBehavior,
+  lldbShouldSuppressOutputEvent
 } from './lldb-policy-shared.js';
 
 export const RustAdapterPolicy: AdapterPolicy = {
@@ -53,6 +54,7 @@ export const RustAdapterPolicy: AdapterPolicy = {
    * LLDB-backed policy; see normalizeLldbStopReason for the full rules.
    */
   normalizeStopReason: normalizeLldbStopReason,
+  shouldSuppressOutputEvent: lldbShouldSuppressOutputEvent,
 
   /**
    * Extract local variables for Rust, filtering out special variables by default

@@ -146,6 +146,52 @@ export function extractLldbLocalVariables(
 }
 
 /**
+ * LLDB's own DWARF-parser diagnostics (issue #361). MinGW/g++-generated
+ * debug info routinely trips LLDB's DWARF parser into printing multi-line
+ * "error: ..." spew on stderr ("DIE has DW_AT_ranges ... range extraction
+ * failed", "DW_TAG_member '...' refers to type ... which extends beyond the
+ * bounds ..."), even though debugging then works perfectly. These are
+ * adapter internals, not debuggee output — filter them out of the captured
+ * output buffer the same way 'telemetry' events are.
+ *
+ * Patterns are anchored on DWARF-specific tokens (DIE / DW_AT_ / DW_TAG_ /
+ * "please file a bug") so genuine program stderr containing the word
+ * "error:" is never eaten.
+ */
+const LLDB_DWARF_NOISE_PATTERNS: RegExp[] = [
+  // "error: <module> [0x...]: DIE has DW_AT_ranges(...) attribute, but ..."
+  /^error:\s+.*\bDIE\b.*\bDW_AT_/,
+  // "error: <module> 0x...: DW_TAG_member '...' refers to type ... which extends beyond the bounds ..."
+  /^error:\s+.*\bDW_TAG_\w+\b/,
+  // Generic DWARF diagnostic shape: "error: <module> 0x...: ... DW_AT_..."
+  /^error:\s+\S+.*\bDW_(AT|TAG|FORM)_\w+/,
+  // Continuation lines of the multi-line DIE diagnostic (LLDB wraps it; the
+  // pieces can arrive trimmed or even as separate line-buffered events)
+  /\bplease file a bug and attach the file\b/,
+  /^start of this error message$/,
+  /\brange extraction failed\b/,
+  /\binvalid range list offset\b/,
+  /\bextends beyond the bounds of 0x[0-9a-f]+\b/
+];
+
+/**
+ * Suppress a DAP output event when it is purely LLDB DWARF-parser noise.
+ * Multi-line events are dropped only when EVERY non-empty line matches a
+ * noise pattern — mixed content always passes through untouched (never
+ * partially rewritten).
+ */
+export function lldbShouldSuppressOutputEvent(category: string, text: string): boolean {
+  if (category !== 'stderr' && category !== 'console') {
+    return false;
+  }
+  const lines = text.split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
+  if (lines.length === 0) {
+    return false;
+  }
+  return lines.every((line) => LLDB_DWARF_NOISE_PATTERNS.some((pattern) => pattern.test(line)));
+}
+
+/**
  * Validate that a CodeLLDB binary exists and answers --version with output
  * containing 'codelldb'.
  */

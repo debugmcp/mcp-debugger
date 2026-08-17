@@ -297,6 +297,63 @@ describe.skipIf(SKIP_DOCKER)('Docker: JavaScript Debugging Smoke Tests', () => {
     console.log('[Docker JS] ✅ All checks passed');
   }, 120000);  // Increased timeout for Docker operations
 
+  it('captures logpoint and program output on run-to-completion in Docker (issue #366)', async () => {
+    const hostScriptPath = path.join(ROOT, 'examples', 'javascript', 'simple_test.js');
+    const scriptPath = hostToContainerPath(hostScriptPath);
+
+    const createResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: { language: 'javascript', name: 'docker-js-logpoint' }
+    }));
+    expect(createResponse.sessionId).toBeDefined();
+    sessionId = createResponse.sessionId as string;
+
+    // Logpoint on the swap line: fires at full speed, no pause.
+    const bpResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'set_breakpoint',
+      arguments: { sessionId, file: scriptPath, line: 14, logMessage: 'LOGPOINT a={a}' }
+    }));
+    expect(bpResponse.success).toBe(true);
+
+    const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'start_debugging',
+      arguments: { sessionId, scriptPath, dapLaunchArgs: { stopOnEntry: false } }
+    }));
+    expect(startResponse.success).toBe(true);
+
+    // Wait for the program to run to completion.
+    let state = '';
+    for (let i = 0; i < 30; i++) {
+      const listResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'list_debug_sessions',
+        arguments: {}
+      }));
+      const sessions = (listResponse.sessions ?? []) as Array<{ id?: string; sessionId?: string; state: string }>;
+      const mine = sessions.find(s2 => (s2.id ?? s2.sessionId) === sessionId);
+      state = mine?.state ?? '';
+      if (state === 'stopped') break;
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    expect(state).toBe('stopped');
+
+    // Issue #366: BOTH the program's own stdout and the interpolated
+    // logpoint text must be captured — before the fix the container lost
+    // all of it (terminated outran the child-session output chain).
+    const outputResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'get_output',
+      arguments: { sessionId, since: 0, limit: 200 }
+    }));
+    const combined = ((outputResponse.entries ?? []) as Array<{ output: string }>)
+      .map(e => e.output).join('');
+    console.log('[Docker JS] Captured output:', JSON.stringify(combined));
+    expect(combined).toContain('Before swap');
+    expect(combined).toContain('After swap');
+    expect(combined).toContain('LOGPOINT a=');
+
+    await mcpClient!.callTool({ name: 'close_debug_session', arguments: { sessionId } });
+    sessionId = null;
+  }, 120000);
+
   it('should step into nested JavaScript frames in Docker', async () => {
     const hostScriptPath = path.join(ROOT, 'examples', 'javascript', 'mcp_target.js');
     const scriptPath = hostToContainerPath(hostScriptPath);

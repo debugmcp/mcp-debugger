@@ -274,7 +274,11 @@ export abstract class SessionManagerCore extends EventEmitter {
     // isRunning()=true, which would resurrect a stale mirror record.
     session.exposure = undefined;
     // Each launch/attach starts with a fresh output buffer (issue #218).
-    session.outputBuffer = new OutputRingBuffer();
+    // Closure-captured (issue #358): this launch's handlers write to THIS
+    // buffer instance, so an in-flight event from a previous run (still in a
+    // microtask/IPC queue when restart_debugging swapped buffers) can never
+    // land in the new launch's buffer and take an early seq.
+    const outputBuffer = session.outputBuffer = new OutputRingBuffer();
     // A new adapter instance has verified nothing yet: clear per-launch
     // breakpoint state so a relaunch reports honest verification (#238).
     for (const bp of session.breakpoints.values()) {
@@ -633,7 +637,7 @@ export abstract class SessionManagerCore extends EventEmitter {
         timestamp: Date.now()
       });
 
-      this.noteUnboundFunctionBreakpoints(session);
+      this.noteUnboundFunctionBreakpoints(session, outputBuffer);
       this._updateSessionState(session, SessionState.STOPPED);
 
       // Clean up listeners since proxy is gone
@@ -663,7 +667,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       if (typeof exitCode === 'number') {
         session.exitCode = exitCode;
       }
-      this.noteUnboundFunctionBreakpoints(session);
+      this.noteUnboundFunctionBreakpoints(session, outputBuffer);
       this._updateSessionState(session, SessionState.STOPPED);
 
       // Clean up listeners since proxy is gone
@@ -887,6 +891,20 @@ export abstract class SessionManagerCore extends EventEmitter {
       if (category === 'telemetry') {
         return;
       }
+      // Policy-declared adapter noise (issue #361 — e.g. LLDB DWARF-parser
+      // spew): dropped from the buffer but kept in debug logs. A policy
+      // lookup failure must never cost the user real output.
+      try {
+        const policy = this.sessionStore.selectPolicy(session.language);
+        if (policy.shouldSuppressOutputEvent?.(category, body.output)) {
+          this.logger.debug(
+            `[SessionManager] Suppressed adapter-noise output event for session ${sessionId} (${category}): ${body.output.slice(0, 200)}`
+          );
+          return;
+        }
+      } catch {
+        // keep the output
+      }
       // Redact-at-write (issue #237): one hook covers both buffer readers —
       // the get_output tool and the debug:// output resource. The original
       // text is deliberately not retained.
@@ -899,7 +917,9 @@ export abstract class SessionManagerCore extends EventEmitter {
           redacted = true;
         }
       }
-      const entry: SessionOutputEntry | undefined = session.outputBuffer?.push(
+      // Push to the closure-captured buffer, NOT session.outputBuffer — see
+      // the buffer construction above (issue #358).
+      const entry: SessionOutputEntry | undefined = outputBuffer.push(
         category,
         text,
         undefined,
@@ -927,7 +947,7 @@ export abstract class SessionManagerCore extends EventEmitter {
    * adapters too: never-bound at exit is a real signal even where
    * unverified-at-launch is by design.
    */
-  protected noteUnboundFunctionBreakpoints(session: ManagedSession): void {
+  protected noteUnboundFunctionBreakpoints(session: ManagedSession, outputBuffer?: OutputRingBuffer): void {
     const neverBound: string[] = [];
     for (const bp of session.functionBreakpoints?.values() ?? []) {
       if (bp.verified || bp.message) {
@@ -944,7 +964,9 @@ export abstract class SessionManagerCore extends EventEmitter {
     }
     if (neverBound.length > 0) {
       const names = neverBound.map((n) => `'${n}'`).join(', ');
-      const entry = session.outputBuffer?.push(
+      // Write to the launch's own buffer when provided (issue #358) — a
+      // restart may already have installed a fresh session.outputBuffer.
+      const entry = (outputBuffer ?? session.outputBuffer)?.push(
         'console',
         `[mcp-debugger] Warning: function breakpoint(s) never bound during this run: ${names}. The program never stopped there — check the symbol name(s).\n`
       );
