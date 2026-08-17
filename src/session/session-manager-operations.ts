@@ -24,6 +24,7 @@ import path from 'path';
 import { ProxyConfig } from '../proxy/proxy-config.js';
 import { MIRROR_EXPOSE_COMMAND, MIRROR_UNEXPOSE_COMMAND } from '../proxy/dap-proxy-interfaces.js';
 import { ErrorMessages } from '../utils/error-messages.js';
+import { checkLaunchToolchain } from '../utils/language-availability.js';
 import { resolveStatement } from '../utils/breakpoint-resolver.js';
 import { SessionManagerData } from './session-manager-data.js';
 import { CustomLaunchRequestArguments, DebugResult } from './session-manager-core.js';
@@ -506,6 +507,22 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       `Attempting to start debugging for session ${sessionId}, script: ${scriptPath}, dryRunSpawn: ${dryRunSpawn}, dapLaunchArgs:`,
       sanitizePayloadForLogging(dapLaunchArgs)
     );
+
+    // Fail fast when the adapter is known-unavailable (issue #360): consult
+    // the same toolchain probe list_supported_languages reports, BEFORE any
+    // state mutation or proxy teardown, so the caller gets the real reason
+    // instead of success-then-silence. Fails open when the probe can't tell.
+    const launchGate = await checkLaunchToolchain(
+      session.language,
+      this.adapterRegistry,
+      this.launchValidationCache,
+      this.logger
+    );
+    if (!launchGate.available) {
+      const error = ErrorMessages.launchUnavailable(session.language, launchGate.reason);
+      this.logger.warn(`[SessionManager] ${error}`);
+      return { success: false, state: session.state, error };
+    }
 
     if (session.proxyManager) {
       // Session-preserving teardown: closeSession here used to REMOVE the

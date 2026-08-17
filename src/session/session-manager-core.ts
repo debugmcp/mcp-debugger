@@ -8,6 +8,7 @@ import {
   AdapterPolicy, SessionOutputEntry, redactSecretsInString
 } from '@debugmcp/shared';
 import { isRedactionEnabled } from '../utils/redaction-mode.js';
+import { ValidationResultCache } from '../utils/language-availability.js';
 import { SessionStore, ManagedSession } from './session-store.js';
 import { OutputRingBuffer } from './output-buffer.js';
 import { DebugProtocol } from '@vscode/debugprotocol'; 
@@ -87,6 +88,13 @@ export abstract class SessionManagerCore extends EventEmitter {
   
   // WeakMap to store event handlers for cleanup
   protected sessionEventHandlers = new WeakMap<ManagedSession, Map<string, (...args: unknown[]) => void>>();
+
+  /**
+   * TTL cache for launch-gate toolchain probes (issue #360) — shares the
+   * semantics of the list_supported_languages cache so repeated
+   * start_debugging calls don't re-probe toolchains.
+   */
+  protected launchValidationCache = new ValidationResultCache();
 
   /**
    * Constructor with full dependency injection

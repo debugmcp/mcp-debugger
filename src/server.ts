@@ -44,8 +44,10 @@ import path from 'path';
 import { SimpleFileChecker, createSimpleFileChecker, FileExistenceResult } from './utils/simple-file-checker.js';
 import { LineReader, createLineReader } from './utils/line-reader.js';
 import { getDisabledLanguages, isLanguageDisabled } from './utils/language-config.js';
+import { ErrorMessages } from './utils/error-messages.js';
 import {
   computeModeAvailability,
+  checkLaunchToolchain,
   ValidationResultCache,
   LanguageModes
 } from './utils/language-availability.js';
@@ -1149,6 +1151,25 @@ export class DebugMcpServer {
               const allowInContainer = isContainer && requested === DebugLanguage.PYTHON;
               if (!allowInContainer && !supported.includes(lang)) {
                 throw new UnsupportedLanguageError(lang, supported);
+              }
+
+              // Fail fast when the adapter can't actually launch here (issue
+              // #360). Attach-style sessions (port provided) skip the launch
+              // gate: direct-connect attach may not need the local toolchain.
+              if (args.port === undefined) {
+                const launchGate = await checkLaunchToolchain(
+                  requested,
+                  this.getAdapterRegistry(),
+                  this.validationCache,
+                  this.logger
+                );
+                if (!launchGate.available) {
+                  result = { content: [{ type: 'text', text: JSON.stringify({
+                    success: false,
+                    error: ErrorMessages.launchUnavailable(requested, launchGate.reason)
+                  }) }] };
+                  break;
+                }
               }
 
               const sessionInfo = await this.createDebugSession({

@@ -119,6 +119,19 @@ export const ErrorMessages = {
     `debug server (e.g. rdbg --open, python -m debugpy --listen) and use attach_to_process.`,
 
   /**
+   * Error message for launches gated on a known-unavailable adapter (issue #360)
+   * Occurs when: create_debug_session/start_debugging target a language whose
+   * toolchain probe already reports unavailable — proceeding would "succeed"
+   * while silently running nothing
+   * Used in: src/session/session-manager-operations.ts, src/server.ts
+   * @param language - The session's language
+   * @param reason - The availability reason from the factory validation
+   */
+  launchUnavailable: (language: string, reason: string) =>
+    `Cannot start a '${language}' debug session: ${reason} ` +
+    `See list_supported_languages for per-mode availability.`,
+
+  /**
    * Reason strings for per-mode availability reporting in list_supported_languages
    * Used in: src/utils/language-availability.ts and tests
    */
