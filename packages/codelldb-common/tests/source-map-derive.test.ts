@@ -21,7 +21,10 @@ function hasGpp(): boolean {
   }
 }
 
-const GPP_AVAILABLE = hasGpp();
+// The derivation only ever runs inside Linux containers (MCP_CONTAINER);
+// the g++ fixtures are skipped on Windows where MinGW's 8.3 short paths
+// (C:\Users\RUNNER~1\...) make embedded-vs-fixture path comparison unstable.
+const GPP_AVAILABLE = hasGpp() && process.platform !== 'win32';
 
 describe('deriveSourceMapFromBinary', () => {
   let hostRoot: string;      // simulated host project root (embedded in DWARF)

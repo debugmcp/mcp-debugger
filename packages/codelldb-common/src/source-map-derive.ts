@@ -108,7 +108,7 @@ function splitSegments(p: string): { rootAnchor: string; sep: string; segments: 
   const rootAnchor = isWindowsStyle ? p.slice(0, 3) : '/';
   const segments = p
     .slice(rootAnchor.length)
-    .split(/[\\/]+/)
+    .split(/[\\/]/)
     .filter((s) => s.length > 0);
   return { rootAnchor, sep, segments };
 }
@@ -149,7 +149,10 @@ export function deriveSourceMapFromBinary(
       fs.closeSync(fd);
     }
 
-    const normalizedWorkspace = workspaceRoot.replace(/[\\/]+$/, '');
+    let normalizedWorkspace = workspaceRoot;
+    while (normalizedWorkspace.endsWith('/') || normalizedWorkspace.endsWith('\\')) {
+      normalizedWorkspace = normalizedWorkspace.slice(0, -1);
+    }
     const { absoluteSources, absoluteDirs, relativeSources } = extractPathStrings(buf);
     // mapping: hostPrefix -> { target, count }
     const mappings = new Map<string, { target: string; count: number }>();
@@ -221,7 +224,7 @@ export function deriveSourceMapFromBinary(
           if (!isDir(candidateDir)) continue;
           let matches = 0;
           for (const rel of relativeSources) {
-            if (isFile(path.join(candidateDir, ...rel.split(/[\\/]+/)))) {
+            if (isFile(path.join(candidateDir, ...rel.split(/[\\/]/).filter((seg) => seg.length > 0)))) {
               matches++;
             }
           }
@@ -237,7 +240,7 @@ export function deriveSourceMapFromBinary(
         if (!mapped) {
           let matches = 0;
           for (const rel of relativeSources) {
-            if (isFile(path.join(normalizedWorkspace, ...rel.split(/[\\/]+/)))) {
+            if (isFile(path.join(normalizedWorkspace, ...rel.split(/[\\/]/).filter((seg) => seg.length > 0)))) {
               matches++;
             }
           }
