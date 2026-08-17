@@ -12,6 +12,7 @@ import {
   IProxyProcess
 } from '@debugmcp/shared';
 import { IProcessManager, IChildProcess } from '@debugmcp/shared';
+import { OWNER_PID_ARG_PREFIX, SESSION_ID_ARG_PREFIX } from '../utils/proxy-orphan-reaper.js';
 
 /**
  * Proxy process adapter that adds proxy-specific functionality
@@ -404,7 +405,18 @@ export class ProxyProcessLauncherImpl implements IProxyProcessLauncher {
     env?: Record<string, string>
   ): IProxyProcess {
     const diagnosticFlags = ['--trace-uncaught', '--trace-exit'];
-    const args = [...diagnosticFlags, proxyScriptPath];
+    // Tag the worker so the startup reaper (proxy-orphan-reaper.ts) can find
+    // chains orphaned by a hard-killed server (issue #343). The markers MUST
+    // come after the script path: node then passes them through as the
+    // script's argv (which proxy-bootstrap.js ignores) instead of consuming
+    // them as node options.
+    const ownerPid = Number(process.env.MCP_DEBUGGER_MAIN_PID) || process.pid;
+    const args = [
+      ...diagnosticFlags,
+      proxyScriptPath,
+      `${OWNER_PID_ARG_PREFIX}${ownerPid}`,
+      `${SESSION_ID_ARG_PREFIX}${sessionId}`
+    ];
 
     // Build environment for proxy process. When no custom env is provided, filter test-related variables from process.env.
     const processEnv: Record<string, string> = {};

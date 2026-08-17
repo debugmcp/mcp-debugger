@@ -284,7 +284,7 @@ This architecture enables:
 1. **Process Isolation** - Each debug session gets its own proxy worker process. The target process behavior depends on mode: in launch mode, the proxy worker spawns the debug adapter which in turn launches the target; in attach mode, the target is an external process that the adapter connects to.
 2. **Path Validation** - Script paths validated before execution
 3. **Timeout Protection** - All operations have configurable timeouts
-4. **Resource Cleanup** - Automatic cleanup of orphaned processes
+4. **Resource Cleanup** - Automatic cleanup of orphaned processes, including two startup reapers that kill tagged debuggee JVMs (`src/utils/jvm-orphan-reaper.ts`) and proxy worker chains (`src/utils/proxy-orphan-reaper.ts`) whose owning server died without cleanup
 
 ## Performance Characteristics
 
