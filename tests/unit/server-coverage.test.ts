@@ -41,6 +41,9 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       startDebugging: vi.fn(),
       getVariables: vi.fn(),
       getStackTrace: vi.fn(),
+      getStackTraceDetailed: vi.fn().mockResolvedValue({
+        frames: [], totalFrameCount: 0, hiddenFrameCount: 0, allFramesInternal: false
+      }),
       getScopes: vi.fn(),
       continue: vi.fn(),
       stepOver: vi.fn(),
@@ -170,13 +173,16 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
         sessionLifecycle: SessionLifecycleState.ACTIVE,
         proxyManager: mockProxy
       });
-      mockSessionManager.getStackTrace.mockResolvedValue([{ id: 1, name: 'main', file: 'test.go', line: 10 }]);
+      mockSessionManager.getStackTraceDetailed.mockResolvedValue({
+        frames: [{ id: 1, name: 'main', file: 'test.go', line: 10 }],
+        totalFrameCount: 1, hiddenFrameCount: 0, allFramesInternal: false
+      });
 
       const result = await server.getStackTrace('test-session');
 
       expect(mockProxy.sendDapRequest).toHaveBeenCalledWith('threads', {});
-      expect(mockSessionManager.getStackTrace).toHaveBeenCalledWith('test-session', 5, false);
-      expect(result).toHaveLength(1);
+      expect(mockSessionManager.getStackTraceDetailed).toHaveBeenCalledWith('test-session', 5, false);
+      expect(result.frames).toHaveLength(1);
     });
 
     it('should throw when getStackTrace has no thread and threads request fails', async () => {

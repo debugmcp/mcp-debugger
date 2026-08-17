@@ -1040,6 +1040,85 @@ describe('SessionManager - DAP Operations', () => {
     });
   });
 
+  describe('Stack frame filtering fallback (issue #346)', () => {
+    const RUNTIME_FRAMES = [
+      { id: 1, name: 'runtime.gopark', line: 402, source: { path: '/usr/local/go/src/runtime/proc.go' } },
+      { id: 2, name: 'runtime.selectgo', line: 327, source: { path: '/usr/local/go/src/runtime/select.go' } },
+      { id: 3, name: 'main.worker', line: 12, source: { path: '/work/main.go' } }
+    ];
+
+    async function pausedSessionWithFrames(frames: unknown[]) {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+      await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+      dependencies.mockProxyManager.simulateStopped(1, 'entry');
+      dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+        if (command === 'stackTrace') {
+          return { success: true, body: { stackFrames: frames } };
+        }
+        return { success: true, body: {} };
+      });
+      return session;
+    }
+
+    function stubFilteringPolicy(keep: (frame: { file?: string }) => boolean) {
+      // Inject a filtering policy (like Go's) without needing a Go adapter in
+      // the unit-test registry — the fallback under test is policy-agnostic.
+      (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => ({
+        filterStackFrames: (frames: { file?: string }[], includeInternals: boolean) =>
+          includeInternals ? frames : frames.filter(keep)
+      });
+    }
+
+    it('reports hidden-frame counts when a policy filters internals', async () => {
+      const session = await pausedSessionWithFrames(RUNTIME_FRAMES);
+      stubFilteringPolicy(f => !(f.file ?? '').includes('/runtime/'));
+
+      const result = await sessionManager.getStackTraceDetailed(session.id);
+
+      expect(result.frames.map(f => f.name)).toEqual(['main.worker']);
+      expect(result.totalFrameCount).toBe(3);
+      expect(result.hiddenFrameCount).toBe(2);
+      expect(result.allFramesInternal).toBe(false);
+    });
+
+    it('keeps the top frame when every frame is filtered, instead of returning an empty stack', async () => {
+      const session = await pausedSessionWithFrames(RUNTIME_FRAMES.slice(0, 2));
+      stubFilteringPolicy(f => !(f.file ?? '').includes('/runtime/'));
+
+      const result = await sessionManager.getStackTraceDetailed(session.id);
+
+      expect(result.frames).toHaveLength(1);
+      expect(result.frames[0].name).toBe('runtime.gopark'); // top unfiltered frame, usable as a frameId anchor
+      expect(result.totalFrameCount).toBe(2);
+      expect(result.hiddenFrameCount).toBe(1);
+      expect(result.allFramesInternal).toBe(true);
+    });
+
+    it('includeInternals bypasses filtering and reports nothing hidden', async () => {
+      const session = await pausedSessionWithFrames(RUNTIME_FRAMES);
+      stubFilteringPolicy(f => !(f.file ?? '').includes('/runtime/'));
+
+      const result = await sessionManager.getStackTraceDetailed(session.id, undefined, true);
+
+      expect(result.frames).toHaveLength(3);
+      expect(result.hiddenFrameCount).toBe(0);
+      expect(result.allFramesInternal).toBe(false);
+    });
+
+    it('getStackTrace (array form) inherits the non-empty guarantee', async () => {
+      const session = await pausedSessionWithFrames(RUNTIME_FRAMES.slice(0, 2));
+      stubFilteringPolicy(() => false);
+
+      const frames = await sessionManager.getStackTrace(session.id);
+
+      expect(frames).toHaveLength(1);
+    });
+  });
+
   describe('Exception Breakpoints and Stop Detail (issue #220)', () => {
     it('threads breakOnExceptions into the ProxyConfig', async () => {
       const session = await sessionManager.createSession({
