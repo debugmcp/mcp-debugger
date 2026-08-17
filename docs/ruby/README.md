@@ -187,6 +187,35 @@ Breakpoints, conditional breakpoints, locals, and expression evaluation all work
 the pod exactly as they do locally. For a pod on a real cluster, the only difference is
 where `kubectl port-forward` points.
 
+### Attaching across a container boundary
+
+Attach sessions send breakpoint paths to the remote rdbg **verbatim** — rdbg checks them
+against the debug **target's** filesystem, not yours. When the debugger and the debuggee
+see the project at different paths (host mcp-debugger + containerized app, or a
+containerized mcp-debugger + host app), a path that is valid on your side can fail on the
+target with `<path> is not available`. That warning is topology, not breakage:
+
+- **Prefer target-side paths.** Set breakpoints using the path the debuggee sees
+  (`/app/app.rb` inside the container, as reported by `get_stack_trace`), not the path on
+  your machine.
+- **Or map paths with `localfsMap`.** rdbg accepts a `localfsMap` attach option
+  (`"remote_prefix:local_prefix"`, comma-separated for multiple pairs) that translates
+  paths between the two filesystems. Pass it through `attach_to_process`:
+
+  ```text
+  attach_to_process {
+    "sessionId": "...",
+    "host": "127.0.0.1",
+    "port": 12345,
+    "localfsMap": "/app:/home/you/project"
+  }
+  ```
+
+- **Reaching a host-side rdbg from a containerized mcp-debugger:** use
+  `host.docker.internal` as the attach host (add
+  `--add-host=host.docker.internal:host-gateway` on Linux Docker), and remember the
+  target-side rule still applies — the host rdbg needs host paths.
+
 ## Troubleshooting
 
 | Symptom | Likely cause / fix |

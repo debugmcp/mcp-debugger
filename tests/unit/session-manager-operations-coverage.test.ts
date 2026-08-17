@@ -454,9 +454,69 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       // Error is caught and logged, breakpoint is still created but unverified
       const { breakpoint: result } = await operations.setBreakpoint('test-session', { file: 'test.py', line: 10 });
-      
+
       expect(result.verified).toBe(false);
       expect(mockLogger.error).toHaveBeenCalled();
+    });
+
+    describe('ruby attach live-sync warning guidance (#357)', () => {
+      const RDBG_ERROR = new Error('/host/path/app.rb is not available');
+      const GUIDANCE = /attach sessions send breakpoint paths to the remote debugger verbatim/i;
+
+      it('appends topology guidance for a ruby attach session when rdbg rejects the path', async () => {
+        mockSession.language = 'ruby';
+        mockSession.attachMode = true;
+        mockSession.state = SessionState.PAUSED;
+        mockProxyManager.sendDapRequest.mockRejectedValue(RDBG_ERROR);
+
+        const { warning } = await operations.setBreakpoint('test-session', { file: '/host/path/app.rb', line: 5 });
+
+        expect(warning).toContain('live sync failed');
+        expect(warning).toContain('is not available');
+        expect(warning).toMatch(GUIDANCE);
+        expect(warning).toContain('localfsMap');
+      });
+
+      it('does not append guidance for a ruby launch session', async () => {
+        mockSession.language = 'ruby';
+        mockSession.attachMode = false;
+        mockSession.state = SessionState.PAUSED;
+        mockProxyManager.sendDapRequest.mockRejectedValue(RDBG_ERROR);
+
+        const { warning } = await operations.setBreakpoint('test-session', { file: '/host/path/app.rb', line: 5 });
+
+        expect(warning).toContain('live sync failed');
+        expect(warning).not.toMatch(GUIDANCE);
+      });
+
+      it('does not append guidance for other languages or other errors', async () => {
+        mockSession.language = 'python';
+        mockSession.attachMode = true;
+        mockSession.state = SessionState.PAUSED;
+        mockProxyManager.sendDapRequest.mockRejectedValue(RDBG_ERROR);
+
+        const { warning: pyWarning } = await operations.setBreakpoint('test-session', { file: 'a.py', line: 5 });
+        expect(pyWarning).not.toMatch(GUIDANCE);
+
+        mockSession.language = 'ruby';
+        mockProxyManager.sendDapRequest.mockRejectedValue(new Error('Connection lost'));
+        const { warning: otherWarning } = await operations.setBreakpoint('test-session', { file: 'a.rb', line: 5 });
+        expect(otherWarning).toContain('live sync failed');
+        expect(otherWarning).not.toMatch(GUIDANCE);
+      });
+
+      it('appends the same guidance on the function-breakpoint sync path', async () => {
+        mockSession.language = 'ruby';
+        mockSession.attachMode = true;
+        mockSession.state = SessionState.PAUSED;
+        mockSession.functionBreakpoints = new Map();
+        mockProxyManager.sendDapRequest.mockRejectedValue(RDBG_ERROR);
+
+        const { warning } = await operations.setFunctionBreakpoint('test-session', { functionName: 'MyClass#run' });
+
+        expect(warning).toContain('live sync failed');
+        expect(warning).toMatch(GUIDANCE);
+      });
     });
   });
 

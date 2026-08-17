@@ -28,6 +28,12 @@ vi.mock('../src/utils/rust-utils.js', async (importOriginal) => ({
   getCargoVersion: vi.fn(async () => 'cargo 1.99.0'),
   getRustHostTriple: vi.fn(async () => 'x86_64-unknown-linux-gnu')
 }));
+vi.mock('@debugmcp/codelldb-common', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  deriveSourceMapFromBinary: vi.fn(() => ({}))
+}));
+
+import { deriveSourceMapFromBinary } from '@debugmcp/codelldb-common';
 
 // Mock dependencies
 const mockDependencies: AdapterDependencies = {
@@ -264,6 +270,55 @@ describe('RustDebugAdapter', () => {
       });
 
       expect(transformed.terminal).toBe('integrated');
+    });
+
+    describe('container sourceMap derivation (#363)', () => {
+      it('injects a derived sourceMap for a prebuilt binary in container mode', async () => {
+        vi.stubEnv('MCP_CONTAINER', 'true');
+        vi.mocked(deriveSourceMapFromBinary).mockReturnValue({
+          '/home/host/proj': '/workspace'
+        });
+        try {
+          const transformed = await adapter.transformLaunchConfig({
+            program: './target/debug/myapp',
+            cwd: '/project'
+          });
+
+          expect(deriveSourceMapFromBinary).toHaveBeenCalledWith(
+            path.resolve('/project', './target/debug/myapp'),
+            '/workspace'
+          );
+          expect(transformed.sourceMap).toEqual({ '/home/host/proj': '/workspace' });
+        } finally {
+          vi.unstubAllEnvs();
+        }
+      });
+
+      it('skips derivation when the caller supplies sourceMap entries', async () => {
+        vi.stubEnv('MCP_CONTAINER', 'true');
+        try {
+          const transformed = await adapter.transformLaunchConfig({
+            program: './target/debug/myapp',
+            cwd: '/project',
+            sourceMap: { '/custom': '/workspace' }
+          });
+
+          expect(deriveSourceMapFromBinary).not.toHaveBeenCalled();
+          expect(transformed.sourceMap).toEqual({ '/custom': '/workspace' });
+        } finally {
+          vi.unstubAllEnvs();
+        }
+      });
+
+      it('skips derivation outside container mode', async () => {
+        const transformed = await adapter.transformLaunchConfig({
+          program: './target/debug/myapp',
+          cwd: '/project'
+        });
+
+        expect(deriveSourceMapFromBinary).not.toHaveBeenCalled();
+        expect(transformed.sourceMap).toEqual({});
+      });
     });
   });
   

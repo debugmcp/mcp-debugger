@@ -15,7 +15,8 @@ vi.mock('@debugmcp/codelldb-common', async (importOriginal) => ({
   resolveCodeLLDBExecutable: vi.fn(),
   resolveCodeLLDBExecutableSyncImpl: vi.fn(),
   getCodeLLDBVersion: vi.fn(),
-  detectBinaryFormat: vi.fn()
+  detectBinaryFormat: vi.fn(),
+  deriveSourceMapFromBinary: vi.fn()
 }));
 
 vi.mock('../src/utils/compile-utils.js', async (importOriginal) => ({
@@ -30,7 +31,8 @@ import {
   resolveCodeLLDBExecutable,
   resolveCodeLLDBExecutableSyncImpl,
   getCodeLLDBVersion,
-  detectBinaryFormat
+  detectBinaryFormat,
+  deriveSourceMapFromBinary
 } from '@debugmcp/codelldb-common';
 import {
   findCompiler,
@@ -78,6 +80,7 @@ describe('CppDebugAdapter', () => {
     vi.mocked(findAnyCompiler).mockReset();
     vi.mocked(needsRecompile).mockReset();
     vi.mocked(compileSourceFile).mockReset();
+    vi.mocked(deriveSourceMapFromBinary).mockReset().mockReturnValue({});
     dependencies = createDependencies();
     adapter = new CppDebugAdapter(dependencies);
   });
@@ -258,6 +261,100 @@ describe('CppDebugAdapter', () => {
     it('throws SCRIPT_NOT_FOUND when no program is given', async () => {
       await expect(adapter.transformLaunchConfig({} as never)).rejects.toMatchObject({
         code: 'SCRIPT_NOT_FOUND'
+      });
+    });
+
+    describe('container sourceMap derivation (#363)', () => {
+      it('injects a derived sourceMap for a prebuilt binary in container mode', async () => {
+        vi.stubEnv('MCP_CONTAINER', 'true');
+        vi.mocked(deriveSourceMapFromBinary).mockReturnValue({
+          '/home/host/proj': '/workspace'
+        });
+        try {
+          const result = await adapter.transformLaunchConfig({
+            program: 'build/app',
+            cwd: '/work'
+          } as never);
+
+          expect(deriveSourceMapFromBinary).toHaveBeenCalledWith(
+            path.resolve('/work', 'build/app'),
+            '/workspace'
+          );
+          expect(result.sourceMap).toEqual({ '/home/host/proj': '/workspace' });
+        } finally {
+          vi.unstubAllEnvs();
+        }
+      });
+
+      it('respects MCP_WORKSPACE_ROOT for derivation', async () => {
+        vi.stubEnv('MCP_CONTAINER', 'true');
+        vi.stubEnv('MCP_WORKSPACE_ROOT', '/mnt/project');
+        try {
+          await adapter.transformLaunchConfig({ program: 'build/app', cwd: '/work' } as never);
+
+          expect(deriveSourceMapFromBinary).toHaveBeenCalledWith(
+            path.resolve('/work', 'build/app'),
+            '/mnt/project'
+          );
+        } finally {
+          vi.unstubAllEnvs();
+        }
+      });
+
+      it('skips derivation when the caller supplies sourceMap entries', async () => {
+        vi.stubEnv('MCP_CONTAINER', 'true');
+        try {
+          const result = await adapter.transformLaunchConfig({
+            program: 'build/app',
+            cwd: '/work',
+            sourceMap: { '/custom': '/workspace' }
+          } as never);
+
+          expect(deriveSourceMapFromBinary).not.toHaveBeenCalled();
+          expect(result.sourceMap).toEqual({ '/custom': '/workspace' });
+        } finally {
+          vi.unstubAllEnvs();
+        }
+      });
+
+      it('skips derivation outside container mode', async () => {
+        const result = await adapter.transformLaunchConfig({
+          program: 'build/app',
+          cwd: '/work'
+        } as never);
+
+        expect(deriveSourceMapFromBinary).not.toHaveBeenCalled();
+        expect(result.sourceMap).toEqual({});
+      });
+
+      it('skips derivation when the binary was compiled at launch', async () => {
+        vi.stubEnv('MCP_CONTAINER', 'true');
+        const src = path.resolve('/work/hello.cpp');
+        const out = getDefaultOutputPath(src, process.platform);
+        vi.mocked(needsRecompile).mockResolvedValue(true);
+        vi.mocked(compileSourceFile).mockResolvedValue({ success: true, binaryPath: out });
+        try {
+          await adapter.transformLaunchConfig({ program: src } as never);
+
+          expect(deriveSourceMapFromBinary).not.toHaveBeenCalled();
+        } finally {
+          vi.unstubAllEnvs();
+        }
+      });
+
+      it('leaves sourceMap empty when derivation finds nothing', async () => {
+        vi.stubEnv('MCP_CONTAINER', 'true');
+        vi.mocked(deriveSourceMapFromBinary).mockReturnValue({});
+        try {
+          const result = await adapter.transformLaunchConfig({
+            program: 'build/app',
+            cwd: '/work'
+          } as never);
+
+          expect(result.sourceMap).toEqual({});
+        } finally {
+          vi.unstubAllEnvs();
+        }
       });
     });
   });

@@ -1302,8 +1302,24 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         error
       );
       const message = error instanceof Error ? error.message : String(error);
-      return { synced: false, warning: `Breakpoint state updated, but live sync failed: ${message}` };
+      return { synced: false, warning: this.buildLiveSyncWarning(session, message) };
     }
+  }
+
+  /**
+   * Compose the live-sync failure warning. For ruby attach sessions whose
+   * error is rdbg's "<path> is not available", append topology guidance
+   * (issue #357): the path was rejected on the debug TARGET's filesystem
+   * (e.g. container server + host rdbg, or vice versa) — expected behavior,
+   * not a debugger fault. Same hint-append style as the netcoredbg
+   * no-symbols guidance above.
+   */
+  private buildLiveSyncWarning(session: ManagedSession, message: string): string {
+    let warning = `Breakpoint state updated, but live sync failed: ${message}`;
+    if (session.attachMode && session.language === 'ruby' && /is not available/.test(message)) {
+      warning += ' (Hint: attach sessions send breakpoint paths to the remote debugger verbatim; the path must be valid on the debug target\'s filesystem. Use target-side paths, or pass localfsMap in the attach config to map local paths to remote ones.)';
+    }
+    return warning;
   }
 
   /**
@@ -1405,7 +1421,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         error
       );
       const message = error instanceof Error ? error.message : String(error);
-      return { synced: false, warning: `Breakpoint state updated, but live sync failed: ${message}` };
+      return { synced: false, warning: this.buildLiveSyncWarning(session, message) };
     }
   }
 
