@@ -33,6 +33,7 @@ import { findNode } from './utils/executable-resolver.js';
 import { detectBinary } from './utils/typescript-detector.js';
 import { determineOutFiles, isESMProject, hasTsConfigPaths } from './utils/config-transformer.js';
 import { JsDebugLaunchBarrier } from './utils/js-debug-launch-barrier.js';
+import { jsDebugCandidatePaths } from './utils/js-debug-resolver.js';
 
 export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapter {
   readonly language = 'javascript' as unknown as DebugLanguage;
@@ -152,16 +153,9 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       // ESM-safe resolution of vendored js-debug adapter path
       const __filename = fileURLToPath(import.meta.url);
       const __dirname = path.dirname(__filename);
-      
-      // Try multiple possible locations
-      const possiblePaths = [
-        path.resolve(__dirname, '../vendor/js-debug/vsDebugServer.cjs'),
-        path.resolve(__dirname, '../vendor/js-debug/vsDebugServer.js'),
-        // In bundled npx distribution
-        path.resolve(__dirname, 'vendor/js-debug/vsDebugServer.cjs'),
-        path.resolve(__dirname, 'vendor/js-debug/vsDebugServer.js'),
-      ];
-      
+
+      const possiblePaths = jsDebugCandidatePaths(__dirname);
+
       let found = false;
       for (const adapterPath of possiblePaths) {
         if (await this.dependencies.fileSystem.pathExists(adapterPath)) {
@@ -241,19 +235,9 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     // ESM-safe resolution of vendored js-debug adapter path
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);
-    
-    // Try multiple possible locations for the vendored js-debug
-    const possiblePaths = [
-      path.resolve(__dirname, '../vendor/js-debug/vsDebugServer.cjs'),
-      path.resolve(__dirname, '../vendor/js-debug/vsDebugServer.js'),
-      // In bundled npx distribution
-      path.resolve(__dirname, 'vendor/js-debug/vsDebugServer.cjs'),
-      path.resolve(__dirname, 'vendor/js-debug/vsDebugServer.js'),
-      // In container builds, might be in different locations
-      '/app/packages/adapter-javascript/vendor/js-debug/vsDebugServer.cjs',
-      '/app/node_modules/@debugmcp/adapter-javascript/vendor/js-debug/vsDebugServer.cjs'
-    ];
-    
+
+    const possiblePaths = jsDebugCandidatePaths(__dirname);
+
     const adapterPath = possiblePaths.find(p => this.dependencies.fileSystem.existsSync(p));
 
     if (!adapterPath) {

@@ -38,10 +38,13 @@ describe('SessionManager - State Machine Integrity', () => {
         executablePath: 'python'
       });
     
-    // CREATED → INITIALIZING
+    // CREATED → INITIALIZING. The transition is no longer synchronous: the
+    // issue-#360 launch gate awaits an availability probe first, so flush
+    // microtasks (not timers) before observing the state.
     const startPromise = sessionManager.startDebugging(session.id, 'test.py');
+    await Promise.resolve().then(() => {}).then(() => {}).then(() => {});
     expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.INITIALIZING);
-    
+
     await vi.runAllTimersAsync();
     await startPromise;
     

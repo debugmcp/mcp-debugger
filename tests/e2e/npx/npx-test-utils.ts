@@ -415,9 +415,13 @@ export async function verifyPackageContents(tarballPath: string): Promise<{
     // List tarball contents
     const { stdout } = await execAsync(`tar -tzf "${tarballPath}"`);
     const contents = stdout.toLowerCase();
-    
-    // Check for adapter-related files in the bundle
-    const hasJavaScript = contents.includes('javascript') || contents.includes('js-debug');
+    const entries = new Set(stdout.split('\n').map((line) => line.trim()).filter(Boolean));
+
+    // Check for adapter payloads at their exact bundled paths — substring
+    // checks passed even when the payload landed somewhere unreachable (#354)
+    const hasJavaScript =
+      entries.has('package/dist/vendor/js-debug/vsDebugServer.cjs') ||
+      entries.has('package/dist/vendor/js-debug/vsDebugServer.js');
     const hasPython = contents.includes('python') || contents.includes('debugpy');
     const hasMock = contents.includes('mock');
     

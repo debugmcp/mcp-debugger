@@ -44,8 +44,10 @@ import path from 'path';
 import { SimpleFileChecker, createSimpleFileChecker, FileExistenceResult } from './utils/simple-file-checker.js';
 import { LineReader, createLineReader } from './utils/line-reader.js';
 import { getDisabledLanguages, isLanguageDisabled } from './utils/language-config.js';
+import { ErrorMessages } from './utils/error-messages.js';
 import {
   computeModeAvailability,
+  checkLaunchToolchain,
   ValidationResultCache,
   LanguageModes
 } from './utils/language-availability.js';
@@ -1149,6 +1151,51 @@ export class DebugMcpServer {
               const allowInContainer = isContainer && requested === DebugLanguage.PYTHON;
               if (!allowInContainer && !supported.includes(lang)) {
                 throw new UnsupportedLanguageError(lang, supported);
+              }
+
+              // Fail fast when the adapter can't do ANYTHING here (issue
+              // #360). A failed launch-toolchain probe alone must not block
+              // session creation: the caller may intend to attach (with or
+              // without a port at create time), and direct-connect attach
+              // needs no local toolchain — e.g. ruby attach works in the
+              // container image without a launch toolchain. Launch itself is
+              // still gated at start_debugging.
+              {
+                const launchGate = await checkLaunchToolchain(
+                  requested,
+                  this.getAdapterRegistry(),
+                  this.validationCache,
+                  this.logger
+                );
+                if (!launchGate.available) {
+                  const registry = this.getAdapterRegistry() as unknown as {
+                    getFactory?: (language: string) => Promise<{ getMetadata?: () => { modes?: { attach?: string } } } | undefined>;
+                  } | undefined;
+                  const attachMechanism = await (async () => {
+                    try {
+                      const factory = typeof registry?.getFactory === 'function'
+                        ? await registry.getFactory(requested)
+                        : undefined;
+                      return factory?.getMetadata?.().modes?.attach ?? 'none';
+                    } catch {
+                      return 'none';
+                    }
+                  })();
+                  // 'direct-connect' attach runs inside the debuggee — usable
+                  // even when the local toolchain probe failed. 'spawn' attach
+                  // shares the failing toolchain; 'none' has no attach at all.
+                  if (attachMechanism !== 'direct-connect') {
+                    result = { content: [{ type: 'text', text: JSON.stringify({
+                      success: false,
+                      error: ErrorMessages.launchUnavailable(requested, launchGate.reason)
+                    }) }] };
+                    break;
+                  }
+                  this.logger.warn(
+                    `[Server] create_debug_session(${requested}): launch toolchain unavailable (${launchGate.reason}); ` +
+                      `allowing session creation because direct-connect attach remains usable.`
+                  );
+                }
               }
 
               const sessionInfo = await this.createDebugSession({

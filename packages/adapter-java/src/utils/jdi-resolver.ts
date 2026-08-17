@@ -25,6 +25,9 @@ export function resolveJdiBridgeClassDir(): string | null {
     path.resolve(__dirname, '..', 'java', 'out'),
     // From compiled workspace distribution (dist/packages/adapter-java/src)
     path.resolve(__dirname, '..', '..', '..', '..', 'packages', 'adapter-java', 'java', 'out'),
+    // Bundled npx CLI: every module shares dist/ as __dirname, and the bridge
+    // is copied to dist/packages/adapter-java/java by bundle-cli.js (#354)
+    path.resolve(__dirname, 'packages', 'adapter-java', 'java', 'out'),
     // Fallback: workspace-relative from CWD
     path.resolve(process.cwd(), 'packages', 'adapter-java', 'java', 'out'),
   ];
@@ -57,6 +60,8 @@ function resolveJdiBridgeSourceDir(): string | null {
     path.resolve(__dirname, '..', '..', 'java'),
     path.resolve(__dirname, '..', 'java'),
     path.resolve(__dirname, '..', '..', '..', '..', 'packages', 'adapter-java', 'java'),
+    // Bundled npx CLI layout (see resolveJdiBridgeClassDir)
+    path.resolve(__dirname, 'packages', 'adapter-java', 'java'),
     path.resolve(process.cwd(), 'packages', 'adapter-java', 'java'),
   ];
 
@@ -114,7 +119,9 @@ export function ensureJdiBridgeCompiled(): string | null {
       // not found
     }
   }
-  if (!javac) return null;
+  // No compiler, or compilation fails: a cached (possibly stale) class beats
+  // nothing — e.g. a read-only global npm install dir where javac can't write.
+  if (!javac) return existing;
 
   // Compile
   try {
@@ -126,7 +133,7 @@ export function ensureJdiBridgeCompiled(): string | null {
     });
     return outDir;
   } catch {
-    return null;
+    return existing;
   }
 }
 
