@@ -151,6 +151,36 @@ describe('set_breakpoint statement anchors (#271)', () => {
     expect(mockSessionManager.setBreakpoint).not.toHaveBeenCalled();
   });
 
+  it('resolves a distinctive substring when no whole line matches (#367)', async () => {
+    const result = await callSetBreakpoint({ statement: 'return' });
+
+    expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
+      'test-session',
+      expect.objectContaining({
+        line: 6,
+        anchor: { statement: 'return' }
+      })
+    );
+    const content = JSON.parse(result.content[0].text);
+    expect(content.success).toBe(true);
+    expect(content.line).toBe(6);
+  });
+
+  it('errors on ambiguous substring matches, listing each match (#367)', async () => {
+    let thrown: Error | undefined;
+    try {
+      await callSetBreakpoint({ statement: 'sum(prices)' });
+    } catch (error) {
+      thrown = error as Error;
+    }
+
+    expect(thrown).toBeDefined();
+    expect(thrown!.message).toContain('matches 2 lines');
+    expect(thrown!.message).toContain('2: total = sum(prices)');
+    expect(thrown!.message).toContain('5: total = sum(prices)');
+    expect(mockSessionManager.setBreakpoint).not.toHaveBeenCalled();
+  });
+
   it('rejects blank or comment anchors', async () => {
     await expect(
       callSetBreakpoint({ statement: '# just a comment' })

@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
-import { DebugLanguage, SessionState } from '@debugmcp/shared';
+import { DebugLanguage, SessionState, RustAdapterPolicy } from '@debugmcp/shared';
 import { createMockDependencies } from './session-manager-test-utils.js';
 import { ErrorMessages } from '../../../../src/utils/error-messages.js';
 import { ProxyNotRunningError } from '../../../../src/errors/debug-errors.js';
@@ -1116,6 +1116,51 @@ describe('SessionManager - DAP Operations', () => {
       const frames = await sessionManager.getStackTrace(session.id);
 
       expect(frames).toHaveLength(1);
+    });
+
+    it('all-internal LLDB stack (issue #369): rust policy filter engages, first-frame fallback annotates', async () => {
+      // A rust program paused inside a sleep: every frame is LLDB/libc
+      // internal. The real RustAdapterPolicy must classify them all as
+      // internal, and the central #346 fallback must keep the top frame
+      // and flag allFramesInternal instead of returning an empty stack.
+      const LLDB_INTERNAL_FRAMES = [
+        { id: 1, name: '__GI___clock_nanosleep', line: 78, source: { path: '../sysdeps/unix/sysv/linux/clock_nanosleep.c' } },
+        { id: 2, name: '@___lldb_unnamed_symbol3688', line: 0, source: undefined },
+        { id: 3, name: '__libc_start_main', line: 0, source: undefined },
+        { id: 4, name: '_start', line: 0, source: undefined }
+      ];
+      const session = await pausedSessionWithFrames(LLDB_INTERNAL_FRAMES);
+      (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => RustAdapterPolicy;
+
+      const result = await sessionManager.getStackTraceDetailed(session.id);
+
+      expect(result.frames).toHaveLength(1);
+      expect(result.frames[0].name).toBe('__GI___clock_nanosleep'); // top unfiltered frame kept as anchor
+      expect(result.totalFrameCount).toBe(4);
+      expect(result.hiddenFrameCount).toBe(3);
+      expect(result.allFramesInternal).toBe(true);
+
+      // includeInternals still surfaces the full stack.
+      const unfiltered = await sessionManager.getStackTraceDetailed(session.id, undefined, true);
+      expect(unfiltered.frames).toHaveLength(4);
+      expect(unfiltered.allFramesInternal).toBe(false);
+    });
+
+    it('mixed LLDB stack (issue #369): rust policy hides internals, keeps user frames', async () => {
+      const MIXED_FRAMES = [
+        { id: 1, name: 'pause_test::busy', line: 7, source: { path: '/work/src/main.rs' } },
+        { id: 2, name: 'pause_test::main', line: 15, source: { path: '/work/src/main.rs' } },
+        { id: 3, name: '__libc_start_main', line: 0, source: undefined },
+        { id: 4, name: '_start', line: 0, source: undefined }
+      ];
+      const session = await pausedSessionWithFrames(MIXED_FRAMES);
+      (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => RustAdapterPolicy;
+
+      const result = await sessionManager.getStackTraceDetailed(session.id);
+
+      expect(result.frames.map(f => f.name)).toEqual(['pause_test::busy', 'pause_test::main']);
+      expect(result.hiddenFrameCount).toBe(2);
+      expect(result.allFramesInternal).toBe(false);
     });
   });
 
