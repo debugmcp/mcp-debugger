@@ -625,7 +625,7 @@ describe('Server Language Discovery Tests', () => {
       expect(mockSessionManager.createSession).toHaveBeenCalled();
     });
 
-    it('skips the launch gate for attach-style sessions (port provided) (issue #360)', async () => {
+    it('allows session creation despite a failed launch probe when direct-connect attach is usable (issue #360)', async () => {
       debugServer = new DebugMcpServer();
       const { callToolHandler } = getToolHandlers(mockServer);
 
@@ -637,20 +637,43 @@ describe('Server Language Discovery Tests', () => {
       mockSessionManager.createSession = vi.fn().mockResolvedValue({
         id: 'session-360-attach', name: 'test-session', language: 'python'
       });
-      mockSessionManager.attachToProcess = vi.fn().mockResolvedValue({ success: true, state: 'paused' });
+
+      // No port at create time — the caller may attach later, and
+      // direct-connect attach does not need the launch toolchain.
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'create_debug_session',
+          arguments: { language: 'python', name: 'test-session' }
+        }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      expect(mockSessionManager.createSession).toHaveBeenCalled();
+    });
+
+    it('still fails creation when launch is unavailable and attach is spawn-based (issue #360)', async () => {
+      debugServer = new DebugMcpServer();
+      const { callToolHandler } = getToolHandlers(mockServer);
+
+      mockAdapterRegistry.getFactory = vi.fn().mockResolvedValue({
+        validate: vi.fn().mockResolvedValue({ valid: false, errors: ['no toolchain'], warnings: [] }),
+        getMetadata: () => ({ modes: { launch: true, attach: 'spawn' } })
+      });
+      mockSessionManager.createSession = vi.fn();
 
       const result = await callToolHandler({
         method: 'tools/call',
         params: {
           name: 'create_debug_session',
-          arguments: { language: 'python', name: 'test-session', port: 5678 }
+          arguments: { language: 'python', name: 'test-session' }
         }
       });
 
       const content = JSON.parse(result.content[0].text);
-      expect(validate).not.toHaveBeenCalled();
-      expect(content.success).toBe(true);
-      expect(mockSessionManager.createSession).toHaveBeenCalled();
+      expect(content.success).toBe(false);
+      expect(mockSessionManager.createSession).not.toHaveBeenCalled();
     });
   });
 
