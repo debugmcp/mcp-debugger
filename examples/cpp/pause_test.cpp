@@ -3,8 +3,16 @@
 #include <chrono>
 #include <iostream>
 #include <thread>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 
 int main() {
+#ifdef __linux__
+    // Yama ptrace_scope=1 only lets ancestors attach; the attach tests spawn
+    // this process outside the debugger's process tree, so opt in to any tracer.
+    prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY, 0, 0, 0);
+#endif
     long long counter = 0;
     std::cout << "PAUSE_TEST_START" << std::endl;
     while (true) {

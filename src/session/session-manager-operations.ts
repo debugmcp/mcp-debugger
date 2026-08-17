@@ -2560,9 +2560,33 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         let threads: DebugProtocol.Thread[] | undefined;
         let lastFailure = 'no threads response received';
 
+        // Some adapters reject the attach only after reporting themselves
+        // configured (CodeLLDB does this for e.g. ptrace EPERM). The proxy
+        // then dies mid-verify and every remaining 'threads' poll would throw
+        // a generic "Proxy not initialized", masking the real error — so latch
+        // the first proxy error/exit as the failure and stop polling.
+        let proxyGone = false;
+        const onProxyError = (err: Error): void => {
+          if (!proxyGone) {
+            proxyGone = true;
+            lastFailure = err.message;
+          }
+        };
+        const onProxyExit = (code: number | null, signal?: string): void => {
+          if (!proxyGone) {
+            proxyGone = true;
+            lastFailure = `debug adapter exited during attach verification (code=${code}${signal ? `, signal=${signal}` : ''})`;
+          }
+        };
+        proxyManager.on('error', onProxyError);
+        proxyManager.on('exit', onProxyExit);
+
         const requestThreads = async (): Promise<void> => {
           const remainingMs = Math.max(deadline - Date.now(), 1);
           const threadsResponse = await this.sendThreadsRequestBounded(proxyManager, remainingMs);
+          if (proxyGone) {
+            return;
+          }
           if (threadsResponse?.success === false) {
             lastFailure = threadsResponse.message || `'threads' request failed`;
             return;
@@ -2575,30 +2599,41 @@ export abstract class SessionManagerOperations extends SessionManagerData {
           }
         };
 
-        // First discovery attempt.
         try {
-          await requestThreads();
-        } catch (err) {
-          lastFailure = err instanceof Error ? err.message : String(err);
-          this.logger.warn(`[SessionManager] Initial thread discovery for attach failed: ${lastFailure}`);
-        }
-
-        // Retry until the deadline if the debugger has not reported threads yet.
-        while (!threads && Date.now() < deadline) {
-          const sleepMs = Math.min(pollIntervalMs, Math.max(deadline - Date.now(), 1));
-          await new Promise((resolve) => setTimeout(resolve, sleepMs));
-          if (Date.now() >= deadline) {
-            break;
-          }
+          // First discovery attempt.
           try {
             await requestThreads();
           } catch (err) {
-            lastFailure = err instanceof Error ? err.message : String(err);
+            if (!proxyGone) {
+              lastFailure = err instanceof Error ? err.message : String(err);
+            }
+            this.logger.warn(`[SessionManager] Initial thread discovery for attach failed: ${lastFailure}`);
           }
+
+          // Retry until the deadline if the debugger has not reported threads yet.
+          while (!threads && !proxyGone && Date.now() < deadline) {
+            const sleepMs = Math.min(pollIntervalMs, Math.max(deadline - Date.now(), 1));
+            await new Promise((resolve) => setTimeout(resolve, sleepMs));
+            if (proxyGone || Date.now() >= deadline) {
+              break;
+            }
+            try {
+              await requestThreads();
+            } catch (err) {
+              if (!proxyGone) {
+                lastFailure = err instanceof Error ? err.message : String(err);
+              }
+            }
+          }
+        } finally {
+          proxyManager.removeListener('error', onProxyError);
+          proxyManager.removeListener('exit', onProxyExit);
         }
 
         if (!threads) {
-          const reason = ErrorMessages.attachVerifyFailed(verifyTimeoutMs, lastFailure);
+          const reason = proxyGone
+            ? ErrorMessages.attachAdapterFailed(lastFailure)
+            : ErrorMessages.attachVerifyFailed(verifyTimeoutMs, lastFailure);
           this.logger.error(`[SessionManager] ${reason} — tearing down proxy for session ${sessionId}`);
           // Tear down the proxy using the same mechanics as closeSession, but
           // keep the session record so the failure is inspectable as ERROR.
