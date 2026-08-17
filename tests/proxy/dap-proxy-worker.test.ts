@@ -2100,6 +2100,50 @@ describe('DapProxyWorker', () => {
     });
   });
 
+  describe('Child-event flush settle (issue #378)', () => {
+    // The production client (MinimalDapClient) always defines flushChildEvents,
+    // so the worker cannot use the method's presence to tell child-session
+    // adapters apart — it must key off the return value: undefined means the
+    // client has no child sessions and there is nothing to settle for.
+    const flushMicrotasks = async (rounds = 10) => {
+      for (let i = 0; i < rounds; i++) {
+        await Promise.resolve();
+      }
+    };
+
+    it('skips the 150ms settle entirely when the client has nothing to flush', async () => {
+      vi.useFakeTimers();
+      const flushChildEvents = vi.fn(() => undefined);
+      (worker as any).dapClient = { flushChildEvents }; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+      let settled = false;
+      void (worker as any).waitForChildEventFlush().then(() => { settled = true; }); // eslint-disable-line @typescript-eslint/no-explicit-any
+      await flushMicrotasks();
+
+      // No timer advancement: non-child-session teardown must not pay the settle
+      expect(settled).toBe(true);
+      expect(flushChildEvents).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the two-round flush with the 150ms settle for child-session clients', async () => {
+      vi.useFakeTimers();
+      const flushChildEvents = vi.fn(() => Promise.resolve());
+      (worker as any).dapClient = { flushChildEvents }; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+      let settled = false;
+      void (worker as any).waitForChildEventFlush().then(() => { settled = true; }); // eslint-disable-line @typescript-eslint/no-explicit-any
+      await flushMicrotasks();
+      // Held open across the settle window so late child-socket bytes can be
+      // read and enqueued before the second flush
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(150);
+      await flushMicrotasks();
+      expect(settled).toBe(true);
+      expect(flushChildEvents).toHaveBeenCalledTimes(2);
+    });
+  });
+
   describe('Exception Breakpoints (issue #220)', () => {
     const buildPayload = (breakOnExceptions?: 'uncaught' | 'all' | 'none'): ProxyInitPayload => ({
       cmd: 'init',

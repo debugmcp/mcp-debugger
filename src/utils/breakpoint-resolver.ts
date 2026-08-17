@@ -9,8 +9,16 @@
 const CONTEXT_LINES = 2;
 const MAX_LISTED_MATCHES = 20;
 
+/**
+ * How an expectedContent assertion matched (issue #379): 'exact' is trimmed
+ * whole-line equality; anything else is a relaxed match the caller should
+ * surface as a warning — the #367 tolerance deliberately accepts lines the
+ * expectation only partially pins down.
+ */
+export type ContentMatchQuality = 'exact' | 'substring' | 'comment-stripped';
+
 export type LineContentAssertion =
-  | { ok: true }
+  | { ok: true; matchQuality: ContentMatchQuality; actual: string }
   | { ok: false; actual: string | null; message: string };
 
 export interface AssertLineContentOptions {
@@ -98,15 +106,22 @@ export function assertLineContent(
   // trailing comments stripped from BOTH sides: stripping only the actual
   // line would be redundant (a stripped prefix is always a substring of the
   // full line) — the strip earns its keep when the EXPECTATION carries a
-  // stale trailing comment the file no longer has.
+  // stale trailing comment the file no longer has. Every relaxed pass is
+  // labeled so callers can warn (issue #379): the substring clause has no
+  // distinctiveness floor, and the naive strip collapses lines that differ
+  // only past a '//' or '#' — even inside string literals.
+  if (actual === expected) {
+    return { ok: true, matchQuality: 'exact', actual };
+  }
+  if (actual.includes(expected)) {
+    return { ok: true, matchQuality: 'substring', actual };
+  }
   const strippedExpected = stripTrailingComment(expectedContent).trim();
   if (
-    actual === expected ||
-    actual.includes(expected) ||
-    (strippedExpected !== '' &&
-      stripTrailingComment(lines[line - 1]).trim().includes(strippedExpected))
+    strippedExpected !== '' &&
+    stripTrailingComment(lines[line - 1]).trim().includes(strippedExpected)
   ) {
-    return { ok: true };
+    return { ok: true, matchQuality: 'comment-stripped', actual };
   }
 
   let message =
@@ -140,7 +155,7 @@ export function isCommentOrBlank(statement: string): boolean {
 }
 
 export type StatementResolution =
-  | { ok: true; line: number }
+  | { ok: true; line: number; candidates?: number[] }
   | { ok: false; message: string };
 
 /**
@@ -148,6 +163,9 @@ export type StatementResolution =
  * `nearLine` selects the closest match (ties broken toward the lower line
  * number), and otherwise the ambiguity error lists every match (the error
  * IS the disambiguation UI). Shared by the exact and substring passes.
+ * A nearLine pick among multiple matches reports the full candidate list
+ * (issue #379) so callers can flag the proximity choice instead of passing
+ * it off as unambiguous.
  */
 function resolveMatches(
   matches: number[],
@@ -170,7 +188,7 @@ function resolveMatches(
       }
       // Ties keep the earlier (lower) line: matches is ascending.
     }
-    return { ok: true, line: best };
+    return { ok: true, line: best, candidates: matches };
   }
 
   const listed = matches

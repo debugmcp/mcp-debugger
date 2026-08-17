@@ -176,9 +176,10 @@ export interface IDapClient {
   /**
    * Resolves once all child-session events enqueued so far (output included)
    * have been forwarded (issue #366). Optional: only MinimalDapClient
-   * (js-debug child sessions) implements it; absent means nothing to flush.
+   * implements it. Absent method or an undefined return both mean the client
+   * has no child sessions — nothing to flush (issue #378).
    */
-  flushChildEvents?(): Promise<void>;
+  flushChildEvents?(): Promise<void> | undefined;
 }
 
 /**

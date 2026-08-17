@@ -129,11 +129,13 @@ export class MinimalDapClient extends EventEmitter {
 
   /**
    * Resolves once all child events enqueued so far (output included) have
-   * been forwarded to this client's listeners (issue #366). No-op for
-   * adapters without child sessions.
+   * been forwarded to this client's listeners (issue #366). Returns
+   * undefined for adapters without child sessions so callers can skip the
+   * flush-and-settle entirely (issue #378) — every adapter shares this
+   * client class, so the method's mere presence says nothing.
    */
-  flushChildEvents(): Promise<void> {
-    return this.childSessionManager?.flushEvents() ?? Promise.resolve();
+  flushChildEvents(): Promise<void> | undefined {
+    return this.childSessionManager?.flushEvents();
   }
 
   /**

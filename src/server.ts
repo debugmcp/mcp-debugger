@@ -62,7 +62,7 @@ import {
 } from './utils/bp-addressing.js';
 import { isRedactionEnabled } from './utils/redaction-mode.js';
 import { getVariableAccessMode, requiresExplicitNames } from './utils/variable-access.js';
-import { assertLineContent, resolveStatement } from './utils/breakpoint-resolver.js';
+import { assertLineContent, resolveStatement, stripTrailingComment } from './utils/breakpoint-resolver.js';
 
 const DEFAULT_LANGUAGES = Object.freeze([DebugLanguage.PYTHON, DebugLanguage.MOCK] as const);
 
@@ -693,18 +693,29 @@ export class DebugMcpServer {
         'Provide line or statement, not both. Use nearLine (with statement) to disambiguate repeated statements.'
       );
     }
-    if (
-      req.statement !== undefined &&
-      req.expectedContent !== undefined &&
-      req.statement.trim() !== req.expectedContent.trim()
-    ) {
+    if (req.statement !== undefined && req.expectedContent !== undefined) {
       // A matching expectedContent alongside a statement anchor is redundant
       // but harmless — agents combine them constantly (issue #280), so only
-      // genuinely contradictory intent is an error.
-      throw new McpError(
-        McpErrorCode.InvalidParams,
-        'statement and expectedContent disagree; a statement anchor is already content-addressed. Provide one or the other (a matching expectedContent is accepted as redundant).'
-      );
+      // genuinely contradictory intent is an error. "Matching" mirrors the
+      // relaxed assertLineContent predicate (issue #379): either value may be
+      // the more complete form of the other, and stale trailing comments on
+      // either side are ignored.
+      const stmt = req.statement.trim();
+      const exp = req.expectedContent.trim();
+      const strippedStmt = stripTrailingComment(req.statement).trim();
+      const strippedExp = stripTrailingComment(req.expectedContent).trim();
+      const compatible =
+        stmt.includes(exp) ||
+        exp.includes(stmt) ||
+        (strippedStmt !== '' &&
+          strippedExp !== '' &&
+          (strippedStmt.includes(strippedExp) || strippedExp.includes(strippedStmt)));
+      if (!compatible) {
+        throw new McpError(
+          McpErrorCode.InvalidParams,
+          'statement and expectedContent disagree; a statement anchor is already content-addressed. Provide one or the other (a matching expectedContent is accepted as redundant).'
+        );
+      }
     }
     if (req.nearLine !== undefined && req.statement === undefined) {
       throw new McpError(
@@ -738,6 +749,11 @@ export class DebugMcpServer {
 
     let line: number;
     let anchor: { statement: string; nearLine?: number } | undefined;
+    // Relaxed content matches succeed but must say so (issue #379): a
+    // substring or comment-stripped pass is indistinguishable from an exact
+    // one in the stored breakpoint, so the warning is the agent's only
+    // signal that its stated content only weakly pinned the line.
+    let addressingWarning: string | undefined;
     if (req.statement !== undefined) {
       const lines = await readLinesForContentAddressing('statement addressing');
       const resolution = resolveStatement(lines, req.statement, resolved.path, req.nearLine);
@@ -745,6 +761,11 @@ export class DebugMcpServer {
         throw new McpError(McpErrorCode.InvalidParams, resolution.message);
       }
       line = resolution.line;
+      if (resolution.candidates !== undefined) {
+        addressingWarning =
+          `statement matches ${resolution.candidates.length} lines (${resolution.candidates.join(', ')}); ` +
+          `nearLine ${req.nearLine} selected line ${line} — verify against the echoed content.`;
+      }
       anchor = {
         statement: req.statement.trim(),
         ...(req.nearLine !== undefined ? { nearLine: req.nearLine } : {})
@@ -759,10 +780,19 @@ export class DebugMcpServer {
         if (!check.ok) {
           throw new McpError(McpErrorCode.InvalidParams, check.message);
         }
+        if (check.matchQuality === 'substring') {
+          addressingWarning =
+            `expectedContent matched line ${line} as a substring of "${check.actual}", ` +
+            `not the whole line — confirm this is the intended line.`;
+        } else if (check.matchQuality === 'comment-stripped') {
+          addressingWarning =
+            `expectedContent matched line ${line} only after ignoring text past a '//' or '#' comment marker, ` +
+            `even inside strings (actual: "${check.actual}") — confirm this is the intended line.`;
+        }
       }
     }
 
-    return this.sessionManager.setBreakpoint(req.sessionId, {
+    const result = await this.sessionManager.setBreakpoint(req.sessionId, {
       file: resolved.path,
       line,
       condition: req.condition,
@@ -773,6 +803,13 @@ export class DebugMcpServer {
       ...(supportsLoudSnapping(mode) ? { requestedLine: line } : {}),
       ...(anchor !== undefined ? { anchor } : {})
     });
+    if (addressingWarning === undefined) {
+      return result;
+    }
+    return {
+      ...result,
+      warning: result.warning ? `${result.warning}; ${addressingWarning}` : addressingWarning
+    };
   }
 
   // The breakpoint management tools below deliberately skip validateSession's
@@ -1016,7 +1053,7 @@ export class DebugMcpServer {
       if (supportsStatementAnchors(bpMode)) {
         setBreakpointExtraProps.statement = {
           type: 'string',
-          description: 'Address by content instead of line number: the text of the target line, like an Edit-tool match — a distinctive substring is enough (leading/trailing whitespace and trailing //- or #-comments are ignored; an exact whole-line match always wins over substring matches). Preferred over line — it cannot land on the wrong line and survives file edits across restart_debugging. If the text appears on multiple lines, the error lists every match; add nearLine to pick one. Provide statement OR line, not both'
+          description: 'Address by content instead of line number: the text of the target line, like an Edit-tool match — a distinctive substring is enough (leading/trailing whitespace and trailing //- or #-comments are ignored; an exact whole-line match always wins over substring matches). Preferred over line — it can only land on a line containing your text (an inexact or multi-candidate match adds a warning to the response) and survives file edits across restart_debugging. If the text appears on multiple lines, the error lists every match; add nearLine to pick one. Provide statement OR line, not both'
         };
         setBreakpointExtraProps.nearLine = {
           type: 'number',
