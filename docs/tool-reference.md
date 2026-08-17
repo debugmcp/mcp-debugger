@@ -155,17 +155,17 @@ Sets a breakpoint in a source file.
   "success": true,
   "breakpointId": "28e06119-619e-43c0-b029-339cec2615df",
   "file": "C:\\path\\to\\debug-mcp-server\\examples\\python_simple_swap\\swap_vars.py",
-  "line": 9,
+  "line": 10,
   "verified": false,
-  "message": "Breakpoint set at C:\\path\\to\\debug-mcp-server\\examples\\python_simple_swap\\swap_vars.py:9",
+  "message": "Breakpoint set at C:\\path\\to\\debug-mcp-server\\examples\\python_simple_swap\\swap_vars.py:10",
   "context": {
-    "lineContent": "    a = b  # Bug: loses original value of 'a'",
+    "lineContent": "    a = b  # Bug: 'a' loses its original value here",
     "surrounding": [
-      { "line": 7, "content": "def swap_variables(a, b):" },
-      { "line": 8, "content": "    \"\"\"This function is supposed to swap two variables.\"\"\"" },
-      { "line": 9, "content": "    a = b  # Bug: loses original value of 'a'" },
-      { "line": 10, "content": "    b = a  # Bug: 'b' gets the new value of 'a', not the original" },
-      { "line": 11, "content": "    return a, b" }
+      { "line": 8, "content": "    # Or Python's tuple assignment: a, b = b, a" },
+      { "line": 9, "content": "    " },
+      { "line": 10, "content": "    a = b  # Bug: 'a' loses its original value here" },
+      { "line": 11, "content": "    b = a  # Bug: 'b' gets the new value of 'a' (which is original 'b')" },
+      { "line": 12, "content": "    " }
     ]
   }
 }

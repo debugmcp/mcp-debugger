@@ -33,7 +33,6 @@ export class SessionNotFoundError extends McpError {
 | `ProxyNotRunningError` | Debug proxy not active | `InvalidRequest` | Has `sessionId` and `operation` as class properties (both stored via `this.sessionId` and `this.operation`) and also included in the MCP error payload `data` |
 | `LanguageRuntimeNotFoundError` | Language runtime missing | `InvalidParams` |
 | `PythonNotFoundError` | Python specifically not found | `InvalidParams` |
-| `LanguageRuntimeNotFoundError` | Language runtime not found (generic) | `InvalidParams` |
 | `DebugSessionCreationError` | Failed to create session | `InternalError` |
 | `UnsupportedLanguageError` | Language not supported or adapter not found | `InvalidParams` |
 | `UnsupportedFeatureError` | Feature not supported by the session's adapter (e.g. logpoints) | `InvalidParams` |

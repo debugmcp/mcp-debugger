@@ -63,7 +63,8 @@ export function handleProxyMessage(
 }
 
 /**
- * Handle status messages (Phase 1)
+ * Handle status messages (Phase 1: proxy lifecycle status/error messages,
+ * as distinct from Phase 2: DAP events and responses)
  */
 function handleStatusMessage(
   state: DAPSessionState,
@@ -138,7 +139,8 @@ function handleStatusMessage(
 }
 
 /**
- * Handle error messages (Phase 1)
+ * Handle error messages (Phase 1: proxy lifecycle status/error messages,
+ * as distinct from Phase 2: DAP events and responses)
  */
 function handleErrorMessage(
   state: DAPSessionState,

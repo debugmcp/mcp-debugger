@@ -1,6 +1,6 @@
 import { PythonDebugger, PythonDebuggerConfig } from '../../src/debugger/python/debugpy.js';
 
-async function testInstantiation() {
+function testInstantiation() {
   console.log('[INSTANTIATION_TEST] Starting PythonDebugger instantiation test...');
 
   const dummySessionId = 'test-instantiation-session';

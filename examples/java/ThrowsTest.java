@@ -10,6 +10,6 @@ public class ThrowsTest {
         } catch (IllegalStateException e) {
             System.out.println("caught: " + e.getMessage());
         }
-        throw new RuntimeException("uncaught on purpose");
+        throw new RuntimeException("uncaught on purpose"); // asserted verbatim by tests/e2e/mcp-server-break-on-exceptions.test.ts -- keep in sync
     }
 }

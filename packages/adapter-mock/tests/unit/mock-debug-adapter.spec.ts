@@ -44,7 +44,11 @@ describe('MockDebugAdapter', () => {
     const adapter = new MockDebugAdapter(deps);
     adapter.setErrorScenario(MockErrorScenario.EXECUTABLE_NOT_FOUND);
 
-    await expect(adapter.initialize()).rejects.toThrowError(/Invalid state transition/);
+    // The original ENVIRONMENT_INVALID error must escape; the catch path's
+    // ERROR re-transition is idempotent and must not mask it.
+    await expect(adapter.initialize()).rejects.toMatchObject({
+      code: AdapterErrorCode.ENVIRONMENT_INVALID
+    });
     expect(adapter.getState()).toBe(AdapterState.ERROR);
   });
 

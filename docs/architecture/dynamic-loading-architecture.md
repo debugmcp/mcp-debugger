@@ -146,7 +146,7 @@ sequenceDiagram
 - Preloading vs Lazy:
   - Prefer lazy for most cases to keep cold-start minimal
   - Calling `listLanguages()` early probes discoverability/availability, but actual registry registration and adapter initialization still occur on `create(...)` or explicit `loadAdapter(...)` paths. To truly preload, construct sessions or call `loadAdapter()` on startup if your environment benefits from it.
-  - **Container mode exception**: When `MCP_CONTAINER=true`, startup pre-registers known adapters (mock, python, javascript, ruby, rust, go, java) via `tryRegister` calls in `dependencies.ts`, so the first `create(...)` call does not incur a dynamic import cost. Note that dotnet is not pre-registered in container mode.
+  - **Container mode exception**: When `MCP_CONTAINER=true`, startup pre-registers known adapters (mock, python, javascript, ruby, rust, go, java, cpp) via `tryRegister` calls in `dependencies.ts`, so the first `create(...)` call does not incur a dynamic import cost. Note that dotnet is not pre-registered in container mode.
 
 ## Container Considerations
 

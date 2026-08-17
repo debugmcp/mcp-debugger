@@ -614,7 +614,7 @@ Supports .NET Core / .NET 5+.`;
       supportsExceptionOptions: true,
       supportsValueFormattingOptions: true,
       supportsExceptionInfoRequest: true,
-      supportTerminateDebuggee: false, // Safety: never allow terminate through DAP
+      supportTerminateDebuggee: false, // Safety: disconnect never kills the debuggee (the separate 'terminate' request below is still supported)
       supportSuspendDebuggee: false,
       supportsDelayedStackTraceLoading: true,
       supportsLoadedSourcesRequest: true,

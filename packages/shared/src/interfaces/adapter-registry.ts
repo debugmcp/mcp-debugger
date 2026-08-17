@@ -247,9 +247,16 @@ export interface AdapterRegistryConfig {
   
   /** Whether to auto-dispose unused adapters */
   autoDispose?: boolean;
-  
+
   /** Auto-dispose timeout in milliseconds */
   autoDisposeTimeout?: number;
+
+  /**
+   * Whether to load adapter packages on demand via AdapterLoader when no
+   * factory is registered. Defaults to false; MCP_CONTAINER=true also
+   * enables it.
+   */
+  enableDynamicLoading?: boolean;
 }
 
 // ===== Error Types =====

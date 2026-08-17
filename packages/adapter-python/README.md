@@ -7,6 +7,7 @@ Python debug adapter for MCP Debugger using debugpy. This package provides:
   - findPythonExecutable
   - getPythonVersion
   - setDefaultCommandFinder (testing)
+  - resetDefaultCommandFinder (testing)
   - CommandNotFoundError (error type)
   - CommandFinder (TypeScript type export only, not a runtime value)
 

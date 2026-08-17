@@ -30,8 +30,10 @@ export class MockCommandFinder implements CommandFinder {
     this.callHistory.push(command);
     
     const response = this.responses.get(command);
-    
-    if (!response) {
+
+    // Only a missing entry means "not found" -- a deliberately configured
+    // empty-string path is still returned as-is.
+    if (response === undefined) {
       throw new CommandNotFoundError(command);
     }
     

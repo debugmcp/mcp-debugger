@@ -107,7 +107,11 @@ async function runTest() {
         
         console.log('Variables at breakpoint:');
         console.log(JSON.stringify(variablesResult, null, 2));
-        
+
+        if (!variablesResult.success) {
+            throw new Error('Failed to get variables');
+        }
+
         // Step 5: Evaluate an expression
         console.log('\n--- Step 5: Evaluate expression ---');
         const evaluateResult = await callTool('evaluate_expression', {
@@ -117,7 +121,11 @@ async function runTest() {
         
         console.log('Evaluation result:');
         console.log(JSON.stringify(evaluateResult, null, 2));
-        
+
+        if (!evaluateResult.success) {
+            throw new Error('Failed to evaluate expression');
+        }
+
         // Step 6: Step over
         console.log('\n--- Step 6: Step over ---');
         const stepOverResult = await callTool('step_over', {
@@ -138,7 +146,11 @@ async function runTest() {
         
         console.log('Stack trace:');
         console.log(JSON.stringify(stackTraceResult, null, 2));
-        
+
+        if (!stackTraceResult.success) {
+            throw new Error('Failed to get stack trace');
+        }
+
         // Step 8: Continue execution
         console.log('\n--- Step 8: Continue execution ---');
         const continueResult = await callTool('continue_execution', {

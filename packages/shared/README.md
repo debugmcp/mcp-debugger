@@ -95,17 +95,22 @@ Everything below is exported from the package root (`import { ... } from '@debug
 | `ChildSessionStrategy` | type | Strategy for child debug sessions |
 | `AdapterSpecificState` | type | Per-adapter custom state |
 | `CommandHandling` | type | How the adapter handles launch commands |
-| `DefaultAdapterPolicy` | class | Lightweight default/placeholder policy |
-| `PythonAdapterPolicy` | class | Python/debugpy policy |
-| `RubyAdapterPolicy` | class | Ruby/rdbg adapter policy |
-| `JsDebugAdapterPolicy` | class | JavaScript/js-debug policy |
-| `RustAdapterPolicy` | class | Rust/CodeLLDB policy |
-| `RustAdapterPolicyInterface` | type | Rust policy interface (for mocking) |
-| `GoAdapterPolicy` | class | Go/Delve policy |
-| `JavaAdapterPolicy` | class | Java/JDI bridge policy |
-| `DotnetAdapterPolicy` | class | .NET/netcoredbg policy |
-| `MockAdapterPolicy` | class | Mock adapter policy for testing |
+| `AdapterSpawnPayload` | type | Payload describing how to spawn the debug adapter |
+| `AdapterSpawnConfig` | type | Resolved adapter spawn configuration |
+| `resolveExceptionFilters` | function | Resolve an abstract break-on-exception mode to the policy's DAP exception filter IDs |
+| `DefaultAdapterPolicy` | const | Lightweight default/placeholder policy (singleton object) |
+| `PythonAdapterPolicy` | const | Python/debugpy policy |
+| `RubyAdapterPolicy` | const | Ruby/rdbg adapter policy |
+| `JsDebugAdapterPolicy` | const | JavaScript/js-debug policy |
+| `RustAdapterPolicy` | const | Rust/CodeLLDB policy |
+| `CppAdapterPolicy` | const | C/C++ / CodeLLDB policy |
+| `GoAdapterPolicy` | const | Go/Delve policy |
+| `JavaAdapterPolicy` | const | Java/JDI bridge policy |
+| `DotnetAdapterPolicy` | const | .NET/netcoredbg policy |
+| `MockAdapterPolicy` | const | Mock adapter policy for testing |
 | `getPolicyForLanguage` | function | Dispatch: returns the `AdapterPolicy` for a given `DebugLanguage` |
+
+The language policies are singleton object constants implementing the `AdapterPolicy` interface, not classes.
 
 ### DAP Client Behavior
 
@@ -115,21 +120,26 @@ Everything below is exported from the package root (`import { ... } from '@debug
 | `DapClientContext` | type | Context passed to DAP client callbacks |
 | `ReverseRequestResult` | type | Result of a DAP reverse request |
 | `ChildSessionConfig` | type | Configuration for DAP child sessions |
-| `AdapterLaunchBarrier` | type | Coordination barrier for adapter launch |
+| `AdapterLaunchBarrier` | interface | Coordination barrier for adapter launch |
 
 ### Models & Enums
 
 | Export | Kind | Description |
 |--------|------|-------------|
-| `DebugLanguage` | enum | Supported languages (Python, Ruby, JavaScript, Rust, Go, Java, Dotnet, Mock) |
+| `DebugLanguage` | enum | Supported languages (Python, Ruby, JavaScript, Rust, Cpp, Go, Java, Dotnet, Mock) |
 | `SessionState` | enum | Session states (CREATED → READY → RUNNING ⇄ PAUSED → STOPPED) |
 | `SessionLifecycleState` | enum | Coarse lifecycle (CREATED → ACTIVE → TERMINATED) |
 | `ExecutionState` | enum | Fine-grained execution state |
 | `ProcessIdentifierType` | enum | Process identifier types for attach mode |
 | `SessionConfig` | type | Session creation configuration |
 | `Breakpoint` | type | Breakpoint descriptor |
+| `FunctionBreakpoint` | type | Function breakpoint descriptor |
 | `DebugSession` | type | Internal debug session representation |
 | `DebugSessionInfo` | type | Public session information |
+| `SessionStopInfo` | type | Details about why a session stopped |
+| `SessionStopExceptionInfo` | type | Exception details attached to a stop |
+| `ExceptionBreakMode` | type | Abstract break-on-exception mode |
+| `SessionOutputEntry` | type | One captured debuggee output entry |
 | `CustomLaunchRequestArguments` | type | Custom launch request args |
 | `GenericAttachConfig` | type | Base attach configuration |
 | `LanguageSpecificAttachConfig` | type | Language-specific attach config |
@@ -187,6 +197,33 @@ Everything below is exported from the package root (`import { ... } from '@debug
 | `sanitizeStderrTail` | function | Sanitize the trailing tail of stderr output before it reaches logs or tool errors |
 
 These helpers ensure unsanitized child-process output and environment data never reach logs or tool error responses.
+
+### Secret Redaction
+
+| Export | Kind | Description |
+|--------|------|-------------|
+| `SECRET_VALUE_RULES` | const | Rule table of labeled secret-value patterns |
+| `SECRET_VALUE_ALTERNATION` | const | Combined alternation pattern derived from the rule table |
+| `REDACTION_NOTICE` | const | Notice text appended when values were redacted |
+| `redactSecretsInString` | function | Redact secret-shaped values in a string |
+| `isSensitiveName` | function | Heuristic: does a variable name look secret-bearing? |
+| `isTrivialValue` | function | Heuristic: is a value too trivial to redact? |
+| `redactVariableValue` | function | Redact a single variable value by name/value heuristics |
+| `redactSecretsDeep` | function | Recursively redact secrets in a nested structure |
+| `buildRedactionNotice` | function | Build the notice text for a set of redaction hits |
+| `SecretRule` | type | One entry of the secret rule table |
+| `RedactionHit` | type | A single redaction occurrence |
+| `RedactionResult` | type | Result of a redaction pass |
+
+### Stream & Breakpoint Utilities
+
+| Export | Kind | Description |
+|--------|------|-------------|
+| `LineBuffer` | class | Incremental newline splitter for streamed output (whole-line filtering) |
+| `toSourceBreakpoint` | function | The single mapper from stored breakpoint fields to a DAP `SourceBreakpoint` |
+| `BreakpointFields` | type | Input fields accepted by `toSourceBreakpoint` |
+| `toFunctionBreakpoint` | function | The single mapper to a DAP `FunctionBreakpoint` |
+| `FunctionBreakpointFields` | type | Input fields accepted by `toFunctionBreakpoint` |
 
 ## Package Structure
 

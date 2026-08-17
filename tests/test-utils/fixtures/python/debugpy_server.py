@@ -104,7 +104,7 @@ if __name__ == "__main__":
         except KeyboardInterrupt:
             print("Server stopped.")
     
-    # Keep the script running for a bit to allow time for debugging
+    # Brief delay before exit so any final DAP communication can complete
     print("Waiting before exit...")
     time.sleep(5)
     print("Exiting")

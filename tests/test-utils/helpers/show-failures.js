@@ -17,7 +17,7 @@ async function showFailures() {
     shell: true
   });
   
-  await new Promise((resolve) => {
+  const childExitCode = await new Promise((resolve) => {
     testProcess.on('close', resolve);
   });
   
@@ -33,6 +33,11 @@ async function showFailures() {
     if (!results.testResults || results.testResults.length === 0) {
       console.log('No test results to analyze.');
       fs.unlinkSync(jsonFile);
+      // A broken run (e.g. a collection error) can produce empty testResults
+      // while Vitest exits non-zero — propagate that instead of exiting 0.
+      if (childExitCode !== 0) {
+        process.exit(1);
+      }
       return;
     }
     
@@ -75,7 +80,13 @@ async function showFailures() {
     
     // Clean up
     fs.unlinkSync(jsonFile);
-    
+
+    // Propagate failure to the caller (e.g. CI): non-zero when Vitest exited
+    // non-zero or any test failed, instead of always exiting 0.
+    if (hasFailures || childExitCode !== 0) {
+      process.exit(1);
+    }
+
   } catch (error) {
     console.error('Error reading test results:', error.message);
     console.error('Make sure tests completed successfully.');

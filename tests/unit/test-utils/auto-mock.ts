@@ -11,6 +11,11 @@ import { vi, type Mock } from 'vitest';
  * Creates a mock object from a real implementation or class prototype.
  * All methods become vi.fn() mocks, all properties start as undefined.
  *
+ * Limitation: when passed a constructor, only prototype-level members
+ * (methods) are discovered. Instance properties initialized in the
+ * constructor body (e.g. `this.foo = ...`) are not included -- pass an
+ * actual instance (`new MyClass()`) if those are needed.
+ *
  * @param target The real implementation or class to mock
  * @param options Configuration options for mock generation
  * @returns A mock object with the same interface as the target

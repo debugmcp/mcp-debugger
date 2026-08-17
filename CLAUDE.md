@@ -142,6 +142,8 @@ docker run -v $(pwd):/workspace mcp-debugger:local
 
 ```bash
 # Test GitHub Actions locally using Act
+# NOTE: the act:* scripts invoke scripts\act-runner.cmd and are Windows-only;
+# on Linux/macOS run `act` directly with the equivalent flags.
 npm run act:check    # Verify Act is installed
 npm run act:lint     # Run lint job
 npm run act:test     # Run test job (Ubuntu)
@@ -201,7 +203,7 @@ The codebase follows a **layered architecture with dependency injection** and **
 5. **DAP Proxy System** (`src/proxy/dap-proxy-*.ts`, `src/proxy/minimal-dap.ts`)
    - **ProxyRunner** (`dap-proxy-core.ts`): Pure business logic, message processing
    - **DapProxyWorker** (`dap-proxy-worker.ts`): Core worker handling debugging operations
-   - **Adapter Policies**: Language-specific behavior via policy pattern (`DefaultAdapterPolicy`, `PythonAdapterPolicy`, `JsDebugAdapterPolicy`, `RustAdapterPolicy`, `GoAdapterPolicy`, `JavaAdapterPolicy`, `DotnetAdapterPolicy`, `CppAdapterPolicy`, `MockAdapterPolicy`); LLDB-generic pieces shared by rust/cpp live in `lldb-policy-shared.ts`. Note: Java is fully wired to `JavaAdapterPolicy` in `DapProxyWorker.selectAdapterPolicy()` (not falling through to `DefaultAdapterPolicy`).
+   - **Adapter Policies**: Language-specific behavior via policy pattern (`DefaultAdapterPolicy`, `PythonAdapterPolicy`, `JsDebugAdapterPolicy`, `RubyAdapterPolicy`, `RustAdapterPolicy`, `GoAdapterPolicy`, `JavaAdapterPolicy`, `DotnetAdapterPolicy`, `CppAdapterPolicy`, `MockAdapterPolicy`); LLDB-generic pieces shared by rust/cpp live in `lldb-policy-shared.ts`. Note: Java is fully wired to `JavaAdapterPolicy` in `DapProxyWorker.selectAdapterPolicy()` (not falling through to `DefaultAdapterPolicy`).
    - **ChildSessionManager** (`src/proxy/child-session-manager.ts`): Manages DAP child sessions within a single proxy process. Currently used by the js-debug adapter (`childSessionStrategy: 'launchWithPendingTarget'`), which spawns a child debug session for the actual debuggee while the parent session manages the launch orchestration.
    - Implements full Debug Adapter Protocol (DAP) communication
 

@@ -22,12 +22,11 @@ vi.mock('child_process', async (importOriginal) => {
 });
 
 import { existsSync, mkdirSync } from 'fs';
-import { execSync, execFileSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { resolveJdiBridgeClassDir, ensureJdiBridgeCompiled } from '@debugmcp/adapter-java';
 
 const mockExistsSync = vi.mocked(existsSync);
 const mockMkdirSync = vi.mocked(mkdirSync);
-const mockExecSync = vi.mocked(execSync);
 const mockExecFileSync = vi.mocked(execFileSync);
 
 describe('jdi-resolver', () => {

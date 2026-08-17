@@ -1,6 +1,6 @@
 # Adapter API Reference
 
-Status: v0.19.0
+Status: Unreleased (post-v0.23.0 main)
 Audience: Adapter authors and maintainers  
 Source of truth: `@debugmcp/shared` interfaces and current implementation in `src/adapters/*`
 
@@ -71,7 +71,7 @@ File: `packages/shared/src/interfaces/adapter-launch-barrier.ts`
 
 Adapters that implement `createLaunchBarrier` should return an object with the following responsibilities:
 - `awaitResponse: boolean` — If `false`, `ProxyManager` does NOT await the DAP response; the request resolves once `waitUntilReady()` completes (fire-and-forget launches). If `true`, `ProxyManager` awaits both the DAP response AND `waitUntilReady()`, then disposes the barrier.
-- `onRequestSent(requestId)` — Observe when the request leaves `ProxyManager`.
+- `onRequestSent(requestId)` — Called after a DAP request is assigned a `requestId` but before it is sent, so the barrier can track in-flight requests.
 - `onProxyStatus(status, message)` / `onDapEvent(event, body)` — Receive raw proxy messages to determine readiness.
 - `onProxyExit(code, signal)` — Fail fast if the proxy exits unexpectedly.
 - `waitUntilReady()` — Resolve when launch coordination is complete; reject to bubble an error.
@@ -102,7 +102,7 @@ Capabilities and features
 Supporting types (selected)
 - `AdapterState`: `UNINITIALIZED | INITIALIZING | READY | CONNECTED | DEBUGGING | DISCONNECTED | ERROR`
 - `ValidationResult`: `{ valid: boolean; errors: ValidationError[]; warnings: ValidationWarning[] }`
-- `AdapterCommand`: `{ command: string; args: string[]; env?: Record<string,string> }`
+- `AdapterCommand`: `{ command: string; args: string[]; env?: Record<string,string>; cwd?: string }` (`cwd` is needed by adapters whose debuggee starts at spawn time, e.g. rdbg — issue #320)
 - `AdapterConfig`: `{ sessionId, executablePath, adapterHost, adapterPort, logDir, scriptPath, scriptArgs?, launchConfig }`
 - `GenericLaunchConfig`: `{ stopOnEntry?, justMyCode?, env?, cwd?, args? }`
 
@@ -223,7 +223,7 @@ Public methods
     - `../../packages/adapter-<language>/dist/index.js`
   - Also attempts `createRequire` + `fileURLToPath` fallback
   - Extracts `<Language>AdapterFactory` named export, instantiates it, caches it
-  - Throws with informative message on `MODULE_NOT_FOUND` or missing factory
+  - Throws with informative message on `ERR_MODULE_NOT_FOUND`/`MODULE_NOT_FOUND` (suggests npm install) or missing factory
 - `isAdapterAvailable(language: string): Promise<boolean>`
   - Returns true if `loadAdapter` succeeds (and caches)
 - `listAvailableAdapters(): Promise<Array<{ name, packageName, description?, installed }>>`
@@ -242,7 +242,7 @@ Purpose: Manage adapter factories and active adapter instances; optionally lazy-
 
 Key runtime behavior
 - Constructor accepts config; dynamic loading enabled in containers by default:
-  - `enableDynamicLoading?: boolean` OR `process.env.MCP_CONTAINER === 'true'`
+  - `enableDynamicLoading?: boolean` (a typed `AdapterRegistryConfig` field) OR `process.env.MCP_CONTAINER === 'true'`
 - `register(language, factory)` with optional validation and override rules
 - `unregister(language)` disposes active adapters, removes timers, unregisters factory
 - `create(language, config): Promise<IDebugAdapter>`

@@ -203,8 +203,7 @@ export abstract class SessionManagerData extends SessionManagerCore {
    * This is a convenience method that orchestrates getting stack trace,
    * scopes, and variables, then delegates to the adapter policy to extract
    * just the local variables.
-   */
-  /**
+   *
    * @param names Optional exact-match, case-sensitive filter (issue #237),
    * applied to the final extracted locals — the policy's scope traversal
    * still sees everything it needs to pick the right scopes.

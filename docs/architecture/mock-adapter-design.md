@@ -105,7 +105,7 @@ enum MockErrorScenario {
 
 Error scenarios are controlled at runtime via `setErrorScenario()` on the `MockDebugAdapter` instance (which accepts a single `MockErrorScenario` value). `MockAdapterConfig` does not have an `errorScenarios` field; error scenarios are set exclusively via the runtime method:
 
-- **EXECUTABLE_NOT_FOUND**: Causes `validateEnvironment()` to return `{ valid: false }` with a `MOCK_NOT_FOUND` error code. The `initialize()` method checks this result and throws an `AdapterError` with `EXECUTABLE_NOT_FOUND` (not `ENVIRONMENT_INVALID`), transitioning the adapter to the `ERROR` state.
+- **EXECUTABLE_NOT_FOUND**: Causes `validateEnvironment()` to return `{ valid: false }` with a `MOCK_NOT_FOUND` error code. `initialize()` transitions the adapter to the `ERROR` state and throws an `AdapterError` with `ENVIRONMENT_INVALID` (the `ERROR` state allows an idempotent self-transition, so the catch path's re-transition does not mask the original error). The adapter is left in the `ERROR` state.
 - **CONNECTION_TIMEOUT**: Causes `connect()` to throw an `AdapterError` with `CONNECTION_TIMEOUT` (recoverable).
 
 ```typescript
@@ -195,7 +195,7 @@ interface MockAdapterConfig {
 
 Note: Error scenarios are not part of `MockAdapterConfig`. They are controlled at runtime via `adapter.setErrorScenario(MockErrorScenario.CONNECTION_TIMEOUT)` on the `MockDebugAdapter` instance.
 
-Default supported features are determined by the constructor-normalized config (defaults: `CONDITIONAL_BREAKPOINTS`, `FUNCTION_BREAKPOINTS`, `VARIABLE_PAGING`, `SET_VARIABLE`). The `getCapabilities()` method builds a DAP capability object with hardcoded true values and dynamic flags keyed off `supportsFeature` for function breakpoints, conditional breakpoints, hover evaluation, set-variable, and log points. Refer to the mock adapter source for the exact default set.
+Default supported features are determined by the constructor-normalized config (defaults: `CONDITIONAL_BREAKPOINTS`, `FUNCTION_BREAKPOINTS`, `VARIABLE_PAGING`, `SET_VARIABLE`, `LOG_POINTS`). The `getCapabilities()` method builds a DAP capability object with hardcoded true values and dynamic flags keyed off `supportsFeature` for function breakpoints, conditional breakpoints, hover evaluation, set-variable, and log points. Refer to the mock adapter source for the exact default set.
 
 Usage:
 
@@ -223,7 +223,7 @@ Usage: node mock-adapter-process.js [--port=<port>] [--host=<host>] [--session=<
 
 The process implements a `DAPConnection` class that handles Content-Length framed DAP messages over streams. In TCP mode, it creates a `net.Server` and allows client reconnection.
 
-**Supported DAP commands**: `initialize`, `configurationDone`, `launch`, `setBreakpoints`, `threads`, `stackTrace`, `scopes`, `variables`, `evaluate`, `continue`, `next`, `stepIn`, `stepOut`, `pause`, `disconnect`, `terminate`.
+**Supported DAP commands**: `initialize`, `configurationDone`, `launch`, `setBreakpoints`, `setFunctionBreakpoints`, `setExceptionBreakpoints`, `threads`, `stackTrace`, `scopes`, `variables`, `evaluate`, `exceptionInfo`, `continue`, `next`, `stepIn`, `stepOut`, `pause`, `disconnect`, `terminate`.
 
 **Simulated behavior**:
 - **Breakpoints**: Tracked per-file. On `launch`, if `stopOnEntry` is true, sends a `stopped(entry)` event. Otherwise runs to the first breakpoint (sorted by line) or terminates if none are set.

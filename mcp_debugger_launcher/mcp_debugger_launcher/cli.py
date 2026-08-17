@@ -185,8 +185,8 @@ def main(mode: str, port: Optional[int], docker: bool, npm: bool,
                 actual_port = port or launcher.DEFAULT_SSE_PORT
                 cmd.extend(["-p", f"{actual_port}:{actual_port}"])
             cmd.extend([launcher.DOCKER_IMAGE, mode])
-            if mode == "sse" and port:
-                cmd.extend(["--port", str(port)])
+            if mode == "sse":
+                cmd.extend(["--port", str(actual_port)])
             print(f"\n🔍 Would execute: {' '.join(cmd)}")
             sys.exit(0)
 
@@ -199,4 +199,6 @@ def main(mode: str, port: Optional[int], docker: bool, npm: bool,
     sys.exit(0)
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # main() never returns: every path inside it (and Click's standalone mode)
+    # terminates via sys.exit directly.
+    main()

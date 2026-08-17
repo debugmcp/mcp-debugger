@@ -127,7 +127,7 @@ The mcp-debugger has undergone a major architectural change: the transformation 
 }
 ```
 
-**⚠️ Breaking Change**: `pythonPath` is no longer the primary parameter. Use `executablePath` instead. The server's `ToolArguments` still includes legacy parameters for normalization, but `executablePath` is the preferred/current parameter.
+**⚠️ Breaking Change**: `pythonPath` is no longer accepted. Use `executablePath` instead — the server's `ToolArguments` has no legacy `pythonPath` parameter and performs no automatic mapping. (The `ConfigMigration` helper interface in `@debugmcp/shared` remains available for adapters that migrate old Python-oriented configs manually.)
 
 #### Language Support
 
@@ -142,11 +142,13 @@ enum DebugLanguage {
 ```typescript
 enum DebugLanguage {
   PYTHON = 'python',
+  RUBY = 'ruby',
   JAVASCRIPT = 'javascript',
   RUST = 'rust',
   GO = 'go',
   JAVA = 'java',
   DOTNET = 'dotnet',
+  CPP = 'cpp',
   MOCK = 'mock',  // For testing
 }
 ```

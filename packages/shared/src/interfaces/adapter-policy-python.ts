@@ -262,9 +262,8 @@ export const PythonAdapterPolicy: AdapterPolicy = {
    */
   getDapClientBehavior: (): DapClientBehavior => {
     return {
-      // Python doesn't handle reverse requests
+      // Python only handles runInTerminal reverse requests (ACKed below); all others are passed through unhandled
       handleReverseRequest: async (request: DebugProtocol.Request, context: DapClientContext): Promise<ReverseRequestResult> => {
-        // Just acknowledge any reverse requests (shouldn't receive any)
         if (request.command === 'runInTerminal') {
           context.sendResponse(request, {});
           return { handled: true };
@@ -296,7 +295,7 @@ export const PythonAdapterPolicy: AdapterPolicy = {
 
     // Attach: debugpy is already listening as a DAP server next to the target
     // (python -m debugpy --listen host:port), so there is no adapter process
-    // to spawn â€” connect directly.
+    // to spawn — connect directly.
     if (launchConfig.request === 'attach') {
       const connect = launchConfig.connect as { host?: string; port?: number } | undefined;
       const host = connect?.host

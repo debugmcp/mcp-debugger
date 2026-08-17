@@ -30,6 +30,7 @@ const DEFAULT_CONFIG: Required<AdapterRegistryConfig> = {
   maxInstancesPerLanguage: 10,
   autoDispose: true,
   autoDisposeTimeout: 300000, // 5 minutes
+  enableDynamicLoading: false,
 };
 
 /**
@@ -48,10 +49,11 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
   constructor(config: AdapterRegistryConfig = {}) {
     super();
     this.config = { ...DEFAULT_CONFIG, ...config };
-    // Enable dynamic loading only when explicitly requested (default false to keep legacy behavior in tests)
+    // Enable dynamic loading only when explicitly requested (default false to
+    // keep legacy behavior in tests). Read from the raw config param, not
+    // this.config, so an unset field still falls back to the env check.
     this.dynamicEnabled = Boolean(
-      (config as unknown as { enableDynamicLoading?: boolean })?.enableDynamicLoading ??
-      (process.env.MCP_CONTAINER === 'true')
+      config.enableDynamicLoading ?? (process.env.MCP_CONTAINER === 'true')
     );
 
     // Safety handler: prevent crash from async dispose error events
@@ -166,7 +168,7 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
 
     // Set up auto-dispose if configured
     if (this.config.autoDispose) {
-      this.setupAutoDispose(language, adapter);
+      this.setupAutoDispose(adapter);
     }
 
     // Listen for adapter disposal
@@ -408,7 +410,7 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
   /**
    * Set up auto-dispose for an adapter
    */
-  private setupAutoDispose(_language: string, adapter: IDebugAdapter): void {
+  private setupAutoDispose(adapter: IDebugAdapter): void {
     this.clearDisposeTimer(adapter);
 
     // Listen for adapter state changes

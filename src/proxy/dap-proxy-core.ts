@@ -6,13 +6,16 @@
  */
 
 import readline from 'readline';
+import { pathToFileURL } from 'url';
 import { DapProxyWorker } from './dap-proxy-worker.js';
 import { MessageParser } from './dap-proxy-message-parser.js';
-import { 
+import {
   DapProxyDependencies,
   ILogger,
-  ParentCommand, 
-  ProxyState 
+  ParentCommand,
+  ProxyState,
+  IPC_HEARTBEAT,
+  IPC_HEARTBEAT_TICK
 } from './dap-proxy-interfaces.js';
 import { getErrorMessage } from '../errors/debug-errors.js';
 import { sanitizePayloadForLogging } from '@debugmcp/shared';
@@ -104,7 +107,7 @@ export class ProxyRunner {
               `[ProxyRunner] Heartbeat tick #${this.heartbeatTickCounter} send attempt (process.connected=${this.proc.connected})`
             );
             this.proc.send?.({
-              type: 'ipc-heartbeat-tick',
+              type: IPC_HEARTBEAT_TICK,
               timestamp: Date.now(),
               counter: this.heartbeatTickCounter
             });
@@ -274,7 +277,7 @@ export class ProxyRunner {
       if (typeof this.proc.send === 'function') {
         try {
           this.proc.send({
-            type: 'ipc-heartbeat',
+            type: IPC_HEARTBEAT,
             counter: this.ipcMessageCounter,
             timestamp: Date.now()
           });
@@ -412,15 +415,29 @@ export class ProxyRunner {
  *
  * @param proc injectable process handle (issue #183); `require.main === module`
  * stays module-scoped and cannot be injected.
+ * @param moduleUrl the caller's `import.meta.url` — pass it so the direct-run
+ * check compares the *entry* module against argv[1], not this module.
  */
-export function detectExecutionMode(proc: Pick<ProcessLike, 'send' | 'env' | 'argv'> = process): {
+export function detectExecutionMode(
+  proc: Pick<ProcessLike, 'send' | 'env' | 'argv'> = process,
+  moduleUrl: string = import.meta.url
+): {
   isDirectRun: boolean;
   hasIPC: boolean;
   isWorkerEnv: boolean;
 } {
+  // pathToFileURL composes a well-formed file URL on every platform (naive
+  // `file://${path}` never matches on Windows drive paths) — same approach as
+  // the main-module check in src/index.ts.
+  let entryUrl: string | undefined;
+  try {
+    entryUrl = proc.argv[1] ? pathToFileURL(proc.argv[1]).href : undefined;
+  } catch {
+    entryUrl = undefined;
+  }
   const isDirectRun =
     (typeof require !== 'undefined' && require.main === module) ||
-    (typeof import.meta !== 'undefined' && import.meta.url === `file://${proc.argv[1]}`);
+    (entryUrl !== undefined && moduleUrl === entryUrl);
 
   const hasIPC = typeof proc.send === 'function';
   const isWorkerEnv = proc.env.DAP_PROXY_WORKER === 'true';

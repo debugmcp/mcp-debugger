@@ -551,7 +551,8 @@ export class DebugMcpServer {
     };
   }
 
-  // Public methods to expose SessionManager functionality for testing/external use
+  // Core business logic methods — delegated to by the MCP tool dispatch handler
+  // (CallToolRequestSchema); public so they are also accessible for testing/external use
   public async createDebugSession(params: { language: DebugLanguage; name?: string; executablePath?: string; }): Promise<DebugSessionInfo> {
     // Validate language support using dynamic discovery
     const supported = await this.getSupportedLanguagesAsync();

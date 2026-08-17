@@ -277,6 +277,12 @@ export interface DapProxyDependencies {
 export const MIRROR_EXPOSE_COMMAND = 'mirrorExpose';
 export const MIRROR_UNEXPOSE_COMMAND = 'mirrorUnexpose';
 
+// IPC watchdog message types sent by the worker (dap-proxy-core.ts) and
+// matched by ProxyManager.handleProxyMessage — shared so the coupling is
+// compiler-checked rather than a keep-in-sync comment.
+export const IPC_HEARTBEAT = 'ipc-heartbeat';
+export const IPC_HEARTBEAT_TICK = 'ipc-heartbeat-tick';
+
 // ===== DAP Types Extensions =====
 
 /**

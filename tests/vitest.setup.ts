@@ -142,7 +142,4 @@ afterEach(() => {
 // Clean up after all tests
 afterAll(async () => {
   portManager.reset();
-  
-  // session-helpers.ts (shared test server) was removed as dead code —
-  // no test file ever imported it, so the singleton was never created.
 });

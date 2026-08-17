@@ -14,5 +14,5 @@ int main() {
             std::cout << "tick " << counter << std::endl;
         }
     }
-    return 0;
+    return 0;  // unreachable — the loop above runs until the process is paused/killed externally
 }

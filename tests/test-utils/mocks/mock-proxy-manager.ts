@@ -5,6 +5,10 @@ import { EventEmitter } from 'events';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import { IProxyManager, ProxyConfig, ProxyManagerEvents } from '../../src/proxy/proxy-manager.js';
 
+/** Error message thrown by start() when shouldFailStart is set; import this in
+ * assertions instead of repeating the literal. */
+export const MOCK_START_FAILURE_MESSAGE = 'Mock start failure';
+
 /**
  * Mock ProxyManager for unit testing
  */
@@ -36,7 +40,7 @@ export class MockProxyManager extends EventEmitter implements IProxyManager {
     this.startCalls.push(config);
 
     if (this.shouldFailStart) {
-      throw new Error('Mock start failure');
+      throw new Error(MOCK_START_FAILURE_MESSAGE);
     }
 
     if (this.startDelay > 0) {

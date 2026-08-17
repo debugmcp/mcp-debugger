@@ -774,7 +774,7 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
     // Handle preLaunchTask for building
     if (rustConfig.preLaunchTask === 'cargo build' || rustConfig.cargo?.build) {
       // Note: preLaunchTask (cargo build) is not yet implemented. Users should build manually before debugging.
-      this.dependencies.logger?.info('[RustDebugAdapter] Cargo build requested before debugging');
+      this.dependencies.logger?.info('[RustDebugAdapter] Cargo build requested but not yet implemented — the build step is skipped; build manually before debugging');
     }
 
     if (typeof launchConfig.program === 'string' && launchConfig.program.length > 0) {

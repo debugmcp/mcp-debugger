@@ -25,7 +25,7 @@ graph TB
     end
 
     subgraph "Debug Adapter Layer"
-        DA[Debug Adapter<br/>debugpy / js-debug / CodeLLDB / Delve / JDI / netcoredbg]
+        DA[Debug Adapter<br/>debugpy / js-debug / rdbg / CodeLLDB / Delve / JDI / netcoredbg]
         TGT[Target Process<br/>Script or Binary]
     end
 
@@ -91,16 +91,23 @@ graph TB
 - **Event Flow**:
   ```typescript
   export interface ProxyManagerEvents {
+    // DAP events
     'stopped': (threadId: number | undefined, reason: string, data?: StoppedEvent['body']) => void;
     'continued': () => void;
     'terminated': () => void;
-    'exited': () => void;
+    'exited': (exitCode?: number) => void;
+    'output': (body: OutputEvent['body']) => void;
+    'breakpoint': (body: BreakpointEvent['body']) => void;
+    // Proxy lifecycle events
     'initialized': () => void;
     'init-received': () => void;
     'error': (error: Error) => void;
-    'exit': (code: number | null, signal?: string) => void;
+    'exit': (code: number | null, signal?: string, expected?: boolean) => void;
+    // Status events
     'dry-run-complete': (command: string, script: string) => void;
     'adapter-configured': () => void;
+    'adapter-capabilities': (capabilities: Capabilities) => void;
+    'function-breakpoints-synced': (results: FunctionBreakpointSyncResult[]) => void;
     'dap-event': (event: string, body: unknown) => void;
   }
   ```

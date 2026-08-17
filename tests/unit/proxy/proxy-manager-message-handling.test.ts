@@ -235,9 +235,11 @@ describe('ProxyManager Message Handling', () => {
       let exitedEmitted = false;
       let capturedCode: number | undefined;
 
-      proxyManager.on('exited', () => {
+      // ProxyManager forwards the DAP body's exitCode as the event arg
+      // (proxy-manager.ts 'exited' handling) -- assert the real plumbing.
+      proxyManager.on('exited', (code?: number) => {
         exitedEmitted = true;
-        capturedCode = 0; // ProxyManager emits 'exited' without args; exit code is in the DAP body
+        capturedCode = code;
       });
 
       proxyManager.simulateMessage(exitedMessage);

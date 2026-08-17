@@ -229,11 +229,13 @@ If neither `tsx` nor `ts-node` is installed, the factory emits a warning (not an
 
 ## Examples
 
-See `/examples/javascript/` for complete examples:
+See `/examples/javascript/` for runnable examples, including:
 
 - `simple_test.js` - Basic variable swap example
 - `pause_test.js` - Testing pause functionality
 - `test_javascript_debug.js` - Comprehensive test suite
+
+The directory contains further examples (attach targets, function-breakpoint fixtures, and TypeScript samples such as `typescript_test.ts`).
 
 ## Implementation Details
 

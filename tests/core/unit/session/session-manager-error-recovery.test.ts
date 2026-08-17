@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
 import { DebugLanguage, SessionState } from '@debugmcp/shared';
 import { createMockDependencies } from './session-manager-test-utils.js';
+import { MOCK_START_FAILURE_MESSAGE } from '../../../test-utils/mocks/mock-proxy-manager.js';
 
 describe('SessionManager - Error Recovery', () => {
   let sessionManager: SessionManager;
@@ -87,7 +88,7 @@ describe('SessionManager - Error Recovery', () => {
       const startResult = await sessionManager.startDebugging(session.id, 'test.py');
       
       expect(startResult.success).toBe(false);
-      expect(startResult.error).toContain('Mock start failure');
+      expect(startResult.error).toContain(MOCK_START_FAILURE_MESSAGE);
       expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.ERROR);
     });
   });

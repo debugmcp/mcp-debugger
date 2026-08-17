@@ -1,5 +1,5 @@
 /**
- * Comprehensive MCP Debugger Test - All 21 Tools x All Languages
+ * Comprehensive MCP Debugger Test - All 25 Tools x All Languages
  *
  * Broad coverage of MCP tools across available language adapters.
  * Produces a detailed matrix report (PASS/FAIL/SKIP per tool per language).
@@ -41,10 +41,6 @@ function record(tool: string, language: string, status: ToolStatus, detail: stri
   const icon = status === 'PASS' ? '✓' : status === 'FAIL' ? '✗' : status === 'SKIP' ? '⊘' : '…';
   console.log(`  [${icon}] ${tool} (${language}): ${detail}${duration ? ` [${duration}ms]` : ''}`);
 }
-
-// Module-level variables set by beforeAll build steps
-let goBinary: string | undefined;
-let dotnetDll: string | undefined;
 
 /* ---------- language definitions ---------- */
 
@@ -141,7 +137,7 @@ describe(`Comprehensive MCP Debugger Test — ${ALL_TOOLS.length} Tools × ${LAN
     const goLang = LANGUAGES.find(l => l.language === 'go');
     if (goLang?.available) {
       try {
-        goBinary = ensureGoBuild();
+        const goBinary = ensureGoBuild();
         goLang.launchScript = goBinary;
         console.log(`[Setup] Go binary compiled: ${goBinary}`);
       } catch (err) {
@@ -154,7 +150,7 @@ describe(`Comprehensive MCP Debugger Test — ${ALL_TOOLS.length} Tools × ${LAN
     const dotnetLang = LANGUAGES.find(l => l.language === 'dotnet');
     if (dotnetLang?.available) {
       try {
-        dotnetDll = ensureDotnetBuild();
+        const dotnetDll = ensureDotnetBuild();
         dotnetLang.launchScript = dotnetDll;
         console.log(`[Setup] .NET DLL built: ${dotnetDll}`);
       } catch (err) {
@@ -343,26 +339,31 @@ describe(`Comprehensive MCP Debugger Test — ${ALL_TOOLS.length} Tools × ${LAN
           file: lang.script,
           line: lang.bpLine,
         });
-        const t0 = Date.now();
-
+        // Track which sub-tool is in flight (and when it started) so a failure
+        // is attributed to the right tool in the results matrix with its own
+        // duration, not the elapsed time since the first stage.
+        let stage = 'list_breakpoints';
+        let stageStart = Date.now();
         try {
           const listRes = await callToolSafely(mcpClient!, 'list_breakpoints', { sessionId: currentSessionId });
           const bps = (listRes as any).breakpoints as Array<{ id: string; file: string; line: number }>;
           expect((listRes as any).success).toBe(true);
           expect((listRes as any).count).toBeGreaterThanOrEqual(1);
-          record('list_breakpoints', lang.language, 'PASS', `count=${(listRes as any).count}`, Date.now() - t0);
+          record('list_breakpoints', lang.language, 'PASS', `count=${(listRes as any).count}`, Date.now() - stageStart);
 
           // remove by id
-          const t1 = Date.now();
+          stage = 'remove_breakpoint';
+          stageStart = Date.now();
           const removeRes = await callToolSafely(mcpClient!, 'remove_breakpoint', {
             sessionId: currentSessionId,
             breakpointId: bps[0].id,
           });
           expect((removeRes as any).success).toBe(true);
-          record('remove_breakpoint', lang.language, 'PASS', `removed=${(removeRes as any).removed?.length}`, Date.now() - t1);
+          record('remove_breakpoint', lang.language, 'PASS', `removed=${(removeRes as any).removed?.length}`, Date.now() - stageStart);
 
           // set again, then clear all and verify empty
-          const t2 = Date.now();
+          stage = 'clear_breakpoints';
+          stageStart = Date.now();
           await callToolSafely(mcpClient!, 'set_breakpoint', {
             sessionId: currentSessionId,
             file: lang.script,
@@ -373,9 +374,9 @@ describe(`Comprehensive MCP Debugger Test — ${ALL_TOOLS.length} Tools × ${LAN
           expect((clearRes as any).cleared).toBeGreaterThanOrEqual(1);
           const finalList = await callToolSafely(mcpClient!, 'list_breakpoints', { sessionId: currentSessionId });
           expect((finalList as any).count).toBe(0);
-          record('clear_breakpoints', lang.language, 'PASS', `cleared=${(clearRes as any).cleared}`, Date.now() - t2);
+          record('clear_breakpoints', lang.language, 'PASS', `cleared=${(clearRes as any).cleared}`, Date.now() - stageStart);
         } catch (err: any) {
-          record('list_breakpoints', lang.language, 'FAIL', err.message, Date.now() - t0);
+          record(stage, lang.language, 'FAIL', err.message, Date.now() - stageStart);
           throw err;
         }
       }, 15_000);
@@ -590,7 +591,7 @@ describe(`Comprehensive MCP Debugger Test — ${ALL_TOOLS.length} Tools × ${LAN
             record('continue_execution', lang.language, 'FAIL', err.message, Date.now() - t0);
           }
 
-          /* ---- Tool 16: get_output (issue #218) ---- */
+          /* ---- get_output (issue #218) ---- */
           // Languages with an outputMarker must capture the script's own
           // output (issues #223/#225, #317). Others stay lenient: entries may
           // legitimately be empty (adapters differ in how debuggee output is
@@ -706,9 +707,9 @@ describe(`Comprehensive MCP Debugger Test — ${ALL_TOOLS.length} Tools × ${LAN
         }, 60_000);
       }
 
-      /* ---- Tool 16: pause_execution ---- */
+      /* ---- pause_execution ---- */
 
-      it(`Tool 16: pause_execution (${lang.language})`, async () => {
+      it(`pause_execution (${lang.language})`, async () => {
         // This tool is documented as "Not Implemented"
         const createRes = await mcpClient!.callTool({
           name: 'create_debug_session',
@@ -730,9 +731,9 @@ describe(`Comprehensive MCP Debugger Test — ${ALL_TOOLS.length} Tools × ${LAN
         }
       }, 30_000);
 
-      /* ---- Tool 18: attach_to_process ---- */
+      /* ---- attach_to_process ---- */
 
-      it(`Tool 18: attach_to_process (${lang.language})`, async () => {
+      it(`attach_to_process (${lang.language})`, async () => {
         // Create a session in attach mode
         const t0 = Date.now();
         try {
@@ -767,9 +768,9 @@ describe(`Comprehensive MCP Debugger Test — ${ALL_TOOLS.length} Tools × ${LAN
         }
       }, 45_000);
 
-      /* ---- Tool 19: detach_from_process ---- */
+      /* ---- detach_from_process ---- */
 
-      it(`Tool 19: detach_from_process (${lang.language})`, async () => {
+      it(`detach_from_process (${lang.language})`, async () => {
         if (!currentSessionId) {
           const createRes = await mcpClient!.callTool({
             name: 'create_debug_session',

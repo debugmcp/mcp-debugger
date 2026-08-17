@@ -160,7 +160,8 @@ describe.skipIf(SKIP_DOCKER)('Docker: JavaScript Debugging Smoke Tests', () => {
         if (containerName) {
           const logs = await getDockerLogs(containerName);
           console.log('[Docker JS] Container logs (last 200 lines):');
-          // Try to get more logs
+          // Fetch the last 200 lines directly via docker logs (fresh call, not a
+          // continuation of getDockerLogs above); fall back to those logs on error
           try {
             const { stdout } = await execAsync(
               `docker logs ${containerName} --tail 200 2>&1`,

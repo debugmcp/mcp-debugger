@@ -10,7 +10,7 @@ Goals:
 
 ## Modular by default
 
-The MCP Debugger ships without auto-installing optional adapters. The adapter loader has a hardcoded known-adapter registry for all eight languages (mock, python, javascript, ruby, rust, go, java, dotnet), but not all are built by default. JavaScript is available as an optional adapter in a separate package:
+The MCP Debugger ships without auto-installing optional adapters. The adapter loader has a hardcoded known-adapter registry for all nine languages (mock, python, javascript, ruby, rust, go, java, dotnet, cpp), but not all are built by default. JavaScript is available as an optional adapter in a separate package:
 
 - Package name: `@debugmcp/adapter-javascript`
 - Factory export: `JavascriptAdapterFactory`
@@ -58,7 +58,7 @@ The shared model defines:
 The display name ("JavaScript/TypeScript") and default executable (`node`) are defined in the adapter implementation (`packages/adapter-javascript/`) and its factory metadata, not in the shared model itself. The shared model only carries the language enum value.
 
 Unit tests were updated to reflect the addition:
-- `tests/core/unit/session/models.test.ts` now expects eight languages (python, javascript, ruby, rust, go, java, dotnet, mock) and verifies inclusion of `javascript`.
+- `tests/core/unit/session/models.test.ts` now expects nine languages (python, javascript, ruby, rust, go, java, dotnet, cpp, mock) and verifies inclusion of `javascript`.
 
 ## Verification steps
 
@@ -83,7 +83,7 @@ js-debug requires a short handoff period before clients can issue requests such 
 
 - The adapter implements `createLaunchBarrier(command, args?)`, returning a `JsDebugLaunchBarrier` when the command is `'launch'` (`packages/adapter-javascript/src/utils/js-debug-launch-barrier.ts`).
 - `ProxyManager` delegates coordination to the barrier. It forwards proxy status updates, DAP events, and exit notifications without embedding language-specific branches.
-- The barrier resolves once js-debug emits a `stopped` event or the transport connection is confirmed (`adapter_connected` after a short delay); it rejects if the proxy exits prematurely. If neither condition is met within the timeout period, the barrier auto-resolves with a warning log to avoid hanging indefinitely.
+- The barrier resolves once js-debug emits a `stopped` event, the debuggee ends during the launch window (`terminated`/`exited` resolve rather than reject, so `start_debugging` returns promptly for fast-exiting scripts — #242), or the transport connection is confirmed (`adapter_connected` after a short delay); it rejects if the proxy exits prematurely. If neither condition is met within the timeout period, the barrier auto-resolves with a warning log to avoid hanging indefinitely.
 - Tests cover both sides: the adapter suite asserts the barrier’s behavior, and `tests/unit/proxy/proxy-manager-message-handling.test.ts` verifies both barrier modes — fire-and-forget (barrier returned with `awaitResponse: false`, launch proceeds without awaiting DAP response) AND await-response (barrier returned with `awaitResponse: true`, launch waits for DAP response and then disposes the barrier).
 
 This approach keeps the core proxy orchestration language-agnostic while allowing adapters to implement bespoke synchronization when necessary.
@@ -109,4 +109,4 @@ The `packages/adapter-javascript/package.json` manifest includes:
 - `"exports": { ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" } }` -- ESM import with type declarations
 - `"main": "dist/index.js"` -- fallback for legacy resolution
 - `"types": "dist/index.d.ts"` -- top-level types field
-- `"files": ["dist", "vendor/js-debug"]` -- published artifacts include both compiled code and vendored js-debug
+- `"files": ["dist", "vendor/js-debug", "assets"]` -- published artifacts include compiled code, the vendored js-debug, and static assets (e.g. the exit-code shim)

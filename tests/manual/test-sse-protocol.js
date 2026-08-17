@@ -16,7 +16,7 @@ function parseSSEEvents(chunk) {
       currentEvent.event = line.substring(7);
     } else if (line.startsWith('data: ')) {
       currentEvent.data = line.substring(6);
-    } else if (line === '' && currentEvent.event) {
+    } else if (line === '' && Object.keys(currentEvent).length > 0) {
       events.push({...currentEvent});
       currentEvent = {};
     }

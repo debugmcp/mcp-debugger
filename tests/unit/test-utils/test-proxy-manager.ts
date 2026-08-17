@@ -7,7 +7,7 @@
 
 import { ProxyManager } from '../../../src/proxy/proxy-manager.js';
 import { ProxyConfig } from '../../../src/proxy/proxy-config.js';
-import { IFileSystem, ILogger, IProxyProcessLauncher } from '@debugmcp/shared';
+import { IFileSystem, ILogger } from '@debugmcp/shared';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 
 export class TestProxyManager extends ProxyManager {

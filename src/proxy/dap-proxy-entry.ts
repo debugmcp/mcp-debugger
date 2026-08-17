@@ -16,8 +16,9 @@ import {
   createConsoleLogger
 } from './dap-proxy-dependencies.js';
 
-// Detect execution mode
-const executionMode = detectExecutionMode();
+// Detect execution mode (pass this module's URL so the direct-run check
+// compares the actual entry script, not dap-proxy-core's own module)
+const executionMode = detectExecutionMode(process, import.meta.url);
 
 console.error('[Proxy Worker] Starting DAP Proxy worker process...');
 console.error(`[Proxy Worker] Detection results: directRun=${executionMode.isDirectRun}, hasIPC=${executionMode.hasIPC}, workerEnv=${executionMode.isWorkerEnv}`);
@@ -38,7 +39,7 @@ if (shouldAutoExecute(executionMode)) {
   // Setup global error handlers
   runner.setupGlobalErrorHandlers(
     () => runner.stop(),
-    () => ((runner.getWorker() as unknown as Record<string, string>)?.currentSessionId) ?? 'unknown' // Access private field for error messages
+    () => runner.getWorker().getCurrentSessionId() ?? 'unknown'
   );
 
   // Start the runner

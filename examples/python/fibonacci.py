@@ -43,7 +43,7 @@ def main():
     print(f"Recursive result: {result_recursive}")
     
     # Introduce a bug for debugging purposes
-    buggy_value = fibonacci_iterative(n - 1) + 1  # This should be +0 not +1
+    buggy_value = fibonacci_iterative(n - 1) + 1  # Bug: should be fibonacci_iterative(n) — both the n-1 argument and the +1 are wrong
     print(f"Buggy value: {buggy_value}")
     
     if buggy_value != fibonacci_iterative(n):

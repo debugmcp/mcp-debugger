@@ -11,7 +11,8 @@ set -e  # Exit on error
 # Configuration
 # Auto-detect the Windows project path by finding where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-# If running from /tmp (copied by .cmd wrapper), use a default or parameter
+# If running from /tmp (copied by .cmd wrapper), require a path argument
+# (exits with an error if none is provided)
 if [[ "$SCRIPT_DIR" == "/tmp" ]]; then
     # Skip over any --prefixed options to find the path argument
     WINDOWS_PROJECT_PATH=""
@@ -22,7 +23,7 @@ if [[ "$SCRIPT_DIR" == "/tmp" ]]; then
         fi
     done
     if [ -z "$WINDOWS_PROJECT_PATH" ]; then
-        # Default to common WSL mount paths
+        # No path argument found — nothing to default to
         echo "Please specify the Windows project path as an argument"
         echo "Usage: $0 [--no-install] [--no-build] [--clean] /mnt/c/path/to/debug-mcp-server"
         exit 1

@@ -23,7 +23,7 @@ async function testCoverageSummary() {
   // Capture output but don't display verbose logs
   testProcess.stdout.on('data', (data) => {
     const output = data.toString();
-    // Extract only the dots/progress indicators
+    // Extract Vitest status characters: progress dots plus failure/skip markers (x, X, !, *)
     const progressMatch = output.match(/[·.xX!*]+/g);
     if (progressMatch) {
       process.stdout.write(progressMatch.join(''));

@@ -91,7 +91,7 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
   // Create adapter registry with validation disabled during registration
   // Validation will happen when actually creating adapter instances
   // Enable dynamic adapter loading in production to allow on-demand adapter discovery
-  const dynConfig: AdapterRegistryConfig & { enableDynamicLoading?: boolean } = {
+  const dynConfig: AdapterRegistryConfig = {
     validateOnRegister: false,
     allowOverride: false,
     enableDynamicLoading: true

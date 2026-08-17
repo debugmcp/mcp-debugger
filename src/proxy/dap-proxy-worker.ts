@@ -199,6 +199,14 @@ export class DapProxyWorker {
   }
 
   /**
+   * Get the current session id (null before initialization).
+   * Used by the entry point for error-message context.
+   */
+  getCurrentSessionId(): string | null {
+    return this.currentSessionId;
+  }
+
+  /**
    * Main command handler
    */
   async handleCommand(command: ParentCommand): Promise<void> {

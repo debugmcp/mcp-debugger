@@ -6,6 +6,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import net from 'net';
 import { EventEmitter } from 'events';
+import { PassThrough } from 'stream';
 import { createBridge, type BridgeHandle } from '../../src/utils/netcoredbg-bridge-core.js';
 
 /* ------------------------------------------------------------------ */
@@ -14,7 +15,7 @@ import { createBridge, type BridgeHandle } from '../../src/utils/netcoredbg-brid
 
 /** Minimal mock ChildProcess with piped stdio */
 function createMockChildProcess() {
-  const stdin = new (require('stream').PassThrough)();
+  const stdin = new PassThrough();
   const stdout = new EventEmitter();
   const stderr = new EventEmitter();
   const cp: any = new EventEmitter();

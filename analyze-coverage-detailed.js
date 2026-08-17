@@ -82,11 +82,15 @@ try {
   console.log('INSIGHTS:');
   console.log('─'.repeat(80));
   
-  const top5 = files.slice(0, 5);
-  const top5Impact = top5.reduce((sum, f) => sum + f.impact, 0);
-  console.log(`• Top 5 files contain ${top5.reduce((sum, f) => sum + f.uncovered, 0)} uncovered lines`);
-  console.log(`• Fixing top 5 files would improve coverage by ${top5Impact.toFixed(1)} percentage points`);
-  console.log(`• This would bring overall coverage from ${overall.toFixed(1)}% to ${(overall + top5Impact).toFixed(1)}%`);
+  const top5 = files.filter(f => f.uncovered > 0).slice(0, 5);
+  if (top5.length > 0) {
+    const top5Impact = top5.reduce((sum, f) => sum + f.impact, 0);
+    console.log(`• Top ${top5.length} files contain ${top5.reduce((sum, f) => sum + f.uncovered, 0)} uncovered lines`);
+    console.log(`• Fixing these ${top5.length} files would improve coverage by ${top5Impact.toFixed(1)} percentage points`);
+    console.log(`• This would bring overall coverage from ${overall.toFixed(1)}% to ${(overall + top5Impact).toFixed(1)}%`);
+  } else {
+    console.log('• No files with uncovered lines — nothing to improve');
+  }
   
   if (files[0] && files[0].uncovered > 50) {
     console.log(`\n• Priority: Focus on ${files[0].path.split('/').pop()}`);

@@ -43,11 +43,14 @@ describe('NodeFileSystem', () => {
       readFileSync: vi.fn().mockReturnValue('stub')
     };
 
-    setDefaultFileSystem(stub);
-    expect(getDefaultFileSystem().existsSync('any')).toBe(true);
-    expect(getDefaultFileSystem().readFileSync('any', 'utf8')).toBe('stub');
-
-    // Reset to real implementation to avoid cross-test pollution
-    setDefaultFileSystem(new NodeFileSystem());
+    try {
+      setDefaultFileSystem(stub);
+      expect(getDefaultFileSystem().existsSync('any')).toBe(true);
+      expect(getDefaultFileSystem().readFileSync('any', 'utf8')).toBe('stub');
+    } finally {
+      // Reset to real implementation even if an assertion above throws,
+      // to avoid cross-test pollution
+      setDefaultFileSystem(new NodeFileSystem());
+    }
   });
 });

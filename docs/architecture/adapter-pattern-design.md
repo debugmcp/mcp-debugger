@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Debug Adapter Pattern powers mcp-debugger as a multi-language debugging platform supporting 7 programming languages plus a mock adapter (Python, Ruby, JavaScript, Rust, Go, Java, and .NET/C#). This design uses a **dual-pattern architecture** that combines two complementary adapter patterns:
+The Debug Adapter Pattern powers mcp-debugger as a multi-language debugging platform supporting 8 programming languages plus a mock adapter (Python, Ruby, JavaScript, Rust, Go, Java, .NET/C#, and C/C++). This design uses a **dual-pattern architecture** that combines two complementary adapter patterns:
 
 1. **IDebugAdapter Interface**: Complete adapter implementations for full language support
 2. **AdapterPolicy Interface**: Lightweight policies for language-specific session management behaviors
@@ -93,6 +93,7 @@ graph TD
         GA[GoAdapter]
         JA[JavaAdapter]
         DA[DotnetAdapter]
+        CA[CppAdapter]
         MA[MockAdapter]
     end
 
@@ -103,6 +104,7 @@ graph TD
     AR --> GA
     AR --> JA
     AR --> DA
+    AR --> CA
     AR --> MA
     
     style AD fill:#9cf,stroke:#333,stroke-width:2px
@@ -191,8 +193,6 @@ sequenceDiagram
     participant C as MCP Client
     participant S as Server
     participant SM as SessionManager
-    participant AR as AdapterRegistry
-    participant A as Adapter
     participant SS as SessionStore
     
     C->>S: create_debug_session(language='python')
@@ -220,17 +220,20 @@ sequenceDiagram
     S->>SM: startDebugging(...)
     SM->>AR: create(language, config)
     AR->>A: new PythonAdapter(deps)
+    Note over AR,A: adapter.initialize() validates the environment here
     AR-->>SM: adapter
+
+    Note over SM,A: SessionManagerOperations calls adapter methods before starting proxy
+    SM->>A: transformLaunchConfig(config)
+    A-->>SM: languageSpecificConfig
+    SM->>A: resolveExecutablePath()
+    A-->>SM: executablePath
+    SM->>A: buildAdapterCommand(adapterConfig)
+    A-->>SM: {command, args, env}
 
     SM->>PM: proxyManagerFactory.create(adapter)
     SM->>PM: start(config)
 
-    Note over SM,A: SessionManagerOperations calls adapter methods before starting proxy
-    SM->>A: validateEnvironment()
-    A-->>SM: {valid: true}
-    SM->>A: buildAdapterCommand(config)
-    A-->>SM: {command, args, env}
-    
     PM->>AP: spawn(command, args)
     AP-->>PM: process started
     
@@ -248,7 +251,7 @@ sequenceDiagram
     participant C as MCP Client
     participant SM as SessionManager
     participant PM as ProxyManager
-    participant PW as ProxyWorker (IPC)
+    participant PW as DapProxyWorker (IPC)
     participant AP as Adapter Process
 
     C->>SM: stepOver(sessionId)
@@ -365,7 +368,7 @@ sequenceDiagram
   "name": "create_debug_session",
   "inputSchema": {
     "properties": {
-      "language": { "enum": ["python", "ruby", "javascript", "rust", "go", "java", "dotnet", "mock"] },
+      "language": { "enum": ["python", "ruby", "javascript", "rust", "go", "java", "dotnet", "cpp", "mock"] },
       "executablePath": { "type": "string" }
     }
   }
@@ -471,11 +474,13 @@ if (!adapter.supportsFeature(DebugFeature.CONDITIONAL_BREAKPOINTS)) {
    ```typescript
    export enum DebugLanguage {
      PYTHON = 'python',
+     RUBY = 'ruby',
      JAVASCRIPT = 'javascript',
      RUST = 'rust',
      GO = 'go',
      JAVA = 'java',
      DOTNET = 'dotnet',
+     CPP = 'cpp',
      MOCK = 'mock'
    }
    ```

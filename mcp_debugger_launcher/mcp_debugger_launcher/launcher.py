@@ -76,9 +76,12 @@ class DebugMCPLauncher:
             cmd.extend(["-p", f"{actual_port}:{actual_port}"])
             
         cmd.extend([self.DOCKER_IMAGE, mode])
-        
-        if mode == "sse" and port:
-            cmd.extend(["--port", str(port)])
+
+        if mode == "sse":
+            # Always forward the port the -p mapping was built with, so the
+            # in-container server listens on the mapped port even when the
+            # caller relied on DEFAULT_SSE_PORT.
+            cmd.extend(["--port", str(actual_port)])
             
         self.log(f"Launching with command: {' '.join(cmd)}")
         

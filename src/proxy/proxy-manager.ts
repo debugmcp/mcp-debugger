@@ -29,6 +29,7 @@ import type {
 import { ErrorMessages } from '../utils/error-messages.js';
 import { ProxyConfig } from './proxy-config.js';
 import type { FunctionBreakpointSyncResult } from './dap-proxy-interfaces.js';
+import { IPC_HEARTBEAT, IPC_HEARTBEAT_TICK } from './dap-proxy-interfaces.js';
 import {
   IDebugAdapter,
   AdapterLaunchBarrier,
@@ -854,14 +855,14 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       this.logger.debug(`[ProxyManager] Ignoring late message after stop (session ${this.sessionId})`);
       return;
     }
-    if ((rawMessage as { type?: string })?.type === 'ipc-heartbeat') {
+    if ((rawMessage as { type?: string })?.type === IPC_HEARTBEAT) {
       const heartbeat = rawMessage as { counter?: number; timestamp?: number };
       this.logger.debug(
         `[ProxyManager] Received worker heartbeat counter=${heartbeat.counter ?? 'n/a'} timestamp=${heartbeat.timestamp ?? 'n/a'}`
       );
       return;
     }
-    if ((rawMessage as { type?: string })?.type === 'ipc-heartbeat-tick') {
+    if ((rawMessage as { type?: string })?.type === IPC_HEARTBEAT_TICK) {
       const heartbeatTick = rawMessage as { timestamp?: number };
       this.logger.debug(
         `[ProxyManager] Received worker heartbeat tick timestamp=${heartbeatTick.timestamp ?? 'n/a'}`
@@ -925,8 +926,10 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
           case 'sendToProxy':
             this.sendCommand(command.command);
             break;
-            
-          // Note: sendToClient is not used in ProxyManager context
+
+          case 'sendToClient':
+            // sendToClient is not used in ProxyManager context
+            break;
         }
       }
       

@@ -65,16 +65,13 @@ describe('Server Lifecycle Tests', () => {
       expect(mockDependencies.logger.info).toHaveBeenCalledWith('Debug MCP Server stopped');
     });
 
-    it('should handle errors when closing sessions during stop', async () => {
+    it('should propagate closeAllSessions errors from stop', async () => {
       debugServer = new DebugMcpServer();
       mockSessionManager.closeAllSessions.mockRejectedValue(new Error('Close sessions failed'));
-      
-      try {
-        await debugServer.stop();
-      } catch (error) {
-        // closeAllSessions rejection may propagate from stop() -- we only verify it was called
-      }
-      
+
+      // stop() awaits closeAllSessions() without catching, so the rejection propagates
+      await expect(debugServer.stop()).rejects.toThrow('Close sessions failed');
+
       expect(mockSessionManager.closeAllSessions).toHaveBeenCalled();
     });
 

@@ -158,6 +158,7 @@ describe('SessionManager - Multi-Session Management', () => {
     
     // Make first proxy fail on stop
     const session1Proxy = sessionManager.getSession(session1.id)?.proxyManager;
+    expect(session1Proxy).toBeDefined(); // guard: fault injection must actually happen
     if (session1Proxy) {
       session1Proxy.stop = vi.fn().mockRejectedValue(new Error('Stop failed'));
     }

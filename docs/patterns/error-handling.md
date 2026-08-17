@@ -21,7 +21,7 @@ export const ErrorMessages = {
   dapRequestTimeout: (command: string, timeout: number) => 
     `Debug adapter did not respond to '${command}' request within ${timeout}s. ` +
     `This typically means the debug adapter has crashed or lost connection. ` +
-    `Try restarting your debug session. If the problem persists, check the debug adapter logs.`,
+    `Try restart_debugging to relaunch the session. If the problem persists, check the debug adapter logs.`,
 
   dapRequestTimeoutHint: () =>
     `If the operation is expected to take this long, retry with a larger 'timeout' (ms) argument. ` +
