@@ -109,6 +109,27 @@ describe('set_breakpoint expectedContent (#271)', () => {
     );
   });
 
+  it('sets the breakpoint when expectedContent is a distinctive substring (#367)', async () => {
+    const result = await callSetBreakpoint({
+      line: 3,
+      expectedContent: 'sum(prices)'
+    });
+
+    const content = JSON.parse(result.content[0].text);
+    expect(content.success).toBe(true);
+    expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
+      'test-session',
+      expect.objectContaining({ line: 3 })
+    );
+  });
+
+  it('rejects an empty expectedContent explicitly (#367)', async () => {
+    await expect(
+      callSetBreakpoint({ line: 3, expectedContent: '   ' })
+    ).rejects.toThrow(/empty or whitespace-only/);
+    expect(mockSessionManager.setBreakpoint).not.toHaveBeenCalled();
+  });
+
   it('rejects with expected/actual and context when the content does not match', async () => {
     let thrown: Error | undefined;
     try {

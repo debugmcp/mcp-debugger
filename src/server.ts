@@ -998,13 +998,13 @@ export class DebugMcpServer {
       if (supportsExpectedContent(bpMode)) {
         setBreakpointExtraProps.expectedContent = {
           type: 'string',
-          description: 'Optional assertion: the exact text you expect on the target line (leading/trailing whitespace ignored). If it does not match, the breakpoint is NOT set and the error shows the actual content of that line and its neighbors — use this to catch stale or off-by-one line numbers before they cause confusing behavior'
+          description: 'Optional assertion: text you expect on the target line — a distinctive substring is enough (leading/trailing whitespace and trailing //- or #-comments are ignored). If it does not match, the breakpoint is NOT set and the error shows the actual content of that line and its neighbors — use this to catch stale or off-by-one line numbers before they cause confusing behavior'
         };
       }
       if (supportsStatementAnchors(bpMode)) {
         setBreakpointExtraProps.statement = {
           type: 'string',
-          description: 'Address by content instead of line number: the exact text of the target line (leading/trailing whitespace ignored), like an Edit-tool match. Preferred over line — it cannot land on the wrong line and survives file edits across restart_debugging. If the text appears on multiple lines, the error lists every match; add nearLine to pick one. Provide statement OR line, not both'
+          description: 'Address by content instead of line number: the text of the target line, like an Edit-tool match — a distinctive substring is enough (leading/trailing whitespace and trailing //- or #-comments are ignored; an exact whole-line match always wins over substring matches). Preferred over line — it cannot land on the wrong line and survives file edits across restart_debugging. If the text appears on multiple lines, the error lists every match; add nearLine to pick one. Provide statement OR line, not both'
         };
         setBreakpointExtraProps.nearLine = {
           type: 'number',
