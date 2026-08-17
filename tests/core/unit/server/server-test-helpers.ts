@@ -106,6 +106,12 @@ export function createMockSessionManager(mockAdapterRegistry: any) {
     getVariables: vi.fn(),
     getLocalVariables: vi.fn(),
     getStackTrace: vi.fn(),
+    getStackTraceDetailed: vi.fn().mockResolvedValue({
+      frames: [],
+      totalFrameCount: 0,
+      hiddenFrameCount: 0,
+      allFramesInternal: false
+    }),
     getScopes: vi.fn(),
     evaluateExpression: vi.fn(),
     getSessionPolicy: vi.fn().mockReturnValue({}),

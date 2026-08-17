@@ -577,6 +577,8 @@ Gets the current call stack.
 **Notes:**
 - Stack frames are ordered from innermost (current) to outermost
 - Frame IDs are used with `get_scopes`
+- Internal/runtime frames (e.g. Node.js internals, Go `/runtime/`, `System.*`) are filtered out by default; pass `includeInternals: true` to see them. When any frames were hidden, the response additionally carries `hiddenFrames` (count) and a `note` explaining how to reveal them.
+- The filtered stack is never empty when the adapter reported frames: if *every* frame is internal (e.g. a goroutine paused inside the Go runtime), the top internal frame is kept so `get_scopes`/`evaluate_expression` still have a valid `frameId`, and the `note` says so.
 
 ---
 

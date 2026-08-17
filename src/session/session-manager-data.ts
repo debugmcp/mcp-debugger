@@ -17,6 +17,22 @@ import { SessionManagerCore } from './session-manager-core.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
 
 /**
+ * Stack trace frames plus filtering metadata (issue #346): how many frames the
+ * adapter reported, how many the language policy hid, and whether the
+ * kept-first-frame fallback fired because every frame was internal.
+ */
+export interface StackTraceResult {
+  frames: StackFrame[];
+  totalFrameCount: number;
+  hiddenFrameCount: number;
+  allFramesInternal: boolean;
+}
+
+function emptyStackTraceResult(): StackTraceResult {
+  return { frames: [], totalFrameCount: 0, hiddenFrameCount: 0, allFramesInternal: false };
+}
+
+/**
  * Data retrieval functionality for session management
  */
 export abstract class SessionManagerData extends SessionManagerCore {
@@ -111,23 +127,35 @@ export abstract class SessionManagerData extends SessionManagerCore {
   }
 
   async getStackTrace(sessionId: string, threadId?: number, includeInternals: boolean = false): Promise<StackFrame[]> {
+    return (await this.getStackTraceDetailed(sessionId, threadId, includeInternals)).frames;
+  }
+
+  /**
+   * Stack trace plus filtering metadata. Guarantees a non-empty `frames` array
+   * whenever the adapter reported any frames: if the language policy filters
+   * every frame as internal (issue #346 — e.g. a goroutine paused entirely in
+   * Go runtime frames), the top unfiltered frame is kept so the agent always
+   * has a frameId to anchor scopes/evaluate, and `hiddenFrameCount` +
+   * `allFramesInternal` let the response say what was hidden.
+   */
+  async getStackTraceDetailed(sessionId: string, threadId?: number, includeInternals: boolean = false): Promise<StackTraceResult> {
     const session = this._getSessionById(sessionId);
     const currentThreadId = session.proxyManager?.getCurrentThreadId();
     this.logger.info(`[SM getStackTrace ${sessionId}] Entered. Requested threadId: ${threadId}, Current state: ${session.state}, Actual currentThreadId: ${currentThreadId}, includeInternals: ${includeInternals}`);
     
-    if (!session.proxyManager || !session.proxyManager.isRunning()) { 
-      this.logger.warn(`[SM getStackTrace ${sessionId}] No active proxy.`); 
-      return []; 
+    if (!session.proxyManager || !session.proxyManager.isRunning()) {
+      this.logger.warn(`[SM getStackTrace ${sessionId}] No active proxy.`);
+      return emptyStackTraceResult();
     }
-    if (session.state !== SessionState.PAUSED) { 
-      this.logger.warn(`[SM getStackTrace ${sessionId}] Session not paused. State: ${session.state}.`); 
-      return []; 
+    if (session.state !== SessionState.PAUSED) {
+      this.logger.warn(`[SM getStackTrace ${sessionId}] Session not paused. State: ${session.state}.`);
+      return emptyStackTraceResult();
     }
-    
+
     const currentThreadForRequest = threadId || currentThreadId;
-    if (typeof currentThreadForRequest !== 'number') { 
-      this.logger.warn(`[SM getStackTrace ${sessionId}] No effective thread ID to use.`); 
-      return []; 
+    if (typeof currentThreadForRequest !== 'number') {
+      this.logger.warn(`[SM getStackTrace ${sessionId}] No effective thread ID to use.`);
+      return emptyStackTraceResult();
     }
 
     try {
@@ -150,15 +178,26 @@ export abstract class SessionManagerData extends SessionManagerCore {
         }));
         
         // Apply filtering using the language's policy
+        const totalFrameCount = frames.length;
+        let allFramesInternal = false;
         const policy = this.selectPolicy(session.language);
         if (policy.filterStackFrames) {
           this.logger.info(`[SM getStackTrace ${sessionId}] Applying stack frame filtering for ${session.language}. Original count: ${frames.length}`);
-          frames = policy.filterStackFrames(frames, includeInternals);
-          this.logger.info(`[SM getStackTrace ${sessionId}] After filtering: ${frames.length} frames`);
+          const filtered = policy.filterStackFrames(frames, includeInternals);
+          // Central guarantee (issue #346): a policy filter must never leave the
+          // agent with zero frames when the adapter reported some — keep the top
+          // unfiltered frame so scopes/evaluate still have an anchor.
+          if (filtered.length === 0 && frames.length > 0) {
+            allFramesInternal = true;
+            frames = [frames[0]];
+          } else {
+            frames = filtered;
+          }
+          this.logger.info(`[SM getStackTrace ${sessionId}] After filtering: ${frames.length} frames (hidden: ${totalFrameCount - frames.length}, allFramesInternal: ${allFramesInternal})`);
         }
-        
+
         this.logger.info(`[SM getStackTrace ${sessionId}] Parsed stack frames (top 3):`, frames.slice(0,3).map(f => ({name:f.name, file:f.file, line:f.line})));
-        return frames;
+        return { frames, totalFrameCount, hiddenFrameCount: totalFrameCount - frames.length, allFramesInternal };
       }
       this.logger.warn(`[SM getStackTrace ${sessionId}] No stackFrames in response body. Response:`, response);
       throw new Error(`DAP 'stackTrace' response did not include stack frames`);
