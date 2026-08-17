@@ -863,6 +863,94 @@ describe('SessionManager - DAP Operations', () => {
       );
     });
 
+    it('caps an enormous scope and reports truncation instead of blowing the response (issues #356/#359)', async () => {
+      const session = await createPausedSession();
+
+      const hugeVars = Array.from({ length: 1000 }, (_, i) => ({
+        name: `v${i}`,
+        value: i === 0 ? 'z'.repeat(5000) : `value-${i}`,
+        type: 'object',
+        variablesReference: 0
+      }));
+
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (command: string) => {
+        switch (command) {
+          case 'stackTrace':
+            return {
+              success: true,
+              body: { stackFrames: [{ id: 1, name: '<anonymous>', source: { path: '<unknown_source>' }, line: 1, column: 1 }] }
+            };
+          case 'scopes':
+            return {
+              success: true,
+              body: { scopes: [{ name: 'Local', variablesReference: 500, expensive: false }] }
+            };
+          case 'variables':
+            return { success: true, body: { variables: hugeVars } };
+          default:
+            return { success: true };
+        }
+      });
+
+      const result = await sessionManager.getLocalVariables(session.id);
+
+      expect(result.variables.length).toBeLessThanOrEqual(300);
+      expect(result.truncation).toBeDefined();
+      expect(result.truncation!.omittedCount).toBeGreaterThan(0);
+      expect(result.truncation!.valueTruncatedCount).toBeGreaterThanOrEqual(1);
+      const bigVar = result.variables.find(v => v.name === 'v0');
+      expect(bigVar?.truncated).toBe(true);
+      expect(bigVar?.value.length).toBe(1024);
+    });
+
+    it('stops fetching further scopes once the variable budget is spent (issue #356 fan-out)', async () => {
+      const session = await createPausedSession();
+
+      const bigScopeVars = Array.from({ length: 400 }, (_, i) => ({
+        name: `g${i}`, value: `x${i}`, type: 'object', variablesReference: 0
+      }));
+      let variablesCalls = 0;
+
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (command: string, args?: { variablesReference?: number }) => {
+        switch (command) {
+          case 'stackTrace':
+            return {
+              success: true,
+              body: {
+                stackFrames: [
+                  { id: 1, name: 'top', source: { path: 'a.js' }, line: 1, column: 1 },
+                  { id: 2, name: 'caller', source: { path: 'a.js' }, line: 9, column: 1 }
+                ]
+              }
+            };
+          case 'scopes':
+            return {
+              success: true,
+              body: {
+                scopes: [
+                  { name: 'Local', variablesReference: args && (args as { frameId?: number }) ? 600 : 600, expensive: false },
+                  { name: 'Global', variablesReference: 700, expensive: true }
+                ]
+              }
+            };
+          case 'variables':
+            variablesCalls++;
+            return { success: true, body: { variables: bigScopeVars } };
+          default:
+            return { success: true };
+        }
+      });
+
+      const result = await sessionManager.getLocalVariables(session.id);
+
+      // 2 frames x 2 scopes = 4 potential fetches; the first fetch (400 vars)
+      // already exceeds the 300 budget, so at most one more scope round can
+      // start — the rest must be skipped and reported.
+      expect(variablesCalls).toBeLessThanOrEqual(1 + 1);
+      expect(result.truncation).toBeDefined();
+      expect(result.truncation!.scopesSkipped ?? 0).toBeGreaterThan(0);
+    });
+
     it('extracts Go locals and reports the real scope name when Delve appends the optimized-function warning', async () => {
       const session = await sessionManager.createSession({
         language: DebugLanguage.GO,

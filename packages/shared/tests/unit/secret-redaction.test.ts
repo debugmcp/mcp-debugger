@@ -168,6 +168,16 @@ describe('isSensitiveName', () => {
   ])('does not match %s (exact, not substring)', (name) => {
     expect(isSensitiveName(name)).toBe(false);
   });
+
+  // Issue #365: 'pwd' is working-directory vocabulary (Dir.pwd, $PWD), not a
+  // password abbreviation worth a whole-value mask; passwd/password remain.
+  it.each([['pwd'], ['PWD'], ['Pwd']])('does not match %s (issue #365)', (name) => {
+    expect(isSensitiveName(name)).toBe(false);
+  });
+
+  it.each([['passwd'], ['password'], ['dbpassword']])('still matches %s after the pwd removal', (name) => {
+    expect(isSensitiveName(name)).toBe(true);
+  });
 });
 
 describe('isTrivialValue', () => {

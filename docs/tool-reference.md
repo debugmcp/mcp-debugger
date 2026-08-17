@@ -657,6 +657,8 @@ Gets variables within a scope.
 - `expandable`: Whether the variable has child properties
 - Values are always returned as strings
 
+**Size guards (issues #356/#359):** responses are capped so an enormous scope (e.g. a JS internal frame reaching `process`/`global`) can't exceed an MCP client's per-result size limit. Per variable, values longer than 1024 chars are cut and flagged `truncated: true`; per call, at most 300 variables (256KB total) are returned. When anything was cut, the response carries a top-level `truncation` object — `{ omittedCount, valueTruncatedCount, notice }` — and the `names` filter is the escape hatch to fetch specific variables in full. Limits are env-overridable: `DEBUG_MCP_MAX_VARIABLE_VALUE_CHARS`, `DEBUG_MCP_MAX_VARIABLES`, `DEBUG_MCP_MAX_VARIABLES_TOTAL_CHARS`.
+
 ---
 
 ### get_local_variables
@@ -697,6 +699,8 @@ Gets local variables by traversing all stack frames and their scopes, then using
   "scopeName": "Locals"
 }
 ```
+
+**Size guards:** same caps and `truncation` advisory as [get_variables](#get_variables); additionally, the multi-frame scope fan-out stops issuing DAP requests once the per-call variable budget is spent (`truncation.scopesSkipped` reports scopes never fetched). Top-frame scopes are fetched first, so the locals that matter are unaffected.
 
 **Example - Python:**
 ```json
