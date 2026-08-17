@@ -178,8 +178,10 @@ describe('Server Inspection Tools Tests', () => {
       };
       
       mockSessionManager.getSession.mockReturnValue(mockSession);
-      mockSessionManager.getStackTrace.mockResolvedValue(mockStackFrames);
-      
+      mockSessionManager.getStackTraceDetailed.mockResolvedValue({
+        frames: mockStackFrames, totalFrameCount: 1, hiddenFrameCount: 0, allFramesInternal: false
+      });
+
       const result = await callToolHandler({
         method: 'tools/call',
         params: {
@@ -187,10 +189,57 @@ describe('Server Inspection Tools Tests', () => {
           arguments: { sessionId: 'test-session' }
         }
       });
-      
+
       const content = JSON.parse(result.content[0].text);
       expect(content.success).toBe(true);
       expect(content.stackFrames).toHaveLength(1);
+      // No frames hidden -> no annotation noise (issue #346)
+      expect(content.hiddenFrames).toBeUndefined();
+      expect(content.note).toBeUndefined();
+    });
+
+    it('annotates hidden internal frames with a count and how to reveal them (issue #346)', async () => {
+      const mockSession = {
+        proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(1) }
+      };
+      mockSessionManager.getSession.mockReturnValue(mockSession);
+      mockSessionManager.getStackTraceDetailed.mockResolvedValue({
+        frames: [{ id: 7, name: 'handler', file: 'app.go', line: 12 }],
+        totalFrameCount: 4, hiddenFrameCount: 3, allFramesInternal: false
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'get_stack_trace', arguments: { sessionId: 'test-session' } }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      expect(content.hiddenFrames).toBe(3);
+      expect(content.note).toContain('includeInternals: true');
+    });
+
+    it('explains the kept-first-frame fallback when every frame is internal (issue #346)', async () => {
+      const mockSession = {
+        proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(1) }
+      };
+      mockSessionManager.getSession.mockReturnValue(mockSession);
+      mockSessionManager.getStackTraceDetailed.mockResolvedValue({
+        frames: [{ id: 1, name: 'runtime.gopark', file: '/usr/local/go/src/runtime/proc.go', line: 402 }],
+        totalFrameCount: 5, hiddenFrameCount: 4, allFramesInternal: true
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'get_stack_trace', arguments: { sessionId: 'test-session' } }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      expect(content.stackFrames).toHaveLength(1);
+      expect(content.hiddenFrames).toBe(4);
+      expect(content.note).toContain('internal/runtime frames');
+      expect(content.note).toContain('includeInternals: true');
     });
 
     it('should handle missing session', async () => {
@@ -259,7 +308,7 @@ describe('Server Inspection Tools Tests', () => {
       };
 
       mockSessionManager.getSession.mockReturnValue(mockSession);
-      mockSessionManager.getStackTrace.mockRejectedValue(new Error('Stack trace failed'));
+      mockSessionManager.getStackTraceDetailed.mockRejectedValue(new Error('Stack trace failed'));
 
       // DAP-level failures must produce success:false with the real error,
       // never an empty-but-successful stack trace (issue #124).
