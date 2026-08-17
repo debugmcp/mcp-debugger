@@ -40,6 +40,7 @@ process.argv = process.argv.map(arg =>
 
 import { createLogger } from './utils/logger.js';
 import { reapOrphanJvms } from './utils/jvm-orphan-reaper.js';
+import { reapOrphanProxies } from './utils/proxy-orphan-reaper.js';
 import { DebugMcpServer } from './server.js';
 import { setupErrorHandlers } from './cli/error-handlers.js';
 import {
@@ -98,16 +99,29 @@ export async function main(): Promise<void> {
   // below uses this to decide which orphans from prior runs are ours to kill.
   process.env.MCP_DEBUGGER_MAIN_PID = String(process.pid);
 
-  // Best-effort cleanup of debuggee JVMs leaked by prior crashed runs. Awaited
-  // synchronously so a fresh server starts in a known-clean state. Failures
-  // here must never block startup — wrapped in try/catch.
-  try {
-    const result = await reapOrphanJvms({ selfPid: process.pid, logger });
-    if (result.killed.length > 0) {
-      logger.info(`[startup] Reaped ${result.killed.length} orphan JVM(s) from prior runs`);
+  // Best-effort cleanup of debuggee JVMs and proxy worker chains leaked by
+  // prior crashed runs. Awaited synchronously so a fresh server starts in a
+  // known-clean state; the two reapers run concurrently so their worst-case
+  // process-listing timeouts don't stack. Failures here must never block
+  // startup — both functions are designed not to throw, and allSettled is
+  // belt-and-suspenders.
+  const [jvmOutcome, proxyOutcome] = await Promise.allSettled([
+    reapOrphanJvms({ selfPid: process.pid, logger }),
+    reapOrphanProxies({ selfPid: process.pid, logger })
+  ]);
+  if (jvmOutcome.status === 'fulfilled') {
+    if (jvmOutcome.value.killed.length > 0) {
+      logger.info(`[startup] Reaped ${jvmOutcome.value.killed.length} orphan JVM(s) from prior runs`);
     }
-  } catch (e) {
-    logger.warn(`[startup] Orphan JVM reaper failed: ${(e as Error).message}`);
+  } else {
+    logger.warn(`[startup] Orphan JVM reaper failed: ${(jvmOutcome.reason as Error)?.message ?? String(jvmOutcome.reason)}`);
+  }
+  if (proxyOutcome.status === 'fulfilled') {
+    if (proxyOutcome.value.killed.length > 0) {
+      logger.info(`[startup] Reaped ${proxyOutcome.value.killed.length} orphan proxy worker(s) from prior runs`);
+    }
+  } else {
+    logger.warn(`[startup] Orphan proxy reaper failed: ${(proxyOutcome.reason as Error)?.message ?? String(proxyOutcome.reason)}`);
   }
 
   // Setup error handlers

@@ -91,6 +91,34 @@ describe('ProxyProcessLauncherImpl', () => {
     expect(options.detached).toBe(false);
   });
 
+  it('tags the worker argv with owner-pid and session-id markers after the script path (issue #343)', () => {
+    vi.stubEnv('MCP_DEBUGGER_MAIN_PID', '4242');
+
+    const spawnSpy = vi.spyOn(processManager, 'spawn');
+    const launcher = new ProxyProcessLauncherImpl(processManager);
+    launcher.launchProxy('./dist/proxy.js', 'session-tagged');
+
+    const args = spawnSpy.mock.calls[0]?.[1] as string[];
+    expect(args).toEqual([
+      '--trace-uncaught',
+      '--trace-exit',
+      './dist/proxy.js',
+      '--mcp-owner-pid=4242',
+      '--mcp-session-id=session-tagged'
+    ]);
+  });
+
+  it('falls back to process.pid for the owner marker when the env var is unset or garbage', () => {
+    vi.stubEnv('MCP_DEBUGGER_MAIN_PID', 'not-a-pid');
+
+    const spawnSpy = vi.spyOn(processManager, 'spawn');
+    const launcher = new ProxyProcessLauncherImpl(processManager);
+    launcher.launchProxy('./dist/proxy.js', 'session-fallback');
+
+    const args = spawnSpy.mock.calls[0]?.[1] as string[];
+    expect(args).toContain(`--mcp-owner-pid=${process.pid}`);
+  });
+
   it('reuses initialization promise for concurrent callers', async () => {
     const launcher = new ProxyProcessLauncherImpl(processManager);
     const proxyProcess = launcher.launchProxy('./dist/proxy.js', 'session-concurrent');
