@@ -410,6 +410,8 @@ export interface Variable {
   children?: Variable[];
   /** Present and true when the value was masked as a secret (issue #237) */
   redacted?: boolean;
+  /** Present and true when the value was cut at the per-variable size cap (issue #359) */
+  truncated?: boolean;
 }
 
 /**
