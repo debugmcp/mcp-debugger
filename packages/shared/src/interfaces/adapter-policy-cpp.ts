@@ -27,6 +27,8 @@ import {
   isLldbInitialized,
   isLldbConnected,
   getLldbDapClientBehavior,
+  isLldbInternalFrame,
+  filterLldbStackFrames,
   lldbShouldSuppressOutputEvent
 } from './lldb-policy-shared.js';
 
@@ -47,6 +49,14 @@ export const CppAdapterPolicy: AdapterPolicy = {
 
   normalizeStopReason: normalizeLldbStopReason,
   shouldSuppressOutputEvent: lldbShouldSuppressOutputEvent,
+
+  /**
+   * Hide LLDB-synthesized symbols and libc/runtime plumbing from stack
+   * traces (issue #369); the central issue-#346 fallback keeps the top
+   * frame when everything is internal.
+   */
+  filterStackFrames: filterLldbStackFrames,
+  isInternalFrame: isLldbInternalFrame,
 
   extractLocalVariables: extractLldbLocalVariables,
 

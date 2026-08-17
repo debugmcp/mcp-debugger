@@ -4,9 +4,12 @@
  * Launches the pause_test binary directly, attaches by PID via CodeLLDB,
  * inspects threads/stack, detaches (target must survive), then kills it.
  * Self-skips without a compiler; on Linux, also self-skips when
- * kernel.yama.ptrace_scope blocks attaching to non-child processes... except
- * the debuggee IS spawned by this process's test runner, so ptrace_scope=1
- * (children allowed) still works — only scope>=2 blocks it.
+ * kernel.yama.ptrace_scope blocks the attach. Note Yama scope 1 requires the
+ * tracer to be an ANCESTOR of the tracee — the debuggee here is spawned by
+ * vitest while the tracer (lldb-server, under the MCP server's proxy) is a
+ * sibling tree, so scope 1 would block it. pause_test.cpp therefore calls
+ * prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY) to allow any tracer; only
+ * scope>=2 (needs CAP_SYS_PTRACE) or scope 3 still forces a skip.
  */
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import path from 'path';

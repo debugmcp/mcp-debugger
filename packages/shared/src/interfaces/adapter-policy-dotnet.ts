@@ -299,6 +299,16 @@ export const DotnetAdapterPolicy: AdapterPolicy = {
   },
 
   /**
+   * netcoredbg does not suspend the target on attach — it reports attach
+   * success while the debuggee keeps running. Without an explicit post-attach
+   * pause the session claims PAUSED while the process is live: stackTrace
+   * fails with 0x80131302 (process not synchronized) and pause_execution
+   * short-circuits with "Already paused" (issue #353). Same contract as the
+   * python/ruby/js policies.
+   */
+  getAttachBehavior: () => ({ pauseAfterAttach: true }),
+
+  /**
    * Filter stack frames to remove .NET runtime/framework internal frames
    */
   filterStackFrames: (frames: StackFrame[], includeInternals: boolean): StackFrame[] => {

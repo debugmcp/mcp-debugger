@@ -260,13 +260,20 @@ describe('MCP Server Ruby Debugging Smoke Test @requires-ruby', () => {
     expect(marker).toBeDefined();
     expect(marker!.category).toBe('stdout');
 
-    // Prove mid-run capture: the session must still be paused (iteration 2's
+    // Prove mid-run capture: the session must end up paused (iteration 2's
     // stop), so the marker cannot have arrived via the exit-flush drain.
-    const listResponse = parseSdkToolResult(await mcpClient!.callTool({
-      name: 'list_debug_sessions',
-      arguments: {}
-    })) as { sessions?: Array<{ id: string; state: string }> };
-    expect(listResponse.sessions?.find(s => s.id === sessionId)?.state).toBe('paused');
+    // The marker beats rdbg's next 'stopped' event by ~30-40ms (synced stdout
+    // is fast, the DAP socket isn't), so poll instead of sampling once; a
+    // run-to-completion settles on 'stopped' and still fails the assertion.
+    const settledState = await pollUntil(async () => {
+      const listResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'list_debug_sessions',
+        arguments: {}
+      })) as { sessions?: Array<{ id: string; state: string }> };
+      const state = listResponse.sessions?.find(s => s.id === sessionId)?.state;
+      return state === 'paused' || state === 'stopped' ? state : undefined;
+    }, 15000);
+    expect(settledState).toBe('paused');
   }, 90000);
 
   it('applies dapLaunchArgs.env to the debuggee (issue #318)', async () => {

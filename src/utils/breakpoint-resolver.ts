@@ -35,9 +35,35 @@ function formatContext(lines: string[], line: number): string {
 }
 
 /**
- * Check that the trimmed content of `line` equals the trimmed expectation.
- * On mismatch the message shows expected vs actual plus surrounding context so
- * the agent can pick the correct line without another read.
+ * Strip a trailing line comment (`//…` or `#…`) from a source line.
+ *
+ * Deliberately naive — NOT string-literal-aware: a `//` or `#` inside a
+ * string ("http://…", "issue #42") is stripped too. That is safe here
+ * because stripping only RELAXES matching (an extra strip can at worst
+ * fail to widen a match, never create a wrong exact match on its own) and
+ * substring matches against the unstripped line are always tried as well.
+ */
+export function stripTrailingComment(line: string): string {
+  const slashes = line.indexOf('//');
+  const hash = line.indexOf('#');
+  let cut = -1;
+  if (slashes !== -1 && hash !== -1) {
+    cut = Math.min(slashes, hash);
+  } else if (slashes !== -1) {
+    cut = slashes;
+  } else {
+    cut = hash;
+  }
+  return cut === -1 ? line : line.slice(0, cut);
+}
+
+/**
+ * Check that `line` contains the expected content. Accepted, in order:
+ * exact trimmed-line equality, then the trimmed expectation as a substring
+ * of the actual line, then as a substring of the comment-stripped actual
+ * line — so trailing comments and partial-line anchors both work.
+ * On mismatch the message shows expected vs actual plus surrounding context
+ * so the agent can pick the correct line without another read.
  */
 export function assertLineContent(
   lines: string[],
@@ -46,6 +72,16 @@ export function assertLineContent(
   filePath: string,
   options?: AssertLineContentOptions
 ): LineContentAssertion {
+  if (expectedContent.trim() === '') {
+    return {
+      ok: false,
+      actual: null,
+      message:
+        'Breakpoint not set: expectedContent is empty or whitespace-only. ' +
+        'Provide a distinctive substring of the target line, or omit expectedContent to skip verification.',
+    };
+  }
+
   if (line < 1 || line > lines.length) {
     return {
       ok: false,
@@ -58,7 +94,18 @@ export function assertLineContent(
 
   const expected = expectedContent.trim();
   const actual = lines[line - 1].trim();
-  if (actual === expected) {
+  // Exact trimmed match, then substring of the actual line. Then retry with
+  // trailing comments stripped from BOTH sides: stripping only the actual
+  // line would be redundant (a stripped prefix is always a substring of the
+  // full line) — the strip earns its keep when the EXPECTATION carries a
+  // stale trailing comment the file no longer has.
+  const strippedExpected = stripTrailingComment(expectedContent).trim();
+  if (
+    actual === expected ||
+    actual.includes(expected) ||
+    (strippedExpected !== '' &&
+      stripTrailingComment(lines[line - 1]).trim().includes(strippedExpected))
+  ) {
     return { ok: true };
   }
 
@@ -97,50 +144,18 @@ export type StatementResolution =
   | { ok: false; message: string };
 
 /**
- * Resolve a statement anchor to a line number by whole-line trimmed-equality
- * match. Ambiguity is an error whose message lists every match (the error IS
- * the disambiguation UI); `nearLine` selects the closest match instead, ties
- * broken toward the lower line number.
+ * Turn a non-empty match list into a resolution: single match resolves,
+ * `nearLine` selects the closest match (ties broken toward the lower line
+ * number), and otherwise the ambiguity error lists every match (the error
+ * IS the disambiguation UI). Shared by the exact and substring passes.
  */
-export function resolveStatement(
+function resolveMatches(
+  matches: number[],
   lines: string[],
-  statement: string,
+  target: string,
   filePath: string,
   nearLine?: number
 ): StatementResolution {
-  if (statement.includes('\n')) {
-    return {
-      ok: false,
-      message:
-        'Invalid statement anchor: statement must be a single line. Anchor on the first line of a multi-line construct.',
-    };
-  }
-  if (isCommentOrBlank(statement)) {
-    return {
-      ok: false,
-      message:
-        `Invalid statement anchor: "${statement.trim()}" is a comment or blank line. ` +
-        `Debuggers cannot break there reliably — anchor on an executable statement (assignment, call, return, condition).`,
-    };
-  }
-
-  const target = statement.trim();
-  const matches: number[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].trim() === target) {
-      matches.push(i + 1);
-    }
-  }
-
-  if (matches.length === 0) {
-    return {
-      ok: false,
-      message:
-        `Breakpoint not set: statement "${target}" not found in ${filePath}.\n` +
-        `Statements match a whole line's content after trimming leading/trailing whitespace — check for typos or partial-line text.`,
-    };
-  }
-
   if (matches.length === 1) {
     return { ok: true, line: matches[0] };
   }
@@ -172,5 +187,76 @@ export function resolveStatement(
       `Breakpoint not set: statement "${target}" matches ${matches.length} lines in ${filePath}:\n` +
       `${listed}${overflow}\n` +
       `Add nearLine to pick the closest match (e.g. nearLine: ${matches[0]}).`,
+  };
+}
+
+/**
+ * Resolve a statement anchor to a line number. Pass 1 matches whole-line
+ * trimmed equality; exact matches always win. Only when there is no exact
+ * match anywhere, pass 2 accepts lines whose comment-stripped trimmed
+ * content CONTAINS the anchor (comment-only and blank lines excluded), so
+ * a distinctive substring is enough and trailing comments don't break
+ * matching. Ambiguity in either pass is an error whose message lists every
+ * match (the error IS the disambiguation UI); `nearLine` selects the
+ * closest match instead, ties broken toward the lower line number.
+ */
+export function resolveStatement(
+  lines: string[],
+  statement: string,
+  filePath: string,
+  nearLine?: number
+): StatementResolution {
+  if (statement.includes('\n')) {
+    return {
+      ok: false,
+      message:
+        'Invalid statement anchor: statement must be a single line. Anchor on the first line of a multi-line construct.',
+    };
+  }
+  if (isCommentOrBlank(statement)) {
+    return {
+      ok: false,
+      message:
+        `Invalid statement anchor: "${statement.trim()}" is a comment or blank line. ` +
+        `Debuggers cannot break there reliably — anchor on an executable statement (assignment, call, return, condition).`,
+    };
+  }
+
+  const target = statement.trim();
+
+  // Pass 1: whole-line trimmed equality. Exact matches always win — the
+  // substring pass never runs when any exact match exists, so the two match
+  // populations are never mixed.
+  const exactMatches: number[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim() === target) {
+      exactMatches.push(i + 1);
+    }
+  }
+  if (exactMatches.length > 0) {
+    return resolveMatches(exactMatches, lines, target, filePath, nearLine);
+  }
+
+  // Pass 2: substring match against the comment-stripped line, so trailing
+  // comments and partial-line anchors still resolve. Comment-only and blank
+  // lines are excluded — debuggers cannot break there.
+  const substringMatches: number[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (isCommentOrBlank(lines[i])) {
+      continue;
+    }
+    if (stripTrailingComment(lines[i]).trim().includes(target)) {
+      substringMatches.push(i + 1);
+    }
+  }
+  if (substringMatches.length > 0) {
+    return resolveMatches(substringMatches, lines, target, filePath, nearLine);
+  }
+
+  return {
+    ok: false,
+    message:
+      `Breakpoint not set: statement "${target}" not found in ${filePath}.\n` +
+      `Statements match a whole line's content after trimming leading/trailing whitespace, or as a substring of a line (trailing comments ignored) — neither matched; check for typos.`,
   };
 }
