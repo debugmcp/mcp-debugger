@@ -453,4 +453,69 @@ describe('MCP Server Java Debugging Smoke Test @requires-java', () => {
 
     console.log('[Conditional BP] TEST PASSED — conditional breakpoint worked');
   }, 60000);
+
+  it('surfaces debuggee exitCode 0 after run to completion (issue #368)', async () => {
+    // Check for java and javac
+    try {
+      execSync('java -version', { stdio: 'ignore' });
+      execSync('javac -version', { stdio: 'ignore' });
+    } catch {
+      console.log('[Java ExitCode Test] Skipping — JDK not installed');
+      return;
+    }
+
+    const { sourcePath: testJavaFile, classDir: testClassDir, mainClass } = prepareJavaExample('HelloWorld');
+
+    // 1. Create session
+    const createResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: { language: 'java', name: 'java-exit-code-test' }
+    }));
+    expect(createResponse.sessionId).toBeDefined();
+    sessionId = createResponse.sessionId as string;
+
+    // 2. Start debugging with no breakpoints — program runs straight to completion
+    const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'start_debugging',
+      arguments: {
+        sessionId,
+        scriptPath: testJavaFile,
+        args: [],
+        dapLaunchArgs: {
+          mainClass,
+          classpath: testClassDir,
+          cwd: testClassDir,
+          stopOnEntry: false
+        }
+      }
+    }));
+    expect(startResponse.success).toBe(true);
+
+    // 3. Poll list_debug_sessions until the session reaches a terminal state.
+    //    'error' is terminal too, so a regression fails fast instead of timing out.
+    interface SessionSnapshot { id: string; state?: string; exitCode?: number }
+    let terminal: SessionSnapshot | undefined;
+    const deadline = Date.now() + 30000;
+    while (Date.now() < deadline) {
+      const listResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'list_debug_sessions',
+        arguments: {}
+      }));
+      const sessions = (listResponse.sessions ?? []) as SessionSnapshot[];
+      const snap = sessions.find(s => s.id === sessionId);
+      if (snap && (snap.state === 'stopped' || snap.state === 'error')) {
+        terminal = snap;
+        break;
+      }
+      await new Promise(r => setTimeout(r, 250));
+    }
+
+    // HARD ASSERTIONS: clean run ends 'stopped' with the debuggee's real
+    // exit code surfaced (issue #368: the JDI bridge previously never sent a
+    // DAP 'exited' event, so exitCode stayed undefined).
+    expect(terminal).toBeDefined();
+    expect(terminal!.state).toBe('stopped');
+    expect(terminal!.exitCode).toBe(0);
+    console.log('[Java ExitCode Test] TEST PASSED — exitCode 0 surfaced');
+  }, 60000);
 });

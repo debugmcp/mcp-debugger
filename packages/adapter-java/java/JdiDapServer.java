@@ -30,6 +30,13 @@ public class JdiDapServer {
     private volatile VirtualMachine vm;
     private volatile Process launchedProcess; // non-null only in launch mode
 
+    // --- Debuggee exit tracking (issue #368, launch mode only) ---
+    // targetExitCode is stored by a daemon watcher thread the moment the
+    // launched process exits; exitedSent guards the single 'exited' emission.
+    private volatile Integer targetExitCode = null;
+    private volatile boolean exitedSent = false;
+    private final Object exitedLock = new Object();
+
     // --- Variable references ---
     // All variable references (scopes, expandable objects) use sequential IDs
     // starting from 1. Maps track what each ref points to.
@@ -354,6 +361,11 @@ public class JdiDapServer {
         String classpath = strOr(args, "classpath", ".");
         this.stopOnEntry = boolVal(args, "stopOnEntry", true);
 
+        // Fresh exit tracking per launch (issue #368) — defensive in case a
+        // bridge process ever services more than one launch.
+        this.targetExitCode = null;
+        this.exitedSent = false;
+
         // Find a free port for JDWP
         int jdwpPort;
         try (ServerSocket ss = new ServerSocket(0)) {
@@ -403,6 +415,18 @@ public class JdiDapServer {
         ProcessBuilder pb = new ProcessBuilder(taggedCmd);
         pb.redirectErrorStream(false);
         launchedProcess = pb.start();
+
+        // Issue #368: watch for debuggee exit so the real exit code is on hand
+        // when VMDeath/VMDisconnect arrives (never fabricated — see
+        // maybeSendExitedEvent).
+        final Process watchedProcess = launchedProcess;
+        Thread exitWatcher = new Thread(() -> {
+            try {
+                targetExitCode = watchedProcess.waitFor();
+            } catch (InterruptedException e) { /* shutting down */ }
+        }, "target-exit-watcher");
+        exitWatcher.setDaemon(true);
+        exitWatcher.start();
 
         // Read stderr to find JDWP listen port (and forward output)
         Thread stderrThread = new Thread(() -> {
@@ -1051,14 +1075,8 @@ public class JdiDapServer {
             if (stopOnEntry) {
                 // stopOnEntry=true: send stopped event, keep VM suspended
                 long threadId = 1;
-                try {
-                    for (ThreadReference tr : vm.allThreads()) {
-                        if ("main".equals(tr.name())) {
-                            threadId = tr.uniqueID();
-                            break;
-                        }
-                    }
-                } catch (Exception e) { /* use default */ }
+                ThreadReference reportable = pickReportableThread();
+                if (reportable != null) threadId = reportable.uniqueID();
 
                 sendStoppedEvent("entry", threadId);
             } else {
@@ -1076,7 +1094,19 @@ public class JdiDapServer {
         List<Map<String, Object>> threads = new ArrayList<>();
         if (vm != null) {
             try {
+                // Issue #352: list the reportable thread (usually "main") first.
+                // Clients commonly take threads[0] as the pause / stack-trace
+                // target, and raw allThreads() order starts with JVM system
+                // threads like "Reference Handler" that report no user frames.
+                ThreadReference first = pickReportableThread();
+                if (first != null) {
+                    Map<String, Object> t = new HashMap<>();
+                    t.put("id", first.uniqueID());
+                    t.put("name", first.name());
+                    threads.add(t);
+                }
                 for (ThreadReference tr : vm.allThreads()) {
+                    if (first != null && tr.uniqueID() == first.uniqueID()) continue;
                     Map<String, Object> t = new HashMap<>();
                     t.put("id", tr.uniqueID());
                     t.put("name", tr.name());
@@ -1092,44 +1122,32 @@ public class JdiDapServer {
     private void handleStackTrace(int reqSeq, Map<String, Object> args) {
         long threadId = longVal(args, "threadId");
         List<Map<String, Object>> frames = new ArrayList<>();
+        String message = null;
 
         if (vm != null) {
             try {
                 ThreadReference thread = findThread(threadId);
-                if (thread != null) {
-                    List<StackFrame> jdiFrames = thread.frames();
-                    // Cache frames for variable lookup
-                    threadFrameCache.put(thread.uniqueID(), jdiFrames);
-
-                    for (int i = 0; i < jdiFrames.size(); i++) {
-                        StackFrame sf = jdiFrames.get(i);
-                        Location loc = sf.location();
-                        int frameId = encodeFrameId(threadId, i);
-
-                        Map<String, Object> frame = new HashMap<>();
-                        frame.put("id", frameId);
-                        // Fully qualified names (java.lang.Thread.sleep0, not sleep0)
-                        // match JDWP/IDE conventions and let clients recognize
-                        // JDK-internal frames by name.
-                        frame.put("name", loc.declaringType().name() + "." + loc.method().name());
-                        frame.put("line", loc.lineNumber());
-                        frame.put("column", 0);
-
-                        // Source info
-                        Map<String, Object> source = new HashMap<>();
+                try {
+                    if (thread != null) {
+                        collectFrames(thread, frames);
+                    }
+                } catch (IncompatibleThreadStateException e) {
+                    // Issue #352: the requested thread cannot report frames
+                    // (not suspended, or a system thread with no user frames).
+                    // Retry once against a thread that can.
+                    log("Thread not suspended for stack trace: " + e.getMessage());
+                    ThreadReference retry = pickReportableThread();
+                    if (retry != null && (thread == null || retry.uniqueID() != thread.uniqueID())) {
                         try {
-                            source.put("name", loc.sourceName());
-                            source.put("path", resolveSourcePath(loc));
-                        } catch (AbsentInformationException e) {
-                            source.put("name", loc.declaringType().name());
+                            collectFrames(retry, frames);
+                        } catch (IncompatibleThreadStateException e2) {
+                            // still nothing usable — fall through to the message
                         }
-                        frame.put("source", source);
-
-                        frames.add(frame);
+                    }
+                    if (frames.isEmpty()) {
+                        message = "Thread " + threadId + " is not suspended; no frames available";
                     }
                 }
-            } catch (IncompatibleThreadStateException e) {
-                log("Thread not suspended for stack trace: " + e.getMessage());
             } catch (VMDisconnectedException e) {
                 // VM already gone
             }
@@ -1138,7 +1156,46 @@ public class JdiDapServer {
         Map<String, Object> body = new HashMap<>();
         body.put("stackFrames", frames);
         body.put("totalFrames", frames.size());
+        if (message != null) body.put("message", message);
         sendResponse(reqSeq, "stackTrace", true, body);
+    }
+
+    /** Collect DAP stack frames for one thread into {@code frames}.
+     *  Throws IncompatibleThreadStateException when the thread cannot report
+     *  frames so handleStackTrace can retry against a reportable thread. */
+    private void collectFrames(ThreadReference thread, List<Map<String, Object>> frames)
+            throws IncompatibleThreadStateException {
+        List<StackFrame> jdiFrames = thread.frames();
+        long threadId = thread.uniqueID();
+        // Cache frames for variable lookup
+        threadFrameCache.put(threadId, jdiFrames);
+
+        for (int i = 0; i < jdiFrames.size(); i++) {
+            StackFrame sf = jdiFrames.get(i);
+            Location loc = sf.location();
+            int frameId = encodeFrameId(threadId, i);
+
+            Map<String, Object> frame = new HashMap<>();
+            frame.put("id", frameId);
+            // Fully qualified names (java.lang.Thread.sleep0, not sleep0)
+            // match JDWP/IDE conventions and let clients recognize
+            // JDK-internal frames by name.
+            frame.put("name", loc.declaringType().name() + "." + loc.method().name());
+            frame.put("line", loc.lineNumber());
+            frame.put("column", 0);
+
+            // Source info
+            Map<String, Object> source = new HashMap<>();
+            try {
+                source.put("name", loc.sourceName());
+                source.put("path", resolveSourcePath(loc));
+            } catch (AbsentInformationException e) {
+                source.put("name", loc.declaringType().name());
+            }
+            frame.put("source", source);
+
+            frames.add(frame);
+        }
     }
 
     private void handleScopes(int reqSeq, Map<String, Object> args) {
@@ -1368,9 +1425,11 @@ public class JdiDapServer {
             } else {
                 // Pause all threads (threadId 0 or absent)
                 vm.suspend();
-                // Pick the first thread for the stopped event
-                List<ThreadReference> threads = vm.allThreads();
-                long stoppedThreadId = threads.isEmpty() ? 0 : threads.get(0).uniqueID();
+                // Issue #352: announce a thread that can actually report frames.
+                // allThreads().get(0) is typically a JVM system thread (e.g.
+                // "Reference Handler") whose stackTrace comes back empty.
+                ThreadReference reportable = pickReportableThread();
+                long stoppedThreadId = reportable != null ? reportable.uniqueID() : 0;
                 sendStoppedEvent("pause", stoppedThreadId);
                 sendResponse(reqSeq, "pause", true, new HashMap<>());
             }
@@ -1630,6 +1689,7 @@ public class JdiDapServer {
             List<String> redefined = new ArrayList<>();
             List<Map<String, Object>> failed = new ArrayList<>();
             int skippedNotLoaded = 0;
+            int replantedBreakpoints = 0;
 
             for (java.nio.file.Path classFile : classFiles) {
                 // Convert path to FQCN: com/example/Foo$Bar.class -> com.example.Foo$Bar
@@ -1652,6 +1712,9 @@ public class JdiDapServer {
                     redefMap.put(types.get(0), bytes);
                     vm.redefineClasses(redefMap);
                     redefined.add(fqcn);
+                    // Issue #370: redefineClasses cancels every BreakpointRequest
+                    // in the redefined class (JDI spec) — re-plant them.
+                    replantedBreakpoints += replantBreakpointsAfterRedefine(fqcn);
                 } catch (Exception e) {
                     Map<String, Object> entry = new HashMap<>();
                     entry.put("fqcn", fqcn);
@@ -1669,12 +1732,61 @@ public class JdiDapServer {
             if (!failed.isEmpty()) body.put("failed", failed);
             body.put("scannedFiles", classFiles.size());
             body.put("newestTimestamp", newestTimestamp);
+            body.put("replantedBreakpoints", replantedBreakpoints);
             sendResponse(reqSeq, "redefineClasses", true, body);
 
         } catch (Exception e) {
             sendErrorResponse(reqSeq, "redefineClasses",
                     "Scan/redefine error: " + e.getClass().getSimpleName() + ": " + e.getMessage());
         }
+    }
+
+    /**
+     * Issue #370: per the JDI spec, {@code vm.redefineClasses} cancels all
+     * BreakpointRequests in the redefined classes without any notification —
+     * nothing re-plants them, so pre-existing breakpoints silently stop
+     * firing. After each successful redefine:
+     *   1. delete stale line/function BreakpointRequests still registered for
+     *      the type (some VMs disable rather than remove them, which would
+     *      make the idempotent re-bind checks skip the re-plant),
+     *   2. re-run the deferred-breakpoint machinery (handleClassPrepared /
+     *      handleClassPreparedForFunctionBreakpoints) to plant fresh requests
+     *      against the new bytecode.
+     * A line whose bytecode became obsolete may re-verify false — that is the
+     * correct surface, not suppressed here.
+     *
+     * @return number of line breakpoints re-planted (verified against the
+     *         redefined type)
+     */
+    private int replantBreakpointsAfterRedefine(String fqcn) {
+        if (vm == null) return 0;
+        List<ReferenceType> types = vm.classesByName(fqcn);
+        if (types.isEmpty()) return 0;
+        ReferenceType refType = types.get(0);
+
+        EventRequestManager erm = vm.eventRequestManager();
+        List<BreakpointRequest> stale = new ArrayList<>();
+        for (BreakpointRequest br : erm.breakpointRequests()) {
+            try {
+                if (refType.equals(br.location().declaringType())) {
+                    stale.add(br);
+                }
+            } catch (RuntimeException e) {
+                // location of a cancelled request may be unreadable — leave it
+            }
+        }
+        for (BreakpointRequest br : stale) {
+            try {
+                erm.deleteEventRequest(br);
+            } catch (RuntimeException e) { /* already gone */ }
+        }
+        if (!stale.isEmpty()) {
+            log("Deleted " + stale.size() + " stale breakpoint request(s) on redefined class " + fqcn);
+        }
+
+        int replanted = handleClassPrepared(refType);
+        handleClassPreparedForFunctionBreakpoints(refType);
+        return replanted;
     }
 
     // ========== JDI Event Loop ==========
@@ -1749,12 +1861,14 @@ public class JdiDapServer {
 
                         } else if (event instanceof VMDeathEvent) {
                             log("VM death event");
+                            maybeSendExitedEvent(); // issue #368: exited before terminated
                             sendEvent("terminated", new HashMap<>());
                             running = false;
                             return;
 
                         } else if (event instanceof VMDisconnectEvent) {
                             log("VM disconnect event");
+                            maybeSendExitedEvent(); // issue #368: exited before terminated
                             sendEvent("terminated", new HashMap<>());
                             running = false;
                             return;
@@ -1785,12 +1899,14 @@ public class JdiDapServer {
                 }
             } catch (VMDisconnectedException e) {
                 log("VM disconnected in event loop");
+                maybeSendExitedEvent(); // issue #368: exited before terminated
                 sendEvent("terminated", new HashMap<>());
             } catch (InterruptedException e) {
                 log("Event loop interrupted");
             } catch (Exception e) {
                 log("Event loop error: " + e.getMessage());
                 try {
+                    maybeSendExitedEvent(); // issue #368: exited before terminated
                     sendEvent("terminated", new HashMap<>());
                 } catch (Exception ex) {
                     log("Failed to send terminated event: " + ex.getMessage());
@@ -1802,7 +1918,8 @@ public class JdiDapServer {
         eventThread.start();
     }
 
-    private void handleClassPrepared(ReferenceType refType) {
+    /** @return the number of breakpoints set (verified) on the prepared type */
+    private int handleClassPrepared(ReferenceType refType) {
         // Look up deferred breakpoints by scanning all deferred entries whose className matches
         // the prepared ReferenceType (full name or simple name).
         // The CPR property is set in handleSetBreakpoints / registerPendingBreakpoints.
@@ -1828,12 +1945,13 @@ public class JdiDapServer {
                 if (entryClassName.equals(outerFqn)) { bpInfo = entry; break; }
             }
         }
-        if (bpInfo == null) return;
+        if (bpInfo == null) return 0;
 
         String sourcePath = str(bpInfo, "sourcePath");
         List<Object> breakpointSpecs = list(bpInfo, "breakpoints");
-        if (breakpointSpecs == null) return;
+        if (breakpointSpecs == null) return 0;
 
+        int planted = 0;
         log("Setting deferred breakpoints on " + className);
         for (Object bpObj : breakpointSpecs) {
             Map<String, Object> bpSpec = asMap(bpObj);
@@ -1844,6 +1962,7 @@ public class JdiDapServer {
 
             // Send breakpoint verified event
             if (Boolean.TRUE.equals(bp.get("verified"))) {
+                planted++;
                 Map<String, Object> bpEvent = new HashMap<>();
                 bpEvent.put("reason", "changed");
                 Map<String, Object> bpBody = new HashMap<>();
@@ -1857,6 +1976,7 @@ public class JdiDapServer {
                 sendEvent("breakpoint", bpEvent);
             }
         }
+        return planted;
     }
 
     private boolean evaluateCondition(ThreadReference thread, String condition) {
@@ -1891,6 +2011,54 @@ public class JdiDapServer {
             }
         }
         throw new RuntimeException("SocketAttach connector not found");
+    }
+
+    /**
+     * Issue #352: pick a thread worth announcing in a stopped event / worth
+     * reading a stack from. Preference order:
+     *   1. the thread named "main" (if it can report frames when suspended),
+     *   2. the first thread that is suspended with at least one frame,
+     *   3. allThreads().get(0) as a last resort (guarding the empty list).
+     * Per-thread JDI state exceptions are swallowed so one bad thread never
+     * hides a usable one.
+     */
+    private ThreadReference pickReportableThread() {
+        if (vm == null) return null;
+        List<ThreadReference> threads;
+        try {
+            threads = vm.allThreads();
+        } catch (VMDisconnectedException e) {
+            return null;
+        }
+        if (threads.isEmpty()) return null;
+
+        ThreadReference mainThread = null;
+        for (ThreadReference t : threads) {
+            try {
+                if ("main".equals(t.name())) {
+                    mainThread = t;
+                    break;
+                }
+            } catch (RuntimeException e) { /* skip unreadable thread */ }
+        }
+        if (mainThread != null) {
+            try {
+                if (!mainThread.isSuspended() || mainThread.frameCount() > 0) {
+                    return mainThread;
+                }
+            } catch (IncompatibleThreadStateException e) {
+                return mainThread; // state raced — still the best candidate
+            } catch (RuntimeException e) { /* fall through to scan */ }
+        }
+
+        for (ThreadReference t : threads) {
+            try {
+                if (t.isSuspended() && t.frameCount() > 0) return t;
+            } catch (IncompatibleThreadStateException e) {
+                // resumed between isSuspended() and frameCount() — skip
+            } catch (RuntimeException e) { /* skip unreadable thread */ }
+        }
+        return threads.get(0);
     }
 
     private ThreadReference findThread(long threadId) {
@@ -1945,6 +2113,35 @@ public class JdiDapServer {
             nextFrameId.set(1);
         }
         lastException = null;
+    }
+
+    /**
+     * Issue #368: emit a DAP 'exited' event carrying the debuggee's real exit
+     * code, at most once, BEFORE the corresponding 'terminated' event.
+     * Launch mode only — in attach mode ({@code launchedProcess == null}) we
+     * never owned the process and never fabricate a code. Waits briefly for
+     * the process to finish (VMDeath can arrive slightly before OS-level
+     * process exit); if it is still running (e.g. detach), no event is sent.
+     */
+    private void maybeSendExitedEvent() {
+        Process proc = launchedProcess;
+        if (proc == null) return; // attach mode (or already cleaned up)
+        synchronized (exitedLock) {
+            if (exitedSent) return;
+            Integer code = targetExitCode; // stored by target-exit-watcher
+            if (code == null) {
+                try {
+                    if (proc.waitFor(2, TimeUnit.SECONDS)) {
+                        code = proc.exitValue();
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            if (code == null) return; // process still alive — no code to report
+            exitedSent = true;
+            sendEvent("exited", mapOf("exitCode", code));
+        }
     }
 
     // synchronized so the shutdown-hook thread and the disconnect/terminate
