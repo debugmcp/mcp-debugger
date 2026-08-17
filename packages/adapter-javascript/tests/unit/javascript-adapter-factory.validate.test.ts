@@ -60,6 +60,37 @@ describe('JavascriptAdapterFactory.validate', () => {
     expect(res.errors).toContain('js-debug adapter not found. Run build script to vendor js-debug');
   });
 
+  it('accepts a vendor payload that only ships vsDebugServer.cjs (issue #354)', async () => {
+    vi.spyOn(fs, 'existsSync').mockImplementation((p: unknown) => {
+      return norm(p).endsWith('/vendor/js-debug/vsDebugServer.cjs');
+    });
+    vi.stubEnv('PATH', '');
+
+    const factory = new JavascriptAdapterFactory();
+    const res = await factory.validate();
+
+    expect(res.valid).toBe(true);
+    expect(res.errors).toEqual([]);
+  });
+
+  it('accepts the bundled npx layout where vendor/ sits inside the module dir (issue #354)', async () => {
+    // In the bundled cli.mjs, __dirname IS the dist dir and the payload lives
+    // at dist/vendor — i.e. vendor is a CHILD of the probing module's dir,
+    // not a sibling of it. Accept only the './vendor' candidate (which does
+    // not traverse '..' out of the module dir).
+    vi.spyOn(fs, 'existsSync').mockImplementation((p: unknown) => {
+      const s = norm(p);
+      return s.endsWith('/vendor/js-debug/vsDebugServer.cjs') && s.includes('/src/vendor/');
+    });
+    vi.stubEnv('PATH', '');
+
+    const factory = new JavascriptAdapterFactory();
+    const res = await factory.validate();
+
+    expect(res.valid).toBe(true);
+    expect(res.errors).toEqual([]);
+  });
+
   it('emits warning when no TS runner (tsx or ts-node) is found', async () => {
     // Vendor present, but no TS runners anywhere
     vi.spyOn(fs, 'existsSync').mockImplementation((p: unknown) => {

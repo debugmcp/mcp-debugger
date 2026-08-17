@@ -10,6 +10,10 @@ const WINDOWS_GNU_TARGET = 'x86_64-pc-windows-gnu';
 const ROOT = path.resolve(process.cwd(), '.');
 const DOCKER_RUST_IMAGE = process.env.RUST_EXAMPLE_DOCKER_IMAGE || 'rust:1.83-slim';
 const LINUX_BUILD_STAMP = '.debug-mcp-linux-build';
+// Docker builds get their own target dir: they mount `examples` at /workspace,
+// so writing to `target/` would clobber the host build with a binary whose
+// DWARF paths say /workspace — breaking every host-path breakpoint/logpoint.
+const LINUX_TARGET_DIR = 'target-linux';
 type RustTarget = 'host' | 'linux';
 
 interface ExamplePaths {
@@ -96,7 +100,7 @@ async function resolveBinaryPath(
   const extension = process.platform === 'win32' ? '.exe' : '';
 
   if (target === 'linux') {
-    const linuxBinary = path.join(exampleRoot, 'target', 'debug', binaryName);
+    const linuxBinary = path.join(exampleRoot, LINUX_TARGET_DIR, 'debug', binaryName);
     if (!(await pathExistsAsync(linuxBinary))) {
       throw new Error(`Linux binary not found at ${linuxBinary}. Did the docker build succeed?`);
     }
@@ -131,7 +135,7 @@ async function resolveBinaryPath(
 }
 
 async function buildExampleBinaryInDocker(exampleRoot: string, exampleName: RustExampleName): Promise<void> {
-  const binaryPath = path.join(exampleRoot, 'target', 'debug', exampleName);
+  const binaryPath = path.join(exampleRoot, LINUX_TARGET_DIR, 'debug', exampleName);
   const sourcePath = path.join(exampleRoot, 'src', 'main.rs');
   const examplesRootFs = path.resolve(ROOT, 'examples');
   const relativeExamplePathFs = path.relative(examplesRootFs, exampleRoot);
@@ -151,6 +155,8 @@ async function buildExampleBinaryInDocker(exampleRoot: string, exampleName: Rust
     `${examplesRoot}:/workspace`,
     '-e',
     'CARGO_HOME=/workspace/.cargo',
+    '-e',
+    `CARGO_TARGET_DIR=${workdir}/${LINUX_TARGET_DIR}`,
     '--workdir',
     workdir,
     DOCKER_RUST_IMAGE,
@@ -158,6 +164,11 @@ async function buildExampleBinaryInDocker(exampleRoot: string, exampleName: Rust
     '-c',
     'cargo build --locked --color never'
   ];
+  // Build as the host user (Linux/macOS dev runs) so artifacts under the
+  // mounted examples tree aren't left root-owned and un-deletable.
+  if (process.platform !== 'win32' && typeof process.getuid === 'function' && typeof process.getgid === 'function') {
+    dockerArgs.splice(2, 0, '--user', `${process.getuid()}:${process.getgid()}`);
+  }
 
   await runDockerCommand(dockerArgs);
   const stampPath = path.join(exampleRoot, LINUX_BUILD_STAMP);

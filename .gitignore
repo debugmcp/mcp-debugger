@@ -141,6 +141,7 @@ __pycache__/
 
 # Rust build artifacts
 target/
+target-linux/
 Cargo.lock
 # Fixture lockfiles ARE tracked: the docker cross-compile builds with --locked,
 # and a fresh CI checkout without them fails ("lock file needs to be updated")
@@ -158,6 +159,7 @@ examples/dotnet/pause_test/obj/
 
 # Java build artifacts
 examples/java/*.class
+examples/java/**/*.class
 
 # Test results and analysis files
 test-results*.json
@@ -192,6 +194,11 @@ eslint-*.json
 packages/adapter-javascript/vendor/js-debug/
 packages/adapter-javascript/vendor/js-debug/**
 
+# Vendored CodeLLDB in the legacy per-adapter location (canonical copy lives in
+# packages/codelldb-common/vendor, ignored by that package's own .gitignore)
+packages/adapter-rust/vendor/
+packages/adapter-cpp/vendor/
+
 # Build artifacts from mcp-debugger bundling (generated during build; do not commit)
 packages/mcp-debugger/proxy/
 packages/mcp-debugger/vendor/
@@ -208,6 +215,7 @@ undefined/
 examples/go/**/*.exe
 examples/go/**/hello_world
 examples/go/**/hello_world_bin
+examples/go/**/hello_world_test
 examples/go/**/pause_test_bin
 __debug_bin*
 

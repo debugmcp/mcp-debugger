@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   assertLineContent,
   resolveStatement,
-  isCommentOrBlank
+  isCommentOrBlank,
+  stripTrailingComment
 } from '../../../src/utils/breakpoint-resolver.js';
 
 const FILE = '/abs/app.py';
@@ -51,6 +52,40 @@ describe('assertLineContent', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.message).toContain('statement: "total = sum(prices)"');
+  });
+
+  it('passes when the expectation is a distinctive substring of the line (issue #367)', () => {
+    const result = assertLineContent(LINES, 3, 'sum(prices)', FILE);
+    expect(result.ok).toBe(true);
+  });
+
+  it('passes when the expectation carries a stale trailing comment (issue #367)', () => {
+    const lines = ['    total = sum(prices)'];
+    const result = assertLineContent(lines, 1, 'total = sum(prices)  // recompute', FILE);
+    expect(result.ok).toBe(true);
+  });
+
+  it('passes full-line expectations against a line that gained a trailing comment', () => {
+    const lines = ['    total = sum(prices)  # recompute'];
+    const result = assertLineContent(lines, 1, 'total = sum(prices)', FILE);
+    expect(result.ok).toBe(true);
+  });
+
+  it('rejects empty and whitespace-only expectations explicitly', () => {
+    for (const expectation of ['', '   ', '\t']) {
+      const result = assertLineContent(LINES, 3, expectation, FILE);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.actual).toBeNull();
+      expect(result.message).toContain('empty or whitespace-only');
+    }
+  });
+
+  it('still fails when the expectation matches nothing on the line', () => {
+    const result = assertLineContent(LINES, 3, 'total = product(prices)', FILE);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.message).toContain('does not match expectedContent');
   });
 
   it('fails clearly when the line is beyond end of file', () => {
@@ -166,5 +201,94 @@ describe('resolveStatement', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.message).toContain('single line');
+  });
+
+  describe('substring pass (issue #367)', () => {
+    const RUST_LINES = [
+      'fn main() {',                                   // 1
+      '    let total = compute();  // sum it up',      // 2
+      '    // let total = compute();',                 // 3
+      '    println!("{}", total);',                    // 4
+      '}',                                             // 5
+    ];
+
+    it('resolves a unique substring match when no exact match exists', () => {
+      const result = resolveStatement(RUST_LINES, 'let total = compute();', FILE);
+      expect(result).toEqual({ ok: true, line: 2 });
+    });
+
+    it('resolves a distinctive partial-line substring', () => {
+      const result = resolveStatement(RUST_LINES, 'println!', FILE);
+      expect(result).toEqual({ ok: true, line: 4 });
+    });
+
+    it('excludes comment-only lines from substring matching', () => {
+      // 'compute()' appears on line 2 (code) and line 3 (commented-out copy);
+      // only the code line counts, so the match is unique.
+      const result = resolveStatement(RUST_LINES, 'compute()', FILE);
+      expect(result).toEqual({ ok: true, line: 2 });
+    });
+
+    it('never lets substring matches compete with an exact match', () => {
+      const lines = [
+        'total = 1',        // 1: substring superset of the target below
+        'total',            // 2: exact match
+        'subtotal = total', // 3: another substring occurrence
+      ];
+      const result = resolveStatement(lines, 'total', FILE);
+      expect(result).toEqual({ ok: true, line: 2 });
+    });
+
+    it('errors on ambiguous substring matches, listing every line', () => {
+      const lines = [
+        'x = retry(a)',
+        'y = retry(b)',
+      ];
+      const result = resolveStatement(lines, 'retry(', FILE);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.message).toContain(`matches 2 lines in ${FILE}`);
+      expect(result.message).toContain('1: x = retry(a)');
+      expect(result.message).toContain('2: y = retry(b)');
+      expect(result.message).toContain('nearLine');
+    });
+
+    it('disambiguates substring matches with nearLine', () => {
+      const lines = [
+        'x = retry(a)',
+        'noop()',
+        'y = retry(b)',
+      ];
+      const result = resolveStatement(lines, 'retry(', FILE, 3);
+      expect(result).toEqual({ ok: true, line: 3 });
+    });
+
+    it('mentions substring matching in the not-found error', () => {
+      const result = resolveStatement(RUST_LINES, 'does_not_exist()', FILE);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.message).toContain('not found');
+      expect(result.message).toContain('substring');
+    });
+  });
+});
+
+describe('stripTrailingComment', () => {
+  it('strips // and # trailing comments', () => {
+    expect(stripTrailingComment('let x = 5;  // note').trim()).toBe('let x = 5;');
+    expect(stripTrailingComment('x = 5  # note').trim()).toBe('x = 5');
+  });
+
+  it('returns the line unchanged when no comment marker is present', () => {
+    expect(stripTrailingComment('let x = 5;')).toBe('let x = 5;');
+  });
+
+  it('strips at the earliest marker when both are present', () => {
+    expect(stripTrailingComment('x = 1 # a // b').trim()).toBe('x = 1');
+    expect(stripTrailingComment('x = 1 // a # b').trim()).toBe('x = 1');
+  });
+
+  it('is deliberately not string-literal-aware (fails safe)', () => {
+    expect(stripTrailingComment('url = "http://x"').trim()).toBe('url = "http:');
   });
 });

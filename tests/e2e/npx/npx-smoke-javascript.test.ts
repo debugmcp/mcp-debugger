@@ -116,7 +116,20 @@ describe.sequential('NPX: JavaScript Debugging Smoke Tests', () => {
     // This is the critical check - JavaScript must be available!
     expect(jsLang).toBeDefined();
     expect(jsLang.displayName).toBe('JavaScript/TypeScript');
-    
+
+    // Issue #354/#364: presence in `languages` is not enough — the bundled
+    // layout must also pass the vendor probe, or launch/attach silently no-op.
+    const available = response.available as Array<{
+      language: string;
+      modes?: { launch?: { available?: boolean; reason?: string }; attach?: { available?: boolean } };
+    }>;
+    expect(Array.isArray(available)).toBe(true);
+    const jsAvailability = available.find(l => l.language === 'javascript');
+    expect(jsAvailability).toBeDefined();
+    expect(jsAvailability!.modes?.launch?.available,
+      `javascript launch unavailable: ${jsAvailability!.modes?.launch?.reason}`).toBe(true);
+    expect(jsAvailability!.modes?.attach?.available).toBe(true);
+
     console.log('[NPX JavaScript] ✓ JavaScript language is available');
     console.log('[NPX JavaScript] ✓ CRITICAL FIX VERIFIED: JavaScript adapter is now included in npx distribution!');
   });
