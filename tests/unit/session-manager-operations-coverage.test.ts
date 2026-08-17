@@ -1644,6 +1644,49 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(mockProxyManager.setCurrentThreadId).not.toHaveBeenCalled();
     });
 
+    it('surfaces the adapter error and aborts early when the proxy dies during verification', async () => {
+      // CodeLLDB rejects an attach (e.g. ptrace EPERM) only after the worker
+      // has reported adapter_configured_and_launched; the proxy then exits and
+      // every further 'threads' poll throws "Proxy not initialized". The
+      // verify loop must report the adapter's error, not the generic poll
+      // failure, and must stop polling instead of running out the window.
+      (operations as unknown as { attachVerifyTimeoutMs: number }).attachVerifyTimeoutMs = 5000;
+
+      let errorHandler: ((err: Error) => void) | undefined;
+      mockProxyManager.on.mockImplementation((event: string, handler: (err: Error) => void) => {
+        if (event === 'error') errorHandler = handler;
+        return mockProxyManager;
+      });
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          // The adapter rejection lands while the first poll is in flight.
+          errorHandler?.(new Error('Critical initialization error: attach failed: Operation not permitted'));
+          throw new Error('Proxy not initialized');
+        }
+        return {};
+      });
+
+      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+      });
+
+      const startedAt = Date.now();
+      const result = await operations.attachToProcess('test-session', {
+        port: 5005,
+        host: 'localhost',
+        stopOnEntry: true
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.state).toBe(SessionState.ERROR);
+      expect(result.error).toContain('Operation not permitted');
+      expect(result.error).not.toContain('Proxy not initialized');
+      expect(result.error).not.toContain('verifyTimeout');
+      expect(Date.now() - startedAt).toBeLessThan(2000);
+      expect(mockProxyManager.stop).toHaveBeenCalled();
+      expect(mockSession.proxyManager).toBeUndefined();
+    });
+
     it('should invoke the adapter policy performHandshake for attach when the policy defines it', async () => {
       // js-debug's DAP attach sequence is driven by performHandshake; before
       // issue #124 attachToProcess never called it, so no attach request ever

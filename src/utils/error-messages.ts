@@ -84,6 +84,17 @@ export const ErrorMessages = {
     `(e.g. a busy or warming JVM), retry with a larger 'verifyTimeout' (ms) on attach_to_process.`,
 
   /**
+   * Error message for attaches rejected by the debug adapter itself
+   * Occurs when: The adapter rejects the attach after reporting itself
+   * configured (e.g. CodeLLDB on ptrace EPERM) and the proxy dies mid-verify —
+   * a retry with a larger timeout cannot help
+   * Used in: src/session/session-manager-operations.ts
+   * @param failure - The adapter's error, or the proxy exit description
+   */
+  attachAdapterFailed: (failure: string) =>
+    `Attach failed: the debug adapter reported an error and exited during attach verification: ${failure}`,
+
+  /**
    * Error message for adapter ready timeouts
    * Occurs when: Waiting for the debug adapter to be configured times out
    * Used in: src/session/session-manager.ts (logged as warning)
@@ -117,6 +128,19 @@ export const ErrorMessages = {
   attachMayStillWork: (language: string) =>
     `Attach mode may still be available for '${language}': start the target under its ` +
     `debug server (e.g. rdbg --open, python -m debugpy --listen) and use attach_to_process.`,
+
+  /**
+   * Error message for launches gated on a known-unavailable adapter (issue #360)
+   * Occurs when: create_debug_session/start_debugging target a language whose
+   * toolchain probe already reports unavailable — proceeding would "succeed"
+   * while silently running nothing
+   * Used in: src/session/session-manager-operations.ts, src/server.ts
+   * @param language - The session's language
+   * @param reason - The availability reason from the factory validation
+   */
+  launchUnavailable: (language: string, reason: string) =>
+    `Cannot start a '${language}' debug session: ${reason} ` +
+    `See list_supported_languages for per-mode availability.`,
 
   /**
    * Reason strings for per-mode availability reporting in list_supported_languages
