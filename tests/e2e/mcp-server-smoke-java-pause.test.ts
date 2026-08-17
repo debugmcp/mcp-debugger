@@ -162,4 +162,59 @@ describe('MCP Server Java PauseTest Smoke Test @requires-java', () => {
     const contResult = await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
     expect(contResult.success).toBe(true);
   }, 60000);
+
+  it('pause_execution on a running launch reports a thread with usable frames (issue #352)', async () => {
+    try {
+      execSync('java -version', { stdio: 'ignore' });
+      execSync('javac -version', { stdio: 'ignore' });
+    } catch {
+      console.log('[Java Pause #352] Skipping — JDK not installed');
+      return;
+    }
+
+    const { sourcePath, classDir, mainClass } = prepareJavaExample('PauseTest');
+
+    // 1. Create session
+    const createResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: { language: 'java', name: 'java-pause-352' }
+    }));
+    expect(createResponse.sessionId).toBeDefined();
+    sessionId = createResponse.sessionId as string;
+
+    // 2. Start debugging with NO breakpoints — PauseTest loops forever
+    const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'start_debugging',
+      arguments: {
+        sessionId,
+        scriptPath: sourcePath,
+        args: [],
+        dapLaunchArgs: { mainClass, classpath: classDir, cwd: classDir, stopOnEntry: false }
+      }
+    }));
+    expect(startResponse.success).toBe(true);
+
+    // 3. Let the program actually run before pausing
+    await new Promise(r => setTimeout(r, 1500));
+
+    // 4. Pause all threads. Issue #352: the bridge previously announced
+    //    vm.allThreads().get(0) — typically a JVM system thread like
+    //    "Reference Handler" — in the stopped event, so the follow-up
+    //    stackTrace came back with 0 frames.
+    const pauseResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'pause_execution',
+      arguments: { sessionId }
+    }));
+    expect(pauseResponse.success).toBe(true);
+
+    // 5. Stack trace must be non-empty and contain the user's main frame
+    const stack = await waitForPausedState(mcpClient!, sessionId, 20, 500);
+    expect(stack).not.toBeNull();
+    const frames = stack!.stackFrames!;
+    expect(frames.length).toBeGreaterThan(0);
+    console.log('[Java Pause #352] Frames:', frames.map(f => f.name));
+    expect(frames.some(f => (f.name ?? '').includes('PauseTest.main'))).toBe(true);
+
+    console.log('[Java Pause #352] TEST PASSED — pause reported a usable thread');
+  }, 60000);
 });

@@ -24,6 +24,7 @@ import path from 'path';
 import { ProxyConfig } from '../proxy/proxy-config.js';
 import { MIRROR_EXPOSE_COMMAND, MIRROR_UNEXPOSE_COMMAND } from '../proxy/dap-proxy-interfaces.js';
 import { ErrorMessages } from '../utils/error-messages.js';
+import { checkLaunchToolchain } from '../utils/language-availability.js';
 import { resolveStatement } from '../utils/breakpoint-resolver.js';
 import { SessionManagerData } from './session-manager-data.js';
 import { CustomLaunchRequestArguments, DebugResult } from './session-manager-core.js';
@@ -66,6 +67,8 @@ export interface RedefineClassesResult {
   failed?: Array<{ fqcn: string; error: string }>;
   scannedFiles?: number;
   newestTimestamp?: number;
+  /** Breakpoints re-planted after redefine (issue #370). */
+  replantedBreakpoints?: number;
   error?: string;
 }
 
@@ -506,6 +509,22 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       `Attempting to start debugging for session ${sessionId}, script: ${scriptPath}, dryRunSpawn: ${dryRunSpawn}, dapLaunchArgs:`,
       sanitizePayloadForLogging(dapLaunchArgs)
     );
+
+    // Fail fast when the adapter is known-unavailable (issue #360): consult
+    // the same toolchain probe list_supported_languages reports, BEFORE any
+    // state mutation or proxy teardown, so the caller gets the real reason
+    // instead of success-then-silence. Fails open when the probe can't tell.
+    const launchGate = await checkLaunchToolchain(
+      session.language,
+      this.adapterRegistry,
+      this.launchValidationCache,
+      this.logger
+    );
+    if (!launchGate.available) {
+      const error = ErrorMessages.launchUnavailable(session.language, launchGate.reason);
+      this.logger.warn(`[SessionManager] ${error}`);
+      return { success: false, state: session.state, error };
+    }
 
     if (session.proxyManager) {
       // Session-preserving teardown: closeSession here used to REMOVE the
@@ -2576,9 +2595,33 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         let threads: DebugProtocol.Thread[] | undefined;
         let lastFailure = 'no threads response received';
 
+        // Some adapters reject the attach only after reporting themselves
+        // configured (CodeLLDB does this for e.g. ptrace EPERM). The proxy
+        // then dies mid-verify and every remaining 'threads' poll would throw
+        // a generic "Proxy not initialized", masking the real error — so latch
+        // the first proxy error/exit as the failure and stop polling.
+        let proxyGone = false;
+        const onProxyError = (err: Error): void => {
+          if (!proxyGone) {
+            proxyGone = true;
+            lastFailure = err.message;
+          }
+        };
+        const onProxyExit = (code: number | null, signal?: string): void => {
+          if (!proxyGone) {
+            proxyGone = true;
+            lastFailure = `debug adapter exited during attach verification (code=${code}${signal ? `, signal=${signal}` : ''})`;
+          }
+        };
+        proxyManager.on('error', onProxyError);
+        proxyManager.on('exit', onProxyExit);
+
         const requestThreads = async (): Promise<void> => {
           const remainingMs = Math.max(deadline - Date.now(), 1);
           const threadsResponse = await this.sendThreadsRequestBounded(proxyManager, remainingMs);
+          if (proxyGone) {
+            return;
+          }
           if (threadsResponse?.success === false) {
             lastFailure = threadsResponse.message || `'threads' request failed`;
             return;
@@ -2591,30 +2634,41 @@ export abstract class SessionManagerOperations extends SessionManagerData {
           }
         };
 
-        // First discovery attempt.
         try {
-          await requestThreads();
-        } catch (err) {
-          lastFailure = err instanceof Error ? err.message : String(err);
-          this.logger.warn(`[SessionManager] Initial thread discovery for attach failed: ${lastFailure}`);
-        }
-
-        // Retry until the deadline if the debugger has not reported threads yet.
-        while (!threads && Date.now() < deadline) {
-          const sleepMs = Math.min(pollIntervalMs, Math.max(deadline - Date.now(), 1));
-          await new Promise((resolve) => setTimeout(resolve, sleepMs));
-          if (Date.now() >= deadline) {
-            break;
-          }
+          // First discovery attempt.
           try {
             await requestThreads();
           } catch (err) {
-            lastFailure = err instanceof Error ? err.message : String(err);
+            if (!proxyGone) {
+              lastFailure = err instanceof Error ? err.message : String(err);
+            }
+            this.logger.warn(`[SessionManager] Initial thread discovery for attach failed: ${lastFailure}`);
           }
+
+          // Retry until the deadline if the debugger has not reported threads yet.
+          while (!threads && !proxyGone && Date.now() < deadline) {
+            const sleepMs = Math.min(pollIntervalMs, Math.max(deadline - Date.now(), 1));
+            await new Promise((resolve) => setTimeout(resolve, sleepMs));
+            if (proxyGone || Date.now() >= deadline) {
+              break;
+            }
+            try {
+              await requestThreads();
+            } catch (err) {
+              if (!proxyGone) {
+                lastFailure = err instanceof Error ? err.message : String(err);
+              }
+            }
+          }
+        } finally {
+          proxyManager.removeListener('error', onProxyError);
+          proxyManager.removeListener('exit', onProxyExit);
         }
 
         if (!threads) {
-          const reason = ErrorMessages.attachVerifyFailed(verifyTimeoutMs, lastFailure);
+          const reason = proxyGone
+            ? ErrorMessages.attachAdapterFailed(lastFailure)
+            : ErrorMessages.attachVerifyFailed(verifyTimeoutMs, lastFailure);
           this.logger.error(`[SessionManager] ${reason} — tearing down proxy for session ${sessionId}`);
           // Tear down the proxy using the same mechanics as closeSession, but
           // keep the session record so the failure is inspectable as ERROR.
@@ -2870,6 +2924,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         failed: body.failed,
         scannedFiles: body.scannedFiles,
         newestTimestamp: body.newestTimestamp,
+        replantedBreakpoints: body.replantedBreakpoints,
       };
     } catch (error) {
       this.logger.error(`[SM redefineClasses ${sessionId}] Error: ${error}`);

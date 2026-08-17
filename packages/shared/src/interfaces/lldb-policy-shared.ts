@@ -146,6 +146,127 @@ export function extractLldbLocalVariables(
 }
 
 /**
+ * Symbols LLDB synthesizes for stripped/unnamed code regions, e.g.
+ * '___lldb_unnamed_symbol3688'. Frame names sometimes arrive with a leading
+ * '@' (CodeLLDB renders source-less frames as '@symbol'), which is stripped
+ * before matching.
+ */
+const LLDB_UNNAMED_SYMBOL_PATTERN = /^_*_lldb_unnamed_symbol/;
+
+/** glibc internal aliases, e.g. '__GI___clock_nanosleep'. */
+const GLIBC_INTERNAL_PATTERN = /^__GI_/;
+
+/**
+ * libc/runtime entry and thread plumbing — internal only when the frame also
+ * lacks user source (see isLldbInternalFrame).
+ */
+const LIBC_RUNTIME_NAME_PATTERNS = [
+  /^__libc_/,
+  /^_start$/,
+  /^__clone/,
+  /^clone3?$/
+];
+
+/**
+ * Common syscall wrappers that show up above user code in blocked/sleeping
+ * threads. A user function may legitimately share one of these names, so
+ * these only count as internal when the frame has no user source.
+ */
+const SYSCALL_WRAPPER_NAMES = new Set([
+  'clock_nanosleep',
+  'nanosleep',
+  'usleep',
+  'sleep',
+  'poll',
+  'ppoll',
+  'epoll_wait',
+  'epoll_pwait',
+  'select',
+  'pselect',
+  'read',
+  'write',
+  'pread',
+  'pwrite',
+  'accept',
+  'accept4',
+  'recv',
+  'recvfrom',
+  'recvmsg',
+  'send',
+  'sendto',
+  'sendmsg',
+  'wait4',
+  'waitpid',
+  'futex_wait',
+  'futex_wake',
+  'sigwait',
+  'sigtimedwait',
+  'pause'
+]);
+
+/**
+ * Source paths that mark a frame as non-user code: system libraries and
+ * headers, glibc build-tree paths (sysdeps/nptl), and rustc's std sources.
+ * Only consulted for name-matched frames — a plain user frame that happens
+ * to live under /usr is never hidden by path alone.
+ */
+const SYSTEM_SOURCE_PATH_PATTERNS = [
+  '/usr/lib',
+  '/lib/',
+  '/lib64/',
+  '/usr/include/',
+  '../sysdeps/',
+  './nptl/',
+  '/rustc/'
+];
+
+function isSystemOrMissingSource(file: string | undefined): boolean {
+  if (!file || file === '<unknown_source>') {
+    return true;
+  }
+  return SYSTEM_SOURCE_PATH_PATTERNS.some((pattern) => file.includes(pattern));
+}
+
+/**
+ * Classify an LLDB stack frame as debugger/libc/runtime-internal (issue
+ * #369). Two rule classes:
+ *
+ * 1. Pure-name rules — LLDB-synthesized unnamed symbols and glibc '__GI_'
+ *    aliases are internal regardless of source (they never carry user
+ *    source anyway).
+ * 2. Name+source rules — libc runtime plumbing and syscall wrappers are
+ *    internal only when the frame ALSO has no user source (absent,
+ *    '<unknown_source>', or a system path). A user function named e.g.
+ *    'nanosleep' with workspace source is kept.
+ */
+export function isLldbInternalFrame(frame: StackFrame): boolean {
+  // CodeLLDB renders source-less frames as '@symbol' — strip the sigil.
+  const name = (frame.name ?? '').replace(/^@/, '');
+
+  if (LLDB_UNNAMED_SYMBOL_PATTERN.test(name) || GLIBC_INTERNAL_PATTERN.test(name)) {
+    return true;
+  }
+
+  const nameMatches =
+    LIBC_RUNTIME_NAME_PATTERNS.some((pattern) => pattern.test(name)) ||
+    SYSCALL_WRAPPER_NAMES.has(name);
+  return nameMatches && isSystemOrMissingSource(frame.file);
+}
+
+/**
+ * Filter LLDB stack frames through isLldbInternalFrame. Deliberately no
+ * empty-result fallback here — the central guarantee in
+ * session-manager-data (issue #346) restores the top frame when every
+ * frame is internal, and duplicating it would mask that annotation.
+ */
+export function filterLldbStackFrames(frames: StackFrame[], includeInternals: boolean): StackFrame[] {
+  if (includeInternals) {
+    return frames;
+  }
+  return frames.filter((frame) => !isLldbInternalFrame(frame));
+}
+
+/**
  * Validate that a CodeLLDB binary exists and answers --version with output
  * containing 'codelldb'.
  */

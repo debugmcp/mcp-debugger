@@ -285,4 +285,174 @@ describe('Java Hot-Reload (redefine_classes) Smoke Test @requires-java', () => {
       }
     }
   }, 90000);
+
+  it('re-plants pre-existing breakpoints after redefine_classes (issue #370)', async () => {
+    // Check JDK availability
+    try {
+      execSync('java -version', { stdio: 'ignore' });
+      execSync('javac -version', { stdio: 'ignore' });
+    } catch {
+      console.log('[Redefine #370] Skipping — JDK not installed');
+      return;
+    }
+
+    // Compile original version (getValue() returns 42)
+    execSync(`javac -g -d "${testJavaDir}" "${mainFile}"`, {
+      cwd: testJavaDir,
+      stdio: 'pipe'
+    });
+
+    try {
+      // Start JVM with JDWP
+      const jdwpPort = await getFreePort();
+      console.log(`[Redefine #370] Using JDWP port: ${jdwpPort}`);
+
+      jvmProcess = spawn('java', [
+        `-agentlib:jdwp=transport=dt_socket,server=y,address=${jdwpPort},suspend=y`,
+        '-cp', testJavaDir,
+        'RedefineTarget'
+      ], {
+        cwd: testJavaDir,
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+
+      // Wait for JDWP ready
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Timeout waiting for JDWP agent')), 15000);
+        let outputData = '';
+        let resolved = false;
+
+        const checkOutput = (chunk: Buffer) => {
+          if (resolved) return;
+          outputData += chunk.toString();
+          if (outputData.includes('Listening for transport')) {
+            resolved = true;
+            clearTimeout(timeout);
+            resolve();
+          }
+        };
+
+        jvmProcess!.stdout!.on('data', checkOutput);
+        jvmProcess!.stderr!.on('data', checkOutput);
+        jvmProcess!.on('error', (err) => { if (!resolved) { clearTimeout(timeout); reject(err); } });
+        jvmProcess!.on('exit', (code) => { if (!resolved) { clearTimeout(timeout); reject(new Error(`JVM exited ${code}`)); } });
+      });
+
+      // 1. Create session
+      const createResult = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'create_debug_session',
+        arguments: { language: 'java', name: 'java-redefine-370' }
+      }));
+      expect(createResult.sessionId).toBeDefined();
+      sessionId = createResult.sessionId as string;
+
+      // 2. Set breakpoints on line 19 (first getValue() call) AND line 22
+      //    (second getValue() call). Line 22 is the one that must survive
+      //    the hot-swap.
+      const bp1 = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'set_breakpoint',
+        arguments: { sessionId, file: mainFile, line: 19 }
+      }));
+      expect(bp1.success).toBe(true);
+      const bp2 = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'set_breakpoint',
+        arguments: { sessionId, file: mainFile, line: 22 }
+      }));
+      expect(bp2.success).toBe(true);
+
+      // 3. Attach and continue past initial suspend
+      const attachResult = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'attach_to_process',
+        arguments: { sessionId, port: jdwpPort, host: '127.0.0.1', sourcePaths: [testJavaDir] }
+      }));
+      expect(attachResult.success).toBe(true);
+
+      const cont1 = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'continue_execution',
+        arguments: { sessionId }
+      }));
+      expect(cont1.success).toBe(true);
+
+      // 4. Wait for the first breakpoint at line 19
+      const stack1 = await waitForPausedState(mcpClient!, sessionId, 30, 500,
+        (frames) => frames[0]?.line === 19
+      );
+      expect(stack1).not.toBeNull();
+      console.log('[Redefine #370] Hit first breakpoint at line 19');
+
+      // 5. Recompile with a SAME-LINE-LAYOUT modification (only the constant
+      //    in getValue() changes) so all breakpoint lines stay meaningful.
+      const originalContent = fs.readFileSync(mainFile, 'utf-8');
+      expect(originalContent).toContain('return 42;');
+      fs.writeFileSync(mainFile, originalContent.replace('return 42;', 'return 99;'));
+      try {
+        execSync(`javac -g -d "${testJavaDir}" "${mainFile}"`, {
+          cwd: testJavaDir,
+          stdio: 'pipe'
+        });
+        console.log('[Redefine #370] Recompiled with getValue()=99 (same line layout)');
+      } finally {
+        fs.writeFileSync(mainFile, originalContent);
+      }
+
+      // 6. Hot-swap while paused at line 19
+      const redefineResult = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'redefine_classes',
+        arguments: { sessionId, classesDir: testJavaDir, sinceTimestamp: 0 }
+      }));
+      console.log('[Redefine #370] Result:', JSON.stringify(redefineResult));
+      expect(redefineResult.success).toBe(true);
+      expect(redefineResult.redefinedCount).toBeGreaterThanOrEqual(1);
+      // Issue #370: the response reports how many breakpoints were re-planted
+      // after JDI cancelled them during redefinition.
+      expect(redefineResult.replantedBreakpoints).toBeGreaterThanOrEqual(2);
+
+      // Confirm the hot-swap took effect
+      const evalRes = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'evaluate_expression',
+        arguments: { sessionId, expression: 'getValue()' }
+      }));
+      expect(evalRes.success).toBe(true);
+      expect(evalRes.result).toBe('99');
+
+      // 7. Continue — the PRE-EXISTING breakpoint on line 22 must still fire.
+      //    Before the fix, vm.redefineClasses silently cancelled it and the
+      //    program ran to completion.
+      const cont2 = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'continue_execution',
+        arguments: { sessionId }
+      }));
+      expect(cont2.success).toBe(true);
+
+      const stack2 = await waitForPausedState(mcpClient!, sessionId, 30, 500,
+        (frames) => frames[0]?.line === 22
+      );
+      expect(stack2).not.toBeNull();
+      expect(stack2!.stackFrames![0].line).toBe(22);
+      console.log('[Redefine #370] Pre-existing breakpoint at line 22 fired after hot-swap');
+
+      // 8. Continue to finish
+      const cont3 = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'continue_execution',
+        arguments: { sessionId }
+      }));
+      expect(cont3.success).toBe(true);
+
+      console.log('[Redefine #370] TEST PASSED — breakpoints survived redefine_classes');
+
+    } finally {
+      // Cleanup compiled classes
+      for (const cls of ['RedefineTarget.class']) {
+        try {
+          const f = path.resolve(testJavaDir, cls);
+          if (fs.existsSync(f)) fs.unlinkSync(f);
+        } catch { /* ignore */ }
+      }
+
+      if (jvmProcess && !jvmProcess.killed) {
+        jvmProcess.kill('SIGKILL');
+        jvmProcess = null;
+      }
+    }
+  }, 90000);
 });

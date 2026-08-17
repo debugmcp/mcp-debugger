@@ -1,9 +1,10 @@
 /**
  * Per-mode language availability computation for list_supported_languages.
  *
- * Availability is advisory for launch (enforcement stays with the natural
- * failure at executable resolution) and authoritative for attach 'none'
- * (enforced in SessionManagerOperations.attachToProcess).
+ * Availability is advisory-but-enforced for launch (checkLaunchToolchain
+ * gates create_debug_session/start_debugging, failing open whenever the probe
+ * can't assess the toolchain — issue #360) and authoritative for attach
+ * 'none' (enforced in SessionManagerOperations.attachToProcess).
  */
 import type { AttachMechanism, FactoryValidationResult } from '@debugmcp/shared';
 import { ErrorMessages } from './error-messages.js';
@@ -60,6 +61,49 @@ export class ValidationResultCache {
 
   clear(): void {
     this.entries.clear();
+  }
+}
+
+/**
+ * Launch-mode gate shared by create_debug_session and start_debugging
+ * (issue #360): consult the same toolchain probe list_supported_languages
+ * uses, so a known-unavailable adapter fails fast with the same reason text
+ * instead of reporting success and silently running nothing.
+ *
+ * Fail-open contract: any probe failure (registry without getFactory, missing
+ * factory, thrown validate) reports available — enforcement must never block
+ * a launch the advisory probe can't assess (mirrors computeModeAvailability).
+ */
+export async function checkLaunchToolchain(
+  language: string,
+  registry: unknown,
+  cache: ValidationResultCache,
+  logger?: { warn?: (message: string) => void }
+): Promise<{ available: true } | { available: false; reason: string }> {
+  try {
+    const dyn = registry as
+      | { getFactory?: (language: string) => Promise<{ validate?: () => Promise<FactoryValidationResult> } | undefined> }
+      | undefined;
+    if (typeof dyn?.getFactory !== 'function') {
+      return { available: true };
+    }
+    const factory = await dyn.getFactory(language);
+    if (!factory || typeof factory.validate !== 'function') {
+      return { available: true };
+    }
+    const validate = factory.validate.bind(factory) as () => Promise<FactoryValidationResult>;
+    const validation = await cache.get(language, validate);
+    if (validation.valid) {
+      return { available: true };
+    }
+    const reason = validation.errors.join('; ') || `The '${language}' debug adapter is not available in this runtime.`;
+    return { available: false, reason };
+  } catch (error) {
+    logger?.warn?.(
+      `[language-availability] launch gate probe failed for '${language}'; allowing launch. ` +
+        `${error instanceof Error ? error.message : String(error)}`
+    );
+    return { available: true };
   }
 }
 

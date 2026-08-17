@@ -137,6 +137,22 @@ describe('SessionManager - secret redaction (issue #237)', () => {
       expect(result.redaction?.rules).toContain('sensitive-name');
     });
 
+    it('does not mask Dir.pwd — pwd is not a sensitive name (issue #365)', async () => {
+      const { sessionManager, dependencies } = makeManager('');
+      const session = await createPausedSession(sessionManager, dependencies);
+      dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+        if (command === 'evaluate') {
+          return { success: true, body: { result: '"/home/user/project"', type: 'String', variablesReference: 0 } };
+        }
+        return { success: true };
+      });
+
+      const result = await sessionManager.evaluateExpression(session.id, 'Dir.pwd', 1);
+
+      expect(result.result).toBe('"/home/user/project"');
+      expect(result.redaction).toBeUndefined();
+    });
+
     it('returns raw results when DEBUG_MCP_NO_REDACT=1', async () => {
       const { sessionManager, dependencies } = makeManager('1');
       const session = await createPausedSession(sessionManager, dependencies);
