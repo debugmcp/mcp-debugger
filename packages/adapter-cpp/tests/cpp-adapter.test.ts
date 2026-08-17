@@ -268,7 +268,7 @@ describe('CppDebugAdapter', () => {
       it('injects a derived sourceMap for a prebuilt binary in container mode', async () => {
         vi.stubEnv('MCP_CONTAINER', 'true');
         vi.mocked(deriveSourceMapFromBinary).mockReturnValue({
-          '/home/host/proj': '/workspace'
+          '/home/user/proj': '/workspace'
         });
         try {
           const result = await adapter.transformLaunchConfig({
@@ -280,7 +280,7 @@ describe('CppDebugAdapter', () => {
             path.resolve('/work', 'build/app'),
             '/workspace'
           );
-          expect(result.sourceMap).toEqual({ '/home/host/proj': '/workspace' });
+          expect(result.sourceMap).toEqual({ '/home/user/proj': '/workspace' });
         } finally {
           vi.unstubAllEnvs();
         }

@@ -276,7 +276,7 @@ describe('RustDebugAdapter', () => {
       it('injects a derived sourceMap for a prebuilt binary in container mode', async () => {
         vi.stubEnv('MCP_CONTAINER', 'true');
         vi.mocked(deriveSourceMapFromBinary).mockReturnValue({
-          '/home/host/proj': '/workspace'
+          '/home/user/proj': '/workspace'
         });
         try {
           const transformed = await adapter.transformLaunchConfig({
@@ -288,7 +288,7 @@ describe('RustDebugAdapter', () => {
             path.resolve('/project', './target/debug/myapp'),
             '/workspace'
           );
-          expect(transformed.sourceMap).toEqual({ '/home/host/proj': '/workspace' });
+          expect(transformed.sourceMap).toEqual({ '/home/user/proj': '/workspace' });
         } finally {
           vi.unstubAllEnvs();
         }

@@ -207,7 +207,7 @@ target with `<path> is not available`. That warning is topology, not breakage:
     "sessionId": "...",
     "host": "127.0.0.1",
     "port": 12345,
-    "localfsMap": "/app:/home/you/project"
+    "localfsMap": "/app:/home/user/project"
   }
   ```
 

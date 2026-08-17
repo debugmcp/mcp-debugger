@@ -96,7 +96,7 @@ Data breakpoints (hardware watchpoints), disassembly view, instruction stepping,
 
 ## Debugging host-built binaries in Docker
 
-A binary compiled on the host embeds host-absolute source paths (e.g. `/home/you/proj/src/main.cpp`) in its DWARF debug info. When the mcp-debugger container mounts the project at `/workspace`, breakpoint requests use `/workspace/...` paths and CodeLLDB cannot match them against the DWARF paths — file+line breakpoints and logpoints silently never bind (function breakpoints and pause still work; issue #363).
+A binary compiled on the host embeds host-absolute source paths (e.g. `/home/user/proj/src/main.cpp`) in its DWARF debug info. When the mcp-debugger container mounts the project at `/workspace`, breakpoint requests use `/workspace/...` paths and CodeLLDB cannot match them against the DWARF paths — file+line breakpoints and logpoints silently never bind (function breakpoints and pause still work; issue #363).
 
 In container mode (`MCP_CONTAINER=true`) the adapter auto-derives a best-effort `sourceMap` for prebuilt binaries by scanning the binary for embedded host paths whose suffixes exist under the workspace mount (`MCP_WORKSPACE_ROOT`, default `/workspace`), so this usually just works. If auto-derivation misses (unusual layouts, stripped path strings), pass the mapping explicitly — a caller-supplied `sourceMap` always wins:
 
@@ -104,12 +104,12 @@ In container mode (`MCP_CONTAINER=true`) the adapter auto-derives a best-effort 
 {
   "scriptPath": "/workspace/build/app",
   "dapLaunchArgs": {
-    "sourceMap": { "/home/you/proj": "/workspace" }
+    "sourceMap": { "/home/user/proj": "/workspace" }
   }
 }
 ```
 
-Alternatively, compile inside the container (or with `-fdebug-prefix-map=/home/you/proj=/workspace`) so the DWARF paths match the mount directly.
+Alternatively, compile inside the container (or with `-fdebug-prefix-map=/home/user/proj=/workspace`) so the DWARF paths match the mount directly.
 
 ## Troubleshooting
 

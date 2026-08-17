@@ -151,7 +151,9 @@ describe('mock-adapter-process stopped events (issue #355)', () => {
 
   async function startSession(): Promise<DapTestClient> {
     const port = await getFreePort();
-    child = spawn(process.execPath, [PROCESS_JS, '--port', String(port)], {
+    // Bind explicitly to 127.0.0.1: the process's default host 'localhost'
+    // can resolve to ::1 on CI runners while the client dials 127.0.0.1.
+    child = spawn(process.execPath, [PROCESS_JS, '--port', String(port), '--host', '127.0.0.1'], {
       stdio: ['ignore', 'ignore', 'ignore'],
     });
     client = new DapTestClient();
