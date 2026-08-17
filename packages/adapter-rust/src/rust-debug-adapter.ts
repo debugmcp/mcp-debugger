@@ -48,7 +48,8 @@ import {
   resolveTerminalKind,
   prepareCodelldbExecutablePath,
   buildCodeLLDBArgs,
-  configurePythonEnvironment
+  configurePythonEnvironment,
+  deriveSourceMapFromBinary
 } from '@debugmcp/codelldb-common';
 
 export type MsvcBehavior = 'warn' | 'error' | 'continue';
@@ -681,6 +682,11 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
       postRunCommands: rustConfig.postRunCommands || []
     };
     
+    // Tracks whether the binary was (re)built during this launch — a binary
+    // built inside the container already has container paths in its DWARF,
+    // so sourceMap derivation (issue #363) is unnecessary.
+    let compiledAtLaunch = false;
+
     // Resolve program path - handle source file paths
     if (rustConfig.program) {
       const programPath = rustConfig.program;
@@ -721,8 +727,9 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
             if (!buildResult.success) {
               throw new Error(`Cargo build failed: ${buildResult.error}`);
             }
-            
+
             launchConfig.program = buildResult.binaryPath!;
+            compiledAtLaunch = true;
           } else {
             this.dependencies.logger?.info('[Rust Debugger] Using existing binary (up to date)');
             launchConfig.program = binaryPath;
@@ -780,10 +787,31 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
     if (typeof launchConfig.program === 'string' && launchConfig.program.length > 0) {
       await this.evaluateToolchain(launchConfig.program);
     }
-    
+
+    // Container mode (issue #363): a host-built binary embeds host-absolute
+    // DWARF paths, so /workspace breakpoint requests never match. Best-effort:
+    // derive a hostPrefix -> workspaceRoot sourceMap from the binary's
+    // embedded path strings. Caller-supplied sourceMap entries always win.
+    if (
+      process.env.MCP_CONTAINER === 'true' &&
+      !compiledAtLaunch &&
+      Object.keys(rustConfig.sourceMap || {}).length === 0 &&
+      typeof launchConfig.program === 'string' &&
+      launchConfig.program.length > 0
+    ) {
+      const workspaceRoot = process.env.MCP_WORKSPACE_ROOT || '/workspace';
+      const derived = deriveSourceMapFromBinary(launchConfig.program, workspaceRoot);
+      if (Object.keys(derived).length > 0) {
+        launchConfig.sourceMap = derived;
+        this.dependencies.logger?.info(
+          `[Rust Debugger] Container mode: derived sourceMap from binary DWARF paths: ${JSON.stringify(derived)}`
+        );
+      }
+    }
+
     return launchConfig;
   }
-  
+
   getDefaultLaunchConfig(): Partial<GenericLaunchConfig> {
     return {
       stopOnEntry: false,

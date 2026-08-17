@@ -291,6 +291,23 @@ Response will show Rust types clearly:
 }
 ```
 
+## Debugging host-built binaries in Docker
+
+A binary built by `cargo build` on the host embeds host-absolute source paths (e.g. `/home/user/proj/src/main.rs`) in its DWARF debug info. When the mcp-debugger container mounts the project at `/workspace`, breakpoint requests use `/workspace/...` paths and CodeLLDB cannot match them — file+line breakpoints silently never bind (function breakpoints and pause still work; issue #363).
+
+In container mode (`MCP_CONTAINER=true`) the adapter auto-derives a best-effort `sourceMap` for prebuilt binaries by scanning the binary for embedded host paths whose suffixes exist under the workspace mount (`MCP_WORKSPACE_ROOT`, default `/workspace`). If derivation misses, pass the mapping explicitly — a caller-supplied `sourceMap` always wins:
+
+```json
+{
+  "scriptPath": "/workspace/target/debug/myapp",
+  "dapLaunchArgs": {
+    "sourceMap": { "/home/user/proj": "/workspace" }
+  }
+}
+```
+
+Alternatively, build inside the container (or with `RUSTFLAGS="--remap-path-prefix=/home/user/proj=/workspace"`) so the DWARF paths match the mount directly.
+
 ## Troubleshooting
 
 ### Breakpoints Not Hit

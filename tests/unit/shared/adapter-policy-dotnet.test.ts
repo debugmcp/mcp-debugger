@@ -151,6 +151,14 @@ describe('DotnetAdapterPolicy', () => {
     expect(DotnetAdapterPolicy.getDapAdapterConfiguration()).toEqual({ type: 'coreclr' });
   });
 
+  it('pauses the target after attach (issue #353)', () => {
+    // netcoredbg does not suspend a running target on attach; without an
+    // explicit post-attach pause the session reports PAUSED while the
+    // process is live (stackTrace fails with 0x80131302, pause_execution
+    // claims "Already paused").
+    expect(DotnetAdapterPolicy.getAttachBehavior?.()).toEqual({ pauseAfterAttach: true });
+  });
+
   it('getDebuggerConfiguration returns expected values', () => {
     const config = DotnetAdapterPolicy.getDebuggerConfiguration();
     expect(config.requiresStrictHandshake).toBe(false);

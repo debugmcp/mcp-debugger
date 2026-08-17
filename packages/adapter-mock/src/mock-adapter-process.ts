@@ -413,15 +413,38 @@ class MockDebugAdapterProcess {
   }
 
   /**
+   * Emit a stopped event for a hit breakpoint. Function breakpoints report
+   * reason 'function breakpoint' (issue #355); plain line breakpoints keep
+   * 'breakpoint'. Both carry hitBreakpointIds when the record has an id.
+   */
+  private sendBreakpointStopped(bp: DebugProtocol.Breakpoint & { isFunctionBreakpoint?: boolean }): void {
+    this.sendEvent({
+      seq: 0,
+      type: 'event',
+      event: 'stopped',
+      body: {
+        reason: bp.isFunctionBreakpoint ? 'function breakpoint' : 'breakpoint',
+        threadId: 1,
+        allThreadsStopped: true,
+        ...(bp.id !== undefined ? { hitBreakpointIds: [bp.id] } : {})
+      }
+    } as DebugProtocol.StoppedEvent);
+  }
+
+  /**
    * Walk the sorted breakpoint list from a line: logpoint lines emit an
    * output event (naive {expr} interpolation) and do NOT stop; the first
    * plain breakpoint after the line is the next stop (issue #235).
    */
-  private findNextStop(fromLine: number): (DebugProtocol.Breakpoint & { logMessage?: string }) | undefined {
-    const allBreakpoints = Array.from(this.breakpoints.values())
-      .flat()
+  private findNextStop(fromLine: number): (DebugProtocol.Breakpoint & { logMessage?: string; isFunctionBreakpoint?: boolean }) | undefined {
+    const allBreakpoints = (Array.from(this.breakpoints.values())
+      .flat() as (DebugProtocol.Breakpoint & { logMessage?: string; isFunctionBreakpoint?: boolean })[])
       .filter(bp => bp.line !== undefined)
-      .sort((a, b) => (a.line || 0) - (b.line || 0));
+      // Sort by line; when a line breakpoint and a function breakpoint share a
+      // line, the plain line breakpoint wins the tiebreak (issue #355)
+      .sort((a, b) =>
+        ((a.line || 0) - (b.line || 0)) ||
+        ((a.isFunctionBreakpoint ? 1 : 0) - (b.isFunctionBreakpoint ? 1 : 0)));
 
     for (const bp of allBreakpoints) {
       if ((bp.line || 0) <= fromLine) continue;
@@ -480,16 +503,7 @@ class MockDebugAdapterProcess {
         if (firstStop) {
           this.currentLine = firstStop.line || 1;
           this.log(`Hit first breakpoint at line ${this.currentLine}`);
-          this.sendEvent({
-            seq: 0,
-            type: 'event',
-            event: 'stopped',
-            body: {
-              reason: 'breakpoint',
-              threadId: 1,
-              allThreadsStopped: true
-            }
-          } as DebugProtocol.StoppedEvent);
+          this.sendBreakpointStopped(firstStop);
         } else if (this.shouldSimulateException()) {
           this.sendExceptionStopped();
         } else {
@@ -603,8 +617,11 @@ class MockDebugAdapterProcess {
           id: Math.floor(Math.random() * 100000),
           verified: true,
           line,
-          source: { path: this.programPath || 'mock://program' }
-        });
+          source: { path: this.programPath || 'mock://program' },
+          // Marker so the run simulation can report 'function breakpoint'
+          // as the stop reason (issue #355)
+          isFunctionBreakpoint: true
+        } as DebugProtocol.Breakpoint & { isFunctionBreakpoint: boolean });
       } else {
         breakpoints.push({
           id: Math.floor(Math.random() * 100000),
@@ -777,16 +794,7 @@ class MockDebugAdapterProcess {
         // Hit the next breakpoint
         this.currentLine = nextBreakpoint.line;
         this.log(`Stopping at breakpoint on line ${this.currentLine}`);
-        this.sendEvent({
-          seq: 0,
-          type: 'event',
-          event: 'stopped',
-          body: {
-            reason: 'breakpoint',
-            threadId: 1,
-            allThreadsStopped: true
-          }
-        } as DebugProtocol.StoppedEvent);
+        this.sendBreakpointStopped(nextBreakpoint);
       } else if (this.shouldSimulateException()) {
         // Crash before completion: uncaught exception past the last breakpoint
         this.sendExceptionStopped();

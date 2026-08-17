@@ -22,6 +22,8 @@ export type { CodeLLDBPlatformDir } from './codelldb-resolver.js';
 export { detectBinaryFormat } from './binary-detector.js';
 export type { BinaryInfo } from './binary-detector.js';
 
+export { deriveSourceMapFromBinary } from './source-map-derive.js';
+
 export {
   resolveTerminalKind,
   prepareCodelldbExecutablePath,
