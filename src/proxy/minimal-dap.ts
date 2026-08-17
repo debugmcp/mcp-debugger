@@ -128,6 +128,15 @@ export class MinimalDapClient extends EventEmitter {
   }
 
   /**
+   * Resolves once all child events enqueued so far (output included) have
+   * been forwarded to this client's listeners (issue #366). No-op for
+   * adapters without child sessions.
+   */
+  flushChildEvents(): Promise<void> {
+    return this.childSessionManager?.flushEvents() ?? Promise.resolve();
+  }
+
+  /**
    * Handle raw data using the same algorithm as vscode's ProtocolServer
    * (extracted to DapFrameDecoder). This ensures compatibility and proper
    * message boundaries.

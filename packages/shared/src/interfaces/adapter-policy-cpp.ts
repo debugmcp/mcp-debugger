@@ -28,7 +28,8 @@ import {
   isLldbConnected,
   getLldbDapClientBehavior,
   isLldbInternalFrame,
-  filterLldbStackFrames
+  filterLldbStackFrames,
+  lldbShouldSuppressOutputEvent
 } from './lldb-policy-shared.js';
 
 export const CppAdapterPolicy: AdapterPolicy = {
@@ -47,6 +48,7 @@ export const CppAdapterPolicy: AdapterPolicy = {
   },
 
   normalizeStopReason: normalizeLldbStopReason,
+  shouldSuppressOutputEvent: lldbShouldSuppressOutputEvent,
 
   /**
    * Hide LLDB-synthesized symbols and libc/runtime plumbing from stack

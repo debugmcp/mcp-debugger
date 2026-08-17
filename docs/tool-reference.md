@@ -960,7 +960,7 @@ Gets the debuggee's output (stdout/stderr/console) captured for a session. Outpu
 
 **Notes:**
 - The buffer holds the last 1000 entries per launch; older entries are evicted and counted in `dropped`. Individual entries longer than 8192 characters are cut and flagged `"truncated": true`.
-- Adapter-internal `telemetry` events are filtered out at capture time; all other categories (`stdout`, `stderr`, `console`, `important`, ...) are kept. Adapters that omit a category default to `console`.
+- Adapter-internal `telemetry` events are filtered out at capture time, as are output events an adapter policy declares to be pure adapter noise — e.g. LLDB's harmless DWARF-parser error spew on MinGW-built rust/cpp binaries (issue #361); suppressed lines remain visible in debug logs. All other categories (`stdout`, `stderr`, `console`, `important`, ...) are kept. Adapters that omit a category default to `console`.
 - Works while the program is running and after it finishes — output stays readable until `close_debug_session`. Re-launching a session starts a fresh buffer (seq restarts at 1).
 - `hasMore: true` means more entries matched than `limit` allowed; call again with `since: nextSince`.
 - Incremental polling recipe: call once, remember `nextSince`, and pass it as `since` on the next call — you'll only ever see new output.

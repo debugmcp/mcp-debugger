@@ -190,6 +190,36 @@ describe('ChildSessionManager', () => {
       }
     });
     
+    it('flushEvents resolves only after chained child events have been forwarded (issue #366)', async () => {
+      vi.useFakeTimers();
+      try {
+        const childCreatedSpy = vi.fn();
+        manager.on('childCreated', childCreatedSpy);
+        const createPromise = manager.createChildSession({
+          pendingId: 'test-pending-flush',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: { type: 'pwa-node', request: 'launch' }
+        });
+        await vi.advanceTimersByTimeAsync(20000);
+        await createPromise;
+
+        const child = childCreatedSpy.mock.calls[0][1] as MockMinimalDapClient;
+        const forwarded: string[] = [];
+        manager.on('childEvent', (evt: { event: string }) => forwarded.push(evt.event));
+
+        // js-debug policy => CDP bridge active => output events ride the
+        // serialization chain (microtask-deferred).
+        child.emit('event', { seq: 1, type: 'event', event: 'output', body: { category: 'stdout', output: 'LOGPOINT a=1\n' } });
+        child.emit('event', { seq: 2, type: 'event', event: 'output', body: { category: 'stdout', output: 'done\n' } });
+
+        await manager.flushEvents();
+        expect(forwarded).toEqual(['output', 'output']);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('skips the entry-stop pause for attach-mode parents (issue #124)', async () => {
       // MinimalDapClient.enrichChildConfig threads request:'attach' into the
       // parentConfig of attach-mode children. For those, ensureChildStopped

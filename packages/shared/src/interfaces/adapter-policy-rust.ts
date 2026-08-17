@@ -21,7 +21,8 @@ import {
   isLldbConnected,
   getLldbDapClientBehavior,
   isLldbInternalFrame,
-  filterLldbStackFrames
+  filterLldbStackFrames,
+  lldbShouldSuppressOutputEvent
 } from './lldb-policy-shared.js';
 
 export const RustAdapterPolicy: AdapterPolicy = {
@@ -55,6 +56,7 @@ export const RustAdapterPolicy: AdapterPolicy = {
    * LLDB-backed policy; see normalizeLldbStopReason for the full rules.
    */
   normalizeStopReason: normalizeLldbStopReason,
+  shouldSuppressOutputEvent: lldbShouldSuppressOutputEvent,
 
   /**
    * Hide LLDB-synthesized symbols and libc/runtime plumbing from stack

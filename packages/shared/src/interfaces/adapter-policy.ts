@@ -167,6 +167,20 @@ export interface AdapterPolicy {
   isInternalFrame?(frame: StackFrame): boolean;
 
   /**
+   * Return true to drop a DAP 'output' event that is known adapter-internal
+   * noise, not debuggee output (issue #361 — e.g. LLDB's DWARF-parsing
+   * error spew on MinGW binaries). Consulted by the session manager's output
+   * capture AFTER the standard 'telemetry' category drop; suppressed events
+   * are still logged at debug level. Optional — absent means capture
+   * everything. Implementations must be conservative: when in doubt, keep
+   * the output.
+   *
+   * @param category The DAP output category ('stdout', 'stderr', 'console', ...)
+   * @param text The event's output text (may span multiple lines)
+   */
+  shouldSuppressOutputEvent?(category: string, text: string): boolean;
+
+  /**
    * Normalize an adapter-specific DAP stop reason into a canonical reason
    * ('pause', 'breakpoint', 'step', 'exception', ...). Some adapters report
    * misleading raw reasons — e.g. CodeLLDB surfaces a user-initiated pause as

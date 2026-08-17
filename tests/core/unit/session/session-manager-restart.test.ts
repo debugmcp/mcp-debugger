@@ -45,6 +45,39 @@ describe('SessionManager - restart and relaunch', () => {
     return session;
   }
 
+  describe('output buffer isolation across restarts (issue #358)', () => {
+    it('a stale output handler from the previous launch cannot write into the new buffer', async () => {
+      const session = await createLaunchedSession();
+
+      // Capture the launch-1 output handler exactly as the proxy holds it.
+      const oldHandlers = dependencies.mockProxyManager.listeners('output');
+      expect(oldHandlers.length).toBeGreaterThan(0);
+      const oldHandler = oldHandlers[0] as (body: unknown) => void;
+
+      dependencies.mockProxyManager.emit('output', { category: 'stdout', output: 'from run 1\n' });
+      const bufferBefore = sessionManager.getSession(session.id)?.outputBuffer;
+      expect(bufferBefore?.read(0, 100).entries.some(e => e.output.includes('from run 1'))).toBe(true);
+
+      // Relaunch: installs a fresh buffer and fresh handlers.
+      await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+      const bufferAfter = sessionManager.getSession(session.id)?.outputBuffer;
+      expect(bufferAfter).not.toBe(bufferBefore);
+
+      // The race (issue #358): an event still in flight from run 1 fires the
+      // OLD handler after the swap. It must land in the OLD buffer, never in
+      // the new one where it would take an early seq.
+      oldHandler({ category: 'stdout', output: 'stale logpoint from run 1\n' });
+
+      // The new buffer must be untouched — before the fix the stale event
+      // landed here with seq 1, reordering the fresh run's output.
+      expect(bufferAfter!.read(0, 100).entries).toEqual([]);
+
+      // The stale event stayed with its own launch's buffer.
+      expect(bufferBefore!.read(0, 100).entries.some(e => e.output.includes('stale logpoint'))).toBe(true);
+    });
+  });
+
   describe('start_debugging on a live-proxy session (landmine regression)', () => {
     it('relaunches instead of destroying the session', async () => {
       const session = await createLaunchedSession();

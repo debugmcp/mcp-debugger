@@ -147,6 +147,16 @@ export class ChildSessionManager extends EventEmitter {
   // (correlation/bind window) cannot be overtaken by later events
   private childEventChain: Promise<void> = Promise.resolve();
 
+  /**
+   * Resolves when every child event enqueued so far has been forwarded
+   * (issue #366): output events ride the childEventChain when the CDP bridge
+   * is active, so a terminal event must not be forwarded upstream until the
+   * chain has drained or queued output is silently dropped at teardown.
+   */
+  flushEvents(): Promise<void> {
+    return this.childEventChain;
+  }
+
   constructor(options: ChildSessionOptions) {
     super();
     this.policy = options.policy;
