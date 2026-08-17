@@ -25,13 +25,41 @@ class DebugMCPLauncher:
             prefix = "ERROR: " if error else ""
             print(f"{prefix}{message}", file=sys.stderr if error else sys.stdout)
     
-    def launch_with_npx(self, mode: str = "stdio", port: Optional[int] = None) -> int:
-        """Launch the server using npx."""
+    def build_npx_command(self, mode: str = "stdio", port: Optional[int] = None) -> List[str]:
+        """Build the npx launch command.
+
+        Single source of truth for both the real launch and --dry-run (issue
+        #345). Deliberate asymmetry with Docker: --port is only forwarded when
+        the caller supplied one, because the npx-run server applies its own
+        default; Docker must always pin --port to match its -p mapping.
+        """
         cmd = ["npx", self.NPM_PACKAGE, mode]
-        
         if mode == "sse" and port:
             cmd.extend(["--port", str(port)])
-            
+        return cmd
+
+    def build_docker_command(self, mode: str = "stdio", port: Optional[int] = None) -> List[str]:
+        """Build the docker run command.
+
+        Single source of truth for both the real launch and --dry-run (issue
+        #345).
+        """
+        cmd = ["docker", "run", "-it", "--rm"]
+        if mode == "sse":
+            actual_port = port or self.DEFAULT_SSE_PORT
+            cmd.extend(["-p", f"{actual_port}:{actual_port}"])
+        cmd.extend([self.DOCKER_IMAGE, mode])
+        if mode == "sse":
+            # Always forward the port the -p mapping was built with, so the
+            # in-container server listens on the mapped port even when the
+            # caller relied on DEFAULT_SSE_PORT.
+            cmd.extend(["--port", str(actual_port)])
+        return cmd
+
+    def launch_with_npx(self, mode: str = "stdio", port: Optional[int] = None) -> int:
+        """Launch the server using npx."""
+        cmd = self.build_npx_command(mode, port)
+
         self.log(f"Launching with command: {' '.join(cmd)}")
         
         try:
@@ -69,20 +97,8 @@ class DebugMCPLauncher:
 
     def launch_with_docker(self, mode: str = "stdio", port: Optional[int] = None) -> int:
         """Launch the server using Docker."""
-        cmd = ["docker", "run", "-it", "--rm"]
-        
-        if mode == "sse":
-            actual_port = port or self.DEFAULT_SSE_PORT
-            cmd.extend(["-p", f"{actual_port}:{actual_port}"])
-            
-        cmd.extend([self.DOCKER_IMAGE, mode])
+        cmd = self.build_docker_command(mode, port)
 
-        if mode == "sse":
-            # Always forward the port the -p mapping was built with, so the
-            # in-container server listens on the mapped port even when the
-            # caller relied on DEFAULT_SSE_PORT.
-            cmd.extend(["--port", str(actual_port)])
-            
         self.log(f"Launching with command: {' '.join(cmd)}")
         
         try:

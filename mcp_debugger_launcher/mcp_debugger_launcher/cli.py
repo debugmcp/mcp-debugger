@@ -161,9 +161,9 @@ def main(mode: str, port: Optional[int], docker: bool, npm: bool,
     # Prepare the command
     if runtime == "npx":
         if dry_run:
-            cmd = ["npx", launcher.NPM_PACKAGE, mode]
-            if mode == "sse" and port:
-                cmd.extend(["--port", str(port)])
+            # Same builder as the real launch (issue #345): dry-run output can
+            # never drift from the executed command.
+            cmd = launcher.build_npx_command(mode, port)
             print(f"\n🔍 Would execute: {' '.join(cmd)}")
             sys.exit(0)
 
@@ -180,13 +180,9 @@ def main(mode: str, port: Optional[int], docker: bool, npm: bool,
         
     elif runtime == "docker":
         if dry_run:
-            cmd = ["docker", "run", "-it", "--rm"]
-            if mode == "sse":
-                actual_port = port or launcher.DEFAULT_SSE_PORT
-                cmd.extend(["-p", f"{actual_port}:{actual_port}"])
-            cmd.extend([launcher.DOCKER_IMAGE, mode])
-            if mode == "sse":
-                cmd.extend(["--port", str(actual_port)])
+            # Same builder as the real launch (issue #345): dry-run output can
+            # never drift from the executed command.
+            cmd = launcher.build_docker_command(mode, port)
             print(f"\n🔍 Would execute: {' '.join(cmd)}")
             sys.exit(0)
 
