@@ -1607,14 +1607,16 @@ export class DapProxyWorker {
    * wedged chain cannot hang shutdown.
    */
   private async waitForChildEventFlush(): Promise<void> {
-    if (typeof this.dapClient?.flushChildEvents !== 'function') {
+    // An undefined return means the client has no child sessions (issue
+    // #378): every adapter shares MinimalDapClient, so the method exists
+    // everywhere and only its return value tells child-session adapters
+    // apart. Skipping here — not inside the rounds — is what avoids the
+    // settle for python/ruby/go/etc.
+    const firstFlush = this.dapClient?.flushChildEvents?.();
+    if (!firstFlush) {
       return;
     }
-    const boundedFlush = async (): Promise<void> => {
-      const flush = this.dapClient?.flushChildEvents?.();
-      if (!flush) {
-        return;
-      }
+    const boundedFlush = async (flush: Promise<void>): Promise<void> => {
       let timer: NodeJS.Timeout | undefined;
       const backstop = new Promise<void>(resolve => {
         timer = setTimeout(resolve, 2000);
@@ -1630,10 +1632,13 @@ export class DapProxyWorker {
     // Two rounds with a short settle: the parent session's terminated can
     // arrive while child output is still UNREAD in the child socket (not on
     // the chain yet). The settle lets those bytes be read and enqueued; the
-    // second flush drains them. Only paid by child-session adapters.
-    await boundedFlush();
+    // second flush drains them.
+    await boundedFlush(firstFlush);
     await new Promise(resolve => setTimeout(resolve, 150));
-    await boundedFlush();
+    const secondFlush = this.dapClient?.flushChildEvents?.();
+    if (secondFlush) {
+      await boundedFlush(secondFlush);
+    }
   }
 
   /**

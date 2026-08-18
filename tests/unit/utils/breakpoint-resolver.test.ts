@@ -71,6 +71,48 @@ describe('assertLineContent', () => {
     expect(result.ok).toBe(true);
   });
 
+  it('reports how the expectation matched (issue #379)', () => {
+    expect(assertLineContent(LINES, 3, 'total = sum(prices)', FILE)).toEqual({
+      ok: true,
+      matchQuality: 'exact',
+      actual: 'total = sum(prices)'
+    });
+    expect(assertLineContent(LINES, 3, 'sum(prices)', FILE)).toEqual({
+      ok: true,
+      matchQuality: 'substring',
+      actual: 'total = sum(prices)'
+    });
+    const gainedComment = assertLineContent(
+      ['    total = sum(prices)  # recompute'], 1, 'total = sum(prices)', FILE
+    );
+    expect(gainedComment).toEqual({
+      ok: true,
+      matchQuality: 'substring',
+      actual: 'total = sum(prices)  # recompute'
+    });
+    const staleComment = assertLineContent(
+      ['    total = sum(prices)'], 1, 'total = sum(prices)  // recompute', FILE
+    );
+    expect(staleComment).toEqual({
+      ok: true,
+      matchQuality: 'comment-stripped',
+      actual: 'total = sum(prices)'
+    });
+  });
+
+  it('passes lines that differ only past a comment marker, but says so (issue #379)', () => {
+    // The deliberate #367 trade-off: stripTrailingComment is not
+    // string-literal-aware, so both sides collapse to `url = "http:`. The
+    // match is accepted — but labeled comment-stripped so callers can warn
+    // instead of silently reporting a clean assertion.
+    const result = assertLineContent(['url = "http://b"'], 1, 'url = "http://a"', FILE);
+    expect(result).toEqual({
+      ok: true,
+      matchQuality: 'comment-stripped',
+      actual: 'url = "http://b"'
+    });
+  });
+
   it('rejects empty and whitespace-only expectations explicitly', () => {
     for (const expectation of ['', '   ', '\t']) {
       const result = assertLineContent(LINES, 3, expectation, FILE);
@@ -155,16 +197,21 @@ describe('resolveStatement', () => {
     expect(result.message).toContain('nearLine');
   });
 
-  it('uses nearLine to select the closest match', () => {
+  it('uses nearLine to select the closest match, reporting every candidate (issue #379)', () => {
     const result = resolveStatement(DUP_LINES, 'total = sum(prices)', FILE, 6);
-    expect(result).toEqual({ ok: true, line: 5 });
+    expect(result).toEqual({ ok: true, line: 5, candidates: [2, 5, 8] });
   });
 
   it('breaks nearLine ties toward the lower line number', () => {
     // nearLine 3.5 is impossible; use equidistant case: matches at 2 and 8 from nearLine 5
     const lines = ['a = 1', 'x()', 'b = 2', 'c = 3', 'd = 4', 'e = 5', 'f = 6', 'x()'];
     const result = resolveStatement(lines, 'x()', FILE, 5);
-    expect(result).toEqual({ ok: true, line: 2 });
+    expect(result).toEqual({ ok: true, line: 2, candidates: [2, 8] });
+  });
+
+  it('omits candidates when the match was unique even with nearLine given', () => {
+    const result = resolveStatement(DUP_LINES, 'return total', FILE, 4);
+    expect(result).toEqual({ ok: true, line: 6 });
   });
 
   it('caps the multi-match listing at 20 entries', () => {
@@ -253,14 +300,14 @@ describe('resolveStatement', () => {
       expect(result.message).toContain('nearLine');
     });
 
-    it('disambiguates substring matches with nearLine', () => {
+    it('disambiguates substring matches with nearLine, reporting candidates', () => {
       const lines = [
         'x = retry(a)',
         'noop()',
         'y = retry(b)',
       ];
       const result = resolveStatement(lines, 'retry(', FILE, 3);
-      expect(result).toEqual({ ok: true, line: 3 });
+      expect(result).toEqual({ ok: true, line: 3, candidates: [1, 3] });
     });
 
     it('mentions substring matching in the not-found error', () => {

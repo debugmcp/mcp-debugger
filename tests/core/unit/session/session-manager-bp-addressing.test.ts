@@ -194,6 +194,32 @@ describe('SessionManager - breakpoint addressing (#271)', () => {
       ]);
     });
 
+    it('flags an ambiguous proximity re-anchor with candidates and a warning (issue #379)', async () => {
+      const session = await createLaunchedSession();
+      await sessionManager.setBreakpoint(session.id, {
+        file: 'test.py',
+        line: 6,
+        requestedLine: 6,
+        anchor: { statement: 'retry()' }
+      });
+      await terminate();
+
+      // Matches at lines 2 and 7; nearLine (the old line 6) silently picks 7.
+      // The re-anchor must say the pick was among multiple candidates.
+      stubFileContent('def a():\n    retry()\n\n\ndef b():\n    x = 1\n    retry()\n');
+      const result = await restart(session.id);
+
+      expect(result.success).toBe(true);
+      const data = result.data as {
+        anchorResolution?: { moved: Array<{ from: number; to: number; candidates?: number[] }> };
+        warning?: string;
+      };
+      expect(data.anchorResolution?.moved).toEqual([
+        expect.objectContaining({ from: 6, to: 7, candidates: [2, 7] })
+      ]);
+      expect(String(data.warning)).toMatch(/multiple lines/i);
+    });
+
     it('reports no anchorResolution when no breakpoint has an anchor', async () => {
       const session = await createLaunchedSession();
       await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 3 });

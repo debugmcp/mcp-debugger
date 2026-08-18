@@ -129,6 +129,24 @@ describe('set_breakpoint statement anchors (#271)', () => {
     );
   });
 
+  it('warns when nearLine picked among multiple matches (issue #379)', async () => {
+    const result = await callSetBreakpoint({ statement: 'total = sum(prices)', nearLine: 4 });
+
+    const content = JSON.parse(result.content[0].text);
+    expect(content.success).toBe(true);
+    expect(content.line).toBe(5);
+    expect(String(content.warning)).toContain('matches 2 lines (2, 5)');
+    expect(String(content.warning)).toContain('selected line 5');
+  });
+
+  it('emits no ambiguity warning when the statement is unique (issue #379)', async () => {
+    const result = await callSetBreakpoint({ statement: 'return total', nearLine: 5 });
+
+    const content = JSON.parse(result.content[0].text);
+    expect(content.success).toBe(true);
+    expect(content.warning).toBeUndefined();
+  });
+
   it('errors on ambiguity, listing each match', async () => {
     let thrown: Error | undefined;
     try {
@@ -197,6 +215,22 @@ describe('set_breakpoint statement anchors (#271)', () => {
     const result = await callSetBreakpoint({
       statement: 'return total',
       expectedContent: '  return total  '
+    });
+
+    const content = JSON.parse(result.content[0].text);
+    expect(content.success).toBe(true);
+    expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
+      'test-session',
+      expect.objectContaining({ line: 6, anchor: { statement: 'return total' } })
+    );
+  });
+
+  it('accepts an expectedContent that differs from the statement only by a trailing comment (issue #379)', async () => {
+    // assertLineContent tolerates stale trailing comments, so the
+    // contradictory-intent gate must not be stricter than the assertion.
+    const result = await callSetBreakpoint({
+      statement: 'return total',
+      expectedContent: 'return total  # tally'
     });
 
     const content = JSON.parse(result.content[0].text);

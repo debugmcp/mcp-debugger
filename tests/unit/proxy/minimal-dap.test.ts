@@ -47,6 +47,7 @@ describe('MinimalDapClient', () => {
     storeBreakpoints: ReturnType<typeof vi.fn>;
     isAdoptionInProgress: ReturnType<typeof vi.fn>;
     shutdown: ReturnType<typeof vi.fn>;
+    flushEvents: ReturnType<typeof vi.fn>;
   };
 
   const createChildSessionManagerStub = (): ChildSessionManagerStub => {
@@ -58,6 +59,7 @@ describe('MinimalDapClient', () => {
     emitter.storeBreakpoints = vi.fn();
     emitter.isAdoptionInProgress = vi.fn().mockReturnValue(false);
     emitter.shutdown = vi.fn().mockResolvedValue(undefined);
+    emitter.flushEvents = vi.fn().mockReturnValue(Promise.resolve());
     return emitter;
   };
 
@@ -947,6 +949,23 @@ describe('MinimalDapClient', () => {
       stubManager.emit('childClosed');
       expect((client as any).childSessions.size).toBe(0);
       expect((client as any).activeChild).toBeNull();
+    });
+
+    it('flushChildEvents returns undefined when the policy has no child sessions (issue #378)', () => {
+      const plain = new MinimalDapClient('localhost', 5678);
+      expect(plain.flushChildEvents()).toBeUndefined();
+      plain.shutdown();
+    });
+
+    it('flushChildEvents returns the manager flush promise when child sessions are supported', () => {
+      const stubManager = createChildSessionManagerStub();
+      const chain = Promise.resolve();
+      stubManager.flushEvents.mockReturnValue(chain);
+      const managed = new MinimalDapClient('localhost', 5678, JsDebugAdapterPolicy, {
+        childSessionManagerFactory: () => stubManager as unknown as ChildSessionManager
+      });
+      expect(managed.flushChildEvents()).toBe(chain);
+      managed.shutdown();
     });
 
     it('appends trace output when DAP_TRACE_FILE is set', async () => {

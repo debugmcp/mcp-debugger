@@ -1060,7 +1060,11 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         const staleWarning = staleCount > 0
           ? `${staleCount} statement anchor(s) no longer match the current file; those breakpoints kept their previous lines — re-set them if the target moved.`
           : undefined;
-        const warnings = [priorWarning, staleWarning].filter(Boolean);
+        const ambiguousCount = anchorResolution?.moved.filter((m) => m.candidates !== undefined).length ?? 0;
+        const ambiguousWarning = ambiguousCount > 0
+          ? `${ambiguousCount} statement anchor(s) matched multiple lines and re-anchored to the nearest match — check anchorResolution.moved (candidates listed) and re-set any that landed wrong.`
+          : undefined;
+        const warnings = [priorWarning, staleWarning, ambiguousWarning].filter(Boolean);
         result.data = {
           ...((result.data as object) ?? {}),
           breakpointsReapplied: this._getSessionById(sessionId).breakpoints.size,
@@ -1088,7 +1092,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
    */
   private async reresolveAnchors(session: ManagedSession): Promise<
     | {
-        moved: Array<{ breakpointId: string; file: string; from: number; to: number; statement: string }>;
+        moved: Array<{ breakpointId: string; file: string; from: number; to: number; statement: string; candidates?: number[] }>;
         stale: Array<{ breakpointId: string; file: string; line: number; statement: string; reason: string }>;
       }
     | undefined
@@ -1100,7 +1104,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       return undefined;
     }
 
-    const moved: Array<{ breakpointId: string; file: string; from: number; to: number; statement: string }> = [];
+    const moved: Array<{ breakpointId: string; file: string; from: number; to: number; statement: string; candidates?: number[] }> = [];
     const stale: Array<{ breakpointId: string; file: string; line: number; statement: string; reason: string }> = [];
 
     const byFile = new Map<string, typeof anchored>();
@@ -1146,6 +1150,11 @@ export abstract class SessionManagerOperations extends SessionManagerData {
               from: bp.line,
               to: resolution.line,
               statement: bp.anchor.statement,
+              // The bp's old line doubles as nearLine here, so the ambiguity
+              // error can never fire on this path — a multi-match proximity
+              // pick must be flagged instead of passing as unambiguous
+              // (issue #379).
+              ...(resolution.candidates !== undefined ? { candidates: resolution.candidates } : {}),
             });
             this.logger.info(
               `[SessionManager] Anchor re-resolved: breakpoint ${bp.id} moved ${bp.line} -> ${resolution.line} ("${bp.anchor.statement}")`

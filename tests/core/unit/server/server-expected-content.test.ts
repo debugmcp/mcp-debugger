@@ -123,6 +123,40 @@ describe('set_breakpoint expectedContent (#271)', () => {
     );
   });
 
+  it('warns when expectedContent matched only as a substring (issue #379)', async () => {
+    const result = await callSetBreakpoint({
+      line: 3,
+      expectedContent: 'sum(prices)'
+    });
+
+    const content = JSON.parse(result.content[0].text);
+    expect(content.success).toBe(true);
+    expect(String(content.warning)).toMatch(/substring/i);
+    expect(String(content.warning)).toContain('total = sum(prices)');
+  });
+
+  it('warns when expectedContent matched only after comment stripping (issue #379)', async () => {
+    const result = await callSetBreakpoint({
+      line: 3,
+      expectedContent: 'total = sum(prices)  # recount'
+    });
+
+    const content = JSON.parse(result.content[0].text);
+    expect(content.success).toBe(true);
+    expect(String(content.warning)).toMatch(/comment/i);
+  });
+
+  it('emits no match warning for an exact expectedContent (issue #379)', async () => {
+    const result = await callSetBreakpoint({
+      line: 3,
+      expectedContent: 'total = sum(prices)'
+    });
+
+    const content = JSON.parse(result.content[0].text);
+    expect(content.success).toBe(true);
+    expect(content.warning).toBeUndefined();
+  });
+
   it('rejects an empty expectedContent explicitly (#367)', async () => {
     await expect(
       callSetBreakpoint({ line: 3, expectedContent: '   ' })
