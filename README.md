@@ -33,14 +33,18 @@ Microsoft's [DebugMCP](https://github.com/microsoft/DebugMCP) exposes VS Code's 
 | Per-session process isolation | ✅ one proxy process per session | shares the VS Code instance |
 | Java hot-swap (`redefine_classes`) | ✅ | ❌ |
 | Debuggee output as subscribable MCP resource | ✅ | ❌ |
-| In-IDE debugging UX alongside the agent | ✅ read-only IDE mirror (`expose_session`, [#217](https://github.com/debugmcp/mcp-debugger/issues/217)) | ✅ native |
+| In-IDE debugging UX alongside the agent | ✅ read-only IDE mirror ([`expose_session`](docs/tool-reference.md#expose_session)) — the IDE joins the *agent's* live session | ✅ native |
+| Logpoints without pausing (prod-safe value watching) | ✅ [`logMessage` breakpoints](docs/tool-reference.md#set_breakpoint) | ✅ via VS Code |
+| Content/function-addressed breakpoints (`statement:`, `function:`, `expectedContent`) | ✅ agent-native addressing that survives edits | — |
+| Secret redaction on by default | ✅ variable/evaluate/output masking + least-privilege mode | — |
+| Kubernetes ephemeral debug sidecar (native attach-by-PID) | ✅ [`kubectl debug` flow](docs/jit-diagnostics/README.md) | ❌ |
 | C/C++ | ✅ via CodeLLDB (launch + attach-by-PID) | ✅ via VS Code extensions |
 | PHP | ❌ | ✅ via VS Code extensions |
 | Languages | Python, JS/TS, Ruby, Rust, Go, Java, .NET, C/C++ | Python, JS/TS, Ruby, Rust, Go, Java, .NET, C/C++, PHP |
 
 If your agent runs in a terminal, a pipeline, or a cloud sandbox — or needs to attach to a process on another machine — you want mcp-debugger.
 
-> 🆕 **v0.22.0** — **Ruby debugging support** lands (launch + attach via `rdbg`, including remote attach to containers and Kubernetes pods), alongside JavaScript attach-mode fixes and session/proxy lifecycle hardening. See the [CHANGELOG](./CHANGELOG.md) for the full release history.
+> 🆕 **v0.24.0** — **C/C++ debugging** lands (CodeLLDB: prebuilt binaries, auto-compiled single sources, attach by PID), alongside statement/function-addressed breakpoints, logpoints, `restart_debugging`, breakpoint management tools, buffered `get_output`, break-on-uncaught-exceptions by default, a read-only IDE mirror (`expose_session`), default-on secret redaction, and a multi-language Docker image (Python, JS, Java, Rust, C/C++ native; Ruby attach). See the [CHANGELOG](./CHANGELOG.md) for the full release history.
 
 ## ✨ Key Features
 
@@ -54,7 +58,14 @@ If your agent runs in a terminal, a pipeline, or a cloud sandbox — or needs to
 - 🔷 **.NET/C# debugging via netcoredbg** – Debug .NET applications with full DAP support
 - ⚙️ **C/C++ debugging via CodeLLDB** – Launch prebuilt binaries or lone source files (auto-compiled), attach by PID; core dumps and gdbserver/rr targets via config pass-through
 - 🧪 **Mock adapter for testing** – Test without external dependencies
-- 🛰️ **Out-of-IDE & remote attach** – Attach over host/port to a process on another machine or inside a container (Python via debugpy, Ruby via rdbg, Java via JDWP), with source-path mapping
+- 🛰️ **Out-of-IDE & remote attach** – Attach over host/port to a process on another machine or inside a container (Python via debugpy, Ruby via rdbg, Java via JDWP) with source-path mapping, or by PID for native code (C/C++) — direct-connect attach needs no local toolchain, and `list_supported_languages` reports per-mode availability with reasons
+- 🎯 **Breakpoints that survive edits** – Address by content (`statement: "total = sum(prices)"`), by symbol (`function: "main"`), or assert line content with `expectedContent`; anchors re-resolve across `restart_debugging` and weak matches warn loudly
+- 🪵 **Logpoints** – `set_breakpoint` with `logMessage: "x={x}"` streams interpolated values into `get_output` without pausing — prod-safe value watching on hot paths
+- 🧰 **Full breakpoint lifecycle** – `list_breakpoints` / `remove_breakpoint` / `clear_breakpoints` work live mid-run; `restart_debugging` relaunches with the same config and re-applies everything in one call
+- 📡 **Buffered program output** – `get_output` returns debuggee stdout/stderr with a cursor, and each session exposes its transcript as a subscribable MCP resource
+- 💥 **Crash-state debugging by default** – Launch sessions pause on uncaught exceptions with stack and locals live (`breakOnExceptions`; exception class/message surfaced via `lastStop`)
+- 🪞 **Read-only IDE mirror** – `expose_session` opens a loopback, token-gated DAP endpoint so a human's IDE can inspect the agent's live session without taking control
+- ☸️ **Kubernetes ephemeral debug sidecar** – `kubectl debug --target` + attach-by-PID reaches native processes in running pods ([guide](docs/jit-diagnostics/README.md))
 - 🔌 **STDIO and Streamable HTTP transports** – Works with any MCP client (legacy SSE transport is deprecated)
 - 📦 **Zero-runtime dependencies** – Self-contained bundles via esbuild + tsup
 - ⚡ **npx ready** – Run directly with `npx @debugmcp/mcp-debugger` - no installation needed
@@ -78,9 +89,17 @@ cp -r skills/debugging ~/.agents/skills/mcp-debugger
 
 The server also serves condensed guidance in-band: MCP `instructions` on connect, plus a `debugging-workflow` prompt any MCP client can request. See [skills/debugging/README.md](skills/debugging/README.md) for details.
 
+## 🎬 See It In Action
+
+- **[Auto-debug failing CI tests](.github/actions/debug-failing-test/)** – a composite GitHub Action that launches mcp-debugger + an agent on a test failure and posts the root-cause analysis
+- **[Sick pod walkthrough](examples/sick-pod/)** – attach to a misbehaving Python service in Kubernetes via port-forward ([tutorial](docs/jit-diagnostics/README.md))
+- **[Native sick pod](examples/sick-pod-cpp/)** – same story for compiled code: ephemeral debug sidecar + attach-by-PID, no in-process agent required
+
 ## 🚀 Quick Start
 
 > **Requirements:** Node.js 22+ for the server. Each language you debug also needs its own toolchain installed (Python + debugpy, Ruby + the `debug` gem / `rdbg`, Node.js, Go + Delve, JDK 21+, .NET SDK, the Rust toolchain, or a C/C++ compiler — g++/clang++, only needed for source-file launch).
+>
+> **CodeLLDB platform note (npx/npm installs):** the npm package bundles the CodeLLDB debug engine for **linux-x64 only**, so Rust and C/C++ debugging work out of the box on Linux (CI, containers, cloud sandboxes). On Windows/macOS set `CODELLDB_PATH` to a [CodeLLDB release](https://github.com/vadimcn/codelldb/releases) binary, build from source (vendors your platform automatically), or use the Docker image.
 
 ### For MCP Clients (Claude Desktop, etc.)
 
@@ -125,7 +144,7 @@ claude mcp list
 docker run -v $(pwd):/workspace debugmcp/mcp-debugger:latest
 ```
 
-> ⚠️ The Docker image bundles the toolchains for **Python, JavaScript, and Java** debugging (Rust, Go, .NET, and C/C++ are disabled inside the container image, and the image does not include a Ruby runtime). For those languages, run the server via npm/npx next to your local toolchain — or, for Ruby, use remote attach to a `rdbg --open` process inside the container (see the [Ruby guide](./docs/ruby/README.md)). Adapters load dynamically at runtime — `list_supported_languages` reports only those whose toolchain is detected.
+> The Docker image debugs **Python, JavaScript, Java, Rust, and C/C++** natively (toolchains + a shared vendored CodeLLDB are included), plus the mock adapter. **Ruby is attach-only** in the image (the adapter ships without a Ruby runtime — attach to any `rdbg --open` process, local or remote). Only **Go and .NET** are disabled in the container — run those via npm/npx next to your local toolchain. Host-built Rust/C++ binaries debugged in the container get an auto-derived source map back to `/workspace`. `list_supported_languages` reports per-mode availability (`modes.launch` / `modes.attach`) with reasons. See [Docker support](./docs/docker-support.md).
 
 ### Using npm
 
@@ -159,6 +178,8 @@ mcp-debugger exposes debugging operations as MCP tools that can be called with s
 ```
 
 ## 🛠️ Available Tools
+
+All **28 tools** below are implemented — see the [tool reference](docs/tool-reference.md) for parameters and response shapes.
 
 | Tool | Description | Status |
 |------|-------------|--------|
@@ -356,7 +377,12 @@ Then get the local variables:
 - 🐹 [Go Debugging Guide](./docs/go/README.md) – Go debugging with Delve
 - ☕ [Java Debugging Guide](./docs/java/README.md) – Java debugging with JDI bridge
 - 🔷 [.NET Debugging Guide](./docs/dotnet/README.md) – .NET/C# debugging with netcoredbg
-- [Rust Debugging on Windows](docs/rust-debugging-windows.md) - Toolchain requirements and troubleshooting
+- ⚙️ [C/C++ Debugging Guide](./docs/cpp/README.md) – CodeLLDB launch, auto-compile, attach-by-PID, core dumps, remote stubs
+- 🦀 [Rust Debugging Guide](./docs/rust-debugging.md) – CodeLLDB setup ([Windows specifics](docs/rust-debugging-windows.md))
+- 🐳 [Docker Support](./docs/docker-support.md) – Container languages, attach modes, host-binary source mapping
+- 🚑 [JIT Diagnostics Tutorial](./docs/jit-diagnostics/README.md) – Debug live services in Kubernetes, incl. the ephemeral-sidecar flow for compiled code
+- 🤖 [Agent Debugging Guide](./docs/agent-debugging-guide.md) – Correct tool usage patterns for AI agents
+- ⚠️ [Known Issues](./docs/KNOWN_ISSUES.md) – Current caveats and workarounds
 - 🔧 [Troubleshooting](./docs/troubleshooting.md) – Common issues & solutions
 
 ## 🤝 Contributing
@@ -370,7 +396,8 @@ cd mcp-debugger
 
 # Install dependencies and vendor debug adapters
 pnpm install
-# All debug adapters (JavaScript js-debug, Rust CodeLLDB) are automatically downloaded
+# Vendored debug engines (Microsoft's js-debug; CodeLLDB, shared by Rust and C/C++)
+# are downloaded automatically and verified against committed SHA-256 digest pins
 
 # Build the project
 pnpm build
@@ -389,7 +416,8 @@ pnpm vendor:force
 
 The project automatically vendors debug adapters during `pnpm install`:
 - **JavaScript**: Downloads Microsoft's js-debug from GitHub releases
-- **Rust**: Downloads CodeLLDB binaries for the current platform
+- **Rust & C/C++**: Download a single shared copy of CodeLLDB for the current platform (`packages/codelldb-common`)
+- **Integrity**: Every download is verified against the pinned SHA-256 digests in the packages' `vendor-manifest.json`; mismatches fail the build
 - **CI Environment**: Set `SKIP_ADAPTER_VENDOR=true` to skip vendoring
 
 To manually manage adapters:
@@ -423,7 +451,7 @@ See [tests/README.md](./tests/README.md) for detailed testing instructions.
 
 ## 📊 Project Status
 
-- ✅ **Production Ready**: v0.22.0 with eight language adapters and polished multi-language distribution
+- ✅ **Production Ready**: v0.24.0 with eight language adapters, 28 tools, and polished multi-language distribution
 - ✅ **Clean architecture** with a dynamic adapter pattern
 - ✅ **Python · Ruby · JavaScript/TypeScript · Go · Java · .NET/C#**: Full step-through debugging
 - 🦀 **Rust**: Full support on Linux/macOS/Windows (Windows requires the GNU toolchain; MSVC is not supported by CodeLLDB)

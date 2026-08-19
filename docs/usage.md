@@ -401,4 +401,4 @@ All 28 tools are fully implemented, including:
 
 ---
 
-*Last updated: 2026-08-11 - All 28 tools including breakpoint management (#236), logpoints (#235), restart_debugging (#238), and the DAP mirror (#217) are fully implemented*
+*Last updated: 2026-08-19 (v0.24.0) - All 28 tools including breakpoint management, logpoints, restart_debugging, and the DAP mirror; variable responses are size-guarded (truncation field, narrow with names: [...]) and get_stack_trace may annotate hiddenFrames*
