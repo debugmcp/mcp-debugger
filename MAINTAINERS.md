@@ -1,6 +1,6 @@
 # Maintainers
 
-mcp-debugger is maintained by [Sycamore LLC](mailto:debug@sycamore.llc).
+mcp-debugger is maintained by [Sycamore LLC](mailto:admin@debugmcp.io).
 
 | Name | GitHub | Affiliation | Role |
 |---|---|---|---|
@@ -12,7 +12,7 @@ Maintainers review and merge pull requests, cut releases, hold publishing access
 
 | Channel | Identity |
 |---|---|
-| npm | [`@debugmcp` scope](https://www.npmjs.com/org/debugmcp) (OIDC trusted publishing — no personal tokens) |
+| npm | [`@debugmcp` scope](https://www.npmjs.com/org/debugmcp) (OIDC trusted publishing; a scoped token is used only for a package's first-ever publish) |
 | Docker Hub | [`debugmcp` org](https://hub.docker.com/r/debugmcp/mcp-debugger) |
 | PyPI | [`debug-mcp-server-launcher`](https://pypi.org/project/debug-mcp-server-launcher/) |
 | GitHub | [`debugmcp` org](https://github.com/debugmcp) |
@@ -23,4 +23,4 @@ Publishing is tied to the GitHub repository via OIDC where supported, not to ind
 
 ## Becoming a maintainer
 
-Sustained, high-quality contributions (code, adapters, triage) are the path. Open an issue or email debug@sycamore.llc if you're interested in taking on a language adapter or subsystem.
+Sustained, high-quality contributions (code, adapters, triage) are the path. Open an issue or email admin@debugmcp.io if you're interested in taking on a language adapter or subsystem.

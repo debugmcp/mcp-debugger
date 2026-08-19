@@ -26,7 +26,7 @@ Day-to-day decisions are made by the lead maintainer. Significant directional ch
 
 ## Security decisions
 
-Vulnerability handling follows [SECURITY.md](SECURITY.md): private disclosure via GitHub Security Advisories or debug@sycamore.llc, coordinated release of fixes, and public advisories after patches ship.
+Vulnerability handling follows [SECURITY.md](SECURITY.md): private disclosure via GitHub Security Advisories or security@debugmcp.io, coordinated release of fixes, and public advisories after patches ship.
 
 ## Changes to this document
 

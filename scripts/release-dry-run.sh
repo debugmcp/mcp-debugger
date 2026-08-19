@@ -30,6 +30,8 @@ JAVA_VER=$(node -e "console.log(require('./packages/adapter-java/package.json').
 JS_VER=$(node -e "console.log(require('./packages/adapter-javascript/package.json').version)")
 RUST_VER=$(node -e "console.log(require('./packages/adapter-rust/package.json').version)")
 DOTNET_VER=$(node -e "console.log(require('./packages/adapter-dotnet/package.json').version)")
+CPP_VER=$(node -e "console.log(require('./packages/adapter-cpp/package.json').version)")
+CODELLDB_VER=$(node -e "console.log(require('./packages/codelldb-common/package.json').version)")
 CLI_VER=$(node -e "console.log(require('./packages/mcp-debugger/package.json').version)")
 
 echo "  Root:               $ROOT_VER"
@@ -42,9 +44,11 @@ echo "  adapter-java:       $JAVA_VER"
 echo "  adapter-javascript: $JS_VER"
 echo "  adapter-rust:       $RUST_VER"
 echo "  adapter-dotnet:     $DOTNET_VER"
+echo "  adapter-cpp:        $CPP_VER"
+echo "  codelldb-common:    $CODELLDB_VER"
 echo "  mcp-debugger:       $CLI_VER"
 
-if [[ "$ROOT_VER" == "$SHARED_VER" && "$ROOT_VER" == "$MOCK_VER" && "$ROOT_VER" == "$PYTHON_VER" && "$ROOT_VER" == "$RUBY_VER" && "$ROOT_VER" == "$GO_VER" && "$ROOT_VER" == "$JAVA_VER" && "$ROOT_VER" == "$JS_VER" && "$ROOT_VER" == "$RUST_VER" && "$ROOT_VER" == "$DOTNET_VER" && "$ROOT_VER" == "$CLI_VER" ]]; then
+if [[ "$ROOT_VER" == "$SHARED_VER" && "$ROOT_VER" == "$MOCK_VER" && "$ROOT_VER" == "$PYTHON_VER" && "$ROOT_VER" == "$RUBY_VER" && "$ROOT_VER" == "$GO_VER" && "$ROOT_VER" == "$JAVA_VER" && "$ROOT_VER" == "$JS_VER" && "$ROOT_VER" == "$RUST_VER" && "$ROOT_VER" == "$DOTNET_VER" && "$ROOT_VER" == "$CPP_VER" && "$ROOT_VER" == "$CODELLDB_VER" && "$ROOT_VER" == "$CLI_VER" ]]; then
   pass "All package versions match ($ROOT_VER)"
 else
   fail "Package versions are inconsistent"
@@ -86,7 +90,7 @@ fi
 # --- 5. npm pack dry-run and provenance readiness ---
 echo ""
 echo "── npm pack dry-run ──"
-PUBLISHED_PKGS=("shared" "adapter-mock" "adapter-python" "adapter-ruby" "mcp-debugger")
+PUBLISHED_PKGS=("shared" "adapter-mock" "adapter-python" "adapter-ruby" "adapter-javascript" "adapter-go" "adapter-java" "adapter-dotnet" "mcp-debugger")
 for pkg_dir in "${PUBLISHED_PKGS[@]}"; do
   pkg_name=$(node -e "console.log(require('./packages/$pkg_dir/package.json').name)")
   if npm pack --dry-run -w "$pkg_name" > /dev/null 2>&1; then
@@ -158,7 +162,7 @@ else
 fi
 
 # Check if packages already exist at this version (would be skipped during publish)
-for pkg in @debugmcp/shared @debugmcp/adapter-mock @debugmcp/adapter-python @debugmcp/adapter-ruby @debugmcp/mcp-debugger; do
+for pkg in @debugmcp/shared @debugmcp/adapter-mock @debugmcp/adapter-python @debugmcp/adapter-ruby @debugmcp/adapter-javascript @debugmcp/adapter-go @debugmcp/adapter-java @debugmcp/adapter-dotnet @debugmcp/mcp-debugger; do
   if npm view "${pkg}@${ROOT_VER}" version > /dev/null 2>&1; then
     warn "${pkg}@${ROOT_VER} already published — will be skipped"
   fi
@@ -184,6 +188,12 @@ if echo "$CHANGELOG_EXTRACT" | grep -q 'tags/v}'; then
   pass "release.yml strips v-prefix for changelog extraction"
 else
   fail "release.yml changelog extraction may not strip v-prefix"
+fi
+
+if grep -q 'resolve-workspace-deps' .github/workflows/release.yml && [[ -f scripts/resolve-workspace-deps.cjs ]]; then
+  pass "release.yml resolves workspace: deps before publish"
+else
+  fail "release.yml missing workspace-dep resolution — published packages would carry uninstallable workspace:* deps"
 fi
 
 # --- 8. Git state ---

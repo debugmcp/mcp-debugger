@@ -50,6 +50,19 @@ updates:
     cooldown:
       default-days: 3
 
+  # Hash-pinned CI dependencies (requirements/pip.txt, requirements/debugpy.txt)
+  # installed with --require-hashes by CI and the release workflow. Without this
+  # entry they receive no update PRs and drift silently.
+  - package-ecosystem: pip
+    directory: /requirements
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "deps"
+    cooldown:
+      default-days: 3
+
   # Keep digest-pinned base images (Dockerfile FROM ...@sha256:) fresh.
   - package-ecosystem: docker
     directories:

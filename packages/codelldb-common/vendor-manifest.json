@@ -1,0 +1,16 @@
+{
+  "comment": "Pinned upstream release for the vendored CodeLLDB binaries. vendor-codelldb.js verifies every downloaded VSIX against these digests and fails the build on mismatch. To bump: set the new version, download each platform VSIX from the upstream release, compute sha256 for each, update this file, re-vendor, and run the rust + cpp adapter test suites. See SUPPLY-CHAIN-SECURITY.md (Embedded third-party components).",
+  "codelldb": {
+    "version": "1.11.8",
+    "upstream": "https://github.com/vadimcn/codelldb",
+    "license": "MIT",
+    "verifiedAt": "2026-08-19",
+    "assets": {
+      "codelldb-win32-x64.vsix": "8dd720faadfb2f05c280f0f37b3f49c750c3baa0c4d6c77bac0259db78fea674",
+      "codelldb-darwin-x64.vsix": "c18f7c64be4b136eb8589549fd3af12c5e97c2dd3d74943d960803f74b39bc51",
+      "codelldb-darwin-arm64.vsix": "a1065e34be3f72954b296657821a06c566a8747d4930c2d9ebb749146a756ed7",
+      "codelldb-linux-x64.vsix": "98c90cc08427d04f83a726931e6cad99a039c3d796788a0d683ed5064e41be42",
+      "codelldb-linux-arm64.vsix": "ea8b93043231e40eca98da58e1c53f1ea4e9431498b29bde11a32c7ad815d1f4"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "comment": "Pinned upstream release for the vendored js-debug DAP server. build-js-debug.js verifies every downloaded release asset against these digests and fails the build on mismatch. To bump: pick the new upstream tag, download its js-debug-dap-<tag>.tar.gz, compute sha256 of the archive AND of the extracted js-debug/src/dapDebugServer.js, update this file, re-run the vendor script, and run the adapter test suite. See SUPPLY-CHAIN-SECURITY.md (Embedded third-party components).",
+  "js-debug": {
+    "version": "v1.112.0",
+    "upstream": "https://github.com/microsoft/vscode-js-debug",
+    "license": "MIT",
+    "verifiedAt": "2026-08-19",
+    "assets": {
+      "js-debug-dap-v1.112.0.tar.gz": "31eb1bd9792f62c32f7c22b66ce612e2e54a7664201a2d80bdb49cc4bf4ca925"
+    },
+    "derived": {
+      "vsDebugServer.js": "1a375a9370e46e786c4095b2a0d2fd74fe54b29564dba7f1e2fe34605104d258"
+    }
+  }
+}

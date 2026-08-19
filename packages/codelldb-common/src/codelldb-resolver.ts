@@ -14,7 +14,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-/** Keep in sync with the CODELLDB_VERSION default in scripts/vendor-codelldb.js */
+/** Keep in sync with the pinned version in vendor-manifest.json (the vendor script's default) */
 export const DEFAULT_CODELLDB_VERSION = '1.11.8';
 
 /**

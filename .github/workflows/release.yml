@@ -9,7 +9,7 @@ on:
       ref:
         description: 'Git ref (tag or branch) to release from'
         required: true
-        default: 'refs/tags/v0.22.0'
+        default: 'refs/tags/v0.24.0'
 
 permissions: {}
 
@@ -82,7 +82,10 @@ jobs:
     
     - name: Install dependencies
       run: pnpm install --frozen-lockfile --ignore-scripts
-    
+
+    - name: Audit production dependencies
+      run: pnpm audit --prod --audit-level=high
+
     - name: Build project
       run: pnpm run build
       env:
@@ -232,8 +235,6 @@ jobs:
     permissions:
       contents: read
       id-token: write  # Required for npm trusted publishing (OIDC)
-    outputs:
-      hashes: ${{ steps.hash.outputs.hashes }}
 
     steps:
     - name: Checkout code
@@ -241,18 +242,24 @@ jobs:
       with:
         fetch-depth: 0
         ref: ${{ github.event.inputs.ref || github.ref }}
-    
+
     - name: Setup pnpm
       uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
       with:
         version: 10
 
+    # No registry-url here: setup-node would write an _authToken=${NODE_AUTH_TOKEN}
+    # placeholder into .npmrc, which breaks token-less OIDC publishes when the
+    # env var is unset. The token step below writes its own scoped .npmrc.
     - name: Setup Node.js
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
       with:
         node-version: '22.x'
-        registry-url: 'https://registry.npmjs.org'
         cache: 'pnpm'
+
+    # npm >= 11.5.1 is required for OIDC trusted publishing; Node 22 bundles npm 10.
+    - name: Upgrade npm for trusted publishing
+      run: npm install -g npm@12.0.2
     
     - name: Setup Java 21
       uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961  # v5.7.0
@@ -292,6 +299,10 @@ jobs:
         node -e 'console.log("ADAPTER_MOCK_VERSION="+require("./packages/adapter-mock/package.json").version)' >> $GITHUB_ENV
         node -e 'console.log("ADAPTER_PYTHON_VERSION="+require("./packages/adapter-python/package.json").version)' >> $GITHUB_ENV
         node -e 'console.log("ADAPTER_RUBY_VERSION="+require("./packages/adapter-ruby/package.json").version)' >> $GITHUB_ENV
+        node -e 'console.log("ADAPTER_JAVASCRIPT_VERSION="+require("./packages/adapter-javascript/package.json").version)' >> $GITHUB_ENV
+        node -e 'console.log("ADAPTER_GO_VERSION="+require("./packages/adapter-go/package.json").version)' >> $GITHUB_ENV
+        node -e 'console.log("ADAPTER_JAVA_VERSION="+require("./packages/adapter-java/package.json").version)' >> $GITHUB_ENV
+        node -e 'console.log("ADAPTER_DOTNET_VERSION="+require("./packages/adapter-dotnet/package.json").version)' >> $GITHUB_ENV
         node -e 'console.log("CLI_VERSION="+require("./packages/mcp-debugger/package.json").version)' >> $GITHUB_ENV
     - name: Set npm dist-tag
       run: |
@@ -306,43 +317,54 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+    # npm (unlike pnpm) does not rewrite workspace:* at publish time; without
+    # this step the published adapter packages carry an uninstallable
+    # "workspace:*" dependency on @debugmcp/shared (EUNSUPPORTEDPROTOCOL).
+    # The rewrite happens only in the runner checkout, never committed.
+    - name: Resolve workspace deps for publish
+      run: node scripts/resolve-workspace-deps.cjs
+
     - name: Pack npm tarballs (dry-run)
       run: |
         npm pack --dry-run -w @debugmcp/shared
         npm pack --dry-run -w @debugmcp/adapter-mock
         npm pack --dry-run -w @debugmcp/adapter-python
         npm pack --dry-run -w @debugmcp/adapter-ruby
+        npm pack --dry-run -w @debugmcp/adapter-javascript
+        npm pack --dry-run -w @debugmcp/adapter-go
+        npm pack --dry-run -w @debugmcp/adapter-java
+        npm pack --dry-run -w @debugmcp/adapter-dotnet
         npm pack --dry-run -w @debugmcp/mcp-debugger
-    
-    - name: Publish to npm (workspaces)
-      run: |
-        # Auth via NPM_TOKEN (granular access token scoped to @debugmcp packages)
-        # --provenance adds signed build attestation (requires id-token: write)
-        # Trusted publisher config on npmjs.com verifies provenance against this repo
 
+    # Existing packages publish via OIDC trusted publishing: no token anywhere,
+    # npm mints a short-lived credential from the workflow's OIDC identity and
+    # generates provenance automatically. Each package must have this repo +
+    # workflow configured as a trusted publisher on npmjs.com BEFORE tagging.
+    - name: Publish existing packages to npm (OIDC trusted publishing)
+      run: |
         # Publish packages in dependency order if the target version does NOT yet exist
         if npm view @debugmcp/shared@${SHARED_VERSION} version >/dev/null 2>&1; then
           echo "@debugmcp/shared@${SHARED_VERSION} already exists, skipping"
         else
-          npm publish -w @debugmcp/shared --access public --provenance
+          npm publish -w @debugmcp/shared --access public --provenance --tag ${NPM_TAG}
         fi
 
         if npm view @debugmcp/adapter-mock@${ADAPTER_MOCK_VERSION} version >/dev/null 2>&1; then
           echo "@debugmcp/adapter-mock@${ADAPTER_MOCK_VERSION} already exists, skipping"
         else
-          npm publish -w @debugmcp/adapter-mock --access public --provenance
+          npm publish -w @debugmcp/adapter-mock --access public --provenance --tag ${NPM_TAG}
         fi
 
         if npm view @debugmcp/adapter-python@${ADAPTER_PYTHON_VERSION} version >/dev/null 2>&1; then
           echo "@debugmcp/adapter-python@${ADAPTER_PYTHON_VERSION} already exists, skipping"
         else
-          npm publish -w @debugmcp/adapter-python --access public --provenance
+          npm publish -w @debugmcp/adapter-python --access public --provenance --tag ${NPM_TAG}
         fi
 
         if npm view @debugmcp/adapter-ruby@${ADAPTER_RUBY_VERSION} version >/dev/null 2>&1; then
           echo "@debugmcp/adapter-ruby@${ADAPTER_RUBY_VERSION} already exists, skipping"
         else
-          npm publish -w @debugmcp/adapter-ruby --access public --provenance
+          npm publish -w @debugmcp/adapter-ruby --access public --provenance --tag ${NPM_TAG}
         fi
 
         if npm view @debugmcp/mcp-debugger@${CLI_VERSION} version >/dev/null 2>&1; then
@@ -350,11 +372,45 @@ jobs:
         else
           npm publish -w @debugmcp/mcp-debugger --access public --provenance --tag ${NPM_TAG}
         fi
+
+    # First-time publishes cannot use trusted publishing (the trusted-publisher
+    # config lives on an existing npm package). These four publish with the
+    # scoped NPM_TOKEN this release only; once they exist, configure trusted
+    # publishers for them and move them into the OIDC step above.
+    - name: Publish new packages to npm (token, first publish)
       env:
         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      run: |
+        echo "//registry.npmjs.org/:_authToken=\${NODE_AUTH_TOKEN}" > "$HOME/.npmrc"
 
-    # The packed tarballs become GitHub Release assets; their hashes feed the
-    # SLSA provenance job below (OpenSSF Scorecard Signed-Releases).
+        if npm view @debugmcp/adapter-javascript@${ADAPTER_JAVASCRIPT_VERSION} version >/dev/null 2>&1; then
+          echo "@debugmcp/adapter-javascript@${ADAPTER_JAVASCRIPT_VERSION} already exists, skipping"
+        else
+          npm publish -w @debugmcp/adapter-javascript --access public --provenance --tag ${NPM_TAG}
+        fi
+
+        if npm view @debugmcp/adapter-go@${ADAPTER_GO_VERSION} version >/dev/null 2>&1; then
+          echo "@debugmcp/adapter-go@${ADAPTER_GO_VERSION} already exists, skipping"
+        else
+          npm publish -w @debugmcp/adapter-go --access public --provenance --tag ${NPM_TAG}
+        fi
+
+        if npm view @debugmcp/adapter-java@${ADAPTER_JAVA_VERSION} version >/dev/null 2>&1; then
+          echo "@debugmcp/adapter-java@${ADAPTER_JAVA_VERSION} already exists, skipping"
+        else
+          npm publish -w @debugmcp/adapter-java --access public --provenance --tag ${NPM_TAG}
+        fi
+
+        if npm view @debugmcp/adapter-dotnet@${ADAPTER_DOTNET_VERSION} version >/dev/null 2>&1; then
+          echo "@debugmcp/adapter-dotnet@${ADAPTER_DOTNET_VERSION} already exists, skipping"
+        else
+          npm publish -w @debugmcp/adapter-dotnet --access public --provenance --tag ${NPM_TAG}
+        fi
+
+        rm -f "$HOME/.npmrc"
+
+    # The packed tarballs become GitHub Release assets, attested by the
+    # provenance job below (OpenSSF Scorecard Signed-Releases).
     - name: Pack release artifacts for provenance
       run: |
         mkdir -p release-artifacts
@@ -362,13 +418,11 @@ jobs:
         npm pack -w @debugmcp/adapter-mock --pack-destination release-artifacts
         npm pack -w @debugmcp/adapter-python --pack-destination release-artifacts
         npm pack -w @debugmcp/adapter-ruby --pack-destination release-artifacts
+        npm pack -w @debugmcp/adapter-javascript --pack-destination release-artifacts
+        npm pack -w @debugmcp/adapter-go --pack-destination release-artifacts
+        npm pack -w @debugmcp/adapter-java --pack-destination release-artifacts
+        npm pack -w @debugmcp/adapter-dotnet --pack-destination release-artifacts
         npm pack -w @debugmcp/mcp-debugger --pack-destination release-artifacts
-
-    - name: Compute artifact hashes (SLSA subjects)
-      id: hash
-      run: |
-        cd release-artifacts
-        echo "hashes=$(sha256sum *.tgz | base64 -w0)" >> "$GITHUB_OUTPUT"
 
     - name: Upload release artifacts
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -523,12 +577,19 @@ jobs:
         pip install debug-mcp-server-launcher==${{ steps.changelog.outputs.VERSION }}
         ```
         
-        **Optional adapters:**
+        **Optional adapters** (for programmatic embedding; the CLI above bundles all of them):
         ```bash
-        npm install -g @debugmcp/adapter-python
-        npm install -g @debugmcp/adapter-ruby
-        npm install -g @debugmcp/adapter-mock
+        npm install @debugmcp/adapter-python   # or: adapter-ruby, adapter-javascript,
+                                               # adapter-go, adapter-java, adapter-dotnet,
+                                               # adapter-mock
         ```
+
+        ### 🔏 Verify this release
+        ```bash
+        gh attestation verify <asset>.tgz --repo debugmcp/mcp-debugger
+        npm audit signatures   # in a project that installs @debugmcp packages
+        ```
+        SBOMs (SPDX + CycloneDX) are attached as release assets.
         
         ### 📚 Documentation
         See the [README](https://github.com/debugmcp/mcp-debugger#readme) for usage instructions.

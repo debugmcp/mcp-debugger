@@ -178,12 +178,18 @@ describe('codelldb-resolver', () => {
   });
 
   describe('version drift guard', () => {
-    it('keeps DEFAULT_CODELLDB_VERSION in sync with the vendor script default', () => {
-      const source = readFileSync(new URL('../scripts/vendor-codelldb.js', import.meta.url), 'utf-8');
-      const match = source.match(/CODELLDB_VERSION\s*=\s*process\.env\.CODELLDB_VERSION\s*\|\|\s*'([^']+)'/);
+    it('keeps DEFAULT_CODELLDB_VERSION in sync with the pinned vendor-manifest version', () => {
+      // The vendor script's default version comes from the committed digest
+      // manifest; the resolver's compile-time default must match it.
+      const manifest = JSON.parse(
+        readFileSync(new URL('../vendor-manifest.json', import.meta.url), 'utf-8')
+      ) as { codelldb: { version: string; assets: Record<string, string> } };
 
-      expect(match).not.toBeNull();
-      expect(match![1]).toBe(DEFAULT_CODELLDB_VERSION);
+      expect(manifest.codelldb.version).toBe(DEFAULT_CODELLDB_VERSION);
+      // Every pinned digest must look like a sha256 hex string.
+      for (const [asset, digest] of Object.entries(manifest.codelldb.assets)) {
+        expect(digest, `digest for ${asset}`).toMatch(/^[0-9a-f]{64}$/);
+      }
     });
   });
 

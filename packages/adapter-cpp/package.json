@@ -1,6 +1,7 @@
 {
   "name": "@debugmcp/adapter-cpp",
   "version": "0.1.0",
+  "private": true,
   "description": "C/C++ debug adapter for MCP Debugger using CodeLLDB",
   "type": "module",
   "main": "./dist/index.js",
@@ -35,5 +36,5 @@
   "engines": {
     "node": ">=22.0.0"
   },
-  "author": "Sycamore LLC <debug@sycamore.llc> (https://github.com/debugmcp)"
+  "author": "Sycamore LLC <admin@debugmcp.io> (https://github.com/debugmcp)"
 }

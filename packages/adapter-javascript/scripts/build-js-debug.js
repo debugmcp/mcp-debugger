@@ -34,12 +34,19 @@ import { ensureDir, copy as fsxCopy } from 'fs-extra';
 import { selectBestAsset, normalizePath } from './lib/js-debug-helpers.js';
 import { determineVendoringPlan } from './lib/vendor-strategy.js';
 
-const VERSION = process.env.JS_DEBUG_VERSION || 'latest';
-const FORCE = (process.env.JS_DEBUG_FORCE_REBUILD || '').trim() === 'true';
-const GH_TOKEN = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '';
-
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(__dirname, '..');
+
+// Pinned upstream release + expected digests (supply-chain integrity).
+// Downloaded assets are verified against this committed manifest; a version
+// override away from the pin requires JS_DEBUG_ALLOW_UNPINNED=true.
+const PIN_MANIFEST_FILE = path.join(PKG_ROOT, 'vendor-manifest.json');
+const PIN = JSON.parse(fs.readFileSync(PIN_MANIFEST_FILE, 'utf8'))['js-debug'];
+const ALLOW_UNPINNED = (process.env.JS_DEBUG_ALLOW_UNPINNED || '').trim() === 'true';
+
+const VERSION = process.env.JS_DEBUG_VERSION || PIN.version;
+const FORCE = (process.env.JS_DEBUG_FORCE_REBUILD || '').trim() === 'true';
+const GH_TOKEN = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '';
 const VENDOR_DIR = path.join(PKG_ROOT, 'vendor', 'js-debug');
 const VENDOR_FILE = path.join(VENDOR_DIR, 'vsDebugServer.js');
 const VENDOR_FILE_CJS = path.join(VENDOR_DIR, 'vsDebugServer.cjs');
@@ -564,6 +571,29 @@ async function main() {
 
     logInfo(`Selected asset: ${best.name} (${best.type}). Downloading...`);
     await downloadWithRetries(best.url, archiveFile);
+
+    // Supply-chain integrity gate: verify the downloaded archive against the
+    // committed digest pin before extracting anything from it. GitHub release
+    // assets are mutable, so "same tag" does not imply "same bytes".
+    const archiveSha = await sha256File(archiveFile);
+    const expectedSha = PIN.assets?.[best.name];
+    if (expectedSha) {
+      if (archiveSha !== expectedSha) {
+        throw new Error(
+          `Integrity check FAILED for ${best.name}: expected sha256 ${expectedSha}, got ${archiveSha}. ` +
+          'The upstream release asset does not match the pinned digest in vendor-manifest.json. ' +
+          'Do NOT bypass this without investigating; if a deliberate upstream re-release is confirmed, update vendor-manifest.json.'
+        );
+      }
+      logInfo(`Integrity check passed: ${best.name} matches pinned sha256.`);
+    } else if (ALLOW_UNPINNED) {
+      logWarn(`UNPINNED asset ${best.name} (sha256 ${archiveSha}) — allowed by JS_DEBUG_ALLOW_UNPINNED. Pin it in vendor-manifest.json before shipping.`);
+    } else {
+      throw new Error(
+        `Asset ${best.name} has no pinned digest in vendor-manifest.json. ` +
+        'Set JS_DEBUG_ALLOW_UNPINNED=true only for local experiments; releases must pin the digest.'
+      );
+    }
 
     const extractDir = path.join(tmpDir, 'extract');
     await extractArchive(archiveFile, best.type, extractDir);
