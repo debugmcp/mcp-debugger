@@ -28,8 +28,8 @@ mkdir -p ~/.copilot/skills && cp -r skills/debugging ~/.copilot/skills/mcp-debug
 ## Contents
 
 - `SKILL.md` — entry point: when to debug, golden path, root-cause discipline, attach recipes, current limitations
-- `references/python.md`, `javascript.md`, `ruby.md`, `rust.md`, `go.md`, `java.md`, `dotnet.md` — per-language prerequisites, quickstarts, quirks, troubleshooting
+- `references/python.md`, `javascript.md`, `ruby.md`, `rust.md`, `go.md`, `java.md`, `dotnet.md`, `cpp.md` — per-language prerequisites, quickstarts, quirks, troubleshooting
 
 ## Keeping it honest
 
-The skill states current limitations (e.g. per-language output-capture gaps) with issue links. If you hit a behavior the skill doesn't describe, please [open an issue](https://github.com/debugmcp/mcp-debugger/issues) — the skill is maintained against real agent transcripts.
+The skill states current limitations plainly (e.g. adapter-specific `pause_execution` support, Ruby attach stdout). If you hit a behavior the skill doesn't describe, please [open an issue](https://github.com/debugmcp/mcp-debugger/issues) — the skill is maintained against real agent transcripts.

@@ -57,7 +57,7 @@ Rules that prevent 90% of failed sessions:
 
 ## Program output
 
-`get_output {sessionId}` returns buffered debuggee stdout/stderr with a cursor: pass the returned `nextCursor` back as `cursor` to read only new output. Each session also exposes the transcript as MCP resource `debug://sessions/{id}/output` with subscription support. Caveat: on Ruby, Go, and Rust, debuggee stdout capture currently has gaps (issues #222/#225/#223) — for those languages, verify behavior via `evaluate_expression`/breakpoints rather than stdout, or have the program write a file.
+`get_output {sessionId}` returns buffered debuggee stdout/stderr with a cursor: pass the returned `nextSince` back as `since` to read only new output. Each session also exposes the transcript as MCP resource `debug://sessions/{id}/output` with subscription support. Caveat: Ruby **attach** sessions capture no stdout (launch sessions stream it) — when attached to Ruby, verify behavior via `evaluate_expression`/breakpoints or have the program write a file.
 
 ## Attach instead of launch
 
@@ -70,6 +70,9 @@ attach_to_process {sessionId, host: "localhost", port: 5678, sourcePaths: ["<loc
 - **Python**: target ran `python -m debugpy --listen <host>:<port> ...`
 - **Ruby**: target ran `rdbg --open --port <port> ...` (works through `kubectl port-forward`)
 - **Java**: target JVM has `-agentlib:jdwp=transport=dt_socket,server=y,address=*:<port>`; breakpoints in not-yet-loaded classes are deferred automatically
+- **C/C++ (and other native)**: attach by PID instead of port — `attach_to_process {sessionId, processId: <pid>, adapterConfig: {program: "<path to binary>"}}`; in a Kubernetes ephemeral debug container use `processId: 1` with `program: "/proc/1/root/<binary path>"` (on Linux, mind `kernel.yama.ptrace_scope`)
+
+Direct-connect attaches (debugpy, rdbg) need no local language toolchain — the debug engine runs inside the target. `list_supported_languages` reports per-mode availability (`modes.launch` / `modes.attach`) with reasons.
 
 `detach_from_process` leaves the target running; `close_debug_session` after detach cleans up the session.
 
@@ -91,6 +94,7 @@ Relay the endpoint with a ready-to-paste VS Code config: `{"name": "Mirror", "ty
 ## Current limitations (be honest with yourself)
 
 - `pause_execution` support varies by adapter; prefer breakpoints over pausing a free-running program.
+- Variable responses are size-guarded (values truncated past ~1KB, capped variable counts/response size, all env-tunable); a `truncation` field says what was cut and suggests narrowing with `names: [...]` or a targeted `evaluate_expression`.
 
 ## Language specifics
 
@@ -100,9 +104,9 @@ Read the matching reference before your first session in a language — each has
 |---|---|---|
 | Python | references/python.md | expand "special variables" containers; late breakpoint verification |
 | JavaScript/TS | references/javascript.md | child-session architecture; internals filtered from stacks |
-| Ruby | references/ruby.md | entry pause auto-continued; stdout capture gap (#222) |
+| Ruby | references/ruby.md | entry pause auto-continued; attach captures no stdout |
 | Rust | references/rust.md | GNU toolchain on Windows; scriptPath = source file, adapter finds Cargo project |
-| Go | references/go.md | Delve native DAP; stdout capture gap (#225) |
+| Go | references/go.md | Delve native DAP; optimized-binary locals warning |
 | Java | references/java.md | javac -g required; FQCN breakpoints; redefine_classes hot-swap |
 | .NET/C# | references/dotnet.md | scriptPath = compiled .dll; Portable PDB required |
 | C/C++ | references/cpp.md | scriptPath = binary (-gdwarf-4 -O0) or lone .c/.cpp (auto-compiled); attach by PID; MinGW/DWARF on Windows |

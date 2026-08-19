@@ -37,7 +37,7 @@ export function buildServerInstructions(
     ? `\n- Prefer set_breakpoint {statement: "<line text>"} over line numbers: it matches like an Edit-tool old_string (whole line or a distinctive substring — whitespace-trimmed, trailing comments ignored, exact matches win), only lands on a line containing your text (inexact or multi-candidate matches are flagged in the response warning), lists every occurrence on ambiguity (disambiguate with nearLine), and re-resolves across restart_debugging after you edit the file.\n- set_breakpoint {function: "name"} breaks on entry to a symbol with no file or line at all — names survive edits best (Python/Go/Rust/.NET/Java/JavaScript; JS names are dotted runtime paths and functions in lazily-loaded modules bind at the next pause).`
     : '';
 
-  return `mcp-debugger drives real step-through debuggers (Python, JavaScript/TypeScript, Ruby, Rust, Go, Java, .NET) as MCP tools.
+  return `mcp-debugger drives real step-through debuggers (Python, JavaScript/TypeScript, Ruby, Rust, Go, Java, .NET, C/C++) as MCP tools.
 
 Golden path: create_debug_session -> set_breakpoint (ABSOLUTE file path) -> start_debugging (ABSOLUTE scriptPath) -> get_stack_trace -> get_scopes(frameId from the stack frame's "id" field) -> get_variables / get_local_variables / evaluate_expression -> step_* or continue_execution -> get_output -> close_debug_session (always, even on failure).
 
@@ -48,7 +48,7 @@ Key rules:
 - list_breakpoints shows every breakpoint with its verified state; remove_breakpoint (by id or file+line) and clear_breakpoints take effect immediately, even mid-run — use them to move a bisection window without restarting.${statementRule}${expectedContentRule}
 - Logpoints: set_breakpoint with logMessage ("order={orderId}") logs the interpolated message to get_output WITHOUT pausing — the prod-safe way to watch values on a hot path (Python/JS/Go/Rust; not Java/.NET).
 - restart_debugging {sessionId} relaunches with the same config in one call — breakpoints re-apply automatically, output buffer resets (read get_output from since=0). Works after the program exits; not for attach sessions.
-- get_output returns buffered debuggee stdout/stderr with a cursor; pass nextCursor back to read only new output.
+- get_output returns buffered debuggee stdout/stderr with a cursor; pass the returned nextSince back as since to read only new output.
 - attach_to_process connects to running/remote targets (debugpy --listen, rdbg --open, JVM JDWP), including pods via port-forward.
 - expose_session {sessionId} returns host/port/token for a read-only IDE mirror of the live session (VS Code launch.json: "debugServer": port + "mirrorToken"); relay these to the human, unexpose_session when done. The IDE observes — execution control stays with you.
 - Launch sessions pause at uncaught exceptions by default (breakOnExceptions "uncaught"; Ruby excepted — rdbg has no uncaught filter). Pass "none" to let crashing scripts run to termination; attach applies no default.${redactionRule}${variableAccessRule}
@@ -80,7 +80,7 @@ ${setBreakpointStep}
 6. get_variables {sessionId, scope: variablesReference} or get_local_variables {sessionId}
 7. evaluate_expression {sessionId, expression}
 8. step_over / step_into / step_out / continue_execution
-9. get_output {sessionId} — cursor-based; pass nextCursor back for only-new output
+9. get_output {sessionId} — cursor-based; pass the returned nextSince back as since for only-new output
 10. close_debug_session {sessionId} — ALWAYS, even after errors
 
 ## Root-cause discipline
@@ -110,9 +110,9 @@ When a human wants to look around in their IDE, expose_session {sessionId} opens
 ## Per-language quirks (one-liners)
 - Python: expand the "special variables" container; breakpoints verify after module load.
 - JavaScript/TS: internals are filtered from stacks; entry pause auto-continues when stopOnEntry=false.
-- Ruby: launch always pauses at load then auto-continues; stdout capture currently has gaps (#222) — verify state via evaluate_expression.
+- Ruby: launch always pauses at load then auto-continues; attach sessions capture no stdout (launch streams it) — verify state via evaluate_expression when attached.
 - Rust: scriptPath is the source file (adapter resolves the Cargo project); Windows needs the GNU toolchain.
-- Go: Delve native DAP; stdout capture gap (#225) — verify via evaluate_expression.
+- Go: Delve native DAP; get_local_variables warns when the binary looks optimized (rebuild with -gcflags="all=-N -l" for full locals).
 - Java: compile with javac -g; FQCN accepted as breakpoint "file"; redefine_classes hot-swaps changed classes.
 - .NET: scriptPath is the compiled .dll; PDBs must be Portable format.
 - C/C++: scriptPath is a compiled executable (build with -gdwarf-4 -O0; MinGW's default DWARF-5 breaks LLDB line breakpoints on Windows) or a lone .c/.cpp file (auto-compiled); attach by PID supported; MSVC PDB support is partial.
