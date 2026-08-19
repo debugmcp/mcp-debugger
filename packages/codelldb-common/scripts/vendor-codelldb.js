@@ -18,7 +18,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { Readable, Transform } from 'stream';
 import { pipeline } from 'stream/promises';
-import { createWriteStream, createReadStream } from 'fs';
+import { createWriteStream, createReadStream, readFileSync } from 'fs';
 import extractZip from 'extract-zip';
 import ProgressBar from 'progress';
 import { fileURLToPath } from 'url';
@@ -28,7 +28,21 @@ import { createHash } from 'crypto';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const CODELLDB_VERSION = process.env.CODELLDB_VERSION || '1.11.8';
+// Pinned upstream release + expected digests (supply-chain integrity).
+// Downloaded VSIXs are verified against this committed manifest; a version
+// override away from the pin requires CODELLDB_ALLOW_UNPINNED=true.
+const PIN_MANIFEST_FILE = path.resolve(__dirname, '..', 'vendor-manifest.json');
+const PIN = JSON.parse(readFileSync(PIN_MANIFEST_FILE, 'utf-8')).codelldb;
+const ALLOW_UNPINNED = process.env.CODELLDB_ALLOW_UNPINNED === 'true';
+
+const CODELLDB_VERSION = process.env.CODELLDB_VERSION || PIN.version;
+if (CODELLDB_VERSION !== PIN.version && !ALLOW_UNPINNED) {
+  console.error(
+    `[CodeLLDB vendor] CODELLDB_VERSION=${CODELLDB_VERSION} differs from the pinned ${PIN.version} in vendor-manifest.json. ` +
+    'Set CODELLDB_ALLOW_UNPINNED=true only for local experiments; releases must update the manifest digests.'
+  );
+  process.exit(1);
+}
 const VENDOR_DIR = path.resolve(__dirname, '..', 'vendor', 'codelldb');
 const FORCE_REBUILD = process.env.CODELLDB_FORCE_REBUILD === 'true';
 const IS_CI = process.env.CI === 'true';
@@ -220,6 +234,7 @@ async function tryUseCachedArtifact(platform, platformInfo, vsixName) {
   }
   log(`Using cached ${vsixName} for ${platform} (${formatBytes(cacheEntry.stats.size)})`);
   try {
+    await verifyPinnedDigest(vsixName, cacheEntry.filePath);
     await extractAndCopyFiles(cacheEntry.filePath, platform, platformInfo, vsixName);
     return true;
   } catch (error) {
@@ -276,6 +291,36 @@ function formatBytes(bytes) {
     unitIndex++;
   }
   return `${value.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+/**
+ * Supply-chain integrity gate: verify an artifact against the committed digest
+ * pin in vendor-manifest.json. GitHub release assets are mutable, so "same
+ * version" does not imply "same bytes". Throws on mismatch; throws on unpinned
+ * assets unless CODELLDB_ALLOW_UNPINNED=true.
+ */
+async function verifyPinnedDigest(vsixName, filePath) {
+  const actual = await computeSha256(filePath);
+  const expected = CODELLDB_VERSION === PIN.version ? PIN.assets?.[vsixName] : undefined;
+  if (expected) {
+    if (actual !== expected) {
+      throw new Error(
+        `Integrity check FAILED for ${vsixName}: expected sha256 ${expected}, got ${actual}. ` +
+        'The artifact does not match the pinned digest in vendor-manifest.json. ' +
+        'Do NOT bypass this without investigating; if a deliberate upstream re-release is confirmed, update vendor-manifest.json.'
+      );
+    }
+    log(`Integrity check passed: ${vsixName} matches pinned sha256.`);
+    return;
+  }
+  if (ALLOW_UNPINNED) {
+    logWarn(`UNPINNED artifact ${vsixName} (sha256 ${actual}) — allowed by CODELLDB_ALLOW_UNPINNED. Pin it in vendor-manifest.json before shipping.`);
+    return;
+  }
+  throw new Error(
+    `Artifact ${vsixName} has no pinned digest in vendor-manifest.json. ` +
+    'Set CODELLDB_ALLOW_UNPINNED=true only for local experiments; releases must pin the digest.'
+  );
 }
 
 function computeSha256(filePath) {
@@ -568,6 +613,7 @@ async function downloadAndExtract(platform) {
         
         try {
           await downloadFile(downloadUrl, vsixPath);
+          await verifyPinnedDigest(vsixName, vsixPath);
           await extractAndCopyFiles(vsixPath, platform, platformInfo, vsixName);
           await saveArtifactToCache(vsixName, vsixPath);
           successForArtifact = true;

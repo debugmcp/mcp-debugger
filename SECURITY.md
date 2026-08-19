@@ -4,8 +4,8 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.22.x  | :white_check_mark: |
-| < 0.22  | :x:                |
+| 0.24.x  | :white_check_mark: |
+| < 0.24  | :x:                |
 
 ## Reporting a Vulnerability
 
@@ -17,7 +17,7 @@ Report vulnerabilities through [GitHub Security Advisories](https://github.com/d
 
 ### Alternative: Email
 
-Send details to **debug@sycamore.llc** with subject line `[SECURITY] mcp-debugger: <brief description>`.
+Send details to **security@debugmcp.io** with subject line `[SECURITY] mcp-debugger: <brief description>`.
 
 ### What to Include
 
@@ -81,5 +81,5 @@ mcp-debugger follows these security principles:
 - **No credential storage**: The server does not store or manage user credentials
 - **UX-level path validation**: File paths are checked for existence at request boundaries to give the MCP client immediate feedback on bad inputs. This is not an access-control mechanism — see [Trust Model](#trust-model).
 - **Least privilege**: CI workflows use minimal GitHub token permissions
-- **Supply chain hardening**: GitHub Actions are SHA-pinned, dependencies are audited, npm packages are published with sigstore provenance
+- **Supply chain hardening**: GitHub Actions are SHA-pinned, dependencies are audited, npm packages are published with sigstore provenance, SBOMs ship with every release, and vendored debug engines are digest-pinned — see [SUPPLY-CHAIN-SECURITY.md](SUPPLY-CHAIN-SECURITY.md) and the [assurance case](docs/assurance-case.md)
 - **Self-assessed against community baselines**: [OpenSSF Best Practices "passing" badge](https://www.bestpractices.dev/projects/13543) and [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/debugmcp/mcp-debugger)

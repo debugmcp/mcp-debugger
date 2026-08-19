@@ -1,6 +1,7 @@
 {
   "name": "@debugmcp/codelldb-common",
   "version": "0.22.0",
+  "private": true,
   "description": "Shared CodeLLDB vendoring, resolution, and spawn glue for CodeLLDB-backed MCP Debugger adapters",
   "type": "module",
   "main": "./dist/index.js",
@@ -35,5 +36,5 @@
   "engines": {
     "node": ">=22.0.0"
   },
-  "author": "Sycamore LLC <debug@sycamore.llc> (https://github.com/debugmcp)"
+  "author": "Sycamore LLC <admin@debugmcp.io> (https://github.com/debugmcp)"
 }

@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.8"
 license = "MIT"
 authors = [
-  { name = "debugmcp", email = "debug@sycamore.llc" }
+  { name = "debugmcp", email = "admin@debugmcp.io" }
 ]
 keywords = ["mcp", "dap", "debugger", "debugpy", "ai-agent", "llm"]
 classifiers = [
