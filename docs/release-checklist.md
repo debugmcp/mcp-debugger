@@ -5,7 +5,7 @@ Pre-release validation for mcp-debugger. Run `npm run release:dry-run` to automa
 ## Before Tagging
 
 ### Automated (via `npm run release:dry-run`)
-- [ ] Package versions match (the dry-run script checks root plus all workspace packages including adapter-dotnet)
+- [ ] Package versions match (the dry-run script checks root plus **all 12** workspace packages, including the private/bundle-only `adapter-rust`, `adapter-cpp`, and `codelldb-common`)
 - [ ] `CHANGELOG.md` has `[x.y.z] - YYYY-MM-DD` entry with date
 - [ ] `CHANGELOG.md` has empty `[Unreleased]` section at top
 - [ ] `npm run build` succeeds
@@ -14,28 +14,42 @@ Pre-release validation for mcp-debugger. Run `npm run release:dry-run` to automa
 - [ ] `release.yml` has `setup-java` (JDI bridge compiles with `--release 21`)
 - [ ] `release.yml` has `setup-go` (Go adapter needs Delve)
 - [ ] `release.yml` changelog extraction strips `v` prefix (`refs/tags/v}` not `refs/tags/}`)
+- [ ] `release.yml` runs `scripts/resolve-workspace-deps.cjs` before publishing (published manifests must not contain `workspace:*`)
 
 ### Manual
-- [ ] **npm trusted publishing configured** — each published `@debugmcp/*` package must have trusted publishing enabled at npmjs.com → package Settings → Configure Trusted Publishing (repo: `debugmcp/mcp-debugger`, workflow: `release.yml`). Auth uses a granular access token via `NPM_TOKEN` secret; trusted publishing enables provenance verification.
+- [ ] **npm trusted publishing configured** — every *previously published* `@debugmcp/*` package must have a trusted publisher at npmjs.com → package Settings → Trusted Publisher (GitHub Actions; org/user: `debugmcp`, repo: `mcp-debugger`, workflow: `release.yml`, environment: blank). These packages publish token-free via OIDC; a publish without this config fails (404/permission error) — configure, then re-run via workflow_dispatch.
+- [ ] **First-time packages** — any package that has never been on npm publishes via the `NPM_TOKEN` step in `release.yml` this once. After the release: configure its trusted publisher, then move it from the token step into the OIDC step. When no first-publishes remain, delete the token step and the `NPM_TOKEN` secret.
 - [ ] **Docker Hub credentials** — `DOCKER_USERNAME` and `DOCKER_PASSWORD` secrets are current
 - [ ] **PyPI token** — `PYPI_TOKEN` secret is current
 - [ ] `release.yml` default ref updated to current tag (for workflow_dispatch reruns)
 - [ ] All new adapters have their toolchain in `release.yml` **both** `build-and-test` and `npm-publish` jobs
+- [ ] New adapters intended for npm publishing have `publishConfig.access: "public"`, a `git+https` `repository.url` with `directory`, and appear in: `release.yml` (pack dry-run, publish, pack-artifacts) and `PUBLISHED_PKGS` in `scripts/release-dry-run.sh`. Bundle-only packages carry `"private": true`.
+- [ ] Vendored-engine pins current: `packages/adapter-javascript/vendor-manifest.json` and `packages/codelldb-common/vendor-manifest.json` match the versions you intend to ship (digest verification fails the build on drift)
 - [ ] Contributors credited in CHANGELOG (check `git log --format="%an" | sort -u`)
 
 ## Common Failures
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `E404` on `npm publish` PUT | Trusted publishing not configured for the package | npmjs.com → package Settings → Configure Trusted Publishing |
-| `release version 21 not supported` | JDK < 21 in workflow job | Add `actions/setup-java@v4` with `java-version: '21'` |
+| `E404`/permission error on OIDC `npm publish` | Trusted publisher not configured for the package | npmjs.com → package Settings → Trusted Publisher; re-run npm-publish via workflow_dispatch (per-package skip-guards make re-runs safe) |
+| `E422` on `npm publish --provenance` | Missing/mismatched `repository.url` in package.json | Add `git+https://github.com/debugmcp/mcp-debugger.git` + `directory` |
+| Published package uninstallable (`EUNSUPPORTEDPROTOCOL workspace:`) | Publish ran without workspace-dep resolution | Ensure `Resolve workspace deps for publish` step precedes publishing |
+| Vendor script fails `Integrity check FAILED` | Upstream release asset changed since pinning | Investigate before bypassing; if a legitimate re-release, update the vendor-manifest digests in a reviewed PR |
+| `release version 21 not supported` | JDK < 21 in workflow job | Add `actions/setup-java` with `java-version: '21'` |
 | Changelog empty in GitHub Release | `release.yml` doesn't strip `v` from tag | Use `${RELEASE_REF#refs/tags/v}` |
 | Build fails in `npm-publish` | Missing toolchain (Go/Java/etc.) | Mirror `build-and-test` toolchain setup in `npm-publish` job |
-| `workspace:*` resolution error | pnpm pack without resolving workspace deps | Check `scripts/prepare-pack.js` handles new packages |
+| `workspace:*` resolution error in CLI pack | pnpm pack without resolving workspace deps | Check `scripts/prepare-pack.js` handles new packages |
 
 ## After Tagging
 
-- [ ] Monitor GitHub Actions → Release workflow (all 5 jobs: build-and-test, docker-publish, npm-publish, pypi-publish, create-release)
-- [ ] Verify: `npx @debugmcp/mcp-debugger@x.y.z stdio` works
+- [ ] Monitor GitHub Actions → Release workflow (all **6** jobs: build-and-test, docker-publish, npm-publish, pypi-publish, **provenance**, create-release)
+- [ ] GitHub Release has all expected assets: one `.tgz` per published package, `multiple.intoto.jsonl`, `multiple.sigstore.json`, `sbom.spdx.json`, `sbom.cyclonedx.json`
+- [ ] GitHub Release body has the correct changelog content
+- [ ] Verify provenance: `gh attestation verify debugmcp-mcp-debugger-x.y.z.tgz --repo debugmcp/mcp-debugger` (download the asset first)
+- [ ] Verify npm: each published package shows the new version with `latest` dist-tag and a provenance badge on npmjs.com; `npm audit signatures` passes in a scratch project that installs them
+- [ ] Verify: `npx @debugmcp/mcp-debugger@x.y.z stdio` works (if the npx cache misbehaves, `npm install --prefix <tmp-dir>` is the reliable smoke path)
 - [ ] Verify: `docker pull debugmcp/mcp-debugger:x.y.z` works
-- [ ] Verify: GitHub Release has correct changelog content
+- [ ] Verify: PyPI has `debug-mcp-server-launcher==x.y.z`
+- [ ] **Website content review** — audit https://debugmcp.io against what this release shipped (language matrix, tool count, feature claims, comparison table) and update `debugmcp/website`
+- [ ] Update `SECURITY.md` supported-versions table if a new minor line started (should have happened pre-tag)
+- [ ] First-publish follow-up: configure trusted publishers for any packages that just had their first release (see Manual section above)

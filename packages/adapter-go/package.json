@@ -42,11 +42,14 @@
     "delve",
     "dap"
   ],
-  "author": "Sycamore LLC <debug@sycamore.llc> (https://github.com/debugmcp)",
+  "author": "Sycamore LLC <admin@debugmcp.io> (https://github.com/debugmcp)",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/debugmcp/mcp-debugger.git",
+    "url": "git+https://github.com/debugmcp/mcp-debugger.git",
     "directory": "packages/adapter-go"
   }
 }

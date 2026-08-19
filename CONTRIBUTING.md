@@ -91,7 +91,7 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
 **IMPORTANT**: Never commit personal information to the repository. This includes:
 
 - Personal file paths (e.g., `C:\path\to\` or `/path/to/`)
-- Personal email addresses (project emails like `debug@sycamore.llc` are okay)
+- Personal email addresses (project emails like `admin@debugmcp.io` are okay)
 - Cloud storage paths with personal folders
 - Any other personally identifiable information
 
@@ -247,6 +247,18 @@ Fixed race condition where disconnect during step operations
 could leave the session in an invalid state.
 ```
 
+## ✍️ Developer Certificate of Origin
+
+By contributing to this project, you certify the [Developer Certificate of Origin (DCO) v1.1](https://developercertificate.org/): that you wrote the contribution or otherwise have the right to submit it under the project's MIT license, and that you understand the contribution is public and a record of it is maintained indefinitely.
+
+Sign off each commit to make this certification explicit:
+
+```bash
+git commit -s -m "feat(scope): your change"
+```
+
+which appends a `Signed-off-by: Your Name <you@example.com>` trailer. If you forget, `git commit --amend -s` fixes the latest commit. We do not currently enforce sign-off in CI, but including it is expected for non-trivial contributions.
+
 ## 🚦 Pull Request Process
 
 1. **Before submitting**:
@@ -346,6 +358,6 @@ To see mcp-debugger in action:
 
 - **General questions**: Open a [Discussion](https://github.com/debugmcp/mcp-debugger/discussions)
 - **Bug reports**: Open an [Issue](https://github.com/debugmcp/mcp-debugger/issues)
-- **Direct contact**: debug@sycamore.llc
+- **Direct contact**: admin@debugmcp.io
 
 Thank you for contributing to mcp-debugger! 🙏

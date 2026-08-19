@@ -8,6 +8,7 @@
   "files": [
     "dist",
     "vendor/js-debug",
+    "vendor-manifest.json",
     "assets"
   ],
   "exports": {
@@ -50,5 +51,11 @@
   "publishConfig": {
     "access": "public"
   },
-  "author": "Sycamore LLC <debug@sycamore.llc> (https://github.com/debugmcp)"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/debugmcp/mcp-debugger.git",
+    "directory": "packages/adapter-javascript"
+  },
+  "author": "Sycamore LLC <admin@debugmcp.io> (https://github.com/debugmcp)"
 }
