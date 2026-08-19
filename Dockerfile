@@ -68,8 +68,22 @@ COPY packages/adapter-cpp/tsconfig*.json ./packages/adapter-cpp/
 COPY src ./src
 COPY scripts ./scripts/
 
-# 4) Build workspace packages and main project (root build runs build:packages); then bundle
-# Download Linux CodeLLDB artifacts during the container build if they are not already vendored.
+# 4) Vendor the CodeLLDB engine for this image's architecture (rust + cpp adapters).
+# This MUST be explicit: the root postinstall that vendors on dev machines is
+# skipped by --ignore-scripts, and codelldb-common's package build is tsc-only —
+# without this step a fresh CI context ships an image with no CodeLLDB (#387;
+# the committed vendor/.gitkeep kept the later cp -r from failing, so v0.24.0
+# shipped silently broken). The download is verified against the pinned SHA-256
+# digests in packages/codelldb-common/vendor-manifest.json. A "current" symlink
+# gives the runtime stage an architecture-independent CODELLDB_PATH.
+ARG TARGETARCH
+RUN set -eux; \
+    case "${TARGETARCH:-amd64}" in arm64) CODELLDB_ARCH=linux-arm64;; *) CODELLDB_ARCH=linux-x64;; esac; \
+    CODELLDB_PLATFORMS="$CODELLDB_ARCH" pnpm --filter @debugmcp/codelldb-common run build:adapter; \
+    test -x "/app/packages/codelldb-common/vendor/codelldb/$CODELLDB_ARCH/adapter/codelldb"; \
+    ln -sfn "$CODELLDB_ARCH" /app/packages/codelldb-common/vendor/codelldb/current
+
+# 5) Build workspace packages and main project (root build runs build:packages); then bundle
 RUN CODELLDB_VENDOR_ALL=false CODELLDB_PLATFORMS=linux-x64 pnpm run build --silent
 RUN node scripts/bundle.js
 
@@ -175,8 +189,13 @@ COPY --from=builder /app/node_modules/@debugmcp /app/node_modules/@debugmcp
 # Single shared CodeLLDB copy for the rust and cpp adapters (issue #328).
 # Both adapters probe their own package roots first (dead in this image) and
 # fall back to CODELLDB_PATH; the sibling lldb/ tree next to the binary
-# supplies liblldb and the Python support files.
-ENV CODELLDB_PATH=/app/node_modules/@debugmcp/codelldb-common/vendor/codelldb/linux-x64/adapter/codelldb
+# supplies liblldb and the Python support files. "current" is a symlink to
+# this image's architecture dir, created in the builder stage.
+ENV CODELLDB_PATH=/app/node_modules/@debugmcp/codelldb-common/vendor/codelldb/current/adapter/codelldb
+
+# Fail the image build if the debug engine is missing — the v0.24.0 image
+# shipped without CodeLLDB because nothing guarded this (#387).
+RUN test -x "$CODELLDB_PATH"
 
 # Pre-compile JDI bridge for instant Java debugging (no on-demand compilation at runtime)
 RUN mkdir -p /app/node_modules/@debugmcp/adapter-java/java/out && \
