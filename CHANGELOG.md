@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-08-19
+
+### Fixed
+- **Published Docker image ships CodeLLDB again** — the v0.24.0 image was missing the CodeLLDB engine entirely, so Rust and C/C++ debugging reported "CodeLLDB not found" in the container (#387). Nothing in the Docker build invoked the vendor step (the root postinstall that does it on dev machines is skipped by `--ignore-scripts`), and a committed `vendor/.gitkeep` kept the build from failing loudly; local image builds were masked by developer machines' pre-populated vendor trees. The Dockerfile now vendors CodeLLDB explicitly per image architecture (linux-x64 / linux-arm64, digest-verified against the pinned manifest), points `CODELLDB_PATH` at an architecture-independent `current` symlink (the old hardcoded linux-x64 path was also silently wrong for the arm64 image), and **fails the image build if the engine is missing**
+
 ## [0.24.0] - 2026-08-19
 
 ### Changed
