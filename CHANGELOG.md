@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-08-19
+
 ### Changed
 - **Variable responses are size-guarded** — values truncate past 1024 chars, per-call variable count and total response size are capped (all env-tunable), with a `truncation` object explaining what was cut and pointing at the `names: [...]` filter or a targeted `evaluate_expression`; keeps huge scopes from blowing out agent context windows (#356, #359)
 - **BREAKING (behavioral): launch sessions now default to `breakOnExceptions: "uncaught"`** — a crashing script pauses at the uncaught exception (`lastStop.reason: "exception"`, stack/locals inspectable, `exceptionInfo` where supported) instead of running to termination. Applies uniformly to Python, JavaScript, Java, Go (panics), .NET, Rust (panics), and the mock adapter; Ruby keeps the old run-to-termination behavior (rdbg has no uncaught-only filter). Pass `breakOnExceptions: "none"` to restore the old behavior per session. Attach sessions are unchanged — no default is ever applied on attach (fixes #244)
