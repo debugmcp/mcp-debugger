@@ -73,18 +73,37 @@ COPY scripts ./scripts/
 # skipped by --ignore-scripts, and codelldb-common's package build is tsc-only —
 # without this step a fresh CI context ships an image with no CodeLLDB (#387;
 # the committed vendor/.gitkeep kept the later cp -r from failing, so v0.24.0
-# shipped silently broken). The download is verified against the pinned SHA-256
-# digests in packages/codelldb-common/vendor-manifest.json. A "current" symlink
-# gives the runtime stage an architecture-independent CODELLDB_PATH.
+# shipped silently broken). Implemented in plain shell (curl + sha256sum +
+# unzip) because the node vendor script dies mid-extraction with exit 0 under
+# buildkit (#389); the download is verified against the pinned SHA-256 digests
+# in packages/codelldb-common/vendor-manifest.json. A "current" symlink gives
+# the runtime stage an architecture-independent CODELLDB_PATH. If the build
+# context already carries a vendored engine (local dev builds), it is reused.
 ARG TARGETARCH
 RUN set -eux; \
     case "${TARGETARCH:-amd64}" in arm64) CODELLDB_ARCH=linux-arm64;; *) CODELLDB_ARCH=linux-x64;; esac; \
-    CODELLDB_PLATFORMS="$CODELLDB_ARCH" pnpm --filter @debugmcp/codelldb-common run build:adapter; \
-    test -x "/app/packages/codelldb-common/vendor/codelldb/$CODELLDB_ARCH/adapter/codelldb"; \
+    DEST="/app/packages/codelldb-common/vendor/codelldb/${CODELLDB_ARCH}"; \
+    if [ ! -x "$DEST/adapter/codelldb" ]; then \
+      apt-get update && apt-get install -y --no-install-recommends curl ca-certificates unzip && rm -rf /var/lib/apt/lists/*; \
+      MANIFEST=/app/packages/codelldb-common/vendor-manifest.json; \
+      CODELLDB_VERSION="$(node -p "require('$MANIFEST').codelldb.version")"; \
+      EXPECTED_SHA="$(node -p "require('$MANIFEST').codelldb.assets['codelldb-${CODELLDB_ARCH}.vsix']")"; \
+      curl -fsSL --retry 3 -o /tmp/codelldb.vsix "https://github.com/vadimcn/codelldb/releases/download/v${CODELLDB_VERSION}/codelldb-${CODELLDB_ARCH}.vsix"; \
+      echo "${EXPECTED_SHA}  /tmp/codelldb.vsix" | sha256sum -c -; \
+      unzip -q /tmp/codelldb.vsix -d /tmp/codelldb-extract; \
+      rm -rf "$DEST"; mkdir -p "$DEST"; \
+      cp -r /tmp/codelldb-extract/extension/adapter "$DEST/adapter"; \
+      cp -r /tmp/codelldb-extract/extension/lldb "$DEST/lldb"; \
+      if [ -d /tmp/codelldb-extract/extension/lang_support ]; then cp -r /tmp/codelldb-extract/extension/lang_support "$DEST/lang_support"; fi; \
+      chmod 755 "$DEST/adapter/codelldb"; \
+      printf '{\n  "version": "%s",\n  "platform": "%s"\n}\n' "$CODELLDB_VERSION" "$CODELLDB_ARCH" > "$DEST/version.json"; \
+      rm -rf /tmp/codelldb.vsix /tmp/codelldb-extract; \
+    fi; \
+    test -x "$DEST/adapter/codelldb"; \
     ln -sfn "$CODELLDB_ARCH" /app/packages/codelldb-common/vendor/codelldb/current
 
 # 5) Build workspace packages and main project (root build runs build:packages); then bundle
-RUN CODELLDB_VENDOR_ALL=false CODELLDB_PLATFORMS=linux-x64 pnpm run build --silent
+RUN pnpm run build --silent
 RUN node scripts/bundle.js
 
 # Optional: quick diagnostics for bundle

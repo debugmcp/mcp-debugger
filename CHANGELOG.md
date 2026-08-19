@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.2] - 2026-08-19
+
+### Fixed
+- **Docker image build: CodeLLDB vendoring moved to plain shell** — the node vendor script dies mid-extraction with exit code 0 under CI buildkit (#389; deterministic there, intermittent locally), which made the v0.24.1 `docker-publish` job fail on its own missing-engine guard, so **v0.24.1 shipped to npm and PyPI only** (no Docker image, no GitHub release). The Dockerfile now downloads the VSIX with curl, verifies it against the pinned SHA-256 from `vendor-manifest.json` with `sha256sum -c`, and extracts with unzip — same integrity guarantee, no node in the loop. The `test -x` guard and per-architecture `current` symlink from #388 are unchanged
+
 ## [0.24.1] - 2026-08-19
 
 ### Fixed
