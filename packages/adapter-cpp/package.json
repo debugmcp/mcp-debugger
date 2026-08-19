@@ -1,6 +1,6 @@
 {
   "name": "@debugmcp/adapter-cpp",
-  "version": "0.24.1",
+  "version": "0.24.2",
   "private": true,
   "description": "C/C++ debug adapter for MCP Debugger using CodeLLDB",
   "type": "module",
