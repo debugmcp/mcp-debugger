@@ -36,9 +36,6 @@ importers:
       debug:
         specifier: ^4.4.3
         version: 4.4.3
-      eventsource:
-        specifier: ^4.1.1
-        version: 4.1.1
       express:
         specifier: ^5.2.1
         version: 5.2.1
@@ -1640,10 +1637,6 @@ packages:
   eventsource@3.0.7:
     resolution: {integrity: sha512-CRT1WTyuQoD771GW56XEZFQ/ZoSfWid1alKGDYMmkt2yl8UXrVR4pspqWNEcqKvVIzg6PAltWjxcSSPrboA4iA==}
     engines: {node: '>=18.0.0'}
-
-  eventsource@4.1.1:
-    resolution: {integrity: sha512-D6bTRWh6KahHTK/m4WnjPQyEinNPf9eFLEZSEoj7d6fTibspnAVYfzHvirL7u/aoX5d9YYfIkBVAhmigUELk9w==}
-    engines: {node: '>=20.0.0'}
 
   expect-type@1.4.0:
     resolution: {integrity: sha512-KfYbmpRm0VbLjEvVa9yGwCi9GI34xvi7A/HXYWQO65CSD2u3MczUJSuwXKFIxlGsgBQizV9q5J9NHj4VG0n+pA==}
@@ -3672,10 +3665,6 @@ snapshots:
   eventsource-parser@3.1.0: {}
 
   eventsource@3.0.7:
-    dependencies:
-      eventsource-parser: 3.1.0
-
-  eventsource@4.1.1:
     dependencies:
       eventsource-parser: 3.1.0
 
