@@ -209,7 +209,7 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
       if (!codelldbPath) {
         errors.push({
           code: 'CODELLDB_NOT_FOUND',
-          message: 'CodeLLDB executable not found. Run: npm run build:adapter',
+          message: 'CodeLLDB executable not found. It normally ships via the @debugmcp/codelldb-* optional dependencies (reinstall without --omit=optional), or set CODELLDB_PATH, or in a repo checkout run: npm run build:adapter',
           recoverable: true
         });
       }
@@ -579,7 +579,7 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
     
     if (!resolvedPath) {
       throw new AdapterError(
-        'CodeLLDB executable not found. Run: npm run build:adapter',
+        'CodeLLDB executable not found. It normally ships via the @debugmcp/codelldb-* optional dependencies (reinstall without --omit=optional), or set CODELLDB_PATH, or in a repo checkout run: npm run build:adapter',
         AdapterErrorCode.ENVIRONMENT_INVALID
       );
     }
@@ -948,7 +948,7 @@ You can also specify the Rust executable path explicitly in your debug configura
     const message = error.message.toLowerCase();
     
     if (message.includes('codelldb') && message.includes('not found')) {
-      return 'CodeLLDB is not installed. Please run: npm run build:adapter in packages/adapter-rust/';
+      return 'CodeLLDB is not installed. It normally ships via the @debugmcp/codelldb-* optional dependencies; set CODELLDB_PATH, or in a repo checkout run: npm run build:adapter';
     }
     
     if (message.includes('cargo') && message.includes('not found')) {

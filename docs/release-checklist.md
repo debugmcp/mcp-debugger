@@ -5,7 +5,7 @@ Pre-release validation for mcp-debugger. Run `npm run release:dry-run` to automa
 ## Before Tagging
 
 ### Automated (via `npm run release:dry-run`)
-- [ ] Package versions match (the dry-run script checks root plus **all 12** workspace packages, including the private/bundle-only `adapter-rust`, `adapter-cpp`, and `codelldb-common`)
+- [ ] Package versions match (the dry-run script checks root plus **all 17** workspace packages, including the private/bundle-only `adapter-rust`, `adapter-cpp`, and `codelldb-common`; the five `codelldb-<platform>` payload packages are checked against the **CodeLLDB pin**, not the repo version)
 - [ ] `CHANGELOG.md` has `[x.y.z] - YYYY-MM-DD` entry with date
 - [ ] `CHANGELOG.md` has empty `[Unreleased]` section at top
 - [ ] `npm run build` succeeds
@@ -18,13 +18,14 @@ Pre-release validation for mcp-debugger. Run `npm run release:dry-run` to automa
 
 ### Manual
 - [ ] **npm trusted publishing configured** — every *previously published* `@debugmcp/*` package must have a trusted publisher at npmjs.com → package Settings → Trusted Publisher (GitHub Actions; org/user: `debugmcp`, repo: `mcp-debugger`, workflow: `release.yml`, environment: blank). These packages publish token-free via OIDC; a publish without this config fails (404/permission error) — configure, then re-run via workflow_dispatch.
-- [ ] **First-time packages** — any package that has never been on npm publishes via the `NPM_TOKEN` step in `release.yml` this once. After the release: configure its trusted publisher, then move it from the token step into the OIDC step. When no first-publishes remain, delete the token step and the `NPM_TOKEN` secret.
+- [ ] **First-time packages** — any package that has never been on npm publishes via the `NPM_TOKEN` step in `release.yml` this once. After the release: configure its trusted publisher, then move it from the token step into the OIDC step. When no first-publishes remain, delete the token step and the `NPM_TOKEN` secret. (The five `@debugmcp/codelldb-<platform>` packages have their own token step and follow the same dance after their first release.)
 - [ ] **Docker Hub credentials** — `DOCKER_USERNAME` and `DOCKER_PASSWORD` secrets are current
 - [ ] **PyPI token** — `PYPI_TOKEN` secret is current
 - [ ] `release.yml` default ref updated to current tag (for workflow_dispatch reruns)
 - [ ] All new adapters have their toolchain in `release.yml` **both** `build-and-test` and `npm-publish` jobs
 - [ ] New adapters intended for npm publishing have `publishConfig.access: "public"`, a `git+https` `repository.url` with `directory`, and appear in: `release.yml` (pack dry-run, publish, pack-artifacts) and `PUBLISHED_PKGS` in `scripts/release-dry-run.sh`. Bundle-only packages carry `"private": true`.
 - [ ] Vendored-engine pins current: `packages/adapter-javascript/vendor-manifest.json` and `packages/codelldb-common/vendor-manifest.json` match the versions you intend to ship (digest verification fails the build on drift)
+- [ ] **CodeLLDB bump procedure** (when bumping the CodeLLDB pin): update `vendor-manifest.json` (version + all five VSIX digests), update `DEFAULT_CODELLDB_VERSION` in `packages/codelldb-common/src/codelldb-resolver.ts`, run `node scripts/sync-versions.cjs` (it writes the pin into the five `packages/codelldb-<platform>/package.json` versions automatically), re-vendor, and run the rust + cpp + codelldb-common test suites (drift guards enforce manifest ↔ resolver ↔ package versions stay in sync). The next release then republishes exactly the five platform packages; at an unchanged pin the npm-view guards skip them.
 - [ ] Contributors credited in CHANGELOG (check `git log --format="%an" | sort -u`)
 
 ## Common Failures

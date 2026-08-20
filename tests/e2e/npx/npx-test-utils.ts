@@ -235,8 +235,29 @@ export async function installPackageGlobally(tarballPath: string): Promise<void>
       // Package might not be installed
     }
     
-    // Install from tarball
-    await execAsync(`npm install -g "${tarballPath}"`);
+    // Install from tarball. The @debugmcp/codelldb-* optionalDependencies live
+    // on the registry (issue #383); until their first publish resolving them
+    // fails with E404/ETARGET, so retry without optional deps (rust/cpp then
+    // fall back to CODELLDB_PATH/vendor tree). The retry is deliberately
+    // narrow: any OTHER install failure must stay loud — a blanket retry
+    // would let e.g. a broken optionalDependencies rewrite pass CI silently.
+    try {
+      await execAsync(`npm install -g "${tarballPath}"`);
+    } catch (installError) {
+      const text = installError instanceof Error
+        ? `${installError.message}\n${(installError as { stderr?: string }).stderr ?? ''}`
+        : String(installError);
+      const isMissingCodelldbPackage =
+        /E404|ETARGET/.test(text) && text.includes('@debugmcp/codelldb-');
+      if (!isMissingCodelldbPackage) {
+        throw installError;
+      }
+      console.warn(
+        '[NPX Test] npm install -g failed resolving a @debugmcp/codelldb-* optional dep ' +
+        '(not yet published?); retrying with --omit=optional'
+      );
+      await execAsync(`npm install -g "${tarballPath}" --omit=optional`);
+    }
     console.log('[NPX Test] Package installed globally');
     
     // Verify installation

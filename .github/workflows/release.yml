@@ -304,6 +304,8 @@ jobs:
         node -e 'console.log("ADAPTER_JAVA_VERSION="+require("./packages/adapter-java/package.json").version)' >> $GITHUB_ENV
         node -e 'console.log("ADAPTER_DOTNET_VERSION="+require("./packages/adapter-dotnet/package.json").version)' >> $GITHUB_ENV
         node -e 'console.log("CLI_VERSION="+require("./packages/mcp-debugger/package.json").version)' >> $GITHUB_ENV
+        # CodeLLDB platform packages are versioned by the vendored CodeLLDB release (issue #383)
+        node -e 'console.log("CODELLDB_PKG_VERSION="+require("./packages/codelldb-common/vendor-manifest.json").codelldb.version)' >> $GITHUB_ENV
     - name: Set npm dist-tag
       run: |
         if [[ "${CLI_VERSION}" == *"-beta"* ]] || [[ "${CLI_VERSION}" == *"-alpha"* ]]; then
@@ -316,6 +318,17 @@ jobs:
       run: pnpm run build
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    # Downloads the digest-pinned VSIXs for all five platforms (the build above
+    # vendored linux-x64 only under CI=true) and copies the payloads into the
+    # @debugmcp/codelldb-* platform packages. Verification runs in a SEPARATE
+    # process: a vendoring process that died silently (issue #389) cannot
+    # vouch for itself, and --verify-only fails the job if any package would
+    # pack without its binaries (issue #383).
+    - name: Stage CodeLLDB platform packages
+      run: |
+        node scripts/stage-codelldb-packages.mjs
+        node scripts/stage-codelldb-packages.mjs --verify-only
 
     # npm (unlike pnpm) does not rewrite workspace:* at publish time; without
     # this step the published adapter packages carry an uninstallable
@@ -335,6 +348,46 @@ jobs:
         npm pack --dry-run -w @debugmcp/adapter-java
         npm pack --dry-run -w @debugmcp/adapter-dotnet
         npm pack --dry-run -w @debugmcp/mcp-debugger
+        npm pack --dry-run -w @debugmcp/codelldb-win32-x64
+        npm pack --dry-run -w @debugmcp/codelldb-darwin-x64
+        npm pack --dry-run -w @debugmcp/codelldb-darwin-arm64
+        npm pack --dry-run -w @debugmcp/codelldb-linux-x64
+        npm pack --dry-run -w @debugmcp/codelldb-linux-arm64
+
+    # CodeLLDB platform packages (issue #383). Published BEFORE the CLI package
+    # so its optionalDependencies always resolve on the registry. Versioned by
+    # the CodeLLDB release and tagged latest explicitly (they are shared across
+    # beta/latest channels), so re-releases at an unchanged pin are skipped by
+    # the npm-view guards. First publish must use the token flow; once the five
+    # exist, configure trusted publishers and move them into the OIDC step.
+    - name: Publish CodeLLDB platform packages to npm (token, first publish)
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      run: |
+        # trap (not a trailing rm) so the token file cannot survive a
+        # mid-loop publish failure on the runner.
+        trap 'rm -f "$HOME/.npmrc"' EXIT
+        echo "//registry.npmjs.org/:_authToken=\${NODE_AUTH_TOKEN}" > "$HOME/.npmrc"
+
+        # "already exists" is the NORMAL path here (every re-release at an
+        # unchanged CodeLLDB pin walks it), so the guard must distinguish a
+        # true 404 from a transient registry error - publishing over an
+        # existing version would otherwise kill the job before the OIDC step.
+        for pkg in codelldb-win32-x64 codelldb-darwin-x64 codelldb-darwin-arm64 codelldb-linux-x64 codelldb-linux-arm64; do
+          set +e
+          VIEW_OUT=$(npm view @debugmcp/${pkg}@${CODELLDB_PKG_VERSION} version 2>&1)
+          VIEW_CODE=$?
+          set -e
+          if [ "$VIEW_CODE" -eq 0 ]; then
+            echo "@debugmcp/${pkg}@${CODELLDB_PKG_VERSION} already exists, skipping"
+          elif echo "$VIEW_OUT" | grep -q "E404"; then
+            npm publish -w @debugmcp/${pkg} --access public --provenance --tag latest
+          else
+            echo "npm view for @debugmcp/${pkg}@${CODELLDB_PKG_VERSION} failed with a non-404 error; refusing to guess:"
+            echo "$VIEW_OUT"
+            exit 1
+          fi
+        done
 
     # Existing packages publish via OIDC trusted publishing: no token anywhere,
     # npm mints a short-lived credential from the workflow's OIDC identity and
@@ -423,6 +476,11 @@ jobs:
         npm pack -w @debugmcp/adapter-java --pack-destination release-artifacts
         npm pack -w @debugmcp/adapter-dotnet --pack-destination release-artifacts
         npm pack -w @debugmcp/mcp-debugger --pack-destination release-artifacts
+        npm pack -w @debugmcp/codelldb-win32-x64 --pack-destination release-artifacts
+        npm pack -w @debugmcp/codelldb-darwin-x64 --pack-destination release-artifacts
+        npm pack -w @debugmcp/codelldb-darwin-arm64 --pack-destination release-artifacts
+        npm pack -w @debugmcp/codelldb-linux-x64 --pack-destination release-artifacts
+        npm pack -w @debugmcp/codelldb-linux-arm64 --pack-destination release-artifacts
 
     - name: Upload release artifacts
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1

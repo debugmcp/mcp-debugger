@@ -1,0 +1,30 @@
+{
+  "name": "@debugmcp/codelldb-darwin-arm64",
+  "version": "1.11.8",
+  "description": "CodeLLDB debug adapter binaries for macOS arm64 (Apple Silicon), vendored for @debugmcp/mcp-debugger (Rust/C++ debugging)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/debugmcp/mcp-debugger.git",
+    "directory": "packages/codelldb-darwin-arm64"
+  },
+  "license": "MIT",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "preferUnplugged": true,
+  "files": [
+    "adapter",
+    "lldb",
+    "lang_support",
+    "version.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "author": "Sycamore LLC <admin@debugmcp.io> (https://github.com/debugmcp)"
+}

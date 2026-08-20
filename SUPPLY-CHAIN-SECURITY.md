@@ -37,7 +37,7 @@ Two upstream debug engines are vendored (as prebuilt artifacts) into distributed
 | Component | Upstream | License | Pin manifest | Embedded in |
 |-----------|----------|---------|--------------|-------------|
 | js-debug (VS Code JavaScript debugger, DAP server build) | [microsoft/vscode-js-debug](https://github.com/microsoft/vscode-js-debug) | MIT | [`packages/adapter-javascript/vendor-manifest.json`](packages/adapter-javascript/vendor-manifest.json) | `@debugmcp/adapter-javascript`, `@debugmcp/mcp-debugger` CLI bundle, Docker image |
-| CodeLLDB (LLDB-based DAP adapter) | [vadimcn/codelldb](https://github.com/vadimcn/codelldb) | MIT | [`packages/codelldb-common/vendor-manifest.json`](packages/codelldb-common/vendor-manifest.json) | `@debugmcp/mcp-debugger` CLI bundle (linux-x64), Docker image |
+| CodeLLDB (LLDB-based DAP adapter) | [vadimcn/codelldb](https://github.com/vadimcn/codelldb) | MIT | [`packages/codelldb-common/vendor-manifest.json`](packages/codelldb-common/vendor-manifest.json) | `@debugmcp/codelldb-{win32-x64,darwin-x64,darwin-arm64,linux-x64,linux-arm64}` platform packages (optionalDependencies of `@debugmcp/mcp-debugger`, versioned by the CodeLLDB release, payload staged from the digest-pinned VSIXs by `scripts/stage-codelldb-packages.mjs`), Docker image |
 
 The manifests pin the upstream version, the SHA-256 of each release asset, and (for js-debug) the digest of the derived server file. Overriding the pinned version requires an explicit `*_ALLOW_UNPINNED=true` escape hatch intended for local experiments only; release builds always verify against the committed digests. Version bumps are deliberate PRs that update the manifest (the bump procedure is documented inside each manifest file).
 

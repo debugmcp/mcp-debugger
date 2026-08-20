@@ -19,7 +19,7 @@ npm run build:adapter  # Downloads and extracts CodeLLDB
 
 ## CodeLLDB Vendoring
 
-The Rust adapter bundles the CodeLLDB binaries into `packages/codelldb-common/vendor/codelldb`. Vendoring runs automatically when you install or build the workspace. To keep the published npm package within registry limits, the pre-built CLI ships only the Linux x64 CodeLLDB runtime. If you are on macOS or Windows, set the `CODELLDB_PATH` environment variable to your local CodeLLDB installation (for example from the VSCode extension) or run `pnpm --filter @debugmcp/codelldb-common run build:adapter` from a cloned repository to download your platform binaries.
+The Rust adapter bundles the CodeLLDB binaries into `packages/codelldb-common/vendor/codelldb`. Vendoring runs automatically when you install or build the workspace. The published CLI installs CodeLLDB via per-platform `@debugmcp/codelldb-*` optional dependencies — npm picks the one matching your os/cpu, so no manual setup is needed. If you installed with `--omit=optional`, set the `CODELLDB_PATH` environment variable to a local CodeLLDB installation (for example from the VSCode extension) or run `pnpm --filter @debugmcp/codelldb-common run build:adapter` from a cloned repository to download your platform binaries.
 
 - `pnpm install` (postinstall hook)
 - `pnpm vendor` or `pnpm vendor:adapters`

@@ -99,7 +99,7 @@ The server also serves condensed guidance in-band: MCP `instructions` on connect
 
 > **Requirements:** Node.js 22+ for the server. Each language you debug also needs its own toolchain installed (Python + debugpy, Ruby + the `debug` gem / `rdbg`, Node.js, Go + Delve, JDK 21+, .NET SDK, the Rust toolchain, or a C/C++ compiler — g++/clang++, only needed for source-file launch).
 >
-> **CodeLLDB platform note (npx/npm installs):** the npm package bundles the CodeLLDB debug engine for **linux-x64 only**, so Rust and C/C++ debugging work out of the box on Linux (CI, containers, cloud sandboxes). On Windows/macOS set `CODELLDB_PATH` to a [CodeLLDB release](https://github.com/vadimcn/codelldb/releases) binary, build from source (vendors your platform automatically), or use the Docker image.
+> **CodeLLDB platform note (npx/npm installs):** the CodeLLDB debug engine ships as per-platform optional dependencies (`@debugmcp/codelldb-win32-x64`, `-darwin-x64`, `-darwin-arm64`, `-linux-x64`, `-linux-arm64`) — npm installs exactly the one matching your platform, so Rust and C/C++ debugging work out of the box everywhere npm serves. If you install with `--omit=optional`, set `CODELLDB_PATH` to a [CodeLLDB release](https://github.com/vadimcn/codelldb/releases) binary instead, or use the Docker image.
 
 ### For MCP Clients (Claude Desktop, etc.)
 

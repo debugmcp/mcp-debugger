@@ -12,6 +12,8 @@ export {
   SUPPORTED_CODELLDB_PLATFORM_DIRS,
   getCodeLLDBPlatformDir,
   getCodeLLDBExecutableName,
+  getCodeLLDBPlatformPackageName,
+  resolveCodeLLDBPlatformPackageRoot,
   buildVendorCandidatePaths,
   resolveCodeLLDBExecutableSyncImpl,
   resolveCodeLLDBExecutable,

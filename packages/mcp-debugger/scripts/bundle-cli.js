@@ -172,23 +172,23 @@ async function bundleCLI() {
 
   const rustVendorSrc = path.join(repoRoot, 'packages/codelldb-common/vendor/codelldb');
   if (fs.existsSync(rustVendorSrc)) {
-    const rawPlatforms = process.env.CODELLDB_PACKAGE_PLATFORMS ?? 'linux-x64';
+    // Default empty since issue #383: CodeLLDB ships via the per-platform
+    // @debugmcp/codelldb-* optionalDependencies instead of inside this
+    // tarball. Set CODELLDB_PACKAGE_PLATFORMS to build a fat bundle
+    // ('none' is the explicit skip for override contexts).
+    const rawPlatforms = process.env.CODELLDB_PACKAGE_PLATFORMS ?? '';
     const requestedPlatforms = rawPlatforms
       .split(',')
       .map((platform) => platform.trim())
-      .filter(Boolean);
+      .filter((platform) => platform && platform.toLowerCase() !== 'none');
 
     if (requestedPlatforms.length === 0) {
-      console.log('Skipping CodeLLDB inclusion (CODELLDB_PACKAGE_PLATFORMS empty).');
+      console.log('Skipping CodeLLDB inclusion (resolved via @debugmcp/codelldb-* platform packages).');
     } else {
       const rustVendorDest = path.join(distDir, 'vendor/codelldb');
       fs.mkdirSync(rustVendorDest, { recursive: true });
 
       for (const platform of requestedPlatforms) {
-        if (platform.toLowerCase() === 'none') {
-          continue;
-        }
-
         const srcDir = path.join(rustVendorSrc, platform);
         if (!fs.existsSync(srcDir)) {
           console.warn(`[CodeLLDB bundler] Requested platform "${platform}" not found in vendor directory.`);

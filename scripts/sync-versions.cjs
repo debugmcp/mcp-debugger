@@ -104,6 +104,23 @@ async function syncVersions() {
       const oldVersion = pkg.version;
       const packageName = path.basename(pkgPath) || 'root';
 
+      // CodeLLDB platform payload packages (the only workspace packages with
+      // os/cpu fields) are versioned by the vendored CodeLLDB release, not the
+      // repo version (issue #383) — sync them to the vendor-manifest pin so a
+      // pin bump is just "edit vendor-manifest.json, run sync".
+      if (pkg.os && pkg.cpu) {
+        const pin = require('../packages/codelldb-common/vendor-manifest.json').codelldb.version;
+        if (oldVersion !== pin) {
+          pkg.version = pin;
+          fs.writeFileSync(packageJsonPath, JSON.stringify(pkg, null, 2) + '\n');
+          versionChanges.push(`  ✅ ${packageName}: ${oldVersion} → CodeLLDB pin ${pin}`);
+          updatedCount++;
+        } else {
+          versionChanges.push(`  ⏩ ${packageName}: at CodeLLDB pin ${pin}`);
+        }
+        continue;
+      }
+
       let changed = false;
 
       if (oldVersion !== targetVersion) {
