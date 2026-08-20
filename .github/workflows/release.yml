@@ -321,10 +321,14 @@ jobs:
 
     # Downloads the digest-pinned VSIXs for all five platforms (the build above
     # vendored linux-x64 only under CI=true) and copies the payloads into the
-    # @debugmcp/codelldb-* platform packages. --verify fails the job if any
-    # package would pack without its binaries (issue #383).
+    # @debugmcp/codelldb-* platform packages. Verification runs in a SEPARATE
+    # process: a vendoring process that died silently (issue #389) cannot
+    # vouch for itself, and --verify-only fails the job if any package would
+    # pack without its binaries (issue #383).
     - name: Stage CodeLLDB platform packages
-      run: node scripts/stage-codelldb-packages.mjs --verify
+      run: |
+        node scripts/stage-codelldb-packages.mjs
+        node scripts/stage-codelldb-packages.mjs --verify-only
 
     # npm (unlike pnpm) does not rewrite workspace:* at publish time; without
     # this step the published adapter packages carry an uninstallable
@@ -360,17 +364,30 @@ jobs:
       env:
         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       run: |
+        # trap (not a trailing rm) so the token file cannot survive a
+        # mid-loop publish failure on the runner.
+        trap 'rm -f "$HOME/.npmrc"' EXIT
         echo "//registry.npmjs.org/:_authToken=\${NODE_AUTH_TOKEN}" > "$HOME/.npmrc"
 
+        # "already exists" is the NORMAL path here (every re-release at an
+        # unchanged CodeLLDB pin walks it), so the guard must distinguish a
+        # true 404 from a transient registry error - publishing over an
+        # existing version would otherwise kill the job before the OIDC step.
         for pkg in codelldb-win32-x64 codelldb-darwin-x64 codelldb-darwin-arm64 codelldb-linux-x64 codelldb-linux-arm64; do
-          if npm view @debugmcp/${pkg}@${CODELLDB_PKG_VERSION} version >/dev/null 2>&1; then
+          set +e
+          VIEW_OUT=$(npm view @debugmcp/${pkg}@${CODELLDB_PKG_VERSION} version 2>&1)
+          VIEW_CODE=$?
+          set -e
+          if [ "$VIEW_CODE" -eq 0 ]; then
             echo "@debugmcp/${pkg}@${CODELLDB_PKG_VERSION} already exists, skipping"
-          else
+          elif echo "$VIEW_OUT" | grep -q "E404"; then
             npm publish -w @debugmcp/${pkg} --access public --provenance --tag latest
+          else
+            echo "npm view for @debugmcp/${pkg}@${CODELLDB_PKG_VERSION} failed with a non-404 error; refusing to guess:"
+            echo "$VIEW_OUT"
+            exit 1
           fi
         done
-
-        rm -f "$HOME/.npmrc"
 
     # Existing packages publish via OIDC trusted publishing: no token anywhere,
     # npm mints a short-lived credential from the workflow's OIDC identity and

@@ -55,12 +55,20 @@ else
 fi
 
 # CodeLLDB platform packages are versioned by the vendored CodeLLDB release,
-# NOT the repo version (issue #383).
-CODELLDB_PIN=$(node -e "console.log(require('./packages/codelldb-common/vendor-manifest.json').codelldb.version)")
+# NOT the repo version (issue #383). Command substitutions are guarded so a
+# malformed JSON becomes a red ✗ line instead of aborting the whole checklist
+# under set -e.
+if ! CODELLDB_PIN=$(node -e "console.log(require('./packages/codelldb-common/vendor-manifest.json').codelldb.version)"); then
+  fail "vendor-manifest.json unreadable — cannot check CodeLLDB platform package versions"
+  CODELLDB_PIN=""
+fi
 CODELLDB_PLATFORM_PKGS=("codelldb-win32-x64" "codelldb-darwin-x64" "codelldb-darwin-arm64" "codelldb-linux-x64" "codelldb-linux-arm64")
-echo "  CodeLLDB pin:       $CODELLDB_PIN"
+echo "  CodeLLDB pin:       ${CODELLDB_PIN:-<unreadable>}"
 for pkg_dir in "${CODELLDB_PLATFORM_PKGS[@]}"; do
-  PKG_VER=$(node -e "console.log(require('./packages/$pkg_dir/package.json').version)")
+  if ! PKG_VER=$(node -e "console.log(require('./packages/$pkg_dir/package.json').version)"); then
+    fail "$pkg_dir package.json unreadable"
+    continue
+  fi
   if [[ "$PKG_VER" == "$CODELLDB_PIN" ]]; then
     pass "$pkg_dir version matches CodeLLDB pin ($PKG_VER)"
   else
@@ -125,8 +133,11 @@ done
 # CodeLLDB platform packages: manifest sanity always; pack dry-run only when
 # the payload is staged (stage-codelldb-packages.mjs runs at release time).
 for pkg_dir in "${CODELLDB_PLATFORM_PKGS[@]}"; do
-  pkg_name=$(node -e "console.log(require('./packages/$pkg_dir/package.json').name)")
-  MANIFEST_OK=$(node -e "
+  if ! pkg_name=$(node -e "console.log(require('./packages/$pkg_dir/package.json').name)"); then
+    fail "$pkg_dir package.json unreadable"
+    continue
+  fi
+  if ! MANIFEST_OK=$(node -e "
     const p = require('./packages/$pkg_dir/package.json');
     const ok = Array.isArray(p.os) && p.os.length > 0 &&
       Array.isArray(p.cpu) && p.cpu.length > 0 &&
@@ -134,7 +145,9 @@ for pkg_dir in "${CODELLDB_PLATFORM_PKGS[@]}"; do
       (p.repository?.url || '').includes('github.com/debugmcp/mcp-debugger') &&
       p.repository?.directory === 'packages/$pkg_dir';
     console.log(ok ? 'ok' : 'bad');
-  ")
+  "); then
+    MANIFEST_OK="bad"
+  fi
   if [[ "$MANIFEST_OK" == "ok" ]]; then
     pass "$pkg_name manifest (os/cpu/publishConfig/repository)"
   else

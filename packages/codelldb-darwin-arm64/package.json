@@ -15,7 +15,6 @@
     "arm64"
   ],
   "preferUnplugged": true,
-  "codelldbPlatform": "darwin-arm64",
   "files": [
     "adapter",
     "lldb",

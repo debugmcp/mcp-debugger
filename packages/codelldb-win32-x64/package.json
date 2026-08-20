@@ -16,7 +16,6 @@
     "arm64"
   ],
   "preferUnplugged": true,
-  "codelldbPlatform": "win32-x64",
   "files": [
     "adapter",
     "lldb",

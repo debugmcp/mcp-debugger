@@ -96,19 +96,35 @@ export function getCodeLLDBPlatformPackageName(platformDir: string): string {
  * Root directory of the installed @debugmcp/codelldb-<dir> platform package,
  * or null when it is not installed. These packages are optionalDependencies
  * of @debugmcp/mcp-debugger (npm installs exactly the os/cpu match), so this
- * resolves in npx/global installs; in the monorepo it returns null by design
- * (codelldb-common declares no platform-package dependency) and the vendor
- * tree wins. `resolvePkg` is injectable so tests stay hermetic.
+ * resolves in npx/global installs. Resolving from codelldb-common inside the
+ * monorepo fails (it declares no platform-package dependency, drift-guarded);
+ * workspace-aware contexts (the bundled CLI's install root, pnpm NODE_PATH)
+ * may resolve the payload-less workspace shells, which is harmless because
+ * the resolvers probe this candidate LAST and its executable does not exist.
+ * `resolvePkg` is injectable so tests stay hermetic; the default path is
+ * memoized per platformDir (the answer cannot change within a process, and
+ * a failed require.resolve walks node_modules up to the filesystem root).
  */
+const platformPackageRootMemo = new Map<string, string | null>();
+
 export function resolveCodeLLDBPlatformPackageRoot(
   platformDir: string,
-  resolvePkg: (id: string) => string = (id) => nodeRequire.resolve(id)
+  resolvePkg?: (id: string) => string
 ): string | null {
-  try {
-    return path.dirname(resolvePkg(`${getCodeLLDBPlatformPackageName(platformDir)}/package.json`));
-  } catch {
-    return null;
+  if (resolvePkg === undefined && platformPackageRootMemo.has(platformDir)) {
+    return platformPackageRootMemo.get(platformDir) ?? null;
   }
+  const resolve = resolvePkg ?? ((id: string) => nodeRequire.resolve(id));
+  let root: string | null;
+  try {
+    root = path.dirname(resolve(`${getCodeLLDBPlatformPackageName(platformDir)}/package.json`));
+  } catch {
+    root = null;
+  }
+  if (resolvePkg === undefined) {
+    platformPackageRootMemo.set(platformDir, root);
+  }
+  return root;
 }
 
 /**
@@ -153,24 +169,28 @@ export function resolveCodeLLDBExecutableSyncImpl(options?: {
     }
   }
 
-  // Installed @debugmcp/codelldb-<dir> platform package (npx/global installs)
+  // Explicit CODELLDB_PATH beats the auto-installed platform package (it is
+  // deliberate user configuration) but not a vendored copy — the pre-existing
+  // documented order for dev checkouts and the Docker image.
+  if (process.env.CODELLDB_PATH) {
+    try {
+      if (exists(process.env.CODELLDB_PATH)) {
+        return process.env.CODELLDB_PATH;
+      }
+    } catch {
+      // Fall through
+    }
+  }
+
+  // Last resort: the installed @debugmcp/codelldb-<dir> platform package
+  // (npx/global installs). Resolved lazily — the require walk only runs when
+  // everything above missed.
   const platformPackageRoot = resolvePlatformPackageRoot(platformDir);
   if (platformPackageRoot) {
     const candidate = path.join(platformPackageRoot, 'adapter', getCodeLLDBExecutableName(platform));
     try {
       if (exists(candidate)) {
         return candidate;
-      }
-    } catch {
-      // Fall through to the env var
-    }
-  }
-
-  // Check environment variable as fallback (after vendored candidates)
-  if (process.env.CODELLDB_PATH) {
-    try {
-      if (exists(process.env.CODELLDB_PATH)) {
-        return process.env.CODELLDB_PATH;
       }
     } catch {
       // Fall through
@@ -201,14 +221,6 @@ export async function resolveCodeLLDBExecutable(options?: {
     getCodeLLDBExecutableName(process.platform)
   );
 
-  // Installed @debugmcp/codelldb-<dir> platform package (npx/global installs)
-  const platformPackageRoot = resolvePlatformPackageRoot(platformDir);
-  if (platformPackageRoot) {
-    candidatePaths.push(
-      path.join(platformPackageRoot, 'adapter', getCodeLLDBExecutableName(process.platform))
-    );
-  }
-
   for (const candidate of candidatePaths) {
     try {
       await fs.access(candidate, fsConstants.F_OK);
@@ -218,11 +230,27 @@ export async function resolveCodeLLDBExecutable(options?: {
     }
   }
 
-  // Check environment variable as fallback
+  // Explicit CODELLDB_PATH beats the auto-installed platform package (it is
+  // deliberate user configuration) but not a vendored copy — same order as
+  // the sync impl above.
   if (process.env.CODELLDB_PATH) {
     try {
       await fs.access(process.env.CODELLDB_PATH, fsConstants.F_OK);
       return process.env.CODELLDB_PATH;
+    } catch {
+      // Fall through
+    }
+  }
+
+  // Last resort: the installed @debugmcp/codelldb-<dir> platform package
+  // (npx/global installs). Resolved lazily — the require walk only runs when
+  // everything above missed.
+  const platformPackageRoot = resolvePlatformPackageRoot(platformDir);
+  if (platformPackageRoot) {
+    const candidate = path.join(platformPackageRoot, 'adapter', getCodeLLDBExecutableName(process.platform));
+    try {
+      await fs.access(candidate, fsConstants.F_OK);
+      return candidate;
     } catch {
       // Fall through
     }
@@ -250,11 +278,14 @@ export async function getCodeLLDBVersion(options?: {
     return DEFAULT_CODELLDB_VERSION;
   }
 
-  const versionFileCandidates = buildVendorCandidatePaths(
-    defaultPackageRoot(),
-    platformDir,
-    'version.json'
-  );
+  // The version.json that describes the binary we actually resolved sits
+  // beside it (<root>/adapter/codelldb -> <root>/version.json) — probe that
+  // first so the reported version cannot be misattributed to a different
+  // install (e.g. a stale vendor tree under the cwd fallback).
+  const versionFileCandidates = [
+    path.resolve(path.dirname(codelldbPath), '..', 'version.json'),
+    ...buildVendorCandidatePaths(defaultPackageRoot(), platformDir, 'version.json')
+  ];
 
   const platformPackageRoot = resolvePlatformPackageRoot(platformDir);
   if (platformPackageRoot) {

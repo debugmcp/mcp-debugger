@@ -15,7 +15,6 @@
     "arm64"
   ],
   "preferUnplugged": true,
-  "codelldbPlatform": "linux-arm64",
   "files": [
     "adapter",
     "lldb",

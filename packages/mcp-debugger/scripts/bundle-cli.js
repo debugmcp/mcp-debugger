@@ -172,10 +172,11 @@ async function bundleCLI() {
 
   const rustVendorSrc = path.join(repoRoot, 'packages/codelldb-common/vendor/codelldb');
   if (fs.existsSync(rustVendorSrc)) {
-    // Default 'none' since issue #383: CodeLLDB ships via the per-platform
+    // Default empty since issue #383: CodeLLDB ships via the per-platform
     // @debugmcp/codelldb-* optionalDependencies instead of inside this
-    // tarball. Set CODELLDB_PACKAGE_PLATFORMS to build a fat bundle.
-    const rawPlatforms = process.env.CODELLDB_PACKAGE_PLATFORMS ?? 'none';
+    // tarball. Set CODELLDB_PACKAGE_PLATFORMS to build a fat bundle
+    // ('none' is the explicit skip for override contexts).
+    const rawPlatforms = process.env.CODELLDB_PACKAGE_PLATFORMS ?? '';
     const requestedPlatforms = rawPlatforms
       .split(',')
       .map((platform) => platform.trim())

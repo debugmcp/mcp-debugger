@@ -25,6 +25,10 @@ import {
 } from './npx-test-utils.js';
 import { parseSdkToolResult } from '../smoke-test-utils.js';
 import { prepareRustExample } from '../rust-example-utils.js';
+import {
+  getCodeLLDBPlatformDir,
+  getCodeLLDBExecutableName
+} from '@debugmcp/codelldb-common';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 
 const execAsync = promisify(exec);
@@ -33,14 +37,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, '../../..');
 
-function currentCodelldbPlatformDir(): string | null {
-  if (process.platform === 'win32') return 'win32-x64';
-  if (process.platform === 'darwin') return process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
-  if (process.platform === 'linux') return process.arch === 'arm64' ? 'linux-arm64' : 'linux-x64';
-  return null;
-}
-
-const platformDir = currentCodelldbPlatformDir();
+const platformDir = getCodeLLDBPlatformDir(process.platform, process.arch);
 const codelldbPin = (
   JSON.parse(
     readFileSync(path.join(ROOT, 'packages', 'codelldb-common', 'vendor-manifest.json'), 'utf8')
@@ -50,7 +47,11 @@ const codelldbPin = (
 async function platformPackagePublished(): Promise<boolean> {
   if (!platformDir) return false;
   try {
-    await execAsync(`npm view @debugmcp/codelldb-${platformDir}@${codelldbPin} version`);
+    // Timeboxed: this runs at collection time, and an offline npm's internal
+    // retries must not be able to stall the whole e2e run.
+    await execAsync(`npm view @debugmcp/codelldb-${platformDir}@${codelldbPin} version`, {
+      timeout: 15_000
+    });
     return true;
   } catch {
     return false;
@@ -115,7 +116,7 @@ describe.sequential.skipIf(!packageAvailable)('NPX: Rust Debugging Smoke Tests',
   it('npm delivered the CodeLLDB platform package next to the installed CLI', async () => {
     const { stdout } = await execAsync('npm root -g');
     const globalRoot = stdout.trim();
-    const exe = platformDir === 'win32-x64' ? 'codelldb.exe' : 'codelldb';
+    const exe = getCodeLLDBExecutableName(process.platform);
     // Global installs nest deps under the package; npm may also hoist.
     const candidates = [
       path.join(globalRoot, '@debugmcp', 'mcp-debugger', 'node_modules', '@debugmcp', `codelldb-${platformDir}`, 'adapter', exe),
