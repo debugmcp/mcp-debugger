@@ -1,6 +1,6 @@
 {
   "name": "@debugmcp/codelldb-common",
-  "version": "0.22.0",
+  "version": "0.24.2",
   "private": true,
   "description": "Shared CodeLLDB vendoring, resolution, and spawn glue for CodeLLDB-backed MCP Debugger adapters",
   "type": "module",

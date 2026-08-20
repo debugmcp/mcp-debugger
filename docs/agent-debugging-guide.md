@@ -1,6 +1,6 @@
 # MCP Debugger Usage Guide for AI Agents
 
-This guide explains how to correctly use the MCP Debugger tools when testing debugging functionality across all supported languages (Python, Ruby, JavaScript, Rust, Go, Java, and .NET/C#).
+This guide explains how to correctly use the MCP Debugger tools when testing debugging functionality across all supported languages (Python, Ruby, JavaScript, Rust, Go, Java, .NET/C#, and C/C++).
 
 ## Key Concepts
 

@@ -1191,4 +1191,4 @@ Session-lifecycle failures (unknown/terminated session, proxy not running) are a
 
 ---
 
-*Last updated: 2026-03-18 based on source code review of mcp-debugger v0.19.0*
+*Last updated: 2026-08-19 based on source code review of mcp-debugger v0.24.0 (28 tools)*

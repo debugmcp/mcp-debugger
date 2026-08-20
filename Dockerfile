@@ -68,9 +68,42 @@ COPY packages/adapter-cpp/tsconfig*.json ./packages/adapter-cpp/
 COPY src ./src
 COPY scripts ./scripts/
 
-# 4) Build workspace packages and main project (root build runs build:packages); then bundle
-# Download Linux CodeLLDB artifacts during the container build if they are not already vendored.
-RUN CODELLDB_VENDOR_ALL=false CODELLDB_PLATFORMS=linux-x64 pnpm run build --silent
+# 4) Vendor the CodeLLDB engine for this image's architecture (rust + cpp adapters).
+# This MUST be explicit: the root postinstall that vendors on dev machines is
+# skipped by --ignore-scripts, and codelldb-common's package build is tsc-only —
+# without this step a fresh CI context ships an image with no CodeLLDB (#387;
+# the committed vendor/.gitkeep kept the later cp -r from failing, so v0.24.0
+# shipped silently broken). Implemented in plain shell (curl + sha256sum +
+# unzip) because the node vendor script dies mid-extraction with exit 0 under
+# buildkit (#389); the download is verified against the pinned SHA-256 digests
+# in packages/codelldb-common/vendor-manifest.json. A "current" symlink gives
+# the runtime stage an architecture-independent CODELLDB_PATH. If the build
+# context already carries a vendored engine (local dev builds), it is reused.
+ARG TARGETARCH
+RUN set -eux; \
+    case "${TARGETARCH:-amd64}" in arm64) CODELLDB_ARCH=linux-arm64;; *) CODELLDB_ARCH=linux-x64;; esac; \
+    DEST="/app/packages/codelldb-common/vendor/codelldb/${CODELLDB_ARCH}"; \
+    if [ ! -x "$DEST/adapter/codelldb" ]; then \
+      apt-get update && apt-get install -y --no-install-recommends curl ca-certificates unzip && rm -rf /var/lib/apt/lists/*; \
+      MANIFEST=/app/packages/codelldb-common/vendor-manifest.json; \
+      CODELLDB_VERSION="$(node -p "require('$MANIFEST').codelldb.version")"; \
+      EXPECTED_SHA="$(node -p "require('$MANIFEST').codelldb.assets['codelldb-${CODELLDB_ARCH}.vsix']")"; \
+      curl -fsSL --retry 3 -o /tmp/codelldb.vsix "https://github.com/vadimcn/codelldb/releases/download/v${CODELLDB_VERSION}/codelldb-${CODELLDB_ARCH}.vsix"; \
+      echo "${EXPECTED_SHA}  /tmp/codelldb.vsix" | sha256sum -c -; \
+      unzip -q /tmp/codelldb.vsix -d /tmp/codelldb-extract; \
+      rm -rf "$DEST"; mkdir -p "$DEST"; \
+      cp -r /tmp/codelldb-extract/extension/adapter "$DEST/adapter"; \
+      cp -r /tmp/codelldb-extract/extension/lldb "$DEST/lldb"; \
+      if [ -d /tmp/codelldb-extract/extension/lang_support ]; then cp -r /tmp/codelldb-extract/extension/lang_support "$DEST/lang_support"; fi; \
+      chmod 755 "$DEST/adapter/codelldb"; \
+      printf '{\n  "version": "%s",\n  "platform": "%s"\n}\n' "$CODELLDB_VERSION" "$CODELLDB_ARCH" > "$DEST/version.json"; \
+      rm -rf /tmp/codelldb.vsix /tmp/codelldb-extract; \
+    fi; \
+    test -x "$DEST/adapter/codelldb"; \
+    ln -sfn "$CODELLDB_ARCH" /app/packages/codelldb-common/vendor/codelldb/current
+
+# 5) Build workspace packages and main project (root build runs build:packages); then bundle
+RUN pnpm run build --silent
 RUN node scripts/bundle.js
 
 # Optional: quick diagnostics for bundle
@@ -175,8 +208,13 @@ COPY --from=builder /app/node_modules/@debugmcp /app/node_modules/@debugmcp
 # Single shared CodeLLDB copy for the rust and cpp adapters (issue #328).
 # Both adapters probe their own package roots first (dead in this image) and
 # fall back to CODELLDB_PATH; the sibling lldb/ tree next to the binary
-# supplies liblldb and the Python support files.
-ENV CODELLDB_PATH=/app/node_modules/@debugmcp/codelldb-common/vendor/codelldb/linux-x64/adapter/codelldb
+# supplies liblldb and the Python support files. "current" is a symlink to
+# this image's architecture dir, created in the builder stage.
+ENV CODELLDB_PATH=/app/node_modules/@debugmcp/codelldb-common/vendor/codelldb/current/adapter/codelldb
+
+# Fail the image build if the debug engine is missing — the v0.24.0 image
+# shipped without CodeLLDB because nothing guarded this (#387).
+RUN test -x "$CODELLDB_PATH"
 
 # Pre-compile JDI bridge for instant Java debugging (no on-demand compilation at runtime)
 RUN mkdir -p /app/node_modules/@debugmcp/adapter-java/java/out && \

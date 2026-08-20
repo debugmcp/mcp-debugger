@@ -1,6 +1,6 @@
 {
   "name": "@debugmcp/adapter-javascript",
-  "version": "0.22.0",
+  "version": "0.24.2",
   "description": "JavaScript/TypeScript debug adapter for MCP debugger",
   "type": "module",
   "main": "dist/index.js",
@@ -36,7 +36,7 @@
     "@vscode/debugprotocol": "^1.68.0"
   },
   "peerDependencies": {
-    "@debugmcp/shared": "0.22.0"
+    "@debugmcp/shared": "0.24.2"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
