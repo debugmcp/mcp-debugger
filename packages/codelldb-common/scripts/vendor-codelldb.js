@@ -53,9 +53,10 @@ const LOCAL_ONLY = process.env.CODELLDB_VENDOR_LOCAL_ONLY === 'true';
 const parsedExtractTimeout = Number(process.env.CODELLDB_EXTRACT_TIMEOUT_MS);
 const EXTRACT_TIMEOUT_MS =
   Number.isFinite(parsedExtractTimeout) && parsedExtractTimeout > 0 ? parsedExtractTimeout : 120000;
-// Test-only hooks (issue #389 regression coverage): simulate a stalled extraction /
-// a fully drained event loop without touching the network.
-const TEST_STALL_EXTRACTION = process.env.CODELLDB_TEST_STALL_EXTRACTION === 'true';
+// Test-only hook (issue #389 regression coverage): simulate a fully drained
+// event loop without touching the network. This must live in the script (not
+// a test seam) because the premature-exit guard it exercises is registered
+// only when the script is invoked directly as a whole process.
 const TEST_SIMULATE_DRAIN = process.env.CODELLDB_TEST_SIMULATE_DRAIN === 'true';
 const RELEASE_BASE_URLS = [
   process.env.CODELLDB_RELEASE_BASE?.replace(/\/$/, '') ||
@@ -430,11 +431,14 @@ async function downloadFile(url, destPath, maxRetries = 3) {
  * drains and exits 0 before any failure path runs. The pending watchdog timer
  * keeps the event loop alive for the whole extraction window, and converts a
  * stall into a rejection that flows through the normal retry/failure paths.
+ *
+ * `opts.extractFn` / `opts.timeoutMs` are test seams (unit tests inject a
+ * stalling extractor and a short timeout); production callers pass neither.
  */
-async function extractVsixWithWatchdog(vsixPath, destDir, vsixName) {
-  const work = TEST_STALL_EXTRACTION
-    ? new Promise(() => {})
-    : extractZip(vsixPath, { dir: destDir });
+async function extractVsixWithWatchdog(vsixPath, destDir, vsixName, opts = {}) {
+  const extractFn = opts.extractFn ?? extractZip;
+  const timeoutMs = opts.timeoutMs ?? EXTRACT_TIMEOUT_MS;
+  const work = extractFn(vsixPath, { dir: destDir });
   // The abandoned extraction may still reject after the watchdog fires;
   // swallow it so it cannot surface as a fatal unhandledRejection later.
   work.catch(() => {});
@@ -442,12 +446,12 @@ async function extractVsixWithWatchdog(vsixPath, destDir, vsixName) {
   const watchdog = new Promise((_, reject) => {
     timer = setTimeout(() => {
       reject(new Error(
-        `Extraction of ${vsixName} did not complete within ${EXTRACT_TIMEOUT_MS}ms ` +
+        `Extraction of ${vsixName} did not complete within ${timeoutMs}ms ` +
         `(likely a stalled unzip stream - issue #389). ` +
         `Re-run with CODELLDB_KEEP_TEMP=true to inspect ${destDir}, ` +
         `or raise CODELLDB_EXTRACT_TIMEOUT_MS if this machine is just slow.`
       ));
-    }, EXTRACT_TIMEOUT_MS);
+    }, timeoutMs);
   });
   try {
     await Promise.race([work, watchdog]);

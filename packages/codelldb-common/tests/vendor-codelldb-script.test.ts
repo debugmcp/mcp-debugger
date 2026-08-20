@@ -4,18 +4,23 @@
  * The observed defect: a mid-extraction stall left extract-zip's promise
  * forever pending, the event loop drained, and Node exited 0 without any
  * failure output. These tests pin the whole-process exit codes via spawned
- * children (network-free, using the script's test hooks) and unit-test the
- * extraction watchdog via direct import.
+ * children (network-free, using the script's drain hook) and unit-test the
+ * extraction watchdog via direct import with injected seams.
  */
-import { describe, it, expect, afterAll, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterAll } from 'vitest';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const scriptPath = path.resolve(__dirname, '../scripts/vendor-codelldb.js');
+
+type ExtractOpts = { extractFn?: (p: string, o: { dir: string }) => Promise<void>; timeoutMs?: number };
+const { extractVsixWithWatchdog } = (await import(pathToFileURL(scriptPath).href)) as {
+  extractVsixWithWatchdog: (vsixPath: string, destDir: string, vsixName: string, opts?: ExtractOpts) => Promise<void>;
+};
 
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-vendor-script-test-'));
 
@@ -37,27 +42,16 @@ function runScript(extraEnv: Record<string, string>): RunResult {
       CODELLDB_FORCE_REBUILD: '',
       CODELLDB_VENDOR_LOCAL_ONLY: '',
       CODELLDB_TEST_SIMULATE_DRAIN: '',
-      CODELLDB_TEST_STALL_EXTRACTION: '',
       CODELLDB_CACHE_DIR: path.join(tempDir, 'cache'),
       ...extraEnv
     },
     encoding: 'utf8',
-    timeout: 60_000
+    // Kept below the unit project's 15s testTimeout: a hung child must be
+    // killed (and fail on real evidence) inside the test's own budget.
+    timeout: 10_000
   });
   return { status: result.status, output: `${result.stdout ?? ''}\n${result.stderr ?? ''}` };
 }
-
-async function importScript(env: Record<string, string>): Promise<Record<string, unknown>> {
-  vi.resetModules();
-  for (const [key, value] of Object.entries(env)) {
-    vi.stubEnv(key, value);
-  }
-  return (await import('../scripts/vendor-codelldb.js')) as Record<string, unknown>;
-}
-
-afterEach(() => {
-  vi.unstubAllEnvs();
-});
 
 afterAll(() => {
   fs.rmSync(tempDir, { recursive: true, force: true });
@@ -96,17 +90,15 @@ describe('vendor-codelldb.js exit codes (spawned)', () => {
 
 describe('extractVsixWithWatchdog (imported)', () => {
   it('converts a stalled extraction into a rejection after the timeout', async () => {
-    const mod = await importScript({
-      CODELLDB_TEST_STALL_EXTRACTION: 'true',
-      CODELLDB_EXTRACT_TIMEOUT_MS: '100'
-    });
-    const extractVsixWithWatchdog = mod.extractVsixWithWatchdog as (
-      vsixPath: string,
-      destDir: string,
-      vsixName: string
-    ) => Promise<void>;
+    // extract-zip's floating-promise failure mode, injected via the seam.
+    const stallingExtract = () => new Promise<void>(() => {});
     await expect(
-      extractVsixWithWatchdog(path.join(tempDir, 'missing.vsix'), path.join(tempDir, 'out'), 'test.vsix')
+      extractVsixWithWatchdog(
+        path.join(tempDir, 'missing.vsix'),
+        path.join(tempDir, 'out'),
+        'test.vsix',
+        { extractFn: stallingExtract, timeoutMs: 100 }
+      )
     ).rejects.toThrow(/did not complete within 100ms/);
   });
 
@@ -115,12 +107,6 @@ describe('extractVsixWithWatchdog (imported)', () => {
     const emptyZip = Buffer.concat([Buffer.from('504b0506', 'hex'), Buffer.alloc(18)]);
     const zipPath = path.join(tempDir, 'empty.zip');
     fs.writeFileSync(zipPath, emptyZip);
-    const mod = await importScript({});
-    const extractVsixWithWatchdog = mod.extractVsixWithWatchdog as (
-      vsixPath: string,
-      destDir: string,
-      vsixName: string
-    ) => Promise<void>;
     await expect(
       extractVsixWithWatchdog(zipPath, path.join(tempDir, 'empty-out'), 'empty.zip')
     ).resolves.toBeUndefined();
@@ -128,9 +114,12 @@ describe('extractVsixWithWatchdog (imported)', () => {
     // clean resolve above plus normal worker shutdown covers it.
   });
 
-  it('registers no exit listener when merely imported', async () => {
-    const before = process.listenerCount('exit');
-    await importScript({});
-    expect(process.listenerCount('exit')).toBe(before);
+  it('registers no exit listener when merely imported', () => {
+    // The premature-exit guard is scoped to direct invocation; the static
+    // import at the top of this file must not have installed it.
+    const listeners = process.listeners('exit').map(String);
+    for (const src of listeners) {
+      expect(src).not.toContain('Premature exit');
+    }
   });
 });
