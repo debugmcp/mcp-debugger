@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **vendor-codelldb.js can no longer die silently with exit 0** — the script-level root cause behind #389 (the Docker workaround shipped in v0.24.2 stands): a stalled extract-zip promise drained the event loop and Node exited 0 with no failure output. Extraction now runs under a watchdog (default 120 s, `CODELLDB_EXTRACT_TIMEOUT_MS`) whose pending timer keeps the event loop alive and converts a stall into a normal retry/failure, and a premature-exit guard forces exit code 1 with a requested/completed/unresolved-platforms diagnostic if the process would otherwise exit 0 before vendoring finished (#389)
+
 ## [0.24.2] - 2026-08-19
 
 ### Fixed
