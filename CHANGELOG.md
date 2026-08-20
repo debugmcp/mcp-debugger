@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **CodeLLDB ships as per-platform npm packages (esbuild pattern)** — five new packages `@debugmcp/codelldb-{win32-x64,darwin-x64,darwin-arm64,linux-x64,linux-arm64}` (versioned by the CodeLLDB release, currently 1.11.8, payload staged from the digest-pinned VSIXs) are `optionalDependencies` of `@debugmcp/mcp-debugger`, so npm installs exactly the one matching your os/cpu. Rust and C/C++ debugging now work out of the box on every platform npm serves — previously the CLI tarball bundled linux-x64 only — and the core tarball shrinks from ~54 MB to a few MB. The resolver probes the installed platform package last — after the vendor tree and after `CODELLDB_PATH` — so an explicit `CODELLDB_PATH` still overrides the auto-installed package, and installs with `--omit=optional` keep working via `CODELLDB_PATH` (#383)
 
+### Fixed
+- **vendor-codelldb.js can no longer die silently with exit 0** — the script-level root cause behind #389 (the Docker workaround shipped in v0.24.2 stands): a stalled extract-zip promise drained the event loop and Node exited 0 with no failure output. Extraction now runs under a watchdog (default 120 s, `CODELLDB_EXTRACT_TIMEOUT_MS`) whose pending timer keeps the event loop alive and converts a stall into a normal retry/failure, and a premature-exit guard forces exit code 1 with a requested/completed/unresolved-platforms diagnostic if the process would otherwise exit 0 before vendoring finished (#389)
+
 ## [0.24.2] - 2026-08-19
 
 ### Fixed

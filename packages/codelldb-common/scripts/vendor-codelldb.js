@@ -12,13 +12,14 @@
  *   - CODELLDB_VENDOR_ALL: Set to 'true' to vendor all platforms in CI, or 'false' for current-only locally
  *   - CODELLDB_FORCE_REBUILD: Set to 'true' to force re-vendor
  *   - CODELLDB_VENDOR_LOCAL_ONLY: Set to 'true' to forbid downloads (use existing artifacts only)
+ *   - CODELLDB_EXTRACT_TIMEOUT_MS: Watchdog for VSIX extraction (default: 120000)
  */
 
 import fs from 'fs/promises';
 import path from 'path';
 import { Readable, Transform } from 'stream';
 import { pipeline } from 'stream/promises';
-import { createWriteStream, createReadStream, readFileSync } from 'fs';
+import { createWriteStream, createReadStream, readFileSync, realpathSync } from 'fs';
 import extractZip from 'extract-zip';
 import ProgressBar from 'progress';
 import { fileURLToPath } from 'url';
@@ -49,6 +50,14 @@ const IS_CI = process.env.CI === 'true';
 const SKIP_VENDOR = process.env.SKIP_ADAPTER_VENDOR === 'true';
 const KEEP_TEMP = process.env.CODELLDB_KEEP_TEMP === 'true';
 const LOCAL_ONLY = process.env.CODELLDB_VENDOR_LOCAL_ONLY === 'true';
+const parsedExtractTimeout = Number(process.env.CODELLDB_EXTRACT_TIMEOUT_MS);
+const EXTRACT_TIMEOUT_MS =
+  Number.isFinite(parsedExtractTimeout) && parsedExtractTimeout > 0 ? parsedExtractTimeout : 120000;
+// Test-only hook (issue #389 regression coverage): simulate a fully drained
+// event loop without touching the network. This must live in the script (not
+// a test seam) because the premature-exit guard it exercises is registered
+// only when the script is invoked directly as a whole process.
+const TEST_SIMULATE_DRAIN = process.env.CODELLDB_TEST_SIMULATE_DRAIN === 'true';
 const RELEASE_BASE_URLS = [
   process.env.CODELLDB_RELEASE_BASE?.replace(/\/$/, '') ||
     'https://github.com/vadimcn/vscode-lldb/releases/download',
@@ -415,6 +424,43 @@ async function downloadFile(url, destPath, maxRetries = 3) {
 }
 
 /**
+ * Extract a VSIX with a watchdog timer (issue #389).
+ *
+ * extract-zip's promise settles only on yauzl 'close'/'error'; a stalled entry
+ * pump leaves it forever pending with nothing else on the event loop, so Node
+ * drains and exits 0 before any failure path runs. The pending watchdog timer
+ * keeps the event loop alive for the whole extraction window, and converts a
+ * stall into a rejection that flows through the normal retry/failure paths.
+ *
+ * `opts.extractFn` / `opts.timeoutMs` are test seams (unit tests inject a
+ * stalling extractor and a short timeout); production callers pass neither.
+ */
+async function extractVsixWithWatchdog(vsixPath, destDir, vsixName, opts = {}) {
+  const extractFn = opts.extractFn ?? extractZip;
+  const timeoutMs = opts.timeoutMs ?? EXTRACT_TIMEOUT_MS;
+  const work = extractFn(vsixPath, { dir: destDir });
+  // The abandoned extraction may still reject after the watchdog fires;
+  // swallow it so it cannot surface as a fatal unhandledRejection later.
+  work.catch(() => {});
+  let timer;
+  const watchdog = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(
+        `Extraction of ${vsixName} did not complete within ${timeoutMs}ms ` +
+        `(likely a stalled unzip stream - issue #389). ` +
+        `Re-run with CODELLDB_KEEP_TEMP=true to inspect ${destDir}, ` +
+        `or raise CODELLDB_EXTRACT_TIMEOUT_MS if this machine is just slow.`
+      ));
+    }, timeoutMs);
+  });
+  try {
+    await Promise.race([work, watchdog]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Extract VSIX and copy required files
  */
 async function extractAndCopyFiles(vsixPath, platform, platformInfo, vsixName) {
@@ -442,8 +488,10 @@ async function extractAndCopyFiles(vsixPath, platform, platformInfo, vsixName) {
 
     // Extract VSIX (which is a zip file)
     log(`Extracting ${vsixName}...`);
-    await extractZip(vsixPath, { dir: tempExtractDir });
-    
+    const extractStartedAt = Date.now();
+    await extractVsixWithWatchdog(vsixPath, tempExtractDir, vsixName);
+    log(`Extracted ${vsixName} in ${Date.now() - extractStartedAt}ms`);
+
     // Target directories for adapter and lldb
     const targetAdapterDir = path.join(VENDOR_DIR, platformInfo.targetDir, 'adapter');
     const targetLldbDir = path.join(VENDOR_DIR, platformInfo.targetDir, 'lldb');
@@ -557,8 +605,13 @@ async function isAlreadyVendored(platform, platformInfo) {
  * Download and extract CodeLLDB for a specific platform
  */
 async function downloadAndExtract(platform) {
+  if (TEST_SIMULATE_DRAIN) {
+    log(`TEST HOOK: simulating stalled vendoring for ${platform} (event-loop drain, issue #389)`);
+    await new Promise(() => {});
+  }
+
   const platformInfo = PLATFORMS[platform];
-  
+
   if (!platformInfo) {
     logWarn(`Unsupported platform: ${platform}`);
     return false;
@@ -621,6 +674,9 @@ async function downloadAndExtract(platform) {
         } catch (error) {
           lastError = error;
           logWarn(`Attempt with ${vsixName} via ${baseUrl} failed: ${error.message}`);
+          if (error?.stack) {
+            logWarn(error.stack);
+          }
           await invalidateCacheEntry(vsixName).catch(() => {});
         } finally {
           if (KEEP_TEMP) {
@@ -710,6 +766,9 @@ async function main() {
   // Check if vendoring should be skipped
   if (SKIP_VENDOR) {
     log('Skipping vendoring (SKIP_ADAPTER_VENDOR=true)');
+    // Must be marked complete BEFORE process.exit: the premature-exit guard
+    // honors process.exitCode mutations made inside 'exit' listeners.
+    runState.completedNormally = true;
     process.exit(0);
   }
   
@@ -751,10 +810,11 @@ async function main() {
   
   // Determine which platforms to vendor
   const selectedPlatforms = determinePlatforms();
-  
+  runState.requested = selectedPlatforms;
+
   log(`Platforms to vendor: ${selectedPlatforms.join(', ')}\n`);
-  
-  const results = [];
+
+  const results = runState.results;
   for (const platform of selectedPlatforms) {
     const success = await downloadAndExtract(platform);
     results.push({ platform, success });
@@ -802,18 +862,53 @@ async function main() {
   }
 }
 
-const invokedDirectly = Boolean(process.argv[1] && path.resolve(process.argv[1]) === __filename);
+// Tracks run progress so the premature-exit guard can tell a finished run from
+// one whose event loop drained mid-vendoring (issue #389).
+const runState = { requested: [], results: [], completedNormally: false };
+
+function resolveReal(p) {
+  try {
+    return realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
+const invokedDirectly = Boolean(
+  process.argv[1] && resolveReal(process.argv[1]) === resolveReal(__filename)
+);
 
 // Run if called directly
 if (invokedDirectly) {
-  main().catch(error => {
-    logError(`Fatal error: ${error.message}`);
-    if (error?.stack) {
-      logError(error.stack);
+  // Safety net: if an async operation stalls and the event loop drains, Node
+  // exits 0 without main() ever settling. Force a diagnostic + exit code 1.
+  process.on('exit', (code) => {
+    if (code === 0 && !runState.completedNormally) {
+      const done = runState.results.filter(r => r.success).map(r => r.platform);
+      const unresolved = runState.requested.filter(p => !done.includes(p));
+      logError('Premature exit: process is exiting with code 0 before vendoring finished (issue #389).');
+      logError(
+        `Requested: ${runState.requested.join(', ') || '<not yet determined>'}; ` +
+        `completed: ${done.join(', ') || '<none>'}; unresolved: ${unresolved.join(', ') || '<unknown>'}`
+      );
+      logError('An async operation likely stalled and the event loop drained. Forcing exit code 1.');
+      process.exitCode = 1;
     }
-    logWarn('Rust debugging will not be available');
-    process.exitCode = 1;
   });
+
+  main()
+    .then(() => {
+      runState.completedNormally = true;
+    })
+    .catch(error => {
+      logError(`Fatal error: ${error.message}`);
+      if (error?.stack) {
+        logError(error.stack);
+      }
+      logWarn('Rust debugging will not be available');
+      runState.completedNormally = true;
+      process.exitCode = 1;
+    });
 }
 
-export { downloadAndExtract, PLATFORMS, CODELLDB_VERSION };
+export { downloadAndExtract, extractVsixWithWatchdog, PLATFORMS, CODELLDB_VERSION };

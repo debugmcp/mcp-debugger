@@ -46,6 +46,7 @@ SKIP_ADAPTER_VENDOR=true pnpm install
 - `CODELLDB_VENDOR_ALL=false`: opt out of the "vendor every platform" default and fall back to host-only downloads
 - `CODELLDB_VENDOR_LOCAL_ONLY=true`: disable network downloads entirely and fail if the requested platform isn't already vendored (used by Docker builds that copy pre-fetched artifacts)
 - `CODELLDB_KEEP_TEMP=true`: retain the downloaded VSIX and extracted temp folders for inspection
+- `CODELLDB_EXTRACT_TIMEOUT_MS`: watchdog for VSIX extraction (default `120000`); a stalled unzip is aborted, retried, and surfaced as a failure instead of dying silently
 - `SKIP_ADAPTER_VENDOR=true`: opt out entirely (used by CI jobs that pre-bake artifacts)
 
 ### Troubleshooting vendoring
