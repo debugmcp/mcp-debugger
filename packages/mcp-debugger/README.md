@@ -61,7 +61,7 @@ All language adapters are bundled into the CLI package. No separate installation
 - **.NET**: netcoredbg + a compatible .NET runtime (Portable PDBs)
 - **C/C++**: none for prebuilt binaries (CodeLLDB vendored); a compiler (g++/clang++) only for lone-source-file launch
 
-> **CodeLLDB platform note:** this npm package bundles CodeLLDB for **linux-x64 only** — Rust and C/C++ debugging work out of the box on Linux (CI, containers, cloud sandboxes). On Windows/macOS, point `CODELLDB_PATH` at a [CodeLLDB](https://github.com/vadimcn/codelldb/releases) binary for your platform, or use the Docker image.
+> **CodeLLDB platform note:** the CodeLLDB debug engine ships via per-platform optional dependencies (`@debugmcp/codelldb-<platform>`) — npm installs exactly the one matching your os/cpu, so Rust and C/C++ debugging work out of the box on Windows, macOS, and Linux. Installs with `--omit=optional` skip it; point `CODELLDB_PATH` at a [CodeLLDB](https://github.com/vadimcn/codelldb/releases) binary instead, or use the Docker image.
 
 **Attach without a toolchain:** direct-connect attach modes (Python `debugpy --listen`, Ruby `rdbg --open`, Java JDWP) need no local language toolchain — the debug engine runs inside the target. `list_supported_languages` reports per-mode availability with reasons.
 
@@ -72,7 +72,7 @@ All language adapters are bundled into the CLI package. No separate installation
 | `DEBUG_MCP_NO_REDACT=1` | Disable default-on secret redaction in variable/evaluate/output results |
 | `DEBUG_MCP_VARIABLE_ACCESS=explicit` | Least-privilege mode: `get_variables` requires explicit `names: [...]` |
 | `DEBUG_MCP_BP_ADDRESSING=line\|assert\|content` | Breakpoint addressing mode (default `content`: statement anchors + content assertions) |
-| `CODELLDB_PATH` | Path to a CodeLLDB binary for platforms not bundled (see note above) |
+| `CODELLDB_PATH` | Path to a CodeLLDB binary when the platform packages are unavailable (see note above) |
 | `CPP_MSVC_BEHAVIOR=warn\|error\|continue` | What to do when a C/C++ target looks MSVC-built (partial PDB fidelity) |
 | `MCP_HTTP_STALE_SESSION_MS` | HTTP mode: reap crash-abandoned MCP sessions after this idle time (default 30 min) |
 

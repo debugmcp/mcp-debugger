@@ -1,0 +1,31 @@
+{
+  "name": "@debugmcp/codelldb-linux-arm64",
+  "version": "1.11.8",
+  "description": "CodeLLDB debug adapter binaries for Linux arm64, vendored for @debugmcp/mcp-debugger (Rust/C++ debugging)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/debugmcp/mcp-debugger.git",
+    "directory": "packages/codelldb-linux-arm64"
+  },
+  "license": "MIT",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "preferUnplugged": true,
+  "codelldbPlatform": "linux-arm64",
+  "files": [
+    "adapter",
+    "lldb",
+    "lang_support",
+    "version.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "author": "Sycamore LLC <admin@debugmcp.io> (https://github.com/debugmcp)"
+}

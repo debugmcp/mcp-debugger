@@ -22,6 +22,8 @@ import {
   DEFAULT_CODELLDB_VERSION,
   getCodeLLDBPlatformDir,
   getCodeLLDBExecutableName,
+  getCodeLLDBPlatformPackageName,
+  resolveCodeLLDBPlatformPackageRoot,
   SUPPORTED_CODELLDB_PLATFORM_DIRS,
   buildVendorCandidatePaths,
   resolveCodeLLDBExecutableSyncImpl
@@ -98,7 +100,9 @@ describe('codelldb-resolver', () => {
       stubPlatform('linux', 'x64');
       accessMock.mockRejectedValue(new Error('ENOENT'));
 
-      await expect(resolveCodeLLDBExecutable()).resolves.toBeNull();
+      await expect(
+        resolveCodeLLDBExecutable({ resolvePlatformPackageRoot: () => null })
+      ).resolves.toBeNull();
 
       expect(accessMock).toHaveBeenCalledTimes(4);
       const suffix = path.join('vendor', 'codelldb', 'linux-x64', 'adapter', 'codelldb');
@@ -114,7 +118,9 @@ describe('codelldb-resolver', () => {
         p === '/custom/codelldb' ? Promise.resolve() : Promise.reject(new Error('ENOENT'))
       );
 
-      await expect(resolveCodeLLDBExecutable()).resolves.toBe('/custom/codelldb');
+      await expect(
+        resolveCodeLLDBExecutable({ resolvePlatformPackageRoot: () => null })
+      ).resolves.toBe('/custom/codelldb');
       expect(accessMock).toHaveBeenCalledTimes(5); // 4 vendored candidates + env path
     });
 
@@ -123,7 +129,9 @@ describe('codelldb-resolver', () => {
       vi.stubEnv('CODELLDB_PATH', '/missing/codelldb');
       accessMock.mockRejectedValue(new Error('ENOENT'));
 
-      await expect(resolveCodeLLDBExecutable()).resolves.toBeNull();
+      await expect(
+        resolveCodeLLDBExecutable({ resolvePlatformPackageRoot: () => null })
+      ).resolves.toBeNull();
       expect(accessMock).toHaveBeenCalledTimes(5);
     });
   });
@@ -164,7 +172,9 @@ describe('codelldb-resolver', () => {
       accessMock.mockResolvedValue(undefined);
       readFileMock.mockRejectedValue(new Error('ENOENT'));
 
-      await expect(getCodeLLDBVersion()).resolves.toBe(DEFAULT_CODELLDB_VERSION);
+      await expect(
+        getCodeLLDBVersion({ resolvePlatformPackageRoot: () => null })
+      ).resolves.toBe(DEFAULT_CODELLDB_VERSION);
       expect(readFileMock).toHaveBeenCalledTimes(4);
     });
 
@@ -291,7 +301,9 @@ describe('codelldb-resolver', () => {
       vi.stubEnv('CODELLDB_PATH', '/custom/sync/codelldb');
       const exists = vi.fn((p: string) => p === '/custom/sync/codelldb');
 
-      const result = resolveCodeLLDBExecutableSyncImpl({ platform: 'linux', arch: 'x64', exists });
+      const result = resolveCodeLLDBExecutableSyncImpl({
+        platform: 'linux', arch: 'x64', exists, resolvePlatformPackageRoot: () => null
+      });
 
       expect(result).toBe('/custom/sync/codelldb');
       expect(exists).toHaveBeenCalledTimes(5);
@@ -301,7 +313,9 @@ describe('codelldb-resolver', () => {
       vi.stubEnv('CODELLDB_PATH', '/missing/codelldb');
       const exists = vi.fn().mockReturnValue(false);
 
-      expect(resolveCodeLLDBExecutableSyncImpl({ platform: 'linux', arch: 'x64', exists })).toBeNull();
+      expect(resolveCodeLLDBExecutableSyncImpl({
+        platform: 'linux', arch: 'x64', exists, resolvePlatformPackageRoot: () => null
+      })).toBeNull();
       expect(exists).toHaveBeenCalledTimes(5);
     });
 
@@ -313,6 +327,88 @@ describe('codelldb-resolver', () => {
 
       expect(result).toContain('darwin-arm64');
     });
+  });
+
+  describe('platform package resolution (issue #383)', () => {
+    const pkgRoot = path.resolve('/npx-install/node_modules/@debugmcp/codelldb-linux-x64');
+
+    it('getCodeLLDBPlatformPackageName maps a platform dir to the npm package name', () => {
+      expect(getCodeLLDBPlatformPackageName('linux-x64')).toBe('@debugmcp/codelldb-linux-x64');
+      expect(getCodeLLDBPlatformPackageName('win32-x64')).toBe('@debugmcp/codelldb-win32-x64');
+    });
+
+    it('resolveCodeLLDBPlatformPackageRoot returns the package dir on success and null on failure', () => {
+      const resolvePkg = vi.fn().mockReturnValue(path.join(pkgRoot, 'package.json'));
+      expect(resolveCodeLLDBPlatformPackageRoot('linux-x64', resolvePkg)).toBe(pkgRoot);
+      expect(resolvePkg).toHaveBeenCalledWith('@debugmcp/codelldb-linux-x64/package.json');
+
+      const failing = vi.fn(() => {
+        throw new Error('MODULE_NOT_FOUND');
+      });
+      expect(resolveCodeLLDBPlatformPackageRoot('linux-x64', failing)).toBeNull();
+    });
+
+    it('sync: resolves the installed platform package after the vendor candidates miss', () => {
+      const expected = path.join(pkgRoot, 'adapter', 'codelldb');
+      const exists = vi.fn((p: string) => p === expected);
+
+      const result = resolveCodeLLDBExecutableSyncImpl({
+        platform: 'linux',
+        arch: 'x64',
+        exists,
+        resolvePlatformPackageRoot: () => pkgRoot
+      });
+
+      expect(result).toBe(expected);
+      // 4 vendor candidates first, then the platform-package candidate
+      expect(exists).toHaveBeenCalledTimes(5);
+      expect(exists.mock.calls[4][0]).toBe(expected);
+    });
+
+    it('sync: the vendor tree still wins over an installed platform package', () => {
+      const exists = vi.fn().mockReturnValue(true);
+      const resolvePlatformPackageRoot = vi.fn().mockReturnValue(pkgRoot);
+
+      const result = resolveCodeLLDBExecutableSyncImpl({
+        platform: 'linux',
+        arch: 'x64',
+        exists,
+        resolvePlatformPackageRoot
+      });
+
+      expect(exists).toHaveBeenCalledTimes(1);
+      expect(result).not.toContain('@debugmcp');
+    });
+
+    it('sync: falls through to CODELLDB_PATH when the platform package lacks the binary', () => {
+      vi.stubEnv('CODELLDB_PATH', '/custom/pkg/codelldb');
+      const exists = vi.fn((p: string) => p === '/custom/pkg/codelldb');
+
+      const result = resolveCodeLLDBExecutableSyncImpl({
+        platform: 'linux',
+        arch: 'x64',
+        exists,
+        resolvePlatformPackageRoot: () => pkgRoot
+      });
+
+      expect(result).toBe('/custom/pkg/codelldb');
+      // 4 vendor + 1 platform package + 1 env
+      expect(exists).toHaveBeenCalledTimes(6);
+    });
+
+    it('async: resolves the installed platform package after the vendor candidates miss', async () => {
+      stubPlatform('linux', 'x64');
+      const expected = path.join(pkgRoot, 'adapter', 'codelldb');
+      accessMock.mockImplementation((p: string) =>
+        p === expected ? Promise.resolve() : Promise.reject(new Error('ENOENT'))
+      );
+
+      await expect(
+        resolveCodeLLDBExecutable({ resolvePlatformPackageRoot: () => pkgRoot })
+      ).resolves.toBe(expected);
+      expect(accessMock).toHaveBeenCalledTimes(5);
+    });
+
   });
 
   describe('platform table drift guards', () => {

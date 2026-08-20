@@ -399,6 +399,16 @@ importers:
         specifier: ^4.1.10
         version: 4.1.10(@types/node@26.2.0)(@vitest/coverage-istanbul@4.1.10)(@vitest/coverage-v8@4.1.10)(vite@7.3.6(@types/node@26.2.0))
 
+  packages/codelldb-darwin-arm64: {}
+
+  packages/codelldb-darwin-x64: {}
+
+  packages/codelldb-linux-arm64: {}
+
+  packages/codelldb-linux-x64: {}
+
+  packages/codelldb-win32-x64: {}
+
   packages/mcp-debugger:
     devDependencies:
       '@debugmcp/adapter-cpp':
@@ -431,6 +441,22 @@ importers:
       '@debugmcp/shared':
         specifier: workspace:*
         version: link:../shared
+    optionalDependencies:
+      '@debugmcp/codelldb-darwin-arm64':
+        specifier: workspace:*
+        version: link:../codelldb-darwin-arm64
+      '@debugmcp/codelldb-darwin-x64':
+        specifier: workspace:*
+        version: link:../codelldb-darwin-x64
+      '@debugmcp/codelldb-linux-arm64':
+        specifier: workspace:*
+        version: link:../codelldb-linux-arm64
+      '@debugmcp/codelldb-linux-x64':
+        specifier: workspace:*
+        version: link:../codelldb-linux-x64
+      '@debugmcp/codelldb-win32-x64':
+        specifier: workspace:*
+        version: link:../codelldb-win32-x64
 
   packages/shared:
     dependencies:

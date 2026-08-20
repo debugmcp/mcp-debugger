@@ -30,6 +30,13 @@
     "access": "public"
   },
   "dependencies": {},
+  "optionalDependencies": {
+    "@debugmcp/codelldb-darwin-arm64": "workspace:*",
+    "@debugmcp/codelldb-darwin-x64": "workspace:*",
+    "@debugmcp/codelldb-linux-arm64": "workspace:*",
+    "@debugmcp/codelldb-linux-x64": "workspace:*",
+    "@debugmcp/codelldb-win32-x64": "workspace:*"
+  },
   "devDependencies": {
     "@debugmcp/adapter-cpp": "workspace:*",
     "@debugmcp/adapter-dotnet": "workspace:*",

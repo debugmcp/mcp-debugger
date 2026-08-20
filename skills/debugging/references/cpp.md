@@ -50,7 +50,7 @@ attach_to_process {"sessionId": "<id>", "processId": 4242}
 |---|---|---|
 | Breakpoints never hit | Built without debug info, DWARF-5-in-PE (MinGW default), or optimized | Rebuild `-gdwarf-4 -O0`; absolute source paths |
 | Variables `<unavailable>` (Windows) | MSVC PDB binary | Rebuild with MinGW-w64/clang (DWARF) |
-| "Can't find CodeLLDB" | Not vendored / npx package on non-Linux | `pnpm --filter @debugmcp/codelldb-common run build:adapter`, or `CODELLDB_PATH` |
+| "Can't find CodeLLDB" | Not vendored / npx install with `--omit=optional` | `pnpm --filter @debugmcp/codelldb-common run build:adapter`, reinstall with optional deps, or `CODELLDB_PATH` |
 | Attach EPERM (Linux) | ptrace scope | `sudo sysctl kernel.yama.ptrace_scope=0` |
 | First stop in system frames | Launch-time system stop | One `continue_execution` |
 | Compile fails on source-file launch | No compiler on PATH | Install g++/clang++, or pass a prebuilt binary |

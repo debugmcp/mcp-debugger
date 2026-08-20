@@ -1,0 +1,5 @@
+# Binary payload staged by scripts/stage-codelldb-packages.mjs - never committed
+adapter/
+lldb/
+lang_support/
+version.json

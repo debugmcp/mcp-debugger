@@ -29,7 +29,11 @@ function getWorkspaceVersions() {
   const packagesDir = path.resolve(__dirname, '../packages');
   
   // Read each workspace package
-  const workspaces = ['shared', 'codelldb-common', 'adapter-cpp', 'adapter-dotnet', 'adapter-go', 'adapter-java', 'adapter-javascript', 'adapter-python', 'adapter-mock', 'adapter-ruby', 'adapter-rust'];
+  const workspaces = [
+    'shared', 'codelldb-common', 'adapter-cpp', 'adapter-dotnet', 'adapter-go', 'adapter-java',
+    'adapter-javascript', 'adapter-python', 'adapter-mock', 'adapter-ruby', 'adapter-rust',
+    'codelldb-win32-x64', 'codelldb-darwin-x64', 'codelldb-darwin-arm64', 'codelldb-linux-x64', 'codelldb-linux-arm64'
+  ];
   
   for (const ws of workspaces) {
     const pkgPath = path.join(packagesDir, ws, 'package.json');
@@ -80,7 +84,11 @@ function resolveWorkspaceDeps(pkg, versions) {
   if (resolved.peerDependencies) {
     resolved.peerDependencies = resolveDeps(resolved.peerDependencies);
   }
-  
+
+  if (resolved.optionalDependencies) {
+    resolved.optionalDependencies = resolveDeps(resolved.optionalDependencies);
+  }
+
   return resolved;
 }
 

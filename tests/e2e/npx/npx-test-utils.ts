@@ -235,8 +235,20 @@ export async function installPackageGlobally(tarballPath: string): Promise<void>
       // Package might not be installed
     }
     
-    // Install from tarball
-    await execAsync(`npm install -g "${tarballPath}"`);
+    // Install from tarball. The @debugmcp/codelldb-* optionalDependencies live
+    // on the registry (issue #383); until their first publish — or during a
+    // registry hiccup — resolving them fails with E404, so retry without
+    // optional deps (rust/cpp then fall back to CODELLDB_PATH/vendor tree).
+    try {
+      await execAsync(`npm install -g "${tarballPath}"`);
+    } catch (installError) {
+      console.warn(
+        '[NPX Test] npm install -g failed; retrying with --omit=optional ' +
+        '(codelldb platform packages unavailable?):',
+        installError instanceof Error ? installError.message : installError
+      );
+      await execAsync(`npm install -g "${tarballPath}" --omit=optional`);
+    }
     console.log('[NPX Test] Package installed globally');
     
     // Verify installation

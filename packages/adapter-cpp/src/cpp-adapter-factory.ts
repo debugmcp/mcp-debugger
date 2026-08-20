@@ -54,7 +54,7 @@ export class CppAdapterFactory implements IAdapterFactory {
     // Check CodeLLDB — the only hard requirement
     const resolvedCodelldb = await resolveCodeLLDBExecutable();
     if (!resolvedCodelldb) {
-      errors.push('CodeLLDB not found. Run: npm run build:adapter');
+      errors.push('CodeLLDB not found. It normally ships via the @debugmcp/codelldb-* optional dependencies; set CODELLDB_PATH, or in a repo checkout run: npm run build:adapter');
     } else {
       codelldbPath = resolvedCodelldb;
       codelldbVersion = await getCodeLLDBVersion() || undefined;

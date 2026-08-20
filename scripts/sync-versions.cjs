@@ -104,6 +104,13 @@ async function syncVersions() {
       const oldVersion = pkg.version;
       const packageName = path.basename(pkgPath) || 'root';
 
+      // CodeLLDB platform packages are versioned by the vendored CodeLLDB
+      // release (vendor-manifest.json), not by the repo version (issue #383).
+      if (pkg.codelldbPlatform) {
+        versionChanges.push(`  ⏩ ${packageName}: pinned to CodeLLDB ${oldVersion} (not synced)`);
+        continue;
+      }
+
       let changed = false;
 
       if (oldVersion !== targetVersion) {

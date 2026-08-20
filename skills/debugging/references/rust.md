@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Rust toolchain (`rustc`, `cargo`) installed via rustup.
-- CodeLLDB debug adapter is vendored automatically at install/build time (`pnpm install` postinstall, or `pnpm --filter @debugmcp/codelldb-common run build:adapter`). The published npx CLI ships only the Linux x64 CodeLLDB runtime — on macOS/Windows set `CODELLDB_PATH` to a local CodeLLDB install (e.g. from the VSCode extension) or vendor from a cloned repo.
+- CodeLLDB debug adapter is vendored automatically at install/build time (`pnpm install` postinstall, or `pnpm --filter @debugmcp/codelldb-common run build:adapter`). The published npx CLI installs CodeLLDB via per-platform `@debugmcp/codelldb-*` optional dependencies (all major platforms covered); with `--omit=optional` set `CODELLDB_PATH` to a local CodeLLDB install or vendor from a cloned repo.
 - **Windows: use the GNU toolchain.** CodeLLDB needs DWARF symbols; MSVC builds emit PDB, which LLDB reads only partially (variables often show `<unavailable>`). Build with:
   ```bash
   rustup target add x86_64-pc-windows-gnu
@@ -70,7 +70,7 @@ Not supported. The Rust adapter implements launch mode only — `attach_to_proce
 |---|---|---|
 | Breakpoints never hit | Release/optimized build lacks usable debug info | `cargo build` (debug profile), `opt-level = 0`; absolute source paths |
 | Variables `<unavailable>` / garbage strings (Windows) | MSVC toolchain — PDB symbols | Rebuild: `cargo +stable-gnu build --target x86_64-pc-windows-gnu`; verify with `check-rust-binary` |
-| "Can't find CodeLLDB" | Adapter not vendored / npx package on non-Linux | Run `pnpm --filter @debugmcp/codelldb-common run build:adapter`, or set `CODELLDB_PATH` |
+| "Can't find CodeLLDB" | Adapter not vendored / npx install with `--omit=optional` | Run `pnpm --filter @debugmcp/codelldb-common run build:adapter`, reinstall with optional deps, or set `CODELLDB_PATH` |
 | First stop is in system/ntdll frames (or a SIGSTOP stop on Linux) | Launch-time system stop | `continue_execution` once, then you land on your breakpoint |
 | `continue_execution` re-stops on the same line | The line is a macro (`format!`, `println!`, …) whose expansion resolves to several breakpoint locations; each stop is a genuine hit at a different PC (issue #255) | Continue again until the line's locations are drained, or `step_over` once to cross the whole line |
 | `dlltool ... CreateProcess` build error | rustup GNU toolchain missing `as.exe` | Install MSYS2 mingw-w64 binutils/gcc; prepend `C:\msys64\mingw64\bin` to PATH |

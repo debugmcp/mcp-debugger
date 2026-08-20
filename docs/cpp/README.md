@@ -10,7 +10,7 @@ MCP Client → mcp-debugger → proxy worker → CodeLLDB (vendored) → LLDB �
 
 - CodeLLDB binaries are vendored in `packages/codelldb-common/vendor/codelldb/<platform>/` (shared with the Rust adapter — one ~150 MB copy per platform, downloaded automatically during `pnpm install`).
 - The adapter spawns CodeLLDB in TCP mode and speaks DAP to it. No system LLDB or gdb installation is required.
-- `CODELLDB_PATH` env var overrides the vendored binary (e.g. npm users on macOS/Windows pointing at the VSCode extension's copy).
+- npm/npx installs get CodeLLDB via the per-platform `@debugmcp/codelldb-*` optional dependencies; the `CODELLDB_PATH` env var overrides both that and the vendored binary (e.g. pointing at the VSCode extension's copy).
 
 ## Prerequisites
 

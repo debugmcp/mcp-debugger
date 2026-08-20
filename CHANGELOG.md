@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **CodeLLDB ships as per-platform npm packages (esbuild pattern)** — five new packages `@debugmcp/codelldb-{win32-x64,darwin-x64,darwin-arm64,linux-x64,linux-arm64}` (versioned by the CodeLLDB release, currently 1.11.8, payload staged from the digest-pinned VSIXs) are `optionalDependencies` of `@debugmcp/mcp-debugger`, so npm installs exactly the one matching your os/cpu. Rust and C/C++ debugging now work out of the box on every platform npm serves — previously the CLI tarball bundled linux-x64 only — and the core tarball shrinks from ~54 MB to a few MB. The resolver probes the installed platform package after the vendor tree and before `CODELLDB_PATH`; installs with `--omit=optional` keep the `CODELLDB_PATH` fallback (#383)
+
 ## [0.24.2] - 2026-08-19
 
 ### Fixed
