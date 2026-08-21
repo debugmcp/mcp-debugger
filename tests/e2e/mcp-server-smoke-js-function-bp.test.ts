@@ -359,7 +359,7 @@ describe('MCP Server JavaScript Function Breakpoints', () => {
       name: 'attach_to_process',
       arguments: { sessionId: sid, host: '127.0.0.1', port }
     }));
-    expect(attachResponse.success).toBe(true);
+    expect(attachResponse.success, JSON.stringify(attachResponse)).toBe(true);
 
     // Ensure the target is running (attach may leave it paused), then set the
     // function breakpoint while it runs: no pause frames exist, so the bridge

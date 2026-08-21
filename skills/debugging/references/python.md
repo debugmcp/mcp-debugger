@@ -49,7 +49,7 @@ set_breakpoint       { "sessionId": "<id>", "file": "/abs/path/script.py", "line
 continue_execution   { "sessionId": "<id>" }
 ```
 
-Shorthand: `create_debug_session { "language": "python", "host": "127.0.0.1", "port": 5678 }` creates the session and attaches in one call. After the handshake the attach is verified by polling for threads; raise `verifyTimeout` (default ~5000 ms) for slow targets. Detach with `detach_from_process { "sessionId": "<id>", "terminateProcess": false }`.
+Shorthand: `create_debug_session { "language": "python", "host": "127.0.0.1", "port": 5678 }` creates the session and attaches in one call. After the handshake the attach is verified by polling for threads; raise `verifyTimeout` (default ~20000 ms) for slow targets. Detach with `detach_from_process { "sessionId": "<id>", "terminateProcess": false }`.
 
 ## Quirks
 

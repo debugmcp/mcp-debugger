@@ -872,7 +872,11 @@ export class DebugMcpServer {
     if (typeof currentThreadId !== 'number') {
         throw new ProxyNotRunningError(sessionId || 'unknown', 'get stack trace');
     }
-    return this.sessionManager.getStackTraceDetailed(sessionId, currentThreadId, includeInternals);
+    // ensureStackReady: the thread above was resolved implicitly (the MCP tool
+    // has no threadId argument), so a paused session answering with zero
+    // frames gets the bounded readiness retry + thread scan instead of a
+    // confusing empty success.
+    return this.sessionManager.getStackTraceDetailed(sessionId, currentThreadId, includeInternals, { ensureStackReady: true });
   }
 
   public async getScopes(sessionId: string, frameId: number): Promise<DebugProtocol.Scope[]> {
@@ -1080,7 +1084,7 @@ export class DebugMcpServer {
 
       return {
         tools: [
-          { name: 'create_debug_session', description: 'Create a new debugging session. Provide host and port to attach to a running process; omit them for launch mode', inputSchema: { type: 'object', properties: { language: { type: 'string', enum: supportedLanguages, description: 'Programming language for debugging' }, name: { type: 'string', description: 'Optional session name' }, executablePath: {type: 'string', description: 'Path to language executable (optional, will auto-detect if not provided)'}, host: { type: 'string', description: 'Host to attach to for remote debugging (optional, triggers attach mode)' }, port: { type: 'number', description: 'Debug port to attach to for remote debugging (optional, triggers attach mode)' }, timeout: { type: 'number', description: 'Connection timeout in milliseconds for attach mode (default: 30000)' }, verifyTimeout: { type: 'number', description: 'Attach mode only: how long to wait (ms) for the debugger to report at least one thread after attaching before failing the attach (default: 5000, max: 600000)' }, adapterConfig: { type: 'object', description: 'Attach mode only: adapter-specific attach configuration merged into the attach config (see attach_to_process)', additionalProperties: true } }, required: ['language'] } },
+          { name: 'create_debug_session', description: 'Create a new debugging session. Provide host and port to attach to a running process; omit them for launch mode', inputSchema: { type: 'object', properties: { language: { type: 'string', enum: supportedLanguages, description: 'Programming language for debugging' }, name: { type: 'string', description: 'Optional session name' }, executablePath: {type: 'string', description: 'Path to language executable (optional, will auto-detect if not provided)'}, host: { type: 'string', description: 'Host to attach to for remote debugging (optional, triggers attach mode)' }, port: { type: 'number', description: 'Debug port to attach to for remote debugging (optional, triggers attach mode)' }, timeout: { type: 'number', description: 'Connection timeout in milliseconds for attach mode (default: 30000)' }, verifyTimeout: { type: 'number', description: 'Attach mode only: how long to wait (ms) for the debugger to report at least one thread after attaching before failing the attach (default: 20000, max: 600000)' }, adapterConfig: { type: 'object', description: 'Attach mode only: adapter-specific attach configuration merged into the attach config (see attach_to_process)', additionalProperties: true } }, required: ['language'] } },
           { name: 'list_supported_languages', description: 'List all supported debugging languages with metadata', inputSchema: { type: 'object', properties: {} } },
           { name: 'list_debug_sessions', description: 'List all active debugging sessions. Paused sessions include lastStop with the reason for the most recent stop (e.g. "breakpoint" vs "exception")', inputSchema: { type: 'object', properties: {} } },
           { name: 'set_breakpoint', description: 'Set a breakpoint. Setting breakpoints on non-executable lines (structural, declarative) may lead to unexpected behavior', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: 'Path to the source file or Java FQCN. For Java, passing a fully-qualified class name (e.g. "com.example.MyClass" or "com.example.Outer$Inner") is preferred — it works reliably with all classloaders including custom classloaders. Alternatively, use absolute file paths.' }, line: { type: 'number', description: 'Line number where to set breakpoint. Executable statements (assignments, function calls, conditionals, returns) work best. Structural lines (function/class definitions), declarative lines (imports), or non-executable lines (comments, blank lines) may cause unexpected stepping behavior' }, ...setBreakpointExtraProps, condition: { type: 'string', description: 'Optional expression: only break (or log) when it evaluates truthy' }, logMessage: { type: 'string', description: 'Create a logpoint: instead of pausing, log this message when the line is hit. Expressions in {curly braces} are interpolated (e.g. "order={orderId} total={total}"). Messages arrive in get_output while the program runs at full speed. Supported by Python, JavaScript, Go, and Rust adapters; not by Java or .NET' }, suspendPolicy: { type: 'string', enum: ['all', 'thread'], description: 'Suspend policy when breakpoint is hit: "all" suspends all threads (default), "thread" only suspends the event thread. Only supported by the Java/JDI adapter.' } }, required: setBreakpointRequired } },
@@ -1113,7 +1117,7 @@ export class DebugMcpServer {
             }
           },
           { name: 'restart_debugging', description: 'Restart the debuggee: terminate the current program (if still running) and relaunch it with the same configuration as the last start_debugging. All current breakpoints are re-applied automatically. The get_output buffer starts fresh — read from since=0 after a restart. Works while running, paused, or after the program has exited. Not available for attach sessions or sessions never launched', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
-          { name: 'attach_to_process', description: 'Attach to a running process for debugging. After the attach handshake the target is verified by polling for threads; if none are reported within verifyTimeout (~5s default) the attach fails and the debug proxy is torn down', inputSchema: {
+          { name: 'attach_to_process', description: 'Attach to a running process for debugging. After the attach handshake the target is verified by polling for threads; if none are reported within verifyTimeout (~20s default) the attach fails and the debug proxy is torn down', inputSchema: {
               type: 'object',
               properties: {
                 sessionId: { type: 'string', description: 'Debug session ID' },
@@ -1121,7 +1125,7 @@ export class DebugMcpServer {
                 host: { type: 'string', description: 'Host to attach to (default: localhost)' },
                 processId: { type: ['number', 'string'], description: 'Process ID (for local attach, language-specific)' },
                 timeout: { type: 'number', description: 'Connection timeout in milliseconds (default: 30000)' },
-                verifyTimeout: { type: 'number', description: 'How long to wait (ms) for the debugger to report at least one thread after attaching before failing the attach (default: 5000, max: 600000). Increase for targets that are slow to become debuggable, e.g. a busy or warming JVM' },
+                verifyTimeout: { type: 'number', description: 'How long to wait (ms) for the debugger to report at least one thread after attaching before failing the attach (default: 20000, max: 600000). Decrease for fast failure-by-design probes; increase for targets that are exceptionally slow to become debuggable' },
                 sourcePaths: { type: 'array', items: { type: 'string' }, description: 'Source paths for code mapping' },
                 stopOnEntry: { type: 'boolean', description: 'Stop on entry after attaching' },
                 justMyCode: { type: 'boolean', description: 'Only debug user code (skip library code)' },
@@ -2055,13 +2059,21 @@ export class DebugMcpServer {
                   stopReason: lastStop?.reason,
                   lastStop
                 };
-                // Issue #346: when the language policy hid frames, say so in the
-                // response instead of relying on the agent knowing filtering exists.
+                // Anything the result needs explaining (not paused, stack came
+                // from a different thread, all threads frameless) plus the
+                // issue #346 hidden-frames disclosure share the note field.
+                const notes: string[] = [];
+                if (stackTrace.note) {
+                  notes.push(stackTrace.note);
+                }
                 if (stackTrace.hiddenFrameCount > 0) {
                   payload.hiddenFrames = stackTrace.hiddenFrameCount;
-                  payload.note = stackTrace.allFramesInternal
+                  notes.push(stackTrace.allFramesInternal
                     ? `All ${stackTrace.totalFrameCount} frames are internal/runtime frames; showing the top internal frame so scopes and evaluate still work. Pass includeInternals: true to see the full stack.`
-                    : `${stackTrace.hiddenFrameCount} internal frame(s) hidden — pass includeInternals: true to see them.`;
+                    : `${stackTrace.hiddenFrameCount} internal frame(s) hidden — pass includeInternals: true to see them.`);
+                }
+                if (notes.length > 0) {
+                  payload.note = notes.join(' ');
                 }
                 result = { content: [{ type: 'text', text: JSON.stringify(payload) }] };
               } catch (error) {

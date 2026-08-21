@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Attach verification window default raised 5s → 20s** — the `attach_to_process` thread-poll deadline only ever bites when the debug adapter is alive but the target is slow to become debuggable (js-debug child-session adoption on a loaded host, a warming JVM); adapter death still fails fast via the proxy-gone latch, and the poll returns the moment threads appear, so healthy attaches never pay for the headroom. A false "attach failed" on a healthy target is strictly worse for an agent than a slower genuine failure. Pass a small `verifyTimeout` for fast failure-by-design probes
+
+### Fixed
+- **A paused session can no longer answer `get_stack_trace` with a silent empty success** — some adapters report a stop before the stack is materialized (netcoredbg right after the post-attach pause — the milder sibling of #353's `0x80131302`), and the tracked thread can be a frameless runtime thread. The agent-facing stack path now retries an empty-but-successful stackTrace within a bounded window (~3s, exits on first frame), falls back to scanning the other stopped threads and adopts the first one with frames (annotated via a `note` in the response, so scopes/evaluate anchor correctly), and — if everything stays frameless — returns the empty result with a `note` saying what to try instead. Not-paused and no-known-thread empty results now carry an explanatory `note` too
+
 ### Added
 - **CodeLLDB ships as per-platform npm packages (esbuild pattern)** — five new packages `@debugmcp/codelldb-{win32-x64,darwin-x64,darwin-arm64,linux-x64,linux-arm64}` (versioned by the CodeLLDB release, currently 1.11.8, payload staged from the digest-pinned VSIXs) are `optionalDependencies` of `@debugmcp/mcp-debugger`, so npm installs exactly the one matching your os/cpu. Rust and C/C++ debugging now work out of the box on every platform npm serves — previously the CLI tarball bundled linux-x64 only — and the core tarball shrinks from ~54 MB to a few MB. The resolver probes the installed platform package last — after the vendor tree and after `CODELLDB_PATH` — so an explicit `CODELLDB_PATH` still overrides the auto-installed package, and installs with `--omit=optional` keep working via `CODELLDB_PATH` (#383)
 
