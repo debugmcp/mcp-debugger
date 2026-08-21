@@ -221,3 +221,6 @@ __debug_bin*
 
 # E2E test result artifacts
 tests/e2e/*-results.json
+
+# Memory benchmark results (scripts/mem-bench.mjs)
+bench-results/
