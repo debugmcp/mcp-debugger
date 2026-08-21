@@ -1252,6 +1252,139 @@ describe('SessionManager - DAP Operations', () => {
     });
   });
 
+  describe('Paused stack readiness (empty-stack hardening)', () => {
+    // A PAUSED session answering stackTrace with success + zero frames is
+    // (nearly always) a transient adapter race — netcoredbg does this right
+    // after the post-attach pause. With ensureStackReady the agent-facing
+    // path retries within a bounded window and falls back to scanning other
+    // stopped threads; internal callers keep the single-shot behavior.
+    const READY_FRAME = { id: 7, name: 'Program.Main', source: { path: '/work/Program.cs' }, line: 12, column: 1 };
+
+    function setShortReadyWindow() {
+      (sessionManager as unknown as { pausedStackReadyTimeoutMs: number; pausedStackReadyIntervalMs: number })
+        .pausedStackReadyTimeoutMs = 400;
+      (sessionManager as unknown as { pausedStackReadyIntervalMs: number })
+        .pausedStackReadyIntervalMs = 25;
+    }
+
+    it('retries an empty-but-successful stack until frames appear', async () => {
+      const session = await createPausedSession();
+      setShortReadyWindow();
+      let stackTraceCalls = 0;
+      dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+        if (command === 'stackTrace') {
+          stackTraceCalls++;
+          return { success: true, body: { stackFrames: stackTraceCalls < 3 ? [] : [READY_FRAME] } };
+        }
+        return { success: true, body: {} };
+      });
+
+      const result = await sessionManager.getStackTraceDetailed(session.id, undefined, false, { ensureStackReady: true });
+
+      expect(result.frames.map(f => f.name)).toEqual(['Program.Main']);
+      expect(stackTraceCalls).toBeGreaterThanOrEqual(3);
+      expect(result.note).toBeUndefined();
+    });
+
+    it('falls back to another stopped thread when the current one stays frameless, and annotates', async () => {
+      const session = await createPausedSession(); // currentThreadId = 1
+      setShortReadyWindow();
+      dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: { threadId?: number }) => {
+        if (command === 'stackTrace') {
+          return { success: true, body: { stackFrames: args?.threadId === 2 ? [READY_FRAME] : [] } };
+        }
+        if (command === 'threads') {
+          return { success: true, body: { threads: [{ id: 1, name: '' }, { id: 2, name: 'worker' }] } };
+        }
+        return { success: true, body: {} };
+      });
+
+      const result = await sessionManager.getStackTraceDetailed(session.id, undefined, false, { ensureStackReady: true });
+
+      expect(result.frames.map(f => f.name)).toEqual(['Program.Main']);
+      expect(result.note).toMatch(/thread 2/);
+      // The frame-bearing thread is adopted so scopes/evaluate anchor to it.
+      expect(dependencies.mockProxyManager.getCurrentThreadId()).toBe(2);
+    });
+
+    it('returns an honest empty result with a note when no thread reports frames', async () => {
+      const session = await createPausedSession();
+      setShortReadyWindow();
+      dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+        if (command === 'stackTrace') {
+          return { success: true, body: { stackFrames: [] } };
+        }
+        if (command === 'threads') {
+          return { success: true, body: { threads: [{ id: 1, name: '' }] } };
+        }
+        return { success: true, body: {} };
+      });
+
+      const result = await sessionManager.getStackTraceDetailed(session.id, undefined, false, { ensureStackReady: true });
+
+      expect(result.frames).toEqual([]);
+      expect(result.note).toMatch(/no stack frames/i);
+    });
+
+    it('does not retry or scan without ensureStackReady (internal-caller behavior unchanged)', async () => {
+      const session = await createPausedSession();
+      dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+        if (command === 'stackTrace') {
+          return { success: true, body: { stackFrames: [] } };
+        }
+        return { success: true, body: {} };
+      });
+
+      const result = await sessionManager.getStackTraceDetailed(session.id);
+
+      expect(result.frames).toEqual([]);
+      expect(dependencies.mockProxyManager.dapRequestCalls.filter(c => c.command === 'stackTrace')).toHaveLength(1);
+    });
+
+    // Raw 'continued' events are deliberately ignored while PAUSED (the
+    // stale-event guard in session-manager-core), so these tests leave the
+    // paused state the way the continue/step operations do: through
+    // _updateSessionState.
+    function forceRunning(sessionId: string) {
+      const managed = sessionManager.getSession(sessionId);
+      (sessionManager as unknown as { _updateSessionState: (s: unknown, st: SessionState) => void })
+        ._updateSessionState(managed, SessionState.RUNNING);
+    }
+
+    it('stops retrying when the session leaves PAUSED mid-wait', async () => {
+      const session = await createPausedSession();
+      setShortReadyWindow();
+      let stackTraceCalls = 0;
+      dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+        if (command === 'stackTrace') {
+          stackTraceCalls++;
+          if (stackTraceCalls === 1) {
+            // A continue races in between readiness polls.
+            forceRunning(session.id);
+          }
+          return { success: true, body: { stackFrames: [] } };
+        }
+        return { success: true, body: {} };
+      });
+
+      const result = await sessionManager.getStackTraceDetailed(session.id, undefined, false, { ensureStackReady: true });
+
+      expect(result.frames).toEqual([]);
+      expect(stackTraceCalls).toBe(1);
+      expect(result.note).toMatch(/paused/i);
+    });
+
+    it('annotates the not-paused empty result', async () => {
+      const session = await createPausedSession();
+      forceRunning(session.id);
+
+      const result = await sessionManager.getStackTraceDetailed(session.id);
+
+      expect(result.frames).toEqual([]);
+      expect(result.note).toMatch(/not paused/i);
+    });
+  });
+
   describe('Exception Breakpoints and Stop Detail (issue #220)', () => {
     it('threads breakOnExceptions into the ProxyConfig', async () => {
       const session = await sessionManager.createSession({

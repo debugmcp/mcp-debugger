@@ -204,6 +204,10 @@ export class MockProxyManager extends EventEmitter implements IProxyManager {
     return this._currentThreadId;
   }
 
+  setCurrentThreadId(threadId: number): void {
+    this._currentThreadId = threadId;
+  }
+
   // Test helpers
   setDapRequestHandler(handler: (command: string, args?: any) => Promise<any>): void {
     this._dapRequestHandler = handler;

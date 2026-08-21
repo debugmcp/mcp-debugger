@@ -236,11 +236,15 @@ target (e.g. a busy or warming JVM) can legitimately need longer than the
 default window, the window is caller-configurable (issue #143):
 
 - The default lives in the protected, test-shrinkable field
-  `attachVerifyTimeoutMs` (5s), following the `stepGraceMs`/`pauseGraceMs`
-  field pattern.
+  `attachVerifyTimeoutMs` (20s), following the `stepGraceMs`/`pauseGraceMs`
+  field pattern. It is deliberately generous: adapter death fails fast
+  regardless (the proxy-gone latch), so the deadline only bites when the
+  adapter is alive but the target is slow to report threads — where a false
+  "attach failed" is worse than a slow genuine failure.
 - Callers override it per attach via the `verifyTimeout` (ms) argument on
   `attach_to_process` / `create_debug_session`; the value is validated
-  (positive finite number) and clamped to 10 minutes.
+  (positive finite number) and clamped to 10 minutes. Pass a small value for
+  fast failure-by-design probes.
 - The failure text comes from `ErrorMessages.attachVerifyFailed(timeoutMs,
   lastFailure)`, which names the `verifyTimeout` knob so a caller that hit the
   window on a slow target knows how to retry.

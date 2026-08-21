@@ -14,6 +14,7 @@ import {
   redactVariableValue
 } from '@debugmcp/shared';
 import { SessionManagerCore } from './session-manager-core.js';
+import { IProxyManager } from '../proxy/proxy-manager.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import {
   applyVariableCaps,
@@ -32,16 +33,36 @@ export interface StackTraceResult {
   totalFrameCount: number;
   hiddenFrameCount: number;
   allFramesInternal: boolean;
+  /**
+   * Present when the result needs explaining: the session was not paused, no
+   * stopped thread was known, the stack came from a different thread than the
+   * tracked one, or every thread stayed frameless. Surfaced to the agent in
+   * the get_stack_trace tool payload.
+   */
+  note?: string;
 }
 
-function emptyStackTraceResult(): StackTraceResult {
-  return { frames: [], totalFrameCount: 0, hiddenFrameCount: 0, allFramesInternal: false };
+function emptyStackTraceResult(note?: string): StackTraceResult {
+  return { frames: [], totalFrameCount: 0, hiddenFrameCount: 0, allFramesInternal: false, ...(note ? { note } : {}) };
 }
 
 /**
  * Data retrieval functionality for session management
  */
 export abstract class SessionManagerData extends SessionManagerCore {
+  /**
+   * How long the agent-facing stack-trace path keeps polling a PAUSED session
+   * whose adapter answers stackTrace with success + zero frames, before
+   * returning the honest empty result. Some adapters report the stop before
+   * the stack is materialized (netcoredbg after the post-attach pause — the
+   * milder sibling of issue #353's 0x80131302), so success-with-0-frames
+   * while paused is nearly always a transient race, not truth. The poll exits
+   * on the first non-empty answer, so the window costs nothing when the
+   * adapter is ready. Follows the attachVerifyTimeoutMs pattern.
+   */
+  protected pausedStackReadyTimeoutMs = 3000;
+  protected pausedStackReadyIntervalMs = 250;
+
   /**
    * Selects the appropriate adapter policy based on language
    */
@@ -167,73 +188,182 @@ export abstract class SessionManagerData extends SessionManagerCore {
    * has a frameId to anchor scopes/evaluate, and `hiddenFrameCount` +
    * `allFramesInternal` let the response say what was hidden.
    */
-  async getStackTraceDetailed(sessionId: string, threadId?: number, includeInternals: boolean = false): Promise<StackTraceResult> {
+  async getStackTraceDetailed(
+    sessionId: string,
+    threadId?: number,
+    includeInternals: boolean = false,
+    opts?: { ensureStackReady?: boolean }
+  ): Promise<StackTraceResult> {
     const session = this._getSessionById(sessionId);
     const currentThreadId = session.proxyManager?.getCurrentThreadId();
     this.logger.info(`[SM getStackTrace ${sessionId}] Entered. Requested threadId: ${threadId}, Current state: ${session.state}, Actual currentThreadId: ${currentThreadId}, includeInternals: ${includeInternals}`);
-    
+
     if (!session.proxyManager || !session.proxyManager.isRunning()) {
       this.logger.warn(`[SM getStackTrace ${sessionId}] No active proxy.`);
-      return emptyStackTraceResult();
+      return emptyStackTraceResult('No active debug process for this session.');
     }
     if (session.state !== SessionState.PAUSED) {
       this.logger.warn(`[SM getStackTrace ${sessionId}] Session not paused. State: ${session.state}.`);
-      return emptyStackTraceResult();
+      return emptyStackTraceResult(`Session is not paused (state: ${session.state}); stack traces are only available while paused.`);
     }
 
     const currentThreadForRequest = threadId || currentThreadId;
     if (typeof currentThreadForRequest !== 'number') {
       this.logger.warn(`[SM getStackTrace ${sessionId}] No effective thread ID to use.`);
-      return emptyStackTraceResult();
+      return emptyStackTraceResult('No stopped thread is known for this session.');
     }
 
+    const proxyManager = session.proxyManager;
     try {
-      this.logger.info(`[SM getStackTrace ${sessionId}] Sending DAP 'stackTrace' for threadId ${currentThreadForRequest}.`);
-      const response = await session.proxyManager.sendDapRequest<DebugProtocol.StackTraceResponse>('stackTrace', { threadId: currentThreadForRequest });
-      this.logger.info(`[SM getStackTrace ${sessionId}] DAP 'stackTrace' response received. Body:`, response?.body);
+      let rawFrames = await this.requestRawStackFrames(sessionId, proxyManager, currentThreadForRequest);
+      let note: string | undefined;
 
-      // A failed DAP response (e.g. "Child session not ready ...") must not
-      // be flattened into an empty-but-successful stack trace (issue #124):
-      // propagate the failure to the caller.
-      if (response?.success === false) {
-        throw new Error(response.message || `DAP 'stackTrace' request failed`);
+      // A PAUSED session answering with zero frames is nearly always a
+      // transient adapter race (netcoredbg materializes the managed stack a
+      // beat after the stop event) or a frameless runtime thread being
+      // tracked as current. On the agent-facing path, chase the real stack
+      // instead of handing back a confusing empty success.
+      if (rawFrames.length === 0 && opts?.ensureStackReady) {
+        const ready = await this.waitForReadyStack(sessionId, session, proxyManager, currentThreadForRequest);
+        rawFrames = ready.frames;
+        note = ready.note;
       }
 
-      if (response && response.body && response.body.stackFrames) {
-        let frames: StackFrame[] = response.body.stackFrames.map((sf: DebugProtocol.StackFrame) => ({ 
-            id: sf.id, name: sf.name, 
-            file: sf.source?.path || sf.source?.name || "<unknown_source>", 
-            line: sf.line, column: sf.column
-        }));
-        
-        // Apply filtering using the language's policy
-        const totalFrameCount = frames.length;
-        let allFramesInternal = false;
-        const policy = this.selectPolicy(session.language);
-        if (policy.filterStackFrames) {
-          this.logger.info(`[SM getStackTrace ${sessionId}] Applying stack frame filtering for ${session.language}. Original count: ${frames.length}`);
-          const filtered = policy.filterStackFrames(frames, includeInternals);
-          // Central guarantee (issue #346): a policy filter must never leave the
-          // agent with zero frames when the adapter reported some — keep the top
-          // unfiltered frame so scopes/evaluate still have an anchor.
-          if (filtered.length === 0 && frames.length > 0) {
-            allFramesInternal = true;
-            frames = [frames[0]];
-          } else {
-            frames = filtered;
-          }
-          this.logger.info(`[SM getStackTrace ${sessionId}] After filtering: ${frames.length} frames (hidden: ${totalFrameCount - frames.length}, allFramesInternal: ${allFramesInternal})`);
+      let frames: StackFrame[] = rawFrames.map((sf: DebugProtocol.StackFrame) => ({
+          id: sf.id, name: sf.name,
+          file: sf.source?.path || sf.source?.name || "<unknown_source>",
+          line: sf.line, column: sf.column
+      }));
+
+      // Apply filtering using the language's policy
+      const totalFrameCount = frames.length;
+      let allFramesInternal = false;
+      const policy = this.selectPolicy(session.language);
+      if (policy.filterStackFrames) {
+        this.logger.info(`[SM getStackTrace ${sessionId}] Applying stack frame filtering for ${session.language}. Original count: ${frames.length}`);
+        const filtered = policy.filterStackFrames(frames, includeInternals);
+        // Central guarantee (issue #346): a policy filter must never leave the
+        // agent with zero frames when the adapter reported some — keep the top
+        // unfiltered frame so scopes/evaluate still have an anchor.
+        if (filtered.length === 0 && frames.length > 0) {
+          allFramesInternal = true;
+          frames = [frames[0]];
+        } else {
+          frames = filtered;
         }
-
-        this.logger.info(`[SM getStackTrace ${sessionId}] Parsed stack frames (top 3):`, frames.slice(0,3).map(f => ({name:f.name, file:f.file, line:f.line})));
-        return { frames, totalFrameCount, hiddenFrameCount: totalFrameCount - frames.length, allFramesInternal };
+        this.logger.info(`[SM getStackTrace ${sessionId}] After filtering: ${frames.length} frames (hidden: ${totalFrameCount - frames.length}, allFramesInternal: ${allFramesInternal})`);
       }
-      this.logger.warn(`[SM getStackTrace ${sessionId}] No stackFrames in response body. Response:`, response);
-      throw new Error(`DAP 'stackTrace' response did not include stack frames`);
+
+      this.logger.info(`[SM getStackTrace ${sessionId}] Parsed stack frames (top 3):`, frames.slice(0,3).map(f => ({name:f.name, file:f.file, line:f.line})));
+      return { frames, totalFrameCount, hiddenFrameCount: totalFrameCount - frames.length, allFramesInternal, ...(note ? { note } : {}) };
     } catch (error) {
       this.logger.error(`[SM getStackTrace ${sessionId}] Error getting stack trace:`, error);
       throw error instanceof Error ? error : new Error(String(error));
     }
+  }
+
+  /**
+   * Send one DAP stackTrace request and return the raw frames. A failed DAP
+   * response (e.g. "Child session not ready ...") must not be flattened into
+   * an empty-but-successful stack trace (issue #124): propagate the failure.
+   */
+  private async requestRawStackFrames(
+    sessionId: string,
+    proxyManager: IProxyManager,
+    threadId: number
+  ): Promise<DebugProtocol.StackFrame[]> {
+    this.logger.info(`[SM getStackTrace ${sessionId}] Sending DAP 'stackTrace' for threadId ${threadId}.`);
+    const response = await proxyManager.sendDapRequest<DebugProtocol.StackTraceResponse>('stackTrace', { threadId });
+    this.logger.info(`[SM getStackTrace ${sessionId}] DAP 'stackTrace' response received. Body:`, response?.body);
+
+    if (response?.success === false) {
+      throw new Error(response.message || `DAP 'stackTrace' request failed`);
+    }
+    if (!response || !response.body || !response.body.stackFrames) {
+      this.logger.warn(`[SM getStackTrace ${sessionId}] No stackFrames in response body. Response:`, response);
+      throw new Error(`DAP 'stackTrace' response did not include stack frames`);
+    }
+    return response.body.stackFrames;
+  }
+
+  /**
+   * Bounded readiness loop for a PAUSED session whose stackTrace succeeded
+   * with zero frames: re-poll the same thread (the stack may not be
+   * materialized yet), and each round also scan the other stopped threads —
+   * the tracked thread may be a frameless runtime thread (finalizer, JIT)
+   * while the real stack lives elsewhere. A frame-bearing thread found by the
+   * scan is adopted as current so scopes/evaluate anchor to it. If nothing
+   * reports frames within the window, return the honest empty answer with a
+   * note telling the agent what to try instead.
+   */
+  private async waitForReadyStack(
+    sessionId: string,
+    session: { state: SessionState },
+    proxyManager: IProxyManager,
+    threadId: number
+  ): Promise<{ frames: DebugProtocol.StackFrame[]; note?: string }> {
+    const deadline = Date.now() + this.pausedStackReadyTimeoutMs;
+    while (Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, this.pausedStackReadyIntervalMs));
+      if (session.state !== SessionState.PAUSED) {
+        return { frames: [], note: 'The session left the paused state while waiting for the stack; it is no longer paused.' };
+      }
+      const frames = await this.requestRawStackFrames(sessionId, proxyManager, threadId);
+      if (frames.length > 0) {
+        return { frames };
+      }
+      const scanned = await this.scanThreadsForFrames(sessionId, proxyManager, threadId);
+      if (scanned) {
+        proxyManager.setCurrentThreadId(scanned.threadId);
+        this.logger.info(`[SM getStackTrace ${sessionId}] Thread ${threadId} stayed frameless; adopted thread ${scanned.threadId} which has a stack.`);
+        return {
+          frames: scanned.frames,
+          note: `The stopped thread ${threadId} reported no stack frames; switched to thread ${scanned.threadId}, which has one.`
+        };
+      }
+    }
+    this.logger.warn(`[SM getStackTrace ${sessionId}] Stack stayed empty for ${this.pausedStackReadyTimeoutMs}ms while paused (threadId ${threadId}).`);
+    return {
+      frames: [],
+      note: `The stopped thread reported no stack frames within ${this.pausedStackReadyTimeoutMs}ms; the target may be paused in native code. Retry get_stack_trace, or use list_threads to inspect other threads.`
+    };
+  }
+
+  /**
+   * Probe the other stopped threads for one that reports stack frames.
+   * Probe failures on individual threads are not fatal — runtime threads may
+   * reject stackTrace outright.
+   */
+  private async scanThreadsForFrames(
+    sessionId: string,
+    proxyManager: IProxyManager,
+    excludeThreadId: number
+  ): Promise<{ threadId: number; frames: DebugProtocol.StackFrame[] } | null> {
+    let threads: DebugProtocol.Thread[] | undefined;
+    try {
+      const response = await proxyManager.sendDapRequest<DebugProtocol.ThreadsResponse>('threads', {});
+      threads = response?.body?.threads;
+    } catch (err) {
+      this.logger.warn(`[SM getStackTrace ${sessionId}] Thread scan could not list threads: ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    }
+    if (!Array.isArray(threads)) {
+      return null;
+    }
+    for (const thread of threads) {
+      if (!thread || typeof thread.id !== 'number' || thread.id === excludeThreadId) {
+        continue;
+      }
+      try {
+        const frames = await this.requestRawStackFrames(sessionId, proxyManager, thread.id);
+        if (frames.length > 0) {
+          return { threadId: thread.id, frames };
+        }
+      } catch {
+        // This thread rejected stackTrace — keep scanning.
+      }
+    }
+    return null;
   }
 
   async getScopes(sessionId: string, frameId: number): Promise<DebugProtocol.Scope[]> {

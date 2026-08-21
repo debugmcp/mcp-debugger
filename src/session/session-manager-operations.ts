@@ -100,11 +100,20 @@ export abstract class SessionManagerOperations extends SessionManagerData {
    * 'threads' is polled until the debugger reports at least one thread.
    * If the window elapses without any threads, the attach is reported as a
    * failure instead of a false "paused" success (issue #124).
-   * Callers can widen the window per attach via the 'verifyTimeout' tool
-   * argument for targets that are slow to become debuggable (issue #143).
+   * Callers can adjust the window per attach via the 'verifyTimeout' tool
+   * argument (issue #143) — smaller for fast failure-by-design probes, larger
+   * for targets that are exceptionally slow to become debuggable.
+   *
+   * The default is deliberately generous: an adapter that dies mid-verify
+   * fails fast regardless (the proxyGone latch), so the deadline only ever
+   * bites when the adapter is alive but the target is slow to report threads
+   * — e.g. js-debug child-session adoption on a heavily loaded host, or a
+   * warming JVM — where a false "attach failed" is far worse than a slow
+   * genuine failure. The poll exits as soon as threads appear, so healthy
+   * attaches never pay for the headroom.
    * Protected so tests can shrink the window.
    */
-  protected attachVerifyTimeoutMs = 5000;
+  protected attachVerifyTimeoutMs = 20000;
   protected attachVerifyIntervalMs = 250;
 
   /**

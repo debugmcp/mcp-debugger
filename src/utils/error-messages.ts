@@ -74,7 +74,7 @@ export const ErrorMessages = {
    * threads within the verification window — either the attach is dead
    * (issue #124) or the target is slow to become debuggable (issue #143)
    * Used in: src/session/session-manager-operations.ts
-   * Default window: 5 seconds, overridable per call via 'verifyTimeout'
+   * Default window: 20 seconds, overridable per call via 'verifyTimeout'
    * @param timeoutMs - The verification window in milliseconds
    * @param lastFailure - The last observed failure while polling 'threads'
    */
