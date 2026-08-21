@@ -29,6 +29,7 @@ import {
   listDarwinProxies,
   listWindowsProxies,
 } from '../../../src/utils/proxy-orphan-reaper.js';
+import { PROC_SCAN_CONCURRENCY } from '../../../src/utils/proc-scan-concurrency.js';
 
 const mockExecFile = execFile as unknown as ReturnType<typeof vi.fn>;
 const mockReaddir = fsp.readdir as unknown as ReturnType<typeof vi.fn>;
@@ -260,6 +261,26 @@ describe('listLinuxProxies', () => {
     expect(await listLinuxProxies()).toEqual([
       { pid: 100, ownerPid: 42, sessionId: 'tag-a' },
     ]);
+  });
+
+  it('bounds concurrent cmdline reads on hosts with many processes', async () => {
+    const pids = Array.from({ length: 500 }, (_, i) => String(1000 + i));
+    mockReaddir.mockResolvedValueOnce(pids as never);
+
+    let inFlight = 0;
+    let peak = 0;
+    mockReadFile.mockImplementation(async () => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setImmediate(resolve));
+      inFlight--;
+      return 'bash\0-l\0';
+    });
+
+    await listLinuxProxies();
+
+    expect(mockReadFile).toHaveBeenCalledTimes(pids.length);
+    expect(peak).toBeLessThanOrEqual(PROC_SCAN_CONCURRENCY);
   });
 });
 
