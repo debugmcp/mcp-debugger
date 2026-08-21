@@ -102,7 +102,13 @@ RUN set -eux; \
     test -x "$DEST/adapter/codelldb"; \
     ln -sfn "$CODELLDB_ARCH" /app/packages/codelldb-common/vendor/codelldb/current
 
-# 5) Build workspace packages and main project (root build runs build:packages); then bundle
+# 5) Build workspace packages and main project (root build runs build:packages); then bundle.
+# The node vendor script runs via prebuild -> vendor:adapters; without this env it
+# would default to all five platforms and re-download the win32/darwin payloads the
+# .dockerignore deliberately excludes (~450 MB the Linux image never uses, and a
+# needless network dependency that can fail the build). Host-only mode finds the
+# shell-vendored engine above already fresh and downloads nothing.
+ENV CODELLDB_VENDOR_ALL=false
 RUN pnpm run build --silent
 RUN node scripts/bundle.js
 
