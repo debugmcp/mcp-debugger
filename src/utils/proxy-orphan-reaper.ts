@@ -34,6 +34,8 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as fs from 'node:fs/promises';
 import { isPidAlive, SignalFn } from './jvm-orphan-reaper.js';
+import { forEachBounded } from './bounded-concurrency.js';
+import { PROC_SCAN_CONCURRENCY } from './proc-scan-concurrency.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -163,21 +165,19 @@ export async function listLinuxProxies(): Promise<TaggedProxy[]> {
     return [];
   }
   const result: TaggedProxy[] = [];
-  await Promise.all(
-    entries.map(async (entry) => {
-      if (!/^\d+$/.test(entry)) return;
-      const pid = Number(entry);
-      let raw: string;
-      try {
-        raw = await fs.readFile(`/proc/${entry}/cmdline`, 'utf8');
-      } catch {
-        return; // disappeared, or permission denied
-      }
-      const args = raw.split('\0').filter((s) => s.length > 0);
-      const tagged = parseProxyArgs(pid, args);
-      if (tagged) result.push(tagged);
-    }),
-  );
+  await forEachBounded(entries, PROC_SCAN_CONCURRENCY, async (entry) => {
+    if (!/^\d+$/.test(entry)) return;
+    const pid = Number(entry);
+    let raw: string;
+    try {
+      raw = await fs.readFile(`/proc/${entry}/cmdline`, 'utf8');
+    } catch {
+      return; // disappeared, or permission denied
+    }
+    const args = raw.split('\0').filter((s) => s.length > 0);
+    const tagged = parseProxyArgs(pid, args);
+    if (tagged) result.push(tagged);
+  });
   return result;
 }
 
