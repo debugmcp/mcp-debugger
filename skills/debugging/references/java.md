@@ -50,7 +50,7 @@ continue_execution    {"sessionId": "<id>"}   // required with suspend=y to let 
 ```
 
 - **Deferred breakpoints work natively:** for classes not yet loaded, the JDI bridge registers a `ClassPrepareRequest` and binds the breakpoint when the JVM loads the class, then reports `verified: true`. Set breakpoints freely before or after attach — no re-sends needed.
-- For a busy or warming JVM, raise `verifyTimeout` (ms) on `attach_to_process` — attach fails if no thread is reported within ~5 s by default. Attach sessions skip host-side file checks, so remote paths are fine.
+- For a busy or warming JVM, raise `verifyTimeout` (ms) on `attach_to_process` — attach fails if no thread is reported within ~20 s by default. Attach sessions skip host-side file checks, so remote paths are fine.
 
 ## Quirks
 

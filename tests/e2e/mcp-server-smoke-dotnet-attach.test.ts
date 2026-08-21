@@ -173,8 +173,8 @@ describe.skipIf(SKIP_DOTNET)('MCP Server .NET Attach Smoke Test @requires-dotnet
         name: 'get_stack_trace',
         arguments: { sessionId }
       })) as { success?: boolean; stackFrames?: Array<{ name?: string; file?: string }> };
-      expect(stackResponse.success).toBe(true);
-      expect((stackResponse.stackFrames ?? []).length).toBeGreaterThan(0);
+      expect(stackResponse.success, JSON.stringify(stackResponse)).toBe(true);
+      expect((stackResponse.stackFrames ?? []).length, JSON.stringify(stackResponse)).toBeGreaterThan(0);
 
       // Breakpoints must bind against the attached process ("No symbols have
       // been loaded" was the second #353 symptom).

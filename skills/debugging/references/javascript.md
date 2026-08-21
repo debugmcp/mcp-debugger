@@ -53,7 +53,7 @@ set_breakpoint       { "sessionId": "<id>", "file": "/abs/path/server.js", "line
 continue_execution   { "sessionId": "<id>" }
 ```
 
-Shorthand: `create_debug_session { "language": "javascript", "host": "127.0.0.1", "port": 9229 }` attaches in one call. Attach is verified by polling for threads (`verifyTimeout`, default ~5000 ms). Detach with `detach_from_process { "sessionId": "<id>", "terminateProcess": false }`; remote debugging beyond a reachable host/port requires manual configuration (e.g. an SSH tunnel).
+Shorthand: `create_debug_session { "language": "javascript", "host": "127.0.0.1", "port": 9229 }` attaches in one call. Attach is verified by polling for threads (`verifyTimeout`, default ~20000 ms). Detach with `detach_from_process { "sessionId": "<id>", "terminateProcess": false }`; remote debugging beyond a reachable host/port requires manual configuration (e.g. an SSH tunnel).
 
 ## Quirks
 

@@ -748,6 +748,9 @@ describe(`Comprehensive MCP Debugger Test — ${ALL_TOOLS.length} Tools × ${LAN
             sessionId: currentSessionId,
             port: 5678,
             host: 'localhost',
+            // Nothing is listening — failure is the expected outcome, so opt
+            // out of the generous default verify window to keep the sweep fast.
+            verifyTimeout: 2000,
           });
 
           // Attach will likely fail because no process is actually listening

@@ -181,7 +181,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       const result = await server.getStackTrace('test-session');
 
       expect(mockProxy.sendDapRequest).toHaveBeenCalledWith('threads', {});
-      expect(mockSessionManager.getStackTraceDetailed).toHaveBeenCalledWith('test-session', 5, false);
+      expect(mockSessionManager.getStackTraceDetailed).toHaveBeenCalledWith('test-session', 5, false, { ensureStackReady: true });
       expect(result.frames).toHaveLength(1);
     });
 
