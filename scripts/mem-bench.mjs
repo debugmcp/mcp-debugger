@@ -41,7 +41,12 @@
  *   --sleepers <n>                 default 1500         (env MEM_BENCH_SLEEPERS)
  *   --sessions <m>                 cycle iterations, default 10
  *   --json <path>                  default bench-results/mem-<target>-<ts>.json
- *   --label <name>                 stored in JSON; default current git branch
+ *   --label <name>                 stored in JSON; default current git branch.
+ *                                  NOTE: the stored git info describes the
+ *                                  bench-runner checkout — when benchmarking a
+ *                                  docker image built from a different commit
+ *                                  (DOCKER_IMAGE_NAME + MEM_BENCH_SKIP_DOCKER_BUILD),
+ *                                  use --label to record the image's provenance
  *   --settle-timeout <ms>          settle cap per checkpoint, default 15000
  *
  * The docker image is (re)built via scripts/docker-build-if-needed.js, which
