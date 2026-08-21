@@ -2,8 +2,10 @@
  * Runs `fn` over `items` with at most `limit` calls in flight, so peak memory
  * scales with `limit` instead of `items.length`.
  *
- * Completion order is not guaranteed. A rejection propagates and leaves the
- * remaining items unprocessed; catch inside `fn` to survive single failures.
+ * Completion order is not guaranteed. A rejection propagates to the caller,
+ * but cancels nothing: only the failing worker stops, and the surviving
+ * workers keep draining the remaining items in the background even after the
+ * returned promise has rejected. Catch inside `fn` to survive single failures.
  */
 export async function forEachBounded<T>(
   items: readonly T[],

@@ -87,4 +87,18 @@ describe('forEachBounded', () => {
       }),
     ).rejects.toBe(boom);
   });
+
+  it('rejection stops only the failing worker; survivors keep draining', async () => {
+    const seen: number[] = [];
+    const err = await forEachBounded([1, 2, 3, 4], 2, async (item) => {
+      if (item === 1) throw new Error('first worker dies');
+      seen.push(item);
+      await new Promise((resolve) => setImmediate(resolve));
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    // The surviving worker is not cancelled: it drains the remaining items in
+    // the background even though the returned promise already rejected.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(seen).toEqual([2, 3, 4]);
+  });
 });
