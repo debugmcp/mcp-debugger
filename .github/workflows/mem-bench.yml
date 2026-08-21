@@ -1,0 +1,83 @@
+name: Memory Bench
+
+# Advisory memory-footprint tracking (scripts/mem-bench.mjs). Measures the RSS
+# of a freshly started server at lifecycle checkpoints (startup floor, first
+# tools/list, session-cycle retention) plus the docker busy-/proc scenario that
+# stresses the startup orphan reapers (PR #395).
+#
+# NEVER a required check: shared-runner memory numbers are noisy, so this job
+# has no thresholds and no PR trigger. Results go to the step summary and an
+# uploaded JSON artifact for trend-watching; the local harness is the source
+# of truth for design decisions (compare mode: mem-bench.mjs compare a b).
+#
+# ubuntu only: Linux is the platform under study (the /proc reaper path), and
+# docker is preinstalled on ubuntu runners.
+
+on:
+  schedule:
+    - cron: '0 8 * * 1'  # weekly, Monday 08:00 UTC
+  workflow_dispatch:
+    inputs:
+      trials:
+        description: 'Trials per scenario'
+        required: false
+        default: '3'
+      sleepers:
+        description: 'Sleeper processes for the busy-/proc scenario'
+        required: false
+        default: '1500'
+
+permissions: {}
+
+jobs:
+  mem-bench:
+    name: Memory Bench (ubuntu)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      with:
+        persist-credentials: false
+
+    - name: Setup pnpm
+      uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
+      with:
+        version: 10
+
+    - name: Setup Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      with:
+        node-version: 22.x
+        cache: 'pnpm'
+
+    - name: Install Node dependencies
+      run: pnpm install --frozen-lockfile
+
+    - name: Build project (CI)
+      run: pnpm run build:ci
+
+    - name: Bench dist target (idle, tools, cycle)
+      run: |
+        node scripts/mem-bench.mjs --target dist --scenario idle,tools,cycle \
+          --trials "$TRIALS" --json bench-results/ci-dist.json | tee -a "$GITHUB_STEP_SUMMARY"
+      env:
+        TRIALS: ${{ github.event.inputs.trials || '3' }}
+
+    - name: Bench docker target (busy-proc)
+      run: |
+        node scripts/mem-bench.mjs --target docker --scenario busy-proc \
+          --trials "$TRIALS" --sleepers "$SLEEPERS" --json bench-results/ci-docker.json | tee -a "$GITHUB_STEP_SUMMARY"
+      env:
+        TRIALS: ${{ github.event.inputs.trials || '3' }}
+        SLEEPERS: ${{ github.event.inputs.sleepers || '1500' }}
+
+    - name: Upload results
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      with:
+        name: mem-bench-results
+        path: bench-results/ci-*.json
+        retention-days: 90

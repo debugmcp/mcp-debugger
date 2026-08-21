@@ -51,6 +51,8 @@
     "posttest:strict": "node scripts/cleanup-test-processes.js",
     "test:flake": "node scripts/flake-hunt.mjs",
     "posttest:flake": "node scripts/cleanup-test-processes.js",
+    "bench:mem": "node scripts/mem-bench.mjs",
+    "bench:mem:docker": "node scripts/mem-bench.mjs --target docker --scenario all",
     "test:integration": "vitest run --project integration",
     "posttest:integration": "node scripts/cleanup-test-processes.js",
     "test:e2e": "pnpm run pretest:docker && vitest run --project e2e",
