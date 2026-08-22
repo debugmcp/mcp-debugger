@@ -350,8 +350,7 @@ async function writeManifest({ source, repo, version, asset, sha256, original })
     version,
     asset,
     sha256,
-    ...(original ? { original } : {}),
-    fetchedAt: new Date().toISOString()
+    ...(original ? { original } : {})
   };
   await fsp.writeFile(MANIFEST_FILE, JSON.stringify(manifest, null, 2) + '\n', 'utf8');
 }
