@@ -1015,3 +1015,129 @@ describe('Verbose discovery logging', () => {
     }
   });
 });
+
+describe('WhichCommandFinder internals (coverage sprint)', () => {
+  beforeEach(() => {
+    // CI runners (setup-python) export pythonLocation/PYTHON_PATH, which
+    // short-circuit discovery before WhichCommandFinder is ever consulted —
+    // neutralize them so these tests exercise the finder on every machine.
+    vi.stubEnv('pythonLocation', undefined);
+    vi.stubEnv('PythonLocation', undefined);
+    vi.stubEnv('PYTHON_PATH', undefined);
+    vi.stubEnv('PYTHON_EXECUTABLE', undefined);
+    spawnMock.mockReset();
+    whichMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  const validPythonSpawn = () =>
+    spawnMock.mockImplementation(() => createSpawn({ exitCode: 0, stdout: 'Python 3.12.0\n' }));
+
+  it('installs a ComSpec fallback on Windows when neither ComSpec nor COMSPEC is set', async () => {
+    vi.stubEnv('ComSpec', '');
+    vi.stubEnv('COMSPEC', '');
+    vi.stubEnv('SystemRoot', 'C:\\WinTest');
+    whichMock.mockResolvedValue(['C:\\py\\python.exe']);
+    validPythonSpawn();
+
+    await expect(findPythonExecutable(undefined, undefined, undefined, 'win32'))
+      .resolves.toBe('C:\\py\\python.exe');
+
+    expect(process.env.ComSpec).toBe(path.join('C:\\WinTest', 'System32', 'cmd.exe'));
+    expect(process.env.COMSPEC).toBe(path.join('C:\\WinTest', 'System32', 'cmd.exe'));
+  });
+
+  it('copies Path into PATH on Windows when only Path is defined', async () => {
+    vi.stubEnv('PATH', '');
+    vi.stubEnv('Path', 'C:\\one;C:\\two');
+    whichMock.mockResolvedValue(['C:\\py\\python.exe']);
+    validPythonSpawn();
+
+    await findPythonExecutable(undefined, undefined, undefined, 'win32');
+
+    expect(process.env.PATH).toBe('C:\\one;C:\\two');
+  });
+
+  it('throws CommandNotFoundError when every candidate is a Windows Store alias', async () => {
+    whichMock.mockResolvedValue([
+      'C:\\Users\\test\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe'
+    ]);
+    validPythonSpawn();
+
+    // Each candidate ends in CommandNotFoundError, so discovery reports the
+    // aggregate not-found error rather than any resolved shim path
+    await expect(findPythonExecutable(undefined, undefined, undefined, 'win32'))
+      .rejects.toThrow(/Python not found/);
+  });
+
+  it('treats a python that fails to spawn --version as invalid (validator error arm)', async () => {
+    whichMock.mockResolvedValue(['C:\\broken\\python.exe']);
+    spawnMock.mockImplementation(() => createSpawn({ exitCode: 1, error: new Error('EACCES') }));
+
+    await expect(findPythonExecutable(undefined, undefined, undefined, 'win32'))
+      .rejects.toThrow();
+    expect(spawnMock).toHaveBeenCalledWith(
+      'C:\\broken\\python.exe',
+      ['-c', expect.stringContaining('sys.exit')],
+      expect.anything()
+    );
+  });
+
+  it('emits the verbose discovery diagnostics when DEBUG_PYTHON_DISCOVERY=true', async () => {
+    vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'true');
+    vi.stubEnv('PATH', 'C:\\a;;C:\\"quoted" ');
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    whichMock.mockResolvedValue(['C:\\py\\python.exe']);
+    validPythonSpawn();
+
+    await findPythonExecutable(undefined, undefined, undefined, 'win32');
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Looking for command: py'));
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('PATH issues found'),
+      expect.arrayContaining([expect.stringContaining('empty entries')])
+    );
+    expect(logSpy).toHaveBeenCalledWith('[PYTHON_DISCOVERY_DEBUG]', expect.any(String));
+  });
+
+  it('runs the direct-spawn failure probe when verbose discovery is on and which fails', async () => {
+    vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'true');
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    whichMock.mockRejectedValue(new Error('which exploded'));
+    spawnMock.mockImplementation(() => createSpawn({ exitCode: 0, stdout: 'Python 3.12.0\n' }));
+
+    await expect(findPythonExecutable(undefined, undefined, undefined, 'win32'))
+      .rejects.toThrow();
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('which failed for'),
+      expect.objectContaining({ message: 'which exploded' })
+    );
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Direct spawn result: SUCCESS')
+    );
+  });
+
+  it('falls through to auto-detection when the env-var interpreter is not found', async () => {
+    vi.stubEnv('PYTHON_PATH', 'ghost-python');
+    // The auto-detect winner still gets a debugpy probe
+    spawnMock.mockImplementation(() => createSpawn({ exitCode: 0, stdout: '1.8.0\n' }));
+    const finder: CommandFinder = {
+      find: async (cmd: string) => {
+        if (cmd === 'ghost-python') {
+          throw new CommandNotFoundError(cmd);
+        }
+        return '/usr/bin/python3';
+      }
+    };
+
+    await expect(findPythonExecutable(undefined, undefined, finder, 'linux'))
+      .resolves.toBe('/usr/bin/python3');
+  });
+});
