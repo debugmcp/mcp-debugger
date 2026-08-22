@@ -140,7 +140,8 @@ export const ErrorMessages = {
    */
   launchUnavailable: (language: string, reason: string) =>
     `Cannot start a '${language}' debug session: ${reason} ` +
-    `See list_supported_languages for per-mode availability.`,
+    `See list_supported_languages for per-mode availability, or run ` +
+    `'mcp-debugger doctor ${language}' on the server host for a diagnosis.`,
 
   /**
    * Reason strings for per-mode availability reporting in list_supported_languages

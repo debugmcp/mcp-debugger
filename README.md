@@ -384,6 +384,7 @@ Then get the local variables:
 - 🚑 [JIT Diagnostics Tutorial](./docs/jit-diagnostics/README.md) – Debug live services in Kubernetes, incl. the ephemeral-sidecar flow for compiled code
 - 🤖 [Agent Debugging Guide](./docs/agent-debugging-guide.md) – Correct tool usage patterns for AI agents
 - ⚠️ [Known Issues](./docs/KNOWN_ISSUES.md) – Current caveats and workarounds
+- 🩺 [Diagnostics](./docs/diagnostics.md) – `mcp-debugger doctor`, per-language prerequisites, failure signatures, env-var reference
 - 🔧 [Troubleshooting](./docs/troubleshooting.md) – Common issues & solutions
 
 ## 🤝 Contributing

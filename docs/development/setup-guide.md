@@ -303,12 +303,14 @@ TEST_TIMEOUT=30000
 
 ### Available Environment Variables
 
+The complete runtime-affecting set lives in the [Diagnostics guide's environment variable reference](../diagnostics.md#environment-variable-reference) — that table is canonical. Development-relevant highlights:
+
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `DEBUG_MCP_LOG_LEVEL` | Logging level (error, warn, info, debug) | `info` |
 | `PYTHON_PATH` | Path to Python executable | Auto-detected |
 | `PYTHON_EXECUTABLE` | Alternative to `PYTHON_PATH` for Python executable path (checked as fallback) | Auto-detected |
-| `DLV_PATH` | Path to Delve debugger (Go) | Auto-detected |
+| `GOBIN` | Searched first for the Delve debugger (Go), before `GOPATH/bin` and PATH | Not set |
 | `NETCOREDBG_PATH` | Path to netcoredbg (.NET) | Auto-detected |
 | `JAVA_HOME` | Path to JDK installation (Java) | Auto-detected |
 | `DEBUG` | Enable debug output (e.g., `DEBUG=debug-mcp:*`) | Not set |
