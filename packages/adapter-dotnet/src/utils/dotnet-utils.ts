@@ -201,6 +201,67 @@ export async function findDotnetBackend(
 }
 
 /**
+ * Report the version of a netcoredbg executable, or null when it cannot be
+ * spawned or exits non-zero. Extracts the version token from output like
+ * "NET Core debugger 3.1.2-1054"; falls back to the first non-empty output
+ * line for builds that print a different banner. Doctor-only probe (issue
+ * #423) — not called from validate(), so registration cost is unchanged.
+ */
+export async function getNetcoredbgVersion(netcoredbgPath: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    try {
+      const child = spawn(netcoredbgPath, ['--version'], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true
+      });
+      let output = '';
+      child.stdout?.on('data', (data) => { output += data.toString(); });
+      child.on('error', () => resolve(null));
+      child.on('exit', (code) => {
+        if (code !== 0) {
+          resolve(null);
+          return;
+        }
+        const match = output.match(/(\d+\.\d+\.\d+(?:-[\w.]+)?)/);
+        if (match) {
+          resolve(match[1]);
+          return;
+        }
+        const firstLine = output.split(/\r?\n/).map((line) => line.trim()).find((line) => line.length > 0);
+        resolve(firstLine ?? null);
+      });
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+/**
+ * Report the active .NET SDK version (`dotnet --version`), or null when the
+ * dotnet CLI is missing or reports an error (e.g. no SDK behind a bare
+ * runtime install). Doctor-only probe (issue #423).
+ */
+export async function getDotnetSdkVersion(): Promise<string | null> {
+  return new Promise((resolve) => {
+    try {
+      const child = spawn('dotnet', ['--version'], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true
+      });
+      let output = '';
+      child.stdout?.on('data', (data) => { output += data.toString(); });
+      child.on('error', () => resolve(null));
+      child.on('exit', (code) => {
+        const version = output.trim().split(/\r?\n/)[0]?.trim() ?? '';
+        resolve(code === 0 && version.length > 0 ? version : null);
+      });
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+/**
  * List running .NET processes on the system.
  * Currently Windows-only using tasklist.
  *

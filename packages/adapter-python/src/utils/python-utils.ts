@@ -488,6 +488,29 @@ export async function findPythonExecutable(
 /**
  * Get Python version for a given executable
  */
+/**
+ * Report the debugpy version importable by the given interpreter, or null when
+ * debugpy is missing (or the interpreter cannot be spawned). Null is not fatal:
+ * debugpy may still be available in the user's virtualenv (issue #16).
+ */
+export async function getDebugpyVersion(pythonPath: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const child = spawn(pythonPath, ['-c', 'import debugpy; print(debugpy.__version__)'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true
+    });
+
+    let output = '';
+    child.stdout?.on('data', (data) => { output += data.toString(); });
+
+    child.on('error', () => resolve(null));
+    child.on('exit', (code) => {
+      const version = output.trim();
+      resolve(code === 0 && version.length > 0 ? version : null);
+    });
+  });
+}
+
 export async function getPythonVersion(pythonPath: string): Promise<string | null> {
   return new Promise((resolve) => {
     const child = spawn(pythonPath, ['--version'], { stdio: 'pipe', windowsHide: true });

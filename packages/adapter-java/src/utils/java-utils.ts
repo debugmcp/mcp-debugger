@@ -73,6 +73,68 @@ export async function validateJavaExecutable(javaPath: string): Promise<boolean>
 }
 
 /**
+ * Find a working javac executable, or null when none validates.
+ *
+ * Priority: sibling of the resolved java path > JAVA_HOME/bin/javac > 'javac'
+ * in PATH. Doctor-only probe (issue #423): javac is required to compile
+ * target code with -g for variable inspection, but the adapter itself only
+ * needs the JRE side, so this is never part of validate().
+ */
+export async function findJavacExecutable(javaPath?: string): Promise<string | null> {
+  /* istanbul ignore next -- platform-specific executable extension */
+  const ext = process.platform === 'win32' ? '.exe' : '';
+  const candidates: string[] = [];
+
+  if (javaPath && path.dirname(javaPath) !== '.') {
+    candidates.push(path.join(path.dirname(javaPath), `javac${ext}`));
+  }
+  if (process.env.JAVA_HOME) {
+    candidates.push(path.join(process.env.JAVA_HOME, 'bin', `javac${ext}`));
+  }
+  candidates.push('javac');
+
+  for (const candidate of new Set(candidates)) {
+    if (await validateJavacExecutable(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+/**
+ * Validate that a javac executable works by running `javac -version`.
+ */
+async function validateJavacExecutable(javacPath: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    try {
+      const child = spawn(javacPath, ['-version'], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+
+      let hasOutput = false;
+      child.stdout?.on('data', () => { hasOutput = true; });
+      child.stderr?.on('data', () => { hasOutput = true; });
+      child.on('error', () => {
+        if (settled) return;
+        settled = true;
+        resolve(false);
+      });
+      child.on('exit', (code) => {
+        if (settled) return;
+        settled = true;
+        resolve(code === 0 && hasOutput);
+      });
+    } catch {
+      if (settled) return;
+      settled = true;
+      resolve(false);
+    }
+  });
+}
+
+/**
  * Get the Java version string.
  */
 export async function getJavaVersion(javaPath?: string): Promise<string | null> {

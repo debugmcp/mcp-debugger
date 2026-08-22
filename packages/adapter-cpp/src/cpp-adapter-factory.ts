@@ -8,7 +8,7 @@ import { IDebugAdapter } from '@debugmcp/shared';
 import { IAdapterFactory, AdapterDependencies, AdapterMetadata, FactoryValidationResult } from '@debugmcp/shared';
 import { CppDebugAdapter } from './cpp-debug-adapter.js';
 import { DebugLanguage } from '@debugmcp/shared';
-import { resolveCodeLLDBExecutable, getCodeLLDBVersion } from '@debugmcp/codelldb-common';
+import { resolveCodeLLDBExecutableWithSource, getCodeLLDBVersion } from '@debugmcp/codelldb-common';
 import { findAnyCompiler } from './utils/compile-utils.js';
 
 /**
@@ -49,14 +49,16 @@ export class CppAdapterFactory implements IAdapterFactory {
     const warnings: string[] = [];
     let codelldbPath: string | undefined;
     let codelldbVersion: string | undefined;
+    let codelldbSource: string | undefined;
     let compiler: string | undefined;
 
     // Check CodeLLDB — the only hard requirement
-    const resolvedCodelldb = await resolveCodeLLDBExecutable();
+    const resolvedCodelldb = await resolveCodeLLDBExecutableWithSource();
     if (!resolvedCodelldb) {
       errors.push('CodeLLDB not found. It normally ships via the @debugmcp/codelldb-* optional dependencies; set CODELLDB_PATH, or in a repo checkout run: npm run build:adapter');
     } else {
-      codelldbPath = resolvedCodelldb;
+      codelldbPath = resolvedCodelldb.path;
+      codelldbSource = resolvedCodelldb.source;
       codelldbVersion = await getCodeLLDBVersion() || undefined;
     }
 
@@ -75,6 +77,7 @@ export class CppAdapterFactory implements IAdapterFactory {
       details: {
         codelldbPath,
         codelldbVersion,
+        codelldbSource,
         compiler,
         platform: process.platform,
         arch: process.arch,

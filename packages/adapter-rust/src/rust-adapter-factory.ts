@@ -9,7 +9,7 @@ import { IAdapterFactory, AdapterDependencies, AdapterMetadata, FactoryValidatio
 import { RustDebugAdapter } from './rust-debug-adapter.js';
 import { DebugLanguage } from '@debugmcp/shared';
 import { checkCargoInstallation, getCargoVersion, getRustHostTriple } from './utils/rust-utils.js';
-import { resolveCodeLLDBExecutable, getCodeLLDBVersion } from './utils/codelldb-resolver.js';
+import { resolveCodeLLDBExecutableWithSource, getCodeLLDBVersion } from './utils/codelldb-resolver.js';
 
 /**
  * Factory for creating Rust debug adapters
@@ -49,15 +49,17 @@ export class RustAdapterFactory implements IAdapterFactory {
     const warnings: string[] = [];
     let codelldbPath: string | undefined;
     let codelldbVersion: string | undefined;
+    let codelldbSource: string | undefined;
     let cargoVersion: string | undefined;
     let hostTriple: string | undefined;
-    
+
     // Check CodeLLDB
-    const resolvedCodelldb = await resolveCodeLLDBExecutable();
+    const resolvedCodelldb = await resolveCodeLLDBExecutableWithSource();
     if (!resolvedCodelldb) {
       errors.push('CodeLLDB not found. It normally ships via the @debugmcp/codelldb-* optional dependencies; set CODELLDB_PATH, or in a repo checkout run: npm run build:adapter');
     } else {
-      codelldbPath = resolvedCodelldb;
+      codelldbPath = resolvedCodelldb.path;
+      codelldbSource = resolvedCodelldb.source;
       codelldbVersion = await getCodeLLDBVersion() || undefined;
     }
     
@@ -84,6 +86,7 @@ export class RustAdapterFactory implements IAdapterFactory {
       details: {
         codelldbPath,
         codelldbVersion,
+        codelldbSource,
         cargoVersion,
         hostTriple,
         platform: process.platform,

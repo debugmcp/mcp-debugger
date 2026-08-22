@@ -10,8 +10,7 @@ import { IDebugAdapter } from '@debugmcp/shared';
 import { IAdapterFactory, AdapterDependencies, AdapterMetadata, FactoryValidationResult } from '@debugmcp/shared';
 import { PythonDebugAdapter } from './python-debug-adapter.js';
 import { DebugLanguage } from '@debugmcp/shared';
-import { findPythonExecutable, getPythonVersion } from './utils/python-utils.js';
-import { spawn } from 'child_process';
+import { findPythonExecutable, getPythonVersion, getDebugpyVersion } from './utils/python-utils.js';
 
 /**
  * Factory for creating Python debug adapters
@@ -51,11 +50,12 @@ export class PythonAdapterFactory implements IAdapterFactory {
     const warnings: string[] = [];
     let pythonPath: string | undefined;
     let pythonVersion: string | undefined;
-    
+    let debugpyVersion: string | undefined;
+
     try {
       // Check Python executable
       pythonPath = await findPythonExecutable();
-      
+
       // Check Python version
       pythonVersion = await getPythonVersion(pythonPath) || undefined;
       if (pythonVersion) {
@@ -66,18 +66,18 @@ export class PythonAdapterFactory implements IAdapterFactory {
       } else {
         warnings.push('Could not determine Python version');
       }
-      
+
       // Check debugpy installation (warning only — debugpy may be available in the
       // user's virtualenv even if missing from system Python. See issue #16.)
-      const hasDebugpy = await this.checkDebugpyInstalled(pythonPath);
-      if (!hasDebugpy) {
+      debugpyVersion = await getDebugpyVersion(pythonPath) || undefined;
+      if (!debugpyVersion) {
         warnings.push('debugpy not found in system Python. If using a virtualenv, debugpy will be checked at launch time. Otherwise run: pip install debugpy');
       }
-      
+
     } catch (error) {
       errors.push(error instanceof Error ? error.message : 'Python executable not found');
     }
-    
+
     return {
       valid: errors.length === 0,
       errors,
@@ -85,30 +85,11 @@ export class PythonAdapterFactory implements IAdapterFactory {
       details: {
         pythonPath,
         pythonVersion,
+        debugpyVersion,
         pythonDetectionMethod: 'multi-strategy',
         platform: process.platform,
         timestamp: new Date().toISOString()
       }
     };
-  }
-  
-  /**
-   * Check if debugpy is installed
-   */
-  private checkDebugpyInstalled(pythonPath: string): Promise<boolean> {
-    return new Promise((resolve) => {
-      const child = spawn(pythonPath, ['-c', 'import debugpy; print(debugpy.__version__)'], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true
-      });
-      
-      let output = '';
-      child.stdout?.on('data', (data) => { output += data.toString(); });
-      
-      child.on('error', () => resolve(false));
-      child.on('exit', (code) => {
-        resolve(code === 0 && output.trim().length > 0);
-      });
-    });
   }
 }

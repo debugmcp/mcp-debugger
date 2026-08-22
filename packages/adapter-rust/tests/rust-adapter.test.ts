@@ -20,6 +20,10 @@ import * as path from 'path';
 vi.mock('../src/utils/codelldb-resolver.js', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   resolveCodeLLDBExecutable: vi.fn(async () => '/mock/vendor/codelldb'),
+  resolveCodeLLDBExecutableWithSource: vi.fn(async () => ({
+    path: '/mock/vendor/codelldb',
+    source: 'vendored'
+  })),
   getCodeLLDBVersion: vi.fn(async () => '1.11.0')
 }));
 vi.mock('../src/utils/rust-utils.js', async (importOriginal) => ({
@@ -387,10 +391,19 @@ describe('RustAdapterFactory', () => {
     });
   });
 
+  it('should attribute the CodeLLDB resolution source in details (issue #423)', async () => {
+    const result = await factory.validate();
+
+    expect(result.details).toMatchObject({
+      codelldbPath: '/mock/vendor/codelldb',
+      codelldbSource: 'vendored'
+    });
+  });
+
   it('should report an error when CodeLLDB is missing and a warning when cargo is missing', async () => {
-    const { resolveCodeLLDBExecutable } = await import('../src/utils/codelldb-resolver.js');
+    const { resolveCodeLLDBExecutableWithSource } = await import('../src/utils/codelldb-resolver.js');
     const { checkCargoInstallation } = await import('../src/utils/rust-utils.js');
-    vi.mocked(resolveCodeLLDBExecutable).mockResolvedValueOnce(null);
+    vi.mocked(resolveCodeLLDBExecutableWithSource).mockResolvedValueOnce(null);
     vi.mocked(checkCargoInstallation).mockResolvedValueOnce(false);
 
     const result = await factory.validate();

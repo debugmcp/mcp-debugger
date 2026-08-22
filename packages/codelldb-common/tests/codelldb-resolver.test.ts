@@ -18,6 +18,7 @@ vi.mock('fs/promises', () => ({
 
 import {
   resolveCodeLLDBExecutable,
+  resolveCodeLLDBExecutableWithSource,
   getCodeLLDBVersion,
   DEFAULT_CODELLDB_VERSION,
   getCodeLLDBPlatformDir,
@@ -135,6 +136,79 @@ describe('codelldb-resolver', () => {
         resolveCodeLLDBExecutable({ resolvePlatformPackageRoot: () => null })
       ).resolves.toBeNull();
       expect(accessMock).toHaveBeenCalledTimes(5);
+    });
+  });
+
+  describe('resolveCodeLLDBExecutableWithSource (issue #423)', () => {
+    const pkgRoot = path.resolve('/npx-install/node_modules/@debugmcp/codelldb-linux-x64');
+
+    it('attributes a vendored candidate hit to source "vendored"', async () => {
+      stubPlatform('linux', 'x64');
+      accessMock.mockResolvedValue(undefined);
+
+      const result = await resolveCodeLLDBExecutableWithSource();
+
+      expect(result).not.toBeNull();
+      expect(result!.source).toBe('vendored');
+      expect(result!.path).toBe(accessMock.mock.calls[0][0]);
+    });
+
+    it('attributes a CODELLDB_PATH hit to source "env:CODELLDB_PATH"', async () => {
+      stubPlatform('darwin', 'arm64');
+      vi.stubEnv('CODELLDB_PATH', '/custom/codelldb');
+      accessMock.mockImplementation((p: string) =>
+        p === '/custom/codelldb' ? Promise.resolve() : Promise.reject(new Error('ENOENT'))
+      );
+
+      await expect(
+        resolveCodeLLDBExecutableWithSource({ resolvePlatformPackageRoot: () => null })
+      ).resolves.toEqual({ path: '/custom/codelldb', source: 'env:CODELLDB_PATH' });
+    });
+
+    it('attributes a platform-package hit to source "platform-package"', async () => {
+      stubPlatform('linux', 'x64');
+      const expected = path.join(pkgRoot, 'adapter', 'codelldb');
+      accessMock.mockImplementation((p: string) =>
+        p === expected ? Promise.resolve() : Promise.reject(new Error('ENOENT'))
+      );
+
+      await expect(
+        resolveCodeLLDBExecutableWithSource({ resolvePlatformPackageRoot: () => pkgRoot })
+      ).resolves.toEqual({ path: expected, source: 'platform-package' });
+    });
+
+    it('returns null when nothing resolves', async () => {
+      stubPlatform('linux', 'x64');
+      accessMock.mockRejectedValue(new Error('ENOENT'));
+
+      await expect(
+        resolveCodeLLDBExecutableWithSource({ resolvePlatformPackageRoot: () => null })
+      ).resolves.toBeNull();
+    });
+
+    it('returns null on unsupported platforms without touching the filesystem', async () => {
+      stubPlatform('freebsd');
+
+      await expect(resolveCodeLLDBExecutableWithSource()).resolves.toBeNull();
+      expect(accessMock).not.toHaveBeenCalled();
+    });
+
+    it('resolveCodeLLDBExecutable delegates: same path, same probe sequence', async () => {
+      stubPlatform('linux', 'x64');
+      accessMock
+        .mockRejectedValueOnce(new Error('ENOENT'))
+        .mockResolvedValueOnce(undefined);
+
+      const plain = await resolveCodeLLDBExecutable();
+
+      accessMock.mockReset();
+      accessMock
+        .mockRejectedValueOnce(new Error('ENOENT'))
+        .mockResolvedValueOnce(undefined);
+
+      const withSource = await resolveCodeLLDBExecutableWithSource();
+
+      expect(withSource!.path).toBe(plain);
     });
   });
 

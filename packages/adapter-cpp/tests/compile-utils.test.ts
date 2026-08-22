@@ -22,12 +22,13 @@ import {
   dialectForSource,
   findCompiler,
   findAnyCompiler,
+  getCompilerInfo,
   getDefaultOutputPath,
   needsRecompile,
   compileSourceFile
 } from '../src/utils/compile-utils.js';
 
-function fakeProcess(exitCode: number, stderr = ''): EventEmitter & { stdout: EventEmitter; stderr: EventEmitter } {
+function fakeProcess(exitCode: number, stderr = '', stdout = ''): EventEmitter & { stdout: EventEmitter; stderr: EventEmitter } {
   const proc = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter };
   proc.stdout = new EventEmitter();
   proc.stderr = new EventEmitter();
@@ -35,8 +36,19 @@ function fakeProcess(exitCode: number, stderr = ''): EventEmitter & { stdout: Ev
     if (stderr) {
       proc.stderr.emit('data', Buffer.from(stderr));
     }
+    if (stdout) {
+      proc.stdout.emit('data', Buffer.from(stdout));
+    }
     proc.emit('exit', exitCode);
   });
+  return proc;
+}
+
+function erroringProcess(): EventEmitter & { stdout: EventEmitter; stderr: EventEmitter } {
+  const proc = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter };
+  proc.stdout = new EventEmitter();
+  proc.stderr = new EventEmitter();
+  setImmediate(() => proc.emit('error', new Error('ENOENT')));
   return proc;
 }
 
@@ -128,6 +140,35 @@ describe('compile-utils', () => {
         .mockImplementationOnce(() => fakeProcess(0));
 
       await expect(findAnyCompiler()).resolves.toBe('gcc');
+    });
+  });
+
+  describe('getCompilerInfo (issue #423)', () => {
+    it('returns the discovered command and the first line of its --version output', async () => {
+      spawnMock
+        .mockImplementationOnce(() => fakeProcess(0))  // findAnyCompiler probe: g++ answers
+        .mockImplementationOnce(() =>
+          fakeProcess(0, '', 'g++ (MinGW-w64 x86_64-posix-seh) 13.2.0\nCopyright (C) 2023 Free Software Foundation\n')
+        );
+
+      await expect(getCompilerInfo()).resolves.toEqual({
+        command: 'g++',
+        version: 'g++ (MinGW-w64 x86_64-posix-seh) 13.2.0'
+      });
+    });
+
+    it('returns null when no compiler is installed', async () => {
+      spawnMock.mockImplementation(() => fakeProcess(1)); // every candidate probe fails
+
+      await expect(getCompilerInfo()).resolves.toBeNull();
+    });
+
+    it('returns a null version when the --version re-run fails after discovery', async () => {
+      spawnMock
+        .mockImplementationOnce(() => fakeProcess(0))    // probe succeeds
+        .mockImplementationOnce(() => erroringProcess()); // version capture fails
+
+      await expect(getCompilerInfo()).resolves.toEqual({ command: 'g++', version: null });
     });
   });
 

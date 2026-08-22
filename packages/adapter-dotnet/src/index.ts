@@ -10,6 +10,8 @@ export { DotnetDebugAdapter } from './DotnetDebugAdapter.js';
 export {
   findNetcoredbgExecutable,
   findDotnetBackend,
+  getNetcoredbgVersion,
+  getDotnetSdkVersion,
   listDotnetProcesses,
   isPortablePdb,
   findPdb2PdbExecutable,

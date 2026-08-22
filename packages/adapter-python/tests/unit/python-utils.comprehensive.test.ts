@@ -20,6 +20,7 @@ import which from 'which';
 import {
   findPythonExecutable,
   getPythonVersion,
+  getDebugpyVersion,
   setDefaultCommandFinder,
   resetDefaultCommandFinder,
   CommandNotFoundError,
@@ -555,6 +556,51 @@ describe('getPythonVersion', () => {
 
     const version = await getPythonVersion('/usr/bin/python3');
     expect(version).toBeNull();
+  });
+});
+
+describe('getDebugpyVersion (issue #423)', () => {
+  beforeEach(() => {
+    spawnMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('returns the printed debugpy version, trimmed', async () => {
+    spawnMock.mockImplementation(() =>
+      createSpawn({ exitCode: 0, stdout: '1.8.14\n' })
+    );
+
+    await expect(getDebugpyVersion('/usr/bin/python3')).resolves.toBe('1.8.14');
+    expect(spawnMock).toHaveBeenCalledWith(
+      '/usr/bin/python3',
+      ['-c', 'import debugpy; print(debugpy.__version__)'],
+      expect.objectContaining({ windowsHide: true })
+    );
+  });
+
+  it('returns null when the import fails (debugpy not installed)', async () => {
+    spawnMock.mockImplementation(() =>
+      createSpawn({ exitCode: 1, stderr: "ModuleNotFoundError: No module named 'debugpy'" })
+    );
+
+    await expect(getDebugpyVersion('/usr/bin/python3')).resolves.toBeNull();
+  });
+
+  it('returns null when the interpreter cannot be spawned', async () => {
+    spawnMock.mockImplementation(() =>
+      createSpawn({ exitCode: 0, error: new Error('ENOENT') })
+    );
+
+    await expect(getDebugpyVersion('/nonexistent/python')).resolves.toBeNull();
+  });
+
+  it('returns null when the command prints nothing', async () => {
+    spawnMock.mockImplementation(() => createSpawn({ exitCode: 0 }));
+
+    await expect(getDebugpyVersion('/usr/bin/python3')).resolves.toBeNull();
   });
 });
 

@@ -73,6 +73,45 @@ export async function findAnyCompiler(): Promise<string | null> {
   return (await findCompiler('cpp')) ?? (await findCompiler('c'));
 }
 
+export interface CompilerInfo {
+  command: string;
+  version: string | null;
+}
+
+/**
+ * Discover the available compiler and its version banner (the first line of
+ * `--version` output, e.g. "g++ (MinGW-w64 ...) 13.2.0"). Doctor-only probe
+ * (issue #423) — validate() keeps its cheaper presence-only findAnyCompiler.
+ */
+export async function getCompilerInfo(): Promise<CompilerInfo | null> {
+  const command = await findAnyCompiler();
+  if (!command) {
+    return null;
+  }
+  return { command, version: await captureVersionLine(command) };
+}
+
+function captureVersionLine(command: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    try {
+      const child = spawn(command, ['--version'], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true
+      });
+      let output = '';
+      child.stdout?.on('data', (data) => { output += data.toString(); });
+      child.stderr?.on('data', (data) => { output += data.toString(); });
+      child.on('error', () => resolve(null));
+      child.on('exit', (code) => {
+        const firstLine = output.split(/\r?\n/).map((line) => line.trim()).find((line) => line.length > 0);
+        resolve(code === 0 && firstLine ? firstLine : null);
+      });
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
 /**
  * Deterministic output location for a compiled single-file program:
  * `<sourceDir>/.debug-mcp/<basename>[.exe]`. Git-ignorable and stable, so
