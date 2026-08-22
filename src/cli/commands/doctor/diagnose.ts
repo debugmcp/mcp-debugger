@@ -195,11 +195,17 @@ async function diagnoseLanguage(
     };
   }
 
-  const factory = await deps.registry.getFactory(entry.name).catch(() => undefined);
+  let factoryLoadError: unknown;
+  const factory = await deps.registry.getFactory(entry.name).catch((error: unknown) => {
+    factoryLoadError = error;
+    return undefined;
+  });
 
   if (!factory || typeof factory.validate !== 'function') {
-    // Mirrors the server: no factory means no probe, and availability is
-    // assumed. Doctor surfaces that it could not actually look.
+    // An installed adapter whose factory cannot even be loaded cannot start
+    // any session — that is broken, and a gated run must fail. (The server
+    // fails open here; the modes below reflect that so the divergence stays
+    // visible rather than silent.)
     const modes = await computeModeAvailability({
       language: entry.name,
       packageName: entry.packageName,
@@ -208,13 +214,19 @@ async function diagnoseLanguage(
       attach: entry.attach ?? 'none',
       logger: deps.logger
     });
+    const loadDetail =
+      factoryLoadError instanceof Error ? `: ${factoryLoadError.message}` : '';
     return {
       ...base,
-      verdict: 'warn',
-      errors: [],
-      warnings: ['Adapter factory could not be loaded, so the toolchain was not probed'],
+      verdict: 'broken',
+      errors: [
+        `Adapter factory could not be loaded${loadDetail} — the installed ${entry.packageName} ` +
+          `may be corrupt or version-skewed; try reinstalling it. ` +
+          `(The server assumes availability when it cannot probe.)`
+      ],
+      warnings: [],
       modes,
-      probe: { durationMs: 0, timedOut: false, failed: false }
+      probe: { durationMs: 0, timedOut: false, failed: true }
     };
   }
 
@@ -228,17 +240,24 @@ async function diagnoseLanguage(
     probeError = error;
     timedOut = error instanceof ProbeTimeoutError;
   }
-  const durationMs = Date.now() - started;
   const failed = probeError !== undefined && !timedOut;
 
   // Feed computeModeAvailability the same outcome the server would see: the
-  // memoized result, or a throwing probe so its fail-open path runs.
+  // memoized result, or a throwing probe so its fail-open path runs. A
+  // throwing getMetadata (malformed third-party factory) must not take the
+  // other languages down with it.
+  let metadataAttach: AttachMechanism | undefined;
+  try {
+    metadataAttach = factory.getMetadata().modes?.attach;
+  } catch {
+    metadataAttach = undefined;
+  }
   const modes = await computeModeAvailability({
     language: entry.name,
     packageName: entry.packageName,
     installed: true,
     disabled: false,
-    attach: factory.getMetadata().modes?.attach ?? entry.attach ?? 'none',
+    attach: metadataAttach ?? entry.attach ?? 'none',
     validate: validation
       ? async () => validation
       : async () => {
@@ -249,15 +268,23 @@ async function diagnoseLanguage(
 
   let details = validation?.details ? { ...validation.details } : undefined;
   if (validation) {
+    // Extras share the language's timeout budget: whatever validate() left
+    // over. A hung extras child is flagged via probe.timedOut so the handler's
+    // force-exit containment covers it too.
+    const remainingMs = Math.max(0, deps.timeoutMs - (Date.now() - started));
     try {
-      const extras = await withTimeout(collectExtras(entry.name, details ?? {}), deps.timeoutMs);
+      const extras = await withTimeout(collectExtras(entry.name, details ?? {}), remainingMs);
       if (extras && Object.keys(extras).length > 0) {
         details = { ...(details ?? {}), ...extras };
       }
-    } catch {
+    } catch (error) {
       // Extras are best-effort; the verdict stands on validate() alone.
+      if (error instanceof ProbeTimeoutError) {
+        timedOut = true;
+      }
     }
   }
+  const durationMs = Date.now() - started;
 
   let verdict: DoctorVerdict;
   let errors: string[];

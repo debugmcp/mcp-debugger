@@ -150,19 +150,22 @@ describe('handleDoctorCommand', () => {
     expect(deps.disposeLogger).toHaveBeenCalled();
   });
 
-  it('returns 2 for an unparseable --timeout', async () => {
-    const writeError = vi.fn();
+  it.each(['soon', '1e4', '10s', '5,000', '-100', '0'])(
+    'returns 2 for a non-integer --timeout %s instead of truncating it',
+    async (timeout) => {
+      const writeError = vi.fn();
 
-    const code = await handleDoctorCommand([], { timeout: 'soon' }, {
-      createDependencies: () => makeFakeDependencies([]),
-      writeOutput: vi.fn(),
-      writeError,
-      exit: vi.fn()
-    });
+      const code = await handleDoctorCommand([], { timeout }, {
+        createDependencies: () => makeFakeDependencies([]),
+        writeOutput: vi.fn(),
+        writeError,
+        exit: vi.fn()
+      });
 
-    expect(code).toBe(2);
-    expect(writeError.mock.calls.join('\n')).toContain('timeout');
-  });
+      expect(code).toBe(2);
+      expect(writeError.mock.calls.join('\n')).toContain('timeout');
+    }
+  );
 
   it('force-exits only when a probe timed out (hung child containment)', async () => {
     const hungDeps = makeFakeDependencies([

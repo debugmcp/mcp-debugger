@@ -219,6 +219,77 @@ describe('diagnose', () => {
     expect(dotnet.modes?.launch.available).toBe(true); // fail-open parity
   });
 
+  it('reports broken (not warn) for an installed adapter whose factory cannot be loaded, failing a gated run', async () => {
+    // installed: true but no validate => the fake registry returns undefined
+    // from getFactory, modelling a corrupt/version-skewed adapter package.
+    const deps = makeDeps([{ name: 'python', installed: true }]);
+
+    const report = await diagnose(['python'], deps);
+
+    const python = report.languages[0];
+    expect(python.verdict).toBe('broken');
+    expect(python.probe.failed).toBe(true);
+    expect(python.errors[0]).toContain('factory');
+    expect(report.exitCode).toBe(1);
+    // Fail-open parity: the server would still assume availability here.
+    expect(python.modes?.launch.available).toBe(true);
+  });
+
+  it('sets probe.timedOut when the extras collector hangs, so the handler can force-exit', async () => {
+    vi.useFakeTimers();
+    const deps = makeDeps(
+      [{ name: 'dotnet', validate: okValidate({ debuggerPath: '/x' }) }],
+      {
+        timeoutMs: 1000,
+        collectExtras: () => new Promise(() => undefined)
+      }
+    );
+
+    const reportPromise = diagnose([], deps);
+    await vi.advanceTimersByTimeAsync(2200);
+    const report = await reportPromise;
+
+    const dotnet = report.languages[0];
+    expect(dotnet.verdict).toBe('ok'); // extras are best-effort; the verdict stands on validate()
+    expect(dotnet.probe.timedOut).toBe(true);
+  });
+
+  it('counts the extras phase inside probe.durationMs', async () => {
+    vi.useFakeTimers();
+    const deps = makeDeps(
+      [{ name: 'dotnet', validate: okValidate({ debuggerPath: '/x' }) }],
+      {
+        timeoutMs: 5000,
+        collectExtras: () =>
+          new Promise((resolve) => setTimeout(() => resolve({ dotnetSdkVersion: '8.0.301' }), 300))
+      }
+    );
+
+    const reportPromise = diagnose([], deps);
+    await vi.advanceTimersByTimeAsync(400);
+    const report = await reportPromise;
+
+    expect(report.languages[0].probe.durationMs).toBeGreaterThanOrEqual(300);
+  });
+
+  it('survives a factory whose getMetadata throws, falling back to the registry attach mechanism', async () => {
+    const deps = makeDeps([{ name: 'ruby', attach: 'direct-connect', validate: okValidate() }]);
+    const registry = deps.registry as unknown as { getFactory: ReturnType<typeof vi.fn> };
+    const originalGetFactory = registry.getFactory;
+    registry.getFactory = vi.fn(async (language: string) => {
+      const factory = await originalGetFactory(language);
+      return factory
+        ? { ...factory, getMetadata: () => { throw new Error('metadata exploded'); } }
+        : undefined;
+    });
+
+    const report = await diagnose([], deps);
+
+    expect(report.languages).toHaveLength(1);
+    expect(report.languages[0].verdict).toBe('ok');
+    expect(report.languages[0].modes?.attach.available).toBe(true); // from entry.attach
+  });
+
   it('merges collectExtras output into the reported details', async () => {
     const deps = makeDeps(
       [{ name: 'dotnet', validate: okValidate({ debuggerPath: '/opt/netcoredbg' }) }],

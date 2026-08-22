@@ -85,6 +85,21 @@ export async function checkContainerWorkspace(
   const mountBase = { id: 'workspace-mount' as const, label: 'workspace mount' };
 
   if (!isContainerMode(environment)) {
+    // Only the exact string 'true' enables container mode — a truthy-looking
+    // near-miss (MCP_CONTAINER=1/TRUE/yes) is precisely the misconfiguration
+    // a doctor run should call out rather than bless as "host mode".
+    const rawValue = environment.get('MCP_CONTAINER');
+    if (rawValue !== undefined && rawValue !== '') {
+      return [
+        {
+          ...containerBase,
+          status: 'warn',
+          detail: `MCP_CONTAINER='${rawValue}' is set but does not enable container mode`,
+          fixHint: "Container mode requires exactly MCP_CONTAINER=true"
+        },
+        { ...mountBase, status: 'skipped', detail: 'host mode (container mode not enabled)' }
+      ];
+    }
     return [
       { ...containerBase, status: 'ok', detail: 'not running in container mode' },
       { ...mountBase, status: 'skipped', detail: 'host mode' }

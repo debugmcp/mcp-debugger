@@ -80,6 +80,31 @@ describe('checkContainerWorkspace', () => {
     expect(mount.status).toBe('skipped');
   });
 
+  it('warns when MCP_CONTAINER is set to a truthy-looking but unrecognized value', async () => {
+    const environment = makeEnvironment({ MCP_CONTAINER: '1' });
+    const fileSystem = makeFileSystem();
+
+    const [containerMode, mount] = await checkContainerWorkspace(environment, fileSystem);
+
+    expect(containerMode.status).toBe('warn');
+    expect(containerMode.detail).toContain("'1'");
+    expect(containerMode.fixHint).toContain('true');
+    expect(mount.status).toBe('skipped');
+  });
+
+  it('echoes the recognized MCP_CONTAINER value in the detail', async () => {
+    const environment = makeEnvironment({ MCP_CONTAINER: 'true', MCP_WORKSPACE_ROOT: '/workspace' });
+    const fileSystem = makeFileSystem({
+      stat: vi.fn().mockResolvedValue({ isDirectory: () => true }),
+      readdir: vi.fn().mockResolvedValue(['src'])
+    });
+
+    const [containerMode] = await checkContainerWorkspace(environment, fileSystem);
+
+    expect(containerMode.status).toBe('ok');
+    expect(containerMode.detail).toContain('MCP_CONTAINER=true');
+  });
+
   it('reports broken when MCP_WORKSPACE_ROOT is unset in container mode', async () => {
     const environment = makeEnvironment({ MCP_CONTAINER: 'true' });
     const fileSystem = makeFileSystem();

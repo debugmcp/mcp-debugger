@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+﻿import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import path from 'path';
@@ -37,7 +37,7 @@ describe('java-utils', () => {
         proc.stderr = new EventEmitter();
         process.nextTick(() => {
           proc.stderr.emit('data', Buffer.from('openjdk version "17.0.1"\n'));
-          proc.emit('exit', 0);
+          proc.emit('exit', 0); proc.emit('close', 0);
         });
         return proc;
       });
@@ -69,7 +69,7 @@ describe('java-utils', () => {
         proc.stderr = new EventEmitter();
         process.nextTick(() => {
           proc.stderr.emit('data', Buffer.from('openjdk version "17.0.1"\n'));
-          proc.emit('exit', 0);
+          proc.emit('exit', 0); proc.emit('close', 0);
         });
         return proc;
       });
@@ -89,7 +89,7 @@ describe('java-utils', () => {
         process.nextTick(() => {
           if (cmd === 'java') {
             proc.stderr.emit('data', Buffer.from('openjdk version "17.0.1"\n'));
-            proc.emit('exit', 0);
+            proc.emit('exit', 0); proc.emit('close', 0);
           } else {
             proc.emit('error', new Error('ENOENT'));
           }
@@ -127,7 +127,7 @@ describe('java-utils', () => {
         process.nextTick(() => {
           if (validPaths.includes(cmd)) {
             proc.stdout.emit('data', Buffer.from('javac 21.0.6\n'));
-            proc.emit('exit', 0);
+            proc.emit('exit', 0); proc.emit('close', 0);
           } else {
             proc.emit('error', new Error('ENOENT'));
           }
@@ -176,7 +176,7 @@ describe('java-utils', () => {
         proc.stderr = new EventEmitter();
         process.nextTick(() => {
           proc.stderr.emit('data', Buffer.from('openjdk version "17.0.1" 2021-10-19\nOpenJDK Runtime Environment\n'));
-          proc.emit('exit', 0);
+          proc.emit('exit', 0); proc.emit('close', 0);
         });
         return proc;
       });
@@ -192,7 +192,7 @@ describe('java-utils', () => {
         proc.stderr = new EventEmitter();
         process.nextTick(() => {
           proc.stderr.emit('data', Buffer.from('java version "1.8.0_301"\n'));
-          proc.emit('exit', 0);
+          proc.emit('exit', 0); proc.emit('close', 0);
         });
         return proc;
       });
@@ -219,12 +219,29 @@ describe('java-utils', () => {
         const proc = new EventEmitter() as any;
         proc.stdout = new EventEmitter();
         proc.stderr = new EventEmitter();
-        process.nextTick(() => proc.emit('exit', 1));
+        process.nextTick(() => { proc.emit('exit', 1); proc.emit('close', 1); });
         return proc;
       });
 
       const version = await getJavaVersion('java');
       expect(version).toBeNull();
+    });
+
+    it("still sees stderr that arrives between 'exit' and 'close' (stdio drain race)", async () => {
+      mockSpawn.mockImplementation(() => {
+        const proc = new EventEmitter() as any;
+        proc.stdout = new EventEmitter();
+        proc.stderr = new EventEmitter();
+        process.nextTick(() => {
+          proc.emit('exit', 0);
+          proc.stderr.emit('data', Buffer.from('openjdk version "21.0.6"\n'));
+          proc.emit('close', 0);
+        });
+        return proc;
+      });
+
+      const version = await getJavaVersion('java');
+      expect(version).toBe('21.0.6');
     });
   });
 

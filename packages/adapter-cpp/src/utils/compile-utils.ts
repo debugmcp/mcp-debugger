@@ -78,17 +78,22 @@ export interface CompilerInfo {
   version: string | null;
 }
 
+/** Upper bound for a single toolchain probe child before it is killed. */
+const PROBE_KILL_TIMEOUT_MS = 10_000;
+
 /**
- * Discover the available compiler and its version banner (the first line of
- * `--version` output, e.g. "g++ (MinGW-w64 ...) 13.2.0"). Doctor-only probe
- * (issue #423) — validate() keeps its cheaper presence-only findAnyCompiler.
+ * The available compiler and its version banner (the first line of
+ * `--version` output, e.g. "g++ (MinGW-w64 ...) 13.2.0"). Pass an already
+ * discovered `command` (e.g. validate()'s details.compiler) to skip the
+ * candidate scan. Doctor-only probe (issue #423) — validate() keeps its
+ * cheaper presence-only findAnyCompiler.
  */
-export async function getCompilerInfo(): Promise<CompilerInfo | null> {
-  const command = await findAnyCompiler();
-  if (!command) {
+export async function getCompilerInfo(command?: string): Promise<CompilerInfo | null> {
+  const resolved = command ?? (await findAnyCompiler());
+  if (!resolved) {
     return null;
   }
-  return { command, version: await captureVersionLine(command) };
+  return { command: resolved, version: await captureVersionLine(resolved) };
 }
 
 function captureVersionLine(command: string): Promise<string | null> {
@@ -101,8 +106,19 @@ function captureVersionLine(command: string): Promise<string | null> {
       let output = '';
       child.stdout?.on('data', (data) => { output += data.toString(); });
       child.stderr?.on('data', (data) => { output += data.toString(); });
-      child.on('error', () => resolve(null));
-      child.on('exit', (code) => {
+
+      const killTimer = setTimeout(() => {
+        try { child.kill(); } catch { /* already gone */ }
+      }, PROBE_KILL_TIMEOUT_MS);
+      killTimer.unref?.();
+
+      child.on('error', () => {
+        clearTimeout(killTimer);
+        resolve(null);
+      });
+      // 'close' (not 'exit') so stdio is fully drained before reading output
+      child.on('close', (code) => {
+        clearTimeout(killTimer);
         const firstLine = output.split(/\r?\n/).map((line) => line.trim()).find((line) => line.length > 0);
         resolve(code === 0 && firstLine ? firstLine : null);
       });

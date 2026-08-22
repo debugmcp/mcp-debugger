@@ -313,9 +313,10 @@ To add support for a new language:
 3. **Export Factory**: Export a factory class named `{Language}AdapterFactory`
 4. **Register in root `package.json`**: Add `"@debugmcp/adapter-{language}": "workspace:*"` to `optionalDependencies`
 5. **Add Vitest alias**: Add `{ find: '@debugmcp/adapter-{language}', replacement: path.resolve(__dirname, './packages/adapter-{language}/src/index.ts') }` to `resolve.alias` in `vitest.config.ts`
-6. **Update adapter count**: Update hardcoded adapter counts in tests (`adapter-loader.test.ts`, `models.test.ts`)
-7. **Add Tests**: Include unit and integration tests in the package
-8. **Run `pnpm install`**: To link the new workspace package
+6. **Update adapter count**: Update hardcoded adapter counts in tests (`adapter-loader.test.ts`, `models.test.ts`, `tests/e2e/doctor-smoke.test.ts`)
+7. **Wire the doctor command**: Add the language's runtime/backend column mapping to `presentLanguage` in `src/cli/commands/doctor/presenters.ts` (and `collectDoctorExtras` if it has doctor-only probes)
+8. **Add Tests**: Include unit and integration tests in the package
+9. **Run `pnpm install`**: To link the new workspace package
 
 Example structure:
 ```

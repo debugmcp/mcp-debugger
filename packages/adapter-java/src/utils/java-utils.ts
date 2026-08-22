@@ -39,8 +39,13 @@ export async function findJavaExecutable(preferredPath?: string): Promise<string
   );
 }
 
+/** Upper bound for a single toolchain probe child before it is killed. */
+const PROBE_KILL_TIMEOUT_MS = 10_000;
+
 /**
- * Validate that a Java executable works by running `java -version`.
+ * Validate that a Java-family executable (java or javac) works by running
+ * `<exe> -version`. Reads on 'close' (not 'exit') so late stdio chunks still
+ * count as output, and kills the child if it hangs past the guard timeout.
  */
 export async function validateJavaExecutable(javaPath: string): Promise<boolean> {
   return new Promise((resolve) => {
@@ -54,14 +59,22 @@ export async function validateJavaExecutable(javaPath: string): Promise<boolean>
       let hasOutput = false;
       child.stderr?.on('data', () => { hasOutput = true; });
       child.stdout?.on('data', () => { hasOutput = true; });
+
+      const killTimer = setTimeout(() => {
+        try { child.kill(); } catch { /* already gone */ }
+      }, PROBE_KILL_TIMEOUT_MS);
+      killTimer.unref?.();
+
       child.on('error', () => {
         if (settled) return;
         settled = true;
+        clearTimeout(killTimer);
         resolve(false);
       });
-      child.on('exit', (code) => {
+      child.on('close', (code) => {
         if (settled) return;
         settled = true;
+        clearTimeout(killTimer);
         resolve(code === 0 && hasOutput);
       });
     } catch {
@@ -94,44 +107,12 @@ export async function findJavacExecutable(javaPath?: string): Promise<string | n
   candidates.push('javac');
 
   for (const candidate of new Set(candidates)) {
-    if (await validateJavacExecutable(candidate)) {
+    // javac answers `-version` exactly like java — reuse the shared probe
+    if (await validateJavaExecutable(candidate)) {
       return candidate;
     }
   }
   return null;
-}
-
-/**
- * Validate that a javac executable works by running `javac -version`.
- */
-async function validateJavacExecutable(javacPath: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    let settled = false;
-    try {
-      const child = spawn(javacPath, ['-version'], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true,
-      });
-
-      let hasOutput = false;
-      child.stdout?.on('data', () => { hasOutput = true; });
-      child.stderr?.on('data', () => { hasOutput = true; });
-      child.on('error', () => {
-        if (settled) return;
-        settled = true;
-        resolve(false);
-      });
-      child.on('exit', (code) => {
-        if (settled) return;
-        settled = true;
-        resolve(code === 0 && hasOutput);
-      });
-    } catch {
-      if (settled) return;
-      settled = true;
-      resolve(false);
-    }
-  });
 }
 
 /**
@@ -157,14 +138,22 @@ export async function getJavaVersion(javaPath?: string): Promise<string | null> 
         output += data.toString();
       });
 
+      const killTimer = setTimeout(() => {
+        try { child.kill(); } catch { /* already gone */ }
+      }, PROBE_KILL_TIMEOUT_MS);
+      killTimer.unref?.();
+
       child.on('error', () => {
         if (settled) return;
         settled = true;
+        clearTimeout(killTimer);
         resolve(null);
       });
-      child.on('exit', (code) => {
+      // 'close' (not 'exit') so stdio is fully drained before parsing
+      child.on('close', (code) => {
         if (settled) return;
         settled = true;
+        clearTimeout(killTimer);
         if (code !== 0) {
           resolve(null);
           return;

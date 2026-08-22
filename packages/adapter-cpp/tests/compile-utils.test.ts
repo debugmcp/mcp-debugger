@@ -40,6 +40,8 @@ function fakeProcess(exitCode: number, stderr = '', stdout = ''): EventEmitter &
       proc.stdout.emit('data', Buffer.from(stdout));
     }
     proc.emit('exit', exitCode);
+    // Real children emit 'close' after 'exit' once stdio drains
+    proc.emit('close', exitCode);
   });
   return proc;
 }
@@ -169,6 +171,56 @@ describe('compile-utils', () => {
         .mockImplementationOnce(() => erroringProcess()); // version capture fails
 
       await expect(getCompilerInfo()).resolves.toEqual({ command: 'g++', version: null });
+    });
+
+    it('skips candidate discovery when the command is already known', async () => {
+      spawnMock.mockImplementationOnce(() =>
+        fakeProcess(0, '', 'clang++ version 17.0.1\n')
+      );
+
+      await expect(getCompilerInfo('clang++')).resolves.toEqual({
+        command: 'clang++',
+        version: 'clang++ version 17.0.1'
+      });
+      expect(spawnMock).toHaveBeenCalledTimes(1);
+      expect(spawnMock.mock.calls[0][0]).toBe('clang++');
+    });
+
+    it("still sees stdout that arrives between 'exit' and 'close' (stdio drain race)", async () => {
+      spawnMock.mockImplementationOnce(() => {
+        const proc = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; kill: () => void };
+        proc.stdout = new EventEmitter();
+        proc.stderr = new EventEmitter();
+        proc.kill = vi.fn();
+        setImmediate(() => {
+          proc.emit('exit', 0);
+          proc.stdout.emit('data', Buffer.from('g++ 13.2.0\n'));
+          proc.emit('close', 0);
+        });
+        return proc;
+      });
+
+      await expect(getCompilerInfo('g++')).resolves.toEqual({ command: 'g++', version: 'g++ 13.2.0' });
+    });
+
+    it('kills a hung version capture after the guard timeout', async () => {
+      vi.useFakeTimers();
+      const kill = vi.fn();
+      let proc!: EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; kill: typeof kill };
+      spawnMock.mockImplementationOnce(() => {
+        proc = new EventEmitter() as typeof proc;
+        proc.stdout = new EventEmitter();
+        proc.stderr = new EventEmitter();
+        proc.kill = kill;
+        return proc;
+      });
+
+      const pending = getCompilerInfo('g++');
+      await vi.advanceTimersByTimeAsync(10_100);
+      expect(kill).toHaveBeenCalled();
+      proc.emit('close', null);
+      await expect(pending).resolves.toEqual({ command: 'g++', version: null });
+      vi.useRealTimers();
     });
   });
 

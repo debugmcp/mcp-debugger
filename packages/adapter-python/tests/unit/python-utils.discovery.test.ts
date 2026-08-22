@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+﻿import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import path from 'node:path';
 import fs from 'node:fs';
 import { EventEmitter } from 'node:events';
@@ -38,7 +38,7 @@ const createSpawn = (options: { exitCode: number; stdout?: string; stderr?: stri
     if (options.stderr) {
       proc.stderr.emit('data', Buffer.from(options.stderr));
     }
-    proc.emit('exit', options.exitCode);
+    proc.emit('exit', options.exitCode); proc.emit('close', options.exitCode);
   });
 
   return proc;

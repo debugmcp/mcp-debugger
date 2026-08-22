@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+﻿import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import { spawn } from 'child_process';
 import path from 'path';
@@ -89,7 +89,7 @@ describe('JavaDebugAdapter', () => {
 
         process.nextTick(() => {
           proc.stderr.emit('data', Buffer.from('openjdk version "17.0.1" 2021-10-19\n'));
-          proc.emit('exit', 0);
+          proc.emit('exit', 0); proc.emit('close', 0);
         });
 
         return proc;
@@ -107,7 +107,7 @@ describe('JavaDebugAdapter', () => {
         proc.stderr = new EventEmitter();
         process.nextTick(() => {
           proc.stderr.emit('data', Buffer.from('openjdk version "17.0.1"\n'));
-          proc.emit('exit', 0);
+          proc.emit('exit', 0); proc.emit('close', 0);
         });
         return proc;
       });
@@ -143,7 +143,7 @@ describe('JavaDebugAdapter', () => {
         process.nextTick(() => {
           // Simulate Java 8 (1.8.0) version string
           proc.stderr.emit('data', Buffer.from('openjdk version "1.8.0_292"\n'));
-          proc.emit('exit', 0);
+          proc.emit('exit', 0); proc.emit('close', 0);
         });
         return proc;
       });
@@ -165,7 +165,7 @@ describe('JavaDebugAdapter', () => {
         proc.stderr = new EventEmitter();
         process.nextTick(() => {
           proc.stderr.emit('data', Buffer.from('openjdk version "17.0.1"\n'));
-          proc.emit('exit', 0);
+          proc.emit('exit', 0); proc.emit('close', 0);
         });
         return proc;
       });
@@ -356,13 +356,13 @@ describe('JavaDebugAdapter', () => {
 
       try {
         const result = fn();
-        // JDI bridge is compiled — verify we got a valid command back
+        // JDI bridge is compiled â€” verify we got a valid command back
         expect(result.command).toBeTruthy();
         expect(result.args).toBeDefined();
         // Should launch java with JdiDapServer
         expect(result.args).toContain('JdiDapServer');
       } catch (error) {
-        // JDI bridge not compiled — verify the error message
+        // JDI bridge not compiled â€” verify the error message
         expect((error as Error).message).toMatch(/JDI bridge not compiled/);
       }
     });
@@ -397,7 +397,7 @@ describe('JavaDebugAdapter', () => {
         expect(idx).toBeGreaterThanOrEqual(0);
         expect(result.args[idx + 1]).toBe('424242');
       } catch (error) {
-        // JDI bridge not compiled in this environment — covered by other tests
+        // JDI bridge not compiled in this environment â€” covered by other tests
         expect((error as Error).message).toMatch(/JDI bridge not compiled/);
       }
     });
@@ -684,7 +684,7 @@ describe('JavaDebugAdapter', () => {
       expect(config.stopOnEntry).toBeUndefined();
       expect(config.cwd).toBeUndefined();
       expect(config.env).toBeUndefined();
-      // No mandatory timeout — JDI bridge doesn't require it
+      // No mandatory timeout â€” JDI bridge doesn't require it
       expect(config.timeout).toBeUndefined();
     });
   });

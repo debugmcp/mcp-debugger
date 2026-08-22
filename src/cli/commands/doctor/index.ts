@@ -61,9 +61,11 @@ export async function handleDoctorCommand(
   const exit = overrides.exit ?? ((code: number) => process.exit(code));
 
   const timeoutRaw = options.timeout ?? '10000';
-  const timeoutMs = Number.parseInt(timeoutRaw, 10);
+  // Strict digits only: parseInt would silently truncate '1e4' to 1 and
+  // '10s' to 10, turning a unit typo into millisecond probe budgets.
+  const timeoutMs = /^\d+$/.test(timeoutRaw.trim()) ? Number(timeoutRaw.trim()) : NaN;
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-    writeError(`Invalid --timeout value: '${timeoutRaw}' (expected a positive number of milliseconds)`);
+    writeError(`Invalid --timeout value: '${timeoutRaw}' (expected a positive whole number of milliseconds)`);
     return 2;
   }
 

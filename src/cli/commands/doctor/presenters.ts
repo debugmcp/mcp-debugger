@@ -33,68 +33,86 @@ const str = (details: Details | undefined, key: string): string | undefined => {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 };
 
+/**
+ * A cell is only rendered when something was actually detected — a bare label
+ * would make an absent toolchain read as present. `(built-in)` style labels
+ * stand alone by design (mock).
+ */
+function component<T extends DoctorRuntimeInfo | DoctorBackendInfo>(info: T): T | undefined {
+  const { label, ...rest } = info as DoctorBackendInfo;
+  if (label.startsWith('(')) {
+    return info;
+  }
+  return Object.values(rest).some((value) => value !== undefined) ? info : undefined;
+}
+
 export function presentLanguage(language: string, details: Details | undefined): LanguageView {
+  if (details === undefined) {
+    // The probe failed or timed out before producing anything — an empty row
+    // is the honest rendering.
+    return {};
+  }
   switch (language) {
     case 'python':
       return {
-        runtime: { label: 'Python', path: str(details, 'pythonPath'), version: str(details, 'pythonVersion') },
-        backend: { label: 'debugpy', version: str(details, 'debugpyVersion') }
+        runtime: component({ label: 'Python', path: str(details, 'pythonPath'), version: str(details, 'pythonVersion') }),
+        backend: component({ label: 'debugpy', version: str(details, 'debugpyVersion') })
       };
     case 'javascript':
       return {
-        runtime: { label: 'Node.js', version: str(details, 'nodeVersion') },
+        runtime: component({ label: 'Node.js', version: str(details, 'nodeVersion') }),
         backend: { label: 'js-debug', source: 'vendored' }
       };
     case 'ruby':
       return {
-        runtime: { label: 'Ruby', path: str(details, 'rubyPath'), version: str(details, 'rubyVersion') },
-        backend: { label: 'rdbg', path: str(details, 'rdbgPath'), version: str(details, 'rdbgVersion') }
+        runtime: component({ label: 'Ruby', path: str(details, 'rubyPath'), version: str(details, 'rubyVersion') }),
+        backend: component({ label: 'rdbg', path: str(details, 'rdbgPath'), version: str(details, 'rdbgVersion') })
       };
     case 'go':
       return {
-        runtime: { label: 'Go', path: str(details, 'goPath'), version: str(details, 'goVersion') },
-        backend: { label: 'Delve', path: str(details, 'dlvPath'), version: str(details, 'dlvVersion') }
+        runtime: component({ label: 'Go', path: str(details, 'goPath'), version: str(details, 'goVersion') }),
+        backend: component({ label: 'Delve', path: str(details, 'dlvPath'), version: str(details, 'dlvVersion') })
       };
     case 'java':
       return {
-        runtime: { label: 'Java', path: str(details, 'javaPath'), version: str(details, 'javaVersion') },
-        backend: { label: 'JDI bridge', path: str(details, 'jdiBridgeDir') }
+        runtime: component({ label: 'Java', path: str(details, 'javaPath'), version: str(details, 'javaVersion') }),
+        backend: component({ label: 'JDI bridge', path: str(details, 'jdiBridgeDir') })
       };
     case 'dotnet':
       return {
-        runtime: { label: '.NET SDK', version: str(details, 'dotnetSdkVersion') },
-        backend: {
+        runtime: component({ label: '.NET SDK', version: str(details, 'dotnetSdkVersion') }),
+        backend: component({
           label: 'netcoredbg',
           path: str(details, 'debuggerPath'),
           version: str(details, 'netcoredbgVersion')
-        }
+        })
       };
     case 'rust':
       return {
-        runtime: { label: 'Rust', version: str(details, 'cargoVersion') },
-        backend: {
+        runtime: component({ label: 'Rust', version: str(details, 'cargoVersion') }),
+        backend: component({
           label: 'CodeLLDB',
           path: str(details, 'codelldbPath'),
           version: str(details, 'codelldbVersion'),
           source: str(details, 'codelldbSource')
-        }
+        })
       };
     case 'cpp': {
       // The --version banner already names the command; only show the bare
       // command when no banner was captured.
       const compilerVersion = str(details, 'compilerVersion');
       return {
-        runtime: {
+        runtime: component({
           label: 'C/C++ compiler',
           path: compilerVersion ? undefined : str(details, 'compiler'),
           version: compilerVersion
-        },
-        backend: {
+        }),
+        backend: component({
           label: 'CodeLLDB',
           path: str(details, 'codelldbPath'),
           version: str(details, 'codelldbVersion'),
           source: str(details, 'codelldbSource')
-        }
+        })
       };
     }
     case 'mock':
@@ -109,7 +127,25 @@ export function presentLanguage(language: string, details: Details | undefined):
 
 type ImportModule = (id: string) => Promise<unknown>;
 
-const defaultImportModule: ImportModule = (id) => import(/* @vite-ignore */ id);
+/**
+ * Literal specifiers only: a variable `import(id)` cannot be inlined by the
+ * npx bundle's esbuild pass, so it would throw ERR_MODULE_NOT_FOUND in every
+ * npx/global install (the CLI package ships no adapter dependencies — they
+ * are bundled). With literals, esbuild bundles each target and the same code
+ * works in repo checkouts, Docker, and npx.
+ */
+const defaultImportModule: ImportModule = (id) => {
+  switch (id) {
+    case '@debugmcp/adapter-dotnet':
+      return import('@debugmcp/adapter-dotnet');
+    case '@debugmcp/adapter-java':
+      return import('@debugmcp/adapter-java');
+    case '@debugmcp/adapter-cpp':
+      return import('@debugmcp/adapter-cpp');
+    default:
+      return Promise.reject(new Error(`No doctor extras module registered for '${id}'`));
+  }
+};
 
 /**
  * Doctor-only probes, run per installed language after validate(). Each is
@@ -153,10 +189,12 @@ export async function collectDoctorExtras(
       }
       case 'cpp': {
         const mod = (await importModule('@debugmcp/adapter-cpp')) as Partial<{
-          getCompilerInfo(): Promise<{ command: string; version: string | null } | null>;
+          getCompilerInfo(command?: string): Promise<{ command: string; version: string | null } | null>;
         }>;
         if (typeof mod.getCompilerInfo === 'function') {
-          const info = await mod.getCompilerInfo();
+          // validate() already discovered the command — reuse it instead of
+          // re-probing the whole candidate list.
+          const info = await mod.getCompilerInfo(str(details, 'compiler'));
           if (info?.version) return { compilerVersion: info.version };
         }
         return {};

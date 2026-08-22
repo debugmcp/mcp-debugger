@@ -99,11 +99,26 @@ describe('presentLanguage', () => {
     expect(view.backend?.label).toContain('built-in');
   });
 
-  it('tolerates missing details entirely', () => {
+  it('returns empty cells when the probe produced no details (failed/timed-out probe)', () => {
     const view = presentLanguage('python', undefined);
 
-    expect(view.runtime).toMatchObject({ label: 'Python' });
-    expect(view.runtime?.version).toBeUndefined();
+    expect(view.runtime).toBeUndefined();
+    expect(view.backend).toBeUndefined();
+  });
+
+  it('omits a component that was not detected instead of naming it as if found', () => {
+    // dotnet with netcoredbg resolved but no SDK: the runtime cell must read
+    // as absent, not ".NET SDK".
+    const view = presentLanguage('dotnet', { debuggerPath: '/opt/netcoredbg/netcoredbg' });
+
+    expect(view.runtime).toBeUndefined();
+    expect(view.backend).toMatchObject({ label: 'netcoredbg', path: '/opt/netcoredbg/netcoredbg' });
+  });
+
+  it('keeps the vendored js-debug backend visible without a version (source counts as detection)', () => {
+    const view = presentLanguage('javascript', { nodeVersion: 'v22.0.0' });
+
+    expect(view.backend).toMatchObject({ label: 'js-debug', source: 'vendored' });
   });
 });
 
@@ -144,13 +159,15 @@ describe('collectDoctorExtras', () => {
     expect(extras).toEqual({ javacPath: '/opt/jdk/bin/javac' });
   });
 
-  it('collects the compiler version banner for cpp', async () => {
-    const importModule = vi.fn().mockResolvedValue({
-      getCompilerInfo: vi.fn().mockResolvedValue({ command: 'g++', version: 'g++ (MinGW-w64) 13.2.0' })
-    });
+  it('collects the compiler version banner for cpp, reusing the already-discovered command', async () => {
+    const getCompilerInfo = vi.fn().mockResolvedValue({ command: 'g++', version: 'g++ (MinGW-w64) 13.2.0' });
+    const importModule = vi.fn().mockResolvedValue({ getCompilerInfo });
 
     const extras = await collectDoctorExtras('cpp', { compiler: 'g++' }, { importModule });
 
+    // validate() already discovered the command — extras must not re-probe the
+    // whole candidate list.
+    expect(getCompilerInfo).toHaveBeenCalledWith('g++');
     expect(extras).toEqual({ compilerVersion: 'g++ (MinGW-w64) 13.2.0' });
   });
 

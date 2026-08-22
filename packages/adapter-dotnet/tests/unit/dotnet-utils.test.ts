@@ -78,6 +78,15 @@ const spawnMock = spawn as unknown as vi.Mock;
 const spawnSyncMock = spawnSync as unknown as vi.Mock;
 const whichMock = which as unknown as vi.Mock;
 
+const createSpawnShell = (): ChildProcessMock => {
+  const proc = new EventEmitter() as ChildProcessMock;
+  proc.stdout = new EventEmitter();
+  proc.stderr = new EventEmitter();
+  proc.stdin = new EventEmitter();
+  proc.kill = vi.fn();
+  return proc;
+};
+
 const createSpawn = (options: { exitCode: number; stdout?: string; stderr?: string; error?: Error }) => {
   const proc = new EventEmitter() as ChildProcessMock;
   proc.stdout = new EventEmitter();
@@ -97,6 +106,8 @@ const createSpawn = (options: { exitCode: number; stdout?: string; stderr?: stri
       proc.stderr.emit('data', Buffer.from(options.stderr));
     }
     proc.emit('exit', options.exitCode);
+    // Real children emit 'close' after 'exit' once stdio drains
+    proc.emit('close', options.exitCode);
   });
 
   return proc;
@@ -138,6 +149,33 @@ describe('getNetcoredbgVersion (issue #423)', () => {
     spawnMock.mockImplementation(() => createSpawn({ exitCode: 0, error: new Error('ENOENT') }));
 
     await expect(getNetcoredbgVersion('/missing/netcoredbg')).resolves.toBeNull();
+  });
+
+  it("still sees stdout that arrives between 'exit' and 'close' (stdio drain race)", async () => {
+    spawnMock.mockImplementation(() => {
+      const proc = createSpawnShell();
+      setImmediate(() => {
+        proc.emit('exit', 0);
+        proc.stdout.emit('data', Buffer.from('NET Core debugger 3.1.2-1054\n'));
+        proc.emit('close', 0);
+      });
+      return proc;
+    });
+
+    await expect(getNetcoredbgVersion('/opt/netcoredbg/netcoredbg')).resolves.toBe('3.1.2-1054');
+  });
+
+  it('kills a hung probe child after the guard timeout and resolves null', async () => {
+    vi.useFakeTimers();
+    const proc = createSpawnShell();
+    spawnMock.mockImplementation(() => proc);
+
+    const pending = getNetcoredbgVersion('/opt/netcoredbg/netcoredbg');
+    await vi.advanceTimersByTimeAsync(10_100);
+    expect(proc.kill).toHaveBeenCalled();
+    proc.emit('close', null);
+    await expect(pending).resolves.toBeNull();
+    vi.useRealTimers();
   });
 });
 
