@@ -667,27 +667,34 @@ export class DapProxyWorker {
 
     this.connectionManager.setupEventHandlers(this.dapClient, {
       onInitialized: async () => {
-        // Update adapter state
-        if (this.adapterPolicy.updateStateOnEvent) {
-          this.adapterPolicy.updateStateOnEvent('initialized', {}, this.adapterState);
-        }
-
-        if (this.adapterPolicy.requiresCommandQueueing()) {
-          this.logger!.info(`[Worker] DAP "initialized" (${this.adapterPolicy.name}) received; forwarding event and draining queue.`);
-          this.sendDapEvent('initialized', {});
-          await this.drainCommandQueue();
-        } else {
-          // If we're deferring initialized handling (e.g., to send launch/attach first),
-          // mark the event as pending and resolve the promise to signal it arrived
-          if (this.deferInitializedHandling) {
-            this.logger!.info('[Worker] DAP "initialized" event received but deferred until after launch/attach');
-            this.initializedEventPending = true;
-            if (this.initializedEventResolver) {
-              this.initializedEventResolver();
-            }
-          } else {
-            await this.handleInitializedEvent();
+        // Nothing awaits this listener — a rejection escaping it has no
+        // handler and surfaces as an unhandled rejection (issue #420), so
+        // failures are contained and logged here.
+        try {
+          // Update adapter state
+          if (this.adapterPolicy.updateStateOnEvent) {
+            this.adapterPolicy.updateStateOnEvent('initialized', {}, this.adapterState);
           }
+
+          if (this.adapterPolicy.requiresCommandQueueing()) {
+            this.logger!.info(`[Worker] DAP "initialized" (${this.adapterPolicy.name}) received; forwarding event and draining queue.`);
+            this.sendDapEvent('initialized', {});
+            await this.drainCommandQueue();
+          } else {
+            // If we're deferring initialized handling (e.g., to send launch/attach first),
+            // mark the event as pending and resolve the promise to signal it arrived
+            if (this.deferInitializedHandling) {
+              this.logger!.info('[Worker] DAP "initialized" event received but deferred until after launch/attach');
+              this.initializedEventPending = true;
+              if (this.initializedEventResolver) {
+                this.initializedEventResolver();
+              }
+            } else {
+              await this.handleInitializedEvent();
+            }
+          }
+        } catch (error) {
+          this.logger!.error('[Worker] Error handling DAP "initialized" event:', error);
         }
       },
       onOutput: (body) => {

@@ -336,15 +336,21 @@ describe('Go initialized event fallback', () => {
 
     // Start the connection — it will wait for initialized
     const connectPromise = (worker as any).startAdapterAndConnect(GO_PAYLOAD);
-
-    // Advance past Phase 1 (2s) and Phase 2 (10s)
-    await vi.advanceTimersByTimeAsync(13000);
-
-    await expect(connectPromise).rejects.toThrow(
+    // Attach the rejection expectation BEFORE the timer advance: the async
+    // fake-timer loop yields through real ticks, where a handler-less
+    // rejection surfaces as unhandled (issue #420).
+    const rejection = expect(connectPromise).rejects.toThrow(
       /Timeout waiting for initialized event \(after launch fallback\)/
     );
 
-    vi.useRealTimers();
+    try {
+      // Advance past Phase 1 (2s) and Phase 2 (10s)
+      await vi.advanceTimersByTimeAsync(13000);
+
+      await rejection;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   /**

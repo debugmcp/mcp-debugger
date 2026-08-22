@@ -588,6 +588,36 @@ describe('DapProxyWorker', () => {
       }
     });
     
+    it('resolves (not rejects) the onInitialized event handler when worker state is missing (issue #420)', async () => {
+      // Event listeners are fire-and-forget: nothing awaits the async
+      // onInitialized handler, so a rejection escaping it surfaces as an
+      // unhandled rejection — in production and as cross-test noise under
+      // shuffled unit runs.
+      const connectionStub = {
+        setupEventHandlers: vi.fn()
+      };
+
+      (worker as any).logger = mockLogger;
+      (worker as any).dapClient = mockDapClient;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = DefaultAdapterPolicy;
+      (worker as any).adapterState = DefaultAdapterPolicy.createInitialState();
+      (worker as any).setupDapEventHandlers();
+
+      const handlers = connectionStub.setupEventHandlers.mock.calls[0][1] as {
+        onInitialized: () => Promise<void>;
+      };
+
+      // Tear down the state handleInitializedEvent requires
+      (worker as any).currentInitPayload = null;
+
+      await expect(handlers.onInitialized()).resolves.toBeUndefined();
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining('initialized'),
+        expect.anything()
+      );
+    });
+
     it('forwards logMessage and suspendPolicy on initial breakpoints (issue #235)', async () => {
       const connectionStub = {
         setBreakpoints: vi.fn().mockResolvedValue({ body: { breakpoints: [] } }),

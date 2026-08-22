@@ -65,7 +65,9 @@ if (failures.length === 0) {
 } else {
   console.error(`[flake-hunt] ✗ ${failures.length}/${RUNS} run(s) failed. Reproduce with:`);
   for (const seed of failures) {
-    console.error(`    vitest run --project ${PROJECT} --sequence.seed=${seed}`);
+    // Keep --sequence.shuffle.tests: the committed config shuffles files only,
+    // so omitting it would not reproduce a within-file ordering failure.
+    console.error(`    vitest run --project ${PROJECT} --sequence.seed=${seed} --sequence.shuffle.tests`);
   }
   process.exit(1);
 }
