@@ -234,3 +234,11 @@ export {
 export type { SecretRule, RedactionHit, RedactionResult } from './utils/secret-redaction.js';
 export { LineBuffer } from './utils/line-buffer.js';
 export { toSourceBreakpoint, type BreakpointFields, toFunctionBreakpoint, type FunctionBreakpointFields } from './utils/to-source-breakpoint.js';
+// Argv marker constants shared by spawn-time tagging and the startup orphan
+// reapers (issues #343, #431).
+export {
+  PROXY_BOOTSTRAP_MARKER,
+  JS_DEBUG_ADAPTER_MARKER,
+  OWNER_PID_ARG_PREFIX,
+  SESSION_ID_ARG_PREFIX
+} from './utils/process-markers.js';

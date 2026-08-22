@@ -5,8 +5,9 @@
  * transport from coming up.
  *
  * Covers:
- * - Orphan debuggee JVMs and proxy workers, via ONE shared process scan
- *   feeding both reapers' matchers (previously two independent walks).
+ * - Orphan debuggee JVMs, proxy workers, and js-debug DAP servers (#431), via
+ *   ONE shared process scan feeding all reaper matchers (previously
+ *   independent walks).
  *   `MCP_SKIP_ORPHAN_REAPERS=1` skips this part for PID-namespaced containers
  *   where orphans are impossible.
  * - Stale per-session run logs (proxy-<id>.log / dap-trace-<id>.ndjson) under
@@ -22,7 +23,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { scanProcessArgs, type ProcessScanOptions, type ScannedProcess } from './process-scan.js';
 import { reapOrphanJvms, parseArgs, type ReapResult as JvmReapResult, type ReapOptions as JvmReapOptions } from './jvm-orphan-reaper.js';
-import { reapOrphanProxies, parseProxyArgs, type ReapResult as ProxyReapResult, type ReapOptions as ProxyReapOptions } from './proxy-orphan-reaper.js';
+import { reapOrphanProxies, parseProxyArgs, parseJsDebugAdapterArgs, type ReapResult as ProxyReapResult, type ReapOptions as ProxyReapOptions } from './proxy-orphan-reaper.js';
 
 export interface JanitorLogger {
   info?: (msg: string) => void;
@@ -39,6 +40,7 @@ export interface StartupJanitorOptions {
   scan?: (options: ProcessScanOptions) => Promise<ScannedProcess[]>;
   reapJvms?: (opts: JvmReapOptions) => Promise<JvmReapResult>;
   reapProxies?: (opts: ProxyReapOptions) => Promise<ProxyReapResult>;
+  reapJsDebugAdapters?: (opts: ProxyReapOptions) => Promise<ProxyReapResult>;
   sweep?: (opts: SweepOptions) => Promise<SweepResult>;
 }
 
@@ -77,16 +79,24 @@ async function runOrphanReapers(opts: StartupJanitorOptions, selfPid: number): P
     return;
   }
 
-  // Matchers are marker-based, so feeding every row to both is harmless —
-  // JVM -D markers only appear in java cmdlines and vice versa.
+  // Matchers are marker-based, so feeding every row to all three is harmless —
+  // each identity marker only appears in its own family's cmdlines.
   const jvmLister = async () =>
     processes.map((p) => parseArgs(p.pid, p.args)).filter((t): t is NonNullable<typeof t> => t !== null);
   const proxyLister = async () =>
     processes.map((p) => parseProxyArgs(p.pid, p.args)).filter((t): t is NonNullable<typeof t> => t !== null);
+  // js-debug DAP servers are spawned detached+unref'd, so a hard-killed worker
+  // strands them outside every tree-kill path (issue #431). Reusing the proxy
+  // reaper works because its win32 kill is taskkill /T /F — while the stranded
+  // vsDebugServer is alive, the tree kill also reaches the debuggee/watchdog
+  // children js-debug spawned beneath it.
+  const jsDebugAdapterLister = async () =>
+    processes.map((p) => parseJsDebugAdapterArgs(p.pid, p.args)).filter((t): t is NonNullable<typeof t> => t !== null);
 
-  const [jvmOutcome, proxyOutcome] = await Promise.allSettled([
+  const [jvmOutcome, proxyOutcome, jsDebugOutcome] = await Promise.allSettled([
     (opts.reapJvms ?? reapOrphanJvms)({ selfPid, logger: log, lister: jvmLister }),
     (opts.reapProxies ?? reapOrphanProxies)({ selfPid, logger: log, lister: proxyLister }),
+    (opts.reapJsDebugAdapters ?? reapOrphanProxies)({ selfPid, logger: log, lister: jsDebugAdapterLister }),
   ]);
 
   if (jvmOutcome.status === 'fulfilled') {
@@ -102,6 +112,13 @@ async function runOrphanReapers(opts: StartupJanitorOptions, selfPid: number): P
     }
   } else {
     log.warn?.(`[startup-janitor] Orphan proxy reaper failed: ${(proxyOutcome.reason as Error)?.message ?? String(proxyOutcome.reason)}`);
+  }
+  if (jsDebugOutcome.status === 'fulfilled') {
+    if (jsDebugOutcome.value.killed.length > 0) {
+      log.info?.(`[startup-janitor] Reaped ${jsDebugOutcome.value.killed.length} orphan js-debug adapter(s) from prior runs`);
+    }
+  } else {
+    log.warn?.(`[startup-janitor] Orphan js-debug adapter reaper failed: ${(jsDebugOutcome.reason as Error)?.message ?? String(jsDebugOutcome.reason)}`);
   }
 }
 
