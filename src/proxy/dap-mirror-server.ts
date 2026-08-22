@@ -186,8 +186,10 @@ export class MirrorClientConnection {
     this.decoder = new DapFrameDecoder({
       onError: (error, context) => {
         this.logger.warn(`[DapMirror] Malformed frame from mirror client (${context}): ${error.message}`);
-        if (context === 'header') {
-          // Framing is unrecoverable once the byte stream is corrupt.
+        if (context === 'header' || context === 'overflow') {
+          // Framing is unrecoverable once the byte stream is corrupt, and a
+          // client advertising an over-cap frame is equally untrustworthy
+          // (issue #402).
           this.close();
         }
       }

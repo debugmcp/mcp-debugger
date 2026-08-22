@@ -153,6 +153,68 @@ describe('DapFrameDecoder malformed-input recovery', () => {
     expect(errors).toEqual(['json']);
   });
 
+  it('rejects a Content-Length above the cap with an overflow error and recovers (issue #402)', () => {
+    const errors: string[] = [];
+    const decoder = new DapFrameDecoder({
+      onError: (_err, context) => errors.push(context),
+      maxContentLength: 1024
+    });
+
+    // A hostile/buggy peer advertises a frame the decoder must never buffer
+    const evil = Buffer.from('Content-Length: 999999999\r\n\r\npartial body...', 'utf8');
+    expect(decoder.push(evil)).toEqual([]);
+    expect(errors).toEqual(['overflow']);
+
+    // The overflow discarded the buffer; a fresh valid frame decodes normally
+    const msg = { seq: 4, type: 'event', event: 'output', body: { text: 'ok' } };
+    expect(decoder.push(frame(msg))).toEqual([msg]);
+  });
+
+  it('accepts a frame exactly at the cap boundary (issue #402)', () => {
+    const bodyText = '{"type":"event"}';
+    const decoder = new DapFrameDecoder({
+      maxContentLength: Buffer.byteLength(bodyText, 'utf8')
+    });
+
+    const exact = Buffer.from(
+      `Content-Length: ${Buffer.byteLength(bodyText, 'utf8')}\r\n\r\n${bodyText}`,
+      'utf8'
+    );
+    expect(decoder.push(exact)).toEqual([{ type: 'event' }]);
+  });
+
+  it('bounds header-search accumulation when no header separator ever arrives (issue #402)', () => {
+    const errors: string[] = [];
+    const decoder = new DapFrameDecoder({
+      onError: (_err, context) => errors.push(context)
+    });
+
+    // A garbage stream with no \r\n\r\n used to buffer without bound
+    const garbage = Buffer.alloc(20 * 1024, 0x78); // 20 KB of 'x'
+    expect(decoder.push(garbage)).toEqual([]);
+    expect(errors).toEqual(['overflow']);
+
+    // Recovery after the discard
+    const msg = { seq: 5, type: 'event', event: 'output', body: {} };
+    expect(decoder.push(frame(msg))).toEqual([msg]);
+  });
+
+  it('reassembles a large frame delivered in many small chunks (issue #402)', () => {
+    // The old implementation Buffer.concat'ed per chunk — O(N^2) on exactly
+    // this shape. This pins correctness; the linear accumulation is the fix.
+    const big = { seq: 6, type: 'event', event: 'output', body: { text: 'y'.repeat(256 * 1024) } };
+    const encoded = frame(big);
+    const decoder = new DapFrameDecoder();
+
+    const received: unknown[] = [];
+    const CHUNK = 1024;
+    for (let offset = 0; offset < encoded.length; offset += CHUNK) {
+      received.push(...decoder.push(encoded.subarray(offset, offset + CHUNK)));
+    }
+
+    expect(received).toEqual([big]);
+  });
+
   it('reset() drops any partial frame in progress', () => {
     const decoder = new DapFrameDecoder();
     const msg = { seq: 3, type: 'event', event: 'continued', body: {} };

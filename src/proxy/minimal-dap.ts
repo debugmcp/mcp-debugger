@@ -40,8 +40,9 @@ export class MinimalDapClient extends EventEmitter {
   private socket: Socket | null = null;
   private decoder = new DapFrameDecoder({
     onError: (error, context) => {
-      if (context === 'header') {
-        logger.warn('[MinimalDapClient] Invalid Content-Length header encountered; discarding payload');
+      if (context === 'header' || context === 'overflow') {
+        // Same recovery contract: the decoder discarded the buffer (issue #402)
+        logger.warn(`[MinimalDapClient] ${error.message}`);
       } else {
         logger.error('[MinimalDapClient] Error parsing message:', error);
       }
