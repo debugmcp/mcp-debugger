@@ -59,14 +59,15 @@ Note: the SBOMs attached to releases are generated from the source tree and enum
 
 #### PyPI (`debug-mcp-server-launcher`)
 
-- Currently uses token-based authentication via repository secret.
-- Migration to OIDC trusted publishing (via `pypa/gh-action-pypi-publish`) is planned to eliminate the long-lived PyPI token.
+- **OIDC trusted publishing** via `pypa/gh-action-pypi-publish`: CI exchanges its GitHub OIDC identity for a short-lived credential at publish time; no long-lived PyPI token is involved.
+- **PEP 740 attestations**: the publish action generates and uploads digital attestations for every distribution, shown under "Verified details" on the PyPI project page.
 
 #### Docker Hub (`debugmcp/mcp-debugger`)
 
 - Multi-platform images (linux/amd64, linux/arm64) built in CI from digest-pinned base images.
 - Published only after all tests pass.
-- Credential-based authentication via repository secrets.
+- Credential-based authentication via repository secrets (Docker Hub does not support OIDC publishing).
+- **Build-provenance attestation**: the pushed image digest is attested with `actions/attest-build-provenance` and the attestation is pushed to the registry, so the image is verifiable back to the tagged commit and workflow (see [Verifying a Release](#verifying-a-release)).
 
 ### SBOMs
 
@@ -86,13 +87,21 @@ All tools installed during CI are pinned to specific versions to ensure reproduc
 
 ## Verifying a Release
 
-What is attested: **the npm package tarballs** (the `.tgz` files published to npm and attached to the GitHub release). The Docker image and the PyPI launcher are built by the same tag-triggered workflow but do not yet carry their own attestations.
+What is attested: **every distributed artifact** — the npm package tarballs (the `.tgz` files published to npm and attached to the GitHub release), the Docker image, and the PyPI launcher. All are built by the same tag-triggered workflow. (Applies to releases after v0.24.2; earlier releases attest only the npm tarballs.)
 
 **Verify a release asset's build provenance** (proves the tarball was built by this repository's release workflow from the tagged commit):
 
 ```bash
 gh attestation verify debugmcp-mcp-debugger-<version>.tgz --repo debugmcp/mcp-debugger
 ```
+
+**Verify the Docker image** (proves the pushed image digest was built and attested by the same release workflow):
+
+```bash
+gh attestation verify oci://index.docker.io/debugmcp/mcp-debugger:<version> --repo debugmcp/mcp-debugger
+```
+
+**Verify the PyPI launcher**: distributions carry [PEP 740](https://peps.python.org/pep-0740/) attestations, generated at upload by trusted publishing — see "Verified details" on the [PyPI project page](https://pypi.org/project/debug-mcp-server-launcher/), or verify locally with `pypi-attestations verify pypi ...`.
 
 **Verify installed npm packages** (checks registry signatures and provenance attestations for everything in your lockfile):
 
@@ -133,7 +142,7 @@ The project currently has a single lead maintainer (see [MAINTAINERS.md](MAINTAI
 | npm (`@debugmcp` scope) | Trusted publishing bound to this GitHub repository's release workflow (not to individual accounts); scoped token only for first-publishes |
 | Docker Hub (`debugmcp/mcp-debugger`) | Project maintainers via repository secrets |
 | GitHub (admin) | Organization owners of `debugmcp` |
-| PyPI (`debug-mcp-server-launcher`) | Project maintainers via repository secret (OIDC planned) |
+| PyPI (`debug-mcp-server-launcher`) | Trusted publishing bound to this GitHub repository's release workflow (not to individual accounts) |
 
 If the primary maintainer becomes unavailable, organization-level access on GitHub ensures continuity. npm trusted publishing is tied to the GitHub repository, not individual accounts.
 

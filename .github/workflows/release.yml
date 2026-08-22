@@ -100,6 +100,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write      # Required for signing the image attestation (OIDC)
+      attestations: write  # Required to store the attestation
 
     steps:
     - name: Checkout code
@@ -147,6 +149,7 @@ jobs:
           type=raw,value=latest,enable=${{ env.PUBLISH_LATEST == 'true' }}
     
     - name: Build and push Docker image
+      id: build
       uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
       with:
         context: .
@@ -157,12 +160,27 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
+    # Attest the pushed image digest so the Docker artifact is verifiable back
+    # to this workflow and commit, like the npm tarballs already are:
+    #   gh attestation verify oci://index.docker.io/debugmcp/mcp-debugger:<tag> \
+    #     --repo debugmcp/mcp-debugger
+    # Same composite-action approach as the provenance job below (see the note
+    # there for why slsa-github-generator's reusable workflows are not usable
+    # in this org).
+    - name: Attest Docker image provenance
+      uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+      with:
+        subject-name: index.docker.io/debugmcp/mcp-debugger
+        subject-digest: ${{ steps.build.outputs.digest }}
+        push-to-registry: true
+
   pypi-publish:
     name: Publish Python Launcher to PyPI
     needs: build-and-test
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write  # Required for PyPI trusted publishing (OIDC)
 
     steps:
     - name: Checkout code
@@ -219,14 +237,21 @@ jobs:
         rm -rf dist build *.egg-info
         python -m build
     
-    - name: Publish to PyPI
-      env:
-        TWINE_USERNAME: __token__
-        TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+    - name: Check package metadata
       run: |
         cd mcp_debugger_launcher
         python -m twine check dist/*
-        python -m twine upload --skip-existing dist/*
+
+    # PyPI trusted publishing (OIDC) - no long-lived token. The action also
+    # generates and uploads PEP 740 digital attestations for the dists.
+    # Requires the trusted publisher configured on pypi.org for
+    # debug-mcp-server-launcher (repo debugmcp/mcp-debugger, workflow
+    # release.yml).
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2
+      with:
+        packages-dir: mcp_debugger_launcher/dist
+        skip-existing: true
 
   npm-publish:
     name: Publish to npm
@@ -645,8 +670,10 @@ jobs:
         ### 🔏 Verify this release
         ```bash
         gh attestation verify <asset>.tgz --repo debugmcp/mcp-debugger
+        gh attestation verify oci://index.docker.io/debugmcp/mcp-debugger:${{ steps.changelog.outputs.VERSION }} --repo debugmcp/mcp-debugger
         npm audit signatures   # in a project that installs @debugmcp packages
         ```
+        The PyPI launcher carries PEP 740 attestations — see the "Verified details" on its [PyPI page](https://pypi.org/project/debug-mcp-server-launcher/${{ steps.changelog.outputs.VERSION }}/).
         SBOMs (SPDX + CycloneDX) are attached as release assets.
         
         ### 📚 Documentation
