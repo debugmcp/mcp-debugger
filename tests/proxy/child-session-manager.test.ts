@@ -21,6 +21,13 @@ class MockMinimalDapClient extends EventEmitter {
   // Emit a stopped event shortly after the attach request (issue #295 —
   // simulates the entry stop firing while later adoption steps still run)
   static emitStoppedAfterAttach = false;
+  // Emit a post-attach 'initialized' (some adapters re-initialize after
+  // attach; drives handlePostAttachInit's replay path)
+  static emitInitializedAfterAttach = false;
+  // When set, returned verbatim for 'threads'
+  static threadsResponse: unknown | undefined = undefined;
+  // When true, shutdown() throws (drives the parent shutdown catch arm)
+  static shutdownThrows = false;
 
   host: string;
   port: number;
@@ -55,6 +62,9 @@ class MockMinimalDapClient extends EventEmitter {
     if (command === 'attach' && MockMinimalDapClient.emitStoppedAfterAttach) {
       setTimeout(() => this.emit('event', { event: 'stopped', body: { reason: 'entry', threadId: 0 } }), 5);
     }
+    if (command === 'attach' && MockMinimalDapClient.emitInitializedAfterAttach) {
+      setTimeout(() => this.emit('event', { event: 'initialized' }), 5);
+    }
 
     // Simulate responses
     if (command === 'initialize') {
@@ -64,6 +74,9 @@ class MockMinimalDapClient extends EventEmitter {
       return { body: { capabilities: {} } };
     }
     if (command === 'threads') {
+      if (MockMinimalDapClient.threadsResponse !== undefined) {
+        return MockMinimalDapClient.threadsResponse;
+      }
       return { body: { threads: [{ id: 1, name: 'main' }] } };
     }
     if (command === 'setBreakpoints') {
@@ -86,6 +99,9 @@ class MockMinimalDapClient extends EventEmitter {
 
   shutdown(reason: string): void {
     this.shutdownCalls.push(reason);
+    if (MockMinimalDapClient.shutdownThrows) {
+      throw new Error('shutdown exploded');
+    }
     this.connected = false;
   }
 
@@ -109,6 +125,9 @@ describe('ChildSessionManager', () => {
     MockMinimalDapClient.suppressInitialized = false;
     MockMinimalDapClient.setBreakpointsResponse = undefined;
     MockMinimalDapClient.emitStoppedAfterAttach = false;
+    MockMinimalDapClient.emitInitializedAfterAttach = false;
+    MockMinimalDapClient.threadsResponse = undefined;
+    MockMinimalDapClient.shutdownThrows = false;
   });
 
   describe('JavaScript policy (multi-session)', () => {
@@ -907,6 +926,153 @@ describe('ChildSessionManager', () => {
       expect(bridge.detachCalls).toBe(1);
       await mgr.shutdown();
       expect(bridge.detachCalls).toBe(2);
+    });
+  });
+
+  describe('adoption edges and the child-safe policy (coverage sprint)', () => {
+    const childConfig = {
+      pendingId: 'edge-pending-1',
+      host: 'localhost',
+      port: 9229,
+      parentConfig: { type: 'pwa-node', request: 'launch' }
+    };
+
+    async function createChild(mgr: ChildSessionManager): Promise<void> {
+      vi.useFakeTimers();
+      try {
+        const promise = mgr.createChildSession(childConfig);
+        await vi.advanceTimersByTimeAsync(20000);
+        await promise;
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+
+    it('hands children a policy that cannot spawn grandchildren', async () => {
+      const baseHandle = vi.fn(async (req: DebugProtocol.Request) =>
+        req.command === 'startDebugging' ? { handled: true, wouldSpawn: true } : { handled: false }
+      );
+      const basePolicy: AdapterPolicy = {
+        ...JsDebugAdapterPolicy,
+        getDapClientBehavior: () => ({
+          ...JsDebugAdapterPolicy.getDapClientBehavior(),
+          handleReverseRequest: baseHandle as never
+        })
+      };
+      const mgr = new ChildSessionManager({ policy: basePolicy, host: 'localhost', port: 9229 });
+      await createChild(mgr);
+
+      const childPolicy = MockMinimalDapClient.lastInstance!.policy!;
+      expect(childPolicy.supportsReverseStartDebugging).toBe(false);
+      expect(childPolicy.childSessionStrategy).toBe('none');
+
+      const behavior = childPolicy.getDapClientBehavior();
+      expect(behavior.mirrorBreakpointsToChild).toBe(false);
+      expect(behavior.pauseAfterChildAttach).toBe(false);
+      expect(behavior.childRoutedCommands?.size).toBe(0);
+
+      // A grandchild-spawning reverse request is acknowledged and stopped
+      const spawnResult = await behavior.handleReverseRequest!(
+        { seq: 1, type: 'request', command: 'startDebugging' } as never,
+        {} as never
+      );
+      expect(spawnResult).toEqual({ handled: true });
+
+      // Unhandled reverse requests pass through untouched
+      const passthrough = await behavior.handleReverseRequest!(
+        { seq: 2, type: 'request', command: 'somethingElse' } as never,
+        {} as never
+      );
+      expect(passthrough).toEqual({ handled: false });
+
+      await mgr.shutdown();
+    });
+
+    it('survives failing configuration requests during adoption', async () => {
+      MockMinimalDapClient.failCommands.set('setExceptionBreakpoints', new Error('no exception filters'));
+      MockMinimalDapClient.failCommands.set('configurationDone', new Error('not required'));
+      MockMinimalDapClient.failCommands.set('setBreakpoints', new Error('bp mirror failed'));
+
+      const mgr = new ChildSessionManager({ policy: JsDebugAdapterPolicy, host: 'localhost', port: 9229 });
+      mgr.storeBreakpoints('/abs/app.js', [{ line: 3 }]);
+      const created = vi.fn();
+      mgr.on('childCreated', created);
+
+      await createChild(mgr);
+
+      expect(created).toHaveBeenCalled();
+      await mgr.shutdown();
+    });
+
+    it('replays stored breakpoints after a post-attach initialized event', async () => {
+      MockMinimalDapClient.emitInitializedAfterAttach = true;
+      const mgr = new ChildSessionManager({ policy: JsDebugAdapterPolicy, host: 'localhost', port: 9229 });
+      mgr.storeBreakpoints('/abs/app.js', [{ line: 7 }]);
+
+      await createChild(mgr);
+
+      const child = MockMinimalDapClient.lastInstance!;
+      const bpRequests = child.requests.filter(
+        (r) => r.command === 'setBreakpoints' &&
+          (r.args as { source?: { path?: string } })?.source?.path === '/abs/app.js'
+      );
+      // Once from configureChild's mirror, once from the post-attach replay
+      expect(bpRequests.length).toBeGreaterThanOrEqual(2);
+      await mgr.shutdown();
+    });
+
+    it('applies the js-debug double-pause quirk when the first thread id is 0', async () => {
+      MockMinimalDapClient.threadsResponse = { body: { threads: [{ id: 0, name: 'main' }] } };
+      const mgr = new ChildSessionManager({ policy: JsDebugAdapterPolicy, host: 'localhost', port: 9229 });
+
+      await createChild(mgr);
+
+      const pauses = MockMinimalDapClient.lastInstance!.requests
+        .filter((r) => r.command === 'pause')
+        .map((r) => (r.args as { threadId?: number })?.threadId);
+      expect(pauses).toEqual(expect.arrayContaining([0, 1]));
+      await mgr.shutdown();
+    });
+
+    it('tolerates a threads request failure while trying to pause the child', async () => {
+      MockMinimalDapClient.failCommands.set('threads', new Error('threads unavailable'));
+      const mgr = new ChildSessionManager({ policy: JsDebugAdapterPolicy, host: 'localhost', port: 9229 });
+      const created = vi.fn();
+      mgr.on('childCreated', created);
+
+      await createChild(mgr);
+
+      expect(created).toHaveBeenCalled();
+      await mgr.shutdown();
+    });
+
+    it('rejects adoption once the child errors, ignoring the follow-up close', async () => {
+      vi.useFakeTimers();
+      try {
+        MockMinimalDapClient.hangCommands.add('attach');
+        const mgr = new ChildSessionManager({ policy: JsDebugAdapterPolicy, host: 'localhost', port: 9229 });
+        const promise = mgr.createChildSession(childConfig);
+        promise.catch(() => {});
+        await vi.advanceTimersByTimeAsync(50);
+
+        const child = MockMinimalDapClient.lastInstance!;
+        child.emit('error', new Error('socket reset'));
+        child.emit('close'); // second death signal must be a no-op
+
+        await expect(promise).rejects.toThrow(/errored during adoption: socket reset/);
+        await mgr.shutdown();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('shutdown survives a child whose own shutdown throws', async () => {
+      const mgr = new ChildSessionManager({ policy: JsDebugAdapterPolicy, host: 'localhost', port: 9229 });
+      await createChild(mgr);
+      MockMinimalDapClient.shutdownThrows = true;
+
+      await expect(mgr.shutdown()).resolves.toBeUndefined();
+      expect((mgr as unknown as { childSessions: Map<string, unknown> }).childSessions.size).toBe(0);
     });
   });
 
