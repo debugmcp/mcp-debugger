@@ -533,8 +533,7 @@ async function extractAndCopyFiles(vsixPath, platform, platformInfo, vsixName) {
     const versionFile = path.join(VENDOR_DIR, platformInfo.targetDir, 'version.json');
     await fs.writeFile(versionFile, JSON.stringify({
       version: CODELLDB_VERSION,
-      platform: platform,
-      downloadedAt: new Date().toISOString()
+      platform: platform
     }, null, 2));
     
     log(`Success: ${platform} vendored successfully`);
