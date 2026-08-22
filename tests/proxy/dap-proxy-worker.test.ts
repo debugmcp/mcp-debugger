@@ -7,7 +7,7 @@ import { EventEmitter } from 'events';
 import type { ChildProcess } from 'child_process';
 import path from 'path';
 import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest';
-import { DapProxyWorker } from '../../src/proxy/dap-proxy-worker.js';
+import { DapProxyWorker, MAX_QUEUED_COMMANDS } from '../../src/proxy/dap-proxy-worker.js';
 import { GenericAdapterManager } from '../../src/proxy/dap-proxy-adapter-manager.js';
 import { DapConnectionManager } from '../../src/proxy/dap-proxy-connection-manager.js';
 import type {
@@ -3792,6 +3792,61 @@ describe('DapProxyWorker', () => {
       const [response] = dapResponses();
       expect(response.success).toBe(false);
       expect(response.error).toContain('not configured');
+    });
+  });
+
+  describe('bounded worker queues (issue #405)', () => {
+    const dapPayload = (id: string): DapCommandPayload => ({
+      cmd: 'dap',
+      sessionId: 'test-session',
+      requestId: id,
+      dapCommand: 'setBreakpoints',
+      dapArgs: {}
+    });
+
+    const responseFor = (requestId: string) =>
+      mockMessageSender.send.mock.calls
+        .map((c) => c[0] as { type?: string; requestId?: string; success?: boolean; error?: string })
+        .find((m) => m.type === 'dapResponse' && m.requestId === requestId);
+
+    it('rejects a command with an error response when the pre-connect queue is full', async () => {
+      (worker as any).state = ProxyState.INITIALIZING;
+      (worker as any).dapClient = null;
+      (worker as any).preConnectQueue = Array.from(
+        { length: MAX_QUEUED_COMMANDS },
+        (_, i) => dapPayload(`preconnect-${i}`)
+      );
+
+      await worker.handleCommand(dapPayload('overflow-pre'));
+
+      expect((worker as any).preConnectQueue).toHaveLength(MAX_QUEUED_COMMANDS);
+      const response = responseFor('overflow-pre');
+      expect(response?.success).toBe(false);
+      expect(String(response?.error)).toMatch(/queue/i);
+    });
+
+    it('rejects a command with an error response when the policy command queue is full', async () => {
+      (worker as any).state = ProxyState.CONNECTED;
+      (worker as any).dapClient = mockDapClient;
+      (worker as any).adapterPolicy = {
+        name: 'queue-test',
+        shouldQueueCommand: () => ({ shouldQueue: true, shouldDefer: false }),
+        getInitializationBehavior: () => ({}),
+        getDapClientBehavior: () => ({})
+      };
+      (worker as any).commandQueue = Array.from(
+        { length: MAX_QUEUED_COMMANDS },
+        (_, i) => dapPayload(`queued-${i}`)
+      );
+
+      await worker.handleCommand(dapPayload('overflow-cmd'));
+
+      // Overflow must not drain or grow the queue — the queued commands hold
+      // live requestIds that a silent evict would leave hanging forever.
+      expect((worker as any).commandQueue).toHaveLength(MAX_QUEUED_COMMANDS);
+      const response = responseFor('overflow-cmd');
+      expect(response?.success).toBe(false);
+      expect(String(response?.error)).toMatch(/queue/i);
     });
   });
 });

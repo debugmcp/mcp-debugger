@@ -909,4 +909,33 @@ describe('ChildSessionManager', () => {
       expect(bridge.detachCalls).toBe(2);
     });
   });
+
+  describe('stored breakpoint lifecycle (issue #405)', () => {
+    beforeEach(() => {
+      manager = new ChildSessionManager({
+        policy: JsDebugAdapterPolicy,
+        host: 'localhost',
+        port: 9229
+      });
+    });
+
+    it('clears stored breakpoints on shutdown', async () => {
+      manager.storeBreakpoints('/abs/app.js', [{ line: 1 }]);
+      manager.storeBreakpoints('/abs/lib.js', [{ line: 2 }]);
+      expect((manager as any).storedBreakpoints.size).toBe(2);
+
+      await manager.shutdown();
+
+      expect((manager as any).storedBreakpoints.size).toBe(0);
+    });
+
+    it('deletes the entry when a file clears to zero breakpoints', () => {
+      manager.storeBreakpoints('/abs/app.js', [{ line: 1 }]);
+      expect((manager as any).storedBreakpoints.size).toBe(1);
+
+      manager.storeBreakpoints('/abs/app.js', []);
+
+      expect((manager as any).storedBreakpoints.size).toBe(0);
+    });
+  });
 });

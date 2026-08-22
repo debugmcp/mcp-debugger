@@ -12,7 +12,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import { CdpFunctionBreakpointBridge } from '../../src/proxy/cdp-function-breakpoint-bridge.js';
+import { CdpFunctionBreakpointBridge, MAX_SCRIPT_URLS } from '../../src/proxy/cdp-function-breakpoint-bridge.js';
 
 type CdpHandler = (params: Record<string, unknown>) => unknown;
 
@@ -638,6 +638,24 @@ describe('CdpFunctionBreakpointBridge', () => {
       cdp.pause({ hitBreakpoints: ['cdp-obj-greet'] });
       const out = await bridge.processStoppedEvent(stoppedEvent('breakpoint'));
       expect((out.body as DebugProtocol.StoppedEvent['body']).reason).toBe('breakpoint');
+    });
+  });
+
+  describe('scriptUrls cap (issue #405)', () => {
+    it('evicts the oldest scriptParsed entries past the cap', async () => {
+      await attach();
+
+      const overshoot = 10;
+      for (let i = 0; i < MAX_SCRIPT_URLS + overshoot; i++) {
+        cdp.emit('cdp-event', 'Debugger.scriptParsed', { scriptId: `s${i}`, url: `file:///f${i}.js` });
+      }
+
+      const urls = (bridge as unknown as { scriptUrls: Map<string, string> }).scriptUrls;
+      expect(urls.size).toBe(MAX_SCRIPT_URLS);
+      // FIFO: the earliest scripts fell out, the newest survive
+      expect(urls.has('s0')).toBe(false);
+      expect(urls.has(`s${overshoot - 1}`)).toBe(false);
+      expect(urls.get(`s${MAX_SCRIPT_URLS + overshoot - 1}`)).toBe(`file:///f${MAX_SCRIPT_URLS + overshoot - 1}.js`);
     });
   });
 });

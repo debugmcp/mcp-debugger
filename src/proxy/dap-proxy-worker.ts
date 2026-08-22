@@ -60,6 +60,14 @@ export type DapProxyWorkerHooks = {
   createTraceFile?: (sessionId: string, logDir: string) => string | undefined;
 };
 
+/**
+ * Cap for the pre-connect and policy command queues (issue #405). Both are
+ * normally drained within one adapter handshake, so a queue this deep means
+ * the adapter is wedged — commands past the cap are rejected with an error
+ * response on their live requestId (silent eviction would hang the client).
+ */
+export const MAX_QUEUED_COMMANDS = 256;
+
 export class DapProxyWorker {
   private logger: ILogger | null = null;
   private dapClient: IDapClient | null = null;
@@ -934,11 +942,21 @@ export class DapProxyWorker {
     // Check if we're connected
     if (!this.dapClient) {
       if (this.state === ProxyState.INITIALIZING) {
+        if (this.preConnectQueue.length >= MAX_QUEUED_COMMANDS) {
+          // A wedged adapter never drains this queue; reject instead of
+          // growing without bound (issue #405). Every queued command holds a
+          // live requestId, so the overflow must answer, not silently drop.
+          this.sendDapResponse(
+            payload.requestId, false, undefined,
+            `pre-connect queue overflow (${MAX_QUEUED_COMMANDS} commands queued; adapter never became ready)`
+          );
+          return;
+        }
         this.preConnectQueue.push(payload);
         this.logger?.info(`[Worker] Queued pre-connect DAP command: ${payload.dapCommand}`);
         return;
       }
-      
+
       this.sendDapResponse(payload.requestId, false, undefined, 'DAP client not connected');
       return;
     }
@@ -970,8 +988,17 @@ export class DapProxyWorker {
       );
       
       if (handling.shouldQueue) {
+        if (this.commandQueue.length >= MAX_QUEUED_COMMANDS) {
+          // Same shape as the pre-connect overflow: reject with an error on
+          // the live requestId rather than queueing forever (issue #405).
+          this.sendDapResponse(
+            payload.requestId, false, undefined,
+            `command queue overflow (${MAX_QUEUED_COMMANDS} commands queued; adapter is not draining)`
+          );
+          return;
+        }
         this.logger!.info(`[Worker] ${handling.reason || 'Queuing command'}`);
-        
+
         // Check if we need to inject configurationDone
         const initBehavior = this.adapterPolicy.getInitializationBehavior();
         if (handling.shouldDefer && initBehavior.deferConfigDone) {
