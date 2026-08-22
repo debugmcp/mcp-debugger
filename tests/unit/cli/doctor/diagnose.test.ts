@@ -125,6 +125,42 @@ describe('diagnose', () => {
     expect(report.languages[0].modes?.launch.available).toBe(false);
   });
 
+  it('downgrades broken to warn when attach remains available (container ruby: attach-only by design)', async () => {
+    const deps = makeDeps([
+      {
+        name: 'ruby',
+        attach: 'direct-connect',
+        validate: async () => ({ valid: false, errors: ['Ruby not found.'], warnings: [], details: {} })
+      }
+    ]);
+
+    const report = await diagnose([], deps);
+
+    const ruby = report.languages[0];
+    expect(ruby.verdict).toBe('warn');
+    expect(ruby.errors[0]).toContain('Ruby not found');
+    expect(ruby.warnings.some((w) => w.includes('attach'))).toBe(true);
+    expect(ruby.modes?.launch.available).toBe(false);
+    expect(ruby.modes?.attach.available).toBe(true);
+    // Gating on such a language must pass: its supported mode works.
+    await expect(diagnose(['ruby'], deps)).resolves.toMatchObject({ exitCode: 0 });
+  });
+
+  it('keeps broken when neither launch nor attach is available', async () => {
+    const deps = makeDeps([
+      {
+        name: 'go',
+        attach: 'none',
+        validate: async () => ({ valid: false, errors: ['Delve not found.'], warnings: [], details: {} })
+      }
+    ]);
+
+    const report = await diagnose(['go'], deps);
+
+    expect(report.languages[0].verdict).toBe('broken');
+    expect(report.exitCode).toBe(1);
+  });
+
   it('reports missing for adapters that are not installed', async () => {
     const deps = makeDeps([{ name: 'ruby', installed: false }]);
 

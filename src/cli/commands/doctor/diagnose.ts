@@ -271,9 +271,22 @@ async function diagnoseLanguage(
     ];
     warnings = [];
   } else if (!validation.valid) {
-    verdict = 'broken';
-    errors = validation.errors;
-    warnings = validation.warnings;
+    // A failed toolchain probe kills launch, but direct-connect attach runs
+    // the debug engine inside the debuggee and needs nothing local (container
+    // ruby is attach-only by design) — a partially usable adapter is a warn,
+    // not broken, and must not fail a gated run.
+    if (modes.attach.available) {
+      verdict = 'warn';
+      errors = validation.errors;
+      warnings = [
+        ...validation.warnings,
+        `Launch is unavailable, but attach (direct-connect) still works — see the errors above for what launch would need.`
+      ];
+    } else {
+      verdict = 'broken';
+      errors = validation.errors;
+      warnings = validation.warnings;
+    }
   } else {
     verdict = validation.warnings.length > 0 ? 'warn' : 'ok';
     errors = [];
