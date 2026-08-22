@@ -268,7 +268,14 @@ export class ChildSessionManager extends EventEmitter {
     }
     
     const absolutePath = path.isAbsolute(sourcePath) ? sourcePath : path.resolve(sourcePath);
-    this.storedBreakpoints.set(absolutePath, breakpoints);
+    if (breakpoints.length === 0) {
+      // A fresh child never saw this file's breakpoints, so replaying an
+      // empty set is a no-op — drop the key instead of retaining every file
+      // that ever had a breakpoint (issue #405).
+      this.storedBreakpoints.delete(absolutePath);
+    } else {
+      this.storedBreakpoints.set(absolutePath, breakpoints);
+    }
     
     // Mirror to active child if present
     if (this.activeChild) {
@@ -767,5 +774,6 @@ export class ChildSessionManager extends EventEmitter {
     this.childSessions.clear();
     this.activeChild = null;
     this.adoptedTargets.clear();
+    this.storedBreakpoints.clear();
   }
 }
