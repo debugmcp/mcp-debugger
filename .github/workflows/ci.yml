@@ -274,12 +274,22 @@ jobs:
 
   test-summary:
     name: Test Summary
-    needs: [build-and-test, container-tests]
+    needs: [build-and-test, windows-python-integration, lint, container-tests]
     runs-on: ubuntu-latest
     if: always()
-    
+
     steps:
     - name: Check test results
       run: |
-        echo "✅ CI pipeline completed"
-        echo "Check the test results in the build-and-test job"
+        echo "build-and-test: ${{ needs.build-and-test.result }}"
+        echo "windows-python-integration: ${{ needs.windows-python-integration.result }}"
+        echo "lint: ${{ needs.lint.result }}"
+        echo "container-tests: ${{ needs.container-tests.result }}"
+        if [ "${{ needs.build-and-test.result }}" != "success" ] \
+          || [ "${{ needs.windows-python-integration.result }}" != "success" ] \
+          || [ "${{ needs.lint.result }}" != "success" ] \
+          || [ "${{ needs.container-tests.result }}" != "success" ]; then
+          echo "❌ One or more required jobs did not succeed"
+          exit 1
+        fi
+        echo "✅ All required jobs succeeded"
