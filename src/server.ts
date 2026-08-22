@@ -248,6 +248,8 @@ export class DebugMcpServer {
   public server: Server;
   private sessionManager: SessionManager;
   private logger;
+  /** Detaches this server's logger from the shared file transport on stop() (issue #404). */
+  private readonly disposeLogger?: () => void;
   private fileChecker: SimpleFileChecker;
   private lineReader: LineReader;
   private environment: IEnvironment;
@@ -938,8 +940,9 @@ export class DebugMcpServer {
     };
     
     const dependencies = createProductionDependencies(containerConfig);
-    
+
     this.logger = dependencies.logger;
+    this.disposeLogger = dependencies.disposeLogger;
     this.environment = dependencies.environment;
     this.logger.info('[DebugMcpServer Constructor] Main server logger instance assigned.');
 
@@ -2888,6 +2891,10 @@ export class DebugMcpServer {
     this.subscribedUris.clear();
     this.sessionManager.removeListener('output-captured', this.handleOutputCaptured);
     this.logger.info('Debug MCP Server stopped');
+    // Last: detach this server's logger from the shared file transport so
+    // per-session servers in HTTP mode don't accumulate on it (issue #404).
+    // After this line the logger no longer writes to the shared file.
+    this.disposeLogger?.();
   }
 
   /**

@@ -48,6 +48,13 @@ const STALE_LOG_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
  */
 const fileTransportCache = new Map<string, winston.transport>();
 
+/**
+ * Which shared file transport each logger attached, so per-session loggers
+ * can be detached on DebugMcpServer.stop() without closing the transport for
+ * everyone (issue #404). WeakMap: a discarded logger must not be retained here.
+ */
+const loggerFileTransports = new WeakMap<WinstonLoggerType, winston.transport>();
+
 let staleLogCleanupDone = false;
 
 /** Sends a signal to a pid; injectable so tests never spy the global process.kill (issue #183). */
@@ -189,6 +196,7 @@ export function createLogger(namespace: string, options: LoggerOptions = {}): Wi
     cleanupStaleLogFiles(path.dirname(logFilePath));
   }
 
+  let attachedFileTransport: winston.transport | undefined;
   try {
     const cacheKey = path.resolve(logFilePath);
     let fileTransport = fileTransportCache.get(cacheKey);
@@ -206,19 +214,24 @@ export function createLogger(namespace: string, options: LoggerOptions = {}): Wi
       fileTransportCache.set(cacheKey, fileTransport);
     }
     transports.push(fileTransport);
+    attachedFileTransport = fileTransport;
   } catch (fileTransportError) {
     // When console output is silenced we must not write to console as it corrupts transports
     if (!isConsoleSilenced) {
       console.error(`[Logger Init Error] Failed to create file transport for ${logFilePath}:`, fileTransportError);
     }
   }
-  
+
   const logger = winston.createLogger({
     level,
     transports,
     defaultMeta: { namespace },
     exitOnError: false
   });
+
+  if (attachedFileTransport) {
+    loggerFileTransports.set(logger, attachedFileTransport);
+  }
 
   logger.on('error', (error: Error) => {
     // When console output is silenced we must not write to console as it corrupts transports
@@ -233,6 +246,37 @@ export function createLogger(namespace: string, options: LoggerOptions = {}): Wi
   }
 
   return logger;
+}
+
+/**
+ * Detach a logger from the shared file transport it attached in createLogger,
+ * WITHOUT closing the transport for the other loggers still piping into it
+ * (issue #404). This is the per-session disposal path for Streamable HTTP
+ * mode, where every MCP session builds a DebugMcpServer whose logger would
+ * otherwise stay piped into the process-lifetime shared transport forever.
+ *
+ * winston-transport registers `once('unpipe', src => { if (src ===
+ * this.parent) { this.parent = null; this.close(); } })`, where `parent` is
+ * the FIRST logger that piped the transport — so a plain logger.remove() from
+ * that logger would close the shared file stream for everyone. The close is
+ * neutralized by shadowing `close` with an own undefined property for the
+ * duration of the remove (`if (this.close)` in the handler is then falsy),
+ * and restored in finally. logger.close() remains forbidden as documented on
+ * the transport cache above.
+ */
+export function detachSharedFileTransport(logger: WinstonLoggerType): void {
+  const transport = loggerFileTransports.get(logger);
+  if (!transport) {
+    return;
+  }
+  loggerFileTransports.delete(logger);
+  const t = transport as unknown as Record<string, unknown>;
+  t.close = undefined;
+  try {
+    logger.remove(transport);
+  } finally {
+    delete t.close;
+  }
 }
 
 /**
