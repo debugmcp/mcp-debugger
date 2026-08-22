@@ -39,8 +39,7 @@ process.argv = process.argv.map(arg =>
 );
 
 import { createLogger } from './utils/logger.js';
-import { reapOrphanJvms } from './utils/jvm-orphan-reaper.js';
-import { reapOrphanProxies } from './utils/proxy-orphan-reaper.js';
+import { runStartupJanitor } from './utils/startup-janitor.js';
 import { DebugMcpServer } from './server.js';
 import { setupErrorHandlers } from './cli/error-handlers.js';
 import {
@@ -97,30 +96,17 @@ export async function main(): Promise<void> {
   // below uses this to decide which orphans from prior runs are ours to kill.
   process.env.MCP_DEBUGGER_MAIN_PID = String(process.pid);
 
-  // Best-effort cleanup of debuggee JVMs and proxy worker chains leaked by
-  // prior crashed runs. Awaited synchronously so a fresh server starts in a
-  // known-clean state; the two reapers run concurrently so their worst-case
-  // process-listing timeouts don't stack. Failures here must never block
-  // startup — both functions are designed not to throw, and allSettled is
-  // belt-and-suspenders.
-  const [jvmOutcome, proxyOutcome] = await Promise.allSettled([
-    reapOrphanJvms({ selfPid: process.pid, logger }),
-    reapOrphanProxies({ selfPid: process.pid, logger })
-  ]);
-  if (jvmOutcome.status === 'fulfilled') {
-    if (jvmOutcome.value.killed.length > 0) {
-      logger.info(`[startup] Reaped ${jvmOutcome.value.killed.length} orphan JVM(s) from prior runs`);
-    }
-  } else {
-    logger.warn(`[startup] Orphan JVM reaper failed: ${(jvmOutcome.reason as Error)?.message ?? String(jvmOutcome.reason)}`);
-  }
-  if (proxyOutcome.status === 'fulfilled') {
-    if (proxyOutcome.value.killed.length > 0) {
-      logger.info(`[startup] Reaped ${proxyOutcome.value.killed.length} orphan proxy worker(s) from prior runs`);
-    }
-  } else {
-    logger.warn(`[startup] Orphan proxy reaper failed: ${(proxyOutcome.reason as Error)?.message ?? String(proxyOutcome.reason)}`);
-  }
+  // Best-effort cleanup of debris from prior crashed runs (orphan JVMs and
+  // proxy workers, stale session logs) runs fire-and-forget from the
+  // server-starting command actions below — never for --version/--help, and
+  // never blocking the transport from coming up (issue #399). Safe alongside
+  // the live server: reapers only kill processes whose recorded owner pid is
+  // dead. MCP_SKIP_ORPHAN_REAPERS=1 skips the process scans entirely.
+  const kickStartupJanitor = () => {
+    void runStartupJanitor({ logger }).catch(() => {
+      // runStartupJanitor logs its own failures; this guard is belt-and-suspenders.
+    });
+  };
 
   // Setup error handlers
   setupErrorHandlers({ logger });
@@ -129,19 +115,22 @@ export async function main(): Promise<void> {
   const program = createCLI('debug-mcp-server', 'Step-through debugging MCP server for LLMs', getVersion());
   
   // Setup commands
-  setupStdioCommand(program, (options) => 
-    handleStdioCommand(options, { logger, serverFactory: createDebugMcpServer })
-  );
-  
+  setupStdioCommand(program, (options) => {
+    kickStartupJanitor();
+    return handleStdioCommand(options, { logger, serverFactory: createDebugMcpServer });
+  });
+
   // The SSE/HTTP command modules pull in express and the SDK's HTTP transport
   // stacks; import them only when their subcommand actually runs so stdio mode
   // (the common case) never pays for them (issue #400).
   setupSSECommand(program, async (options) => {
+    kickStartupJanitor();
     const { handleSSECommand } = await import('./cli/sse-command.js');
     return handleSSECommand(options, { logger, serverFactory: createDebugMcpServer });
   });
 
   setupHttpCommand(program, async (options) => {
+    kickStartupJanitor();
     const { handleHttpCommand } = await import('./cli/http-command.js');
     return handleHttpCommand(options, { logger, serverFactory: createDebugMcpServer });
   });
