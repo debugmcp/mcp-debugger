@@ -299,9 +299,9 @@ describe('MinimalDapClient', () => {
         '[MinimalDapClient] Invalid Content-Length header encountered; discarding payload'
       );
       expect(protocolSpy).not.toHaveBeenCalled();
-      expect(
-        (client as unknown as { decoder: { rawData: Buffer } }).decoder.rawData.length
-      ).toBe(0);
+      const decoder = (client as unknown as { decoder: { headerData: Buffer; bodyBytes: number } }).decoder;
+      expect(decoder.headerData.length).toBe(0);
+      expect(decoder.bodyBytes).toBe(0);
       protocolSpy.mockRestore();
     });
 
@@ -325,9 +325,9 @@ describe('MinimalDapClient', () => {
         2,
         '[MinimalDapClient] Invalid Content-Length header encountered; discarding payload'
       );
-      expect(
-        (client as unknown as { decoder: { rawData: Buffer } }).decoder.rawData.length
-      ).toBe(0);
+      const decoder = (client as unknown as { decoder: { headerData: Buffer; bodyBytes: number } }).decoder;
+      expect(decoder.headerData.length).toBe(0);
+      expect(decoder.bodyBytes).toBe(0);
     });
 
     it('should handle incomplete message body', async () => {

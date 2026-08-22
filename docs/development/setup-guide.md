@@ -315,6 +315,7 @@ TEST_TIMEOUT=30000
 | `DAP_TRACE` | Set to `1` to trace every DAP frame to a per-session `dap-trace-<sessionId>.ndjson` (capped at 50 MB) | Not set |
 | `DAP_TRACE_FILE` | Explicit DAP trace file path (implies tracing on) | Not set |
 | `MCP_SKIP_ORPHAN_REAPERS` | Set to `1` to skip the startup orphan-process scans (e.g. PID-namespaced containers where orphans are impossible) | Not set |
+| `DAP_MAX_FRAME_BYTES` | Upper bound for a single DAP frame body accepted by the frame decoder | 64 MB |
 
 ## Troubleshooting Setup Issues
 
