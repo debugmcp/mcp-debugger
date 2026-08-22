@@ -20,6 +20,8 @@ export interface ProxyConfig {
   initialBreakpoints?: Array<{ file: string; line: number; condition?: string; logMessage?: string; suspendPolicy?: 'all' | 'thread' }>;
   initialFunctionBreakpoints?: Array<{ name: string; condition?: string }>;
   dryRunSpawn?: boolean;
+  /** Effective log level for the per-session proxy logger (issue #403) */
+  logLevel?: string;
   breakOnExceptions?: ExceptionBreakMode;
   launchConfig?: LanguageSpecificLaunchConfig;
   attachMode?: boolean;           // True for attach sessions; direct-connect attach skips local toolchain probing

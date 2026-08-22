@@ -136,6 +136,17 @@ describe('ProxyManager.start', () => {
     );
   });
 
+  it('includes logLevel in the init command when set (issue #403)', async () => {
+    await proxyManager.start({ ...baseConfig, logLevel: 'info' });
+
+    expect(fakeProcess.sendCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cmd: 'init',
+        logLevel: 'info'
+      })
+    );
+  });
+
   it('sends breakOnExceptions as undefined in the init command when not set', async () => {
     await proxyManager.start(baseConfig);
 

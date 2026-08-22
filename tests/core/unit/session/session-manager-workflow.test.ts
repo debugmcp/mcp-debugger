@@ -113,6 +113,20 @@ describe('SessionManager - Debug Session Workflow', () => {
       expect(dependencies.mockProxyManager.startCalls[0].dryRunSpawn).toBe(true);
     });
 
+    it('propagates the effective log level into the proxy config (issue #403)', async () => {
+      (dependencies.mockLogger as { level?: string }).level = 'warn';
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        pythonPath: 'python'
+      });
+
+      const startPromise = sessionManager.startDebugging(session.id, 'test.py', [], {}, true);
+      await vi.runAllTimersAsync();
+      await startPromise;
+
+      expect(dependencies.mockProxyManager.startCalls[0].logLevel).toBe('warn');
+    });
+
     it('should handle stopOnEntry=false workflow', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,

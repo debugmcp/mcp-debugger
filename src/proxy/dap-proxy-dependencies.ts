@@ -24,11 +24,13 @@ import type { ProcessLike } from '../interfaces/process-interfaces.js';
 export function createProductionDependencies(
   proc: Pick<ProcessLike, 'send' | 'stdout'> = process
 ): DapProxyDependencies {
-  // Logger factory for delayed initialization
-  const loggerFactory: ILoggerFactory = async (sessionId: string, logDir: string) => {
+  // Logger factory for delayed initialization. The level comes from the init
+  // payload (CLI --log-level / DEBUG_MCP_LOG_LEVEL, issue #403); legacy parents
+  // that send no level keep the historical 'debug'.
+  const loggerFactory: ILoggerFactory = async (sessionId: string, logDir: string, level?: string) => {
     const logPath = path.join(logDir, `proxy-${sessionId}.log`);
     return createLogger(`dap-proxy:${sessionId}`, {
-      level: 'debug',
+      level: level ?? 'debug',
       file: logPath
     });
   };
