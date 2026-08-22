@@ -86,7 +86,7 @@ Expected outputs
 - vendor/js-debug/watchdog.js (optional sidecar — copied if present)
 - vendor/js-debug/package.json (forces `type: 'commonjs'`)
 - vendor/js-debug/vsDebugServer.js.sha256
-- vendor/js-debug/manifest.json (metadata: source, repo, version, asset, sha256, fetchedAt)
+- vendor/js-debug/manifest.json (metadata: source, repo, version, asset, sha256)
 - vendor/ subdirectory (contains the js-debug vendored files)
 
 Determinism and safety
