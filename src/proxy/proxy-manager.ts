@@ -981,9 +981,13 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     }
 
     if (message.success) {
-      // If this was a 'threads' response, opportunistically capture a usable thread id
+      // If this was a 'threads' response and no thread is anchored yet, capture a
+      // usable thread id as a fallback for adapters that omit threadId from
+      // 'stopped' events. Never overwrite an existing anchor: a list_threads call
+      // (or internal threads poll) while paused on a non-first thread must not
+      // retarget stackTrace/scopes/evaluate to threads[0] (issue #396).
       try {
-        if (pending.command === 'threads') {
+        if (pending.command === 'threads' && this.currentThreadId == null) {
           const resp = (message.response || message.body) as DebugProtocol.ThreadsResponse | undefined;
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const threads = (resp && (resp as any).body && Array.isArray((resp as any).body.threads)) ? (resp as any).body.threads : [];

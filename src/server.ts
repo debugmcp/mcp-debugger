@@ -1003,6 +1003,28 @@ export class DebugMcpServer {
   }
 
   /**
+   * Derive the success flag for the tool:response log line from the tool's own
+   * payload. Handlers report failures as { success: false } inside the JSON
+   * text content without throwing; the log line must agree with the payload
+   * rather than meaning merely "the handler didn't throw" (issue #397).
+   */
+  private extractPayloadSuccess(result: ServerResult): boolean {
+    try {
+      const content = (result as { content?: Array<{ type?: string; text?: string }> }).content;
+      const first = content?.[0];
+      if (first?.type === 'text' && typeof first.text === 'string') {
+        const payload = JSON.parse(first.text) as unknown;
+        if (payload && typeof payload === 'object' && typeof (payload as { success?: unknown }).success === 'boolean') {
+          return (payload as { success: boolean }).success;
+        }
+      }
+    } catch {
+      // Non-JSON payloads carry no success flag; treat handler completion as success.
+    }
+    return true;
+  }
+
+  /**
    * Get session name for logging
    */
   private getSessionName(sessionId: string): string {
@@ -2151,12 +2173,12 @@ export class DebugMcpServer {
               throw new McpError(McpErrorCode.MethodNotFound, `Unknown tool: ${toolName}`);
           }
           
-          // Log successful tool response
+          // Log tool response; success mirrors the payload's own success flag (issue #397)
           this.logger.info('tool:response', {
             tool: toolName,
             sessionId: args.sessionId,
             sessionName: args.sessionId ? this.getSessionName(args.sessionId) : undefined,
-            success: true,
+            success: this.extractPayloadSuccess(result),
             timestamp: Date.now()
           });
           
