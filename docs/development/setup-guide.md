@@ -314,6 +314,7 @@ TEST_TIMEOUT=30000
 | `DEBUG` | Enable debug output (e.g., `DEBUG=debug-mcp:*`) | Not set |
 | `DAP_TRACE` | Set to `1` to trace every DAP frame to a per-session `dap-trace-<sessionId>.ndjson` (capped at 50 MB) | Not set |
 | `DAP_TRACE_FILE` | Explicit DAP trace file path (implies tracing on) | Not set |
+| `MCP_SKIP_ORPHAN_REAPERS` | Set to `1` to skip the startup orphan-process scans (e.g. PID-namespaced containers where orphans are impossible) | Not set |
 
 ## Troubleshooting Setup Issues
 

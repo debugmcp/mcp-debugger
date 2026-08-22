@@ -7,8 +7,10 @@ import * as setup from '../../src/cli/setup.js';
 import * as stdioCommand from '../../src/cli/stdio-command.js';
 import * as sseCommand from '../../src/cli/sse-command.js';
 import * as version from '../../src/cli/version.js';
+import { runStartupJanitor } from '../../src/utils/startup-janitor.js';
 
 vi.mock('../../src/utils/logger.js');
+vi.mock('../../src/utils/startup-janitor.js');
 vi.mock('../../src/server.js');
 vi.mock('../../src/cli/error-handlers.js');
 vi.mock('../../src/cli/setup.js');
@@ -49,6 +51,7 @@ describe('index.ts', () => {
     // Mock command handlers
     vi.mocked(stdioCommand.handleStdioCommand).mockResolvedValue(undefined);
     vi.mocked(sseCommand.handleSSECommand).mockResolvedValue(undefined);
+    vi.mocked(runStartupJanitor).mockResolvedValue(undefined);
   });
 
   describe('createDebugMcpServer', () => {
@@ -109,6 +112,30 @@ describe('index.ts', () => {
           serverFactory: createDebugMcpServer
         }
       );
+    });
+
+    it('does not run the startup janitor for non-server invocations (issue #399)', async () => {
+      // main() sets up commands but parseAsync is mocked — no command action
+      // runs, so the janitor (orphan reapers + log sweep) must not either.
+      // Before #399 the reapers ran before argv parsing, so even --version paid
+      // the process scans.
+      await main();
+
+      expect(runStartupJanitor).not.toHaveBeenCalled();
+    });
+
+    it('kicks the startup janitor when the stdio command action runs (issue #399)', async () => {
+      let capturedHandler: any;
+      vi.mocked(setup.setupStdioCommand).mockImplementation((program, handler) => {
+        capturedHandler = handler;
+      });
+
+      await main();
+      expect(runStartupJanitor).not.toHaveBeenCalled();
+
+      await capturedHandler({ logLevel: 'debug' });
+
+      expect(runStartupJanitor).toHaveBeenCalledTimes(1);
     });
 
     it('should pass correct handlers to setupSSECommand', async () => {

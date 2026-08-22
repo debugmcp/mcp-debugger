@@ -32,10 +32,8 @@
  */
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import * as fs from 'node:fs/promises';
 import { isPidAlive, SignalFn } from './jvm-orphan-reaper.js';
-import { forEachBounded } from './bounded-concurrency.js';
-import { PROC_SCAN_CONCURRENCY } from './proc-scan-concurrency.js';
+import { scanLinux, scanDarwin, scanWindows, scanProcessArgs, type ScannedProcess } from './process-scan.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -45,7 +43,6 @@ export const OWNER_PID_ARG_PREFIX = '--mcp-owner-pid=';
 export const SESSION_ID_ARG_PREFIX = '--mcp-session-id=';
 
 const LIST_TIMEOUT_MS = 5000;
-const LIST_MAX_BUFFER = 10 * 1024 * 1024;
 /** How often the POSIX escalation path polls for the SIGTERM cascade to finish. */
 const TERM_POLL_MS = 200;
 /** Bounded wait before SIGKILL escalation; must exceed the ~2s #339 cascade. */
@@ -143,108 +140,34 @@ export async function reapOrphanProxies(opts: ReapOptions): Promise<ReapResult> 
   return result;
 }
 
-export async function listTaggedProxies(): Promise<TaggedProxy[]> {
-  switch (process.platform) {
-    case 'linux':
-      return listLinuxProxies();
-    case 'darwin':
-      return listDarwinProxies();
-    case 'win32':
-      return listWindowsProxies();
-    default:
-      return [];
+// The platform walks live in process-scan.ts (issue #399: shared with the
+// JVM reaper); these wrappers apply the proxy matcher over the scan rows.
+function matchTaggedProxies(processes: ScannedProcess[]): TaggedProxy[] {
+  const result: TaggedProxy[] = [];
+  for (const p of processes) {
+    const tagged = parseProxyArgs(p.pid, p.args);
+    if (tagged) result.push(tagged);
   }
+  return result;
+}
+
+export async function listTaggedProxies(): Promise<TaggedProxy[]> {
+  return matchTaggedProxies(await scanProcessArgs({ windowsProcessNames: ['node.exe'] }));
 }
 
 /** @internal Exposed for unit tests; not part of the public module API. */
 export async function listLinuxProxies(): Promise<TaggedProxy[]> {
-  let entries: string[];
-  try {
-    entries = await fs.readdir('/proc');
-  } catch {
-    return [];
-  }
-  const result: TaggedProxy[] = [];
-  await forEachBounded(entries, PROC_SCAN_CONCURRENCY, async (entry) => {
-    if (!/^\d+$/.test(entry)) return;
-    const pid = Number(entry);
-    let raw: string;
-    try {
-      raw = await fs.readFile(`/proc/${entry}/cmdline`, 'utf8');
-    } catch {
-      return; // disappeared, or permission denied
-    }
-    const args = raw.split('\0').filter((s) => s.length > 0);
-    const tagged = parseProxyArgs(pid, args);
-    if (tagged) result.push(tagged);
-  });
-  return result;
+  return matchTaggedProxies(await scanLinux());
 }
 
 /** @internal Exposed for unit tests; not part of the public module API. */
 export async function listDarwinProxies(): Promise<TaggedProxy[]> {
-  // -ww disables column truncation; otherwise long node cmdlines lose the
-  // markers we depend on. -A lists all users' processes (we filter by
-  // owner_pid liveness anyway).
-  const { stdout } = await execFileAsync('ps', ['-ww', '-A', '-o', 'pid=,command='], {
-    timeout: LIST_TIMEOUT_MS,
-    maxBuffer: LIST_MAX_BUFFER,
-  });
-  const result: TaggedProxy[] = [];
-  for (const line of stdout.split('\n')) {
-    const trimmed = line.replace(/\s+$/, '');
-    if (!trimmed) continue;
-    const match = trimmed.match(/^\s*(\d+)\s+(.*)$/);
-    if (!match) continue;
-    const pid = Number(match[1]);
-    const args = match[2].split(/\s+/).filter(Boolean);
-    const tagged = parseProxyArgs(pid, args);
-    if (tagged) result.push(tagged);
-  }
-  return result;
+  return matchTaggedProxies(await scanDarwin());
 }
 
 /** @internal Exposed for unit tests; not part of the public module API. */
 export async function listWindowsProxies(): Promise<TaggedProxy[]> {
-  // Get-CimInstance is the modern path; wmic is deprecated and missing on
-  // fresh Windows 11 installs. ConvertTo-Json -Compress keeps stdout small.
-  // -NoProfile skips loading user profile scripts (faster, more deterministic).
-  const ps = `Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Select-Object ProcessId, CommandLine | ConvertTo-Json -Compress`;
-  let stdout: string;
-  try {
-    const r = await execFileAsync('powershell.exe', ['-NoProfile', '-Command', ps], {
-      timeout: LIST_TIMEOUT_MS,
-      maxBuffer: LIST_MAX_BUFFER,
-      windowsHide: true,
-    });
-    stdout = r.stdout;
-  } catch {
-    return [];
-  }
-  const trimmed = stdout.trim();
-  if (!trimmed) return [];
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(trimmed);
-  } catch {
-    return [];
-  }
-  const items = Array.isArray(parsed) ? parsed : [parsed];
-  const result: TaggedProxy[] = [];
-  for (const item of items) {
-    if (!item || typeof item !== 'object') continue;
-    const obj = item as { ProcessId?: number; CommandLine?: string | null };
-    const pid = obj.ProcessId;
-    const cmdline = obj.CommandLine;
-    if (typeof pid !== 'number' || typeof cmdline !== 'string') continue;
-    // Naive whitespace split is enough: a path containing spaces fragments,
-    // but the fragment holding 'proxy-bootstrap.js' survives intact, and the
-    // --mcp-* marker args never contain whitespace.
-    const args = cmdline.split(/\s+/).filter(Boolean);
-    const tagged = parseProxyArgs(pid, args);
-    if (tagged) result.push(tagged);
-  }
-  return result;
+  return matchTaggedProxies(await scanWindows(['node.exe']));
 }
 
 /**
