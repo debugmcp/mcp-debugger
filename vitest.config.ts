@@ -233,8 +233,13 @@ export default defineConfig({
         'packages/shared/src/models/index.ts'
       ],
       include: ['src/**/*.{ts,js}', 'packages/**/src/**/*.{ts,js}'],
+      // Ratcheted after the 2026-08 coverage sprint (measured: statements
+      // 92.9, branches 83.0). Margins absorb platform-specific branches
+      // (win32-only arms uncovered on linux and vice versa) — raise again
+      // when the measured numbers move up, never loosen to admit a regression.
       thresholds: {
-        statements: 80
+        statements: 90,
+        branches: 80
       }
     },
     // --- Projects: parallel `unit` + serial `integration` + serial `e2e` ---
