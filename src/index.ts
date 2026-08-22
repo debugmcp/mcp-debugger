@@ -51,8 +51,6 @@ import {
   setupCheckRustBinaryCommand,
 } from './cli/setup.js';
 import { handleStdioCommand } from './cli/stdio-command.js';
-import { handleSSECommand } from './cli/sse-command.js';
-import { handleHttpCommand } from './cli/http-command.js';
 import { handleCheckRustBinaryCommand } from './cli/commands/check-rust-binary.js';
 import { getVersion } from './cli/version.js';
 import fs from 'fs';
@@ -135,13 +133,18 @@ export async function main(): Promise<void> {
     handleStdioCommand(options, { logger, serverFactory: createDebugMcpServer })
   );
   
-  setupSSECommand(program, (options) =>
-    handleSSECommand(options, { logger, serverFactory: createDebugMcpServer })
-  );
+  // The SSE/HTTP command modules pull in express and the SDK's HTTP transport
+  // stacks; import them only when their subcommand actually runs so stdio mode
+  // (the common case) never pays for them (issue #400).
+  setupSSECommand(program, async (options) => {
+    const { handleSSECommand } = await import('./cli/sse-command.js');
+    return handleSSECommand(options, { logger, serverFactory: createDebugMcpServer });
+  });
 
-  setupHttpCommand(program, (options) =>
-    handleHttpCommand(options, { logger, serverFactory: createDebugMcpServer })
-  );
+  setupHttpCommand(program, async (options) => {
+    const { handleHttpCommand } = await import('./cli/http-command.js');
+    return handleHttpCommand(options, { logger, serverFactory: createDebugMcpServer });
+  });
 
   setupCheckRustBinaryCommand(program, (binaryPath, options) =>
     handleCheckRustBinaryCommand(binaryPath, options)
@@ -192,7 +195,9 @@ if (isMainModule) {
   }
 }
 
-// Export for testing
+// Export for testing. handleSSECommand/handleHttpCommand are deliberately not
+// re-exported: their modules are lazy-imported inside the command actions
+// (issue #400) and consumers import them from their own modules directly.
 export {
   setupErrorHandlers,
   createCLI,
@@ -201,7 +206,5 @@ export {
   setupHttpCommand,
   setupCheckRustBinaryCommand,
   handleStdioCommand,
-  handleSSECommand,
-  handleHttpCommand,
   handleCheckRustBinaryCommand
 };
