@@ -17,12 +17,22 @@ export interface CheckRustBinaryOptions {
   json?: boolean;
 }
 
+export interface DoctorOptions {
+  json?: boolean;
+  timeout?: string;
+}
+
 export type StdioHandler = (options: StdioOptions, command?: Command) => Promise<void>;
 export type SSEHandler = (options: SSEOptions, command?: Command) => Promise<void>;
 export type HttpHandler = (options: HttpOptions, command?: Command) => Promise<void>;
 export type CheckRustBinaryHandler = (
   binaryPath: string,
   options: CheckRustBinaryOptions,
+  command?: Command
+) => Promise<void>;
+export type DoctorHandler = (
+  languages: string[],
+  options: DoctorOptions,
   command?: Command
 ) => Promise<void>;
 
@@ -75,6 +85,18 @@ export function setupHttpCommand(program: Command, handler: HttpHandler): void {
       // Silence console output to protect any spawned proxy IPC channels
       process.env.CONSOLE_OUTPUT_SILENCED = '1';
       await handler(options, command);
+    });
+}
+
+export function setupDoctorCommand(program: Command, handler: DoctorHandler): void {
+  program
+    .command('doctor')
+    .description('Diagnose language toolchains and debug backends (exit code reflects the requested languages)')
+    .argument('[languages...]', 'Languages to check and gate the exit code on (default: report all, exit 0)')
+    .option('--json', 'Emit JSON output', false)
+    .option('--timeout <ms>', 'Per-language probe timeout in milliseconds', '10000')
+    .action(async (languages: string[], options: DoctorOptions, command: Command) => {
+      await handler(languages, options, command);
     });
 }
 

@@ -1,0 +1,314 @@
+/**
+ * Unit tests for the doctor command's orchestration (issue #423).
+ *
+ * Everything is injected: a fake registry with fake factories, a fake
+ * environment/filesystem, a stubbed extras collector. No process is spawned.
+ */
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import type { IEnvironment, IFileSystem } from '@debugmcp/shared';
+import { diagnose, type DiagnoseDeps } from '../../../../src/cli/commands/doctor/diagnose.js';
+
+const makeEnvironment = (env: Record<string, string | undefined> = {}): IEnvironment => ({
+  get: (key: string) => env[key],
+  getAll: () => env,
+  getCurrentWorkingDirectory: () => process.cwd()
+});
+
+const makeFileSystem = (): IFileSystem =>
+  ({
+    readFile: vi.fn().mockRejectedValue(new Error('ENOENT')),
+    stat: vi.fn().mockRejectedValue(new Error('ENOENT')),
+    readdir: vi.fn().mockRejectedValue(new Error('ENOENT'))
+  }) as unknown as IFileSystem;
+
+interface FakeAdapterSpec {
+  name: string;
+  installed?: boolean;
+  attach?: 'none' | 'direct-connect' | 'spawn';
+  validate?: () => Promise<{ valid: boolean; errors: string[]; warnings: string[]; details?: Record<string, unknown> }>;
+}
+
+function makeDeps(adapters: FakeAdapterSpec[], overrides: Partial<DiagnoseDeps> = {}): DiagnoseDeps {
+  const registry = {
+    listAvailableAdapters: vi.fn().mockResolvedValue(
+      adapters.map((a) => ({
+        name: a.name,
+        packageName: `@debugmcp/adapter-${a.name}`,
+        installed: a.installed ?? true,
+        attach: a.attach ?? 'none'
+      }))
+    ),
+    getFactory: vi.fn(async (language: string) => {
+      const spec = adapters.find((a) => a.name === language);
+      if (!spec || !(spec.installed ?? true) || !spec.validate) {
+        return undefined;
+      }
+      return {
+        validate: spec.validate,
+        getMetadata: () => ({ modes: { launch: true, attach: spec.attach ?? 'none' } }),
+        createAdapter: () => {
+          throw new Error('doctor must never instantiate adapters');
+        }
+      };
+    })
+  };
+
+  return {
+    registry: registry as unknown as DiagnoseDeps['registry'],
+    environment: makeEnvironment(),
+    fileSystem: makeFileSystem(),
+    env: {},
+    platform: 'win32',
+    timeoutMs: 5000,
+    version: '0.0.0-test',
+    collectExtras: async () => ({}),
+    ...overrides
+  };
+}
+
+const okValidate = (details: Record<string, unknown> = {}) => async () => ({
+  valid: true,
+  errors: [],
+  warnings: [],
+  details
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe('diagnose', () => {
+  it('reports ok for a healthy adapter and carries validate details through', async () => {
+    const deps = makeDeps([
+      { name: 'python', validate: okValidate({ pythonPath: '/usr/bin/python3', pythonVersion: '3.12.1' }) }
+    ]);
+
+    const report = await diagnose([], deps);
+
+    expect(report.schemaVersion).toBe(1);
+    expect(report.languages).toHaveLength(1);
+    const python = report.languages[0];
+    expect(python.verdict).toBe('ok');
+    expect(python.errors).toEqual([]);
+    expect(python.details).toMatchObject({ pythonPath: '/usr/bin/python3' });
+    expect(python.probe.timedOut).toBe(false);
+    expect(python.probe.failed).toBe(false);
+    expect(python.modes?.launch.available).toBe(true);
+  });
+
+  it('reports warn when validation succeeds with warnings', async () => {
+    const deps = makeDeps([
+      {
+        name: 'rust',
+        validate: async () => ({ valid: true, errors: [], warnings: ['MSVC toolchain detected'], details: {} })
+      }
+    ]);
+
+    const report = await diagnose([], deps);
+
+    expect(report.languages[0].verdict).toBe('warn');
+    expect(report.languages[0].warnings).toEqual(['MSVC toolchain detected']);
+  });
+
+  it('reports broken with the validation errors when the toolchain is invalid', async () => {
+    const deps = makeDeps([
+      {
+        name: 'go',
+        validate: async () => ({ valid: false, errors: ['Delve not found. Run: go install ...'], warnings: [], details: {} })
+      }
+    ]);
+
+    const report = await diagnose([], deps);
+
+    expect(report.languages[0].verdict).toBe('broken');
+    expect(report.languages[0].errors[0]).toContain('Delve not found');
+    expect(report.languages[0].modes?.launch.available).toBe(false);
+  });
+
+  it('reports missing for adapters that are not installed', async () => {
+    const deps = makeDeps([{ name: 'ruby', installed: false }]);
+
+    const report = await diagnose([], deps);
+
+    expect(report.languages[0].verdict).toBe('missing');
+    expect(report.languages[0].modes?.launch.available).toBe(false);
+    expect(report.languages[0].modes?.launch.reason).toContain('@debugmcp/adapter-ruby');
+  });
+
+  it('reports disabled for adapters disabled via DEBUG_MCP_DISABLE_LANGUAGES', async () => {
+    const deps = makeDeps([{ name: 'python', validate: okValidate() }], {
+      env: { DEBUG_MCP_DISABLE_LANGUAGES: 'python' }
+    });
+
+    const report = await diagnose([], deps);
+
+    expect(report.languages[0].verdict).toBe('disabled');
+  });
+
+  it('reports broken with probe.failed when validate throws, while modes fail open like the server', async () => {
+    const deps = makeDeps([
+      {
+        name: 'java',
+        validate: async () => {
+          throw new Error('probe exploded');
+        }
+      }
+    ]);
+
+    const report = await diagnose([], deps);
+
+    const java = report.languages[0];
+    expect(java.verdict).toBe('broken');
+    expect(java.probe.failed).toBe(true);
+    expect(java.errors[0]).toContain('probe exploded');
+    // Parity: computeModeAvailability fails open on probe errors, and doctor
+    // must report the same modes the server would.
+    expect(java.modes?.launch.available).toBe(true);
+  });
+
+  it('reports broken with probe.timedOut when validate never settles', async () => {
+    vi.useFakeTimers();
+    const deps = makeDeps(
+      [{ name: 'dotnet', validate: () => new Promise(() => undefined) }],
+      { timeoutMs: 1000 }
+    );
+
+    const reportPromise = diagnose([], deps);
+    await vi.advanceTimersByTimeAsync(1100);
+    const report = await reportPromise;
+
+    const dotnet = report.languages[0];
+    expect(dotnet.verdict).toBe('broken');
+    expect(dotnet.probe.timedOut).toBe(true);
+    expect(dotnet.modes?.launch.available).toBe(true); // fail-open parity
+  });
+
+  it('merges collectExtras output into the reported details', async () => {
+    const deps = makeDeps(
+      [{ name: 'dotnet', validate: okValidate({ debuggerPath: '/opt/netcoredbg' }) }],
+      {
+        collectExtras: async (language, details) => {
+          expect(language).toBe('dotnet');
+          expect(details).toMatchObject({ debuggerPath: '/opt/netcoredbg' });
+          return { netcoredbgVersion: '3.1.2-1054', dotnetSdkVersion: '8.0.301' };
+        }
+      }
+    );
+
+    const report = await diagnose([], deps);
+
+    expect(report.languages[0].details).toMatchObject({
+      debuggerPath: '/opt/netcoredbg',
+      netcoredbgVersion: '3.1.2-1054',
+      dotnetSdkVersion: '8.0.301'
+    });
+  });
+
+  it('keeps the verdict when collectExtras itself fails', async () => {
+    const deps = makeDeps([{ name: 'cpp', validate: okValidate() }], {
+      collectExtras: async () => {
+        throw new Error('extras exploded');
+      }
+    });
+
+    const report = await diagnose([], deps);
+
+    expect(report.languages[0].verdict).toBe('ok');
+  });
+
+  it('lists unknown requested languages and fails the run', async () => {
+    const deps = makeDeps([{ name: 'python', validate: okValidate() }]);
+
+    const report = await diagnose(['python', 'nosuchlang'], deps);
+
+    expect(report.unknownLanguages).toEqual(['nosuchlang']);
+    expect(report.exitCode).toBe(1);
+  });
+
+  describe('exit code', () => {
+    it('is 0 in overview mode even when adapters are broken', async () => {
+      const deps = makeDeps([
+        { name: 'go', validate: async () => ({ valid: false, errors: ['nope'], warnings: [] }) }
+      ]);
+
+      const report = await diagnose([], deps);
+
+      expect(report.exitCode).toBe(0);
+    });
+
+    it('is 0 when every requested language is ok or warn', async () => {
+      const deps = makeDeps([
+        { name: 'python', validate: okValidate() },
+        { name: 'rust', validate: async () => ({ valid: true, errors: [], warnings: ['w'] }) },
+        { name: 'go', validate: async () => ({ valid: false, errors: ['nope'], warnings: [] }) }
+      ]);
+
+      const report = await diagnose(['python', 'rust'], deps);
+
+      expect(report.exitCode).toBe(0);
+    });
+
+    it('is 1 when a requested language is broken', async () => {
+      const deps = makeDeps([
+        { name: 'python', validate: okValidate() },
+        { name: 'go', validate: async () => ({ valid: false, errors: ['nope'], warnings: [] }) }
+      ]);
+
+      const report = await diagnose(['go'], deps);
+
+      expect(report.exitCode).toBe(1);
+    });
+
+    it('is 1 when a requested language is missing or disabled', async () => {
+      const deps = makeDeps([{ name: 'ruby', installed: false }, { name: 'python', validate: okValidate() }], {
+        env: { DEBUG_MCP_DISABLE_LANGUAGES: 'python' }
+      });
+
+      await expect(diagnose(['ruby'], deps)).resolves.toMatchObject({ exitCode: 1 });
+      await expect(diagnose(['python'], deps)).resolves.toMatchObject({ exitCode: 1 });
+    });
+
+    it('normalizes requested language casing', async () => {
+      const deps = makeDeps([{ name: 'python', validate: okValidate() }]);
+
+      const report = await diagnose(['PYTHON'], deps);
+
+      expect(report.unknownLanguages).toEqual([]);
+      expect(report.exitCode).toBe(0);
+    });
+  });
+
+  it('runs the language probes in parallel', async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const slowValidate = () => async () => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      inFlight -= 1;
+      return { valid: true, errors: [], warnings: [] };
+    };
+    const deps = makeDeps([
+      { name: 'python', validate: slowValidate() },
+      { name: 'go', validate: slowValidate() },
+      { name: 'ruby', validate: slowValidate() }
+    ]);
+
+    await diagnose([], deps);
+
+    expect(maxInFlight).toBeGreaterThan(1);
+  });
+
+  it('includes platform checks and platform info in the report', async () => {
+    const deps = makeDeps([{ name: 'mock', validate: okValidate() }]);
+
+    const report = await diagnose([], deps);
+
+    expect(report.platform.os).toBe('win32');
+    expect(report.platform.containerMode).toBe(false);
+    const ids = report.platformChecks.map((c) => c.id);
+    expect(ids).toContain('container-mode');
+    expect(ids).toContain('workspace-mount');
+    expect(ids).toContain('yama-ptrace-scope');
+  });
+});

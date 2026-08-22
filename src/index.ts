@@ -48,6 +48,7 @@ import {
   setupSSECommand,
   setupHttpCommand,
   setupCheckRustBinaryCommand,
+  setupDoctorCommand,
 } from './cli/setup.js';
 import { handleStdioCommand } from './cli/stdio-command.js';
 import { handleCheckRustBinaryCommand } from './cli/commands/check-rust-binary.js';
@@ -138,7 +139,16 @@ export async function main(): Promise<void> {
   setupCheckRustBinaryCommand(program, (binaryPath, options) =>
     handleCheckRustBinaryCommand(binaryPath, options)
   );
-  
+
+  // Doctor is a diagnostic, not a server: no janitor (issue #399 contract),
+  // lazy import so stdio startup never pays for it (issue #400 pattern), and
+  // the exit code lands on process.exitCode rather than a throw (main().catch
+  // would collapse every failure to 1).
+  setupDoctorCommand(program, async (languages, options) => {
+    const { handleDoctorCommand } = await import('./cli/commands/doctor/index.js');
+    process.exitCode = await handleDoctorCommand(languages, options);
+  });
+
   // Parse command line arguments
   await program.parseAsync();
 }
@@ -194,6 +204,7 @@ export {
   setupSSECommand,
   setupHttpCommand,
   setupCheckRustBinaryCommand,
+  setupDoctorCommand,
   handleStdioCommand,
   handleCheckRustBinaryCommand
 };
