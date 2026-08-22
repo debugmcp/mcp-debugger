@@ -29,7 +29,12 @@ type MinimalDapClientOptions = {
     setTimeout: typeof setTimeout;
     clearTimeout: typeof clearTimeout;
   };
+  /** Byte cap for the opt-in DAP trace file; injectable for tests (issue #403) */
+  traceMaxBytes?: number;
 };
+
+/** Trace cap consistent with the main logger's maxsize (issue #403). */
+const DEFAULT_TRACE_MAX_BYTES = 50 * 1024 * 1024;
 
 export class MinimalDapClient extends EventEmitter {
   private socket: Socket | null = null;
@@ -52,6 +57,9 @@ export class MinimalDapClient extends EventEmitter {
   private host: string;
   private port: number;
   private traceFile?: string = process.env.DAP_TRACE_FILE;
+  private traceMaxBytes: number = DEFAULT_TRACE_MAX_BYTES;
+  private traceBytesWritten = 0;
+  private traceTruncated = false;
   private adoptedTargets = new Set<string>();
   private childSessions = new Map<string, MinimalDapClient>();
   private activeChild: MinimalDapClient | null = null;
@@ -81,6 +89,7 @@ export class MinimalDapClient extends EventEmitter {
       setTimeout,
       clearTimeout
     };
+    this.traceMaxBytes = options?.traceMaxBytes ?? DEFAULT_TRACE_MAX_BYTES;
     // Initialize ChildSessionManager for policies that support child sessions
     if (this.policy.supportsReverseStartDebugging) {
       const createChildSessionManager =
@@ -291,15 +300,26 @@ export class MinimalDapClient extends EventEmitter {
   }
 
   private appendTrace(direction: 'in' | 'out', payload: unknown): void {
-    if (!this.traceFile) return;
+    if (!this.traceFile || this.traceTruncated) return;
     try {
-      fs.appendFileSync(
-        this.traceFile,
-        // env objects are redacted: the trace file persists next to the logs
-        // and the launch request embeds the debuggee's full environment
-        JSON.stringify({ ts: new Date().toISOString(), direction, payload: sanitizePayloadForLogging(payload) }) + '\n',
-        'utf8'
-      );
+      // env objects are redacted: the trace file persists next to the logs
+      // and the launch request embeds the debuggee's full environment
+      const line =
+        JSON.stringify({ ts: new Date().toISOString(), direction, payload: sanitizePayloadForLogging(payload) }) + '\n';
+      const lineBytes = Buffer.byteLength(line, 'utf8');
+      if (this.traceBytesWritten + lineBytes > this.traceMaxBytes) {
+        // One marker, then stop for the client's lifetime — the trace must
+        // never grow without bound (issue #403).
+        this.traceTruncated = true;
+        fs.appendFileSync(
+          this.traceFile,
+          JSON.stringify({ ts: new Date().toISOString(), truncated: true, reason: `trace byte cap ${this.traceMaxBytes} reached` }) + '\n',
+          'utf8'
+        );
+        return;
+      }
+      fs.appendFileSync(this.traceFile, line, 'utf8');
+      this.traceBytesWritten += lineBytes;
     } catch {
       // ignore trace errors
     }

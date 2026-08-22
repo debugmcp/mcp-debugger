@@ -424,6 +424,11 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       initialBreakpoints,
       initialFunctionBreakpoints,
       dryRunSpawn: dryRunSpawn === true,
+      // ILogger doesn't declare level, but the injected logger is the winston
+      // instance whose level already resolves CLI --log-level and
+      // DEBUG_MCP_LOG_LEVEL (issue #403); mocks without it fall back to the
+      // worker's legacy default.
+      logLevel: (this.logger as { level?: string }).level,
       breakOnExceptions,
       launchConfig: launchConfigData,
       adapterCommand, // Pass the adapter command

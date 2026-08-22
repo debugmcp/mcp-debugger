@@ -312,6 +312,8 @@ TEST_TIMEOUT=30000
 | `NETCOREDBG_PATH` | Path to netcoredbg (.NET) | Auto-detected |
 | `JAVA_HOME` | Path to JDK installation (Java) | Auto-detected |
 | `DEBUG` | Enable debug output (e.g., `DEBUG=debug-mcp:*`) | Not set |
+| `DAP_TRACE` | Set to `1` to trace every DAP frame to a per-session `dap-trace-<sessionId>.ndjson` (capped at 50 MB) | Not set |
+| `DAP_TRACE_FILE` | Explicit DAP trace file path (implies tracing on) | Not set |
 
 ## Troubleshooting Setup Issues
 

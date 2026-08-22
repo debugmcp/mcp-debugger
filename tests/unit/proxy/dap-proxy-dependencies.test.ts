@@ -11,7 +11,14 @@ import {
   createProductionDependencies,
   createConsoleLogger
 } from '../../../src/proxy/dap-proxy-dependencies.js';
+import { createLogger } from '../../../src/utils/logger.js';
 import { FakeCurrentProcess } from '../../test-utils/mocks/fake-current-process.js';
+
+vi.mock('../../../src/utils/logger.js', () => ({
+  createLogger: vi.fn().mockReturnValue({
+    info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn()
+  })
+}));
 
 /* ------------------------------------------------------------------ */
 /*  createProductionDependencies                                       */
@@ -30,6 +37,26 @@ describe('createProductionDependencies', () => {
   it('loggerFactory is a function', () => {
     const deps = createProductionDependencies();
     expect(typeof deps.loggerFactory).toBe('function');
+  });
+
+  it('loggerFactory passes the requested level through to createLogger (issue #403)', async () => {
+    const deps = createProductionDependencies();
+    await deps.loggerFactory('sess-1', '/logs', 'info');
+
+    expect(vi.mocked(createLogger)).toHaveBeenCalledWith(
+      'dap-proxy:sess-1',
+      expect.objectContaining({ level: 'info' })
+    );
+  });
+
+  it('loggerFactory keeps the legacy debug level when no level is given', async () => {
+    const deps = createProductionDependencies();
+    await deps.loggerFactory('sess-2', '/logs');
+
+    expect(vi.mocked(createLogger)).toHaveBeenCalledWith(
+      'dap-proxy:sess-2',
+      expect.objectContaining({ level: 'debug' })
+    );
   });
 
   it('fileSystem has ensureDir and pathExists', () => {

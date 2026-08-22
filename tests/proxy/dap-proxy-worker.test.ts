@@ -453,6 +453,73 @@ describe('DapProxyWorker', () => {
       vi.useRealTimers();
     });
 
+    it('default trace factory leaves tracing off when DAP_TRACE is not set (issue #403)', async () => {
+      vi.useFakeTimers();
+      vi.stubEnv('DAP_TRACE', '');
+      vi.stubEnv('DAP_TRACE_FILE', '');
+      try {
+        worker = new DapProxyWorker(dependencies, { exit: vi.fn() });
+        await worker.handleCommand(basePayload);
+        vi.clearAllTimers();
+
+        expect(process.env.DAP_TRACE_FILE || '').toBe('');
+      } finally {
+        vi.unstubAllEnvs();
+        vi.useRealTimers();
+      }
+    });
+
+    it('default trace factory enables tracing when DAP_TRACE=1 (issue #403)', async () => {
+      vi.useFakeTimers();
+      vi.stubEnv('DAP_TRACE', '1');
+      vi.stubEnv('DAP_TRACE_FILE', '');
+      try {
+        worker = new DapProxyWorker(dependencies, { exit: vi.fn() });
+        await worker.handleCommand(basePayload);
+        vi.clearAllTimers();
+
+        expect(process.env.DAP_TRACE_FILE).toBe(
+          path.join(basePayload.logDir, `dap-trace-${basePayload.sessionId}.ndjson`)
+        );
+      } finally {
+        vi.unstubAllEnvs();
+        vi.useRealTimers();
+      }
+    });
+
+    it('default trace factory honors an explicit DAP_TRACE_FILE without renaming it (issue #403)', async () => {
+      vi.useFakeTimers();
+      vi.stubEnv('DAP_TRACE', '');
+      vi.stubEnv('DAP_TRACE_FILE', '/tmp/explicit-trace.ndjson');
+      try {
+        worker = new DapProxyWorker(dependencies, { exit: vi.fn() });
+        await worker.handleCommand(basePayload);
+        vi.clearAllTimers();
+
+        expect(process.env.DAP_TRACE_FILE).toBe('/tmp/explicit-trace.ndjson');
+      } finally {
+        vi.unstubAllEnvs();
+        vi.useRealTimers();
+      }
+    });
+
+    it('passes the payload logLevel through to the logger factory (issue #403)', async () => {
+      vi.useFakeTimers();
+      try {
+        worker = new DapProxyWorker(dependencies, { exit: vi.fn() });
+        await worker.handleCommand({ ...basePayload, logLevel: 'info' });
+        vi.clearAllTimers();
+
+        expect(dependencies.loggerFactory).toHaveBeenCalledWith(
+          basePayload.sessionId,
+          basePayload.logDir,
+          'info'
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('invokes custom exit hook when initialization fails critically', async () => {
       vi.useFakeTimers();
 

@@ -1746,6 +1746,31 @@ describe('MinimalDapClient', () => {
     });
   });
 
+  describe('Trace file byte cap (issue #403)', () => {
+    it('stops writing after the cap and records a single truncation marker', () => {
+      vi.stubEnv('DAP_TRACE_FILE', 'trace.ndjson');
+      const appended: string[] = [];
+      const appendSpy = vi.spyOn(fs, 'appendFileSync').mockImplementation((_path, data) => {
+        appended.push(String(data));
+      });
+      try {
+        const client = new MinimalDapClient('localhost', 5678, undefined, { traceMaxBytes: 150 });
+
+        (client as any).appendTrace('out', { small: 'first' });   // fits under the cap
+        (client as any).appendTrace('out', { small: 'second' });  // would exceed → marker
+        (client as any).appendTrace('out', { small: 'third' });   // silently dropped
+
+        expect(appended).toHaveLength(2);
+        expect(appended[0]).toContain('"small":"first"');
+        expect(appended[1]).toContain('truncated');
+        expect(appended[1]).not.toContain('third');
+      } finally {
+        appendSpy.mockRestore();
+        vi.unstubAllEnvs();
+      }
+    });
+  });
+
   describe('Trace file error handling', () => {
     it('swallows fs.appendFileSync errors so requests still complete', async () => {
       vi.stubEnv('DAP_TRACE_FILE', 'trace.ndjson');

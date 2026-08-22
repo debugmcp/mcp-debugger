@@ -28,6 +28,9 @@ export interface ProxyInitPayload {
   initialBreakpoints?: { file: string; line: number; condition?: string; logMessage?: string; suspendPolicy?: 'all' | 'thread' }[];
   initialFunctionBreakpoints?: { name: string; condition?: string }[];
   dryRunSpawn?: boolean;
+  /** Effective log level for the per-session proxy logger; absent on legacy
+   *  payloads, where the worker keeps its historical 'debug' default (issue #403) */
+  logLevel?: string;
   /** Abstract break-on-exception mode; resolved to concrete DAP filters via the adapter policy (issue #220) */
   breakOnExceptions?: 'uncaught' | 'all' | 'none';
   launchConfig?: LanguageSpecificLaunchConfig;
@@ -200,7 +203,7 @@ export interface IMessageSender {
  * Logger factory for delayed initialization
  */
 export interface ILoggerFactory {
-  (sessionId: string, logDir: string): Promise<ILogger>;
+  (sessionId: string, logDir: string, level?: string): Promise<ILogger>;
 }
 
 // ===== Configuration Types =====

@@ -140,7 +140,19 @@ export class DapProxyWorker {
       process.exit(code);
     });
 
+    // Per-frame DAP tracing is opt-in (issue #403): every frame is written
+    // synchronously to an uncapped ndjson file, so it must never be the
+    // default. DAP_TRACE=1 enables it with the standard per-session path; an
+    // explicit DAP_TRACE_FILE (inherited via the spawn env) is honored as-is.
     this.traceFileFactory = hooks.createTraceFile ?? ((sessionId: string, logDir: string) => {
+      const explicit = process.env.DAP_TRACE_FILE;
+      if (explicit) {
+        return explicit;
+      }
+      const flag = (process.env.DAP_TRACE ?? '').toLowerCase();
+      if (flag !== '1' && flag !== 'true') {
+        return undefined;
+      }
       const tracePath = path.join(logDir, `dap-trace-${sessionId}.ndjson`);
       process.env.DAP_TRACE_FILE = tracePath;
       return tracePath;
@@ -281,7 +293,7 @@ export class DapProxyWorker {
       // Create logger
       const logPath = path.join(payload.logDir, `proxy-${payload.sessionId}.log`);
       await this.dependencies.fileSystem.ensureDir(path.dirname(logPath));
-      this.logger = await this.dependencies.loggerFactory(payload.sessionId, payload.logDir);
+      this.logger = await this.dependencies.loggerFactory(payload.sessionId, payload.logDir, payload.logLevel);
       this.logger.info(`[Worker] DAP Proxy worker initialized for session ${payload.sessionId}`);
       this.logger.info(`[Worker] Using adapter policy: ${this.adapterPolicy.name}`);
 
