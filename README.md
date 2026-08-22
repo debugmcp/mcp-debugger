@@ -364,6 +364,7 @@ Then get the local variables:
 
 ## 📖 Documentation
 
+- 🗺️ [Roadmap](./ROADMAP.md) – Path to 1.0: stability criteria, near-term themes, non-goals
 - 📘 [Tool Reference](./docs/tool-reference.md) – Complete API documentation
 - 🚦 [Getting Started Guide](./docs/getting-started.md) – First-time setup
 - 🏗️ [Architecture Overview](./docs/architecture/README.md) – Multi-language design
@@ -457,7 +458,7 @@ See [tests/README.md](./tests/README.md) for detailed testing instructions.
 - 🦀 **Rust**: Full support on Linux/macOS/Windows (Windows requires the GNU toolchain; MSVC is not supported by CodeLLDB)
 - ⚙️ **C/C++**: Full step-through debugging via CodeLLDB (launch + attach-by-PID; on Windows prefer MinGW/DWARF — MSVC PDB fidelity is partial)
 - 🟢 **Runtime**: Node.js 22+
-- 📈 **Active Development**: Regular updates and improvements
+- 📈 **Active Development**: Regular updates and improvements — see the [Roadmap](./ROADMAP.md) for the path to 1.0
 
 ## 🏛️ Who Maintains This
 
