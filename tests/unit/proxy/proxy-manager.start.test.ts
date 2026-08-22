@@ -1255,6 +1255,56 @@ describe('ProxyManager.start', () => {
     expect(pending.size).toBe(0);
   });
 
+  it('does not clobber a stopped-event thread id with threads[0] from a threads response', async () => {
+    (proxyManager as unknown as { proxyProcess: IProxyProcess | null }).proxyProcess = fakeProcess;
+    (proxyManager as unknown as { isInitialized: boolean }).isInitialized = true;
+    (proxyManager as unknown as { sessionId: string | null }).sessionId = baseConfig.sessionId;
+    (proxyManager as unknown as { dapState: ReturnType<typeof createInitialState> | null }).dapState =
+      createInitialState(baseConfig.sessionId);
+
+    // Breakpoint hits on worker thread 12
+    (proxyManager as unknown as {
+      handleProxyMessage: (message: object) => void;
+    }).handleProxyMessage({
+      type: 'dapEvent',
+      sessionId: baseConfig.sessionId,
+      event: 'stopped',
+      body: { threadId: 12, reason: 'breakpoint' }
+    });
+    expect(proxyManager.getCurrentThreadId()).toBe(12);
+    // handleProxyMessage syncs isInitialized from the functional-core state,
+    // which this test primes as uninitialized — restore the flag.
+    (proxyManager as unknown as { isInitialized: boolean }).isInitialized = true;
+
+    fakeProcess.sendCommand.mockImplementation((payload) => {
+      if (payload.cmd === 'dap') {
+        (proxyManager as unknown as {
+          handleProxyMessage: (message: object) => void;
+        }).handleProxyMessage({
+          type: 'dapResponse',
+          sessionId: baseConfig.sessionId,
+          requestId: payload.requestId,
+          success: true,
+          response: {
+            type: 'response',
+            seq: 11,
+            request_seq: 6,
+            command: payload.dapCommand,
+            success: true,
+            body: {
+              threads: [{ id: 1, name: 'main' }, { id: 12, name: 'worker' }]
+            }
+          }
+        });
+      }
+    });
+
+    // A list_threads-style lookup must not retarget the anchored thread
+    await proxyManager.sendDapRequest<any>('threads');
+
+    expect(proxyManager.getCurrentThreadId()).toBe(12);
+  });
+
   it('rejects DAP requests on proxy error', async () => {
     (proxyManager as unknown as { proxyProcess: IProxyProcess | null }).proxyProcess = fakeProcess;
     (proxyManager as unknown as { isInitialized: boolean }).isInitialized = true;

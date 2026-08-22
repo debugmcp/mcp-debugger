@@ -29,7 +29,11 @@ Logged when an MCP tool is invoked.
 ```
 
 #### tool:response
-Logged when a tool completes successfully.
+Logged when a tool handler completes without throwing. `success` mirrors the
+`success` boolean inside the tool's own response payload, so a handler that
+returns `{ "success": false }` (e.g. a failed `attach_to_process`) is logged
+with `success: false`. Payloads that carry no boolean `success` field are
+logged as `success: true`.
 
 ```json
 {
@@ -41,12 +45,6 @@ Logged when a tool completes successfully.
   "sessionId": "abc-123-def-456",
   "sessionName": "My Debug Session",
   "success": true,
-  "response": {
-    "breakpointId": "bp-1",
-    "verified": true,
-    "file": "path/to/file.py",
-    "line": 42
-  },
 }
 ```
 
