@@ -107,6 +107,14 @@ interface ProxyRuntimeEnvironment {
   cwd: () => string;
 }
 
+/** Minimal emitter surface shared by IProxyProcess and its stderr stream. */
+interface RemovableEmitter {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  on(event: string, listener: (...args: any[]) => void): unknown;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  removeListener(event: string, listener: (...args: any[]) => void): unknown;
+}
+
 const DEFAULT_RUNTIME_ENVIRONMENT: ProxyRuntimeEnvironment = {
   moduleUrl: import.meta.url,
   cwd: () => process.cwd()
@@ -123,6 +131,8 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     resolve: (response: DebugProtocol.Response) => void;
     reject: (error: Error) => void;
     command: string;
+    /** Parent-side backstop timer; must be cleared wherever the entry settles (issue #420). */
+    timer?: NodeJS.Timeout;
   }>();
   private isInitialized = false;
   private isStopped = false;
@@ -155,6 +165,18 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   private activeLaunchBarrierRequestId: string | null = null;
   private proxyMessageCounter = 0;
   private exitEmitted = false;
+  /**
+   * Listeners installed on the proxy process (and its stderr stream) by
+   * setupEventHandlers, tracked so a failed start() can detach them — a stale
+   * process driving handleProxyExit after start() already rejected would fire
+   * rejections with nobody listening (issue #420).
+   */
+  private trackedProxyListeners: Array<{
+    emitter: RemovableEmitter;
+    event: string;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    listener: (...args: any[]) => void;
+  }> = [];
 
   constructor(
     private adapter: IDebugAdapter | null,  // Optional adapter for language-agnostic support
@@ -212,6 +234,9 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     }
 
     if (!this.proxyProcess || typeof this.proxyProcess.pid === 'undefined') {
+      // Clear the handle so this manager is not permanently stuck on the
+      // 'Proxy already running' guard above (issue #420).
+      this.proxyProcess = null;
       throw new Error('Proxy process is invalid or PID is missing');
     }
 
@@ -256,12 +281,27 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       } : null
     });
 
+    // From here on, any failure must detach the listeners just installed on
+    // the proxy process: start()'s caller discards this manager on failure,
+    // and a stale process handle still wired to handleProxyExit would reject
+    // pending requests into a void (issue #420).
+    try {
+      await this.startInitializationSequence(initCommand);
+    } catch (error) {
+      this.detachProxyEventHandlers();
+      throw error;
+    }
+  }
+
+  /** Send init (with retry) and await readiness; extracted so start() can detach on any failure. */
+  private async startInitializationSequence(initCommand: object): Promise<void> {
     // Send init command with retry logic
     await this.sendInitWithRetry(initCommand);
 
     // Wait for initialization or dry run completion
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
+        cleanup();
         reject(new Error(ErrorMessages.proxyInitTimeout(30)));
       }, 30000);
 
@@ -365,22 +405,28 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
     // Wait for graceful exit or force kill after timeout
     return new Promise((resolve) => {
+      const onExit = () => {
+        clearTimeout(timeout);
+        resolve();
+      };
+
       const timeout = setTimeout(() => {
         this.logger.warn(`[ProxyManager] Timeout waiting for proxy exit. Force killing.`);
         if (!process.killed) {
           process.kill('SIGKILL');
         }
+        // Detach the once-listener: it never fired, and leaving it would
+        // accumulate a dead handler on the process object (issue #420).
+        process.removeListener('exit', onExit);
         resolve();
       }, 5000);
 
-      process.once('exit', () => {
-        clearTimeout(timeout);
-        resolve();
-      });
+      process.once('exit', onExit);
 
       // If already killed/exited, resolve immediately
       if (process.killed || process.exitCode !== null) {
         clearTimeout(timeout);
+        process.removeListener('exit', onExit);
         resolve();
       }
     });
@@ -461,10 +507,33 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     }
 
     return new Promise<T>((resolve, reject) => {
+      // Timeout handler. The worker/socket timeout (timeoutMs, default 30s)
+      // fires first and produces the actionable error; this parent timer is a
+      // backstop that only fires if the worker never responds at all. The
+      // handle is stored on the pending entry and cleared wherever the entry
+      // settles — a fired-but-uncleared backstop would otherwise reject with
+      // nobody listening long after the caller has moved on (issue #420).
+      const effectiveTimeoutMs =
+        (options?.timeoutMs ?? this.defaultDapRequestTimeoutMs) + this.dapParentMarginMs;
+      const timer = setTimeout(() => {
+        if (this.pendingDapRequests.has(requestId)) {
+          this.pendingDapRequests.delete(requestId);
+          if (this.dapState) {
+            this.dapState = removePendingRequest(this.dapState, requestId);
+          }
+          if (this.activeLaunchBarrier && this.activeLaunchBarrierRequestId === requestId) {
+            this.clearActiveLaunchBarrier();
+          }
+          reject(new Error(ErrorMessages.dapRequestTimeout(command, Math.round(effectiveTimeoutMs / 1000))));
+        }
+      }, effectiveTimeoutMs);
+      timer.unref?.();
+
       this.pendingDapRequests.set(requestId, {
         resolve: resolve as (value: DebugProtocol.Response) => void,
         reject,
-        command
+        command,
+        timer
       });
 
       // Mirror into functional core for observability (seq is placeholder; ProxyManager remains authoritative)
@@ -480,30 +549,13 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       try {
         this.sendCommand(commandToSend);
       } catch (error) {
+        clearTimeout(timer);
         this.pendingDapRequests.delete(requestId);
         if (barrier) {
           this.clearActiveLaunchBarrier(barrier);
         }
         reject(error);
       }
-
-      // Timeout handler. The worker/socket timeout (timeoutMs, default 30s)
-      // fires first and produces the actionable error; this parent timer is a
-      // backstop that only fires if the worker never responds at all.
-      const effectiveTimeoutMs =
-        (options?.timeoutMs ?? this.defaultDapRequestTimeoutMs) + this.dapParentMarginMs;
-      setTimeout(() => {
-        if (this.pendingDapRequests.has(requestId)) {
-          this.pendingDapRequests.delete(requestId);
-          if (this.dapState) {
-            this.dapState = removePendingRequest(this.dapState, requestId);
-          }
-          if (this.activeLaunchBarrier && this.activeLaunchBarrierRequestId === requestId) {
-            this.clearActiveLaunchBarrier();
-          }
-          reject(new Error(ErrorMessages.dapRequestTimeout(command, Math.round(effectiveTimeoutMs / 1000))));
-        }
-      }, effectiveTimeoutMs);
     });
   }
 
@@ -627,7 +679,10 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
           const handler = () => {
             if (resolved) return;
             resolved = true;
-            if (timer) clearTimeout(timer);
+            // Detach on success too — this listener is registered with on(),
+            // and each un-removed acknowledgment handler would otherwise stay
+            // on the manager for its lifetime (issue #420).
+            cleanup();
             resolve(true);
           };
 
@@ -748,30 +803,40 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   private setupEventHandlers(): void {
     if (!this.proxyProcess) return;
 
+    // Track every listener installed here so a failed start() can detach the
+    // lot (issue #420); see trackedProxyListeners.
+    this.trackedProxyListeners = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const track = (emitter: RemovableEmitter, event: string, listener: (...args: any[]) => void) => {
+      emitter.on(event, listener);
+      this.trackedProxyListeners.push({ emitter, event, listener });
+    };
+    const proc = this.proxyProcess as unknown as RemovableEmitter;
+
     // Handle IPC messages
-    this.proxyProcess.on('message', (rawMessage: unknown) => {
+    track(proc, 'message', (rawMessage: unknown) => {
       this.handleProxyMessage(rawMessage);
     });
 
-    this.proxyProcess.on('ipc-send-start', (data: { pid?: number; connectedBefore?: boolean; summary?: string; timestamp?: number }) => {
+    track(proc, 'ipc-send-start', (data: { pid?: number; connectedBefore?: boolean; summary?: string; timestamp?: number }) => {
       this.logger.debug(
         `[ProxyManager] IPC send start pid=${data?.pid ?? 'unknown'} connected=${data?.connectedBefore} summary=${data?.summary ?? 'n/a'}`
       );
     });
 
-    this.proxyProcess.on('ipc-send-complete', (data: { pid?: number; connectedAfter?: boolean; summary?: string; timestamp?: number; queueSizeBefore?: number; queueSizeAfter?: number }) => {
+    track(proc, 'ipc-send-complete', (data: { pid?: number; connectedAfter?: boolean; summary?: string; timestamp?: number; queueSizeBefore?: number; queueSizeAfter?: number }) => {
       this.logger.debug(
         `[ProxyManager] IPC send complete pid=${data?.pid ?? 'unknown'} connected=${data?.connectedAfter} summary=${data?.summary ?? 'n/a'} queueBefore=${data?.queueSizeBefore ?? 'n/a'} queueAfter=${data?.queueSizeAfter ?? 'n/a'}`
       );
     });
 
-    this.proxyProcess.on('ipc-send-failed', (data: { pid?: number; killed?: boolean; childProcessKilled?: boolean | string; summary?: string; timestamp?: number }) => {
+    track(proc, 'ipc-send-failed', (data: { pid?: number; killed?: boolean; childProcessKilled?: boolean | string; summary?: string; timestamp?: number }) => {
       this.logger.warn(
         `[ProxyManager] IPC send returned false pid=${data?.pid ?? 'unknown'} killed=${data?.killed} childKilled=${data?.childProcessKilled} summary=${data?.summary ?? 'n/a'}`
       );
     });
 
-    this.proxyProcess.on('ipc-send-error', (data: { pid?: number; error?: string; summary?: string; timestamp?: number }) => {
+    track(proc, 'ipc-send-error', (data: { pid?: number; error?: string; summary?: string; timestamp?: number }) => {
       this.logger.error(
         `[ProxyManager] IPC send error pid=${data?.pid ?? 'unknown'} error=${data?.error ?? 'unknown'} summary=${data?.summary ?? 'n/a'}`
       );
@@ -783,19 +848,22 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     // patterns (issue #151). Scoped to this process's handlers so a pending
     // partial line survives until this stream's own 'end'/'close', and never
     // bleeds into a later process's stderr.
-    const stderrLineBuffer = new LineBuffer();
-    this.proxyProcess.stderr?.on('data', (data: Buffer | string) => {
-      this.recordStderrLines(stderrLineBuffer.append(data.toString()));
-    });
-    // Flush the trailing partial line only once the stream itself is done.
-    // Flushing on process 'exit' would be wrong: the pipe can still deliver
-    // the rest of a split line afterwards, re-creating the straddle leak.
-    const flushStderr = () => this.recordStderrLines(stderrLineBuffer.flush());
-    this.proxyProcess.stderr?.on('end', flushStderr);
-    this.proxyProcess.stderr?.on('close', flushStderr);
+    const stderr = this.proxyProcess.stderr as unknown as RemovableEmitter | null;
+    if (stderr) {
+      const stderrLineBuffer = new LineBuffer();
+      track(stderr, 'data', (data: Buffer | string) => {
+        this.recordStderrLines(stderrLineBuffer.append(data.toString()));
+      });
+      // Flush the trailing partial line only once the stream itself is done.
+      // Flushing on process 'exit' would be wrong: the pipe can still deliver
+      // the rest of a split line afterwards, re-creating the straddle leak.
+      const flushStderr = () => this.recordStderrLines(stderrLineBuffer.flush());
+      track(stderr, 'end', flushStderr);
+      track(stderr, 'close', flushStderr);
+    }
 
     // Handle exit
-    this.proxyProcess.on('exit', (code: number | null, signal: string | null) => {
+    track(proc, 'exit', (code: number | null, signal: string | null) => {
       this.logger.info(`[ProxyManager] Proxy exited. Code: ${code}, Signal: ${signal}`);
 
       this.lastExitDetails = {
@@ -816,11 +884,30 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     });
 
     // Handle errors
-    this.proxyProcess.on('error', (err: Error) => {
+    track(proc, 'error', (err: Error) => {
       this.logger.error(`[ProxyManager] Proxy error:`, err);
       this.emit('error', err);
       this.cleanup();
     });
+  }
+
+  /**
+   * Remove the listeners setupEventHandlers installed on the proxy process.
+   * Called when start() fails: the manager is about to be discarded, and a
+   * stale process handle must not keep driving handleProxyExit/cleanup —
+   * those reject pending requests with nobody left to listen (issue #420).
+   * The caller (SessionManager) still runs stop(), which operates on the
+   * process handle directly and needs none of these listeners.
+   */
+  private detachProxyEventHandlers(): void {
+    for (const { emitter, event, listener } of this.trackedProxyListeners) {
+      try {
+        emitter.removeListener(event, listener);
+      } catch {
+        // Best-effort: a torn-down stream may throw on removeListener.
+      }
+    }
+    this.trackedProxyListeners = [];
   }
 
   /**
@@ -972,6 +1059,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     }
 
     this.pendingDapRequests.delete(message.requestId);
+    if (pending.timer) clearTimeout(pending.timer);
     // Mirror completion into functional core
     if (this.dapState) {
       this.dapState = removePendingRequest(this.dapState, message.requestId);
@@ -1148,6 +1236,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
     // Clean up pending requests
     this.pendingDapRequests.forEach(pending => {
+      if (pending.timer) clearTimeout(pending.timer);
       pending.reject(new Error('Proxy exited'));
     });
     this.pendingDapRequests.clear();
@@ -1167,6 +1256,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     if (this.pendingDapRequests.size > 0) {
       this.logger.debug(`[ProxyManager] Clearing ${this.pendingDapRequests.size} pending DAP requests during cleanup`);
       for (const pending of this.pendingDapRequests.values()) {
+        if (pending.timer) clearTimeout(pending.timer);
         pending.reject(new Error(`Request cancelled during proxy shutdown: ${pending.command}`));
       }
       this.pendingDapRequests.clear();

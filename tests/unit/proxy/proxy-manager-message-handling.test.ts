@@ -703,10 +703,14 @@ describe('ProxyManager Message Handling', () => {
       vi.useFakeTimers();
 
       const request = proxyManager.sendDapRequest('threads');
+      // Attach the rejection expectation BEFORE the timer advance — the async
+      // fake-timer loop yields through real ticks, where a handler-less
+      // rejection surfaces as unhandled (issue #420).
+      const rejection = expect(request).rejects.toThrow(/Debug adapter did not respond/i);
 
       await vi.advanceTimersByTimeAsync(35_000);
 
-      await expect(request).rejects.toThrow(/Debug adapter did not respond/i);
+      await rejection;
 
       const pending = (proxyManager as unknown as { pendingDapRequests: Map<string, unknown> }).pendingDapRequests;
       expect(pending.size).toBe(0);
@@ -1091,11 +1095,14 @@ describe('ProxyManager Message Handling', () => {
         createInitialState('timeout-session');
 
       const requestPromise = proxyManager.sendDapRequest('launch', {});
+      // Attach before advancing so the rejection is never handler-less at a
+      // real tick boundary (issue #420).
+      const rejection = expect(requestPromise).rejects.toThrow(/Debug adapter did not respond to 'launch'/);
 
       await vi.advanceTimersByTimeAsync(35000);
 
       try {
-        await expect(requestPromise).rejects.toThrow(/Debug adapter did not respond to 'launch'/);
+        await rejection;
         expect(barrier.dispose).toHaveBeenCalled();
       } finally {
         vi.useRealTimers();

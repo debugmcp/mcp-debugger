@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import path from 'path';
 import { pathToFileURL } from 'url';
@@ -86,6 +86,20 @@ describe('ProxyManager.start', () => {
       fileSystem,
       logger
     );
+  });
+
+  // Under shuffled ordering (issue #420, seed 1038859894) anything this file
+  // leaves behind — fake timers, live listeners between the manager and its
+  // fake process, stray setImmediate emits — fires into whichever test runs
+  // next and surfaces there as unhandled-rejection noise. Tear it all down.
+  afterEach(async () => {
+    vi.useRealTimers();
+    // Detach the fake first so any straggling emit finds no manager handlers.
+    fakeProcess.removeAllListeners();
+    (fakeProcess.stderr as unknown as EventEmitter | null)?.removeAllListeners();
+    proxyManager.removeAllListeners();
+    // Flush this test's stray macrotasks inside its own attribution window.
+    await new Promise((resolve) => setImmediate(resolve));
   });
 
   const baseConfig: ProxyConfig = {
@@ -499,9 +513,13 @@ describe('ProxyManager.start', () => {
 
       const startPromise = proxyManager.start(baseConfig);
 
+      // Attach the rejection expectation BEFORE driving the rejection: the
+      // async fake-timer loop yields through real ticks, where an unhandled
+      // rejection would otherwise be flagged (issue #420).
+      const rejection = expect(startPromise).rejects.toThrow(/Failed to initialize proxy after 6 attempts\. Last error: ipc failure/);
       await vi.advanceTimersByTimeAsync(16500);
 
-      await expect(startPromise).rejects.toThrow(/Failed to initialize proxy after 6 attempts\. Last error: ipc failure/);
+      await rejection;
       expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Error sending init on attempt 6'));
     });
   });
@@ -526,10 +544,11 @@ describe('ProxyManager.start', () => {
     });
 
     try {
+      const rejection = expect(startPromise).rejects.toThrow(/Debug proxy initialization did not complete within 30s/);
       await vi.advanceTimersByTimeAsync(30000);
       await vi.runOnlyPendingTimersAsync();
       await Promise.resolve();
-      await expect(startPromise).rejects.toThrow(/Debug proxy initialization did not complete within 30s/);
+      await rejection;
     } finally {
       vi.useRealTimers();
     }
@@ -568,12 +587,13 @@ describe('ProxyManager.start', () => {
       });
 
       const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+      const rejection = expect(startPromise).rejects.toThrow(
+        /Proxy exit details -> code=2 signal=SIGTERM stderr:\nboot failure/
+      );
       // Drive the init-retry backoff via fake timers: 35s covers the ~15.5s
       // backoff schedule plus timeout margins.
       await vi.advanceTimersByTimeAsync(35000);
-      await expect(startPromise).rejects.toThrow(
-        /Proxy exit details -> code=2 signal=SIGTERM stderr:\nboot failure/
-      );
+      await rejection;
     } finally {
       vi.useRealTimers();
     }
@@ -791,12 +811,13 @@ describe('ProxyManager.start', () => {
       });
 
       const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+      const rejection = expect(startPromise).rejects.toThrow(
+        /Proxy exit details -> code=2 signal=SIGTERM stderr:\nlate boot failure/
+      );
       // Drive the init-retry backoff via fake timers: 35s covers the ~15.5s
       // backoff schedule plus timeout margins.
       await vi.advanceTimersByTimeAsync(35000);
-      await expect(startPromise).rejects.toThrow(
-        /Proxy exit details -> code=2 signal=SIGTERM stderr:\nlate boot failure/
-      );
+      await rejection;
     } finally {
       vi.useRealTimers();
     }
@@ -886,26 +907,29 @@ describe('ProxyManager.start', () => {
   describe('stop and cleanup behavior', () => {
     it('sends terminate and force kills when proxy does not exit in time', async () => {
       vi.useFakeTimers();
+      try {
+        (proxyManager as unknown as { proxyProcess: IProxyProcess | null }).proxyProcess = fakeProcess;
+        (proxyManager as unknown as { sessionId: string | null }).sessionId = baseConfig.sessionId;
 
-      (proxyManager as unknown as { proxyProcess: IProxyProcess | null }).proxyProcess = fakeProcess;
-      (proxyManager as unknown as { sessionId: string | null }).sessionId = baseConfig.sessionId;
+        fakeProcess.killed = false;
+        fakeProcess.exitCode = null;
+        fakeProcess.send.mockClear();
+        fakeProcess.kill.mockClear();
 
-      fakeProcess.killed = false;
-      fakeProcess.exitCode = null;
-      fakeProcess.send.mockClear();
-      fakeProcess.kill.mockClear();
+        const stopPromise = proxyManager.stop();
 
-      const stopPromise = proxyManager.stop();
+        await vi.advanceTimersByTimeAsync(5000);
+        await vi.runOnlyPendingTimersAsync();
+        await stopPromise;
 
-      await vi.advanceTimersByTimeAsync(5000);
-      await vi.runOnlyPendingTimersAsync();
-      await stopPromise;
-
-      expect(fakeProcess.send).toHaveBeenCalledWith({ cmd: 'terminate', sessionId: baseConfig.sessionId });
-      expect(fakeProcess.kill).toHaveBeenCalledWith('SIGKILL');
-      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Timeout waiting for proxy exit'));
-
-      vi.useRealTimers();
+        expect(fakeProcess.send).toHaveBeenCalledWith({ cmd: 'terminate', sessionId: baseConfig.sessionId });
+        expect(fakeProcess.kill).toHaveBeenCalledWith('SIGKILL');
+        expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Timeout waiting for proxy exit'));
+      } finally {
+        // Without the finally, a failed assertion above would leak fake
+        // timers into the next shuffled test (issue #420).
+        vi.useRealTimers();
+      }
     });
 
     it('resolves immediately when proxy already exited', async () => {
@@ -1354,10 +1378,11 @@ describe('ProxyManager.start', () => {
       });
 
       const request = proxyManager.sendDapRequest('continue');
+      const rejection = expect(request).rejects.toThrow(/Debug adapter did not respond to 'continue'/);
 
       await vi.advanceTimersByTimeAsync(35000);
 
-      await expect(request).rejects.toThrow(/Debug adapter did not respond to 'continue'/);
+      await rejection;
       const pending = (proxyManager as unknown as { pendingDapRequests: Map<string, unknown> }).pendingDapRequests;
       expect(pending.size).toBe(0);
     } finally {
@@ -1413,13 +1438,14 @@ describe('ProxyManager.start', () => {
       });
 
       const startPromise = proxyManager.start(config);
+      // With retry logic, error message is different
+      const rejection = expect(startPromise).rejects.toThrow(/Failed to initialize proxy after \d+ attempts/);
 
       // Drive the init-retry backoff via fake timers: 35s covers the ~15.5s
       // backoff schedule plus timeout margins.
       await vi.advanceTimersByTimeAsync(35000);
 
-      // With retry logic, error message is different
-      await expect(startPromise).rejects.toThrow(/Failed to initialize proxy after \d+ attempts/);
+      await rejection;
     } finally {
       vi.useRealTimers();
     }
@@ -1441,13 +1467,14 @@ describe('ProxyManager.start', () => {
       });
 
       const startPromise = proxyManager.start(config);
+      // With retry logic, error message is different
+      const rejection = expect(startPromise).rejects.toThrow(/Failed to initialize proxy after \d+ attempts/);
 
       // Drive the init-retry backoff via fake timers: 35s covers the ~15.5s
       // backoff schedule plus timeout margins.
       await vi.advanceTimersByTimeAsync(35000);
 
-      // With retry logic, error message is different
-      await expect(startPromise).rejects.toThrow(/Failed to initialize proxy after \d+ attempts/);
+      await rejection;
     } finally {
       vi.useRealTimers();
     }
@@ -1490,6 +1517,11 @@ describe('ProxyManager.start', () => {
       const startPromise = proxyManager.start(config);
       const stopPromise = proxyManager.stop();
 
+      // Attach the rejection expectation BEFORE the timer advance: this was
+      // the worst offender of the seed-1038859894 flake — startPromise sat
+      // handler-less across the whole 35s advance (issue #420).
+      const startRejection = expect(startPromise).rejects.toThrow(/Proxy/);
+
       setImmediate(() => {
         fakeProcess.emit('exit', 0, null);
       });
@@ -1499,7 +1531,7 @@ describe('ProxyManager.start', () => {
       await vi.advanceTimersByTimeAsync(35000);
 
       await expect(stopPromise).resolves.toBeUndefined();
-      await expect(startPromise).rejects.toThrow(/Proxy/);
+      await startRejection;
     } finally {
       vi.useRealTimers();
     }
@@ -1513,6 +1545,126 @@ describe('ProxyManager.start', () => {
     });
 
     await expect(proxyManager.stop()).resolves.toBeUndefined();
+  });
+
+  // Leaked timers and listeners from settled operations were the enablers of
+  // the seed-1038859894 shuffle flake: rejections fired into later tests
+  // after this file's tests had finished (issue #420).
+  describe('listener and timer hygiene (issue #420)', () => {
+    it('clears the DAP parent backstop timer when the response arrives', async () => {
+      (proxyManager as unknown as { proxyProcess: IProxyProcess | null }).proxyProcess = fakeProcess;
+      (proxyManager as unknown as { isInitialized: boolean }).isInitialized = true;
+      (proxyManager as unknown as { sessionId: string | null }).sessionId = baseConfig.sessionId;
+      (proxyManager as unknown as { dapState: ReturnType<typeof createInitialState> | null }).dapState =
+        createInitialState(baseConfig.sessionId);
+
+      vi.useFakeTimers();
+      try {
+        fakeProcess.sendCommand.mockImplementation((payload) => {
+          if (payload.cmd === 'dap') {
+            (proxyManager as unknown as {
+              handleProxyMessage: (message: object) => void;
+            }).handleProxyMessage({
+              type: 'dapResponse',
+              sessionId: baseConfig.sessionId,
+              requestId: payload.requestId,
+              success: true,
+              response: { type: 'response', seq: 1, request_seq: 1, command: payload.dapCommand, success: true }
+            });
+          }
+        });
+
+        const before = vi.getTimerCount();
+        await proxyManager.sendDapRequest('threads');
+
+        // The ~35s backstop must not survive a settled request.
+        expect(vi.getTimerCount()).toBe(before);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('removes the init-received listener after a successful start', async () => {
+      await proxyManager.start(baseConfig);
+
+      expect(proxyManager.listenerCount('init-received')).toBe(0);
+    });
+
+    it('detaches proxy process listeners when start fails via init exhaustion', async () => {
+      vi.useFakeTimers();
+      try {
+        fakeProcess.sendCommand.mockReset();
+        fakeProcess.sendCommand.mockImplementation(() => {
+          throw new Error('ipc failure');
+        });
+
+        const startPromise = proxyManager.start(baseConfig);
+        const rejection = expect(startPromise).rejects.toThrow(/Failed to initialize proxy/);
+        await vi.advanceTimersByTimeAsync(16500);
+        await rejection;
+
+        // A stale process emitting after the failed start must not reach the
+        // manager (it would fire handleProxyExit into a later test).
+        const exitSpy = vi.fn();
+        proxyManager.on('exit', exitSpy);
+        fakeProcess.emit('exit', 1, null);
+        fakeProcess.emit('message', { type: 'status', status: 'terminated', sessionId: baseConfig.sessionId });
+        expect(exitSpy).not.toHaveBeenCalled();
+
+        expect(fakeProcess.listenerCount('exit')).toBe(0);
+        expect(fakeProcess.listenerCount('message')).toBe(0);
+        expect((fakeProcess.stderr as unknown as EventEmitter).listenerCount('data')).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('detaches proxy process listeners when start times out awaiting readiness', async () => {
+      vi.useFakeTimers();
+      try {
+        fakeProcess.sendCommand.mockImplementation((cmd: { cmd?: string; sessionId?: string }) => {
+          if (cmd.cmd === 'init') {
+            setTimeout(() => {
+              fakeProcess.emit('message', {
+                type: 'status',
+                status: 'init_received',
+                sessionId: cmd.sessionId
+              });
+            }, 0);
+          }
+        });
+
+        const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+        const rejection = expect(startPromise).rejects.toThrow(/did not complete within 30s/);
+        await vi.advanceTimersByTimeAsync(30100);
+        await rejection;
+
+        expect(fakeProcess.listenerCount('exit')).toBe(0);
+        expect(fakeProcess.listenerCount('message')).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('removes the stop() exit listener when the force-kill timeout wins', async () => {
+      vi.useFakeTimers();
+      try {
+        (proxyManager as unknown as { proxyProcess: IProxyProcess | null }).proxyProcess = fakeProcess;
+        (proxyManager as unknown as { sessionId: string | null }).sessionId = baseConfig.sessionId;
+        fakeProcess.killed = false;
+        fakeProcess.exitCode = null;
+
+        const baseline = fakeProcess.listenerCount('exit');
+        const stopPromise = proxyManager.stop();
+        await vi.advanceTimersByTimeAsync(5000);
+        await stopPromise;
+
+        expect(fakeProcess.kill).toHaveBeenCalledWith('SIGKILL');
+        expect(fakeProcess.listenerCount('exit')).toBe(baseline);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });
 
