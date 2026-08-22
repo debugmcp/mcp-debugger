@@ -34,7 +34,7 @@ describe('presentLanguage', () => {
     const view = presentLanguage('go', {
       goPath: '/usr/local/go/bin/go',
       goVersion: '1.24.1',
-      dlvPath: '/home/u/go/bin/dlv',
+      dlvPath: '/home/user/go/bin/dlv',
       dlvVersion: '1.26.3'
     });
 
