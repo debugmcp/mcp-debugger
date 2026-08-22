@@ -2,6 +2,7 @@
  * Tests for redefine_classes tool and attach stopOnEntry behavior
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { McpError, ErrorCode as McpErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { DebugMcpServer } from '../../../../src/server.js';
@@ -533,6 +534,76 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
 
       expect(mockSessionManager.createSession).not.toHaveBeenCalled();
       expect(mockSessionManager.attachToProcess).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('detach_from_process tool dispatch (coverage sprint)', () => {
+    const callDetach = (args: Record<string, unknown>) =>
+      callToolHandler({
+        method: 'tools/call',
+        params: { name: 'detach_from_process', arguments: args }
+      });
+
+    it('returns the detach result payload on success', async () => {
+      mockSessionManager.detachFromProcess.mockResolvedValue({
+        success: true,
+        state: 'running',
+        data: { message: 'Detached; target left running' }
+      });
+
+      const result = await callDetach({ sessionId: 'sess-1', terminateProcess: false });
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(mockSessionManager.detachFromProcess).toHaveBeenCalledWith('sess-1', false);
+      expect(payload).toEqual({
+        success: true,
+        state: 'running',
+        message: 'Detached; target left running',
+        data: { message: 'Detached; target left running' }
+      });
+    });
+
+    it('defaults terminateProcess to false and propagates failures', async () => {
+      mockSessionManager.detachFromProcess.mockResolvedValue({
+        success: false,
+        state: 'error',
+        error: 'No attach session to detach from'
+      });
+
+      const result = await callDetach({ sessionId: 'sess-1' });
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(mockSessionManager.detachFromProcess).toHaveBeenCalledWith('sess-1', false);
+      expect(payload.success).toBe(false);
+      expect(payload.message).toBe('No attach session to detach from');
+    });
+
+    it('maps session-state McpErrors to a stopped failure payload', async () => {
+      mockSessionManager.detachFromProcess.mockRejectedValue(
+        new McpError(McpErrorCode.InvalidParams, 'Session sess-1 not found')
+      );
+
+      const result = await callDetach({ sessionId: 'sess-1' });
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload).toEqual({
+        success: false,
+        error: expect.stringContaining('Session sess-1 not found'),
+        state: 'stopped'
+      });
+    });
+
+    it('rethrows unrelated errors', async () => {
+      mockSessionManager.detachFromProcess.mockRejectedValue(
+        new McpError(McpErrorCode.InternalError, 'adapter exploded mid-flight')
+      );
+
+      await expect(callDetach({ sessionId: 'sess-1' })).rejects.toThrow(/adapter exploded/);
+    });
+
+    it('requires a sessionId', async () => {
+      await expect(callDetach({})).rejects.toThrow(/sessionId/);
+      expect(mockSessionManager.detachFromProcess).not.toHaveBeenCalled();
     });
   });
 });
