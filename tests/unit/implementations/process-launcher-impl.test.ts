@@ -172,4 +172,76 @@ describe('ProxyProcessLauncherImpl', () => {
     const result = proxyProcess.kill('SIGTERM');
     expect(result).toBe(false);
   });
+
+  // On win32 any cross-process signal is TerminateProcess on the single PID,
+  // which strands the detached js-debug adapter subtree (issue #431). kill()
+  // must sweep the worker's tree first, while the worker is still alive.
+  describe('win32 tree-kill on kill()', () => {
+    it('tree-kills via the injected treeKill before terminating the worker on win32', () => {
+      const treeKill = vi.fn();
+      const launcher = new ProxyProcessLauncherImpl(processManager, 'win32', treeKill);
+      const proxyProcess = launcher.launchProxy('./dist/proxy.js', 'session-tree');
+
+      const result = proxyProcess.kill('SIGKILL');
+
+      expect(result).toBe(true);
+      expect(treeKill).toHaveBeenCalledWith(2222);
+      expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+      // Tree-kill must strike first: taskkill /T can only discover children
+      // while the parent is alive.
+      expect(treeKill.mock.invocationCallOrder[0]).toBeLessThan(
+        (child.kill as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]
+      );
+    });
+
+    it('does not tree-kill when the worker already exited (PID may be recycled)', () => {
+      const treeKill = vi.fn();
+      const launcher = new ProxyProcessLauncherImpl(processManager, 'win32', treeKill);
+      const proxyProcess = launcher.launchProxy('./dist/proxy.js', 'session-tree-exited');
+
+      child.emit('exit', 0, null);
+      proxyProcess.kill('SIGKILL');
+
+      expect(treeKill).not.toHaveBeenCalled();
+    });
+
+    it('does not tree-kill on POSIX platforms', () => {
+      const treeKill = vi.fn();
+      const launcher = new ProxyProcessLauncherImpl(processManager, 'linux', treeKill);
+      const proxyProcess = launcher.launchProxy('./dist/proxy.js', 'session-tree-posix');
+
+      proxyProcess.kill('SIGKILL');
+
+      expect(treeKill).not.toHaveBeenCalled();
+      expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+    });
+
+    it('still terminates the worker when treeKill throws', () => {
+      const treeKill = vi.fn(() => {
+        throw new Error('taskkill missing');
+      });
+      const launcher = new ProxyProcessLauncherImpl(processManager, 'win32', treeKill);
+      const proxyProcess = launcher.launchProxy('./dist/proxy.js', 'session-tree-throw');
+
+      const result = proxyProcess.kill('SIGKILL');
+
+      expect(result).toBe(true);
+      expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+    });
+
+    it('spawns taskkill /PID <pid> /T /F via the process manager by default on win32', () => {
+      const spawnSpy = vi.spyOn(processManager, 'spawn');
+      const launcher = new ProxyProcessLauncherImpl(processManager, 'win32');
+      const proxyProcess = launcher.launchProxy('./dist/proxy.js', 'session-tree-default');
+      spawnSpy.mockClear();
+
+      proxyProcess.kill('SIGKILL');
+
+      expect(spawnSpy).toHaveBeenCalledWith(
+        'taskkill',
+        ['/PID', '2222', '/T', '/F'],
+        expect.objectContaining({ windowsHide: true })
+      );
+    });
+  });
 });

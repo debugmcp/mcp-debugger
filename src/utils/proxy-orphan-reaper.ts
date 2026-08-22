@@ -32,15 +32,21 @@
  */
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import {
+  PROXY_BOOTSTRAP_MARKER,
+  JS_DEBUG_ADAPTER_MARKER,
+  OWNER_PID_ARG_PREFIX,
+  SESSION_ID_ARG_PREFIX
+} from '@debugmcp/shared';
 import { isPidAlive, SignalFn } from './jvm-orphan-reaper.js';
 import { scanLinux, scanDarwin, scanWindows, scanProcessArgs, type ScannedProcess } from './process-scan.js';
 
 const execFileAsync = promisify(execFile);
 
-/** Substring of the worker's script-path argv token used as the identity marker. */
-export const PROXY_BOOTSTRAP_MARKER = 'proxy-bootstrap';
-export const OWNER_PID_ARG_PREFIX = '--mcp-owner-pid=';
-export const SESSION_ID_ARG_PREFIX = '--mcp-session-id=';
+// Marker constants live in @debugmcp/shared so adapter packages can tag their
+// own spawns with the same markers this reaper matches (issue #431); re-exported
+// here to keep this module the reaper-side import point.
+export { PROXY_BOOTSTRAP_MARKER, JS_DEBUG_ADAPTER_MARKER, OWNER_PID_ARG_PREFIX, SESSION_ID_ARG_PREFIX };
 
 const LIST_TIMEOUT_MS = 5000;
 /** How often the POSIX escalation path polls for the SIGTERM cascade to finish. */
@@ -171,18 +177,17 @@ export async function listWindowsProxies(): Promise<TaggedProxy[]> {
 }
 
 /**
- * Two-factor identification: a token containing the proxy-bootstrap script
- * name AND a valid --mcp-owner-pid marker. Untagged bootstrap processes
- * (pre-upgrade workers) and malformed tags are ignored, never killed.
- *
- * @internal Exposed for unit tests; not part of the public module API.
+ * Two-factor identification: a token containing the identity marker AND a
+ * valid --mcp-owner-pid marker. Untagged processes (pre-upgrade workers,
+ * VS Code's own js-debug instances) and malformed tags are ignored, never
+ * killed.
  */
-export function parseProxyArgs(pid: number, args: string[]): TaggedProxy | null {
+function parseTaggedArgs(pid: number, args: string[], identityMarker: string): TaggedProxy | null {
   let hasMarker = false;
   let ownerPid = -1;
   let sessionId = '';
   for (const a of args) {
-    if (a.includes(PROXY_BOOTSTRAP_MARKER)) {
+    if (a.includes(identityMarker)) {
       hasMarker = true;
     } else if (a.startsWith(OWNER_PID_ARG_PREFIX)) {
       const v = Number(a.slice(OWNER_PID_ARG_PREFIX.length));
@@ -193,6 +198,24 @@ export function parseProxyArgs(pid: number, args: string[]): TaggedProxy | null 
   }
   if (!hasMarker || ownerPid <= 0) return null;
   return { pid, ownerPid, sessionId };
+}
+
+/** @internal Exposed for unit tests; not part of the public module API. */
+export function parseProxyArgs(pid: number, args: string[]): TaggedProxy | null {
+  return parseTaggedArgs(pid, args, PROXY_BOOTSTRAP_MARKER);
+}
+
+/**
+ * Matcher for js-debug DAP server processes (vsDebugServer.cjs) tagged at
+ * spawn time by JavascriptDebugAdapter.buildAdapterCommand (issue #431).
+ * These are spawned detached+unref'd by the proxy worker, so a hard-killed
+ * worker strands them outside every tree-kill path; the startup janitor
+ * feeds scan rows through this matcher to find them.
+ *
+ * @internal Exposed for unit tests; not part of the public module API.
+ */
+export function parseJsDebugAdapterArgs(pid: number, args: string[]): TaggedProxy | null {
+  return parseTaggedArgs(pid, args, JS_DEBUG_ADAPTER_MARKER);
 }
 
 const defaultSignal: SignalFn = (pid, signal) => process.kill(pid, signal);

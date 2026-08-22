@@ -73,6 +73,41 @@ describe('JavascriptDebugAdapter.buildAdapterCommand (stdio)', () => {
     expect(path.isAbsolute(adapterPath as string)).toBe(true);
   });
 
+  it('tags the adapter argv with owner-pid and session-id reaper markers (issue #431)', () => {
+    const adapter = new JavascriptDebugAdapter(deps);
+
+    vi.stubEnv('MCP_DEBUGGER_MAIN_PID', '4242');
+    const cmd = adapter.buildAdapterCommand(defaultConfig);
+
+    // vsDebugServer.cjs reads only argv[2] (port) and argv[3] (host); trailing
+    // tokens are inert, which is what makes these markers safe to append.
+    expect(cmd.args[3]).toBe('--mcp-owner-pid=4242');
+    expect(cmd.args[4]).toBe('--mcp-session-id=test-session');
+  });
+
+  it('falls back to process.pid for the owner marker when MCP_DEBUGGER_MAIN_PID is unset', () => {
+    const adapter = new JavascriptDebugAdapter(deps);
+
+    vi.stubEnv('MCP_DEBUGGER_MAIN_PID', undefined);
+    const cmd = adapter.buildAdapterCommand(defaultConfig);
+
+    expect(cmd.args[3]).toBe(`--mcp-owner-pid=${process.pid}`);
+  });
+
+  it('marker tokens contain no whitespace and never the string --help', () => {
+    // Whitespace would fragment under the win32 CommandLine split; --help
+    // anywhere in argv makes vsDebugServer print usage instead of serving.
+    const adapter = new JavascriptDebugAdapter(deps);
+
+    const cmd = adapter.buildAdapterCommand(defaultConfig);
+
+    for (const token of cmd.args.slice(3)) {
+      expect(token).not.toMatch(/\s/);
+      expect(token).not.toContain('--help');
+    }
+    expect(cmd.args.slice(3).length).toBeGreaterThan(0);
+  });
+
   it('environment includes NODE_OPTIONS and does not mutate process.env', () => {
     const adapter = new JavascriptDebugAdapter(deps);
 

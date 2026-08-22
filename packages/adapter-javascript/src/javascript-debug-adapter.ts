@@ -25,7 +25,9 @@ import {
   type LanguageSpecificAttachConfig,
   type FeatureRequirement,
   type AdapterCapabilities,
-  type AdapterLaunchBarrier
+  type AdapterLaunchBarrier,
+  OWNER_PID_ARG_PREFIX,
+  SESSION_ID_ARG_PREFIX
 } from '@debugmcp/shared';
 import { DebugLanguage } from '@debugmcp/shared';
 import type { AdapterDependencies } from '@debugmcp/shared';
@@ -280,7 +282,22 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       typeof config?.adapterHost === 'string' && config.adapterHost.trim().length > 0
         ? config.adapterHost
         : '127.0.0.1';
-    const args = [adapterPath, String(port), host];
+    // Reaper markers (issue #431): vsDebugServer.cjs reads only argv[2] (port)
+    // and argv[3] (host) and ignores trailing tokens, so these tags are inert
+    // at runtime — but they let the startup janitor recognize an instance
+    // stranded by a hard-killed proxy worker (spawned detached+unref'd, it
+    // survives every tree-kill path) and reap it by owner pid. Constraints:
+    // tokens must stay whitespace-free (the win32 process scan splits
+    // CommandLine on whitespace) and must never contain `--help` (vsDebugServer
+    // prints usage and exits if --help appears anywhere in argv).
+    const ownerPid = Number(process.env.MCP_DEBUGGER_MAIN_PID) || process.pid;
+    const args = [
+      adapterPath,
+      String(port),
+      host,
+      `${OWNER_PID_ARG_PREFIX}${ownerPid}`,
+      `${SESSION_ID_ARG_PREFIX}${config.sessionId}`
+    ];
 
     // Environment: clone from process.env (string values only), safely ensure NODE_OPTIONS memory flag
     const env: Record<string, string> = {};

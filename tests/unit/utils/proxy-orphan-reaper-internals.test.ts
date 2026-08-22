@@ -23,6 +23,7 @@ import { execFile } from 'node:child_process';
 import * as fsp from 'node:fs/promises';
 import {
   parseProxyArgs,
+  parseJsDebugAdapterArgs,
   killPosixWithEscalation,
   killWindows,
   listLinuxProxies,
@@ -109,6 +110,66 @@ describe('parseProxyArgs', () => {
         '--mcp-session-id=s',
       ]),
     ).toEqual({ pid: 9001, ownerPid: 42, sessionId: 's' });
+  });
+});
+
+describe('parseJsDebugAdapterArgs', () => {
+  /** A js-debug adapter cmdline exactly as spawned via buildAdapterCommand (issue #431). */
+  const adapterArgs = (ownerPid: number | string, sessionId = 'sess-1') => [
+    'C:\\nodejs\\node.exe',
+    'C:\\repo\\packages\\adapter-javascript\\vendor\\js-debug\\vsDebugServer.cjs',
+    '5679',
+    '127.0.0.1',
+    `--mcp-owner-pid=${ownerPid}`,
+    `--mcp-session-id=${sessionId}`,
+  ];
+
+  it('parses the full spawn shape including session id', () => {
+    expect(parseJsDebugAdapterArgs(9001, adapterArgs(42, 'abc-123'))).toEqual({
+      pid: 9001,
+      ownerPid: 42,
+      sessionId: 'abc-123',
+    });
+  });
+
+  it("returns null for VS Code's own js-debug instances (no owner marker)", () => {
+    expect(
+      parseJsDebugAdapterArgs(9001, [
+        'C:\\nodejs\\node.exe',
+        'c:\\Users\\x\\.vscode\\extensions\\ms-vscode.js-debug\\src\\vsDebugServer.cjs',
+        '5680',
+      ]),
+    ).toBeNull();
+  });
+
+  it('returns null when the owner marker is present but the vsDebugServer token is absent', () => {
+    // e.g. a tagged proxy worker row — must stay matched by parseProxyArgs only
+    expect(
+      parseJsDebugAdapterArgs(9001, [
+        'node',
+        '/app/dist/proxy/proxy-bootstrap.js',
+        '--mcp-owner-pid=42',
+        '--mcp-session-id=s',
+      ]),
+    ).toBeNull();
+  });
+
+  it('returns null when owner pid is non-numeric, zero, or negative', () => {
+    expect(parseJsDebugAdapterArgs(9001, adapterArgs('not-a-pid'))).toBeNull();
+    expect(parseJsDebugAdapterArgs(9001, adapterArgs(0))).toBeNull();
+    expect(parseJsDebugAdapterArgs(9001, adapterArgs(-5))).toBeNull();
+  });
+
+  it('tolerates a missing session id by leaving it empty', () => {
+    expect(
+      parseJsDebugAdapterArgs(9001, [
+        'node',
+        '/repo/vendor/js-debug/vsDebugServer.cjs',
+        '5679',
+        '127.0.0.1',
+        '--mcp-owner-pid=42',
+      ]),
+    ).toEqual({ pid: 9001, ownerPid: 42, sessionId: '' });
   });
 });
 

@@ -24,11 +24,33 @@ describe('runStartupJanitor', () => {
     args: ['node', 'dist/proxy/proxy-bootstrap.js', '--mcp-owner-pid=7', '--mcp-session-id=s1']
   };
   const noiseRow: ScannedProcess = { pid: 300, args: ['bash'] };
+  // A js-debug DAP server tagged at spawn by buildAdapterCommand (issue #431)
+  const vsDebugServerRow: ScannedProcess = {
+    pid: 400,
+    args: [
+      'C:\\nodejs\\node.exe',
+      'C:\\repo\\packages\\adapter-javascript\\vendor\\js-debug\\vsDebugServer.cjs',
+      '5679',
+      '127.0.0.1',
+      '--mcp-owner-pid=7',
+      '--mcp-session-id=s2'
+    ]
+  };
+  // VS Code's own js-debug instance — unmarked, must never be reaped
+  const foreignVsDebugServerRow: ScannedProcess = {
+    pid: 500,
+    args: [
+      'C:\\nodejs\\node.exe',
+      'c:\\Users\\x\\.vscode\\extensions\\ms-vscode.js-debug\\src\\vsDebugServer.cjs',
+      '5680'
+    ]
+  };
 
-  it('scans once and feeds both reapers from the same result', async () => {
-    const scan = vi.fn().mockResolvedValue([jvmRow, proxyRow, noiseRow]);
+  it('scans once and feeds all three reapers from the same result', async () => {
+    const scan = vi.fn().mockResolvedValue([jvmRow, proxyRow, noiseRow, vsDebugServerRow, foreignVsDebugServerRow]);
     const reapJvms = vi.fn().mockResolvedValue({ scanned: 1, killed: [], skipped: [], errors: [] });
     const reapProxies = vi.fn().mockResolvedValue({ scanned: 1, killed: [], skipped: [], errors: [] });
+    const reapJsDebugAdapters = vi.fn().mockResolvedValue({ scanned: 1, killed: [], skipped: [], errors: [] });
 
     await runStartupJanitor({
       logger: makeLogger(),
@@ -37,6 +59,7 @@ describe('runStartupJanitor', () => {
       scan,
       reapJvms,
       reapProxies,
+      reapJsDebugAdapters,
       sweep: vi.fn().mockResolvedValue({ removedRuns: 0 })
     });
 
@@ -52,12 +75,19 @@ describe('runStartupJanitor', () => {
     await expect(proxyLister()).resolves.toEqual([
       { pid: 200, ownerPid: 7, sessionId: 's1' }
     ]);
+    // The marked vsDebugServer row reaches only the adapter reaper; VS Code's
+    // unmarked instance reaches none.
+    const adapterLister = reapJsDebugAdapters.mock.calls[0][0].lister;
+    await expect(adapterLister()).resolves.toEqual([
+      { pid: 400, ownerPid: 7, sessionId: 's2' }
+    ]);
   });
 
   it('skips the reapers entirely when MCP_SKIP_ORPHAN_REAPERS=1', async () => {
     const scan = vi.fn();
     const reapJvms = vi.fn();
     const reapProxies = vi.fn();
+    const reapJsDebugAdapters = vi.fn();
 
     await runStartupJanitor({
       logger: makeLogger(),
@@ -66,12 +96,14 @@ describe('runStartupJanitor', () => {
       scan,
       reapJvms,
       reapProxies,
+      reapJsDebugAdapters,
       sweep: vi.fn().mockResolvedValue({ removedRuns: 0 })
     });
 
     expect(scan).not.toHaveBeenCalled();
     expect(reapJvms).not.toHaveBeenCalled();
     expect(reapProxies).not.toHaveBeenCalled();
+    expect(reapJsDebugAdapters).not.toHaveBeenCalled();
   });
 
   it('logs kill counts and never throws when a reaper rejects', async () => {
@@ -84,6 +116,12 @@ describe('runStartupJanitor', () => {
       errors: []
     });
     const reapProxies = vi.fn().mockRejectedValue(new Error('reaper exploded'));
+    const reapJsDebugAdapters = vi.fn().mockResolvedValue({
+      scanned: 1,
+      killed: [{ pid: 400, ownerPid: 7, sessionId: 's2' }],
+      skipped: [],
+      errors: []
+    });
 
     await expect(runStartupJanitor({
       logger,
@@ -92,10 +130,12 @@ describe('runStartupJanitor', () => {
       scan,
       reapJvms,
       reapProxies,
+      reapJsDebugAdapters,
       sweep: vi.fn().mockResolvedValue({ removedRuns: 0 })
     })).resolves.toBeUndefined();
 
     expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Reaped 1 orphan JVM'));
+    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Reaped 1 orphan js-debug adapter'));
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('reaper exploded'));
   });
 });

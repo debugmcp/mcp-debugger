@@ -32,7 +32,9 @@ class ProxyProcessAdapter extends EventEmitter implements IProxyProcess {
 
   constructor(
     public readonly childProcess: IChildProcess,
-    public readonly sessionId: string
+    public readonly sessionId: string,
+    private readonly platform: NodeJS.Platform = process.platform,
+    private readonly treeKill?: (pid: number) => void
   ) {
     super();
 
@@ -377,12 +379,32 @@ class ProxyProcessAdapter extends EventEmitter implements IProxyProcess {
     if (this.killed || this.disposed) {
       return false; // Already killed or disposed
     }
-    
+
     // If waiting for initialization, fail it
     if (this.initializationState === 'waiting') {
       this.failInitialization(new Error('Process killed during initialization'));
     }
-    
+
+    // win32: any cross-process signal is TerminateProcess on the single PID —
+    // the worker's JS never runs, so its own adapter tree-kill cascade cannot
+    // fire, stranding detached adapter children like js-debug's vsDebugServer
+    // (issue #431). Sweep the tree FIRST, while the worker is still alive:
+    // taskkill /T can only discover children through a live parent. Skipped
+    // once the worker has exited — its PID may already be recycled.
+    if (
+      this.platform === 'win32' &&
+      this.treeKill &&
+      this._exitCode === null &&
+      this._signalCode === null &&
+      typeof this.childProcess.pid === 'number'
+    ) {
+      try {
+        this.treeKill(this.childProcess.pid);
+      } catch {
+        // Best-effort: fall through to the plain kill below.
+      }
+    }
+
     try {
       return this.childProcess.kill(signal);
     } catch {
@@ -396,7 +418,9 @@ class ProxyProcessAdapter extends EventEmitter implements IProxyProcess {
  */
 export class ProxyProcessLauncherImpl implements IProxyProcessLauncher {
   constructor(
-    private processManager: IProcessManager
+    private processManager: IProcessManager,
+    private platform: NodeJS.Platform = process.platform,
+    private treeKill?: (pid: number) => void
   ) {}
 
   launchProxy(
@@ -474,8 +498,21 @@ export class ProxyProcessLauncherImpl implements IProxyProcessLauncher {
       options
     );
     
-    // Create the proxy process adapter with the raw child process
-    return new ProxyProcessAdapter(childProcess, sessionId);
+    // Create the proxy process adapter with the raw child process. The
+    // win32 tree-kill (issue #431) defaults to spawning taskkill through the
+    // same process manager; injectable for tests.
+    const treeKill =
+      this.treeKill ??
+      ((pid: number) => {
+        const killer = this.processManager.spawn(
+          'taskkill',
+          ['/PID', String(pid), '/T', '/F'],
+          { stdio: 'ignore', windowsHide: true } as IProcessOptions
+        );
+        // Fire-and-forget: a missing taskkill must not crash the server.
+        killer.on('error', () => {});
+      });
+    return new ProxyProcessAdapter(childProcess, sessionId, this.platform, treeKill);
   }
 
 }
