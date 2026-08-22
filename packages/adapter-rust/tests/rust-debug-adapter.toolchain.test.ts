@@ -538,4 +538,176 @@ describe('RustDebugAdapter toolchain logic', () => {
       expect(capabilities.supportsSetExpression).toBe(false);
     });
   });
+
+  describe('lifecycle (coverage sprint)', () => {
+    function healthyToolchain(): void {
+      vi.mocked(resolveCodeLLDBExecutable).mockResolvedValue('/mock/vendor/codelldb');
+      vi.mocked(checkRustInstallation).mockResolvedValue(true);
+      vi.mocked(checkCargoInstallation).mockResolvedValue(true);
+      vi.mocked(getRustHostTriple).mockResolvedValue('x86_64-unknown-linux-gnu');
+    }
+
+    it('initialize reaches READY and emits initialized on a healthy toolchain', async () => {
+      healthyToolchain();
+      const initialized = vi.fn();
+      adapter.on('initialized', initialized);
+
+      await adapter.initialize();
+
+      expect(adapter.getState()).toBe(AdapterState.READY);
+      expect(initialized).toHaveBeenCalled();
+    });
+
+    it('initialize logs validation warnings but still succeeds', async () => {
+      healthyToolchain();
+      vi.mocked(checkRustInstallation).mockResolvedValue(false); // warning, not error
+
+      await adapter.initialize();
+
+      expect(adapter.getState()).toBe(AdapterState.READY);
+      expect(dependencies.logger?.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Rust toolchain not found')
+      );
+    });
+
+    it('initialize throws ENVIRONMENT_INVALID and lands in ERROR when CodeLLDB is missing', async () => {
+      healthyToolchain();
+      vi.mocked(resolveCodeLLDBExecutable).mockResolvedValue(null);
+
+      await expect(adapter.initialize()).rejects.toThrow(/CodeLLDB executable not found/);
+      expect(adapter.getState()).toBe(AdapterState.ERROR);
+    });
+
+    it('dispose resets the adapter and emits disposed', async () => {
+      healthyToolchain();
+      await adapter.initialize();
+      const disposed = vi.fn();
+      adapter.on('disposed', disposed);
+
+      await adapter.dispose();
+
+      expect(adapter.getState()).toBe(AdapterState.UNINITIALIZED);
+      expect(adapter.getCurrentThreadId()).toBeNull();
+      expect(disposed).toHaveBeenCalled();
+    });
+
+    it('collects RUST_NOT_FOUND and CARGO_NOT_FOUND warnings together', async () => {
+      vi.mocked(resolveCodeLLDBExecutable).mockResolvedValue('/mock/vendor/codelldb');
+      vi.mocked(checkRustInstallation).mockResolvedValue(false);
+      vi.mocked(checkCargoInstallation).mockResolvedValue(false);
+      vi.mocked(getRustHostTriple).mockResolvedValue(null);
+
+      const result = await adapter.validateEnvironment();
+
+      expect(result.valid).toBe(true);
+      expect(result.warnings.map((w) => w.code)).toEqual(
+        expect.arrayContaining(['RUST_NOT_FOUND', 'CARGO_NOT_FOUND'])
+      );
+    });
+
+    it('wraps unexpected validation failures in VALIDATION_ERROR', async () => {
+      vi.mocked(resolveCodeLLDBExecutable).mockRejectedValue(new Error('resolver exploded'));
+
+      const result = await adapter.validateEnvironment();
+
+      expect(result.valid).toBe(false);
+      expect(result.errors[0]).toMatchObject({
+        code: 'VALIDATION_ERROR',
+        message: 'resolver exploded',
+        recoverable: false
+      });
+    });
+
+    it('records a discovered dlltool path on win32', async () => {
+      const win = new RustDebugAdapter(createDependencies(), 'win32');
+      vi.mocked(resolveCodeLLDBExecutable).mockResolvedValue('/mock/vendor/codelldb');
+      vi.mocked(checkRustInstallation).mockResolvedValue(true);
+      vi.mocked(checkCargoInstallation).mockResolvedValue(true);
+      vi.mocked(getRustHostTriple).mockResolvedValue('x86_64-pc-windows-gnu');
+      vi.mocked(findDlltoolExecutable).mockResolvedValue('C:/mingw64/bin/dlltool.exe');
+
+      await win.validateEnvironment();
+
+      expect((win as unknown as { dlltoolPath?: string }).dlltoolPath).toBe('C:/mingw64/bin/dlltool.exe');
+    });
+  });
+
+  describe('executable resolution edges (coverage sprint)', () => {
+    it('throws EXECUTABLE_NOT_FOUND when neither cargo nor rustc is available', async () => {
+      vi.mocked(checkCargoInstallation).mockResolvedValue(false);
+      vi.mocked(checkRustInstallation).mockResolvedValue(false);
+
+      await expect(adapter.resolveExecutablePath()).rejects.toThrow(/Neither cargo nor rustc found/);
+    });
+
+    it('falls back to the prebuilt placeholder under MCP_CONTAINER=true', async () => {
+      vi.stubEnv('MCP_CONTAINER', 'true');
+      try {
+        vi.mocked(checkCargoInstallation).mockResolvedValue(false);
+        vi.mocked(checkRustInstallation).mockResolvedValue(false);
+
+        await expect(adapter.resolveExecutablePath()).resolves.toBe('rust-prebuilt-binary');
+        expect(dependencies.logger?.warn).toHaveBeenCalledWith(
+          expect.stringContaining('MCP_CONTAINER')
+        );
+      } finally {
+        vi.stubEnv('MCP_CONTAINER', undefined as unknown as string);
+      }
+    });
+
+    it('returns darwin-specific search paths for a darwin-constructed adapter', () => {
+      const mac = new RustDebugAdapter(createDependencies(), 'darwin');
+      const paths = mac.getExecutableSearchPaths();
+      expect(paths).toContain('/opt/homebrew/bin');
+      expect(paths).toContain('/usr/local/bin');
+    });
+
+    it.each(['0', 'false', 'no'])('resolveAutoSuggestGnu treats %j as disabled', (value) => {
+      vi.stubEnv('RUST_AUTO_SUGGEST_GNU', value);
+      try {
+        expect((adapter as unknown as { resolveAutoSuggestGnu(): boolean }).resolveAutoSuggestGnu()).toBe(false);
+      } finally {
+        vi.stubEnv('RUST_AUTO_SUGGEST_GNU', undefined as unknown as string);
+      }
+    });
+
+    it('getDefaultExecutableName is cargo', () => {
+      expect(adapter.getDefaultExecutableName()).toBe('cargo');
+    });
+  });
+
+  describe('transformLaunchConfig cargo targets (coverage sprint)', () => {
+    it('resolves cargo.example into target/<profile>/<example>', async () => {
+      const linux = new RustDebugAdapter(createDependencies(), 'linux');
+      const transformed = await linux.transformLaunchConfig({
+        cargo: { example: 'demo' },
+        cwd: '/proj'
+      } as never);
+
+      expect(String(transformed.program).replace(/\\/g, '/')).toBe('/proj/target/debug/demo');
+    });
+
+    it('resolves cargo.test into the release dir when release is set', async () => {
+      const linux = new RustDebugAdapter(createDependencies(), 'linux');
+      const transformed = await linux.transformLaunchConfig({
+        cargo: { test: 'integration', release: true },
+        cwd: '/proj'
+      } as never);
+
+      expect(String(transformed.program).replace(/\\/g, '/')).toBe('/proj/target/release/integration');
+    });
+
+    it('falls back to the default cargo binary when no target is named', async () => {
+      vi.mocked(getDefaultBinary).mockResolvedValue('main-bin');
+      const linux = new RustDebugAdapter(createDependencies(), 'linux');
+
+      const transformed = await linux.transformLaunchConfig({
+        cargo: {},
+        cwd: '/proj'
+      } as never);
+
+      expect(getDefaultBinary).toHaveBeenCalledWith('/proj');
+      expect(String(transformed.program).replace(/\\/g, '/')).toBe('/proj/target/debug/main-bin');
+    });
+  });
 });

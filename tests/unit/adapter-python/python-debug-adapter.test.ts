@@ -481,5 +481,156 @@ describe('PythonDebugAdapter', () => {
         justMyCode: true
       });
     });
+
+    it('propagates stopOnEntry into the attach config when provided', () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+      const attach = adapter.transformAttachConfig({ port: 5678, stopOnEntry: true });
+      expect(attach.stopOnEntry).toBe(true);
+    });
+  });
+
+  describe('validateEnvironment through the real helpers (coverage sprint)', () => {
+    // Scripted spawn: the debugpy probe runs `-c "import debugpy; ..."`,
+    // the venv probe runs `-c "... real_prefix ..."`.
+    function scriptSpawn(opts: { debugpyOutput?: string; debugpyExit?: number; venvOutput?: string; venvError?: boolean }): void {
+      (spawn as Mock).mockImplementation(((_cmd: string, args: string[]) => {
+        const proc = new EventEmitter() as any;
+        proc.stdout = new EventEmitter();
+        proc.stderr = new EventEmitter();
+        const script = args?.[1] ?? '';
+        process.nextTick(() => {
+          if (script.includes('import debugpy')) {
+            if (opts.debugpyOutput) proc.stdout.emit('data', Buffer.from(opts.debugpyOutput));
+            proc.emit('exit', opts.debugpyExit ?? 0);
+          } else if (script.includes('real_prefix')) {
+            if (opts.venvError) {
+              proc.emit('error', new Error('spawn failed'));
+              return;
+            }
+            if (opts.venvOutput) proc.stdout.emit('data', Buffer.from(opts.venvOutput));
+            proc.emit('exit', 0);
+          } else {
+            proc.emit('exit', 0);
+          }
+        });
+        return proc;
+      }) as never);
+    }
+
+    it('warns when the Python version cannot be determined and detects a virtualenv', async () => {
+      findPythonExecutable.mockResolvedValue('/usr/bin/python');
+      (getPythonVersion as Mock).mockResolvedValue(null);
+      scriptSpawn({ debugpyOutput: '1.8.0\n', venvOutput: 'True\n' });
+      const deps = createDependencies();
+      const adapter = new PythonDebugAdapter(deps as never);
+
+      const result = await adapter.validateEnvironment();
+
+      expect(result.warnings).toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: 'PYTHON_VERSION_CHECK_FAILED' })
+      ]));
+      expect(deps.logger.info).toHaveBeenCalledWith(
+        expect.stringContaining('Virtual environment detected')
+      );
+    });
+
+    it('resolves the version via getPythonVersion on cache miss and reuses the cached debugpy answer', async () => {
+      findPythonExecutable.mockResolvedValue('/usr/bin/python');
+      (getPythonVersion as Mock).mockResolvedValue('3.12.1');
+      scriptSpawn({ debugpyOutput: '1.8.0\n', venvOutput: 'False\n' });
+      const adapter = new PythonDebugAdapter(createDependencies() as never);
+
+      const first = await adapter.validateEnvironment();
+      expect(first.valid).toBe(true);
+      expect(getPythonVersion).toHaveBeenCalledTimes(1);
+
+      const debugpySpawns = () => (spawn as Mock).mock.calls
+        .filter((c) => String(c[1]?.[1] ?? '').includes('import debugpy')).length;
+      const before = debugpySpawns();
+      await adapter.validateEnvironment();
+      // Second validation: version and debugpy answers come from the cache
+      expect(getPythonVersion).toHaveBeenCalledTimes(1);
+      expect(debugpySpawns()).toBe(before);
+    });
+
+    it('treats a failing virtualenv probe as not-a-venv', async () => {
+      findPythonExecutable.mockResolvedValue('/usr/bin/python');
+      (getPythonVersion as Mock).mockResolvedValue('3.12.1');
+      scriptSpawn({ debugpyOutput: '1.8.0\n', venvError: true });
+      const deps = createDependencies();
+      const adapter = new PythonDebugAdapter(deps as never);
+
+      const result = await adapter.validateEnvironment();
+
+      expect(result.valid).toBe(true);
+      expect(deps.logger.info).not.toHaveBeenCalledWith(
+        expect.stringContaining('Virtual environment detected')
+      );
+    });
+
+    it('emits CI diagnostics during initialize when CI=true', async () => {
+      vi.stubEnv('CI', 'true');
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        findPythonExecutable.mockResolvedValue('/usr/bin/python');
+        (getPythonVersion as Mock).mockResolvedValue('3.12.1');
+        scriptSpawn({ debugpyOutput: '1.8.0\n', venvOutput: 'False\n' });
+        const adapter = new PythonDebugAdapter(createDependencies() as never);
+
+        await adapter.initialize();
+
+        expect(consoleSpy).toHaveBeenCalledWith('[PythonDebugAdapter] Starting initialize()');
+        expect(consoleSpy).toHaveBeenCalledWith('[PythonDebugAdapter] Resolved Python path:', '/usr/bin/python');
+      } finally {
+        consoleSpy.mockRestore();
+        vi.unstubAllEnvs();
+      }
+    });
+  });
+
+  describe('platform-dependent configuration surface (coverage sprint)', () => {
+    function withPlatform(platform: NodeJS.Platform, fn: () => void): void {
+      const original = Object.getOwnPropertyDescriptor(process, 'platform')!;
+      Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+      try {
+        fn();
+      } finally {
+        Object.defineProperty(process, 'platform', original);
+      }
+    }
+
+    it('names the default executable per platform', () => {
+      const adapter = new PythonDebugAdapter(createDependencies() as never);
+      withPlatform('win32', () => expect(adapter.getDefaultExecutableName()).toBe('py'));
+      withPlatform('linux', () => expect(adapter.getDefaultExecutableName()).toBe('python3'));
+      withPlatform('darwin', () => expect(adapter.getDefaultExecutableName()).toBe('python3'));
+    });
+
+    it('returns platform-appropriate search paths', () => {
+      const adapter = new PythonDebugAdapter(createDependencies() as never);
+      withPlatform('win32', () => {
+        expect(adapter.getExecutableSearchPaths()).toEqual(expect.arrayContaining(['C:\\Python312']));
+      });
+      withPlatform('darwin', () => {
+        expect(adapter.getExecutableSearchPaths()).toEqual(expect.arrayContaining(['/opt/homebrew/bin']));
+      });
+      withPlatform('linux', () => {
+        expect(adapter.getExecutableSearchPaths()).toEqual(expect.arrayContaining(['/opt/python/bin']));
+      });
+    });
+
+    it('exposes the documented dependencies and install metadata', () => {
+      const adapter = new PythonDebugAdapter(createDependencies() as never);
+      expect(adapter.getRequiredDependencies().map((d: { name: string }) => d.name)).toEqual(['Python', 'debugpy']);
+      expect(adapter.getAdapterModuleName()).toBe('debugpy.adapter');
+      expect(adapter.getAdapterInstallCommand()).toBe('pip install debugpy');
+    });
+
+    it('reports feature requirements for conditional breakpoints', () => {
+      const adapter = new PythonDebugAdapter(createDependencies() as never);
+      expect(adapter.getFeatureRequirements(DebugFeature.CONDITIONAL_BREAKPOINTS)).toEqual([
+        { type: 'dependency', description: 'debugpy 1.0+', required: true }
+      ]);
+    });
   });
 });

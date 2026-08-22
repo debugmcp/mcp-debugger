@@ -498,4 +498,150 @@ describe('GoDebugAdapter', () => {
       expect(transformed.mode).toBe('test');
     });
   });
+
+  describe('validateEnvironment error and warning arms (coverage sprint)', () => {
+    // Scripted spawn: args[0]==='version' is `go version`, args[0]==='dap' is
+    // the Delve DAP support probe (`dlv dap --help`).
+    function scriptSpawn(opts: { goOutput?: string; dapExit?: number; dapStderr?: string }): void {
+      vi.spyOn(fs.promises, 'access').mockResolvedValue(undefined);
+      mockSpawn.mockImplementation(((_cmd: unknown, args?: readonly string[]) => {
+        const proc = new EventEmitter() as any;
+        proc.stdout = new EventEmitter();
+        proc.stderr = new EventEmitter();
+        process.nextTick(() => {
+          if (args?.[0] === 'version') {
+            proc.stdout.emit('data', Buffer.from(opts.goOutput ?? 'go version go1.21.0 linux/amd64\n'));
+            proc.emit('exit', 0);
+          } else if (args?.[0] === 'dap') {
+            if (opts.dapStderr) {
+              proc.stderr.emit('data', Buffer.from(opts.dapStderr));
+            }
+            proc.emit('exit', opts.dapExit ?? 0);
+          } else {
+            proc.emit('exit', 0);
+          }
+        });
+        return proc;
+      }) as never);
+    }
+
+    it('flags Go versions older than 1.18 as a hard error', async () => {
+      scriptSpawn({ goOutput: 'go version go1.17.5 linux/amd64\n' });
+
+      const result = await adapter.validateEnvironment();
+
+      expect(result.valid).toBe(false);
+      expect(result.errors).toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: 'GO_VERSION_TOO_OLD', message: expect.stringContaining('1.17.5') })
+      ]));
+    });
+
+    it('warns when the Go version cannot be determined', async () => {
+      scriptSpawn({ goOutput: 'not a version banner\n' });
+
+      const result = await adapter.validateEnvironment();
+
+      expect(result.warnings).toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: 'GO_VERSION_CHECK_FAILED' })
+      ]));
+    });
+
+    it('reports Delve without DAP support, embedding the stderr hint', async () => {
+      scriptSpawn({ dapExit: 1, dapStderr: 'Error: unknown command "dap" for "dlv"' });
+
+      const result = await adapter.validateEnvironment();
+
+      expect(result.valid).toBe(false);
+      const dapError = result.errors.find((e) => e.code === 'DELVE_DAP_NOT_SUPPORTED');
+      expect(dapError?.message).toContain('go install github.com/go-delve/delve/cmd/dlv@latest');
+      expect(dapError?.message).toContain('unknown command');
+      expect(dapError?.recoverable).toBe(true);
+    });
+
+    it('emits CI diagnostics when CI=true', async () => {
+      vi.stubEnv('CI', 'true');
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        scriptSpawn({});
+        await adapter.validateEnvironment();
+        expect(consoleSpy).toHaveBeenCalledWith('[GoDebugAdapter] Resolved Go path:', expect.any(String));
+        expect(consoleSpy).toHaveBeenCalledWith('[GoDebugAdapter] Resolved Delve path:', expect.any(String));
+      } finally {
+        consoleSpy.mockRestore();
+        vi.unstubAllEnvs();
+      }
+    });
+  });
+
+  describe('executable resolution and version caching (coverage sprint)', () => {
+    it('resolveExecutablePath caches the Delve path per preferredPath key', async () => {
+      vi.spyOn(fs.promises, 'access').mockResolvedValue(undefined);
+
+      const first = await adapter.resolveExecutablePath('/fake/dlv');
+      const second = await adapter.resolveExecutablePath('/fake/dlv');
+
+      expect(second).toBe(first);
+      expect(mockDependencies.logger?.debug).toHaveBeenCalledWith(
+        expect.stringContaining('Using cached Delve path')
+      );
+    });
+
+    it('checkDelveVersion parses the version banner and caches it', async () => {
+      mockSpawn.mockImplementation((() => {
+        const proc = new EventEmitter() as any;
+        proc.stdout = new EventEmitter();
+        proc.stderr = new EventEmitter();
+        process.nextTick(() => {
+          proc.stdout.emit('data', Buffer.from('Delve Debugger\nVersion: 1.26.3\nBuild: abc\n'));
+          proc.emit('exit', 0);
+        });
+        return proc;
+      }) as never);
+
+      await expect(adapter.checkDelveVersion('/fake/dlv')).resolves.toBe('1.26.3');
+      // Second call served from the cache — no new spawn
+      const spawnCalls = mockSpawn.mock.calls.length;
+      await expect(adapter.checkDelveVersion('/fake/dlv')).resolves.toBe('1.26.3');
+      expect(mockSpawn.mock.calls.length).toBe(spawnCalls);
+    });
+  });
+
+  describe('configuration surface (coverage sprint)', () => {
+    it('exposes the documented dependencies and install commands', () => {
+      const deps = adapter.getRequiredDependencies();
+      expect(deps.map((d) => d.name)).toEqual(['Go', 'Delve (dlv)']);
+      expect(adapter.getAdapterModuleName()).toBe('dlv');
+      expect(adapter.getAdapterInstallCommand()).toContain('go install');
+      expect(adapter.getDefaultExecutableName()).toBe(process.platform === 'win32' ? 'dlv.exe' : 'dlv');
+      expect(Array.isArray(adapter.getExecutableSearchPaths())).toBe(true);
+      expect(adapter.getCurrentThreadId()).toBeNull();
+    });
+
+    it('getDefaultLaunchConfig returns the documented defaults', () => {
+      expect(adapter.getDefaultLaunchConfig()).toEqual({ stopOnEntry: false, justMyCode: true });
+    });
+
+    it('buildAdapterCommand adds DAP logging flags when DEBUG is set', () => {
+      vi.stubEnv('DEBUG', 'debug-mcp:*');
+      try {
+        const cmd = adapter.buildAdapterCommand({
+          sessionId: 's',
+          adapterHost: '127.0.0.1',
+          adapterPort: 2345,
+          logDir: '/tmp',
+          scriptPath: 'main.go',
+          executablePath: '/fake/dlv'
+        });
+        expect(cmd.command).toBe('/fake/dlv');
+        expect(cmd.args).toContain('--log');
+        expect(cmd.args).toContain('--log-output=dap');
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+
+    it('sendDapRequest is not implemented at the adapter level', async () => {
+      await expect(adapter.sendDapRequest('threads')).rejects.toThrow(/not implemented/);
+    });
+  });
 });
