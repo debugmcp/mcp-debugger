@@ -15,8 +15,11 @@ const sessionStoreFactoryInstance = { tag: 'session-factory' };
 const registerMock = vi.fn();
 const getSupportedLanguagesMock = vi.fn(() => []);
 
+const detachSharedFileTransportMock = vi.fn();
+
 vi.mock('../../../src/utils/logger.js', () => ({
-  createLogger: createLoggerMock
+  createLogger: createLoggerMock,
+  detachSharedFileTransport: detachSharedFileTransportMock
 }));
 
 vi.mock('../../../src/implementations/index.js', () => ({
@@ -112,6 +115,18 @@ describe('createProductionDependencies', () => {
         enableDynamicLoading: true
       })
     );
+  });
+
+  it('returns a disposeLogger that detaches the shared file transport (issue #404)', () => {
+    const dependencies = createProductionDependencies({ logFile: '/tmp/debug.log' });
+
+    expect(typeof dependencies.disposeLogger).toBe('function');
+    expect(detachSharedFileTransportMock).not.toHaveBeenCalled();
+
+    dependencies.disposeLogger!();
+
+    expect(detachSharedFileTransportMock).toHaveBeenCalledTimes(1);
+    expect(detachSharedFileTransportMock).toHaveBeenCalledWith(dependencies.logger);
   });
 
   it('registers bundled adapters and logs async failures', async () => {

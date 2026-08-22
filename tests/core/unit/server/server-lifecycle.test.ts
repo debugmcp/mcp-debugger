@@ -58,11 +58,21 @@ describe('Server Lifecycle Tests', () => {
     it('should stop server and close all sessions', async () => {
       debugServer = new DebugMcpServer();
       mockSessionManager.closeAllSessions.mockResolvedValue(undefined);
-      
+
       await debugServer.stop();
-      
+
       expect(mockSessionManager.closeAllSessions).toHaveBeenCalled();
       expect(mockDependencies.logger.info).toHaveBeenCalledWith('Debug MCP Server stopped');
+    });
+
+    it('stop() disposes the container logger so churning HTTP sessions do not leak (issue #404)', async () => {
+      mockDependencies.disposeLogger = vi.fn();
+      debugServer = new DebugMcpServer();
+      mockSessionManager.closeAllSessions.mockResolvedValue(undefined);
+
+      await debugServer.stop();
+
+      expect(mockDependencies.disposeLogger).toHaveBeenCalledTimes(1);
     });
 
     it('should propagate closeAllSessions errors from stop', async () => {

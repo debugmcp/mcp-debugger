@@ -3,7 +3,7 @@
  * Manages all dependencies and their wiring for production use
  */
 import { ContainerConfig } from './types.js';
-import { createLogger } from '../utils/logger.js';
+import { createLogger, detachSharedFileTransport } from '../utils/logger.js';
 import {
   IFileSystem,
   IProcessManager,
@@ -55,6 +55,14 @@ export interface Dependencies {
   
   // Adapter support
   adapterRegistry: IAdapterRegistry;
+
+  /**
+   * Detach this container's logger from the shared file transport (issue
+   * #404). Called from DebugMcpServer.stop() so per-session servers in
+   * Streamable HTTP mode don't accumulate pipe edges on the process-lifetime
+   * transport. Optional: test containers may omit it.
+   */
+  disposeLogger?: () => void;
 }
 
 /**
@@ -158,6 +166,7 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
     proxyProcessLauncher,
     proxyManagerFactory,
     sessionStoreFactory,
-    adapterRegistry
+    adapterRegistry,
+    disposeLogger: () => detachSharedFileTransport(logger)
   };
 }
