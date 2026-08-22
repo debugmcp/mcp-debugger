@@ -3,9 +3,54 @@ import type { Logger as WinstonLogger } from 'winston';
 import { createLogger } from '../utils/logger.js';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
+import { promises as fsPromises } from 'fs';
 
 export interface ModuleLoader {
   load(modulePath: string): Promise<Record<string, unknown>>;
+}
+
+/**
+ * Metadata-only availability probe: is the adapter package (or a monorepo
+ * fallback build) present on disk? Deliberately does NOT execute the module —
+ * merely listing tools must not drag every installed adapter package into the
+ * heap (issue #401). Full import + factory instantiation stays in loadAdapter,
+ * i.e. the first real use of a language.
+ */
+export interface PackageResolver {
+  isInstalled(packageName: string, fallbackUrls: string[]): Promise<boolean>;
+}
+
+export function createDefaultPackageResolver(io: {
+  /** Node-resolve a bare package specifier to a file path. Default: createRequire(import.meta.url).resolve */
+  resolve?: (id: string) => string;
+  /** Check a file path exists. Default: fs.promises.access */
+  access?: (fsPath: string) => Promise<void>;
+} = {}): PackageResolver {
+  const resolve = io.resolve ?? ((id: string) => createRequire(import.meta.url).resolve(id));
+  const access = io.access ?? (async (fsPath: string) => { await fsPromises.access(fsPath); });
+  return {
+    async isInstalled(packageName: string, fallbackUrls: string[]): Promise<boolean> {
+      try {
+        resolve(packageName);
+        return true;
+      } catch (error) {
+        // An exports map that hides the CJS entry still proves the package is
+        // present on disk (ESM-only packages under require.resolve).
+        if ((error as { code?: string })?.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED') {
+          return true;
+        }
+      }
+      for (const url of fallbackUrls) {
+        try {
+          await access(fileURLToPath(url));
+          return true;
+        } catch {
+          // try next candidate
+        }
+      }
+      return false;
+    }
+  };
 }
 
 export interface AdapterMetadata {
@@ -21,10 +66,12 @@ export class AdapterLoader {
   private cache = new Map<string, IAdapterFactory>();
   private logger: WinstonLogger;
   private moduleLoader: ModuleLoader;
+  private resolver: PackageResolver;
 
-  constructor(logger?: WinstonLogger, moduleLoader?: ModuleLoader) {
+  constructor(logger?: WinstonLogger, moduleLoader?: ModuleLoader, resolver?: PackageResolver) {
     this.logger = logger || createLogger('AdapterLoader');
     this.moduleLoader = moduleLoader || this.createDefaultModuleLoader();
+    this.resolver = resolver || createDefaultPackageResolver();
   }
 
   private createDefaultModuleLoader(): ModuleLoader {
@@ -122,12 +169,21 @@ export class AdapterLoader {
   }
 
   /**
-   * Check if an adapter is available (and cache it if so)
+   * Check if an adapter is available. Metadata-only: probes package presence
+   * via the resolver without importing or instantiating anything (issue #401).
+   * A factory already loaded for real short-circuits to true. Trade-off: a
+   * present-but-broken package reports available here and surfaces its error
+   * at first loadAdapter, with the existing install-hint message.
    */
   async isAdapterAvailable(language: string): Promise<boolean> {
-    try {
-      await this.loadAdapter(language);
+    if (this.cache.has(language)) {
       return true;
+    }
+    try {
+      return await this.resolver.isInstalled(
+        this.getPackageName(language),
+        this.getFallbackModulePaths(language)
+      );
     } catch {
       return false;
     }
@@ -151,10 +207,11 @@ export class AdapterLoader {
 
     const results: AdapterMetadata[] = [];
     for (const a of known) {
-      // Check if adapter is currently loadable; don't fail if not — adapters are loaded
-      // on-demand, so unavailability here just means installed=false in the metadata
+      // Metadata-only presence probe (issue #401) — adapters are imported
+      // on-demand at first create(), so unavailability here just means
+      // installed=false in the metadata
       const installed = await this.isAdapterAvailable(a.name);
-      // Prefer the loaded factory's own declaration over the static known-list value
+      // Prefer a genuinely-loaded factory's own declaration over the static known-list value
       const factoryAttach = installed ? this.cache.get(a.name)?.getMetadata().modes?.attach : undefined;
       results.push({ ...a, installed, attach: factoryAttach ?? a.attach });
     }

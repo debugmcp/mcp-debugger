@@ -5,8 +5,10 @@
  * for the adapter loading system.
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { AdapterLoader } from '../../../src/adapters/adapter-loader.js';
-import type { ModuleLoader } from '../../../src/adapters/adapter-loader.js';
+import path from 'path';
+import { pathToFileURL } from 'url';
+import { AdapterLoader, createDefaultPackageResolver } from '../../../src/adapters/adapter-loader.js';
+import type { ModuleLoader, PackageResolver } from '../../../src/adapters/adapter-loader.js';
 import type { Mock } from 'vitest';
 
 // Mock the dynamic imports and createRequire
@@ -229,66 +231,18 @@ describe('AdapterLoader', () => {
     });
   });
 
-  describe('isAdapterAvailable', () => {
-    it('should return true when adapter can be loaded', async () => {
-      const mockFactory = createMockAdapterFactory('python');
-      const mockFactoryClass = vi.fn().mockImplementation(function() { return mockFactory; });
-      const mockModule = { PythonAdapterFactory: mockFactoryClass };
-
-      (mockModuleLoader.load as Mock).mockResolvedValue(mockModule);
-
-      const available = await adapterLoader.isAdapterAvailable('python');
-      expect(available).toBe(true);
-    });
-
-    it('should return false when adapter cannot be loaded', async () => {
-      (mockModuleLoader.load as Mock).mockRejectedValue(new Error('Module not found'));
-
-      const { createRequire } = await import('module');
-      const mockRequire = vi.fn().mockImplementation(() => {
-        throw new Error('Module not found');
-      }) as unknown as NodeJS.Require;
-      vi.mocked(createRequire as any).mockReturnValue(mockRequire as any);
-
-      const available = await adapterLoader.isAdapterAvailable('nonexistent');
-      expect(available).toBe(false);
-    });
-
-    it('should cache successful availability checks', async () => {
-      const mockFactory = createMockAdapterFactory('mock');
-      const mockFactoryClass = vi.fn().mockImplementation(function() { return mockFactory; });
-      const mockModule = { MockAdapterFactory: mockFactoryClass };
-
-      (mockModuleLoader.load as Mock).mockResolvedValue(mockModule);
-
-      // First check
-      await adapterLoader.isAdapterAvailable('mock');
-      // Second check (should use cache)
-      await adapterLoader.isAdapterAvailable('mock');
-
-      // Load should only be called once due to caching
-      expect(mockModuleLoader.load).toHaveBeenCalledTimes(1);
-    });
-  });
+  // Load-based isAdapterAvailable tests were replaced by the metadata-only
+  // probe describe below (issue #401): the probe never imports adapter modules.
 
   describe('listAvailableAdapters', () => {
     it('should return metadata for known adapters with availability status', async () => {
-      // Setup mocks for different availability scenarios
-      const mockPythonFactory = createMockAdapterFactory('python');
-      const pythonModule = { PythonAdapterFactory: vi.fn(function() { return mockPythonFactory; }) };
-
-      (mockModuleLoader.load as Mock).mockImplementation((path: string) => {
-        if (path === '@debugmcp/adapter-python') {
-          return Promise.resolve(pythonModule);
-        }
-        throw new Error('Module not found');
-      });
-
-      const { createRequire } = await import('module');
-      const mockRequire = vi.fn().mockImplementation(() => {
-        throw new Error('Module not found');
-      }) as unknown as NodeJS.Require;
-      vi.mocked(createRequire as any).mockReturnValue(mockRequire as any);
+      // Only the python package is present on disk (metadata-only probe)
+      const mockResolver: PackageResolver = {
+        isInstalled: vi.fn().mockImplementation(
+          async (pkg: string) => pkg === '@debugmcp/adapter-python'
+        )
+      };
+      adapterLoader = new AdapterLoader(mockLogger, mockModuleLoader, mockResolver);
 
       const adapters = await adapterLoader.listAvailableAdapters();
 
@@ -393,29 +347,23 @@ describe('AdapterLoader', () => {
     });
   });
 
-  // Monorepo fallback should mark javascript installed:true when packages/adapter-javascript/dist exists
+  // Monorepo fallback: a package that doesn't node-resolve but exists under
+  // packages/adapter-*/dist is still reported installed — via the default
+  // resolver's fs fallback, with no module import (issue #401).
   it('should mark javascript installed:true when resolved from monorepo packages fallback', async () => {
-    const mockFactory = createMockAdapterFactory('javascript');
-    const mockFactoryClass = vi.fn().mockImplementation(function() { return mockFactory; });
-    const jsModule = { JavascriptAdapterFactory: mockFactoryClass };
-
-    // Primary package import fails
-    (mockModuleLoader.load as Mock).mockImplementation((path: string) => {
-      if (path === '@debugmcp/adapter-javascript') {
-        throw Object.assign(new Error('Module not found'), { code: 'ERR_MODULE_NOT_FOUND' });
-      }
-      // Simulate fallback path resolution in monorepo to packages/adapter-javascript/dist/index.js
-      if (path.includes('packages/adapter-javascript/dist/index.js')) {
-        return Promise.resolve(jsModule);
-      }
-      throw new Error(`Module not found: ${path}`);
+    const resolver = createDefaultPackageResolver({
+      resolve: vi.fn().mockImplementation(() => {
+        throw Object.assign(new Error('Module not found'), { code: 'MODULE_NOT_FOUND' });
+      }),
+      access: vi.fn().mockImplementation(async (p: string) => {
+        // Only the monorepo packages/ copy of adapter-javascript exists
+        const normalized = p.replace(/\\/g, '/');
+        if (!normalized.includes('packages/adapter-javascript/dist/index.js')) {
+          throw new Error('ENOENT');
+        }
+      })
     });
-
-    // Ensure createRequire path is not taken (force using module loader load on fallback URL)
-    const { createRequire } = await import('module');
-    vi.mocked(createRequire as any).mockReturnValue(
-      vi.fn().mockImplementation(() => { throw Object.assign(new Error('Module not found'), { code: 'MODULE_NOT_FOUND' }); }) as any
-    );
+    adapterLoader = new AdapterLoader(mockLogger, mockModuleLoader, resolver);
 
     const adapters = await adapterLoader.listAvailableAdapters();
     const jsAdapter = adapters.find(a => a.name === 'javascript');
@@ -426,8 +374,8 @@ describe('AdapterLoader', () => {
       installed: true,
       attach: 'spawn'
     });
-    // And factory constructor should have been invoked via fallback
-    expect(mockFactoryClass).toHaveBeenCalled();
+    // The probe must not have imported anything
+    expect(mockModuleLoader.load).not.toHaveBeenCalled();
   });
 
   describe('private methods behavior', () => {
@@ -449,6 +397,123 @@ describe('AdapterLoader', () => {
       expect(paths).toHaveLength(2);
       expect(paths[0]).toContain('node_modules/@debugmcp/adapter-python');
       expect(paths[1]).toContain('packages/adapter-python');
+    });
+  });
+
+  describe('metadata-only availability probe (issue #401)', () => {
+    let mockResolver: { isInstalled: Mock };
+
+    beforeEach(() => {
+      mockResolver = { isInstalled: vi.fn().mockResolvedValue(false) };
+      adapterLoader = new AdapterLoader(mockLogger, mockModuleLoader, mockResolver as PackageResolver);
+    });
+
+    it('reports availability without importing or instantiating the adapter package', async () => {
+      mockResolver.isInstalled.mockResolvedValue(true);
+
+      const available = await adapterLoader.isAdapterAvailable('python');
+
+      expect(available).toBe(true);
+      expect(mockResolver.isInstalled).toHaveBeenCalledWith(
+        '@debugmcp/adapter-python',
+        expect.arrayContaining([expect.stringContaining('adapter-python')])
+      );
+      expect(mockModuleLoader.load).not.toHaveBeenCalled();
+    });
+
+    it('reports installed:false without importing when the resolver finds nothing', async () => {
+      const available = await adapterLoader.isAdapterAvailable('nonexistent');
+
+      expect(available).toBe(false);
+      expect(mockModuleLoader.load).not.toHaveBeenCalled();
+    });
+
+    it('short-circuits to true for an already-loaded factory without re-probing', async () => {
+      const mockFactory = createMockAdapterFactory('mock');
+      (mockModuleLoader.load as Mock).mockResolvedValue({
+        MockAdapterFactory: vi.fn().mockImplementation(function() { return mockFactory; })
+      });
+      await adapterLoader.loadAdapter('mock');
+
+      const available = await adapterLoader.isAdapterAvailable('mock');
+
+      expect(available).toBe(true);
+      expect(mockResolver.isInstalled).not.toHaveBeenCalled();
+    });
+
+    it('listAvailableAdapters reports all nine adapters without importing any module', async () => {
+      mockResolver.isInstalled.mockImplementation(
+        async (pkg: string) => pkg === '@debugmcp/adapter-python'
+      );
+
+      const adapters = await adapterLoader.listAvailableAdapters();
+
+      expect(adapters).toHaveLength(9);
+      expect(mockModuleLoader.load).not.toHaveBeenCalled();
+      expect(adapters.filter(a => a.installed).map(a => a.name)).toEqual(['python']);
+      expect(adapters.find(a => a.name === 'python')).toEqual({
+        name: 'python',
+        packageName: '@debugmcp/adapter-python',
+        description: 'Python debugger using debugpy',
+        installed: true,
+        attach: 'direct-connect'
+      });
+    });
+  });
+
+  describe('createDefaultPackageResolver', () => {
+    it('reports installed when the package name resolves', async () => {
+      const resolver = createDefaultPackageResolver({
+        resolve: vi.fn().mockReturnValue('/fake/node_modules/@debugmcp/adapter-python/dist/index.js'),
+        access: vi.fn().mockRejectedValue(new Error('should not be reached'))
+      });
+
+      await expect(resolver.isInstalled('@debugmcp/adapter-python', [])).resolves.toBe(true);
+    });
+
+    it('treats an exports-map rejection as installed (package present, ESM-only exports)', async () => {
+      const resolve = vi.fn().mockImplementation(() => {
+        throw Object.assign(new Error('not exported'), { code: 'ERR_PACKAGE_PATH_NOT_EXPORTED' });
+      });
+      const access = vi.fn().mockRejectedValue(new Error('should not be reached'));
+      const resolver = createDefaultPackageResolver({ resolve, access });
+
+      await expect(resolver.isInstalled('@debugmcp/adapter-cpp', [])).resolves.toBe(true);
+      expect(access).not.toHaveBeenCalled();
+    });
+
+    it('falls back to fs access over the monorepo fallback paths', async () => {
+      const resolve = vi.fn().mockImplementation(() => {
+        throw Object.assign(new Error('nope'), { code: 'MODULE_NOT_FOUND' });
+      });
+      const access = vi.fn().mockImplementation(async (p: string) => {
+        if (!p.includes('packages') || !p.includes('adapter-javascript')) {
+          throw new Error('ENOENT');
+        }
+      });
+      const resolver = createDefaultPackageResolver({ resolve, access });
+
+      // pathToFileURL keeps the URLs convertible back to paths on every
+      // platform (bare file:///repo/... has no drive letter and throws in
+      // fileURLToPath on Windows).
+      const fallbackUrls = [
+        pathToFileURL(path.resolve('/repo/node_modules/@debugmcp/adapter-javascript/dist/index.js')).href,
+        pathToFileURL(path.resolve('/repo/packages/adapter-javascript/dist/index.js')).href
+      ];
+      await expect(resolver.isInstalled('@debugmcp/adapter-javascript', fallbackUrls)).resolves.toBe(true);
+      expect(access).toHaveBeenCalledTimes(2);
+    });
+
+    it('reports not installed when nothing resolves', async () => {
+      const resolver = createDefaultPackageResolver({
+        resolve: vi.fn().mockImplementation(() => { throw new Error('nope'); }),
+        access: vi.fn().mockRejectedValue(new Error('ENOENT'))
+      });
+
+      await expect(resolver.isInstalled(
+        '@debugmcp/adapter-nonexistent',
+        [pathToFileURL(path.resolve('/repo/packages/adapter-nonexistent/dist/index.js')).href]
+      )).resolves.toBe(false);
     });
   });
 
