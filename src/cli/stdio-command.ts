@@ -1,7 +1,7 @@
 import type { Logger as WinstonLoggerType } from 'winston';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { DebugMcpServer } from '../server.js';
-import { StdioOptions } from './setup.js';
+import type { StdioOptions } from './setup.js';
 import type { ProcessLike } from '../interfaces/process-interfaces.js';
 
 export interface ServerFactoryOptions {
