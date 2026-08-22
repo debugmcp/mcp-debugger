@@ -15,6 +15,7 @@ import {
   DotnetAdapterPolicy,
   RubyAdapterPolicy,
   RustAdapterPolicy,
+  CppAdapterPolicy,
   MockAdapterPolicy
 } from '../../src/index.js';
 
@@ -37,6 +38,10 @@ const EXPECTATIONS: PolicyExpectation[] = [
   // Ruby: no uncaught-only filter in rdbg → no launch default; crashes run to termination
   { name: 'ruby', policy: RubyAdapterPolicy, uncaught: [], all: ['any'], defaultMode: undefined },
   { name: 'rust', policy: RustAdapterPolicy, uncaught: ['rust_panic'], all: ['rust_panic', 'cpp_throw'], defaultMode: 'uncaught' },
+  // Cpp: LLDB has no uncaught-only C++ filter — cpp_throw fires on every throw,
+  // and uncaught exceptions reach std::terminate -> SIGABRT, which LLDB stops
+  // on natively. So 'uncaught' maps to NO filters (issue #244 default).
+  { name: 'cpp', policy: CppAdapterPolicy, uncaught: [], all: ['cpp_throw'], defaultMode: 'uncaught' },
   { name: 'mock', policy: MockAdapterPolicy, uncaught: ['uncaught'], all: ['all'], defaultMode: 'uncaught' }
 ];
 

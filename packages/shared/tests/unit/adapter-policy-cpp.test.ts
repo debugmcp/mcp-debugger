@@ -156,6 +156,12 @@ describe('CppAdapterPolicy', () => {
       const env = (config as { env?: NodeJS.ProcessEnv }).env;
       expect(env?.LLDB_USE_NATIVE_PDB_READER).toBe('1');
     });
+
+    it('defaults platform/arch to the host when omitted', () => {
+      const config = CppAdapterPolicy.getAdapterSpawnConfig!(payload);
+      expect((config as { command: string }).command).toBeTruthy();
+      expect((config as { args: string[] }).args).toEqual(['--port', '4711']);
+    });
   });
 
   describe('matchesAdapter', () => {
@@ -168,6 +174,48 @@ describe('CppAdapterPolicy', () => {
   it('reports session ready when paused', () => {
     expect(CppAdapterPolicy.isSessionReady!(SessionState.PAUSED)).toBe(true);
     expect(CppAdapterPolicy.isSessionReady!(SessionState.RUNNING)).toBe(false);
+  });
+
+  it('throws when building child session args', () => {
+    expect(() => CppAdapterPolicy.buildChildStartArgs!('pending-1', {})).toThrow(
+      'CppAdapterPolicy does not support child sessions'
+    );
+  });
+
+  it("treats only 'initialized' as the child-ready event", () => {
+    const event = (name: string): DebugProtocol.Event => ({ seq: 1, type: 'event', event: name });
+    expect(CppAdapterPolicy.isChildReadyEvent!(event('initialized'))).toBe(true);
+    expect(CppAdapterPolicy.isChildReadyEvent!(event('stopped'))).toBe(false);
+  });
+
+  it('reads locals from the shared LLDB scope names', () => {
+    expect(CppAdapterPolicy.getLocalScopeName!()).toEqual(['Local', 'Locals']);
+  });
+
+  it('resolves executable path from inputs only, deferring to the adapter otherwise', () => {
+    expect(CppAdapterPolicy.resolveExecutablePath!('/custom/codelldb')).toBe('/custom/codelldb');
+    // CODELLDB_PATH env var is handled in codelldb-resolver.ts, not here
+    expect(CppAdapterPolicy.resolveExecutablePath!()).toBeUndefined();
+  });
+
+  it('reports CodeLLDB debugger capabilities', () => {
+    expect(CppAdapterPolicy.getDebuggerConfiguration!()).toEqual({
+      requiresStrictHandshake: false,
+      skipConfigurationDone: false,
+      supportsVariableType: true,
+      supportsValueFormat: true,
+      supportsMemoryReferences: true
+    });
+  });
+
+  it('never queues commands', () => {
+    expect(CppAdapterPolicy.requiresCommandQueueing!()).toBe(false);
+    const handling = CppAdapterPolicy.shouldQueueCommand!('next', CppAdapterPolicy.createInitialState!());
+    expect(handling).toEqual({
+      shouldQueue: false,
+      shouldDefer: false,
+      reason: 'C++/CodeLLDB adapter does not queue commands'
+    });
   });
 
   it('tracks initialization state via the shared LLDB state helpers', () => {

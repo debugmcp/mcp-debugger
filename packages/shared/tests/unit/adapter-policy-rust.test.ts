@@ -365,9 +365,34 @@ describe('RustAdapterPolicy', () => {
   });
 
   it('never queues commands', () => {
+    expect(RustAdapterPolicy.requiresCommandQueueing!()).toBe(false);
     const result = RustAdapterPolicy.shouldQueueCommand!();
     expect(result.shouldQueue).toBe(false);
     expect(result.shouldDefer).toBe(false);
+  });
+
+  it("treats only 'initialized' as the child-ready event", () => {
+    const event = (name: string): DebugProtocol.Event => ({ seq: 1, type: 'event', event: name });
+    expect(RustAdapterPolicy.isChildReadyEvent!(event('initialized'))).toBe(true);
+    expect(RustAdapterPolicy.isChildReadyEvent!(event('stopped'))).toBe(false);
+  });
+
+  it('reads locals from the shared LLDB scope names', () => {
+    expect(RustAdapterPolicy.getLocalScopeName!()).toEqual(['Local', 'Locals']);
+  });
+
+  it('uses the CodeLLDB adapter type', () => {
+    expect(RustAdapterPolicy.getDapAdapterConfiguration!()).toEqual({ type: 'lldb' });
+  });
+
+  it('reports CodeLLDB debugger capabilities', () => {
+    expect(RustAdapterPolicy.getDebuggerConfiguration!()).toEqual({
+      requiresStrictHandshake: false,
+      skipConfigurationDone: false,
+      supportsVariableType: true,
+      supportsValueFormat: true,
+      supportsMemoryReferences: true
+    });
   });
 
   it('matches CodeLLDB adapter invocations', () => {
