@@ -25,7 +25,7 @@ export interface ProxyInitPayload {
   scriptArgs?: string[];
   stopOnEntry?: boolean;
   justMyCode?: boolean;
-  initialBreakpoints?: { file: string; line: number; condition?: string; logMessage?: string; suspendPolicy?: 'all' | 'thread' }[];
+  initialBreakpoints?: { id?: string; file: string; line: number; condition?: string; logMessage?: string; suspendPolicy?: 'all' | 'thread' }[];
   initialFunctionBreakpoints?: { name: string; condition?: string }[];
   dryRunSpawn?: boolean;
   /** Effective log level for the per-session proxy logger; absent on legacy
@@ -87,6 +87,33 @@ export interface StatusMessage extends ProxyMessage {
    * breakpoint immediately at launch.
    */
   functionBreakpoints?: FunctionBreakpointSyncResult[];
+  /**
+   * Pre-launch setBreakpoints results, on 'breakpoints_synced' (issue #439).
+   * For a launch that never pauses (logpoint-only short program) the
+   * post-launch re-sync is gated off — the session is already STOPPED — so
+   * this is the only path that ever stamps verified/adapterId in the store.
+   */
+  breakpoints?: BreakpointSyncResult[];
+}
+
+/** One entry of StatusMessage.breakpoints (issue #439). */
+export interface BreakpointSyncResult {
+  /**
+   * Store breakpoint id echoed from the init payload — an exact-match key
+   * immune to the worker's path.resolve canonicalization. Absent on legacy
+   * payloads that carried no id.
+   */
+  id?: string;
+  /** Requested file, as sent in initialBreakpoints (pre-resolution) */
+  file: string;
+  /** Requested line */
+  line: number;
+  verified: boolean;
+  /** Adapter-assigned breakpoint id */
+  adapterId?: number;
+  /** Line the adapter actually bound (may differ from requested) */
+  boundLine?: number;
+  message?: string;
 }
 
 /** One entry of StatusMessage.functionBreakpoints (issue #302). */

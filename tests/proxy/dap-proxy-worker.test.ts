@@ -653,6 +653,209 @@ describe('DapProxyWorker', () => {
       ]);
     });
 
+    it('forwards initial setBreakpoints results to the parent (issue #439)', async () => {
+      // The parent's store depends on the post-launch re-sync, which is
+      // gated on RUNNING/PAUSED — a logpoint-only launch is already STOPPED
+      // by then. The worker must forward the results it already has.
+      const connectionStub = {
+        setBreakpoints: vi.fn().mockResolvedValue({
+          body: { breakpoints: [{ id: 42, verified: true, line: 6, message: 'ok' }] }
+        }),
+        sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+        setupEventHandlers: vi.fn()
+      };
+
+      (worker as any).logger = mockLogger;
+      (worker as any).dapClient = mockDapClient;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = DefaultAdapterPolicy;
+      (worker as any).adapterState = DefaultAdapterPolicy.createInitialState();
+      (worker as any).currentSessionId = 'sync-session';
+      (worker as any).currentInitPayload = {
+        cmd: 'init',
+        sessionId: 'sync-session',
+        executablePath: 'python',
+        adapterHost: 'localhost',
+        adapterPort: 5678,
+        logDir: '/tmp/logs',
+        scriptPath: '/work/app.py',
+        initialBreakpoints: [
+          { id: 'bp-1', file: '/work/app.py', line: 5, logMessage: 'x is {x}' }
+        ]
+      };
+
+      await (worker as any).handleInitializedEvent();
+
+      const syncCall = mockMessageSender.send.mock.calls.find(
+        ([m]: [{ type?: string; status?: string }]) => m.type === 'status' && m.status === 'breakpoints_synced'
+      );
+      expect(syncCall).toBeDefined();
+      expect((syncCall![0] as { breakpoints: unknown }).breakpoints).toEqual([
+        { id: 'bp-1', file: '/work/app.py', line: 5, verified: true, adapterId: 42, boundLine: 6, message: 'ok' }
+      ]);
+    });
+
+    it('echoes the right id per breakpoint across multi-file grouping (issue #439)', async () => {
+      const connectionStub = {
+        setBreakpoints: vi.fn().mockImplementation(async (_client: unknown, filePath: string) => ({
+          body: {
+            breakpoints: filePath.endsWith('a.py')
+              ? [{ id: 1, verified: true }, { id: 2, verified: true }]
+              : [{ id: 9, verified: false, message: 'pending' }]
+          }
+        })),
+        sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+        setupEventHandlers: vi.fn()
+      };
+
+      (worker as any).logger = mockLogger;
+      (worker as any).dapClient = mockDapClient;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = DefaultAdapterPolicy;
+      (worker as any).adapterState = DefaultAdapterPolicy.createInitialState();
+      (worker as any).currentSessionId = 'sync-session';
+      (worker as any).currentInitPayload = {
+        cmd: 'init',
+        sessionId: 'sync-session',
+        executablePath: 'python',
+        adapterHost: 'localhost',
+        adapterPort: 5678,
+        logDir: '/tmp/logs',
+        scriptPath: '/work/a.py',
+        initialBreakpoints: [
+          { id: 'bp-a1', file: '/work/a.py', line: 3 },
+          { id: 'bp-b1', file: '/work/b.py', line: 7 },
+          { id: 'bp-a2', file: '/work/a.py', line: 12 }
+        ]
+      };
+
+      await (worker as any).handleInitializedEvent();
+
+      const syncCall = mockMessageSender.send.mock.calls.find(
+        ([m]: [{ type?: string; status?: string }]) => m.type === 'status' && m.status === 'breakpoints_synced'
+      );
+      const results = (syncCall![0] as { breakpoints: Array<{ id?: string; adapterId?: number; verified: boolean }> }).breakpoints;
+      expect(results).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'bp-a1', line: 3, verified: true, adapterId: 1 }),
+          expect.objectContaining({ id: 'bp-a2', line: 12, verified: true, adapterId: 2 }),
+          expect.objectContaining({ id: 'bp-b1', line: 7, verified: false, adapterId: 9, message: 'pending' })
+        ])
+      );
+      expect(results).toHaveLength(3);
+    });
+
+    it('reports verified:false for entries a short adapter response left unanswered (issue #439)', async () => {
+      const connectionStub = {
+        setBreakpoints: vi.fn().mockResolvedValue({
+          body: { breakpoints: [{ id: 5, verified: true }] } // 1 result for 2 requests
+        }),
+        sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+        setupEventHandlers: vi.fn()
+      };
+
+      (worker as any).logger = mockLogger;
+      (worker as any).dapClient = mockDapClient;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = DefaultAdapterPolicy;
+      (worker as any).adapterState = DefaultAdapterPolicy.createInitialState();
+      (worker as any).currentSessionId = 'sync-session';
+      (worker as any).currentInitPayload = {
+        cmd: 'init',
+        sessionId: 'sync-session',
+        executablePath: 'python',
+        adapterHost: 'localhost',
+        adapterPort: 5678,
+        logDir: '/tmp/logs',
+        scriptPath: '/work/app.py',
+        initialBreakpoints: [
+          { id: 'bp-1', file: '/work/app.py', line: 5 },
+          { id: 'bp-2', file: '/work/app.py', line: 9 }
+        ]
+      };
+
+      await (worker as any).handleInitializedEvent();
+
+      const syncCall = mockMessageSender.send.mock.calls.find(
+        ([m]: [{ type?: string; status?: string }]) => m.type === 'status' && m.status === 'breakpoints_synced'
+      );
+      const results = (syncCall![0] as { breakpoints: Array<Record<string, unknown>> }).breakpoints;
+      expect(results[0]).toEqual(expect.objectContaining({ id: 'bp-1', verified: true, adapterId: 5 }));
+      expect(results[1]).toEqual({ id: 'bp-2', file: '/work/app.py', line: 9, verified: false });
+    });
+
+    it('still syncs id-less legacy initial breakpoints without an id field (issue #439)', async () => {
+      const connectionStub = {
+        setBreakpoints: vi.fn().mockResolvedValue({
+          body: { breakpoints: [{ id: 3, verified: true }] }
+        }),
+        sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+        setupEventHandlers: vi.fn()
+      };
+
+      (worker as any).logger = mockLogger;
+      (worker as any).dapClient = mockDapClient;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = DefaultAdapterPolicy;
+      (worker as any).adapterState = DefaultAdapterPolicy.createInitialState();
+      (worker as any).currentSessionId = 'sync-session';
+      (worker as any).currentInitPayload = {
+        cmd: 'init',
+        sessionId: 'sync-session',
+        executablePath: 'python',
+        adapterHost: 'localhost',
+        adapterPort: 5678,
+        logDir: '/tmp/logs',
+        scriptPath: '/work/app.py',
+        initialBreakpoints: [{ file: '/work/app.py', line: 5 }]
+      };
+
+      await (worker as any).handleInitializedEvent();
+
+      const syncCall = mockMessageSender.send.mock.calls.find(
+        ([m]: [{ type?: string; status?: string }]) => m.type === 'status' && m.status === 'breakpoints_synced'
+      );
+      const results = (syncCall![0] as { breakpoints: Array<Record<string, unknown>> }).breakpoints;
+      expect(results).toEqual([{ file: '/work/app.py', line: 5, verified: true, adapterId: 3 }]);
+      expect(results[0]).not.toHaveProperty('id');
+    });
+
+    it('keeps launching when the breakpoints_synced status send throws (issue #439)', async () => {
+      const connectionStub = {
+        setBreakpoints: vi.fn().mockResolvedValue({ body: { breakpoints: [{ id: 1, verified: true }] } }),
+        sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+        setupEventHandlers: vi.fn()
+      };
+      mockMessageSender.send.mockImplementationOnce(() => {
+        throw new Error('IPC channel closed');
+      });
+
+      (worker as any).logger = mockLogger;
+      (worker as any).dapClient = mockDapClient;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = DefaultAdapterPolicy;
+      (worker as any).adapterState = DefaultAdapterPolicy.createInitialState();
+      (worker as any).currentSessionId = 'sync-session';
+      (worker as any).currentInitPayload = {
+        cmd: 'init',
+        sessionId: 'sync-session',
+        executablePath: 'python',
+        adapterHost: 'localhost',
+        adapterPort: 5678,
+        logDir: '/tmp/logs',
+        scriptPath: '/work/app.py',
+        initialBreakpoints: [{ id: 'bp-1', file: '/work/app.py', line: 5 }]
+      };
+
+      await (worker as any).handleInitializedEvent();
+
+      // The launch sequence must complete despite the failed status send.
+      expect(connectionStub.sendConfigurationDone).toHaveBeenCalledTimes(1);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('breakpoints_synced')
+      );
+    });
+
     it('sends initial function breakpoints before configurationDone (issue #271 phase 3)', async () => {
       const callOrder: string[] = [];
       const connectionStub = {

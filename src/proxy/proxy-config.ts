@@ -17,7 +17,9 @@ export interface ProxyConfig {
   scriptArgs?: string[];
   stopOnEntry?: boolean;
   justMyCode?: boolean;
-  initialBreakpoints?: Array<{ file: string; line: number; condition?: string; logMessage?: string; suspendPolicy?: 'all' | 'thread' }>;
+  /** id is the store breakpoint id, echoed back by the worker's
+   *  breakpoints_synced status for exact store matching (issue #439) */
+  initialBreakpoints?: Array<{ id?: string; file: string; line: number; condition?: string; logMessage?: string; suspendPolicy?: 'all' | 'thread' }>;
   initialFunctionBreakpoints?: Array<{ name: string; condition?: string }>;
   dryRunSpawn?: boolean;
   /** Effective log level for the per-session proxy logger (issue #403) */

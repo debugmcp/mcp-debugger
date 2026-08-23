@@ -99,6 +99,29 @@ describe('ProxyManager Message Handling', () => {
       expect(received[0]).toEqual(capabilities);
     });
 
+    it('emits breakpoints-synced exactly once per status message (issue #439)', () => {
+      // Same single-emission rule as adapter_capabilities: the imperative
+      // handler emits, the functional core has no case for the status.
+      const breakpoints = [
+        { id: 'bp-1', file: '/work/app.py', line: 5, verified: true, adapterId: 42 }
+      ];
+
+      const received: unknown[] = [];
+      proxyManager.on('breakpoints-synced', (results) => {
+        received.push(results);
+      });
+
+      proxyManager.simulateMessage({
+        type: 'status',
+        sessionId: 'test-session',
+        status: 'breakpoints_synced',
+        breakpoints
+      });
+
+      expect(received).toHaveLength(1);
+      expect(received[0]).toEqual(breakpoints);
+    });
+
     it('should handle dry-run complete status messages', () => {
       const dryRunMessage = {
         type: 'status',

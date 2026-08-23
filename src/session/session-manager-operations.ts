@@ -174,7 +174,10 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       // Breakpoint file path has been validated by server.ts before reaching here.
       // Carry every per-breakpoint field (condition, logMessage, suspendPolicy) —
       // dropping one here silently loses it for the whole launch (#235).
+      // The store id is echoed back by the worker's breakpoints_synced
+      // status for exact store matching (issue #439).
       return {
+        id: bp.id,
         file: bp.file, // Use the validated path
         line: bp.line,
         condition: bp.condition,
@@ -834,11 +837,14 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       const finalSession = this._getSessionById(sessionId);
       const finalState = finalSession.state;
 
-      // The worker applies initialBreakpoints itself, but its setBreakpoints
-      // responses never reach this store — without a re-sync, pre-launch
-      // breakpoints would stay verified:false forever on adapters that don't
-      // push breakpoint events (issue #236). Replace-all with the identical
-      // set is idempotent; syncBreakpointsForFile no-ops unless live.
+      // Belt-and-braces re-sync (issues #236/#439): the worker forwards its
+      // initial setBreakpoints results via the breakpoints_synced status, so
+      // the store is normally already stamped — including for launches that
+      // are STOPPED by now (logpoint-only short programs), which this gated
+      // path can never help. A live re-sync still heals anything that
+      // changed between the snapshot and now, or a status lost to an IPC
+      // hiccup. Replace-all with the identical set is idempotent;
+      // syncBreakpointsForFile no-ops unless live.
       if (finalSession.breakpoints.size > 0 &&
           (finalState === SessionState.RUNNING || finalState === SessionState.PAUSED)) {
         const files = [...new Set(Array.from(finalSession.breakpoints.values()).map(bp => bp.file))];
