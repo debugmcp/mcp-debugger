@@ -315,6 +315,24 @@ describe('diagnose', () => {
     expect(report.languages[0].probe.durationMs).toBeGreaterThanOrEqual(400);
   });
 
+  it('surfaces the real loader error when the registry provides getFactoryResult (issue #435 part 4)', async () => {
+    // Same corrupt-package scenario as above, but through a registry that can
+    // say WHY the load failed — doctor must report that instead of the vague
+    // "(the registry returned no factory)".
+    const deps = makeDeps([{ name: 'python', installed: true }]);
+    (deps.registry as unknown as Record<string, unknown>).getFactoryResult = vi
+      .fn()
+      .mockResolvedValue({ loadError: new Error('corrupted dist') });
+
+    const report = await diagnose(['python'], deps);
+
+    const python = report.languages[0];
+    expect(python.verdict).toBe('broken');
+    expect(python.errors[0]).toContain('corrupted dist');
+    expect(python.errors[0]).not.toContain('the registry returned no factory');
+    expect(report.exitCode).toBe(1);
+  });
+
   it('diagnoses a loaded factory without validate() as version skew, not a load failure', async () => {
     const deps = makeDeps([{ name: 'python', factoryWithoutValidate: true }]);
 

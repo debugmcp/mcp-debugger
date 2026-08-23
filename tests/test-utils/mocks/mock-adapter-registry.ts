@@ -124,10 +124,30 @@ export function createMockAdapterRegistry(): IAdapterRegistry {
     })),
     
     register: vi.fn().mockResolvedValue(undefined),
-    
+
     unregister: vi.fn().mockReturnValue(true),
-    
-    getAdapterInfo: vi.fn().mockImplementation((lang: string) => 
+
+    // Typed discovery surface (issue #435 part 4). Defaults are fail-open
+    // neutral and mirror the pre-typed fallback paths: languages from the
+    // supported list, entries with attach 'none', and no loadable factory
+    // (consumers assume availability when they cannot probe). Tests that
+    // need richer behavior override per-test, as before.
+    listLanguages: vi.fn().mockResolvedValue(supportedLanguages),
+
+    listAvailableAdapters: vi.fn().mockResolvedValue(
+      supportedLanguages.map((language) => ({
+        name: language,
+        packageName: `@debugmcp/adapter-${language}`,
+        installed: true,
+        attach: 'none' as const
+      }))
+    ),
+
+    getFactory: vi.fn().mockResolvedValue(undefined),
+
+    getFactoryMetadata: vi.fn().mockResolvedValue(undefined),
+
+    getAdapterInfo: vi.fn().mockImplementation((lang: string) =>
       adapterInfoMap.get(lang)
     ),
     
@@ -149,6 +169,8 @@ export function createMockAdapterRegistryWithErrors(): IAdapterRegistry {
   // Override to simulate no languages supported
   mock.getSupportedLanguages = vi.fn().mockReturnValue([]);
   mock.isLanguageSupported = vi.fn().mockReturnValue(false);
+  mock.listLanguages = vi.fn().mockResolvedValue([]);
+  mock.listAvailableAdapters = vi.fn().mockResolvedValue([]);
   mock.create = vi.fn().mockRejectedValue(new Error('Adapter not found'));
   mock.getAdapterInfo = vi.fn().mockReturnValue(undefined);
   mock.getAllAdapterInfo = vi.fn().mockReturnValue(new Map());
@@ -164,10 +186,19 @@ export function createMockAdapterRegistryWithLanguages(languages: string[]): IAd
   const mock = createMockAdapterRegistry();
   
   mock.getSupportedLanguages = vi.fn().mockReturnValue(languages);
-  mock.isLanguageSupported = vi.fn().mockImplementation((lang: string) => 
+  mock.isLanguageSupported = vi.fn().mockImplementation((lang: string) =>
     languages.includes(lang)
   );
-  
+  mock.listLanguages = vi.fn().mockResolvedValue(languages);
+  mock.listAvailableAdapters = vi.fn().mockResolvedValue(
+    languages.map((language) => ({
+      name: language,
+      packageName: `@debugmcp/adapter-${language}`,
+      installed: true,
+      attach: 'none' as const
+    }))
+  );
+
   // Update adapter info to match languages
   const adapterInfoMap = new Map<string, AdapterInfo>();
   languages.forEach(lang => {

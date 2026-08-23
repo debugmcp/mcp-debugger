@@ -11,8 +11,8 @@
  * probe.failed / probe.timedOut so the divergence is visible).
  */
 import type {
-  AttachMechanism,
-  IAdapterFactory,
+  AdapterManifestEntry,
+  IAdapterRegistry,
   IEnvironment,
   IFileSystem,
   ILogger,
@@ -59,18 +59,17 @@ export interface DoctorReport {
   exitCode: 0 | 1;
 }
 
-interface RegistryAdapterEntry {
-  name: string;
-  packageName: string;
-  installed: boolean;
-  attach?: AttachMechanism;
-  description?: string;
-}
-
-export interface DoctorRegistry {
-  listAvailableAdapters(): Promise<RegistryAdapterEntry[]>;
-  getFactory(language: string): Promise<IAdapterFactory | undefined>;
-}
+/**
+ * The slice of IAdapterRegistry doctor needs (issue #435 part 4): the same
+ * typed surface the server uses, so a registry rename breaks doctor at
+ * compile time too. getFactoryResult stays optional (it is optional on the
+ * interface); when present, the shared probe prefers it and surfaces real
+ * load errors.
+ */
+export type DoctorRegistry = Pick<
+  IAdapterRegistry,
+  'listAvailableAdapters' | 'getFactory' | 'getFactoryResult'
+>;
 
 export interface DiagnoseDeps {
   registry: DoctorRegistry;
@@ -157,7 +156,7 @@ export async function diagnose(requested: string[], deps: DiagnoseDeps): Promise
 }
 
 async function diagnoseLanguage(
-  entry: RegistryAdapterEntry,
+  entry: AdapterManifestEntry,
   disabledSet: Set<string>,
   deps: DiagnoseDeps
 ): Promise<LanguageDiagnosis> {

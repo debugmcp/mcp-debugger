@@ -2513,11 +2513,10 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     // before any state mutation (issue #331). Only an explicit 'none'
     // declaration is enforced — absent metadata falls through to the
     // adapter's natural behavior.
-    const registryWithMeta = this.adapterRegistry as unknown as {
-      getFactoryMetadata?: (language: string) => Promise<{ modes?: { attach?: string } } | undefined>;
-    };
-    if (typeof registryWithMeta.getFactoryMetadata === 'function') {
-      const factoryMeta = await registryWithMeta.getFactoryMetadata(session.language).catch(() => undefined);
+    // getFactoryMetadata is on IAdapterRegistry (issue #435 part 4); the
+    // runtime guard stays for partial registry doubles.
+    if (typeof this.adapterRegistry.getFactoryMetadata === 'function') {
+      const factoryMeta = await this.adapterRegistry.getFactoryMetadata(session.language).catch(() => undefined);
       if (factoryMeta?.modes?.attach === 'none') {
         return {
           success: false,

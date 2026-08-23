@@ -187,6 +187,51 @@ describe('AdapterRegistry', () => {
     ).rejects.toBeInstanceOf(AdapterNotFoundError);
   });
 
+  describe('getFactory / getFactoryResult', () => {
+    it('returns a registered factory without touching the loader', async () => {
+      const registry = new AdapterRegistry();
+      const factory = createFactory();
+      await registry.register('mock', factory as any);
+
+      await expect(registry.getFactory('mock')).resolves.toBe(factory);
+      await expect(registry.getFactoryResult('mock')).resolves.toEqual({ factory });
+    });
+
+    it('returns a loader-cached factory', async () => {
+      const cached = createFactory();
+      const registry = new AdapterRegistry({ enableDynamicLoading: true });
+      vi.spyOn(registry as any, 'loader', 'get').mockReturnValue({
+        getCachedFactory: vi.fn().mockReturnValue(cached),
+        loadAdapter: vi.fn()
+      });
+
+      await expect(registry.getFactory('python')).resolves.toBe(cached);
+      await expect(registry.getFactoryResult('python')).resolves.toEqual({ factory: cached });
+    });
+
+    it('surfaces the loader error through getFactoryResult while getFactory stays fail-open', async () => {
+      const registry = new AdapterRegistry({ enableDynamicLoading: true });
+      vi.spyOn(registry as any, 'loader', 'get').mockReturnValue({
+        getCachedFactory: vi.fn().mockReturnValue(undefined),
+        loadAdapter: vi.fn().mockRejectedValue(new Error('Failed to load adapter: corrupted dist'))
+      });
+
+      await expect(registry.getFactory('python')).resolves.toBeUndefined();
+
+      const result = await registry.getFactoryResult('python');
+      expect(result.factory).toBeUndefined();
+      expect(result.loadError).toBeInstanceOf(Error);
+      expect(result.loadError?.message).toContain('corrupted dist');
+    });
+
+    it('reports dynamicLoadingDisabled for an unregistered language when loading is off', async () => {
+      const registry = new AdapterRegistry();
+
+      await expect(registry.getFactory('python')).resolves.toBeUndefined();
+      await expect(registry.getFactoryResult('python')).resolves.toEqual({ dynamicLoadingDisabled: true });
+    });
+  });
+
   it('auto-disposes adapters on state change and clears timers', async () => {
     vi.useFakeTimers();
 

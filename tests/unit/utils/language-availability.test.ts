@@ -4,6 +4,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
+  checkLaunchToolchain,
   computeModeAvailability,
   probeLanguageEntry,
   ValidationResultCache
@@ -338,6 +339,68 @@ describe('probeLanguageEntry (issue #435)', () => {
     expect(probe.modes.launch.available).toBe(true);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('validate'));
   });
+
+  describe('getFactoryResult support (issue #435 part 4)', () => {
+    it('prefers getFactoryResult over getFactory when the registry offers it', async () => {
+      const factory = makeFactory();
+      const getFactory = vi.fn();
+      const getFactoryResult = vi.fn().mockResolvedValue({ factory });
+
+      const probe = await probeLanguageEntry(entry(), {
+        registry: { getFactory, getFactoryResult },
+        disabledSet: new Set()
+      });
+
+      expect(getFactoryResult).toHaveBeenCalledWith('python');
+      expect(getFactory).not.toHaveBeenCalled();
+      expect(probe.factory).toBe(factory);
+      expect(probe.modes.launch.available).toBe(true);
+    });
+
+    it('carries the loadError into factoryLoadError while modes fail open', async () => {
+      const loadError = new Error('Failed to load adapter: corrupted dist');
+      const probe = await probeLanguageEntry(entry(), {
+        registry: {
+          getFactory: vi.fn(),
+          getFactoryResult: vi.fn().mockResolvedValue({ loadError })
+        },
+        disabledSet: new Set()
+      });
+
+      expect(probe.factory).toBeUndefined();
+      expect(probe.factoryLoadError).toBe(loadError);
+      expect(probe.modes.launch.available).toBe(true); // fail-open contract
+    });
+
+    it('records a throwing getFactoryResult as factoryLoadError and fails open', async () => {
+      const probe = await probeLanguageEntry(entry(), {
+        registry: {
+          getFactory: vi.fn(),
+          getFactoryResult: vi.fn().mockRejectedValue(new Error('result exploded'))
+        },
+        disabledSet: new Set()
+      });
+
+      expect(probe.factory).toBeUndefined();
+      expect(probe.factoryLoadError).toBeInstanceOf(Error);
+      expect(probe.modes.launch.available).toBe(true);
+    });
+
+    it('treats dynamicLoadingDisabled as no factory, with no load error', async () => {
+      const probe = await probeLanguageEntry(entry(), {
+        registry: {
+          getFactory: vi.fn(),
+          getFactoryResult: vi.fn().mockResolvedValue({ dynamicLoadingDisabled: true })
+        },
+        disabledSet: new Set()
+      });
+
+      expect(probe.factory).toBeUndefined();
+      expect(probe.factoryLoadError).toBeUndefined();
+      expect(probe.probeable).toBe(false);
+      expect(probe.modes.launch.available).toBe(true);
+    });
+  });
 });
 
 describe('ValidationResultCache', () => {
@@ -382,5 +445,173 @@ describe('ValidationResultCache', () => {
     cache.clear();
     await cache.get('ruby', validate);
     expect(validate).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('checkLaunchToolchain (issues #360, #435)', () => {
+  const factoryWith = (validate: () => Promise<unknown>) => ({
+    validate,
+    getMetadata: () => ({ modes: { launch: true, attach: 'none' as const } })
+  });
+  const registryWith = (validate: () => Promise<unknown>) => ({
+    getFactory: vi.fn().mockResolvedValue(factoryWith(validate))
+  });
+  const cache = () => new ValidationResultCache(30_000);
+
+  it('reports available for a valid toolchain', async () => {
+    await expect(
+      checkLaunchToolchain('python', registryWith(async () => ok), cache())
+    ).resolves.toEqual({ available: true });
+  });
+
+  it('reports unavailable with the joined validation errors', async () => {
+    const registry = registryWith(async () => ({
+      valid: false,
+      errors: ['Delve not found.', 'Go too old.'],
+      warnings: []
+    }));
+
+    await expect(checkLaunchToolchain('go', registry, cache())).resolves.toEqual({
+      available: false,
+      reason: 'Delve not found.; Go too old.'
+    });
+  });
+
+  it('falls back to the generic sentence when validation fails with empty errors', async () => {
+    const registry = registryWith(async () => ({ valid: false, errors: [], warnings: [] }));
+
+    await expect(checkLaunchToolchain('go', registry, cache())).resolves.toEqual({
+      available: false,
+      reason: "The 'go' debug adapter is not available in this runtime."
+    });
+  });
+
+  it('fails open when the registry is undefined or has no getFactory', async () => {
+    await expect(checkLaunchToolchain('python', undefined, cache())).resolves.toEqual({
+      available: true
+    });
+    await expect(checkLaunchToolchain('python', {}, cache())).resolves.toEqual({
+      available: true
+    });
+  });
+
+  it('fails open when getFactory rejects, resolves no factory, or the factory has no validate', async () => {
+    await expect(
+      checkLaunchToolchain(
+        'python',
+        { getFactory: vi.fn().mockRejectedValue(new Error('import exploded')) },
+        cache()
+      )
+    ).resolves.toEqual({ available: true });
+    await expect(
+      checkLaunchToolchain('python', { getFactory: vi.fn().mockResolvedValue(undefined) }, cache())
+    ).resolves.toEqual({ available: true });
+    await expect(
+      checkLaunchToolchain(
+        'python',
+        { getFactory: vi.fn().mockResolvedValue({ getMetadata: () => ({}) }) },
+        cache()
+      )
+    ).resolves.toEqual({ available: true });
+  });
+
+  it('fails open when validate itself rejects', async () => {
+    const registry = registryWith(async () => {
+      throw new Error('probe exploded');
+    });
+
+    await expect(checkLaunchToolchain('ruby', registry, cache())).resolves.toEqual({
+      available: true
+    });
+  });
+
+  it('fails open on a getFactoryResult loadError (load failures never block a launch)', async () => {
+    const registry = {
+      getFactory: vi.fn(),
+      getFactoryResult: vi.fn().mockResolvedValue({ loadError: new Error('corrupted dist') })
+    };
+
+    await expect(checkLaunchToolchain('python', registry, cache())).resolves.toEqual({
+      available: true
+    });
+  });
+
+  it('runs validate once across two gate checks through the shared cache', async () => {
+    const validate = vi.fn().mockResolvedValue(ok);
+    const registry = registryWith(validate);
+    const shared = cache();
+
+    await checkLaunchToolchain('python', registry, shared);
+    await checkLaunchToolchain('python', registry, shared);
+
+    expect(validate).toHaveBeenCalledTimes(1);
+  });
+
+  it('gates purely on the toolchain — DEBUG_MCP_DISABLE_LANGUAGES is enforced upstream, not here', async () => {
+    vi.stubEnv('DEBUG_MCP_DISABLE_LANGUAGES', 'python');
+    try {
+      await expect(
+        checkLaunchToolchain('python', registryWith(async () => ok), cache())
+      ).resolves.toEqual({ available: true });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  describe('drift fence: gate ≡ probeLanguageEntry launch mode', () => {
+    // The gate is a wrapper over the shared probe (issue #435 part 3). This
+    // matrix is the gate-side analogue of server-doctor-parity: for every
+    // registry shape, the gate's answer must equal the probe's launch mode
+    // (modulo the documented empty-reason fallback sentence).
+    const shapes: Array<{ title: string; registry: unknown }> = [
+      { title: 'valid toolchain', registry: registryWith(async () => ok) },
+      {
+        title: 'invalid with reason',
+        registry: registryWith(async () => bad('toolchain gone'))
+      },
+      {
+        title: 'invalid with empty errors',
+        registry: registryWith(async () => ({ valid: false, errors: [], warnings: [] }))
+      },
+      {
+        title: 'throwing validate',
+        registry: registryWith(async () => {
+          throw new Error('boom');
+        })
+      },
+      { title: 'missing factory', registry: { getFactory: vi.fn().mockResolvedValue(undefined) } },
+      {
+        title: 'loadError via getFactoryResult',
+        registry: {
+          getFactory: vi.fn(),
+          getFactoryResult: vi.fn().mockResolvedValue({ loadError: new Error('nope') })
+        }
+      }
+    ];
+
+    for (const { title, registry } of shapes) {
+      it(`agrees with the probe for: ${title}`, async () => {
+        const gate = await checkLaunchToolchain(
+          'python',
+          registry as Parameters<typeof checkLaunchToolchain>[1],
+          cache()
+        );
+        const probe = await probeLanguageEntry(
+          { language: 'python', packageName: '@debugmcp/adapter-python', installed: true },
+          {
+            registry: registry as Parameters<typeof probeLanguageEntry>[1]['registry'],
+            disabledSet: new Set()
+          }
+        );
+
+        expect(gate.available).toBe(probe.modes.launch.available);
+        if (!gate.available) {
+          const expectedReason =
+            probe.modes.launch.reason ||
+            "The 'python' debug adapter is not available in this runtime.";
+          expect((gate as { reason: string }).reason).toBe(expectedReason);
+        }
+      });
+    }
   });
 });
