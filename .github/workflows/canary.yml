@@ -112,6 +112,20 @@ jobs:
           CLI="$(npm root -g)/@debugmcp/mcp-debugger/dist/cli.mjs"
           test -f "$CLI"
           echo "CLI=$CLI" >> "$GITHUB_ENV"
+          # Era detection: a slim-era CLI (v0.25.0+) declares the
+          # @debugmcp/codelldb-* optionalDependencies; a fat-era CLI
+          # (<= 0.24.x) bundles the engine in dist/ instead (linux-x64 only —
+          # see the rust cycle's era gate).
+          SLIM="$(node -p "Object.keys(require(process.argv[1]).optionalDependencies||{}).some(k=>k.startsWith('@debugmcp/codelldb-'))" "$(npm root -g)/@debugmcp/mcp-debugger/package.json")"
+          echo "SLIM=$SLIM" >> "$GITHUB_ENV"
+          case "${{ matrix.os }}" in
+            ubuntu-latest)    PLAT=linux-x64 ;;
+            ubuntu-24.04-arm) PLAT=linux-arm64 ;;
+            macos-latest)     PLAT=darwin-arm64 ;;
+            windows-latest)   PLAT=win32-x64 ;;
+            *) echo "unmapped runner ${{ matrix.os }}"; exit 1 ;;
+          esac
+          echo "CANARY_PLAT=$PLAT" >> "$GITHUB_ENV"
 
       - name: Provision CODELLDB_PATH fallback
         if: ${{ matrix.leg == 'omit-optional' }}
@@ -120,27 +134,30 @@ jobs:
         # upstream VSIX (same pin and guarantee as the Dockerfile vendor
         # step). vendor-codelldb.js needs workspace deps, so it is not used.
         run: |
-          case "${{ matrix.os }}" in
-            ubuntu-latest)    PLAT=linux-x64;    EXT="" ;;
-            ubuntu-24.04-arm) PLAT=linux-arm64;  EXT="" ;;
-            macos-latest)     PLAT=darwin-arm64; EXT="" ;;
-            windows-latest)   PLAT=win32-x64;    EXT=".exe" ;;
-            *) echo "unmapped runner ${{ matrix.os }}"; exit 1 ;;
-          esac
+          EXT=""
+          [ "${{ runner.os }}" = "Windows" ] && EXT=".exe"
           MANIFEST=packages/codelldb-common/vendor-manifest.json
           VERSION="$(node -p "require('./$MANIFEST').codelldb.version")"
-          EXPECTED_SHA="$(node -p "require('./$MANIFEST').codelldb.assets['codelldb-$PLAT.vsix']")"
+          EXPECTED_SHA="$(node -p "require('./$MANIFEST').codelldb.assets['codelldb-$CANARY_PLAT.vsix']")"
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/codelldb.vsix" \
-            "https://github.com/vadimcn/codelldb/releases/download/v${VERSION}/codelldb-${PLAT}.vsix"
+            "https://github.com/vadimcn/codelldb/releases/download/v${VERSION}/codelldb-${CANARY_PLAT}.vsix"
           ACTUAL_SHA="$(node -e "const{createHash}=require('crypto');const{readFileSync}=require('fs');console.log(createHash('sha256').update(readFileSync(process.argv[1])).digest('hex'))" "$RUNNER_TEMP/codelldb.vsix")"
           if [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
-            echo "codelldb-$PLAT.vsix digest mismatch: expected $EXPECTED_SHA got $ACTUAL_SHA"
+            echo "codelldb-$CANARY_PLAT.vsix digest mismatch: expected $EXPECTED_SHA got $ACTUAL_SHA"
             exit 1
           fi
-          python -m zipfile -e "$RUNNER_TEMP/codelldb.vsix" "$RUNNER_TEMP/codelldb"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            # No exec bits to preserve on Windows; python -m zipfile suffices.
+            python -m zipfile -e "$RUNNER_TEMP/codelldb.vsix" "$RUNNER_TEMP/codelldb"
+          else
+            # unzip preserves the zip's unix modes — the engine needs +x on
+            # more than the adapter binary (lldb-server/debugserver under
+            # lldb/bin), which python -m zipfile silently drops.
+            unzip -q "$RUNNER_TEMP/codelldb.vsix" -d "$RUNNER_TEMP/codelldb"
+          fi
           BIN="$RUNNER_TEMP/codelldb/extension/adapter/codelldb$EXT"
-          [ -n "$EXT" ] || chmod 755 "$BIN"
           test -e "$BIN"
+          [ -n "$EXT" ] || test -x "$BIN"
           echo "CODELLDB_PATH=$BIN" >> "$GITHUB_ENV"
 
       - name: Assert CodeLLDB backend source (doctor)
@@ -154,8 +171,6 @@ jobs:
         # This flips automatically when v0.25.0 publishes, and a release that
         # ships neither optional deps nor a vendor payload fails loudly here.
         run: |
-          PKG="$(npm root -g)/@debugmcp/mcp-debugger/package.json"
-          SLIM="$(node -p "Object.keys(require(process.argv[1]).optionalDependencies||{}).some(k=>k.startsWith('@debugmcp/codelldb-'))" "$PKG")"
           if [ "$SLIM" = "true" ]; then
             if [ "$LEG" = "omit-optional" ]; then EXPECT="env:CODELLDB_PATH"; else EXPECT="platform-package"; fi
           else
@@ -197,10 +212,31 @@ jobs:
             -- node "$CLI" stdio
 
       - name: Smoke cycle (rust — CodeLLDB engine proof)
+        env:
+          LEG: ${{ matrix.leg }}
         run: |
+          # Era gate: a fat-era CLI bundles CodeLLDB only for linux-x64, so a
+          # default install genuinely has no engine elsewhere — a known 0.24.x
+          # gap that the @debugmcp/codelldb-* platform packages close in
+          # v0.25.0 (the slim era, where this cycle runs everywhere). The
+          # omit-optional leg still proves the engine on every platform via
+          # the CODELLDB_PATH fallback.
+          if [ "$SLIM" != "true" ] && [ "$LEG" = "default" ] && [ "$CANARY_PLAT" != "linux-x64" ]; then
+            echo "::notice::fat-era CLI ships CodeLLDB only for linux-x64 — rust cycle skipped on $CANARY_PLAT (closed by v0.25.0 platform packages)"
+            exit 0
+          fi
           EXT=""
-          [ "${{ runner.os }}" = "Windows" ] && EXT=".exe"
-          rustc -g -o "$RUNNER_TEMP/canary-hello$EXT" examples/rust/hello_world/src/main.rs
+          RUSTC=(rustc)
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            EXT=".exe"
+            # The runner's default rustc is MSVC-host (PDB); the rust adapter
+            # refuses PDB binaries (MSVC_TOOLCHAIN_DETECTED) and the repo's
+            # supported Windows path is DWARF via the GNU toolchain
+            # (tests/e2e/rust-example-utils.ts).
+            rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal
+            RUSTC=(rustc +stable-x86_64-pc-windows-gnu)
+          fi
+          "${RUSTC[@]}" -g -o "$RUNNER_TEMP/canary-hello$EXT" examples/rust/hello_world/src/main.rs
           node scripts/canary-smoke.mjs --lang rust \
             --program "$RUNNER_TEMP/canary-hello$EXT" \
             --break-file "$GITHUB_WORKSPACE/examples/rust/hello_world/src/main.rs" --line 26 \
