@@ -102,6 +102,10 @@ export interface ManagedSession extends DebugSessionInfo {
   // Debuggee output captured from DAP 'output' events (issue #218).
   // Created fresh on each launch/attach; readable until the session is closed.
   outputBuffer?: OutputRingBuffer;
+  // Policy-annotated adapter degradation notes (issue #441 — e.g. CodeLLDB
+  // failing to load Rust formatters). Reset per launch, deduped; joined into
+  // the start_debugging warning when they arrive before the launch resolves.
+  adapterNotices?: string[];
   // Live capabilities from the adapter's DAP initialize response (issue #243).
   // Reset on each launch; gates best-effort requests like exceptionInfo and
   // lets tooling validate static policy tables against the real adapter.

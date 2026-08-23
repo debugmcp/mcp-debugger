@@ -154,6 +154,17 @@ RUN rm -rf /app/node_modules/@debugmcp && \
     cp -r /app/packages/adapter-rust/dist /app/node_modules/@debugmcp/adapter-rust/ && \
     cp /app/packages/adapter-rust/package.json /app/node_modules/@debugmcp/adapter-rust/
 
+# Rust LLDB formatter scripts (issue #441): pure-Python files shipped with
+# every Rust toolchain, which CodeLLDB never bundles. The runtime image has
+# no rustc, so CodeLLDB's lang_support/rust.py cannot locate them via
+# `rustc --print sysroot`; instead they are vendored here and surfaced via
+# CODELLDB_RUST_SYSROOT, which the rust adapter turns into the CodeLLDB
+# setting lang.rust.sysroot (_adapterSettings.scriptConfig). Digest is the
+# multi-arch OCI index, so amd64 and arm64 TARGETARCH builds both resolve.
+# Bump alongside CodeLLDB bumps or when formatter drift is reported.
+FROM rust:1.98.0-slim@sha256:cc0448b41c3b7b7fea44f5dc50eacba729a56db365b65b7bd5e8a82d5b3db078 AS rust-formatters
+RUN cp -r "$(rustc --print sysroot)/lib/rustlib/etc" /rust-etc
+
 # Stage 2: Create runtime image with full LLDB dependencies
 FROM ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03
 # Disabled languages: go has no attach implementation and no Delve here,
@@ -221,6 +232,15 @@ ENV CODELLDB_PATH=/app/node_modules/@debugmcp/codelldb-common/vendor/codelldb/cu
 # Fail the image build if the debug engine is missing — the v0.24.0 image
 # shipped without CodeLLDB because nothing guarded this (#387).
 RUN test -x "$CODELLDB_PATH"
+
+# Rust formatter scripts for CodeLLDB (issue #441) — see the rust-formatters
+# stage. The path is a sysroot ROOT: rust.py appends lib/rustlib/etc itself.
+COPY --from=rust-formatters /rust-etc /opt/rust-sysroot/lib/rustlib/etc
+ENV CODELLDB_RUST_SYSROOT=/opt/rust-sysroot
+# Guard (mirrors the CODELLDB_PATH test above): a sysroot without
+# lldb_lookup.py would make rust.py silently no-op instead of falling back
+# to rustc — fail the build instead.
+RUN test -f "$CODELLDB_RUST_SYSROOT/lib/rustlib/etc/lldb_lookup.py"
 
 # Pre-compile JDI bridge for instant Java debugging (no on-demand compilation at runtime)
 RUN mkdir -p /app/node_modules/@debugmcp/adapter-java/java/out && \

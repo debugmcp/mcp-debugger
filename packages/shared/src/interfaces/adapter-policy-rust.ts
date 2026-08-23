@@ -22,7 +22,8 @@ import {
   getLldbDapClientBehavior,
   isLldbInternalFrame,
   filterLldbStackFrames,
-  lldbShouldSuppressOutputEvent
+  lldbShouldSuppressOutputEvent,
+  lldbAnnotateOutputEvent
 } from './lldb-policy-shared.js';
 
 export const RustAdapterPolicy: AdapterPolicy = {
@@ -57,6 +58,9 @@ export const RustAdapterPolicy: AdapterPolicy = {
    */
   normalizeStopReason: normalizeLldbStopReason,
   shouldSuppressOutputEvent: lldbShouldSuppressOutputEvent,
+  // Rust-only (issue #441): cpp sessions never set sourceLanguages:['rust'],
+  // so the rust language-support failure can't occur there.
+  annotateOutputEvent: lldbAnnotateOutputEvent,
 
   /**
    * Hide LLDB-synthesized symbols and libc/runtime plumbing from stack

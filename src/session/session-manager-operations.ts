@@ -866,6 +866,15 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       // unverified-at-launch is the designed deferral path.
       const fnBpWarning = this.buildFunctionBreakpointLaunchWarning(finalSession);
 
+      // Adapter degradation notes (issue #441) accumulate on the session as
+      // annotated output events arrive; joining here is best-effort — a note
+      // arriving after this return still lands in the output buffer as an
+      // attributed [mcp-debugger] Warning entry.
+      const launchWarning =
+        [fnBpWarning, ...(finalSession.adapterNotices ?? [])]
+          .filter(Boolean)
+          .join('; ') || undefined;
+
       this.logger.info(
         `[SessionManager] Debugging started for session ${sessionId}. State: ${finalState}`
       );
@@ -874,7 +883,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         success: true,
         state: finalState,
         data: {
-          ...(fnBpWarning ? { warning: fnBpWarning } : {}),
+          ...(launchWarning ? { warning: launchWarning } : {}),
           message: `Debugging started for ${scriptPath}. Current state: ${finalState}`,
           // Prefer the actual DAP stop reason (issue #214) — the first stop is
           // not always a breakpoint (e.g. an uncaught exception before any

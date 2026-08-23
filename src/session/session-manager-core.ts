@@ -278,6 +278,8 @@ export abstract class SessionManagerCore extends EventEmitter {
     session.lastStop = undefined;
     session.exitCode = undefined;
     session.adapterCapabilities = undefined;
+    // Adapter degradation notes are per-launch (issue #441).
+    session.adapterNotices = [];
     // Mandatory (issue #217): the relaunch's new proxyManager reports
     // isRunning()=true, which would resurrect a stale mirror record.
     session.exposure = undefined;
@@ -956,12 +958,18 @@ export abstract class SessionManagerCore extends EventEmitter {
       if (category === 'telemetry') {
         return;
       }
-      // Policy-declared adapter noise (issue #361 — e.g. LLDB DWARF-parser
-      // spew): dropped from the buffer but kept in debug logs. A policy
-      // lookup failure must never cost the user real output.
+      // Policy hooks below consult the language policy; a lookup failure
+      // must never cost the user real output.
+      let policy: AdapterPolicy | undefined;
       try {
-        const policy = this.sessionStore.selectPolicy(session.language);
-        if (policy.shouldSuppressOutputEvent?.(category, body.output)) {
+        policy = this.sessionStore.selectPolicy(session.language);
+      } catch {
+        policy = undefined;
+      }
+      // Policy-declared adapter noise (issue #361 — e.g. LLDB DWARF-parser
+      // spew): dropped from the buffer but kept in debug logs.
+      try {
+        if (policy?.shouldSuppressOutputEvent?.(category, body.output)) {
           this.logger.debug(
             `[SessionManager] Suppressed adapter-noise output event for session ${sessionId} (${category}): ${body.output.slice(0, 200)}`
           );
@@ -992,6 +1000,21 @@ export abstract class SessionManagerCore extends EventEmitter {
       );
       if (entry) {
         this.emit('output-captured', sessionId, entry);
+      }
+      // Policy-annotated degradation (issue #441 — e.g. CodeLLDB failing to
+      // load Rust formatters): keep the raw line, then follow it with an
+      // attributed explanation and record it for the launch-result warning.
+      try {
+        const note = policy?.annotateOutputEvent?.(category, body.output);
+        if (note && !session.adapterNotices?.includes(note)) {
+          (session.adapterNotices ??= []).push(note);
+          const noteEntry = outputBuffer.push('console', `[mcp-debugger] Warning: ${note}\n`);
+          if (noteEntry) {
+            this.emit('output-captured', sessionId, noteEntry);
+          }
+        }
+      } catch {
+        // annotation must never break output capture
       }
     };
     proxyManager.on('output', handleOutput);

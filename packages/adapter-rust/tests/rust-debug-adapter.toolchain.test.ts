@@ -7,7 +7,10 @@ import * as fsSync from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-vi.mock('../src/utils/rust-utils.js', () => ({
+// Partial mock (importOriginal spread): keeps pure helpers such as
+// buildRustAdapterSettings real while stubbing the spawn-probing functions.
+vi.mock('../src/utils/rust-utils.js', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
   checkCargoInstallation: vi.fn(),
   checkRustInstallation: vi.fn(),
   getRustHostTriple: vi.fn(),

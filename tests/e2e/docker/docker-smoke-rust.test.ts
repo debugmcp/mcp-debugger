@@ -206,6 +206,31 @@ describeDockerRust.sequential('Docker: Rust Debugging Smoke Tests', () => {
       );
       expect((bpFrame as { line?: number }).line).toBe(26);
 
+      // Rust type summaries (issue #441): the image vendors the Rust
+      // formatter scripts and sets CODELLDB_RUST_SYSROOT, so a &str renders
+      // as its value. Without formatters `name` is a raw
+      // {data_ptr, length} struct (large enough to trip the value guard).
+      const localsResult = await mcpClient!.callTool({
+        name: 'get_local_variables',
+        arguments: { sessionId }
+      });
+      const localsResponse = parseSdkToolResult(localsResult) as {
+        variables?: Array<{ name: string; value: string }>;
+      };
+      ensureSuccess(localsResponse, 'get_local_variables (formatter fidelity)');
+      const nameVar = (localsResponse.variables ?? []).find(v => v.name === 'name');
+      expect(nameVar, 'local variable `name` should be in scope at line 26').toBeDefined();
+      expect(nameVar!.value).toMatch(/"Rust"/);
+
+      // And the CodeLLDB language-support init must not have failed — that
+      // console line is the no-formatters symptom this fix removes.
+      const outputResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'get_output',
+        arguments: { sessionId }
+      })) as { entries?: Array<{ output: string }> };
+      const outputText = (outputResponse.entries ?? []).map(e => e.output).join('');
+      expect(outputText).not.toContain('Failed to initialize language support');
+
       const continueResult1 = await mcpClient!.callTool({
         name: 'continue_execution',
         arguments: { sessionId }
@@ -295,6 +320,97 @@ describeDockerRust.sequential('Docker: Rust Debugging Smoke Tests', () => {
         arguments: { sessionId }
       });
       ensureSuccess(parseSdkToolResult(continueResult2), 'continue_execution');
+
+      const closeResult = await mcpClient!.callTool({
+        name: 'close_debug_session',
+        arguments: { sessionId }
+      });
+      ensureSuccess(parseSdkToolResult(closeResult), 'close_debug_session');
+      sessionId = null;
+    },
+    120000
+  );
+});
+
+// Negative path for issue #441: with CODELLDB_RUST_SYSROOT cleared (and no
+// rustc in the image), CodeLLDB cannot load the Rust formatters — the raw
+// failure line must be followed by the attributed [mcp-debugger] warning so
+// the degraded rendering is attributable instead of reading as a bug.
+describeDockerRust.sequential('Docker: Rust formatter degradation warning (issue #441)', () => {
+  let mcpClient: Client | null = null;
+  let cleanup: (() => Promise<void>) | null = null;
+  let sessionId: string | null = null;
+  const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+  beforeAll(async () => {
+    await prepareRustExample('hello_world', { target: 'linux' });
+    await buildDockerImage({ imageName: 'mcp-debugger:test' });
+
+    const result = await createDockerMcpClient({
+      imageName: 'mcp-debugger:test',
+      containerName: `mcp-debugger-rust-nofmt-test-${Date.now()}`,
+      logLevel: 'debug',
+      extraRunArgs: ['-e', 'CODELLDB_RUST_SYSROOT=']
+    });
+    mcpClient = result.client;
+    cleanup = result.cleanup;
+  }, 240000);
+
+  afterAll(async () => {
+    if (sessionId && mcpClient) {
+      try {
+        await mcpClient.callTool({ name: 'close_debug_session', arguments: { sessionId } });
+      } catch {
+        // session might already be closed
+      }
+    }
+    if (cleanup) {
+      await cleanup();
+    }
+  });
+
+  it(
+    'surfaces an attributed warning when the Rust formatters cannot load',
+    async () => {
+      const { binaryPath } = await prepareRustExample('hello_world', { target: 'linux' });
+      const containerBinaryPath = hostToContainerPath(binaryPath);
+
+      const createResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'create_debug_session',
+        arguments: { language: 'rust', name: 'docker-rust-nofmt' }
+      }));
+      ensureSuccess(createResponse, 'create_debug_session');
+      sessionId = createResponse.sessionId as string;
+
+      const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: containerBinaryPath,
+          args: [],
+          dapLaunchArgs: { stopOnEntry: true },
+          adapterLaunchConfig: { sourceLanguages: ['rust'] }
+        }
+      }));
+      ensureSuccess(startResponse, 'start_debugging');
+
+      // The failure line lands during adapter init; poll the buffer briefly.
+      // Assert only the output-buffer surface — the launch-result warning is
+      // timing-best-effort by design.
+      let outputText = '';
+      for (let attempt = 0; attempt < 40; attempt++) {
+        const outputResponse = parseSdkToolResult(await mcpClient!.callTool({
+          name: 'get_output',
+          arguments: { sessionId }
+        })) as { entries?: Array<{ output: string }> };
+        outputText = (outputResponse.entries ?? []).map(e => e.output).join('');
+        if (outputText.includes('[mcp-debugger] Warning:')) {
+          break;
+        }
+        await wait(250);
+      }
+      expect(outputText).toContain('Failed to initialize language support for rust');
+      expect(outputText).toContain('[mcp-debugger] Warning: Rust type summaries are unavailable');
 
       const closeResult = await mcpClient!.callTool({
         name: 'close_debug_session',

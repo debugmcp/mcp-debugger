@@ -1,8 +1,12 @@
 /**
- * LLDB DWARF-parser noise suppression (issue #361).
+ * LLDB DWARF-parser noise suppression (issue #361) and language-support
+ * degradation annotation (issue #441).
  */
 import { describe, it, expect } from 'vitest';
-import { lldbShouldSuppressOutputEvent } from '../../src/interfaces/lldb-policy-shared.js';
+import {
+  lldbShouldSuppressOutputEvent,
+  lldbAnnotateOutputEvent
+} from '../../src/interfaces/lldb-policy-shared.js';
 import { CppAdapterPolicy } from '../../src/interfaces/adapter-policy-cpp.js';
 import { RustAdapterPolicy } from '../../src/interfaces/adapter-policy-rust.js';
 
@@ -49,5 +53,38 @@ describe('lldbShouldSuppressOutputEvent', () => {
     expect(RustAdapterPolicy.shouldSuppressOutputEvent?.('stderr', MEMBER_ERROR)).toBe(true);
     expect(CppAdapterPolicy.shouldSuppressOutputEvent?.('stderr', MEMBER_ERROR)).toBe(true);
     expect(RustAdapterPolicy.shouldSuppressOutputEvent?.('stdout', 'hello\n')).toBe(false);
+  });
+});
+
+const RUST_LANG_SUPPORT_FAILURE =
+  "Failed to initialize language support for rust [Errno 2] No such file or directory: 'rustc'\n";
+
+describe('lldbAnnotateOutputEvent (issue #441)', () => {
+  it('annotates the rust language-support failure line on console and stderr', () => {
+    for (const category of ['console', 'stderr']) {
+      const note = lldbAnnotateOutputEvent(category, RUST_LANG_SUPPORT_FAILURE);
+      expect(note).toBeDefined();
+      expect(note).toContain('Rust type summaries are unavailable');
+      expect(note).toContain('CODELLDB_RUST_SYSROOT');
+    }
+  });
+
+  it('returns undefined for ordinary output', () => {
+    expect(lldbAnnotateOutputEvent('console', 'Loading Rust formatters from /sysroot/lib/rustlib/etc\n')).toBeUndefined();
+    expect(lldbAnnotateOutputEvent('stderr', 'panicked at src/main.rs:10\n')).toBeUndefined();
+    expect(lldbAnnotateOutputEvent('console', '')).toBeUndefined();
+  });
+
+  it('ignores stdout — debuggee output can never trigger the annotation', () => {
+    expect(lldbAnnotateOutputEvent('stdout', RUST_LANG_SUPPORT_FAILURE)).toBeUndefined();
+  });
+
+  it('does not annotate DWARF-noise lines handled by suppression', () => {
+    expect(lldbAnnotateOutputEvent('stderr', MEMBER_ERROR)).toBeUndefined();
+  });
+
+  it('is wired into the rust policy but not cpp', () => {
+    expect(RustAdapterPolicy.annotateOutputEvent?.('console', RUST_LANG_SUPPORT_FAILURE)).toBeDefined();
+    expect(CppAdapterPolicy.annotateOutputEvent).toBeUndefined();
   });
 });

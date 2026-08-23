@@ -101,6 +101,7 @@ The image vendors linux-x64 CodeLLDB (one shared copy under `@debugmcp/codelldb-
 - **Prebuilt binaries**: must be **Linux-compiled** (linux-x64). Binaries compiled on a Windows/macOS host and mounted into the container are not debuggable by container LLDB — that's a binary-format fact, not a packaging gap. Cross-compile for Linux or compile in-container.
 - **Attach by PID**: works for native processes inside the container. Attaching to a non-descendant process needs `--cap-add=SYS_PTRACE` when the host kernel sets `kernel.yama.ptrace_scope >= 1` (Kubernetes `kubectl debug` profiles grant the equivalent).
 - Rust remains **launch-only** (the rust adapter has no attach implementation).
+- **Rust type summaries work out of the box** (issue #441): the image vendors the Rust toolchain's LLDB formatter scripts at `/opt/rust-sysroot/lib/rustlib/etc` and sets `CODELLDB_RUST_SYSROOT=/opt/rust-sysroot`, which the rust adapter translates into CodeLLDB's `lang.rust.sysroot` setting — so `&str`/`String`/`Vec` values render as values without any `rustc` in the image. Override with `-e CODELLDB_RUST_SYSROOT=/path/to/sysroot` (a sysroot root whose `lib/rustlib/etc` holds the formatters), or disable with `-e CODELLDB_RUST_SYSROOT=` to fall back to CodeLLDB's normal `rustc --print sysroot` lookup. Caveat: the vendored formatters track the Rust version pinned in the Dockerfile; a debuggee built by a much newer/older rustc may render some std types imperfectly.
 
 ## Ruby attach in Docker (attach-only)
 

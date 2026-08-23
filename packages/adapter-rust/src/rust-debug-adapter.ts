@@ -42,6 +42,7 @@ import {
   checkRustInstallation,
   getRustHostTriple,
   findDlltoolExecutable,
+  buildRustAdapterSettings,
 } from './utils/rust-utils.js';
 import { detectBinaryFormat, BinaryInfo } from './utils/binary-detector.js';
 import {
@@ -93,6 +94,7 @@ interface RustLaunchConfig extends LanguageSpecificLaunchConfig {
   postRunCommands?: string[];           // LLDB commands after running
   terminal?: 'console' | 'integrated' | 'external';  // CodeLLDB's canonical attribute
   console?: 'internalConsole' | 'integratedTerminal' | 'externalTerminal';  // legacy alias, accepted as input
+  _adapterSettings?: Record<string, unknown>;  // CodeLLDB adapter settings passthrough (issue #441)
   [key: string]: unknown;               // Required by LanguageSpecificLaunchConfig
 }
 
@@ -448,6 +450,34 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
       return raw;
     }
     return 'warn';
+  }
+
+  /**
+   * CODELLDB_RUST_SYSROOT (issue #441): a Rust sysroot root whose
+   * lib/rustlib/etc holds the LLDB formatter scripts, for hosts without
+   * rustc (the Docker image sets it to a vendored copy). A configured but
+   * invalid path is ignored with a warning rather than injected — once
+   * lang.rust.sysroot is set, CodeLLDB never falls back to rustc, so a bad
+   * value would disable formatters that a local rustc could have supplied.
+   */
+  private resolveRustSysrootOverride(): string | undefined {
+    const raw =
+      this.dependencies.environment?.get('CODELLDB_RUST_SYSROOT') ??
+      process.env.CODELLDB_RUST_SYSROOT ??
+      '';
+    const sysroot = raw.trim();
+    if (!sysroot) {
+      return undefined;
+    }
+    const lookupPath = path.join(sysroot, 'lib', 'rustlib', 'etc', 'lldb_lookup.py');
+    if (!existsSync(lookupPath)) {
+      this.dependencies.logger?.warn(
+        `[Rust Debugger] CODELLDB_RUST_SYSROOT is set but ${lookupPath} does not exist — ` +
+        'ignoring the override so CodeLLDB can fall back to rustc'
+      );
+      return undefined;
+    }
+    return sysroot;
   }
 
   private resolveAutoSuggestGnu(): boolean {
@@ -807,6 +837,18 @@ export class RustDebugAdapter extends EventEmitter implements IDebugAdapter {
           `[Rust Debugger] Container mode: derived sourceMap from binary DWARF paths: ${JSON.stringify(derived)}`
         );
       }
+    }
+
+    // CodeLLDB adapter settings (issue #441): pass the user's _adapterSettings
+    // through (the explicit key list above would otherwise drop it) and inject
+    // the CODELLDB_RUST_SYSROOT-derived formatter location. A future attach
+    // implementation must apply the same injection to its config.
+    const adapterSettings = buildRustAdapterSettings(
+      rustConfig._adapterSettings,
+      this.resolveRustSysrootOverride()
+    );
+    if (adapterSettings) {
+      launchConfig._adapterSettings = adapterSettings;
     }
 
     return launchConfig;

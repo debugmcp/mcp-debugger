@@ -354,6 +354,7 @@ packages/adapter-{language}/
 - Rust toolchain must be installed (rustc, cargo)
 - Uses vendored CodeLLDB debug adapter (auto-downloaded during `pnpm install`)
 - Supports both MSVC and GNU toolchains on Windows
+- Rust type summaries need the toolchain's LLDB formatter scripts: CodeLLDB locates them via `rustc --print sysroot`, or — on rustc-less hosts — via `CODELLDB_RUST_SYSROOT` (a sysroot root whose `lib/rustlib/etc` holds them; the adapter injects it as `_adapterSettings.scriptConfig.lang.rust.sysroot`, issue #441). The Docker image vendors them and sets the env var automatically
 
 ### Java
 - JDK 21+ must be installed (`java` and `javac` on PATH, or `JAVA_HOME` set)
