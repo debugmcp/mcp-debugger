@@ -245,10 +245,55 @@ describe('GoAdapterFactory', () => {
       });
 
       const result = await factory.validate();
-      
+
       expect(result.details?.platform).toBe(process.platform);
       expect(result.details?.arch).toBe(process.arch);
       expect(result.details?.timestamp).toBeDefined();
+    });
+  });
+
+  describe('describeToolchain', () => {
+    it('renders Go and Delve cells from its own validate() details', async () => {
+      const factory = new GoAdapterFactory();
+
+      const description = await factory.describeToolchain({
+        valid: true,
+        errors: [],
+        warnings: [],
+        details: {
+          goPath: '/usr/local/go/bin/go',
+          goVersion: '1.22.3',
+          dlvPath: '/home/user/go/bin/dlv',
+          dlvVersion: '1.26.3',
+          platform: 'linux',
+          arch: 'amd64',
+          timestamp: 'now'
+        }
+      });
+
+      expect(description).toEqual({
+        runtime: { label: 'Go', path: '/usr/local/go/bin/go', version: '1.22.3' },
+        backend: { label: 'Delve', path: '/home/user/go/bin/dlv', version: '1.26.3' }
+      });
+    });
+
+    it('omits undetected components and renders empty cells without details', async () => {
+      const factory = new GoAdapterFactory();
+
+      expect(
+        await factory.describeToolchain({
+          valid: false,
+          errors: ['dlv not found'],
+          warnings: [],
+          details: { goPath: '/usr/local/go/bin/go', goVersion: '1.22.3' }
+        })
+      ).toEqual({
+        runtime: { label: 'Go', path: '/usr/local/go/bin/go', version: '1.22.3' }
+      });
+
+      expect(
+        await factory.describeToolchain({ valid: false, errors: [], warnings: [] })
+      ).toEqual({});
     });
   });
 });

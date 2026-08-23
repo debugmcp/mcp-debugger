@@ -7,10 +7,26 @@
  * @since 0.1.0
  */
 import { IDebugAdapter } from '@debugmcp/shared';
-import { IAdapterFactory, AdapterDependencies, AdapterMetadata, FactoryValidationResult } from '@debugmcp/shared';
+import { IAdapterFactory, AdapterDependencies, AdapterMetadata, FactoryValidationResult, ToolchainDescription } from '@debugmcp/shared';
+import { toolchainComponent } from '@debugmcp/shared';
 import { GoDebugAdapter } from './go-debug-adapter.js';
 import { DebugLanguage } from '@debugmcp/shared';
 import { findGoExecutable, findDelveExecutable, getGoVersion, getDelveVersion, checkDelveDapSupport } from './utils/go-utils.js';
+
+/**
+ * The details shape validate() emits and describeToolchain() reads — keeping
+ * producer and consumer on one alias makes key renames compiler-checked
+ * within this package (issue #435).
+ */
+type GoToolchainDetails = {
+  goPath?: string;
+  goVersion?: string;
+  dlvPath?: string;
+  dlvVersion?: string;
+  platform: string;
+  arch: string;
+  timestamp: string;
+};
 
 /**
  * Factory for creating Go debug adapters
@@ -87,19 +103,31 @@ export class GoAdapterFactory implements IAdapterFactory {
       errors.push(error instanceof Error ? error.message : 'Go executable not found');
     }
     
+    const details: GoToolchainDetails = {
+      goPath,
+      goVersion,
+      dlvPath,
+      dlvVersion,
+      platform: process.platform,
+      arch: process.arch,
+      timestamp: new Date().toISOString()
+    };
     return {
       valid: errors.length === 0,
       errors,
       warnings,
-      details: {
-        goPath,
-        goVersion,
-        dlvPath,
-        dlvVersion,
-        platform: process.platform,
-        arch: process.arch,
-        timestamp: new Date().toISOString()
-      }
+      details
+    };
+  }
+
+  /**
+   * Doctor row (issue #435): rendered entirely from validate() details.
+   */
+  async describeToolchain(validation: FactoryValidationResult): Promise<ToolchainDescription> {
+    const details = (validation.details ?? {}) as Partial<GoToolchainDetails>;
+    return {
+      runtime: toolchainComponent({ label: 'Go', path: details.goPath, version: details.goVersion }),
+      backend: toolchainComponent({ label: 'Delve', path: details.dlvPath, version: details.dlvVersion })
     };
   }
 }

@@ -2,7 +2,8 @@
  * Unit tests for the doctor command's orchestration (issue #423).
  *
  * Everything is injected: a fake registry with fake factories, a fake
- * environment/filesystem, a stubbed extras collector. No process is spawned.
+ * environment/filesystem. No process is spawned. Presentation comes from the
+ * factories' own describeToolchain (issue #435).
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { IEnvironment, IFileSystem } from '@debugmcp/shared';
@@ -26,6 +27,8 @@ interface FakeAdapterSpec {
   installed?: boolean;
   attach?: 'none' | 'direct-connect' | 'spawn';
   validate?: () => Promise<{ valid: boolean; errors: string[]; warnings: string[]; details?: Record<string, unknown> }>;
+  /** Adapter-owned doctor row (issue #435); absent models an older factory. */
+  describeToolchain?: (validation: unknown, options?: unknown) => Promise<unknown>;
   /** Return a loaded factory that lacks a validate function (version skew). */
   factoryWithoutValidate?: boolean;
   /** Delay (ms) before getFactory resolves — models a slow dynamic import. */
@@ -58,6 +61,7 @@ function makeDeps(adapters: FakeAdapterSpec[], overrides: Partial<DiagnoseDeps> 
       }
       return {
         validate: spec.validate,
+        ...(spec.describeToolchain ? { describeToolchain: spec.describeToolchain } : {}),
         getMetadata: () => ({ modes: { launch: true, attach: spec.attach ?? 'none' } }),
         createAdapter: () => {
           throw new Error('doctor must never instantiate adapters');
@@ -74,7 +78,6 @@ function makeDeps(adapters: FakeAdapterSpec[], overrides: Partial<DiagnoseDeps> 
     platform: 'win32',
     timeoutMs: 5000,
     version: '0.0.0-test',
-    collectExtras: async () => ({}),
     ...overrides
   };
 }
@@ -248,21 +251,21 @@ describe('diagnose', () => {
     expect(python.modes?.launch.available).toBe(true);
   });
 
-  it('does not bill a slow factory import against the validate/extras budget (no spurious timeout)', async () => {
+  it('does not bill a slow factory import against the validate/describe budget (no spurious timeout)', async () => {
     vi.useFakeTimers();
     const deps = makeDeps(
       [
         {
           name: 'dotnet',
           factoryLoadDelayMs: 900, // slow cold import eats most of a naive shared budget
-          validate: okValidate({ debuggerPath: '/x' })
+          validate: okValidate({ debuggerPath: '/x' }),
+          describeToolchain: () =>
+            new Promise((resolve) =>
+              setTimeout(() => resolve({ runtime: { label: '.NET SDK', version: '8.0.301' } }), 500)
+            )
         }
       ],
-      {
-        timeoutMs: 1000,
-        collectExtras: () =>
-          new Promise((resolve) => setTimeout(() => resolve({ dotnetSdkVersion: '8.0.301' }), 500))
-      }
+      { timeoutMs: 1000 }
     );
 
     const reportPromise = diagnose([], deps);
@@ -272,7 +275,7 @@ describe('diagnose', () => {
     const dotnet = report.languages[0];
     expect(dotnet.verdict).toBe('ok');
     expect(dotnet.probe.timedOut).toBe(false);
-    expect(dotnet.details).toMatchObject({ dotnetSdkVersion: '8.0.301' }); // extras survived
+    expect(dotnet.runtime).toEqual({ label: '.NET SDK', version: '8.0.301' }); // the slow row survived
   });
 
   it('reports broken with probe.timedOut when getFactory itself hangs (wedged dynamic import)', async () => {
@@ -319,14 +322,17 @@ describe('diagnose', () => {
     expect(report.exitCode).toBe(1);
   });
 
-  it('sets probe.timedOut when the extras collector hangs, so the handler can force-exit', async () => {
+  it('sets probe.timedOut when describeToolchain hangs, so the handler can force-exit', async () => {
     vi.useFakeTimers();
     const deps = makeDeps(
-      [{ name: 'dotnet', validate: okValidate({ debuggerPath: '/x' }) }],
-      {
-        timeoutMs: 1000,
-        collectExtras: () => new Promise(() => undefined)
-      }
+      [
+        {
+          name: 'dotnet',
+          validate: okValidate({ debuggerPath: '/x' }),
+          describeToolchain: () => new Promise(() => undefined)
+        }
+      ],
+      { timeoutMs: 1000 }
     );
 
     const reportPromise = diagnose([], deps);
@@ -334,19 +340,25 @@ describe('diagnose', () => {
     const report = await reportPromise;
 
     const dotnet = report.languages[0];
-    expect(dotnet.verdict).toBe('ok'); // extras are best-effort; the verdict stands on validate()
+    expect(dotnet.verdict).toBe('ok'); // presentation is best-effort; the verdict stands on validate()
     expect(dotnet.probe.timedOut).toBe(true);
+    expect(dotnet.runtime).toBeUndefined();
   });
 
-  it('counts the extras phase inside probe.durationMs', async () => {
+  it('counts the describeToolchain phase inside probe.durationMs', async () => {
     vi.useFakeTimers();
     const deps = makeDeps(
-      [{ name: 'dotnet', validate: okValidate({ debuggerPath: '/x' }) }],
-      {
-        timeoutMs: 5000,
-        collectExtras: () =>
-          new Promise((resolve) => setTimeout(() => resolve({ dotnetSdkVersion: '8.0.301' }), 300))
-      }
+      [
+        {
+          name: 'dotnet',
+          validate: okValidate({ debuggerPath: '/x' }),
+          describeToolchain: () =>
+            new Promise((resolve) =>
+              setTimeout(() => resolve({ runtime: { label: '.NET SDK', version: '8.0.301' } }), 300)
+            )
+        }
+      ],
+      { timeoutMs: 5000 }
     );
 
     const reportPromise = diagnose([], deps);
@@ -374,37 +386,99 @@ describe('diagnose', () => {
     expect(report.languages[0].modes?.attach.available).toBe(true); // from entry.attach
   });
 
-  it('merges collectExtras output into the reported details', async () => {
-    const deps = makeDeps(
-      [{ name: 'dotnet', validate: okValidate({ debuggerPath: '/opt/netcoredbg' }) }],
+  it('hands the validate() result to describeToolchain and carries its rows into runtime/backend', async () => {
+    const deps = makeDeps([
       {
-        collectExtras: async (language, details) => {
-          expect(language).toBe('dotnet');
-          expect(details).toMatchObject({ debuggerPath: '/opt/netcoredbg' });
-          return { netcoredbgVersion: '3.1.2-1054', dotnetSdkVersion: '8.0.301' };
+        name: 'dotnet',
+        validate: okValidate({ debuggerPath: '/opt/netcoredbg' }),
+        describeToolchain: async (validation) => {
+          expect(validation).toMatchObject({ valid: true, details: { debuggerPath: '/opt/netcoredbg' } });
+          return {
+            runtime: { label: '.NET SDK', version: '8.0.301' },
+            backend: { label: 'netcoredbg', path: '/opt/netcoredbg', version: '3.1.2-1054' }
+          };
         }
       }
-    );
+    ]);
 
     const report = await diagnose([], deps);
 
-    expect(report.languages[0].details).toMatchObject({
-      debuggerPath: '/opt/netcoredbg',
-      netcoredbgVersion: '3.1.2-1054',
-      dotnetSdkVersion: '8.0.301'
-    });
+    const dotnet = report.languages[0];
+    expect(dotnet.runtime).toEqual({ label: '.NET SDK', version: '8.0.301' });
+    expect(dotnet.backend).toEqual({ label: 'netcoredbg', path: '/opt/netcoredbg', version: '3.1.2-1054' });
+    // details stay the raw validate() output — presentation no longer leaks into them
+    expect(dotnet.details).toEqual({ debuggerPath: '/opt/netcoredbg' });
   });
 
-  it('keeps the verdict when collectExtras itself fails', async () => {
-    const deps = makeDeps([{ name: 'cpp', validate: okValidate() }], {
-      collectExtras: async () => {
-        throw new Error('extras exploded');
+  it('keeps the verdict and renders empty cells when describeToolchain itself fails', async () => {
+    const deps = makeDeps([
+      {
+        name: 'cpp',
+        validate: okValidate(),
+        describeToolchain: async () => {
+          throw new Error('presentation exploded');
+        }
       }
-    });
+    ]);
 
     const report = await diagnose([], deps);
 
     expect(report.languages[0].verdict).toBe('ok');
+    expect(report.languages[0].runtime).toBeUndefined();
+    expect(report.languages[0].backend).toBeUndefined();
+  });
+
+  it('renders empty cells for a factory without describeToolchain (older adapter package)', async () => {
+    const deps = makeDeps([
+      { name: 'python', validate: okValidate({ pythonPath: '/usr/bin/python3' }) }
+    ]);
+
+    const report = await diagnose([], deps);
+
+    expect(report.languages[0].verdict).toBe('ok');
+    expect(report.languages[0].runtime).toBeUndefined();
+    expect(report.languages[0].backend).toBeUndefined();
+    expect(report.languages[0].details).toEqual({ pythonPath: '/usr/bin/python3' });
+  });
+
+  it('normalizes a malformed describeToolchain return (out-of-tree factory is plain JS)', async () => {
+    const deps = makeDeps([
+      {
+        name: 'python',
+        validate: okValidate(),
+        describeToolchain: async () => ({
+          runtime: { label: 'Python' }, // bare label — nothing detected, must not render
+          backend: 'not even an object'
+        })
+      }
+    ]);
+
+    const report = await diagnose([], deps);
+
+    expect(report.languages[0].runtime).toBeUndefined();
+    expect(report.languages[0].backend).toBeUndefined();
+  });
+
+  it('still describes the toolchain when validate() reports invalid (partial rows stay honest)', async () => {
+    const deps = makeDeps([
+      {
+        name: 'dotnet',
+        validate: async () => ({
+          valid: false,
+          errors: ['dotnet SDK not found'],
+          warnings: [],
+          details: { debuggerPath: '/opt/netcoredbg' }
+        }),
+        describeToolchain: async () => ({
+          backend: { label: 'netcoredbg', path: '/opt/netcoredbg' }
+        })
+      }
+    ]);
+
+    const report = await diagnose([], deps);
+
+    expect(report.languages[0].verdict).toBe('broken');
+    expect(report.languages[0].backend).toEqual({ label: 'netcoredbg', path: '/opt/netcoredbg' });
   });
 
   it('lists unknown requested languages and fails the run', async () => {

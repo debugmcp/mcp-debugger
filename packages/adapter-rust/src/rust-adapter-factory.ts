@@ -5,11 +5,28 @@
  * Implements the adapter factory interface for dependency injection.
  */
 import { IDebugAdapter } from '@debugmcp/shared';
-import { IAdapterFactory, AdapterDependencies, AdapterMetadata, FactoryValidationResult } from '@debugmcp/shared';
+import { IAdapterFactory, AdapterDependencies, AdapterMetadata, FactoryValidationResult, ToolchainDescription } from '@debugmcp/shared';
+import { toolchainComponent } from '@debugmcp/shared';
 import { RustDebugAdapter } from './rust-debug-adapter.js';
 import { DebugLanguage } from '@debugmcp/shared';
 import { checkCargoInstallation, getCargoVersion, getRustHostTriple } from './utils/rust-utils.js';
 import { resolveCodeLLDBExecutableWithSource, getCodeLLDBVersion } from './utils/codelldb-resolver.js';
+
+/**
+ * The details shape validate() emits and describeToolchain() reads — keeping
+ * producer and consumer on one alias makes key renames compiler-checked
+ * within this package (issue #435).
+ */
+type RustToolchainDetails = {
+  codelldbPath?: string;
+  codelldbVersion?: string;
+  codelldbSource?: string;
+  cargoVersion?: string;
+  hostTriple?: string;
+  platform: string;
+  arch: string;
+  timestamp: string;
+};
 
 /**
  * Factory for creating Rust debug adapters
@@ -79,20 +96,37 @@ export class RustAdapterFactory implements IAdapterFactory {
       }
     }
 
+    const details: RustToolchainDetails = {
+      codelldbPath,
+      codelldbVersion,
+      codelldbSource,
+      cargoVersion,
+      hostTriple,
+      platform: process.platform,
+      arch: process.arch,
+      timestamp: new Date().toISOString()
+    };
     return {
       valid: errors.length === 0,
       errors,
       warnings,
-      details: {
-        codelldbPath,
-        codelldbVersion,
-        codelldbSource,
-        cargoVersion,
-        hostTriple,
-        platform: process.platform,
-        arch: process.arch,
-        timestamp: new Date().toISOString()
-      }
+      details
+    };
+  }
+
+  /**
+   * Doctor row (issue #435): rendered entirely from validate() details.
+   */
+  async describeToolchain(validation: FactoryValidationResult): Promise<ToolchainDescription> {
+    const details = (validation.details ?? {}) as Partial<RustToolchainDetails>;
+    return {
+      runtime: toolchainComponent({ label: 'Rust', version: details.cargoVersion }),
+      backend: toolchainComponent({
+        label: 'CodeLLDB',
+        path: details.codelldbPath,
+        version: details.codelldbVersion,
+        source: details.codelldbSource
+      })
     };
   }
 }

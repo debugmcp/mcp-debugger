@@ -7,10 +7,25 @@
  * @since 2.0.0
  */
 import { IDebugAdapter } from '@debugmcp/shared';
-import { IAdapterFactory, AdapterDependencies, AdapterMetadata, FactoryValidationResult } from '@debugmcp/shared';
+import { IAdapterFactory, AdapterDependencies, AdapterMetadata, FactoryValidationResult, ToolchainDescription } from '@debugmcp/shared';
+import { toolchainComponent } from '@debugmcp/shared';
 import { PythonDebugAdapter } from './python-debug-adapter.js';
 import { DebugLanguage } from '@debugmcp/shared';
 import { findPythonExecutable, getPythonVersion, getDebugpyVersion } from './utils/python-utils.js';
+
+/**
+ * The details shape validate() emits and describeToolchain() reads — keeping
+ * producer and consumer on one alias makes key renames compiler-checked
+ * within this package (issue #435).
+ */
+type PythonToolchainDetails = {
+  pythonPath?: string;
+  pythonVersion?: string;
+  debugpyVersion?: string;
+  pythonDetectionMethod: string;
+  platform: string;
+  timestamp: string;
+};
 
 /**
  * Factory for creating Python debug adapters
@@ -78,18 +93,30 @@ export class PythonAdapterFactory implements IAdapterFactory {
       errors.push(error instanceof Error ? error.message : 'Python executable not found');
     }
 
+    const details: PythonToolchainDetails = {
+      pythonPath,
+      pythonVersion,
+      debugpyVersion,
+      pythonDetectionMethod: 'multi-strategy',
+      platform: process.platform,
+      timestamp: new Date().toISOString()
+    };
     return {
       valid: errors.length === 0,
       errors,
       warnings,
-      details: {
-        pythonPath,
-        pythonVersion,
-        debugpyVersion,
-        pythonDetectionMethod: 'multi-strategy',
-        platform: process.platform,
-        timestamp: new Date().toISOString()
-      }
+      details
+    };
+  }
+
+  /**
+   * Doctor row (issue #435): rendered entirely from validate() details.
+   */
+  async describeToolchain(validation: FactoryValidationResult): Promise<ToolchainDescription> {
+    const details = (validation.details ?? {}) as Partial<PythonToolchainDetails>;
+    return {
+      runtime: toolchainComponent({ label: 'Python', path: details.pythonPath, version: details.pythonVersion }),
+      backend: toolchainComponent({ label: 'debugpy', version: details.debugpyVersion })
     };
   }
 }

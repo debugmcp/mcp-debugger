@@ -104,6 +104,20 @@ export interface IAdapterFactory {
    * @returns Validation result with any warnings or errors
    */
   validate(): Promise<FactoryValidationResult>;
+
+  /**
+   * Doctor-only presentation of the resolved toolchain (issue #435): the
+   * adapter owns its own runtime/backend row instead of the CLI restating
+   * adapter internals. Receives the just-computed validate() result so the
+   * producer and consumer of each `details` key live in the same class; may
+   * run additional best-effort probes (the caller enforces a hard timeout).
+   * Must not throw for a missing toolchain — omit the cell instead. Absent
+   * method → doctor renders empty cells.
+   */
+  describeToolchain?(
+    validation: FactoryValidationResult,
+    options?: DescribeToolchainOptions
+  ): Promise<ToolchainDescription>;
 }
 
 /**
@@ -206,6 +220,42 @@ export interface FactoryValidationResult {
   
   /** Additional validation details */
   details?: Record<string, unknown>;
+}
+
+/**
+ * One resolved toolchain component (a doctor table cell): the runtime a
+ * debuggee needs (Python, Node.js, a C++ compiler) or the debug backend that
+ * drives it (debugpy, js-debug, CodeLLDB).
+ */
+export interface ToolchainComponent {
+  /** Display name, e.g. 'Python', 'CodeLLDB', '(built-in)' */
+  label: string;
+
+  /** Resolved executable/directory path, when detected */
+  path?: string;
+
+  /** Resolved version, when detected */
+  version?: string;
+
+  /** Where the component came from, e.g. 'vendored', 'env:CODELLDB_PATH' */
+  source?: string;
+}
+
+/**
+ * An adapter's own doctor row (issue #435). Absent cells render as empty —
+ * a component that was not detected must be omitted, not named as if found.
+ */
+export interface ToolchainDescription {
+  runtime?: ToolchainComponent;
+  backend?: ToolchainComponent;
+}
+
+/**
+ * Options for IAdapterFactory.describeToolchain.
+ */
+export interface DescribeToolchainOptions {
+  /** Advisory budget for extra probes; the caller also enforces a hard timeout. */
+  timeoutMs?: number;
 }
 
 // ===== Registry Implementation Helpers =====

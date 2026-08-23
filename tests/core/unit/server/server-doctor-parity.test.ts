@@ -131,8 +131,7 @@ describe('doctor / list_supported_languages availability parity (issue #435)', (
       env: { DEBUG_MCP_DISABLE_LANGUAGES: 'mock' },
       platform: 'linux',
       timeoutMs: 5000,
-      version: '0.0.0-test',
-      collectExtras: async () => ({})
+      version: '0.0.0-test'
     };
     const report = await diagnose([], doctorDeps);
     const doctorModes = new Map(report.languages.map((l) => [l.language, l.modes]));

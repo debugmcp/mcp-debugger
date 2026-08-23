@@ -6,17 +6,20 @@
  * factory.validate() per installed language, computeModeAvailability() —
  * so doctor's launch/attach availability can never disagree with the
  * server. Doctor adds what the server deliberately omits: per-probe
- * timeouts, doctor-only extras, host-platform checks, and an honest
- * verdict where the server fails open (recorded via probe.failed /
- * probe.timedOut so the divergence is visible).
+ * timeouts, adapter-owned presentation (describeToolchain), host-platform
+ * checks, and an honest verdict where the server fails open (recorded via
+ * probe.failed / probe.timedOut so the divergence is visible).
  */
 import type {
   AttachMechanism,
   IAdapterFactory,
   IEnvironment,
   IFileSystem,
-  ILogger
+  ILogger,
+  ToolchainComponent,
+  ToolchainDescription
 } from '@debugmcp/shared';
+import { normalizeToolchainDescription } from '@debugmcp/shared';
 import { probeLanguageEntry, type LanguageModes } from '../../../utils/language-availability.js';
 import { getDisabledLanguages } from '../../../utils/language-config.js';
 import {
@@ -24,12 +27,6 @@ import {
   checkYamaPtraceScope,
   type PlatformCheckResult
 } from './platform-checks.js';
-import {
-  collectDoctorExtras,
-  presentLanguage,
-  type DoctorBackendInfo,
-  type DoctorRuntimeInfo
-} from './presenters.js';
 import { isContainerMode } from '../../../utils/container-path-utils.js';
 
 export type DoctorVerdict = 'ok' | 'warn' | 'missing' | 'disabled' | 'broken';
@@ -42,11 +39,11 @@ export interface LanguageDiagnosis {
   verdict: DoctorVerdict;
   errors: string[];
   warnings: string[];
-  runtime?: DoctorRuntimeInfo;
-  backend?: DoctorBackendInfo;
+  runtime?: ToolchainComponent;
+  backend?: ToolchainComponent;
   /** Verbatim computeModeAvailability output — matches list_supported_languages */
   modes?: LanguageModes;
-  /** Raw validate() details plus doctor-only extras */
+  /** Raw validate() details, verbatim */
   details?: Record<string, unknown>;
   probe: { durationMs: number; timedOut: boolean; failed: boolean };
 }
@@ -86,8 +83,6 @@ export interface DiagnoseDeps {
   timeoutMs: number;
   version: string;
   logger?: ILogger;
-  /** Doctor-only extras collector; injectable for tests. Defaults to collectDoctorExtras. */
-  collectExtras?: (language: string, details: Record<string, unknown>) => Promise<Record<string, unknown>>;
 }
 
 class ProbeTimeoutError extends Error {
@@ -118,8 +113,6 @@ const GATING_VERDICTS: ReadonlySet<DoctorVerdict> = new Set(['broken', 'missing'
 export async function diagnose(requested: string[], deps: DiagnoseDeps): Promise<DoctorReport> {
   const env = deps.env ?? process.env;
   const platform = deps.platform ?? process.platform;
-  const collectExtras =
-    deps.collectExtras ?? ((language, details) => collectDoctorExtras(language, details));
 
   const entries = await deps.registry.listAvailableAdapters();
   const knownNames = new Set(entries.map((entry) => entry.name));
@@ -128,7 +121,7 @@ export async function diagnose(requested: string[], deps: DiagnoseDeps): Promise
   const disabledSet = getDisabledLanguages(env);
 
   const languages = await Promise.all(
-    entries.map((entry) => diagnoseLanguage(entry, disabledSet, deps, collectExtras))
+    entries.map((entry) => diagnoseLanguage(entry, disabledSet, deps))
   );
 
   const platformChecks: PlatformCheckResult[] = [
@@ -163,8 +156,7 @@ export async function diagnose(requested: string[], deps: DiagnoseDeps): Promise
 async function diagnoseLanguage(
   entry: RegistryAdapterEntry,
   disabledSet: Set<string>,
-  deps: DiagnoseDeps,
-  collectExtras: (language: string, details: Record<string, unknown>) => Promise<Record<string, unknown>>
+  deps: DiagnoseDeps
 ): Promise<LanguageDiagnosis> {
   const probeStarted = Date.now();
   // The validate/extras budget clock starts when validate actually runs, so a
@@ -280,26 +272,32 @@ async function diagnoseLanguage(
   const failed = probeError !== undefined && !timedOut;
   const modes = probe.modes;
 
-  let details = validation?.details ? { ...validation.details } : undefined;
-  if (validation) {
-    // Extras share the language's timeout budget: whatever validate() left
-    // over (clocked from validate start, so factory-import time is excluded).
-    // A hung extras child is flagged via probe.timedOut so the handler's
-    // force-exit containment covers it too.
+  const details = validation?.details ? { ...validation.details } : undefined;
+  // Adapter-owned presentation (issue #435): the factory renders its own
+  // runtime/backend row from the validate() result — including valid:false,
+  // so partially detected toolchains still show what IS there. It shares the
+  // language's timeout budget: whatever validate() left over (clocked from
+  // validate start, so factory-import time is excluded). A hung probe child
+  // is flagged via probe.timedOut so the handler's force-exit containment
+  // covers it too.
+  let view: ToolchainDescription = {};
+  if (validation && typeof probe.factory.describeToolchain === 'function') {
     const remainingMs = Math.max(0, deps.timeoutMs - (Date.now() - validateStarted));
     try {
-      const extras = await withTimeout(collectExtras(entry.name, details ?? {}), remainingMs);
-      if (extras && Object.keys(extras).length > 0) {
-        details = { ...(details ?? {}), ...extras };
-      }
+      view = normalizeToolchainDescription(
+        await withTimeout(
+          probe.factory.describeToolchain(validation, { timeoutMs: remainingMs }),
+          remainingMs
+        )
+      );
     } catch (error) {
-      // Extras are best-effort; the verdict stands on validate() alone.
+      // Presentation is best-effort; the verdict stands on validate() alone.
       if (error instanceof ProbeTimeoutError) {
         timedOut = true;
       }
     }
   }
-  // Validate + extras — the toolchain's own cost, excluding the module import
+  // Validate + presentation — the toolchain's own cost, excluding the module import
   const durationMs = Date.now() - validateStarted;
 
   let verdict: DoctorVerdict;
@@ -335,8 +333,6 @@ async function diagnoseLanguage(
     errors = [];
     warnings = validation.warnings;
   }
-
-  const view = presentLanguage(entry.name, details);
 
   return {
     ...base,

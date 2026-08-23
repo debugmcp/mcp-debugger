@@ -5,11 +5,26 @@
  * Uses JDI bridge (JdiDapServer) as the underlying DAP server.
  */
 import { IDebugAdapter } from '@debugmcp/shared';
-import { IAdapterFactory, AdapterDependencies, AdapterMetadata, FactoryValidationResult } from '@debugmcp/shared';
+import { IAdapterFactory, AdapterDependencies, AdapterMetadata, FactoryValidationResult, ToolchainDescription } from '@debugmcp/shared';
+import { toolchainComponent } from '@debugmcp/shared';
 import { JavaDebugAdapter } from './java-debug-adapter.js';
 import { DebugLanguage } from '@debugmcp/shared';
 import { findJavaExecutable, getJavaVersion } from './utils/java-utils.js';
 import { resolveJdiBridgeClassDir } from './utils/jdi-resolver.js';
+
+/**
+ * The details shape validate() emits and describeToolchain() reads — keeping
+ * producer and consumer on one alias makes key renames compiler-checked
+ * within this package (issue #435).
+ */
+type JavaToolchainDetails = {
+  javaPath?: string;
+  javaVersion?: string;
+  jdiBridgeDir?: string;
+  platform: string;
+  arch: string;
+  timestamp: string;
+};
 
 /**
  * Factory for creating Java debug adapters
@@ -78,18 +93,32 @@ export class JavaAdapterFactory implements IAdapterFactory {
       errors.push('Java not found. Install JDK 21+ from https://adoptium.net/');
     }
 
+    const details: JavaToolchainDetails = {
+      javaPath,
+      javaVersion,
+      jdiBridgeDir,
+      platform: process.platform,
+      arch: process.arch,
+      timestamp: new Date().toISOString()
+    };
     return {
       valid: errors.length === 0,
       errors,
       warnings,
-      details: {
-        javaPath,
-        javaVersion,
-        jdiBridgeDir,
-        platform: process.platform,
-        arch: process.arch,
-        timestamp: new Date().toISOString()
-      }
+      details
+    };
+  }
+
+  /**
+   * Doctor row (issue #435): rendered entirely from validate() details — no
+   * extra probes (the old doctor-only javac lookup was never rendered and
+   * was dropped with the extras mechanism).
+   */
+  async describeToolchain(validation: FactoryValidationResult): Promise<ToolchainDescription> {
+    const details = (validation.details ?? {}) as Partial<JavaToolchainDetails>;
+    return {
+      runtime: toolchainComponent({ label: 'Java', path: details.javaPath, version: details.javaVersion }),
+      backend: toolchainComponent({ label: 'JDI bridge', path: details.jdiBridgeDir })
     };
   }
 }

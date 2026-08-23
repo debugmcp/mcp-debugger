@@ -9,15 +9,29 @@
 import type { IDebugAdapter } from '@debugmcp/shared';
 import {
   AdapterFactory as BaseAdapterFactory,
+  toolchainComponent,
   type AdapterDependencies,
   type AdapterMetadata,
-  type FactoryValidationResult
+  type FactoryValidationResult,
+  type ToolchainDescription
 } from '@debugmcp/shared';
 import { JavascriptDebugAdapter } from './javascript-debug-adapter.js';
 import { resolveJsDebugServer } from './utils/js-debug-resolver.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+
+/**
+ * The details shape validate() emits and describeToolchain() reads — keeping
+ * producer and consumer on one alias makes key renames compiler-checked
+ * within this package (issue #435).
+ */
+type JavascriptToolchainDetails = {
+  nodeVersion: string;
+  vendorPathChecked: string | null;
+  tsxFound: boolean;
+  tsNodeFound: boolean;
+};
 
 const metadata: AdapterMetadata = {
   language: 'javascript',
@@ -116,16 +130,34 @@ export class JavascriptAdapterFactory extends BaseAdapterFactory {
       warnings.push('No TypeScript runner found. Install tsx or ts-node for TS debugging');
     }
 
+    const details: JavascriptToolchainDetails = {
+      nodeVersion,
+      vendorPathChecked: vendorPath,
+      tsxFound,
+      tsNodeFound
+    };
     return {
       valid: errors.length === 0,
       errors,
       warnings,
-      details: {
-        nodeVersion,
-        vendorPathChecked: vendorPath,
-        tsxFound,
-        tsNodeFound
-      }
+      details
+    };
+  }
+
+  /**
+   * Doctor row (issue #435): rendered entirely from validate() details. The
+   * js-debug cell only renders when the vendored payload was actually found —
+   * a hardcoded 'vendored' badge used to show even when validate() errored
+   * "js-debug adapter not found".
+   */
+  async describeToolchain(validation: FactoryValidationResult): Promise<ToolchainDescription> {
+    const details = (validation.details ?? {}) as Partial<JavascriptToolchainDetails>;
+    return {
+      runtime: toolchainComponent({ label: 'Node.js', version: details.nodeVersion }),
+      backend: toolchainComponent({
+        label: 'js-debug',
+        source: typeof details.vendorPathChecked === 'string' && details.vendorPathChecked.length > 0 ? 'vendored' : undefined
+      })
     };
   }
 

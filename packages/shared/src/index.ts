@@ -70,7 +70,12 @@ export type {
   
   // Validation
   FactoryValidationResult,
-  
+
+  // Doctor presentation (issue #435)
+  ToolchainComponent,
+  ToolchainDescription,
+  DescribeToolchainOptions,
+
   // Utility types
   AdapterFactoryMap,
   ActiveAdapterMap
@@ -233,6 +238,8 @@ export {
 } from './utils/secret-redaction.js';
 export type { SecretRule, RedactionHit, RedactionResult } from './utils/secret-redaction.js';
 export { LineBuffer } from './utils/line-buffer.js';
+// Doctor-row helpers for IAdapterFactory.describeToolchain (issue #435).
+export { toolchainComponent, normalizeToolchainDescription } from './utils/toolchain-description.js';
 export { toSourceBreakpoint, type BreakpointFields, toFunctionBreakpoint, type FunctionBreakpointFields } from './utils/to-source-breakpoint.js';
 // Argv marker constants shared by spawn-time tagging and the startup orphan
 // reapers (issues #343, #431).

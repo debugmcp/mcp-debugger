@@ -137,3 +137,48 @@ describe('JavascriptAdapterFactory.validate', () => {
     expect(res.warnings).not.toContain('No TypeScript runner found. Install tsx or ts-node for TS debugging');
   });
 });
+
+describe('JavascriptAdapterFactory.describeToolchain', () => {
+  const validation = (details: Record<string, unknown>) => ({
+    valid: true,
+    errors: [],
+    warnings: [],
+    details
+  });
+
+  it('renders Node.js and the vendored js-debug cells from its own validate() details', async () => {
+    const description = await new JavascriptAdapterFactory().describeToolchain(
+      validation({
+        nodeVersion: 'v22.4.0',
+        vendorPathChecked: '/pkg/vendor/js-debug/vsDebugServer.js',
+        tsxFound: true,
+        tsNodeFound: false
+      })
+    );
+
+    expect(description).toEqual({
+      runtime: { label: 'Node.js', version: 'v22.4.0' },
+      backend: { label: 'js-debug', source: 'vendored' }
+    });
+  });
+
+  it('hides the js-debug cell when the vendored payload was not found (regression: cell rendered even when validate errored)', async () => {
+    const description = await new JavascriptAdapterFactory().describeToolchain(
+      validation({ nodeVersion: 'v22.4.0', vendorPathChecked: null, tsxFound: false, tsNodeFound: false })
+    );
+
+    expect(description).toEqual({
+      runtime: { label: 'Node.js', version: 'v22.4.0' }
+    });
+  });
+
+  it('renders empty cells when validate() produced no details', async () => {
+    const description = await new JavascriptAdapterFactory().describeToolchain({
+      valid: false,
+      errors: [],
+      warnings: []
+    });
+
+    expect(description).toEqual({});
+  });
+});
