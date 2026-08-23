@@ -2,6 +2,8 @@
 
 This guide provides solutions for common issues you might encounter when setting up and using the Debug MCP Server.
 
+> **Start with `mcp-debugger doctor`** — it checks every adapter's runtime and debug backend in one pass and prints fix hints. See the [Diagnostics guide](./diagnostics.md) for the command, per-language prerequisites, and failure signatures.
+
 ## Connection Issues
 
 ### MCP Server Shows "Disconnected" in VS Code
