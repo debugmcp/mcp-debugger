@@ -17,6 +17,9 @@ vi.mock('../../src/cli/setup.js');
 vi.mock('../../src/cli/stdio-command.js');
 vi.mock('../../src/cli/sse-command.js');
 vi.mock('../../src/cli/version.js');
+vi.mock('../../src/cli/commands/doctor/index.js', () => ({
+  handleDoctorCommand: vi.fn().mockResolvedValue(1)
+}));
 
 describe('index.ts', () => {
   let mockLogger: any;
@@ -136,6 +139,30 @@ describe('index.ts', () => {
       await capturedHandler({ logLevel: 'debug' });
 
       expect(runStartupJanitor).toHaveBeenCalledTimes(1);
+    });
+
+    it('wires the doctor command, propagates its exit code, and skips the janitor (issue #423)', async () => {
+      let capturedHandler: any;
+      vi.mocked(setup.setupDoctorCommand).mockImplementation((program, handler) => {
+        capturedHandler = handler;
+      });
+      const { handleDoctorCommand } = await import('../../src/cli/commands/doctor/index.js');
+      const previousExitCode = process.exitCode;
+
+      try {
+        await main();
+
+        expect(setup.setupDoctorCommand).toHaveBeenCalledWith(mockProgram, expect.any(Function));
+
+        await capturedHandler(['python'], { json: true });
+
+        expect(handleDoctorCommand).toHaveBeenCalledWith(['python'], { json: true });
+        expect(process.exitCode).toBe(1);
+        // Doctor is a diagnostic, not a server: no orphan reaping (issue #399 contract)
+        expect(runStartupJanitor).not.toHaveBeenCalled();
+      } finally {
+        process.exitCode = previousExitCode;
+      }
     });
 
     it('should pass correct handlers to setupSSECommand', async () => {

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+﻿import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import { spawn } from 'child_process';
 import type { AdapterDependencies } from '@debugmcp/shared';
@@ -97,7 +97,7 @@ describe('JavaAdapterFactory', () => {
 
         process.nextTick(() => {
           proc.stderr.emit('data', Buffer.from('openjdk version "17.0.1" 2021-10-19\n'));
-          proc.emit('exit', 0);
+          proc.emit('exit', 0); proc.emit('close', 0);
         });
 
         return proc;
@@ -136,7 +136,7 @@ describe('JavaAdapterFactory', () => {
         proc.stderr = new EventEmitter();
         process.nextTick(() => {
           proc.stderr.emit('data', Buffer.from('openjdk version "17.0.1"\n'));
-          proc.emit('exit', 0);
+          proc.emit('exit', 0); proc.emit('close', 0);
         });
         return proc;
       });
@@ -155,7 +155,7 @@ describe('JavaAdapterFactory', () => {
         proc.stderr = new EventEmitter();
         process.nextTick(() => {
           proc.stderr.emit('data', Buffer.from('openjdk version "17.0.1"\n'));
-          proc.emit('exit', 0);
+          proc.emit('exit', 0); proc.emit('close', 0);
         });
         return proc;
       });
@@ -175,7 +175,7 @@ describe('JavaAdapterFactory', () => {
         process.nextTick(() => {
           // Simulate Java 17 which is valid but below recommended 21
           proc.stderr.emit('data', Buffer.from('openjdk version "17.0.1"\n'));
-          proc.emit('exit', 0);
+          proc.emit('exit', 0); proc.emit('close', 0);
         });
         return proc;
       });
@@ -194,7 +194,7 @@ describe('JavaAdapterFactory', () => {
         proc.stderr = new EventEmitter();
         process.nextTick(() => {
           proc.stderr.emit('data', Buffer.from('openjdk version "21.0.1"\n'));
-          proc.emit('exit', 0);
+          proc.emit('exit', 0); proc.emit('close', 0);
         });
         return proc;
       });

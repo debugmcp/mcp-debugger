@@ -20,6 +20,7 @@ import which from 'which';
 import {
   findPythonExecutable,
   getPythonVersion,
+  getDebugpyVersion,
   setDefaultCommandFinder,
   resetDefaultCommandFinder,
   CommandNotFoundError,
@@ -53,6 +54,8 @@ const createSpawn = (options: { exitCode: number; stdout?: string; stderr?: stri
       proc.stderr.emit('data', Buffer.from(options.stderr));
     }
     proc.emit('exit', options.exitCode);
+    // Real children emit 'close' after 'exit' once stdio drains
+    proc.emit('close', options.exitCode);
   });
 
   return proc;
@@ -555,6 +558,91 @@ describe('getPythonVersion', () => {
 
     const version = await getPythonVersion('/usr/bin/python3');
     expect(version).toBeNull();
+  });
+});
+
+describe('getDebugpyVersion (issue #423)', () => {
+  beforeEach(() => {
+    spawnMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('returns the printed debugpy version, trimmed', async () => {
+    spawnMock.mockImplementation(() =>
+      createSpawn({ exitCode: 0, stdout: '1.8.14\n' })
+    );
+
+    await expect(getDebugpyVersion('/usr/bin/python3')).resolves.toBe('1.8.14');
+    expect(spawnMock).toHaveBeenCalledWith(
+      '/usr/bin/python3',
+      ['-c', 'import debugpy; print(debugpy.__version__)'],
+      expect.objectContaining({ windowsHide: true })
+    );
+  });
+
+  it('returns null when the import fails (debugpy not installed)', async () => {
+    spawnMock.mockImplementation(() =>
+      createSpawn({ exitCode: 1, stderr: "ModuleNotFoundError: No module named 'debugpy'" })
+    );
+
+    await expect(getDebugpyVersion('/usr/bin/python3')).resolves.toBeNull();
+  });
+
+  it('returns null when the interpreter cannot be spawned', async () => {
+    spawnMock.mockImplementation(() =>
+      createSpawn({ exitCode: 0, error: new Error('ENOENT') })
+    );
+
+    await expect(getDebugpyVersion('/nonexistent/python')).resolves.toBeNull();
+  });
+
+  it('returns null when the command prints nothing', async () => {
+    spawnMock.mockImplementation(() => createSpawn({ exitCode: 0 }));
+
+    await expect(getDebugpyVersion('/usr/bin/python3')).resolves.toBeNull();
+  });
+
+  it("still sees stdout that arrives between 'exit' and 'close' (stdio drain race)", async () => {
+    // Node documents that stdio may still be open when 'exit' fires: the
+    // final chunk can land after it. Reading on 'close' (the ruby-utils fix)
+    // is the only safe pattern.
+    spawnMock.mockImplementation(() => {
+      const proc = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; kill: () => void };
+      proc.stdout = new EventEmitter();
+      proc.stderr = new EventEmitter();
+      proc.kill = vi.fn();
+      setImmediate(() => {
+        proc.emit('exit', 0);
+        proc.stdout.emit('data', Buffer.from('1.8.14\n'));
+        proc.emit('close', 0);
+      });
+      return proc;
+    });
+
+    await expect(getDebugpyVersion('/usr/bin/python3')).resolves.toBe('1.8.14');
+  });
+
+  it('kills a hung probe child after the guard timeout and resolves null', async () => {
+    vi.useFakeTimers();
+    const kill = vi.fn();
+    let proc!: EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; kill: typeof kill };
+    spawnMock.mockImplementation(() => {
+      proc = new EventEmitter() as typeof proc;
+      proc.stdout = new EventEmitter();
+      proc.stderr = new EventEmitter();
+      proc.kill = kill;
+      return proc;
+    });
+
+    const pending = getDebugpyVersion('/usr/bin/python3');
+    await vi.advanceTimersByTimeAsync(10_100);
+    expect(kill).toHaveBeenCalled();
+    proc.emit('close', null);
+    await expect(pending).resolves.toBeNull();
+    vi.useRealTimers();
   });
 });
 

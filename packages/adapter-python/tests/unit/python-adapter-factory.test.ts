@@ -1,29 +1,19 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import type { Mock } from 'vitest';
 import type { AdapterDependencies } from '@debugmcp/shared';
 import { DebugLanguage } from '@debugmcp/shared';
-import { EventEmitter } from 'events';
 import { PythonAdapterFactory } from '../../src/python-adapter-factory.js';
 import { PythonDebugAdapter } from '../../src/python-debug-adapter.js';
-import { findPythonExecutable, getPythonVersion } from '../../src/utils/python-utils.js';
-import { spawn } from 'child_process';
+import { findPythonExecutable, getPythonVersion, getDebugpyVersion } from '../../src/utils/python-utils.js';
 
 vi.mock('../../src/utils/python-utils.js', () => ({
   findPythonExecutable: vi.fn(),
-  getPythonVersion: vi.fn()
+  getPythonVersion: vi.fn(),
+  getDebugpyVersion: vi.fn()
 }));
-
-vi.mock('child_process', async () => {
-  const actual = await vi.importActual<typeof import('child_process')>('child_process');
-  return {
-    ...actual,
-    spawn: vi.fn()
-  };
-});
 
 const findPythonExecutableMock = vi.mocked(findPythonExecutable);
 const getPythonVersionMock = vi.mocked(getPythonVersion);
-const spawnMock = spawn as unknown as Mock;
+const getDebugpyVersionMock = vi.mocked(getDebugpyVersion);
 
 const createDependencies = (): AdapterDependencies & {
   logger: { info: () => void; debug: () => void; error: () => void };
@@ -41,35 +31,12 @@ const createDependencies = (): AdapterDependencies & {
   }
 });
 
-const simulateSpawn = (options: { output?: string; exitCode?: number; emitError?: boolean } = {}): void => {
-  const { output = '', exitCode = 0, emitError = false } = options;
-  spawnMock.mockImplementation(() => {
-    const stdout = new EventEmitter();
-    const child = new EventEmitter() as EventEmitter & { stdout: EventEmitter };
-    (child as unknown as { stdout: EventEmitter }).stdout = stdout;
-
-    queueMicrotask(() => {
-      if (emitError) {
-        child.emit('error', new Error('spawn failed'));
-        return;
-      }
-
-      if (output) {
-        stdout.emit('data', Buffer.from(output));
-      }
-      child.emit('exit', exitCode ?? 0);
-    });
-
-    return child as unknown as ReturnType<typeof spawn>;
-  });
-};
-
 describe('PythonAdapterFactory', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     findPythonExecutableMock.mockReset();
     getPythonVersionMock.mockReset();
-    spawnMock.mockReset();
+    getDebugpyVersionMock.mockReset();
   });
 
   it('creates PythonDebugAdapter instances with provided dependencies', () => {
@@ -97,7 +64,7 @@ describe('PythonAdapterFactory', () => {
   it('validates environment when Python and debugpy are available', async () => {
     findPythonExecutableMock.mockResolvedValue('/usr/bin/python3');
     getPythonVersionMock.mockResolvedValue('3.10.1');
-    simulateSpawn({ output: '1.8.1', exitCode: 0 });
+    getDebugpyVersionMock.mockResolvedValue('1.8.1');
 
     const factory = new PythonAdapterFactory();
     const result = await factory.validate();
@@ -108,6 +75,7 @@ describe('PythonAdapterFactory', () => {
     expect(result.details).toMatchObject({
       pythonPath: '/usr/bin/python3',
       pythonVersion: '3.10.1',
+      debugpyVersion: '1.8.1',
       platform: process.platform
     });
   });
@@ -125,7 +93,7 @@ describe('PythonAdapterFactory', () => {
   it('reports error when Python version is below 3.7', async () => {
     findPythonExecutableMock.mockResolvedValue('/usr/bin/python3');
     getPythonVersionMock.mockResolvedValue('3.6.9');
-    simulateSpawn({ output: '1.6.0', exitCode: 0 });
+    getDebugpyVersionMock.mockResolvedValue('1.6.0');
 
     const factory = new PythonAdapterFactory();
     const result = await factory.validate();
@@ -137,7 +105,7 @@ describe('PythonAdapterFactory', () => {
   it('warns when Python version cannot be determined', async () => {
     findPythonExecutableMock.mockResolvedValue('/usr/bin/python3');
     getPythonVersionMock.mockResolvedValue(undefined);
-    simulateSpawn({ output: '1.6.0', exitCode: 0 });
+    getDebugpyVersionMock.mockResolvedValue('1.6.0');
 
     const factory = new PythonAdapterFactory();
     const result = await factory.validate();
@@ -147,23 +115,10 @@ describe('PythonAdapterFactory', () => {
     expect(result.warnings).toContain('Could not determine Python version');
   });
 
-  it('warns (not errors) when debugpy detection fails with exit code', async () => {
+  it('warns (not errors) when debugpy detection fails', async () => {
     findPythonExecutableMock.mockResolvedValue('/usr/bin/python3');
     getPythonVersionMock.mockResolvedValue('3.10.1');
-    simulateSpawn({ output: '', exitCode: 1 });
-
-    const factory = new PythonAdapterFactory();
-    const result = await factory.validate();
-
-    expect(result.valid).toBe(true);
-    expect(result.errors).toEqual([]);
-    expect(result.warnings.some(w => w.includes('debugpy'))).toBe(true);
-  });
-
-  it('warns (not errors) when debugpy spawn emits an error', async () => {
-    findPythonExecutableMock.mockResolvedValue('/usr/bin/python3');
-    getPythonVersionMock.mockResolvedValue('3.10.1');
-    simulateSpawn({ emitError: true });
+    getDebugpyVersionMock.mockResolvedValue(null);
 
     const factory = new PythonAdapterFactory();
     const result = await factory.validate();
@@ -179,7 +134,7 @@ describe('PythonAdapterFactory', () => {
     // return valid:true with a warning, NOT block adapter registration.
     findPythonExecutableMock.mockResolvedValue('/usr/bin/python3');
     getPythonVersionMock.mockResolvedValue('3.11.0');
-    simulateSpawn({ output: '', exitCode: 1 }); // debugpy not installed
+    getDebugpyVersionMock.mockResolvedValue(null); // debugpy not installed
 
     const factory = new PythonAdapterFactory();
     const result = await factory.validate();

@@ -1,6 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Command } from 'commander';
-import { createCLI, setupStdioCommand, setupSSECommand, setupHttpCommand } from '../../../src/cli/setup.js';
+import {
+  createCLI,
+  setupStdioCommand,
+  setupSSECommand,
+  setupHttpCommand,
+  setupDoctorCommand
+} from '../../../src/cli/setup.js';
 
 describe('CLI Setup', () => {
   describe('createCLI', () => {
@@ -193,6 +199,59 @@ describe('CLI Setup', () => {
     });
   });
 
+  describe('setupDoctorCommand', () => {
+    it('should configure doctor command with variadic languages and options', () => {
+      const program = new Command();
+      const mockHandler = vi.fn();
+
+      setupDoctorCommand(program, mockHandler);
+
+      const doctorCommand = program.commands.find(cmd => cmd.name() === 'doctor');
+
+      expect(doctorCommand).toBeDefined();
+      expect(doctorCommand?.description()).toContain('toolchain');
+
+      const options = doctorCommand?.options || [];
+      const jsonOption = options.find(opt => opt.long === '--json');
+      const timeoutOption = options.find(opt => opt.long === '--timeout');
+
+      expect(jsonOption).toBeDefined();
+      expect(jsonOption?.defaultValue).toBe(false);
+      expect(timeoutOption).toBeDefined();
+      expect(timeoutOption?.defaultValue).toBe('10000');
+    });
+
+    it('should pass requested languages and parsed options to the handler', async () => {
+      const program = new Command();
+      const mockHandler = vi.fn().mockResolvedValue(undefined);
+
+      setupDoctorCommand(program, mockHandler);
+
+      await program.parseAsync(['node', 'test', 'doctor', 'python', 'go', '--json']);
+
+      expect(mockHandler).toHaveBeenCalledWith(
+        ['python', 'go'],
+        expect.objectContaining({ json: true, timeout: '10000' }),
+        expect.anything()
+      );
+    });
+
+    it('should pass an empty language list when none are requested', async () => {
+      const program = new Command();
+      const mockHandler = vi.fn().mockResolvedValue(undefined);
+
+      setupDoctorCommand(program, mockHandler);
+
+      await program.parseAsync(['node', 'test', 'doctor']);
+
+      expect(mockHandler).toHaveBeenCalledWith(
+        [],
+        expect.objectContaining({ json: false, timeout: '10000' }),
+        expect.anything()
+      );
+    });
+  });
+
   describe('Integration', () => {
     it('should set stdio as default command', async () => {
       const program = new Command();
@@ -207,6 +266,20 @@ describe('CLI Setup', () => {
 
       expect(stdioHandler).toHaveBeenCalled();
       expect(sseHandler).not.toHaveBeenCalled();
+    });
+
+    it('should keep stdio as the default when doctor is registered', async () => {
+      const program = new Command();
+      const stdioHandler = vi.fn().mockResolvedValue(undefined);
+      const doctorHandler = vi.fn().mockResolvedValue(undefined);
+
+      setupStdioCommand(program, stdioHandler);
+      setupDoctorCommand(program, doctorHandler);
+
+      await program.parseAsync(['node', 'test']);
+
+      expect(stdioHandler).toHaveBeenCalled();
+      expect(doctorHandler).not.toHaveBeenCalled();
     });
   });
 });

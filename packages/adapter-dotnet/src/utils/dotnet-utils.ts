@@ -200,6 +200,77 @@ export async function findDotnetBackend(
   return { backend: 'netcoredbg', path: netcoredbgPath };
 }
 
+/** Upper bound for a single toolchain probe child before it is killed. */
+const PROBE_KILL_TIMEOUT_MS = 10_000;
+
+/**
+ * Run a --version-style probe, resolving with drained stdout on 'close'
+ * (never 'exit' — the final chunk can arrive after it), killing the child if
+ * it hangs past the guard timeout. Null on spawn failure or non-zero exit.
+ */
+function runVersionProbe(command: string, args: string[]): Promise<string | null> {
+  return new Promise((resolve) => {
+    try {
+      const child = spawn(command, args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true
+      });
+      let output = '';
+      child.stdout?.on('data', (data) => { output += data.toString(); });
+
+      const killTimer = setTimeout(() => {
+        try { child.kill(); } catch { /* already gone */ }
+      }, PROBE_KILL_TIMEOUT_MS);
+      killTimer.unref?.();
+
+      child.on('error', () => {
+        clearTimeout(killTimer);
+        resolve(null);
+      });
+      child.on('close', (code) => {
+        clearTimeout(killTimer);
+        resolve(code === 0 ? output : null);
+      });
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+/**
+ * Report the version of a netcoredbg executable, or null when it cannot be
+ * spawned or exits non-zero. Extracts the version token from output like
+ * "NET Core debugger 3.1.2-1054"; falls back to the first non-empty output
+ * line for builds that print a different banner. Doctor-only probe (issue
+ * #423) — not called from validate(), so registration cost is unchanged.
+ */
+export async function getNetcoredbgVersion(netcoredbgPath: string): Promise<string | null> {
+  const output = await runVersionProbe(netcoredbgPath, ['--version']);
+  if (output === null) {
+    return null;
+  }
+  const match = output.match(/(\d+\.\d+\.\d+(?:-[\w.]+)?)/);
+  if (match) {
+    return match[1];
+  }
+  const firstLine = output.split(/\r?\n/).map((line) => line.trim()).find((line) => line.length > 0);
+  return firstLine ?? null;
+}
+
+/**
+ * Report the active .NET SDK version (`dotnet --version`), or null when the
+ * dotnet CLI is missing or reports an error (e.g. no SDK behind a bare
+ * runtime install). Doctor-only probe (issue #423).
+ */
+export async function getDotnetSdkVersion(): Promise<string | null> {
+  const output = await runVersionProbe('dotnet', ['--version']);
+  if (output === null) {
+    return null;
+  }
+  const version = output.trim().split(/\r?\n/)[0]?.trim() ?? '';
+  return version.length > 0 ? version : null;
+}
+
 /**
  * List running .NET processes on the system.
  * Currently Windows-only using tasklist.

@@ -201,11 +201,19 @@ export function resolveCodeLLDBExecutableSyncImpl(options?: {
 }
 
 /**
- * Resolve the CodeLLDB executable path based on platform
+ * Which resolution stage produced the CodeLLDB executable (issue #423).
+ * Reported by `mcp-debugger doctor` so users can see whether they are running
+ * a vendored copy, an explicit CODELLDB_PATH override, or a platform package.
  */
-export async function resolveCodeLLDBExecutable(options?: {
+export type CodeLLDBSource = 'vendored' | 'env:CODELLDB_PATH' | 'platform-package';
+
+/**
+ * Resolve the CodeLLDB executable and report which stage of the documented
+ * order (vendored → CODELLDB_PATH → platform package) produced it.
+ */
+export async function resolveCodeLLDBExecutableWithSource(options?: {
   resolvePlatformPackageRoot?: (platformDir: string) => string | null;
-}): Promise<string | null> {
+}): Promise<{ path: string; source: CodeLLDBSource } | null> {
   const resolvePlatformPackageRoot =
     options?.resolvePlatformPackageRoot ?? resolveCodeLLDBPlatformPackageRoot;
 
@@ -224,7 +232,7 @@ export async function resolveCodeLLDBExecutable(options?: {
   for (const candidate of candidatePaths) {
     try {
       await fs.access(candidate, fsConstants.F_OK);
-      return candidate;
+      return { path: candidate, source: 'vendored' };
     } catch {
       // Try next candidate
     }
@@ -236,7 +244,7 @@ export async function resolveCodeLLDBExecutable(options?: {
   if (process.env.CODELLDB_PATH) {
     try {
       await fs.access(process.env.CODELLDB_PATH, fsConstants.F_OK);
-      return process.env.CODELLDB_PATH;
+      return { path: process.env.CODELLDB_PATH, source: 'env:CODELLDB_PATH' };
     } catch {
       // Fall through
     }
@@ -250,13 +258,23 @@ export async function resolveCodeLLDBExecutable(options?: {
     const candidate = path.join(platformPackageRoot, 'adapter', getCodeLLDBExecutableName(process.platform));
     try {
       await fs.access(candidate, fsConstants.F_OK);
-      return candidate;
+      return { path: candidate, source: 'platform-package' };
     } catch {
       // Fall through
     }
   }
 
   return null;
+}
+
+/**
+ * Resolve the CodeLLDB executable path based on platform
+ */
+export async function resolveCodeLLDBExecutable(options?: {
+  resolvePlatformPackageRoot?: (platformDir: string) => string | null;
+}): Promise<string | null> {
+  const resolved = await resolveCodeLLDBExecutableWithSource(options);
+  return resolved?.path ?? null;
 }
 
 /**

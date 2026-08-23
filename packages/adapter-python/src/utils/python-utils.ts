@@ -277,27 +277,17 @@ async function isValidPythonExecutable(pythonCmd: string, logger: Logger = noopL
 }
 
 /**
- * Check if a Python executable has debugpy installed
+ * Check if a Python executable has debugpy installed. Delegates to the shared
+ * getDebugpyVersion probe so the spawn command cannot drift between callers.
+ * (PythonDebugAdapter.checkDebugpyInstalled keeps its own cached copy for now
+ * — its tests replace this module wholesale.)
  */
 async function hasDebugpy(pythonPath: string, logger: Logger = noopLogger): Promise<boolean> {
-  return new Promise((resolve) => {
-    const child = spawn(pythonPath, ['-c', 'import debugpy; print(debugpy.__version__)'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true
-    });
-    
-    let output = '';
-    child.stdout?.on('data', (data) => { output += data.toString(); });
-    
-    child.on('error', () => resolve(false));
-    child.on('exit', (code) => {
-      const hasIt = code === 0 && output.trim().length > 0;
-      if (hasIt) {
-        logger.debug?.(`[Python Detection] debugpy version: ${sanitizeStderrTail(output)}`);
-      }
-      resolve(hasIt);
-    });
-  });
+  const version = await getDebugpyVersion(pythonPath);
+  if (version !== null) {
+    logger.debug?.(`[Python Detection] debugpy version: ${sanitizeStderrTail(version)}`);
+  }
+  return version !== null;
 }
 
 /**
@@ -488,6 +478,49 @@ export async function findPythonExecutable(
 /**
  * Get Python version for a given executable
  */
+/** Upper bound for a single toolchain probe child before it is killed. */
+const PROBE_KILL_TIMEOUT_MS = 10_000;
+
+/**
+ * Report the debugpy version importable by the given interpreter, or null when
+ * debugpy is missing (or the interpreter cannot be spawned). Null is not fatal:
+ * debugpy may still be available in the user's virtualenv (issue #16).
+ *
+ * Reads output on 'close' (not 'exit') so stdio is fully drained, and kills
+ * the child if it hangs past the guard timeout — probes must never strand
+ * processes (Development Guidelines #8).
+ */
+export async function getDebugpyVersion(pythonPath: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    try {
+      const child = spawn(pythonPath, ['-c', 'import debugpy; print(debugpy.__version__)'], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true
+      });
+
+      let output = '';
+      child.stdout?.on('data', (data) => { output += data.toString(); });
+
+      const killTimer = setTimeout(() => {
+        try { child.kill(); } catch { /* already gone */ }
+      }, PROBE_KILL_TIMEOUT_MS);
+      killTimer.unref?.();
+
+      child.on('error', () => {
+        clearTimeout(killTimer);
+        resolve(null);
+      });
+      child.on('close', (code) => {
+        clearTimeout(killTimer);
+        const version = output.trim();
+        resolve(code === 0 && version.length > 0 ? version : null);
+      });
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
 export async function getPythonVersion(pythonPath: string): Promise<string | null> {
   return new Promise((resolve) => {
     const child = spawn(pythonPath, ['--version'], { stdio: 'pipe', windowsHide: true });

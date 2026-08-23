@@ -17,9 +17,10 @@ export {
   buildVendorCandidatePaths,
   resolveCodeLLDBExecutableSyncImpl,
   resolveCodeLLDBExecutable,
+  resolveCodeLLDBExecutableWithSource,
   getCodeLLDBVersion
 } from './codelldb-resolver.js';
-export type { CodeLLDBPlatformDir } from './codelldb-resolver.js';
+export type { CodeLLDBPlatformDir, CodeLLDBSource } from './codelldb-resolver.js';
 
 export { detectBinaryFormat } from './binary-detector.js';
 export type { BinaryInfo } from './binary-detector.js';

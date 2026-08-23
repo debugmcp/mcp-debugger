@@ -62,6 +62,8 @@ import {
   getExeArchitecture,
   getProcessArchitecture,
   getProcessExecutablePath,
+  getNetcoredbgVersion,
+  getDotnetSdkVersion,
   CommandNotFoundError
 } from '../../src/utils/dotnet-utils.js';
 
@@ -75,6 +77,15 @@ type ChildProcessMock = EventEmitter & {
 const spawnMock = spawn as unknown as vi.Mock;
 const spawnSyncMock = spawnSync as unknown as vi.Mock;
 const whichMock = which as unknown as vi.Mock;
+
+const createSpawnShell = (): ChildProcessMock => {
+  const proc = new EventEmitter() as ChildProcessMock;
+  proc.stdout = new EventEmitter();
+  proc.stderr = new EventEmitter();
+  proc.stdin = new EventEmitter();
+  proc.kill = vi.fn();
+  return proc;
+};
 
 const createSpawn = (options: { exitCode: number; stdout?: string; stderr?: string; error?: Error }) => {
   const proc = new EventEmitter() as ChildProcessMock;
@@ -95,10 +106,107 @@ const createSpawn = (options: { exitCode: number; stdout?: string; stderr?: stri
       proc.stderr.emit('data', Buffer.from(options.stderr));
     }
     proc.emit('exit', options.exitCode);
+    // Real children emit 'close' after 'exit' once stdio drains
+    proc.emit('close', options.exitCode);
   });
 
   return proc;
 };
+
+describe('getNetcoredbgVersion (issue #423)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('extracts the version token from netcoredbg --version output', async () => {
+    spawnMock.mockImplementation(() =>
+      createSpawn({ exitCode: 0, stdout: 'NET Core debugger 3.1.2-1054\n\nCopyright (c) 2020 Samsung Electronics Co., LTD\n' })
+    );
+
+    await expect(getNetcoredbgVersion('/opt/netcoredbg/netcoredbg')).resolves.toBe('3.1.2-1054');
+    expect(spawnMock).toHaveBeenCalledWith(
+      '/opt/netcoredbg/netcoredbg',
+      ['--version'],
+      expect.objectContaining({ windowsHide: true })
+    );
+  });
+
+  it('falls back to the first non-empty output line when no version token matches', async () => {
+    spawnMock.mockImplementation(() =>
+      createSpawn({ exitCode: 0, stdout: '\ncustom development build\n' })
+    );
+
+    await expect(getNetcoredbgVersion('/opt/netcoredbg/netcoredbg')).resolves.toBe('custom development build');
+  });
+
+  it('returns null on a non-zero exit code', async () => {
+    spawnMock.mockImplementation(() => createSpawn({ exitCode: 1, stderr: 'boom' }));
+
+    await expect(getNetcoredbgVersion('/opt/netcoredbg/netcoredbg')).resolves.toBeNull();
+  });
+
+  it('returns null when the executable cannot be spawned', async () => {
+    spawnMock.mockImplementation(() => createSpawn({ exitCode: 0, error: new Error('ENOENT') }));
+
+    await expect(getNetcoredbgVersion('/missing/netcoredbg')).resolves.toBeNull();
+  });
+
+  it("still sees stdout that arrives between 'exit' and 'close' (stdio drain race)", async () => {
+    spawnMock.mockImplementation(() => {
+      const proc = createSpawnShell();
+      setImmediate(() => {
+        proc.emit('exit', 0);
+        proc.stdout.emit('data', Buffer.from('NET Core debugger 3.1.2-1054\n'));
+        proc.emit('close', 0);
+      });
+      return proc;
+    });
+
+    await expect(getNetcoredbgVersion('/opt/netcoredbg/netcoredbg')).resolves.toBe('3.1.2-1054');
+  });
+
+  it('kills a hung probe child after the guard timeout and resolves null', async () => {
+    vi.useFakeTimers();
+    const proc = createSpawnShell();
+    spawnMock.mockImplementation(() => proc);
+
+    const pending = getNetcoredbgVersion('/opt/netcoredbg/netcoredbg');
+    await vi.advanceTimersByTimeAsync(10_100);
+    expect(proc.kill).toHaveBeenCalled();
+    proc.emit('close', null);
+    await expect(pending).resolves.toBeNull();
+    vi.useRealTimers();
+  });
+});
+
+describe('getDotnetSdkVersion (issue #423)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns the trimmed dotnet --version output', async () => {
+    spawnMock.mockImplementation(() => createSpawn({ exitCode: 0, stdout: '8.0.301\n' }));
+
+    await expect(getDotnetSdkVersion()).resolves.toBe('8.0.301');
+    expect(spawnMock).toHaveBeenCalledWith(
+      'dotnet',
+      ['--version'],
+      expect.objectContaining({ windowsHide: true })
+    );
+  });
+
+  it('returns null when the dotnet CLI is not installed', async () => {
+    spawnMock.mockImplementation(() => createSpawn({ exitCode: 0, error: new Error('ENOENT') }));
+
+    await expect(getDotnetSdkVersion()).resolves.toBeNull();
+  });
+
+  it('returns null on a non-zero exit code', async () => {
+    spawnMock.mockImplementation(() => createSpawn({ exitCode: 145, stderr: 'A compatible .NET SDK was not found.' }));
+
+    await expect(getDotnetSdkVersion()).resolves.toBeNull();
+  });
+});
 
 describe('CommandNotFoundError', () => {
   it('creates error with command property', () => {

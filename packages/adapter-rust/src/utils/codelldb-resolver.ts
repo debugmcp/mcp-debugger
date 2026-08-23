@@ -15,6 +15,7 @@ export {
   buildVendorCandidatePaths,
   resolveCodeLLDBExecutableSyncImpl,
   resolveCodeLLDBExecutable,
+  resolveCodeLLDBExecutableWithSource,
   getCodeLLDBVersion
 } from '@debugmcp/codelldb-common';
-export type { CodeLLDBPlatformDir } from '@debugmcp/codelldb-common';
+export type { CodeLLDBPlatformDir, CodeLLDBSource } from '@debugmcp/codelldb-common';

@@ -15,7 +15,9 @@ export {
   dialectForSource,
   findCompiler,
   findAnyCompiler,
+  getCompilerInfo,
   getDefaultOutputPath,
   needsRecompile,
   compileSourceFile
 } from './utils/compile-utils.js';
+export type { CompilerInfo } from './utils/compile-utils.js';

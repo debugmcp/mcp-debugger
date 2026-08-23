@@ -13,6 +13,7 @@ import type { AdapterConfig, AdapterDependencies } from '@debugmcp/shared';
 vi.mock('@debugmcp/codelldb-common', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   resolveCodeLLDBExecutable: vi.fn(),
+  resolveCodeLLDBExecutableWithSource: vi.fn(),
   resolveCodeLLDBExecutableSyncImpl: vi.fn(),
   getCodeLLDBVersion: vi.fn(),
   detectBinaryFormat: vi.fn(),
@@ -29,6 +30,7 @@ vi.mock('../src/utils/compile-utils.js', async (importOriginal) => ({
 
 import {
   resolveCodeLLDBExecutable,
+  resolveCodeLLDBExecutableWithSource,
   resolveCodeLLDBExecutableSyncImpl,
   getCodeLLDBVersion,
   detectBinaryFormat,
@@ -420,6 +422,7 @@ describe('CppDebugAdapter', () => {
 describe('CppAdapterFactory', () => {
   beforeEach(() => {
     vi.mocked(resolveCodeLLDBExecutable).mockReset();
+    vi.mocked(resolveCodeLLDBExecutableWithSource).mockReset();
     vi.mocked(getCodeLLDBVersion).mockReset();
     vi.mocked(findAnyCompiler).mockReset();
   });
@@ -436,9 +439,12 @@ describe('CppAdapterFactory', () => {
     expect(adapter.language).toBe(DebugLanguage.CPP);
   });
 
-  it('validate reports the discovered compiler in details when everything is present', async () => {
+  it('validate reports the discovered compiler and CodeLLDB source in details when everything is present', async () => {
     const factory = new CppAdapterFactory();
-    vi.mocked(resolveCodeLLDBExecutable).mockResolvedValue('/vendor/codelldb');
+    vi.mocked(resolveCodeLLDBExecutableWithSource).mockResolvedValue({
+      path: '/vendor/codelldb',
+      source: 'vendored'
+    });
     vi.mocked(getCodeLLDBVersion).mockResolvedValue('1.11.8');
     vi.mocked(findAnyCompiler).mockResolvedValue('clang++');
 
@@ -449,6 +455,7 @@ describe('CppAdapterFactory', () => {
     expect(result.details).toMatchObject({
       codelldbPath: '/vendor/codelldb',
       codelldbVersion: '1.11.8',
+      codelldbSource: 'vendored',
       compiler: 'clang++'
     });
   });
@@ -456,17 +463,21 @@ describe('CppAdapterFactory', () => {
   it('validate errors without CodeLLDB and warns without a compiler', async () => {
     const factory = new CppAdapterFactory();
 
-    vi.mocked(resolveCodeLLDBExecutable).mockResolvedValue(null);
+    vi.mocked(resolveCodeLLDBExecutableWithSource).mockResolvedValue(null);
     vi.mocked(findAnyCompiler).mockResolvedValue(null);
     let result = await factory.validate();
     expect(result.valid).toBe(false);
     expect(result.errors[0]).toMatch(/CodeLLDB/);
 
-    vi.mocked(resolveCodeLLDBExecutable).mockResolvedValue('/vendor/codelldb');
+    vi.mocked(resolveCodeLLDBExecutableWithSource).mockResolvedValue({
+      path: '/vendor/codelldb',
+      source: 'env:CODELLDB_PATH'
+    });
     vi.mocked(getCodeLLDBVersion).mockResolvedValue('1.11.8');
     vi.mocked(findAnyCompiler).mockResolvedValue(null);
     result = await factory.validate();
     expect(result.valid).toBe(true);
     expect(result.warnings[0]).toMatch(/compiler/i);
+    expect(result.details).toMatchObject({ codelldbSource: 'env:CODELLDB_PATH' });
   });
 });

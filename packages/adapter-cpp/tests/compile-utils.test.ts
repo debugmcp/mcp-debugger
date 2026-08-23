@@ -22,12 +22,13 @@ import {
   dialectForSource,
   findCompiler,
   findAnyCompiler,
+  getCompilerInfo,
   getDefaultOutputPath,
   needsRecompile,
   compileSourceFile
 } from '../src/utils/compile-utils.js';
 
-function fakeProcess(exitCode: number, stderr = ''): EventEmitter & { stdout: EventEmitter; stderr: EventEmitter } {
+function fakeProcess(exitCode: number, stderr = '', stdout = ''): EventEmitter & { stdout: EventEmitter; stderr: EventEmitter } {
   const proc = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter };
   proc.stdout = new EventEmitter();
   proc.stderr = new EventEmitter();
@@ -35,8 +36,21 @@ function fakeProcess(exitCode: number, stderr = ''): EventEmitter & { stdout: Ev
     if (stderr) {
       proc.stderr.emit('data', Buffer.from(stderr));
     }
+    if (stdout) {
+      proc.stdout.emit('data', Buffer.from(stdout));
+    }
     proc.emit('exit', exitCode);
+    // Real children emit 'close' after 'exit' once stdio drains
+    proc.emit('close', exitCode);
   });
+  return proc;
+}
+
+function erroringProcess(): EventEmitter & { stdout: EventEmitter; stderr: EventEmitter } {
+  const proc = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter };
+  proc.stdout = new EventEmitter();
+  proc.stderr = new EventEmitter();
+  setImmediate(() => proc.emit('error', new Error('ENOENT')));
   return proc;
 }
 
@@ -128,6 +142,85 @@ describe('compile-utils', () => {
         .mockImplementationOnce(() => fakeProcess(0));
 
       await expect(findAnyCompiler()).resolves.toBe('gcc');
+    });
+  });
+
+  describe('getCompilerInfo (issue #423)', () => {
+    it('returns the discovered command and the first line of its --version output', async () => {
+      spawnMock
+        .mockImplementationOnce(() => fakeProcess(0))  // findAnyCompiler probe: g++ answers
+        .mockImplementationOnce(() =>
+          fakeProcess(0, '', 'g++ (MinGW-w64 x86_64-posix-seh) 13.2.0\nCopyright (C) 2023 Free Software Foundation\n')
+        );
+
+      await expect(getCompilerInfo()).resolves.toEqual({
+        command: 'g++',
+        version: 'g++ (MinGW-w64 x86_64-posix-seh) 13.2.0'
+      });
+    });
+
+    it('returns null when no compiler is installed', async () => {
+      spawnMock.mockImplementation(() => fakeProcess(1)); // every candidate probe fails
+
+      await expect(getCompilerInfo()).resolves.toBeNull();
+    });
+
+    it('returns a null version when the --version re-run fails after discovery', async () => {
+      spawnMock
+        .mockImplementationOnce(() => fakeProcess(0))    // probe succeeds
+        .mockImplementationOnce(() => erroringProcess()); // version capture fails
+
+      await expect(getCompilerInfo()).resolves.toEqual({ command: 'g++', version: null });
+    });
+
+    it('skips candidate discovery when the command is already known', async () => {
+      spawnMock.mockImplementationOnce(() =>
+        fakeProcess(0, '', 'clang++ version 17.0.1\n')
+      );
+
+      await expect(getCompilerInfo('clang++')).resolves.toEqual({
+        command: 'clang++',
+        version: 'clang++ version 17.0.1'
+      });
+      expect(spawnMock).toHaveBeenCalledTimes(1);
+      expect(spawnMock.mock.calls[0][0]).toBe('clang++');
+    });
+
+    it("still sees stdout that arrives between 'exit' and 'close' (stdio drain race)", async () => {
+      spawnMock.mockImplementationOnce(() => {
+        const proc = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; kill: () => void };
+        proc.stdout = new EventEmitter();
+        proc.stderr = new EventEmitter();
+        proc.kill = vi.fn();
+        setImmediate(() => {
+          proc.emit('exit', 0);
+          proc.stdout.emit('data', Buffer.from('g++ 13.2.0\n'));
+          proc.emit('close', 0);
+        });
+        return proc;
+      });
+
+      await expect(getCompilerInfo('g++')).resolves.toEqual({ command: 'g++', version: 'g++ 13.2.0' });
+    });
+
+    it('kills a hung version capture after the guard timeout', async () => {
+      vi.useFakeTimers();
+      const kill = vi.fn();
+      let proc!: EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; kill: typeof kill };
+      spawnMock.mockImplementationOnce(() => {
+        proc = new EventEmitter() as typeof proc;
+        proc.stdout = new EventEmitter();
+        proc.stderr = new EventEmitter();
+        proc.kill = kill;
+        return proc;
+      });
+
+      const pending = getCompilerInfo('g++');
+      await vi.advanceTimersByTimeAsync(10_100);
+      expect(kill).toHaveBeenCalled();
+      proc.emit('close', null);
+      await expect(pending).resolves.toEqual({ command: 'g++', version: null });
+      vi.useRealTimers();
     });
   });
 

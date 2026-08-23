@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+﻿import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { spawn } from 'child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -42,7 +42,7 @@ describe('python-utils', () => {
       proc.stderr = new EventEmitter();
 
       // Default to successful validation
-      process.nextTick(() => proc.emit('exit', 0));
+      process.nextTick(() => { proc.emit('exit', 0); proc.emit('close', 0); });
 
       return proc;
     });
@@ -121,14 +121,14 @@ describe('python-utils', () => {
             if (hasDebugpyCallCount === 1) {
               process.nextTick(() => {
                 proc.stdout.emit('data', Buffer.from('1.8.0'));
-                proc.emit('exit', 0);
+                proc.emit('exit', 0); proc.emit('close', 0);
               });
             } else {
-              process.nextTick(() => proc.emit('exit', 1));
+              process.nextTick(() => { proc.emit('exit', 1); proc.emit('close', 1); });
             }
           } else {
             // Regular validation check
-            process.nextTick(() => proc.emit('exit', 0));
+            process.nextTick(() => { proc.emit('exit', 0); proc.emit('close', 0); });
           }
           
           return proc;
@@ -222,7 +222,7 @@ describe('python-utils', () => {
           proc.stderr = new EventEmitter();
           
           // Default to successful validation
-          process.nextTick(() => proc.emit('exit', 0));
+          process.nextTick(() => { proc.emit('exit', 0); proc.emit('close', 0); });
           
           return proc;
         });
@@ -260,14 +260,14 @@ describe('python-utils', () => {
             if (cmd === 'C:\\Windows\\py.exe') {
               process.nextTick(() => {
                 proc.stdout.emit('data', Buffer.from('1.8.0'));
-                proc.emit('exit', 0);
+                proc.emit('exit', 0); proc.emit('close', 0);
               });
             } else {
-              process.nextTick(() => proc.emit('exit', 1));
+              process.nextTick(() => { proc.emit('exit', 1); proc.emit('close', 1); });
             }
           } else {
             // Regular validation check
-            process.nextTick(() => proc.emit('exit', 0));
+            process.nextTick(() => { proc.emit('exit', 0); proc.emit('close', 0); });
           }
           
           return proc;
@@ -298,10 +298,10 @@ describe('python-utils', () => {
             // Simulate Windows Store alias behavior
             process.nextTick(() => {
               proc.stderr.emit('data', Buffer.from('Python was not found; run without arguments to install from the Microsoft Store'));
-              proc.emit('exit', 9009);
+              proc.emit('exit', 9009); proc.emit('close', 9009);
             });
           } else {
-            process.nextTick(() => proc.emit('exit', 0));
+            process.nextTick(() => { proc.emit('exit', 0); proc.emit('close', 0); });
           }
           
           return proc;
@@ -327,7 +327,7 @@ describe('python-utils', () => {
         if (args?.[0] === '--version') {
           process.nextTick(() => {
             proc.stdout.emit('data', Buffer.from('Python 3.11.5\n'));
-            proc.emit('exit', 0);
+            proc.emit('exit', 0); proc.emit('close', 0);
           });
         }
         
@@ -347,7 +347,7 @@ describe('python-utils', () => {
         if (args?.[0] === '--version') {
           process.nextTick(() => {
             proc.stderr.emit('data', Buffer.from('Python 3.9.0'));
-            proc.emit('exit', 0);
+            proc.emit('exit', 0); proc.emit('close', 0);
           });
         }
         
@@ -376,7 +376,7 @@ describe('python-utils', () => {
         const proc = new EventEmitter() as any;
         proc.stdout = new EventEmitter();
         proc.stderr = new EventEmitter();
-        process.nextTick(() => proc.emit('exit', 1));
+        process.nextTick(() => { proc.emit('exit', 1); proc.emit('close', 1); });
         return proc;
       });
 
@@ -393,7 +393,7 @@ describe('python-utils', () => {
         if (args?.[0] === '--version') {
           process.nextTick(() => {
             proc.stdout.emit('data', Buffer.from('Custom Python Build'));
-            proc.emit('exit', 0);
+            proc.emit('exit', 0); proc.emit('close', 0);
           });
         }
         

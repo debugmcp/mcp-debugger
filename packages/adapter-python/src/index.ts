@@ -10,6 +10,7 @@ export { PythonDebugAdapter } from './python-debug-adapter.js';
 export {
   findPythonExecutable,
   getPythonVersion,
+  getDebugpyVersion,
   setDefaultCommandFinder,
   resetDefaultCommandFinder,
   CommandNotFoundError
