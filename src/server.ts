@@ -2048,7 +2048,7 @@ export class DebugMcpServer {
                   ? args.names.filter(name => !variables.some(v => v.name === name))
                   : undefined;
                 const truncationInfo = truncation
-                  ? { ...truncation, notice: buildTruncationNotice(truncation) }
+                  ? { ...truncation, notice: buildTruncationNotice(truncation, variables) }
                   : undefined;
                 result = { content: [{ type: 'text', text: JSON.stringify({ success: true, variables, count: variables.length, variablesReference: args.scope, ...(notFound !== undefined ? { notFound } : {}), ...(redaction ? { redaction } : {}), ...(truncationInfo ? { truncation: truncationInfo } : {}) }) }] };
               } catch (error) {
@@ -2709,7 +2709,7 @@ export class DebugMcpServer {
       if (result.truncation) {
         response.truncation = {
           ...result.truncation,
-          notice: buildTruncationNotice(result.truncation)
+          notice: buildTruncationNotice(result.truncation, result.variables)
         };
       }
 

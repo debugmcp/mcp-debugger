@@ -951,6 +951,113 @@ describe('SessionManager - DAP Operations', () => {
       expect(result.truncation!.scopesSkipped ?? 0).toBeGreaterThan(0);
     });
 
+    it('reports no truncation when only discarded fan-out scopes were cut (issue #438)', async () => {
+      const session = await createPausedSession();
+
+      // Global's huge values get cut during the fan-out fetch, but the
+      // policy narrows the payload to the Local scope — so the response
+      // contains only complete values and must not claim anything was cut.
+      const globalVars = Array.from({ length: 5 }, (_, i) => ({
+        name: `G${i}`, value: 'z'.repeat(5000), type: 'string', variablesReference: 0
+      }));
+
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(
+        async (command: string, args?: { variablesReference?: number }) => {
+          switch (command) {
+            case 'stackTrace':
+              return {
+                success: true,
+                body: { stackFrames: [{ id: 1, name: 'main', source: { path: 'a.js' }, line: 3, column: 1 }] }
+              };
+            case 'scopes':
+              return {
+                success: true,
+                body: {
+                  scopes: [
+                    { name: 'Local', variablesReference: 500, expensive: false },
+                    { name: 'Global', variablesReference: 600, expensive: true }
+                  ]
+                }
+              };
+            case 'variables':
+              return args?.variablesReference === 600
+                ? { success: true, body: { variables: globalVars } }
+                : {
+                    success: true,
+                    body: {
+                      variables: [
+                        { name: 'a', value: '1', type: 'number', variablesReference: 0 },
+                        { name: 'b', value: '2', type: 'number', variablesReference: 0 }
+                      ]
+                    }
+                  };
+            default:
+              return { success: true };
+          }
+        }
+      );
+
+      const result = await sessionManager.getLocalVariables(session.id);
+
+      expect(result.variables.map(v => v.name)).toEqual(['a', 'b']);
+      expect(result.variables.every(v => v.truncated !== true)).toBe(true);
+      expect(result.truncation).toBeUndefined();
+    });
+
+    it('still counts cuts in the returned scope while excluding discarded scopes (issue #438)', async () => {
+      const session = await createPausedSession();
+
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(
+        async (command: string, args?: { variablesReference?: number }) => {
+          switch (command) {
+            case 'stackTrace':
+              return {
+                success: true,
+                body: { stackFrames: [{ id: 1, name: 'main', source: { path: 'a.js' }, line: 3, column: 1 }] }
+              };
+            case 'scopes':
+              return {
+                success: true,
+                body: {
+                  scopes: [
+                    { name: 'Local', variablesReference: 500, expensive: false },
+                    { name: 'Global', variablesReference: 600, expensive: true }
+                  ]
+                }
+              };
+            case 'variables':
+              return args?.variablesReference === 600
+                ? {
+                    success: true,
+                    body: {
+                      variables: Array.from({ length: 5 }, (_, i) => ({
+                        name: `G${i}`, value: 'z'.repeat(5000), type: 'string', variablesReference: 0
+                      }))
+                    }
+                  }
+                : {
+                    success: true,
+                    body: {
+                      variables: [
+                        { name: 'big', value: 'y'.repeat(5000), type: 'string', variablesReference: 0 },
+                        { name: 'small', value: 'ok', type: 'string', variablesReference: 0 }
+                      ]
+                    }
+                  };
+            default:
+              return { success: true };
+          }
+        }
+      );
+
+      const result = await sessionManager.getLocalVariables(session.id);
+
+      // The Local cut is real (the caller received a sliced value flagged
+      // truncated:true); the 5 Global cuts never reached the caller.
+      expect(result.variables.find(v => v.name === 'big')?.truncated).toBe(true);
+      expect(result.truncation).toEqual({ omittedCount: 0, valueTruncatedCount: 1 });
+    });
+
     it('extracts Go locals and reports the real scope name when Delve appends the optimized-function warning', async () => {
       const session = await sessionManager.createSession({
         language: DebugLanguage.GO,
