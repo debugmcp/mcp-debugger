@@ -11,11 +11,14 @@ const MAX_LISTED_MATCHES = 20;
 
 /**
  * How an expectedContent assertion matched (issue #379): 'exact' is trimmed
- * whole-line equality; anything else is a relaxed match the caller should
- * surface as a warning — the #367 tolerance deliberately accepts lines the
- * expectation only partially pins down.
+ * whole-line equality, and 'comment-stripped-exact' is its exact-equivalent
+ * — the expectation is the entire code of the line, the line merely carries
+ * a trailing comment (issue #440); neither warrants a warning. The remaining
+ * qualities are relaxed matches the caller should surface as a warning — the
+ * #367 tolerance deliberately accepts lines the expectation only partially
+ * pins down.
  */
-export type ContentMatchQuality = 'exact' | 'substring' | 'comment-stripped';
+export type ContentMatchQuality = 'exact' | 'comment-stripped-exact' | 'substring' | 'comment-stripped';
 
 export type LineContentAssertion =
   | { ok: true; matchQuality: ContentMatchQuality; actual: string }
@@ -67,9 +70,11 @@ export function stripTrailingComment(line: string): string {
 
 /**
  * Check that `line` contains the expected content. Accepted, in order:
- * exact trimmed-line equality, then the trimmed expectation as a substring
- * of the actual line, then as a substring of the comment-stripped actual
- * line — so trailing comments and partial-line anchors both work.
+ * exact trimmed-line equality, then exact equality against the
+ * comment-stripped actual line (the expectation is the line's entire code,
+ * issue #440), then the trimmed expectation as a substring of the actual
+ * line, then as a substring of the comment-stripped actual line — so
+ * trailing comments and partial-line anchors both work.
  * On mismatch the message shows expected vs actual plus surrounding context
  * so the agent can pick the correct line without another read.
  */
@@ -102,16 +107,29 @@ export function assertLineContent(
 
   const expected = expectedContent.trim();
   const actual = lines[line - 1].trim();
-  // Exact trimmed match, then substring of the actual line. Then retry with
-  // trailing comments stripped from BOTH sides: stripping only the actual
-  // line would be redundant (a stripped prefix is always a substring of the
-  // full line) — the strip earns its keep when the EXPECTATION carries a
-  // stale trailing comment the file no longer has. Every relaxed pass is
-  // labeled so callers can warn (issue #379): the substring clause has no
-  // distinctiveness floor, and the naive strip collapses lines that differ
-  // only past a '//' or '#' — even inside string literals.
+  // Exact trimmed match, then comment-stripped-exact (whole code of a
+  // commented line, #440), then substring of the actual line. Then retry
+  // substring with trailing comments stripped from BOTH sides: stripping
+  // only the actual line would be redundant (a stripped prefix is always a
+  // substring of the full line) — the strip earns its keep when the
+  // EXPECTATION carries a stale trailing comment the file no longer has.
+  // Every relaxed pass is labeled so callers can warn (issue #379): the
+  // substring clause has no distinctiveness floor, and the naive strip
+  // collapses lines that differ only past a '//' or '#' — even inside
+  // string literals.
   if (actual === expected) {
     return { ok: true, matchQuality: 'exact', actual };
+  }
+  // Whole-code match on a line that merely carries a trailing comment
+  // (issue #440): exact-equivalent, no warning. The expectation-side guard
+  // (strip must be a no-op on the expectation) is load-bearing — without it
+  // the naive strip would collapse lines that differ only inside a string
+  // literal ("http://a" vs "http://b") into a clean match.
+  if (
+    stripTrailingComment(expectedContent).trim() === expected &&
+    stripTrailingComment(lines[line - 1]).trim() === expected
+  ) {
+    return { ok: true, matchQuality: 'comment-stripped-exact', actual };
   }
   if (actual.includes(expected)) {
     return { ok: true, matchQuality: 'substring', actual };

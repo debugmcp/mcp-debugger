@@ -27,7 +27,7 @@ vi.mock('../../../../src/container/dependencies.js');
 
 const PY_FILE = [
   'def total_cart():',
-  '    prices = load()',
+  '    prices = load()  # fetch cart',
   '    total = sum(prices)',
   '    return total',
   '',
@@ -150,6 +150,19 @@ describe('set_breakpoint expectedContent (#271)', () => {
     const result = await callSetBreakpoint({
       line: 3,
       expectedContent: 'total = sum(prices)'
+    });
+
+    const content = JSON.parse(result.content[0].text);
+    expect(content.success).toBe(true);
+    expect(content.warning).toBeUndefined();
+  });
+
+  it('emits no warning when the line differs only by a trailing comment (issue #440)', async () => {
+    // Full code of the line, minus the trailing '#' comment: an exact
+    // whole-code match must not trigger the low-confidence advisory.
+    const result = await callSetBreakpoint({
+      line: 2,
+      expectedContent: 'prices = load()'
     });
 
     const content = JSON.parse(result.content[0].text);

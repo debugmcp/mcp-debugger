@@ -87,7 +87,7 @@ describe('assertLineContent', () => {
     );
     expect(gainedComment).toEqual({
       ok: true,
-      matchQuality: 'substring',
+      matchQuality: 'comment-stripped-exact',
       actual: 'total = sum(prices)  # recompute'
     });
     const staleComment = assertLineContent(
@@ -97,6 +97,32 @@ describe('assertLineContent', () => {
       ok: true,
       matchQuality: 'comment-stripped',
       actual: 'total = sum(prices)'
+    });
+  });
+
+  it('classifies a full-code expectation on a commented line as exact-equivalent (issue #440)', () => {
+    // The caller supplied everything on the line except the trailing
+    // comment — after stripping it is a whole-line match, so it must NOT
+    // carry a warn-worthy quality ('substring'/'comment-stripped').
+    const slashes = assertLineContent(
+      ['        int sum = add(x, y);                       // line 24'],
+      1, 'int sum = add(x, y);', FILE
+    );
+    expect(slashes).toEqual({
+      ok: true,
+      matchQuality: 'comment-stripped-exact',
+      actual: 'int sum = add(x, y);                       // line 24'
+    });
+  });
+
+  it('still labels a partial-code match on a commented line as substring (issue #440)', () => {
+    const result = assertLineContent(
+      ['    total = sum(prices)  # recompute'], 1, 'sum(prices)', FILE
+    );
+    expect(result).toEqual({
+      ok: true,
+      matchQuality: 'substring',
+      actual: 'total = sum(prices)  # recompute'
     });
   });
 
