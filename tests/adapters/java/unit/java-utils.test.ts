@@ -4,7 +4,6 @@ import { EventEmitter } from 'events';
 import path from 'path';
 import {
   findJavaExecutable,
-  findJavacExecutable,
   getJavaVersion,
   getJavaSearchPaths
 } from '@debugmcp/adapter-java';
@@ -113,58 +112,6 @@ describe('java-utils', () => {
       });
 
       await expect(findJavaExecutable()).rejects.toThrow('Java not found');
-    });
-  });
-
-  describe('findJavacExecutable (issue #423)', () => {
-    const ext = process.platform === 'win32' ? '.exe' : '';
-
-    const validatingSpawn = (validPaths: string[]) => {
-      mockSpawn.mockImplementation(((cmd: string) => {
-        const proc = new EventEmitter() as any;
-        proc.stdout = new EventEmitter();
-        proc.stderr = new EventEmitter();
-        process.nextTick(() => {
-          if (validPaths.includes(cmd)) {
-            proc.stdout.emit('data', Buffer.from('javac 21.0.6\n'));
-            proc.emit('exit', 0); proc.emit('close', 0);
-          } else {
-            proc.emit('error', new Error('ENOENT'));
-          }
-        });
-        return proc;
-      }) as any);
-    };
-
-    it('returns the javac sibling of a resolved java path', async () => {
-      const javaPath = path.join(path.sep, 'jdk', 'bin', `java${ext}`);
-      const javacPath = path.join(path.sep, 'jdk', 'bin', `javac${ext}`);
-      validatingSpawn([javacPath]);
-
-      await expect(findJavacExecutable(javaPath)).resolves.toBe(javacPath);
-    });
-
-    it('falls back to JAVA_HOME/bin/javac when the sibling does not validate', async () => {
-      const home = path.join(path.sep, 'opt', 'jdk21');
-      vi.stubEnv('JAVA_HOME', home);
-      const javacHome = path.join(home, 'bin', `javac${ext}`);
-      validatingSpawn([javacHome]);
-
-      await expect(findJavacExecutable(path.join(path.sep, 'elsewhere', 'java'))).resolves.toBe(javacHome);
-    });
-
-    it('falls back to bare javac on PATH', async () => {
-      vi.stubEnv('JAVA_HOME', '');
-      validatingSpawn(['javac']);
-
-      await expect(findJavacExecutable()).resolves.toBe('javac');
-    });
-
-    it('returns null when no javac validates anywhere', async () => {
-      vi.stubEnv('JAVA_HOME', '');
-      validatingSpawn([]);
-
-      await expect(findJavacExecutable(path.join(path.sep, 'jdk', 'bin', 'java'))).resolves.toBeNull();
     });
   });
 

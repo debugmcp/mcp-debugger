@@ -5,12 +5,13 @@
  * 
  * @since 2.0.0
  */
-import type { 
-  IAdapterFactory, 
+import type {
+  IAdapterFactory,
   AdapterDependencies,
   AdapterMetadata,
   FactoryValidationResult,
-  IDebugAdapter
+  IDebugAdapter,
+  ToolchainDescription
 } from '@debugmcp/shared';
 import { MockDebugAdapter, MockAdapterConfig } from './mock-debug-adapter.js';
 import { DebugLanguage } from '@debugmcp/shared';
@@ -68,6 +69,17 @@ export class MockAdapterFactory implements IAdapterFactory {
         platform: process.platform,
         config: this.config
       }
+    };
+  }
+
+  /**
+   * Doctor row (issue #435): nothing external to detect — the standalone
+   * '(built-in)' labels render by design.
+   */
+  async describeToolchain(_validation: FactoryValidationResult): Promise<ToolchainDescription> {
+    return {
+      runtime: { label: '(built-in)' },
+      backend: { label: '(built-in)' }
     };
   }
 }

@@ -5,11 +5,27 @@
  * Implements the adapter factory interface for dependency injection.
  */
 import { IDebugAdapter } from '@debugmcp/shared';
-import { IAdapterFactory, AdapterDependencies, AdapterMetadata, FactoryValidationResult } from '@debugmcp/shared';
+import { IAdapterFactory, AdapterDependencies, AdapterMetadata, FactoryValidationResult, ToolchainDescription, DescribeToolchainOptions } from '@debugmcp/shared';
+import { toolchainComponent, probeWithinBudget } from '@debugmcp/shared';
 import { CppDebugAdapter } from './cpp-debug-adapter.js';
 import { DebugLanguage } from '@debugmcp/shared';
 import { resolveCodeLLDBExecutableWithSource, getCodeLLDBVersion } from '@debugmcp/codelldb-common';
-import { findAnyCompiler } from './utils/compile-utils.js';
+import { findAnyCompiler, getCompilerInfo } from './utils/compile-utils.js';
+
+/**
+ * The details shape validate() emits and describeToolchain() reads — keeping
+ * producer and consumer on one alias makes key renames compiler-checked
+ * within this package (issue #435).
+ */
+type CppToolchainDetails = {
+  codelldbPath?: string;
+  codelldbVersion?: string;
+  codelldbSource?: string;
+  compiler?: string;
+  platform: string;
+  arch: string;
+  timestamp: string;
+};
 
 /**
  * Factory for creating C/C++ debug adapters
@@ -70,19 +86,54 @@ export class CppAdapterFactory implements IAdapterFactory {
       compiler = foundCompiler;
     }
 
+    const details: CppToolchainDetails = {
+      codelldbPath,
+      codelldbVersion,
+      codelldbSource,
+      compiler,
+      platform: process.platform,
+      arch: process.arch,
+      timestamp: new Date().toISOString()
+    };
     return {
       valid: errors.length === 0,
       errors,
       warnings,
-      details: {
-        codelldbPath,
-        codelldbVersion,
-        codelldbSource,
-        compiler,
-        platform: process.platform,
-        arch: process.arch,
-        timestamp: new Date().toISOString()
-      }
+      details
+    };
+  }
+
+  /**
+   * Doctor row (issue #435): reuses the validate()-discovered compiler
+   * command instead of re-probing the whole candidate list; the --version
+   * banner already names the command, so the bare command only shows when no
+   * banner was captured (including when the probe fails or outlives the
+   * advisory budget — probeWithinBudget guarantees this method resolves
+   * before the caller's hard timeout would blank the row).
+   */
+  async describeToolchain(
+    validation: FactoryValidationResult,
+    options?: DescribeToolchainOptions
+  ): Promise<ToolchainDescription> {
+    const details = (validation.details ?? {}) as Partial<CppToolchainDetails>;
+    const compiler = details.compiler;
+    let compilerVersion: string | undefined;
+    if (compiler) {
+      const info = await probeWithinBudget(options?.timeoutMs, () => getCompilerInfo(compiler));
+      compilerVersion = info?.version ?? undefined;
+    }
+    return {
+      runtime: toolchainComponent({
+        label: 'C/C++ compiler',
+        path: compilerVersion ? undefined : details.compiler,
+        version: compilerVersion
+      }),
+      backend: toolchainComponent({
+        label: 'CodeLLDB',
+        path: details.codelldbPath,
+        version: details.codelldbVersion,
+        source: details.codelldbSource
+      })
     };
   }
 }

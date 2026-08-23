@@ -86,36 +86,6 @@ export async function validateJavaExecutable(javaPath: string): Promise<boolean>
 }
 
 /**
- * Find a working javac executable, or null when none validates.
- *
- * Priority: sibling of the resolved java path > JAVA_HOME/bin/javac > 'javac'
- * in PATH. Doctor-only probe (issue #423): javac is required to compile
- * target code with -g for variable inspection, but the adapter itself only
- * needs the JRE side, so this is never part of validate().
- */
-export async function findJavacExecutable(javaPath?: string): Promise<string | null> {
-  /* istanbul ignore next -- platform-specific executable extension */
-  const ext = process.platform === 'win32' ? '.exe' : '';
-  const candidates: string[] = [];
-
-  if (javaPath && path.dirname(javaPath) !== '.') {
-    candidates.push(path.join(path.dirname(javaPath), `javac${ext}`));
-  }
-  if (process.env.JAVA_HOME) {
-    candidates.push(path.join(process.env.JAVA_HOME, 'bin', `javac${ext}`));
-  }
-  candidates.push('javac');
-
-  for (const candidate of new Set(candidates)) {
-    // javac answers `-version` exactly like java — reuse the shared probe
-    if (await validateJavaExecutable(candidate)) {
-      return candidate;
-    }
-  }
-  return null;
-}
-
-/**
  * Get the Java version string.
  */
 export async function getJavaVersion(javaPath?: string): Promise<string | null> {

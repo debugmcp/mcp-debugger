@@ -6,17 +6,20 @@
  * factory.validate() per installed language, computeModeAvailability() —
  * so doctor's launch/attach availability can never disagree with the
  * server. Doctor adds what the server deliberately omits: per-probe
- * timeouts, doctor-only extras, host-platform checks, and an honest
- * verdict where the server fails open (recorded via probe.failed /
- * probe.timedOut so the divergence is visible).
+ * timeouts, adapter-owned presentation (describeToolchain), host-platform
+ * checks, and an honest verdict where the server fails open (recorded via
+ * probe.failed / probe.timedOut so the divergence is visible).
  */
 import type {
   AttachMechanism,
   IAdapterFactory,
   IEnvironment,
   IFileSystem,
-  ILogger
+  ILogger,
+  ToolchainComponent,
+  ToolchainDescription
 } from '@debugmcp/shared';
+import { normalizeToolchainDescription } from '@debugmcp/shared';
 import { probeLanguageEntry, type LanguageModes } from '../../../utils/language-availability.js';
 import { getDisabledLanguages } from '../../../utils/language-config.js';
 import {
@@ -24,12 +27,6 @@ import {
   checkYamaPtraceScope,
   type PlatformCheckResult
 } from './platform-checks.js';
-import {
-  collectDoctorExtras,
-  presentLanguage,
-  type DoctorBackendInfo,
-  type DoctorRuntimeInfo
-} from './presenters.js';
 import { isContainerMode } from '../../../utils/container-path-utils.js';
 
 export type DoctorVerdict = 'ok' | 'warn' | 'missing' | 'disabled' | 'broken';
@@ -42,11 +39,11 @@ export interface LanguageDiagnosis {
   verdict: DoctorVerdict;
   errors: string[];
   warnings: string[];
-  runtime?: DoctorRuntimeInfo;
-  backend?: DoctorBackendInfo;
+  runtime?: ToolchainComponent;
+  backend?: ToolchainComponent;
   /** Verbatim computeModeAvailability output — matches list_supported_languages */
   modes?: LanguageModes;
-  /** Raw validate() details plus doctor-only extras */
+  /** Raw validate() details, verbatim */
   details?: Record<string, unknown>;
   probe: { durationMs: number; timedOut: boolean; failed: boolean };
 }
@@ -86,8 +83,6 @@ export interface DiagnoseDeps {
   timeoutMs: number;
   version: string;
   logger?: ILogger;
-  /** Doctor-only extras collector; injectable for tests. Defaults to collectDoctorExtras. */
-  collectExtras?: (language: string, details: Record<string, unknown>) => Promise<Record<string, unknown>>;
 }
 
 class ProbeTimeoutError extends Error {
@@ -100,7 +95,10 @@ class ProbeTimeoutError extends Error {
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new ProbeTimeoutError(timeoutMs)), timeoutMs);
-    promise.then(
+    // Promise.resolve: a plain-JS factory can return a non-thenable from
+    // describeToolchain; `.then` on it would throw inside this executor,
+    // discarding the value and leaving the timer armed to stall the CLI.
+    Promise.resolve(promise).then(
       (value) => {
         clearTimeout(timer);
         resolve(value);
@@ -118,8 +116,6 @@ const GATING_VERDICTS: ReadonlySet<DoctorVerdict> = new Set(['broken', 'missing'
 export async function diagnose(requested: string[], deps: DiagnoseDeps): Promise<DoctorReport> {
   const env = deps.env ?? process.env;
   const platform = deps.platform ?? process.platform;
-  const collectExtras =
-    deps.collectExtras ?? ((language, details) => collectDoctorExtras(language, details));
 
   const entries = await deps.registry.listAvailableAdapters();
   const knownNames = new Set(entries.map((entry) => entry.name));
@@ -128,7 +124,7 @@ export async function diagnose(requested: string[], deps: DiagnoseDeps): Promise
   const disabledSet = getDisabledLanguages(env);
 
   const languages = await Promise.all(
-    entries.map((entry) => diagnoseLanguage(entry, disabledSet, deps, collectExtras))
+    entries.map((entry) => diagnoseLanguage(entry, disabledSet, deps))
   );
 
   const platformChecks: PlatformCheckResult[] = [
@@ -163,8 +159,7 @@ export async function diagnose(requested: string[], deps: DiagnoseDeps): Promise
 async function diagnoseLanguage(
   entry: RegistryAdapterEntry,
   disabledSet: Set<string>,
-  deps: DiagnoseDeps,
-  collectExtras: (language: string, details: Record<string, unknown>) => Promise<Record<string, unknown>>
+  deps: DiagnoseDeps
 ): Promise<LanguageDiagnosis> {
   const probeStarted = Date.now();
   // The validate/extras budget clock starts when validate actually runs, so a
@@ -280,32 +275,59 @@ async function diagnoseLanguage(
   const failed = probeError !== undefined && !timedOut;
   const modes = probe.modes;
 
-  let details = validation?.details ? { ...validation.details } : undefined;
+  const details = validation?.details ? { ...validation.details } : undefined;
+  // Snapshot the verdict inputs before any adapter-owned code runs: the
+  // factory is plain JS and receives only a defensive clone below, so a buggy
+  // (or malicious) describeToolchain cannot mutate its way past a broken
+  // verdict or blank the reported errors.
+  const verdictInputs = validation
+    ? { valid: validation.valid, errors: [...validation.errors], warnings: [...validation.warnings] }
+    : undefined;
+
+  // Adapter-owned presentation (issue #435): the factory renders its own
+  // runtime/backend row from the validate() result — including valid:false,
+  // so partially detected toolchains still show what IS there. It shares the
+  // language's timeout budget: whatever validate() left over (clocked from
+  // validate start, so factory-import time is excluded). A hung probe child
+  // is flagged via probe.timedOut so the handler's force-exit containment
+  // covers it too.
+  let view: ToolchainDescription = {};
+  let describeMissing = false;
   if (validation) {
-    // Extras share the language's timeout budget: whatever validate() left
-    // over (clocked from validate start, so factory-import time is excluded).
-    // A hung extras child is flagged via probe.timedOut so the handler's
-    // force-exit containment covers it too.
-    const remainingMs = Math.max(0, deps.timeoutMs - (Date.now() - validateStarted));
-    try {
-      const extras = await withTimeout(collectExtras(entry.name, details ?? {}), remainingMs);
-      if (extras && Object.keys(extras).length > 0) {
-        details = { ...(details ?? {}), ...extras };
+    if (typeof probe.factory.describeToolchain === 'function') {
+      const remainingMs = Math.max(0, deps.timeoutMs - (Date.now() - validateStarted));
+      try {
+        view = normalizeToolchainDescription(
+          await withTimeout(
+            probe.factory.describeToolchain(
+              {
+                valid: validation.valid,
+                errors: [...validation.errors],
+                warnings: [...validation.warnings],
+                ...(validation.details ? { details: { ...validation.details } } : {})
+              },
+              { timeoutMs: remainingMs }
+            ),
+            remainingMs
+          )
+        );
+      } catch (error) {
+        // Presentation is best-effort; the verdict stands on validate() alone.
+        if (error instanceof ProbeTimeoutError) {
+          timedOut = true;
+        }
       }
-    } catch (error) {
-      // Extras are best-effort; the verdict stands on validate() alone.
-      if (error instanceof ProbeTimeoutError) {
-        timedOut = true;
-      }
+    } else {
+      describeMissing = true;
     }
   }
-  // Validate + extras — the toolchain's own cost, excluding the module import
+  // Validate + presentation — the toolchain's own cost, excluding the module import
   const durationMs = Date.now() - validateStarted;
 
   let verdict: DoctorVerdict;
   let errors: string[];
   let warnings: string[];
-  if (!validation) {
+  if (!verdictInputs) {
     verdict = 'broken';
     errors = [
       timedOut
@@ -313,30 +335,40 @@ async function diagnoseLanguage(
         : `Toolchain probe failed: ${probeError instanceof Error ? probeError.message : String(probeError)}`
     ];
     warnings = [];
-  } else if (!validation.valid) {
+  } else if (!verdictInputs.valid) {
     // A failed toolchain probe kills launch, but direct-connect attach runs
     // the debug engine inside the debuggee and needs nothing local (container
     // ruby is attach-only by design) — a partially usable adapter is a warn,
     // not broken, and must not fail a gated run.
     if (modes.attach.available) {
       verdict = 'warn';
-      errors = validation.errors;
+      errors = verdictInputs.errors;
       warnings = [
-        ...validation.warnings,
+        ...verdictInputs.warnings,
         `Launch is unavailable, but attach (direct-connect) still works — see the errors above for what launch would need.`
       ];
     } else {
       verdict = 'broken';
-      errors = validation.errors;
-      warnings = validation.warnings;
+      errors = verdictInputs.errors;
+      warnings = verdictInputs.warnings;
     }
   } else {
-    verdict = validation.warnings.length > 0 ? 'warn' : 'ok';
+    verdict = verdictInputs.warnings.length > 0 ? 'warn' : 'ok';
     errors = [];
-    warnings = validation.warnings;
+    warnings = verdictInputs.warnings;
   }
 
-  const view = presentLanguage(entry.name, details);
+  if (describeMissing) {
+    // Display-only breadcrumb (appended after the verdict is computed so an
+    // older adapter package never flips ok→warn): the cells are empty because
+    // the factory predates adapter-owned presentation, not because nothing
+    // was detected.
+    warnings = [
+      ...warnings,
+      `The installed ${entry.packageName} predates adapter-owned doctor presentation ` +
+        `(describeToolchain) — runtime/backend cells are left empty; update the package to restore them.`
+    ];
+  }
 
   return {
     ...base,

@@ -52,6 +52,10 @@ describe('doctor e2e smoke', () => {
     expect(report.languages).toHaveLength(9);
     const mock = report.languages.find((l: { language: string }) => l.language === 'mock');
     expect(mock.verdict).toBe('ok');
+    // Adapter-owned presentation (issue #435) survives the real built bundle:
+    // mock's describeToolchain renders the standalone '(built-in)' cells.
+    expect(mock.runtime).toEqual({ label: '(built-in)' });
+    expect(mock.backend).toEqual({ label: '(built-in)' });
     const ids = report.platformChecks.map((c: { id: string }) => c.id);
     expect(ids).toEqual(expect.arrayContaining(['container-mode', 'workspace-mount', 'yama-ptrace-scope']));
   }, 120_000);

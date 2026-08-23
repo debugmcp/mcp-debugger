@@ -7,10 +7,23 @@
  * @since 0.2.0
  */
 import { IDebugAdapter } from '@debugmcp/shared';
-import { IAdapterFactory, AdapterDependencies, AdapterMetadata, FactoryValidationResult } from '@debugmcp/shared';
+import { IAdapterFactory, AdapterDependencies, AdapterMetadata, FactoryValidationResult, ToolchainDescription, DescribeToolchainOptions } from '@debugmcp/shared';
+import { toolchainComponent, probeWithinBudget } from '@debugmcp/shared';
 import { DotnetDebugAdapter } from './DotnetDebugAdapter.js';
 import { DebugLanguage } from '@debugmcp/shared';
-import { findNetcoredbgExecutable } from './utils/dotnet-utils.js';
+import { findNetcoredbgExecutable, getNetcoredbgVersion, getDotnetSdkVersion } from './utils/dotnet-utils.js';
+
+/**
+ * The details shape validate() emits and describeToolchain() reads — keeping
+ * producer and consumer on one alias makes key renames compiler-checked
+ * within this package (issue #435).
+ */
+type DotnetToolchainDetails = {
+  debuggerPath?: string;
+  backend: string;
+  platform: string;
+  timestamp: string;
+};
 
 /**
  * Factory for creating .NET debug adapters
@@ -56,16 +69,46 @@ export class DotnetAdapterFactory implements IAdapterFactory {
       errors.push(error instanceof Error ? error.message : 'netcoredbg not found');
     }
 
+    const details: DotnetToolchainDetails = {
+      debuggerPath,
+      backend: 'netcoredbg',
+      platform: process.platform,
+      timestamp: new Date().toISOString()
+    };
     return {
       valid: errors.length === 0,
       errors,
       warnings,
-      details: {
-        debuggerPath,
-        backend: 'netcoredbg',
-        platform: process.platform,
-        timestamp: new Date().toISOString()
-      }
+      details
+    };
+  }
+
+  /**
+   * Doctor row (issue #435): the version probes that used to live in the
+   * doctor CLI's extras path run here instead, in parallel and best-effort —
+   * a failed or over-budget probe just leaves its cell field empty, and the
+   * detail-derived cells always render (probeWithinBudget guarantees this
+   * method resolves before the caller's hard timeout would blank the row).
+   */
+  async describeToolchain(
+    validation: FactoryValidationResult,
+    options?: DescribeToolchainOptions
+  ): Promise<ToolchainDescription> {
+    const details = (validation.details ?? {}) as Partial<DotnetToolchainDetails>;
+    const debuggerPath = details.debuggerPath;
+    const [netcoredbgVersion, sdkVersion] = await Promise.all([
+      debuggerPath
+        ? probeWithinBudget(options?.timeoutMs, () => getNetcoredbgVersion(debuggerPath))
+        : Promise.resolve(null),
+      probeWithinBudget(options?.timeoutMs, () => getDotnetSdkVersion())
+    ]);
+    return {
+      runtime: toolchainComponent({ label: '.NET SDK', version: sdkVersion ?? undefined }),
+      backend: toolchainComponent({
+        label: 'netcoredbg',
+        path: debuggerPath,
+        version: netcoredbgVersion ?? undefined
+      })
     };
   }
 }

@@ -3,9 +3,10 @@ import {
   IAdapterFactory,
   AdapterDependencies,
   AdapterMetadata,
-  FactoryValidationResult
+  FactoryValidationResult,
+  ToolchainDescription
 } from '@debugmcp/shared';
-import { DebugLanguage } from '@debugmcp/shared';
+import { DebugLanguage, toolchainComponent } from '@debugmcp/shared';
 import { RubyDebugAdapter } from './ruby-debug-adapter.js';
 import {
   findRubyExecutable,
@@ -13,6 +14,20 @@ import {
   findRdbgExecutable,
   getRdbgVersion
 } from './utils/ruby-utils.js';
+
+/**
+ * The details shape validate() emits and describeToolchain() reads — keeping
+ * producer and consumer on one alias makes key renames compiler-checked
+ * within this package (issue #435).
+ */
+type RubyToolchainDetails = {
+  rubyPath?: string;
+  rubyVersion?: string;
+  rdbgPath?: string;
+  rdbgVersion?: string;
+  platform: string;
+  timestamp: string;
+};
 
 export class RubyAdapterFactory implements IAdapterFactory {
   createAdapter(dependencies: AdapterDependencies): IDebugAdapter {
@@ -68,18 +83,30 @@ export class RubyAdapterFactory implements IAdapterFactory {
       errors.push(error instanceof Error ? error.message : 'rdbg not found');
     }
 
+    const details: RubyToolchainDetails = {
+      rubyPath,
+      rubyVersion,
+      rdbgPath,
+      rdbgVersion,
+      platform: process.platform,
+      timestamp: new Date().toISOString()
+    };
     return {
       valid: errors.length === 0,
       errors,
       warnings,
-      details: {
-        rubyPath,
-        rubyVersion,
-        rdbgPath,
-        rdbgVersion,
-        platform: process.platform,
-        timestamp: new Date().toISOString()
-      }
+      details
+    };
+  }
+
+  /**
+   * Doctor row (issue #435): rendered entirely from validate() details.
+   */
+  async describeToolchain(validation: FactoryValidationResult): Promise<ToolchainDescription> {
+    const details = (validation.details ?? {}) as Partial<RubyToolchainDetails>;
+    return {
+      runtime: toolchainComponent({ label: 'Ruby', path: details.rubyPath, version: details.rubyVersion }),
+      backend: toolchainComponent({ label: 'rdbg', path: details.rdbgPath, version: details.rdbgVersion })
     };
   }
 }

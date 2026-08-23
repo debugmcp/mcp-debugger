@@ -115,8 +115,12 @@ export interface LanguageAdapterEntry {
   attach?: AttachMechanism;
 }
 
-/** The structural minimum the probe needs from a factory. */
-export type ProbeableAdapterFactory = Pick<IAdapterFactory, 'validate' | 'getMetadata'>;
+/**
+ * The structural minimum the probe needs from a factory, plus the optional
+ * adapter-owned doctor presentation (issue #435) so doctor can call it on
+ * probe.factory without a re-fetch.
+ */
+export type ProbeableAdapterFactory = Pick<IAdapterFactory, 'validate' | 'getMetadata' | 'describeToolchain'>;
 
 export interface AvailabilityProbeOptions {
   /** Source of factories; absent getFactory means "cannot probe" (assume valid). */

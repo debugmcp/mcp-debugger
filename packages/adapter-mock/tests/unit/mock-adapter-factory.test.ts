@@ -64,3 +64,18 @@ describe('MockAdapterFactory', () => {
     expect(adapter.supportsFeature(DebugFeature.SET_VARIABLE)).toBe(true);
   });
 });
+
+describe('MockAdapterFactory.describeToolchain', () => {
+  it('renders standalone (built-in) cells regardless of details', async () => {
+    const description = await new MockAdapterFactory().describeToolchain({
+      valid: true,
+      errors: [],
+      warnings: []
+    });
+
+    expect(description).toEqual({
+      runtime: { label: '(built-in)' },
+      backend: { label: '(built-in)' }
+    });
+  });
+});

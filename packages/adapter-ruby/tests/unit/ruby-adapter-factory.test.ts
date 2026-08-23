@@ -91,3 +91,43 @@ describe('RubyAdapterFactory', () => {
     expect(result.warnings).toHaveLength(2);
   });
 });
+
+describe('RubyAdapterFactory.describeToolchain', () => {
+  it('renders Ruby and rdbg cells from its own validate() details', async () => {
+    const description = await new RubyAdapterFactory().describeToolchain({
+      valid: true,
+      errors: [],
+      warnings: [],
+      details: {
+        rubyPath: 'C:\\Ruby34-x64\\bin\\ruby.exe',
+        rubyVersion: '3.4.1',
+        rdbgPath: 'C:\\Ruby34-x64\\bin\\rdbg',
+        rdbgVersion: '1.11.0',
+        platform: 'win32',
+        timestamp: 'now'
+      }
+    });
+
+    expect(description).toEqual({
+      runtime: { label: 'Ruby', path: 'C:\\Ruby34-x64\\bin\\ruby.exe', version: '3.4.1' },
+      backend: { label: 'rdbg', path: 'C:\\Ruby34-x64\\bin\\rdbg', version: '1.11.0' }
+    });
+  });
+
+  it('omits undetected components and renders empty cells without details', async () => {
+    const factory = new RubyAdapterFactory();
+
+    expect(
+      await factory.describeToolchain({
+        valid: false,
+        errors: ['Ruby not found'],
+        warnings: [],
+        details: { rdbgPath: '/usr/bin/rdbg' }
+      })
+    ).toEqual({ backend: { label: 'rdbg', path: '/usr/bin/rdbg' } });
+
+    expect(
+      await factory.describeToolchain({ valid: false, errors: [], warnings: [] })
+    ).toEqual({});
+  });
+});

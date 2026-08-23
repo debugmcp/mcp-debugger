@@ -150,3 +150,56 @@ describe('PythonAdapterFactory', () => {
     });
   });
 });
+
+describe('PythonAdapterFactory.describeToolchain', () => {
+  const validation = (details: Record<string, unknown>) => ({
+    valid: true,
+    errors: [],
+    warnings: [],
+    details
+  });
+
+  it('renders Python and debugpy cells from its own validate() details', async () => {
+    const factory = new PythonAdapterFactory();
+
+    const description = await factory.describeToolchain(
+      validation({
+        pythonPath: '/usr/bin/python3',
+        pythonVersion: '3.12.1',
+        debugpyVersion: '1.8.14',
+        pythonDetectionMethod: 'multi-strategy',
+        platform: 'linux',
+        timestamp: 'now'
+      })
+    );
+
+    expect(description).toEqual({
+      runtime: { label: 'Python', path: '/usr/bin/python3', version: '3.12.1' },
+      backend: { label: 'debugpy', version: '1.8.14' }
+    });
+  });
+
+  it('omits a component that was not detected instead of naming it as if found', async () => {
+    const factory = new PythonAdapterFactory();
+
+    const description = await factory.describeToolchain(
+      validation({ pythonPath: '/usr/bin/python3' })
+    );
+
+    expect(description).toEqual({
+      runtime: { label: 'Python', path: '/usr/bin/python3' }
+    });
+  });
+
+  it('renders empty cells when validate() produced no details', async () => {
+    const factory = new PythonAdapterFactory();
+
+    const description = await factory.describeToolchain({
+      valid: false,
+      errors: ['Python executable not found'],
+      warnings: []
+    });
+
+    expect(description).toEqual({});
+  });
+});

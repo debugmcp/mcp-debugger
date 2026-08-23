@@ -206,4 +206,48 @@ describe('JavaAdapterFactory', () => {
       expect(result.warnings?.some(w => w.includes('Java 21+ recommended'))).toBeFalsy();
     });
   });
+
+  describe('describeToolchain', () => {
+    it('renders Java and JDI bridge cells from its own validate() details, with no extra probes', async () => {
+      const factory = new JavaAdapterFactory();
+
+      const description = await factory.describeToolchain({
+        valid: true,
+        errors: [],
+        warnings: [],
+        details: {
+          javaPath: '/usr/lib/jvm/temurin-21/bin/java',
+          javaVersion: '21.0.4',
+          jdiBridgeDir: '/pkg/bridge/classes',
+          platform: 'linux',
+          arch: 'x64',
+          timestamp: 'now'
+        }
+      });
+
+      expect(description).toEqual({
+        runtime: { label: 'Java', path: '/usr/lib/jvm/temurin-21/bin/java', version: '21.0.4' },
+        backend: { label: 'JDI bridge', path: '/pkg/bridge/classes' }
+      });
+      // The javac extras probe is gone (issue #435): no process is spawned.
+      expect(vi.mocked(spawn)).not.toHaveBeenCalled();
+    });
+
+    it('omits undetected components and renders empty cells without details', async () => {
+      const factory = new JavaAdapterFactory();
+
+      expect(
+        await factory.describeToolchain({
+          valid: false,
+          errors: ['Java not found. Install JDK 21+ from https://adoptium.net/'],
+          warnings: [],
+          details: { jdiBridgeDir: '/pkg/bridge/classes' }
+        })
+      ).toEqual({ backend: { label: 'JDI bridge', path: '/pkg/bridge/classes' } });
+
+      expect(
+        await factory.describeToolchain({ valid: false, errors: [], warnings: [] })
+      ).toEqual({});
+    });
+  });
 });
