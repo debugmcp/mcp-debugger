@@ -11,7 +11,10 @@ import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
 import { createProductionDependencies } from '../../../../src/container/dependencies.js';
 import { diagnose, type DiagnoseDeps } from '../../../../src/cli/commands/doctor/diagnose.js';
-import type { IEnvironment, IFileSystem } from '@debugmcp/shared';
+import {
+  createMockEnvironment,
+  createMockFileSystem
+} from '../../../test-utils/helpers/test-dependencies.js';
 import {
   createMockDependencies,
   createMockServer,
@@ -117,18 +120,14 @@ describe('doctor / list_supported_languages availability parity (issue #435)', (
     );
 
     // Doctor path, against a fresh identical registry (no shared validation cache)
+    const fileSystem = createMockFileSystem();
+    vi.mocked(fileSystem.readFile).mockRejectedValue(new Error('ENOENT'));
+    vi.mocked(fileSystem.stat).mockRejectedValue(new Error('ENOENT'));
+    vi.mocked(fileSystem.readdir).mockRejectedValue(new Error('ENOENT'));
     const doctorDeps: DiagnoseDeps = {
       registry: buildSharedRegistry() as unknown as DiagnoseDeps['registry'],
-      environment: {
-        get: () => undefined,
-        getAll: () => ({}),
-        getCurrentWorkingDirectory: () => process.cwd()
-      } as IEnvironment,
-      fileSystem: {
-        readFile: vi.fn().mockRejectedValue(new Error('ENOENT')),
-        stat: vi.fn().mockRejectedValue(new Error('ENOENT')),
-        readdir: vi.fn().mockRejectedValue(new Error('ENOENT'))
-      } as unknown as IFileSystem,
+      environment: createMockEnvironment(),
+      fileSystem,
       env: { DEBUG_MCP_DISABLE_LANGUAGES: 'mock' },
       platform: 'linux',
       timeoutMs: 5000,

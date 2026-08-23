@@ -2831,32 +2831,36 @@ export class DebugMcpServer {
       }
 
       // Shared per-entry probe (issue #435): doctor consumes the same
-      // function, so the two views cannot drift apart.
+      // function, so the two views cannot drift apart. Probes run in
+      // parallel — on a cold cache each may import an adapter package and
+      // spawn a toolchain check, and this call should pay the max, not the
+      // sum (the doctor path already runs them concurrently).
       const disabledSet = getDisabledLanguages();
-      const available: AvailableLanguage[] = [];
-      for (const entry of baseEntries) {
-        const probe = await probeLanguageEntry(
-          {
+      const available: AvailableLanguage[] = await Promise.all(
+        baseEntries.map(async (entry) => {
+          const probe = await probeLanguageEntry(
+            {
+              language: entry.language,
+              packageName: entry.package,
+              installed: entry.installed,
+              attach: entry.attach
+            },
+            {
+              registry: dyn,
+              disabledSet,
+              runValidate: (language, validate) => this.validationCache.get(language, validate),
+              logger: this.logger
+            }
+          );
+          return {
             language: entry.language,
-            packageName: entry.package,
+            package: entry.package,
             installed: entry.installed,
-            attach: entry.attach
-          },
-          {
-            registry: dyn,
-            disabledSet,
-            runValidate: (language, validate) => this.validationCache.get(language, validate),
-            logger: this.logger
-          }
-        );
-        available.push({
-          language: entry.language,
-          package: entry.package,
-          installed: entry.installed,
-          description: entry.description,
-          modes: probe.modes
-        });
-      }
+            description: entry.description,
+            modes: probe.modes
+          };
+        })
+      );
 
       // Also build simple metadata array for backward compatibility with previous payload shape
       const languageMetadata = await this.getLanguageMetadata();

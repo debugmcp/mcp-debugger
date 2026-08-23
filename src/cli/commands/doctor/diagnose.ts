@@ -12,7 +12,6 @@
  */
 import type {
   AttachMechanism,
-  FactoryValidationResult,
   IAdapterFactory,
   IEnvironment,
   IFileSystem,
@@ -167,46 +166,62 @@ async function diagnoseLanguage(
   deps: DiagnoseDeps,
   collectExtras: (language: string, details: Record<string, unknown>) => Promise<Record<string, unknown>>
 ): Promise<LanguageDiagnosis> {
-  const started = Date.now();
-  let validation: FactoryValidationResult | undefined;
-  let probeError: unknown;
-  let timedOut = false;
-
-  // The shared probe (issue #435) — the same function the server's
-  // list_supported_languages runs, so the two views cannot drift apart.
-  // Doctor's wrapper adds what the server deliberately omits: a per-probe
-  // timeout and a record of the raw outcome; the rethrow lets
-  // computeModeAvailability fail open exactly as it does for the server.
-  const probe = await probeLanguageEntry(
-    {
-      language: entry.name,
-      packageName: entry.packageName,
-      installed: entry.installed,
-      attach: entry.attach
-    },
-    {
-      registry: deps.registry,
-      disabledSet,
-      runValidate: async (_language, validate) => {
-        try {
-          validation = await withTimeout(validate(), deps.timeoutMs);
-          return validation;
-        } catch (error) {
-          probeError = error;
-          timedOut = error instanceof ProbeTimeoutError;
-          throw error;
-        }
-      },
-      logger: deps.logger
-    }
-  );
+  const probeStarted = Date.now();
+  // The validate/extras budget clock starts when validate actually runs, so a
+  // slow factory import cannot eat the budget and manufacture timeouts.
+  let validateStarted = probeStarted;
 
   const base = {
     language: entry.name,
     package: entry.packageName,
     installed: entry.installed,
-    disabled: probe.disabled
+    disabled: disabledSet.has(entry.name)
   };
+
+  // The shared probe (issue #435) — the same function the server's
+  // list_supported_languages runs, so the two views cannot drift apart.
+  // Doctor's wrapper adds what the server deliberately omits: a per-probe
+  // timeout (the probe carries the outcome back; computeModeAvailability
+  // fails open on the rethrow exactly as it does for the server). The outer
+  // timeout bounds everything else — chiefly a wedged getFactory dynamic
+  // import, which validate's inner timeout can never see.
+  let probe;
+  try {
+    probe = await withTimeout(
+      probeLanguageEntry(
+        {
+          language: entry.name,
+          packageName: entry.packageName,
+          installed: entry.installed,
+          attach: entry.attach
+        },
+        {
+          registry: deps.registry,
+          disabledSet,
+          runValidate: (_language, validate) => {
+            validateStarted = Date.now();
+            return withTimeout(validate(), deps.timeoutMs);
+          },
+          logger: deps.logger
+        }
+      ),
+      deps.timeoutMs * 2
+    );
+  } catch (error) {
+    const outerTimedOut = error instanceof ProbeTimeoutError;
+    return {
+      ...base,
+      verdict: 'broken',
+      errors: [
+        outerTimedOut
+          ? `Adapter probe timed out after ${deps.timeoutMs * 2}ms while loading the adapter — ` +
+            `the ${entry.packageName} import may be wedged`
+          : `Adapter probe failed: ${error instanceof Error ? error.message : String(error)}`
+      ],
+      warnings: [],
+      probe: { durationMs: Date.now() - probeStarted, timedOut: outerTimedOut, failed: !outerTimedOut }
+    };
+  }
 
   if (probe.disabled || !entry.installed) {
     return {
@@ -219,13 +234,15 @@ async function diagnoseLanguage(
     };
   }
 
-  if (!probe.factory || typeof probe.factory.validate !== 'function') {
+  if (!probe.factory) {
     // An installed adapter whose factory cannot even be loaded cannot start
     // any session — that is broken, and a gated run must fail. (The server
     // fails open here; probe.modes reflects that so the divergence stays
     // visible rather than silent.)
     const loadDetail =
-      probe.factoryLoadError instanceof Error ? `: ${probe.factoryLoadError.message}` : '';
+      probe.factoryLoadError instanceof Error
+        ? `: ${probe.factoryLoadError.message}`
+        : ' (the registry returned no factory)';
     return {
       ...base,
       verdict: 'broken',
@@ -236,19 +253,40 @@ async function diagnoseLanguage(
       ],
       warnings: [],
       modes: probe.modes,
-      probe: { durationMs: 0, timedOut: false, failed: true }
+      probe: { durationMs: Date.now() - probeStarted, timedOut: false, failed: true }
     };
   }
 
+  if (!probe.probeable) {
+    // The factory loaded but is not probeable — a different defect than a
+    // load failure, and 'reinstall' phrasing would misdiagnose it.
+    return {
+      ...base,
+      verdict: 'broken',
+      errors: [
+        `Adapter factory loaded but exposes no validate() function — the installed ${entry.packageName} ` +
+          `is likely version-skewed relative to this server. ` +
+          `(The server assumes availability when it cannot probe.)`
+      ],
+      warnings: [],
+      modes: probe.modes,
+      probe: { durationMs: Date.now() - probeStarted, timedOut: false, failed: true }
+    };
+  }
+
+  const validation = probe.validation;
+  const probeError = probe.validationError;
+  let timedOut = probeError instanceof ProbeTimeoutError;
   const failed = probeError !== undefined && !timedOut;
   const modes = probe.modes;
 
   let details = validation?.details ? { ...validation.details } : undefined;
   if (validation) {
     // Extras share the language's timeout budget: whatever validate() left
-    // over. A hung extras child is flagged via probe.timedOut so the handler's
+    // over (clocked from validate start, so factory-import time is excluded).
+    // A hung extras child is flagged via probe.timedOut so the handler's
     // force-exit containment covers it too.
-    const remainingMs = Math.max(0, deps.timeoutMs - (Date.now() - started));
+    const remainingMs = Math.max(0, deps.timeoutMs - (Date.now() - validateStarted));
     try {
       const extras = await withTimeout(collectExtras(entry.name, details ?? {}), remainingMs);
       if (extras && Object.keys(extras).length > 0) {
@@ -261,7 +299,8 @@ async function diagnoseLanguage(
       }
     }
   }
-  const durationMs = Date.now() - started;
+  // Validate + extras — the toolchain's own cost, excluding the module import
+  const durationMs = Date.now() - validateStarted;
 
   let verdict: DoctorVerdict;
   let errors: string[];

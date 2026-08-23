@@ -135,14 +135,27 @@ export interface AvailabilityProbeOptions {
 
 export interface LanguageAvailabilityProbe {
   disabled: boolean;
-  installed: boolean;
   /** The loaded factory, when one was loaded (installed, enabled, load succeeded). */
   factory?: ProbeableAdapterFactory;
   /** Set when registry.getFactory threw (doctor reports it; the server fails open). */
   factoryLoadError?: unknown;
-  /** Metadata-preferred attach mechanism (entry attach when metadata is unavailable). */
-  attach: AttachMechanism;
+  /** Whether a validate() probe could actually run (factory loaded and callable). */
+  probeable: boolean;
+  /** The validate() outcome, when the probe ran and settled successfully. */
+  validation?: FactoryValidationResult;
+  /** The validate() rejection, when the probe ran and threw (modes fail open). */
+  validationError?: unknown;
   modes: LanguageModes;
+}
+
+const KNOWN_ATTACH: readonly AttachMechanism[] = ['none', 'direct-connect', 'spawn'];
+
+/**
+ * Third-party factories are plain JS — an unknown attach string would fall
+ * through computeModeAvailability's switch and leave modes.attach undefined.
+ */
+function normalizeAttach(value: unknown, fallback: AttachMechanism): AttachMechanism {
+  return KNOWN_ATTACH.includes(value as AttachMechanism) ? (value as AttachMechanism) : fallback;
 }
 
 /**
@@ -158,7 +171,7 @@ export async function probeLanguageEntry(
   options: AvailabilityProbeOptions
 ): Promise<LanguageAvailabilityProbe> {
   const disabled = options.disabledSet.has(entry.language);
-  const entryAttach = entry.attach ?? 'none';
+  const entryAttach = normalizeAttach(entry.attach, 'none');
 
   let factory: ProbeableAdapterFactory | undefined;
   let factoryLoadError: unknown;
@@ -171,20 +184,31 @@ export async function probeLanguageEntry(
   }
 
   // A malformed factory's getMetadata must not take the probe down — fall
-  // back to the registry entry's attach declaration.
+  // back to the registry entry's attach declaration, but leave a breadcrumb.
   let attach = entryAttach;
   if (factory) {
     try {
-      attach = factory.getMetadata().modes?.attach ?? entryAttach;
-    } catch {
+      attach = normalizeAttach(factory.getMetadata().modes?.attach, entryAttach);
+    } catch (error) {
       attach = entryAttach;
+      options.logger?.warn?.(
+        `[language-availability] getMetadata() threw for '${entry.language}'; using the registry attach declaration. ` +
+          `${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 
   const runValidate =
     options.runValidate ?? ((_language, validate) => validate());
   const probeable = factory !== undefined && typeof factory.validate === 'function';
+  if (factory && !probeable) {
+    options.logger?.warn?.(
+      `[language-availability] factory for '${entry.language}' has no validate() function; assuming available.`
+    );
+  }
 
+  let validation: FactoryValidationResult | undefined;
+  let validationError: unknown;
   const modes = await computeModeAvailability({
     language: entry.language,
     packageName: entry.packageName,
@@ -192,17 +216,26 @@ export async function probeLanguageEntry(
     disabled,
     attach,
     validate: probeable
-      ? () => runValidate(entry.language, () => factory!.validate())
+      ? async () => {
+          try {
+            validation = await runValidate(entry.language, () => factory!.validate());
+            return validation;
+          } catch (error) {
+            validationError = error;
+            throw error; // computeModeAvailability fails open and logs
+          }
+        }
       : undefined,
     logger: options.logger
   });
 
   return {
     disabled,
-    installed: entry.installed,
     factory,
     factoryLoadError,
-    attach,
+    probeable,
+    validation,
+    validationError,
     modes
   };
 }

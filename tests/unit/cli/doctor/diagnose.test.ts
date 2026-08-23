@@ -26,6 +26,10 @@ interface FakeAdapterSpec {
   installed?: boolean;
   attach?: 'none' | 'direct-connect' | 'spawn';
   validate?: () => Promise<{ valid: boolean; errors: string[]; warnings: string[]; details?: Record<string, unknown> }>;
+  /** Return a loaded factory that lacks a validate function (version skew). */
+  factoryWithoutValidate?: boolean;
+  /** Delay (ms) before getFactory resolves — models a slow dynamic import. */
+  factoryLoadDelayMs?: number;
 }
 
 function makeDeps(adapters: FakeAdapterSpec[], overrides: Partial<DiagnoseDeps> = {}): DiagnoseDeps {
@@ -40,7 +44,16 @@ function makeDeps(adapters: FakeAdapterSpec[], overrides: Partial<DiagnoseDeps> 
     ),
     getFactory: vi.fn(async (language: string) => {
       const spec = adapters.find((a) => a.name === language);
-      if (!spec || !(spec.installed ?? true) || !spec.validate) {
+      if (!spec || !(spec.installed ?? true)) {
+        return undefined;
+      }
+      if (spec.factoryLoadDelayMs) {
+        await new Promise((resolve) => setTimeout(resolve, spec.factoryLoadDelayMs));
+      }
+      if (spec.factoryWithoutValidate) {
+        return { getMetadata: () => ({ modes: { launch: true, attach: spec.attach ?? 'none' } }) };
+      }
+      if (!spec.validate) {
         return undefined;
       }
       return {
@@ -233,6 +246,77 @@ describe('diagnose', () => {
     expect(report.exitCode).toBe(1);
     // Fail-open parity: the server would still assume availability here.
     expect(python.modes?.launch.available).toBe(true);
+  });
+
+  it('does not bill a slow factory import against the validate/extras budget (no spurious timeout)', async () => {
+    vi.useFakeTimers();
+    const deps = makeDeps(
+      [
+        {
+          name: 'dotnet',
+          factoryLoadDelayMs: 900, // slow cold import eats most of a naive shared budget
+          validate: okValidate({ debuggerPath: '/x' })
+        }
+      ],
+      {
+        timeoutMs: 1000,
+        collectExtras: () =>
+          new Promise((resolve) => setTimeout(() => resolve({ dotnetSdkVersion: '8.0.301' }), 500))
+      }
+    );
+
+    const reportPromise = diagnose([], deps);
+    await vi.advanceTimersByTimeAsync(2000);
+    const report = await reportPromise;
+
+    const dotnet = report.languages[0];
+    expect(dotnet.verdict).toBe('ok');
+    expect(dotnet.probe.timedOut).toBe(false);
+    expect(dotnet.details).toMatchObject({ dotnetSdkVersion: '8.0.301' }); // extras survived
+  });
+
+  it('reports broken with probe.timedOut when getFactory itself hangs (wedged dynamic import)', async () => {
+    vi.useFakeTimers();
+    const deps = makeDeps([{ name: 'java', validate: okValidate() }], { timeoutMs: 1000 });
+    (deps.registry as unknown as { getFactory: ReturnType<typeof vi.fn> }).getFactory = vi.fn(
+      () => new Promise(() => undefined)
+    );
+
+    const reportPromise = diagnose([], deps);
+    await vi.advanceTimersByTimeAsync(3000);
+    const report = await reportPromise;
+
+    const java = report.languages[0];
+    expect(java.verdict).toBe('broken');
+    expect(java.probe.timedOut).toBe(true);
+  });
+
+  it('reports the elapsed load time on a broken factory instead of durationMs 0', async () => {
+    vi.useFakeTimers();
+    const deps = makeDeps([{ name: 'python', installed: true }], { timeoutMs: 5000 });
+    (deps.registry as unknown as { getFactory: ReturnType<typeof vi.fn> }).getFactory = vi.fn(
+      () =>
+        new Promise((_resolve, reject) => setTimeout(() => reject(new Error('import exploded')), 400))
+    );
+
+    const reportPromise = diagnose([], deps);
+    await vi.advanceTimersByTimeAsync(500);
+    const report = await reportPromise;
+
+    expect(report.languages[0].verdict).toBe('broken');
+    expect(report.languages[0].probe.durationMs).toBeGreaterThanOrEqual(400);
+  });
+
+  it('diagnoses a loaded factory without validate() as version skew, not a load failure', async () => {
+    const deps = makeDeps([{ name: 'python', factoryWithoutValidate: true }]);
+
+    const report = await diagnose(['python'], deps);
+
+    const python = report.languages[0];
+    expect(python.verdict).toBe('broken');
+    expect(python.errors[0]).toContain('validate');
+    expect(python.errors[0]).not.toContain('could not be loaded');
+    expect(report.exitCode).toBe(1);
   });
 
   it('sets probe.timedOut when the extras collector hangs, so the handler can force-exit', async () => {
