@@ -108,11 +108,15 @@ export interface IAdapterFactory {
   /**
    * Doctor-only presentation of the resolved toolchain (issue #435): the
    * adapter owns its own runtime/backend row instead of the CLI restating
-   * adapter internals. Receives the just-computed validate() result so the
-   * producer and consumer of each `details` key live in the same class; may
-   * run additional best-effort probes (the caller enforces a hard timeout).
-   * Must not throw for a missing toolchain — omit the cell instead. Absent
-   * method → doctor renders empty cells.
+   * adapter internals. Receives a snapshot of the just-computed validate()
+   * result so the producer and consumer of each `details` key live in the
+   * same class; may run additional best-effort probes, bounded by the
+   * advisory options.timeoutMs (use probeWithinBudget so the method resolves
+   * before the caller's hard timeout — a hard timeout blanks the whole row).
+   * Must not throw for a missing toolchain — omit the cell instead
+   * (toolchainComponent enforces this; '('-prefixed labels are the one
+   * standalone exception, see ToolchainComponent.label). Absent method →
+   * doctor renders empty cells with a version-skew warning.
    */
   describeToolchain?(
     validation: FactoryValidationResult,
@@ -228,7 +232,12 @@ export interface FactoryValidationResult {
  * drives it (debugpy, js-debug, CodeLLDB).
  */
 export interface ToolchainComponent {
-  /** Display name, e.g. 'Python', 'CodeLLDB', '(built-in)' */
+  /**
+   * Display name, e.g. 'Python', 'CodeLLDB', '(built-in)'. A label starting
+   * with '(' is a standalone annotation: it renders by itself even when no
+   * path/version/source was detected (and the table renders ONLY the label),
+   * so use the prefix exclusively for cells that are not real detections.
+   */
   label: string;
 
   /** Resolved executable/directory path, when detected */

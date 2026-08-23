@@ -76,7 +76,7 @@ export class MockAdapterFactory implements IAdapterFactory {
    * Doctor row (issue #435): nothing external to detect — the standalone
    * '(built-in)' labels render by design.
    */
-  async describeToolchain(): Promise<ToolchainDescription> {
+  async describeToolchain(_validation: FactoryValidationResult): Promise<ToolchainDescription> {
     return {
       runtime: { label: '(built-in)' },
       backend: { label: '(built-in)' }

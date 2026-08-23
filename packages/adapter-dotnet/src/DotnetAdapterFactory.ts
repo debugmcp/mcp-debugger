@@ -7,8 +7,8 @@
  * @since 0.2.0
  */
 import { IDebugAdapter } from '@debugmcp/shared';
-import { IAdapterFactory, AdapterDependencies, AdapterMetadata, FactoryValidationResult, ToolchainDescription } from '@debugmcp/shared';
-import { toolchainComponent } from '@debugmcp/shared';
+import { IAdapterFactory, AdapterDependencies, AdapterMetadata, FactoryValidationResult, ToolchainDescription, DescribeToolchainOptions } from '@debugmcp/shared';
+import { toolchainComponent, probeWithinBudget } from '@debugmcp/shared';
 import { DotnetDebugAdapter } from './DotnetDebugAdapter.js';
 import { DebugLanguage } from '@debugmcp/shared';
 import { findNetcoredbgExecutable, getNetcoredbgVersion, getDotnetSdkVersion } from './utils/dotnet-utils.js';
@@ -86,14 +86,21 @@ export class DotnetAdapterFactory implements IAdapterFactory {
   /**
    * Doctor row (issue #435): the version probes that used to live in the
    * doctor CLI's extras path run here instead, in parallel and best-effort —
-   * a failed probe just leaves its cell field empty.
+   * a failed or over-budget probe just leaves its cell field empty, and the
+   * detail-derived cells always render (probeWithinBudget guarantees this
+   * method resolves before the caller's hard timeout would blank the row).
    */
-  async describeToolchain(validation: FactoryValidationResult): Promise<ToolchainDescription> {
+  async describeToolchain(
+    validation: FactoryValidationResult,
+    options?: DescribeToolchainOptions
+  ): Promise<ToolchainDescription> {
     const details = (validation.details ?? {}) as Partial<DotnetToolchainDetails>;
     const debuggerPath = details.debuggerPath;
     const [netcoredbgVersion, sdkVersion] = await Promise.all([
-      debuggerPath ? getNetcoredbgVersion(debuggerPath).catch(() => null) : Promise.resolve(null),
-      getDotnetSdkVersion().catch(() => null)
+      debuggerPath
+        ? probeWithinBudget(options?.timeoutMs, () => getNetcoredbgVersion(debuggerPath))
+        : Promise.resolve(null),
+      probeWithinBudget(options?.timeoutMs, () => getDotnetSdkVersion())
     ]);
     return {
       runtime: toolchainComponent({ label: '.NET SDK', version: sdkVersion ?? undefined }),

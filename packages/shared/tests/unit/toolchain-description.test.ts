@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   toolchainComponent,
-  normalizeToolchainDescription
+  normalizeToolchainDescription,
+  probeWithinBudget
 } from '../../src/utils/toolchain-description.js';
 
 describe('toolchainComponent', () => {
@@ -93,5 +94,35 @@ describe('normalizeToolchainDescription', () => {
         backend: { label: 'Delve', version: 'v1.26.3', extra: 'ignored' }
       })
     ).toEqual({ backend: { label: 'Delve', version: 'v1.26.3' } });
+  });
+});
+
+describe('probeWithinBudget', () => {
+  it('returns the probe result when it settles inside the budget', async () => {
+    await expect(probeWithinBudget(5000, async () => '8.0.401')).resolves.toBe('8.0.401');
+  });
+
+  it('returns null instead of hanging when the probe outlives the budget', async () => {
+    const result = await probeWithinBudget(150, () => new Promise<string>(() => undefined));
+    expect(result).toBeNull();
+  });
+
+  it('does not run the probe at all when the budget is already exhausted', async () => {
+    const probe = vi.fn().mockResolvedValue('never');
+
+    await expect(probeWithinBudget(0, probe)).resolves.toBeNull();
+    expect(probe).not.toHaveBeenCalled();
+  });
+
+  it('swallows a probe rejection as null', async () => {
+    await expect(
+      probeWithinBudget(5000, async () => {
+        throw new Error('spawn failed');
+      })
+    ).resolves.toBeNull();
+  });
+
+  it('awaits the probe fully when no budget was given', async () => {
+    await expect(probeWithinBudget(undefined, async () => 'value')).resolves.toBe('value');
   });
 });

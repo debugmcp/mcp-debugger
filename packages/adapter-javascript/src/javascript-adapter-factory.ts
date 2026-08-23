@@ -156,7 +156,9 @@ export class JavascriptAdapterFactory extends BaseAdapterFactory {
       runtime: toolchainComponent({ label: 'Node.js', version: details.nodeVersion }),
       backend: toolchainComponent({
         label: 'js-debug',
-        source: typeof details.vendorPathChecked === 'string' && details.vendorPathChecked.length > 0 ? 'vendored' : undefined
+        // vendorPathChecked is a resolved path or null — truthiness is the
+        // detection; toolchainComponent re-applies the non-empty-string rule.
+        source: details.vendorPathChecked ? 'vendored' : undefined
       })
     };
   }

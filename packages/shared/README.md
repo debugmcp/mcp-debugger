@@ -60,6 +60,19 @@ Everything below is exported from the package root (`import { ... } from '@debug
 | `ActiveAdapterMap` | type | Map of language to active adapter |
 | `BaseAdapterFactory` | class | Abstract base for adapter factories |
 
+### Doctor Presentation (issue #435)
+
+An adapter factory may implement the optional `IAdapterFactory.describeToolchain(validation, options?)` to own its `mcp-debugger doctor` runtime/backend row.
+
+| Export | Kind | Description |
+|--------|------|-------------|
+| `ToolchainComponent` | type | One doctor table cell (label + optional path/version/source) |
+| `ToolchainDescription` | type | An adapter's doctor row: `{ runtime?, backend? }` |
+| `DescribeToolchainOptions` | type | Advisory options for `describeToolchain` (`timeoutMs`) |
+| `toolchainComponent` | function | Build one cell, omitting it unless something was actually detected (`(`-prefixed labels stand alone) |
+| `normalizeToolchainDescription` | function | Defensively normalize an untrusted `describeToolchain` return value |
+| `probeWithinBudget` | function | Run one best-effort probe inside the advisory budget; settles with the value or `null` |
+
 ### Dependency Injection
 
 | Export | Kind | Description |

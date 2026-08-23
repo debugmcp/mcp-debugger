@@ -5,8 +5,8 @@
  * Implements the adapter factory interface for dependency injection.
  */
 import { IDebugAdapter } from '@debugmcp/shared';
-import { IAdapterFactory, AdapterDependencies, AdapterMetadata, FactoryValidationResult, ToolchainDescription } from '@debugmcp/shared';
-import { toolchainComponent } from '@debugmcp/shared';
+import { IAdapterFactory, AdapterDependencies, AdapterMetadata, FactoryValidationResult, ToolchainDescription, DescribeToolchainOptions } from '@debugmcp/shared';
+import { toolchainComponent, probeWithinBudget } from '@debugmcp/shared';
 import { CppDebugAdapter } from './cpp-debug-adapter.js';
 import { DebugLanguage } from '@debugmcp/shared';
 import { resolveCodeLLDBExecutableWithSource, getCodeLLDBVersion } from '@debugmcp/codelldb-common';
@@ -107,13 +107,19 @@ export class CppAdapterFactory implements IAdapterFactory {
    * Doctor row (issue #435): reuses the validate()-discovered compiler
    * command instead of re-probing the whole candidate list; the --version
    * banner already names the command, so the bare command only shows when no
-   * banner was captured.
+   * banner was captured (including when the probe fails or outlives the
+   * advisory budget — probeWithinBudget guarantees this method resolves
+   * before the caller's hard timeout would blank the row).
    */
-  async describeToolchain(validation: FactoryValidationResult): Promise<ToolchainDescription> {
+  async describeToolchain(
+    validation: FactoryValidationResult,
+    options?: DescribeToolchainOptions
+  ): Promise<ToolchainDescription> {
     const details = (validation.details ?? {}) as Partial<CppToolchainDetails>;
+    const compiler = details.compiler;
     let compilerVersion: string | undefined;
-    if (details.compiler) {
-      const info = await getCompilerInfo(details.compiler).catch(() => null);
+    if (compiler) {
+      const info = await probeWithinBudget(options?.timeoutMs, () => getCompilerInfo(compiler));
       compilerVersion = info?.version ?? undefined;
     }
     return {

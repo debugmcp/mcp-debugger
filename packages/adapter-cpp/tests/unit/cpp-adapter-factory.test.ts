@@ -3,7 +3,10 @@ import { DebugLanguage } from '@debugmcp/shared';
 import { CppAdapterFactory } from '../../src/cpp-adapter-factory.js';
 import { getCompilerInfo } from '../../src/utils/compile-utils.js';
 
-vi.mock('../../src/utils/compile-utils.js', () => ({
+vi.mock('../../src/utils/compile-utils.js', async (importOriginal) => ({
+  // Spread the real module so unrelated exports (used by CppDebugAdapter)
+  // stay defined if this file ever grows adapter-level tests.
+  ...(await importOriginal<typeof import('../../src/utils/compile-utils.js')>()),
   findAnyCompiler: vi.fn(),
   getCompilerInfo: vi.fn()
 }));
@@ -110,5 +113,31 @@ describe('CppAdapterFactory.describeToolchain', () => {
     expect(
       await new CppAdapterFactory().describeToolchain({ valid: false, errors: [], warnings: [] })
     ).toEqual({});
+  });
+
+  it('still resolves with detail-derived cells when the banner probe hangs, inside the advisory budget', async () => {
+    getCompilerInfoMock.mockReturnValue(new Promise(() => undefined));
+
+    const description = await new CppAdapterFactory().describeToolchain(
+      validation({ compiler: 'g++', codelldbPath: '/opt/codelldb/adapter/codelldb', codelldbVersion: '1.11.5', codelldbSource: 'vendored' }),
+      { timeoutMs: 300 }
+    );
+
+    expect(description).toEqual({
+      runtime: { label: 'C/C++ compiler', path: 'g++' },
+      backend: { label: 'CodeLLDB', path: '/opt/codelldb/adapter/codelldb', version: '1.11.5', source: 'vendored' }
+    });
+  });
+
+  it('skips the banner probe entirely when the advisory budget is exhausted', async () => {
+    const description = await new CppAdapterFactory().describeToolchain(
+      validation({ compiler: 'g++' }),
+      { timeoutMs: 50 }
+    );
+
+    expect(getCompilerInfoMock).not.toHaveBeenCalled();
+    expect(description).toEqual({
+      runtime: { label: 'C/C++ compiler', path: 'g++' }
+    });
   });
 });

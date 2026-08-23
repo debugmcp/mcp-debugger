@@ -27,8 +27,11 @@ interface FakeAdapterSpec {
   installed?: boolean;
   attach?: 'none' | 'direct-connect' | 'spawn';
   validate?: () => Promise<{ valid: boolean; errors: string[]; warnings: string[]; details?: Record<string, unknown> }>;
-  /** Adapter-owned doctor row (issue #435); absent models an older factory. */
-  describeToolchain?: (validation: unknown, options?: unknown) => Promise<unknown>;
+  /**
+   * Adapter-owned doctor row (issue #435). Absent → a no-op modern factory;
+   * explicit null → a pre-describeToolchain factory (version skew).
+   */
+  describeToolchain?: ((validation: unknown, options?: unknown) => Promise<unknown>) | null;
   /** Return a loaded factory that lacks a validate function (version skew). */
   factoryWithoutValidate?: boolean;
   /** Delay (ms) before getFactory resolves — models a slow dynamic import. */
@@ -61,7 +64,9 @@ function makeDeps(adapters: FakeAdapterSpec[], overrides: Partial<DiagnoseDeps> 
       }
       return {
         validate: spec.validate,
-        ...(spec.describeToolchain ? { describeToolchain: spec.describeToolchain } : {}),
+        ...(spec.describeToolchain === null
+          ? {}
+          : { describeToolchain: spec.describeToolchain ?? (async () => ({})) }),
         getMetadata: () => ({ modes: { launch: true, attach: spec.attach ?? 'none' } }),
         createAdapter: () => {
           throw new Error('doctor must never instantiate adapters');
@@ -428,17 +433,72 @@ describe('diagnose', () => {
     expect(report.languages[0].backend).toBeUndefined();
   });
 
-  it('renders empty cells for a factory without describeToolchain (older adapter package)', async () => {
+  it('renders empty cells with a version-skew breadcrumb for a factory without describeToolchain', async () => {
     const deps = makeDeps([
-      { name: 'python', validate: okValidate({ pythonPath: '/usr/bin/python3' }) }
+      { name: 'python', validate: okValidate({ pythonPath: '/usr/bin/python3' }), describeToolchain: null }
+    ]);
+
+    const report = await diagnose([], deps);
+
+    // The breadcrumb is display-only: the verdict stands on validate() and
+    // must not flip to warn just because the adapter package is older.
+    expect(report.languages[0].verdict).toBe('ok');
+    expect(report.languages[0].runtime).toBeUndefined();
+    expect(report.languages[0].backend).toBeUndefined();
+    expect(report.languages[0].details).toEqual({ pythonPath: '/usr/bin/python3' });
+    expect(
+      report.languages[0].warnings.some(
+        (w) => w.includes('predates') && w.includes('@debugmcp/adapter-python')
+      )
+    ).toBe(true);
+  });
+
+  it('computes the verdict from a snapshot — describeToolchain cannot mutate its way past a broken verdict', async () => {
+    // Adapter-owned presentation runs before the report is assembled; a buggy
+    // (or malicious) plain-JS factory that mutates the validation object it
+    // was handed must not be able to flip broken→ok or blank the errors.
+    const deps = makeDeps([
+      {
+        name: 'go',
+        validate: async () => ({
+          valid: false,
+          errors: ['Delve not found.'],
+          warnings: [],
+          details: { goPath: '/usr/local/go/bin/go' }
+        }),
+        describeToolchain: async (validation) => {
+          const v = validation as { valid: boolean; errors: string[] };
+          v.valid = true;
+          v.errors.length = 0;
+          return {};
+        }
+      }
+    ]);
+
+    const report = await diagnose(['go'], deps);
+
+    expect(report.languages[0].verdict).toBe('broken');
+    expect(report.languages[0].errors).toEqual(['Delve not found.']);
+    expect(report.exitCode).toBe(1);
+  });
+
+  it('accepts a synchronous plain-object describeToolchain return without discarding it', async () => {
+    // Out-of-tree factories are plain JS: a sync (non-Promise) return must be
+    // normalized like any other, not lost to a thenable assumption.
+    const deps = makeDeps([
+      {
+        name: 'python',
+        validate: okValidate(),
+        describeToolchain: (() => ({
+          runtime: { label: 'Python', version: '3.12.1' }
+        })) as unknown as FakeAdapterSpec['describeToolchain']
+      }
     ]);
 
     const report = await diagnose([], deps);
 
     expect(report.languages[0].verdict).toBe('ok');
-    expect(report.languages[0].runtime).toBeUndefined();
-    expect(report.languages[0].backend).toBeUndefined();
-    expect(report.languages[0].details).toEqual({ pythonPath: '/usr/bin/python3' });
+    expect(report.languages[0].runtime).toEqual({ label: 'Python', version: '3.12.1' });
   });
 
   it('normalizes a malformed describeToolchain return (out-of-tree factory is plain JS)', async () => {

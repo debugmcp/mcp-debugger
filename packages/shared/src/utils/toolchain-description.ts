@@ -39,6 +39,45 @@ export function toolchainComponent(info: {
 }
 
 /**
+ * Headroom subtracted from the advisory describeToolchain budget so the
+ * method always resolves BEFORE the caller's hard timeout — a hard timeout
+ * blanks the whole row, losing cells validate() already resolved.
+ */
+const PROBE_BUDGET_HEADROOM_MS = 100;
+
+/**
+ * Run one best-effort probe inside the advisory describeToolchain budget:
+ * settles with the probe's value, or null when the probe rejects, outlives
+ * the budget, or the budget is already exhausted (then the probe is never
+ * started — no child is spawned that nothing will await). An undefined
+ * budget means "no limit".
+ */
+export async function probeWithinBudget<T>(
+  budgetMs: number | undefined,
+  probe: () => Promise<T>
+): Promise<T | null> {
+  const budget =
+    budgetMs === undefined
+      ? Number.POSITIVE_INFINITY
+      : Math.max(0, budgetMs - PROBE_BUDGET_HEADROOM_MS);
+  if (budget <= 0) {
+    return null;
+  }
+  const attempt = probe().catch(() => null);
+  if (!Number.isFinite(budget)) {
+    return attempt;
+  }
+  return Promise.race([
+    attempt,
+    new Promise<null>((resolve) => {
+      const timer = setTimeout(() => resolve(null), budget);
+      // Node returns a Timeout with unref(); browsers return a number.
+      (timer as { unref?: () => void }).unref?.();
+    })
+  ]);
+}
+
+/**
  * Defensive normalization of a describeToolchain() return value: an
  * out-of-tree factory is plain JS, so anything can come back. Non-object
  * values yield empty cells; each cell must carry a non-empty string label and

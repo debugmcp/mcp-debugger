@@ -95,7 +95,10 @@ class ProbeTimeoutError extends Error {
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new ProbeTimeoutError(timeoutMs)), timeoutMs);
-    promise.then(
+    // Promise.resolve: a plain-JS factory can return a non-thenable from
+    // describeToolchain; `.then` on it would throw inside this executor,
+    // discarding the value and leaving the timer armed to stall the CLI.
+    Promise.resolve(promise).then(
       (value) => {
         clearTimeout(timer);
         resolve(value);
@@ -273,6 +276,14 @@ async function diagnoseLanguage(
   const modes = probe.modes;
 
   const details = validation?.details ? { ...validation.details } : undefined;
+  // Snapshot the verdict inputs before any adapter-owned code runs: the
+  // factory is plain JS and receives only a defensive clone below, so a buggy
+  // (or malicious) describeToolchain cannot mutate its way past a broken
+  // verdict or blank the reported errors.
+  const verdictInputs = validation
+    ? { valid: validation.valid, errors: [...validation.errors], warnings: [...validation.warnings] }
+    : undefined;
+
   // Adapter-owned presentation (issue #435): the factory renders its own
   // runtime/backend row from the validate() result — including valid:false,
   // so partially detected toolchains still show what IS there. It shares the
@@ -281,20 +292,33 @@ async function diagnoseLanguage(
   // is flagged via probe.timedOut so the handler's force-exit containment
   // covers it too.
   let view: ToolchainDescription = {};
-  if (validation && typeof probe.factory.describeToolchain === 'function') {
-    const remainingMs = Math.max(0, deps.timeoutMs - (Date.now() - validateStarted));
-    try {
-      view = normalizeToolchainDescription(
-        await withTimeout(
-          probe.factory.describeToolchain(validation, { timeoutMs: remainingMs }),
-          remainingMs
-        )
-      );
-    } catch (error) {
-      // Presentation is best-effort; the verdict stands on validate() alone.
-      if (error instanceof ProbeTimeoutError) {
-        timedOut = true;
+  let describeMissing = false;
+  if (validation) {
+    if (typeof probe.factory.describeToolchain === 'function') {
+      const remainingMs = Math.max(0, deps.timeoutMs - (Date.now() - validateStarted));
+      try {
+        view = normalizeToolchainDescription(
+          await withTimeout(
+            probe.factory.describeToolchain(
+              {
+                valid: validation.valid,
+                errors: [...validation.errors],
+                warnings: [...validation.warnings],
+                ...(validation.details ? { details: { ...validation.details } } : {})
+              },
+              { timeoutMs: remainingMs }
+            ),
+            remainingMs
+          )
+        );
+      } catch (error) {
+        // Presentation is best-effort; the verdict stands on validate() alone.
+        if (error instanceof ProbeTimeoutError) {
+          timedOut = true;
+        }
       }
+    } else {
+      describeMissing = true;
     }
   }
   // Validate + presentation — the toolchain's own cost, excluding the module import
@@ -303,7 +327,7 @@ async function diagnoseLanguage(
   let verdict: DoctorVerdict;
   let errors: string[];
   let warnings: string[];
-  if (!validation) {
+  if (!verdictInputs) {
     verdict = 'broken';
     errors = [
       timedOut
@@ -311,27 +335,39 @@ async function diagnoseLanguage(
         : `Toolchain probe failed: ${probeError instanceof Error ? probeError.message : String(probeError)}`
     ];
     warnings = [];
-  } else if (!validation.valid) {
+  } else if (!verdictInputs.valid) {
     // A failed toolchain probe kills launch, but direct-connect attach runs
     // the debug engine inside the debuggee and needs nothing local (container
     // ruby is attach-only by design) — a partially usable adapter is a warn,
     // not broken, and must not fail a gated run.
     if (modes.attach.available) {
       verdict = 'warn';
-      errors = validation.errors;
+      errors = verdictInputs.errors;
       warnings = [
-        ...validation.warnings,
+        ...verdictInputs.warnings,
         `Launch is unavailable, but attach (direct-connect) still works — see the errors above for what launch would need.`
       ];
     } else {
       verdict = 'broken';
-      errors = validation.errors;
-      warnings = validation.warnings;
+      errors = verdictInputs.errors;
+      warnings = verdictInputs.warnings;
     }
   } else {
-    verdict = validation.warnings.length > 0 ? 'warn' : 'ok';
+    verdict = verdictInputs.warnings.length > 0 ? 'warn' : 'ok';
     errors = [];
-    warnings = validation.warnings;
+    warnings = verdictInputs.warnings;
+  }
+
+  if (describeMissing) {
+    // Display-only breadcrumb (appended after the verdict is computed so an
+    // older adapter package never flips ok→warn): the cells are empty because
+    // the factory predates adapter-owned presentation, not because nothing
+    // was detected.
+    warnings = [
+      ...warnings,
+      `The installed ${entry.packageName} predates adapter-owned doctor presentation ` +
+        `(describeToolchain) — runtime/backend cells are left empty; update the package to restore them.`
+    ];
   }
 
   return {

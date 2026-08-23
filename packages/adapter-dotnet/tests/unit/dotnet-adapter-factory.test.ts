@@ -9,7 +9,10 @@ import {
   getDotnetSdkVersion
 } from '../../src/utils/dotnet-utils.js';
 
-vi.mock('../../src/utils/dotnet-utils.js', () => ({
+vi.mock('../../src/utils/dotnet-utils.js', async (importOriginal) => ({
+  // Spread the real module so unrelated exports (used by DotnetDebugAdapter)
+  // stay defined if this file ever grows adapter-level tests.
+  ...(await importOriginal<typeof import('../../src/utils/dotnet-utils.js')>()),
   findNetcoredbgExecutable: vi.fn(),
   findDotnetBackend: vi.fn(),
   listDotnetProcesses: vi.fn(),
@@ -139,6 +142,35 @@ describe('DotnetAdapterFactory.describeToolchain', () => {
       validation({ debuggerPath: '/path/to/netcoredbg' })
     );
 
+    expect(description).toEqual({
+      backend: { label: 'netcoredbg', path: '/path/to/netcoredbg' }
+    });
+  });
+
+  it('still resolves with the detail-derived cells when a probe hangs, inside the advisory budget', async () => {
+    // The caller's hard timeout would otherwise blank the WHOLE row, losing
+    // the debuggerPath validate() already resolved (#435 review finding).
+    getNetcoredbgVersionMock.mockReturnValue(new Promise(() => undefined));
+    getDotnetSdkVersionMock.mockReturnValue(new Promise(() => undefined));
+
+    const description = await new DotnetAdapterFactory().describeToolchain(
+      validation({ debuggerPath: '/path/to/netcoredbg' }),
+      { timeoutMs: 300 }
+    );
+
+    expect(description).toEqual({
+      backend: { label: 'netcoredbg', path: '/path/to/netcoredbg' }
+    });
+  });
+
+  it('skips the version probes entirely when the advisory budget is exhausted', async () => {
+    const description = await new DotnetAdapterFactory().describeToolchain(
+      validation({ debuggerPath: '/path/to/netcoredbg' }),
+      { timeoutMs: 50 }
+    );
+
+    expect(getNetcoredbgVersionMock).not.toHaveBeenCalled();
+    expect(getDotnetSdkVersionMock).not.toHaveBeenCalled();
     expect(description).toEqual({
       backend: { label: 'netcoredbg', path: '/path/to/netcoredbg' }
     });
