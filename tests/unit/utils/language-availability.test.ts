@@ -1,9 +1,11 @@
 /**
  * Unit tests for per-mode language availability computation (issue #331)
+ * and the shared per-entry availability probe (issue #435).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   computeModeAvailability,
+  probeLanguageEntry,
   ValidationResultCache
 } from '../../../src/utils/language-availability.js';
 
@@ -133,6 +135,208 @@ describe('computeModeAvailability', () => {
       attach: 'none'
     });
     expect(modes.launch).toEqual({ supported: true, available: true });
+  });
+});
+
+describe('probeLanguageEntry (issue #435)', () => {
+  const entry = (overrides: Record<string, unknown> = {}) => ({
+    language: 'python',
+    packageName: '@debugmcp/adapter-python',
+    installed: true,
+    attach: 'direct-connect' as const,
+    ...overrides
+  });
+
+  const makeFactory = (overrides: Record<string, unknown> = {}) => ({
+    validate: vi.fn().mockResolvedValue(ok),
+    getMetadata: vi.fn().mockReturnValue({ modes: { launch: true, attach: 'spawn' } }),
+    createAdapter: vi.fn(),
+    ...overrides
+  });
+
+  it('does not load the factory for a disabled language and reports disabled modes', async () => {
+    const getFactory = vi.fn();
+
+    const probe = await probeLanguageEntry(entry(), {
+      registry: { getFactory },
+      disabledSet: new Set(['python'])
+    });
+
+    expect(probe.disabled).toBe(true);
+    expect(getFactory).not.toHaveBeenCalled();
+    expect(probe.factory).toBeUndefined();
+    expect(probe.modes.launch.available).toBe(false);
+    expect(probe.modes.launch.reason).toContain('disabled in this runtime');
+  });
+
+  it('does not load the factory for a not-installed package and reports not-installed modes', async () => {
+    const getFactory = vi.fn();
+
+    const probe = await probeLanguageEntry(entry({ installed: false }), {
+      registry: { getFactory },
+      disabledSet: new Set()
+    });
+
+    expect(getFactory).not.toHaveBeenCalled();
+    expect(probe.modes.launch.reason).toContain('@debugmcp/adapter-python');
+  });
+
+  it('prefers the loaded factory metadata attach over the registry entry attach', async () => {
+    const factory = makeFactory(); // metadata declares 'spawn'
+
+    const probe = await probeLanguageEntry(entry({ attach: 'none' }), {
+      registry: { getFactory: vi.fn().mockResolvedValue(factory) },
+      disabledSet: new Set()
+    });
+
+    // entry said 'none' (unsupported); metadata's 'spawn' must win
+    expect(probe.modes.attach.supported).toBe(true);
+  });
+
+  it('falls back to the entry attach when getMetadata throws, and logs a warning', async () => {
+    const warn = vi.fn();
+    const factory = makeFactory({
+      getMetadata: vi.fn(() => {
+        throw new Error('metadata exploded');
+      })
+    });
+
+    const probe = await probeLanguageEntry(entry({ attach: 'direct-connect' }), {
+      registry: { getFactory: vi.fn().mockResolvedValue(factory) },
+      disabledSet: new Set(),
+      logger: { warn }
+    });
+
+    expect(probe.modes.attach.supported).toBe(true); // direct-connect from the entry
+    expect(probe.modes.launch.available).toBe(true);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('metadata exploded'));
+  });
+
+  it('normalizes an unknown metadata attach string instead of producing undefined attach modes', async () => {
+    // A version-skewed third-party factory (plain JS) can return any string;
+    // computeModeAvailability's switch is not exhaustive, so an unknown value
+    // must be normalized here or modes.attach comes back undefined and
+    // crashes consumers.
+    const factory = makeFactory({
+      getMetadata: vi.fn().mockReturnValue({ modes: { launch: true, attach: 'tcp' } })
+    });
+
+    const probe = await probeLanguageEntry(entry({ attach: 'direct-connect' }), {
+      registry: { getFactory: vi.fn().mockResolvedValue(factory) },
+      disabledSet: new Set()
+    });
+
+    expect(probe.modes.attach).toBeDefined();
+    expect(probe.modes.attach.supported).toBe(true); // fell back to the entry's direct-connect
+  });
+
+  it("normalizes to 'none' when both metadata and entry attach are unknown strings", async () => {
+    const factory = makeFactory({
+      getMetadata: vi.fn().mockReturnValue({ modes: { launch: true, attach: 'tcp' } })
+    });
+
+    const probe = await probeLanguageEntry(
+      entry({ attach: 'udp' as never }),
+      {
+        registry: { getFactory: vi.fn().mockResolvedValue(factory) },
+        disabledSet: new Set()
+      }
+    );
+
+    expect(probe.modes.attach).toBeDefined();
+    expect(probe.modes.attach.supported).toBe(false); // treated as 'none'
+  });
+
+  it('records a factory load failure and fails open like the server', async () => {
+    const probe = await probeLanguageEntry(entry(), {
+      registry: { getFactory: vi.fn().mockRejectedValue(new Error('import exploded')) },
+      disabledSet: new Set()
+    });
+
+    expect(probe.factory).toBeUndefined();
+    expect(probe.factoryLoadError).toBeInstanceOf(Error);
+    // No factory means no probe: availability is assumed (issue #360 contract)
+    expect(probe.modes.launch.available).toBe(true);
+  });
+
+  it('assumes availability when the registry has no getFactory at all', async () => {
+    const probe = await probeLanguageEntry(entry(), {
+      registry: undefined,
+      disabledSet: new Set()
+    });
+
+    expect(probe.modes.launch.available).toBe(true);
+  });
+
+  it('routes validate through the runValidate wrapper and carries the result on the probe', async () => {
+    const factory = makeFactory();
+    const runValidate = vi.fn(async (_language: string, validate: () => Promise<typeof ok>) => {
+      return validate();
+    });
+
+    const probe = await probeLanguageEntry(entry(), {
+      registry: { getFactory: vi.fn().mockResolvedValue(factory) },
+      disabledSet: new Set(),
+      runValidate
+    });
+
+    expect(runValidate).toHaveBeenCalledWith('python', expect.any(Function));
+    expect(factory.validate).toHaveBeenCalledTimes(1);
+    expect(probe.probeable).toBe(true);
+    expect(probe.validation).toEqual(ok);
+    expect(probe.validationError).toBeUndefined();
+    expect(probe.modes.launch.available).toBe(true);
+  });
+
+  it('drives modes from the wrapper result, not a second validate call', async () => {
+    const factory = makeFactory();
+    const runValidate = vi.fn().mockResolvedValue(bad('toolchain gone'));
+
+    const probe = await probeLanguageEntry(entry(), {
+      registry: { getFactory: vi.fn().mockResolvedValue(factory) },
+      disabledSet: new Set(),
+      runValidate
+    });
+
+    expect(probe.validation).toEqual(bad('toolchain gone'));
+    expect(probe.modes.launch).toEqual({
+      supported: true,
+      available: false,
+      reason: 'toolchain gone'
+    });
+    expect(factory.validate).not.toHaveBeenCalled();
+  });
+
+  it('fails open and records validationError when the wrapped validate throws', async () => {
+    const warn = vi.fn();
+    const factory = makeFactory({ validate: vi.fn().mockRejectedValue(new Error('probe exploded')) });
+
+    const probe = await probeLanguageEntry(entry(), {
+      registry: { getFactory: vi.fn().mockResolvedValue(factory) },
+      disabledSet: new Set(),
+      logger: { warn }
+    });
+
+    expect(probe.validation).toBeUndefined();
+    expect(probe.validationError).toBeInstanceOf(Error);
+    expect(probe.modes.launch.available).toBe(true);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('probe exploded'));
+  });
+
+  it('marks a factory without a validate function unprobeable (assume valid) and logs a warning', async () => {
+    const warn = vi.fn();
+    const factory = { getMetadata: vi.fn().mockReturnValue({}) };
+
+    const probe = await probeLanguageEntry(entry(), {
+      registry: { getFactory: vi.fn().mockResolvedValue(factory) },
+      disabledSet: new Set(),
+      logger: { warn }
+    });
+
+    expect(probe.probeable).toBe(false);
+    expect(probe.factory).toBeDefined();
+    expect(probe.modes.launch.available).toBe(true);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('validate'));
   });
 });
 
