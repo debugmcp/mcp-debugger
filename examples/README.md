@@ -2,6 +2,17 @@
 
 This directory contains example code that can be used to test the Debug MCP Server.
 
+## Kubernetes
+
+The [`kubernetes/`](kubernetes/) directory contains **turnkey, registry-free debug
+targets** for every attach-capable language (stock public images + ConfigMap source —
+`kubectl apply` and attach, no docker build), plus per-language
+[attach presets](kubernetes/attach-presets.md) and an ephemeral-sidecar helper. See the
+[Kubernetes debugging recipe](../docs/kubernetes.md). For the narrative tutorial with a
+realistic log-invisible bug, see [`sick-pod/`](sick-pod/) and
+[`sick-pod-cpp/`](sick-pod-cpp/) with the
+[JIT diagnostics tutorial](../docs/jit-diagnostics/README.md).
+
 ## Python Examples
 
 The `python` directory contains Python scripts that can be used for testing the Python debugging capabilities.

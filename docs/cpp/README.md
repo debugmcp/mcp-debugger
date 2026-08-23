@@ -62,6 +62,8 @@ attach_to_process sessionId=... processId=<pid>
                      adapterConfig: {initCommands: ["settings set target.exec-search-paths /proc/1/root"]}}
   ```
 
+  For the full Kubernetes ephemeral-sidecar flow (flags, symbols, turnkey manifests), see the [Kubernetes debugging recipe](../kubernetes.md).
+
 ## Advanced CodeLLDB Features (pass-through)
 
 Unrecognized keys in the launch config flow through to CodeLLDB untouched, so its full power stays available:

@@ -16,7 +16,7 @@ mcp-debugger gives AI agents step-through debugging over the Model Context Proto
 ## Near-term themes
 
 - **Environment self-check** — ✅ shipped: the [`mcp-debugger doctor` command](docs/diagnostics.md) checks every adapter's runtime prerequisites in one pass, and the [diagnostics guide](docs/diagnostics.md) consolidates prerequisites and failure signatures ([#423](https://github.com/debugmcp/mcp-debugger/issues/423)).
-- **Turnkey Kubernetes debugging** — a copy-paste recipe (docs + example manifests + attach presets) for debugging pods via ephemeral sidecar containers and port-forwarded attach ([#424](https://github.com/debugmcp/mcp-debugger/issues/424)).
+- **Turnkey Kubernetes debugging** — ✅ shipped: the [Kubernetes debugging recipe](docs/kubernetes.md) with registry-free [example manifests](examples/kubernetes/) and per-language [attach presets](examples/kubernetes/attach-presets.md), covering ephemeral sidecar containers and port-forwarded attach ([#424](https://github.com/debugmcp/mcp-debugger/issues/424)).
 - **Published-artifact canary** — ✅ shipped: the [Canary workflow](.github/workflows/canary.yml) runs a weekly (and on-demand, as the release gate) install-and-debug matrix over what users actually install (npx, global npm, Docker) across x64/arm64 Linux, arm64 macOS, and Windows, catching packaging regressions before users do ([#425](https://github.com/debugmcp/mcp-debugger/issues/425)).
 
 ## Non-goals

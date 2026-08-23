@@ -168,6 +168,11 @@ sessions mcp-debugger skips host-side file existence checks for exactly this rea
 
 ### Kubernetes
 
+> **No-build alternative:** [`examples/kubernetes/ruby-app.yaml`](../../examples/kubernetes/ruby-app.yaml)
+> deploys a debuggable Ruby target from stock `ruby:3.3-slim` (rdbg is a bundled gem)
+> with the source in a ConfigMap — no docker build or `kind load` required. See the
+> [Kubernetes debugging recipe](../kubernetes.md) and its [attach presets](../../examples/kubernetes/attach-presets.md).
+
 The same flow works against a pod through `kubectl port-forward` (verified with a
 [kind](https://kind.sigs.k8s.io/) cluster and the manifest in the demo directory):
 

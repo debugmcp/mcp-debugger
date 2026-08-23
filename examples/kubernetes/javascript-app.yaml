@@ -1,0 +1,68 @@
+# Turnkey JavaScript/Node.js debug target — no registry, no image build.
+# Stock node:22-slim + app source from a ConfigMap; the V8 inspector
+# listens on 9229. Zero dependencies to install.
+#
+#   kubectl apply -f javascript-app.yaml
+#   kubectl wait --for=condition=available deployment/javascript-demo
+#   kubectl port-forward deploy/javascript-demo 9229:9229
+#
+# Attach preset: see attach-presets.md (#javascript). The inspector port is
+# unauthenticated — reach it via kubectl port-forward only, never a Service.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: javascript-demo-src
+data:
+  app.js: |
+    function tick(counter) {
+      const label = `tick-${counter}`;
+      const total = counter * 2;
+      console.log(`${label}: total=${total}`);
+      return total;
+    }
+
+    let counter = 0;
+    setInterval(() => {
+      counter += 1;
+      tick(counter);
+    }, 2000);
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: javascript-demo
+  labels:
+    app: javascript-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: javascript-demo
+  template:
+    metadata:
+      labels:
+        app: javascript-demo
+    spec:
+      containers:
+        - name: app # kubectl debug --target=app
+          image: node:22-slim
+          # --preserve-symlinks-main keeps the script's runtime path at
+          # /app/app.js: ConfigMap volumes are symlink trees, and without the
+          # flag node resolves the main module to /app/..<timestamp>/app.js,
+          # which breaks file+line breakpoint addressing on attach.
+          command: ["node", "--preserve-symlinks-main", "--inspect=0.0.0.0:9229", "/app/app.js"]
+          ports:
+            - containerPort: 9229 # V8 inspector — port-forward only, NEVER a Service/Ingress
+          volumeMounts:
+            - name: src
+              mountPath: /app
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: src
+          configMap:
+            name: javascript-demo-src

@@ -37,7 +37,7 @@ Microsoft's [DebugMCP](https://github.com/microsoft/DebugMCP) exposes VS Code's 
 | Logpoints without pausing (prod-safe value watching) | ✅ [`logMessage` breakpoints](docs/tool-reference.md#set_breakpoint) | ✅ via VS Code |
 | Content/function-addressed breakpoints (`statement:`, `function:`, `expectedContent`) | ✅ agent-native addressing that survives edits | — |
 | Secret redaction on by default | ✅ variable/evaluate/output masking + least-privilege mode | — |
-| Kubernetes ephemeral debug sidecar (native attach-by-PID) | ✅ [`kubectl debug` flow](docs/jit-diagnostics/README.md) | ❌ |
+| Kubernetes ephemeral debug sidecar (native attach-by-PID) | ✅ [`kubectl debug` flow](docs/kubernetes.md) | ❌ |
 | C/C++ | ✅ via CodeLLDB (launch + attach-by-PID) | ✅ via VS Code extensions |
 | PHP | ❌ | ✅ via VS Code extensions |
 | Languages | Python, JS/TS, Ruby, Rust, Go, Java, .NET, C/C++ | Python, JS/TS, Ruby, Rust, Go, Java, .NET, C/C++, PHP |
@@ -65,7 +65,7 @@ If your agent runs in a terminal, a pipeline, or a cloud sandbox — or needs to
 - 📡 **Buffered program output** – `get_output` returns debuggee stdout/stderr with a cursor, and each session exposes its transcript as a subscribable MCP resource
 - 💥 **Crash-state debugging by default** – Launch sessions pause on uncaught exceptions with stack and locals live (`breakOnExceptions`; exception class/message surfaced via `lastStop`)
 - 🪞 **Read-only IDE mirror** – `expose_session` opens a loopback, token-gated DAP endpoint so a human's IDE can inspect the agent's live session without taking control
-- ☸️ **Kubernetes ephemeral debug sidecar** – `kubectl debug --target` + attach-by-PID reaches native processes in running pods ([guide](docs/jit-diagnostics/README.md))
+- ☸️ **Kubernetes debugging** – port-forward attach for interpreted runtimes, `kubectl debug --target` + attach-by-PID for native processes ([recipe](docs/kubernetes.md), [turnkey manifests](examples/kubernetes/))
 - 🔌 **STDIO and Streamable HTTP transports** – Works with any MCP client (legacy SSE transport is deprecated)
 - 📦 **Zero-runtime dependencies** – Self-contained bundles via esbuild + tsup
 - ⚡ **npx ready** – Run directly with `npx @debugmcp/mcp-debugger` - no installation needed
@@ -381,6 +381,7 @@ Then get the local variables:
 - ⚙️ [C/C++ Debugging Guide](./docs/cpp/README.md) – CodeLLDB launch, auto-compile, attach-by-PID, core dumps, remote stubs
 - 🦀 [Rust Debugging Guide](./docs/rust-debugging.md) – CodeLLDB setup ([Windows specifics](docs/rust-debugging-windows.md))
 - 🐳 [Docker Support](./docs/docker-support.md) – Container languages, attach modes, host-binary source mapping
+- ☸️ [Kubernetes Debugging](./docs/kubernetes.md) – Turnkey attach recipes: registry-free manifests, per-language presets, ephemeral debug sidecar
 - 🚑 [JIT Diagnostics Tutorial](./docs/jit-diagnostics/README.md) – Debug live services in Kubernetes, incl. the ephemeral-sidecar flow for compiled code
 - 🤖 [Agent Debugging Guide](./docs/agent-debugging-guide.md) – Correct tool usage patterns for AI agents
 - ⚠️ [Known Issues](./docs/KNOWN_ISSUES.md) – Current caveats and workarounds

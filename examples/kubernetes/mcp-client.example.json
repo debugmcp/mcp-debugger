@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "mcp-debugger": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["@debugmcp/mcp-debugger", "stdio"]
+    },
+    "k8s-sidecar": {
+      "type": "http",
+      "url": "http://127.0.0.1:3001/mcp"
+    }
+  }
+}
