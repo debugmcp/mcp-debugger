@@ -48,8 +48,8 @@ Pre-release validation for mcp-debugger. Run `npm run release:dry-run` to automa
 - [ ] GitHub Release body has the correct changelog content
 - [ ] Verify provenance: `gh attestation verify debugmcp-mcp-debugger-x.y.z.tgz --repo debugmcp/mcp-debugger` (download the asset first)
 - [ ] Verify npm: each published package shows the new version with `latest` dist-tag and a provenance badge on npmjs.com; `npm audit signatures` passes in a scratch project that installs them
-- [ ] Verify: `npx @debugmcp/mcp-debugger@x.y.z stdio` works (if the npx cache misbehaves, `npm install --prefix <tmp-dir>` is the reliable smoke path)
-- [ ] Verify: `docker pull debugmcp/mcp-debugger:x.y.z` works
+- [ ] **Run the canary as the release gate**: `gh workflow run canary.yml -f version=x.y.z` and confirm every leg is green (Actions → "Canary (published artifacts)"). It installs the published npm package (default and `--omit=optional` + `CODELLDB_PATH` legs), runs npx, pulls the Docker image, and drives a breakpoint→variables→continue cycle in mock/python/rust on x64/arm64 Linux, arm64 macOS, and Windows — superseding the manual npx/docker spot checks below
+- [ ] Fallback manual checks (when the canary can't run): `npx @debugmcp/mcp-debugger@x.y.z stdio` works (if the npx cache misbehaves, `npm install --prefix <tmp-dir>` is the reliable smoke path); `docker pull debugmcp/mcp-debugger:x.y.z` works
 - [ ] Verify: PyPI has `debug-mcp-server-launcher==x.y.z`
 - [ ] **Website content review** — audit https://debugmcp.io against what this release shipped (language matrix, tool count, feature claims, comparison table) and update `debugmcp/website`
 - [ ] Update `SECURITY.md` supported-versions table if a new minor line started (should have happened pre-tag)
