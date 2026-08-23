@@ -20,7 +20,6 @@ import { IDebugAdapter, AdapterConfig } from '@debugmcp/shared';
 import type { AdapterMetadata as SharedAdapterMetadata, AdapterManifestEntry, FactoryLoadResult } from '@debugmcp/shared';
 import { AdapterLoader } from './adapter-loader.js';
 import type { AdapterMetadata } from './adapter-loader.js';
-import { createLogger } from '../utils/logger.js';
 
 /**
  * Default registry configuration
@@ -32,6 +31,11 @@ const DEFAULT_CONFIG: Required<AdapterRegistryConfig> = {
   autoDispose: true,
   autoDisposeTimeout: 300000, // 5 minutes
   enableDynamicLoading: false,
+  // No injected sink → discovery warnings are dropped. Deliberately NOT a
+  // per-instance createLogger(): HTTP mode builds a registry per session and
+  // a per-instance winston logger pipes each into the process-lifetime
+  // shared transport with no detach path (the issue-#404 leak class).
+  logger: {},
 };
 
 /**
@@ -44,9 +48,12 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
   private readonly disposeTimers = new Map<IDebugAdapter, NodeJS.Timeout>();
   private readonly registrationTimestamps = new Map<string, Date>();
   private readonly loader = new AdapterLoader();
-  private readonly logger = createLogger('AdapterRegistry');
   // Dynamic loading is opt-in via constructor config or MCP_CONTAINER=true env var
   private readonly dynamicEnabled: boolean;
+
+  private warn(message: string): void {
+    this.config.logger.warn?.(message);
+  }
 
   constructor(config: AdapterRegistryConfig = {}) {
     super();
@@ -264,7 +271,7 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
     } catch (error) {
       // Fall back to registered adapters (bundled environments embed them),
       // but leave a breadcrumb — a broken loader should not be silent.
-      this.logger.warn(
+      this.warn(
         `[AdapterRegistry] listLanguages: loader discovery failed, falling back to registered adapters: ${
           error instanceof Error ? error.message : String(error)
         }`
@@ -285,13 +292,28 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
   async listAvailableAdapters(): Promise<AdapterManifestEntry[]> {
     const registered = new Set(this.getSupportedLanguages());
 
-    const buildEntry = (language: string): AdapterMetadata => ({
-      name: language,
-      packageName: `@debugmcp/adapter-${language}`,
-      description: undefined,
-      installed: true,
-      attach: this.factories.get(language)?.getMetadata().modes?.attach ?? 'none'
-    });
+    const buildEntry = (language: string): AdapterMetadata => {
+      // A registered plain-JS factory can throw from getMetadata(); one bad
+      // factory must not reject the whole listing (doctor would lose every
+      // verdict). Same defense probeLanguageEntry applies per entry.
+      let attach: AdapterMetadata['attach'] = 'none';
+      try {
+        attach = this.factories.get(language)?.getMetadata().modes?.attach ?? 'none';
+      } catch (error) {
+        this.warn(
+          `[AdapterRegistry] getMetadata() threw for registered '${language}'; listing it with attach 'none'. ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
+      return {
+        name: language,
+        packageName: `@debugmcp/adapter-${language}`,
+        description: undefined,
+        installed: true,
+        attach
+      };
+    };
 
     if (!this.dynamicEnabled) {
       // Provide minimal metadata from registered factories
@@ -308,7 +330,7 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
       }
     } catch (error) {
       // Fall back to registered adapters, but leave a breadcrumb.
-      this.logger.warn(
+      this.warn(
         `[AdapterRegistry] listAvailableAdapters: loader discovery failed, falling back to registered adapters: ${
           error instanceof Error ? error.message : String(error)
         }`

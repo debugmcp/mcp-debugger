@@ -9,6 +9,7 @@ import {
   probeLanguageEntry,
   ValidationResultCache
 } from '../../../src/utils/language-availability.js';
+import { ErrorMessages } from '../../../src/utils/error-messages.js';
 
 const ok = { valid: true, errors: [], warnings: [] };
 const bad = (msg: string) => ({ valid: false, errors: [msg], warnings: [] });
@@ -386,6 +387,24 @@ describe('probeLanguageEntry (issue #435)', () => {
       expect(probe.modes.launch.available).toBe(true);
     });
 
+    it('treats a contract-violating undefined resolution as no factory, not a load error', async () => {
+      // An untyped plain-JS registry can resolve undefined; that must land in
+      // the honest no-factory branch, not surface as a bogus corrupt-adapter
+      // diagnosis via a TypeError recorded in factoryLoadError.
+      const probe = await probeLanguageEntry(entry(), {
+        registry: {
+          getFactory: vi.fn(),
+          getFactoryResult: vi.fn().mockResolvedValue(undefined as never)
+        },
+        disabledSet: new Set()
+      });
+
+      expect(probe.factory).toBeUndefined();
+      expect(probe.factoryLoadError).toBeUndefined();
+      expect(probe.probeable).toBe(false);
+      expect(probe.modes.launch.available).toBe(true);
+    });
+
     it('treats dynamicLoadingDisabled as no factory, with no load error', async () => {
       const probe = await probeLanguageEntry(entry(), {
         registry: {
@@ -536,6 +555,19 @@ describe('checkLaunchToolchain (issues #360, #435)', () => {
     });
   });
 
+  it('warns with the real load failure while failing open — the breadcrumb must not be discarded', async () => {
+    const warn = vi.fn();
+    const registry = {
+      getFactory: vi.fn(),
+      getFactoryResult: vi.fn().mockResolvedValue({ loadError: new Error('corrupted dist') })
+    };
+
+    await expect(checkLaunchToolchain('python', registry, cache(), { warn })).resolves.toEqual({
+      available: true
+    });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('corrupted dist'));
+  });
+
   it('runs validate once across two gate checks through the shared cache', async () => {
     const validate = vi.fn().mockResolvedValue(ok);
     const registry = registryWith(validate);
@@ -558,57 +590,73 @@ describe('checkLaunchToolchain (issues #360, #435)', () => {
     }
   });
 
-  describe('drift fence: gate ≡ probeLanguageEntry launch mode', () => {
+  describe('drift fence: gate ≡ probeLanguageEntry launch mode (toolchain axis)', () => {
     // The gate is a wrapper over the shared probe (issue #435 part 3). This
     // matrix is the gate-side analogue of server-doctor-parity: for every
     // registry shape, the gate's answer must equal the probe's launch mode
     // (modulo the documented empty-reason fallback sentence).
-    const shapes: Array<{ title: string; registry: unknown }> = [
-      { title: 'valid toolchain', registry: registryWith(async () => ok) },
+    //
+    // Registries are built INSIDE each test via thunks: the global afterEach
+    // vi.resetAllMocks() wipes describe-scope vi.fn implementations before
+    // any test executes, which once made this whole fence vacuously pass as
+    // true===true fail-open on both sides. expectAvailable pins each shape's
+    // intended branch so silent vacuity cannot recur.
+    const shapes: Array<{ title: string; makeRegistry: () => unknown; expectAvailable: boolean }> = [
+      { title: 'valid toolchain', makeRegistry: () => registryWith(async () => ok), expectAvailable: true },
       {
         title: 'invalid with reason',
-        registry: registryWith(async () => bad('toolchain gone'))
+        makeRegistry: () => registryWith(async () => bad('toolchain gone')),
+        expectAvailable: false
       },
       {
         title: 'invalid with empty errors',
-        registry: registryWith(async () => ({ valid: false, errors: [], warnings: [] }))
+        makeRegistry: () => registryWith(async () => ({ valid: false, errors: [], warnings: [] })),
+        expectAvailable: false
       },
       {
         title: 'throwing validate',
-        registry: registryWith(async () => {
-          throw new Error('boom');
-        })
+        makeRegistry: () =>
+          registryWith(async () => {
+            throw new Error('boom');
+          }),
+        expectAvailable: true
       },
-      { title: 'missing factory', registry: { getFactory: vi.fn().mockResolvedValue(undefined) } },
+      {
+        title: 'missing factory',
+        makeRegistry: () => ({ getFactory: vi.fn(async () => undefined) }),
+        expectAvailable: true
+      },
       {
         title: 'loadError via getFactoryResult',
-        registry: {
+        makeRegistry: () => ({
           getFactory: vi.fn(),
-          getFactoryResult: vi.fn().mockResolvedValue({ loadError: new Error('nope') })
-        }
+          getFactoryResult: vi.fn(async () => ({ loadError: new Error('nope') }))
+        }),
+        expectAvailable: true
       }
     ];
 
-    for (const { title, registry } of shapes) {
+    for (const { title, makeRegistry, expectAvailable } of shapes) {
       it(`agrees with the probe for: ${title}`, async () => {
         const gate = await checkLaunchToolchain(
           'python',
-          registry as Parameters<typeof checkLaunchToolchain>[1],
+          makeRegistry() as Parameters<typeof checkLaunchToolchain>[1],
           cache()
         );
         const probe = await probeLanguageEntry(
           { language: 'python', packageName: '@debugmcp/adapter-python', installed: true },
           {
-            registry: registry as Parameters<typeof probeLanguageEntry>[1]['registry'],
+            registry: makeRegistry() as Parameters<typeof probeLanguageEntry>[1]['registry'],
             disabledSet: new Set()
           }
         );
 
+        expect(gate.available).toBe(expectAvailable); // non-vacuity pin
         expect(gate.available).toBe(probe.modes.launch.available);
         if (!gate.available) {
           const expectedReason =
             probe.modes.launch.reason ||
-            "The 'python' debug adapter is not available in this runtime.";
+            ErrorMessages.modeUnavailableReason.launchFallback('python');
           expect((gate as { reason: string }).reason).toBe(expectedReason);
         }
       });

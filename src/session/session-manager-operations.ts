@@ -2514,7 +2514,9 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     // declaration is enforced — absent metadata falls through to the
     // adapter's natural behavior.
     // getFactoryMetadata is on IAdapterRegistry (issue #435 part 4); the
-    // runtime guard stays for partial registry doubles.
+    // runtime guard stays for partial registry doubles, but skipping the
+    // gate must never be silent — that is the fail-open degradation the
+    // typed surface exists to expose.
     if (typeof this.adapterRegistry.getFactoryMetadata === 'function') {
       const factoryMeta = await this.adapterRegistry.getFactoryMetadata(session.language).catch(() => undefined);
       if (factoryMeta?.modes?.attach === 'none') {
@@ -2524,6 +2526,11 @@ export abstract class SessionManagerOperations extends SessionManagerData {
           error: ErrorMessages.attachModeNotSupported(session.language)
         };
       }
+    } else {
+      this.logger.warn(
+        `[SessionManager] adapterRegistry has no getFactoryMetadata; skipping the attach-'none' ` +
+          `enforcement gate for '${session.language}'.`
+      );
     }
 
     if (session.proxyManager) {

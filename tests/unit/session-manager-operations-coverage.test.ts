@@ -115,6 +115,10 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
           buildAdapterCommand: vi.fn().mockReturnValue('python -m debugpy'),
           resolveExecutablePath: vi.fn().mockResolvedValue('python')
         }),
+        // Implementation (not mockResolvedValue) so it survives mock resets;
+        // undefined metadata lets the attach-'none' gate fall through while
+        // still being exercised (issue #435 part 4 review).
+        getFactoryMetadata: vi.fn(async () => undefined),
         getAdapterPolicy: vi.fn().mockReturnValue({
           name: 'python',
           getInitializationBehavior: () => ({})
@@ -1530,6 +1534,26 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       (operations as unknown as { attachVerifyTimeoutMs: number }).attachVerifyTimeoutMs = 200;
       (operations as unknown as { attachVerifyIntervalMs: number }).attachVerifyIntervalMs = 10;
       (operations as unknown as { attachPauseStopTimeoutMs: number }).attachPauseStopTimeoutMs = 50;
+    });
+
+    it('warns and proceeds when the registry lacks getFactoryMetadata (attach gate self-disabled)', async () => {
+      delete (mockDependencies.adapterRegistry as Record<string, unknown>).getFactoryMetadata;
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) =>
+        command === 'threads' ? { body: { threads: [{ id: 1, name: 'main' }] } } : {}
+      );
+      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+      });
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 5005,
+        host: 'localhost'
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('getFactoryMetadata')
+      );
     });
 
     it('should discover main thread when available', async () => {

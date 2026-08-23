@@ -389,6 +389,15 @@ export interface AdapterRegistryConfig {
    * enables it.
    */
   enableDynamicLoading?: boolean;
+
+  /**
+   * Sink for discovery-fallback warnings (loader failures, malformed factory
+   * metadata). Injected by the DI container so registry breadcrumbs follow
+   * the configured log level/file instead of a per-instance logger piping
+   * into the process-lifetime transport (issue #404 leak class). Absent →
+   * warnings are dropped.
+   */
+  logger?: { warn?: (message: string) => void };
 }
 
 // ===== Error Types =====
@@ -453,7 +462,14 @@ export function isAdapterRegistry(obj: unknown): obj is IAdapterRegistry {
     obj !== null &&
     'register' in obj &&
     'create' in obj &&
-    'getSupportedLanguages' in obj
+    'getSupportedLanguages' in obj &&
+    // The typed discovery surface (issue #435 part 4): certifying a legacy
+    // three-method registry would hand callers of these required members a
+    // runtime TypeError with no compile-time warning.
+    'listLanguages' in obj &&
+    'listAvailableAdapters' in obj &&
+    'getFactory' in obj &&
+    'getFactoryMetadata' in obj
   );
 }
 

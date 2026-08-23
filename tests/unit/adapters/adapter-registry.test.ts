@@ -232,6 +232,53 @@ describe('AdapterRegistry', () => {
     });
   });
 
+  describe('discovery hardening (issue #435 part 4 review)', () => {
+    it('routes the listAvailableAdapters fallback warning through the injected config logger', async () => {
+      const warn = vi.fn();
+      const registry = new AdapterRegistry({ enableDynamicLoading: true, logger: { warn } });
+      vi.spyOn(registry as any, 'loader', 'get').mockReturnValue({
+        listAvailableAdapters: vi.fn().mockRejectedValue(new Error('loader exploded'))
+      });
+
+      await registry.listAvailableAdapters();
+
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('loader exploded'));
+    });
+
+    it('routes the listLanguages fallback warning through the injected config logger', async () => {
+      const warn = vi.fn();
+      const registry = new AdapterRegistry({ enableDynamicLoading: true, logger: { warn } });
+      vi.spyOn(registry as any, 'loader', 'get').mockReturnValue({
+        listAvailableAdapters: vi.fn().mockRejectedValue(new Error('loader exploded'))
+      });
+
+      await registry.listLanguages();
+
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('loader exploded'));
+    });
+
+    it('keeps listing when a registered factory getMetadata throws (attach falls back to none)', async () => {
+      // A plain-JS third-party factory can stay registered with a throwing
+      // getMetadata: register() sets the factories map BEFORE the emit that
+      // calls getMetadata(), and production registration sites swallow the
+      // rejection. One bad factory must not then reject the whole listing
+      // (which would kill every doctor verdict).
+      const registry = new AdapterRegistry();
+      const factory = createFactory({
+        getMetadata: vi.fn(() => {
+          throw new Error('metadata exploded');
+        })
+      });
+      await registry.register('mock', factory as any).catch(() => undefined);
+
+      const adapters = await registry.listAvailableAdapters();
+
+      expect(adapters).toEqual([
+        expect.objectContaining({ name: 'mock', installed: true, attach: 'none' })
+      ]);
+    });
+  });
+
   it('auto-disposes adapters on state change and clears timers', async () => {
     vi.useFakeTimers();
 

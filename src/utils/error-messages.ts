@@ -154,5 +154,8 @@ export const ErrorMessages = {
       `Adapter package ${packageName} is not installed.`,
     attachNotImplemented: (language: string) =>
       `The '${language}' adapter does not implement attach mode.`,
+    /** Launch-gate fallback when validation failed with an empty errors list */
+    launchFallback: (language: string) =>
+      `The '${language}' debug adapter is not available in this runtime.`,
   },
 };

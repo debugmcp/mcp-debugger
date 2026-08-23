@@ -102,7 +102,11 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
   const dynConfig: AdapterRegistryConfig = {
     validateOnRegister: false,
     allowOverride: false,
-    enableDynamicLoading: true
+    enableDynamicLoading: true,
+    // Route registry discovery warnings through the container logger so they
+    // follow the configured level/file and detach with it on stop() —
+    // a registry-owned logger would leak per HTTP session (issue #404 class).
+    logger: { warn: (message: string) => logger.warn?.(message) }
   };
   const adapterRegistry = new AdapterRegistry(dynConfig);
 
