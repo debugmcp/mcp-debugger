@@ -19,6 +19,7 @@ import {
   DapResponseMessage,
   DapEventMessage,
   ErrorMessage,
+  BreakpointSyncResult,
   MIRROR_EXPOSE_COMMAND,
   MIRROR_UNEXPOSE_COMMAND
 } from './dap-proxy-interfaces.js';
@@ -824,7 +825,8 @@ export class DapProxyWorker {
       // Set initial breakpoints if provided
       if (this.currentInitPayload.initialBreakpoints?.length) {
         this.logger!.info('[Worker] Initial breakpoints payload:', this.currentInitPayload.initialBreakpoints);
-        const groupedBreakpoints = new Map<string, BreakpointFields[]>();
+        type InitialBreakpointEntry = BreakpointFields & { id?: string; file: string };
+        const groupedBreakpoints = new Map<string, InitialBreakpointEntry[]>();
 
         for (const breakpoint of this.currentInitPayload.initialBreakpoints) {
           const filePath = path.resolve(breakpoint.file);
@@ -832,8 +834,12 @@ export class DapProxyWorker {
             groupedBreakpoints.set(filePath, []);
           }
           // Full per-breakpoint fields — the connection manager maps them via
-          // the shared toSourceBreakpoint, so nothing is dropped here (#235)
+          // the shared toSourceBreakpoint, so nothing is dropped here (#235).
+          // id/file ride along only for the breakpoints_synced echo below;
+          // toSourceBreakpoint whitelists what reaches the adapter (#439).
           groupedBreakpoints.get(filePath)!.push({
+            id: breakpoint.id,
+            file: breakpoint.file,
             line: breakpoint.line,
             condition: breakpoint.condition,
             logMessage: breakpoint.logMessage,
@@ -841,11 +847,41 @@ export class DapProxyWorker {
           });
         }
 
+        const syncResults: BreakpointSyncResult[] = [];
         for (const [filePath, breakpoints] of groupedBreakpoints.entries()) {
-          await this.connectionManager.setBreakpoints(
+          const response = await this.connectionManager.setBreakpoints(
             this.dapClient,
             filePath,
             breakpoints
+          );
+          // DAP guarantees the response breakpoints array is positional per
+          // request; zip within each group so the echoed id stays attached.
+          const resultBps = response?.body?.breakpoints ?? [];
+          breakpoints.forEach((bp, i) => {
+            syncResults.push({
+              ...(bp.id !== undefined ? { id: bp.id } : {}),
+              file: bp.file,
+              line: bp.line,
+              verified: resultBps[i]?.verified === true,
+              ...(typeof resultBps[i]?.id === 'number' ? { adapterId: resultBps[i].id } : {}),
+              ...(typeof resultBps[i]?.line === 'number' ? { boundLine: resultBps[i].line } : {}),
+              ...(resultBps[i]?.message !== undefined ? { message: resultBps[i].message } : {})
+            });
+          });
+        }
+        // Forward the results to the parent (issue #439): for a launch that
+        // never pauses, the post-launch re-sync is gated off (STOPPED), so
+        // this status is the only path that stamps verified/adapterId in the
+        // store. A status failure must never abort the launch;
+        // setBreakpoints failures keep their existing abort semantics via
+        // the outer catch.
+        try {
+          this.sendStatus('breakpoints_synced', { breakpoints: syncResults });
+        } catch (err) {
+          this.logger!.warn(
+            `[Worker] breakpoints_synced status failed (continuing): ${
+              err instanceof Error ? err.message : String(err)
+            }`
           );
         }
       }

@@ -23,7 +23,7 @@ import {
 import { ISessionStoreFactory } from '../factories/session-store-factory.js';
 import { IProxyManager } from '../proxy/proxy-manager.js';
 import { IProxyManagerFactory } from '../factories/proxy-manager-factory.js';
-import type { FunctionBreakpointSyncResult } from '../proxy/dap-proxy-interfaces.js';
+import type { BreakpointSyncResult, FunctionBreakpointSyncResult } from '../proxy/dap-proxy-interfaces.js';
 import { IAdapterRegistry } from '@debugmcp/shared';
 
 // Custom launch arguments interface extending DebugProtocol.LaunchRequestArguments
@@ -810,6 +810,63 @@ export abstract class SessionManagerCore extends EventEmitter {
     };
     proxyManager.on('function-breakpoints-synced', handleFunctionBreakpointsSynced);
     handlers.set('function-breakpoints-synced', handleFunctionBreakpointsSynced);
+
+    // Pre-launch line-breakpoint sync results from the worker (issue #439):
+    // stamp verified/adapterId into the store immediately. For a launch that
+    // never pauses (a logpoint-only short program), the session is already
+    // STOPPED when the post-launch re-sync gate runs, so this status is the
+    // only path that ever stamps these breakpoints. Matched by the echoed
+    // store id — exact, immune to the worker's path canonicalization.
+    const handleBreakpointsSynced = (results: BreakpointSyncResult[]) => {
+      // js-debug's worker path never emits this status (queueing policies
+      // skip handleInitializedEvent), but guard anyway: parent responses
+      // are non-authoritative for mirroring policies — never downgrade
+      // child-verified state or clobber child-space adapter ids.
+      let mirrorsToChild = false;
+      try {
+        mirrorsToChild =
+          !!this.sessionStore.selectPolicy(session.language).getDapClientBehavior().mirrorBreakpointsToChild;
+      } catch {
+        // Unknown policy: default handling
+      }
+      for (const result of results) {
+        if (typeof result.id !== 'string') {
+          continue; // legacy payload without an echo key
+        }
+        const target = session.breakpoints.get(result.id);
+        if (!target) {
+          continue; // removed mid-launch
+        }
+        if (mirrorsToChild) {
+          target.verified = target.verified || result.verified;
+          continue;
+        }
+        target.verified = result.verified;
+        if (typeof result.adapterId === 'number') {
+          target.adapterId = result.adapterId;
+        }
+        if (typeof result.boundLine === 'number') {
+          target.line = result.boundLine;
+        }
+        // Stamp message only when present — a clean sync must not wipe the
+        // capability-drift warning handleAdapterCapabilities may have set.
+        if (result.message !== undefined) {
+          target.message = result.message;
+        }
+        this.logger.info('debug:breakpoint', {
+          event: 'verified',
+          sessionId,
+          sessionName: session.name,
+          breakpointId: target.id,
+          file: target.file,
+          line: target.line,
+          verified: target.verified,
+          timestamp: Date.now(),
+        });
+      }
+    };
+    proxyManager.on('breakpoints-synced', handleBreakpointsSynced);
+    handlers.set('breakpoints-synced', handleBreakpointsSynced);
 
     // Named function for dry run complete event
     const handleDryRunComplete = (command: string, script: string) => {

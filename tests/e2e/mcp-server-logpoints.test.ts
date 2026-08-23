@@ -141,6 +141,19 @@ describe('Logpoints e2e (set_breakpoint logMessage)', () => {
       });
       const outputText = JSON.stringify((outRes as { entries?: unknown[] }).entries ?? []);
       expect(outputText).toContain(expectInOutput);
+
+      // A logpoint that demonstrably fired must not read as unbound (issue
+      // #439): the worker's breakpoints_synced status stamps the store even
+      // though the never-paused launch skipped the post-launch re-sync.
+      // javascript is excluded — its verification is child-event-driven and
+      // timing-dependent on a program this short.
+      if (lang.language !== 'javascript') {
+        const bpList = await callToolSafely(mcpClient!, 'list_breakpoints', {
+          sessionId: currentSessionId,
+        });
+        const bps = (bpList as { breakpoints?: Array<{ verified: boolean }> }).breakpoints ?? [];
+        expect(bps[0]?.verified).toBe(true);
+      }
     }, 60_000);
   }
 });

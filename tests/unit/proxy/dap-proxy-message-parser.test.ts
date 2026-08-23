@@ -244,6 +244,24 @@ describe('MessageParser', () => {
       });
     });
 
+    it('passes the store id through on initial breakpoints (issue #439)', () => {
+      const payload = {
+        cmd: 'init',
+        sessionId: 'test-session',
+        executablePath: '/usr/bin/python3',
+        adapterHost: 'localhost',
+        adapterPort: 5678,
+        logDir: '/tmp/logs',
+        scriptPath: '/home/user/script.py',
+        initialBreakpoints: [
+          { id: 'store-uuid-1', file: 'test.py', line: 10 }
+        ]
+      };
+
+      const result = MessageParser.validateInitPayload(payload);
+      expect(result.initialBreakpoints?.[0]).toMatchObject({ id: 'store-uuid-1' });
+    });
+
     it('should throw on invalid breakpoints', () => {
       const invalidBreakpoints = [
         [{}], // Missing file and line
@@ -253,7 +271,8 @@ describe('MessageParser', () => {
         [{ file: 'test.py', line: 'abc' }], // Non-numeric line string still fails
         [{ file: 'test.py', line: 10, condition: 123 }], // Invalid condition type
         [{ file: 'test.py', line: 10, logMessage: 123 }], // Invalid logMessage type
-        [{ file: 'test.py', line: 10, suspendPolicy: 'sometimes' }] // Invalid suspendPolicy value
+        [{ file: 'test.py', line: 10, suspendPolicy: 'sometimes' }], // Invalid suspendPolicy value
+        [{ id: 42, file: 'test.py', line: 10 }] // Invalid id type (issue #439)
       ];
 
       invalidBreakpoints.forEach(breakpoints => {

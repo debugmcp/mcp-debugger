@@ -144,6 +144,9 @@ export class MessageParser {
         if (bpObj.suspendPolicy !== undefined && bpObj.suspendPolicy !== 'all' && bpObj.suspendPolicy !== 'thread') {
           throw new Error(`Breakpoint 'suspendPolicy' must be 'all' or 'thread' if provided`);
         }
+        if (bpObj.id !== undefined && typeof bpObj.id !== 'string') {
+          throw new Error(`Breakpoint 'id' must be a string if provided`);
+        }
       }
     }
 

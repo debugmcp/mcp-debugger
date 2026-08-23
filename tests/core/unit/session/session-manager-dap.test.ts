@@ -189,6 +189,7 @@ describe('SessionManager - DAP Operations', () => {
       const startConfig = dependencies.mockProxyManager.startCalls[0];
       expect(startConfig.initialBreakpoints).toEqual([
         expect.objectContaining({
+          id: expect.any(String), // echo key for breakpoints_synced (issue #439)
           file: 'test.py',
           line: 20,
           condition: 'x > 1',
@@ -221,9 +222,9 @@ describe('SessionManager - DAP Operations', () => {
 
   describe('launch-time breakpoint verification sync', () => {
     // Breakpoints queued before start_debugging are sent by the proxy worker
-    // as initialBreakpoints, but that path's setBreakpoints responses never
-    // reach the session store. After a successful launch the SessionManager
-    // re-syncs each breakpoint file so the store learns verified/adapterId.
+    // as initialBreakpoints. The worker forwards its setBreakpoints results
+    // via the breakpoints_synced status (issue #439); the post-launch
+    // re-sync remains as a belt-and-braces pass for live sessions.
     it('marks pre-launch breakpoints verified in the store once the launch completes', async () => {
       const session = await sessionManager.createSession({
         language: DebugLanguage.MOCK,
@@ -238,6 +239,81 @@ describe('SessionManager - DAP Operations', () => {
 
       const [stored] = sessionManager.listBreakpoints(session.id);
       expect(stored.verified).toBe(true);
+    });
+
+    it('stamps the store from the worker breakpoints-synced results (issue #439)', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+      await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 10 });
+      const [queued] = sessionManager.listBreakpoints(session.id);
+
+      await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+
+      dependencies.mockProxyManager.simulateEvent('breakpoints-synced', [
+        { id: queued.id, file: 'test.py', line: 10, verified: true, adapterId: 5, boundLine: 11, message: 'Resolved' }
+      ]);
+
+      const [stored] = sessionManager.listBreakpoints(session.id);
+      expect(stored.verified).toBe(true);
+      expect(stored.adapterId).toBe(5);
+      expect(stored.line).toBe(11);
+      expect(stored.message).toBe('Resolved');
+    });
+
+    it('keeps verified state for a launch that terminates before ever pausing (issue #439)', async () => {
+      // The logpoint shape: the program runs to completion without a pause,
+      // so the session is already STOPPED when the post-launch re-sync gate
+      // is evaluated — the worker's breakpoints_synced status must be the
+      // path that stamps the store.
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+      await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 18, logMessage: 'LOGPOINT {x}' });
+      const [queued] = sessionManager.listBreakpoints(session.id);
+      expect(queued.verified).toBe(false);
+
+      // Simulate the worker: results arrive during launch, then the (short)
+      // program exits before the readiness wait ever sees a pause.
+      dependencies.mockProxyManager.once('initialized', () => {
+        dependencies.mockProxyManager.simulateEvent('breakpoints-synced', [
+          { id: queued.id, file: 'test.py', line: 18, verified: true, adapterId: 3 }
+        ]);
+        dependencies.mockProxyManager.simulateEvent('terminated');
+      });
+
+      await sessionManager.startDebugging(session.id, 'test.py', [], { stopOnEntry: false });
+      await vi.runAllTimersAsync();
+
+      expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.STOPPED);
+      const [stored] = sessionManager.listBreakpoints(session.id);
+      expect(stored.verified).toBe(true);
+      expect(stored.adapterId).toBe(3);
+    });
+
+    it('skips breakpoints-synced entries with unknown or missing ids (issue #439)', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+      await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 10 });
+
+      await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+      const [before] = sessionManager.listBreakpoints(session.id);
+      const verifiedBefore = before.verified;
+
+      dependencies.mockProxyManager.simulateEvent('breakpoints-synced', [
+        { id: 'no-such-id', file: 'test.py', line: 10, verified: false },
+        { file: 'test.py', line: 10, verified: false } // legacy: no id
+      ]);
+
+      const [after] = sessionManager.listBreakpoints(session.id);
+      expect(after.verified).toBe(verifiedBefore);
+      expect(after.adapterId).toBe(before.adapterId);
     });
   });
 
@@ -699,6 +775,23 @@ describe('SessionManager - DAP Operations', () => {
 
       const [stored] = sessionManager.listBreakpoints(session.id);
       expect(stored.verified).toBe(false);
+    });
+
+    it('never lets breakpoints-synced downgrade child-verified state (issue #439)', async () => {
+      // The real js worker path never emits breakpoints_synced (queueing
+      // policies skip handleInitializedEvent) — this documents the
+      // defensive guard: parent results are non-authoritative for
+      // mirroring policies.
+      const session = await createJsSessionWithChildVerifiedBp();
+      const [child] = sessionManager.listBreakpoints(session.id);
+
+      dependencies.mockProxyManager.simulateEvent('breakpoints-synced', [
+        { id: child.id, file: 'app.js', line: 10, verified: false, adapterId: 7 }
+      ]);
+
+      const [stored] = sessionManager.listBreakpoints(session.id);
+      expect(stored.verified).toBe(true);
+      expect(stored.adapterId).toBe(100);
     });
   });
 
