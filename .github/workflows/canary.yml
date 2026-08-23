@@ -1,0 +1,407 @@
+name: Canary (published artifacts)
+
+# Weekly install-and-debug matrix over what users actually run (issue #425):
+# the published npm package (default install and the --omit=optional +
+# CODELLDB_PATH fallback), npx, and the published Docker image — across
+# x64/arm64 Linux, arm64 macOS, and Windows. PR CI builds from source on two
+# OSes and never exercises the published artifacts; the v0.24.0 image shipping
+# without CodeLLDB (#387) is the class of regression this fences.
+#
+# Failures never block PRs: the notify job files (or comments on) an issue
+# labeled `canary-failure` instead. Dispatch with a version input to use the
+# matrix as the post-release verification gate (docs/release-checklist.md).
+#
+# x64 macOS is intentionally not covered — the macos-13 (x64) hosted runners
+# are retired; macos-latest is arm64.
+#
+# The smoke driver (scripts/canary-smoke.mjs) is dependency-free on purpose:
+# no pnpm/workspace install happens in the npm/docker jobs, so every leg tests
+# the installed artifact, not the repo build.
+
+on:
+  schedule:
+    - cron: '0 9 * * 2'  # Tue 09:00 UTC (Mon 06/08/18 + daily 07:00 are taken by other workflows)
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'npm version / Docker tag to test (default: latest)'
+        required: false
+        default: 'latest'
+      channels:
+        description: 'Which install channels to run'
+        type: choice
+        options: [all, npm, docker]
+        default: 'all'
+
+permissions: {}
+
+concurrency:
+  group: canary-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CANARY_VERSION: ${{ github.event.inputs.version || 'latest' }}
+
+jobs:
+  npm-smoke:
+    name: npm ${{ matrix.leg }} (${{ matrix.os }})
+    if: ${{ (github.event.inputs.channels || 'all') != 'docker' }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+        leg: [default, omit-optional]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: 22.x
+
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies (hash-pinned)
+        run: |
+          python -m pip install --require-hashes -r requirements/pip.txt
+          python -m pip install --require-hashes -r requirements/debugpy.txt
+
+      - name: Ensure rustc
+        # rustc is preinstalled on the x64/macos images; the arm images have
+        # drifted before. Minimal profile — only the smoke fixture needs it.
+        run: |
+          if ! command -v rustc >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --profile minimal --default-toolchain stable
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
+
+      - name: Install published CLI (${{ matrix.leg }})
+        env:
+          LEG: ${{ matrix.leg }}
+        # The scratch prefix keeps `npm install -g` honest without polluting
+        # the runner; docs/release-checklist.md documents this as the
+        # reliable smoke path when the npx cache misbehaves.
+        run: |
+          export NPM_CONFIG_PREFIX="$RUNNER_TEMP/canary-prefix"
+          TRANSCRIPTS="$RUNNER_TEMP/canary-transcripts"
+          mkdir -p "$TRANSCRIPTS"
+          echo "NPM_CONFIG_PREFIX=$NPM_CONFIG_PREFIX" >> "$GITHUB_ENV"
+          echo "TRANSCRIPTS=$TRANSCRIPTS" >> "$GITHUB_ENV"
+          OMIT=""
+          [ "$LEG" = "omit-optional" ] && OMIT="--omit=optional"
+          npm install -g $OMIT "@debugmcp/mcp-debugger@${CANARY_VERSION}"
+          CLI="$(npm root -g)/@debugmcp/mcp-debugger/dist/cli.mjs"
+          test -f "$CLI"
+          echo "CLI=$CLI" >> "$GITHUB_ENV"
+
+      - name: Provision CODELLDB_PATH fallback
+        if: ${{ matrix.leg == 'omit-optional' }}
+        # The documented fallback for installs without the optional
+        # @debugmcp/codelldb-* packages: a digest-pinned download of the
+        # upstream VSIX (same pin and guarantee as the Dockerfile vendor
+        # step). vendor-codelldb.js needs workspace deps, so it is not used.
+        run: |
+          case "${{ matrix.os }}" in
+            ubuntu-latest)    PLAT=linux-x64;    EXT="" ;;
+            ubuntu-24.04-arm) PLAT=linux-arm64;  EXT="" ;;
+            macos-latest)     PLAT=darwin-arm64; EXT="" ;;
+            windows-latest)   PLAT=win32-x64;    EXT=".exe" ;;
+            *) echo "unmapped runner ${{ matrix.os }}"; exit 1 ;;
+          esac
+          MANIFEST=packages/codelldb-common/vendor-manifest.json
+          VERSION="$(node -p "require('./$MANIFEST').codelldb.version")"
+          EXPECTED_SHA="$(node -p "require('./$MANIFEST').codelldb.assets['codelldb-$PLAT.vsix']")"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/codelldb.vsix" \
+            "https://github.com/vadimcn/codelldb/releases/download/v${VERSION}/codelldb-${PLAT}.vsix"
+          ACTUAL_SHA="$(node -e "const{createHash}=require('crypto');const{readFileSync}=require('fs');console.log(createHash('sha256').update(readFileSync(process.argv[1])).digest('hex'))" "$RUNNER_TEMP/codelldb.vsix")"
+          if [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
+            echo "codelldb-$PLAT.vsix digest mismatch: expected $EXPECTED_SHA got $ACTUAL_SHA"
+            exit 1
+          fi
+          python -m zipfile -e "$RUNNER_TEMP/codelldb.vsix" "$RUNNER_TEMP/codelldb"
+          BIN="$RUNNER_TEMP/codelldb/extension/adapter/codelldb$EXT"
+          [ -n "$EXT" ] || chmod 755 "$BIN"
+          test -e "$BIN"
+          echo "CODELLDB_PATH=$BIN" >> "$GITHUB_ENV"
+
+      - name: Assert CodeLLDB backend source (doctor)
+        env:
+          LEG: ${{ matrix.leg }}
+        # Era auto-detection: a slim-era CLI (v0.25.0+) declares the
+        # @debugmcp/codelldb-* optionalDependencies and must resolve the
+        # engine from them (or from CODELLDB_PATH on the omit-optional leg);
+        # a fat-era CLI (<= 0.24.x) bundles the engine in dist/ and reports
+        # 'vendored' on both legs (the vendored tree wins over the env var).
+        # This flips automatically when v0.25.0 publishes, and a release that
+        # ships neither optional deps nor a vendor payload fails loudly here.
+        run: |
+          PKG="$(npm root -g)/@debugmcp/mcp-debugger/package.json"
+          SLIM="$(node -p "Object.keys(require(process.argv[1]).optionalDependencies||{}).some(k=>k.startsWith('@debugmcp/codelldb-'))" "$PKG")"
+          if [ "$SLIM" = "true" ]; then
+            if [ "$LEG" = "omit-optional" ]; then EXPECT="env:CODELLDB_PATH"; else EXPECT="platform-package"; fi
+          else
+            EXPECT="vendored"
+          fi
+          set +e
+          node "$CLI" doctor rust --json --timeout 30000 \
+            > "$TRANSCRIPTS/doctor.json" 2> "$TRANSCRIPTS/doctor.err"
+          DOCTOR_EXIT=$?
+          set -e
+          if grep -qE "unknown (option|command)" "$TRANSCRIPTS/doctor.err"; then
+            # Pre-doctor release (<= 0.24.x): the rust debug cycle below is
+            # still the proof that the engine loads.
+            echo "::notice::doctor not available in this release — backend-source assertion skipped"
+            exit 0
+          fi
+          if [ "$DOCTOR_EXIT" -ne 0 ]; then
+            echo "doctor exited $DOCTOR_EXIT"
+            cat "$TRANSCRIPTS/doctor.err" "$TRANSCRIPTS/doctor.json" || true
+            exit 1
+          fi
+          SOURCE="$(node -p "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).languages.find(l=>l.language==='rust').backend.source" "$TRANSCRIPTS/doctor.json")"
+          echo "backend.source=$SOURCE (expected $EXPECT)"
+          [ "$SOURCE" = "$EXPECT" ]
+
+      - name: Smoke cycle (mock)
+        run: |
+          node scripts/canary-smoke.mjs --lang mock \
+            --program "$GITHUB_WORKSPACE/examples/python/simple_test.py" --line 11 \
+            --transcript "$TRANSCRIPTS/mock.jsonl" \
+            -- node "$CLI" stdio
+
+      - name: Smoke cycle (python)
+        run: |
+          node scripts/canary-smoke.mjs --lang python \
+            --program "$GITHUB_WORKSPACE/examples/python/simple_test.py" --line 11 \
+            --expect-line --expect-var a --expect-var b \
+            --transcript "$TRANSCRIPTS/python.jsonl" \
+            -- node "$CLI" stdio
+
+      - name: Smoke cycle (rust — CodeLLDB engine proof)
+        run: |
+          EXT=""
+          [ "${{ runner.os }}" = "Windows" ] && EXT=".exe"
+          rustc -g -o "$RUNNER_TEMP/canary-hello$EXT" examples/rust/hello_world/src/main.rs
+          node scripts/canary-smoke.mjs --lang rust \
+            --program "$RUNNER_TEMP/canary-hello$EXT" \
+            --break-file "$GITHUB_WORKSPACE/examples/rust/hello_world/src/main.rs" --line 26 \
+            --adapter-config '{"sourceLanguages":["rust"]}' \
+            --expect-line --expect-var name \
+            --transcript "$TRANSCRIPTS/rust.jsonl" \
+            -- node "$CLI" stdio
+
+      - name: Smoke cycle (npx channel)
+        # Channel fidelity for the npx one-liner from the README. Skipped on
+        # Windows: spawning npx.cmd without a shell is a known ENOENT
+        # (tests/e2e/npx/npx-test-utils.ts); the scratch-prefix install above
+        # is the documented reliable path there (docs/release-checklist.md).
+        if: ${{ matrix.leg == 'default' && runner.os != 'Windows' }}
+        run: |
+          node scripts/canary-smoke.mjs --lang mock \
+            --program "$GITHUB_WORKSPACE/examples/python/simple_test.py" --line 11 \
+            --transcript "$TRANSCRIPTS/npx-mock.jsonl" \
+            -- npx -y "@debugmcp/mcp-debugger@${CANARY_VERSION}" stdio
+
+      - name: Upload transcripts on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: canary-npm-${{ matrix.os }}-${{ matrix.leg }}
+          path: ${{ runner.temp }}/canary-transcripts/
+          retention-days: 14
+
+  docker-smoke:
+    name: docker (${{ matrix.os }})
+    if: ${{ (github.event.inputs.channels || 'all') != 'npm' }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        # Only for the smoke driver itself — python/debugpy live in the image.
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: 22.x
+
+      - name: Pull published image
+        run: |
+          TRANSCRIPTS="$RUNNER_TEMP/canary-transcripts"
+          mkdir -p "$TRANSCRIPTS"
+          echo "TRANSCRIPTS=$TRANSCRIPTS" >> "$GITHUB_ENV"
+          IMAGE="debugmcp/mcp-debugger:${CANARY_VERSION}"
+          docker pull "$IMAGE"
+          docker image inspect --format 'digest: {{index .RepoDigests 0}}' "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Assert CodeLLDB backend source (doctor, in-container)
+        run: |
+          set +e
+          docker run --rm "$IMAGE" doctor rust cpp --json --timeout 30000 \
+            > "$TRANSCRIPTS/doctor.json" 2> "$TRANSCRIPTS/doctor.err"
+          DOCTOR_EXIT=$?
+          set -e
+          if grep -qE "unknown (option|command)" "$TRANSCRIPTS/doctor.err"; then
+            echo "::notice::doctor not available in this image — backend-source assertion skipped"
+            exit 0
+          fi
+          if [ "$DOCTOR_EXIT" -ne 0 ]; then
+            echo "doctor exited $DOCTOR_EXIT"
+            cat "$TRANSCRIPTS/doctor.err" "$TRANSCRIPTS/doctor.json" || true
+            exit 1
+          fi
+          # The image vendors the engine into the codelldb-common package
+          # root, which outranks the CODELLDB_PATH the image also sets — a
+          # different source here means the vendor tree moved (#387/#394).
+          SOURCE="$(node -p "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).languages.find(l=>l.language==='rust').backend.source" "$TRANSCRIPTS/doctor.json")"
+          echo "backend.source=$SOURCE (expected vendored)"
+          [ "$SOURCE" = "vendored" ]
+
+      - name: Smoke cycle (mock)
+        # Paths are workspace-relative: the server resolves them under the
+        # /workspace mount (MCP_CONTAINER=true).
+        run: |
+          node scripts/canary-smoke.mjs --lang mock \
+            --program examples/python/simple_test.py --line 11 \
+            --transcript "$TRANSCRIPTS/mock.jsonl" \
+            -- docker run -i --rm -v "$GITHUB_WORKSPACE:/workspace" "$IMAGE" stdio
+
+      - name: Smoke cycle (python)
+        run: |
+          node scripts/canary-smoke.mjs --lang python \
+            --program examples/python/simple_test.py --line 11 \
+            --expect-line --expect-var a --expect-var b \
+            --transcript "$TRANSCRIPTS/python.jsonl" \
+            -- docker run -i --rm -v "$GITHUB_WORKSPACE:/workspace" "$IMAGE" stdio
+
+      - name: Smoke cycle (rust — CodeLLDB engine proof)
+        # The image ships no compiler; build the fixture in a rust container
+        # against the same /workspace mount so the DWARF paths match what the
+        # debug container sees (tests/e2e/rust-example-utils.ts pattern).
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/workspace" \
+            -w /workspace/examples/rust/hello_world \
+            rust:1.83-slim cargo build --target-dir target-canary
+          node scripts/canary-smoke.mjs --lang rust \
+            --program examples/rust/hello_world/target-canary/debug/hello_world \
+            --break-file examples/rust/hello_world/src/main.rs --line 26 \
+            --adapter-config '{"sourceLanguages":["rust"]}' \
+            --expect-line --expect-var name \
+            --transcript "$TRANSCRIPTS/rust.jsonl" \
+            -- docker run -i --rm -v "$GITHUB_WORKSPACE:/workspace" "$IMAGE" stdio
+
+      - name: Upload transcripts on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: canary-docker-${{ matrix.os }}
+          path: ${{ runner.temp }}/canary-transcripts/
+          retention-days: 14
+
+  docker-build-guard:
+    name: docker build guard (${{ matrix.os }})
+    if: ${{ (github.event.inputs.channels || 'all') != 'npm' }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build builder stage and assert single-platform vendoring
+        # Fence for #394: a CI checkout has no vendored payloads, so the
+        # Dockerfile's digest-verified fetch always runs; before the fix the
+        # node prebuild re-vendored all five platforms. Asserting state (not
+        # network) keeps the guard meaningful even with layer caching.
+        run: |
+          case "$(uname -m)" in
+            aarch64) ARCH=linux-arm64 ;;
+            *)       ARCH=linux-x64 ;;
+          esac
+          echo "ARCH=$ARCH" >> "$GITHUB_ENV"
+          docker build --target builder -t canary-builder .
+          docker run --rm canary-builder sh -c '
+            set -e
+            cd /app/packages/codelldb-common/vendor/codelldb
+            ls -l
+            PLATS="$(ls -1 | grep -E "^(linux|darwin|win32)-" | sort | tr "\n" " " | sed "s/ *$//")"
+            [ "$PLATS" = "'"$ARCH"'" ] || { echo "expected only '"$ARCH"' in vendor tree, got: $PLATS"; exit 1; }
+            [ "$(readlink current)" = "'"$ARCH"'" ] || { echo "current symlink broken: $(readlink current)"; exit 1; }
+            test -x "current/adapter/codelldb"'
+
+      - name: Build runtime image and assert engine state
+        run: |
+          docker build -t canary-image .
+          docker run --rm --entrypoint sh canary-image -c '
+            set -e
+            cd /app/node_modules/@debugmcp/codelldb-common/vendor/codelldb
+            ls -l
+            COUNT="$(find . -type f -name codelldb | wc -l)"
+            [ "$COUNT" -eq 1 ] || { echo "expected exactly 1 codelldb binary, found $COUNT (2 means the current symlink was copied as a real dir)"; exit 1; }
+            PLATS="$(ls -1 | grep -E "^(linux|darwin|win32)-" | tr "\n" " " | sed "s/ *$//")"
+            [ "$PLATS" = "'"$ARCH"'" ] || { echo "expected only '"$ARCH"' in image vendor tree, got: $PLATS"; exit 1; }
+            [ "$(readlink current)" = "'"$ARCH"'" ] || { echo "current symlink broken: $(readlink current)"; exit 1; }
+            test -x "$CODELLDB_PATH"'
+
+  notify:
+    name: File canary-failure issue
+    needs: [npm-smoke, docker-smoke, docker-build-guard]
+    if: ${{ always() && contains(needs.*.result, 'failure') }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    timeout-minutes: 10
+    steps:
+      - name: File or update canary-failure issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          FAILED="$(printf '%s' "$NEEDS_JSON" | jq -r '[to_entries[] | select(.value.result=="failure") | .key] | join(", ")')"
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          BODY="Canary run failed for version \`${CANARY_VERSION}\` (trigger: ${GITHUB_EVENT_NAME}).
+
+          Failed jobs: ${FAILED}
+          Run: ${RUN_URL}
+
+          Per-leg transcripts are attached as artifacts on the run. A leg that
+          fails here but passes locally against the same version is a
+          release/packaging finding — triage before the next release."
+          EXISTING="$(gh issue list --repo "$GITHUB_REPOSITORY" --label canary-failure --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --repo "$GITHUB_REPOSITORY" --body "$BODY"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --label canary-failure \
+              --title "Canary failure: published-artifact smoke ($(date -u +%F))" \
+              --body "$BODY"
+          fi
