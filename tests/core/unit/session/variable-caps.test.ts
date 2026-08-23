@@ -97,7 +97,35 @@ describe('buildTruncationNotice', () => {
     expect(notice).toContain('7 variable(s) omitted');
     expect(notice).toContain('2 value(s) cut');
     expect(notice).toContain('1 scope(s) not fetched');
-    expect(notice).toContain('names: ["a","b"]');
+    expect(notice).toContain('DEBUG_MCP_MAX_VARIABLES');
+  });
+
+  it('derives the names example from returned variables, preferring truncated ones (issue #438)', () => {
+    const notice = buildTruncationNotice(
+      { omittedCount: 0, valueTruncatedCount: 2 },
+      [
+        makeVar('clean', 'x'),
+        { ...makeVar('big1', 'y'), truncated: true },
+        { ...makeVar('big2', 'z'), truncated: true }
+      ]
+    );
+    expect(notice).toContain('names: ["big1","big2"]');
+  });
+
+  it('falls back to returned variable names when nothing is flagged truncated (issue #438)', () => {
+    const notice = buildTruncationNotice(
+      { omittedCount: 3, valueTruncatedCount: 0 },
+      [makeVar('x', '1'), makeVar('y', '2'), makeVar('z', '3')]
+    );
+    expect(notice).toContain('names: ["x","y"]');
+  });
+
+  it('uses generic phrasing when there are no variables to draw an example from (issue #438)', () => {
+    const notice = buildTruncationNotice({ omittedCount: 1, valueTruncatedCount: 0 });
+    // The old hardcoded ["a","b"] example read as leaked state from another
+    // session — a placeholder must not look like real variable names.
+    expect(notice).not.toContain('["a","b"]');
+    expect(notice).toContain('names: [...]');
     expect(notice).toContain('DEBUG_MCP_MAX_VARIABLES');
   });
 });

@@ -453,7 +453,7 @@ export abstract class SessionManagerData extends SessionManagerCore {
       // fetched before the budget can run out. The `names` filter is pushed
       // down so an explicit request is never starved by the budget.
       const variablesMap: Record<number, Variable[]> = {};
-      const truncationSummaries: Array<VariableTruncationSummary | undefined> = [];
+      const truncationByScope = new Map<number, VariableTruncationSummary | undefined>();
       let fetchedCount = 0;
       let scopeFetchesSkipped = 0;
       const fetchBudget = maxVariablesPerCall();
@@ -467,7 +467,7 @@ export abstract class SessionManagerData extends SessionManagerCore {
             continue;
           }
           const detailed = await this.getVariablesDetailed(sessionId, scope.variablesReference, names);
-          truncationSummaries.push(detailed.truncation);
+          truncationByScope.set(scope.variablesReference, detailed.truncation);
           fetchedCount += detailed.variables.length;
           if (detailed.variables.length > 0) {
             variablesMap[scope.variablesReference] = detailed.variables;
@@ -512,6 +512,21 @@ export abstract class SessionManagerData extends SessionManagerCore {
         }
       }
       
+      // Attribute per-scope truncation to the scopes whose variables
+      // actually reached the caller (issue #438): every policy returns
+      // variablesMap[ref] at most .filter()ed, so object identity survives
+      // extraction. Cuts in fan-out scopes the policy discarded
+      // (Global/Closure) never reached the response and must not be
+      // reported as cuts in it. Computed before the names filter so an
+      // explicit-names request cannot break the attribution.
+      const returnedVars = new Set(localVars);
+      const contributingSummaries: Array<VariableTruncationSummary | undefined> = [];
+      for (const [ref, vars] of Object.entries(variablesMap)) {
+        if (vars.some(v => returnedVars.has(v))) {
+          contributingSummaries.push(truncationByScope.get(Number(ref)));
+        }
+      }
+
       if (names) {
         localVars = localVars.filter(v => names.includes(v.name));
       }
@@ -519,10 +534,10 @@ export abstract class SessionManagerData extends SessionManagerCore {
       this.logger.info(`[SM getLocalVariables ${sessionId}] Found ${localVars.length} local variables.`);
 
       // Cap the final extracted list too (policies may merge several scopes)
-      // and surface every truncation that happened along the way.
+      // and surface every truncation that reached this response.
       const cappedLocals = applyVariableCaps(localVars);
       const truncation = mergeTruncationSummaries([
-        ...truncationSummaries,
+        ...contributingSummaries,
         cappedLocals.truncation,
         scopeFetchesSkipped > 0
           ? { omittedCount: 0, valueTruncatedCount: 0, scopesSkipped: scopeFetchesSkipped }

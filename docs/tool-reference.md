@@ -700,7 +700,7 @@ Gets local variables by traversing all stack frames and their scopes, then using
 }
 ```
 
-**Size guards:** same caps and `truncation` advisory as [get_variables](#get_variables); additionally, the multi-frame scope fan-out stops issuing DAP requests once the per-call variable budget is spent (`truncation.scopesSkipped` reports scopes never fetched). Top-frame scopes are fetched first, so the locals that matter are unaffected.
+**Size guards:** same caps and `truncation` advisory as [get_variables](#get_variables); additionally, the multi-frame scope fan-out stops issuing DAP requests once the per-call variable budget is spent (`truncation.scopesSkipped` reports scopes never fetched). Top-frame scopes are fetched first, so the locals that matter are unaffected. The `truncation` counts describe only the returned payload — values cut while fetching fan-out scopes the policy then discarded (e.g. Global/Closure) are not reported (issue #438).
 
 **Example - Python:**
 ```json
