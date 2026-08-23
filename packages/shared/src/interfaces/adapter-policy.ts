@@ -181,6 +181,22 @@ export interface AdapterPolicy {
   shouldSuppressOutputEvent?(category: string, text: string): boolean;
 
   /**
+   * Return an attributed explanation for a DAP 'output' event that signals a
+   * known adapter-level capability degradation (issue #441 — e.g. CodeLLDB's
+   * "Failed to initialize language support for rust" when no rustc is
+   * available, which leaves Rust values rendering as raw LLDB structures).
+   * Consulted by the session manager's output capture AFTER the event is
+   * recorded; the returned text is pushed to the session's output buffer as a
+   * `[mcp-debugger] Warning:` entry and, when it arrives before the launch
+   * resolves, joined into the start_debugging result's warning. Optional —
+   * absent means no annotation. Return undefined for ordinary output.
+   *
+   * @param category The DAP output category ('stdout', 'stderr', 'console', ...)
+   * @param text The event's output text (may span multiple lines)
+   */
+  annotateOutputEvent?(category: string, text: string): string | undefined;
+
+  /**
    * Normalize an adapter-specific DAP stop reason into a canonical reason
    * ('pause', 'breakpoint', 'step', 'exception', ...). Some adapters report
    * misleading raw reasons — e.g. CodeLLDB surfaces a user-initiated pause as

@@ -176,6 +176,57 @@ export async function getRustBinaryPath(
   }
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Merge the user-supplied CodeLLDB `_adapterSettings` passthrough with the
+ * CODELLDB_RUST_SYSROOT-derived formatter location (issue #441).
+ *
+ * CodeLLDB's lang_support/rust.py reads `lang.rust.sysroot` from
+ * `_adapterSettings.scriptConfig` before falling back to `rustc
+ * --print=sysroot`, so setting it lets rustc-less hosts (the Docker image)
+ * load the Rust formatter scripts. The user's settings always win: the
+ * derived sysroot is written only into an absent `scriptConfig.lang.rust.sysroot`
+ * leaf, and a user value of any type along that path is left untouched.
+ *
+ * Returns undefined when there is nothing to emit (no user settings object,
+ * no sysroot).
+ */
+export function buildRustAdapterSettings(
+  userSettings: unknown,
+  sysroot: string | undefined
+): Record<string, unknown> | undefined {
+  const base: Record<string, unknown> | undefined = isPlainObject(userSettings)
+    ? (structuredClone(userSettings) as Record<string, unknown>)
+    : undefined;
+
+  if (sysroot === undefined) {
+    return base;
+  }
+
+  const merged = base ?? {};
+  let cursor: Record<string, unknown> = merged;
+  for (const key of ['scriptConfig', 'lang', 'rust']) {
+    const existing = cursor[key];
+    if (existing === undefined) {
+      const next: Record<string, unknown> = {};
+      cursor[key] = next;
+      cursor = next;
+    } else if (isPlainObject(existing)) {
+      cursor = existing;
+    } else {
+      // The user set something non-object along the path — leave it alone.
+      return merged;
+    }
+  }
+  if (cursor.sysroot === undefined) {
+    cursor.sysroot = sysroot;
+  }
+  return merged;
+}
+
 /**
  * Retrieve the host triple reported by rustc -Vv
  */

@@ -350,6 +350,13 @@ ls vendor/codelldb/
 # e.g., vendor/codelldb/win32-x64/, vendor/codelldb/linux-x64/, vendor/codelldb/darwin-arm64/
 ```
 
+### Strings/Vecs Render as Raw LLDB Structures
+
+If `&str`/`String`/`Vec` values show as raw `{data_ptr, length}` structs (often with `truncated: true`) instead of their values, CodeLLDB could not load the Rust formatter scripts. It locates them via `rustc --print sysroot`; without `rustc` on PATH the launch output contains `Failed to initialize language support for rust` and the session reports a warning. Fix either way:
+
+- Install rustc (rustup), or
+- Set `CODELLDB_RUST_SYSROOT` to a sysroot root whose `lib/rustlib/etc` contains `lldb_lookup.py` (the Docker image vendors one at `/opt/rust-sysroot` and sets this automatically; issue #441)
+
 ### Async Code Debugging Issues
 
 - Use `tokio::time::sleep` instead of `std::thread::sleep` in async contexts

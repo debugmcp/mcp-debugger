@@ -313,6 +313,35 @@ export function lldbShouldSuppressOutputEvent(category: string, text: string): b
 }
 
 /**
+ * CodeLLDB's lang_support/__init__.py prints this when a language module's
+ * init throws — for Rust, typically because `rustc --print=sysroot` is not
+ * available to locate the formatter scripts (issue #441). The session keeps
+ * working, but &str/String/collection values render as raw LLDB structures.
+ */
+const LLDB_RUST_LANG_SUPPORT_FAILURE = /Failed to initialize language support for rust/i;
+
+/**
+ * Annotate a DAP output event that signals CodeLLDB failed to load its Rust
+ * language support, so the degraded value rendering is attributable instead
+ * of reading as a debugger bug. Returns undefined for everything else.
+ */
+export function lldbAnnotateOutputEvent(category: string, text: string): string | undefined {
+  if (category !== 'stderr' && category !== 'console') {
+    return undefined;
+  }
+  if (!LLDB_RUST_LANG_SUPPORT_FAILURE.test(text)) {
+    return undefined;
+  }
+  return (
+    'Rust type summaries are unavailable for this session: CodeLLDB could not load the ' +
+    'Rust formatter scripts (no rustc on PATH and no valid CODELLDB_RUST_SYSROOT). ' +
+    'String/&str/Vec values will render as raw LLDB structures. Set CODELLDB_RUST_SYSROOT ' +
+    "to a directory whose lib/rustlib/etc contains the Rust toolchain's LLDB formatters, " +
+    'or install rustc.'
+  );
+}
+
+/**
  * Validate that a CodeLLDB binary exists and answers --version with output
  * containing 'codelldb'.
  */

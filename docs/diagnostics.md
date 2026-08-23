@@ -183,6 +183,7 @@ The complete set of runtime-affecting variables (the [development setup guide](.
 | `NETCOREDBG_PATH` | Path to the netcoredbg executable |
 | `NETCOREDBG_X86_PATH` | x86 netcoredbg for attaching to 32-bit processes |
 | `CODELLDB_PATH` | CodeLLDB binary, used when no vendored copy resolves (rust + cpp) |
+| `CODELLDB_RUST_SYSROOT` | Rust sysroot root whose `lib/rustlib/etc` holds the LLDB formatter scripts — enables Rust type summaries without `rustc` (set automatically in the Docker image; issue #441) |
 | `CPP_MSVC_BEHAVIOR` | `warn` (default) \| `error` \| `continue` when a cpp target has MSVC PDB symbols |
 | `DEBUG_MCP_DISABLE_LANGUAGES` | Comma-separated languages to disable (e.g. `go,dotnet` in the Docker image) |
 | `MCP_CONTAINER` | `true` marks container mode (set by the Docker image) |
