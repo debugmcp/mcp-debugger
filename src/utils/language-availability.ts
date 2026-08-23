@@ -6,7 +6,7 @@
  * can't assess the toolchain — issue #360) and authoritative for attach
  * 'none' (enforced in SessionManagerOperations.attachToProcess).
  */
-import type { AttachMechanism, FactoryValidationResult } from '@debugmcp/shared';
+import type { AttachMechanism, FactoryValidationResult, IAdapterFactory } from '@debugmcp/shared';
 import { ErrorMessages } from './error-messages.js';
 
 export interface ModeAvailability {
@@ -105,6 +105,106 @@ export async function checkLaunchToolchain(
     );
     return { available: true };
   }
+}
+
+/** A registry adapter entry as reported by listAvailableAdapters(). */
+export interface LanguageAdapterEntry {
+  language: string;
+  packageName: string;
+  installed: boolean;
+  attach?: AttachMechanism;
+}
+
+/** The structural minimum the probe needs from a factory. */
+export type ProbeableAdapterFactory = Pick<IAdapterFactory, 'validate' | 'getMetadata'>;
+
+export interface AvailabilityProbeOptions {
+  /** Source of factories; absent getFactory means "cannot probe" (assume valid). */
+  registry?: { getFactory?: (language: string) => Promise<ProbeableAdapterFactory | undefined> };
+  disabledSet: Set<string>;
+  /**
+   * Wraps each factory.validate call — the injection point for the server's
+   * TTL cache and doctor's per-probe timeout. Default: call straight through.
+   */
+  runValidate?: (
+    language: string,
+    validate: () => Promise<FactoryValidationResult>
+  ) => Promise<FactoryValidationResult>;
+  logger?: { warn?: (message: string) => void };
+}
+
+export interface LanguageAvailabilityProbe {
+  disabled: boolean;
+  installed: boolean;
+  /** The loaded factory, when one was loaded (installed, enabled, load succeeded). */
+  factory?: ProbeableAdapterFactory;
+  /** Set when registry.getFactory threw (doctor reports it; the server fails open). */
+  factoryLoadError?: unknown;
+  /** Metadata-preferred attach mechanism (entry attach when metadata is unavailable). */
+  attach: AttachMechanism;
+  modes: LanguageModes;
+}
+
+/**
+ * The one per-entry availability probe shared by list_supported_languages and
+ * `mcp-debugger doctor` (issue #435): disabled gate → installed gate →
+ * factory load (fail-open on error) → metadata-over-entry attach preference →
+ * computeModeAvailability. Keeping both consumers on this function is what
+ * makes "doctor can never disagree with the server" structural rather than a
+ * mirroring convention.
+ */
+export async function probeLanguageEntry(
+  entry: LanguageAdapterEntry,
+  options: AvailabilityProbeOptions
+): Promise<LanguageAvailabilityProbe> {
+  const disabled = options.disabledSet.has(entry.language);
+  const entryAttach = entry.attach ?? 'none';
+
+  let factory: ProbeableAdapterFactory | undefined;
+  let factoryLoadError: unknown;
+  if (!disabled && entry.installed && typeof options.registry?.getFactory === 'function') {
+    try {
+      factory = await options.registry.getFactory(entry.language);
+    } catch (error) {
+      factoryLoadError = error;
+    }
+  }
+
+  // A malformed factory's getMetadata must not take the probe down — fall
+  // back to the registry entry's attach declaration.
+  let attach = entryAttach;
+  if (factory) {
+    try {
+      attach = factory.getMetadata().modes?.attach ?? entryAttach;
+    } catch {
+      attach = entryAttach;
+    }
+  }
+
+  const runValidate =
+    options.runValidate ?? ((_language, validate) => validate());
+  const probeable = factory !== undefined && typeof factory.validate === 'function';
+
+  const modes = await computeModeAvailability({
+    language: entry.language,
+    packageName: entry.packageName,
+    installed: entry.installed,
+    disabled,
+    attach,
+    validate: probeable
+      ? () => runValidate(entry.language, () => factory!.validate())
+      : undefined,
+    logger: options.logger
+  });
+
+  return {
+    disabled,
+    installed: entry.installed,
+    factory,
+    factoryLoadError,
+    attach,
+    modes
+  };
 }
 
 export async function computeModeAvailability(input: ModeAvailabilityInput): Promise<LanguageModes> {

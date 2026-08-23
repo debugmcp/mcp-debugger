@@ -47,10 +47,11 @@ import { LineReader, createLineReader } from './utils/line-reader.js';
 import { getDisabledLanguages, isLanguageDisabled } from './utils/language-config.js';
 import { ErrorMessages } from './utils/error-messages.js';
 import {
-  computeModeAvailability,
+  probeLanguageEntry,
   checkLaunchToolchain,
   ValidationResultCache,
-  LanguageModes
+  LanguageModes,
+  ProbeableAdapterFactory
 } from './utils/language-availability.js';
 import { isContainerMode, getWorkspaceRoot } from './utils/container-path-utils.js';
 import {
@@ -2811,7 +2812,7 @@ export class DebugMcpServer {
 
       const dyn = adapterRegistry as unknown as {
         listAvailableAdapters?: () => Promise<Array<{ name: string; packageName: string; description?: string; installed: boolean; attach?: 'none' | 'direct-connect' | 'spawn' }>>;
-        getFactory?: (language: string) => Promise<{ validate: () => Promise<{ valid: boolean; errors: string[]; warnings: string[] }>; getMetadata: () => { modes?: { attach: 'none' | 'direct-connect' | 'spawn' } } } | undefined>;
+        getFactory?: (language: string) => Promise<ProbeableAdapterFactory | undefined>;
       } | undefined;
 
       if (adapterRegistry && typeof dyn?.listAvailableAdapters === 'function') {
@@ -2829,29 +2830,31 @@ export class DebugMcpServer {
         }
       }
 
+      // Shared per-entry probe (issue #435): doctor consumes the same
+      // function, so the two views cannot drift apart.
       const disabledSet = getDisabledLanguages();
       const available: AvailableLanguage[] = [];
       for (const entry of baseEntries) {
-        const disabled = disabledSet.has(entry.language);
-        // Only probe toolchains for installed, enabled adapters
-        const factory = !disabled && entry.installed && typeof dyn?.getFactory === 'function'
-          ? await dyn.getFactory(entry.language).catch(() => undefined)
-          : undefined;
-        const modes = await computeModeAvailability({
-          language: entry.language,
-          packageName: entry.package,
-          installed: entry.installed,
-          disabled,
-          attach: factory?.getMetadata().modes?.attach ?? entry.attach,
-          validate: factory ? () => this.validationCache.get(entry.language, () => factory.validate()) : undefined,
-          logger: this.logger
-        });
+        const probe = await probeLanguageEntry(
+          {
+            language: entry.language,
+            packageName: entry.package,
+            installed: entry.installed,
+            attach: entry.attach
+          },
+          {
+            registry: dyn,
+            disabledSet,
+            runValidate: (language, validate) => this.validationCache.get(language, validate),
+            logger: this.logger
+          }
+        );
         available.push({
           language: entry.language,
           package: entry.package,
           installed: entry.installed,
           description: entry.description,
-          modes
+          modes: probe.modes
         });
       }
 

@@ -18,7 +18,7 @@ import type {
   IFileSystem,
   ILogger
 } from '@debugmcp/shared';
-import { computeModeAvailability, type LanguageModes } from '../../../utils/language-availability.js';
+import { probeLanguageEntry, type LanguageModes } from '../../../utils/language-availability.js';
 import { getDisabledLanguages } from '../../../utils/language-config.js';
 import {
   checkContainerWorkspace,
@@ -129,9 +129,7 @@ export async function diagnose(requested: string[], deps: DiagnoseDeps): Promise
   const disabledSet = getDisabledLanguages(env);
 
   const languages = await Promise.all(
-    entries.map((entry) =>
-      diagnoseLanguage(entry, disabledSet.has(entry.name), deps, collectExtras)
-    )
+    entries.map((entry) => diagnoseLanguage(entry, disabledSet, deps, collectExtras))
   );
 
   const platformChecks: PlatformCheckResult[] = [
@@ -165,57 +163,69 @@ export async function diagnose(requested: string[], deps: DiagnoseDeps): Promise
 
 async function diagnoseLanguage(
   entry: RegistryAdapterEntry,
-  disabled: boolean,
+  disabledSet: Set<string>,
   deps: DiagnoseDeps,
   collectExtras: (language: string, details: Record<string, unknown>) => Promise<Record<string, unknown>>
 ): Promise<LanguageDiagnosis> {
+  const started = Date.now();
+  let validation: FactoryValidationResult | undefined;
+  let probeError: unknown;
+  let timedOut = false;
+
+  // The shared probe (issue #435) — the same function the server's
+  // list_supported_languages runs, so the two views cannot drift apart.
+  // Doctor's wrapper adds what the server deliberately omits: a per-probe
+  // timeout and a record of the raw outcome; the rethrow lets
+  // computeModeAvailability fail open exactly as it does for the server.
+  const probe = await probeLanguageEntry(
+    {
+      language: entry.name,
+      packageName: entry.packageName,
+      installed: entry.installed,
+      attach: entry.attach
+    },
+    {
+      registry: deps.registry,
+      disabledSet,
+      runValidate: async (_language, validate) => {
+        try {
+          validation = await withTimeout(validate(), deps.timeoutMs);
+          return validation;
+        } catch (error) {
+          probeError = error;
+          timedOut = error instanceof ProbeTimeoutError;
+          throw error;
+        }
+      },
+      logger: deps.logger
+    }
+  );
+
   const base = {
     language: entry.name,
     package: entry.packageName,
     installed: entry.installed,
-    disabled
+    disabled: probe.disabled
   };
 
-  if (disabled || !entry.installed) {
-    const modes = await computeModeAvailability({
-      language: entry.name,
-      packageName: entry.packageName,
-      installed: entry.installed,
-      disabled,
-      attach: entry.attach ?? 'none',
-      logger: deps.logger
-    });
+  if (probe.disabled || !entry.installed) {
     return {
       ...base,
-      verdict: disabled ? 'disabled' : 'missing',
+      verdict: probe.disabled ? 'disabled' : 'missing',
       errors: [],
       warnings: [],
-      modes,
+      modes: probe.modes,
       probe: { durationMs: 0, timedOut: false, failed: false }
     };
   }
 
-  let factoryLoadError: unknown;
-  const factory = await deps.registry.getFactory(entry.name).catch((error: unknown) => {
-    factoryLoadError = error;
-    return undefined;
-  });
-
-  if (!factory || typeof factory.validate !== 'function') {
+  if (!probe.factory || typeof probe.factory.validate !== 'function') {
     // An installed adapter whose factory cannot even be loaded cannot start
     // any session — that is broken, and a gated run must fail. (The server
-    // fails open here; the modes below reflect that so the divergence stays
+    // fails open here; probe.modes reflects that so the divergence stays
     // visible rather than silent.)
-    const modes = await computeModeAvailability({
-      language: entry.name,
-      packageName: entry.packageName,
-      installed: true,
-      disabled: false,
-      attach: entry.attach ?? 'none',
-      logger: deps.logger
-    });
     const loadDetail =
-      factoryLoadError instanceof Error ? `: ${factoryLoadError.message}` : '';
+      probe.factoryLoadError instanceof Error ? `: ${probe.factoryLoadError.message}` : '';
     return {
       ...base,
       verdict: 'broken',
@@ -225,46 +235,13 @@ async function diagnoseLanguage(
           `(The server assumes availability when it cannot probe.)`
       ],
       warnings: [],
-      modes,
+      modes: probe.modes,
       probe: { durationMs: 0, timedOut: false, failed: true }
     };
   }
 
-  const started = Date.now();
-  let validation: FactoryValidationResult | undefined;
-  let probeError: unknown;
-  let timedOut = false;
-  try {
-    validation = await withTimeout(factory.validate(), deps.timeoutMs);
-  } catch (error) {
-    probeError = error;
-    timedOut = error instanceof ProbeTimeoutError;
-  }
   const failed = probeError !== undefined && !timedOut;
-
-  // Feed computeModeAvailability the same outcome the server would see: the
-  // memoized result, or a throwing probe so its fail-open path runs. A
-  // throwing getMetadata (malformed third-party factory) must not take the
-  // other languages down with it.
-  let metadataAttach: AttachMechanism | undefined;
-  try {
-    metadataAttach = factory.getMetadata().modes?.attach;
-  } catch {
-    metadataAttach = undefined;
-  }
-  const modes = await computeModeAvailability({
-    language: entry.name,
-    packageName: entry.packageName,
-    installed: true,
-    disabled: false,
-    attach: metadataAttach ?? entry.attach ?? 'none',
-    validate: validation
-      ? async () => validation
-      : async () => {
-          throw probeError;
-        },
-    logger: deps.logger
-  });
+  const modes = probe.modes;
 
   let details = validation?.details ? { ...validation.details } : undefined;
   if (validation) {
