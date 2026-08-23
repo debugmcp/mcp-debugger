@@ -1,4 +1,4 @@
-import { IAdapterFactory, AttachMechanism } from '@debugmcp/shared';
+import { IAdapterFactory, AttachMechanism, AdapterManifestEntry } from '@debugmcp/shared';
 import type { Logger as WinstonLogger } from 'winston';
 import { createLogger } from '../utils/logger.js';
 import { createRequire } from 'module';
@@ -53,11 +53,13 @@ export function createDefaultPackageResolver(io: {
   };
 }
 
-export interface AdapterMetadata {
-  name: string;
-  packageName: string;
-  description?: string;
-  installed: boolean;
+/**
+ * The loader's manifest entry — the shared AdapterManifestEntry with attach
+ * required (the known-adapter list always declares it). Kept as a distinct
+ * name because shared's AdapterMetadata is the factory-declared metadata, a
+ * different shape entirely.
+ */
+export interface AdapterMetadata extends AdapterManifestEntry {
   /** How the adapter implements attach mode (static knowledge; kept in sync with each factory's declaration) */
   attach: AttachMechanism;
 }

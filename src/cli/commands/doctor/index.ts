@@ -16,7 +16,7 @@ import { formatHumanReport, formatJsonReport } from './format.js';
 import type { DoctorOptions } from '../../setup.js';
 
 export interface DoctorDependencies {
-  adapterRegistry: unknown;
+  adapterRegistry: DoctorRegistry;
   environment: IEnvironment;
   fileSystem: IFileSystem;
   logger: ILogger;
@@ -75,7 +75,9 @@ export async function handleDoctorCommand(
       overrides.createDependencies ?? (() => createProductionDependencies({ logLevel: 'error' }));
     deps = createDependencies();
 
-    const registry = deps.adapterRegistry as DoctorRegistry;
+    // Typed field (issue #435 part 4); the runtime guard stays as defense
+    // against overrides handing in a wrong-shaped object through a cast.
+    const registry = deps.adapterRegistry;
     if (
       typeof registry?.listAvailableAdapters !== 'function' ||
       typeof registry?.getFactory !== 'function'

@@ -73,6 +73,13 @@ function buildSharedRegistry() {
     getSupportedLanguages: vi.fn().mockReturnValue(entries.filter((e) => e.installed).map((e) => e.name)),
     listAvailableAdapters: vi.fn().mockResolvedValue(entries),
     getFactory: vi.fn(async (language: string) => factories[language]),
+    // The production AdapterRegistry always offers getFactoryResult, and the
+    // probe prefers it — the parity fence must exercise the branch production
+    // actually runs, not only the legacy getFactory fallback.
+    getFactoryResult: vi.fn(async (language: string) => {
+      const factory = factories[language];
+      return factory ? { factory } : {};
+    }),
     isLanguageSupported: vi.fn().mockReturnValue(true),
     create: vi.fn(),
     register: vi.fn()

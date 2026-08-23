@@ -50,8 +50,7 @@ import {
   probeLanguageEntry,
   checkLaunchToolchain,
   ValidationResultCache,
-  LanguageModes,
-  ProbeableAdapterFactory
+  LanguageModes
 } from './utils/language-availability.js';
 import { isContainerMode, getWorkspaceRoot } from './utils/container-path-utils.js';
 import {
@@ -275,9 +274,9 @@ export class DebugMcpServer {
     if (!adapterRegistry) {
       return filter(getDefaultLanguages());
     }
-    // Prefer dynamic discovery if available on the concrete registry
-    const dynRegistry = adapterRegistry as unknown as { listLanguages?: () => Promise<string[]> };
-    const maybeList = dynRegistry.listLanguages;
+    // Prefer dynamic discovery. listLanguages is on IAdapterRegistry (issue
+    // #435 part 4); the runtime guard stays for partial registry doubles.
+    const maybeList = adapterRegistry.listLanguages;
     if (typeof maybeList === 'function') {
       try {
         const langs = await maybeList.call(adapterRegistry);
@@ -1245,9 +1244,7 @@ export class DebugMcpServer {
                   this.logger
                 );
                 if (!launchGate.available) {
-                  const registry = this.getAdapterRegistry() as unknown as {
-                    getFactory?: (language: string) => Promise<{ getMetadata?: () => { modes?: { attach?: string } } } | undefined>;
-                  } | undefined;
+                  const registry = this.getAdapterRegistry();
                   const attachMechanism = await (async () => {
                     try {
                       const factory = typeof registry?.getFactory === 'function'
@@ -2810,14 +2807,11 @@ export class DebugMcpServer {
           attach: 'none' as const
         }));
 
-      const dyn = adapterRegistry as unknown as {
-        listAvailableAdapters?: () => Promise<Array<{ name: string; packageName: string; description?: string; installed: boolean; attach?: 'none' | 'direct-connect' | 'spawn' }>>;
-        getFactory?: (language: string) => Promise<ProbeableAdapterFactory | undefined>;
-      } | undefined;
-
-      if (adapterRegistry && typeof dyn?.listAvailableAdapters === 'function') {
+      // listAvailableAdapters/getFactory are on IAdapterRegistry (issue #435
+      // part 4); the runtime guards stay for partial registry doubles.
+      if (adapterRegistry && typeof adapterRegistry.listAvailableAdapters === 'function') {
         try {
-          const meta = await dyn.listAvailableAdapters!();
+          const meta = await adapterRegistry.listAvailableAdapters();
           baseEntries = meta.map(m => ({
             language: m.name,
             package: m.packageName,
@@ -2846,7 +2840,7 @@ export class DebugMcpServer {
               attach: entry.attach
             },
             {
-              registry: dyn,
+              registry: adapterRegistry,
               disabledSet,
               runValidate: (language, validate) => this.validationCache.get(language, validate),
               logger: this.logger

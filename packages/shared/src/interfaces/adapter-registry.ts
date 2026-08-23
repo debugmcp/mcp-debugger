@@ -20,7 +20,7 @@ export interface IAdapterRegistry {
    * @param factory Factory to create adapter instances
    * @throws Error if language is already registered
    */
-  register(language: string, factory: IAdapterFactory): void;
+  register(language: string, factory: IAdapterFactory): Promise<void>;
   
   /**
    * Unregister an adapter factory
@@ -55,6 +55,42 @@ export interface IAdapterRegistry {
    */
   isLanguageSupported(language: string): boolean;
   
+  /**
+   * List every known language, registered or dynamically loadable.
+   */
+  listLanguages(): Promise<string[]>;
+
+  /**
+   * List every known adapter with its install state and attach mechanism.
+   */
+  listAvailableAdapters(): Promise<AdapterManifestEntry[]>;
+
+  /**
+   * Get the factory for a language, dynamically loading it when enabled.
+   * Returns undefined when no factory can be produced (never throws) — use
+   * getFactoryResult when the failure reason matters.
+   *
+   * These four members are the typed surface behind issue #435 part 4: the
+   * availability probe and launch gate used to reach them through
+   * `as unknown as` duck-typing, so a rename on the concrete registry
+   * compiled clean and silently degraded every language to fail-open.
+   */
+  getFactory(language: string): Promise<IAdapterFactory | undefined>;
+
+  /**
+   * Get a language's metadata without registering or instantiating anything.
+   */
+  getFactoryMetadata(language: string): Promise<AdapterMetadata | undefined>;
+
+  /**
+   * Diagnostics variant of getFactory: never throws, and carries the load
+   * failure so doctor can report the real import error instead of "the
+   * registry returned no factory". Optional so minimal registry doubles
+   * that stub only getFactory keep working; consumers must treat absence
+   * as "use getFactory".
+   */
+  getFactoryResult?(language: string): Promise<FactoryLoadResult>;
+
   /**
    * Get metadata about a registered adapter
    * @param language Language identifier
@@ -227,6 +263,43 @@ export interface FactoryValidationResult {
 }
 
 /**
+ * A known-adapter manifest entry, as reported by
+ * IAdapterRegistry.listAvailableAdapters(): the static facts about an
+ * adapter package independent of whether its factory has been loaded.
+ */
+export interface AdapterManifestEntry {
+  /** Language identifier, e.g. 'python' */
+  name: string;
+
+  /** npm package name, e.g. '@debugmcp/adapter-python' */
+  packageName: string;
+
+  /** Human-readable description */
+  description?: string;
+
+  /** Whether the adapter package is installed in this runtime */
+  installed: boolean;
+
+  /** How the adapter implements attach; absent means unknown (treat as 'none') */
+  attach?: AttachMechanism;
+}
+
+/**
+ * Outcome of a non-throwing factory-load attempt
+ * (IAdapterRegistry.getFactoryResult). Exactly one of the fields is set.
+ */
+export interface FactoryLoadResult {
+  /** The loaded factory, when one could be produced */
+  factory?: IAdapterFactory;
+
+  /** Set when a dynamic load was attempted and failed */
+  loadError?: Error;
+
+  /** Set when nothing is registered/cached and dynamic loading is disabled */
+  dynamicLoadingDisabled?: boolean;
+}
+
+/**
  * One resolved toolchain component (a doctor table cell): the runtime a
  * debuggee needs (Python, Node.js, a C++ compiler) or the debug backend that
  * drives it (debugpy, js-debug, CodeLLDB).
@@ -316,6 +389,15 @@ export interface AdapterRegistryConfig {
    * enables it.
    */
   enableDynamicLoading?: boolean;
+
+  /**
+   * Sink for discovery-fallback warnings (loader failures, malformed factory
+   * metadata). Injected by the DI container so registry breadcrumbs follow
+   * the configured log level/file instead of a per-instance logger piping
+   * into the process-lifetime transport (issue #404 leak class). Absent →
+   * warnings are dropped.
+   */
+  logger?: { warn?: (message: string) => void };
 }
 
 // ===== Error Types =====
@@ -380,7 +462,14 @@ export function isAdapterRegistry(obj: unknown): obj is IAdapterRegistry {
     obj !== null &&
     'register' in obj &&
     'create' in obj &&
-    'getSupportedLanguages' in obj
+    'getSupportedLanguages' in obj &&
+    // The typed discovery surface (issue #435 part 4): certifying a legacy
+    // three-method registry would hand callers of these required members a
+    // runtime TypeError with no compile-time warning.
+    'listLanguages' in obj &&
+    'listAvailableAdapters' in obj &&
+    'getFactory' in obj &&
+    'getFactoryMetadata' in obj
   );
 }
 

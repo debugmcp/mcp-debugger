@@ -4,9 +4,9 @@
  * @since 2.0.0
  */
 import { EventEmitter } from 'events';
-import { 
-  IAdapterRegistry, 
-  IAdapterFactory, 
+import {
+  IAdapterRegistry,
+  IAdapterFactory,
   AdapterDependencies,
   AdapterInfo,
   AdapterNotFoundError,
@@ -17,7 +17,7 @@ import {
   ActiveAdapterMap
 } from '@debugmcp/shared';
 import { IDebugAdapter, AdapterConfig } from '@debugmcp/shared';
-import type { AdapterMetadata as SharedAdapterMetadata } from '@debugmcp/shared';
+import type { AdapterMetadata as SharedAdapterMetadata, AdapterManifestEntry, FactoryLoadResult } from '@debugmcp/shared';
 import { AdapterLoader } from './adapter-loader.js';
 import type { AdapterMetadata } from './adapter-loader.js';
 
@@ -31,6 +31,11 @@ const DEFAULT_CONFIG: Required<AdapterRegistryConfig> = {
   autoDispose: true,
   autoDisposeTimeout: 300000, // 5 minutes
   enableDynamicLoading: false,
+  // No injected sink → discovery warnings are dropped. Deliberately NOT a
+  // per-instance createLogger(): HTTP mode builds a registry per session and
+  // a per-instance winston logger pipes each into the process-lifetime
+  // shared transport with no detach path (the issue-#404 leak class).
+  logger: {},
 };
 
 /**
@@ -45,6 +50,10 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
   private readonly loader = new AdapterLoader();
   // Dynamic loading is opt-in via constructor config or MCP_CONTAINER=true env var
   private readonly dynamicEnabled: boolean;
+
+  private warn(message: string): void {
+    this.config.logger.warn?.(message);
+  }
 
   constructor(config: AdapterRegistryConfig = {}) {
     super();
@@ -259,8 +268,14 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
           installed.add(adapter.name);
         }
       }
-    } catch {
-      // Ignore loader errors in bundled environments where adapters are embedded.
+    } catch (error) {
+      // Fall back to registered adapters (bundled environments embed them),
+      // but leave a breadcrumb — a broken loader should not be silent.
+      this.warn(
+        `[AdapterRegistry] listLanguages: loader discovery failed, falling back to registered adapters: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
     }
 
     // Always include statically registered adapters so bundled builds expose them.
@@ -274,16 +289,31 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
   /**
    * List detailed adapter metadata (known + install status)
    */
-  async listAvailableAdapters(): Promise<AdapterMetadata[]> {
+  async listAvailableAdapters(): Promise<AdapterManifestEntry[]> {
     const registered = new Set(this.getSupportedLanguages());
 
-    const buildEntry = (language: string): AdapterMetadata => ({
-      name: language,
-      packageName: `@debugmcp/adapter-${language}`,
-      description: undefined,
-      installed: true,
-      attach: this.factories.get(language)?.getMetadata().modes?.attach ?? 'none'
-    });
+    const buildEntry = (language: string): AdapterMetadata => {
+      // A registered plain-JS factory can throw from getMetadata(); one bad
+      // factory must not reject the whole listing (doctor would lose every
+      // verdict). Same defense probeLanguageEntry applies per entry.
+      let attach: AdapterMetadata['attach'] = 'none';
+      try {
+        attach = this.factories.get(language)?.getMetadata().modes?.attach ?? 'none';
+      } catch (error) {
+        this.warn(
+          `[AdapterRegistry] getMetadata() threw for registered '${language}'; listing it with attach 'none'. ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
+      return {
+        name: language,
+        packageName: `@debugmcp/adapter-${language}`,
+        description: undefined,
+        installed: true,
+        attach
+      };
+    };
 
     if (!this.dynamicEnabled) {
       // Provide minimal metadata from registered factories
@@ -298,8 +328,13 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
         results.set(adapter.name, { ...adapter, installed });
         registered.delete(adapter.name);
       }
-    } catch {
-      // Ignore loader failures and fall back to registered adapters.
+    } catch (error) {
+      // Fall back to registered adapters, but leave a breadcrumb.
+      this.warn(
+        `[AdapterRegistry] listAvailableAdapters: loader discovery failed, falling back to registered adapters: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
     }
 
     for (const language of registered) {
@@ -310,27 +345,40 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
   }
 
   /**
-   * Get the factory for a language without creating an adapter instance.
-   * Checks registered factories first, then the loader cache, then attempts
-   * a dynamic load (when enabled). Returns undefined if unavailable.
+   * Get the factory for a language without creating an adapter instance,
+   * with the load failure preserved (issue #435 part 4): checks registered
+   * factories first, then the loader cache, then attempts a dynamic load
+   * (when enabled). Never throws — a failed load comes back as loadError so
+   * the availability probe can surface the real import error instead of
+   * "the registry returned no factory".
    */
-  async getFactory(language: string): Promise<IAdapterFactory | undefined> {
+  async getFactoryResult(language: string): Promise<FactoryLoadResult> {
     const registered = this.factories.get(language);
     if (registered) {
-      return registered;
+      return { factory: registered };
     }
     const cached = this.loader.getCachedFactory(language);
     if (cached) {
-      return cached;
+      return { factory: cached };
     }
-    if (this.dynamicEnabled) {
-      try {
-        return await this.loader.loadAdapter(language);
-      } catch {
-        return undefined;
-      }
+    if (!this.dynamicEnabled) {
+      return { dynamicLoadingDisabled: true };
     }
-    return undefined;
+    try {
+      return { factory: await this.loader.loadAdapter(language) };
+    } catch (error) {
+      return { loadError: error instanceof Error ? error : new Error(String(error)) };
+    }
+  }
+
+  /**
+   * Get the factory for a language without creating an adapter instance.
+   * Fail-open contract: returns undefined whenever no factory can be
+   * produced, whatever the reason — use getFactoryResult when the reason
+   * matters.
+   */
+  async getFactory(language: string): Promise<IAdapterFactory | undefined> {
+    return (await this.getFactoryResult(language)).factory;
   }
 
   /**

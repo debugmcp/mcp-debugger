@@ -6,7 +6,12 @@
  * can't assess the toolchain — issue #360) and authoritative for attach
  * 'none' (enforced in SessionManagerOperations.attachToProcess).
  */
-import type { AttachMechanism, FactoryValidationResult, IAdapterFactory } from '@debugmcp/shared';
+import type {
+  AttachMechanism,
+  FactoryLoadResult,
+  FactoryValidationResult,
+  IAdapterFactory
+} from '@debugmcp/shared';
 import { ErrorMessages } from './error-messages.js';
 
 export interface ModeAvailability {
@@ -66,37 +71,54 @@ export class ValidationResultCache {
 
 /**
  * Launch-mode gate shared by create_debug_session and start_debugging
- * (issue #360): consult the same toolchain probe list_supported_languages
- * uses, so a known-unavailable adapter fails fast with the same reason text
- * instead of reporting success and silently running nothing.
+ * (issue #360): a thin wrapper over probeLanguageEntry (issue #435 part 3),
+ * so on the toolchain axis the gate's answer — availability and reason text
+ * alike — is literally the launch mode list_supported_languages reports and
+ * cannot drift from it. (The disabled/not-installed axes intentionally
+ * diverge: there list_supported_languages reports unavailable while the
+ * gate fails open — see the synthetic entry below.)
+ *
+ * The synthetic entry (installed: true, empty disabledSet) provably
+ * neutralizes the probe's notInstalled/disabled short-circuits: the gate
+ * gates on the toolchain only — disabled languages are refused upstream
+ * (server.ts create_debug_session), before this runs.
  *
  * Fail-open contract: any probe failure (registry without getFactory, missing
- * factory, thrown validate) reports available — enforcement must never block
- * a launch the advisory probe can't assess (mirrors computeModeAvailability).
+ * factory, load error, thrown validate) reports available — enforcement must
+ * never block a launch the advisory probe can't assess.
  */
 export async function checkLaunchToolchain(
   language: string,
-  registry: unknown,
+  registry: AvailabilityProbeOptions['registry'],
   cache: ValidationResultCache,
   logger?: { warn?: (message: string) => void }
 ): Promise<{ available: true } | { available: false; reason: string }> {
   try {
-    const dyn = registry as
-      | { getFactory?: (language: string) => Promise<{ validate?: () => Promise<FactoryValidationResult> } | undefined> }
-      | undefined;
-    if (typeof dyn?.getFactory !== 'function') {
+    const probe = await probeLanguageEntry(
+      { language, packageName: `@debugmcp/adapter-${language}`, installed: true },
+      {
+        registry,
+        disabledSet: new Set(),
+        runValidate: (lang, validate) => cache.get(lang, validate),
+        logger
+      }
+    );
+    if (probe.factoryLoadError !== undefined) {
+      // The real import failure is in hand (getFactoryResult plumbed it) —
+      // leave the breadcrumb even though the gate fails open, or the later
+      // launch death shows only an unrelated proxy/spawn error.
+      logger?.warn?.(
+        `[language-availability] adapter factory for '${language}' failed to load; allowing launch. ` +
+          `${probe.factoryLoadError instanceof Error ? probe.factoryLoadError.message : String(probe.factoryLoadError)}`
+      );
+    }
+    if (probe.modes.launch.available) {
       return { available: true };
     }
-    const factory = await dyn.getFactory(language);
-    if (!factory || typeof factory.validate !== 'function') {
-      return { available: true };
-    }
-    const validate = factory.validate.bind(factory) as () => Promise<FactoryValidationResult>;
-    const validation = await cache.get(language, validate);
-    if (validation.valid) {
-      return { available: true };
-    }
-    const reason = validation.errors.join('; ') || `The '${language}' debug adapter is not available in this runtime.`;
+    // computeModeAvailability yields '' when validation.errors is empty; the
+    // gate's user-facing error needs a sentence either way.
+    const reason =
+      probe.modes.launch.reason || ErrorMessages.modeUnavailableReason.launchFallback(language);
     return { available: false, reason };
   } catch (error) {
     logger?.warn?.(
@@ -123,8 +145,21 @@ export interface LanguageAdapterEntry {
 export type ProbeableAdapterFactory = Pick<IAdapterFactory, 'validate' | 'getMetadata' | 'describeToolchain'>;
 
 export interface AvailabilityProbeOptions {
-  /** Source of factories; absent getFactory means "cannot probe" (assume valid). */
-  registry?: { getFactory?: (language: string) => Promise<ProbeableAdapterFactory | undefined> };
+  /**
+   * Source of factories; absent getFactory means "cannot probe" (assume
+   * valid). getFactoryResult is preferred when present — it carries the
+   * dynamic-load failure, which getFactory's fail-open contract swallows
+   * (issue #435 part 4).
+   */
+  registry?: {
+    getFactory?: (language: string) => Promise<ProbeableAdapterFactory | undefined>;
+    // Derived from the shared FactoryLoadResult (factory widened to the
+    // probe's structural minimum) so a field rename there is a build break
+    // here instead of silent drift back to the vague no-factory message.
+    getFactoryResult?: (
+      language: string
+    ) => Promise<Omit<FactoryLoadResult, 'factory'> & { factory?: ProbeableAdapterFactory }>;
+  };
   disabledSet: Set<string>;
   /**
    * Wraps each factory.validate call — the injection point for the server's
@@ -179,9 +214,18 @@ export async function probeLanguageEntry(
 
   let factory: ProbeableAdapterFactory | undefined;
   let factoryLoadError: unknown;
-  if (!disabled && entry.installed && typeof options.registry?.getFactory === 'function') {
+  if (!disabled && entry.installed) {
     try {
-      factory = await options.registry.getFactory(entry.language);
+      if (typeof options.registry?.getFactoryResult === 'function') {
+        // Optional chaining: an untyped plain-JS registry can resolve
+        // undefined — that is "no factory", not a load error a TypeError
+        // here would misattribute to a corrupt adapter package.
+        const result = await options.registry.getFactoryResult(entry.language);
+        factory = result?.factory;
+        factoryLoadError = result?.loadError;
+      } else if (typeof options.registry?.getFactory === 'function') {
+        factory = await options.registry.getFactory(entry.language);
+      }
     } catch (error) {
       factoryLoadError = error;
     }

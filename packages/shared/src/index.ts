@@ -66,6 +66,8 @@ export type {
   AdapterModes,
   AttachMechanism,
   AdapterInfo,
+  AdapterManifestEntry,
+  FactoryLoadResult,
   AdapterRegistryConfig,
   
   // Validation

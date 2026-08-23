@@ -2513,11 +2513,12 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     // before any state mutation (issue #331). Only an explicit 'none'
     // declaration is enforced — absent metadata falls through to the
     // adapter's natural behavior.
-    const registryWithMeta = this.adapterRegistry as unknown as {
-      getFactoryMetadata?: (language: string) => Promise<{ modes?: { attach?: string } } | undefined>;
-    };
-    if (typeof registryWithMeta.getFactoryMetadata === 'function') {
-      const factoryMeta = await registryWithMeta.getFactoryMetadata(session.language).catch(() => undefined);
+    // getFactoryMetadata is on IAdapterRegistry (issue #435 part 4); the
+    // runtime guard stays for partial registry doubles, but skipping the
+    // gate must never be silent — that is the fail-open degradation the
+    // typed surface exists to expose.
+    if (typeof this.adapterRegistry.getFactoryMetadata === 'function') {
+      const factoryMeta = await this.adapterRegistry.getFactoryMetadata(session.language).catch(() => undefined);
       if (factoryMeta?.modes?.attach === 'none') {
         return {
           success: false,
@@ -2525,6 +2526,11 @@ export abstract class SessionManagerOperations extends SessionManagerData {
           error: ErrorMessages.attachModeNotSupported(session.language)
         };
       }
+    } else {
+      this.logger.warn(
+        `[SessionManager] adapterRegistry has no getFactoryMetadata; skipping the attach-'none' ` +
+          `enforcement gate for '${session.language}'.`
+      );
     }
 
     if (session.proxyManager) {
