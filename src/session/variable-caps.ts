@@ -127,8 +127,16 @@ export function mergeTruncationSummaries(
 /**
  * Human-readable advisory for a truncated response, pointing at the `names`
  * escape hatch (modeled on the redaction notice).
+ *
+ * The `names:` example is derived from the actually-returned variables
+ * (truncated ones first — those are the ones worth re-fetching) rather than
+ * a hardcoded placeholder: a static `["a","b"]` reads as real variable
+ * names, or worse, leaked state from another session (issue #438).
  */
-export function buildTruncationNotice(summary: VariableTruncationSummary): string {
+export function buildTruncationNotice(
+  summary: VariableTruncationSummary,
+  returnedVariables?: ReadonlyArray<Pick<Variable, 'name' | 'truncated'>>
+): string {
   const parts: string[] = [];
   if (summary.omittedCount > 0) {
     parts.push(`${summary.omittedCount} variable(s) omitted`);
@@ -139,8 +147,16 @@ export function buildTruncationNotice(summary: VariableTruncationSummary): strin
   if ((summary.scopesSkipped ?? 0) > 0) {
     parts.push(`${summary.scopesSkipped} scope(s) not fetched after the ${maxVariablesPerCall()}-variable budget`);
   }
+  const vars = returnedVariables ?? [];
+  const examples = [
+    ...vars.filter(v => v.truncated === true),
+    ...vars.filter(v => v.truncated !== true)
+  ].slice(0, 2).map(v => JSON.stringify(v.name));
+  const namesHint = examples.length > 0
+    ? `Pass names: [${examples.join(',')}] to fetch specific variables in full`
+    : `Pass names: [...] (exact variable names) to fetch specific variables in full`;
   return (
-    `Response size-guarded: ${parts.join('; ')}. Pass names: ["a","b"] to fetch specific ` +
-    `variables in full, or raise DEBUG_MCP_MAX_VARIABLES / DEBUG_MCP_MAX_VARIABLE_VALUE_CHARS.`
+    `Response size-guarded: ${parts.join('; ')}. ${namesHint}, ` +
+    `or raise DEBUG_MCP_MAX_VARIABLES / DEBUG_MCP_MAX_VARIABLE_VALUE_CHARS.`
   );
 }
