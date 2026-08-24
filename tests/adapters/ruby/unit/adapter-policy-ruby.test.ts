@@ -335,3 +335,13 @@ describe('buildRdbgInvocation', () => {
       .toThrow(/Set RDBG_PATH to the rdbg Ruby script/);
   });
 });
+
+describe('RubyAdapterPolicy logpoint verdict (issue #469)', () => {
+  it('declares supportsLogPoints false so logMessage is rejected up front', () => {
+    // rdbg does not advertise supportsLogPoints and silently downgrades a
+    // logpoint into a pausing breakpoint. An undefined verdict here defers
+    // to a launch-time validation whose answer the caller never used to
+    // receive — the policy must say false so set_breakpoint fails fast.
+    expect(RubyAdapterPolicy.supportsLogPoints).toBe(false);
+  });
+});
