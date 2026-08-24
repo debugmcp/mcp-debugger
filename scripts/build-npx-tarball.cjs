@@ -40,7 +40,12 @@ fs.mkdirSync(TARBALL_DIR, { recursive: true });
 run('pnpm', ['install', '--frozen-lockfile=false']);
 run('npm', ['run', 'build']);
 run('npm', ['run', 'build:packages']);
-run('npm', ['pack', '--pack-destination', TARBALL_DIR], { cwd: PKG_DIR });
+run('node', ['scripts/prepare-pack.js', 'prepare']);
+try {
+  run('npm', ['pack', '--pack-destination', TARBALL_DIR], { cwd: PKG_DIR });
+} finally {
+  run('node', ['scripts/prepare-pack.js', 'restore']);
+}
 
 const candidates = fs
   .readdirSync(TARBALL_DIR)
