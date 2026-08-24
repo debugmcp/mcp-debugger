@@ -41,8 +41,18 @@ export class MinimalDapClient extends EventEmitter {
   private decoder = new DapFrameDecoder({
     onError: (error, context) => {
       if (context === 'header' || context === 'overflow') {
-        // Same recovery contract: the decoder discarded the buffer (issue #402)
-        logger.warn(`[MinimalDapClient] ${error.message}`);
+        // A discarded frame that was a pending *response* is unrecoverable —
+        // DAP has no resend, so the request promise only settles at its
+        // timeout. Name the seq(s) at error level so this fails loudly
+        // instead of as a generic init/request timeout (issue #470).
+        const pendingSeqs = Array.from(this.pendingRequests.keys());
+        if (pendingSeqs.length > 0) {
+          logger.error(
+            `[MinimalDapClient] ${error.message} (request seq(s) awaiting a response: ${pendingSeqs.join(', ')} — if the discarded frame was one of them, that request will time out)`
+          );
+        } else {
+          logger.warn(`[MinimalDapClient] ${error.message}`);
+        }
       } else {
         logger.error('[MinimalDapClient] Error parsing message:', error);
       }
