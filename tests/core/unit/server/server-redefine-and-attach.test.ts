@@ -431,6 +431,51 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
     });
   });
 
+  describe('attach warning join (issue #450)', () => {
+    it('surfaces data.warning at the top level of the attach_to_process response', async () => {
+      mockSessionManager.attachToProcess.mockResolvedValue({
+        success: true,
+        state: 'paused',
+        data: {
+          message: 'Attached to process at 127.0.0.1:5678',
+          warning: 'adapterConfig key(s) not supported by the python attach request were ignored: localRoot, remoteRoot',
+        },
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'attach_to_process',
+          arguments: { sessionId: 'test-session', port: 5678 },
+        },
+      });
+
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload.success).toBe(true);
+      expect(payload.warning).toContain('localRoot, remoteRoot');
+    });
+
+    it('adds no top-level warning when the attach succeeded cleanly', async () => {
+      mockSessionManager.attachToProcess.mockResolvedValue({
+        success: true,
+        state: 'paused',
+        data: { message: 'Attached to process at 127.0.0.1:5678' },
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'attach_to_process',
+          arguments: { sessionId: 'test-session', port: 5678 },
+        },
+      });
+
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload.success).toBe(true);
+      expect(payload).not.toHaveProperty('warning');
+    });
+  });
+
   describe('adapterConfig passthrough (issue #336)', () => {
     beforeEach(() => {
       mockSessionManager.attachToProcess.mockResolvedValue({

@@ -487,6 +487,50 @@ describe('PythonDebugAdapter', () => {
       const attach = adapter.transformAttachConfig({ port: 5678, stopOnEntry: true });
       expect(attach.stopOnEntry).toBe(true);
     });
+
+    it('passes pathMappings through to the debugpy attach request (issue #450)', () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+
+      const mappings = [{ localRoot: 'C:\\work\\app', remoteRoot: '/app' }];
+      const config = adapter.transformAttachConfig!({
+        request: 'attach',
+        port: 5678,
+        pathMappings: mappings
+      });
+
+      expect(config.pathMappings).toEqual(mappings);
+    });
+
+    it('passes unrecognized debugpy attach knobs through (issue #450)', () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+
+      const config = adapter.transformAttachConfig!({
+        request: 'attach',
+        port: 5678,
+        subProcess: false,
+        django: true
+      });
+
+      expect(config.subProcess).toBe(false);
+      expect(config.django).toBe(true);
+    });
+
+    it('still strips bare localRoot/remoteRoot — pathMappings is the one lever (issue #450)', () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+
+      const config = adapter.transformAttachConfig!({
+        request: 'attach',
+        port: 5678,
+        localRoot: 'C:\\work\\app',
+        remoteRoot: '/app'
+      });
+
+      // The ptvsd-era sugar keys are not forwarded (debugpy's native shape is
+      // pathMappings); the session layer surfaces them as dropped keys instead.
+      expect(config.localRoot).toBeUndefined();
+      expect(config.remoteRoot).toBeUndefined();
+      expect(config.pathMappings).toBeUndefined();
+    });
   });
 
   describe('validateEnvironment through the real helpers (coverage sprint)', () => {

@@ -39,10 +39,21 @@ attach_to_process {"sessionId": "...", "host": "127.0.0.1", "port": 5678,
                    "breakOnExceptions": "uncaught"}
 ```
 
-**Breakpoints & paths**: container-side paths only — `{"file": "/app/app.py", "line": 6}`.
-The python adapter has **no path-mapping lever**: `localRoot`/`remoteRoot`/
-`pathMappings` are silently dropped, and a breakpoint at a local path reports
-`verified: false` ("file does not exist" from the target's point of view).
+**Breakpoints & paths**: container-side paths — `{"file": "/app/app.py", "line": 6}` —
+always work. To address breakpoints by local-checkout path instead, pass
+debugpy's native mapping shape:
+
+```json
+attach_to_process {"sessionId": "...", "host": "127.0.0.1", "port": 5678,
+                   "breakOnExceptions": "uncaught",
+                   "adapterConfig": {"pathMappings": [
+                     {"localRoot": "/home/user/checkout/src", "remoteRoot": "/app"}]}}
+```
+
+Without a mapping, a local path reports `verified: false` ("file does not
+exist" from the target's point of view). Bare `localRoot`/`remoteRoot` (the
+ptvsd-era sugar) are **not** forwarded — `pathMappings` is the one lever; the
+attach response's `warning` names any `adapterConfig` keys that were ignored.
 Function breakpoints (`{"function": "tick"}`) work and need no paths at all.
 **Caveats**: do not put `host`/`port` inside `adapterConfig` (debugpy rejects
 the conflicting `connect.*` combination). Attaching pauses the target; use
