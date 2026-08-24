@@ -114,6 +114,10 @@ export interface ManagedSession extends DebugSessionInfo {
   // attach — the user's value, or the policy's launch default when unset
   // (issue #244). Previously write-only pass-through; recorded for read-back.
   effectiveBreakOnExceptions?: ExceptionBreakMode;
+  // Caller-provided adapterConfig keys the adapter's attach transform did not
+  // carry into the DAP attach request (issue #450). Recorded per attach by
+  // startProxyManager; consumed by attachToProcess for the response warning.
+  attachDroppedConfigKeys?: string[];
   // The most recent real launch, replayed by restart_debugging (issue #238).
   lastLaunch?: LastLaunchSpec;
   // Live DAP mirror endpoint, when exposed via expose_session (issue #217).

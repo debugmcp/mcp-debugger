@@ -74,6 +74,7 @@ interface PythonAttachConfig extends LanguageSpecificAttachConfig {
   justMyCode: boolean;
   cwd?: string;
   env?: Record<string, string>;
+  pathMappings?: Array<{ localRoot: string; remoteRoot: string }>;
 }
 
 /**
@@ -460,27 +461,56 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
       );
     }
 
+    const {
+      request: _request,
+      __attachMode: _attachMode,
+      host: _host,
+      port: _port,
+      // debugpy rejects configs carrying both `connect` and top-level
+      // host/port ("mutually exclusive"), so those must not leak through.
+      console: _console,
+      processId: _processId,
+      processName: _processName,
+      identifierType: _identifierType,
+      timeout: _timeout,
+      sourcePaths: _sourcePaths,
+      // ptvsd-era sugar; debugpy's native shape is pathMappings. Stripping
+      // (rather than forwarding or converting) keeps one canonical lever —
+      // the session layer reports adapterConfig keys dropped here (#450).
+      localRoot: _localRoot,
+      remoteRoot: _remoteRoot,
+      justMyCode,
+      stopOnEntry,
+      cwd,
+      env,
+      ...rest
+    } = config as Record<string, unknown>;
+    void _request; void _attachMode; void _host; void _port; void _console;
+    void _processId; void _processName; void _identifierType; void _timeout;
+    void _sourcePaths; void _localRoot; void _remoteRoot;
+
+    // Advanced passthrough (pathMappings, subProcess, django, …) with the
+    // normalized debugpy client-connect shape on top (issue #450).
     const attachConfig: PythonAttachConfig = {
+      ...rest,
       type: 'python',
       request: 'attach',
       name: 'Python: Attach',
-      // debugpy client-connect convention. Top-level host/port must NOT be
-      // set alongside it — debugpy rejects that combination as mutually
-      // exclusive. The adapter policy's spawn config reads connect.* too.
+      // The adapter policy's spawn config reads connect.* too.
       connect: { host, port },
-      justMyCode: config.justMyCode ?? true
+      justMyCode: (justMyCode as boolean | undefined) ?? true
     };
 
-    if (config.stopOnEntry !== undefined) {
-      attachConfig.stopOnEntry = config.stopOnEntry;
+    if (stopOnEntry !== undefined) {
+      attachConfig.stopOnEntry = stopOnEntry as boolean;
     }
 
-    if (config.cwd) {
-      attachConfig.cwd = config.cwd;
+    if (cwd) {
+      attachConfig.cwd = cwd as string;
     }
 
-    if (config.env) {
-      attachConfig.env = config.env;
+    if (env) {
+      attachConfig.env = env as Record<string, string>;
     }
 
     return attachConfig;

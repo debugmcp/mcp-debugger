@@ -1795,6 +1795,13 @@ export class DebugMcpServer {
 
                 if (attachResult.data) {
                   responsePayload.data = attachResult.data;
+                  // Surface the dropped-adapterConfig-keys warning (issue
+                  // #450) at the top level too — same discoverability as
+                  // set_breakpoint/start_debugging/restart_debugging.
+                  const attachWarning = (attachResult.data as { warning?: string }).warning;
+                  if (attachResult.success && attachWarning) {
+                    responsePayload.warning = attachWarning;
+                  }
                 }
 
                 result = { content: [{ type: 'text', text: JSON.stringify(responsePayload) }] };

@@ -223,6 +223,9 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       }
     }
 
+    // Caller's adapterConfig keys (minus reserved) — diffed against the attach
+    // transform's output to surface silently dropped keys (issue #450).
+    let adapterExtraKeys: string[] = [];
     if (adapterLaunchConfig && typeof adapterLaunchConfig === 'object') {
       // request/__attachMode select the DAP sequence and shutdown semantics —
       // the proxy worker re-reads them from the merged config (attach must
@@ -243,6 +246,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         );
       }
       Object.assign(genericLaunchConfig, adapterExtras);
+      adapterExtraKeys = Object.keys(adapterExtras);
     }
 
     let transformedLaunchConfig: LanguageSpecificLaunchConfig | undefined;
@@ -280,6 +284,21 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         }`
       );
       transformedLaunchConfig = undefined;
+    }
+
+    // Attach transforms may be allowlists that silently discard adapterConfig
+    // keys (issue #450) — record the drops so attachToProcess can warn the
+    // caller. Assigned unconditionally so a prior attach's record never leaks.
+    if (isAttachMode) {
+      const dropped = transformedLaunchConfig
+        ? adapterExtraKeys.filter((key) => !(key in transformedLaunchConfig!))
+        : [];
+      if (dropped.length > 0) {
+        this.logger.warn(
+          `[SessionManager] ${session.language} attach transform dropped adapterConfig key(s) for session ${sessionId}: ${dropped.join(', ')}`
+        );
+      }
+      session.attachDroppedConfigKeys = dropped.length > 0 ? dropped : undefined;
     }
 
     const adapterWithToolchain = adapter as {
@@ -2798,15 +2817,25 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         this.logger.info(`[SessionManager] Set session ${sessionId} to RUNNING (stopOnEntry=false, process started with suspend=n)`);
       }
 
+      const attachData: Record<string, unknown> = {
+        message: attachConfig.processId
+          ? `Attached to process PID ${attachConfig.processId}`
+          : `Attached to process at ${attachConfig.host || 'localhost'}:${attachConfig.port}`,
+        attachConfig
+      };
+      // Surface adapterConfig keys the adapter's attach transform dropped
+      // (issue #450) — "unknown attach keys should either work or warn".
+      const droppedKeys = session.attachDroppedConfigKeys;
+      if (droppedKeys && droppedKeys.length > 0) {
+        session.attachDroppedConfigKeys = undefined;
+        attachData.warning =
+          `adapterConfig key(s) not supported by the ${session.language} attach request were ignored: ${droppedKeys.join(', ')}`;
+      }
+
       return {
         success: true,
         state: finalState,
-        data: {
-          message: attachConfig.processId
-            ? `Attached to process PID ${attachConfig.processId}`
-            : `Attached to process at ${attachConfig.host || 'localhost'}:${attachConfig.port}`,
-          attachConfig
-        }
+        data: attachData
       };
     } catch (error) {
       this.logger.error(`[SessionManager] Failed to attach to process for session ${sessionId}:`, error);
