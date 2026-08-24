@@ -75,4 +75,18 @@ describe('Server Prompts Tests', () => {
       getPromptHandler({ method: 'prompts/get', params: { name: 'nope' } })
     ).rejects.toThrow(McpError);
   });
+
+  it('points attach guidance at the Kubernetes recipe (issue #452)', async () => {
+    const { getPromptHandler } = getPromptHandlers(mockServer);
+    const result = await getPromptHandler({
+      method: 'prompts/get',
+      params: { name: 'debugging-workflow' }
+    });
+
+    const text = result.messages[0].content.text;
+    // The consolidated attach/k8s guidance (#424): debuggee-side paths,
+    // python's pathMappings lever (#450), and the docs pointer.
+    expect(text).toContain('docs/kubernetes.md');
+    expect(text).toContain('pathMappings');
+  });
 });

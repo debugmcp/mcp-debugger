@@ -67,14 +67,18 @@ For an already-running process (including remote machines, containers, and Kuber
 attach_to_process {sessionId, host: "localhost", port: 5678, sourcePaths: ["<local src>"], adapterConfig: {...}}
 ```
 
-- **Python**: target ran `python -m debugpy --listen <host>:<port> ...`
-- **Ruby**: target ran `rdbg --open --port <port> ...` (works through `kubectl port-forward`)
-- **Java**: target JVM has `-agentlib:jdwp=transport=dt_socket,server=y,address=*:<port>`; breakpoints in not-yet-loaded classes are deferred automatically
+- **Python**: target ran `python -m debugpy --listen <host>:<port> ...`; to address breakpoints by local-checkout path, map it onto the debuggee tree with `adapterConfig: {pathMappings: [{localRoot: "<abs local>", remoteRoot: "/app"}]}`
+- **Ruby**: target ran `rdbg --open --port <port> ...` (works through `kubectl port-forward`); `localfsMap: "/app:<abs local dir>"` maps paths
+- **Java**: target JVM has `-agentlib:jdwp=transport=dt_socket,server=y,address=*:<port>`; breakpoints in not-yet-loaded classes are deferred automatically, and a fully-qualified class name as `file` needs no source files at all
 - **C/C++ (and other native)**: attach by PID instead of port — `attach_to_process {sessionId, processId: <pid>, adapterConfig: {program: "<path to binary>"}}`; in a Kubernetes ephemeral debug container use `processId: 1` with `program: "/proc/1/root/<binary path>"` (on Linux, mind `kernel.yama.ptrace_scope`)
+
+Breakpoint paths on attach are sent **verbatim** and resolved against the **target's** filesystem (host-side existence checks are skipped). Without a mapping, use debuggee-side paths — `get_stack_trace` shows the paths the target uses — or address by symbol (`{function: "name"}`), which needs no paths. `adapterConfig` keys the adapter cannot forward into its attach request are named in the response's `warning`.
 
 Direct-connect attaches (debugpy, rdbg) need no local language toolchain — the debug engine runs inside the target. `list_supported_languages` reports per-mode availability (`modes.launch` / `modes.attach`) with reasons.
 
 `detach_from_process` leaves the target running; `close_debug_session` after detach cleans up the session.
+
+For Kubernetes pods, don't re-derive attach configs: the [Kubernetes recipe](https://github.com/debugmcp/mcp-debugger/blob/main/docs/kubernetes.md#breakpoints-and-paths-on-attach-read-this-once) (pattern decision table, path rules) and the per-language [attach presets](https://github.com/debugmcp/mcp-debugger/blob/main/examples/kubernetes/attach-presets.md) have verified copy-paste calls.
 
 ## IDE mirror (let a human look around)
 
