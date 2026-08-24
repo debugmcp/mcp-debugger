@@ -40,11 +40,20 @@ fs.mkdirSync(TARBALL_DIR, { recursive: true });
 run('pnpm', ['install', '--frozen-lockfile=false']);
 run('npm', ['run', 'build']);
 run('npm', ['run', 'build:packages']);
+// Rewrite workspace:* specifiers to real versions before packing (issue #463)
+// — npm cannot install a tarball that ships pnpm-only workspace: protocol.
 run('node', ['scripts/prepare-pack.js', 'prepare']);
-try {
-  run('npm', ['pack', '--pack-destination', TARBALL_DIR], { cwd: PKG_DIR });
-} finally {
-  run('node', ['scripts/prepare-pack.js', 'restore']);
+// run() exits the process on failure, which would skip a `finally` — spawn
+// the pack directly so the original package.json is restored either way.
+process.stderr.write(`[build-npx-tarball] npm pack --pack-destination ${TARBALL_DIR}\n`);
+const packResult = spawnSync('npm', ['pack', '--pack-destination', TARBALL_DIR], {
+  stdio: 'inherit',
+  shell: process.platform === 'win32',
+  cwd: PKG_DIR,
+});
+run('node', ['scripts/prepare-pack.js', 'restore']);
+if (packResult.status !== 0) {
+  process.exit(typeof packResult.status === 'number' ? packResult.status : 1);
 }
 
 const candidates = fs
@@ -77,5 +86,17 @@ if (fs.existsSync(extractDir)) {
 }
 fs.mkdirSync(extractDir, { recursive: true });
 run('tar', ['-xzf', path.join('..', STABLE_NAME)], { cwd: extractDir });
+
+// Regression guard (issue #463): if the packed manifest still carries
+// workspace:* specifiers, prepare-pack did not take effect and the tarball
+// cannot be npm install'ed outside this repo. Fail loudly here rather than
+// at the consumer's `npm install`.
+const packedManifest = fs.readFileSync(path.join(extractDir, 'package', 'package.json'), 'utf8');
+if (packedManifest.includes('workspace:')) {
+  process.stderr.write(
+    '[build-npx-tarball] packed package.json still contains workspace: specifiers — prepare-pack did not run?\n'
+  );
+  process.exit(1);
+}
 
 process.stdout.write(`${dst}\n`);
