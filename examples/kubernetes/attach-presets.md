@@ -47,7 +47,7 @@ debugpy's native mapping shape:
 attach_to_process {"sessionId": "...", "host": "127.0.0.1", "port": 5678,
                    "breakOnExceptions": "uncaught",
                    "adapterConfig": {"pathMappings": [
-                     {"localRoot": "/home/me/checkout/src", "remoteRoot": "/app"}]}}
+                     {"localRoot": "/home/user/checkout/src", "remoteRoot": "/app"}]}}
 ```
 
 Without a mapping, a local path reports `verified: false` ("file does not
