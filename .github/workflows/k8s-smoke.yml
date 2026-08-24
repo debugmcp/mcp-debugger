@@ -22,11 +22,6 @@ name: Kubernetes recipe smoke (kind)
 # surface.
 
 on:
-  # TEMPORARY (remove before merge): branch push trigger so the smoke can be
-  # exercised pre-merge — workflow_dispatch only resolves workflows that
-  # exist on the default branch.
-  push:
-    branches: [feat/451-k8s-smoke]
   schedule:
     - cron: '0 10 * * 2'  # Tue 10:00 UTC — an hour after the canary, so both weekly published-artifact signals land the same morning
   workflow_dispatch:
