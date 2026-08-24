@@ -885,12 +885,16 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       // unverified-at-launch is the designed deferral path.
       const fnBpWarning = this.buildFunctionBreakpointLaunchWarning(finalSession);
 
+      // Logpoint-downgrade verdict (issue #469): the deferred set_breakpoint
+      // warning promised a launch-time answer — deliver it on this response.
+      const logpointWarning = this.buildLogpointDowngradeLaunchWarning(finalSession);
+
       // Adapter degradation notes (issue #441) accumulate on the session as
       // annotated output events arrive; joining here is best-effort — a note
       // arriving after this return still lands in the output buffer as an
       // attributed [mcp-debugger] Warning entry.
       const launchWarning =
-        [fnBpWarning, ...(finalSession.adapterNotices ?? [])]
+        [fnBpWarning, logpointWarning, ...(finalSession.adapterNotices ?? [])]
           .filter(Boolean)
           .join('; ') || undefined;
 
@@ -1507,6 +1511,36 @@ export abstract class SessionManagerOperations extends SessionManagerData {
    * undefined for bind-late policies (js/java) — unverified-at-launch is
    * their designed deferral, not a failure.
    */
+  /**
+   * Launch-time logpoint-downgrade warning (issue #469). A logpoint accepted
+   * pre-launch under unknown policy support ("it will be validated against
+   * the adapter's capabilities at launch") gets its promised verdict here:
+   * when the live adapter does not advertise supportsLogPoints, the logpoint
+   * has been silently downgraded to a pausing breakpoint — say so in the
+   * start_debugging response instead of only in the server log.
+   */
+  protected buildLogpointDowngradeLaunchWarning(session: ManagedSession): string | undefined {
+    const caps = session.adapterCapabilities;
+    if (!caps || caps.supportsLogPoints === true) {
+      return undefined;
+    }
+    const downgraded: string[] = [];
+    for (const bp of session.breakpoints.values()) {
+      if (bp.logMessage !== undefined) {
+        downgraded.push(`${path.basename(bp.file)}:${bp.line}`);
+      }
+    }
+    if (downgraded.length === 0) {
+      return undefined;
+    }
+    return (
+      `Logpoint(s) at ${downgraded.join(', ')} were downgraded to pausing breakpoints: ` +
+      `the ${session.language} adapter does not advertise supportsLogPoints, so the ` +
+      `logMessage will not be logged and the program will PAUSE at those lines instead ` +
+      `of running through them`
+    );
+  }
+
   protected buildFunctionBreakpointLaunchWarning(session: ManagedSession): string | undefined {
     if ((session.functionBreakpoints?.size ?? 0) === 0) {
       return undefined;

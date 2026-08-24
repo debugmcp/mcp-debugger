@@ -6,6 +6,10 @@ import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from '
 
 export const RubyAdapterPolicy: AdapterPolicy = {
   name: 'ruby',
+  // rdbg does not advertise supportsLogPoints and its setBreakpoints ignores
+  // logMessage, silently downgrading a logpoint into a pausing breakpoint —
+  // the inverse of what a logpoint promises. Reject up front (issue #469).
+  supportsLogPoints: false,
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
   buildChildStartArgs: () => {
