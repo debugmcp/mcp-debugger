@@ -7,7 +7,9 @@ narrative tutorial that diagnoses a realistic log-invisible bug, see the
 [JIT diagnostics tutorial](jit-diagnostics/README.md).
 
 Everything below was verified end-to-end on kind (Kubernetes v1.36, containerd)
-and on Amazon EKS — see [Managed clusters: EKS](#managed-clusters-eks).
+and on Amazon EKS — see [Managed clusters: EKS](#managed-clusters-eks) — and the
+python + cpp cycles are re-verified weekly in CI against a kind cluster
+(`.github/workflows/k8s-smoke.yml`, issue #451).
 
 ## The two patterns
 
