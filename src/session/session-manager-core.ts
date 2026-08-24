@@ -615,11 +615,15 @@ export abstract class SessionManagerCore extends EventEmitter {
       if (typeof eventBp.line === 'number') {
         target.line = eventBp.line;
       }
-      if (eventBp.message !== undefined) {
-        // A provisional "unbound" note must not survive verification, and a
-        // leaked l10n key must not reach the user (issue #471).
-        target.message = normalizeBreakpointMessage(eventBp.message, target.verified);
-      }
+      // A provisional "unbound" note must not survive verification, and a
+      // leaked l10n key must not reach the user (issue #471). When the event
+      // carries no message, re-normalize the stored one: js-debug's bind event
+      // omits `message`, so a provisional note stamped earlier would otherwise
+      // outlive the verification it contradicts.
+      target.message = normalizeBreakpointMessage(
+        eventBp.message !== undefined ? eventBp.message : target.message,
+        target.verified
+      );
       if (typeof eventBp.id === 'number') {
         target.adapterId = eventBp.id;
       }
@@ -855,8 +859,13 @@ export abstract class SessionManagerCore extends EventEmitter {
         }
         // Stamp message only when present — a clean sync must not wipe the
         // capability-drift warning handleAdapterCapabilities may have set.
+        // (Normalization drops only provisional "unbound" notes, so a sync
+        // that verifies without a message clears a stale one while other
+        // stored messages pass through untouched — issue #471.)
         if (result.message !== undefined) {
           target.message = normalizeBreakpointMessage(result.message, target.verified);
+        } else if (target.message !== undefined && target.verified) {
+          target.message = normalizeBreakpointMessage(target.message, target.verified);
         }
         this.logger.info('debug:breakpoint', {
           event: 'verified',

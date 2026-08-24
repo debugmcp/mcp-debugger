@@ -20,8 +20,16 @@ const L10N_FALLBACKS: Record<string, string> = {
   'breakpoint.provisionalBreakpoint': 'Unbound breakpoint',
 };
 
-/** Keys whose meaning is "not bound yet", and so cannot survive verification. */
-const PROVISIONAL_KEYS = new Set(['breakpoint.provisionalBreakpoint']);
+/**
+ * Messages whose meaning is "not bound yet", and so cannot survive
+ * verification — in both raw-key and translated form, because the stamping
+ * event may arrive while the breakpoint is still unverified (storing the
+ * translated text) and the later bind event may carry no message at all.
+ */
+const PROVISIONAL_MESSAGES = new Set([
+  'breakpoint.provisionalBreakpoint',
+  'Unbound breakpoint',
+]);
 
 /**
  * Resolve an adapter-supplied breakpoint message for storage.
@@ -38,7 +46,7 @@ export function normalizeBreakpointMessage(
     return undefined;
   }
   // A bound breakpoint cannot carry a "not bound yet" note.
-  if (verified && PROVISIONAL_KEYS.has(message)) {
+  if (verified && PROVISIONAL_MESSAGES.has(message)) {
     return undefined;
   }
   return L10N_FALLBACKS[message] ?? message;

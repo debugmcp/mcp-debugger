@@ -12,6 +12,17 @@ describe('normalizeBreakpointMessage', () => {
     );
   });
 
+  it('clears the translated provisional text once verified', () => {
+    // The provisional note is often stamped while still unverified (stored in
+    // translated form) and the later bind event carries no message — the
+    // stored text is re-normalized, so the translated form must clear too.
+    expect(normalizeBreakpointMessage('Unbound breakpoint', true)).toBeUndefined();
+  });
+
+  it('keeps the translated provisional text while still unverified', () => {
+    expect(normalizeBreakpointMessage('Unbound breakpoint', false)).toBe('Unbound breakpoint');
+  });
+
   it('never surfaces a raw l10n key', () => {
     for (const verified of [true, false]) {
       const out = normalizeBreakpointMessage('breakpoint.provisionalBreakpoint', verified);
