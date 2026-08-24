@@ -49,7 +49,7 @@ Key rules:
 - Logpoints: set_breakpoint with logMessage ("order={orderId}") logs the interpolated message to get_output WITHOUT pausing — the prod-safe way to watch values on a hot path (Python/JS/Go/Rust; not Java/.NET).
 - restart_debugging {sessionId} relaunches with the same config in one call — breakpoints re-apply automatically, output buffer resets (read get_output from since=0). Works after the program exits; not for attach sessions.
 - get_output returns buffered debuggee stdout/stderr with a cursor; pass the returned nextSince back as since to read only new output.
-- attach_to_process connects to running/remote targets (debugpy --listen, rdbg --open, JVM JDWP), including pods via port-forward.
+- attach_to_process connects to running/remote targets (debugpy --listen, rdbg --open, JVM JDWP), including pods via port-forward. Breakpoint paths resolve on the TARGET's filesystem: use debuggee-side paths, function breakpoints, or a mapping (python: adapterConfig.pathMappings; ruby: localfsMap). Kubernetes recipe + per-language attach presets: docs/kubernetes.md in the repo.
 - expose_session {sessionId} returns host/port/token for a read-only IDE mirror of the live session (VS Code launch.json: "debugServer": port + "mirrorToken"); relay these to the human, unexpose_session when done. The IDE observes — execution control stays with you.
 - Launch sessions pause at uncaught exceptions by default (breakOnExceptions "uncaught"; Ruby excepted — rdbg has no uncaught filter). Pass "none" to let crashing scripts run to termination; attach applies no default.${redactionRule}${variableAccessRule}
 
@@ -99,10 +99,13 @@ ${setBreakpointStep}
 
 ## Attach / remote
 attach_to_process {sessionId, host, port, sourcePaths, adapterConfig}
-- Python: target started with "python -m debugpy --listen host:port ..."
-- Ruby: target started with "rdbg --open --port N ..." (works via kubectl port-forward)
-- Java: JVM flag -agentlib:jdwp=transport=dt_socket,server=y,address=*:PORT (breakpoints defer until class load)
+- Python: target started with "python -m debugpy --listen host:port ..."; map a local checkout onto the debuggee tree with adapterConfig: {pathMappings: [{localRoot, remoteRoot}]}
+- Ruby: target started with "rdbg --open --port N ..." (works via kubectl port-forward); localfsMap: "/app:<abs local dir>" maps paths
+- Java: JVM flag -agentlib:jdwp=transport=dt_socket,server=y,address=*:PORT (breakpoints defer until class load); FQCN as "file" needs no source at all
+- C/C++ (and other native): attach by PID — attach_to_process {sessionId, processId, adapterConfig: {program: "<binary path>"}}
+Breakpoint paths are sent verbatim and resolved on the TARGET's filesystem (host-side existence checks are skipped). Without a mapping, use debuggee-side paths — get_stack_trace shows them — or address by symbol ({function: "name"}), which needs no paths. adapterConfig keys the adapter cannot forward are named in the response's warning.
 detach_from_process leaves the target running.
+Kubernetes pods (port-forward vs ephemeral sidecar, copy-paste per-language presets): docs/kubernetes.md and examples/kubernetes/attach-presets.md in the mcp-debugger repo.
 
 ## IDE mirror (human inspection)
 When a human wants to look around in their IDE, expose_session {sessionId} opens a read-only DAP endpoint (127.0.0.1, token-gated) on the live session — even mid-pause. Relay host/port/token with a VS Code launch.json snippet: {"request": "attach", "debugServer": <port>, "mirrorToken": "<token>", "type": <language's debug type>}. The IDE lands on the paused frame and can walk stacks/variables/evaluate; stepping and breakpoints stay yours. unexpose_session closes it.

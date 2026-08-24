@@ -51,6 +51,8 @@ continue_execution   { "sessionId": "<id>" }
 
 Shorthand: `create_debug_session { "language": "python", "host": "127.0.0.1", "port": 5678 }` creates the session and attaches in one call. After the handshake the attach is verified by polling for threads; raise `verifyTimeout` (default ~20000 ms) for slow targets. Detach with `detach_from_process { "sessionId": "<id>", "terminateProcess": false }`.
 
+**Remote targets (containers, pods)**: breakpoint paths resolve on the *target's* filesystem — use debuggee-side paths (`/app/app.py`, as shown by `get_stack_trace`) or a function breakpoint (`{"function": "tick"}`, no paths at all). To address breakpoints by local-checkout path instead, map it with debugpy's native shape: `adapterConfig: {"pathMappings": [{"localRoot": "<abs local dir>", "remoteRoot": "/app"}]}` — frames then report local paths too. The ptvsd-era bare `localRoot`/`remoteRoot` keys are not forwarded (the response `warning` names ignored keys), and `host`/`port` must stay top-level, never in `adapterConfig`. Kubernetes specifics (port-forward pattern, presets): [docs/kubernetes.md](https://github.com/debugmcp/mcp-debugger/blob/main/docs/kubernetes.md#breakpoints-and-paths-on-attach-read-this-once).
+
 ## Quirks
 
 - **Breakpoints report `"verified": false` at set time.** debugpy verifies them asynchronously once it loads the module. Set them anyway, then `start_debugging` — they bind and hit. Do not retry-loop on the unverified flag.
