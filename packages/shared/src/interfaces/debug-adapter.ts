@@ -151,6 +151,12 @@ export interface IDebugAdapter extends EventEmitter {
   /**
    * Transform generic attach config to language-specific format
    * Only called if supportsAttach() returns true
+   *
+   * The result replaces the merged config verbatim as the DAP attach request
+   * body, so prefer a deny-list (strip known-bad keys, spread the rest) over
+   * an allowlist: unknown adapterConfig keys the caller provided should reach
+   * the debug adapter untouched. Caller-provided adapterConfig keys missing
+   * from the result are surfaced as a warning by the session layer (#450).
    * @param config Generic attach configuration
    * @returns Language-specific attach configuration
    */

@@ -29,7 +29,7 @@ never forwarded anywhere.
 
 | Language | Pattern | Debug port | Breakpoint addressing | Path-mapping lever | One-line caveat |
 |---|---|---|---|---|---|
-| python | A (or B in-pod) | 5678 (debugpy) | container path `/app/app.py`, or function | **none** — local paths never bind | don't put host/port in `adapterConfig` |
+| python | A (or B in-pod) | 5678 (debugpy) | container path `/app/app.py`, or function | `adapterConfig.pathMappings: [{localRoot, remoteRoot}]` | don't put host/port in `adapterConfig` |
 | ruby | A (or B in-pod) | 12345 (rdbg) | container path `/app/app.rb` | `localfsMap: "/app:<local>"` | `breakOnExceptions: "all"` (no uncaught-only); attach captures no stdout |
 | javascript | A (or B in-pod) | 9229 (inspector) | container path, or function | none (`adapterConfig` ignored) | needs `--preserve-symlinks-main` (see below) |
 | java | A (or B in-pod) | 5005 (JDWP) | **FQCN** `{"file": "App", "line": 4}` — no source needed | `sourcePaths` | `verifyTimeout` is ms — use `60000` for warming JVMs |
@@ -87,8 +87,10 @@ checks are skipped. Practical rules, all verified:
 
 - Use debuggee-side paths (`/app/app.py`), taken from `get_stack_trace` if in
   doubt. A local-workstation path reports `verified: false` and never binds
-  (python has no mapping mechanism; ruby has `localfsMap`; js and cpp have
-  none).
+  unless a mapping translates it: python takes `adapterConfig.pathMappings:
+  [{localRoot, remoteRoot}]` (debugpy's native shape), ruby takes `localfsMap`;
+  js and cpp have no mapping lever. `adapterConfig` keys an adapter can't
+  forward are named in the attach response's `warning` instead of vanishing.
 - **ConfigMap volumes are symlink trees** and some runtimes resolve them:
   - node resolves the main module's real path (`/app/..<timestamp>/app.js`) —
     start node with `--preserve-symlinks-main` so plain `/app/app.js`

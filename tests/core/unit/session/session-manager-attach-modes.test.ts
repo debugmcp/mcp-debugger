@@ -292,6 +292,109 @@ describe('SessionManagerOperations attach modes', () => {
     });
   });
 
+  describe('dropped adapterConfig keys warning (issue #450)', () => {
+    function makeDirectConnectAdapter(transform: (cfg: unknown) => unknown) {
+      return {
+        resolveExecutablePath: vi.fn(),
+        buildAdapterCommand: vi.fn(),
+        usesDirectConnectForAttach: vi.fn().mockReturnValue(true),
+        supportsAttach: vi.fn().mockReturnValue(true),
+        transformAttachConfig: vi.fn().mockImplementation(transform),
+        getDefaultExecutableName: vi.fn().mockReturnValue('ruby')
+      };
+    }
+
+    beforeEach(() => {
+      mockDependencies.adapterRegistry.getFactoryMetadata = vi
+        .fn()
+        .mockResolvedValue({ modes: { launch: true, attach: 'direct-connect' } });
+    });
+
+    it('surfaces adapterConfig keys the attach transform dropped in data.warning', async () => {
+      const adapterStub = makeDirectConnectAdapter((cfg) => ({
+        request: 'attach',
+        keepMe: (cfg as Record<string, unknown>).keepMe
+      }));
+      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+
+      const result = await operations.attachToProcess('test-session', {
+        host: '127.0.0.1',
+        port: 12345,
+        stopOnEntry: false,
+        adapterConfig: { localRoot: 'C:\\work\\app', remoteRoot: '/app', keepMe: 1 }
+      });
+
+      expect(result.success).toBe(true);
+      const warning = (result.data as { warning?: string }).warning;
+      expect(warning).toContain('localRoot');
+      expect(warning).toContain('remoteRoot');
+      expect(warning).not.toContain('keepMe');
+      expect(mockDependencies.logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('localRoot')
+      );
+    });
+
+    it('emits no warning when the transform preserves every adapterConfig key', async () => {
+      const adapterStub = makeDirectConnectAdapter((cfg) => cfg);
+      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+
+      const result = await operations.attachToProcess('test-session', {
+        host: '127.0.0.1',
+        port: 12345,
+        stopOnEntry: false,
+        adapterConfig: { pathMappings: [{ localRoot: 'C:\\x', remoteRoot: '/app' }] }
+      });
+
+      expect(result.success).toBe(true);
+      expect((result.data as { warning?: string }).warning).toBeUndefined();
+    });
+
+    it('ignores dropped top-level attach params — only adapterConfig keys are the caller contract', async () => {
+      // host/port legitimately vanish into normalized shapes (e.g. debugpy's
+      // connect.*) — no warning unless the caller's adapterConfig lost keys.
+      const adapterStub = makeDirectConnectAdapter(() => ({
+        request: 'attach',
+        connect: { host: '127.0.0.1', port: 12345 }
+      }));
+      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+
+      const result = await operations.attachToProcess('test-session', {
+        host: '127.0.0.1',
+        port: 12345,
+        stopOnEntry: false
+      });
+
+      expect(result.success).toBe(true);
+      expect((result.data as { warning?: string }).warning).toBeUndefined();
+    });
+
+    it('does not leak a stale warning into a later attach on the same session', async () => {
+      const dropAll = makeDirectConnectAdapter(() => ({ request: 'attach' }));
+      mockDependencies.adapterRegistry.create.mockResolvedValue(dropAll);
+
+      const first = await operations.attachToProcess('test-session', {
+        host: '127.0.0.1',
+        port: 12345,
+        stopOnEntry: false,
+        adapterConfig: { localRoot: 'C:\\x' }
+      });
+      expect((first.data as { warning?: string }).warning).toContain('localRoot');
+
+      // Simulate detach + re-attach with a clean adapterConfig
+      mockSession.proxyManager = undefined;
+      mockSession.state = SessionState.CREATED;
+      const identity = makeDirectConnectAdapter((cfg) => cfg);
+      mockDependencies.adapterRegistry.create.mockResolvedValue(identity);
+
+      const second = await operations.attachToProcess('test-session', {
+        host: '127.0.0.1',
+        port: 12345,
+        stopOnEntry: false
+      });
+      expect((second.data as { warning?: string }).warning).toBeUndefined();
+    });
+  });
+
   it('appends an attach hint when launch executable resolution fails on an attach-capable adapter', async () => {
     const adapterStub = {
       resolveExecutablePath: vi.fn().mockRejectedValue(new Error('ruby not found')),
