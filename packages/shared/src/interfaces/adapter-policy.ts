@@ -478,11 +478,16 @@ export interface AdapterPolicy {
   /**
    * Attach-mode behavior tweaks.
    * pauseAfterAttach: send an explicit DAP 'pause' after attaching when
-   * stopOnEntry is requested. Needed for debuggers (rdbg) that do NOT
-   * suspend the target on attach when it is already running — without it the
-   * session would report PAUSED while the target keeps executing.
+   * stopOnEntry is requested. Needed for debuggers (rdbg, the Java JDI
+   * bridge) that do NOT suspend the target on attach when it is already
+   * running — without it the session would report PAUSED while the target
+   * keeps executing.
+   * pauseAllThreads: send the pause with threadId 0 (pause-all) instead of
+   * the discovered thread's id. The JDI bridge suspends the whole VM on a
+   * pause-all and re-anchors its stopped event to a thread that can actually
+   * report frames (issue #465).
    */
-  getAttachBehavior?(): { pauseAfterAttach?: boolean };
+  getAttachBehavior?(): { pauseAfterAttach?: boolean; pauseAllThreads?: boolean };
 
   /**
    * Get the configuration for starting the debug adapter connection.
