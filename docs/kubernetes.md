@@ -123,9 +123,10 @@ Register the endpoint with your agent, e.g.
 The flags that matter — each one is load-bearing:
 
 - **`--profile=general`** injects `SYS_PTRACE` into the ephemeral container.
-  Nodes commonly run `kernel.yama.ptrace_scope=1` (kind and EKS nodes both do),
-  which blocks ptrace of non-descendant processes without it. `sysadmin` also
-  works but over-grants.
+  Many nodes run `kernel.yama.ptrace_scope=1` (kind nodes do), which blocks
+  ptrace of non-descendant processes without it. Some node OSes ship `0` (EKS
+  AL2023 does, observed) — keep the flag anyway: it's harmless where scope is
+  0 and load-bearing everywhere else. `sysadmin` also works but over-grants.
 - **`--target=app`** shares the *PID namespace* with the app container — the
   target process appears as **PID 1**. Mount namespaces are NOT shared.
 - **The `--` arguments replace the image entrypoint** (unlike `docker run`):
@@ -220,15 +221,19 @@ the MCP endpoint, and the containerized server attaches to python, ruby
 
 ## Managed clusters: EKS
 
-<!-- EKS-VERIFIED-STAMP: filled in during Phase 3 verification -->
-Verified on Amazon EKS (see stamp below) with the exact manifests and commands
-above — nothing changes on a managed cluster, with these notes:
+**Verified 2026-08-24 on Amazon EKS** (Kubernetes v1.34, eksctl-managed
+nodegroup, Amazon Linux 2023 nodes) with the exact manifests and commands
+above, unchanged — every image pulled straight from Docker Hub, all five
+languages passed the same attach cycles as on kind, and the ephemeral sidecar
+ran the published `debugmcp/mcp-debugger:latest`. Notes for managed clusters:
 
 - **Ephemeral containers are GA and enabled by default** (Kubernetes ≥ 1.25 —
   every supported EKS version). `kubectl debug --profile=general` works on
   managed node groups as-is.
-- **EKS nodes also run `kernel.yama.ptrace_scope=1`** — `--profile=general` is
-  just as load-bearing there as on kind.
+- **AL2023 nodes were observed with `kernel.yama.ptrace_scope=0`** — PID attach
+  would work there even without SYS_PTRACE. Keep `--profile=general` anyway:
+  other AMIs (e.g. hardened/Bottlerocket variants) and kind differ, and the
+  capability is scoped to the ephemeral container.
 - **Pod Security Admission**: namespaces enforcing the `baseline` or
   `restricted` Pod Security Standards reject `SYS_PTRACE`. EKS does not enforce
   any PSS by default; if your namespace does, label a quarantine namespace
