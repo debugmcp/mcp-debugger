@@ -136,6 +136,7 @@
   "engines": {
     "node": ">=22.0.0"
   },
+  "packageManager": "pnpm@10.33.0",
   "main": "dist/index.js",
   "type": "module",
   "bin": {
