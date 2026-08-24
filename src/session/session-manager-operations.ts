@@ -26,6 +26,7 @@ import { MIRROR_EXPOSE_COMMAND, MIRROR_UNEXPOSE_COMMAND } from '../proxy/dap-pro
 import { ErrorMessages } from '../utils/error-messages.js';
 import { checkLaunchToolchain } from '../utils/language-availability.js';
 import { resolveStatement } from '../utils/breakpoint-resolver.js';
+import { sanitizeBreakpointMessage } from '../utils/breakpoint-l10n.js';
 import { SessionManagerData } from './session-manager-data.js';
 import { CustomLaunchRequestArguments, DebugResult } from './session-manager-core.js';
 import {
@@ -1343,7 +1344,9 @@ export abstract class SessionManagerOperations extends SessionManagerData {
           }
           allBpsForFile[i].line = bpInfo.line || allBpsForFile[i].line;
           if (!keepChildState) {
-            allBpsForFile[i].message = bpInfo.message;
+            allBpsForFile[i].message = sanitizeBreakpointMessage(bpInfo.message, allBpsForFile[i].verified);
+          } else if (allBpsForFile[i].verified && allBpsForFile[i].message) {
+            allBpsForFile[i].message = sanitizeBreakpointMessage(allBpsForFile[i].message, allBpsForFile[i].verified);
           }
           // Enhance "no symbols" message for .NET with PDB format guidance
           if (bpInfo.message && session.language === 'dotnet' &&
@@ -1469,7 +1472,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
           const bpInfo = responseBps[i];
           allFnBps[i].verified = bpInfo.verified;
           allFnBps[i].adapterId = bpInfo.id ?? allFnBps[i].adapterId;
-          allFnBps[i].message = bpInfo.message;
+          allFnBps[i].message = sanitizeBreakpointMessage(bpInfo.message, allFnBps[i].verified);
           if (typeof bpInfo.line === 'number') {
             allFnBps[i].boundLine = bpInfo.line;
           }

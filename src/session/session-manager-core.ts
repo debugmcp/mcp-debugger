@@ -9,6 +9,7 @@ import {
 } from '@debugmcp/shared';
 import { isRedactionEnabled } from '../utils/redaction-mode.js';
 import { ValidationResultCache } from '../utils/language-availability.js';
+import { sanitizeBreakpointMessage } from '../utils/breakpoint-l10n.js';
 import { SessionStore, ManagedSession } from './session-store.js';
 import { OutputRingBuffer } from './output-buffer.js';
 import { DebugProtocol } from '@vscode/debugprotocol'; 
@@ -615,7 +616,10 @@ export abstract class SessionManagerCore extends EventEmitter {
         target.line = eventBp.line;
       }
       if (eventBp.message !== undefined) {
-        target.message = eventBp.message;
+        target.message = sanitizeBreakpointMessage(eventBp.message, target.verified);
+      } else if (target.verified && target.message) {
+        // Clear message if it became verified but didn't provide a new message
+        target.message = sanitizeBreakpointMessage(target.message, target.verified);
       }
       if (typeof eventBp.id === 'number') {
         target.adapterId = eventBp.id;
