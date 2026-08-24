@@ -149,14 +149,19 @@ export interface IDebugAdapter extends EventEmitter {
   usesDirectConnectForAttach?(): boolean;
 
   /**
+   * The explicit set of adapterConfig keys this adapter understands for attach.
+   * Any keys not in this list will be surfaced as a warning to the user.
+   * If undefined, the adapter falls back to the old pass-through behavior.
+   */
+  readonly supportedAttachKeys?: readonly string[];
+
+  /**
    * Transform generic attach config to language-specific format
    * Only called if supportsAttach() returns true
    *
    * The result replaces the merged config verbatim as the DAP attach request
-   * body, so prefer a deny-list (strip known-bad keys, spread the rest) over
-   * an allowlist: unknown adapterConfig keys the caller provided should reach
-   * the debug adapter untouched. Caller-provided adapterConfig keys missing
-   * from the result are surfaced as a warning by the session layer (#450).
+   * body. If `supportedAttachKeys` is defined, unknown keys provided by the
+   * caller are warned about before this transformation.
    * @param config Generic attach configuration
    * @returns Language-specific attach configuration
    */

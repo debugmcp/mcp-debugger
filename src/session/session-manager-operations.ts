@@ -27,6 +27,7 @@ import { ErrorMessages } from '../utils/error-messages.js';
 import { checkLaunchToolchain } from '../utils/language-availability.js';
 import { resolveStatement } from '../utils/breakpoint-resolver.js';
 import { sanitizeBreakpointMessage } from '../utils/breakpoint-l10n.js';
+import { didYouMean } from '../utils/did-you-mean.js';
 import { SessionManagerData } from './session-manager-data.js';
 import { CustomLaunchRequestArguments, DebugResult } from './session-manager-core.js';
 import {
@@ -287,16 +288,31 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       transformedLaunchConfig = undefined;
     }
 
-    // Attach transforms may be allowlists that silently discard adapterConfig
-    // keys (issue #450) — record the drops so attachToProcess can warn the
-    // caller. Assigned unconditionally so a prior attach's record never leaks.
+    // Attach config keys are checked against the adapter's known allow-list
+    // to catch typos and unknown keys (issue #466). If supportedAttachKeys
+    // is missing, we fall back to checking if the transform dropped the key.
+    // Assigned unconditionally so a prior attach's record never leaks.
     if (isAttachMode) {
-      const dropped = transformedLaunchConfig
-        ? adapterExtraKeys.filter((key) => !(key in transformedLaunchConfig!))
-        : [];
+      const supportedKeys = adapter.supportedAttachKeys;
+      let dropped: string[] = [];
+
+      if (supportedKeys) {
+        const supportedSet = new Set(supportedKeys);
+        for (const key of adapterExtraKeys) {
+          if (!supportedSet.has(key)) {
+            const suggestion = didYouMean(key, supportedKeys);
+            dropped.push(suggestion ? `${key} (did you mean ${suggestion}?)` : key);
+          }
+        }
+      } else {
+        dropped = transformedLaunchConfig
+          ? adapterExtraKeys.filter((key) => !(key in transformedLaunchConfig!))
+          : [];
+      }
+
       if (dropped.length > 0) {
         this.logger.warn(
-          `[SessionManager] ${session.language} attach transform dropped adapterConfig key(s) for session ${sessionId}: ${dropped.join(', ')}`
+          `[SessionManager] ${session.language} attach ignored adapterConfig key(s) for session ${sessionId}: ${dropped.join(', ')}`
         );
       }
       session.attachDroppedConfigKeys = dropped.length > 0 ? dropped : undefined;

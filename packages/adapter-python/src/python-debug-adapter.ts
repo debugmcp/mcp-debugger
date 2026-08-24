@@ -442,6 +442,23 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
     return true;
   }
 
+  readonly supportedAttachKeys: readonly string[] = [
+    'pathMappings',
+    'subProcess',
+    'django',
+    'jinja',
+    'justMyCode',
+    'stopOnEntry',
+    'redirectOutput',
+    'showReturnValue',
+    'logToFile',
+    'sudo',
+    'args',
+    'cwd',
+    'env',
+    'envFile'
+  ];
+
   transformAttachConfig(config: GenericAttachConfig): PythonAttachConfig {
     const host = config.host || '127.0.0.1';
     const port = config.port;

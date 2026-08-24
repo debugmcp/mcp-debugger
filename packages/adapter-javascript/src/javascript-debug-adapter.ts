@@ -621,6 +621,22 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     return true;
   }
 
+  readonly supportedAttachKeys: readonly string[] = [
+    'stopOnEntry',
+    'justMyCode',
+    'timeout',
+    'cwd',
+    'env',
+    'sourceMaps',
+    'resolveSourceMapLocations',
+    'outFiles',
+    'localRoot',
+    'remoteRoot',
+    'smartStep',
+    'skipFiles',
+    'trace'
+  ];
+
   /**
    * Build the js-debug (pwa-node) attach configuration. Unlike
    * transformLaunchConfig — which always produces a launch request — this
