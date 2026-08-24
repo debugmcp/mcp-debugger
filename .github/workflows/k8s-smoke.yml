@@ -1,0 +1,259 @@
+name: Kubernetes recipe smoke (kind)
+
+# Weekly kind-cluster smoke over the turnkey Kubernetes recipe (issue #451):
+# apply examples/kubernetes/{python,cpp}-app.yaml to a real cluster and run
+# both documented attach patterns end to end — pattern A (port-forwarded
+# debugpy, local published CLI over stdio) and pattern B (`kubectl debug`
+# ephemeral sidecar running the published Docker image, driven over Streamable
+# HTTP). PR CI covers the sidecar *mechanism* without Kubernetes
+# (tests/e2e/docker/docker-smoke-cpp-attach.test.ts); this adds the
+# with-Kubernetes layer: manifests, kubectl debug flag semantics, port-forward
+# reachability, and detach leaving the pod running.
+#
+# Failures never block PRs: the notify job files (or comments on) an issue
+# labeled `k8s-smoke-failure` instead. Dispatch with a version input to pin
+# the npm version / Docker tag under test.
+#
+# The smoke driver (scripts/k8s-smoke.mjs) is dependency-free on purpose: no
+# pnpm/workspace install happens here, so the job tests the published
+# artifacts against the recipe, not the repo build. All images are anonymous
+# Docker Hub pulls (the manifests are registry-free by design) — pull
+# throttling on shared runner NAT is a known risk the failure issue would
+# surface.
+
+on:
+  schedule:
+    - cron: '0 10 * * 2'  # Tue 10:00 UTC — an hour after the canary, so both weekly published-artifact signals land the same morning
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'npm version / Docker tag to test (default: latest)'
+        required: false
+        default: 'latest'
+
+permissions: {}
+
+concurrency:
+  group: k8s-smoke-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  K8S_SMOKE_VERSION: ${{ github.event.inputs.version || 'latest' }}
+  KIND_VERSION: v0.32.0
+  KIND_SHA256: 50030de23cf40a18505f20426f6a8506bedf13c6e509244bd1fa9463721b0f54  # kind-linux-amd64
+
+jobs:
+  k8s-smoke:
+    name: kind attach cycle (python + cpp)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        # Only for the smoke driver and the published CLI — the debuggees run
+        # in the cluster.
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: 22.x
+
+      - name: Install kind (pinned, digest-verified)
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/kind" \
+            "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
+          echo "${KIND_SHA256}  $RUNNER_TEMP/kind" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/kind"
+          sudo mv "$RUNNER_TEMP/kind" /usr/local/bin/kind
+          kind version
+          # kubectl is preinstalled on ubuntu-latest; fail loudly if that drifts.
+          kubectl version --client
+
+      - name: Create kind cluster
+        run: kind create cluster --name k8s-smoke --wait 120s
+
+      - name: Deploy recipe manifests
+        # The manifests are registry-free (stock images + ConfigMap source +
+        # initContainer builds) — the available condition covers image pulls
+        # and the in-cluster pip install / g++ compile.
+        run: |
+          kubectl apply -f examples/kubernetes/python-app.yaml -f examples/kubernetes/cpp-app.yaml
+          kubectl wait --for=condition=available --timeout=300s deploy/python-demo deploy/cpp-demo
+          kubectl get pods -o wide
+
+      - name: Install published CLI
+        # Scratch prefix keeps `npm install -g` honest without polluting the
+        # runner (canary.yml pattern).
+        run: |
+          export NPM_CONFIG_PREFIX="$RUNNER_TEMP/k8s-smoke-prefix"
+          TRANSCRIPTS="$RUNNER_TEMP/k8s-smoke-transcripts"
+          mkdir -p "$TRANSCRIPTS"
+          echo "NPM_CONFIG_PREFIX=$NPM_CONFIG_PREFIX" >> "$GITHUB_ENV"
+          echo "TRANSCRIPTS=$TRANSCRIPTS" >> "$GITHUB_ENV"
+          npm install -g "@debugmcp/mcp-debugger@${K8S_SMOKE_VERSION}"
+          CLI="$(npm root -g)/@debugmcp/mcp-debugger/dist/cli.mjs"
+          test -f "$CLI"
+          echo "CLI=$CLI" >> "$GITHUB_ENV"
+
+      - name: Pattern A — python attach over port-forward (stdio CLI)
+        # Contract: examples/kubernetes/attach-presets.md #python and
+        # docs/kubernetes.md pattern A. Readiness comes from the port-forward
+        # log, never a TCP probe — a bare probe would open a real tunnel into
+        # debugpy's client slot.
+        run: |
+          PF_LOG="$TRANSCRIPTS/pf-python.log"
+          kubectl port-forward deploy/python-demo 5678:5678 > "$PF_LOG" 2>&1 &
+          PF_PID=$!
+          trap 'kill "$PF_PID" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 30); do
+            grep -q "Forwarding from" "$PF_LOG" && break
+            sleep 1
+          done
+          grep -q "Forwarding from" "$PF_LOG"
+          node scripts/k8s-smoke.mjs --lang python \
+            --attach-host 127.0.0.1 --attach-port 5678 \
+            --break-on-exceptions uncaught \
+            --break-file /app/app.py --line 6 \
+            --expect-frame tick --expect-file /app/app.py --expect-line 6 \
+            --expect-var counter --expect-var label \
+            --hit-timeout 5000 \
+            --transcript "$TRANSCRIPTS/python-attach.jsonl" \
+            -- node "$CLI" stdio
+          kill "$PF_PID" 2>/dev/null || true
+          # Detach must leave the workload untouched.
+          POD="$(kubectl get pods -l app=python-demo -o jsonpath='{.items[0].metadata.name}')"
+          PHASE="$(kubectl get pod "$POD" -o jsonpath='{.status.phase}')"
+          RESTARTS="$(kubectl get pod "$POD" -o jsonpath='{.status.containerStatuses[?(@.name=="app")].restartCount}')"
+          echo "pod $POD phase=$PHASE restarts=$RESTARTS"
+          [ "$PHASE" = "Running" ] && [ "$RESTARTS" = "0" ]
+
+      - name: Pattern B — cpp sidecar via kubectl debug (published image, Streamable HTTP)
+        # Contract: examples/kubernetes/attach-presets.md #cpp and
+        # docs/kubernetes.md pattern B — the exact documented command, incl.
+        # every load-bearing flag (--target shares the PID namespace so the
+        # app is PID 1; --profile=general injects SYS_PTRACE; the -- args
+        # replace the entrypoint, so /app/entry.sh must be spelled out).
+        run: |
+          POD="$(kubectl get pods -l app=cpp-demo -o jsonpath='{.items[0].metadata.name}')"
+          echo "CPP_POD=$POD" >> "$GITHUB_ENV"
+          kubectl debug "$POD" --image="debugmcp/mcp-debugger:${K8S_SMOKE_VERSION}" \
+            --target=app --profile=general --container=debugger \
+            --env=MCP_HTTP_STALE_SESSION_MS=300000 \
+            -- /app/entry.sh http -p 3001
+          # kubectl debug returns before the image is pulled — wait for the
+          # ephemeral container to actually run.
+          RUNNING=""
+          for _ in $(seq 1 120); do
+            RUNNING="$(kubectl get pod "$POD" -o jsonpath='{.status.ephemeralContainerStatuses[?(@.name=="debugger")].state.running}')"
+            [ -n "$RUNNING" ] && break
+            sleep 1
+          done
+          [ -n "$RUNNING" ]
+          PF_LOG="$TRANSCRIPTS/pf-cpp.log"
+          kubectl port-forward "pod/$POD" 3001:3001 > "$PF_LOG" 2>&1 &
+          PF_PID=$!
+          trap 'kill "$PF_PID" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 30); do
+            grep -q "Forwarding from" "$PF_LOG" && break
+            sleep 1
+          done
+          grep -q "Forwarding from" "$PF_LOG"
+          # /health never touches MCP sessions — safe readiness probe.
+          for _ in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:3001/health > /dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:3001/health
+          node scripts/k8s-smoke.mjs --lang cpp \
+            --url http://127.0.0.1:3001/mcp \
+            --attach-pid 1 --stop-on-entry \
+            --adapter-config '{"program":"/proc/1/root/shared/app"}' \
+            --break-function tick --expect-bp-verified \
+            --expect-frame tick --expect-var counter --expect-var label \
+            --hit-timeout 5000 \
+            --transcript "$TRANSCRIPTS/cpp-sidecar.jsonl"
+          kill "$PF_PID" 2>/dev/null || true
+          PHASE="$(kubectl get pod "$POD" -o jsonpath='{.status.phase}')"
+          RESTARTS="$(kubectl get pod "$POD" -o jsonpath='{.status.containerStatuses[?(@.name=="app")].restartCount}')"
+          echo "pod $POD phase=$PHASE restarts=$RESTARTS"
+          [ "$PHASE" = "Running" ] && [ "$RESTARTS" = "0" ]
+
+      - name: Collect cluster diagnostics
+        if: failure()
+        run: |
+          TRANSCRIPTS="${TRANSCRIPTS:-$RUNNER_TEMP/k8s-smoke-transcripts}"
+          mkdir -p "$TRANSCRIPTS"
+          {
+            echo "== pods =="
+            kubectl get pods -A -o wide
+            echo "== deployments =="
+            kubectl describe deploy/python-demo deploy/cpp-demo
+            echo "== app pods =="
+            kubectl describe pods -l 'app in (python-demo, cpp-demo)'
+            echo "== python app logs =="
+            kubectl logs deploy/python-demo -c app --tail=100
+            echo "== cpp app logs =="
+            kubectl logs deploy/cpp-demo -c app --tail=100
+            if [ -n "${CPP_POD:-}" ]; then
+              echo "== sidecar logs =="
+              kubectl logs "$CPP_POD" -c debugger --tail=200
+            fi
+            echo "== events =="
+            kubectl get events --sort-by=.lastTimestamp | tail -50
+          } > "$TRANSCRIPTS/kubectl-diagnostics.txt" 2>&1 || true
+
+      - name: Delete kind cluster
+        if: always()
+        # Hygiene only — the runner VM is discarded either way, so a delete
+        # failure must not repaint an otherwise-green run.
+        run: kind delete cluster --name k8s-smoke || true
+
+      - name: Upload transcripts on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: k8s-smoke-transcripts
+          path: ${{ runner.temp }}/k8s-smoke-transcripts/
+          retention-days: 14
+
+  notify:
+    name: File k8s-smoke-failure issue
+    needs: [k8s-smoke]
+    if: ${{ always() && contains(needs.*.result, 'failure') }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    timeout-minutes: 10
+    steps:
+      - name: File or update k8s-smoke-failure issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          FAILED="$(printf '%s' "$NEEDS_JSON" | jq -r '[to_entries[] | select(.value.result=="failure") | .key] | join(", ")')"
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          BODY="Kubernetes recipe smoke failed for version \`${K8S_SMOKE_VERSION}\` (trigger: ${GITHUB_EVENT_NAME}).
+
+          Failed jobs: ${FAILED}
+          Run: ${RUN_URL}
+
+          Driver transcripts and kubectl diagnostics are attached as artifacts
+          on the run. A failure here with a green canary usually means the
+          recipe (manifests, kubectl debug flags, attach presets) regressed
+          against a real cluster — triage against docs/kubernetes.md before
+          the next release."
+          EXISTING="$(gh issue list --repo "$GITHUB_REPOSITORY" --label k8s-smoke-failure --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --repo "$GITHUB_REPOSITORY" --body "$BODY"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --label k8s-smoke-failure \
+              --title "Kubernetes recipe smoke failure ($(date -u +%F))" \
+              --body "$BODY"
+          fi

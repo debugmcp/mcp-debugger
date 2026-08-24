@@ -39,6 +39,9 @@ For C/C++ (no debug port — the debugger goes *to* the pod):
 | `debug-sidecar.sh` | — | injects `debugmcp/mcp-debugger:latest` as an ephemeral container + port-forwards its MCP endpoint | 3001 |
 | `mcp-client.example.json` | — | MCP client config: local server (pattern A) + port-forwarded sidecar (pattern B) | — |
 
+The python and cpp recipes (both attach patterns) are smoke-tested weekly on a
+kind cluster by [`.github/workflows/k8s-smoke.yml`](../../.github/workflows/k8s-smoke.yml).
+
 There is deliberately **no Service** in any manifest: debug listeners are
 unauthenticated code-execution ports and must only ever be reached through
 `kubectl port-forward` (which stays inside your kubeconfig's auth).
