@@ -24,6 +24,7 @@ import { ISessionStoreFactory } from '../factories/session-store-factory.js';
 import { IProxyManager } from '../proxy/proxy-manager.js';
 import { IProxyManagerFactory } from '../factories/proxy-manager-factory.js';
 import type { BreakpointSyncResult, FunctionBreakpointSyncResult } from '../proxy/dap-proxy-interfaces.js';
+import { normalizeBreakpointMessage } from '../utils/breakpoint-message.js';
 import { IAdapterRegistry } from '@debugmcp/shared';
 
 // Custom launch arguments interface extending DebugProtocol.LaunchRequestArguments
@@ -615,7 +616,9 @@ export abstract class SessionManagerCore extends EventEmitter {
         target.line = eventBp.line;
       }
       if (eventBp.message !== undefined) {
-        target.message = eventBp.message;
+        // A provisional "unbound" note must not survive verification, and a
+        // leaked l10n key must not reach the user (issue #471).
+        target.message = normalizeBreakpointMessage(eventBp.message, target.verified);
       }
       if (typeof eventBp.id === 'number') {
         target.adapterId = eventBp.id;
@@ -853,7 +856,7 @@ export abstract class SessionManagerCore extends EventEmitter {
         // Stamp message only when present — a clean sync must not wipe the
         // capability-drift warning handleAdapterCapabilities may have set.
         if (result.message !== undefined) {
-          target.message = result.message;
+          target.message = normalizeBreakpointMessage(result.message, target.verified);
         }
         this.logger.info('debug:breakpoint', {
           event: 'verified',
