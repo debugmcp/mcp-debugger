@@ -99,7 +99,7 @@ The image vendors linux-x64 CodeLLDB (one shared copy under `@debugmcp/codelldb-
 
 - **C/C++ source-file launch**: pass a lone `.c`/`.cpp` as the program and the adapter compiles it in-container with `-gdwarf-4 -O0` into `.debug-mcp/` next to the source.
 - **Prebuilt binaries**: must be **Linux-compiled** (linux-x64). Binaries compiled on a Windows/macOS host and mounted into the container are not debuggable by container LLDB — that's a binary-format fact, not a packaging gap. Cross-compile for Linux or compile in-container.
-- **Attach by PID**: works for native processes inside the container. Attaching to a non-descendant process needs `--cap-add=SYS_PTRACE` when the host kernel sets `kernel.yama.ptrace_scope >= 1` (Kubernetes `kubectl debug` profiles grant the equivalent).
+- **Attach by PID**: works for native processes inside the container. Attaching to a non-descendant process needs `--cap-add=SYS_PTRACE` when the host kernel sets `kernel.yama.ptrace_scope >= 1` (Kubernetes `kubectl debug --profile=general` grants the equivalent — see the [Kubernetes debugging recipe](kubernetes.md)).
 - Rust remains **launch-only** (the rust adapter has no attach implementation).
 - **Rust type summaries work out of the box** (issue #441): the image vendors the Rust toolchain's LLDB formatter scripts at `/opt/rust-sysroot/lib/rustlib/etc` and sets `CODELLDB_RUST_SYSROOT=/opt/rust-sysroot`, which the rust adapter translates into CodeLLDB's `lang.rust.sysroot` setting — so `&str`/`String`/`Vec` values render as values without any `rustc` in the image. Override with `-e CODELLDB_RUST_SYSROOT=/path/to/sysroot` (a sysroot root whose `lib/rustlib/etc` holds the formatters), or disable with `-e CODELLDB_RUST_SYSROOT=` to fall back to CodeLLDB's normal `rustc --print sysroot` lookup. Caveat: the vendored formatters track the Rust version pinned in the Dockerfile; a debuggee built by a much newer/older rustc may render some std types imperfectly.
 
@@ -107,7 +107,7 @@ The image vendors linux-x64 CodeLLDB (one shared copy under `@debugmcp/codelldb-
 
 The image ships the Ruby adapter **without a Ruby runtime**. Launching Ruby scripts in the container is therefore unavailable, but **attach works**: Ruby attach is a direct TCP connection to a running `rdbg --open` DAP socket, so no local Ruby is needed. `list_supported_languages` reports this per-mode (`ruby.modes.launch.available: false`, `ruby.modes.attach.available: true`).
 
-To attach from the container, the rdbg target's socket must be reachable from inside it — e.g. run both on one docker network and attach by container name, or add `--add-host=host.docker.internal:host-gateway` and attach to a port on the host. See `docs/ruby/README.md` (Remote attach) for the full flow.
+To attach from the container, the rdbg target's socket must be reachable from inside it — e.g. run both on one docker network and attach by container name, or add `--add-host=host.docker.internal:host-gateway` and attach to a port on the host. See `docs/ruby/README.md` (Remote attach) for the full flow, and the [Kubernetes debugging recipe](kubernetes.md) for the in-pod sidecar variant of the same idea.
 
 ## Using Both Debug MCP Server and GitHub MCP Server with Docker
 

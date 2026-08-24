@@ -1,0 +1,96 @@
+# Turnkey C++ debug target — no registry, no image build.
+# Source from a ConfigMap; an initContainer on gcc:13-bookworm compiles with
+# DWARF debug info (-g -O0 -gdwarf-4, unstripped) into an emptyDir, and a
+# stock debian:12-slim runtime runs the binary. gcc:13-bookworm and
+# debian:12 share a glibc generation; -static-libgcc/-static-libstdc++
+# remove the remaining library skew.
+#
+# There is no debug agent and no debug port: compiled code is debugged by
+# sending the debugger to the pod as an ephemeral container that attaches
+# by PID (../kubernetes/debug-sidecar.sh, docs/kubernetes.md pattern B).
+#
+#   kubectl apply -f cpp-app.yaml
+#   kubectl wait --for=condition=available deployment/cpp-demo
+#   ./debug-sidecar.sh app=cpp-demo
+#
+# Attach preset: see attach-presets.md (#cpp).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cpp-demo-src
+data:
+  app.cpp: |
+    #include <cstdio>
+    #include <string>
+    #include <unistd.h>
+
+    int tick(int counter) {
+        std::string label = "tick-" + std::to_string(counter);
+        int total = counter * 2;
+        std::printf("%s: total=%d\n", label.c_str(), total);
+        std::fflush(stdout);
+        return total;
+    }
+
+    int main() {
+        int counter = 0;
+        while (true) {
+            ++counter;
+            tick(counter);
+            sleep(2);
+        }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cpp-demo
+  labels:
+    app: cpp-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cpp-demo
+  template:
+    metadata:
+      labels:
+        app: cpp-demo
+    spec:
+      initContainers:
+        - name: compile
+          image: gcc:13-bookworm
+          command:
+            - g++
+            - -g
+            - -O0
+            - -gdwarf-4
+            - -static-libgcc
+            - -static-libstdc++
+            - -o
+            - /shared/app
+            - /app/app.cpp
+          volumeMounts:
+            - name: src
+              mountPath: /app
+            - name: shared
+              mountPath: /shared
+      containers:
+        - name: app # kubectl debug --target=app
+          image: debian:12-slim
+          command: ["/shared/app"]
+          volumeMounts:
+            - name: shared
+              mountPath: /shared
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: src
+          configMap:
+            name: cpp-demo-src
+        - name: shared
+          emptyDir: {}

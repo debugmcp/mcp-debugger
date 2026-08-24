@@ -6,6 +6,8 @@ The bug in this tutorial is chosen to be **invisible to logs**: it's state-depen
 
 The tutorial has two parts: **Part 1** debugs an interpreted service by connecting to an in-process debug agent over the network; **Part 2** debugs a **compiled** service — where no in-process agent exists — by sending the debugger to the pod as a Kubernetes ephemeral debug container and attaching by PID.
 
+Looking for the operational reference instead of the story? [docs/kubernetes.md](../kubernetes.md) has the pattern decision table, registry-free turnkey manifests ([examples/kubernetes/](../../examples/kubernetes/)), and per-language [attach presets](../../examples/kubernetes/attach-presets.md).
+
 ## Prerequisites
 
 - Docker, [kind](https://kind.sigs.k8s.io/) (or any cluster you can `kubectl port-forward` into), `kubectl`
@@ -54,12 +56,12 @@ Now ask your agent to diagnose it. The tool sequence it should follow:
 
 ```text
 create_debug_session  {language: "python", name: "sick-pod"}
-attach_to_process     {sessionId, host: "127.0.0.1", port: 5678,
-                       localRoot: "<abs path>/examples/sick-pod",
-                       remoteRoot: "/app"}
-set_breakpoint        {sessionId, file: "<abs path>/examples/sick-pod/app.py", line: 51}
+attach_to_process     {sessionId, host: "127.0.0.1", port: 5678}
+set_breakpoint        {sessionId, file: "/app/app.py", line: 51}
                       # line 51 = "total = sum(prices)" in the non-bulk path
 ```
+
+Note the **container-side** breakpoint path: attach sessions send paths verbatim to the remote debugger, which resolves them against the *pod's* filesystem (`/app/app.py`, as `get_stack_trace` reports them). The python adapter has no path-mapping option — a workstation path would report `verified: false` and never bind. See [breakpoints and paths on attach](../kubernetes.md#breakpoints-and-paths-on-attach-read-this-once).
 
 Trigger one request while the breakpoint is armed:
 

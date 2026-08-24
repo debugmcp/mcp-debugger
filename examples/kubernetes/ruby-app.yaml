@@ -1,0 +1,66 @@
+# Turnkey Ruby debug target — no registry, no image build.
+# Stock ruby:3.3-slim already bundles the debug gem (rdbg), so no install
+# step is needed at all: source from a ConfigMap, rdbg opens a DAP socket.
+#
+#   kubectl apply -f ruby-app.yaml
+#   kubectl wait --for=condition=available deployment/ruby-demo
+#   kubectl port-forward deploy/ruby-demo 12345:12345
+#
+# Attach preset: see attach-presets.md (#ruby). The rdbg socket is
+# unauthenticated — reach it via kubectl port-forward only, never a Service.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ruby-demo-src
+data:
+  app.rb: |
+    def tick(counter)
+      label = "tick-#{counter}"
+      total = counter * 2
+      puts "#{label}: total=#{total}"
+      $stdout.flush
+      total
+    end
+
+    counter = 0
+    loop do
+      counter += 1
+      tick(counter)
+      sleep 2
+    end
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ruby-demo
+  labels:
+    app: ruby-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ruby-demo
+  template:
+    metadata:
+      labels:
+        app: ruby-demo
+    spec:
+      containers:
+        - name: app # kubectl debug --target=app
+          image: ruby:3.3-slim
+          command: ["rdbg", "--open", "--host", "0.0.0.0", "--port", "12345", "--nonstop", "/app/app.rb"]
+          ports:
+            - containerPort: 12345 # rdbg DAP — port-forward only, NEVER a Service/Ingress
+          volumeMounts:
+            - name: src
+              mountPath: /app
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: src
+          configMap:
+            name: ruby-demo-src

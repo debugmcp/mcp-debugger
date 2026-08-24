@@ -1,0 +1,90 @@
+# Turnkey Java debug target — no registry, no image build.
+# Stock eclipse-temurin:21 + source from a ConfigMap; an initContainer
+# compiles with javac -g (LocalVariableTable — required for variable
+# inspection) into an emptyDir, and the JVM starts with a JDWP agent.
+# Deliberately not java's single-file source mode: debuggers need real
+# .class files on disk for reliable breakpoint mapping.
+#
+#   kubectl apply -f java-app.yaml
+#   kubectl wait --for=condition=available deployment/java-demo
+#   kubectl port-forward deploy/java-demo 5005:5005
+#
+# Attach preset: see attach-presets.md (#java). The JDWP port is
+# unauthenticated — reach it via kubectl port-forward only, never a Service.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: java-demo-src
+data:
+  App.java: |
+    public class App {
+        static int tick(int counter) {
+            String label = "tick-" + counter;
+            int total = counter * 2;
+            System.out.println(label + ": total=" + total);
+            return total;
+        }
+
+        public static void main(String[] args) throws InterruptedException {
+            int counter = 0;
+            while (true) {
+                counter += 1;
+                tick(counter);
+                Thread.sleep(2000);
+            }
+        }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: java-demo
+  labels:
+    app: java-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: java-demo
+  template:
+    metadata:
+      labels:
+        app: java-demo
+    spec:
+      initContainers:
+        - name: compile
+          image: eclipse-temurin:21 # same image as the app container — one pull
+          command: ["javac", "-g", "-d", "/shared", "/app/App.java"]
+          volumeMounts:
+            - name: src
+              mountPath: /app
+            - name: shared
+              mountPath: /shared
+      containers:
+        - name: app # kubectl debug --target=app
+          image: eclipse-temurin:21
+          command:
+            - java
+            - -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
+            - -cp
+            - /shared
+            - App
+          ports:
+            - containerPort: 5005 # JDWP — port-forward only, NEVER a Service/Ingress
+          volumeMounts:
+            - name: src
+              mountPath: /app
+            - name: shared
+              mountPath: /shared
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+      volumes:
+        - name: src
+          configMap:
+            name: java-demo-src
+        - name: shared
+          emptyDir: {}

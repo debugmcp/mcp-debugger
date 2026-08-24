@@ -1,0 +1,86 @@
+# Turnkey Python debug target — no registry, no image build.
+# Stock python:3.12-slim + app source from a ConfigMap; an initContainer
+# pip-installs debugpy into an emptyDir shared with the app container.
+#
+#   kubectl apply -f python-app.yaml
+#   kubectl wait --for=condition=available deployment/python-demo
+#   kubectl port-forward deploy/python-demo 5678:5678
+#
+# Attach preset: see attach-presets.md (#python). The debugpy listener is
+# unauthenticated — reach it via kubectl port-forward only, never a Service.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: python-demo-src
+data:
+  app.py: |
+    import time
+
+
+    def tick(counter):
+        label = f"tick-{counter}"
+        total = counter * 2
+        print(f"{label}: total={total}", flush=True)
+        return total
+
+
+    def main():
+        counter = 0
+        while True:
+            counter += 1
+            tick(counter)
+            time.sleep(2)
+
+
+    if __name__ == "__main__":
+        main()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: python-demo
+  labels:
+    app: python-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: python-demo
+  template:
+    metadata:
+      labels:
+        app: python-demo
+    spec:
+      initContainers:
+        - name: install-debugpy
+          image: python:3.12-slim
+          command: ["pip", "install", "--no-cache-dir", "--target", "/shared", "debugpy==1.8.21"]
+          volumeMounts:
+            - name: shared
+              mountPath: /shared
+      containers:
+        - name: app # kubectl debug --target=app
+          image: python:3.12-slim
+          command: ["python", "-m", "debugpy", "--listen", "0.0.0.0:5678", "/app/app.py"]
+          env:
+            - name: PYTHONPATH
+              value: /shared
+          ports:
+            - containerPort: 5678 # debugpy — port-forward only, NEVER a Service/Ingress
+          volumeMounts:
+            - name: src
+              mountPath: /app
+            - name: shared
+              mountPath: /shared
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: src
+          configMap:
+            name: python-demo-src
+        - name: shared
+          emptyDir: {}
