@@ -52,6 +52,7 @@ const BUILD_CMD = process.env.DEV_PROXY_BUILD_CMD || 'npm run build';
 const PROJECT_ROOT = process.env.DEV_PROXY_ROOT || path.resolve(__dirname, '..', '..');
 const BACKEND_TRANSPORT = process.env.DEV_PROXY_BACKEND_TRANSPORT || 'http';
 const BACKEND_CMD = process.env.DEV_PROXY_BACKEND_CMD || null;
+const BUILD_TIMEOUT_MS = parseInt(process.env.DEV_PROXY_BUILD_TIMEOUT_MS || '120000', 10);
 const HEALTH_POLL_INTERVAL_MS = 300;
 const HEALTH_POLL_TIMEOUT_MS = 30000;
 const KILL_TIMEOUT_MS = 5000;
@@ -263,14 +264,14 @@ class BackendManager {
         cwd: PROJECT_ROOT,
         encoding: 'utf-8',
         stdio: ['ignore', 'pipe', 'pipe'],
-        timeout: 120000,
+        timeout: BUILD_TIMEOUT_MS,
         env: { ...process.env },
       });
     } catch (err) {
-      // execSync's error message embeds raw build stderr — sanitize before it
-      // reaches tool responses via err.message (issue #154). Include stdout
-      // too: build tools (tsc via npm) print their diagnostics there.
       const output = [err.stdout, err.stderr].filter(Boolean).join('\n') || err.message || String(err);
+      if (err.killed || err.signal === 'SIGTERM') {
+        throw new Error(`Build timed out after ${BUILD_TIMEOUT_MS} ms (raise DEV_PROXY_BUILD_TIMEOUT_MS); the build may still have succeeded, re-run manually to confirm: ${sanitizeStderrTail(output, { maxLines: 20, maxChars: 2000 })}`);
+      }
       throw new Error(`Build failed: ${sanitizeStderrTail(output, { maxLines: 20, maxChars: 2000 })}`);
     }
     log('Build succeeded');
