@@ -2857,8 +2857,13 @@ export abstract class SessionManagerOperations extends SessionManagerData {
             proxyManager.once('stopped', onStopped);
           });
           try {
-            await proxyManager.sendDapRequest('pause', { threadId: discoveredThreadId });
-            this.logger.info(`[SessionManager] Sent post-attach pause (threadId=${discoveredThreadId})`);
+            // pauseAllThreads (issue #465): threadId 0 asks the adapter for a
+            // process-wide suspend — the JDI bridge then re-anchors its
+            // stopped event to a thread that can actually report frames,
+            // instead of single-thread-suspending whichever id we picked.
+            const pauseThreadId = attachBehavior.pauseAllThreads ? 0 : discoveredThreadId;
+            await proxyManager.sendDapRequest('pause', { threadId: pauseThreadId });
+            this.logger.info(`[SessionManager] Sent post-attach pause (threadId=${pauseThreadId})`);
             const stopObserved = await stoppedSeen;
             if (!stopObserved) {
               this.logger.warn(

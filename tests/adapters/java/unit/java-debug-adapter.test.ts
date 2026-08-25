@@ -750,3 +750,12 @@ describe('JavaDebugAdapter', () => {
     });
   });
 });
+
+describe('JavaAdapterPolicy attach behavior (issue #465)', () => {
+  it('requests a pause-all after attach so the reported PAUSED state is real', async () => {
+    const { JavaAdapterPolicy } = await import('@debugmcp/shared');
+    const behavior = JavaAdapterPolicy.getAttachBehavior?.();
+    expect(behavior?.pauseAfterAttach).toBe(true);
+    expect(behavior?.pauseAllThreads).toBe(true);
+  });
+});
