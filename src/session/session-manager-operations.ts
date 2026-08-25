@@ -26,6 +26,7 @@ import { MIRROR_EXPOSE_COMMAND, MIRROR_UNEXPOSE_COMMAND } from '../proxy/dap-pro
 import { ErrorMessages } from '../utils/error-messages.js';
 import { checkLaunchToolchain } from '../utils/language-availability.js';
 import { resolveStatement } from '../utils/breakpoint-resolver.js';
+import { normalizeBreakpointMessage } from '../utils/breakpoint-message.js';
 import { SessionManagerData } from './session-manager-data.js';
 import { CustomLaunchRequestArguments, DebugResult } from './session-manager-core.js';
 import {
@@ -69,6 +70,15 @@ export interface RedefineClassesResult {
   newestTimestamp?: number;
   /** Breakpoints re-planted after redefine (issue #370). */
   replantedBreakpoints?: number;
+  /**
+   * Statement-anchored breakpoints re-resolved against the new source after
+   * the hot-swap (issue #464) — same shape restart_debugging returns.
+   */
+  anchorResolution?: {
+    moved: Array<{ breakpointId: string; file: string; from: number; to: number; statement: string; candidates?: number[] }>;
+    stale: Array<{ breakpointId: string; file: string; line: number; statement: string; reason: string }>;
+  };
+  warning?: string;
   error?: string;
 }
 
@@ -885,12 +895,25 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       // unverified-at-launch is the designed deferral path.
       const fnBpWarning = this.buildFunctionBreakpointLaunchWarning(finalSession);
 
+      // Ran-to-completion with breakpoints that never bound (issue #467):
+      // state "stopped" where the caller expected "paused" is only
+      // explainable via list_breakpoints today — surface the stored
+      // per-breakpoint diagnostics right here where the caller is looking.
+      const unboundAtExitWarning =
+        finalState === SessionState.STOPPED
+          ? this.buildUnboundBreakpointExitWarning(finalSession)
+          : undefined;
+
+      // Logpoint-downgrade verdict (issue #469): the deferred set_breakpoint
+      // warning promised a launch-time answer — deliver it on this response.
+      const logpointWarning = this.buildLogpointDowngradeLaunchWarning(finalSession);
+
       // Adapter degradation notes (issue #441) accumulate on the session as
       // annotated output events arrive; joining here is best-effort — a note
       // arriving after this return still lands in the output buffer as an
       // attributed [mcp-debugger] Warning entry.
       const launchWarning =
-        [fnBpWarning, ...(finalSession.adapterNotices ?? [])]
+        [fnBpWarning, logpointWarning, unboundAtExitWarning, ...(finalSession.adapterNotices ?? [])]
           .filter(Boolean)
           .join('; ') || undefined;
 
@@ -1507,6 +1530,62 @@ export abstract class SessionManagerOperations extends SessionManagerData {
    * undefined for bind-late policies (js/java) — unverified-at-launch is
    * their designed deferral, not a failure.
    */
+  /**
+   * Ran-to-completion unbound-breakpoint warning (issue #467). Built only
+   * when the launch ends in STOPPED: at that point an unverified breakpoint
+   * never bound and never will, for bind-late adapters too — so this is a
+   * zero-false-positive moment to surface the per-breakpoint diagnostics the
+   * store already holds (e.g. the path-remap suggestion CodeLLDB puts in
+   * `message`).
+   */
+  protected buildUnboundBreakpointExitWarning(session: ManagedSession): string | undefined {
+    const unbound = Array.from(session.breakpoints.values()).filter(bp => !bp.verified);
+    if (unbound.length === 0) {
+      return undefined;
+    }
+    const parts = unbound.map(bp => {
+      // Some stamp paths store the raw js-debug l10n key — translate it
+      // rather than showing 'breakpoint.provisionalBreakpoint' (issue #471).
+      const message = normalizeBreakpointMessage(bp.message, bp.verified);
+      return `${path.basename(bp.file)}:${bp.line}${message ? ` (${message})` : ''}`;
+    });
+    return (
+      `${unbound.length} breakpoint(s) never bound during this run: ${parts.join('; ')}. ` +
+      `The program ran to completion without stopping there — check the file path and line, ` +
+      `or list_breakpoints for the full per-breakpoint state`
+    );
+  }
+
+  /**
+   * Launch-time logpoint-downgrade warning (issue #469). A logpoint accepted
+   * pre-launch under unknown policy support ("it will be validated against
+   * the adapter's capabilities at launch") gets its promised verdict here:
+   * when the live adapter does not advertise supportsLogPoints, the logpoint
+   * has been silently downgraded to a pausing breakpoint — say so in the
+   * start_debugging response instead of only in the server log.
+   */
+  protected buildLogpointDowngradeLaunchWarning(session: ManagedSession): string | undefined {
+    const caps = session.adapterCapabilities;
+    if (!caps || caps.supportsLogPoints === true) {
+      return undefined;
+    }
+    const downgraded: string[] = [];
+    for (const bp of session.breakpoints.values()) {
+      if (bp.logMessage !== undefined) {
+        downgraded.push(`${path.basename(bp.file)}:${bp.line}`);
+      }
+    }
+    if (downgraded.length === 0) {
+      return undefined;
+    }
+    return (
+      `Logpoint(s) at ${downgraded.join(', ')} were downgraded to pausing breakpoints: ` +
+      `the ${session.language} adapter does not advertise supportsLogPoints, so the ` +
+      `logMessage will not be logged and the program will PAUSE at those lines instead ` +
+      `of running through them`
+    );
+  }
+
   protected buildFunctionBreakpointLaunchWarning(session: ManagedSession): string | undefined {
     if ((session.functionBreakpoints?.size ?? 0) === 0) {
       return undefined;
@@ -2787,8 +2866,13 @@ export abstract class SessionManagerOperations extends SessionManagerData {
             proxyManager.once('stopped', onStopped);
           });
           try {
-            await proxyManager.sendDapRequest('pause', { threadId: discoveredThreadId });
-            this.logger.info(`[SessionManager] Sent post-attach pause (threadId=${discoveredThreadId})`);
+            // pauseAllThreads (issue #465): threadId 0 asks the adapter for a
+            // process-wide suspend — the JDI bridge then re-anchors its
+            // stopped event to a thread that can actually report frames,
+            // instead of single-thread-suspending whichever id we picked.
+            const pauseThreadId = attachBehavior.pauseAllThreads ? 0 : discoveredThreadId;
+            await proxyManager.sendDapRequest('pause', { threadId: pauseThreadId });
+            this.logger.info(`[SessionManager] Sent post-attach pause (threadId=${pauseThreadId})`);
             const stopObserved = await stoppedSeen;
             if (!stopObserved) {
               this.logger.warn(
@@ -2988,6 +3072,33 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         return { success: false, error: 'No response body from redefineClasses' };
       }
 
+      // Statement anchors are content identities and a hot-swap invalidates
+      // line numbers (issue #464): re-resolve them against the new source —
+      // which IS what is on disk in the edit -> recompile -> hot-swap loop —
+      // and re-send the affected files so the JDI replant binds the moved
+      // lines against the new line table. Ordered after the redefine
+      // response, i.e. after vm.redefineClasses, by construction.
+      let anchorResolution: RedefineClassesResult['anchorResolution'];
+      const syncWarnings: string[] = [];
+      if ((body.redefinedCount ?? 0) > 0) {
+        anchorResolution = await this.reresolveAnchors(session);
+        if (anchorResolution && anchorResolution.moved.length > 0) {
+          const movedFiles = [...new Set(anchorResolution.moved.map(m => m.file))];
+          for (const file of movedFiles) {
+            const { warning } = await this.syncBreakpointsForFile(session, file);
+            if (warning) {
+              syncWarnings.push(warning);
+            }
+          }
+        }
+        if (anchorResolution && anchorResolution.stale.length > 0) {
+          syncWarnings.push(
+            `${anchorResolution.stale.length} statement-anchored breakpoint(s) could not be re-resolved ` +
+            `against the new source and keep their previous line — see anchorResolution.stale`
+          );
+        }
+      }
+
       return {
         success: true,
         redefined: body.redefined,
@@ -2998,6 +3109,8 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         scannedFiles: body.scannedFiles,
         newestTimestamp: body.newestTimestamp,
         replantedBreakpoints: body.replantedBreakpoints,
+        ...(anchorResolution ? { anchorResolution } : {}),
+        ...(syncWarnings.length > 0 ? { warning: syncWarnings.join('; ') } : {}),
       };
     } catch (error) {
       this.logger.error(`[SM redefineClasses ${sessionId}] Error: ${error}`);

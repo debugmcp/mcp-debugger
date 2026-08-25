@@ -29,8 +29,7 @@ jobs:
     
     - name: Setup pnpm
       uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
-      with:
-        version: 10
+      # version comes from package.json "packageManager" (issue #478)
 
     - name: Setup Node.js
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
@@ -111,7 +110,7 @@ jobs:
         ref: ${{ github.event.inputs.ref || github.ref }}
     
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
+      uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4.3.0
     
     - name: Log in to Docker Hub
       uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
@@ -270,8 +269,7 @@ jobs:
 
     - name: Setup pnpm
       uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
-      with:
-        version: 10
+      # version comes from package.json "packageManager" (issue #478)
 
     # No registry-url here: setup-node would write an _authToken=${NODE_AUTH_TOKEN}
     # placeholder into .npmrc, which breaks token-less OIDC publishes when the

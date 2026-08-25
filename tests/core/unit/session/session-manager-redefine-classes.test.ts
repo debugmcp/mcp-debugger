@@ -254,3 +254,134 @@ describe('SessionManager - redefineClasses', () => {
     expect(result.error).toContain("larger 'timeout'");
   });
 });
+
+describe('SessionManager - redefineClasses anchor re-resolution (issue #464)', () => {
+  let sessionManager: SessionManager;
+  let dependencies: ReturnType<typeof createMockDependencies>;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    dependencies = createMockDependencies();
+    sessionManager = new SessionManager(
+      { logDirBase: '/tmp/test-sessions', defaultDapLaunchArgs: { stopOnEntry: true, justMyCode: true } },
+      dependencies
+    );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+    dependencies.mockProxyManager.reset();
+  });
+
+  async function createSessionWithAnchoredBp() {
+    const session = await sessionManager.createSession({
+      language: DebugLanguage.MOCK,
+      executablePath: 'python'
+    });
+    await sessionManager.startDebugging(session.id, 'test.py');
+    await vi.runAllTimersAsync();
+    dependencies.mockProxyManager.simulateStopped(1, 'entry');
+
+    await sessionManager.setBreakpoint(session.id, {
+      file: '/proj/RedefineTarget.java',
+      line: 11,
+      anchor: { statement: 'return 42/99;' }
+    });
+    dependencies.mockProxyManager.dapRequestCalls = [];
+    return session;
+  }
+
+  it('re-resolves statement anchors against the new source and re-sends the file', async () => {
+    const session = await createSessionWithAnchoredBp();
+
+    // Post-swap source: a 3-line-longer header shifts the statement 11 -> 14.
+    const newSource = [
+      ...Array.from({ length: 13 }, (_, i) => `// header ${i + 1}`),
+      '        return 42/99;',
+      '    }'
+    ].join('\n');
+    (dependencies.mockFileSystem.readFile as ReturnType<typeof vi.fn>).mockResolvedValue(newSource);
+
+    dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+      if (command === 'redefineClasses') {
+        return {
+          success: true,
+          body: { redefined: ['RedefineTarget'], redefinedCount: 1, skippedNotLoaded: 0, failedCount: 0, scannedFiles: 1, newestTimestamp: 1, replantedBreakpoints: 1 }
+        };
+      }
+      if (command === 'setBreakpoints') {
+        return { success: true, body: { breakpoints: [{ verified: true, line: 14, id: 7 }] } };
+      }
+      return { success: true };
+    });
+
+    const result = await sessionManager.redefineClasses(session.id, '/classes');
+
+    expect(result.success).toBe(true);
+    expect(result.anchorResolution?.moved).toEqual([
+      expect.objectContaining({ file: '/proj/RedefineTarget.java', from: 11, to: 14, statement: 'return 42/99;' })
+    ]);
+    expect(result.anchorResolution?.stale).toEqual([]);
+
+    // The moved line was re-sent to the adapter AFTER the redefine.
+    const calls = dependencies.mockProxyManager.dapRequestCalls;
+    const redefineIdx = calls.findIndex(c => c.command === 'redefineClasses');
+    const setBpIdx = calls.findIndex(c => c.command === 'setBreakpoints');
+    expect(setBpIdx).toBeGreaterThan(redefineIdx);
+    expect((calls[setBpIdx].args as { breakpoints?: Array<{ line: number }> }).breakpoints).toEqual([
+      expect.objectContaining({ line: 14 })
+    ]);
+
+    // The store reflects the moved line.
+    const bps = sessionManager.listBreakpoints(session.id);
+    expect(bps[0].line).toBe(14);
+  });
+
+  it('reports a stale anchor with a warning when the statement is gone', async () => {
+    const session = await createSessionWithAnchoredBp();
+
+    (dependencies.mockFileSystem.readFile as ReturnType<typeof vi.fn>).mockResolvedValue(
+      'public class RedefineTarget {\n    // statement deleted entirely\n}\n'
+    );
+
+    dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+      if (command === 'redefineClasses') {
+        return {
+          success: true,
+          body: { redefined: ['RedefineTarget'], redefinedCount: 1, skippedNotLoaded: 0, failedCount: 0, scannedFiles: 1, newestTimestamp: 1, replantedBreakpoints: 1 }
+        };
+      }
+      return { success: true };
+    });
+
+    const result = await sessionManager.redefineClasses(session.id, '/classes');
+
+    expect(result.success).toBe(true);
+    expect(result.anchorResolution?.moved).toEqual([]);
+    expect(result.anchorResolution?.stale).toEqual([
+      expect.objectContaining({ file: '/proj/RedefineTarget.java', line: 11, reason: 'statement not found' })
+    ]);
+    expect(result.warning).toMatch(/could not be re-resolved/);
+  });
+
+  it('skips anchor work entirely when nothing was redefined', async () => {
+    const session = await createSessionWithAnchoredBp();
+
+    dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+      if (command === 'redefineClasses') {
+        return {
+          success: true,
+          body: { redefined: [], redefinedCount: 0, skippedNotLoaded: 1, failedCount: 0, scannedFiles: 1, newestTimestamp: 1 }
+        };
+      }
+      return { success: true };
+    });
+
+    const result = await sessionManager.redefineClasses(session.id, '/classes');
+
+    expect(result.success).toBe(true);
+    expect(result.anchorResolution).toBeUndefined();
+    expect(dependencies.mockFileSystem.readFile).not.toHaveBeenCalled();
+  });
+});

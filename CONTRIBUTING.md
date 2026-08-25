@@ -23,7 +23,12 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
 ### Prerequisites
 
 - Node.js 22+
-- pnpm (required — `workspace:*` protocol needs pnpm, not npm)
+- pnpm 10 (required — `workspace:*` protocol needs pnpm, not npm). The exact
+  version is pinned via the `packageManager` field in `package.json`; run
+  `corepack enable` to pick it up automatically. **Never commit a regenerated
+  `pnpm-lock.yaml`** — a different pnpm version rewrites it destructively
+  (dropping the security `overrides` block); if `pnpm install` modifies it,
+  run `git checkout pnpm-lock.yaml` before committing.
 - Python 3.7+ (for debugging Python code)
 - Go 1.18+ and Delve (for debugging Go code, optional)
 - Rust toolchain (for debugging Rust code, optional — CodeLLDB auto-downloads during install)
