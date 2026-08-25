@@ -36,6 +36,7 @@ import {
     Breakpoint,
     FunctionBreakpoint,
     SessionLifecycleState,
+    SessionState,
     IEnvironment,
     ExceptionBreakMode,
     REDACTION_NOTICE
@@ -459,6 +460,21 @@ export class DebugMcpServer {
   }
 
   /**
+   * Policy-certain function-breakpoint name rewrite (issue #467). Swallows
+   * policy-lookup failures — normalization must never break the set path.
+   */
+  private normalizeFunctionBreakpointName(
+    sessionId: string,
+    functionName: string
+  ): { name: string; note: string } | undefined {
+    try {
+      return this.sessionManager.getSessionPolicy(sessionId).normalizeFunctionBreakpointName?.(functionName);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * Shared catch for the breakpoint management tools: session-lifecycle
    * failures become {success: false} results (same contract as
    * set_breakpoint's catch); everything else re-throws.
@@ -851,11 +867,30 @@ export class DebugMcpServer {
     return this.sessionManager.getVariablesDetailed(sessionId, variablesReference, names);
   }
 
-  public async getStackTrace(sessionId: string, includeInternals: boolean = false): Promise<StackTraceResult> {
+  public async getStackTrace(
+    sessionId: string,
+    includeInternals: boolean = false,
+    threadId?: number
+  ): Promise<StackTraceResult> {
     this.validateSession(sessionId);
     const session = this.sessionManager.getSession(sessionId);
     if (!session || !session.proxyManager) {
         throw new ProxyNotRunningError(sessionId || 'unknown', 'get stack trace');
+    }
+    // An explicit threadId (issue #465) targets that thread AND adopts it as
+    // current when it reports frames, so follow-up scopes/locals/evaluate
+    // anchor to it — this is the escape hatch when the session anchored to a
+    // frameless thread.
+    if (typeof threadId === 'number') {
+      // No ensureStackReady scan here: the caller asked about THIS thread,
+      // so an empty answer for it is the honest one (no silent re-anchor).
+      const result = await this.sessionManager.getStackTraceDetailed(
+        sessionId, threadId, includeInternals
+      );
+      if (result.frames.length > 0) {
+        session.proxyManager.setCurrentThreadId(threadId);
+      }
+      return result;
     }
     let currentThreadId = session.proxyManager.getCurrentThreadId();
     // If no thread ID is known (e.g. adapter omitted threadId from stopped event),
@@ -890,6 +925,7 @@ export class DebugMcpServer {
     variables: Variable[];
     frame: { name: string; file: string; line: number } | null;
     scopeName: string | null;
+    anchorNote?: string;
     truncation?: VariableTruncationSummary;
   }> {
     this.validateSession(sessionId);
@@ -1180,7 +1216,7 @@ export class DebugMcpServer {
           { name: 'list_threads', description: 'List all threads in the debugged process', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
           { name: 'get_variables', description: 'Get variables (scope is variablesReference: number). Responses are size-guarded: oversized values are cut (truncated:true) and very large scopes return a capped list with a truncation notice — pass names:[...] to fetch specific variables in full', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, scope: { type: 'number', description: "The variablesReference number from a StackFrame or Variable" }, names: namesProp }, required: getVariablesRequired } },
           { name: 'get_local_variables', description: 'Get local variables for the current stack frame. This is a convenience tool that returns just the local variables without needing to traverse stack->scopes->variables manually. Responses are size-guarded: oversized values are cut (truncated:true) and very large scopes return a capped list with a truncation notice — pass names:[...] to fetch specific variables in full', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, includeSpecial: { type: 'boolean', description: 'Include special/internal variables like this, __proto__, __builtins__, etc. Default: false' }, names: namesProp }, required: getLocalVariablesRequired } },
-          { name: 'get_stack_trace', description: 'Get stack trace. The response includes stopReason — why the session is paused (e.g. "breakpoint" vs "exception"). Internal/runtime frames are filtered by default; when any are hidden the response carries hiddenFrames and a note (the top frame is always kept even if internal, so frameId anchors keep working)', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, includeInternals: { type: 'boolean', description: 'Include internal/framework frames (e.g., Node.js internals). Default: false for cleaner output.' } }, required: ['sessionId'] } },
+          { name: 'get_stack_trace', description: 'Get stack trace. The response includes stopReason — why the session is paused (e.g. "breakpoint" vs "exception"). Internal/runtime frames are filtered by default; when any are hidden the response carries hiddenFrames and a note (the top frame is always kept even if internal, so frameId anchors keep working)', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, includeInternals: { type: 'boolean', description: 'Include internal/framework frames (e.g., Node.js internals). Default: false for cleaner output.' }, threadId: { type: 'number', description: 'Inspect a specific thread (ids from list_threads). When that thread reports frames it becomes the anchor for follow-up scopes/locals/evaluate calls — the escape hatch when the session is anchored to a frameless thread' } }, required: ['sessionId'] } },
           { name: 'get_scopes', description: 'Get scopes for a stack frame', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, frameId: { type: 'number', description: "The ID of the stack frame from a stackTrace response" } }, required: ['sessionId', 'frameId'] } },
           { name: 'evaluate_expression', description: 'Evaluate expression in the current debug context. Expressions can read and modify program state. Waits up to 30s for the result by default; pass timeout for long-running expressions', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, expression: { type: 'string' }, frameId: { type: 'number', description: 'Optional stack frame ID for evaluation context. Must be a frame ID from a get_stack_trace response. If not provided, uses the current (top) frame automatically' }, timeout: { type: 'number', description: 'Max time (ms) to wait for the evaluation to complete (default: 30000, max: 600000). On expiry the request fails but the expression may keep executing in the debuggee. Note: your MCP client may enforce its own overall request timeout' } }, required: ['sessionId', 'expression'] } },
           { name: 'get_source_context', description: 'Get source context around a specific line in a file', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: fileDescription }, line: { type: 'number', description: 'Line number to get context for' }, linesContext: { type: 'number', description: 'Number of lines before and after to include (default: 5)' } }, required: ['sessionId', 'file', 'line'] } },
@@ -1404,13 +1440,21 @@ export class DebugMcpServer {
 
                 try {
                   const fnGate = this.validateFunctionBreakpointSupport(args.sessionId);
+                  // Policy-certain rewrite (issue #467): a name the adapter can
+                  // never bind as given (go bare 'main') is corrected instead
+                  // of stored as a permanently-dead breakpoint; the warning
+                  // says the rewrite happened.
+                  const normalized = this.normalizeFunctionBreakpointName(args.sessionId, args.function!);
+                  const effectiveName = normalized?.name ?? args.function!;
                   // Per-adapter name advisory (issues #303/#308): warn at set
                   // time about names the adapter is known to mis-resolve
                   // (rust bare 'main' -> CRT entry) or never bind (go bare
                   // identifiers). Advisory only — the breakpoint is still set.
-                  const nameHint = this.getFunctionBreakpointNameHint(args.sessionId, args.function!);
+                  const nameHint = normalized
+                    ? undefined
+                    : this.getFunctionBreakpointNameHint(args.sessionId, effectiveName);
                   const { breakpoint, warning: syncWarning } = await this.setFunctionBreakpoint(
-                    args.sessionId, args.function!, args.condition
+                    args.sessionId, effectiveName, args.condition
                   );
 
                   this.logger.info('debug:breakpoint', {
@@ -1423,10 +1467,11 @@ export class DebugMcpServer {
                     timestamp: Date.now()
                   });
 
-                  const warnings = [breakpoint.message, fnGate.warning, nameHint, syncWarning].filter(Boolean);
+                  const warnings = [breakpoint.message, fnGate.warning, normalized?.note, nameHint, syncWarning].filter(Boolean);
                   result = { content: [{ type: 'text', text: JSON.stringify({
                     success: true,
                     breakpointId: breakpoint.id,
+                    ...(normalized ? { requestedName: args.function } : {}),
                     functionName: breakpoint.functionName,
                     condition: breakpoint.condition,
                     verified: breakpoint.verified,
@@ -2079,7 +2124,7 @@ export class DebugMcpServer {
               try {
                 // Default to false for cleaner output
                 const includeInternals = args.includeInternals ?? false;
-                const stackTrace = await this.getStackTrace(args.sessionId, includeInternals);
+                const stackTrace = await this.getStackTrace(args.sessionId, includeInternals, args.threadId);
                 const lastStop = this.sessionManager.getSession(args.sessionId)?.lastStop;
                 const payload: Record<string, unknown> = {
                   success: true,
@@ -2730,10 +2775,16 @@ export class DebugMcpServer {
       if (result.frame) {
         response.frame = result.frame;
       }
-      
+
       // Include scope name if available
       if (result.scopeName) {
         response.scopeName = result.scopeName;
+      }
+
+      // The tool walked down past an empty runtime/stdlib top frame — say so,
+      // since `frame` no longer names the top of the stack (issue #468).
+      if (result.anchorNote) {
+        response.note = result.anchorNote;
       }
 
       // Surface adapter warnings embedded in the scope name — e.g. Delve
@@ -2750,7 +2801,15 @@ export class DebugMcpServer {
       // Add helpful messages for edge cases
       if (result.variables.length === 0) {
         if (!result.frame) {
-          response.message = 'No stack frames available. The debugger may not be paused.';
+          // Distinguish "not paused" from "paused but the anchored thread has
+          // no frames" — the latter used to claim the debugger may not be
+          // paused while list_debug_sessions said paused (issue #465).
+          const sessionState = this.sessionManager.getSession(args.sessionId)?.state;
+          response.message = sessionState === SessionState.PAUSED
+            ? 'The session is paused, but the anchored thread reported no stack frames. ' +
+              'Try get_stack_trace with a threadId from list_threads, or continue_execution ' +
+              'followed by pause_execution to re-anchor on a reportable thread.'
+            : 'No stack frames available. The debugger may not be paused.';
         } else if (!result.scopeName) {
           response.message = 'No local scope found in the current frame.';
         } else {

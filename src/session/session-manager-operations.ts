@@ -26,6 +26,7 @@ import { MIRROR_EXPOSE_COMMAND, MIRROR_UNEXPOSE_COMMAND } from '../proxy/dap-pro
 import { ErrorMessages } from '../utils/error-messages.js';
 import { checkLaunchToolchain } from '../utils/language-availability.js';
 import { resolveStatement } from '../utils/breakpoint-resolver.js';
+import { normalizeBreakpointMessage } from '../utils/breakpoint-message.js';
 import { SessionManagerData } from './session-manager-data.js';
 import { CustomLaunchRequestArguments, DebugResult } from './session-manager-core.js';
 import {
@@ -894,6 +895,15 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       // unverified-at-launch is the designed deferral path.
       const fnBpWarning = this.buildFunctionBreakpointLaunchWarning(finalSession);
 
+      // Ran-to-completion with breakpoints that never bound (issue #467):
+      // state "stopped" where the caller expected "paused" is only
+      // explainable via list_breakpoints today — surface the stored
+      // per-breakpoint diagnostics right here where the caller is looking.
+      const unboundAtExitWarning =
+        finalState === SessionState.STOPPED
+          ? this.buildUnboundBreakpointExitWarning(finalSession)
+          : undefined;
+
       // Logpoint-downgrade verdict (issue #469): the deferred set_breakpoint
       // warning promised a launch-time answer — deliver it on this response.
       const logpointWarning = this.buildLogpointDowngradeLaunchWarning(finalSession);
@@ -903,7 +913,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       // arriving after this return still lands in the output buffer as an
       // attributed [mcp-debugger] Warning entry.
       const launchWarning =
-        [fnBpWarning, logpointWarning, ...(finalSession.adapterNotices ?? [])]
+        [fnBpWarning, logpointWarning, unboundAtExitWarning, ...(finalSession.adapterNotices ?? [])]
           .filter(Boolean)
           .join('; ') || undefined;
 
@@ -1520,6 +1530,32 @@ export abstract class SessionManagerOperations extends SessionManagerData {
    * undefined for bind-late policies (js/java) — unverified-at-launch is
    * their designed deferral, not a failure.
    */
+  /**
+   * Ran-to-completion unbound-breakpoint warning (issue #467). Built only
+   * when the launch ends in STOPPED: at that point an unverified breakpoint
+   * never bound and never will, for bind-late adapters too — so this is a
+   * zero-false-positive moment to surface the per-breakpoint diagnostics the
+   * store already holds (e.g. the path-remap suggestion CodeLLDB puts in
+   * `message`).
+   */
+  protected buildUnboundBreakpointExitWarning(session: ManagedSession): string | undefined {
+    const unbound = Array.from(session.breakpoints.values()).filter(bp => !bp.verified);
+    if (unbound.length === 0) {
+      return undefined;
+    }
+    const parts = unbound.map(bp => {
+      // Some stamp paths store the raw js-debug l10n key — translate it
+      // rather than showing 'breakpoint.provisionalBreakpoint' (issue #471).
+      const message = normalizeBreakpointMessage(bp.message, bp.verified);
+      return `${path.basename(bp.file)}:${bp.line}${message ? ` (${message})` : ''}`;
+    });
+    return (
+      `${unbound.length} breakpoint(s) never bound during this run: ${parts.join('; ')}. ` +
+      `The program ran to completion without stopping there — check the file path and line, ` +
+      `or list_breakpoints for the full per-breakpoint state`
+    );
+  }
+
   /**
    * Launch-time logpoint-downgrade warning (issue #469). A logpoint accepted
    * pre-launch under unknown policy support ("it will be validated against
@@ -2830,8 +2866,13 @@ export abstract class SessionManagerOperations extends SessionManagerData {
             proxyManager.once('stopped', onStopped);
           });
           try {
-            await proxyManager.sendDapRequest('pause', { threadId: discoveredThreadId });
-            this.logger.info(`[SessionManager] Sent post-attach pause (threadId=${discoveredThreadId})`);
+            // pauseAllThreads (issue #465): threadId 0 asks the adapter for a
+            // process-wide suspend — the JDI bridge then re-anchors its
+            // stopped event to a thread that can actually report frames,
+            // instead of single-thread-suspending whichever id we picked.
+            const pauseThreadId = attachBehavior.pauseAllThreads ? 0 : discoveredThreadId;
+            await proxyManager.sendDapRequest('pause', { threadId: pauseThreadId });
+            this.logger.info(`[SessionManager] Sent post-attach pause (threadId=${pauseThreadId})`);
             const stopObserved = await stoppedSeen;
             if (!stopObserved) {
               this.logger.warn(
