@@ -5,11 +5,14 @@
  * hot line does NOT pause execution; the interpolated message arrives as
  * output readable via get_output.
  *
- * Known-unsupported adapters (java, dotnet): set_breakpoint with logMessage
- * fails fast with a clear error.
+ * Known-unsupported adapters (java, dotnet, ruby): set_breakpoint with
+ * logMessage fails fast with a clear error. (Ruby joined this group in
+ * issue #469 — rdbg does not advertise supportsLogPoints and silently
+ * downgrades logpoints into pausing breakpoints.)
  *
- * Unknown support (ruby): accepted with a warning; runtime behavior is
- * adapter-dependent and not asserted.
+ * Unknown support ('warning' expectation): accepted with a warning; runtime
+ * behavior is adapter-dependent and not asserted. No in-tree adapter is in
+ * this group any more, but the path remains for dynamically loaded adapters.
  */
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import path from 'path';
@@ -30,7 +33,7 @@ const EXPECTATION: Record<string, 'logs' | 'error' | 'warning'> = {
   mock: 'logs',
   java: 'error',
   dotnet: 'error',
-  ruby: 'warning',
+  ruby: 'error',
 };
 
 // Python's bpLine has a=1, b=2 in scope — assert real interpolation there.

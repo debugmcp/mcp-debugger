@@ -325,7 +325,7 @@ export abstract class SessionManagerData extends SessionManagerCore {
     this.logger.warn(`[SM getStackTrace ${sessionId}] Stack stayed empty for ${this.pausedStackReadyTimeoutMs}ms while paused (threadId ${threadId}).`);
     return {
       frames: [],
-      note: `The stopped thread reported no stack frames within ${this.pausedStackReadyTimeoutMs}ms; the target may be paused in native code. Retry get_stack_trace, or use list_threads to inspect other threads.`
+      note: `The stopped thread reported no stack frames within ${this.pausedStackReadyTimeoutMs}ms; the target may be paused in native code. Try get_stack_trace with a threadId from list_threads, or continue_execution followed by pause_execution to re-anchor the session on a reportable thread.`
     };
   }
 
@@ -410,6 +410,8 @@ export abstract class SessionManagerData extends SessionManagerCore {
     variables: Variable[];
     frame: { name: string; file: string; line: number } | null;
     scopeName: string | null;
+    /** Set when the top frame had no locals and a lower frame was anchored instead (issue #468). */
+    anchorNote?: string;
     truncation?: VariableTruncationSummary;
   }> {
     const session = this._getSessionById(sessionId);
@@ -482,35 +484,60 @@ export abstract class SessionManagerData extends SessionManagerCore {
       
       // Step 4: Get the appropriate adapter policy
       const policy = this.selectPolicy(session.language);
-      
-      // Step 5: Extract local variables using the adapter policy
-      let localVars: Variable[] = [];
-      let scopeName: string | null = null;
-      
-      if (policy.extractLocalVariables) {
-        localVars = policy.extractLocalVariables(stackFrames, scopesMap, variablesMap, includeSpecial);
 
-        // Report the ACTUAL scope name the adapter returned, not the policy's
-        // canonical name — adapters may annotate it (e.g. Delve's "Locals
-        // (warning: optimized function)") and that annotation matters to the
-        // caller. Fall back to the canonical name when no scope matches.
-        const canonicalNames = policy.getLocalScopeName
-          ? ([] as string[]).concat(policy.getLocalScopeName())
-          : [];
-        const topFrameScopes = scopesMap[topFrame.id] || [];
-        const matchedScope = topFrameScopes.find(s =>
-          canonicalNames.some(c => s.name === c || s.name.startsWith(c + ' '))
-        );
-        scopeName = matchedScope?.name ?? canonicalNames[0] ?? null;
-      } else {
-        // Fallback: use first non-global scope from top frame
-        const topFrameScopes = scopesMap[topFrame.id] || [];
-        const localScope = topFrameScopes.find(s => !s.name.toLowerCase().includes('global'));
-        if (localScope) {
-          localVars = variablesMap[localScope.variablesReference] || [];
-          scopeName = localScope.name;
+      // Step 5: Extract local variables using the adapter policy. Policies
+      // anchor to the first frame of the list they receive, so extraction is
+      // parameterized by anchor: slicing the frame list re-anchors it.
+      const extractAt = (frames: StackFrame[]): { localVars: Variable[]; scopeName: string | null } => {
+        const anchor = frames[0];
+        if (policy.extractLocalVariables) {
+          const vars = policy.extractLocalVariables(frames, scopesMap, variablesMap, includeSpecial);
+
+          // Report the ACTUAL scope name the adapter returned, not the policy's
+          // canonical name — adapters may annotate it (e.g. Delve's "Locals
+          // (warning: optimized function)") and that annotation matters to the
+          // caller. Fall back to the canonical name when no scope matches.
+          const canonicalNames = policy.getLocalScopeName
+            ? ([] as string[]).concat(policy.getLocalScopeName())
+            : [];
+          const anchorScopes = scopesMap[anchor.id] || [];
+          const matchedScope = anchorScopes.find(s =>
+            canonicalNames.some(c => s.name === c || s.name.startsWith(c + ' '))
+          );
+          return { localVars: vars, scopeName: matchedScope?.name ?? canonicalNames[0] ?? null };
+        }
+        // Fallback: use first non-global scope from the anchor frame
+        const anchorScopes = scopesMap[anchor.id] || [];
+        const localScope = anchorScopes.find(s => !s.name.toLowerCase().includes('global'));
+        return localScope
+          ? { localVars: variablesMap[localScope.variablesReference] || [], scopeName: localScope.name }
+          : { localVars: [], scopeName: null };
+      };
+
+      let anchorIndex = 0;
+      let { localVars, scopeName } = extractAt(stackFrames);
+
+      // A pause inside a runtime/stdlib frame (blocking syscall, sleep) puts
+      // an empty-locals frame on top while the user frame sits just below —
+      // and its scopes are already fetched. Walk down to the first frame
+      // that yields locals rather than returning an empty result the caller
+      // cannot act on (issue #468). Skipped under an explicit `names` filter,
+      // where "nothing matched in the top frame" is the honest answer.
+      if (localVars.length === 0 && names === undefined) {
+        for (let k = 1; k < stackFrames.length; k++) {
+          const attempt = extractAt(stackFrames.slice(k));
+          if (attempt.localVars.length > 0) {
+            anchorIndex = k;
+            localVars = attempt.localVars;
+            scopeName = attempt.scopeName;
+            this.logger.info(
+              `[SM getLocalVariables ${sessionId}] Top frame '${topFrame.name}' had no locals; anchored to frame #${k} '${stackFrames[k].name}'.`
+            );
+            break;
+          }
         }
       }
+      const anchorFrame = stackFrames[anchorIndex];
       
       // Attribute per-scope truncation to the scopes whose variables
       // actually reached the caller (issue #438): every policy returns
@@ -547,11 +574,18 @@ export abstract class SessionManagerData extends SessionManagerCore {
       return {
         variables: cappedLocals.variables,
         frame: {
-          name: topFrame.name,
-          file: topFrame.file,
-          line: topFrame.line
+          name: anchorFrame.name,
+          file: anchorFrame.file,
+          line: anchorFrame.line
         },
         scopeName,
+        ...(anchorIndex > 0
+          ? {
+              anchorNote:
+                `Top frame '${topFrame.name}' has no local variables (runtime/stdlib frame); ` +
+                `showing frame #${anchorIndex} '${anchorFrame.name}' instead`
+            }
+          : {}),
         ...(truncation ? { truncation } : {})
       };
       
