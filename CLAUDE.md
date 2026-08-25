@@ -444,8 +444,10 @@ The dev proxy (`tools/dev-proxy/dev-proxy.mjs`) is a lightweight MCP proxy that 
 **Configuration** (env vars, all optional):
 - `DEV_PROXY_PORT` — Backend HTTP port (default: 3001; used by `http` and `sse` modes)
 - `DEV_PROXY_BUILD_CMD` — Build command (default: `npm run build`)
+- `DEV_PROXY_BUILD_TIMEOUT_MS` — Build timeout in milliseconds (default: 120000)
 - `DEV_PROXY_ROOT` — Project root (default: auto-detected)
 - `DEV_PROXY_BACKEND_TRANSPORT` — `http` (default), `sse` (legacy/deprecated), or `stdio`
+- `DEV_PROXY_BACKEND_CMD` — Custom backend command override (e.g. `docker run ...`)
 
 #### Verify Installation
 
