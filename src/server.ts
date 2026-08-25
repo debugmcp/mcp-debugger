@@ -459,6 +459,21 @@ export class DebugMcpServer {
   }
 
   /**
+   * Policy-certain function-breakpoint name rewrite (issue #467). Swallows
+   * policy-lookup failures — normalization must never break the set path.
+   */
+  private normalizeFunctionBreakpointName(
+    sessionId: string,
+    functionName: string
+  ): { name: string; note: string } | undefined {
+    try {
+      return this.sessionManager.getSessionPolicy(sessionId).normalizeFunctionBreakpointName?.(functionName);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * Shared catch for the breakpoint management tools: session-lifecycle
    * failures become {success: false} results (same contract as
    * set_breakpoint's catch); everything else re-throws.
@@ -1404,13 +1419,21 @@ export class DebugMcpServer {
 
                 try {
                   const fnGate = this.validateFunctionBreakpointSupport(args.sessionId);
+                  // Policy-certain rewrite (issue #467): a name the adapter can
+                  // never bind as given (go bare 'main') is corrected instead
+                  // of stored as a permanently-dead breakpoint; the warning
+                  // says the rewrite happened.
+                  const normalized = this.normalizeFunctionBreakpointName(args.sessionId, args.function!);
+                  const effectiveName = normalized?.name ?? args.function!;
                   // Per-adapter name advisory (issues #303/#308): warn at set
                   // time about names the adapter is known to mis-resolve
                   // (rust bare 'main' -> CRT entry) or never bind (go bare
                   // identifiers). Advisory only — the breakpoint is still set.
-                  const nameHint = this.getFunctionBreakpointNameHint(args.sessionId, args.function!);
+                  const nameHint = normalized
+                    ? undefined
+                    : this.getFunctionBreakpointNameHint(args.sessionId, effectiveName);
                   const { breakpoint, warning: syncWarning } = await this.setFunctionBreakpoint(
-                    args.sessionId, args.function!, args.condition
+                    args.sessionId, effectiveName, args.condition
                   );
 
                   this.logger.info('debug:breakpoint', {
@@ -1423,10 +1446,11 @@ export class DebugMcpServer {
                     timestamp: Date.now()
                   });
 
-                  const warnings = [breakpoint.message, fnGate.warning, nameHint, syncWarning].filter(Boolean);
+                  const warnings = [breakpoint.message, fnGate.warning, normalized?.note, nameHint, syncWarning].filter(Boolean);
                   result = { content: [{ type: 'text', text: JSON.stringify({
                     success: true,
                     breakpointId: breakpoint.id,
+                    ...(normalized ? { requestedName: args.function } : {}),
                     functionName: breakpoint.functionName,
                     condition: breakpoint.condition,
                     verified: breakpoint.verified,
