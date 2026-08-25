@@ -1,28 +1,25 @@
 /**
- * Modified version of RedefineTarget for hot-reload testing.
+ * Hot-swap counterpart of RedefineTarget.java — getValue() returns 99, not 42.
  *
- * This file is compiled separately and its .class file replaces the original
- * RedefineTarget.class via redefine_classes. The only change is getValue()
- * returns 99 instead of 42.
- *
- * IMPORTANT: The class name must remain "RedefineTarget" (not "RedefineTargetV2")
- * so the bytecode matches the loaded class. This file is named V2 only for
- * organizational purposes — it is compiled as RedefineTarget.class.
+ * LINE LAYOUT MUST STAY IDENTICAL TO RedefineTarget.java: a redefine re-resolves
+ * breakpoints by line number against the new line table, so drift silently rebinds
+ * them. Class name stays "RedefineTarget"; "V2" is filename-only — stage before javac.
  */
 public class RedefineTarget {
 
     static int getValue() {
-        return 99;  // changed from 42 to 99
+        return 99;  // line 11 — hot-swapped counterpart of RedefineTarget's "return 42"
     }
 
     public static void main(String[] args) throws Exception {
         System.out.println("RedefineTarget starting...");
-        Thread.sleep(2000);
+        Thread.sleep(2000);  // wait for breakpoint setup
 
         int val1 = getValue();
-        System.out.println("val1 = " + val1);
+        System.out.println("val1 = " + val1);  // line 19 — first breakpoint target (val1 already assigned when paused here)
 
-        int val2 = getValue();
+        // After hot-reload, getValue() should return 99
+        int val2 = getValue();              // line 22 — second breakpoint target
         System.out.println("val2 = " + val2);
 
         System.out.println("RedefineTarget done.");
