@@ -36,11 +36,13 @@ const MAX_HEADER_BYTES = 16 * 1024;
 export interface DapFrameDecoderOptions {
   /**
    * Invoked on malformed input. 'header' means an invalid/absent
-   * Content-Length header was seen and the buffered payload was discarded;
-   * 'json' means a complete frame failed to parse and was skipped;
-   * 'overflow' means the peer advertised a frame above maxContentLength (or
-   * streamed header bytes past the header allowance) and the buffer was
-   * discarded — same recovery contract as 'header'.
+   * Content-Length header was seen — the malformed block was discarded and
+   * decoding resynced at the next `Content-Length` occurrence in the
+   * buffered remainder if one exists (issue #470), else the remainder was
+   * discarded too; 'json' means a complete frame failed to parse and was
+   * skipped; 'overflow' means the peer advertised a frame above
+   * maxContentLength (or streamed header bytes past the header allowance)
+   * and the buffer was discarded.
    */
   onError?: (error: Error, context: DapFrameDecoderErrorContext) => void;
   /** Upper bound for a single frame body (issue #402); default 64 MB or DAP_MAX_FRAME_BYTES. */
@@ -150,11 +152,26 @@ export class DapFrameDecoder {
       this.headerData = Buffer.alloc(0);
 
       if (parsedLength === null || parsedLength <= 0 || !Number.isFinite(parsedLength)) {
+        // A malformed header block must not take the frames after it down
+        // too: a dropped *response* is unrecoverable at the DAP layer — the
+        // pending request never settles and the init deadline converts a
+        // transient framing hiccup into a hard launch failure (issue #470).
+        // Resync at the next plausible header start inside the remainder;
+        // when none exists, discard it as before so stray junk cannot
+        // poison the frames of a later push.
+        const resyncAt = remainder.indexOf('Content-Length');
         this.onError?.(
-          new Error('Invalid Content-Length header encountered; discarding payload'),
+          new Error(
+            resyncAt === -1
+              ? 'Invalid Content-Length header encountered; discarding payload'
+              : 'Invalid Content-Length header encountered; discarded malformed block and resynced at next header'
+          ),
           'header'
         );
         this.reset();
+        if (resyncAt !== -1) {
+          input = remainder.subarray(resyncAt);
+        }
         continue;
       }
 
