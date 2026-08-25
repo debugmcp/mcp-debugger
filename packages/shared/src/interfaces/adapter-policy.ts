@@ -118,6 +118,16 @@ export interface AdapterPolicy {
   functionBreakpointNameHint?(name: string): string | undefined;
 
   /**
+   * Policy-certain rewrite of a function-breakpoint name the adapter can
+   * never bind as given (issue #467) — e.g. Go's bare 'main' is always
+   * 'main.main' (func main must live in package main). Applied at
+   * set_breakpoint time; the response warning says the rewrite happened.
+   * Only return a value when the corrected form is certain — an uncertain
+   * name should get a functionBreakpointNameHint instead.
+   */
+  normalizeFunctionBreakpointName?(name: string): { name: string; note: string } | undefined;
+
+  /**
    * True when the adapter binds function breakpoints lazily by design
    * (js-debug: CDP re-resolve at pauses for late-loaded modules; Java:
    * ClassPrepareRequest deferral), so verified:false at launch is normal and
