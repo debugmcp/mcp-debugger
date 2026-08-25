@@ -25,6 +25,7 @@ import { ProxyConfig } from '../proxy/proxy-config.js';
 import { MIRROR_EXPOSE_COMMAND, MIRROR_UNEXPOSE_COMMAND } from '../proxy/dap-proxy-interfaces.js';
 import { ErrorMessages } from '../utils/error-messages.js';
 import { checkLaunchToolchain } from '../utils/language-availability.js';
+import { didYouMean } from '../utils/did-you-mean.js';
 import { resolveStatement } from '../utils/breakpoint-resolver.js';
 import { normalizeBreakpointMessage } from '../utils/breakpoint-message.js';
 import { SessionManagerData } from './session-manager-data.js';
@@ -291,12 +292,28 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     // keys (issue #450) — record the drops so attachToProcess can warn the
     // caller. Assigned unconditionally so a prior attach's record never leaks.
     if (isAttachMode) {
-      const dropped = transformedLaunchConfig
-        ? adapterExtraKeys.filter((key) => !(key in transformedLaunchConfig!))
-        : [];
+      let dropped: string[] = [];
+      const supportedKeys = adapter.supportedAttachKeys;
+
+      if (supportedKeys) {
+        const supportedSet = new Set(supportedKeys);
+        for (const key of adapterExtraKeys) {
+          if (!supportedSet.has(key)) {
+            const suggestion = didYouMean(key, supportedKeys);
+            dropped.push(suggestion ? `${key} (did you mean ${suggestion}?)` : key);
+            if (transformedLaunchConfig && (key in transformedLaunchConfig)) {
+              // Strip from the config to make the 'ignored' warning truthful
+              delete (transformedLaunchConfig as Record<string, unknown>)[key];
+            }
+          }
+        }
+      } else if (transformedLaunchConfig) {
+        dropped = adapterExtraKeys.filter((key) => !(key in transformedLaunchConfig!));
+      }
+
       if (dropped.length > 0) {
         this.logger.warn(
-          `[SessionManager] ${session.language} attach transform dropped adapterConfig key(s) for session ${sessionId}: ${dropped.join(', ')}`
+          `[SessionManager] ${session.language} attach config dropped key(s) for session ${sessionId}: ${dropped.join(', ')}`
         );
       }
       session.attachDroppedConfigKeys = dropped.length > 0 ? dropped : undefined;

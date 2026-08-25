@@ -84,6 +84,20 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
   readonly language = DebugLanguage.PYTHON;
   readonly name = 'Python Debug Adapter';
   
+  // debugpy attach schema https://github.com/microsoft/debugpy/wiki/Debug-configuration-settings
+  readonly supportedAttachKeys = [
+    'host',
+    'port',
+    'justMyCode',
+    'pathMappings',
+    'redirectOutput',
+    'showReturnValue',
+    'subProcess',
+    'clientOS',
+    'django',
+    'jinja'
+  ] as const;
+
   private state: AdapterState = AdapterState.UNINITIALIZED;
   private dependencies: AdapterDependencies;
   

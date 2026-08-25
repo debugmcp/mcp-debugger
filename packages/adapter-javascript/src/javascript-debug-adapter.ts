@@ -41,6 +41,25 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
   readonly language = 'javascript' as unknown as DebugLanguage;
   readonly name = 'JavaScript/TypeScript Debug Adapter';
 
+  // js-debug pwa-node attach options https://github.com/microsoft/vscode-js-debug/blob/main/package.json
+  readonly supportedAttachKeys = [
+    'port',
+    'address',
+    'timeout',
+    'localRoot',
+    'remoteRoot',
+    'smartStep',
+    'skipFiles',
+    'sourceMaps',
+    'outFiles',
+    'resolveSourceMapLocations',
+    'stopOnEntry',
+    'cwd',
+    'env',
+    'websocketAddress',
+    'attachExistingChildren'
+  ] as const;
+
   private state: AdapterState = AdapterState.UNINITIALIZED;
   private readonly dependencies: AdapterDependencies;
 
