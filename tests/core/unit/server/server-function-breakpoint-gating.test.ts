@@ -207,3 +207,90 @@ describe('set_breakpoint function gating (#271 phase 3)', () => {
     expect(tool.inputSchema.required).toEqual(['sessionId']);
   });
 });
+
+describe('set_breakpoint function-name normalization (issue #467)', () => {
+  let mockServer: any;
+  let mockSessionManager: any;
+  let callToolHandler: any;
+
+  beforeEach(() => {
+    const mockDependencies = createMockDependencies();
+    vi.mocked(createProductionDependencies).mockReturnValue(mockDependencies);
+    mockServer = createMockServer();
+    vi.mocked(Server).mockImplementation(function() { return mockServer as any; });
+    const mockStdioTransport = createMockStdioTransport();
+    vi.mocked(StdioServerTransport).mockImplementation(function() { return mockStdioTransport as any; });
+    mockSessionManager = createMockSessionManager(mockDependencies.adapterRegistry);
+    vi.mocked(SessionManager).mockImplementation(function() { return mockSessionManager as any; });
+    new DebugMcpServer();
+    callToolHandler = getToolHandlers(mockServer).callToolHandler;
+    mockSessionManager.getSession.mockReturnValue({ id: 'test-session', sessionLifecycle: 'active' });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function callFn(name: string) {
+    return callToolHandler({
+      method: 'tools/call',
+      params: {
+        name: 'set_breakpoint',
+        arguments: { sessionId: 'test-session', function: name }
+      }
+    });
+  }
+
+  it('rewrites a policy-certain never-binding name and says so', async () => {
+    mockSessionManager.getSessionPolicy.mockReturnValue({
+      name: 'go',
+      supportsFunctionBreakpoints: true,
+      normalizeFunctionBreakpointName: (name: string) =>
+        name === 'main' ? { name: 'main.main', note: 'Auto-qualified to main.main' } : undefined
+    });
+    mockSessionManager.setFunctionBreakpoint.mockResolvedValue({
+      breakpoint: { id: 'fbp-2', functionName: 'main.main', verified: false }
+    });
+
+    const result = await callFn('main');
+    const content = JSON.parse(result.content[0].text);
+
+    expect(mockSessionManager.setFunctionBreakpoint).toHaveBeenCalledWith(
+      'test-session', { functionName: 'main.main', condition: undefined }
+    );
+    expect(content.functionName).toBe('main.main');
+    expect(content.requestedName).toBe('main');
+    expect(content.warning).toContain('Auto-qualified');
+  });
+
+  it('keeps the advisory hint for names without a certain rewrite', async () => {
+    mockSessionManager.getSessionPolicy.mockReturnValue({
+      name: 'go',
+      supportsFunctionBreakpoints: true,
+      normalizeFunctionBreakpointName: () => undefined,
+      functionBreakpointNameHint: (name: string) =>
+        name.includes('.') ? undefined : `bare '${name}' may never bind`
+    });
+    mockSessionManager.setFunctionBreakpoint.mockResolvedValue({
+      breakpoint: { id: 'fbp-3', functionName: 'helper', verified: false }
+    });
+
+    const result = await callFn('helper');
+    const content = JSON.parse(result.content[0].text);
+
+    expect(mockSessionManager.setFunctionBreakpoint).toHaveBeenCalledWith(
+      'test-session', { functionName: 'helper', condition: undefined }
+    );
+    expect(content.requestedName).toBeUndefined();
+    expect(content.warning).toContain("bare 'helper' may never bind");
+  });
+});
+
+describe('GoAdapterPolicy.normalizeFunctionBreakpointName (issue #467)', () => {
+  it("rewrites bare 'main' to 'main.main' and leaves other names alone", async () => {
+    const { GoAdapterPolicy } = await import('@debugmcp/shared');
+    expect(GoAdapterPolicy.normalizeFunctionBreakpointName?.('main')?.name).toBe('main.main');
+    expect(GoAdapterPolicy.normalizeFunctionBreakpointName?.('helper')).toBeUndefined();
+    expect(GoAdapterPolicy.normalizeFunctionBreakpointName?.('main.main')).toBeUndefined();
+  });
+});
