@@ -135,6 +135,64 @@ describe('DapFrameDecoder malformed-input recovery', () => {
     expect(decoder.push(frame(msg))).toEqual([msg]);
   });
 
+  it('recovers a well-formed frame that follows a junk block in the same chunk (issue #470)', () => {
+    // The rdbg direct-socket path intermittently delivers a non-DAP block
+    // ahead of the initialize response. A dropped *response* is
+    // unrecoverable at the DAP layer, so the decoder must resync at the
+    // next header instead of discarding the response with the junk.
+    const errors: Array<{ message: string; context: string }> = [];
+    const decoder = new DapFrameDecoder({
+      onError: (err, context) => errors.push({ message: err.message, context })
+    });
+
+    const response = { seq: 2, type: 'response', command: 'initialize', request_seq: 1, success: true };
+    const junk = Buffer.from('DEBUGGER: unexpected preamble\r\n\r\n', 'utf8');
+    const received = decoder.push(Buffer.concat([junk, frame(response)]));
+
+    expect(received).toEqual([JSON.parse(JSON.stringify(response))]);
+    expect(errors).toEqual([expect.objectContaining({ context: 'header' })]);
+
+    // Later frames decode normally.
+    const event = { seq: 3, type: 'event', event: 'initialized' };
+    expect(decoder.push(frame(event))).toEqual([event]);
+  });
+
+  it('resyncs when the frame after the junk block is itself split across pushes', () => {
+    const errors: string[] = [];
+    const decoder = new DapFrameDecoder({
+      onError: (_err, context) => errors.push(context)
+    });
+
+    const response = { seq: 2, type: 'response', command: 'initialize', request_seq: 1, success: true };
+    const encoded = frame(response);
+    const junk = Buffer.from('garbage line\r\n\r\n', 'utf8');
+    const firstPush = Buffer.concat([junk, encoded.subarray(0, encoded.length - 10)]);
+
+    expect(decoder.push(firstPush)).toEqual([]);
+    expect(decoder.push(encoded.subarray(encoded.length - 10))).toEqual([
+      JSON.parse(JSON.stringify(response))
+    ]);
+    expect(errors).toEqual(['header']);
+  });
+
+  it('junk preamble delivered in a single push never costs the frames behind it', () => {
+    fc.assert(
+      fc.property(
+        messagesArb,
+        fc.string({ unit: fc.constantFrom(...ALNUM.split('')), minLength: 1, maxLength: 64 }),
+        (messages, junkText) => {
+          const decoder = new DapFrameDecoder({ onError: () => { /* expected */ } });
+          const stream = Buffer.concat([
+            Buffer.from(`${junkText}\r\n\r\n`, 'utf8'),
+            ...messages.map(m => encodeDapMessage(m as unknown as DebugProtocol.ProtocolMessage))
+          ]);
+          const received = decoder.push(stream);
+          expect(received).toEqual(messages.map(m => JSON.parse(JSON.stringify(m))));
+        }
+      )
+    );
+  });
+
   it('skips a frame whose body is not valid JSON and continues with the next frame', () => {
     const errors: string[] = [];
     const decoder = new DapFrameDecoder({
