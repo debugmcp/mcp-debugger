@@ -25,6 +25,22 @@ export const GoAdapterPolicy: AdapterPolicy = {
     }
     return undefined;
   },
+  /**
+   * A bare 'main' can only mean main.main (the language requires func main
+   * to live in package main), and Delve will never bind the bare form — so
+   * rewrite it instead of accepting a permanently-dead breakpoint (issue
+   * #467). Other bare names keep the advisory hint only: their package is
+   * not knowable here.
+   */
+  normalizeFunctionBreakpointName: (name: string) => {
+    if (name === 'main') {
+      return {
+        name: 'main.main',
+        note: "Auto-qualified function breakpoint 'main' to 'main.main' — Go resolves function breakpoints against package-qualified runtime names, and a bare 'main' never binds"
+      };
+    }
+    return undefined;
+  },
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
   buildChildStartArgs: () => {
