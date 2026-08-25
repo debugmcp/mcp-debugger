@@ -905,6 +905,7 @@ export class DebugMcpServer {
     variables: Variable[];
     frame: { name: string; file: string; line: number } | null;
     scopeName: string | null;
+    anchorNote?: string;
     truncation?: VariableTruncationSummary;
   }> {
     this.validateSession(sessionId);
@@ -2754,10 +2755,16 @@ export class DebugMcpServer {
       if (result.frame) {
         response.frame = result.frame;
       }
-      
+
       // Include scope name if available
       if (result.scopeName) {
         response.scopeName = result.scopeName;
+      }
+
+      // The tool walked down past an empty runtime/stdlib top frame — say so,
+      // since `frame` no longer names the top of the stack (issue #468).
+      if (result.anchorNote) {
+        response.note = result.anchorNote;
       }
 
       // Surface adapter warnings embedded in the scope name — e.g. Delve

@@ -956,6 +956,104 @@ describe('SessionManager - DAP Operations', () => {
       );
     });
 
+    it('walks down past an empty runtime top frame to the first frame with locals (issue #468)', async () => {
+      const session = await createPausedSession();
+
+      // A pause inside a blocking sleep: frame 0 is a stdlib frame with an
+      // empty Local scope; the user frame with the loop counter is frame 1.
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(
+        async (command: string, args?: { frameId?: number; variablesReference?: number }) => {
+          switch (command) {
+            case 'stackTrace':
+              return {
+                success: true,
+                body: {
+                  stackFrames: [
+                    { id: 1, name: 'std::this_thread::sleep_for', source: { path: '/usr/include/c++/13/bits/this_thread_sleep.h' }, line: 80, column: 0 },
+                    { id: 2, name: 'main', source: { path: '/proj/examples/cpp/pause_test.cpp' }, line: 20, column: 0 }
+                  ]
+                }
+              };
+            case 'scopes':
+              return {
+                success: true,
+                body: {
+                  scopes: [{ name: 'Local', variablesReference: args?.frameId === 2 ? 200 : 100, expensive: false }]
+                }
+              };
+            case 'variables':
+              return {
+                success: true,
+                body: {
+                  variables: args?.variablesReference === 200
+                    ? [{ name: 'counter', value: '348', type: 'long long', variablesReference: 0 }]
+                    : []
+                }
+              };
+            default:
+              return { success: true };
+          }
+        }
+      );
+
+      const result = await sessionManager.getLocalVariables(session.id);
+
+      expect(result.variables).toEqual([
+        expect.objectContaining({ name: 'counter', value: '348' })
+      ]);
+      // The response must disclose the anchor walked down from the top frame.
+      expect(result.frame).toEqual(expect.objectContaining({ name: 'main', line: 20 }));
+      expect(result.anchorNote).toMatch(/sleep_for/);
+      expect(result.anchorNote).toMatch(/'main'/);
+    });
+
+    it('does not walk down when an explicit names filter is set (issue #468)', async () => {
+      const session = await createPausedSession();
+
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(
+        async (command: string, args?: { frameId?: number; variablesReference?: number }) => {
+          switch (command) {
+            case 'stackTrace':
+              return {
+                success: true,
+                body: {
+                  stackFrames: [
+                    { id: 1, name: 'std::this_thread::sleep_for', source: { path: '/usr/include/c++/13/bits/this_thread_sleep.h' }, line: 80, column: 0 },
+                    { id: 2, name: 'main', source: { path: '/proj/examples/cpp/pause_test.cpp' }, line: 20, column: 0 }
+                  ]
+                }
+              };
+            case 'scopes':
+              return {
+                success: true,
+                body: {
+                  scopes: [{ name: 'Local', variablesReference: args?.frameId === 2 ? 200 : 100, expensive: false }]
+                }
+              };
+            case 'variables':
+              return {
+                success: true,
+                body: {
+                  variables: args?.variablesReference === 200
+                    ? [{ name: 'counter', value: '348', type: 'long long', variablesReference: 0 }]
+                    : []
+                }
+              };
+            default:
+              return { success: true };
+          }
+        }
+      );
+
+      // "counter" exists one frame down, but a names request is scoped to the
+      // top frame — the honest answer is that nothing matched there.
+      const result = await sessionManager.getLocalVariables(session.id, false, ['counter']);
+
+      expect(result.variables).toEqual([]);
+      expect(result.frame).toEqual(expect.objectContaining({ name: 'std::this_thread::sleep_for' }));
+      expect(result.anchorNote).toBeUndefined();
+    });
+
     it('caps an enormous scope and reports truncation instead of blowing the response (issues #356/#359)', async () => {
       const session = await createPausedSession();
 
