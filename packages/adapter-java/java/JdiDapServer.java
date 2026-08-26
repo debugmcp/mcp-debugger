@@ -1420,7 +1420,12 @@ public class JdiDapServer {
                 // Pause a specific thread
                 for (ThreadReference t : vm.allThreads()) {
                     if (t.uniqueID() == threadId) {
-                        t.suspend();
+                        // Idempotent: pausing an already-suspended thread must not
+                        // deepen its JDI suspend count, or a single resume won't
+                        // release it.
+                        if (!t.isSuspended()) {
+                            t.suspend();
+                        }
                         sendStoppedEvent("pause", t.uniqueID(), false);
                         sendResponse(reqSeq, "pause", true, new HashMap<>());
                         return;
@@ -1428,8 +1433,25 @@ public class JdiDapServer {
                 }
                 sendErrorResponse(reqSeq, "pause", "Thread not found: " + threadId);
             } else {
-                // Pause all threads (threadId 0 or absent)
-                vm.suspend();
+                // Pause all threads (threadId 0 or absent). Idempotent: a JVM
+                // launched with JDWP suspend=y already holds every thread at
+                // suspend count 1; vm.suspend() here would raise it to 2 while
+                // continue's single vm.resume() only takes it back to 1, leaving
+                // the VM permanently frozen. Skip the suspend when nothing is
+                // running, but still emit the stopped event so the client's
+                // state machine settles.
+                boolean anyRunning = false;
+                for (ThreadReference t : vm.allThreads()) {
+                    if (!t.isSuspended()) {
+                        anyRunning = true;
+                        break;
+                    }
+                }
+                if (anyRunning) {
+                    vm.suspend();
+                } else {
+                    log("Pause: VM already fully suspended; reporting stopped without deepening suspend count");
+                }
                 // Issue #352: announce a thread that can actually report frames.
                 // allThreads().get(0) is typically a JVM system thread (e.g.
                 // "Reference Handler") whose stackTrace comes back empty.
