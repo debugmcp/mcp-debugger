@@ -182,6 +182,9 @@ export const JavaAdapterPolicy: AdapterPolicy = {
   // ("not suspended"), leaving the session uninspectable (issue #465).
   // pauseAllThreads: the bridge's pause-all suspends the whole VM and
   // anchors its stopped event to a thread that can actually report frames.
+  // The bridge's pause is idempotent: on a JVM that is already fully
+  // suspended (JDWP suspend=y attach) it reports stopped without deepening
+  // the JDI suspend count, so a single continue still releases the VM.
   getAttachBehavior: () => ({ pauseAfterAttach: true, pauseAllThreads: true }),
 
   // JdiDapServer sends "initialized" during initialize (before launch).
