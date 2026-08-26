@@ -71,6 +71,15 @@ export interface RedefineClassesResult {
   newestTimestamp?: number;
   /** Breakpoints re-planted after redefine (issue #370). */
   replantedBreakpoints?: number;
+  /**
+   * Statement-anchored breakpoints re-resolved against the new source after
+   * the hot-swap (issue #464) — same shape restart_debugging returns.
+   */
+  anchorResolution?: {
+    moved: Array<{ breakpointId: string; file: string; from: number; to: number; statement: string; candidates?: number[] }>;
+    stale: Array<{ breakpointId: string; file: string; line: number; statement: string; reason: string }>;
+  };
+  warning?: string;
   error?: string;
 }
 
@@ -2874,8 +2883,13 @@ export abstract class SessionManagerOperations extends SessionManagerData {
             proxyManager.once('stopped', onStopped);
           });
           try {
-            await proxyManager.sendDapRequest('pause', { threadId: discoveredThreadId });
-            this.logger.info(`[SessionManager] Sent post-attach pause (threadId=${discoveredThreadId})`);
+            // pauseAllThreads (issue #465): threadId 0 asks the adapter for a
+            // process-wide suspend — the JDI bridge then re-anchors its
+            // stopped event to a thread that can actually report frames,
+            // instead of single-thread-suspending whichever id we picked.
+            const pauseThreadId = attachBehavior.pauseAllThreads ? 0 : discoveredThreadId;
+            await proxyManager.sendDapRequest('pause', { threadId: pauseThreadId });
+            this.logger.info(`[SessionManager] Sent post-attach pause (threadId=${pauseThreadId})`);
             const stopObserved = await stoppedSeen;
             if (!stopObserved) {
               this.logger.warn(
@@ -3075,6 +3089,33 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         return { success: false, error: 'No response body from redefineClasses' };
       }
 
+      // Statement anchors are content identities and a hot-swap invalidates
+      // line numbers (issue #464): re-resolve them against the new source —
+      // which IS what is on disk in the edit -> recompile -> hot-swap loop —
+      // and re-send the affected files so the JDI replant binds the moved
+      // lines against the new line table. Ordered after the redefine
+      // response, i.e. after vm.redefineClasses, by construction.
+      let anchorResolution: RedefineClassesResult['anchorResolution'];
+      const syncWarnings: string[] = [];
+      if ((body.redefinedCount ?? 0) > 0) {
+        anchorResolution = await this.reresolveAnchors(session);
+        if (anchorResolution && anchorResolution.moved.length > 0) {
+          const movedFiles = [...new Set(anchorResolution.moved.map(m => m.file))];
+          for (const file of movedFiles) {
+            const { warning } = await this.syncBreakpointsForFile(session, file);
+            if (warning) {
+              syncWarnings.push(warning);
+            }
+          }
+        }
+        if (anchorResolution && anchorResolution.stale.length > 0) {
+          syncWarnings.push(
+            `${anchorResolution.stale.length} statement-anchored breakpoint(s) could not be re-resolved ` +
+            `against the new source and keep their previous line — see anchorResolution.stale`
+          );
+        }
+      }
+
       return {
         success: true,
         redefined: body.redefined,
@@ -3085,6 +3126,8 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         scannedFiles: body.scannedFiles,
         newestTimestamp: body.newestTimestamp,
         replantedBreakpoints: body.replantedBreakpoints,
+        ...(anchorResolution ? { anchorResolution } : {}),
+        ...(syncWarnings.length > 0 ? { warning: syncWarnings.join('; ') } : {}),
       };
     } catch (error) {
       this.logger.error(`[SM redefineClasses ${sessionId}] Error: ${error}`);

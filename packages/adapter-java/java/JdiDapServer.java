@@ -1006,19 +1006,24 @@ public class JdiDapServer {
      * function breakpoints at once, and dispatching by request tag would drop
      * one of them.
      */
-    private void handleClassPreparedForFunctionBreakpoints(ReferenceType refType) {
+    private int handleClassPreparedForFunctionBreakpoints(ReferenceType refType) {
+        int replanted = 0;
         synchronized (fnBpLock) {
-            if (functionBreakpoints.isEmpty()) return;
+            if (functionBreakpoints.isEmpty()) return 0;
             for (Map<String, Object> record : functionBreakpoints) {
                 if (record.containsKey("invalid")) continue;
                 if (!fnBpClassMatches(str(record, "classPart"), refType)) continue;
                 boolean wasVerified = Boolean.TRUE.equals(record.get("verified"));
                 bindFunctionBreakpointOnType(record, refType);
+                if (Boolean.TRUE.equals(record.get("verified"))) {
+                    replanted++;
+                }
                 if (!wasVerified && Boolean.TRUE.equals(record.get("verified"))) {
                     emitFunctionBreakpointChangedEvent(record);
                 }
             }
         }
+        return replanted;
     }
 
     /** First-bind notification, reusing the id from the setFunctionBreakpoints
@@ -1785,7 +1790,9 @@ public class JdiDapServer {
         }
 
         int replanted = handleClassPrepared(refType);
-        handleClassPreparedForFunctionBreakpoints(refType);
+        // Count re-planted function breakpoints too — dropping this return
+        // value made replantedBreakpoints under-report (issue #464 drive-by).
+        replanted += handleClassPreparedForFunctionBreakpoints(refType);
         return replanted;
     }
 

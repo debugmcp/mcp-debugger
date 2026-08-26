@@ -175,6 +175,15 @@ export const JavaAdapterPolicy: AdapterPolicy = {
            argsStr.includes('java-debug');
   },
 
+  // The JDI bridge does NOT suspend the VM on attach (its attach handler
+  // only suspends for stopOnEntry in the DAP args, which the transform does
+  // not send) — so without an explicit pause the session reports PAUSED
+  // while the JVM keeps running, and every thread refuses stackTrace
+  // ("not suspended"), leaving the session uninspectable (issue #465).
+  // pauseAllThreads: the bridge's pause-all suspends the whole VM and
+  // anchors its stopped event to a thread that can actually report frames.
+  getAttachBehavior: () => ({ pauseAfterAttach: true, pauseAllThreads: true }),
+
   // JdiDapServer sends "initialized" during initialize (before launch).
   // sendLaunchBeforeConfig tells the proxy to wait for initialized first,
   // then send launch, then breakpoints + configurationDone.

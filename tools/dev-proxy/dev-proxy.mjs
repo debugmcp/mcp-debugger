@@ -14,6 +14,7 @@
  * Configuration (all env vars, all optional):
  *   DEV_PROXY_PORT               - Backend HTTP port (default: 3001, http/sse modes only)
  *   DEV_PROXY_BUILD_CMD          - Build command (default: "npm run build")
+ *   DEV_PROXY_BUILD_TIMEOUT_MS   - Build timeout in milliseconds (default: 120000)
  *   DEV_PROXY_ROOT               - Project root (default: auto-detected)
  *   DEV_PROXY_BACKEND_TRANSPORT  - "http" (default), "sse" (legacy), or "stdio"
  *   DEV_PROXY_BACKEND_CMD        - Custom backend command override (e.g. "docker run ...")
@@ -52,6 +53,10 @@ const BUILD_CMD = process.env.DEV_PROXY_BUILD_CMD || 'npm run build';
 const PROJECT_ROOT = process.env.DEV_PROXY_ROOT || path.resolve(__dirname, '..', '..');
 const BACKEND_TRANSPORT = process.env.DEV_PROXY_BACKEND_TRANSPORT || 'http';
 const BACKEND_CMD = process.env.DEV_PROXY_BACKEND_CMD || null;
+
+const parsedTimeout = parseInt(process.env.DEV_PROXY_BUILD_TIMEOUT_MS || '', 10);
+const BUILD_TIMEOUT_MS = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 120000;
+
 const HEALTH_POLL_INTERVAL_MS = 300;
 const HEALTH_POLL_TIMEOUT_MS = 30000;
 const KILL_TIMEOUT_MS = 5000;
@@ -263,10 +268,16 @@ class BackendManager {
         cwd: PROJECT_ROOT,
         encoding: 'utf-8',
         stdio: ['ignore', 'pipe', 'pipe'],
-        timeout: 120000,
+        timeout: BUILD_TIMEOUT_MS,
         env: { ...process.env },
       });
     } catch (err) {
+      if (err.killed || err.signal === 'SIGTERM') {
+        throw new Error(
+          `Build timed out after ${Math.floor(BUILD_TIMEOUT_MS / 1000)}s — the build may still have succeeded, re-run manually to confirm`
+        );
+      }
+      
       // execSync's error message embeds raw build stderr — sanitize before it
       // reaches tool responses via err.message (issue #154). Include stdout
       // too: build tools (tsc via npm) print their diagnostics there.

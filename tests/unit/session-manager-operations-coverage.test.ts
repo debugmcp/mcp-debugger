@@ -2026,6 +2026,34 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('pause', { threadId: 1 });
     });
 
+    it('sends a pause-all post-attach pause for java (issue #465)', async () => {
+      // The JDI bridge does not suspend the VM on attach; without this pause
+      // the session reports PAUSED while the JVM keeps running and every
+      // thread refuses stackTrace. pauseAllThreads sends threadId 0 so the
+      // bridge suspends the whole VM and re-anchors its stopped event to a
+      // thread that can report frames.
+      mockSession.language = 'java';
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          return { body: { threads: [{ id: 1, name: 'main' }] } };
+        }
+        return {};
+      });
+
+      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+      });
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 5016,
+        host: '127.0.0.1',
+        stopOnEntry: true
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('pause', { threadId: 0 });
+    });
+
     it('should tolerate a rejected post-attach pause (target already stopped)', async () => {
       mockSession.language = 'ruby';
       mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
@@ -2054,8 +2082,11 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       );
     });
 
-    it('should not send a post-attach pause for policies without the behavior (java)', async () => {
-      mockSession.language = 'java';
+    it('should not send a post-attach pause for policies without the behavior (go)', async () => {
+      // java moved to pauseAfterAttach in issue #465 — go's policy has no
+      // getAttachBehavior (Delve suspends on attach natively), so it keeps
+      // the no-pause default this test pins.
+      mockSession.language = 'go';
       mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
         if (command === 'threads') {
           return { body: { threads: [{ id: 2, name: 'main' }] } };
