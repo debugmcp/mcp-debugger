@@ -687,6 +687,21 @@ describe('JavaDebugAdapter', () => {
       // No mandatory timeout â€” JDI bridge doesn't require it
       expect(config.timeout).toBeUndefined();
     });
+
+    it('forwards unknown adapterConfig keys and strips reserved ones (issues #450/#466)', () => {
+      const config = adapter.transformAttachConfig({
+        request: 'launch', // must not survive: attach transforms pin the request
+        __attachMode: true,
+        processId: 4242,
+        port: 5005,
+        futureJdiOption: 'yes',
+      } as never);
+
+      expect(config.request).toBe('attach');
+      expect((config as Record<string, unknown>).__attachMode).toBeUndefined();
+      expect((config as Record<string, unknown>).processId).toBeUndefined();
+      expect((config as Record<string, unknown>).futureJdiOption).toBe('yes');
+    });
   });
 
   describe('getDefaultAttachConfig', () => {

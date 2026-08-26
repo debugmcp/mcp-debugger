@@ -103,6 +103,29 @@ export class CppDebugAdapter extends EventEmitter implements IDebugAdapter {
   readonly language = DebugLanguage.CPP;
   readonly name = 'C/C++ Debug Adapter';
 
+  // CodeLLDB attach options (https://github.com/vadimcn/codelldb/blob/master/MANUAL.md)
+  // plus our processId sugar (normalized to pid). Unlisted keys still reach
+  // CodeLLDB (forwarded with a warning) — this list only powers recognition +
+  // typo suggestions (#466).
+  readonly supportedAttachKeys = [
+    'processId',
+    'pid',
+    'program',
+    'stopOnEntry',
+    'waitFor',
+    'initCommands',
+    'preRunCommands',
+    'postRunCommands',
+    'exitCommands',
+    'targetCreateCommands',
+    'processCreateCommands',
+    'expressions',
+    'sourceMap',
+    'sourceLanguages',
+    'relativePathBase',
+    'breakpointMode'
+  ] as const;
+
   private state: AdapterState = AdapterState.UNINITIALIZED;
   private dependencies: AdapterDependencies;
   private lastToolchainValidation: ToolchainValidationResult | undefined;

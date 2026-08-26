@@ -72,6 +72,21 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
   readonly language = DebugLanguage.RUBY;
   readonly name = 'Ruby Debug Adapter (rdbg)';
 
+  // Keys the rdbg attach path consumes (debug gem DAP) plus the generic keys
+  // transformAttachConfig special-cases. Unlisted keys still reach rdbg
+  // (forwarded with a warning) — this list only powers recognition + typo
+  // suggestions (#466).
+  readonly supportedAttachKeys = [
+    'host',
+    'port',
+    'stopOnEntry',
+    'justMyCode',
+    'cwd',
+    'env',
+    'localfs',
+    'localfsMap'
+  ] as const;
+
   private state: AdapterState = AdapterState.UNINITIALIZED;
   private dependencies: AdapterDependencies;
   private rubyPathCache = new Map<string, RubyPathCacheEntry>();
@@ -376,7 +391,6 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
   }
 
   transformAttachConfig(config: GenericAttachConfig): RubyAttachConfig {
-    const rawConfig = config as Record<string, unknown>;
     const host = config.host || '127.0.0.1';
     const port = config.port;
 
@@ -387,7 +401,25 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
       );
     }
 
+    const {
+      request: _request,
+      __attachMode: _attachMode,
+      host: _host,
+      port: _port,
+      processId: _processId,
+      processName: _processName,
+      identifierType: _identifierType,
+      localfsMap,
+      ...rest
+    } = config as Record<string, unknown>;
+    void _request; void _attachMode; void _host; void _port;
+    void _processId; void _processName; void _identifierType;
+
+    // Advanced passthrough with the normalized rdbg attach shape on top
+    // (issues #450/#466); localfs stays computed from the host — localfsMap
+    // is the caller's path-mapping lever.
     const attachConfig: RubyAttachConfig = {
+      ...rest,
       type: 'rdbg',
       request: 'attach',
       name: 'Ruby: Attach',
@@ -398,16 +430,8 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
       justMyCode: config.justMyCode ?? true
     };
 
-    if (typeof rawConfig.localfsMap === 'string') {
-      attachConfig.localfsMap = rawConfig.localfsMap;
-    }
-
-    if (config.cwd) {
-      attachConfig.cwd = config.cwd;
-    }
-
-    if (config.env) {
-      attachConfig.env = config.env;
+    if (typeof localfsMap === 'string') {
+      attachConfig.localfsMap = localfsMap;
     }
 
     return attachConfig;

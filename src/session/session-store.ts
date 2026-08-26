@@ -118,6 +118,10 @@ export interface ManagedSession extends DebugSessionInfo {
   // carry into the DAP attach request (issue #450). Recorded per attach by
   // startProxyManager; consumed by attachToProcess for the response warning.
   attachDroppedConfigKeys?: string[];
+  // Caller-provided adapterConfig keys outside the adapter's declared
+  // supportedAttachKeys that were still forwarded to the debug adapter
+  // (issue #466). Same lifecycle as attachDroppedConfigKeys.
+  attachForwardedUnknownConfigKeys?: string[];
   // The most recent real launch, replayed by restart_debugging (issue #238).
   lastLaunch?: LastLaunchSpec;
   // Live DAP mirror endpoint, when exposed via expose_session (issue #217).

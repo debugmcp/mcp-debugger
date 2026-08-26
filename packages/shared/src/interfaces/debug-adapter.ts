@@ -149,14 +149,17 @@ export interface IDebugAdapter extends EventEmitter {
   usesDirectConnectForAttach?(): boolean;
 
   /**
-   * If provided, specifies the exhaustive list of known adapterConfig keys the
-   * debug adapter recognizes for an attach request. When present, the session
-   * layer will warn on any caller-provided keys not in this list and suggest
-   * typo corrections, and will strip them from the payload passed to
-   * transformAttachConfig (ensuring the warning's claim that they were "ignored"
-   * is truthful).
-   * 
-   * If omitted, all caller-provided keys are passed through verbatim.
+   * The adapterConfig keys this adapter's debugger/bridge is known to consume
+   * on attach. When declared, the session layer warns about caller-provided
+   * keys outside this list — with an edit-distance typo suggestion (e.g.
+   * pathMapping → "did you mean pathMappings?") — but still FORWARDS them to
+   * the debug adapter untouched (issue #466), so upstream debugger options the
+   * list doesn't model remain usable. Keys the attach transform itself drops
+   * are reported separately as ignored (issue #450).
+   *
+   * Ground the list in what actually does something: the upstream debugger's
+   * attach schema plus keys transformAttachConfig special-cases. If omitted,
+   * only the transform-drop warning applies.
    */
   readonly supportedAttachKeys?: readonly string[];
 
@@ -164,12 +167,14 @@ export interface IDebugAdapter extends EventEmitter {
    * Transform generic attach config to language-specific format
    * Only called if supportsAttach() returns true
    *
-   * Originally (#450) this favored a deny-list and spread all unknown keys through,
-   * so new adapter capabilities wouldn't require mcp-debugger updates.
-   * Now, adapters are encouraged to declare `supportedAttachKeys` to enable typo 
-   * detection (e.g. warning when an LLM sends pathMapping instead of pathMappings),
-   * while still allowing unstructured passthrough for adapters that omit the list.
-   * 
+   * The result replaces the merged config verbatim as the DAP attach request
+   * body, so prefer a deny-list (strip known-bad keys, spread the rest) over
+   * an allowlist: unknown adapterConfig keys the caller provided should reach
+   * the debug adapter untouched. Caller-provided adapterConfig keys missing
+   * from the result are surfaced as a warning by the session layer (#450);
+   * kept keys outside `supportedAttachKeys` warn as forwarded-unrecognized
+   * with a typo suggestion (#466).
+   *
    * @param config Generic attach configuration
    * @returns Language-specific attach configuration
    */

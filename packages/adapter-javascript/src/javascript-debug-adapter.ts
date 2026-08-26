@@ -42,7 +42,11 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
   readonly name = 'JavaScript/TypeScript Debug Adapter';
 
   // js-debug pwa-node attach options https://github.com/microsoft/vscode-js-debug/blob/main/package.json
+  // plus the generic keys transformAttachConfig special-cases. Unlisted keys
+  // still reach js-debug (forwarded with a warning) — this list only powers
+  // recognition + typo suggestions (#466).
   readonly supportedAttachKeys = [
+    'host',
     'port',
     'address',
     'timeout',
@@ -51,11 +55,18 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     'smartStep',
     'skipFiles',
     'sourceMaps',
+    'sourceMapPathOverrides',
     'outFiles',
+    'outputCapture',
     'resolveSourceMapLocations',
+    'pauseForSourceMap',
     'stopOnEntry',
+    'justMyCode',
     'cwd',
     'env',
+    'restart',
+    'continueOnAttach',
+    'trace',
     'websocketAddress',
     'attachExistingChildren'
   ] as const;
@@ -647,25 +658,29 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
    * mode and JsDebugAdapterPolicy.performHandshake sends a real DAP 'attach'.
    */
   transformAttachConfig(config: GenericAttachConfig): LanguageSpecificAttachConfig {
-    const attachConfig: LanguageSpecificAttachConfig = {
+    const {
+      request: _request,
+      __attachMode: _attachMode,
+      processId: _processId,
+      processName: _processName,
+      identifierType: _identifierType,
+      host,
+      port,
+      ...rest
+    } = config as Record<string, unknown>;
+    void _request; void _attachMode; void _processId; void _processName;
+    void _identifierType;
+
+    // Advanced passthrough (localRoot/remoteRoot, sourceMaps, skipFiles, …)
+    // with the normalized pwa-node attach shape on top (issues #450/#466).
+    return {
+      ...rest,
       type: 'pwa-node',
       request: 'attach',
       name: 'Attach to Node.js process',
-      host: config.host || '127.0.0.1',
-      port: config.port,
-    };
-
-    if (config.stopOnEntry !== undefined) {
-      attachConfig.stopOnEntry = config.stopOnEntry;
-    }
-    if (config.justMyCode !== undefined) {
-      attachConfig.justMyCode = config.justMyCode;
-    }
-    if (config.timeout !== undefined) {
-      attachConfig.timeout = config.timeout;
-    }
-
-    return attachConfig;
+      host: (host as string | undefined) || '127.0.0.1',
+      port: port as number | undefined,
+    } as LanguageSpecificAttachConfig;
   }
 
   getDefaultAttachConfig(): Partial<GenericAttachConfig> {

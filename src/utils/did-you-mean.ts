@@ -31,12 +31,16 @@ function levenshtein(a: string, b: string): number {
 /**
  * Finds the closest matching string from a list of valid strings using Levenshtein distance.
  * Returns the closest match if its distance is within the threshold, otherwise returns null.
- * For very short strings (<= 3 characters), the threshold is strictly 1 to avoid noisy suggestions.
+ *
+ * Real typos are almost always 1-2 edits; distance 3 starts reaching *different*
+ * keys (a wrong suggestion an agent will obey), so the default threshold is 2.
+ * For short strings (<= 4 characters) the threshold is strictly 1 — e.g. `host`
+ * must not suggest `port`.
  */
-export function didYouMean(target: string, validStrings: readonly string[], threshold = 3): string | null {
+export function didYouMean(target: string, validStrings: readonly string[], threshold = 2): string | null {
   if (!validStrings || validStrings.length === 0) return null;
 
-  const actualThreshold = target.length <= 3 ? 1 : threshold;
+  const actualThreshold = target.length <= 4 ? 1 : threshold;
 
   let closestMatch: string | null = null;
   let minDistance = Infinity;

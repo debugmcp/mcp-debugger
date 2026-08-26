@@ -106,6 +106,19 @@ export class DotnetDebugAdapter extends EventEmitter implements IDebugAdapter {
   readonly language = DebugLanguage.DOTNET;
   readonly name = '.NET Debug Adapter (netcoredbg)';
 
+  // netcoredbg attach options plus the generic keys transformAttachConfig
+  // special-cases (sourcePaths feeds PDB discovery). Unlisted keys still reach
+  // netcoredbg (forwarded with a warning) — this list only powers recognition
+  // + typo suggestions (#466).
+  readonly supportedAttachKeys = [
+    'processId',
+    'justMyCode',
+    'stopOnEntry',
+    'sourcePaths',
+    'sourceFileMap',
+    'symbolOptions'
+  ] as const;
+
   private state: AdapterState = AdapterState.UNINITIALIZED;
   private dependencies: AdapterDependencies;
 
@@ -405,23 +418,42 @@ export class DotnetDebugAdapter extends EventEmitter implements IDebugAdapter {
       }
     }
 
-    const attachConfig = {
+    const {
+      request: _request,
+      __attachMode: _attachMode,
+      host: _host,
+      port: _port,
+      processName: _processName,
+      identifierType: _identifierType,
+      ...rest
+    } = config as Record<string, unknown>;
+    void _request; void _attachMode; void _host; void _port;
+    void _processName; void _identifierType;
+
+    // Advanced passthrough with the normalized netcoredbg attach shape on top
+    // (issues #450/#466). The computed keys stay authoritative — in particular
+    // terminateDebuggee: false (never kill the debuggee on detach) must not be
+    // caller-overridable.
+    const attachConfig: Record<string, unknown> = {
+      ...rest,
       type: 'coreclr',
       request: 'attach',
       name: '.NET: Attach',
       processId: config.processId ? Number(config.processId) : undefined,
       justMyCode: config.justMyCode ?? true,
       // CRITICAL: Never terminate the debuggee on detach
-      terminateDebuggee: false,
-      sourceFileMap: pdbScanDirs ? Object.fromEntries(
-        pdbScanDirs.map(p => [p, p])
-      ) : undefined,
-      symbolOptions: symbolSearchPaths.length > 0
-        ? { searchPaths: symbolSearchPaths, searchMicrosoftSymbolServer: false }
-        : undefined
+      terminateDebuggee: false
     };
+    // Computed values win; a caller-provided sourceFileMap/symbolOptions from
+    // the spread survives when there is nothing computed to replace it.
+    if (pdbScanDirs) {
+      attachConfig.sourceFileMap = Object.fromEntries(pdbScanDirs.map(p => [p, p]));
+    }
+    if (symbolSearchPaths.length > 0) {
+      attachConfig.symbolOptions = { searchPaths: symbolSearchPaths, searchMicrosoftSymbolServer: false };
+    }
 
-    return attachConfig;
+    return attachConfig as LanguageSpecificAttachConfig;
   }
 
   getDefaultAttachConfig(): Partial<GenericAttachConfig> {

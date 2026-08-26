@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Tests for redefine_classes tool and attach stopOnEntry behavior
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -438,7 +438,7 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
         state: 'paused',
         data: {
           message: 'Attached to process at 127.0.0.1:5678',
-          warning: 'adapterConfig key(s) not supported by the python attach request were ignored: pathMapping (did you mean pathMappings?), remoteRoot',
+          warning: 'adapterConfig key(s) not supported by the python attach request were ignored: remoteRoot; adapterConfig key(s) not recognized by mcp-debugger were forwarded to the python adapter as-is: pathMapping (did you mean pathMappings?)',
         },
       });
 
@@ -452,7 +452,8 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
 
       const payload = JSON.parse(result.content[0].text);
       expect(payload.success).toBe(true);
-      expect(payload.warning).toContain('pathMapping (did you mean pathMappings?), remoteRoot');
+      expect(payload.warning).toContain('were ignored: remoteRoot');
+      expect(payload.warning).toContain('forwarded to the python adapter as-is: pathMapping (did you mean pathMappings?)');
     });
 
     it('adds no top-level warning when the attach succeeded cleanly', async () => {

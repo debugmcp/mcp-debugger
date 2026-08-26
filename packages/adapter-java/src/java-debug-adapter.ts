@@ -51,6 +51,21 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
   readonly language = DebugLanguage.JAVA;
   readonly name = 'Java Debug Adapter (JDI)';
 
+  // Keys the JDI bridge's attach handler reads (JdiDapServer.handleAttach)
+  // plus the generic keys transformAttachConfig special-cases. Unlisted keys
+  // still reach the bridge (forwarded with a warning) — this list only powers
+  // recognition + typo suggestions (#466).
+  readonly supportedAttachKeys = [
+    'host',
+    'hostName',
+    'port',
+    'stopOnEntry',
+    'timeout',
+    'sourcePaths',
+    'cwd',
+    'env'
+  ] as const;
+
   private state: AdapterState = AdapterState.UNINITIALIZED;
   private dependencies: AdapterDependencies;
 
@@ -319,30 +334,28 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
   }
 
   transformAttachConfig(config: GenericAttachConfig): LanguageSpecificAttachConfig {
-    const attachConfig: LanguageSpecificAttachConfig = {
+    const {
+      request: _request,
+      __attachMode: _attachMode,
+      processId: _processId,
+      processName: _processName,
+      identifierType: _identifierType,
+      host,
+      port,
+      ...rest
+    } = config as Record<string, unknown>;
+    void _request; void _attachMode; void _processId; void _processName;
+    void _identifierType;
+
+    // Advanced passthrough (the JDI bridge ignores keys it doesn't read) with
+    // the normalized attach shape on top (issues #450/#466).
+    return {
+      ...rest,
       type: 'java',
       request: 'attach',
-      host: config.host || 'localhost',
-      port: config.port,
-    };
-
-    if (config.sourcePaths) {
-      attachConfig.sourcePaths = config.sourcePaths;
-    }
-    if (config.stopOnEntry !== undefined) {
-      attachConfig.stopOnEntry = config.stopOnEntry;
-    }
-    if (config.cwd) {
-      attachConfig.cwd = config.cwd;
-    }
-    if (config.env) {
-      attachConfig.env = config.env;
-    }
-    if (config.timeout !== undefined) {
-      attachConfig.timeout = config.timeout;
-    }
-
-    return attachConfig;
+      host: (host as string | undefined) || 'localhost',
+      port: port as number | undefined,
+    } as LanguageSpecificAttachConfig;
   }
 
   getDefaultAttachConfig(): Partial<GenericAttachConfig> {
