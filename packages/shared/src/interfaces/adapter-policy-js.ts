@@ -41,9 +41,34 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
   childSessionStrategy: 'launchWithPendingTarget',
   buildChildStartArgs: (pendingId: string, parentConfig: Record<string, unknown>) => {
     const type = typeof parentConfig?.type === 'string' ? (parentConfig.type as string) : 'pwa-node';
+    // Carry the parent's forwardable attach extras (localRoot/remoteRoot,
+    // sourceMaps, skipFiles, …) into the child — source resolution happens
+    // here, so this is where they take effect (issue #466). The orchestration
+    // keys stay pinned/excluded: address/port/attachSimplePort would make the
+    // child a second direct attach to the same inspector (the #124
+    // fight-over-the-process failure), and stopOnEntry is consumed by
+    // ChildSessionManager itself, not js-debug.
+    const {
+      request: _request,
+      name: _name,
+      __pendingTargetId: _pendingTargetId,
+      host: _host,
+      address: _address,
+      port: _port,
+      attachSimplePort: _attachSimplePort,
+      attachExistingChildren: _attachExistingChildren,
+      continueOnAttach: _continueOnAttach,
+      stopOnEntry: _stopOnEntry,
+      type: _type,
+      ...parentExtras
+    } = parentConfig ?? {};
+    void _request; void _name; void _pendingTargetId; void _host; void _address;
+    void _port; void _attachSimplePort; void _attachExistingChildren;
+    void _continueOnAttach; void _stopOnEntry; void _type;
     return {
       command: 'attach',
       args: {
+        ...parentExtras,
         type,
         request: 'attach',
         __pendingTargetId: pendingId,
@@ -392,7 +417,18 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
       // fight over the process — every pause is immediately resumed by the
       // other target and stackTrace fails with "Thread is not paused"
       // (observed empirically while fixing issue #124).
+      // Caller-provided attach extras (localRoot/remoteRoot, sourceMaps,
+      // skipFiles, …) are spread through so they reach js-debug — and, via the
+      // recorded attach args, its child sessions (issue #466). The policy's
+      // own keys stay on top: the #124 fight-over-the-process failure modes
+      // live exactly in these knobs.
+      const {
+        attachSimplePort: _ignoredSimplePort,
+        ...callerAttachExtras
+      } = baseRecord;
+      void _ignoredSimplePort;
       const attachArgs: Record<string, unknown> = {
+        ...callerAttachExtras,
         type,
         request: 'attach',
         address: attachHost,

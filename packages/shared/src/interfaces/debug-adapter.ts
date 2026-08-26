@@ -149,6 +149,21 @@ export interface IDebugAdapter extends EventEmitter {
   usesDirectConnectForAttach?(): boolean;
 
   /**
+   * The adapterConfig keys this adapter's debugger/bridge is known to consume
+   * on attach. When declared, the session layer warns about caller-provided
+   * keys outside this list — with an edit-distance typo suggestion (e.g.
+   * pathMapping → "did you mean pathMappings?") — but still FORWARDS them to
+   * the debug adapter untouched (issue #466), so upstream debugger options the
+   * list doesn't model remain usable. Keys the attach transform itself drops
+   * are reported separately as ignored (issue #450).
+   *
+   * Ground the list in what actually does something: the upstream debugger's
+   * attach schema plus keys transformAttachConfig special-cases. If omitted,
+   * only the transform-drop warning applies.
+   */
+  readonly supportedAttachKeys?: readonly string[];
+
+  /**
    * Transform generic attach config to language-specific format
    * Only called if supportsAttach() returns true
    *
@@ -156,7 +171,10 @@ export interface IDebugAdapter extends EventEmitter {
    * body, so prefer a deny-list (strip known-bad keys, spread the rest) over
    * an allowlist: unknown adapterConfig keys the caller provided should reach
    * the debug adapter untouched. Caller-provided adapterConfig keys missing
-   * from the result are surfaced as a warning by the session layer (#450).
+   * from the result are surfaced as a warning by the session layer (#450);
+   * kept keys outside `supportedAttachKeys` warn as forwarded-unrecognized
+   * with a typo suggestion (#466).
+   *
    * @param config Generic attach configuration
    * @returns Language-specific attach configuration
    */

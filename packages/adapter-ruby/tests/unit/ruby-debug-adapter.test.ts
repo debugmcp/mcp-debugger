@@ -418,6 +418,25 @@ describe('RubyDebugAdapter', () => {
       .toThrow(AdapterError);
   });
 
+  it('forwards unknown attach keys and strips reserved ones (issues #450/#466)', () => {
+    const adapter = new RubyDebugAdapter(createDependencies());
+    const config = adapter.transformAttachConfig({
+      request: 'attach',
+      __attachMode: true,
+      processId: 4242,
+      host: '127.0.0.1',
+      port: 12345,
+      nonstop: true
+    } as never) as Record<string, unknown>;
+
+    expect(config.request).toBe('attach');
+    expect(config.__attachMode).toBeUndefined();
+    expect(config.processId).toBeUndefined();
+    expect(config.nonstop).toBe(true);
+    // Normalized keys stay authoritative
+    expect(config.localfs).toBe(true);
+  });
+
   it('tracks state and thread id from DAP events', () => {
     const adapter = new RubyDebugAdapter(createDependencies());
 

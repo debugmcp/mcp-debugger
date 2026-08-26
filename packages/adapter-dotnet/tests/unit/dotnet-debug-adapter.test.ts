@@ -465,6 +465,32 @@ describe('DotnetDebugAdapter', () => {
       expect(defaults).toBeDefined();
       expect(defaults!.justMyCode).toBe(true);
     });
+
+    it('forwards unknown attach keys but keeps terminateDebuggee non-overridable (issues #450/#466)', () => {
+      const result = adapter.transformAttachConfig({
+        request: 'attach',
+        __attachMode: true,
+        processId: 1234,
+        terminateDebuggee: true, // must lose to the computed false
+        futureNetcoredbgOption: 'on'
+      } as never) as Record<string, unknown>;
+
+      expect(result.request).toBe('attach');
+      expect(result.__attachMode).toBeUndefined();
+      expect(result.futureNetcoredbgOption).toBe('on');
+      expect(result.terminateDebuggee).toBe(false);
+    });
+
+    it('keeps a caller-provided sourceFileMap when nothing is computed', () => {
+      getProcessExecutableDirMock.mockReturnValue(null);
+      const result = adapter.transformAttachConfig({
+        request: 'attach',
+        processId: 1234,
+        sourceFileMap: { '/remote': '/local' }
+      } as never) as Record<string, unknown>;
+
+      expect(result.sourceFileMap).toEqual({ '/remote': '/local' });
+    });
   });
 
   // ===== Connection Management =====

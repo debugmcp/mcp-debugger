@@ -397,8 +397,12 @@ export class MinimalDapClient extends EventEmitter {
    * reverse startDebugging configuration only carries
    * {type, name, __pendingTargetId}: without this, ChildSessionManager cannot
    * distinguish attach-mode children from launch-mode children, nor see
-   * whether the user asked for an entry stop (issue #124). Launch-mode
-   * configs are returned unchanged.
+   * whether the user asked for an entry stop (issue #124). Caller-provided
+   * attach extras (localRoot/remoteRoot, sourceMaps, skipFiles, …) ride along
+   * too — the child session is where source resolution actually happens, so
+   * dropping them here would make forwarded attach options inert (issue #466).
+   * js-debug's own child keys win over the parent's. Launch-mode configs are
+   * returned unchanged.
    */
   private enrichChildConfig(config: ChildSessionConfig): ChildSessionConfig {
     const start = this.lastStartRequestArgs;
@@ -406,6 +410,7 @@ export class MinimalDapClient extends EventEmitter {
       return config;
     }
     const parentConfig: Record<string, unknown> = {
+      ...start,
       ...(config.parentConfig ?? {}),
       request: 'attach'
     };

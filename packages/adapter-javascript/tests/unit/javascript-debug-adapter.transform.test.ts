@@ -330,4 +330,51 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
       expect(env.NODE_OPTIONS ?? '').not.toContain('exitcode-shim');
     });
   });
+
+  describe('transformAttachConfig passthrough (issues #450/#466)', () => {
+    it('normalizes the pwa-node attach shape and defaults the host', () => {
+      const adapter = new JavascriptDebugAdapter(deps);
+      const cfg = adapter.transformAttachConfig({
+        request: 'attach',
+        port: 9229,
+        stopOnEntry: true,
+        justMyCode: false,
+        timeout: 15000
+      } as any) as Record<string, unknown>;
+
+      expect(cfg.type).toBe('pwa-node');
+      expect(cfg.request).toBe('attach');
+      expect(cfg.host).toBe('127.0.0.1');
+      expect(cfg.port).toBe(9229);
+      expect(cfg.stopOnEntry).toBe(true);
+      expect(cfg.justMyCode).toBe(false);
+      expect(cfg.timeout).toBe(15000);
+    });
+
+    it('forwards advanced js-debug options and strips reserved keys', () => {
+      const adapter = new JavascriptDebugAdapter(deps);
+      const cfg = adapter.transformAttachConfig({
+        request: 'launch', // must not survive: attach transforms pin the request
+        __attachMode: true,
+        processId: 4242,
+        host: '10.0.0.5',
+        port: 9229,
+        localRoot: '/local/src',
+        remoteRoot: '/app',
+        sourceMaps: false,
+        skipFiles: ['<node_internals>/**'],
+        continueOnAttach: true
+      } as any) as Record<string, unknown>;
+
+      expect(cfg.request).toBe('attach');
+      expect(cfg.__attachMode).toBeUndefined();
+      expect(cfg.processId).toBeUndefined();
+      expect(cfg.host).toBe('10.0.0.5');
+      expect(cfg.localRoot).toBe('/local/src');
+      expect(cfg.remoteRoot).toBe('/app');
+      expect(cfg.sourceMaps).toBe(false);
+      expect(cfg.skipFiles).toEqual(['<node_internals>/**']);
+      expect(cfg.continueOnAttach).toBe(true);
+    });
+  });
 });

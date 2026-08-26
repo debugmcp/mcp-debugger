@@ -25,6 +25,7 @@ import { ProxyConfig } from '../proxy/proxy-config.js';
 import { MIRROR_EXPOSE_COMMAND, MIRROR_UNEXPOSE_COMMAND } from '../proxy/dap-proxy-interfaces.js';
 import { ErrorMessages } from '../utils/error-messages.js';
 import { checkLaunchToolchain } from '../utils/language-availability.js';
+import { didYouMean } from '../utils/did-you-mean.js';
 import { resolveStatement } from '../utils/breakpoint-resolver.js';
 import { normalizeBreakpointMessage } from '../utils/breakpoint-message.js';
 import { SessionManagerData } from './session-manager-data.js';
@@ -296,19 +297,44 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       transformedLaunchConfig = undefined;
     }
 
-    // Attach transforms may be allowlists that silently discard adapterConfig
-    // keys (issue #450) — record the drops so attachToProcess can warn the
-    // caller. Assigned unconditionally so a prior attach's record never leaks.
+    // Attach transforms may strip adapterConfig keys (issue #450) — record the
+    // drops so attachToProcess can warn the caller. Keys the transform kept but
+    // the adapter doesn't declare in supportedAttachKeys are forwarded to the
+    // debug adapter as-is, and recorded separately so the caller learns they
+    // weren't recognized (issue #466) — never deleted, so upstream debugger
+    // capabilities stay reachable without an mcp-debugger release. Both records
+    // are assigned unconditionally so a prior attach's record never leaks.
     if (isAttachMode) {
-      const dropped = transformedLaunchConfig
-        ? adapterExtraKeys.filter((key) => !(key in transformedLaunchConfig!))
-        : [];
+      const supportedKeys = adapter.supportedAttachKeys;
+      // A typo of a supported key is the likeliest caller mistake — annotate
+      // both buckets with an edit-distance suggestion when a list is declared.
+      const describeKey = (key: string): string => {
+        const suggestion = supportedKeys ? didYouMean(key, supportedKeys) : null;
+        return suggestion ? `${key} (did you mean ${suggestion}?)` : key;
+      };
+
+      const dropped: string[] = [];
+      const forwardedUnknown: string[] = [];
+      for (const key of adapterExtraKeys) {
+        if (transformedLaunchConfig && !(key in transformedLaunchConfig)) {
+          dropped.push(describeKey(key));
+        } else if (supportedKeys && !supportedKeys.includes(key)) {
+          forwardedUnknown.push(describeKey(key));
+        }
+      }
+
       if (dropped.length > 0) {
         this.logger.warn(
           `[SessionManager] ${session.language} attach transform dropped adapterConfig key(s) for session ${sessionId}: ${dropped.join(', ')}`
         );
       }
+      if (forwardedUnknown.length > 0) {
+        this.logger.warn(
+          `[SessionManager] ${session.language} attach forwarded unrecognized adapterConfig key(s) for session ${sessionId}: ${forwardedUnknown.join(', ')}`
+        );
+      }
       session.attachDroppedConfigKeys = dropped.length > 0 ? dropped : undefined;
+      session.attachForwardedUnknownConfigKeys = forwardedUnknown.length > 0 ? forwardedUnknown : undefined;
     }
 
     const adapterWithToolchain = adapter as {
@@ -2908,12 +2934,25 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         attachConfig
       };
       // Surface adapterConfig keys the adapter's attach transform dropped
-      // (issue #450) — "unknown attach keys should either work or warn".
+      // (issue #450) and keys forwarded to the adapter unrecognized (issue
+      // #466) — "unknown attach keys should either work or warn".
       const droppedKeys = session.attachDroppedConfigKeys;
+      const forwardedKeys = session.attachForwardedUnknownConfigKeys;
+      session.attachDroppedConfigKeys = undefined;
+      session.attachForwardedUnknownConfigKeys = undefined;
+      const warningParts: string[] = [];
       if (droppedKeys && droppedKeys.length > 0) {
-        session.attachDroppedConfigKeys = undefined;
-        attachData.warning =
-          `adapterConfig key(s) not supported by the ${session.language} attach request were ignored: ${droppedKeys.join(', ')}`;
+        warningParts.push(
+          `adapterConfig key(s) not supported by the ${session.language} attach request were ignored: ${droppedKeys.join(', ')}`
+        );
+      }
+      if (forwardedKeys && forwardedKeys.length > 0) {
+        warningParts.push(
+          `adapterConfig key(s) not recognized by mcp-debugger were forwarded to the ${session.language} adapter as-is: ${forwardedKeys.join(', ')}`
+        );
+      }
+      if (warningParts.length > 0) {
+        attachData.warning = warningParts.join('; ');
       }
 
       return {

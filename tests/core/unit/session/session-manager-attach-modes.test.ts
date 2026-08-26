@@ -293,14 +293,18 @@ describe('SessionManagerOperations attach modes', () => {
   });
 
   describe('dropped adapterConfig keys warning (issue #450)', () => {
-    function makeDirectConnectAdapter(transform: (cfg: unknown) => unknown) {
+    function makeDirectConnectAdapter(
+      transform: (cfg: unknown) => unknown,
+      supportedAttachKeys?: readonly string[]
+    ) {
       return {
         resolveExecutablePath: vi.fn(),
         buildAdapterCommand: vi.fn(),
         usesDirectConnectForAttach: vi.fn().mockReturnValue(true),
         supportsAttach: vi.fn().mockReturnValue(true),
         transformAttachConfig: vi.fn().mockImplementation(transform),
-        getDefaultExecutableName: vi.fn().mockReturnValue('ruby')
+        getDefaultExecutableName: vi.fn().mockReturnValue('ruby'),
+        ...(supportedAttachKeys ? { supportedAttachKeys } : {})
       };
     }
 
@@ -366,6 +370,77 @@ describe('SessionManagerOperations attach modes', () => {
 
       expect(result.success).toBe(true);
       expect((result.data as { warning?: string }).warning).toBeUndefined();
+    });
+
+    it('forwards keys outside supportedAttachKeys with a did-you-mean warning (issue #466)', async () => {
+      const adapterStub = makeDirectConnectAdapter(
+        (cfg) => cfg,
+        ['pathMappings', 'justMyCode']
+      );
+      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+
+      const result = await operations.attachToProcess('test-session', {
+        host: '127.0.0.1',
+        port: 12345,
+        stopOnEntry: false,
+        adapterConfig: { pathMapping: [{ localRoot: 'C:\\x', remoteRoot: '/app' }] }
+      });
+
+      expect(result.success).toBe(true);
+      const warning = (result.data as { warning?: string }).warning;
+      expect(warning).toContain('not recognized by mcp-debugger were forwarded to the ruby adapter as-is');
+      expect(warning).toContain('pathMapping (did you mean pathMappings?)');
+      expect(warning).not.toContain('were ignored');
+
+      // Forwarded means forwarded: the typo'd key must still reach the DAP
+      // attach config handed to the proxy.
+      const proxyConfig = mockProxyManager.start.mock.calls[0][0];
+      expect(proxyConfig.launchConfig).toHaveProperty('pathMapping');
+    });
+
+    it('still warns "ignored" for a listed key the transform drops (union with #450)', async () => {
+      const adapterStub = makeDirectConnectAdapter(
+        (cfg) => ({ request: 'attach', keepMe: (cfg as Record<string, unknown>).keepMe }),
+        ['keepMe', 'alsoSupported']
+      );
+      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+
+      const result = await operations.attachToProcess('test-session', {
+        host: '127.0.0.1',
+        port: 12345,
+        stopOnEntry: false,
+        adapterConfig: { keepMe: 1, alsoSupported: 2 }
+      });
+
+      expect(result.success).toBe(true);
+      const warning = (result.data as { warning?: string }).warning;
+      expect(warning).toContain('were ignored: alsoSupported');
+      expect(warning).not.toContain('keepMe');
+    });
+
+    it('reports dropped and forwarded-unrecognized keys in one combined warning', async () => {
+      const adapterStub = makeDirectConnectAdapter(
+        (cfg) => {
+          const c = cfg as Record<string, unknown>;
+          return { request: 'attach', keepMe: c.keepMe, mystery: c.mystery };
+        },
+        ['keepMe']
+      );
+      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+
+      const result = await operations.attachToProcess('test-session', {
+        host: '127.0.0.1',
+        port: 12345,
+        stopOnEntry: false,
+        adapterConfig: { keepMe: 1, mystery: 2, localRoot: 'C:\\x' }
+      });
+
+      expect(result.success).toBe(true);
+      const warning = (result.data as { warning?: string }).warning ?? '';
+      expect(warning).toContain('were ignored: localRoot');
+      expect(warning).toContain('forwarded to the ruby adapter as-is: mystery');
+      expect(warning.indexOf('; ')).toBeGreaterThan(0);
+      expect(warning).not.toContain('keepMe');
     });
 
     it('does not leak a stale warning into a later attach on the same session', async () => {
