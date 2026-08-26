@@ -357,6 +357,11 @@ describe('MCP Server Go Debugging Smoke Test @requires-go', () => {
   it('surfaces every stage of feedback for a bare fn-bp name that never binds (#308)', async (ctx) => {
     // The full loop the issue asked for: hint at set time, warning at
     // launch, and a post-exit explanation in list_breakpoints + get_output.
+    // A bare 'main' no longer exercises the never-binds path since #484
+    // auto-qualifies it to 'main.main' (tested below). Delve matches a bare
+    // name against function BASE names across the whole binary — runtime
+    // included (e.g. 'compute' binds to runtime.metricReader.compute) — so
+    // the name here must match nothing in the symbol table at all.
     const { execSync } = await import('child_process');
     try {
       execSync('go version', { stdio: 'ignore' });
@@ -388,11 +393,11 @@ describe('MCP Server Go Debugging Smoke Test @requires-go', () => {
       // Stage 1: set-time hint for the bare identifier.
       const bpResponse = await callToolSafely(mcpClient!, 'set_breakpoint', {
         sessionId,
-        function: 'main'
+        function: 'frobnicate'
       });
       expect(bpResponse.success).toBe(true);
       expect((bpResponse as { warning?: string }).warning).toMatch(/package-qualified/);
-      expect((bpResponse as { warning?: string }).warning).toContain("'main.main'");
+      expect((bpResponse as { warning?: string }).warning).toContain("'main.frobnicate'");
 
       const startResponse = parseSdkToolResult(await mcpClient!.callTool({
         name: 'start_debugging',
@@ -425,18 +430,131 @@ describe('MCP Server Go Debugging Smoke Test @requires-go', () => {
       }
       expect(snap?.state, 'program should run to completion without pausing').toBe('stopped');
 
-      // Stage 3: post-exit explanation in list_breakpoints...
+      // Stage 3: post-exit explanation in list_breakpoints. The server
+      // stamps "Never bound during this run" only when the adapter left the
+      // message empty (session-manager-core noteUnboundFunctionBreakpoints);
+      // accept a Delve-supplied diagnostic too — either way the agent gets
+      // an explanation.
       const listRes = await callToolSafely(mcpClient!, 'list_breakpoints', { sessionId });
       const fnBp = ((listRes as { functionBreakpoints?: Array<{ verified?: boolean; message?: string }> }).functionBreakpoints ?? [])[0];
       expect(fnBp?.verified).toBe(false);
-      expect(fnBp?.message).toMatch(/Never bound during this run/);
+      expect(fnBp?.message ?? '').toMatch(/Never bound during this run|not found|could not find/i);
 
-      // ...and in the captured output.
-      const outputResult = await callToolSafely(mcpClient!, 'get_output', { sessionId });
-      const entries = (outputResult.entries ?? []) as Array<{ category?: string; output?: string }>;
-      const warnEntry = entries.find(e => e.output?.includes('never bound during this run'));
-      expect(warnEntry, 'get_output should carry the never-bound warning').toBeDefined();
+      // ...and in the captured output (only emitted alongside the server's
+      // own never-bound stamp).
+      if (/Never bound during this run/.test(fnBp?.message ?? '')) {
+        const outputResult = await callToolSafely(mcpClient!, 'get_output', { sessionId });
+        const entries = (outputResult.entries ?? []) as Array<{ category?: string; output?: string }>;
+        const warnEntry = entries.find(e => e.output?.includes('never bound during this run'));
+        expect(warnEntry, 'get_output should carry the never-bound warning').toBeDefined();
+      }
     } finally {
+      // Close the session before unlinking: on Windows the unlink EBUSYs
+      // (silently, in this catch) while the debuggee still holds the binary.
+      if (sessionId) {
+        try {
+          await callToolSafely(mcpClient!, 'close_debug_session', { sessionId });
+        } catch {
+          // Session may already be closed
+        }
+        sessionId = null;
+      }
+      try {
+        const fs = await import('fs');
+        if (fs.existsSync(testBinary)) {
+          fs.unlinkSync(testBinary);
+        }
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+  }, 60000);
+
+  it("auto-qualifies a bare 'main' fn-bp to 'main.main' and pauses there (#484)", async (ctx) => {
+    // A bare 'main' can only mean main.main and would never bind as-is, so
+    // the go policy rewrites it instead of storing a permanently-dead
+    // breakpoint (#467/#484) — with the rewrite disclosed in the response.
+    const { execSync } = await import('child_process');
+    try {
+      execSync('go version', { stdio: 'ignore' });
+      execSync('dlv version', { stdio: 'ignore' });
+    } catch {
+      console.log('[Go Smoke Test] Go/Delve not installed, skipping auto-qualify test');
+      return;
+    }
+
+    const testGoFile = path.resolve(ROOT, 'examples', 'go', 'hello_world.go');
+    const testBinary = path.resolve(ROOT, 'examples', 'go', 'hello_world_autoqualify_test');
+    try {
+      execSync(`go build -gcflags="all=-N -l" -o "${testBinary}" "${testGoFile}"`, {
+        cwd: path.dirname(testGoFile),
+        stdio: 'pipe'
+      });
+    } catch {
+      console.log('[Go Smoke Test] Failed to compile test binary, skipping auto-qualify test');
+      return;
+    }
+
+    try {
+      const createResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'create_debug_session',
+        arguments: { language: 'go', name: 'go-fnbp-autoqualify' }
+      }));
+      sessionId = createResponse.sessionId as string;
+
+      const bpResponse = await callToolSafely(mcpClient!, 'set_breakpoint', {
+        sessionId,
+        function: 'main'
+      });
+      expect(bpResponse.success).toBe(true);
+      expect((bpResponse as { warning?: string }).warning).toMatch(/Auto-qualified/);
+      expect((bpResponse as { requestedName?: string }).requestedName).toBe('main');
+      expect((bpResponse as { functionName?: string }).functionName).toBe('main.main');
+
+      const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: testBinary,
+          args: [],
+          dapLaunchArgs: { stopOnEntry: false }
+        }
+      }));
+      if (!startResponse.success) {
+        skipIfSpawnBlocked(ctx, startResponse, 'Go');
+      }
+
+      // The rewritten breakpoint binds and fires — the whole point of #484.
+      const deadline = Date.now() + 20000;
+      let snap: { state?: string; lastStop?: { reason?: string } } | undefined;
+      while (Date.now() < deadline) {
+        const res = parseSdkToolResult(await mcpClient!.callTool({ name: 'list_debug_sessions', arguments: {} }));
+        snap = ((res.sessions ?? []) as Array<{ id: string; state?: string; lastStop?: { reason?: string } }>)
+          .find(s => s.id === sessionId);
+        if (snap?.state === 'paused') break;
+        await new Promise(r => setTimeout(r, 500));
+      }
+      expect(snap?.state, 'session should pause at main.main').toBe('paused');
+      expect(snap!.lastStop?.reason).toBe('function breakpoint');
+
+      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+      const exitDeadline = Date.now() + 20000;
+      while (Date.now() < exitDeadline) {
+        const res = parseSdkToolResult(await mcpClient!.callTool({ name: 'list_debug_sessions', arguments: {} }));
+        snap = ((res.sessions ?? []) as Array<{ id: string; state?: string }>).find(s => s.id === sessionId);
+        if (snap?.state === 'stopped') break;
+        await new Promise(r => setTimeout(r, 500));
+      }
+      expect(snap?.state, 'program should run to completion after continue').toBe('stopped');
+    } finally {
+      if (sessionId) {
+        try {
+          await callToolSafely(mcpClient!, 'close_debug_session', { sessionId });
+        } catch {
+          // Session may already be closed
+        }
+        sessionId = null;
+      }
       try {
         const fs = await import('fs');
         if (fs.existsSync(testBinary)) {

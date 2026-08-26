@@ -216,6 +216,9 @@ examples/go/**/*.exe
 examples/go/**/hello_world
 examples/go/**/hello_world_bin
 examples/go/**/hello_world_test
+examples/go/**/hello_world_bare_test
+examples/go/**/hello_world_fnbp_test
+examples/go/**/hello_world_autoqualify_test
 examples/go/**/pause_test_bin
 __debug_bin*
 
