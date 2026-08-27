@@ -376,6 +376,7 @@ Then get the local variables:
 - 💎 [Ruby Debugging Guide](./docs/ruby/README.md) – Ruby debugging with `rdbg`, including remote attach
 - 🔬 [Case Study: the initialize response that never came](./docs/case-studies/rdbg-initialize-response-stall.md) – mcp-debugger debugging itself to root-cause a Ruby launch stall
 - 🔬 [Case Study: attaching the debugger to itself](./docs/case-studies/self-attach-fork-release-and-the-500ms-ack-window.md) – live-patching a running mcp-debugger through its own `evaluate_expression` to catch a race strace couldn't see
+- 🔬 [Case Study: the pause that always succeeded](./docs/case-studies/js-attach-pause-and-the-smart-stepper.md) – reading js-debug's own CDP trace to catch its smart-stepper eating user pauses on idle servers
 - 🟨 [JavaScript Debugging Guide](./docs/javascript/README.md) – JavaScript/TypeScript features
 - 🐹 [Go Debugging Guide](./docs/go/README.md) – Go debugging with Delve
 - ☕ [Java Debugging Guide](./docs/java/README.md) – Java debugging with JDI bridge
