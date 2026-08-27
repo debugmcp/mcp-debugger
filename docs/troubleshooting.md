@@ -179,6 +179,16 @@ This guide provides solutions for common issues you might encounter when setting
    - Session ports are dynamically allocated by the OS (port 0 is requested, so each session gets a unique port); port 5679 is only used by Docker test fixtures and is not the default session port
    - Check server logs if a session fails to start — the assigned port will be logged
 
+### "Debug proxy initialization did not complete within 30s"
+
+The message's second sentence tells you which stage stalled — it is derived from live progress facts, not a guess:
+
+- **"…failed to start or is not properly configured"** — nothing ever spawned or connected: verify the language's toolchain (`mcp-debugger doctor`).
+- **"…spawned (PID N) but the DAP connection was never established"** — the adapter process is up but its port never accepted: check for port conflicts or loopback firewalling.
+- **"…the \"X\" request never received a response … an adapter-side protocol stall, not a missing install"** — the adapter connected and then went quiet mid-handshake. Retrying usually succeeds; if it recurs, capture a `DAP_TRACE=1` trace of the failing launch. The failed `start_debugging` result's `data` carries the same facts structurally (`initProgress`, `proxyLogPath`).
+
+For a worked example of diagnosing this class of failure (an rdbg launch that emitted the `initialized` event but never the `initialize` response), see the [rdbg initialize-response stall case study](./case-studies/rdbg-initialize-response-stall.md).
+
 ## Communication Issues
 
 ### Claude Can't Connect to Debugging Session
