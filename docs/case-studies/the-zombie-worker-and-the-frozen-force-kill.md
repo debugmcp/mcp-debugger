@@ -65,7 +65,7 @@ A 54-second-old zombie (its debuggee died at t≈4s), argv-tagged as exactly the
 
 6. `continue_execution` on session 1 released the frozen timer; SIGKILL delivered; the zombie died within a second. Both attach sessions closed cleanly.
 
-## The fix ([PR #533](https://github.com/debugmcp/mcp-debugger/pull/533))
+## The fix ([PR #535](https://github.com/debugmcp/mcp-debugger/pull/535))
 
 Root cause plus every hole the audit found on the escalation path:
 
