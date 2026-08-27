@@ -18,6 +18,10 @@ class MockMinimalDapClient extends EventEmitter {
   // When set, returned verbatim for setBreakpoints; otherwise a verified
   // breakpoint per requested line with child-space ids (100, 101, ...)
   static setBreakpointsResponse: unknown | undefined = undefined;
+  // Per-call setBreakpoints responses, shifted in order; takes precedence
+  // over setBreakpointsResponse until exhausted (drives the forceFreshEcho
+  // clear+reset sequence, issue #500)
+  static setBreakpointsResponses: unknown[] = [];
   // Emit a stopped event shortly after the attach request (issue #295 —
   // simulates the entry stop firing while later adoption steps still run)
   static emitStoppedAfterAttach = false;
@@ -80,6 +84,9 @@ class MockMinimalDapClient extends EventEmitter {
       return { body: { threads: [{ id: 1, name: 'main' }] } };
     }
     if (command === 'setBreakpoints') {
+      if (MockMinimalDapClient.setBreakpointsResponses.length > 0) {
+        return MockMinimalDapClient.setBreakpointsResponses.shift();
+      }
       if (MockMinimalDapClient.setBreakpointsResponse !== undefined) {
         return MockMinimalDapClient.setBreakpointsResponse;
       }
@@ -124,6 +131,7 @@ describe('ChildSessionManager', () => {
     MockMinimalDapClient.failCommands.clear();
     MockMinimalDapClient.suppressInitialized = false;
     MockMinimalDapClient.setBreakpointsResponse = undefined;
+    MockMinimalDapClient.setBreakpointsResponses = [];
     MockMinimalDapClient.emitStoppedAfterAttach = false;
     MockMinimalDapClient.emitInitializedAfterAttach = false;
     MockMinimalDapClient.threadsResponse = undefined;
@@ -415,6 +423,144 @@ describe('ChildSessionManager', () => {
         await vi.advanceTimersByTimeAsync(0);
 
         expect(events).toHaveLength(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('resolves storeBreakpoints with the child response, and null when no child / mirror fails (issue #500)', async () => {
+      // No child yet: stored for replay, resolves null
+      await expect(manager.storeBreakpoints('/abs/app.js', [{ line: 1 }])).resolves.toBeNull();
+
+      vi.useFakeTimers();
+      try {
+        const createPromise = manager.createChildSession({
+          pendingId: 'child-bp-return',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: {}
+        });
+        await vi.advanceTimersByTimeAsync(20000);
+        await createPromise;
+
+        // Active child: resolves with the child's setBreakpoints response
+        const respPromise = manager.storeBreakpoints('/abs/app.js', [{ line: 42 }]);
+        await vi.advanceTimersByTimeAsync(0);
+        const resp = await respPromise;
+        expect(resp?.body?.breakpoints).toEqual([
+          expect.objectContaining({ id: 100, verified: true, line: 42 })
+        ]);
+
+        // Mirror failure: resolves null, never rejects
+        MockMinimalDapClient.failCommands.set('setBreakpoints', new Error('child died'));
+        const failPromise = manager.storeBreakpoints('/abs/app.js', [{ line: 42 }]);
+        await vi.advanceTimersByTimeAsync(0);
+        await expect(failPromise).resolves.toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('mirrors and synthesizes verified events for attach-mode parents (issue #500)', async () => {
+      vi.useFakeTimers();
+      try {
+        const createPromise = manager.createChildSession({
+          pendingId: 'child-bp-attach',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: { type: 'pwa-node', request: 'attach' }
+        });
+        await vi.advanceTimersByTimeAsync(4000);
+        await createPromise;
+
+        const events: DebugProtocol.Event[] = [];
+        manager.on('childEvent', (evt: DebugProtocol.Event) => {
+          if (evt.event === 'breakpoint') events.push(evt);
+        });
+
+        const respPromise = manager.storeBreakpoints('/abs/attach_target.js', [{ line: 11 }]);
+        await vi.advanceTimersByTimeAsync(0);
+        const resp = await respPromise;
+
+        expect(resp?.body?.breakpoints?.[0]).toMatchObject({ id: 100, verified: true, line: 11 });
+        expect(events).toHaveLength(1);
+        expect((events[0] as DebugProtocol.BreakpointEvent).body.breakpoint).toMatchObject({
+          verified: true,
+          line: 11
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('clears and re-sets on a short no-change echo when forceFreshEcho is set (issue #500)', async () => {
+      vi.useFakeTimers();
+      try {
+        const createPromise = manager.createChildSession({
+          pendingId: 'child-bp-fresh-echo',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: { type: 'pwa-node', request: 'attach' }
+        });
+        await vi.advanceTimersByTimeAsync(4000);
+        await createPromise;
+        const child = manager.getActiveChild() as unknown as MockMinimalDapClient;
+        child.requests = [];
+
+        // js-debug answers a no-change re-send with an EMPTY breakpoints
+        // array; the clear+reset must then produce a real echo.
+        MockMinimalDapClient.setBreakpointsResponses = [
+          { body: { breakpoints: [] } } // initial send: short echo
+          // clear + re-set fall through to the default (verified) response
+        ];
+
+        const respPromise = manager.storeBreakpoints('/abs/attach_target.js', [{ line: 11 }], {
+          forceFreshEcho: true
+        });
+        await vi.advanceTimersByTimeAsync(0);
+        const resp = await respPromise;
+
+        const sbCalls = child.requests.filter(r => r.command === 'setBreakpoints');
+        expect(sbCalls).toHaveLength(3);
+        expect((sbCalls[0].args as { breakpoints: unknown[] }).breakpoints).toHaveLength(1);
+        expect((sbCalls[1].args as { breakpoints: unknown[] }).breakpoints).toHaveLength(0);
+        expect((sbCalls[2].args as { breakpoints: unknown[] }).breakpoints).toHaveLength(1);
+        expect(resp?.body?.breakpoints?.[0]).toMatchObject({ id: 100, verified: true, line: 11 });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not clear+reset on a short echo without forceFreshEcho, or on a complete echo with it', async () => {
+      vi.useFakeTimers();
+      try {
+        const createPromise = manager.createChildSession({
+          pendingId: 'child-bp-no-fresh-echo',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: {}
+        });
+        await vi.advanceTimersByTimeAsync(20000);
+        await createPromise;
+        const child = manager.getActiveChild() as unknown as MockMinimalDapClient;
+
+        // Short echo, no flag: returned as-is, single send
+        child.requests = [];
+        MockMinimalDapClient.setBreakpointsResponses = [{ body: { breakpoints: [] } }];
+        const shortPromise = manager.storeBreakpoints('/abs/app.js', [{ line: 5 }]);
+        await vi.advanceTimersByTimeAsync(0);
+        const shortResp = await shortPromise;
+        expect(child.requests.filter(r => r.command === 'setBreakpoints')).toHaveLength(1);
+        expect(shortResp?.body?.breakpoints).toHaveLength(0);
+
+        // Complete echo, flag set: no clear+reset round-trip
+        child.requests = [];
+        const fullPromise = manager.storeBreakpoints('/abs/app.js', [{ line: 5 }], {
+          forceFreshEcho: true
+        });
+        await vi.advanceTimersByTimeAsync(0);
+        await fullPromise;
+        expect(child.requests.filter(r => r.command === 'setBreakpoints')).toHaveLength(1);
       } finally {
         vi.useRealTimers();
       }
