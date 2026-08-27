@@ -138,6 +138,10 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     timer?: NodeJS.Timeout;
   }>();
   private isInitialized = false;
+  // Never reset by cleanup(): stop() runs cleanup() before the process 'exit'
+  // event arrives, so isInitialized alone cannot distinguish a genuine
+  // pre-init death from the exit that follows every normal stop (issue #530)
+  private everInitialized = false;
   private isStopped = false;
   /** Bounded wait for in-flight DAP requests to settle before stop() cancels them. */
   private stopDrainTimeoutMs = 1000;
@@ -210,6 +214,8 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
     this.sessionId = config.sessionId;
     this.isStopped = false;
+    // The latch tracks the process this start() launches (issue #530)
+    this.everInitialized = false;
     this.isDryRun = config.dryRunSpawn === true;
     this.dryRunCompleteReceived = false;
     this.dryRunCommandSnapshot = undefined;
@@ -331,6 +337,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
       const handleInitialized = () => {
         this.isInitialized = true;
+        this.everInitialized = true;
         cleanup();
         resolve();
       };
@@ -932,7 +939,10 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         capturedStderr: [...this.stderrBuffer],
       };
 
-      if (!this.isInitialized) {
+      // everInitialized, not isInitialized: stop() runs cleanup() (which
+      // resets isInitialized) before this event fires, so the reset flag
+      // would report every orderly shutdown as a pre-init death (issue #530)
+      if (!this.everInitialized) {
         this.logger.error(
           `[ProxyManager] Proxy exited before initialization. code=${code} signal=${signal} stderrLines=${this.stderrBuffer.length}`,
           this.stderrBuffer
@@ -1086,6 +1096,9 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         
         // Sync local state with functional core state
         this.isInitialized = result.newState.initialized;
+        if (result.newState.initialized) {
+          this.everInitialized = true;
+        }
         this.adapterConfigured = result.newState.adapterConfigured;
         // The imperative currentThreadId is authoritative — the fast-path
         // stopped handler in handleDapEvent writes it. Restoring the core's
@@ -1236,6 +1249,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         this.emit('adapter-configured');
         if (!this.isInitialized) {
           this.isInitialized = true;
+          this.everInitialized = true;
           this.emit('initialized');
         }
         break;
@@ -1245,6 +1259,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         this.logger.info(`[ProxyManager] Adapter transport connected. Marking initialized to unblock client handshake.`);
         if (!this.isInitialized) {
           this.isInitialized = true;
+          this.everInitialized = true;
           this.emit('initialized');
         }
         break;

@@ -1012,6 +1012,45 @@ describe('ProxyManager.start', () => {
       expect(fakeProcess.kill).not.toHaveBeenCalled();
     });
 
+    it('does not log "exited before initialization" for the exit that follows a clean stop (issue #530)', async () => {
+      await proxyManager.start(baseConfig);
+      // Initialize through the real message path so the everInitialized
+      // latch is exercised, not poked
+      fakeProcess.emit('message', {
+        type: 'status',
+        status: 'adapter_connected',
+        sessionId: baseConfig.sessionId
+      });
+
+      fakeProcess.killed = false;
+      fakeProcess.send.mockClear();
+
+      const stopPromise = proxyManager.stop();
+      // Let stop() pass its drain and run cleanup() (which resets
+      // isInitialized) before the process exit lands — the real ordering
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(fakeProcess.send).toHaveBeenCalledWith({ cmd: 'terminate', sessionId: baseConfig.sessionId });
+
+      fakeProcess.emit('exit', 0, null);
+      await stopPromise;
+
+      const preInitErrors = (logger.error as ReturnType<typeof vi.fn>).mock.calls
+        .filter((call: unknown[]) => String(call[0]).includes('exited before initialization'));
+      expect(preInitErrors).toEqual([]);
+    });
+
+    it('still logs "exited before initialization" when the proxy dies uninitialized (issue #530)', async () => {
+      // Dry-run start resolves via dry-run-complete without ever marking the
+      // proxy initialized
+      await proxyManager.start(baseConfig);
+
+      fakeProcess.emit('exit', 1, null);
+
+      const preInitErrors = (logger.error as ReturnType<typeof vi.fn>).mock.calls
+        .filter((call: unknown[]) => String(call[0]).includes('exited before initialization'));
+      expect(preInitErrors.length).toBe(1);
+    });
+
     it('cleanup rejects all pending requests and clears launch barrier', () => {
       const pendingReject = vi.fn();
       (proxyManager as unknown as { pendingDapRequests: Map<string, any> }).pendingDapRequests.set('req-1', {
