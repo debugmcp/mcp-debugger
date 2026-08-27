@@ -554,6 +554,75 @@ describe('ProxyManager.start', () => {
     }
   });
 
+  it('names the stalled handshake request and adapter PID when init times out after progress (issue #493)', async () => {
+    vi.useFakeTimers();
+    fakeProcess.sendCommand.mockImplementation((cmd: any) => {
+      if (cmd.cmd === 'init') {
+        setTimeout(() => {
+          const emitStatus = (extra: Record<string, unknown>) =>
+            fakeProcess.emit('message', { type: 'status', sessionId: cmd.sessionId, ...extra });
+          emitStatus({ status: 'init_received' });
+          emitStatus({ status: 'adapter_spawned', pid: 52875 });
+          emitStatus({ status: 'dap_handshake_stage', stage: 'transport_connected' });
+          emitStatus({ status: 'dap_handshake_stage', stage: 'request_pending', command: 'initialize' });
+        }, 0);
+      }
+    });
+
+    const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+
+    try {
+      const rejection = expect(startPromise).rejects.toThrow(
+        /Debug proxy initialization did not complete within 30s\. Connected to the debug adapter, but the "initialize" request never received a response\. The adapter process is running \(PID 52875\)\./
+      );
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.runOnlyPendingTimersAsync();
+      await Promise.resolve();
+      await rejection;
+
+      // The structured facts ride on the error object for the tool result.
+      const error = await startPromise.catch((e: unknown) => e);
+      expect((error as { initProgress?: unknown }).initProgress).toEqual({
+        adapterPid: 52875,
+        transportConnected: true,
+        pendingCommand: 'initialize'
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('an answered handshake request no longer reads as pending when init later times out (issue #493)', async () => {
+    vi.useFakeTimers();
+    fakeProcess.sendCommand.mockImplementation((cmd: any) => {
+      if (cmd.cmd === 'init') {
+        setTimeout(() => {
+          const emitStatus = (extra: Record<string, unknown>) =>
+            fakeProcess.emit('message', { type: 'status', sessionId: cmd.sessionId, ...extra });
+          emitStatus({ status: 'init_received' });
+          emitStatus({ status: 'adapter_spawned', pid: 4242 });
+          emitStatus({ status: 'dap_handshake_stage', stage: 'transport_connected' });
+          emitStatus({ status: 'dap_handshake_stage', stage: 'request_pending', command: 'initialize' });
+          emitStatus({ status: 'dap_handshake_stage', stage: 'response_received', command: 'initialize' });
+        }, 0);
+      }
+    });
+
+    const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+
+    try {
+      const rejection = expect(startPromise).rejects.toThrow(
+        /stalled before completing\. The adapter process is running \(PID 4242\)\./
+      );
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.runOnlyPendingTimersAsync();
+      await Promise.resolve();
+      await rejection;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('resolves when dry-run proxy exits cleanly before reporting completion', async () => {
     fakeProcess.sendCommand.mockImplementation((cmd: any) => {
       if (cmd.cmd === 'init') {

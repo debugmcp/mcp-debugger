@@ -3,6 +3,21 @@
  * This ensures consistency between implementation and tests.
  */
 
+/**
+ * How far debug-proxy initialization got before the deadline fired, tracked by
+ * ProxyManager from the worker's progress statuses (issue #493). Drives the
+ * stage-aware proxyInitTimeout message and rides on the timeout Error object
+ * so the structured facts reach the tool result.
+ */
+export interface ProxyInitProgress {
+  /** PID of the spawned adapter process; absent in connect mode (no process). */
+  adapterPid?: number;
+  /** The DAP transport (TCP) to the adapter connected successfully. */
+  transportConnected: boolean;
+  /** The DAP handshake request that was sent and has not been answered. */
+  pendingCommand?: string;
+}
+
 export const ErrorMessages = {
   /**
    * Error message for DAP request timeouts
@@ -33,12 +48,41 @@ export const ErrorMessages = {
    * Occurs when: The debug proxy process fails to initialize within the timeout period
    * Used in: src/proxy/proxy-manager.ts
    * Default timeout: 30 seconds
+   *
+   * The first sentence is an invariant prefix (pinned by tests and quoted in
+   * docs); the rest reflects how far initialization actually got (issue #493).
+   * The install-hint wording survives only for the case it correctly
+   * describes: nothing ever spawned or connected. Blaming a missing install
+   * when the adapter demonstrably connected and answered events sent agents
+   * to verify healthy toolchains with nowhere to go afterwards.
+   *
    * @param timeout - The timeout duration in seconds
+   * @param progress - How far initialization got (issue #493); omit for the generic message
    */
-  proxyInitTimeout: (timeout: number) =>
-    `Debug proxy initialization did not complete within ${timeout}s. ` +
-    `This may indicate that the debug adapter failed to start or is not properly configured. ` +
-    `Check that the required debug adapter is installed and accessible.`,
+  proxyInitTimeout: (timeout: number, progress?: ProxyInitProgress) => {
+    const base = `Debug proxy initialization did not complete within ${timeout}s.`;
+    if (progress?.transportConnected) {
+      const pidNote = progress.adapterPid !== undefined
+        ? ` The adapter process is running (PID ${progress.adapterPid}).`
+        : '';
+      if (progress.pendingCommand) {
+        return `${base} Connected to the debug adapter, but the "${progress.pendingCommand}" request ` +
+          `never received a response.${pidNote} This is an adapter-side protocol stall, not a missing ` +
+          `install — the adapter started and accepted the connection. Retrying usually succeeds; ` +
+          `if it recurs, capture a DAP trace (DAP_TRACE=1) of the failing launch.`;
+      }
+      return `${base} Connected to the debug adapter and the DAP handshake began, but initialization ` +
+        `stalled before completing.${pidNote}`;
+    }
+    if (progress?.adapterPid !== undefined) {
+      return `${base} The adapter process spawned (PID ${progress.adapterPid}) but the DAP connection ` +
+        `was never established. Check that the adapter's port is reachable and nothing is blocking ` +
+        `loopback TCP connections.`;
+    }
+    return `${base} ` +
+      `This may indicate that the debug adapter failed to start or is not properly configured. ` +
+      `Check that the required debug adapter is installed and accessible.`;
+  },
   
   /**
    * Informational message for step operations still executing after the grace window

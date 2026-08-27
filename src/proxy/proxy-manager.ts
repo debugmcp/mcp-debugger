@@ -27,7 +27,7 @@ import type {
   ProxyDapResponseMessage,
   ProxyMessage
 } from '../dap-core/types.js';
-import { ErrorMessages } from '../utils/error-messages.js';
+import { ErrorMessages, ProxyInitProgress } from '../utils/error-messages.js';
 import { ProxyConfig } from './proxy-config.js';
 import type { BreakpointSyncResult, FunctionBreakpointSyncResult } from './dap-proxy-interfaces.js';
 import { IPC_HEARTBEAT, IPC_HEARTBEAT_TICK } from './dap-proxy-interfaces.js';
@@ -169,6 +169,13 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   private proxyMessageCounter = 0;
   private exitEmitted = false;
   /**
+   * How far worker-side initialization got, from the worker's progress
+   * statuses (adapter_spawned / dap_handshake_stage). Read only when the init
+   * deadline fires, to say what actually stalled instead of blaming adapter
+   * installation (issue #493).
+   */
+  private initProgress: ProxyInitProgress = { transportConnected: false };
+  /**
    * Listeners installed on the proxy process (and its stderr stream) by
    * setupEventHandlers, tracked so a failed start() can detach them — a stale
    * process driving handleProxyExit after start() already rejected would fire
@@ -305,7 +312,13 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         cleanup();
-        reject(new Error(ErrorMessages.proxyInitTimeout(30)));
+        const error = new Error(ErrorMessages.proxyInitTimeout(30, this.initProgress)) as Error & {
+          initProgress?: ProxyInitProgress;
+        };
+        // Structured copy of the facts behind the message, for the tool
+        // result's error payload (issue #493).
+        error.initProgress = { ...this.initProgress };
+        reject(error);
       }, 30000);
 
       const cleanup = () => {
@@ -1205,6 +1218,28 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         // it is not double-processed (issue #243).
         this.logger.info(`[ProxyManager] Adapter capabilities received`);
         this.emit('adapter-capabilities', message.capabilities);
+        break;
+
+      case 'adapter_spawned':
+        // Like adapter_capabilities: handled here only, no dap-core case, so
+        // never double-processed. Progress fact for the init-timeout
+        // diagnosis (issue #493) — no event to emit.
+        this.initProgress.adapterPid = typeof message.pid === 'number' ? message.pid : undefined;
+        this.logger.info(`[ProxyManager] Adapter process spawned (PID ${message.pid ?? 'unknown'})`);
+        break;
+
+      case 'dap_handshake_stage':
+        // Like adapter_capabilities: handled here only, no dap-core case (issue #493).
+        if (message.stage === 'transport_connected') {
+          this.initProgress.transportConnected = true;
+        } else if (message.stage === 'request_pending') {
+          this.initProgress.pendingCommand = message.command;
+        } else if (message.stage === 'response_received' && this.initProgress.pendingCommand === message.command) {
+          this.initProgress.pendingCommand = undefined;
+        }
+        this.logger.info(
+          `[ProxyManager] DAP handshake stage: ${message.stage}${message.command ? ` (${message.command})` : ''}`
+        );
         break;
 
       case 'function_breakpoints_synced':

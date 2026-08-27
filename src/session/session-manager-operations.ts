@@ -992,6 +992,9 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         }>>`;
       }
 
+      // Structured init-progress facts from a proxy init timeout (issue #493)
+      const initProgress = (error as { initProgress?: Record<string, unknown> })?.initProgress;
+
       // Comprehensive error capture for debugging Windows CI issues
       const errorDetails: Record<string, unknown> = {
         type: error?.constructor?.name || 'Unknown',
@@ -1002,6 +1005,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         syscall: (error as Record<string, unknown>)?.syscall,
         path: (error as Record<string, unknown>)?.path,
         toString: error?.toString ? error.toString() : 'No toString',
+        initProgress,
         proxyLogPath,
         proxyLogTail
       };
@@ -1069,7 +1073,25 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         };
       }
 
-      return { success: false, error: errorMessage, state: session.state, errorType, errorCode };
+      // Surface the diagnosis in the tool result, not just the server log
+      // (issue #493): which init stage stalled, and where the full proxy log
+      // lives — the agent reading the error has no other way to these facts.
+      const diagnosticData: Record<string, unknown> = {};
+      if (initProgress) {
+        diagnosticData.initProgress = initProgress;
+      }
+      if (proxyLogPath) {
+        diagnosticData.proxyLogPath = proxyLogPath;
+      }
+
+      return {
+        success: false,
+        error: errorMessage,
+        state: session.state,
+        errorType,
+        errorCode,
+        ...(Object.keys(diagnosticData).length > 0 ? { data: diagnosticData } : {})
+      };
     }
   }
 

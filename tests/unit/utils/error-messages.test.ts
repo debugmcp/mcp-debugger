@@ -21,6 +21,59 @@ describe('ErrorMessages', () => {
     expect(message).toMatch(/debug proxy/i);
   });
 
+  describe('stage-aware proxy initialization timeout (issue #493)', () => {
+    const invariantPrefix = 'Debug proxy initialization did not complete within 30s.';
+
+    it('keeps the install hint only for the no-progress case', () => {
+      const message = ErrorMessages.proxyInitTimeout(30, { transportConnected: false });
+      expect(message).toContain(invariantPrefix);
+      expect(message).toContain('installed and accessible');
+    });
+
+    it('names the outstanding request and adapter PID after a connected handshake stalls', () => {
+      const message = ErrorMessages.proxyInitTimeout(30, {
+        transportConnected: true,
+        pendingCommand: 'initialize',
+        adapterPid: 52875
+      });
+      expect(message).toContain(invariantPrefix);
+      expect(message).toContain('"initialize" request never received a response');
+      expect(message).toContain('PID 52875');
+      expect(message).toContain('not a missing install');
+      expect(message).not.toContain('installed and accessible');
+    });
+
+    it('omits the PID note in connect mode (no adapter process)', () => {
+      const message = ErrorMessages.proxyInitTimeout(30, {
+        transportConnected: true,
+        pendingCommand: 'attach'
+      });
+      expect(message).toContain('"attach" request never received a response');
+      expect(message).not.toContain('PID');
+    });
+
+    it('reports a connected handshake with no outstanding request as a stall, not a bad install', () => {
+      const message = ErrorMessages.proxyInitTimeout(30, {
+        transportConnected: true,
+        adapterPid: 4242
+      });
+      expect(message).toContain(invariantPrefix);
+      expect(message).toContain('stalled before completing');
+      expect(message).toContain('PID 4242');
+      expect(message).not.toContain('installed and accessible');
+    });
+
+    it('reports spawned-but-never-connected distinctly', () => {
+      const message = ErrorMessages.proxyInitTimeout(30, {
+        transportConnected: false,
+        adapterPid: 999
+      });
+      expect(message).toContain('spawned (PID 999)');
+      expect(message).toContain('never established');
+      expect(message).not.toContain('installed and accessible');
+    });
+  });
+
   it('builds step still-running message', () => {
     const message = ErrorMessages.stepStillRunning(5);
     expect(message).toContain('5s');
