@@ -31,6 +31,8 @@ export class MockProxyManager extends EventEmitter implements IProxyManager {
   public startDelay = 0;
   public shouldFailDapRequests = false;
   public dapRequestDelay = 0;
+  /** Reported by getProxyPid() (issue #502); settable per-test. */
+  public proxyPid: number | null = 4242;
 
   constructor() {
     super();
@@ -200,6 +202,10 @@ export class MockProxyManager extends EventEmitter implements IProxyManager {
     return this._isRunning;
   }
 
+  getProxyPid(): number | null {
+    return this.proxyPid;
+  }
+
   getCurrentThreadId(): number | null {
     return this._currentThreadId;
   }
@@ -273,6 +279,7 @@ export class MockProxyManager extends EventEmitter implements IProxyManager {
     this._dryRunCompleted = false;
     this._dryRunCommand = undefined;
     this._dryRunScript = undefined;
+    this.proxyPid = 4242;
     this.removeAllListeners();
   }
 }

@@ -88,6 +88,12 @@ export interface IProxyManager extends EventEmitter {
     options?: { timeoutMs?: number }
   ): Promise<T>;
   isRunning(): boolean;
+  /**
+   * OS pid of the proxy worker this manager spawned (null before the first
+   * successful spawn). Survives stop()/cleanup(), so callers can verify after
+   * teardown that the worker actually died (issue #502).
+   */
+  getProxyPid(): number | null;
   getCurrentThreadId(): number | null;
   setCurrentThreadId(threadId: number): void;
 
@@ -128,6 +134,10 @@ const DEFAULT_RUNTIME_ENVIRONMENT: ProxyRuntimeEnvironment = {
  */
 export class ProxyManager extends EventEmitter implements IProxyManager {
   private proxyProcess: IProxyProcess | null = null;
+  // Worker OS pid, retained across cleanup() (which nulls proxyProcess) so
+  // callers can verify after teardown that the worker actually died — the
+  // leaked-worker case had no post-hoc handle at any layer (issue #502).
+  private lastProxyPid: number | null = null;
   private sessionId: string | null = null;
   private currentThreadId: number | null = null;
   private pendingDapRequests = new Map<string, {
@@ -214,6 +224,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
     this.sessionId = config.sessionId;
     this.isStopped = false;
+    this.lastProxyPid = null;
     // The latch tracks the process this start() launches (issue #530)
     this.everInitialized = false;
     this.isDryRun = config.dryRunSpawn === true;
@@ -256,6 +267,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       throw new Error('Proxy process is invalid or PID is missing');
     }
 
+    this.lastProxyPid = this.proxyProcess.pid ?? null;
     this.logger.info(`[ProxyManager] Proxy spawned with PID: ${this.proxyProcess.pid}`);
 
     // Set up event handlers
@@ -417,9 +429,15 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     // Cleanup (cancels whatever is still pending after the drain)
     this.cleanup();
 
+    // Gate on actual exit evidence, not ChildProcess.killed — Node latches
+    // .killed when any signal is *delivered*, not when the process dies, so a
+    // prior kill() made both the terminate send and the SIGKILL escalation
+    // silent no-ops against a still-live worker (issue #502).
+    const hasExited = () => process.exitCode != null || process.signalCode != null;
+
     // Send terminate command if process is still running
     try {
-      if (!process.killed) {
+      if (!hasExited()) {
         process.send({ cmd: 'terminate', sessionId: sessionIdSnapshot });
       }
     } catch (error) {
@@ -434,8 +452,10 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       };
 
       const timeout = setTimeout(() => {
-        this.logger.warn(`[ProxyManager] Timeout waiting for proxy exit. Force killing.`);
-        if (!process.killed) {
+        this.logger.warn(
+          `[ProxyManager] Timeout waiting for proxy exit. Force killing pid ${this.lastProxyPid ?? 'unknown'}.`
+        );
+        if (!hasExited()) {
           process.kill('SIGKILL');
         }
         // Detach the once-listener: it never fired, and leaving it would
@@ -446,8 +466,8 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
       process.once('exit', onExit);
 
-      // If already killed/exited, resolve immediately
-      if (process.killed || process.exitCode !== null) {
+      // If already exited, resolve immediately
+      if (hasExited()) {
         clearTimeout(timeout);
         process.removeListener('exit', onExit);
         resolve();
@@ -583,7 +603,18 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   }
 
   isRunning(): boolean {
-    return this.proxyProcess !== null && !this.proxyProcess.killed;
+    // Actual-exit evidence, not .killed: a delivered signal latches .killed
+    // while the process may still be alive (issue #502). Loose null checks:
+    // test doubles may leave signalCode undefined.
+    return (
+      this.proxyProcess !== null &&
+      this.proxyProcess.exitCode == null &&
+      this.proxyProcess.signalCode == null
+    );
+  }
+
+  getProxyPid(): number | null {
+    return this.lastProxyPid;
   }
 
   getCurrentThreadId(): number | null {

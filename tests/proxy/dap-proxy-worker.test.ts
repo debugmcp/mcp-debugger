@@ -3628,6 +3628,52 @@ describe('DapProxyWorker', () => {
       expect(mockLogger.info).toHaveBeenCalledWith('[Worker] Shutdown already in progress.');
       expect(worker.getState()).toBe(ProxyState.SHUTTING_DOWN);
     });
+
+    it('terminate during in-flight shutdown latches onto it and completes in TERMINATED (issue #502)', async () => {
+      // Natural termination runs shutdown() as a floating promise off a DAP
+      // event; the parent's terminate command routinely lands inside that
+      // window. It must complete only once state is TERMINATED, or the
+      // runner's post-command exit check never fires and the worker is
+      // stranded alive.
+      vi.useFakeTimers();
+      try {
+        const processStub = { shutdown: vi.fn().mockResolvedValue(undefined) };
+        const connectionStub = { disconnect: vi.fn().mockResolvedValue(undefined) };
+        const adapterProc = { pid: 4242 };
+        (worker as any).dapClient = mockDapClient;
+        (worker as any).processManager = processStub;
+        (worker as any).connectionManager = connectionStub;
+        (worker as any).adapterProcess = adapterProc;
+        (worker as any).state = ProxyState.CONNECTED;
+
+        // Floating shutdown, as onTerminated/onClose start it (no await).
+        const floating = (worker as any).shutdown() as Promise<void>;
+        expect(worker.getState()).toBe(ProxyState.SHUTTING_DOWN);
+
+        // The terminate command arrives mid-shutdown.
+        const terminatePromise = worker.handleTerminate();
+
+        // Let the shutdown's internal 500ms grace wait elapse.
+        await vi.advanceTimersByTimeAsync(500);
+        await floating;
+        await terminatePromise;
+
+        // The property the runner's exit scheduler depends on: when the
+        // terminate command completes, state is TERMINATED.
+        expect(worker.getState()).toBe(ProxyState.TERMINATED);
+        // No double teardown: the latched terminate reuses the in-flight
+        // shutdown rather than running its own.
+        expect(processStub.shutdown).toHaveBeenCalledTimes(1);
+        // The parent still gets its terminated status (expected: true).
+        const terminatedCalls = mockMessageSender.send.mock.calls.filter(
+          call => call[0].type === 'status' && call[0].status === 'terminated'
+        );
+        expect(terminatedCalls.length).toBe(1);
+        expect(terminatedCalls[0][0].expected).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe('Attach Mode Flow', () => {
