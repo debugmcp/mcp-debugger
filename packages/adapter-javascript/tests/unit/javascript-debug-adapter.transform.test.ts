@@ -376,5 +376,39 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
       expect(cfg.skipFiles).toEqual(['<node_internals>/**']);
       expect(cfg.continueOnAttach).toBe(true);
     });
+
+    it('defaults autoAttachChildProcesses to false on attach (issue #501)', () => {
+      const adapter = new JavascriptDebugAdapter(deps);
+      const cfg = adapter.transformAttachConfig({
+        request: 'attach',
+        port: 9229
+      } as any) as Record<string, unknown>;
+
+      // js-debug's pwa-node attach defaults this to true, which parks every
+      // fork() of the inspected process in waitForDebugger
+      expect(cfg.autoAttachChildProcesses).toBe(false);
+    });
+
+    it('respects a caller-supplied autoAttachChildProcesses (issue #501)', () => {
+      const adapter = new JavascriptDebugAdapter(deps);
+      const optIn = adapter.transformAttachConfig({
+        request: 'attach',
+        port: 9229,
+        autoAttachChildProcesses: true
+      } as any) as Record<string, unknown>;
+      expect(optIn.autoAttachChildProcesses).toBe(true);
+
+      const optOut = adapter.transformAttachConfig({
+        request: 'attach',
+        port: 9229,
+        autoAttachChildProcesses: false
+      } as any) as Record<string, unknown>;
+      expect(optOut.autoAttachChildProcesses).toBe(false);
+    });
+
+    it('lists autoAttachChildProcesses as a supported attach key (issue #501)', () => {
+      const adapter = new JavascriptDebugAdapter(deps);
+      expect(adapter.supportedAttachKeys).toContain('autoAttachChildProcesses');
+    });
   });
 });
