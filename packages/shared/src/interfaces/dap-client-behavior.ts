@@ -83,4 +83,39 @@ export interface DapClientBehavior {
    * before issuing stackTrace to avoid empty results.
    */
   stackTraceRequiresChild?: boolean;
+
+  /**
+   * Child-routed commands that MUST reach the child session: forwarding them
+   * to the parent is known-harmful. js-debug's root session answers 'pause'
+   * with an empty success response and performs no CDP action, so a pause
+   * that falls through to the parent "succeeds" yet can never produce a
+   * 'stopped' event (issue #513). Commands listed here fail loudly when no
+   * child session is available instead of falling back to the parent.
+   */
+  childRequiredCommands?: Set<string>;
+}
+
+/**
+ * Marker present in every error thrown when a child-required command has no
+ * child session to run against (issue #513). Shared between the proxy-side
+ * thrower (minimal-dap) and the session-manager matcher so the tool layer can
+ * turn it into a structured failure instead of a protocol error.
+ */
+export const NO_DEBUG_TARGET_MARKER = 'no debug target';
+
+/**
+ * Build the error message for a child-required command with no child session.
+ * `state` distinguishes "never adopted" from "adopted but gone".
+ */
+export function buildNoDebugTargetError(command: string, state: 'none' | 'ended'): string {
+  if (state === 'ended') {
+    return (
+      `Cannot deliver '${command}': the adopted debug target has ended or disconnected ` +
+      `(${NO_DEBUG_TARGET_MARKER} available). Re-attach to continue debugging.`
+    );
+  }
+  return (
+    `Cannot deliver '${command}': ${NO_DEBUG_TARGET_MARKER} adopted yet — the runtime session ` +
+    `is not available. Verify the attach connected (list_threads should report a thread) or retry shortly.`
+  );
 }

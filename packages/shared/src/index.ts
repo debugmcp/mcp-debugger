@@ -205,6 +205,10 @@ export type {
   ReverseRequestResult,
   ChildSessionConfig
 } from './interfaces/dap-client-behavior.js';
+export {
+  NO_DEBUG_TARGET_MARKER,
+  buildNoDebugTargetError
+} from './interfaces/dap-client-behavior.js';
 
 // Adapter launch coordination helpers
 export type { AdapterLaunchBarrier } from './interfaces/adapter-launch-barrier.js';

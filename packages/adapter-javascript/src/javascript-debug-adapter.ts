@@ -690,6 +690,16 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
         typeof rest.autoAttachChildProcesses === 'boolean'
           ? rest.autoAttachChildProcesses
           : false,
+      // js-debug's smart-stepper turns a user pause that lands on a
+      // blackboxed/unmapped frame into an auto-step — and on a mostly-idle
+      // server every frame the pause can land on is a node-internal one, so
+      // it steps forever and the 'stopped' event never fires (issue #513;
+      // its >256-step failsafe switches to step-out, which never escapes an
+      // idle event loop either). Breakpoint/exception/entry stops are exempt
+      // in js-debug itself, so those keep their normal behavior. Default it
+      // off for attach — pausing an attached process must land truthfully,
+      // even in an internal frame; an explicit caller value wins.
+      smartStep: typeof rest.smartStep === 'boolean' ? rest.smartStep : false,
     } as LanguageSpecificAttachConfig;
   }
 

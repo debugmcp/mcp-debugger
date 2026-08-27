@@ -27,6 +27,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import path from 'path';
 import net from 'net';
+import http from 'http';
 import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
 import { spawn, ChildProcess } from 'child_process';
@@ -39,6 +40,7 @@ const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, '../..');
 const TARGET_SCRIPT = path.resolve(ROOT, 'examples', 'javascript', 'attach_target.js');
 const FORK_TARGET_SCRIPT = path.resolve(ROOT, 'examples', 'javascript', 'fork_attach_target.js');
+const IDLE_TARGET_SCRIPT = path.resolve(ROOT, 'examples', 'javascript', 'idle_server_attach_target.js');
 const BREAKPOINT_LINE = 11; // `counter += 1;` inside tick()
 
 function getFreePort(): Promise<number> {
@@ -418,6 +420,120 @@ describe('MCP Server JavaScript Attach-Mode Smoke Tests', () => {
 
     await new Promise(r => setTimeout(r, 500));
     expect(targetProcess!.exitCode, 'detach must leave the target process alive').toBeNull();
+  }, 120000);
+
+  /** Poll list_debug_sessions until this session reports the wanted state. */
+  async function pollForSessionState(wanted: string, deadlineMs: number): Promise<string | undefined> {
+    const deadline = Date.now() + deadlineMs;
+    let lastState: string | undefined;
+    while (Date.now() < deadline) {
+      const listResult = await callToolSafely(mcpClient!, 'list_debug_sessions', {});
+      const sessions = (listResult.sessions as Array<{ id: string; state: string }> | undefined) ?? [];
+      lastState = sessions.find(s => s.id === sessionId)?.state;
+      if (lastState === wanted) {
+        return lastState;
+      }
+      await new Promise(r => setTimeout(r, 250));
+    }
+    return lastState;
+  }
+
+  it('pause_execution lands on an attached IDLE server once JS runs (issue #513)', async () => {
+    // The #513 repro: attach (stopOnEntry:false) to a server whose event loop
+    // is completely idle, request a pause, then make the server execute JS.
+    // Pre-fix, js-debug's smart-stepper turned the pause into an endless
+    // auto-step through internal frames and the stop never landed.
+    const target = await spawnTarget(IDLE_TARGET_SCRIPT);
+    targetProcess = target.proc;
+
+    // The fixture prints `listening <port>` for its HTTP port
+    const httpPort = await (async () => {
+      const deadline = Date.now() + 10000;
+      while (Date.now() < deadline) {
+        const m = target.stdout().match(/listening (\d+)/);
+        if (m) return Number(m[1]);
+        await new Promise(r => setTimeout(r, 100));
+      }
+      throw new Error(`idle server never printed its port; stdout: ${target.stdout()}`);
+    })();
+
+    const attachResponse = await createSessionAndAttach(target.port, { stopOnEntry: false });
+    expect(attachResponse.success, `attach failed: ${JSON.stringify(attachResponse)}`).toBe(true);
+
+    const pauseResult = await callToolSafely(mcpClient!, 'pause_execution', { sessionId: sessionId! });
+    expect(pauseResult.success, `pause_execution failed: ${JSON.stringify(pauseResult)}`).toBe(true);
+
+    const pauseData = (pauseResult.data ?? {}) as { pending?: boolean };
+    if (pauseResult.state !== 'paused') {
+      // Truly idle server: the pause is armed but cannot land until JS runs —
+      // the documented pending contract
+      expect(pauseData.pending, `expected pending pause, got: ${JSON.stringify(pauseResult)}`).toBe(true);
+
+      // Make the server execute JS; the armed pause must now land. The pause
+      // typically fires BEFORE the handler can respond, so the request
+      // hanging (and being torn down) is the expected outcome — its only job
+      // is to put JavaScript on the target's event loop.
+      await new Promise<void>(resolve => {
+        const req = http.get(`http://127.0.0.1:${httpPort}/work`, res => {
+          res.resume();
+          res.on('end', resolve);
+          res.on('error', () => resolve());
+        });
+        req.on('error', () => resolve());
+        req.setTimeout(3000, () => {
+          req.destroy();
+          resolve();
+        });
+      });
+
+      const state = await pollForSessionState('paused', 15000);
+      expect(
+        state,
+        'the pending pause must land once the target provably executes JS (issue #513)'
+      ).toBe('paused');
+    }
+
+    // The paused session must be genuinely usable
+    const stackResult = await callToolSafely(mcpClient!, 'get_stack_trace', {
+      sessionId: sessionId!,
+      includeInternals: true
+    });
+    expect(stackResult.success, `get_stack_trace failed: ${JSON.stringify(stackResult)}`).toBe(true);
+    const frames = (stackResult.stackFrames as unknown[] | undefined) ?? [];
+    expect(frames.length, 'paused session must report at least one stack frame').toBeGreaterThan(0);
+    expect(stackResult.stopReason).toBe('pause');
+
+    // Leave the target running for teardown
+    await callToolSafely(mcpClient!, 'continue_execution', { sessionId: sessionId! });
+  }, 120000);
+
+  it('pause_execution stops a busy attached target within the grace window', async () => {
+    // First-ever attach+pause smoke: the ticking target executes JS every
+    // 100ms, so the stop must land inside pause_execution's own 5s grace.
+    const target = await spawnTarget();
+    targetProcess = target.proc;
+
+    const attachResponse = await createSessionAndAttach(target.port, { stopOnEntry: false });
+    expect(attachResponse.success, `attach failed: ${JSON.stringify(attachResponse)}`).toBe(true);
+
+    const pauseResult = await callToolSafely(mcpClient!, 'pause_execution', { sessionId: sessionId! });
+    expect(pauseResult.success, `pause_execution failed: ${JSON.stringify(pauseResult)}`).toBe(true);
+
+    // A 100ms ticker gives the pause plenty to land on; tolerate pending only
+    // long enough for the state to flip
+    if (pauseResult.state !== 'paused') {
+      const state = await pollForSessionState('paused', 10000);
+      expect(state, 'pause must land on a target that runs JS every 100ms').toBe('paused');
+    }
+
+    const stackResult = await callToolSafely(mcpClient!, 'get_stack_trace', {
+      sessionId: sessionId!,
+      includeInternals: true
+    });
+    expect(stackResult.success).toBe(true);
+    expect(((stackResult.stackFrames as unknown[] | undefined) ?? []).length).toBeGreaterThan(0);
+
+    await callToolSafely(mcpClient!, 'continue_execution', { sessionId: sessionId! });
   }, 120000);
 
   /** Count completed fork→parent IPC handshakes in the fork target's stdout. */

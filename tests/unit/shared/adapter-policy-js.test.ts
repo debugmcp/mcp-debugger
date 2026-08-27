@@ -21,6 +21,19 @@ describe('JsDebugAdapterPolicy', () => {
     );
   });
 
+  it('marks pause child-required but leaves threads parent-fallbackable (issue #513)', () => {
+    const behavior = JsDebugAdapterPolicy.getDapClientBehavior();
+    // js-debug's root session acks 'pause' as a silent no-op, so a pause
+    // falling back to the parent "succeeds" but no stop can ever land
+    expect(behavior.childRequiredCommands?.has('pause')).toBe(true);
+    // the parent's empty threads response is load-bearing for attach verify
+    expect(behavior.childRequiredCommands?.has('threads')).toBe(false);
+    // sanity: child-required commands must also be child-routed
+    for (const cmd of behavior.childRequiredCommands ?? []) {
+      expect(behavior.childRoutedCommands?.has(cmd)).toBe(true);
+    }
+  });
+
   it('identifies child readiness events', () => {
     expect(JsDebugAdapterPolicy.isChildReadyEvent({ event: 'thread' } as any)).toBe(true);
     expect(JsDebugAdapterPolicy.isChildReadyEvent({ event: 'stopped' } as any)).toBe(true);
