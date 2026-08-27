@@ -17,7 +17,9 @@ import type { MinimalDapClient } from './minimal-dap.js';
 import { CdpFunctionBreakpointBridge } from './cdp-function-breakpoint-bridge.js';
 import path from 'path';
 
-const logger = createLogger('child-session-manager');
+// redirectable: the proxy worker re-points this logger into the per-session
+// proxy-<sessionId>.log at init so routing decisions are visible there (#519)
+const logger = createLogger('child-session-manager', { redirectable: true });
 
 // Deferred, cached import of MinimalDapClient — deferred to break the static
 // import cycle with minimal-dap.ts, cached so concurrent first uses (an

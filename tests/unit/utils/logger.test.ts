@@ -236,6 +236,94 @@ describe('logger utility', () => {
 
     expect(consoleErrorSpy).not.toHaveBeenCalled();
   });
+
+  describe('redirectProxyLoggers (issue #519)', () => {
+    /** Mock winston loggers rich enough for add-transport redirection. */
+    function makeMockLogger() {
+      const inst: {
+        on: ReturnType<typeof vi.fn>;
+        warn: ReturnType<typeof vi.fn>;
+        transports: unknown[];
+        level: string;
+        add: ReturnType<typeof vi.fn>;
+      } = {
+        on: vi.fn(),
+        warn: vi.fn(),
+        transports: [],
+        level: 'info',
+        add: vi.fn((t: unknown) => {
+          inst.transports.push(t);
+        })
+      };
+      return inst;
+    }
+
+    it('redirects only opted-in loggers, reusing the cached transport for the path', () => {
+      stubFs();
+      createLoggerSpy.mockImplementation(() => makeMockLogger());
+      const sessionFile = path.join(os.tmpdir(), 'sessions', 'proxy-s1.log');
+
+      // The worker's session logger creates and caches the transport first
+      loggerModule.createLogger('dap-proxy:s1', { level: 'debug', file: sessionFile });
+      loggerModule.createLogger('minimal-dap-simple', { redirectable: true });
+      loggerModule.createLogger('unflagged-module');
+      const constructionsBefore = fileTransportSpy.mock.calls.length;
+
+      const count = loggerModule.redirectProxyLoggers({ file: sessionFile, level: 'debug' });
+
+      expect(count).toBe(1);
+      // Cache hit: redirect constructed no new transport for the path
+      expect(fileTransportSpy.mock.calls.length).toBe(constructionsBefore);
+
+      const redirectable = createLoggerSpy.mock.results[1].value as ReturnType<typeof makeMockLogger>;
+      const unflagged = createLoggerSpy.mock.results[2].value as ReturnType<typeof makeMockLogger>;
+      expect(redirectable.add).toHaveBeenCalledTimes(1);
+      // The added transport is the very instance the session logger attached
+      expect(redirectable.add.mock.calls[0][0]).toBe(fileTransportSpy.mock.instances[0]);
+      expect(redirectable.level).toBe('debug');
+      expect(unflagged.add).not.toHaveBeenCalled();
+      expect(unflagged.level).toBe('info');
+    });
+
+    it('is idempotent — a second redirect adds no duplicate transport', () => {
+      stubFs();
+      createLoggerSpy.mockImplementation(() => makeMockLogger());
+      const sessionFile = path.join(os.tmpdir(), 'sessions', 'proxy-s2.log');
+
+      loggerModule.createLogger('minimal-dap-simple', { redirectable: true });
+
+      expect(loggerModule.redirectProxyLoggers({ file: sessionFile })).toBe(1);
+      expect(loggerModule.redirectProxyLoggers({ file: sessionFile })).toBe(1);
+
+      const redirectable = createLoggerSpy.mock.results[0].value as ReturnType<typeof makeMockLogger>;
+      expect(redirectable.add).toHaveBeenCalledTimes(1);
+    });
+
+    it('leaves the level alone when none is passed', () => {
+      stubFs();
+      createLoggerSpy.mockImplementation(() => makeMockLogger());
+
+      loggerModule.createLogger('minimal-dap-simple', { redirectable: true });
+      loggerModule.redirectProxyLoggers({ file: path.join(os.tmpdir(), 'sessions', 'proxy-s3.log') });
+
+      const redirectable = createLoggerSpy.mock.results[0].value as ReturnType<typeof makeMockLogger>;
+      expect(redirectable.level).toBe('info');
+    });
+
+    it('returns 0 when the transport cannot be created', () => {
+      stubFs();
+      createLoggerSpy.mockImplementation(() => makeMockLogger());
+      loggerModule.createLogger('minimal-dap-simple', { redirectable: true });
+
+      fileTransportSpy.mockImplementationOnce(() => {
+        throw new Error('disk on fire');
+      });
+
+      expect(
+        loggerModule.redirectProxyLoggers({ file: path.join(os.tmpdir(), 'sessions', 'proxy-s4.log') })
+      ).toBe(0);
+    });
+  });
 });
 
 describe('cleanupStaleLogFiles', () => {

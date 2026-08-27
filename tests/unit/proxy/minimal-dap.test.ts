@@ -1990,6 +1990,45 @@ describe('MinimalDapClient', () => {
     });
   });
 
+  describe('Response logging carries the success flag (issue #519)', () => {
+    it('logs success and request_seq on responses, errorMessage only on failures', async () => {
+      const c = new MinimalDapClient('localhost', 5678);
+      loggerInstances.forEach((l) => l.info.mockClear());
+
+      await (c as any).handleProtocolMessage({
+        seq: 10,
+        type: 'response',
+        request_seq: 7,
+        command: 'pause',
+        success: true
+      } satisfies DebugProtocol.Response);
+      await (c as any).handleProtocolMessage({
+        seq: 11,
+        type: 'response',
+        request_seq: 8,
+        command: 'evaluate',
+        success: false,
+        message: 'Request failed'
+      } satisfies DebugProtocol.Response);
+
+      const responseLogs = loggerInstances
+        .flatMap((l) => l.info.mock.calls)
+        .filter(([msg]) => typeof msg === 'string' && msg.includes('DAP message: response'));
+
+      expect(responseLogs).toHaveLength(2);
+      expect(responseLogs[0][1]).toMatchObject({ command: 'pause', success: true, request_seq: 7 });
+      expect(responseLogs[0][1]).not.toHaveProperty('errorMessage');
+      expect(responseLogs[1][1]).toMatchObject({
+        command: 'evaluate',
+        success: false,
+        request_seq: 8,
+        errorMessage: 'Request failed'
+      });
+
+      c.shutdown('test done');
+    });
+  });
+
   describe('Trace file error handling', () => {
     it('swallows fs.appendFileSync errors so requests still complete', async () => {
       vi.stubEnv('DAP_TRACE_FILE', 'trace.ndjson');
