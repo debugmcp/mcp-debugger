@@ -491,36 +491,33 @@ describe('ProxyManager.start', () => {
       expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Error sending init on attempt 1'));
     });
 
-    it('surfaces detailed error after exhausting init retries', async () => {
+    it('surfaces detailed error and fails fast once the worker exited without acking (issue #512)', async () => {
       fakeProcess.sendCommand.mockReset();
-      fakeProcess.sendCommand.mockImplementation(() => {
-        throw new Error('ipc failure');
-      });
-
-      (proxyManager as unknown as {
-        lastExitDetails: {
-          code: number | null;
-          signal: string | null;
-          timestamp: number;
-          capturedStderr: string[];
-        };
-      }).lastExitDetails = {
-        code: 12,
-        signal: 'SIGTERM',
-        timestamp: Date.now(),
-        capturedStderr: ['fatal: adapter crashed']
-      };
+      fakeProcess.sendCommand
+        .mockImplementationOnce(() => {
+          // First init is delivered but never acked; the worker dies shortly
+          // after — handleProxyExit records lastExitDetails
+          setTimeout(() => fakeProcess.emit('exit', 12, 'SIGTERM'), 100);
+        })
+        .mockImplementation(() => {
+          throw new Error('Proxy process not available');
+        });
 
       const startPromise = proxyManager.start(baseConfig);
 
       // Attach the rejection expectation BEFORE driving the rejection: the
       // async fake-timer loop yields through real ticks, where an unhandled
       // rejection would otherwise be flagged (issue #420).
-      const rejection = expect(startPromise).rejects.toThrow(/Failed to initialize proxy after 6 attempts\. Last error: ipc failure/);
-      await vi.advanceTimersByTimeAsync(16500);
+      // With exit details recorded, retrying is pointless (no ack can arrive
+      // from an exited worker) — the failure surfaces on attempt 2's failed
+      // send instead of burning ~15s of retries (issue #512), and carries
+      // the exit details.
+      const rejection = expect(startPromise).rejects.toThrow(/Failed to initialize proxy after 6 attempts\. Last error: Proxy process not available[\s\S]*code=12 signal=SIGTERM/);
+      await vi.advanceTimersByTimeAsync(8000);
 
       await rejection;
-      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Error sending init on attempt 6'));
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Error sending init on attempt 2'));
+      expect(logger.warn).not.toHaveBeenCalledWith(expect.stringContaining('Error sending init on attempt 3'));
     });
   });
 

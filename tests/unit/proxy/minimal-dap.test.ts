@@ -1033,6 +1033,51 @@ describe('MinimalDapClient', () => {
       );
     });
 
+    it('rolls back adoptedTargets when the release of an unadoptable target fails (issue #501)', async () => {
+      const stubManager = createChildSessionManagerStub();
+      stubManager.createChildSession.mockResolvedValue('release-failed');
+      const client = new MinimalDapClient('localhost', 5678, JsDebugAdapterPolicy, {
+        childSessionManagerFactory: () => stubManager as unknown as ChildSessionManager
+      });
+
+      const request: DebugProtocol.Request = {
+        seq: 1,
+        type: 'request',
+        command: 'startDebugging',
+        arguments: { configuration: { __pendingTargetId: 'parked-target' } }
+      };
+
+      await (client as any).handleProtocolMessage(request);
+
+      // A re-sent startDebugging must be able to retry the release
+      expect((client as any).adoptedTargets.has('parked-target')).toBe(false);
+      await (client as any).handleProtocolMessage({ ...request, seq: 2 });
+      expect(stubManager.createChildSession).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps a released target in adoptedTargets so it is not re-processed (issue #501)', async () => {
+      const stubManager = createChildSessionManagerStub();
+      stubManager.createChildSession.mockResolvedValue('released');
+      const client = new MinimalDapClient('localhost', 5678, JsDebugAdapterPolicy, {
+        childSessionManagerFactory: () => stubManager as unknown as ChildSessionManager
+      });
+
+      const request: DebugProtocol.Request = {
+        seq: 1,
+        type: 'request',
+        command: 'startDebugging',
+        arguments: { configuration: { __pendingTargetId: 'released-target' } }
+      };
+
+      await (client as any).handleProtocolMessage(request);
+
+      // A released target's server-side deferred has settled — it can never
+      // be adopted; the policy short-circuits any re-sent request
+      expect((client as any).adoptedTargets.has('released-target')).toBe(true);
+      await (client as any).handleProtocolMessage({ ...request, seq: 2 });
+      expect(stubManager.createChildSession).toHaveBeenCalledTimes(1);
+    });
+
     it('marks child breakpoint events with the child-origin key (issues #500/#495)', () => {
       const stubManager = createChildSessionManagerStub();
       const client = new MinimalDapClient('localhost', 5678, JsDebugAdapterPolicy, {

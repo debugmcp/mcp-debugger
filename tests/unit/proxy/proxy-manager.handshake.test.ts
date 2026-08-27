@@ -61,28 +61,90 @@ describe('ProxyManager sendInitWithRetry', () => {
     expect(sendCommandMock).toHaveBeenCalledTimes(1);
   });
 
-  it('retries when acknowledgement arrives after the first timeout', async () => {
+  it('latches an acknowledgement that lands between attempt windows (issue #512)', async () => {
     vi.useFakeTimers();
-    let attempt = 0;
+    // The worker acks once, 600ms after the init send — after attempt 1's
+    // 500ms window expired, during the backoff sleep. Pre-#512 this ack was
+    // dropped (its listener had been removed) and the whole launch failed if
+    // the worker then exited; now it resolves the retry loop without a resend.
     const sendCommandMock = vi
       .spyOn(manager as unknown as { sendCommand: (command: object) => void }, 'sendCommand')
-      .mockImplementation(() => {
-        attempt += 1;
-        const delay = attempt === 1 ? 600 : 100;
-        setTimeout(() => (manager as unknown as EventEmitter).emit('init-received'), delay);
+      .mockImplementationOnce(() => {
+        setTimeout(() => (manager as unknown as EventEmitter).emit('init-received'), 600);
       });
 
     const initPromise = (manager as unknown as { sendInitWithRetry: (command: object) => Promise<void> }).sendInitWithRetry(
       { cmd: 'init' }
     );
 
-    vi.advanceTimersByTime(600); // first ack (lost) + first timeout (500)
+    vi.advanceTimersByTime(500); // attempt 1 window expires without the ack
+    await Promise.resolve();
+    vi.advanceTimersByTime(100); // ack fires during the backoff sleep
+    await Promise.resolve();
+    await initPromise;
+
+    expect(sendCommandMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries and resolves when only a later attempt is acknowledged', async () => {
+    vi.useFakeTimers();
+    let attempt = 0;
+    const sendCommandMock = vi
+      .spyOn(manager as unknown as { sendCommand: (command: object) => void }, 'sendCommand')
+      .mockImplementation(() => {
+        attempt += 1;
+        if (attempt === 2) {
+          setTimeout(() => (manager as unknown as EventEmitter).emit('init-received'), 100);
+        }
+        // attempt 1: message lost entirely — no ack ever fires for it
+      });
+
+    const initPromise = (manager as unknown as { sendInitWithRetry: (command: object) => Promise<void> }).sendInitWithRetry(
+      { cmd: 'init' }
+    );
+
+    vi.advanceTimersByTime(500); // attempt 1 window expires
     await Promise.resolve();
     vi.advanceTimersByTime(500); // backoff before retry
     await Promise.resolve();
-    vi.advanceTimersByTime(100); // second attempt acknowledges
+    vi.advanceTimersByTime(100); // attempt 2 acknowledges
     await Promise.resolve();
     await initPromise;
+    expect(sendCommandMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails fast once the worker has exited without acking (issue #512)', async () => {
+    vi.useFakeTimers();
+    let attempt = 0;
+    const sendCommandMock = vi
+      .spyOn(manager as unknown as { sendCommand: (command: object) => void }, 'sendCommand')
+      .mockImplementation(() => {
+        attempt += 1;
+        if (attempt > 1) {
+          // Worker exited between attempts; ProxyManager recorded the exit
+          (manager as unknown as { lastExitDetails: unknown }).lastExitDetails = {
+            code: 1,
+            signal: null,
+            timestamp: Date.now(),
+            capturedStderr: ['boom'],
+          };
+          throw new Error('Proxy process not available');
+        }
+      });
+
+    const initPromise = (manager as unknown as { sendInitWithRetry: (command: object) => Promise<void> }).sendInitWithRetry(
+      { cmd: 'init' }
+    );
+    const rejection = expect(initPromise).rejects.toThrow('Proxy exit details -> code=1');
+
+    vi.advanceTimersByTime(500); // attempt 1 window expires
+    await Promise.resolve();
+    vi.advanceTimersByTime(500); // backoff, then attempt 2's send throws
+    await Promise.resolve();
+
+    // No further windows/backoffs are burned: the loop breaks on the dead
+    // worker instead of retrying four more times over ~15s
+    await rejection;
     expect(sendCommandMock).toHaveBeenCalledTimes(2);
   });
 

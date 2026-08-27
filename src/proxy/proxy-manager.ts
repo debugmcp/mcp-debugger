@@ -691,64 +691,88 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     const delays = [500, 1000, 2000, 4000, 8000]; // More generous backoff for Windows CI
     let lastError: Error | undefined;
 
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      const timeoutMs = delays[Math.min(attempt, delays.length - 1)];
+    // Latch the ack for the whole retry sequence (issue #512): the worker
+    // acks exactly once, and on a slow boot (>500ms — inspected or heavily
+    // loaded host) that ack lands between attempt windows. A per-attempt
+    // listener silently drops it, and for a worker that then exits (dry-run)
+    // every remaining retry fails against a process that already did its job.
+    let acked = false;
+    const onAck = () => {
+      acked = true;
+    };
+    this.on('init-received', onAck);
 
-      try {
-        const received = await new Promise<boolean>((resolve, reject) => {
-          let resolved = false;
-
-          const handler = () => {
-            if (resolved) return;
-            resolved = true;
-            // Detach on success too — this listener is registered with on(),
-            // and each un-removed acknowledgment handler would otherwise stay
-            // on the manager for its lifetime (issue #420).
-            cleanup();
-            resolve(true);
-          };
-
-          const cleanup = () => {
-            this.removeListener('init-received', handler);
-            if (timer) clearTimeout(timer);
-          };
-
-          this.on('init-received', handler);
-
-          const timer = setTimeout(() => {
-            if (resolved) return;
-            resolved = true;
-            this.removeListener('init-received', handler);
-            resolve(false);
-          }, timeoutMs);
-
-          try {
-            this.sendCommand(initCommand);
-          } catch (error) {
-            cleanup();
-            reject(error);
-          }
-        });
-
-        if (received) {
-          this.logger.info(`[ProxyManager] Init command acknowledged on attempt ${attempt + 1}`);
+    // Wait up to ms, ending early (true) the moment the ack arrives — or
+    // immediately when it was already latched by the long-lived listener
+    const waitForAck = (ms: number): Promise<boolean> =>
+      new Promise<boolean>((resolve) => {
+        if (acked) {
+          resolve(true);
           return;
         }
+        let settled = false;
+        const settle = (value: boolean) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          this.removeListener('init-received', onAckNow);
+          resolve(value);
+        };
+        const onAckNow = () => settle(true);
+        this.on('init-received', onAckNow);
+        const timer = setTimeout(() => settle(false), ms);
+      });
 
-        this.logger.warn(
-          `[ProxyManager] Init not acknowledged, attempt ${attempt + 1}/${maxRetries + 1}`
-        );
-      } catch (error) {
-        lastError = error as Error;
-        this.logger.warn(
-          `[ProxyManager] Error sending init on attempt ${attempt + 1}: ${lastError.message}`
-        );
-      }
+    try {
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        if (acked) {
+          this.logger.info(`[ProxyManager] Init command acknowledged before attempt ${attempt + 1}`);
+          return;
+        }
+        const timeoutMs = delays[Math.min(attempt, delays.length - 1)];
 
-      if (attempt < maxRetries) {
-        const waitMs = delays[Math.min(attempt, delays.length - 1)];
-        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        let sendFailed = false;
+        try {
+          this.sendCommand(initCommand);
+        } catch (error) {
+          lastError = error as Error;
+          sendFailed = true;
+          this.logger.warn(
+            `[ProxyManager] Error sending init on attempt ${attempt + 1}: ${lastError.message}`
+          );
+          // Once the worker has exited without acking, no ack can arrive —
+          // fail fast with the detailed exit message instead of burning the
+          // remaining retries against a process that is gone (issue #512)
+          if (this.lastExitDetails) {
+            break;
+          }
+        }
+
+        // A failed send delivered nothing to wait for; an earlier attempt's
+        // late ack is still caught by the latch during the backoff below
+        if (!sendFailed) {
+          if (await waitForAck(timeoutMs)) {
+            this.logger.info(`[ProxyManager] Init command acknowledged on attempt ${attempt + 1}`);
+            return;
+          }
+
+          this.logger.warn(
+            `[ProxyManager] Init not acknowledged, attempt ${attempt + 1}/${maxRetries + 1}`
+          );
+        }
+
+        if (attempt < maxRetries) {
+          const waitMs = delays[Math.min(attempt, delays.length - 1)];
+          if (await waitForAck(waitMs)) {
+            this.logger.info(
+              `[ProxyManager] Init command acknowledged during backoff after attempt ${attempt + 1}`
+            );
+            return;
+          }
+        }
       }
+    } finally {
+      this.removeListener('init-received', onAck);
     }
 
     let detailMessage = `Failed to initialize proxy after ${maxRetries + 1} attempts. ${

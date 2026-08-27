@@ -68,7 +68,8 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     'continueOnAttach',
     'trace',
     'websocketAddress',
-    'attachExistingChildren'
+    'attachExistingChildren',
+    'autoAttachChildProcesses'
   ] as const;
 
   private state: AdapterState = AdapterState.UNINITIALIZED;
@@ -680,6 +681,15 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       name: 'Attach to Node.js process',
       host: (host as string | undefined) || '127.0.0.1',
       port: port as number | undefined,
+      // js-debug's pwa-node attach defaults this to true, injecting its
+      // NODE_OPTIONS bootloader into the inspected process; every fork() then
+      // parks under waitForDebugger and only one child can be adopted (#501).
+      // Default it off like launch mode does; an explicit caller value wins
+      // (never silently override a supported key — cf. #499).
+      autoAttachChildProcesses:
+        typeof rest.autoAttachChildProcesses === 'boolean'
+          ? rest.autoAttachChildProcesses
+          : false,
     } as LanguageSpecificAttachConfig;
   }
 

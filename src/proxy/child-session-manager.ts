@@ -19,11 +19,26 @@ import path from 'path';
 
 const logger = createLogger('child-session-manager');
 
+// Deferred, cached import of MinimalDapClient — deferred to break the static
+// import cycle with minimal-dap.ts, cached so concurrent first uses (an
+// adoption racing a release, issue #501) share one import() call: concurrent
+// dynamic imports of the same module can resolve inconsistently under
+// vitest's module mocker, handing one caller the real module and the other
+// the mock.
+let minimalDapModule: Promise<typeof import('./minimal-dap.js')> | undefined;
+function loadMinimalDap(): Promise<typeof import('./minimal-dap.js')> {
+  minimalDapModule ??= import('./minimal-dap.js');
+  return minimalDapModule;
+}
+
 function createInstanceId(): string {
   return randomBytes(4).toString('hex');
 }
 
-function createChildSafePolicy(policy: AdapterPolicy): AdapterPolicy {
+function createChildSafePolicy(
+  policy: AdapterPolicy,
+  onUnadoptableChild?: (config: ChildSessionConfig) => void
+): AdapterPolicy {
   if (!policy.supportsReverseStartDebugging) {
     return policy;
   }
@@ -48,7 +63,13 @@ function createChildSafePolicy(policy: AdapterPolicy): AdapterPolicy {
           if (!result.handled) {
             return result;
           }
-          // Do not spawn grandchildren; acknowledge and stop.
+          // Do not spawn grandchildren — but do not strand them either
+          // (issue #501): js-debug delivers fork auto-attach startDebugging
+          // requests on the adopted child's connection, so hand the target
+          // to the owning manager, which releases it to run undebugged.
+          if (result.createChildSession && result.childConfig && onUnadoptableChild) {
+            onUnadoptableChild(result.childConfig);
+          }
           return { handled: true };
         };
       }
@@ -65,6 +86,17 @@ export interface ChildSessionOptions {
   /** DI seam for tests; only consulted when the policy delivers function breakpoints via CDP (issue #295). */
   cdpBridgeFactory?: () => CdpFunctionBreakpointBridge;
 }
+
+/**
+ * How a startDebugging reverse request was resolved (issue #501):
+ * - 'adopted': became the active child session
+ * - 'duplicate': already adopted or already released; nothing to do
+ * - 'released': could not be adopted (single-child limitation) — attached and
+ *   immediately detached so the pending target runs undebugged
+ * - 'release-failed': the release attempt failed; the target may still be
+ *   parked and a re-sent startDebugging will retry the release
+ */
+export type ChildSessionOutcome = 'adopted' | 'duplicate' | 'released' | 'release-failed';
 
 /**
  * Settle-once death signal for a child client during adoption (issue #248).
@@ -127,6 +159,8 @@ export class ChildSessionManager extends EventEmitter {
   private adoptedTargets = new Set<string>();
   private childSessions = new Map<string, MinimalDapClient>();
   private activeChild: MinimalDapClient | null = null;
+  // Targets resumed undebugged because they could not be adopted (issue #501)
+  private releasedTargets = new Set<string>();
 
   // Breakpoint mirroring
   private storedBreakpoints = new Map<string, DebugProtocol.SourceBreakpoint[]>();
@@ -401,25 +435,43 @@ export class ChildSessionManager extends EventEmitter {
   /**
    * Create and configure a child session
    */
-  async createChildSession(config: ChildSessionConfig): Promise<void> {
+  async createChildSession(config: ChildSessionConfig): Promise<ChildSessionOutcome> {
     const { pendingId, parentConfig } = config;
-    
+
     // Check if already adopted
     if (this.adoptedTargets.has(pendingId)) {
       logger.warn(`Pending target ${pendingId} already adopted`);
-      return;
+      return 'duplicate';
     }
-    
+
     // Check if adoption is in progress or we already have a child
     if (this.adoptionInProgress || this.hasActiveChildren()) {
-      logger.info(`[ChildSessionManager:${this.instanceId}] Ignoring child session request; adoption in progress or child active`, {
+      if (this.releasedTargets.has(pendingId)) {
+        logger.info(`[ChildSessionManager:${this.instanceId}] Pending target ${pendingId} already released; ignoring`);
+        return 'duplicate';
+      }
+      // Single-child limitation: this target cannot be adopted. Silently
+      // dropping the request leaves the forked process parked forever in
+      // waitForDebugger (issue #501) — instead, attach a throwaway connection
+      // and immediately detach so the child runs undebugged.
+      logger.info(`[ChildSessionManager:${this.instanceId}] Cannot adopt child session request; releasing target to run undebugged`, {
+        pendingId,
         adoptionInProgress: this.adoptionInProgress,
         hasActiveChild: !!this.activeChild,
         childSessionCount: this.childSessions.size
       });
-      return;
+      // Stamped before the first await so a concurrent request for the same
+      // target cannot double-release; rolled back only on failure
+      this.releasedTargets.add(pendingId);
+      const released = await this.releaseUndebugged(config);
+      if (!released) {
+        this.releasedTargets.delete(pendingId);
+        return 'release-failed';
+      }
+      logger.warn(`[ChildSessionManager:${this.instanceId}] startDebugging target ${pendingId} could not be adopted (one child session at a time); released to run UNDEBUGGED — breakpoints will not bind in that child process`);
+      return 'released';
     }
-    
+
     this.adoptionInProgress = true;
     logger.info(`[ChildSessionManager:${this.instanceId}] Setting adoptionInProgress = true for ${pendingId}`);
     this.adoptedTargets.add(pendingId);
@@ -428,10 +480,10 @@ export class ChildSessionManager extends EventEmitter {
     let death: ChildDeathLatch | null = null;
     try {
       // Import MinimalDapClient dynamically to avoid circular dependency
-      const { MinimalDapClient } = await import('./minimal-dap.js');
+      const { MinimalDapClient } = await loadMinimalDap();
 
       // Create child client with a policy that disables recursive reverse debugging
-      const childPolicy = createChildSafePolicy(this.policy);
+      const childPolicy = this.buildChildSafePolicy();
       child = new MinimalDapClient(this.host, this.port, childPolicy);
       await child.connect();
 
@@ -491,6 +543,7 @@ export class ChildSessionManager extends EventEmitter {
 
       logger.info(`[ChildSessionManager:${this.instanceId}] Child session created successfully for ${pendingId}`);
       this.emit('childCreated', pendingId, child);
+      return 'adopted';
 
     } catch (error) {
       this.adoptionInProgress = false;
@@ -634,6 +687,120 @@ export class ChildSessionManager extends EventEmitter {
       const msg = lastError instanceof Error ? lastError.message : String(lastError);
       throw new Error(`Failed to attach child after ${maxRetries} attempts or ${totalDeadlineMs}ms deadline: ${msg}`);
     }
+  }
+
+  /**
+   * Child-safe policy wired back to this manager: a startDebugging arriving
+   * on a child (or release) connection is handed to createChildSession,
+   * which — with a child already active — releases it (issue #501).
+   * Fire-and-forget: the DAP ack was already sent by the base policy, and a
+   * release must not block the child's message dispatch.
+   */
+  private buildChildSafePolicy(): AdapterPolicy {
+    return createChildSafePolicy(this.policy, (config) => {
+      void this.createChildSession(config).catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.error(`[ChildSessionManager:${this.instanceId}] Forwarded unadoptable child ${config.pendingId} failed: ${msg}`);
+      });
+    });
+  }
+
+  /**
+   * Resume a pending target that cannot be adopted, without debugging it
+   * (issue #501): the debug server only unparks a pending target when a DAP
+   * connection attaches with its __pendingTargetId — for js-debug the attach
+   * response means initAdapter completed and runIfWaitingForDebugger is about
+   * to run. Attach with a throwaway connection, give the resume a moment to
+   * land, then detach with terminateDebuggee: false.
+   *
+   * Never throws, never touches adoption state (activeChild/childSessions/
+   * adoptedTargets) — a failed release must leave the parent session intact.
+   */
+  private async releaseUndebugged(config: ChildSessionConfig): Promise<boolean> {
+    const { pendingId, parentConfig } = config;
+    let releaseClient: MinimalDapClient | null = null;
+    try {
+      // Import MinimalDapClient dynamically to avoid circular dependency
+      const { MinimalDapClient } = await loadMinimalDap();
+      // Child-safe policy: a grandchild startDebugging arriving on this
+      // socket is forwarded back to this manager (released) rather than
+      // recursing into adoption
+      const client = new MinimalDapClient(this.host, this.port, this.buildChildSafePolicy());
+      releaseClient = client;
+      await this.withTimeout((async () => {
+        await client.connect();
+        // js-debug rejects launch/attach before initialize; the pending-target
+        // attach handler additionally awaits configurationDone
+        await client.sendRequest('initialize', {
+          clientID: `mcp-release-${pendingId}`,
+          adapterID: this.policy.getDapAdapterConfiguration().type,
+          pathFormat: 'path',
+          linesStartAt1: true,
+          columnsStartAt1: true
+        }, 5000);
+        try {
+          await client.sendRequest('configurationDone', {}, 5000);
+        } catch {
+          logger.warn(`[release:${pendingId}] configurationDone failed or not required`);
+        }
+        const startArgs = this.policy.buildChildStartArgs(pendingId, parentConfig);
+        logger.info(`[release:${pendingId}] ${startArgs.command} (throwaway connection)`);
+        await client.sendRequest(startArgs.command, startArgs.args, 15000);
+        // The resume runs just after the attach response resolves; wait for
+        // the policy's ready signal so a fast disconnect cannot detach from a
+        // target that is still parked
+        await this.waitForReadySignal(client, 1500);
+        try {
+          await client.sendRequest('disconnect', { terminateDebuggee: false }, 3000);
+        } catch {
+          // Best effort — detaching is what matters, and shutdown() below
+          // closes the socket either way
+        }
+      })(), 20000, `release of pending target ${pendingId} timed out`);
+      return true;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      logger.error(`[ChildSessionManager:${this.instanceId}] Failed to release pending target ${pendingId}: ${msg}`);
+      return false;
+    } finally {
+      try {
+        releaseClient?.shutdown('release complete');
+      } catch {
+        // Socket may already be gone
+      }
+    }
+  }
+
+  /**
+   * Wait for the policy's child-ready signal (e.g. js-debug posts 'thread'
+   * or an early 'stopped'); resolves false on timeout or client death.
+   */
+  private waitForReadySignal(client: MinimalDapClient, timeoutMs: number): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      let done = false;
+
+      const settle = (value: boolean) => {
+        if (done) return;
+        done = true;
+        client.off('event', onEvent);
+        client.off('close', onDeath);
+        client.off('error', onDeath);
+        clearTimeout(timer);
+        resolve(value);
+      };
+
+      const onEvent = (evt: DebugProtocol.Event) => {
+        if (evt && this.policy.isChildReadyEvent(evt)) {
+          settle(true);
+        }
+      };
+      const onDeath = () => settle(false);
+      const timer = setTimeout(() => settle(false), timeoutMs);
+
+      client.on('event', onEvent);
+      client.on('close', onDeath);
+      client.on('error', onDeath);
+    });
   }
 
   /**
@@ -846,6 +1013,7 @@ export class ChildSessionManager extends EventEmitter {
     this.childSessions.clear();
     this.activeChild = null;
     this.adoptedTargets.clear();
+    this.releasedTargets.clear();
     this.storedBreakpoints.clear();
   }
 }
