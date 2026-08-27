@@ -227,6 +227,7 @@ target with `<path> is not available`. That warning is topology, not breakage:
 |---|---|
 | `rdbg not found` | `gem install debug`, or set `RDBG_PATH` to the rdbg executable |
 | Connect timeout on launch | Ruby startup can take a few seconds; check the session log under the temp directory for the spawn command and rdbg's stderr |
+| Launch warns `'initialized' event arrived but the 'initialize' response is still missing` | rdbg intermittently drops the initialize response frame; the session recovers automatically and continues (adapter capabilities unknown for that run). See the [case study](../case-studies/rdbg-initialize-response-stall.md) |
 | Connect refused on attach | Verify the target was started with `--open --host --port` and the port is reachable (`rdbg` prints `Debugger can attach via TCP/IP`) |
 | Breakpoint not verified on attach | Use the path as the **debuggee** sees it (e.g. `/app/app.rb` in a container), not the host path |
 | Locals empty | Make sure the session is paused (breakpoint hit or explicit pause); rdbg reports locals only while stopped |
