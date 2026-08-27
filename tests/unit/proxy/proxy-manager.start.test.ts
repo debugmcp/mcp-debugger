@@ -1043,6 +1043,19 @@ describe('ProxyManager.start', () => {
       }
     });
 
+    it('isRunning() reflects actual exit evidence, not delivered signals (issue #502)', async () => {
+      await completeStart();
+      expect(proxyManager.isRunning()).toBe(true);
+
+      // A delivered signal alone (killed latched) is NOT death.
+      fakeProcess.killed = true;
+      expect(proxyManager.isRunning()).toBe(true);
+
+      // Actual exit evidence is.
+      fakeProcess.exitCode = 0;
+      expect(proxyManager.isRunning()).toBe(false);
+    });
+
     it('getProxyPid() reports the worker pid and survives stop()/cleanup (issue #502)', async () => {
       await completeStart();
       expect(proxyManager.getProxyPid()).toBe(4242);

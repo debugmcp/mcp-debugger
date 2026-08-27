@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, Mock } from 'vitest';
 import { EventEmitter } from 'events';
+import os from 'os';
+import path from 'path';
 import { createHttpApp, handleHttpCommand } from '../../../src/cli/http-command.js';
 import { FakeCurrentProcess } from '../../test-utils/mocks/fake-current-process.js';
 import type { Logger as WinstonLoggerType } from 'winston';
@@ -563,6 +565,24 @@ describe('HTTP Command Handler', () => {
       expect(mockExitProcess).not.toHaveBeenCalled();
       expect(fakeProc.listenerCount('SIGINT')).toBe(1);
       expect(fakeProc.listenerCount('SIGTERM')).toBe(1);
+    });
+
+    it('wires --log-file into the CLI logger without failing on non-winston loggers (issue #502)', async () => {
+      const listen = vi.fn((_port: number, cb: Function) => {
+        cb();
+        return mockHttpServer;
+      });
+      mockApp.listen = listen;
+
+      // The mock logger has no winston transports — attachSharedFileTransport
+      // must swallow that (best-effort) and startup must proceed normally.
+      await handleHttpCommand(
+        { port: '4001', logLevel: 'debug', logFile: path.join(os.tmpdir(), 'http-cmd-502-test.log') },
+        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+      );
+
+      expect(listen).toHaveBeenCalledWith(4001, expect.any(Function));
+      expect(mockExitProcess).not.toHaveBeenCalled();
     });
 
     it('exits with code 1 when the app cannot be created', async () => {

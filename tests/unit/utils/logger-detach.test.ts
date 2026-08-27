@@ -13,7 +13,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { createLogger, detachSharedFileTransport } from '../../../src/utils/logger.js';
+import { createLogger, detachSharedFileTransport, attachSharedFileTransport } from '../../../src/utils/logger.js';
 
 let tmpDir: string;
 let logFile: string;
@@ -83,5 +83,35 @@ describe('detachSharedFileTransport (issue #404)', () => {
   it('is a no-op for a logger with no shared file transport', () => {
     const bare = createLogger('detach-test-bare');
     expect(() => detachSharedFileTransport(bare)).not.toThrow();
+  });
+});
+
+describe('attachSharedFileTransport (issue #502)', () => {
+  it('attaches the shared transport for a file to an existing logger, idempotently', () => {
+    const fileA = path.join(tmpDir, 'attach-a.log');
+    const fileB = path.join(tmpDir, 'attach-b.log');
+    // A logger created against file A (the CLI logger shape: exists before
+    // --log-file is known).
+    const logger = createLogger('attach-test-cli', { file: fileA });
+    const before = logger.transports.length;
+
+    attachSharedFileTransport(logger, fileB);
+    expect(logger.transports.length).toBe(before + 1);
+
+    // Idempotent: same file again adds nothing.
+    attachSharedFileTransport(logger, fileB);
+    expect(logger.transports.length).toBe(before + 1);
+
+    // The attached transport is the SHARED one for that path — a server
+    // logger created against the same file reuses it, so lines interleave.
+    const server = createLogger('attach-test-server', { file: fileB });
+    const sharedB = fileTransportOf(server);
+    expect(logger.transports).toContain(sharedB);
+  });
+
+  it('is best-effort: a logger without winston internals does not throw', () => {
+    const fileC = path.join(tmpDir, 'attach-c.log');
+    const notALogger = {} as Parameters<typeof attachSharedFileTransport>[0];
+    expect(() => attachSharedFileTransport(notALogger, fileC)).not.toThrow();
   });
 });

@@ -121,6 +121,49 @@ describe('SessionManager - worker reap guarantees (issue #502)', () => {
     expect(leakLine).toBeDefined();
   });
 
+  it('warns when the status-driven exit reap itself fails', async () => {
+    await startSession();
+    const mockProxy = dependencies.mockProxyManager;
+    mockProxy.stop = vi.fn().mockRejectedValue(new Error('stop exploded'));
+
+    mockProxy.simulateEvent('exit', 0, undefined, true);
+    await vi.runAllTimersAsync();
+
+    const warnCalls = (dependencies.mockLogger.warn as ReturnType<typeof vi.fn>).mock.calls;
+    expect(warnCalls.some((call) =>
+      typeof call[0] === 'string' && call[0].includes("Error stopping proxy after 'exit'")
+    )).toBe(true);
+  });
+
+  it('stopProxyPreservingSession awaits a pending stop and survives cleanup/stop failures', async () => {
+    const sessionId = await startSession();
+    const mockProxy = dependencies.mockProxyManager;
+    const managed = sessionManager.getSession(sessionId)!;
+
+    // Both failure paths at once: listener cleanup throws, stop() rejects,
+    // and a terminal handler left a pending stop behind.
+    (sessionManager as unknown as { cleanupProxyEventHandlers: () => void })
+      .cleanupProxyEventHandlers = () => { throw new Error('cleanup boom'); };
+    mockProxy.stop = vi.fn().mockRejectedValue(new Error('stop boom'));
+    let pendingResolved = false;
+    managed.pendingProxyStop = Promise.resolve().then(() => { pendingResolved = true; });
+
+    await (sessionManager as unknown as {
+      stopProxyPreservingSession: (s: typeof managed) => Promise<void>;
+    }).stopProxyPreservingSession(managed);
+
+    expect(managed.proxyManager).toBeUndefined();
+    expect(managed.pendingProxyStop).toBeUndefined();
+    expect(pendingResolved).toBe(true);
+    const errorCalls = (dependencies.mockLogger.error as ReturnType<typeof vi.fn>).mock.calls;
+    expect(errorCalls.some((call) =>
+      typeof call[0] === 'string' && call[0].includes('Error during listener cleanup')
+    )).toBe(true);
+    expect(errorCalls.some((call) =>
+      typeof call[0] === 'string' && call[0].includes('Error stopping proxy for session')
+    )).toBe(true);
+  });
+
   it('stays silent when the worker is confirmed dead after close', async () => {
     const sessionId = await startSession();
     const mockProxy = dependencies.mockProxyManager;
