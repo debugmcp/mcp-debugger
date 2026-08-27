@@ -469,6 +469,8 @@ export class DapProxyWorker {
       }
       this.adapterExitCodeIsDebuggeeExitCode = spawnConfig.adapterExitCodeIsDebuggeeExitCode === true;
       this.logger!.info(`[Worker] Adapter spawned with PID: ${spawnResult.pid}`);
+      // Init-progress fact for the parent's proxyInitTimeout diagnosis (issue #493).
+      this.sendStatus('adapter_spawned', { pid: spawnResult.pid });
 
       this.adapterProcess.on('error', (err) => {
         this.logger!.error('[Worker] Adapter process error:', err);
@@ -505,6 +507,11 @@ export class DapProxyWorker {
       // Record the break-on-exception mode on the client so DAP child
       // sessions (js-debug) can apply the same filters (issue #220).
       this.dapClient.setExceptionBreakMode?.(payload.breakOnExceptions ?? 'none');
+
+      // Init-progress fact for the parent's proxyInitTimeout diagnosis (issue
+      // #493). Deliberately NOT 'adapter_connected', whose parent handler marks
+      // the session initialized to unblock the js-debug queueing handshake.
+      this.sendStatus('dap_handshake_stage', { stage: 'transport_connected' });
 
       // Set up event handlers
       this.setupDapEventHandlers();
@@ -557,10 +564,14 @@ export class DapProxyWorker {
           // so the attach response must not be awaited before handleInitializedEvent.
           const attachPayload = payload.launchConfig || {};
           this.logger!.info(`[Worker] Attach-first mode — sending attach. Keys: ${Object.keys(attachPayload).join(', ')}`);
+          this.sendStatus('dap_handshake_stage', { stage: 'request_pending', command: 'attach' });
           const attachRequest = this.connectionManager!.sendAttachRequest(
             this.dapClient,
             attachPayload
-          );
+          ).then((attachResult) => {
+            this.sendStatus('dap_handshake_stage', { stage: 'response_received', command: 'attach' });
+            return attachResult;
+          });
           // Surface early attach failures (connection refused, bad args) instead
           // of waiting out the initialized timeout. Promise.race subscribes to
           // every arm, so this rejection is consumed even when another arm wins.
@@ -595,10 +606,10 @@ export class DapProxyWorker {
 
           this.logger!.info('[Worker] "initialized" event received, sending attach request');
 
-          await this.connectionManager!.sendAttachRequest(
-            this.dapClient,
+          await this.trackedHandshakeRequest('attach', () => this.connectionManager!.sendAttachRequest(
+            this.dapClient!,
             payload.launchConfig || {}
-          );
+          ));
 
           this.deferInitializedHandling = false;
           await this.handleInitializedEvent();
@@ -618,14 +629,14 @@ export class DapProxyWorker {
           }
 
           // Standard two-phase: send launch, wait for response, then configurationDone
-          await this.connectionManager!.sendLaunchRequest(
-            this.dapClient,
+          await this.trackedHandshakeRequest('launch', () => this.connectionManager!.sendLaunchRequest(
+            this.dapClient!,
             payload.scriptPath,
             payload.scriptArgs,
             payload.stopOnEntry,
             payload.justMyCode,
             payload.launchConfig
-          );
+          ));
 
           if (!receivedBeforeLaunch) {
             // Phase 2: Wait for initialized after launch
@@ -646,14 +657,14 @@ export class DapProxyWorker {
           // Python/debugpy sends "initialized" AFTER receiving the launch request
           this.logger!.info('[Worker] Sending launch request with scriptPath:', payload.scriptPath);
 
-          await this.connectionManager!.sendLaunchRequest(
-            this.dapClient,
+          await this.trackedHandshakeRequest('launch', () => this.connectionManager!.sendLaunchRequest(
+            this.dapClient!,
             payload.scriptPath,
             payload.scriptArgs,
             payload.stopOnEntry,
             payload.justMyCode,
             payload.launchConfig
-          );
+          ));
         }
       }
 
@@ -674,16 +685,35 @@ export class DapProxyWorker {
    * with unknown capabilities (a documented-legal value) and a late response
    * still captures them.
    */
+  /**
+   * Run a blocking init-phase DAP request bracketed by handshake-stage
+   * statuses, so the parent knows which request is outstanding if the init
+   * deadline fires (issue #493). A rejection leaves the request marked
+   * pending — its own error carries the diagnosis then.
+   */
+  private async trackedHandshakeRequest<T>(command: string, run: () => Promise<T>): Promise<T> {
+    this.sendStatus('dap_handshake_stage', { stage: 'request_pending', command });
+    const result = await run();
+    this.sendStatus('dap_handshake_stage', { stage: 'response_received', command });
+    return result;
+  }
+
   private async awaitInitializeResponse(
     payload: ProxyInitPayload,
     initBehavior: ReturnType<AdapterPolicy['getInitializationBehavior']>,
     isAttachMode: boolean
   ): Promise<DebugProtocol.Capabilities | undefined> {
-    const initPromise = this.connectionManager!.initializeSession(
+    this.sendStatus('dap_handshake_stage', { stage: 'request_pending', command: 'initialize' });
+    // Promise.resolve: initializeSession stubs may return bare undefined
+    // (documented-legal for degenerate adapters).
+    const initPromise = Promise.resolve(this.connectionManager!.initializeSession(
       this.dapClient!,
       payload.sessionId,
       this.adapterPolicy.getDapAdapterConfiguration().type
-    );
+    )).then((caps) => {
+      this.sendStatus('dap_handshake_stage', { stage: 'response_received', command: 'initialize' });
+      return caps;
+    });
 
     if (isAttachMode || !initBehavior.initializeResponseOptional || !this.initializedEventPromise) {
       return initPromise;

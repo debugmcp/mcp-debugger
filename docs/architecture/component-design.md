@@ -420,10 +420,12 @@ export const ErrorMessages = {
     `This typically means the debug adapter has crashed or lost connection. ` +
     `Try restart_debugging to relaunch the session. If the problem persists, check the debug adapter logs.`,
     
-  proxyInitTimeout: (timeout: number) =>
-    `Debug proxy initialization did not complete within ${timeout}s. ` +
-    `This may indicate that the debug adapter failed to start or is not properly configured. ` +
-    `Check that the required debug adapter is installed and accessible.`
+  proxyInitTimeout: (timeout: number, progress?: ProxyInitProgress) =>
+    // Invariant first sentence; the rest reflects how far initialization
+    // actually got (spawned? transport connected? which DAP request is
+    // unanswered?) so the error never blames a missing install when the
+    // adapter demonstrably connected (issue #493)
+    `Debug proxy initialization did not complete within ${timeout}s. ` + /* stage-aware detail */
 };
 ```
 
