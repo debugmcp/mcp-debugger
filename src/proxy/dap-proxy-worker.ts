@@ -1233,11 +1233,7 @@ export class DapProxyWorker {
       // Ensure initial stop after launch if needed
       if (initBehavior.requiresInitialStop && (payload.dapCommand === 'launch' || payload.dapCommand === 'attach')) {
         await this.drainCommandQueue();
-        this.ensureInitialStop().catch((err) => {
-          this.logger?.debug?.(
-            `[Worker] ensureInitialStop encountered error: ${err instanceof Error ? err.message : String(err)}`
-          );
-        });
+        this.startInitialStopIfNeeded(payload.dapCommand, payload.dapArgs);
       }
     } catch (error) {
       this.requestTracker.complete(payload.requestId);
@@ -1295,11 +1291,7 @@ export class DapProxyWorker {
 
         const initBehavior = this.adapterPolicy.getInitializationBehavior();
         if (initBehavior.requiresInitialStop && (payload.dapCommand === 'launch' || payload.dapCommand === 'attach')) {
-          this.ensureInitialStop().catch((err) => {
-            this.logger?.debug?.(
-              `[Worker] ensureInitialStop (queued) encountered error: ${err instanceof Error ? err.message : String(err)}`
-            );
-          });
+          this.startInitialStopIfNeeded(payload.dapCommand, payload.dapArgs, true);
         }
       } catch (error) {
         this.requestTracker.complete(payload.requestId);
@@ -1308,6 +1300,34 @@ export class DapProxyWorker {
         this.sendDapResponse(payload.requestId, false, undefined, message);
       }
     }
+  }
+
+  /**
+   * Gate for the fire-and-forget entry-stop enforcement (issue #520).
+   * Attach is excluded entirely: session-manager owns post-attach thread
+   * verification and pause (attachToProcess + getAttachBehavior().pauseAfterAttach),
+   * and a worker-side unconditional pause would fight stopOnEntry:false attach
+   * semantics. Launch runs it only when an entry stop was actually requested.
+   */
+  private startInitialStopIfNeeded(dapCommand: string, dapArgs: unknown, viaQueue = false): void {
+    if (dapCommand !== 'launch') {
+      this.logger?.debug?.(
+        `[Worker] ensureInitialStop skipped for ${dapCommand} (session manager owns the post-attach pause)`
+      );
+      return;
+    }
+    const wantsEntryStop =
+      this.currentInitPayload?.stopOnEntry === true ||
+      (dapArgs as { stopOnEntry?: boolean } | undefined)?.stopOnEntry === true;
+    if (!wantsEntryStop) {
+      this.logger?.debug?.('[Worker] ensureInitialStop skipped (stopOnEntry not requested)');
+      return;
+    }
+    this.ensureInitialStop().catch((err) => {
+      this.logger?.debug?.(
+        `[Worker] ensureInitialStop${viaQueue ? ' (queued)' : ''} encountered error: ${err instanceof Error ? err.message : String(err)}`
+      );
+    });
   }
 
   /**
@@ -1321,14 +1341,24 @@ export class DapProxyWorker {
       try {
         const threadsResp = await this.dapClient.sendRequest<DebugProtocol.ThreadsResponse>('threads', {});
         const first = threadsResp?.body?.threads?.[0]?.id;
-        if (typeof first === 'number' && first > 0) {
-          const pauseTid = first;
-          this.logger?.info(`[Worker] ensureInitialStop: pausing threadId=${pauseTid}`);
-          try {
-            await this.dapClient.sendRequest('pause', { threadId: pauseTid });
-          } catch {
-            // ignore pause errors
+        if (typeof first === 'number') {
+          if (first > 0) {
+            const pauseTid = first;
+            this.logger?.info(`[Worker] ensureInitialStop: pausing threadId=${pauseTid}`);
+            try {
+              await this.dapClient.sendRequest('pause', { threadId: pauseTid });
+            } catch {
+              // ignore pause errors
+            }
+            return;
           }
+          // js-debug reports its sole thread as id 0 — a real thread, but DAP
+          // pause with threadId 0 means "pause all" on some adapters, so it is
+          // not a safe explicit pause target. Threads WERE discovered; say so
+          // instead of polling to a false 'no threads' warning (issue #520).
+          this.logger?.info(
+            `[Worker] ensureInitialStop: threads reported (first id=${first}) — treating as discovered; skipping pause (id ${first} is not a safe pause target)`
+          );
           return;
         }
       } catch {
