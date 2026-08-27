@@ -128,6 +128,11 @@ export const RubyAdapterPolicy: AdapterPolicy = {
   getInitializationBehavior: () => {
     return {
       sendLaunchBeforeConfig: true,
+      // rdbg can process 'initialize' (proving it with the 'initialized' event)
+      // yet never send the response — its DAP send silently skips writing when
+      // the socket slot is momentarily unset (issue #492). Don't let the missing
+      // response park the launch until the 30s deadline.
+      initializeResponseOptional: true,
       // rdbg only offers 'any' (break on every raise) — no uncaught-only filter
       exceptionFilters: {
         uncaught: [],

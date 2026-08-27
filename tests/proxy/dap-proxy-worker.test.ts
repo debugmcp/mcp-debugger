@@ -1482,6 +1482,216 @@ describe('DapProxyWorker', () => {
       expect(outputMessages().length).toBe(before);
     });
 
+    describe('initialize response optional (issue #492)', () => {
+      const rubyLaunchPayload = (): ProxyInitPayload => ({
+        cmd: 'init',
+        sessionId: 'ruby-492-session',
+        language: 'ruby',
+        executablePath: 'ruby',
+        adapterHost: '127.0.0.1',
+        adapterPort: 8124,
+        logDir: '/logs',
+        scriptPath: '/path/to/fizzbuzz.rb',
+        launchConfig: { request: 'launch', type: 'rdbg' },
+        adapterCommand: {
+          command: 'rdbg',
+          args: ['--open', '--host', '127.0.0.1', '--port', '8124', '-c', '--', 'ruby', '/path/to/fizzbuzz.rb']
+        }
+      });
+
+      const makeStubs = (initializeSessionImpl: () => Promise<unknown>) => {
+        const processStub = {
+          spawn: vi.fn().mockResolvedValue({
+            process: new EventEmitter() as unknown as ChildProcess,
+            pid: 4242
+          }),
+          shutdown: vi.fn().mockResolvedValue(undefined)
+        };
+        const connectionStub = {
+          connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+          setAdapterPolicy: vi.fn(),
+          setupEventHandlers: vi.fn((client: EventEmitter, handlers: Record<string, () => void>) => {
+            if (handlers.onInitialized) client.on('initialized', handlers.onInitialized);
+          }),
+          initializeSession: vi.fn().mockImplementation(initializeSessionImpl),
+          sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
+          sendAttachRequest: vi.fn().mockResolvedValue(undefined),
+          setBreakpoints: vi.fn().mockResolvedValue(undefined),
+          sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+          disconnect: vi.fn().mockResolvedValue(undefined)
+        };
+        return { processStub, connectionStub };
+      };
+
+      const wireWorker = (
+        payload: ProxyInitPayload,
+        processStub: unknown,
+        connectionStub: unknown,
+        policy: typeof RubyAdapterPolicy
+      ) => {
+        (worker as any).logger = mockLogger;
+        (worker as any).processManager = processStub;
+        (worker as any).connectionManager = connectionStub;
+        (worker as any).adapterPolicy = policy;
+        (worker as any).adapterState = policy.createInitialState();
+        (worker as any).currentInitPayload = payload;
+        (worker as any).currentSessionId = payload.sessionId;
+        (worker as any).state = ProxyState.INITIALIZING;
+      };
+
+      const capabilitiesStatuses = () => mockMessageSender.send.mock.calls.filter(
+        ([message]) => message.type === 'status' && message.status === 'adapter_capabilities'
+      );
+
+      it('ruby launch proceeds when the initialize response never arrives but initialized did (issue #492)', async () => {
+        vi.useFakeTimers();
+        try {
+          const payload = rubyLaunchPayload();
+          // The #492 shape: rdbg processed the request (the 'initialized' event
+          // proves it) but the initialize response frame never arrives.
+          const { processStub, connectionStub } = makeStubs(() => new Promise(() => {}));
+          wireWorker(payload, processStub, connectionStub, RubyAdapterPolicy);
+
+          const startPromise = (worker as any).startAdapterAndConnect(payload);
+          await vi.advanceTimersByTimeAsync(0); // reach the parked initialize await
+          (mockDapClient as EventEmitter).emit('initialized');
+          await vi.advanceTimersByTimeAsync(2000); // grace period for a late response
+
+          await startPromise;
+
+          expect(connectionStub.sendLaunchRequest).toHaveBeenCalledTimes(1);
+          expect(connectionStub.sendConfigurationDone).toHaveBeenCalledTimes(1);
+          expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('issue #492'));
+          // No response ⇒ no capabilities to report.
+          expect(capabilitiesStatuses()).toHaveLength(0);
+          const statusCall = mockMessageSender.send.mock.calls.find(
+            ([message]: [StatusMessage]) => message.type === 'status' && message.status === 'adapter_configured_and_launched'
+          );
+          expect(statusCall).toBeDefined();
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('a late initialize response still captures capabilities after the event won the race', async () => {
+        vi.useFakeTimers();
+        try {
+          const payload = rubyLaunchPayload();
+          let resolveInit!: (value: unknown) => void;
+          const { processStub, connectionStub } = makeStubs(
+            () => new Promise((resolve) => { resolveInit = resolve; })
+          );
+          wireWorker(payload, processStub, connectionStub, RubyAdapterPolicy);
+
+          const startPromise = (worker as any).startAdapterAndConnect(payload);
+          await vi.advanceTimersByTimeAsync(0);
+          (mockDapClient as EventEmitter).emit('initialized');
+          await vi.advanceTimersByTimeAsync(2000);
+          await startPromise;
+          expect(capabilitiesStatuses()).toHaveLength(0);
+
+          // The response limps in after the launch already proceeded.
+          resolveInit({ supportsConfigurationDoneRequest: true });
+          await vi.advanceTimersByTimeAsync(0);
+          expect(capabilitiesStatuses()).toHaveLength(1);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('healthy ruby launch still captures capabilities and never warns', async () => {
+        const payload = rubyLaunchPayload();
+        const capabilities = { supportsConfigurationDoneRequest: true };
+        const { processStub, connectionStub } = makeStubs(async () => {
+          setImmediate(() => (mockDapClient as EventEmitter).emit('initialized'));
+          return capabilities;
+        });
+        wireWorker(payload, processStub, connectionStub, RubyAdapterPolicy);
+
+        await (worker as any).startAdapterAndConnect(payload);
+
+        expect(connectionStub.sendLaunchRequest).toHaveBeenCalledTimes(1);
+        const capsCalls = capabilitiesStatuses();
+        expect(capsCalls).toHaveLength(1);
+        expect(capsCalls[0][0].capabilities).toEqual(capabilities);
+        expect(mockLogger.warn).not.toHaveBeenCalledWith(expect.stringContaining('issue #492'));
+      });
+
+      it('a policy without the opt-in still blocks on a missing initialize response', async () => {
+        vi.useFakeTimers();
+        try {
+          const payload: ProxyInitPayload = {
+            cmd: 'init',
+            sessionId: 'go-492-session',
+            executablePath: 'dlv',
+            adapterHost: 'localhost',
+            adapterPort: 12345,
+            logDir: '/logs',
+            scriptPath: '/path/to/main.go',
+            scriptArgs: [],
+            stopOnEntry: false,
+            justMyCode: false,
+            adapterCommand: {
+              command: 'dlv',
+              args: ['dap', '--listen', 'localhost:12345']
+            }
+          };
+          const { processStub, connectionStub } = makeStubs(() => new Promise(() => {}));
+          wireWorker(payload, processStub, connectionStub, GoAdapterPolicy);
+
+          let settled = false;
+          const startPromise = (worker as any).startAdapterAndConnect(payload)
+            .then(() => { settled = true; }, () => { settled = true; });
+          await vi.advanceTimersByTimeAsync(0);
+          (mockDapClient as EventEmitter).emit('initialized');
+          await vi.advanceTimersByTimeAsync(10000);
+
+          expect(settled).toBe(false);
+          expect(connectionStub.sendLaunchRequest).not.toHaveBeenCalled();
+          void startPromise;
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('ruby attach still blocks on a missing initialize response (launch-only recovery)', async () => {
+        vi.useFakeTimers();
+        try {
+          const payload: ProxyInitPayload = {
+            cmd: 'init',
+            sessionId: 'ruby-attach-492-session',
+            language: 'ruby',
+            executablePath: 'ruby',
+            adapterHost: '127.0.0.1',
+            adapterPort: 8123,
+            logDir: '/logs',
+            scriptPath: 'attach://remote',
+            launchConfig: {
+              request: 'attach',
+              type: 'rdbg',
+              host: '127.0.0.1',
+              port: 12345
+            }
+          };
+          const { processStub, connectionStub } = makeStubs(() => new Promise(() => {}));
+          wireWorker(payload, processStub, connectionStub, RubyAdapterPolicy);
+
+          let settled = false;
+          const startPromise = (worker as any).startAdapterAndConnect(payload)
+            .then(() => { settled = true; }, () => { settled = true; });
+          await vi.advanceTimersByTimeAsync(0);
+          (mockDapClient as EventEmitter).emit('initialized');
+          await vi.advanceTimersByTimeAsync(10000);
+
+          expect(settled).toBe(false);
+          expect(connectionStub.sendAttachRequest).not.toHaveBeenCalled();
+          void startPromise;
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+    });
+
     it('holds terminated and dap_connection_closed until adapter stdio drains (issue #222)', async () => {
       // A debuggee printing to a block-buffered pipe flushes everything at
       // exit, milliseconds AFTER the adapter's terminated event / socket

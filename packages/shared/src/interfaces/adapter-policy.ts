@@ -456,6 +456,14 @@ export interface AdapterPolicy {
      *  Some adapters send initialized only AFTER processing the attach request, so waiting
      *  for initialized before sending attach causes a deadlock. */
     sendAttachBeforeInitialized?: boolean;
+    /** Whether a launch may proceed when the 'initialized' event has arrived but the
+     *  'initialize' response has not (issue #492). rdbg intermittently emits the event
+     *  and then never sends the response, which would otherwise park initialization
+     *  until the 30s proxy deadline kills the session. When set, the proxy races the
+     *  response against the event plus a short grace period and, if the event wins,
+     *  continues the launch with unknown capabilities. Launch mode only — attach
+     *  initialization is unaffected. */
+    initializeResponseOptional?: boolean;
     /** Concrete DAP exceptionBreakpointFilters IDs per abstract breakOnExceptions
      *  mode (issue #220). Omitted (or an empty array for a mode) means the mode
      *  is unsupported for this adapter and setExceptionBreakpoints is skipped. */
