@@ -310,16 +310,61 @@ describe('set_breakpoint statement anchors (#271)', () => {
     await expect(callSetBreakpoint({})).rejects.toThrow(/[Mm]issing required/);
   });
 
-  it('rejects statement for attach sessions', async () => {
+  it('rejects statement for attach sessions with the attach-specific reason (issue #497)', async () => {
     mockSessionManager.getSession.mockReturnValue({
       id: 'test-session',
       sessionLifecycle: 'active',
       attachMode: true
     });
 
-    await expect(
-      callSetBreakpoint({ statement: 'return total' })
-    ).rejects.toThrow(/line addressing/i);
+    const err = await callSetBreakpoint({ statement: 'return total' }).then(
+      () => { throw new Error('expected rejection'); },
+      (e: Error) => e
+    );
+    // The rejection is correct; the reason must be too — the file is a
+    // readable local path, not "a class name or remote path" (issue #497).
+    expect(err.message).toMatch(/not supported for attach sessions/);
+    expect(err.message).toMatch(/line addressing/i);
+    expect(err.message).not.toMatch(/class name or remote path/);
+  });
+
+  it('rejects expectedContent for attach sessions with the attach-specific reason (issue #497)', async () => {
+    mockSessionManager.getSession.mockReturnValue({
+      id: 'test-session',
+      sessionLifecycle: 'active',
+      attachMode: true
+    });
+
+    const err = await callSetBreakpoint({ line: 6, expectedContent: 'return total' }).then(
+      () => { throw new Error('expected rejection'); },
+      (e: Error) => e
+    );
+    expect(err.message).toMatch(/expectedContent/);
+    expect(err.message).toMatch(/not supported for attach sessions/);
+    expect(err.message).not.toMatch(/class name or remote path/);
+  });
+
+  it('keeps the class-name wording for non-file source identifiers', async () => {
+    mockSessionManager.getSessionPolicy.mockReturnValue({
+      isNonFileSourceIdentifier: () => true
+    });
+
+    const err = await callToolHandler({
+      method: 'tools/call',
+      params: {
+        name: 'set_breakpoint',
+        arguments: {
+          sessionId: 'test-session',
+          file: 'com.example.MyClass',
+          statement: 'return total'
+        }
+      }
+    }).then(
+      () => { throw new Error('expected rejection'); },
+      (e: Error) => e
+    );
+    expect(err.message).toMatch(/class name or remote path/);
+    expect(err.message).toMatch(/line addressing/i);
   });
 
   it('is rejected in assert mode, naming the env value', async () => {
