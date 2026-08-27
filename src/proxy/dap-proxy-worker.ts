@@ -69,6 +69,15 @@ export type DapProxyWorkerHooks = {
  */
 export const MAX_QUEUED_COMMANDS = 256;
 
+/**
+ * How long after the 'initialized' event to keep waiting for the initialize
+ * response before proceeding without it (issue #492, policies declaring
+ * initializeResponseOptional). In every healthy handshake the response
+ * precedes the event, so this only delays the recovery path — matched to the
+ * Phase-1 initialized wait used by the launch-before-config flow.
+ */
+export const INITIALIZE_RESPONSE_GRACE_MS = 2000;
+
 export class DapProxyWorker {
   private logger: ILogger | null = null;
   private dapClient: IDapClient | null = null;
@@ -536,11 +545,7 @@ export class DapProxyWorker {
         }
 
         // Initialize DAP session with correct adapterId
-        const capabilities = await this.connectionManager!.initializeSession(
-          this.dapClient,
-          payload.sessionId,
-          this.adapterPolicy.getDapAdapterConfiguration().type
-        );
+        const capabilities = await this.awaitInitializeResponse(payload, initBehavior, isAttachMode);
         if (capabilities) {
           this.captureAdapterCapabilities(capabilities);
         }
@@ -597,7 +602,6 @@ export class DapProxyWorker {
 
           this.deferInitializedHandling = false;
           await this.handleInitializedEvent();
-        /* istanbul ignore next -- Go/Java launch sequence: covered by E2E/integration tests */
         } else if (initBehavior.sendLaunchBeforeConfig) {
           // TWO-PHASE INITIALIZED HANDLING for adapters like Go/Delve, Java/JDI bridge
           // Phase 1: Brief wait — some adapters send initialized immediately after initialize
@@ -658,6 +662,74 @@ export class DapProxyWorker {
       await this.shutdown();
       throw error;
     }
+  }
+
+  /**
+   * Await the adapter's initialize response. For launch-mode policies that
+   * declare initializeResponseOptional (rdbg, issue #492), the response is
+   * raced against the already-armed 'initialized' event plus a grace period:
+   * rdbg can process the request — proving it with the event — yet never send
+   * the response, which would otherwise park this await until the parent's
+   * 30s deadline kills the session. If the event wins, the launch proceeds
+   * with unknown capabilities (a documented-legal value) and a late response
+   * still captures them.
+   */
+  private async awaitInitializeResponse(
+    payload: ProxyInitPayload,
+    initBehavior: ReturnType<AdapterPolicy['getInitializationBehavior']>,
+    isAttachMode: boolean
+  ): Promise<DebugProtocol.Capabilities | undefined> {
+    const initPromise = this.connectionManager!.initializeSession(
+      this.dapClient!,
+      payload.sessionId,
+      this.adapterPolicy.getDapAdapterConfiguration().type
+    );
+
+    if (isAttachMode || !initBehavior.initializeResponseOptional || !this.initializedEventPromise) {
+      return initPromise;
+    }
+
+    const requestSentAt = Date.now();
+    // `settled` gates the grace timer: when the response wins the race, the
+    // event's continuation (which may fire later, or in the same tick) must
+    // not arm a stray timer.
+    let settled = false;
+    let graceTimer: NodeJS.Timeout | undefined;
+    const eventThenGrace = this.initializedEventPromise.then(
+      () => new Promise<'initialize-response-missing'>((resolve) => {
+        if (settled) {
+          resolve('initialize-response-missing'); // unobserved: the race is already decided
+          return;
+        }
+        graceTimer = setTimeout(() => resolve('initialize-response-missing'), INITIALIZE_RESPONSE_GRACE_MS);
+      })
+    );
+
+    try {
+      const raced = await Promise.race([initPromise, eventThenGrace]);
+      if (raced !== 'initialize-response-missing') {
+        return raced;
+      }
+    } finally {
+      settled = true;
+      if (graceTimer) {
+        clearTimeout(graceTimer);
+      }
+    }
+
+    this.logger!.warn(
+      `[Worker] 'initialized' event arrived but the 'initialize' response is still missing ` +
+      `${Date.now() - requestSentAt}ms after the request (issue #492: rdbg can silently drop the ` +
+      `response frame). Proceeding with the launch without adapter capabilities.`
+    );
+    // A late response still yields capabilities; the request's own timeout
+    // rejection must not become an unhandled rejection.
+    initPromise.then((caps) => {
+      if (caps) {
+        this.captureAdapterCapabilities(caps);
+      }
+    }).catch(() => {});
+    return undefined;
   }
 
   /**

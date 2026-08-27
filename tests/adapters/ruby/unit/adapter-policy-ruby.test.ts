@@ -210,6 +210,9 @@ describe('RubyAdapterPolicy behavior surface', () => {
     });
     expect(RubyAdapterPolicy.getInitializationBehavior?.()).toEqual({
       sendLaunchBeforeConfig: true,
+      // rdbg can emit 'initialized' yet never send the initialize response;
+      // the proxy must not park on the response forever (issue #492)
+      initializeResponseOptional: true,
       exceptionFilters: {
         uncaught: [],
         all: ['any']
