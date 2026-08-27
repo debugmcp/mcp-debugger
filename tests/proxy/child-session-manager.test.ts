@@ -39,15 +39,17 @@ class MockMinimalDapClient extends EventEmitter {
   host: string;
   port: number;
   policy?: AdapterPolicy;
+  options?: { traceLabel?: string };
   connected = false;
   requests: Array<{ command: string; args: unknown }> = [];
   shutdownCalls: string[] = [];
 
-  constructor(host: string, port: number, policy?: AdapterPolicy) {
+  constructor(host: string, port: number, policy?: AdapterPolicy, options?: { traceLabel?: string }) {
     super();
     this.host = host;
     this.port = port;
     this.policy = policy;
+    this.options = options;
     MockMinimalDapClient.lastInstance = this;
     MockMinimalDapClient.instances.push(this);
   }
@@ -627,6 +629,40 @@ describe('ChildSessionManager', () => {
         expect(releaseClient).not.toBe(manager.getActiveChild());
         expect(manager.isAdopted('pending-2')).toBe(false);
         expect((manager as any).childSessions.size).toBe(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('tags adoption and release connections for the DAP trace (issue #518)', async () => {
+      vi.useFakeTimers();
+      try {
+        const adoption = manager.createChildSession({
+          pendingId: 'adopted-target-1',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: {}
+        });
+        await vi.advanceTimersByTimeAsync(20000);
+        expect(await adoption).toBe('adopted');
+
+        const release = manager.createChildSession({
+          pendingId: 'released-target-1',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: {}
+        });
+        await vi.advanceTimersByTimeAsync(20000);
+        expect(await release).toBe('released');
+
+        const adopted = MockMinimalDapClient.instances.find(
+          (c) => c.options?.traceLabel?.startsWith('child:')
+        );
+        const released = MockMinimalDapClient.instances.find(
+          (c) => c.options?.traceLabel?.startsWith('release:')
+        );
+        expect(adopted?.options?.traceLabel).toBe('child:adopted-');
+        expect(released?.options?.traceLabel).toBe('release:released');
       } finally {
         vi.useRealTimers();
       }

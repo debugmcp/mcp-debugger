@@ -2470,11 +2470,36 @@ describe('DapProxyWorker', () => {
         expect.stringContaining('ensureInitialStop: no threads discovered within timeout')
       );
       expect(sendRequestMock).toHaveBeenCalledWith('threads', {});
-      
+
       // Verify that exit was not called during this test
       expect(exitSpy).not.toHaveBeenCalled();
 
       vi.useRealTimers();
+    });
+
+    it('ensureInitialStop treats thread id 0 as discovered and skips pause (issue #520)', async () => {
+      (worker as any).dapClient = mockDapClient;
+      (worker as any).logger = mockLogger;
+      const sendRequestMock = mockDapClient.sendRequest as Mock;
+      sendRequestMock.mockReset();
+      sendRequestMock.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          // js-debug's child target reports its sole thread as id 0
+          return { body: { threads: [{ id: 0, name: 'Remote Process [0]' }] } };
+        }
+        throw new Error(`Unexpected command ${command}`);
+      });
+
+      await (worker as any).ensureInitialStop();
+
+      const threadsCalls = sendRequestMock.mock.calls.filter(([cmd]) => cmd === 'threads');
+      expect(threadsCalls).toHaveLength(1); // polling stops on the first report
+      const pauseCall = sendRequestMock.mock.calls.find(([cmd]) => cmd === 'pause');
+      expect(pauseCall).toBeUndefined();
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('not a safe pause target')
+      );
+      expect(mockLogger.warn).not.toHaveBeenCalled();
     });
 
     it('wires adapter process events and propagates DAP events', async () => {
@@ -3182,6 +3207,120 @@ describe('DapProxyWorker', () => {
 
       trackSpy.mockRestore();
       mockDapClient.sendRequest = vi.fn().mockResolvedValue({ body: {} });
+    });
+  });
+
+  describe('startInitialStopIfNeeded gating (issue #520)', () => {
+    let ensureSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      (worker as any).dapClient = mockDapClient;
+      (worker as any).logger = mockLogger;
+      (worker as any).state = ProxyState.CONNECTED;
+      (worker as any).adapterPolicy = {
+        ...DefaultAdapterPolicy,
+        getInitializationBehavior: () => ({
+          deferConfigDone: false,
+          requiresInitialStop: true,
+          addRuntimeExecutable: false,
+          trackInitializeResponse: false
+        })
+      };
+      (worker as any).adapterState = DefaultAdapterPolicy.createInitialState();
+      (mockDapClient.sendRequest as Mock).mockReset();
+      (mockDapClient.sendRequest as Mock).mockResolvedValue({ body: {} });
+      mockMessageSender.send.mockClear();
+      ensureSpy = vi.spyOn(worker as any, 'ensureInitialStop').mockResolvedValue(undefined);
+    });
+
+    it('attach skips ensureInitialStop but still drains the command queue', async () => {
+      (worker as any).commandQueue = [
+        { cmd: 'dap', sessionId: 's', requestId: 'req-queued-next', dapCommand: 'next', dapArgs: { threadId: 1 } }
+      ];
+
+      await worker.handleCommand({
+        cmd: 'dap',
+        sessionId: 's',
+        requestId: 'req-attach',
+        dapCommand: 'attach',
+        dapArgs: {}
+      } as DapCommandPayload);
+
+      expect(ensureSpy).not.toHaveBeenCalled();
+      const sent = (mockDapClient.sendRequest as Mock).mock.calls.map(([cmd]) => cmd);
+      expect(sent).toContain('attach');
+      // The drain that shares the requiresInitialStop gate must survive the
+      // attach exclusion — queued commands still flush after attach.
+      expect(sent).toContain('next');
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        expect.stringContaining('session manager owns the post-attach pause')
+      );
+    });
+
+    it('launch with stopOnEntry in the init payload triggers ensureInitialStop', async () => {
+      (worker as any).currentInitPayload = { stopOnEntry: true };
+
+      await worker.handleCommand({
+        cmd: 'dap',
+        sessionId: 's',
+        requestId: 'req-launch',
+        dapCommand: 'launch',
+        dapArgs: {}
+      } as DapCommandPayload);
+
+      expect(ensureSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('launch without stopOnEntry skips ensureInitialStop', async () => {
+      (worker as any).currentInitPayload = { stopOnEntry: false };
+
+      await worker.handleCommand({
+        cmd: 'dap',
+        sessionId: 's',
+        requestId: 'req-launch-nostop',
+        dapCommand: 'launch',
+        dapArgs: {}
+      } as DapCommandPayload);
+
+      expect(ensureSpy).not.toHaveBeenCalled();
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        expect.stringContaining('stopOnEntry not requested')
+      );
+    });
+
+    it('launch dapArgs stopOnEntry alone triggers ensureInitialStop', async () => {
+      (worker as any).currentInitPayload = null;
+
+      await worker.handleCommand({
+        cmd: 'dap',
+        sessionId: 's',
+        requestId: 'req-launch-args',
+        dapCommand: 'launch',
+        dapArgs: { stopOnEntry: true }
+      } as DapCommandPayload);
+
+      expect(ensureSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('queued attach does not trigger ensureInitialStop from drainCommandQueue', async () => {
+      (worker as any).commandQueue = [
+        { cmd: 'dap', sessionId: 's', requestId: 'req-queued-attach', dapCommand: 'attach', dapArgs: {} }
+      ];
+
+      await (worker as any).drainCommandQueue();
+
+      expect(ensureSpy).not.toHaveBeenCalled();
+      expect(mockDapClient.sendRequest).toHaveBeenCalledWith('attach', {});
+    });
+
+    it('queued launch with stopOnEntry triggers ensureInitialStop from drainCommandQueue', async () => {
+      (worker as any).commandQueue = [
+        { cmd: 'dap', sessionId: 's', requestId: 'req-queued-launch', dapCommand: 'launch', dapArgs: { stopOnEntry: true } }
+      ];
+
+      await (worker as any).drainCommandQueue();
+
+      expect(ensureSpy).toHaveBeenCalledTimes(1);
     });
   });
 

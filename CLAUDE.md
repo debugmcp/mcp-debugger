@@ -302,7 +302,7 @@ When debugging issues:
 2. Check proxy process output in logs (the per-session `proxy-<sessionId>.log` follows the server's `--log-level`/`DEBUG_MCP_LOG_LEVEL` and carries the DAP routing decisions — MinimalDapClient/ChildSessionManager/CDP-bridge lines land there, not only in the per-pid server log)
 3. Verify language-specific requirements (e.g., `python -m debugpy --version`)
 4. Use `dryRunSpawn: true` in `start_debugging` tool arguments to test configuration without starting a real debug session
-5. Set `DAP_TRACE=1` to capture every DAP frame to a per-session `dap-trace-<sessionId>.ndjson` (off by default; capped at 50 MB; `DAP_TRACE_FILE=<path>` chooses an explicit file)
+5. Set `DAP_TRACE=1` to capture every DAP frame to a per-session `dap-trace-<sessionId>.ndjson` (off by default; capped at 50 MB; `DAP_TRACE_FILE=<path>` chooses an explicit file; each record's `conn` field names the originating connection — `parent`, `child:<id>`, or `release:<id>`)
 
 ## Adding New Language Adapters
 

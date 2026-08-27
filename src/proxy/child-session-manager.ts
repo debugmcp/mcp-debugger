@@ -523,7 +523,11 @@ export class ChildSessionManager extends EventEmitter {
 
       // Create child client with a policy that disables recursive reverse debugging
       const childPolicy = this.buildChildSafePolicy();
-      child = new MinimalDapClient(this.host, this.port, childPolicy);
+      // traceLabel disambiguates this connection's frames in the shared DAP
+      // trace file (issue #518)
+      child = new MinimalDapClient(this.host, this.port, childPolicy, {
+        traceLabel: `child:${pendingId.slice(0, 8)}`
+      });
       await child.connect();
 
       // Wire up event forwarding
@@ -764,7 +768,9 @@ export class ChildSessionManager extends EventEmitter {
       // Child-safe policy: a grandchild startDebugging arriving on this
       // socket is forwarded back to this manager (released) rather than
       // recursing into adoption
-      const client = new MinimalDapClient(this.host, this.port, this.buildChildSafePolicy());
+      const client = new MinimalDapClient(this.host, this.port, this.buildChildSafePolicy(), {
+        traceLabel: `release:${pendingId.slice(0, 8)}`
+      });
       releaseClient = client;
       await this.withTimeout((async () => {
         await client.connect();
