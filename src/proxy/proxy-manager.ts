@@ -723,6 +723,11 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         const timer = setTimeout(() => settle(false), ms);
       });
 
+    // Attempts actually made, for the failure message: a fast-fail on a dead
+    // worker must not report the full retry budget as spent (issue #517)
+    let attemptsMade = 0;
+    let failedFast = false;
+
     try {
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
         if (acked) {
@@ -730,6 +735,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
           return;
         }
         const timeoutMs = delays[Math.min(attempt, delays.length - 1)];
+        attemptsMade = attempt + 1;
 
         let sendFailed = false;
         try {
@@ -744,6 +750,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
           // fail fast with the detailed exit message instead of burning the
           // remaining retries against a process that is gone (issue #512)
           if (this.lastExitDetails) {
+            failedFast = true;
             break;
           }
         }
@@ -775,7 +782,13 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       this.removeListener('init-received', onAck);
     }
 
-    let detailMessage = `Failed to initialize proxy after ${maxRetries + 1} attempts. ${
+    // Report the attempts actually made: "after 6 attempts" on a launch that
+    // fast-failed on attempt 2 misreads how long the launch spent trying
+    // (issue #517)
+    const attemptSummary = failedFast
+      ? `after ${attemptsMade} attempt${attemptsMade === 1 ? '' : 's'} (proxy exited; further retries skipped)`
+      : `after ${attemptsMade} attempts`;
+    let detailMessage = `Failed to initialize proxy ${attemptSummary}. ${
       lastError ? `Last error: ${lastError.message}` : 'Init command not acknowledged'
     }`;
 
