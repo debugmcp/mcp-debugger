@@ -667,12 +667,12 @@ export class DebugMcpServer {
     sessionId: string,
     file: string,
     options?: { requireExists?: boolean }
-  ): Promise<{ path: string; contentAddressable: boolean }> {
+  ): Promise<{ path: string; contentAddressable: boolean; nonAddressableReason?: 'non-file-identifier' | 'attach' }> {
     // Check if the adapter handles non-file source identifiers (e.g. Java FQCNs)
     const policy = this.sessionManager.getSessionPolicy(sessionId);
     if (policy.isNonFileSourceIdentifier?.(file)) {
       this.logger.info(`[DebugMcpServer.resolveBreakpointFile] Non-file source identifier detected: ${file}`);
-      return { path: file, contentAddressable: false };
+      return { path: file, contentAddressable: false, nonAddressableReason: 'non-file-identifier' };
     }
 
     // Attach sessions may debug a target on a remote filesystem (container,
@@ -680,7 +680,7 @@ export class DebugMcpServer {
     // path through as-is — the debugger knows its own filesystem best.
     if (this.sessionManager.getSession(sessionId)?.attachMode) {
       this.logger.info(`[DebugMcpServer.resolveBreakpointFile] Attach session: skipping host file check for ${file}`);
-      return { path: file, contentAddressable: false };
+      return { path: file, contentAddressable: false, nonAddressableReason: 'attach' };
     }
 
     const fileCheck = await this.fileChecker.checkExists(file);
@@ -750,10 +750,14 @@ export class DebugMcpServer {
 
     const readLinesForContentAddressing = async (feature: string): Promise<string[]> => {
       if (!resolved.contentAddressable) {
-        throw new McpError(
-          McpErrorCode.InvalidParams,
-          `${feature} requires a source file readable by the mcp-debugger server; "${req.file}" is a class name or remote path. Use line addressing instead.`
-        );
+        // Two distinct causes, two honest reasons (issue #497): an attach
+        // session's file may be perfectly readable here — the rule is that
+        // the debuggee's loaded source is the authority, not the host's copy.
+        const reason =
+          resolved.nonAddressableReason === 'attach'
+            ? `${feature} is not supported for attach sessions — the debuggee's loaded source may not match the file on the mcp-debugger host. Use line addressing instead.`
+            : `${feature} requires a source file readable by the mcp-debugger server; "${req.file}" is a class name or remote path. Use line addressing instead.`;
+        throw new McpError(McpErrorCode.InvalidParams, reason);
       }
       const lines = await this.lineReader.getFileLines(resolved.path);
       if (!lines) {
