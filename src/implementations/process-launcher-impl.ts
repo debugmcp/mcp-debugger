@@ -376,8 +376,13 @@ class ProxyProcessAdapter extends EventEmitter implements IProxyProcess {
   }
   
   kill(signal?: string): boolean {
-    if (this.killed || this.disposed) {
-      return false; // Already killed or disposed
+    // Refuse only once the child has actually exited (or this adapter was
+    // disposed, which itself follows the child's exit). Gating on .killed
+    // blocked escalation: a delivered signal latches .killed while the
+    // process may still be alive, so a follow-up SIGKILL was silently
+    // swallowed (issue #502).
+    if (this.disposed || this._exitCode !== null || this._signalCode !== null) {
+      return false; // Already exited or disposed
     }
 
     // If waiting for initialization, fail it

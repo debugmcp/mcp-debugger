@@ -77,6 +77,14 @@ export interface SessionExposure {
 export interface ManagedSession extends DebugSessionInfo {
   executablePath?: string;  // Language-agnostic executable path
   proxyManager?: IProxyManager;
+  // In-flight proxy teardown started by a terminal event handler (which
+  // clears proxyManager before its fire-and-forget stop()); closeSession
+  // awaits this so it cannot report success while the worker may still be
+  // dying — or failing to die (issue #502).
+  pendingProxyStop?: Promise<void>;
+  // Worker OS pid retained across teardown so closeSession can verify the
+  // worker actually died and log a leak otherwise (issue #502).
+  lastProxyPid?: number;
   breakpoints: Map<string, Breakpoint>;
   // Function breakpoints (issue #271 phase 3): session-global, name-addressed,
   // synced via DAP setFunctionBreakpoints (replace-all per request).

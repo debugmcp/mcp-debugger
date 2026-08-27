@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, Mock } from 'vitest';
 import { EventEmitter } from 'events';
+import os from 'os';
+import path from 'path';
 import { createHttpApp, handleHttpCommand } from '../../../src/cli/http-command.js';
 import { FakeCurrentProcess } from '../../test-utils/mocks/fake-current-process.js';
 import type { Logger as WinstonLoggerType } from 'winston';
@@ -499,6 +501,38 @@ describe('HTTP Command Handler', () => {
       await vi.advanceTimersByTimeAsync(3 * 60_000);
       expect(transport.close).toHaveBeenCalled();
     });
+
+    it('MCP_HTTP_STALE_SWEEP_INTERVAL_MS shortens the sweep cadence (issue #502)', async () => {
+      vi.useFakeTimers();
+      fakeProc.env.MCP_HTTP_STALE_SWEEP_INTERVAL_MS = '1000';
+      const { handler } = createAppAndHandler('500');
+      const transport = await initSession(handler);
+
+      // Idle 500ms window, 1s sweep: the second tick must reap — no 60s wait.
+      await vi.advanceTimersByTimeAsync(2_100);
+
+      expect(transport.close).toHaveBeenCalled();
+    });
+
+    it('invalid MCP_HTTP_STALE_SWEEP_INTERVAL_MS values warn and keep the 60s default', async () => {
+      vi.useFakeTimers();
+      for (const bad of ['0', '-5', 'abc']) {
+        vi.clearAllMocks();
+        fakeProc.env.MCP_HTTP_STALE_SWEEP_INTERVAL_MS = bad;
+        const { handler } = createAppAndHandler('500');
+        const transport = await initSession(handler);
+
+        expect(mockLogger.warn).toHaveBeenCalledWith(
+          expect.stringContaining('Ignoring invalid MCP_HTTP_STALE_SWEEP_INTERVAL_MS')
+        );
+
+        // Sweep still ticks at the 60s default, not at the invalid value.
+        await vi.advanceTimersByTimeAsync(59_000);
+        expect(transport.close).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(2_000);
+        expect(transport.close).toHaveBeenCalled();
+      }
+    });
   });
 
   describe('handleHttpCommand', () => {
@@ -531,6 +565,24 @@ describe('HTTP Command Handler', () => {
       expect(mockExitProcess).not.toHaveBeenCalled();
       expect(fakeProc.listenerCount('SIGINT')).toBe(1);
       expect(fakeProc.listenerCount('SIGTERM')).toBe(1);
+    });
+
+    it('wires --log-file into the CLI logger without failing on non-winston loggers (issue #502)', async () => {
+      const listen = vi.fn((_port: number, cb: Function) => {
+        cb();
+        return mockHttpServer;
+      });
+      mockApp.listen = listen;
+
+      // The mock logger has no winston transports — attachSharedFileTransport
+      // must swallow that (best-effort) and startup must proceed normally.
+      await handleHttpCommand(
+        { port: '4001', logLevel: 'debug', logFile: path.join(os.tmpdir(), 'http-cmd-502-test.log') },
+        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+      );
+
+      expect(listen).toHaveBeenCalledWith(4001, expect.any(Function));
+      expect(mockExitProcess).not.toHaveBeenCalled();
     });
 
     it('exits with code 1 when the app cannot be created', async () => {

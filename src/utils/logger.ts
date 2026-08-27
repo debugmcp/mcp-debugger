@@ -331,6 +331,26 @@ export function redirectProxyLoggers(options: { file: string; level?: string }):
  * and restored in finally. logger.close() remains forbidden as documented on
  * the transport cache above.
  */
+/**
+ * Attach the shared file transport for `file` to an existing logger
+ * (add-only, idempotent, best-effort). Used by the HTTP CLI action (issue
+ * #502): the CLI logger is created before options are parsed, so `--log-file`
+ * never reached it — and with console silenced in http mode, operationally
+ * important lines (e.g. the stale-session reaper's) were invisible in the
+ * very file the operator asked for. Reuses the per-path transport cache, so
+ * the CLI lines interleave with the DebugMcpServer's in one file.
+ */
+export function attachSharedFileTransport(logger: WinstonLoggerType, file: string): void {
+  try {
+    const transport = getOrCreateSharedFileTransport(file);
+    if (!logger.transports.includes(transport)) {
+      logger.add(transport);
+    }
+  } catch {
+    // Best-effort: the default per-pid log still applies.
+  }
+}
+
 export function detachSharedFileTransport(logger: WinstonLoggerType): void {
   const transport = loggerFileTransports.get(logger);
   if (!transport) {

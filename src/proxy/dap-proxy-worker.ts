@@ -86,6 +86,12 @@ export class DapProxyWorker {
   private currentInitPayload: ProxyInitPayload | null = null;
   private state: ProxyState = ProxyState.UNINITIALIZED;
   private isAttachMode: boolean = false;
+  // In-flight shutdown latch (issue #502): natural termination starts
+  // shutdown() as a floating promise off a DAP event, so a terminate command
+  // arriving mid-shutdown must await the same promise — otherwise
+  // handleCommand returns while state is still SHUTTING_DOWN and the runner's
+  // post-command exit check never fires, stranding the worker alive forever.
+  private shutdownPromise: Promise<void> | null = null;
   /** Once-per-session guard for the adapter_capabilities status message (issue #243). */
   private adapterCapabilitiesSent: boolean = false;
   // Exit-code synthesis bookkeeping (issue #247): a real DAP exited event
@@ -363,7 +369,13 @@ export class DapProxyWorker {
       // Start adapter and connect
       await this.startAdapterAndConnect(payload);
     } catch (error) {
-      this.state = ProxyState.UNINITIALIZED;
+      // Roll back for a possible re-init — unless a shutdown already ran
+      // (startAdapterAndConnect shuts down before rethrowing): the latched
+      // shutdown() below is then a completed no-op, and clobbering its
+      // TERMINATED would let a retry re-init a torn-down worker (issue #502).
+      if (!this.shutdownPromise) {
+        this.state = ProxyState.UNINITIALIZED;
+      }
       const message = error instanceof Error ? error.message : String(error);
 
       // Include adapter spawn config (command + args only, NOT env) for diagnostics
@@ -1410,9 +1422,29 @@ export class DapProxyWorker {
    * Handle terminate command
    */
   async handleTerminate(): Promise<void> {
-    // Check if already shutting down or terminated for idempotent behavior
-    if (this.state === ProxyState.SHUTTING_DOWN || this.state === ProxyState.TERMINATED) {
+    // Already fully terminated: return immediately — the runner's post-command
+    // check sees TERMINATED and schedules the process exit.
+    if (this.state === ProxyState.TERMINATED) {
       this.logger?.info('[Worker] Already shutting down or terminated.');
+      return;
+    }
+
+    // Shutdown in flight (issue #502): natural termination runs shutdown() as
+    // a floating promise off a DAP event, and the parent's terminate command
+    // routinely lands inside that ≥1s window. Returning early here left
+    // handleCommand finishing while state was still SHUTTING_DOWN, so the
+    // runner's exit check never fired and the worker sat alive forever in
+    // TERMINATED. Latch onto the in-flight shutdown instead, so this command
+    // completes only once state is TERMINATED and the exit gets scheduled.
+    if (this.state === ProxyState.SHUTTING_DOWN) {
+      if (this.shutdownPromise) {
+        this.logger?.info('[Worker] Terminate received during in-flight shutdown; awaiting completion.');
+        await this.shutdownPromise;
+        this.sendStatus('terminated', { expected: true });
+      } else {
+        // State poked without an in-flight shutdown (tests only).
+        this.logger?.info('[Worker] Already shutting down or terminated.');
+      }
       return;
     }
 
@@ -1439,14 +1471,27 @@ export class DapProxyWorker {
   }
 
   /**
-   * Shutdown the worker
+   * Shutdown the worker. Re-entrant: a second caller gets the same in-flight
+   * promise, so awaiting shutdown() always means "shutdown has completed"
+   * (issue #502). The worker is single-shot — the promise is never cleared.
    */
-  async shutdown(): Promise<void> {
+  shutdown(): Promise<void> {
+    if (this.shutdownPromise) {
+      this.logger?.info('[Worker] Shutdown already in progress.');
+      return this.shutdownPromise;
+    }
+    // State poked without a promise (only happens in tests): keep the old
+    // early-return contract.
     if (this.state === ProxyState.SHUTTING_DOWN || this.state === ProxyState.TERMINATED) {
       this.logger?.info('[Worker] Shutdown already in progress.');
-      return;
+      return Promise.resolve();
     }
 
+    this.shutdownPromise = this.performShutdown();
+    return this.shutdownPromise;
+  }
+
+  private async performShutdown(): Promise<void> {
     this.state = ProxyState.SHUTTING_DOWN;
     this.logger?.info('[Worker] Initiating shutdown sequence...');
 

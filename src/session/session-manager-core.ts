@@ -26,6 +26,7 @@ import { IProxyManagerFactory } from '../factories/proxy-manager-factory.js';
 import type { BreakpointSyncResult, FunctionBreakpointSyncResult } from '../proxy/dap-proxy-interfaces.js';
 import { normalizeBreakpointMessage } from '../utils/breakpoint-message.js';
 import { consumeChildOrigin } from '../utils/child-origin-events.js';
+import { isPidAlive } from '../utils/jvm-orphan-reaper.js';
 import { IAdapterRegistry } from '@debugmcp/shared';
 
 // Custom launch arguments interface extending DebugProtocol.LaunchRequestArguments
@@ -194,6 +195,7 @@ export abstract class SessionManagerCore extends EventEmitter {
     this.logger.info(`Closing debug session: ${sessionId}. Active proxy: ${session.proxyManager ? 'yes' : 'no'}`);
     
     if (session.proxyManager) {
+      session.lastProxyPid = session.proxyManager.getProxyPid?.() ?? session.lastProxyPid;
       // Always cleanup listeners first
       try {
         this.cleanupProxyEventHandlers(session, session.proxyManager);
@@ -201,28 +203,64 @@ export abstract class SessionManagerCore extends EventEmitter {
         this.logger.error(`[SessionManager] Critical error during listener cleanup for session ${sessionId}:`, cleanupError);
         // Continue with session closure despite cleanup errors
       }
-      
+
       // Then stop the proxy
       try {
         await session.proxyManager.stop();
-      } catch (error: unknown) { 
+      } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         this.logger.error(`[SessionManager] Error stopping proxy for session ${sessionId}:`, message);
       } finally {
         session.proxyManager = undefined;
       }
     }
-    
+
+    // A terminal event handler may have cleared proxyManager and left its
+    // stop() in flight; await it so close cannot outrun the teardown and
+    // report success while the worker is still dying (issue #502).
+    if (session.pendingProxyStop) {
+      await session.pendingProxyStop;
+      session.pendingProxyStop = undefined;
+    }
+
     this._updateSessionState(session, SessionState.STOPPED);
-    
+
     // Also update session lifecycle to TERMINATED
     this.sessionStore.update(sessionId, {
       sessionLifecycle: SessionLifecycleState.TERMINATED
     });
-    
+
     this.logger.info(`Session ${sessionId} marked as STOPPED/TERMINATED.`);
     this.sessionStore.remove(sessionId);
+    this.verifyProxyReaped(sessionId, session.lastProxyPid);
     return true;
+  }
+
+  /**
+   * Post-close verification (issue #502): a short while after a session is
+   * closed, confirm its proxy worker OS process is actually gone and log an
+   * error naming the pid if not. The historical leak was invisible — every
+   * layer had dropped its handle — so a recurrence must at least log itself.
+   * The timer is unref'd and best-effort; overridable seam for tests.
+   */
+  protected pidLivenessCheck: (pid: number) => boolean = isPidAlive;
+
+  private verifyProxyReaped(sessionId: string, pid: number | undefined): void {
+    if (!pid) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      try {
+        if (this.pidLivenessCheck(pid)) {
+          this.logger.error(
+            `[SessionManager] Proxy worker pid=${pid} for session ${sessionId} is still alive after session close — leaked worker (issue #502)`
+          );
+        }
+      } catch {
+        // Liveness probe is diagnostics only; never let it throw.
+      }
+    }, 1500);
+    timer.unref?.();
   }
 
   /**
@@ -235,26 +273,32 @@ export abstract class SessionManagerCore extends EventEmitter {
    */
   protected async stopProxyPreservingSession(session: ManagedSession): Promise<void> {
     const proxyManager = session.proxyManager;
-    if (!proxyManager) {
-      return;
+    if (proxyManager) {
+      session.lastProxyPid = proxyManager.getProxyPid?.() ?? session.lastProxyPid;
+      try {
+        this.cleanupProxyEventHandlers(session, proxyManager);
+      } catch (cleanupError) {
+        this.logger.error(
+          `[SessionManager] Error during listener cleanup for session ${session.id}:`,
+          cleanupError
+        );
+      }
+      try {
+        await proxyManager.stop();
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(`[SessionManager] Error stopping proxy for session ${session.id}:`, message);
+      } finally {
+        session.proxyManager = undefined;
+        // The mirror listener lived in the stopped worker (issue #217).
+        session.exposure = undefined;
+      }
     }
-    try {
-      this.cleanupProxyEventHandlers(session, proxyManager);
-    } catch (cleanupError) {
-      this.logger.error(
-        `[SessionManager] Error during listener cleanup for session ${session.id}:`,
-        cleanupError
-      );
-    }
-    try {
-      await proxyManager.stop();
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`[SessionManager] Error stopping proxy for session ${session.id}:`, message);
-    } finally {
-      session.proxyManager = undefined;
-      // The mirror listener lived in the stopped worker (issue #217).
-      session.exposure = undefined;
+    // Await a teardown started by a terminal event handler (issue #502) so a
+    // relaunch cannot race the previous worker's exit.
+    if (session.pendingProxyStop) {
+      await session.pendingProxyStop;
+      session.pendingProxyStop = undefined;
     }
   }
 
@@ -673,6 +717,7 @@ export abstract class SessionManagerCore extends EventEmitter {
 
       // Clean up listeners since proxy is gone
       this.cleanupProxyEventHandlers(session, proxyManager);
+      session.lastProxyPid = proxyManager.getProxyPid?.() ?? session.lastProxyPid;
       session.proxyManager = undefined;
 
       // Reap the proxy process instead of just dropping the reference. The
@@ -680,7 +725,8 @@ export abstract class SessionManagerCore extends EventEmitter {
       // stalls (e.g. a hung adapter process) nothing else reaps it — on
       // Windows especially, orphans accumulate (issue #122). stop() is
       // idempotent against an already-exiting worker and force-kills after 5s.
-      proxyManager.stop().catch((err) => {
+      // The promise is retained so closeSession can await it (issue #502).
+      session.pendingProxyStop = proxyManager.stop().catch((err) => {
         this.logger.warn(
           `[SessionManager] Error stopping proxy after 'terminated' for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`
         );
@@ -703,10 +749,12 @@ export abstract class SessionManagerCore extends EventEmitter {
 
       // Clean up listeners since proxy is gone
       this.cleanupProxyEventHandlers(session, proxyManager);
+      session.lastProxyPid = proxyManager.getProxyPid?.() ?? session.lastProxyPid;
       session.proxyManager = undefined;
 
-      // Reap the proxy process (see handleTerminated for rationale, issue #122)
-      proxyManager.stop().catch((err) => {
+      // Reap the proxy process (see handleTerminated for rationale, issue
+      // #122); promise retained for closeSession (issue #502).
+      session.pendingProxyStop = proxyManager.stop().catch((err) => {
         this.logger.warn(
           `[SessionManager] Error stopping proxy after 'exited' for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`
         );
@@ -918,10 +966,12 @@ export abstract class SessionManagerCore extends EventEmitter {
 
       // Clean up listeners since proxy is in error state
       this.cleanupProxyEventHandlers(session, proxyManager);
+      session.lastProxyPid = proxyManager.getProxyPid?.() ?? session.lastProxyPid;
       session.proxyManager = undefined;
 
-      // Reap the proxy process (see handleTerminated for rationale, issue #122)
-      proxyManager.stop().catch((err) => {
+      // Reap the proxy process (see handleTerminated for rationale, issue
+      // #122); promise retained for closeSession (issue #502).
+      session.pendingProxyStop = proxyManager.stop().catch((err) => {
         this.logger.warn(
           `[SessionManager] Error stopping proxy after 'error' for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`
         );
@@ -964,7 +1014,22 @@ export abstract class SessionManagerCore extends EventEmitter {
 
       // Clean up listeners since proxy is gone
       this.cleanupProxyEventHandlers(session, proxyManager);
+      session.lastProxyPid = proxyManager.getProxyPid?.() ?? session.lastProxyPid;
       session.proxyManager = undefined;
+
+      // A defined 'expected' marks the status-driven emission (the worker
+      // REPORTED termination over IPC — the OS process may still be alive,
+      // e.g. stranded mid-shutdown). Reap it like the other terminal
+      // handlers; stop() is idempotent and cheap once the worker is truly
+      // gone. The undefined case is the real child-process exit, where the
+      // process is already dead and handleProxyExit cleaned up (issue #502).
+      if (expected !== undefined) {
+        session.pendingProxyStop = proxyManager.stop().catch((err) => {
+          this.logger.warn(
+            `[SessionManager] Error stopping proxy after 'exit' for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`
+          );
+        });
+      }
     };
     proxyManager.on('exit', handleExit);
     handlers.set('exit', handleExit);

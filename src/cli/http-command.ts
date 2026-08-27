@@ -7,6 +7,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { DebugMcpServer } from '../server.js';
+import { attachSharedFileTransport } from '../utils/logger.js';
 import { SSEOptions } from './setup.js';
 import { watchStdinForParentExit } from './stdin-watchdog.js';
 import type { ProcessLike } from '../interfaces/process-interfaces.js';
@@ -37,7 +38,7 @@ interface SessionData {
 
 /** Idle window before a streamless HTTP session is reaped (issue #337). */
 const DEFAULT_STALE_SESSION_MS = 30 * 60 * 1000;
-const STALE_SWEEP_INTERVAL_MS = 60 * 1000;
+const DEFAULT_STALE_SWEEP_INTERVAL_MS = 60 * 1000;
 
 function parseStaleSessionMs(raw: string | undefined, logger: WinstonLoggerType): number {
   if (raw === undefined || raw === '') {
@@ -47,6 +48,23 @@ function parseStaleSessionMs(raw: string | undefined, logger: WinstonLoggerType)
   if (!Number.isFinite(parsed) || parsed < 0) {
     logger.warn(`Ignoring invalid MCP_HTTP_STALE_SESSION_MS value "${raw}"; using default ${DEFAULT_STALE_SESSION_MS}ms.`);
     return DEFAULT_STALE_SESSION_MS;
+  }
+  return parsed;
+}
+
+/**
+ * Sweep cadence override (issue #502): lets tests exercise the reap path in
+ * seconds instead of the 60s production default. Disabling the reaper stays
+ * the job of MCP_HTTP_STALE_SESSION_MS=0, so only positive values are valid.
+ */
+function parseSweepIntervalMs(raw: string | undefined, logger: WinstonLoggerType): number {
+  if (raw === undefined || raw === '') {
+    return DEFAULT_STALE_SWEEP_INTERVAL_MS;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    logger.warn(`Ignoring invalid MCP_HTTP_STALE_SWEEP_INTERVAL_MS value "${raw}"; using default ${DEFAULT_STALE_SWEEP_INTERVAL_MS}ms.`);
+    return DEFAULT_STALE_SWEEP_INTERVAL_MS;
   }
   return parsed;
 }
@@ -72,6 +90,7 @@ export function createHttpApp(
   // MCP_HTTP_STALE_SESSION_MS (default 30 min; 0 disables) is closed through
   // the normal onclose path, which stops its server and debug sessions.
   const staleSessionMs = parseStaleSessionMs(proc.env.MCP_HTTP_STALE_SESSION_MS, logger);
+  const staleSweepIntervalMs = parseSweepIntervalMs(proc.env.MCP_HTTP_STALE_SWEEP_INTERVAL_MS, logger);
   let staleSweepTimer: NodeJS.Timeout | undefined;
   if (staleSessionMs > 0) {
     staleSweepTimer = setInterval(() => {
@@ -86,7 +105,7 @@ export function createHttpApp(
           }
         }
       }
-    }, STALE_SWEEP_INTERVAL_MS);
+    }, staleSweepIntervalMs);
     staleSweepTimer.unref?.();
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -244,6 +263,13 @@ export async function handleHttpCommand(
 
   if (options.logLevel) {
     logger.level = options.logLevel;
+  }
+  if (options.logFile) {
+    // The CLI logger predates option parsing, so --log-file never reached it;
+    // with console silenced in http mode that made this module's lines (the
+    // stale-session reaper's especially) invisible in the operator's log
+    // (issue #502).
+    attachSharedFileTransport(logger, options.logFile);
   }
 
   const port = parseInt(options.port, 10);

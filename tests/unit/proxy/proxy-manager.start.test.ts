@@ -1003,13 +1003,71 @@ describe('ProxyManager.start', () => {
     it('resolves immediately when proxy already exited', async () => {
       (proxyManager as unknown as { proxyProcess: IProxyProcess | null }).proxyProcess = fakeProcess;
       (proxyManager as unknown as { sessionId: string | null }).sessionId = baseConfig.sessionId;
+      // Actual death evidence: exitCode set. (killed alone no longer counts —
+      // Node latches it on any delivered signal, issue #502.)
       fakeProcess.killed = true;
+      fakeProcess.exitCode = 0;
 
       const stopPromise = proxyManager.stop();
       await stopPromise;
 
       expect(fakeProcess.send).not.toHaveBeenCalled();
       expect(fakeProcess.kill).not.toHaveBeenCalled();
+    });
+
+    it('still terminates and escalates when killed is latched but the process never exited (issue #502)', async () => {
+      // ChildProcess.killed flips on any *delivered* signal, not on death: a
+      // prior kill() must not neuter the terminate send, the SIGKILL, or turn
+      // stop() into an instant no-op against a live worker.
+      vi.useFakeTimers();
+      try {
+        (proxyManager as unknown as { proxyProcess: IProxyProcess | null }).proxyProcess = fakeProcess;
+        (proxyManager as unknown as { sessionId: string | null }).sessionId = baseConfig.sessionId;
+
+        fakeProcess.killed = true;
+        fakeProcess.exitCode = null;
+        fakeProcess.signalCode = null;
+        fakeProcess.send.mockClear();
+        fakeProcess.kill.mockClear();
+
+        const stopPromise = proxyManager.stop();
+
+        await vi.advanceTimersByTimeAsync(5000);
+        await vi.runOnlyPendingTimersAsync();
+        await stopPromise;
+
+        expect(fakeProcess.send).toHaveBeenCalledWith({ cmd: 'terminate', sessionId: baseConfig.sessionId });
+        expect(fakeProcess.kill).toHaveBeenCalledWith('SIGKILL');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('isRunning() reflects actual exit evidence, not delivered signals (issue #502)', async () => {
+      await completeStart();
+      expect(proxyManager.isRunning()).toBe(true);
+
+      // A delivered signal alone (killed latched) is NOT death.
+      fakeProcess.killed = true;
+      expect(proxyManager.isRunning()).toBe(true);
+
+      // Actual exit evidence is.
+      fakeProcess.exitCode = 0;
+      expect(proxyManager.isRunning()).toBe(false);
+    });
+
+    it('getProxyPid() reports the worker pid and survives stop()/cleanup (issue #502)', async () => {
+      await completeStart();
+      expect(proxyManager.getProxyPid()).toBe(4242);
+
+      const stopPromise = proxyManager.stop();
+      fakeProcess.exitCode = 0;
+      fakeProcess.emit('exit', 0, null);
+      await stopPromise;
+
+      // cleanup() nulls the process handle, but the pid must remain readable
+      // so callers can verify the worker actually died after teardown.
+      expect(proxyManager.getProxyPid()).toBe(4242);
     });
 
     it('does not log "exited before initialization" for the exit that follows a clean stop (issue #530)', async () => {
