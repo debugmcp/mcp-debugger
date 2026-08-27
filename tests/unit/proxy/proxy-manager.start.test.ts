@@ -1340,6 +1340,112 @@ describe('ProxyManager.start', () => {
     expect(proxyManager.getCurrentThreadId()).toBe(12);
   });
 
+  // Issue #496: an anchor adopted via setCurrentThreadId() (the frameless-thread
+  // fallback and the get_stack_trace {threadId} path) must survive subsequent
+  // proxy messages — the functional-core state echo used to restore the stale
+  // stopped-event thread over it on every response and event.
+  describe('adopted thread anchor persistence (issue #496)', () => {
+    const primeStoppedOnThread1 = () => {
+      (proxyManager as unknown as { proxyProcess: IProxyProcess | null }).proxyProcess = fakeProcess;
+      (proxyManager as unknown as { isInitialized: boolean }).isInitialized = true;
+      (proxyManager as unknown as { sessionId: string | null }).sessionId = baseConfig.sessionId;
+      (proxyManager as unknown as { dapState: ReturnType<typeof createInitialState> | null }).dapState =
+        createInitialState(baseConfig.sessionId);
+
+      // The DAP-stopped thread reports no frames in the #496 scenario; the
+      // session layer then adopts a frame-bearing thread via setCurrentThreadId.
+      (proxyManager as unknown as {
+        handleProxyMessage: (message: object) => void;
+      }).handleProxyMessage({
+        type: 'dapEvent',
+        sessionId: baseConfig.sessionId,
+        event: 'stopped',
+        body: { threadId: 1, reason: 'pause' }
+      });
+      expect(proxyManager.getCurrentThreadId()).toBe(1);
+      // handleProxyMessage syncs isInitialized from the functional-core state,
+      // which this test primes as uninitialized — restore the flag.
+      (proxyManager as unknown as { isInitialized: boolean }).isInitialized = true;
+
+      proxyManager.setCurrentThreadId(2);
+      expect(proxyManager.getCurrentThreadId()).toBe(2);
+    };
+
+    const respondToDapWith = (body: object) => {
+      fakeProcess.sendCommand.mockImplementation((payload) => {
+        if (payload.cmd === 'dap') {
+          (proxyManager as unknown as {
+            handleProxyMessage: (message: object) => void;
+          }).handleProxyMessage({
+            type: 'dapResponse',
+            sessionId: baseConfig.sessionId,
+            requestId: payload.requestId,
+            success: true,
+            response: {
+              type: 'response',
+              seq: 21,
+              request_seq: 7,
+              command: payload.dapCommand,
+              success: true,
+              body
+            }
+          });
+        }
+      });
+    };
+
+    it('survives a threads response (list_threads)', async () => {
+      primeStoppedOnThread1();
+      respondToDapWith({ threads: [{ id: 1, name: 'main' }, { id: 2, name: 'worker' }] });
+
+      await proxyManager.sendDapRequest<any>('threads');
+
+      expect(proxyManager.getCurrentThreadId()).toBe(2);
+    });
+
+    it('survives an unrelated output event', () => {
+      primeStoppedOnThread1();
+
+      (proxyManager as unknown as {
+        handleProxyMessage: (message: object) => void;
+      }).handleProxyMessage({
+        type: 'dapEvent',
+        sessionId: baseConfig.sessionId,
+        event: 'output',
+        body: { category: 'stdout', output: 'hello\n' }
+      });
+
+      expect(proxyManager.getCurrentThreadId()).toBe(2);
+    });
+
+    it('survives a stackTrace response (anchor is not single-use)', async () => {
+      primeStoppedOnThread1();
+      respondToDapWith({
+        stackFrames: [{ id: 1000, name: 'main', line: 7, column: 1 }],
+        totalFrames: 1
+      });
+
+      await proxyManager.sendDapRequest<any>('stackTrace', { threadId: 2 });
+
+      expect(proxyManager.getCurrentThreadId()).toBe(2);
+    });
+
+    it('still re-anchors on a genuine stopped event', () => {
+      primeStoppedOnThread1();
+
+      (proxyManager as unknown as {
+        handleProxyMessage: (message: object) => void;
+      }).handleProxyMessage({
+        type: 'dapEvent',
+        sessionId: baseConfig.sessionId,
+        event: 'stopped',
+        body: { threadId: 7, reason: 'breakpoint' }
+      });
+
+      expect(proxyManager.getCurrentThreadId()).toBe(7);
+    });
+  });
+
   it('rejects DAP requests on proxy error', async () => {
     (proxyManager as unknown as { proxyProcess: IProxyProcess | null }).proxyProcess = fakeProcess;
     (proxyManager as unknown as { isInitialized: boolean }).isInitialized = true;
