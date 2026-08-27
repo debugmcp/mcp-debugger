@@ -135,7 +135,11 @@ describe('ProxyManager sendInitWithRetry', () => {
     const initPromise = (manager as unknown as { sendInitWithRetry: (command: object) => Promise<void> }).sendInitWithRetry(
       { cmd: 'init' }
     );
-    const rejection = expect(initPromise).rejects.toThrow('Proxy exit details -> code=1');
+    // The message reports the attempts actually made, flagged as a fast-fail
+    // (issue #517), and still carries the exit details
+    const rejection = expect(initPromise).rejects.toThrow(
+      /after 2 attempts \(proxy exited; further retries skipped\)[\s\S]*Proxy exit details -> code=1/
+    );
 
     vi.advanceTimersByTime(500); // attempt 1 window expires
     await Promise.resolve();
@@ -175,7 +179,9 @@ describe('ProxyManager sendInitWithRetry', () => {
       }
     }
 
-    await expect(initPromise).rejects.toThrow('Failed to initialize proxy');
+    // Exhaustion reports the full count without the fast-fail suffix — every
+    // one of the 6 attempts was really made (issue #517)
+    await expect(initPromise).rejects.toThrow(/Failed to initialize proxy after 6 attempts\./);
     expect(sendCommandMock).toHaveBeenCalledTimes(6);
   });
 });
