@@ -31,6 +31,10 @@ class MockMinimalDapClient extends EventEmitter {
   // Emit a post-attach 'initialized' (some adapters re-initialize after
   // attach; drives handlePostAttachInit's replay path)
   static emitInitializedAfterAttach = false;
+  // Commands that emit 'initialized' synchronously during sendRequest, i.e.
+  // before the caller's await resumes — models the event arriving in the same
+  // socket chunk as the response (issue #529)
+  static emitInitializedSyncOn = new Set<string>();
   // When set, returned verbatim for 'threads'
   static threadsResponse: unknown | undefined = undefined;
   // When true, shutdown() throws (drives the parent shutdown catch arm)
@@ -74,6 +78,13 @@ class MockMinimalDapClient extends EventEmitter {
     }
     if (command === 'attach' && MockMinimalDapClient.emitInitializedAfterAttach) {
       setTimeout(() => this.emit('event', { event: 'initialized' }), 5);
+    }
+    if (MockMinimalDapClient.emitInitializedSyncOn.has(command)) {
+      // Same-chunk semantics (issue #529): the real client dispatches an event
+      // that shares a socket chunk with the response synchronously, while the
+      // response's awaiter is still parked in the microtask queue — so a
+      // listener registered after `await sendRequest(...)` never sees it.
+      this.emit('event', { event: 'initialized' });
     }
 
     // Simulate responses
@@ -141,6 +152,7 @@ describe('ChildSessionManager', () => {
     MockMinimalDapClient.setBreakpointsResponses = [];
     MockMinimalDapClient.emitStoppedAfterAttach = false;
     MockMinimalDapClient.emitInitializedAfterAttach = false;
+    MockMinimalDapClient.emitInitializedSyncOn.clear();
     MockMinimalDapClient.threadsResponse = undefined;
     MockMinimalDapClient.shutdownThrows = false;
   });
@@ -188,6 +200,69 @@ describe('ChildSessionManager', () => {
         const exceptionRequests = child.requests.filter(r => r.command === 'setExceptionBreakpoints');
         expect(exceptionRequests.length).toBeGreaterThan(0);
         expect(exceptionRequests[0].args).toEqual({ filters: [] });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not stall adoption when the post-attach initialized rides the attach response (issue #529)', async () => {
+      // The post-attach 'initialized' is emitted synchronously during the
+      // attach request — before handlePostAttachInit could register a
+      // listener. Without the latch, its 3s waitForEvent times out in full,
+      // delaying the CDP bridge attach past the entry pause.
+      vi.useFakeTimers();
+      try {
+        MockMinimalDapClient.emitInitializedSyncOn.add('attach');
+        MockMinimalDapClient.emitStoppedAfterAttach = true;
+
+        const createPromise = manager.createChildSession({
+          pendingId: 'test-pending-race',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: { type: 'pwa-node', request: 'launch' }
+        });
+        let resolved = false;
+        void createPromise.then(() => { resolved = true; }, () => { resolved = true; });
+
+        // Well under the 3s post-attach wait: adoption must already be done.
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(resolved).toBe(true);
+        await createPromise;
+
+        // sawPostInit=true also gates the post-attach mirror re-send: a
+        // second setExceptionBreakpoints proves the latch was consumed
+        // rather than the wait timing out to false.
+        const child = MockMinimalDapClient.instances[0];
+        const exceptionRequests = child.requests.filter(r => r.command === 'setExceptionBreakpoints');
+        expect(exceptionRequests.length).toBeGreaterThanOrEqual(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not stall adoption when initialized rides the initialize response (issue #529)', async () => {
+      vi.useFakeTimers();
+      try {
+        MockMinimalDapClient.suppressInitialized = true;
+        MockMinimalDapClient.emitInitializedSyncOn.add('initialize');
+        MockMinimalDapClient.emitStoppedAfterAttach = true;
+
+        const createPromise = manager.createChildSession({
+          pendingId: 'test-pending-race-init',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: { type: 'pwa-node', request: 'launch' }
+        });
+        let resolved = false;
+        void createPromise.then(() => { resolved = true; }, () => { resolved = true; });
+
+        // Well under initializeChild's 12s wait (and the 3s post-attach one).
+        // The post-attach wait sees no second 'initialized' and legitimately
+        // times out at 3s — advance past it, but nowhere near 12s.
+        await vi.advanceTimersByTimeAsync(4000);
+        expect(resolved).toBe(true);
+        await createPromise;
+        expect(manager.hasActiveChildren()).toBe(true);
       } finally {
         vi.useRealTimers();
       }

@@ -177,6 +177,10 @@ export class ChildSessionManager extends EventEmitter {
   // State tracking
   private adoptionInProgress = false;
   private sawChildStop = false;
+  // Latched in wireChildEvents: an 'initialized' event can arrive in the same
+  // socket chunk as the request's response, i.e. before any waitForEvent
+  // listener registered by the response's awaiter exists (issue #529)
+  private childInitializedCount = 0;
   // An adopted child's connection closed and no new adoption has started
   // since — routed commands can only hit the parent, where child-required
   // ones (e.g. js-debug 'pause') would silently no-op (issue #513)
@@ -547,11 +551,16 @@ export class ChildSessionManager extends EventEmitter {
       // Configure child session
       await death.race(this.configureChild(child, pendingId, parentConfig));
 
-      // Attach to pending target
+      // Attach to pending target. Snapshot the 'initialized' latch first:
+      // js-debug can deliver the post-attach 'initialized' in the same socket
+      // chunk as the attach response, and a listener registered only after
+      // attachChild resolves would miss it — stalling adoption 3s and pushing
+      // the CDP bridge attach past the entry pause (issue #529)
+      const postAttachInitBaseline = this.childInitializedCount;
       await this.attachChild(child, pendingId, parentConfig, death);
 
       // Handle post-attach initialization if needed
-      await death.race(this.handlePostAttachInit(child));
+      await death.race(this.handlePostAttachInit(child, postAttachInitBaseline));
 
       // Connect the CDP function-breakpoint bridge BEFORE forcing the entry
       // pause so the proxy's sticky Debugger.paused replay plus a live
@@ -631,10 +640,12 @@ export class ChildSessionManager extends EventEmitter {
     };
     
     logger.info(`[child:${pendingId}] initialize`);
+    const initializedBaseline = this.childInitializedCount;
     await child.sendRequest('initialize', initArgs);
-    
-    // Wait for initialized event
-    await this.waitForEvent(child, 'initialized', this.dapBehavior.childInitTimeout || 12000);
+
+    // Wait for initialized event (latched — it may have arrived with the
+    // initialize response itself, issue #529)
+    await this.waitForChildInitialized(child, initializedBaseline, this.dapBehavior.childInitTimeout || 12000);
   }
 
   /**
@@ -869,11 +880,13 @@ export class ChildSessionManager extends EventEmitter {
   }
 
   /**
-   * Handle post-attach initialization (some adapters emit another 'initialized')
+   * Handle post-attach initialization (some adapters emit another 'initialized').
+   * `initializedBaseline` is the latch count snapshotted before the attach
+   * request was sent, so an event that raced the attach response still counts.
    */
-  private async handlePostAttachInit(child: MinimalDapClient): Promise<void> {
+  private async handlePostAttachInit(child: MinimalDapClient, initializedBaseline: number): Promise<void> {
     // Wait briefly for a post-attach initialized event
-    const sawPostInit = await this.waitForEvent(child, 'initialized', 3000, false);
+    const sawPostInit = await this.waitForChildInitialized(child, initializedBaseline, 3000, false);
     
     if (sawPostInit && this.dapBehavior.mirrorBreakpointsToChild) {
       // Re-send configuration after post-attach initialized
@@ -946,6 +959,9 @@ export class ChildSessionManager extends EventEmitter {
       if (evt.event === 'stopped') {
         this.sawChildStop = true;
       }
+      if (evt.event === 'initialized') {
+        this.childInitializedCount++;
+      }
       const bridge = this.cdpBridge;
       if (!bridge) {
         // Forward child events through parent
@@ -985,6 +1001,28 @@ export class ChildSessionManager extends EventEmitter {
       this.childEnded = true;
       logger.info(`[ChildSessionManager:${this.instanceId}] *** ACTIVE CHILD CLEARED *** (child closed) at timestamp ${Date.now()}`);
     });
+  }
+
+  /**
+   * Wait until the child has emitted more 'initialized' events than
+   * `baseline`. The count is latched in wireChildEvents from connect time, so
+   * an event delivered in the same socket chunk as a request's response —
+   * dispatched before the response's awaiter could register a listener — is
+   * not lost (issue #529; same shape as the #515 init-ACK latch). The latch
+   * check and waitForEvent's listener registration share one synchronous
+   * frame, so no event can slip between them.
+   */
+  private waitForChildInitialized(
+    child: MinimalDapClient,
+    baseline: number,
+    timeoutMs: number,
+    required: boolean = true
+  ): Promise<boolean> {
+    if (this.childInitializedCount > baseline) {
+      logger.info(`[ChildSessionManager:${this.instanceId}] 'initialized' already latched (count=${this.childInitializedCount}); skipping wait`);
+      return Promise.resolve(true);
+    }
+    return this.waitForEvent(child, 'initialized', timeoutMs, required);
   }
 
   /**
