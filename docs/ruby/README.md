@@ -31,9 +31,10 @@ mcp-debugger auto-detects `ruby` and `rdbg` from `PATH` plus common install loca
 (RubyInstaller `C:\RubyXX-x64\bin` on Windows, Homebrew, system paths). Override with the
 `RUBY_PATH` (or its alias `RUBY_EXECUTABLE`) and `RDBG_PATH` environment variables when needed.
 
-> **Windows note:** gem executables are `.bat` shims, which Node.js refuses to spawn
-> directly. mcp-debugger automatically runs the sibling `rdbg` Ruby script via your Ruby
-> interpreter instead — no configuration required for RubyInstaller layouts.
+> **Windows note:** `RDBG_PATH` may point to either the `rdbg.bat`/`rdbg.cmd` shim or the
+> extensionless `rdbg` Ruby script installed beside it. mcp-debugger runs the extensionless
+> script through your Ruby interpreter because Node.js cannot spawn either form directly.
+> No configuration is required for standard RubyInstaller layouts.
 
 ## Launch mode
 
