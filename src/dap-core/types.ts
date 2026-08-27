@@ -55,6 +55,8 @@ export type ProxyStatusMessage =
   | { type: 'status'; sessionId: string; status: 'adapter_capabilities'; capabilities: DebugProtocol.Capabilities; data?: unknown }
   | { type: 'status'; sessionId: string; status: 'function_breakpoints_synced'; functionBreakpoints: Array<{ name: string; verified: boolean; id?: number; line?: number; source?: string }>; data?: unknown }
   | { type: 'status'; sessionId: string; status: 'breakpoints_synced'; breakpoints: Array<{ id?: string; file: string; line: number; verified: boolean; adapterId?: number; boundLine?: number; message?: string }>; data?: unknown }
+  | { type: 'status'; sessionId: string; status: 'adapter_spawned'; pid?: number; data?: unknown }
+  | { type: 'status'; sessionId: string; status: 'dap_handshake_stage'; stage: 'transport_connected' | 'request_pending' | 'response_received'; command?: string; data?: unknown }
   | { type: 'status'; sessionId: string; status: 'adapter_exited' | 'dap_connection_closed' | 'terminated'; code?: number | null; signal?: NodeJS.Signals | null; expected?: boolean; data?: unknown };
 
 export type ProxyDapEventMessage = { 

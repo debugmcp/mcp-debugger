@@ -1617,6 +1617,30 @@ describe('DapProxyWorker', () => {
         expect(mockLogger.warn).not.toHaveBeenCalledWith(expect.stringContaining('issue #492'));
       });
 
+      it('emits init-progress statuses for the parent init-timeout diagnosis (issue #493)', async () => {
+        const payload = rubyLaunchPayload();
+        const { processStub, connectionStub } = makeStubs(async () => {
+          setImmediate(() => (mockDapClient as EventEmitter).emit('initialized'));
+          return { supportsConfigurationDoneRequest: true };
+        });
+        wireWorker(payload, processStub, connectionStub, RubyAdapterPolicy);
+
+        await (worker as any).startAdapterAndConnect(payload);
+
+        const progress = mockMessageSender.send.mock.calls
+          .map(([m]) => m as StatusMessage & { pid?: number; stage?: string; command?: string })
+          .filter((m) => m.type === 'status' && (m.status === 'adapter_spawned' || m.status === 'dap_handshake_stage'))
+          .map((m) => (m.status === 'adapter_spawned' ? `spawned:${m.pid}` : `${m.stage}:${m.command ?? ''}`));
+        expect(progress).toEqual([
+          'spawned:4242',
+          'transport_connected:',
+          'request_pending:initialize',
+          'response_received:initialize',
+          'request_pending:launch',
+          'response_received:launch'
+        ]);
+      });
+
       it('a policy without the opt-in still blocks on a missing initialize response', async () => {
         vi.useFakeTimers();
         try {

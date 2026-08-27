@@ -303,10 +303,12 @@ The system uses centralized error messages (`src/utils/error-messages.ts`) with:
 
 Example from error-messages.ts:
 ```typescript
-proxyInitTimeout: (timeout: number) =>
-  `Debug proxy initialization did not complete within ${timeout}s. ` +
-  `This may indicate that the debug adapter failed to start or is not properly configured. ` +
-  `Check that the required debug adapter is installed and accessible.`
+proxyInitTimeout: (timeout: number, progress?: ProxyInitProgress) =>
+  // Invariant first sentence; the rest reflects how far initialization got
+  // (spawned? transport connected? which DAP request is unanswered?) so the
+  // error never blames a missing install when the adapter demonstrably
+  // connected (issue #493)
+  `Debug proxy initialization did not complete within ${timeout}s. ` + /* stage-aware detail */
 ```
 
 ## Next Steps
