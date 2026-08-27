@@ -635,6 +635,23 @@ describe('SessionManager - DAP Operations', () => {
       expect(stored.adapterId).toBe(77);
     });
 
+    it('applies downgrades from unmarked events for non-mirroring adapters (issue #495 guard is js-scoped)', async () => {
+      const { session } = await createSessionWithUnverifiedBp(55);
+
+      dependencies.mockProxyManager.simulateEvent('breakpoint', {
+        reason: 'changed',
+        breakpoint: { id: 55, verified: true, line: 10 }
+      });
+      expect(sessionManager.listBreakpoints(session.id)[0].verified).toBe(true);
+
+      // A real unbind from a single-session adapter must still land.
+      dependencies.mockProxyManager.simulateEvent('breakpoint', {
+        reason: 'changed',
+        breakpoint: { id: 55, verified: false, line: 10 }
+      });
+      expect(sessionManager.listBreakpoints(session.id)[0].verified).toBe(false);
+    });
+
     it('matches Windows paths case-insensitively (js-debug lowercases drive letters)', async () => {
       const session = await sessionManager.createSession({
         language: DebugLanguage.MOCK,
@@ -724,10 +741,13 @@ describe('SessionManager - DAP Operations', () => {
       // Parent response ids must not be adopted for mirroring policies
       expect(bp.adapterId).toBeUndefined();
 
-      // Child verifies via (synthesized or real) breakpoint event, child id 100
+      // Child verifies via (synthesized or real) breakpoint event, child id
+      // 100. The proxy marks child events with the child-origin key (issues
+      // #500/#495) — only marked verified events may stamp adapterId.
       dependencies.mockProxyManager.simulateEvent('breakpoint', {
         reason: 'changed',
-        breakpoint: { id: 100, verified: true, line: 10, source: { path: 'app.js' } }
+        breakpoint: { id: 100, verified: true, line: 10, source: { path: 'app.js' } },
+        __mcpChildOrigin: true
       });
       const [stored] = sessionManager.listBreakpoints(session.id);
       expect(stored.verified).toBe(true);
@@ -765,16 +785,182 @@ describe('SessionManager - DAP Operations', () => {
       expect(stored.adapterId).toBe(100);
     });
 
-    it('still applies an id-matched downgrade (real child unbinding)', async () => {
+    it('still applies a child-origin id-matched downgrade (real child unbinding)', async () => {
       const session = await createJsSessionWithChildVerifiedBp();
 
       dependencies.mockProxyManager.simulateEvent('breakpoint', {
         reason: 'changed',
-        breakpoint: { id: 100, verified: false, line: 10 }
+        breakpoint: { id: 100, verified: false, line: 10 },
+        __mcpChildOrigin: true
       });
 
       const [stored] = sessionManager.listBreakpoints(session.id);
       expect(stored.verified).toBe(false);
+    });
+
+    it('ignores an id-matched downgrade from an unmarked (parent) event — issue #495 id collision', async () => {
+      // Parent and child breakpoint ids share one integer space: a late
+      // parent stub carrying the SAME id as the stored child id used to
+      // match by id, bypass the fallback-only guard, and permanently
+      // downgrade a verified record (issue #495's signature).
+      const session = await createJsSessionWithChildVerifiedBp();
+
+      dependencies.mockProxyManager.simulateEvent('breakpoint', {
+        reason: 'changed',
+        breakpoint: {
+          id: 100,
+          verified: false,
+          line: 10,
+          source: { path: 'app.js' },
+          message: 'breakpoint.provisionalBreakpoint'
+        }
+      });
+
+      const [stored] = sessionManager.listBreakpoints(session.id);
+      expect(stored.verified).toBe(true);
+      expect(stored.adapterId).toBe(100);
+      expect(stored.message).toBeUndefined();
+    });
+
+    it('never stamps adapterId from an unmarked event or a child-origin provisional stub', async () => {
+      const session = await createJsSessionWithChildVerifiedBp();
+      await sessionManager.setBreakpoint(session.id, { file: 'app.js', line: 20 });
+
+      // Unmarked (parent) event, (file,line) fallback match on the new bp:
+      // verified state applies upward, message normalizes, but the
+      // parent-space id must not enter the store.
+      dependencies.mockProxyManager.simulateEvent('breakpoint', {
+        reason: 'changed',
+        breakpoint: {
+          id: 8,
+          verified: false,
+          line: 20,
+          source: { path: 'app.js' },
+          message: 'breakpoint.provisionalBreakpoint'
+        }
+      });
+      let bp2 = sessionManager.listBreakpoints(session.id).find(bp => bp.line === 20)!;
+      expect(bp2.verified).toBe(false);
+      expect(bp2.adapterId).toBeUndefined();
+      expect(bp2.message).toBe('Unbound breakpoint');
+
+      // Child-origin but PROVISIONAL (the child answers its own pending
+      // stub while adoption is in flight, issue #500): still no id stamp —
+      // stub ids are unstable across the pending→bound transition.
+      dependencies.mockProxyManager.simulateEvent('breakpoint', {
+        reason: 'changed',
+        breakpoint: {
+          id: 1,
+          verified: false,
+          line: 20,
+          source: { path: 'app.js' },
+          message: 'breakpoint.provisionalBreakpoint'
+        },
+        __mcpChildOrigin: true
+      });
+      bp2 = sessionManager.listBreakpoints(session.id).find(bp => bp.line === 20)!;
+      expect(bp2.adapterId).toBeUndefined();
+
+      // Child-origin VERIFIED event: full stamp, provisional note cleared.
+      dependencies.mockProxyManager.simulateEvent('breakpoint', {
+        reason: 'changed',
+        breakpoint: { id: 101, verified: true, line: 20, source: { path: 'app.js' } },
+        __mcpChildOrigin: true
+      });
+      bp2 = sessionManager.listBreakpoints(session.id).find(bp => bp.line === 20)!;
+      expect(bp2.verified).toBe(true);
+      expect(bp2.adapterId).toBe(101);
+      expect(bp2.message).toBeUndefined();
+    });
+
+    it('normalizes raw l10n keys in stored messages and full-stamps from a child-sourced response (issues #471/#500)', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.JAVASCRIPT,
+        executablePath: 'node'
+      });
+      dependencies.mockProxyManager.setDapRequestHandler(async (command, args) => {
+        if (command === 'initialize') {
+          dependencies.mockProxyManager.simulateEvent('dap-event', { event: 'initialized' });
+        }
+        if (command === 'setBreakpoints') {
+          return {
+            success: true,
+            body: {
+              breakpoints: args?.breakpoints?.map((bp: { line: number }, i: number) => ({
+                id: 7 + i,
+                verified: false,
+                line: bp.line,
+                message: 'breakpoint.provisionalBreakpoint'
+              })) || []
+            }
+          };
+        }
+        return { success: true };
+      });
+      await sessionManager.startDebugging(session.id, 'app.js');
+      await vi.runAllTimersAsync();
+      // Force a live (PAUSED) state so syncBreakpointsForFile's merge runs
+      dependencies.mockProxyManager.simulateStopped(1, 'entry');
+
+      const { breakpoint: bp } = await sessionManager.setBreakpoint(session.id, { file: 'app.js', line: 10 });
+      expect(bp.verified).toBe(false);
+      // The raw l10n key must never sit in the store (issue #471)
+      expect(bp.message).toBe('Unbound breakpoint');
+      expect(bp.adapterId).toBeUndefined();
+
+      // The proxy hands back the CHILD session's answer, marked child-sourced
+      // (issue #500): full stamp — verified, child ids (0 included), message.
+      dependencies.mockProxyManager.setDapRequestHandler(async (command, args) => {
+        if (command === 'setBreakpoints') {
+          return {
+            success: true,
+            __mcpChildSourced: true,
+            body: {
+              breakpoints: args?.breakpoints?.map((bp: { line: number }, i: number) => ({
+                id: i,
+                verified: true,
+                line: bp.line
+              })) || []
+            }
+          };
+        }
+        return { success: true };
+      });
+      await sessionManager.setBreakpoint(session.id, { file: 'app.js', line: 20 });
+
+      const stored = sessionManager.listBreakpoints(session.id);
+      const b1 = stored.find(b => b.line === 10)!;
+      const b2 = stored.find(b => b.line === 20)!;
+      expect(b1.verified).toBe(true);
+      expect(b1.adapterId).toBe(0);
+      expect(b1.message).toBeUndefined();
+      expect(b2.verified).toBe(true);
+      expect(b2.adapterId).toBe(1);
+
+      // A child-sourced UNVERIFIED echo tells the truth about verified but
+      // must not stamp its (unstable stub) id.
+      dependencies.mockProxyManager.setDapRequestHandler(async (command, args) => {
+        if (command === 'setBreakpoints') {
+          return {
+            success: true,
+            __mcpChildSourced: true,
+            body: {
+              breakpoints: args?.breakpoints?.map((bp: { line: number }) => ({
+                id: 9,
+                verified: false,
+                line: bp.line,
+                message: 'breakpoint.provisionalBreakpoint'
+              })) || []
+            }
+          };
+        }
+        return { success: true };
+      });
+      await sessionManager.setBreakpoint(session.id, { file: 'other.js', line: 30 });
+      const b3 = sessionManager.listBreakpoints(session.id).find(b => b.line === 30)!;
+      expect(b3.verified).toBe(false);
+      expect(b3.adapterId).toBeUndefined();
+      expect(b3.message).toBe('Unbound breakpoint');
     });
 
     it('never lets breakpoints-synced downgrade child-verified state (issue #439)', async () => {

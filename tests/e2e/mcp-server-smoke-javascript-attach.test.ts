@@ -174,6 +174,34 @@ describe('MCP Server JavaScript Attach-Mode Smoke Tests', () => {
     return parseSdkToolResult(attachResult);
   }
 
+  interface StoredBreakpoint {
+    line: number;
+    verified: boolean;
+    adapterId?: number;
+    message?: string;
+  }
+
+  /**
+   * Poll list_breakpoints until the breakpoint at BREAKPOINT_LINE reports
+   * verified:true with an adapterId (eventual-consistency pattern from
+   * mcp-server-breakpoint-management.test.ts). Returns null on deadline.
+   */
+  async function pollForVerifiedBreakpoint(deadlineMs = 10000): Promise<StoredBreakpoint | null> {
+    const deadline = Date.now() + deadlineMs;
+    let last: StoredBreakpoint | undefined;
+    while (Date.now() < deadline) {
+      const listResult = await callToolSafely(mcpClient!, 'list_breakpoints', { sessionId: sessionId! });
+      const bps = (listResult.breakpoints as StoredBreakpoint[] | undefined) ?? [];
+      last = bps.find(bp => bp.line === BREAKPOINT_LINE);
+      if (last && last.verified === true && last.adapterId !== undefined) {
+        return last;
+      }
+      await new Promise(r => setTimeout(r, 200));
+    }
+    console.log(`[JS Attach Test] pollForVerifiedBreakpoint deadline; last state: ${JSON.stringify(last)}`);
+    return null;
+  }
+
   it('attach_to_process must either really attach (threads + frames) or fail loudly', async () => {
     const target = await spawnTarget();
     targetProcess = target.proc;
@@ -256,6 +284,18 @@ describe('MCP Server JavaScript Attach-Mode Smoke Tests', () => {
     }
     expect(hit, 'breakpoint at tick() was not hit within 10s of continue').not.toBeNull();
 
+    // 3b. The store must tell the truth about a breakpoint that just fired
+    // (issue #500): verified with a child-session adapterId, and no
+    // provisional "Unbound breakpoint" note. Poll — verification is
+    // eventually consistent on the child-session path.
+    const stored = await pollForVerifiedBreakpoint();
+    expect(
+      stored,
+      'list_breakpoints must report verified:true + adapterId for a breakpoint that has ' +
+      'demonstrably fired (issue #500: js attach breakpoints were stuck "Unbound breakpoint")'
+    ).not.toBeNull();
+    expect(stored!.message ?? '').not.toMatch(/Unbound breakpoint|breakpoint\.provisionalBreakpoint/);
+
     // 4. Evaluate at the stop — counter is live program state
     const evalResult = await callToolSafely(mcpClient!, 'evaluate_expression', {
       sessionId: sessionId!,
@@ -278,6 +318,71 @@ describe('MCP Server JavaScript Attach-Mode Smoke Tests', () => {
       target.stdout().length,
       'the target must resume ticking after detach (it was left paused or was killed)'
     ).toBeGreaterThan(outputBeforeDetach);
+  }, 120000);
+
+  it('verifies a breakpoint set BEFORE attach once the attach completes (issue #500)', async () => {
+    const target = await spawnTarget();
+    targetProcess = target.proc;
+
+    // 1. Create the session and set the breakpoint FIRST — the exact shape
+    // that stayed "Unbound breakpoint" forever: js-debug registers the
+    // breakpoint via its pending-target queue during adoption and then
+    // answers identical re-sends with an empty no-change echo, so only the
+    // post-attach fresh-echo re-sync can recover the verified state.
+    const createResult = await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: { language: 'javascript', name: 'js-attach-preset-bp' }
+    });
+    sessionId = parseSdkToolResult(createResult).sessionId as string;
+    expect(sessionId).toBeTruthy();
+
+    const bpResult = await callToolSafely(mcpClient!, 'set_breakpoint', {
+      sessionId: sessionId!,
+      file: TARGET_SCRIPT,
+      line: BREAKPOINT_LINE
+    });
+    expect(bpResult.success, `pre-attach set_breakpoint failed: ${JSON.stringify(bpResult)}`).toBe(true);
+
+    // 2. Attach
+    const attachResult = await mcpClient!.callTool({
+      name: 'attach_to_process',
+      arguments: { sessionId, host: '127.0.0.1', port: target.port, verifyTimeout: 20000 }
+    });
+    const attachResponse = parseSdkToolResult(attachResult);
+    expect(attachResponse.success, `attach failed: ${JSON.stringify(attachResponse)}`).toBe(true);
+
+    // 3. The pre-attach breakpoint must become verified with an adapterId
+    const stored = await pollForVerifiedBreakpoint();
+    expect(
+      stored,
+      'a breakpoint set before attach_to_process must verify once the attach completes ' +
+      '(issue #500: it stayed "Unbound breakpoint" with no adapterId forever)'
+    ).not.toBeNull();
+    expect(stored!.message ?? '').not.toMatch(/Unbound breakpoint|breakpoint\.provisionalBreakpoint/);
+
+    // 4. And it must actually fire
+    const contResult = await callToolSafely(mcpClient!, 'continue_execution', { sessionId: sessionId! });
+    expect(contResult.success, `continue_execution failed: ${JSON.stringify(contResult)}`).toBe(true);
+    let hit = false;
+    for (let i = 0; i < 20; i++) {
+      await new Promise(r => setTimeout(r, 500));
+      const stack = await callToolSafely(mcpClient!, 'get_stack_trace', { sessionId: sessionId! });
+      const frames = (stack.stackFrames as Array<{ line?: number }> | undefined) ?? [];
+      if (stack.success && frames.length > 0 && frames[0].line === BREAKPOINT_LINE) {
+        hit = true;
+        break;
+      }
+    }
+    expect(hit, 'the pre-attach breakpoint was reported verified but never fired').toBe(true);
+
+    // 5. Detach must leave the target alive
+    const detachResult = await callToolSafely(mcpClient!, 'detach_from_process', {
+      sessionId: sessionId!,
+      terminateProcess: false
+    });
+    expect(detachResult.success, `detach_from_process failed: ${JSON.stringify(detachResult)}`).toBe(true);
+    await new Promise(r => setTimeout(r, 500));
+    expect(targetProcess!.exitCode, 'detach must leave the target process alive').toBeNull();
   }, 120000);
 
   it('should not pause the target when attaching with stopOnEntry:false', async () => {

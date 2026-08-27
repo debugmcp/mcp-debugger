@@ -1033,6 +1033,167 @@ describe('MinimalDapClient', () => {
       );
     });
 
+    it('marks child breakpoint events with the child-origin key (issues #500/#495)', () => {
+      const stubManager = createChildSessionManagerStub();
+      const client = new MinimalDapClient('localhost', 5678, JsDebugAdapterPolicy, {
+        childSessionManagerFactory: () => stubManager as unknown as ChildSessionManager
+      });
+
+      const bpHandler = vi.fn();
+      const stoppedHandler = vi.fn();
+      client.on('breakpoint', bpHandler);
+      client.on('stopped', stoppedHandler);
+
+      stubManager.emit('childEvent', {
+        seq: 1, type: 'event', event: 'breakpoint',
+        body: { reason: 'changed', breakpoint: { id: 0, verified: true } }
+      });
+      stubManager.emit('childEvent', {
+        seq: 2, type: 'event', event: 'stopped',
+        body: { reason: 'breakpoint', threadId: 1 }
+      });
+
+      expect(bpHandler).toHaveBeenCalledWith(
+        expect.objectContaining({ __mcpChildOrigin: true })
+      );
+      // Only breakpoint events carry the marker
+      expect(stoppedHandler).toHaveBeenCalledWith({ reason: 'breakpoint', threadId: 1 });
+      expect(stoppedHandler.mock.calls[0][0]).not.toHaveProperty('__mcpChildOrigin');
+      client.shutdown();
+    });
+
+    function createMirrorMergeClient(stubManager: ChildSessionManagerStub) {
+      const client = new MinimalDapClient('localhost', 5678, JsDebugAdapterPolicy, {
+        childSessionManagerFactory: () => stubManager as unknown as ChildSessionManager
+      });
+      const fakeSocket = {
+        write: vi.fn((_: string, cb?: (err?: Error | null) => void) => {
+          if (cb) cb(null);
+          return true;
+        }),
+        end: vi.fn(),
+        destroy: vi.fn(),
+        destroyed: false
+      } as unknown as net.Socket;
+      (client as any).socket = fakeSocket;
+      const respondToParent = async () => {
+        await (client as any).handleProtocolMessage({
+          seq: 99, type: 'response', request_seq: 1, command: 'setBreakpoints',
+          success: true,
+          body: { breakpoints: [{ id: 7, verified: false, message: 'breakpoint.provisionalBreakpoint' }] }
+        });
+      };
+      return { client, fakeSocket, respondToParent };
+    }
+
+    it('returns the child response, marked child-sourced, when a live child echoes the full set (issue #500)', async () => {
+      const stubManager = createChildSessionManagerStub();
+      stubManager.hasActiveChildren.mockReturnValue(true);
+      const childBody = { breakpoints: [{ id: 0, verified: true, line: 10 }] };
+      stubManager.storeBreakpoints.mockResolvedValue({ success: true, body: childBody });
+      const { client, respondToParent } = createMirrorMergeClient(stubManager);
+
+      const sendPromise = client.sendRequest('setBreakpoints', {
+        source: { path: './foo.js' },
+        breakpoints: [{ line: 10 }]
+      });
+      await respondToParent();
+      const resp = await sendPromise;
+
+      expect(resp.body).toEqual(childBody);
+      expect(resp).toHaveProperty('__mcpChildSourced', true);
+      client.shutdown();
+    });
+
+    it('keeps the parent response when the child echo is short, absent, or the child is adopting', async () => {
+      const stubManager = createChildSessionManagerStub();
+      stubManager.hasActiveChildren.mockReturnValue(true);
+
+      // Short echo (js-debug's no-change [] answer)
+      stubManager.storeBreakpoints.mockResolvedValue({ success: true, body: { breakpoints: [] } });
+      const first = createMirrorMergeClient(stubManager);
+      const p1 = first.client.sendRequest('setBreakpoints', {
+        source: { path: './foo.js' }, breakpoints: [{ line: 10 }]
+      });
+      await first.respondToParent();
+      const r1 = await p1;
+      expect(r1.body?.breakpoints?.[0]).toMatchObject({ id: 7, verified: false });
+      expect(r1).not.toHaveProperty('__mcpChildSourced');
+      first.client.shutdown();
+
+      // No child answer at all (mirror resolved null)
+      stubManager.storeBreakpoints.mockResolvedValue(null);
+      const second = createMirrorMergeClient(stubManager);
+      const p2 = second.client.sendRequest('setBreakpoints', {
+        source: { path: './foo.js' }, breakpoints: [{ line: 10 }]
+      });
+      await second.respondToParent();
+      expect((await p2).body?.breakpoints?.[0]).toMatchObject({ id: 7 });
+      second.client.shutdown();
+
+      // Adoption in progress: child answer not trusted (its stub answered)
+      stubManager.storeBreakpoints.mockResolvedValue({
+        success: true, body: { breakpoints: [{ id: 1, verified: false }] }
+      });
+      stubManager.isAdoptionInProgress.mockReturnValue(true);
+      const third = createMirrorMergeClient(stubManager);
+      const p3 = third.client.sendRequest('setBreakpoints', {
+        source: { path: './foo.js' }, breakpoints: [{ line: 10 }]
+      });
+      await third.respondToParent();
+      const r3 = await p3;
+      expect(r3.body?.breakpoints?.[0]).toMatchObject({ id: 7 });
+      expect(r3).not.toHaveProperty('__mcpChildSourced');
+      third.client.shutdown();
+    });
+
+    it('falls back to the parent response when the child mirror never answers (bounded wait)', async () => {
+      vi.useFakeTimers();
+      try {
+        const stubManager = createChildSessionManagerStub();
+        stubManager.hasActiveChildren.mockReturnValue(true);
+        stubManager.storeBreakpoints.mockReturnValue(new Promise(() => {})); // hangs
+        const { client, respondToParent } = createMirrorMergeClient(stubManager);
+
+        const sendPromise = client.sendRequest('setBreakpoints', {
+          source: { path: './foo.js' }, breakpoints: [{ line: 10 }]
+        });
+        await respondToParent();
+        await vi.advanceTimersByTimeAsync(3000);
+        const resp = await sendPromise;
+        expect(resp.body?.breakpoints?.[0]).toMatchObject({ id: 7, verified: false });
+        expect(resp).not.toHaveProperty('__mcpChildSourced');
+        client.shutdown();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('strips the reserved __mcpForceFreshEcho key and forwards the intent to the mirror', async () => {
+      const stubManager = createChildSessionManagerStub();
+      const { client, fakeSocket, respondToParent } = createMirrorMergeClient(stubManager);
+
+      const sendPromise = client.sendRequest('setBreakpoints', {
+        source: { path: './foo.js' },
+        breakpoints: [{ line: 10 }],
+        __mcpForceFreshEcho: true
+      });
+      await respondToParent();
+      await sendPromise;
+
+      expect(stubManager.storeBreakpoints).toHaveBeenCalledWith(
+        expect.stringContaining('foo.js'),
+        expect.any(Array),
+        { forceFreshEcho: true }
+      );
+      const written = (fakeSocket.write as ReturnType<typeof vi.fn>).mock.calls
+        .map(c => String(c[0]))
+        .join('');
+      expect(written).toContain('setBreakpoints');
+      expect(written).not.toContain('__mcpForceFreshEcho');
+      client.shutdown();
+    });
+
     it('should mirror breakpoints to ChildSessionManager during sendRequest', async () => {
       const stubManager = createChildSessionManagerStub();
       const client = new MinimalDapClient(
@@ -1075,7 +1236,8 @@ describe('MinimalDapClient', () => {
 
       expect(stubManager.storeBreakpoints).toHaveBeenCalledWith(
         expect.stringContaining('foo.js'),
-        expect.arrayContaining([expect.objectContaining({ line: 10 })])
+        expect.arrayContaining([expect.objectContaining({ line: 10 })]),
+        { forceFreshEcho: false }
       );
     });
 

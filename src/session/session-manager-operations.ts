@@ -28,6 +28,7 @@ import { checkLaunchToolchain } from '../utils/language-availability.js';
 import { didYouMean } from '../utils/did-you-mean.js';
 import { resolveStatement } from '../utils/breakpoint-resolver.js';
 import { normalizeBreakpointMessage } from '../utils/breakpoint-message.js';
+import { consumeChildSourced } from '../utils/child-origin-events.js';
 import { SessionManagerData } from './session-manager-data.js';
 import { CustomLaunchRequestArguments, DebugResult } from './session-manager-core.js';
 import {
@@ -1339,7 +1340,8 @@ export abstract class SessionManagerOperations extends SessionManagerData {
    */
   protected async syncBreakpointsForFile(
     session: ManagedSession,
-    file: string
+    file: string,
+    options?: { forceFreshEcho?: boolean }
   ): Promise<{ synced: boolean; warning?: string }> {
     const sessionId = session.id;
     if (
@@ -1364,6 +1366,10 @@ export abstract class SessionManagerOperations extends SessionManagerData {
           {
             source: { path: file },
             breakpoints: allBpsForFile.map(toSourceBreakpoint),
+            // Reserved key, stripped by the proxy before the adapter sees
+            // it: asks a child-mirroring proxy for an authoritative echo
+            // even when the set is unchanged (issue #500).
+            ...(options?.forceFreshEcho === true ? { __mcpForceFreshEcho: true } : {}),
           }
         );
       if (
@@ -1380,11 +1386,23 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         // verified state or clobber child adapter ids.
         const childAuthoritative =
           !!this.selectPolicy(session.language)?.getDapClientBehavior?.().mirrorBreakpointsToChild;
+        // A response the proxy marked child-sourced (issue #500) carries the
+        // child session's own answer — the authoritative one — so it stamps
+        // fully instead of upgrade-only.
+        const childSourced = consumeChildSourced(response);
         // Update ALL breakpoints from response (positional match)
         for (let i = 0; i < Math.min(responseBps.length, allBpsForFile.length); i++) {
           const bpInfo = responseBps[i];
-          const keepChildState = childAuthoritative && allBpsForFile[i].verified === true;
-          if (childAuthoritative) {
+          const keepChildState =
+            childAuthoritative && !childSourced && allBpsForFile[i].verified === true;
+          if (childAuthoritative && childSourced) {
+            allBpsForFile[i].verified = bpInfo.verified;
+            // Only a VERIFIED child id enters the store: stub ids are
+            // unstable across the pending→bound transition (issue #495).
+            if (bpInfo.verified === true && typeof bpInfo.id === 'number') {
+              allBpsForFile[i].adapterId = bpInfo.id;
+            }
+          } else if (childAuthoritative) {
             allBpsForFile[i].verified = allBpsForFile[i].verified || bpInfo.verified;
           } else {
             allBpsForFile[i].verified = bpInfo.verified;
@@ -1392,7 +1410,13 @@ export abstract class SessionManagerOperations extends SessionManagerData {
           }
           allBpsForFile[i].line = bpInfo.line || allBpsForFile[i].line;
           if (!keepChildState) {
-            allBpsForFile[i].message = bpInfo.message;
+            // Normalize before storing (issue #471): raw l10n keys like
+            // js-debug's "breakpoint.provisionalBreakpoint" must never sit in
+            // the store, and a provisional note must not survive verification.
+            allBpsForFile[i].message = normalizeBreakpointMessage(
+              bpInfo.message,
+              allBpsForFile[i].verified
+            );
           }
           // Enhance "no symbols" message for .NET with PDB format guidance
           if (bpInfo.message && session.language === 'dotnet' &&
@@ -2927,6 +2951,32 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         this.logger.info(`[SessionManager] Set session ${sessionId} to RUNNING (stopOnEntry=false, process started with suspend=n)`);
       }
 
+      // Attach parity with the post-launch belt-and-braces re-sync (issues
+      // #236/#439, here for #500): breakpoints set before attach_to_process
+      // were sent during the handshake, whose responses the policy may
+      // discard — and for js-debug the child session only answered its
+      // pending stub while adoption was in flight. Re-sending now, with the
+      // debuggee-owning session provably live, delivers the authoritative
+      // verification. Replace-all with the identical set is idempotent;
+      // syncBreakpointsForFile never throws and no-ops unless live.
+      if (session.breakpoints.size > 0) {
+        const files = [...new Set(Array.from(session.breakpoints.values()).map(bp => bp.file))];
+        for (const file of files) {
+          // forceFreshEcho: js-debug answers a no-change re-send with an
+          // empty echo, and pre-attach breakpoints were already registered
+          // via its pending-target queue — without a fresh echo their
+          // verified state is unrecoverable (issue #500).
+          await this.syncBreakpointsForFile(session, file, { forceFreshEcho: true });
+        }
+      }
+      if ((session.functionBreakpoints?.size ?? 0) > 0) {
+        await this.syncFunctionBreakpoints(session);
+      }
+      // Unverified-at-attach function breakpoints get the same launch-style
+      // warning (issue #308); bind-late adapters (js/java) stay suppressed
+      // inside the builder.
+      const attachFnBpWarning = this.buildFunctionBreakpointLaunchWarning(session);
+
       const attachData: Record<string, unknown> = {
         message: attachConfig.processId
           ? `Attached to process PID ${attachConfig.processId}`
@@ -2941,6 +2991,9 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       session.attachDroppedConfigKeys = undefined;
       session.attachForwardedUnknownConfigKeys = undefined;
       const warningParts: string[] = [];
+      if (attachFnBpWarning) {
+        warningParts.push(attachFnBpWarning);
+      }
       if (droppedKeys && droppedKeys.length > 0) {
         warningParts.push(
           `adapterConfig key(s) not supported by the ${session.language} attach request were ignored: ${droppedKeys.join(', ')}`

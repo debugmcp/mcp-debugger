@@ -18,6 +18,7 @@ import {
   sanitizePayloadForLogging
 } from '@debugmcp/shared';
 import { ChildSessionManager, type ChildSessionOptions } from './child-session-manager.js';
+import { markChildOrigin, markChildSourced } from '../utils/child-origin-events.js';
 import { getErrorMessage } from '../errors/debug-errors.js';
 import { DapFrameDecoder, encodeDapMessage } from './dap-framing.js';
 
@@ -35,6 +36,12 @@ type MinimalDapClientOptions = {
 
 /** Trace cap consistent with the main logger's maxsize (issue #403). */
 const DEFAULT_TRACE_MAX_BYTES = 50 * 1024 * 1024;
+
+// Upper bound on waiting for a mirrored setBreakpoints to be answered by the
+// child session (issue #500). A healthy child answers in single-digit ms; the
+// bound only matters when the child hangs, and then the parent's own
+// (provisional) response is returned instead.
+const CHILD_MIRROR_TIMEOUT_MS = 3000;
 
 export class MinimalDapClient extends EventEmitter {
   private socket: Socket | null = null;
@@ -121,7 +128,13 @@ export class MinimalDapClient extends EventEmitter {
       });
       
       this.childSessionManager.on('childEvent', (evt: DebugProtocol.Event) => {
-        // Forward child events
+        // Forward child events. Breakpoint events are tagged with their
+        // origin so the SessionManager can tell the child's authoritative
+        // verification apart from the parent's provisional stubs, whose ids
+        // share the same integer space (issues #500/#495).
+        if (evt.event === 'breakpoint') {
+          markChildOrigin(evt.body);
+        }
         this.emit(evt.event, evt.body);
         this.emit('event', evt);
       });
@@ -578,7 +591,20 @@ export class MinimalDapClient extends EventEmitter {
       );
     }
     
+    // Reserved key (issue #500): strip before the adapter sees it, for every
+    // adapter — only child-mirroring proxies act on it.
+    let forceFreshEcho = false;
+    if (command === 'setBreakpoints' && args !== null && typeof args === 'object') {
+      const a = args as Record<string, unknown>;
+      if ('__mcpForceFreshEcho' in a) {
+        forceFreshEcho = a.__mcpForceFreshEcho === true;
+        delete a.__mcpForceFreshEcho;
+      }
+    }
+
     // Track and mirror setBreakpoints to child if/when present using ChildSessionManager
+    let childMirror: Promise<DebugProtocol.SetBreakpointsResponse | null> | null = null;
+    let mirroredCount = 0;
     if (command === 'setBreakpoints' && this.childSessionManager) {
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -587,8 +613,11 @@ export class MinimalDapClient extends EventEmitter {
         const bps: DebugProtocol.SourceBreakpoint[] | undefined = a?.breakpoints;
         if (typeof sp === 'string' && Array.isArray(bps)) {
           const absolutePath = path.isAbsolute(sp) ? sp : path.resolve(sp);
-          // Store breakpoints in ChildSessionManager for mirroring
-          this.childSessionManager.storeBreakpoints(absolutePath, bps);
+          mirroredCount = bps.length;
+          // Store breakpoints in ChildSessionManager for mirroring; the
+          // promise carries the child's response (or null) for the
+          // child-authoritative merge below (issue #500).
+          childMirror = this.childSessionManager.storeBreakpoints(absolutePath, bps, { forceFreshEcho });
         }
       } catch {
         // ignore tracking errors
@@ -630,7 +659,7 @@ export class MinimalDapClient extends EventEmitter {
       args: sanitizePayloadForLogging(args || {})
     });
     
-    return new Promise<T>((resolve, reject) => {
+    const parentPromise = new Promise<T>((resolve, reject) => {
       // Set up timeout
       const timer = this.timers.setTimeout(() => {
         if (this.pendingRequests.has(requestSeq)) {
@@ -638,14 +667,14 @@ export class MinimalDapClient extends EventEmitter {
           reject(new Error(`DAP request '${command}' (seq ${requestSeq}) timed out`));
         }
       }, timeoutMs);
-      
+
       // Store pending request
       this.pendingRequests.set(requestSeq, {
         resolve: resolve as (value: DebugProtocol.Response) => void,
         reject,
         timer
       });
-      
+
       // Send the request
       this.appendTrace('out', request);
       const message = encodeDapMessage(request);
@@ -657,12 +686,75 @@ export class MinimalDapClient extends EventEmitter {
         reject(new Error('Socket unexpectedly null'));
         return;
       }
-      
+
       this.socket.write(message, (err) => {
         if (err) {
           this.timers.clearTimeout(timer);
           this.pendingRequests.delete(requestSeq);
           reject(err);
+        }
+      });
+    });
+
+    if (!childMirror) {
+      return parentPromise;
+    }
+
+    // Child-authoritative setBreakpoints merge (issue #500): for mirroring
+    // policies the parent session owns no runtime and answers with
+    // pessimistic provisional stubs, while the mirrored child request gets
+    // the real verification. When a fully-adopted child echoes every
+    // requested breakpoint, hand its body back in place of the parent's so
+    // the caller's positional merge stamps the truth synchronously — no
+    // reliance on a later `breakpoint` event that js-debug may never send.
+    const parentResp = await parentPromise;
+    const childResp = await this.awaitChildMirror(childMirror);
+    const adoptionInProgress =
+      typeof this.childSessionManager?.isAdoptionInProgress === 'function'
+        ? this.childSessionManager.isAdoptionInProgress()
+        : false;
+    const hasActiveChild = this.childSessionManager?.hasActiveChildren?.() ?? false;
+    const childBps = childResp?.body?.breakpoints;
+    if (
+      hasActiveChild &&
+      !adoptionInProgress &&
+      Array.isArray(childBps) &&
+      childBps.length === mirroredCount
+    ) {
+      const merged = { ...(parentResp as object), body: childResp!.body } as T;
+      markChildSourced(merged);
+      logger.info(
+        `[MinimalDapClient] setBreakpoints: using child session's response (${childBps.length} breakpoint(s)) over the parent's provisional answer`
+      );
+      return merged;
+    }
+    return parentResp;
+  }
+
+  /**
+   * Await a child setBreakpoints mirror with a bound, resolving null on
+   * timeout so a hung child can only delay — never fail — the parent path.
+   * The mirror promise itself never rejects (storeBreakpoints catches).
+   */
+  private awaitChildMirror(
+    mirror: Promise<DebugProtocol.SetBreakpointsResponse | null>
+  ): Promise<DebugProtocol.SetBreakpointsResponse | null> {
+    return new Promise((resolve) => {
+      let settled = false;
+      const timer = this.timers.setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          logger.warn(
+            `[MinimalDapClient] Child setBreakpoints mirror did not answer within ${CHILD_MIRROR_TIMEOUT_MS}ms; returning the parent response`
+          );
+          resolve(null);
+        }
+      }, CHILD_MIRROR_TIMEOUT_MS);
+      void mirror.then((resp) => {
+        if (!settled) {
+          settled = true;
+          this.timers.clearTimeout(timer);
+          resolve(resp);
         }
       });
     });

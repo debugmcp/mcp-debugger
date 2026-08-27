@@ -470,6 +470,86 @@ describe('SessionManagerOperations attach modes', () => {
     });
   });
 
+  describe('post-attach breakpoint re-sync (issue #500)', () => {
+    function makeDirectConnectAdapter() {
+      return {
+        resolveExecutablePath: vi.fn(),
+        buildAdapterCommand: vi.fn(),
+        usesDirectConnectForAttach: vi.fn().mockReturnValue(true),
+        supportsAttach: vi.fn().mockReturnValue(true),
+        transformAttachConfig: vi.fn().mockImplementation((cfg: unknown) => cfg),
+        getDefaultExecutableName: vi.fn().mockReturnValue('ruby')
+      };
+    }
+
+    beforeEach(() => {
+      mockDependencies.adapterRegistry.getFactoryMetadata = vi
+        .fn()
+        .mockResolvedValue({ modes: { launch: true, attach: 'direct-connect' } });
+      mockDependencies.adapterRegistry.create.mockResolvedValue(makeDirectConnectAdapter());
+    });
+
+    it('re-sends every queued breakpoint file with forceFreshEcho after a successful attach', async () => {
+      mockSession.breakpoints.set('bp-1', { id: 'bp-1', file: '/abs/app.js', line: 11, verified: false });
+      mockSession.breakpoints.set('bp-2', { id: 'bp-2', file: '/abs/app.js', line: 22, verified: false });
+      mockSession.breakpoints.set('bp-3', { id: 'bp-3', file: '/abs/lib.js', line: 5, verified: false });
+
+      const result = await operations.attachToProcess('test-session', {
+        host: '127.0.0.1',
+        port: 12345,
+        stopOnEntry: false
+      });
+      expect(result.success).toBe(true);
+
+      const sbCalls = mockProxyManager.sendDapRequest.mock.calls.filter(
+        (c: unknown[]) => c[0] === 'setBreakpoints'
+      );
+      expect(sbCalls).toHaveLength(2);
+      const byPath = Object.fromEntries(
+        sbCalls.map((c: [string, { source: { path: string }; breakpoints: unknown[]; __mcpForceFreshEcho?: boolean }]) => [
+          c[1].source.path,
+          c[1]
+        ])
+      );
+      expect(byPath['/abs/app.js'].breakpoints).toHaveLength(2);
+      expect(byPath['/abs/lib.js'].breakpoints).toHaveLength(1);
+      // The reserved key asks a child-mirroring proxy for an authoritative
+      // echo even when js-debug diffs the re-send to a no-op (issue #500).
+      expect(byPath['/abs/app.js'].__mcpForceFreshEcho).toBe(true);
+      expect(byPath['/abs/lib.js'].__mcpForceFreshEcho).toBe(true);
+    });
+
+    it('a failing re-sync does not fail the attach', async () => {
+      mockSession.breakpoints.set('bp-1', { id: 'bp-1', file: '/abs/app.js', line: 11, verified: false });
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'setBreakpoints') {
+          throw new Error('adapter rejected setBreakpoints');
+        }
+        return {};
+      });
+
+      const result = await operations.attachToProcess('test-session', {
+        host: '127.0.0.1',
+        port: 12345,
+        stopOnEntry: false
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('sends no re-sync traffic when no breakpoints are queued', async () => {
+      const result = await operations.attachToProcess('test-session', {
+        host: '127.0.0.1',
+        port: 12345,
+        stopOnEntry: false
+      });
+      expect(result.success).toBe(true);
+      const sbCalls = mockProxyManager.sendDapRequest.mock.calls.filter(
+        (c: unknown[]) => c[0] === 'setBreakpoints'
+      );
+      expect(sbCalls).toHaveLength(0);
+    });
+  });
+
   it('appends an attach hint when launch executable resolution fails on an attach-capable adapter', async () => {
     const adapterStub = {
       resolveExecutablePath: vi.fn().mockRejectedValue(new Error('ruby not found')),

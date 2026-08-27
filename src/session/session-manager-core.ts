@@ -25,6 +25,7 @@ import { IProxyManager } from '../proxy/proxy-manager.js';
 import { IProxyManagerFactory } from '../factories/proxy-manager-factory.js';
 import type { BreakpointSyncResult, FunctionBreakpointSyncResult } from '../proxy/dap-proxy-interfaces.js';
 import { normalizeBreakpointMessage } from '../utils/breakpoint-message.js';
+import { consumeChildOrigin } from '../utils/child-origin-events.js';
 import { IAdapterRegistry } from '@debugmcp/shared';
 
 // Custom launch arguments interface extending DebugProtocol.LaunchRequestArguments
@@ -540,9 +541,19 @@ export abstract class SessionManagerCore extends EventEmitter {
       a === b ||
       (windowsPathish.test(a) && windowsPathish.test(b) && a.toLowerCase() === b.toLowerCase());
     const handleBreakpoint = (body: DebugProtocol.BreakpointEvent['body']) => {
+      // Strip the child-origin marker before anything else so it never leaks
+      // past this handler (issues #500/#495).
+      const fromChild = consumeChildOrigin(body);
       const eventBp = body?.breakpoint;
       if (!eventBp) {
         return;
+      }
+      let mirrorsToChild = false;
+      try {
+        mirrorsToChild =
+          !!this.sessionStore.selectPolicy(session.language).getDapClientBehavior().mirrorBreakpointsToChild;
+      } catch {
+        // Unknown policy: treat as non-mirroring — default handling below
       }
       // Function breakpoints (issue #271 phase 3) match by adapterId ONLY —
       // DAP breakpoint events carry no function name, and letting them join
@@ -586,30 +597,26 @@ export abstract class SessionManagerCore extends EventEmitter {
         target = all.find(bp => samePath(bp.file, eventPath) && bp.line === eventBp.line);
       }
       if (!target) {
+        const stored = all
+          .map(bp => `${bp.file}:${bp.line}(adapterId=${bp.adapterId ?? 'none'})`)
+          .join(', ');
         this.logger.debug(
-          `[SessionManager ${sessionId}] Breakpoint event matched no stored breakpoint (id=${eventBp.id}, ${eventBp.source?.path}:${eventBp.line})`
+          `[SessionManager ${sessionId}] Breakpoint event matched no stored breakpoint (event: id=${eventBp.id}, verified=${eventBp.verified}, ${eventBp.source?.path}:${eventBp.line}, message=${eventBp.message ?? 'none'}); stored: [${stored}]`
         );
         return;
       }
       // Child-mirroring adapters (js-debug): the parent session emits its own
-      // breakpoint events with pessimistic verified:false and parent-space ids.
-      // Only stored adapterIds are child ids, so a (file,line)-fallback match
-      // carrying a downgrade is the parent contradicting the authoritative
-      // child — ignore it. Id-matched downgrades (real child unbinding) apply.
-      if (!matchedByAdapterId && target.verified === true && eventBp.verified === false) {
-        let mirrorsToChild = false;
-        try {
-          mirrorsToChild =
-            !!this.sessionStore.selectPolicy(session.language).getDapClientBehavior().mirrorBreakpointsToChild;
-        } catch {
-          // Unknown policy: fall through to the default handling below
-        }
-        if (mirrorsToChild) {
-          this.logger.debug(
-            `[SessionManager ${sessionId}] Ignoring non-authoritative breakpoint downgrade for ${target.file}:${target.line}`
-          );
-          return;
-        }
+      // breakpoint events with pessimistic verified:false and parent-space ids
+      // that share the child's integer id space (issue #495) — so a parent
+      // stub can even match a stored child id. A non-child downgrade of a
+      // verified record is the parent contradicting the authoritative child;
+      // ignore it whether it matched by id or by (file,line). Child-origin
+      // downgrades (real unbinding) still apply.
+      if (mirrorsToChild && !fromChild && target.verified === true && eventBp.verified === false) {
+        this.logger.debug(
+          `[SessionManager ${sessionId}] Ignoring non-authoritative breakpoint downgrade for ${target.file}:${target.line} (matchedByAdapterId=${matchedByAdapterId})`
+        );
+        return;
       }
       target.verified = eventBp.verified;
       if (typeof eventBp.line === 'number') {
@@ -624,7 +631,14 @@ export abstract class SessionManagerCore extends EventEmitter {
         eventBp.message !== undefined ? eventBp.message : target.message,
         target.verified
       );
-      if (typeof eventBp.id === 'number') {
+      // For mirroring policies only a child-origin VERIFIED event's id enters
+      // the store: parent-space ids and provisional stub ids (the child
+      // answers its own pending stub while adoption is in flight, issue #500)
+      // are unstable and would poison future id matching.
+      if (
+        typeof eventBp.id === 'number' &&
+        (!mirrorsToChild || (fromChild && eventBp.verified === true))
+      ) {
         target.adapterId = eventBp.id;
       }
       this.logger.info('debug:breakpoint', {

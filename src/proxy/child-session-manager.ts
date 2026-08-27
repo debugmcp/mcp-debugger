@@ -260,13 +260,22 @@ export class ChildSessionManager extends EventEmitter {
   }
 
   /**
-   * Store breakpoints for mirroring to child sessions
+   * Store breakpoints for mirroring to child sessions.
+   *
+   * Returns the child's setBreakpoints response when an active child was
+   * mirrored to, or null when there was no child / the mirror failed — the
+   * child owns the runtime, so its response carries the authoritative
+   * verified state (issue #500). Never rejects.
    */
-  storeBreakpoints(sourcePath: string, breakpoints: DebugProtocol.SourceBreakpoint[]): void {
+  storeBreakpoints(
+    sourcePath: string,
+    breakpoints: DebugProtocol.SourceBreakpoint[],
+    options?: { forceFreshEcho?: boolean }
+  ): Promise<DebugProtocol.SetBreakpointsResponse | null> {
     if (!this.dapBehavior.mirrorBreakpointsToChild) {
-      return;
+      return Promise.resolve(null);
     }
-    
+
     const absolutePath = path.isAbsolute(sourcePath) ? sourcePath : path.resolve(sourcePath);
     if (breakpoints.length === 0) {
       // A fresh child never saw this file's breakpoints, so replaying an
@@ -276,18 +285,69 @@ export class ChildSessionManager extends EventEmitter {
     } else {
       this.storedBreakpoints.set(absolutePath, breakpoints);
     }
-    
+
     // Mirror to active child if present
-    if (this.activeChild) {
-      void this.activeChild.sendRequest<DebugProtocol.SetBreakpointsResponse>('setBreakpoints', {
+    const child = this.activeChild;
+    if (!child) {
+      logger.info(
+        `[ChildSessionManager:${this.instanceId}] No active child to mirror ${breakpoints.length} breakpoint(s) for ${absolutePath} (adoptionInProgress=${this.adoptionInProgress}); stored for replay`
+      );
+      return Promise.resolve(null);
+    }
+    logger.info(
+      `[ChildSessionManager:${this.instanceId}] Mirroring ${breakpoints.length} breakpoint(s) for ${absolutePath} to active child`
+    );
+    const send = (): Promise<DebugProtocol.SetBreakpointsResponse> =>
+      child.sendRequest<DebugProtocol.SetBreakpointsResponse>('setBreakpoints', {
         source: { path: absolutePath },
         breakpoints
-      }).then(resp => {
-        this.emitBreakpointResults(absolutePath, breakpoints, resp);
-      }).catch(() => {
-        // Ignore errors when mirroring
       });
-    }
+    return send().then(async resp => {
+      let effective = resp;
+      const echoed = resp?.body?.breakpoints;
+      if (
+        options?.forceFreshEcho === true &&
+        breakpoints.length > 0 &&
+        Array.isArray(echoed) &&
+        echoed.length < breakpoints.length
+      ) {
+        // js-debug's BreakpointManager answers a no-change re-send with an
+        // EMPTY breakpoints array (`if (unbound===0 && new===0) return
+        // {breakpoints:[]}` in the vendored bundle), so re-sending an
+        // already-registered set can never recover verified state — the
+        // exact hole behind issue #500's pre-attach breakpoints. When the
+        // caller asked for an authoritative echo (the post-attach re-sync,
+        // which runs against a paused or freshly-attached debuggee), clear
+        // the path and set again so the child must answer with real records.
+        logger.info(
+          `[ChildSessionManager:${this.instanceId}] Child echoed ${echoed.length}/${breakpoints.length} breakpoint(s) for ${absolutePath} (no-change short echo); clearing and re-setting for a fresh echo`
+        );
+        try {
+          await child.sendRequest<DebugProtocol.SetBreakpointsResponse>('setBreakpoints', {
+            source: { path: absolutePath },
+            breakpoints: []
+          });
+          effective = await send();
+        } catch (err: unknown) {
+          logger.warn(
+            `[ChildSessionManager:${this.instanceId}] Fresh-echo re-set FAILED for ${absolutePath}: ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
+      }
+      const summary = (effective?.body?.breakpoints ?? [])
+        .map(bp => `id=${bp.id} verified=${bp.verified} line=${bp.line}`)
+        .join('; ');
+      logger.info(
+        `[ChildSessionManager:${this.instanceId}] Child setBreakpoints response for ${absolutePath}: [${summary}]`
+      );
+      this.emitBreakpointResults(absolutePath, breakpoints, effective);
+      return effective;
+    }).catch((err: unknown) => {
+      logger.warn(
+        `[ChildSessionManager:${this.instanceId}] Child setBreakpoints mirror FAILED for ${absolutePath}: ${err instanceof Error ? err.message : String(err)}`
+      );
+      return null;
+    });
   }
 
   /**
@@ -304,10 +364,22 @@ export class ChildSessionManager extends EventEmitter {
     response: DebugProtocol.SetBreakpointsResponse | undefined
   ): void {
     const bps = response?.body?.breakpoints;
+    if (!Array.isArray(bps) || bps.length < requested.length) {
+      // Silent before issue #500: an attach-path child answering without a
+      // breakpoints array — or with fewer entries than requested (observed:
+      // an empty [] from a post-attach-init replay) — left the store
+      // unreconciled with no trace. Synthesize from whatever did come back.
+      logger.warn(
+        `[ChildSessionManager:${this.instanceId}] Child setBreakpoints response for ${sourcePath} echoed ${Array.isArray(bps) ? bps.length : 'no'} breakpoint(s) for ${requested.length} requested (body=${JSON.stringify(response?.body)}); unechoed breakpoints stay unreconciled`
+      );
+    }
     if (!Array.isArray(bps)) {
       return;
     }
     bps.forEach((bp, i) => {
+      logger.debug(
+        `[ChildSessionManager:${this.instanceId}] Synthesizing breakpoint event from child response: id=${bp.id} verified=${bp.verified} ${bp.source?.path ?? sourcePath}:${bp.line ?? requested[i]?.line}`
+      );
       const event: DebugProtocol.BreakpointEvent = {
         seq: 0,
         type: 'event',
