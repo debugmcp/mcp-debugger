@@ -7,7 +7,7 @@ import fs from 'fs-extra';
 import path from 'path';
 import { MinimalDapClient } from './minimal-dap.js';
 import { DapMirrorServer } from './dap-mirror-server.js';
-import { createLogger } from '../utils/logger.js';
+import { createLogger, redirectProxyLoggers } from '../utils/logger.js';
 import {
   DapProxyDependencies,
   ILogger,
@@ -37,7 +37,9 @@ export function createProductionDependencies(
 
   return {
     loggerFactory,
-    
+
+    redirectProxyLoggers,
+
     fileSystem: {
       ensureDir: (path: string) => fs.ensureDir(path),
       pathExists: (path: string) => fs.pathExists(path),

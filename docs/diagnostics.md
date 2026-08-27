@@ -165,7 +165,7 @@ When a session misbehaves rather than a toolchain:
 - **`dryRunSpawn: true`** in `start_debugging` validates the whole spawn (adapter command, paths, environment) without starting a real debug session — the fastest way to distinguish config problems from runtime ones.
 - **`DAP_TRACE=1`** captures every DAP frame to a per-session `dap-trace-<sessionId>.ndjson` (off by default, capped at 50 MB; `DAP_TRACE_FILE=<path>` picks an explicit file). This is the ground truth for "what did the adapter actually say". Each record carries a `conn` field (`parent`, `child:<targetId>`, or `release:<targetId>`) naming the DAP connection that produced the frame — js-debug sessions interleave parent and child frames (with independent `seq` spaces) in the one file.
 - **Server log**: `logs/debug-mcp-server-<pid>.log` (working-directory-relative; `--log-file` overrides; the container writes `/app/logs/debug-mcp-server.log`). Set verbosity with `--log-level debug` or `DEBUG_MCP_LOG_LEVEL`.
-- **Per-session proxy log**: each session writes `proxy-<sessionId>.log` to the OS temp directory, at the same level as the server log — this is where adapter spawn commands and stderr land.
+- **Per-session proxy log**: each session writes `proxy-<sessionId>.log` to the OS temp directory, at the same level as the server log — this is where adapter spawn commands, stderr, and the proxy's DAP routing decisions (DAP client, child-session manager, CDP bridges) land. Lines those modules emit before the session initializes go to the worker's per-pid server log instead.
 - Format details: [docs/logging-format-specification.md](./logging-format-specification.md).
 
 ## Environment variable reference

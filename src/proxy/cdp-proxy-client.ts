@@ -9,7 +9,8 @@
 import { EventEmitter } from 'events';
 import { createLogger } from '../utils/logger.js';
 
-const logger = createLogger('cdp-proxy-client');
+// redirectable: re-pointed into the per-session proxy log at worker init (#519)
+const logger = createLogger('cdp-proxy-client', { redirectable: true });
 
 export interface CdpTransport {
   send(data: string): void;

@@ -305,6 +305,12 @@ export interface DapProxyDependencies {
    * tests that don't exercise the mirror need no fake.
    */
   mirrorServerFactory?: IDapMirrorServerFactory;
+  /**
+   * Re-points redirectable module loggers (minimal-dap, child-session-manager,
+   * cdp-*) at the per-session proxy log at worker init (issue #519). Optional:
+   * tests that don't exercise logging need no fake.
+   */
+  redirectProxyLoggers?: (options: { file: string; level?: string }) => number;
 }
 
 // ===== DAP mirror pseudo-commands (issue #217) =====

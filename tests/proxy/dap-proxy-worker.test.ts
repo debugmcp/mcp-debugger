@@ -503,6 +503,56 @@ describe('DapProxyWorker', () => {
       }
     });
 
+    it('init redirects proxy module loggers into the per-session log file (issue #519)', async () => {
+      vi.useFakeTimers();
+      try {
+        const redirectSpy = vi.fn().mockReturnValue(4);
+        dependencies.redirectProxyLoggers = redirectSpy;
+        worker = new DapProxyWorker(dependencies, { exit: vi.fn() });
+
+        await worker.handleCommand({ ...basePayload, logLevel: 'info' });
+        vi.clearAllTimers();
+
+        expect(redirectSpy).toHaveBeenCalledTimes(1);
+        expect(redirectSpy).toHaveBeenCalledWith({
+          file: path.join(basePayload.logDir, `proxy-${basePayload.sessionId}.log`),
+          level: 'info'
+        });
+        expect(mockLogger.info).toHaveBeenCalledWith(
+          expect.stringContaining('Redirected 4 module logger(s)')
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('init defaults the redirect level to debug and survives a missing redirect dependency (issue #519)', async () => {
+      vi.useFakeTimers();
+      try {
+        // Leg 1: no logLevel in the payload → level 'debug'
+        const redirectSpy = vi.fn().mockReturnValue(0);
+        dependencies.redirectProxyLoggers = redirectSpy;
+        worker = new DapProxyWorker(dependencies, { exit: vi.fn() });
+        await worker.handleCommand(basePayload);
+        vi.clearAllTimers();
+        expect(redirectSpy).toHaveBeenCalledWith(
+          expect.objectContaining({ level: 'debug' })
+        );
+
+        // Leg 2: the dependency is optional — init completes without it
+        delete dependencies.redirectProxyLoggers;
+        const bareWorker = new DapProxyWorker(dependencies, { exit: vi.fn() });
+        await bareWorker.handleCommand({ ...basePayload, sessionId: 'no-redirect-session' });
+        vi.clearAllTimers();
+        const statuses = mockMessageSender.send.mock.calls
+          .map(([m]: [StatusMessage]) => m)
+          .filter((m) => m.type === 'status' && m.sessionId === 'no-redirect-session');
+        expect(statuses.length).toBeGreaterThan(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('passes the payload logLevel through to the logger factory (issue #403)', async () => {
       vi.useFakeTimers();
       try {

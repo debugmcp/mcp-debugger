@@ -23,7 +23,9 @@ import { markChildOrigin, markChildSourced } from '../utils/child-origin-events.
 import { getErrorMessage } from '../errors/debug-errors.js';
 import { DapFrameDecoder, encodeDapMessage } from './dap-framing.js';
 
-const logger = createLogger('minimal-dap-simple');
+// redirectable: the proxy worker re-points this logger into the per-session
+// proxy-<sessionId>.log at init so routing decisions are visible there (#519)
+const logger = createLogger('minimal-dap-simple', { redirectable: true });
 
 type MinimalDapClientOptions = {
   childSessionManagerFactory?: (options: ChildSessionOptions) => ChildSessionManager;
@@ -210,7 +212,20 @@ export class MinimalDapClient extends EventEmitter {
     if (message.type === 'request' || message.type === 'response') {
       debugInfo.command = (message as DebugProtocol.Request | DebugProtocol.Response).command;
     }
-    
+
+    // Whether the adapter ACCEPTED a request was unknowable from the logs —
+    // the response line carried only {type, seq, command} (issue #519).
+    // 'errorMessage' not 'message': winston concatenates a meta 'message'
+    // onto the log line's own message string.
+    if (message.type === 'response') {
+      const resp = message as DebugProtocol.Response;
+      debugInfo.success = resp.success;
+      debugInfo.request_seq = resp.request_seq;
+      if (resp.success === false && resp.message) {
+        debugInfo.errorMessage = resp.message;
+      }
+    }
+
     // Add event if it's an event
     if (message.type === 'event') {
       debugInfo.event = (message as DebugProtocol.Event).event;

@@ -16,6 +16,14 @@ export interface LoggerOptions {
   level?: string;
   /** Optional file path to log to */
   file?: string;
+  /**
+   * Register this logger for redirectProxyLoggers() (issue #519). Only
+   * process-lifetime module loggers in the proxy layer set this; the proxy
+   * worker (one process == one session) re-points them at the per-session
+   * log file at init. Never set on per-session loggers — the registry holds
+   * strong references for the life of the process.
+   */
+  redirectable?: boolean;
 }
 
 let defaultLogger: WinstonLoggerType | null = null;
@@ -54,6 +62,14 @@ const fileTransportCache = new Map<string, winston.transport>();
  * everyone (issue #404). WeakMap: a discarded logger must not be retained here.
  */
 const loggerFileTransports = new WeakMap<WinstonLoggerType, winston.transport>();
+
+/**
+ * Module loggers that opted in to per-session redirection via
+ * `{ redirectable: true }` (issue #519). A plain strong Set is safe here
+ * because only a fixed handful of module-level constants ever register —
+ * never per-session loggers (see LoggerOptions.redirectable).
+ */
+const redirectableLoggers = new Set<WinstonLoggerType>();
 
 let staleLogCleanupDone = false;
 
@@ -198,21 +214,7 @@ export function createLogger(namespace: string, options: LoggerOptions = {}): Wi
 
   let attachedFileTransport: winston.transport | undefined;
   try {
-    const cacheKey = path.resolve(logFilePath);
-    let fileTransport = fileTransportCache.get(cacheKey);
-    if (!fileTransport) {
-      fileTransport = new SafeFileTransport({
-        filename: logFilePath,
-        maxsize: 50 * 1024 * 1024,  // 50 MB per file
-        maxFiles: 3,                 // Keep 3 rotated files (150 MB max)
-        tailable: true,              // Newest logs always in base filename
-        format: winston.format.combine(
-          winston.format.timestamp(),
-          winston.format.json()
-        )
-      });
-      fileTransportCache.set(cacheKey, fileTransport);
-    }
+    const fileTransport = getOrCreateSharedFileTransport(logFilePath);
     transports.push(fileTransport);
     attachedFileTransport = fileTransport;
   } catch (fileTransportError) {
@@ -245,7 +247,72 @@ export function createLogger(namespace: string, options: LoggerOptions = {}): Wi
     defaultLogger = logger;
   }
 
+  if (options.redirectable) {
+    redirectableLoggers.add(logger);
+  }
+
   return logger;
+}
+
+/**
+ * Get (or create and cache) the shared file transport for a log path. One
+ * transport per resolved path — see fileTransportCache above for why sharing
+ * is mandatory. Throws when transport construction fails; createLogger wraps
+ * this in its own error handling.
+ */
+function getOrCreateSharedFileTransport(logFilePath: string): winston.transport {
+  const cacheKey = path.resolve(logFilePath);
+  let fileTransport = fileTransportCache.get(cacheKey);
+  if (!fileTransport) {
+    fileTransport = new SafeFileTransport({
+      filename: logFilePath,
+      maxsize: 50 * 1024 * 1024,  // 50 MB per file
+      maxFiles: 3,                 // Keep 3 rotated files (150 MB max)
+      tailable: true,              // Newest logs always in base filename
+      format: winston.format.combine(
+        winston.format.timestamp(),
+        winston.format.json()
+      )
+    });
+    fileTransportCache.set(cacheKey, fileTransport);
+  }
+  return fileTransport;
+}
+
+/**
+ * Point every redirectable module logger at a session log file and level
+ * (issue #519). Called ONLY from the proxy worker's init — one worker process
+ * serves one session, so cross-session mixing is impossible; the main server
+ * process must never call this. Add-only: the per-pid default transport stays
+ * attached (fallback for lines emitted before init), nothing is removed or
+ * closed, so the unpipe-close hazard documented on detachSharedFileTransport
+ * is never touched. loggerFileTransports intentionally keeps tracking only
+ * the construction-time transport — detachSharedFileTransport is a
+ * server-side API the worker never calls. Raising the level also raises
+ * per-pid-file verbosity in this process; acceptable, it is capped and
+ * rotated.
+ *
+ * @returns the number of loggers redirected (0 in processes where no module
+ * logger opted in, or when the transport cannot be created).
+ */
+export function redirectProxyLoggers(options: { file: string; level?: string }): number {
+  let transport: winston.transport;
+  try {
+    transport = getOrCreateSharedFileTransport(options.file);
+  } catch {
+    return 0;
+  }
+  let count = 0;
+  for (const logger of redirectableLoggers) {
+    if (!logger.transports.includes(transport)) {
+      logger.add(transport);
+    }
+    if (options.level) {
+      logger.level = options.level;
+    }
+    count++;
+  }
+  return count;
 }
 
 /**

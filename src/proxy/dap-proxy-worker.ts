@@ -315,6 +315,17 @@ export class DapProxyWorker {
       this.logger.info(`[Worker] DAP Proxy worker initialized for session ${payload.sessionId}`);
       this.logger.info(`[Worker] Using adapter policy: ${this.adapterPolicy.name}`);
 
+      // Pull the proxy-layer module loggers (DAP client, child-session
+      // manager, CDP bridges) into this session's log file so routing
+      // decisions are readable next to the worker's own lines (issue #519)
+      const redirected = this.dependencies.redirectProxyLoggers?.({
+        file: logPath,
+        level: payload.logLevel ?? 'debug'
+      });
+      if (redirected) {
+        this.logger.info(`[Worker] Redirected ${redirected} module logger(s) into ${logPath}`);
+      }
+
       // Enable per-session DAP frame tracing for diagnostics
       try {
         const tracePath = this.traceFileFactory(payload.sessionId, payload.logDir);

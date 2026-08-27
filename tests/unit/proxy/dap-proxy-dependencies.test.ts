@@ -17,7 +17,8 @@ import { FakeCurrentProcess } from '../../test-utils/mocks/fake-current-process.
 vi.mock('../../../src/utils/logger.js', () => ({
   createLogger: vi.fn().mockReturnValue({
     info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn()
-  })
+  }),
+  redirectProxyLoggers: vi.fn().mockReturnValue(4)
 }));
 
 /* ------------------------------------------------------------------ */
@@ -57,6 +58,13 @@ describe('createProductionDependencies', () => {
       'dap-proxy:sess-2',
       expect.objectContaining({ level: 'debug' })
     );
+  });
+
+  it('exposes the logger util redirectProxyLoggers for worker init (issue #519)', async () => {
+    const { redirectProxyLoggers } = await import('../../../src/utils/logger.js');
+    const deps = createProductionDependencies();
+
+    expect(deps.redirectProxyLoggers).toBe(redirectProxyLoggers);
   });
 
   it('fileSystem has ensureDir and pathExists', () => {
