@@ -118,6 +118,25 @@ Add to your MCP settings configuration:
 }
 ```
 
+### For Codex CLI, desktop, and IDE
+
+Register the published stdio server with the Codex CLI:
+
+```bash
+codex mcp add mcp-debugger -- npx -y @debugmcp/mcp-debugger stdio
+codex mcp list
+```
+
+Codex stores this entry in `~/.codex/config.toml`. The ChatGPT desktop app, Codex CLI,
+and Codex IDE extension share that configuration when they run on the same Codex host.
+Restart the active desktop client or IDE extension (or start a new CLI session), then use
+`/mcp` to confirm that `mcp-debugger` is connected. See the official
+[Codex MCP documentation](https://developers.openai.com/codex/mcp) for configuration and
+troubleshooting details.
+
+Developing mcp-debugger itself? Use the restartable [source dev proxy](tools/dev-proxy/README.md#codex-cli-desktop-and-ide)
+instead of the published package.
+
 ### For Claude Code CLI
 
 For Claude Code users, we provide an automated installation script:
