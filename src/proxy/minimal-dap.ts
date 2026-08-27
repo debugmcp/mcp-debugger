@@ -261,9 +261,17 @@ export class MinimalDapClient extends EventEmitter {
             },
             createChildSession: async (config: ChildSessionConfig) => {
               if (this.childSessionManager) {
-                await this.childSessionManager.createChildSession(this.enrichChildConfig(config));
+                const outcome = await this.childSessionManager.createChildSession(this.enrichChildConfig(config));
                 // Update active child reference from manager
                 this.activeChild = this.childSessionManager.getActiveChild();
+                // A failed release keeps the target parked; forget it so a
+                // re-sent startDebugging can retry (parity with the #249
+                // rollback below). 'released'/'duplicate' stay recorded — a
+                // released target's server-side deferred has settled and can
+                // never be adopted (issue #501)
+                if (outcome === 'release-failed') {
+                  this.adoptedTargets.delete(config.pendingId);
+                }
               }
             },
             activeChildren: this.childSessions as Map<string, unknown>,
@@ -278,10 +286,17 @@ export class MinimalDapClient extends EventEmitter {
               // Create child session through the manager
               logger.info(`[MinimalDapClient] Creating child session via ChildSessionManager`);
               try {
-                await this.childSessionManager.createChildSession(this.enrichChildConfig(result.childConfig));
+                const outcome = await this.childSessionManager.createChildSession(this.enrichChildConfig(result.childConfig));
 
                 // Update active child reference from manager
                 this.activeChild = this.childSessionManager.getActiveChild();
+                // A failed release keeps the target parked; forget it so a
+                // re-sent startDebugging can retry (same reasoning as the
+                // #249 rollback in the catch). 'released'/'duplicate' stay
+                // recorded — a released target can never be adopted (#501)
+                if (outcome === 'release-failed' && typeof result.childConfig.pendingId === 'string') {
+                  this.adoptedTargets.delete(result.childConfig.pendingId);
+                }
               } catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
                 logger.error(`[MinimalDapClient] Failed to create child session: ${msg}`);

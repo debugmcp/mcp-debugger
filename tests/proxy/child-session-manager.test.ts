@@ -12,6 +12,9 @@ import { ChildSessionManager } from '../../src/proxy/child-session-manager.js';
 class MockMinimalDapClient extends EventEmitter {
   // Knobs for death-aware adoption tests (issue #248); reset in beforeEach
   static lastInstance: MockMinimalDapClient | null = null;
+  // All clients created in order — a release (issue #501) creates a second
+  // client, so lastInstance alone cannot address the adoption child
+  static instances: MockMinimalDapClient[] = [];
   static hangCommands = new Set<string>();
   static failCommands = new Map<string, Error>();
   static suppressInitialized = false;
@@ -46,6 +49,7 @@ class MockMinimalDapClient extends EventEmitter {
     this.port = port;
     this.policy = policy;
     MockMinimalDapClient.lastInstance = this;
+    MockMinimalDapClient.instances.push(this);
   }
 
   async connect(): Promise<void> {
@@ -127,6 +131,7 @@ describe('ChildSessionManager', () => {
 
   beforeEach(() => {
     MockMinimalDapClient.lastInstance = null;
+    MockMinimalDapClient.instances = [];
     MockMinimalDapClient.hangCommands.clear();
     MockMinimalDapClient.failCommands.clear();
     MockMinimalDapClient.suppressInitialized = false;
@@ -567,21 +572,21 @@ describe('ChildSessionManager', () => {
     });
 
     
-    it('should handle adoption in progress correctly', async () => {
+    it('releases a target that arrives while adoption is in progress (issue #501)', async () => {
       const config1 = {
         pendingId: 'pending-1',
         host: 'localhost',
         port: 9229,
         parentConfig: {}
       };
-      
+
       const config2 = {
         pendingId: 'pending-2',
         host: 'localhost',
         port: 9229,
         parentConfig: {}
       };
-      
+
       vi.useFakeTimers();
       try {
         // Start first adoption
@@ -591,11 +596,194 @@ describe('ChildSessionManager', () => {
         const promise2 = manager.createChildSession(config2);
 
         await vi.advanceTimersByTimeAsync(20000);
-        await Promise.all([promise1, promise2]);
+        const [outcome1, outcome2] = await Promise.all([promise1, promise2]);
 
-        // Only one should succeed
+        // First is adopted; second cannot be, but instead of being silently
+        // dropped (leaving the forked process parked in waitForDebugger) it
+        // is attached-and-detached so it runs undebugged
+        expect(outcome1).toBe('adopted');
+        expect(outcome2).toBe('released');
         expect(manager.getActiveChild()).toBeDefined();
         expect(manager.hasActiveChildren()).toBe(true);
+
+        // The release rode a separate throwaway client with the minimal
+        // unpark sequence, then closed its socket
+        const releaseClient = MockMinimalDapClient.instances.find(c =>
+          c.requests.some(r =>
+            r.command === 'attach' &&
+            (r.args as Record<string, unknown>).__pendingTargetId === 'pending-2'
+          )
+        );
+        expect(releaseClient).toBeDefined();
+        const commands = releaseClient!.requests.map(r => r.command);
+        expect(commands).toEqual(['initialize', 'configurationDone', 'attach', 'disconnect']);
+        const attachArgs = releaseClient!.requests[2].args as Record<string, unknown>;
+        expect(attachArgs.continueOnAttach).toBe(true);
+        const disconnectArgs = releaseClient!.requests[3].args as Record<string, unknown>;
+        expect(disconnectArgs.terminateDebuggee).toBe(false);
+        expect(releaseClient!.shutdownCalls).toEqual(['release complete']);
+
+        // Adoption state is untouched by the release
+        expect(releaseClient).not.toBe(manager.getActiveChild());
+        expect(manager.isAdopted('pending-2')).toBe(false);
+        expect((manager as any).childSessions.size).toBe(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('releases a target when a child is already active, exactly once (issue #501)', async () => {
+      vi.useFakeTimers();
+      try {
+        const adoption = manager.createChildSession({
+          pendingId: 'first-child',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: {}
+        });
+        await vi.advanceTimersByTimeAsync(20000);
+        expect(await adoption).toBe('adopted');
+        const activeChild = manager.getActiveChild();
+
+        const release = manager.createChildSession({
+          pendingId: 'forked-child',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: {}
+        });
+        await vi.advanceTimersByTimeAsync(20000);
+        expect(await release).toBe('released');
+
+        // A repeat request for the released target is a no-op duplicate
+        const clientCount = MockMinimalDapClient.instances.length;
+        const repeat = manager.createChildSession({
+          pendingId: 'forked-child',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: {}
+        });
+        await vi.advanceTimersByTimeAsync(20000);
+        expect(await repeat).toBe('duplicate');
+        expect(MockMinimalDapClient.instances.length).toBe(clientCount);
+
+        // Active child undisturbed throughout
+        expect(manager.getActiveChild()).toBe(activeChild);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('reports release-failed and stays retryable when the release attach fails (issue #501)', async () => {
+      vi.useFakeTimers();
+      try {
+        const adoption = manager.createChildSession({
+          pendingId: 'first-child',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: {}
+        });
+        await vi.advanceTimersByTimeAsync(20000);
+        expect(await adoption).toBe('adopted');
+        const activeChild = manager.getActiveChild();
+
+        MockMinimalDapClient.failCommands.set('attach', new Error('target gone'));
+        const failed = manager.createChildSession({
+          pendingId: 'forked-child',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: {}
+        });
+        await vi.advanceTimersByTimeAsync(30000);
+        expect(await failed).toBe('release-failed');
+        expect(manager.getActiveChild()).toBe(activeChild);
+
+        // The failed release rolled its bookkeeping back: a re-sent
+        // startDebugging retries the release and can now succeed
+        MockMinimalDapClient.failCommands.clear();
+        const retried = manager.createChildSession({
+          pendingId: 'forked-child',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: {}
+        });
+        await vi.advanceTimersByTimeAsync(20000);
+        expect(await retried).toBe('released');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('bounds a hung release and settles without touching the active child (issue #501)', async () => {
+      vi.useFakeTimers();
+      try {
+        const adoption = manager.createChildSession({
+          pendingId: 'first-child',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: {}
+        });
+        await vi.advanceTimersByTimeAsync(20000);
+        expect(await adoption).toBe('adopted');
+
+        MockMinimalDapClient.hangCommands.add('attach');
+        const hung = manager.createChildSession({
+          pendingId: 'forked-child',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: {}
+        });
+        // The release flow is bounded at 20s overall
+        await vi.advanceTimersByTimeAsync(25000);
+        expect(await hung).toBe('release-failed');
+        expect(manager.getActiveChild()).toBeDefined();
+
+        // The hung throwaway socket was still torn down
+        const releaseClient = MockMinimalDapClient.instances.find(c =>
+          c.requests.some(r =>
+            r.command === 'attach' &&
+            (r.args as Record<string, unknown>).__pendingTargetId === 'forked-child'
+          )
+        );
+        expect(releaseClient!.shutdownCalls).toEqual(['release complete']);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('never mirrors breakpoints to a release client (issue #501)', async () => {
+      vi.useFakeTimers();
+      try {
+        const adoption = manager.createChildSession({
+          pendingId: 'first-child',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: {}
+        });
+        await vi.advanceTimersByTimeAsync(20000);
+        expect(await adoption).toBe('adopted');
+
+        const release = manager.createChildSession({
+          pendingId: 'forked-child',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: {}
+        });
+        await vi.advanceTimersByTimeAsync(20000);
+        expect(await release).toBe('released');
+
+        const storePromise = manager.storeBreakpoints('/abs/app.js', [{ line: 5 }]);
+        await vi.advanceTimersByTimeAsync(0);
+        await storePromise;
+
+        const releaseClient = MockMinimalDapClient.instances.find(c =>
+          c.requests.some(r =>
+            r.command === 'attach' &&
+            (r.args as Record<string, unknown>).__pendingTargetId === 'forked-child'
+          )
+        );
+        expect(releaseClient!.requests.filter(r => r.command === 'setBreakpoints')).toHaveLength(0);
+        const child = manager.getActiveChild() as unknown as MockMinimalDapClient;
+        expect(child.requests.filter(r => r.command === 'setBreakpoints').length).toBeGreaterThan(0);
       } finally {
         vi.useRealTimers();
       }
@@ -1130,6 +1318,46 @@ describe('ChildSessionManager', () => {
         {} as never
       );
       expect(passthrough).toEqual({ handled: false });
+
+      await mgr.shutdown();
+    });
+
+    it('releases a fork startDebugging arriving on the child connection (issue #501)', async () => {
+      const mgr = new ChildSessionManager({ policy: JsDebugAdapterPolicy, host: 'localhost', port: 9229 });
+      await createChild(mgr);
+
+      // js-debug delivers fork auto-attach startDebugging requests on the
+      // ADOPTED CHILD's connection, so the child-safe policy must hand them
+      // back to the manager for release instead of dropping them
+      const childPolicy = MockMinimalDapClient.lastInstance!.policy!;
+      const behavior = childPolicy.getDapClientBehavior();
+
+      vi.useFakeTimers();
+      try {
+        const result = await behavior.handleReverseRequest!(
+          {
+            seq: 3,
+            type: 'request',
+            command: 'startDebugging',
+            arguments: { configuration: { __pendingTargetId: 'grandchild-1' } }
+          } as never,
+          { sendResponse: vi.fn(), adoptedTargets: new Set(), activeChildren: new Map() } as never
+        );
+        expect(result).toEqual({ handled: true });
+        // The forward is fire-and-forget; drive the release flow to completion
+        await vi.advanceTimersByTimeAsync(25000);
+      } finally {
+        vi.useRealTimers();
+      }
+
+      const releaseClient = MockMinimalDapClient.instances.find(c =>
+        c.requests.some(r =>
+          r.command === 'attach' &&
+          (r.args as Record<string, unknown>).__pendingTargetId === 'grandchild-1'
+        )
+      );
+      expect(releaseClient, 'the forwarded fork target must be released via a throwaway client').toBeDefined();
+      expect(releaseClient!.shutdownCalls).toEqual(['release complete']);
 
       await mgr.shutdown();
     });

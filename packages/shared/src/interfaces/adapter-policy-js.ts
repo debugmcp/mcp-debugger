@@ -448,6 +448,20 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
       if (typeof stopOnEntryValue === 'boolean') {
         attachArgs.stopOnEntry = stopOnEntryValue;
       }
+      // js-debug's pwa-node attach defaults autoAttachChildProcesses to true,
+      // which bootloads every fork() of the inspected process into
+      // waitForDebugger; with single-child adoption those forks wedge (#501).
+      // The MCP path already defaults this off in transformAttachConfig; this
+      // guard makes the policy self-contained for embedders that bypass the
+      // adapter transform. A caller-supplied boolean is respected, sourced
+      // like stopOnEntry above: launchConfig (via callerAttachExtras), then
+      // dapLaunchArgs.
+      if (typeof attachArgs.autoAttachChildProcesses !== 'boolean') {
+        attachArgs.autoAttachChildProcesses =
+          typeof a.autoAttachChildProcesses === 'boolean'
+            ? (a.autoAttachChildProcesses as boolean)
+            : false;
+      }
       try {
         console.info(`[JsDebugAdapterPolicy] [JS] Sending 'attach' to ${attachPort} (address=${attachHost})`);
         await pm.sendDapRequest('attach', attachArgs);
@@ -748,11 +762,17 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
           const cfg = args?.configuration ?? {};
           const pendingId: string | undefined = cfg?.__pendingTargetId;
           
-          // Send acknowledgment
+          // Send acknowledgment. The early success ack is correct: js-debug
+          // ignores the response body — a pending target is resolved only by
+          // a fresh DAP connection attaching with its __pendingTargetId.
           context.sendResponse(request, {});
-          
+
           if (pendingId && typeof pendingId === 'string') {
-            // Check if not already adopted
+            // Bookkeeping invariant (issues #249/#501): the id is added here,
+            // before the adoption/release runs; MinimalDapClient removes it
+            // again when adoption throws or the release fails, so a re-sent
+            // startDebugging can retry. Adopted and released targets stay
+            // recorded — both are settled server-side.
             if (!context.adoptedTargets.has(pendingId)) {
               context.adoptedTargets.add(pendingId);
               return {

@@ -16,6 +16,12 @@
  * Test 3 — stopOnEntry:false: attaching must NOT pause the target (the
  * js-debug child adoption path must not force an entry stop), and detach
  * must leave it alive.
+ *
+ * Tests 5/6 — forking targets (issue #501): attaching must not wedge child
+ * processes the target fork()s. By default the auto-attach bootloader is off,
+ * so forks run untouched; with autoAttachChildProcesses:true each fork parks
+ * under waitForDebugger and js-debug requests adoption — the single-child
+ * limitation means it must be released to run undebugged, not dropped.
  */
 
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
@@ -32,6 +38,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, '../..');
 const TARGET_SCRIPT = path.resolve(ROOT, 'examples', 'javascript', 'attach_target.js');
+const FORK_TARGET_SCRIPT = path.resolve(ROOT, 'examples', 'javascript', 'fork_attach_target.js');
 const BREAKPOINT_LINE = 11; // `counter += 1;` inside tick()
 
 function getFreePort(): Promise<number> {
@@ -56,12 +63,12 @@ interface Target {
   stdout: () => string;
 }
 
-/** Spawn the tick target with an open inspector port and wait until it listens. */
-async function spawnTarget(): Promise<Target> {
+/** Spawn a tick target with an open inspector port and wait until it listens. */
+async function spawnTarget(script: string = TARGET_SCRIPT): Promise<Target> {
   const port = await getFreePort();
   const proc = spawn(
     process.execPath,
-    [`--inspect=127.0.0.1:${port}`, TARGET_SCRIPT],
+    [`--inspect=127.0.0.1:${port}`, script],
     { stdio: ['ignore', 'pipe', 'pipe'] }
   );
 
@@ -409,6 +416,103 @@ describe('MCP Server JavaScript Attach-Mode Smoke Tests', () => {
     });
     expect(detachResult.success, `detach_from_process failed: ${JSON.stringify(detachResult)}`).toBe(true);
 
+    await new Promise(r => setTimeout(r, 500));
+    expect(targetProcess!.exitCode, 'detach must leave the target process alive').toBeNull();
+  }, 120000);
+
+  /** Count completed fork→parent IPC handshakes in the fork target's stdout. */
+  function countHandshakes(target: Target): number {
+    return (target.stdout().match(/child-handshake /g) ?? []).length;
+  }
+
+  /** Poll until the fork target completes a NEW handshake, or the deadline. */
+  async function waitForHandshakeProgress(target: Target, baseline: number, deadlineMs: number): Promise<boolean> {
+    const deadline = Date.now() + deadlineMs;
+    while (Date.now() < deadline) {
+      if (countHandshakes(target) > baseline) {
+        return true;
+      }
+      await new Promise(r => setTimeout(r, 500));
+    }
+    return false;
+  }
+
+  it('forked children keep completing their IPC handshake while attached (issue #501)', async () => {
+    const target = await spawnTarget(FORK_TARGET_SCRIPT);
+    targetProcess = target.proc;
+
+    const attachResponse = await createSessionAndAttach(target.port, { stopOnEntry: false });
+    expect(attachResponse.success, `attach failed: ${JSON.stringify(attachResponse)}`).toBe(true);
+
+    // Forks started AFTER the attach must complete their fork→IPC→ack round
+    // trip. Pre-fix, js-debug's auto-attach bootloader (attach default: on)
+    // parked every fork in waitForDebugger and only one target could ever be
+    // adopted — each fork wedged until the fixture's 5s diagnostic timeout.
+    const baseline = countHandshakes(target);
+    const progressed = await waitForHandshakeProgress(target, baseline, 45000);
+    expect(
+      progressed,
+      `no fork completed its IPC handshake within 45s of attach (issue #501: children ` +
+      `parked by the auto-attach bootloader); target stdout:\n${target.stdout()}`
+    ).toBe(true);
+    expect(
+      target.stdout(),
+      'a forked child hit the 5s wedge diagnostic while attached (issue #501)'
+    ).not.toContain('child-wedged');
+
+    const detachResult = await callToolSafely(mcpClient!, 'detach_from_process', {
+      sessionId: sessionId!,
+      terminateProcess: false
+    });
+    expect(detachResult.success, `detach_from_process failed: ${JSON.stringify(detachResult)}`).toBe(true);
+    await new Promise(r => setTimeout(r, 500));
+    expect(targetProcess!.exitCode, 'detach must leave the target process alive').toBeNull();
+  }, 120000);
+
+  it('releases forks it cannot adopt when autoAttachChildProcesses is opted in (issue #501)', async () => {
+    const target = await spawnTarget(FORK_TARGET_SCRIPT);
+    targetProcess = target.proc;
+
+    const attachResponse = await createSessionAndAttach(target.port, {
+      stopOnEntry: false,
+      adapterConfig: { autoAttachChildProcesses: true }
+    });
+    expect(attachResponse.success, `attach failed: ${JSON.stringify(attachResponse)}`).toBe(true);
+
+    // The key is declared in supportedAttachKeys — opting in must not trip
+    // the unrecognized-adapterConfig-key warning (issue #466 mechanism)
+    const warning = String(attachResponse.warning ?? '');
+    expect(
+      warning,
+      `autoAttachChildProcesses is a supported attach key but the attach warned about it: ${warning}`
+    ).not.toContain('autoAttachChildProcesses');
+
+    // With the bootloader ON, every fork parks under waitForDebugger and
+    // js-debug requests adoption for it. The single-child limitation means it
+    // cannot be adopted — it must be RELEASED to run undebugged (attach with
+    // its __pendingTargetId, then detach), so handshakes keep completing.
+    const baseline = countHandshakes(target);
+    const progressed = await waitForHandshakeProgress(target, baseline, 45000);
+    expect(
+      progressed,
+      `no fork completed its IPC handshake within 45s of attach with ` +
+      `autoAttachChildProcesses:true — unadoptable forks are not being released ` +
+      `(issue #501); target stdout:\n${target.stdout()}`
+    ).toBe(true);
+
+    // Debugging the parent must remain intact after releases happened
+    const threadsResult = await callToolSafely(mcpClient!, 'list_threads', { sessionId: sessionId! });
+    const threads = (threadsResult.threads as unknown[] | undefined) ?? [];
+    expect(
+      threads.length,
+      `list_threads failed after fork releases: ${JSON.stringify(threadsResult)}`
+    ).toBeGreaterThan(0);
+
+    const detachResult = await callToolSafely(mcpClient!, 'detach_from_process', {
+      sessionId: sessionId!,
+      terminateProcess: false
+    });
+    expect(detachResult.success, `detach_from_process failed: ${JSON.stringify(detachResult)}`).toBe(true);
     await new Promise(r => setTimeout(r, 500));
     expect(targetProcess!.exitCode, 'detach must leave the target process alive').toBeNull();
   }, 120000);

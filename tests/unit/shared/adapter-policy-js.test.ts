@@ -334,5 +334,50 @@ describe('JsDebugAdapterPolicy', () => {
       );
       expect(sendDapRequest.mock.calls.some(([cmd]) => cmd === 'launch')).toBe(false);
     });
+
+    it('defaults autoAttachChildProcesses to false in attach args, keeping a caller value (issue #501)', async () => {
+      const runAttachHandshake = async (dapLaunchArgs: Record<string, unknown>) => {
+        vi.useFakeTimers();
+        try {
+          const events = new EventEmitter();
+          const sendDapRequest = vi.fn().mockResolvedValue({});
+          const proxyManager = Object.assign(events, {
+            isRunning: () => true,
+            sendDapRequest,
+            removeListener: events.removeListener.bind(events)
+          });
+          const context = {
+            proxyManager,
+            sessionId: 'session-501',
+            dapLaunchArgs,
+            scriptPath: '/workspace/app.js',
+            scriptArgs: [],
+            breakpoints: new Map()
+          };
+
+          const handshakePromise = JsDebugAdapterPolicy.performHandshake(context as any);
+          await Promise.resolve();
+          events.emit('dap-event', 'initialized');
+          await vi.advanceTimersByTimeAsync(0);
+          await handshakePromise;
+
+          const attachCall = sendDapRequest.mock.calls.find(([cmd]) => cmd === 'attach');
+          return attachCall?.[1] as Record<string, unknown>;
+        } finally {
+          vi.useRealTimers();
+        }
+      };
+
+      const defaulted = await runAttachHandshake({
+        request: 'attach', attachSimplePort: 9229, type: 'pwa-node'
+      });
+      expect(defaulted.autoAttachChildProcesses).toBe(false);
+
+      const optedIn = await runAttachHandshake({
+        request: 'attach', attachSimplePort: 9229, type: 'pwa-node',
+        autoAttachChildProcesses: true
+      });
+      expect(optedIn.autoAttachChildProcesses).toBe(true);
+    });
   });
 });
