@@ -15,6 +15,7 @@ import {
   redactVariableValue,
   redactSecretsDeep,
   buildRedactionNotice,
+  NO_DEBUG_TARGET_MARKER,
   type AdapterPolicy,
   type ExceptionBreakMode
 } from '@debugmcp/shared';
@@ -2177,6 +2178,15 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         if (Array.isArray(threads) && threads.length > 0 && typeof threads[0]?.id === 'number') {
           effectiveThreadId = threads[0].id;
           this.logger.info(`[SessionManager pause] Auto-discovered threadId=${effectiveThreadId} for pause`);
+        } else if (Array.isArray(threads) && threads.length === 0) {
+          // Tell-tale for child-session adapters (issue #513): on a policy
+          // that routes 'threads' to a child session, an empty list usually
+          // means the request hit the parent (root) session — the pause below
+          // goes through the same routing, where child-required handling
+          // waits for/rejects on the missing child.
+          this.logger.info(
+            `[SessionManager pause] threads returned empty for session ${sessionId}; proceeding with threadId=0`
+          );
         }
       } catch {
         // threads request failed — fall through with threadId=0
@@ -2276,6 +2286,10 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         this.logger.info(
           `[SessionManager pause] No stopped event within ${this.pauseGraceMs}ms grace window in session ${sessionId}; completing asynchronously`
         );
+        // session.pausePending stays armed on purpose: the pause was
+        // delivered and the stop may land whenever the debuggee next runs
+        // (e.g. an idle server, issue #513) — that late stop must still be
+        // normalized to 'pause'. handleStopped clears the flag on any stop.
         settle({
           success: true,
           state: session.state,
@@ -2320,6 +2334,13 @@ export abstract class SessionManagerOperations extends SessionManagerData {
           if (!settled) {
             settled = true;
             cleanup();
+            // A pause with no debuggable target to run against (issue #513)
+            // is an actionable state, not a protocol failure — return the
+            // structured shape other unpausable states use
+            if (errorMessage.includes(NO_DEBUG_TARGET_MARKER)) {
+              resolve({ success: false, error: errorMessage, state: session.state });
+              return;
+            }
             reject(error instanceof Error ? error : new Error(errorMessage));
           }
         });

@@ -15,6 +15,7 @@ import {
   DapClientBehavior,
   DapClientContext,
   ChildSessionConfig,
+  buildNoDebugTargetError,
   sanitizePayloadForLogging
 } from '@debugmcp/shared';
 import { ChildSessionManager, type ChildSessionOptions } from './child-session-manager.js';
@@ -36,6 +37,14 @@ type MinimalDapClientOptions = {
 
 /** Trace cap consistent with the main logger's maxsize (issue #403). */
 const DEFAULT_TRACE_MAX_BYTES = 50 * 1024 * 1024;
+
+/**
+ * How long a child-required command waits for an adoption to START when no
+ * child exists yet (issue #513) — absorbs the attach → reverse-startDebugging
+ * race without holding a genuinely childless session's request for the full
+ * childInitTimeout.
+ */
+const CHILD_REQUIRED_ADOPTION_GRACE_MS = 2000;
 
 // Upper bound on waiting for a mirrored setBreakpoints to be answered by the
 // child session (issue #500). A healthy child answers in single-digit ms; the
@@ -370,6 +379,52 @@ export class MinimalDapClient extends EventEmitter {
     });
   }
 
+  /**
+   * Poll the ChildSessionManager for an active child for up to maxWaitMs,
+   * refreshing this.activeChild as soon as one appears (issue #513).
+   */
+  private async awaitActiveChild(maxWaitMs: number): Promise<MinimalDapClient | null> {
+    const manager = this.childSessionManager;
+    if (!manager) {
+      return this.activeChild;
+    }
+    if (!this.activeChild) {
+      this.activeChild = manager.getActiveChild();
+    }
+    const pollIntervalMs = 100;
+    const maxIterations = Math.max(1, Math.ceil(maxWaitMs / pollIntervalMs));
+    for (let i = 0; i < maxIterations && !this.activeChild; i++) {
+      await this.sleep(pollIntervalMs);
+      this.activeChild = manager.getActiveChild();
+    }
+    return this.activeChild;
+  }
+
+  /**
+   * Poll until the child target state reaches 'active' — adoption complete,
+   * child bound to its pending target — or maxWaitMs elapses (issue #513).
+   * An activeChild reference alone is NOT readiness: a request written to the
+   * child between its initialize and attach is swallowed by js-debug without
+   * a response. Returns the final observed state.
+   */
+  private async awaitChildTargetActive(maxWaitMs: number): Promise<'active' | 'adopting' | 'ended' | 'none'> {
+    const manager = this.childSessionManager;
+    if (!manager) {
+      return 'none';
+    }
+    const pollIntervalMs = 100;
+    const maxIterations = Math.max(1, Math.ceil(maxWaitMs / pollIntervalMs));
+    let state = manager.getChildTargetState();
+    for (let i = 0; i < maxIterations && state !== 'active'; i++) {
+      await this.sleep(pollIntervalMs);
+      state = manager.getChildTargetState();
+    }
+    if (state === 'active') {
+      this.activeChild = manager.getActiveChild();
+    }
+    return state;
+  }
+
   public connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       logger.info(`[MinimalDapClient] Connecting to ${this.host}:${this.port}`);
@@ -507,7 +562,39 @@ export class MinimalDapClient extends EventEmitter {
       // Special handling for stackTrace when child isn't ready yet.
       // Policies can opt-in to waiting for a child session instead of falling back immediately.
       const stackTraceRequiresChild = this.dapBehavior.stackTraceRequiresChild === true;
-      if (command === 'stackTrace' && !this.activeChild) {
+      const requiresChild = this.dapBehavior.childRequiredCommands?.has(command) === true;
+      if (requiresChild && manager) {
+        // Commands the parent session is known to no-op (issue #513): only a
+        // FULLY adopted child may carry them. This gate runs even when an
+        // activeChild reference already exists — during adoption the child is
+        // connected but not yet bound to its target, and a request written in
+        // that window (observed with 'pause' between the child's initialize
+        // and attach) is swallowed by js-debug without a response.
+        const childInitTimeout = this.dapBehavior.childInitTimeout ?? 12000;
+        let state = manager.getChildTargetState();
+        if (state === 'adopting' || (state === 'active' && !this.activeChild)) {
+          logger.info(
+            `[MinimalDapClient] Waiting for adoption to complete before '${command}' (child-required, state=${state})`
+          );
+          state = await this.awaitChildTargetActive(childInitTimeout);
+        } else if (state === 'none') {
+          // Adoption may not have started yet (attach just returned, the
+          // reverse startDebugging is still in flight) — grant a short
+          // grace, then the full wait if adoption began meanwhile
+          logger.info(
+            `[MinimalDapClient] No child session yet for child-required '${command}'; granting adoption grace`
+          );
+          state = await this.awaitChildTargetActive(CHILD_REQUIRED_ADOPTION_GRACE_MS);
+          if (state === 'adopting') {
+            state = await this.awaitChildTargetActive(childInitTimeout);
+          }
+        } // state === 'ended': no wait — nothing can appear
+        if (state !== 'active' || !this.activeChild) {
+          const message = buildNoDebugTargetError(command, state === 'ended' ? 'ended' : 'none');
+          logger.warn(`[MinimalDapClient] ${message}`);
+          throw new Error(message);
+        }
+      } else if (command === 'stackTrace' && !this.activeChild) {
         const expectChild =
           stackTraceRequiresChild || adoptionInProgress || hasActiveChild;
 
@@ -555,10 +642,7 @@ export class MinimalDapClient extends EventEmitter {
       } else if (!this.activeChild && manager?.hasActiveChildren()) {
         // For other commands, wait longer if needed
         logger.info(`[MinimalDapClient] Waiting for active child before routing '${command}'`);
-        for (let i = 0; i < 120 && !this.activeChild; i++) {
-          await this.sleep(100); // up to ~12s
-          this.activeChild = manager.getActiveChild();
-        }
+        await this.awaitActiveChild(this.dapBehavior.childInitTimeout ?? 12000);
       }
       
       if (this.activeChild) {
@@ -574,6 +658,13 @@ export class MinimalDapClient extends EventEmitter {
             message.includes('Socket not connected') ||
             message.includes('write after end')
           ) {
+            if (this.dapBehavior.childRequiredCommands?.has(command)) {
+              // The parent would silently no-op this command (issue #513) —
+              // surface the dead target instead of falling back
+              const noTarget = buildNoDebugTargetError(command, 'ended');
+              logger.warn(`[MinimalDapClient] Child session died during '${command}' (${message}); ${noTarget}`);
+              throw new Error(noTarget);
+            }
             logger.warn(`[MinimalDapClient] Child session unavailable for '${command}' (${message}); falling back to parent session.`);
             if (treatAsGracefulCompletion) {
               const syntheticResponse = {

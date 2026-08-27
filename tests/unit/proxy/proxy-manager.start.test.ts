@@ -512,7 +512,9 @@ describe('ProxyManager.start', () => {
       // from an exited worker) — the failure surfaces on attempt 2's failed
       // send instead of burning ~15s of retries (issue #512), and carries
       // the exit details.
-      const rejection = expect(startPromise).rejects.toThrow(/Failed to initialize proxy after 6 attempts\. Last error: Proxy process not available[\s\S]*code=12 signal=SIGTERM/);
+      // The message reports the attempts actually made — 2, not the full
+      // retry budget of 6 the loop never spent (issue #517)
+      const rejection = expect(startPromise).rejects.toThrow(/Failed to initialize proxy after 2 attempts \(proxy exited; further retries skipped\)\. Last error: Proxy process not available[\s\S]*code=12 signal=SIGTERM/);
       await vi.advanceTimersByTimeAsync(8000);
 
       await rejection;
