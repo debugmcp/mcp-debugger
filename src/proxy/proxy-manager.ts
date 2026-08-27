@@ -18,7 +18,8 @@ import {
   DAPSessionState,
   addPendingRequest,
   removePendingRequest,
-  clearPendingRequests
+  clearPendingRequests,
+  setCurrentThreadId as setCoreCurrentThreadId
 } from '../dap-core/index.js';
 import type {
   ProxyStatusMessage,
@@ -571,6 +572,12 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
   setCurrentThreadId(threadId: number): void {
     this.currentThreadId = threadId;
+    // Mirror into the functional-core snapshot so an adopted anchor (the
+    // frameless-thread fallback, get_stack_trace {threadId}) is not stale
+    // there (issue #496).
+    if (this.dapState) {
+      this.dapState = setCoreCurrentThreadId(this.dapState, threadId);
+    }
   }
 
   private async prepareSpawnContext(config: ProxyConfig): Promise<{
@@ -1030,12 +1037,10 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         // Sync local state with functional core state
         this.isInitialized = result.newState.initialized;
         this.adapterConfigured = result.newState.adapterConfigured;
-        // Only update currentThreadId if the core provided a concrete number.
-        // Avoid overwriting the value we set in the fast-path dapEvent handler with null/undefined.
-        const coreTid = (result.newState as { currentThreadId?: number | null }).currentThreadId;
-        if (typeof coreTid === 'number') {
-          this.currentThreadId = coreTid;
-        }
+        // The imperative currentThreadId is authoritative — the fast-path
+        // stopped handler in handleDapEvent writes it. Restoring the core's
+        // copy here clobbered anchors adopted via setCurrentThreadId() on
+        // every subsequent response/event (issue #496).
       }
       
       // Resolve/reject pending DAP request Promises. The functional core above only
@@ -1085,6 +1090,9 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
           const first = threads.length ? threads[0]?.id : undefined;
           if (typeof first === 'number') {
             this.currentThreadId = first;
+            if (this.dapState) {
+              this.dapState = setCoreCurrentThreadId(this.dapState, first);
+            }
           }
         }
       } catch {
