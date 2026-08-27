@@ -1990,6 +1990,63 @@ describe('MinimalDapClient', () => {
     });
   });
 
+  describe('Trace connection labels (issue #518)', () => {
+    let appended: string[];
+    let appendSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      vi.stubEnv('DAP_TRACE_FILE', 'trace.ndjson');
+      appended = [];
+      appendSpy = vi.spyOn(fs, 'appendFileSync').mockImplementation((_path, data) => {
+        appended.push(String(data));
+      });
+    });
+
+    afterEach(() => {
+      appendSpy.mockRestore();
+      vi.unstubAllEnvs();
+    });
+
+    it('stamps conn: parent by default and pins the record shape', () => {
+      const client = new MinimalDapClient('localhost', 5678);
+
+      (client as any).appendTrace('out', { x: 1 });
+
+      expect(appended).toHaveLength(1);
+      const record = JSON.parse(appended[0]);
+      expect(record.conn).toBe('parent');
+      expect(record.direction).toBe('out');
+      expect(record.payload).toEqual({ x: 1 });
+      expect(Object.keys(record).sort()).toEqual(['conn', 'direction', 'payload', 'ts']);
+    });
+
+    it('stamps a custom traceLabel on data records', () => {
+      const client = new MinimalDapClient('localhost', 5678, undefined, {
+        traceLabel: 'child:abc12345'
+      });
+
+      (client as any).appendTrace('in', { y: 2 });
+
+      expect(appended).toHaveLength(1);
+      expect(JSON.parse(appended[0]).conn).toBe('child:abc12345');
+    });
+
+    it('the truncation marker carries conn too', () => {
+      const client = new MinimalDapClient('localhost', 5678, undefined, {
+        traceMaxBytes: 170,
+        traceLabel: 'release:abc12345'
+      });
+
+      (client as any).appendTrace('out', { small: 'first' });
+      (client as any).appendTrace('out', { small: 'second' });
+
+      expect(appended).toHaveLength(2);
+      const marker = JSON.parse(appended[1]);
+      expect(marker.truncated).toBe(true);
+      expect(marker.conn).toBe('release:abc12345');
+    });
+  });
+
   describe('Trace file error handling', () => {
     it('swallows fs.appendFileSync errors so requests still complete', async () => {
       vi.stubEnv('DAP_TRACE_FILE', 'trace.ndjson');

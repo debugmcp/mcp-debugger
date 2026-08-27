@@ -33,6 +33,12 @@ type MinimalDapClientOptions = {
   };
   /** Byte cap for the opt-in DAP trace file; injectable for tests (issue #403) */
   traceMaxBytes?: number;
+  /**
+   * Connection tag stamped as `conn` on every DAP trace record (issue #518).
+   * All clients in a proxy worker append to one trace file with independent
+   * seq spaces; without this, parent and child frames are indistinguishable.
+   */
+  traceLabel?: string;
 };
 
 /** Trace cap consistent with the main logger's maxsize (issue #403). */
@@ -85,6 +91,7 @@ export class MinimalDapClient extends EventEmitter {
   private port: number;
   private traceFile?: string = process.env.DAP_TRACE_FILE;
   private traceMaxBytes: number = DEFAULT_TRACE_MAX_BYTES;
+  private traceLabel: string = 'parent';
   private traceBytesWritten = 0;
   private traceTruncated = false;
   private adoptedTargets = new Set<string>();
@@ -117,6 +124,7 @@ export class MinimalDapClient extends EventEmitter {
       clearTimeout
     };
     this.traceMaxBytes = options?.traceMaxBytes ?? DEFAULT_TRACE_MAX_BYTES;
+    this.traceLabel = options?.traceLabel ?? 'parent';
     // Initialize ChildSessionManager for policies that support child sessions
     if (this.policy.supportsReverseStartDebugging) {
       const createChildSessionManager =
@@ -353,7 +361,7 @@ export class MinimalDapClient extends EventEmitter {
       // env objects are redacted: the trace file persists next to the logs
       // and the launch request embeds the debuggee's full environment
       const line =
-        JSON.stringify({ ts: new Date().toISOString(), direction, payload: sanitizePayloadForLogging(payload) }) + '\n';
+        JSON.stringify({ ts: new Date().toISOString(), conn: this.traceLabel, direction, payload: sanitizePayloadForLogging(payload) }) + '\n';
       const lineBytes = Buffer.byteLength(line, 'utf8');
       if (this.traceBytesWritten + lineBytes > this.traceMaxBytes) {
         // One marker, then stop for the client's lifetime — the trace must
@@ -361,7 +369,7 @@ export class MinimalDapClient extends EventEmitter {
         this.traceTruncated = true;
         fs.appendFileSync(
           this.traceFile,
-          JSON.stringify({ ts: new Date().toISOString(), truncated: true, reason: `trace byte cap ${this.traceMaxBytes} reached` }) + '\n',
+          JSON.stringify({ ts: new Date().toISOString(), conn: this.traceLabel, truncated: true, reason: `trace byte cap ${this.traceMaxBytes} reached` }) + '\n',
           'utf8'
         );
         return;
