@@ -55,6 +55,9 @@ function createChildSafePolicy(
         mirrorBreakpointsToChild: false,
         pauseAfterChildAttach: false,
         stackTraceRequiresChild: false,
+        // Child/release connections talk to the real target directly — they
+        // must never self-gate on child availability (issue #513)
+        childRequiredCommands: new Set<string>(),
       };
 
       if (baseBehavior.handleReverseRequest) {
@@ -172,6 +175,10 @@ export class ChildSessionManager extends EventEmitter {
   // State tracking
   private adoptionInProgress = false;
   private sawChildStop = false;
+  // An adopted child's connection closed and no new adoption has started
+  // since — routed commands can only hit the parent, where child-required
+  // ones (e.g. js-debug 'pause') would silently no-op (issue #513)
+  private childEnded = false;
   private readonly instanceId: string;
 
   // CDP-delivered function breakpoints (issue #295); present only when the
@@ -261,6 +268,35 @@ export class ChildSessionManager extends EventEmitter {
   getActiveChild(): MinimalDapClient | null {
     logger.info(`[ChildSessionManager:${this.instanceId}] getActiveChild() => ${this.activeChild ? 'active' : 'null'}`);
     return this.activeChild;
+  }
+
+  /**
+   * Where the debuggable target session currently lives (issue #513):
+   * - 'active':   adoption completed — the child is connected AND bound to
+   *               its pending target (its attach handshake finished)
+   * - 'adopting': adoption is underway. The activeChild reference may already
+   *               be set in this state, but the child is not yet bound to the
+   *               target: a request dispatched to it now can be swallowed by
+   *               js-debug without a response (observed with 'pause' sent
+   *               between the child's initialize and attach)
+   * - 'ended':    an adopted child closed and nothing replaced it — routed
+   *               commands can only reach the parent from here on
+   * - 'none':     no adoption has happened (yet); released targets do not
+   *               count — they run undebugged by design (issue #501)
+   */
+  getChildTargetState(): 'active' | 'adopting' | 'ended' | 'none' {
+    let state: 'active' | 'adopting' | 'ended' | 'none';
+    if (this.adoptionInProgress) {
+      state = 'adopting';
+    } else if (this.activeChild !== null) {
+      state = 'active';
+    } else if (this.childEnded) {
+      state = 'ended';
+    } else {
+      state = 'none';
+    }
+    logger.info(`[ChildSessionManager:${this.instanceId}] getChildTargetState() => ${state}`);
+    return state;
   }
 
   /**
@@ -473,6 +509,7 @@ export class ChildSessionManager extends EventEmitter {
     }
 
     this.adoptionInProgress = true;
+    this.childEnded = false;
     logger.info(`[ChildSessionManager:${this.instanceId}] Setting adoptionInProgress = true for ${pendingId}`);
     this.adoptedTargets.add(pendingId);
 
@@ -937,6 +974,7 @@ export class ChildSessionManager extends EventEmitter {
       this.emit('childClosed');
       this.childSessions.clear();
       this.activeChild = null;
+      this.childEnded = true;
       logger.info(`[ChildSessionManager:${this.instanceId}] *** ACTIVE CHILD CLEARED *** (child closed) at timestamp ${Date.now()}`);
     });
   }
@@ -1012,6 +1050,7 @@ export class ChildSessionManager extends EventEmitter {
     
     this.childSessions.clear();
     this.activeChild = null;
+    this.childEnded = false;
     this.adoptedTargets.clear();
     this.releasedTargets.clear();
     this.storedBreakpoints.clear();

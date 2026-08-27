@@ -1478,4 +1478,86 @@ describe('ChildSessionManager', () => {
       expect((manager as any).storedBreakpoints.size).toBe(0);
     });
   });
+
+  describe('getChildTargetState (issue #513)', () => {
+    const config = (pendingId: string) => ({
+      pendingId,
+      host: 'localhost',
+      port: 9229,
+      parentConfig: { type: 'pwa-node', request: 'launch' }
+    });
+
+    beforeEach(() => {
+      manager = new ChildSessionManager({
+        policy: JsDebugAdapterPolicy,
+        host: 'localhost',
+        port: 9229
+      });
+    });
+
+    it('walks none → adopting → active → ended, and adopting again on re-adoption', async () => {
+      expect(manager.getChildTargetState()).toBe('none');
+
+      vi.useFakeTimers();
+      try {
+        const adoption = manager.createChildSession(config('state-child-1'));
+        // adoptionInProgress is stamped synchronously, before the client
+        // connects and becomes the active child
+        expect(manager.getChildTargetState()).toBe('adopting');
+
+        await vi.advanceTimersByTimeAsync(20000);
+        await adoption;
+        expect(manager.getChildTargetState()).toBe('active');
+
+        const child = MockMinimalDapClient.lastInstance!;
+        child.emit('close');
+        await vi.advanceTimersByTimeAsync(0);
+        // An adopted child that closed with nothing replacing it: routed
+        // commands can only hit the parent from here on
+        expect(manager.getChildTargetState()).toBe('ended');
+
+        const readoption = manager.createChildSession(config('state-child-2'));
+        expect(manager.getChildTargetState()).toBe('adopting');
+        await vi.advanceTimersByTimeAsync(20000);
+        await readoption;
+        expect(manager.getChildTargetState()).toBe('active');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('reports none after shutdown', async () => {
+      vi.useFakeTimers();
+      try {
+        const adoption = manager.createChildSession(config('state-child-3'));
+        await vi.advanceTimersByTimeAsync(20000);
+        await adoption;
+        MockMinimalDapClient.lastInstance!.emit('close');
+        await vi.advanceTimersByTimeAsync(0);
+        expect(manager.getChildTargetState()).toBe('ended');
+      } finally {
+        vi.useRealTimers();
+      }
+
+      await manager.shutdown();
+      expect(manager.getChildTargetState()).toBe('none');
+    });
+
+    it('blanks childRequiredCommands on the child-safe policy', async () => {
+      vi.useFakeTimers();
+      try {
+        const adoption = manager.createChildSession(config('state-child-4'));
+        await vi.advanceTimersByTimeAsync(20000);
+        await adoption;
+      } finally {
+        vi.useRealTimers();
+      }
+
+      const childPolicy = MockMinimalDapClient.lastInstance!.policy!;
+      const behavior = childPolicy.getDapClientBehavior();
+      // Child/release connections talk to the real target directly — they
+      // must never self-gate on child availability
+      expect(behavior.childRequiredCommands?.size).toBe(0);
+    });
+  });
 });

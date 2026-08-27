@@ -46,6 +46,7 @@ describe('MinimalDapClient', () => {
     shouldRouteToChild: ReturnType<typeof vi.fn>;
     storeBreakpoints: ReturnType<typeof vi.fn>;
     isAdoptionInProgress: ReturnType<typeof vi.fn>;
+    getChildTargetState: ReturnType<typeof vi.fn>;
     shutdown: ReturnType<typeof vi.fn>;
     flushEvents: ReturnType<typeof vi.fn>;
   };
@@ -58,9 +59,20 @@ describe('MinimalDapClient', () => {
     emitter.shouldRouteToChild = vi.fn().mockReturnValue(false);
     emitter.storeBreakpoints = vi.fn();
     emitter.isAdoptionInProgress = vi.fn().mockReturnValue(false);
+    emitter.getChildTargetState = vi.fn().mockReturnValue('none');
     emitter.shutdown = vi.fn().mockResolvedValue(undefined);
     emitter.flushEvents = vi.fn().mockReturnValue(Promise.resolve());
     return emitter;
+  };
+
+  // Immediate-fire timers: sleeps in the child-await polling loops resolve on
+  // the next microtask so wait windows collapse without fake-timer plumbing
+  const immediateTimers = {
+    setTimeout: ((cb: () => void) => {
+      queueMicrotask(cb);
+      return 0 as unknown as NodeJS.Timeout;
+    }) as unknown as typeof setTimeout,
+    clearTimeout: (() => undefined) as unknown as typeof clearTimeout
   };
 
   // Helper function to create a mock socket
@@ -2095,6 +2107,196 @@ describe('MinimalDapClient', () => {
       const p = client.sendRequest('setFunctionBreakpoints', { breakpoints: [] }, 50).catch(() => undefined);
       expect(mockSocket.write).toHaveBeenCalled();
       await p;
+    });
+  });
+
+  describe('Child-required command routing (issue #513)', () => {
+    // An echo socket immediately answers whatever request is written to it —
+    // proves a command reached the PARENT connection and keeps the test off
+    // the 30s response timer
+    const attachEchoSocket = (target: MinimalDapClient) => {
+      const write = vi.fn((raw: Buffer | string, cb?: (err?: Error | null) => void) => {
+        cb?.(null);
+        queueMicrotask(() => {
+          const [, body] = raw.toString('utf8').split('\r\n\r\n');
+          const request = JSON.parse(body) as DebugProtocol.Request;
+          void (target as any).handleProtocolMessage({
+            seq: request.seq,
+            type: 'response',
+            request_seq: request.seq,
+            command: request.command,
+            success: true
+          } satisfies DebugProtocol.Response);
+        });
+        return true;
+      });
+      (target as any).socket = { destroyed: false, write, end: vi.fn(), destroy: vi.fn() } as unknown as net.Socket;
+      return write;
+    };
+
+    // Immediate timers collapse the child-await polling loops; tests whose
+    // request reaches the parent socket keep real timers so the echoed
+    // response beats the (real, 30s) response timeout
+    const buildClient = (
+      stubManager: ChildSessionManagerStub,
+      policy = JsDebugAdapterPolicy,
+      opts: { realTimers?: boolean } = {}
+    ) =>
+      new MinimalDapClient('localhost', 5678, policy, {
+        childSessionManagerFactory: () => stubManager as unknown as ChildSessionManager,
+        ...(opts.realTimers ? {} : { timers: immediateTimers })
+      });
+
+    it('dispatches pause to the active child session', async () => {
+      const stubManager = createChildSessionManagerStub();
+      stubManager.shouldRouteToChild.mockReturnValue(true);
+      stubManager.getChildTargetState.mockReturnValue('active');
+      const childResponse = { seq: 1, type: 'response', request_seq: 1, command: 'pause', success: true };
+      const childClient = { sendRequest: vi.fn().mockResolvedValue(childResponse) } as unknown as MinimalDapClient;
+
+      const routed = buildClient(stubManager);
+      const write = attachEchoSocket(routed);
+      (routed as any).activeChild = childClient;
+
+      const result = await routed.sendRequest<DebugProtocol.Response>('pause', { threadId: 0 });
+
+      expect((childClient as any).sendRequest).toHaveBeenCalledWith('pause', { threadId: 0 }, 30000);
+      expect(result).toEqual(childResponse);
+      expect(write).not.toHaveBeenCalled();
+      routed.shutdown();
+    });
+
+    it('waits through an in-flight adoption and dispatches once adoption completes', async () => {
+      const stubManager = createChildSessionManagerStub();
+      stubManager.shouldRouteToChild.mockReturnValue(true);
+      const childResponse = { seq: 1, type: 'response', request_seq: 1, command: 'pause', success: true };
+      const childClient = { sendRequest: vi.fn().mockResolvedValue(childResponse) } as unknown as MinimalDapClient;
+      let stateCalls = 0;
+      stubManager.getChildTargetState.mockImplementation(() => (++stateCalls >= 4 ? 'active' : 'adopting'));
+      stubManager.getActiveChild.mockReturnValue(childClient);
+
+      const routed = buildClient(stubManager);
+      const write = attachEchoSocket(routed);
+      // The activeChild reference is already set mid-adoption — the gate must
+      // still hold the dispatch until the child is bound to its target
+      (routed as any).activeChild = childClient;
+
+      const result = await routed.sendRequest<DebugProtocol.Response>('pause', { threadId: 0 });
+
+      expect((childClient as any).sendRequest).toHaveBeenCalled();
+      expect(result).toEqual(childResponse);
+      // The gate waited for adoption completion before dispatching
+      expect(stateCalls).toBeGreaterThanOrEqual(4);
+      expect(write).not.toHaveBeenCalled();
+      routed.shutdown();
+    });
+
+    it('rejects pause with the no-target error instead of forwarding to the parent when no child ever appears', async () => {
+      const stubManager = createChildSessionManagerStub();
+      stubManager.shouldRouteToChild.mockReturnValue(true);
+      stubManager.getChildTargetState.mockReturnValue('none');
+
+      const routed = buildClient(stubManager);
+      const write = attachEchoSocket(routed);
+
+      await expect(routed.sendRequest('pause', { threadId: 0 })).rejects.toThrow(/no debug target/);
+      // The parent connection must never carry the pause — js-debug's root
+      // acks it as a silent no-op
+      expect(write).not.toHaveBeenCalled();
+      routed.shutdown();
+    });
+
+    it('rejects pause immediately with the re-attach hint once the adopted child has ended', async () => {
+      const stubManager = createChildSessionManagerStub();
+      stubManager.shouldRouteToChild.mockReturnValue(true);
+      stubManager.getChildTargetState.mockReturnValue('ended');
+
+      const routed = buildClient(stubManager);
+      const write = attachEchoSocket(routed);
+
+      await expect(routed.sendRequest('pause', { threadId: 0 })).rejects.toThrow(/ended or disconnected.*Re-attach/s);
+      expect(stubManager.getActiveChild).not.toHaveBeenCalled();
+      expect(write).not.toHaveBeenCalled();
+      routed.shutdown();
+    });
+
+    it('extends the wait when adoption starts during the grace window', async () => {
+      const stubManager = createChildSessionManagerStub();
+      stubManager.shouldRouteToChild.mockReturnValue(true);
+      // 'none' at gate entry and through most of the grace window, then an
+      // adoption starts ('adopting') and completes ('active') during the
+      // extended wait
+      let stateCalls = 0;
+      stubManager.getChildTargetState.mockImplementation(() => {
+        stateCalls++;
+        if (stateCalls <= 20) return 'none';
+        if (stateCalls <= 24) return 'adopting';
+        return 'active';
+      });
+      const childResponse = { seq: 1, type: 'response', request_seq: 1, command: 'pause', success: true };
+      const childClient = { sendRequest: vi.fn().mockResolvedValue(childResponse) } as unknown as MinimalDapClient;
+      stubManager.getActiveChild.mockReturnValue(childClient);
+
+      const routed = buildClient(stubManager);
+      const write = attachEchoSocket(routed);
+
+      const result = await routed.sendRequest<DebugProtocol.Response>('pause', { threadId: 0 });
+
+      expect(result).toEqual(childResponse);
+      expect(write).not.toHaveBeenCalled();
+      routed.shutdown();
+    });
+
+    it('still forwards pause to the parent for a policy without childRequiredCommands', async () => {
+      const stubManager = createChildSessionManagerStub();
+      stubManager.shouldRouteToChild.mockReturnValue(true);
+      const legacyPolicy = {
+        ...JsDebugAdapterPolicy,
+        getDapClientBehavior: () => ({
+          ...JsDebugAdapterPolicy.getDapClientBehavior(),
+          childRequiredCommands: undefined
+        })
+      } as typeof JsDebugAdapterPolicy;
+
+      const routed = buildClient(stubManager, legacyPolicy, { realTimers: true });
+      const write = attachEchoSocket(routed);
+
+      const result = await routed.sendRequest<DebugProtocol.Response>('pause', { threadId: 0 });
+
+      expect(result.success).toBe(true);
+      expect(write).toHaveBeenCalled();
+      routed.shutdown();
+    });
+
+    it('still lets threads fall through to the parent with no child (attach verify depends on it)', async () => {
+      const stubManager = createChildSessionManagerStub();
+      stubManager.shouldRouteToChild.mockReturnValue(true);
+
+      const routed = buildClient(stubManager, JsDebugAdapterPolicy, { realTimers: true });
+      const write = attachEchoSocket(routed);
+
+      const result = await routed.sendRequest<DebugProtocol.Response>('threads');
+
+      expect(result.success).toBe(true);
+      expect(write).toHaveBeenCalled();
+      routed.shutdown();
+    });
+
+    it('rejects pause with the no-target error when the child dies mid-dispatch', async () => {
+      const stubManager = createChildSessionManagerStub();
+      stubManager.shouldRouteToChild.mockReturnValue(true);
+      stubManager.getChildTargetState.mockReturnValue('active');
+      const childClient = {
+        sendRequest: vi.fn().mockRejectedValue(new Error('DAP client disconnected'))
+      } as unknown as MinimalDapClient;
+
+      const routed = buildClient(stubManager);
+      const write = attachEchoSocket(routed);
+      (routed as any).activeChild = childClient;
+
+      await expect(routed.sendRequest('pause', { threadId: 0 })).rejects.toThrow(/no debug target|ended or disconnected/);
+      expect(write).not.toHaveBeenCalled();
+      routed.shutdown();
     });
   });
 

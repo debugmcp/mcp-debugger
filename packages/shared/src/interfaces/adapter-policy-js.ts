@@ -826,6 +826,13 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
       mirrorBreakpointsToChild: true,
       pauseAfterChildAttach: true,
       stackTraceRequiresChild: true,
+
+      // Commands that must not fall back to the parent when no child session
+      // is available: js-debug's root session acks 'pause' as a silent no-op,
+      // so a fallen-through pause "succeeds" but no stop can ever land
+      // (issue #513). 'threads' is deliberately NOT listed — the parent's
+      // empty threads response is load-bearing for the attach verify loop.
+      childRequiredCommands: new Set(['pause']),
       
       // Normalize adapter ID for initialize
       normalizeAdapterId: (requestedId: string): string => {

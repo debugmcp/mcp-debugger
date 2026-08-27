@@ -410,5 +410,35 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
       const adapter = new JavascriptDebugAdapter(deps);
       expect(adapter.supportedAttachKeys).toContain('autoAttachChildProcesses');
     });
+
+    it('defaults smartStep to false on attach (issue #513)', () => {
+      const adapter = new JavascriptDebugAdapter(deps);
+      const cfg = adapter.transformAttachConfig({
+        request: 'attach',
+        port: 9229
+      } as any) as Record<string, unknown>;
+
+      // js-debug's smart-stepper converts a user pause landing on a
+      // blackboxed/unmapped frame into an endless auto-step on an idle
+      // server, so the 'stopped' event never fires
+      expect(cfg.smartStep).toBe(false);
+    });
+
+    it('respects a caller-supplied smartStep (issue #513)', () => {
+      const adapter = new JavascriptDebugAdapter(deps);
+      const optIn = adapter.transformAttachConfig({
+        request: 'attach',
+        port: 9229,
+        smartStep: true
+      } as any) as Record<string, unknown>;
+      expect(optIn.smartStep).toBe(true);
+
+      const optOut = adapter.transformAttachConfig({
+        request: 'attach',
+        port: 9229,
+        smartStep: false
+      } as any) as Record<string, unknown>;
+      expect(optOut.smartStep).toBe(false);
+    });
   });
 });

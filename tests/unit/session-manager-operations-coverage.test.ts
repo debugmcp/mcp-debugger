@@ -3085,6 +3085,27 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(mockSession.pausePending).toBe(false);
     });
 
+    it('returns a structured failure (not a rejection) when the pause has no debug target (issue #513)', async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockProxyManager.sendDapRequest.mockImplementation((command: string) => {
+        if (command === 'pause') {
+          // The shape minimal-dap throws when a child-required command has no
+          // child session to run against
+          return Promise.reject(new Error(
+            "Cannot deliver 'pause': no debug target adopted yet — the runtime session is not available."
+          ));
+        }
+        return Promise.resolve({ body: { threads: [] } });
+      });
+
+      const result = await operations.pause('test-session', 1);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/no debug target/);
+      expect(result.state).toBe(SessionState.RUNNING);
+      expect(mockSession.pausePending).toBe(false);
+    });
+
     it('includes the last stop reason when already paused', async () => {
       mockSession.state = SessionState.PAUSED;
       mockSession.lastStop = { reason: 'breakpoint', threadId: 1, timestamp: Date.now() };
