@@ -201,21 +201,42 @@ see the project at different paths (host mcp-debugger + containerized app, or a
 containerized mcp-debugger + host app), a path that is valid on your side can fail on the
 target with `<path> is not available`. That warning is topology, not breakage:
 
-- **Prefer target-side paths.** Set breakpoints using the path the debuggee sees
-  (`/app/app.rb` inside the container, as reported by `get_stack_trace`), not the path on
-  your machine.
+- **Use a shared target-side path.** When the client can see the source at the exact same
+  absolute path as rdbg (for example, both containers bind it at `/app`), opt into rdbg's
+  shared-filesystem mode and set breakpoints with that path:
+
+  ```text
+  attach_to_process {
+    "sessionId": "...",
+    "host": "ruby-target",
+    "port": 12345,
+    "adapterConfig": { "localfs": true }
+  }
+  set_breakpoint { "sessionId": "...", "file": "/app/app.rb", "line": 18 }
+  ```
+
+  mcp-debugger infers `localfs` from a loopback host only when it is omitted; an explicit
+  boolean wins, which is useful for sibling containers and necessary when a loopback port
+  forward still crosses a filesystem boundary.
 - **Or map paths with `localfsMap`.** rdbg accepts a `localfsMap` attach option
   (`"remote_prefix:local_prefix"`, comma-separated for multiple pairs) that translates
-  paths between the two filesystems. Pass it through `attach_to_process`:
+  client paths to target paths. Pass it inside `adapterConfig`:
 
   ```text
   attach_to_process {
     "sessionId": "...",
     "host": "127.0.0.1",
     "port": 12345,
-    "localfsMap": "/app:/home/user/project"
+    "adapterConfig": {
+      "localfsMap": "/app:/home/user/project"
+    }
   }
   ```
+
+  `localfsMap` uses colons to separate each target/client prefix pair. A Windows drive
+  letter also contains a colon, so mappings involving paths such as `C:/work/app` are
+  ambiguous in rdbg's current format. For a Windows target, prefer a shared identical
+  path with `localfs: true` where possible.
 
 - **Reaching a host-side rdbg from a containerized mcp-debugger:** use
   `host.docker.internal` as the attach host (add
@@ -230,7 +251,7 @@ target with `<path> is not available`. That warning is topology, not breakage:
 | Connect timeout on launch | Ruby startup can take a few seconds; check the session log under the temp directory for the spawn command and rdbg's stderr |
 | Launch warns `'initialized' event arrived but the 'initialize' response is still missing` | rdbg intermittently drops the initialize response frame; the session recovers automatically and continues (adapter capabilities unknown for that run). See the [case study](../case-studies/rdbg-initialize-response-stall.md) |
 | Connect refused on attach | Verify the target was started with `--open --host --port` and the port is reachable (`rdbg` prints `Debugger can attach via TCP/IP`) |
-| Breakpoint not verified on attach | Use the path as the **debuggee** sees it (e.g. `/app/app.rb` in a container), not the host path |
+| Breakpoint not verified on attach | If both sides share paths, pass `adapterConfig.localfs: true` and use the target path. Otherwise pass `adapterConfig.localfsMap` as `target_prefix:client_prefix`; Windows drive-letter mappings are ambiguous in rdbg's colon-separated format |
 | Locals empty | Make sure the session is paused (breakpoint hit or explicit pause); rdbg reports locals only while stopped |
 
 ## Additional resources
