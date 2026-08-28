@@ -409,6 +409,7 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
       processId: _processId,
       processName: _processName,
       identifierType: _identifierType,
+      localfs,
       localfsMap,
       ...rest
     } = config as Record<string, unknown>;
@@ -416,8 +417,10 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
     void _processId; void _processName; void _identifierType;
 
     // Advanced passthrough with the normalized rdbg attach shape on top
-    // (issues #450/#466); localfs stays computed from the host — localfsMap
-    // is the caller's path-mapping lever.
+    // (issues #450/#466). An explicit boolean localfs is authoritative: a
+    // remote host can still share the client's filesystem (for example via a
+    // bind mount), while a loopback connection can cross a container boundary.
+    // Infer from the host only when the caller did not provide a valid boolean.
     const attachConfig: RubyAttachConfig = {
       ...rest,
       type: 'rdbg',
@@ -425,7 +428,7 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
       name: 'Ruby: Attach',
       host,
       port,
-      localfs: this.isLocalHost(host),
+      localfs: typeof localfs === 'boolean' ? localfs : this.isLocalHost(host),
       stopOnEntry: config.stopOnEntry,
       justMyCode: config.justMyCode ?? true
     };

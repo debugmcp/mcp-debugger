@@ -55,7 +55,8 @@ describe.skipIf(SKIP_DOCKER)('Docker: Ruby attach-only debugging', () => {
     const fixtureDir = path.resolve(ROOT, 'examples', 'ruby', 'remote-attach');
     await execAsync(
       `docker run -d --rm --network ${networkName} --name ${targetName} ` +
-      `-v "${fixtureDir}:/app:ro" -w /app ${RUBY_IMAGE} ` +
+      `-v "${fixtureDir}:/workspace/ruby/remote-attach:ro" ` +
+      `-w /workspace/ruby/remote-attach ${RUBY_IMAGE} ` +
       `rdbg --open --host 0.0.0.0 --port ${RDBG_PORT} --nonstop app.rb`,
       { maxBuffer: 16 * 1024 * 1024 }
     );
@@ -81,6 +82,8 @@ describe.skipIf(SKIP_DOCKER)('Docker: Ruby attach-only debugging', () => {
       imageName: 'mcp-debugger:test',
       containerName,
       logLevel: 'debug',
+      // createDockerMcpClient already mounts examples/ at /workspace; the
+      // target uses the matching /workspace/ruby/remote-attach path above.
       extraRunArgs: ['--network', networkName]
     });
     mcpClient = result.client;
@@ -139,7 +142,7 @@ describe.skipIf(SKIP_DOCKER)('Docker: Ruby attach-only debugging', () => {
     console.log('[Docker Ruby Attach] ✓ per-mode availability reported:', JSON.stringify(ruby.modes));
   }, 60000);
 
-  it('attaches to the remote rdbg socket, inspects, and detaches', async () => {
+  it('binds a target-side breakpoint, inspects locals, and detaches', async () => {
     // Step 1: Create ruby session (must succeed despite no local Ruby)
     const createResult = await mcpClient!.callTool({
       name: 'create_debug_session',
@@ -150,13 +153,26 @@ describe.skipIf(SKIP_DOCKER)('Docker: Ruby attach-only debugging', () => {
     sessionId = createResponse.sessionId as string;
     console.log('[Docker Ruby Attach] ✓ Session created');
 
-    // Step 2: Attach across the docker network by container DNS name
+    // Step 2: Queue a breakpoint using the path shared by the MCP client and
+    // target containers. It is synchronized during the attach handshake.
+    const targetSourcePath = '/workspace/ruby/remote-attach/app.rb';
+    const breakpointLine = 18;
+    const breakpointResult = await mcpClient!.callTool({
+      name: 'set_breakpoint',
+      arguments: { sessionId, file: targetSourcePath, line: breakpointLine }
+    });
+    expect(parseSdkToolResult(breakpointResult).success).toBe(true);
+
+    // Step 3: Attach across the docker network by container DNS name. The
+    // explicit override is the regression: before #499 it was silently
+    // replaced with false because the host is not loopback.
     const attachResult = await mcpClient!.callTool({
       name: 'attach_to_process',
       arguments: {
         sessionId,
         host: targetName,
-        port: RDBG_PORT
+        port: RDBG_PORT,
+        adapterConfig: { localfs: true }
       }
     });
     const attachResponse = parseSdkToolResult(attachResult);
@@ -164,31 +180,42 @@ describe.skipIf(SKIP_DOCKER)('Docker: Ruby attach-only debugging', () => {
     expect(attachResponse.success).not.toBe(false);
     console.log('[Docker Ruby Attach] ✓ Attached');
 
-    // Step 3: Pause the running loop and take a stack trace
-    const pauseResult = await mcpClient!.callTool({
-      name: 'pause_execution',
-      arguments: { sessionId }
-    });
-    expect(parseSdkToolResult(pauseResult).success).not.toBe(false);
-
-    // Give the stop event a moment to land
-    await new Promise(resolve => setTimeout(resolve, 1500));
-
-    const stackResult = await mcpClient!.callTool({
-      name: 'get_stack_trace',
-      arguments: { sessionId }
-    });
-    const stackResponse = parseSdkToolResult(stackResult);
-    expect(stackResponse.stackFrames).toBeDefined();
-    expect((stackResponse.stackFrames as any[]).length).toBeGreaterThan(0);
-    console.log('[Docker Ruby Attach] ✓ Stack trace retrieved while paused');
-
-    // Step 4: Resume and detach without terminating the target
+    // Step 4: Release rdbg's attach stop and wait for the mapped breakpoint.
     const continueResult = await mcpClient!.callTool({
       name: 'continue_execution',
       arguments: { sessionId }
     });
     expect(parseSdkToolResult(continueResult).success).not.toBe(false);
+
+    let breakpointFrame: { file?: string; line?: number } | undefined;
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const stackResult = await mcpClient!.callTool({
+        name: 'get_stack_trace',
+        arguments: { sessionId }
+      });
+      const stackResponse = parseSdkToolResult(stackResult);
+      const frames = Array.isArray(stackResponse.stackFrames)
+        ? stackResponse.stackFrames as Array<{ file?: string; line?: number }>
+        : [];
+      breakpointFrame = frames.find(frame => frame.line === breakpointLine);
+      if (breakpointFrame) break;
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    expect(breakpointFrame).toMatchObject({ file: targetSourcePath, line: breakpointLine });
+
+    const localsResult = await mcpClient!.callTool({
+      name: 'get_local_variables',
+      arguments: { sessionId }
+    });
+    const localsResponse = parseSdkToolResult(localsResult) as {
+      variables?: Array<{ name: string; value: string }>;
+    };
+    expect(localsResponse.success).not.toBe(false);
+    expect(localsResponse.variables?.find(variable => variable.name === 'tick')).toBeDefined();
+    expect(localsResponse.variables?.find(variable => variable.name === 'revenue')).toBeDefined();
+    console.log('[Docker Ruby Attach] ✓ Target-side breakpoint hit and locals retrieved');
+
+    // Step 5: Detach without terminating the target
 
     const detachResult = await mcpClient!.callTool({
       name: 'detach_from_process',
@@ -199,7 +226,7 @@ describe.skipIf(SKIP_DOCKER)('Docker: Ruby attach-only debugging', () => {
     expect(detachResponse.success).not.toBe(false);
     console.log('[Docker Ruby Attach] ✓ Detached');
 
-    // Step 5: The target must still be alive after detach
+    // Step 6: The target must still be alive after detach
     await new Promise(resolve => setTimeout(resolve, 2000));
     const { stdout } = await execAsync(
       `docker ps --filter name=${targetName} --format "{{.Names}}"`
@@ -207,7 +234,7 @@ describe.skipIf(SKIP_DOCKER)('Docker: Ruby attach-only debugging', () => {
     expect(stdout).toContain(targetName);
     console.log('[Docker Ruby Attach] ✓ Target still running after detach');
 
-    // Step 6: Close the session
+    // Step 7: Close the session
     const closeResult = await mcpClient!.callTool({
       name: 'close_debug_session',
       arguments: { sessionId }
