@@ -412,6 +412,27 @@ describe('RubyDebugAdapter', () => {
     });
   });
 
+  it.each([
+    { host: '10.0.0.1', localfs: true, expected: true },
+    { host: '127.0.0.1', localfs: false, expected: false },
+    { host: '10.0.0.1', localfs: undefined, expected: false },
+    { host: '127.0.0.1', localfs: undefined, expected: true },
+    { host: '10.0.0.1', localfs: 'true', expected: false },
+    { host: '127.0.0.1', localfs: 'false', expected: true }
+  ])('honors boolean localfs=$localfs and otherwise infers from host=$host (issue #499)', (
+    { host, localfs, expected }
+  ) => {
+    const adapter = new RubyDebugAdapter(createDependencies());
+    const config = adapter.transformAttachConfig({
+      request: 'attach',
+      host,
+      port: 4000,
+      ...(localfs === undefined ? {} : { localfs })
+    } as never);
+
+    expect(config.localfs).toBe(expected);
+  });
+
   it('rejects attach without a numeric port', () => {
     const adapter = new RubyDebugAdapter(createDependencies());
     expect(() => adapter.transformAttachConfig({ request: 'attach', host: 'x' } as never))
