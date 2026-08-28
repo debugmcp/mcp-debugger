@@ -56,8 +56,7 @@ import {
 import {
   isCppSourceFile,
   findAnyCompiler,
-  needsRecompile,
-  compileSourceFile,
+  prepareSourceBinary,
   getDefaultOutputPath,
   CPP_COMPILER_CANDIDATES,
   C_COMPILER_CANDIDATES
@@ -576,21 +575,22 @@ export class CppDebugAdapter extends EventEmitter implements IDebugAdapter {
         const sourcePath = path.resolve(cwd || process.cwd(), programPath);
         const outputPath = getDefaultOutputPath(sourcePath, this.platform);
 
-        if (forceRebuild === true || await needsRecompile(sourcePath, outputPath)) {
-          this.dependencies.logger?.info(`[CppDebugAdapter] Compiling ${sourcePath}...`);
-          const result = await compileSourceFile({
-            sourcePath,
-            outputPath,
-            logger: this.dependencies.logger
-          });
-          if (!result.success) {
-            throw new Error(`C/C++ compile failed: ${result.error}`);
-          }
-          launchConfig.program = result.binaryPath!;
-          compiledAtLaunch = true;
+        const result = await prepareSourceBinary({
+          sourcePath,
+          outputPath,
+          forceRebuild: forceRebuild === true,
+          platform: this.platform,
+          logger: this.dependencies.logger
+        });
+        if (!result.success) {
+          throw new Error(`C/C++ compile failed: ${result.error}`);
+        }
+        launchConfig.program = result.binaryPath!;
+        compiledAtLaunch = result.compiled === true;
+        if (compiledAtLaunch) {
+          this.dependencies.logger?.info(`[CppDebugAdapter] Compiled ${sourcePath}`);
         } else {
           this.dependencies.logger?.info('[CppDebugAdapter] Using existing binary (up to date)');
-          launchConfig.program = outputPath;
         }
       } else {
         // Primary path: a prebuilt executable

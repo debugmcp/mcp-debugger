@@ -24,8 +24,7 @@ vi.mock('../src/utils/compile-utils.js', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   findCompiler: vi.fn(),
   findAnyCompiler: vi.fn(),
-  needsRecompile: vi.fn(),
-  compileSourceFile: vi.fn()
+  prepareSourceBinary: vi.fn()
 }));
 
 import {
@@ -39,8 +38,7 @@ import {
 import {
   findCompiler,
   findAnyCompiler,
-  needsRecompile,
-  compileSourceFile,
+  prepareSourceBinary,
   getDefaultOutputPath
 } from '../src/utils/compile-utils.js';
 import { CppDebugAdapter } from '../src/cpp-debug-adapter.js';
@@ -80,8 +78,7 @@ describe('CppDebugAdapter', () => {
     vi.mocked(detectBinaryFormat).mockReset().mockResolvedValue(gnuBinaryInfo);
     vi.mocked(findCompiler).mockReset();
     vi.mocked(findAnyCompiler).mockReset();
-    vi.mocked(needsRecompile).mockReset();
-    vi.mocked(compileSourceFile).mockReset();
+    vi.mocked(prepareSourceBinary).mockReset();
     vi.mocked(deriveSourceMapFromBinary).mockReset().mockReturnValue({});
     dependencies = createDependencies();
     adapter = new CppDebugAdapter(dependencies);
@@ -215,42 +212,53 @@ describe('CppDebugAdapter', () => {
     it('compiles a lone source file when stale', async () => {
       const src = path.resolve('/work/hello.cpp');
       const out = getDefaultOutputPath(src, process.platform);
-      vi.mocked(needsRecompile).mockResolvedValue(true);
-      vi.mocked(compileSourceFile).mockResolvedValue({ success: true, binaryPath: out });
+      vi.mocked(prepareSourceBinary).mockResolvedValue({
+        success: true,
+        binaryPath: out,
+        compiled: true
+      });
 
       const result = await adapter.transformLaunchConfig({ program: src } as never);
 
-      expect(compileSourceFile).toHaveBeenCalledWith(
-        expect.objectContaining({ sourcePath: src, outputPath: out })
+      expect(prepareSourceBinary).toHaveBeenCalledWith(
+        expect.objectContaining({ sourcePath: src, outputPath: out, forceRebuild: false })
       );
       expect(result.program).toBe(out);
     });
 
     it('reuses a fresh compiled binary without invoking the compiler', async () => {
       const src = path.resolve('/work/hello.cpp');
-      vi.mocked(needsRecompile).mockResolvedValue(false);
+      vi.mocked(prepareSourceBinary).mockResolvedValue({
+        success: true,
+        binaryPath: getDefaultOutputPath(src, process.platform),
+        compiled: false
+      });
 
       const result = await adapter.transformLaunchConfig({ program: src } as never);
 
-      expect(compileSourceFile).not.toHaveBeenCalled();
+      expect(prepareSourceBinary).toHaveBeenCalledOnce();
       expect(result.program).toBe(getDefaultOutputPath(src, process.platform));
     });
 
     it('recompiles when forceRebuild is set even if fresh', async () => {
       const src = path.resolve('/work/hello.cpp');
       const out = getDefaultOutputPath(src, process.platform);
-      vi.mocked(needsRecompile).mockResolvedValue(false);
-      vi.mocked(compileSourceFile).mockResolvedValue({ success: true, binaryPath: out });
+      vi.mocked(prepareSourceBinary).mockResolvedValue({
+        success: true,
+        binaryPath: out,
+        compiled: true
+      });
 
       await adapter.transformLaunchConfig({ program: src, forceRebuild: true } as never);
 
-      expect(compileSourceFile).toHaveBeenCalled();
+      expect(prepareSourceBinary).toHaveBeenCalledWith(
+        expect.objectContaining({ forceRebuild: true })
+      );
     });
 
     it('throws with compiler output when compilation fails', async () => {
       const src = path.resolve('/work/broken.cpp');
-      vi.mocked(needsRecompile).mockResolvedValue(true);
-      vi.mocked(compileSourceFile).mockResolvedValue({
+      vi.mocked(prepareSourceBinary).mockResolvedValue({
         success: false,
         error: "expected ';' before '}' token"
       });
@@ -333,8 +341,11 @@ describe('CppDebugAdapter', () => {
         vi.stubEnv('MCP_CONTAINER', 'true');
         const src = path.resolve('/work/hello.cpp');
         const out = getDefaultOutputPath(src, process.platform);
-        vi.mocked(needsRecompile).mockResolvedValue(true);
-        vi.mocked(compileSourceFile).mockResolvedValue({ success: true, binaryPath: out });
+        vi.mocked(prepareSourceBinary).mockResolvedValue({
+          success: true,
+          binaryPath: out,
+          compiled: true
+        });
         try {
           await adapter.transformLaunchConfig({ program: src } as never);
 

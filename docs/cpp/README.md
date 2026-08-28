@@ -39,6 +39,7 @@ Compile with **`-gdwarf-4 -O0`**: full debug info, no optimization (optimized co
    ```
 2. **A lone `.c`/`.cpp`/`.cc`/`.cxx` source file** (convenience path): the adapter compiles it (`-gdwarf-4 -O0`) into `.debug-mcp/` next to the source, staleness-checked by mtime.
    - Headers are **not** staleness-tracked — pass `forceRebuild: true` in the launch config after header-only edits.
+   - Rebuilds compile to a staging executable before replacing the stable output. On Windows, if a running debugger still locks the stable `.exe`, mcp-debugger launches the successful versioned artifact instead and reuses the newest managed artifact on the next launch. Older unlocked versions are cleaned up automatically.
    - Multi-file projects: build them yourself (make/cmake), then launch the executable.
    - Dialect by extension: `.c` → gcc/clang/cc, everything else → g++/clang++.
 

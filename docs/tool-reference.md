@@ -279,11 +279,12 @@ Lists all breakpoints in a session with their current verified state and adapter
 
 ### remove_breakpoint
 
-Removes one breakpoint by id, or every breakpoint at a `file` + `line` location. Takes effect immediately while the program is running or paused (the file's remaining breakpoint set is re-sent to the adapter); also works after the program exits, so breakpoints can be adjusted before a relaunch.
+Removes one breakpoint by id, every function breakpoint with a given name, or every breakpoint at a `file` + `line` location. Takes effect immediately while the program is running or paused (the file's remaining breakpoint set is re-sent to the adapter); also works after the program exits, so breakpoints can be adjusted before a relaunch.
 
 **Parameters:**
 - `sessionId` (string, required): The ID of the debug session.
-- `breakpointId` (string, optional): Breakpoint id from `set_breakpoint` or `list_breakpoints`. Takes precedence over `file` + `line`.
+- `breakpointId` (string, optional): Breakpoint id from `set_breakpoint` or `list_breakpoints`. Takes precedence over `function` and `file` + `line`.
+- `function` (string, optional): Alternative addressing — remove **all** function breakpoints with this symbol name. The same per-language rewrite `set_breakpoint` applies is used here, so the name you set with is the name you remove with (a bare Go `main` matches the stored `main.main`); the response reports the effective name as `functionName` and, when it was rewritten, the original as `requestedName`.
 - `file` (string, optional): Alternative addressing — source file path (use together with `line`). Removes **all** breakpoints at that location.
 - `line` (number, optional): Alternative addressing — line number (use together with `file`).
 
@@ -299,7 +300,7 @@ Removes one breakpoint by id, or every breakpoint at a `file` + `line` location.
 ```
 
 **Notes:**
-- An unknown `breakpointId` (or an empty location) returns `success: false` with an explanatory error.
+- An unknown `breakpointId` (or an empty location or function name) returns `success: false` with an explanatory error; for a function name the error names the effective (rewritten) form, and a bare name with no rewrite gets the same package-qualification hint `set_breakpoint` gives.
 - If the live re-send to the adapter fails, the breakpoint is still removed from the session (it will not be re-applied on the next launch) and the response carries a `warning`.
 
 ---

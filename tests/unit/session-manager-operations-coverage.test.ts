@@ -112,8 +112,10 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       },
       adapterRegistry: {
         create: vi.fn().mockResolvedValue({
+          transformLaunchConfig: vi.fn(async (config: unknown) => config),
           buildAdapterCommand: vi.fn().mockReturnValue('python -m debugpy'),
-          resolveExecutablePath: vi.fn().mockResolvedValue('python')
+          resolveExecutablePath: vi.fn().mockResolvedValue('python'),
+          dispose: vi.fn().mockResolvedValue(undefined)
         }),
         // Implementation (not mockResolvedValue) so it survives mock resets;
         // undefined metadata lets the attach-'none' gate fall through while
@@ -148,14 +150,95 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     it('raises PythonNotFoundError when adapter cannot resolve interpreter', async () => {
       const adapterStub = {
+        transformLaunchConfig: vi.fn(async (config: unknown) => config),
         resolveExecutablePath: vi.fn().mockRejectedValue(new Error('python not found')),
-        buildAdapterCommand: vi.fn()
+        buildAdapterCommand: vi.fn(),
+        dispose: vi.fn().mockResolvedValue(undefined)
       };
       mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
       await expect(
         (operations as any).startProxyManager(mockSession, 'script.py')
       ).rejects.toBeInstanceOf(PythonNotFoundError);
+      // The adapter never reached a ProxyManager, so its registry slot must
+      // be released here (issue #552 review).
+      expect(adapterStub.dispose).toHaveBeenCalledTimes(1);
+    });
+
+    it('disposes the adapter when the launch transform rejects', async () => {
+      mockSession.language = 'cpp';
+      const adapterStub = {
+        transformLaunchConfig: vi.fn().mockRejectedValue(new Error('C/C++ compile failed: boom')),
+        resolveExecutablePath: vi.fn(),
+        buildAdapterCommand: vi.fn(),
+        dispose: vi.fn().mockResolvedValue(undefined)
+      };
+      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+
+      await expect(
+        (operations as any).startProxyManager(mockSession, 'main.cpp')
+      ).rejects.toThrow('C/C++ compile failed: boom');
+      expect(adapterStub.dispose).toHaveBeenCalledTimes(1);
+      expect(adapterStub.resolveExecutablePath).not.toHaveBeenCalled();
+    });
+
+    it('surfaces the MSVC verdict as the structured sentinel when the transform rejects under behavior=error', async () => {
+      mockSession.language = 'cpp';
+      const validation = {
+        compatible: false,
+        behavior: 'error',
+        toolchain: 'msvc',
+        message: 'MSVC binaries are not supported by CodeLLDB'
+      };
+      const adapterStub = {
+        transformLaunchConfig: vi.fn().mockRejectedValue(new Error(validation.message)),
+        consumeLastToolchainValidation: vi.fn().mockReturnValue(validation),
+        resolveExecutablePath: vi.fn(),
+        buildAdapterCommand: vi.fn(),
+        dispose: vi.fn().mockResolvedValue(undefined)
+      };
+      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+
+      let capturedError: unknown;
+      try {
+        await (operations as any).startProxyManager(mockSession, 'msvc.exe');
+      } catch (error) {
+        capturedError = error;
+      }
+
+      expect((capturedError as Error).message).toBe('MSVC_TOOLCHAIN_DETECTED');
+      expect((capturedError as { toolchainValidation?: unknown }).toolchainValidation).toBe(validation);
+      expect(mockSessionStore.update).toHaveBeenCalledWith(
+        mockSession.id,
+        expect.objectContaining({ toolchainValidation: validation })
+      );
+      expect(adapterStub.dispose).toHaveBeenCalledTimes(1);
+    });
+
+    it('clears a stale toolchain verdict when the transform rejects for another reason', async () => {
+      mockSession.language = 'cpp';
+      mockSession.toolchainValidation = {
+        compatible: false,
+        behavior: 'warn',
+        toolchain: 'msvc',
+        message: 'stale verdict from a previous launch'
+      } as any;
+      const adapterStub = {
+        transformLaunchConfig: vi.fn().mockRejectedValue(new Error('C/C++ compile failed: syntax error')),
+        consumeLastToolchainValidation: vi.fn().mockReturnValue(undefined),
+        resolveExecutablePath: vi.fn(),
+        buildAdapterCommand: vi.fn(),
+        dispose: vi.fn().mockResolvedValue(undefined)
+      };
+      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+
+      await expect(
+        (operations as any).startProxyManager(mockSession, 'main.cpp')
+      ).rejects.toThrow('C/C++ compile failed: syntax error');
+      expect(mockSessionStore.update).toHaveBeenCalledWith(
+        mockSession.id,
+        expect.objectContaining({ toolchainValidation: undefined })
+      );
     });
 
     it('throws when log directory cannot be verified after creation', async () => {
@@ -169,8 +252,10 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     it('wraps unresolved executable errors for non-python languages', async () => {
       mockSession.language = 'javascript';
       const adapterStub = {
+        transformLaunchConfig: vi.fn(async (config: unknown) => config),
         resolveExecutablePath: vi.fn().mockRejectedValue(new Error('node missing')),
-        buildAdapterCommand: vi.fn()
+        buildAdapterCommand: vi.fn(),
+        dispose: vi.fn().mockResolvedValue(undefined)
       };
       mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
@@ -1536,6 +1621,67 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       (operations as unknown as { attachPauseStopTimeoutMs: number }).attachPauseStopTimeoutMs = 50;
     });
 
+    it('returns init progress and proxy log path when proxy initialization fails (issue #551)', async () => {
+      const initProgress = {
+        transportConnected: true,
+        pendingCommand: 'initialize'
+      };
+      const initError = Object.assign(
+        new Error('Debug proxy initialization did not complete within 30s'),
+        { initProgress }
+      );
+      mockSession.proxyManager = undefined;
+      mockSession.logDir = path.join('/tmp', 'logs', 'test-session', 'run-123');
+      vi.spyOn(operations as any, 'startProxyManager').mockRejectedValue(initError);
+      // Teardown (which only clears the proxy handle) must still run on the
+      // failure path; the diagnostics come from the error and logDir.
+      const stopSpy = vi.spyOn(operations as any, 'stopProxyPreservingSession')
+        .mockImplementation(async (session: typeof mockSession) => {
+          session.proxyManager = undefined;
+        });
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 45999,
+        host: '127.0.0.1'
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.data).toEqual({
+        initProgress,
+        proxyLogPath: path.join('/tmp', 'logs', 'test-session', 'run-123', 'proxy-test-session.log')
+      });
+      expect(stopSpy).toHaveBeenCalled();
+    });
+
+    it('returns an available proxy log path even when init progress is absent', async () => {
+      mockSession.proxyManager = undefined;
+      mockSession.logDir = path.join('/tmp', 'logs', 'test-session', 'run-456');
+      vi.spyOn(operations as any, 'startProxyManager').mockRejectedValue(new Error('adapter exited'));
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 45999,
+        host: '127.0.0.1'
+      });
+
+      expect(result.data).toEqual({
+        proxyLogPath: path.join('/tmp', 'logs', 'test-session', 'run-456', 'proxy-test-session.log')
+      });
+    });
+
+    it('does not invent structured diagnostics for an ordinary pre-log failure', async () => {
+      mockSession.proxyManager = undefined;
+      mockSession.logDir = undefined;
+      vi.spyOn(operations as any, 'startProxyManager').mockRejectedValue(new Error('bad attach config'));
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 45999,
+        host: '127.0.0.1'
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.data).toBeUndefined();
+    });
+
     it('warns and proceeds when the registry lacks getFactoryMetadata (attach gate self-disabled)', async () => {
       delete (mockDependencies.adapterRegistry as Record<string, unknown>).getFactoryMetadata;
       mockProxyManager.sendDapRequest.mockImplementation(async (command: string) =>
@@ -2217,7 +2363,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(mockAdapter.transformLaunchConfig).toHaveBeenCalled();
     });
 
-    it('should handle transformAttachConfig errors gracefully', async () => {
+    it('should propagate transformAttachConfig errors without starting an untransformed attach', async () => {
       const mockAdapter = {
         supportsAttach: vi.fn().mockReturnValue(true),
         transformAttachConfig: vi.fn().mockImplementation(() => {
@@ -2239,10 +2385,66 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       );
 
       expect(result.success).toBe(false);
+      expect(result.error).toContain('Attach config transformation failed');
+      expect(mockAdapter.resolveExecutablePath).not.toHaveBeenCalled();
       // Should have logged the warning about transformAttachConfig failure
       expect(mockLogger.warn).toHaveBeenCalledWith(
         expect.stringContaining('transformAttachConfig failed')
       );
+    });
+
+    it('should propagate transformLaunchConfig errors without starting an untransformed launch', async () => {
+      const mockAdapter = {
+        transformLaunchConfig: vi.fn().mockRejectedValue(new Error('C/C++ compile failed: denied')),
+        resolveExecutablePath: vi.fn().mockRejectedValue(new Error('must not run')),
+        dispose: vi.fn().mockResolvedValue(undefined)
+      };
+
+      mockDependencies.adapterRegistry.create.mockResolvedValue(mockAdapter);
+      mockSession.language = 'cpp';
+      mockSession.state = SessionState.CREATED;
+
+      const result = await operations.startDebugging(
+        'test-session',
+        '/work/main.cpp',
+        [],
+        { forceRebuild: true }
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('C/C++ compile failed: denied');
+      expect(mockAdapter.resolveExecutablePath).not.toHaveBeenCalled();
+      expect(mockAdapter.dispose).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns the structured MSVC response when the transform rejects under behavior=error', async () => {
+      const validation = {
+        compatible: false,
+        behavior: 'error',
+        toolchain: 'msvc',
+        message: 'MSVC binaries are not supported by CodeLLDB'
+      };
+      const mockAdapter = {
+        transformLaunchConfig: vi.fn().mockRejectedValue(new Error(validation.message)),
+        consumeLastToolchainValidation: vi.fn().mockReturnValue(validation),
+        resolveExecutablePath: vi.fn().mockRejectedValue(new Error('must not run')),
+        dispose: vi.fn().mockResolvedValue(undefined)
+      };
+
+      mockDependencies.adapterRegistry.create.mockResolvedValue(mockAdapter);
+      mockSession.language = 'cpp';
+      mockSession.state = SessionState.CREATED;
+
+      const result = await operations.startDebugging('test-session', '/work/msvc.exe', []);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('MSVC_TOOLCHAIN_DETECTED');
+      expect(result.canContinue).toBe(false);
+      expect(result.data).toEqual(
+        expect.objectContaining({ toolchainValidation: validation, message: validation.message })
+      );
+      expect(mockSession.state).toBe(SessionState.CREATED);
+      expect(mockAdapter.dispose).toHaveBeenCalledTimes(1);
     });
   });
 
