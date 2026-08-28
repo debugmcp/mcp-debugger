@@ -20,14 +20,14 @@ import {
 // compares the actual entry script, not dap-proxy-core's own module)
 const executionMode = detectExecutionMode(process, import.meta.url);
 
-console.error('[Proxy Worker] Starting DAP Proxy worker process...');
-console.error(`[Proxy Worker] Detection results: directRun=${executionMode.isDirectRun}, hasIPC=${executionMode.hasIPC}, workerEnv=${executionMode.isWorkerEnv}`);
-console.error('[Proxy Worker] Node.js version:', process.version);
-console.error(`[Proxy Worker] Current working directory: ${process.cwd()}`);
+console.error('[INFO] [Proxy Worker] Starting DAP Proxy worker process...');
+console.error(`[INFO] [Proxy Worker] Detection results: directRun=${executionMode.isDirectRun}, hasIPC=${executionMode.hasIPC}, workerEnv=${executionMode.isWorkerEnv}`);
+console.error('[INFO] [Proxy Worker] Node.js version:', process.version);
+console.error(`[INFO] [Proxy Worker] Current working directory: ${process.cwd()}`);
 
 // Auto-execute if running as worker (NO test environment checks!)
 if (shouldAutoExecute(executionMode)) {
-  console.error('[Proxy Worker] Auto-executing proxy runner...');
+  console.error('[INFO] [Proxy Worker] Auto-executing proxy runner...');
   
   // Create dependencies and logger
   const dependencies = createProductionDependencies();
@@ -48,7 +48,7 @@ if (shouldAutoExecute(executionMode)) {
     process.exit(1);
   });
 
-  console.error('[Proxy Worker] Ready to receive commands.');
+  console.error('[INFO] [Proxy Worker] Ready to receive commands.');
 } else {
-  console.error('[Proxy Worker] Not auto-executing (not running as worker).');
+  console.error('[INFO] [Proxy Worker] Not auto-executing (not running as worker).');
 }

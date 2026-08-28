@@ -702,6 +702,64 @@ describe('ProxyManager.start', () => {
     }
   });
 
+  it('maps worker stderr prefixes to logger levels and keeps captured lines unchanged (issue #534)', async () => {
+    await completeStart();
+    (logger.debug as ReturnType<typeof vi.fn>).mockClear();
+    (logger.info as ReturnType<typeof vi.fn>).mockClear();
+    (logger.warn as ReturnType<typeof vi.fn>).mockClear();
+    (logger.error as ReturnType<typeof vi.fn>).mockClear();
+    (proxyManager as unknown as { isInitialized: boolean }).isInitialized = false;
+
+    const stderrEmitter = fakeProcess.stderr as unknown as EventEmitter;
+    stderrEmitter.emit('data', Buffer.from([
+      '[DEBUG] dispatching request',
+      '  cmd: dap',
+      '}',
+      '[INFO] worker ready',
+      '[WARN] retrying request',
+      '  attempt: 2',
+      '[WARNING] compatibility warning',
+      '[ERROR] adapter failed',
+      'uncaught worker crash',
+      '  at worker.js:10:2',
+      '(node:1234) WARNING: Exited the environment with code 0',
+      '    at exit (node:internal/process:1:1)',
+      '',
+    ].join('\n')));
+
+    expect(logger.debug).toHaveBeenCalledWith('[ProxyManager STDERR] [DEBUG] dispatching request');
+    expect(logger.debug).toHaveBeenCalledWith('[ProxyManager STDERR]   cmd: dap');
+    expect(logger.debug).toHaveBeenCalledWith('[ProxyManager STDERR] }');
+    expect(logger.info).toHaveBeenCalledWith('[ProxyManager STDERR] [INFO] worker ready');
+    expect(logger.warn).toHaveBeenCalledWith('[ProxyManager STDERR] [WARN] retrying request');
+    expect(logger.warn).toHaveBeenCalledWith('[ProxyManager STDERR]   attempt: 2');
+    expect(logger.warn).toHaveBeenCalledWith('[ProxyManager STDERR] [WARNING] compatibility warning');
+    expect(logger.error).toHaveBeenCalledWith('[ProxyManager STDERR] [ERROR] adapter failed');
+    expect(logger.error).toHaveBeenCalledWith('[ProxyManager STDERR] uncaught worker crash');
+    expect(logger.error).toHaveBeenCalledWith('[ProxyManager STDERR]   at worker.js:10:2');
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[ProxyManager STDERR] (node:1234) WARNING: Exited the environment with code 0'
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[ProxyManager STDERR]     at exit (node:internal/process:1:1)'
+    );
+
+    expect((proxyManager as unknown as { stderrBuffer: string[] }).stderrBuffer).toEqual([
+      '[DEBUG] dispatching request',
+      '  cmd: dap',
+      '}',
+      '[INFO] worker ready',
+      '[WARN] retrying request',
+      '  attempt: 2',
+      '[WARNING] compatibility warning',
+      '[ERROR] adapter failed',
+      'uncaught worker crash',
+      '  at worker.js:10:2',
+      '(node:1234) WARNING: Exited the environment with code 0',
+      '    at exit (node:internal/process:1:1)',
+    ]);
+  });
+
   it('caps stderr embedded in init-exit errors and never leaks secrets (issue #146)', async () => {
     const stderrEmitter = fakeProcess.stderr as unknown as EventEmitter;
     fakeProcess.sendCommand.mockImplementation((cmd: any) => {

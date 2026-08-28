@@ -131,6 +131,42 @@ interface RemovableEmitter {
   removeListener(event: string, listener: (...args: any[]) => void): unknown;
 }
 
+type WorkerStderrLevel = 'debug' | 'info' | 'warn' | 'error';
+
+interface WorkerStderrLogState {
+  level: WorkerStderrLevel;
+}
+
+function classifyWorkerStderrLine(line: string, state: WorkerStderrLogState): WorkerStderrLevel {
+  const prefix = /^\s*\[(DEBUG|INFO|WARN|WARNING|ERROR)\](?:\s|$)/.exec(line);
+  if (prefix) {
+    const explicit = prefix[1];
+    state.level = explicit === 'DEBUG'
+      ? 'debug'
+      : explicit === 'INFO'
+        ? 'info'
+        : explicit === 'WARN' || explicit === 'WARNING'
+          ? 'warn'
+          : 'error';
+    return state.level;
+  }
+
+  // Node's own warning format self-identifies without the worker logger's
+  // bracket prefix. Treat it as explicit warning context so its stack stays
+  // out of the error channel.
+  if (/^\(node:\d+\)\s+(?:\[[^\]]+\]\s+)?warning:/i.test(line)) {
+    state.level = 'warn';
+    return state.level;
+  }
+
+  // Pretty-printed objects and stack traces arrive as indented follow-up
+  // lines. Keep them with the preceding diagnostic instead of promoting
+  // every fragment to error. An unprefixed top-level line is a fresh error.
+  if (/^\s/.test(line) || /^[}\])]+[,;]?$/.test(line.trim())) return state.level;
+  state.level = 'error';
+  return state.level;
+}
+
 const DEFAULT_RUNTIME_ENVIRONMENT: ProxyRuntimeEnvironment = {
   moduleUrl: import.meta.url,
   cwd: () => process.cwd()
@@ -966,13 +1002,14 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     const stderr = this.proxyProcess.stderr as unknown as RemovableEmitter | null;
     if (stderr) {
       const stderrLineBuffer = new LineBuffer();
+      const stderrLogState: WorkerStderrLogState = { level: 'error' };
       track(stderr, 'data', (data: Buffer | string) => {
-        this.recordStderrLines(stderrLineBuffer.append(data.toString()));
+        this.recordStderrLines(stderrLineBuffer.append(data.toString()), stderrLogState);
       });
       // Flush the trailing partial line only once the stream itself is done.
       // Flushing on process 'exit' would be wrong: the pipe can still deliver
       // the rest of a split line afterwards, re-creating the straddle leak.
-      const flushStderr = () => this.recordStderrLines(stderrLineBuffer.flush());
+      const flushStderr = () => this.recordStderrLines(stderrLineBuffer.flush(), stderrLogState);
       track(stderr, 'end', flushStderr);
       track(stderr, 'close', flushStderr);
     }
@@ -1033,10 +1070,17 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
    * the process 'exit' event snapshotted the buffer (the pipe drains last),
    * so late lines are also appended to the captured exit details.
    */
-  private recordStderrLines(lines: string[]): void {
-    const sanitized = sanitizeStderr(lines.filter(line => line.trim().length > 0));
-    for (const line of sanitized) {
-      this.logger.error(`[ProxyManager STDERR] ${line}`);
+  private recordStderrLines(lines: string[], logState: WorkerStderrLogState): void {
+    const filtered = lines.filter(line => line.trim().length > 0);
+    const sanitized = sanitizeStderr(filtered);
+    for (let index = 0; index < sanitized.length; index++) {
+      const line = sanitized[index];
+      const level = classifyWorkerStderrLine(filtered[index], logState);
+      const message = `[ProxyManager STDERR] ${line}`;
+      if (level === 'debug') this.logger.debug(message);
+      else if (level === 'info') this.logger.info(message);
+      else if (level === 'warn') this.logger.warn(message);
+      else this.logger.error(message);
       // Capture sanitized stderr for error reporting during initialization.
       // Bounded so a chatty proxy cannot grow the buffer (and everything it
       // gets copied into) without limit.
