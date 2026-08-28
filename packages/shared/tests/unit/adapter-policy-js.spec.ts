@@ -116,6 +116,91 @@ describe('JsDebugAdapterPolicy', () => {
       const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars, true);
       expect(result).toHaveLength(2);
     });
+
+    it('falls through an empty Local scope to Module on the same frame (issue #548)', () => {
+      const scopes: Record<number, DebugProtocol.Scope[]> = {
+        1: [
+          { name: 'Local', variablesReference: 100, expensive: false },
+          { name: 'Module', variablesReference: 200, expensive: false },
+          { name: 'Global', variablesReference: 300, expensive: true },
+        ],
+      };
+      const vars: Record<number, DebugProtocol.Variable[]> = {
+        100: [],
+        200: [{ name: 'counter', value: '46', variablesReference: 0 }],
+        300: [{ name: 'process', value: 'Process', variablesReference: 1 }],
+      };
+
+      const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
+
+      expect(result.map(variable => variable.name)).toEqual(['counter']);
+    });
+
+    it('prefers Closure over Global when Local is empty (issue #548)', () => {
+      const scopes: Record<number, DebugProtocol.Scope[]> = {
+        1: [
+          { name: 'Local', variablesReference: 100, expensive: false },
+          { name: 'Global', variablesReference: 300, expensive: true },
+          { name: 'Closure (replay)', variablesReference: 200, expensive: false },
+        ],
+      };
+      const vars: Record<number, DebugProtocol.Variable[]> = {
+        100: [],
+        200: [{ name: 'captured', value: '7', variablesReference: 0 }],
+        300: [{ name: 'process', value: 'Process', variablesReference: 1 }],
+      };
+
+      const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
+
+      expect(result.map(variable => variable.name)).toEqual(['captured']);
+    });
+
+    it('keeps a non-empty Local scope ahead of sibling scopes', () => {
+      const scopes: Record<number, DebugProtocol.Scope[]> = {
+        1: [
+          { name: 'Local', variablesReference: 100, expensive: false },
+          { name: 'Module', variablesReference: 200, expensive: false },
+        ],
+      };
+      const vars: Record<number, DebugProtocol.Variable[]> = {
+        100: [{ name: 'localValue', value: '1', variablesReference: 0 }],
+        200: [{ name: 'moduleValue', value: '2', variablesReference: 0 }],
+      };
+
+      const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
+
+      expect(result.map(variable => variable.name)).toEqual(['localValue']);
+    });
+
+    it('filters V8 internals before falling through to Global', () => {
+      const scopes: Record<number, DebugProtocol.Scope[]> = {
+        1: [
+          { name: 'Local', variablesReference: 100, expensive: false },
+          { name: 'Global', variablesReference: 200, expensive: true },
+        ],
+      };
+      const vars: Record<number, DebugProtocol.Variable[]> = {
+        100: [{ name: '[[Scopes]]', value: 'internal', variablesReference: 1 }],
+        200: [{ name: 'globalValue', value: '9', variablesReference: 0 }],
+      };
+
+      const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
+
+      expect(result.map(variable => variable.name)).toEqual(['globalValue']);
+    });
+
+    it('returns no locals when every useful same-frame scope is empty', () => {
+      const scopes: Record<number, DebugProtocol.Scope[]> = {
+        1: [
+          { name: 'Local', variablesReference: 100, expensive: false },
+          { name: 'Closure', variablesReference: 200, expensive: false },
+          { name: 'Module', variablesReference: 300, expensive: false },
+          { name: 'Global', variablesReference: 400, expensive: true },
+        ],
+      };
+
+      expect(JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, {})).toEqual([]);
+    });
   });
 
   describe('command queueing', () => {

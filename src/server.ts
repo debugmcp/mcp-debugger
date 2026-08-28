@@ -2134,6 +2134,7 @@ export class DebugMcpServer {
                   success: true,
                   stackFrames: stackTrace.frames,
                   count: stackTrace.frames.length,
+                  ...(typeof stackTrace.threadId === 'number' ? { threadId: stackTrace.threadId } : {}),
                   includeInternals,
                   stopReason: lastStop?.reason,
                   lastStop

@@ -188,6 +188,26 @@ describe('RubyAdapterPolicy hooks', () => {
     expect(locals).toEqual([{ name: 'counter', value: '3', type: 'Integer' }]);
   });
 
+  it('filters rdbg pseudo-variables unless includeSpecial is requested (issue #549)', () => {
+    const frames = [{ id: 1, name: '[C] Kernel#sleep', file: 'app.rb', line: 10 }];
+    const scopes: Record<number, DebugProtocol.Scope[]> = {
+      1: [
+        { name: 'Local variables', presentationHint: 'locals', variablesReference: 7, expensive: false }
+      ]
+    };
+    const variables = {
+      7: [
+        { name: '%self', value: 'main', type: 'Object' },
+        { name: 'counter', value: '3', type: 'Integer' }
+      ]
+    };
+
+    expect(RubyAdapterPolicy.extractLocalVariables!(frames, scopes, variables))
+      .toEqual([{ name: 'counter', value: '3', type: 'Integer' }]);
+    expect(RubyAdapterPolicy.extractLocalVariables!(frames, scopes, variables, true))
+      .toEqual(variables[7]);
+  });
+
   it('filters Ruby-internal and gem frames', () => {
     const frames = [
       { id: 1, name: 'block in main', file: '/workspace/app.rb', line: 5 },
