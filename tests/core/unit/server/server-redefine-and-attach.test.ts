@@ -431,12 +431,13 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
     });
   });
 
-  describe('attach warning join (issue #450)', () => {
-    it('preserves structured diagnostics on a failed attach (issue #551)', async () => {
-      const diagnosticData = {
-        initProgress: { transportConnected: true, pendingRequest: 'initialize' },
-        proxyLogPath: '/tmp/logs/session/proxy-session.log'
-      };
+  describe('attach failure diagnostics (issue #551)', () => {
+    const diagnosticData = {
+      initProgress: { transportConnected: true, pendingCommand: 'initialize' },
+      proxyLogPath: '/tmp/logs/session/proxy-session.log'
+    };
+
+    it('preserves structured diagnostics on a failed attach_to_process', async () => {
       mockSessionManager.attachToProcess.mockResolvedValue({
         success: false,
         state: 'error',
@@ -458,6 +459,71 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
       expect(payload.data).toEqual(diagnosticData);
     });
 
+    it('forwards the same diagnostics from a create_debug_session inline attach', async () => {
+      const sessionInfo: DebugSessionInfo = {
+        id: 'inline-attach-session',
+        name: 'inline',
+        language: 'python' as DebugLanguage,
+        state: 'created' as SessionState,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+      mockSessionManager.createSession.mockResolvedValue(sessionInfo);
+      mockSessionManager.attachToProcess.mockResolvedValue({
+        success: false,
+        state: 'error',
+        error: 'Failed to attach: initialize stalled',
+        data: diagnosticData
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'create_debug_session',
+          arguments: { language: 'python', port: 45999 }
+        }
+      });
+
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload.success).toBe(false);
+      expect(payload.sessionId).toBe('inline-attach-session');
+      expect(payload.message).toContain('initialize stalled');
+      expect(payload.data).toEqual(diagnosticData);
+      expect(payload.warning).toBeUndefined();
+    });
+
+    it('surfaces data.warning at the top level of a successful create_debug_session inline attach', async () => {
+      const sessionInfo: DebugSessionInfo = {
+        id: 'inline-attach-session',
+        name: 'inline',
+        language: 'python' as DebugLanguage,
+        state: 'created' as SessionState,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+      mockSessionManager.createSession.mockResolvedValue(sessionInfo);
+      mockSessionManager.attachToProcess.mockResolvedValue({
+        success: true,
+        state: 'paused',
+        data: { message: 'Attached', warning: 'adapterConfig key(s) were ignored: remoteRoot' }
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'create_debug_session',
+          arguments: { language: 'python', port: 45999 }
+        }
+      });
+
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload.success).toBe(true);
+      expect(payload.warning).toContain('remoteRoot');
+      expect(payload.data.warning).toContain('remoteRoot');
+    });
+  });
+
+  describe('attach warning join (issue #450)', () => {
     it('surfaces data.warning at the top level of the attach_to_process response', async () => {
       mockSessionManager.attachToProcess.mockResolvedValue({
         success: true,

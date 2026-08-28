@@ -24,7 +24,7 @@ import { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';
 import { ProxyConfig } from '../proxy/proxy-config.js';
 import { MIRROR_EXPOSE_COMMAND, MIRROR_UNEXPOSE_COMMAND } from '../proxy/dap-proxy-interfaces.js';
-import { ErrorMessages } from '../utils/error-messages.js';
+import { ErrorMessages, ProxyInitProgress } from '../utils/error-messages.js';
 import { checkLaunchToolchain } from '../utils/language-availability.js';
 import { didYouMean } from '../utils/did-you-mean.js';
 import { resolveStatement } from '../utils/breakpoint-resolver.js';
@@ -972,8 +972,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       };
     } catch (error) {
       const diagnosticData = this.collectProxyFailureDiagnostics(session, error);
-      const initProgress = diagnosticData.initProgress as Record<string, unknown> | undefined;
-      const proxyLogPath = diagnosticData.proxyLogPath as string | undefined;
+      const { initProgress, proxyLogPath } = diagnosticData;
 
       // Attempt to capture proxy log tail for debugging initialization failures
       let proxyLogTail: string | undefined;
@@ -3045,9 +3044,6 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       };
     } catch (error) {
       this.logger.error(`[SessionManager] Failed to attach to process for session ${sessionId}:`, error);
-      // Capture initialization diagnostics before teardown, which can clear
-      // the proxy and its per-run log directory (issue #551).
-      const diagnosticData = this.collectProxyFailureDiagnostics(session, error);
       // Never leave a live proxy chain behind a failed attach — e.g.
       // ProxyManager.start()'s init timeout rejects after the worker was
       // spawned (issue #337). Idempotent with the verify-failure teardown
@@ -3055,6 +3051,11 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       await this.stopProxyPreservingSession(session);
       this._updateSessionState(session, SessionState.ERROR);
 
+      // Surface the same structured diagnostics the launch path returns
+      // (issue #551). Teardown only clears the proxy handle; logDir and the
+      // error's initProgress survive it, so this reads after the teardown
+      // and can never keep it from running.
+      const diagnosticData = this.collectProxyFailureDiagnostics(session, error);
       const message = error instanceof Error ? error.message : String(error);
       return {
         success: false,
@@ -3066,16 +3067,16 @@ export abstract class SessionManagerOperations extends SessionManagerData {
   }
 
   /**
-   * Collect display-safe pointers to proxy initialization diagnostics while
-   * the session still owns its current proxy run.
+   * Pointers to proxy initialization diagnostics for a failed launch/attach
+   * (issue #493 / #551): which init stage stalled (from the timeout error) and
+   * where the proxy log for the session's current run lives.
    */
   private collectProxyFailureDiagnostics(
     session: ManagedSession,
     error: unknown
-  ): Record<string, unknown> {
-    const diagnostics: Record<string, unknown> = {};
-    const initProgress = (error as { initProgress?: Record<string, unknown> } | null)
-      ?.initProgress;
+  ): { initProgress?: ProxyInitProgress; proxyLogPath?: string } {
+    const diagnostics: { initProgress?: ProxyInitProgress; proxyLogPath?: string } = {};
+    const initProgress = (error as { initProgress?: ProxyInitProgress } | null)?.initProgress;
 
     if (initProgress) {
       diagnostics.initProgress = initProgress;

@@ -1539,7 +1539,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     it('returns init progress and proxy log path when proxy initialization fails (issue #551)', async () => {
       const initProgress = {
         transportConnected: true,
-        pendingRequest: 'initialize'
+        pendingCommand: 'initialize'
       };
       const initError = Object.assign(
         new Error('Debug proxy initialization did not complete within 30s'),
@@ -1548,11 +1548,10 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockSession.proxyManager = undefined;
       mockSession.logDir = path.join('/tmp', 'logs', 'test-session', 'run-123');
       vi.spyOn(operations as any, 'startProxyManager').mockRejectedValue(initError);
+      // Teardown (which only clears the proxy handle) must still run on the
+      // failure path; the diagnostics come from the error and logDir.
       const stopSpy = vi.spyOn(operations as any, 'stopProxyPreservingSession')
         .mockImplementation(async (session: typeof mockSession) => {
-          // Diagnostics must be captured before teardown can clear runtime
-          // fields from the session.
-          session.logDir = undefined;
           session.proxyManager = undefined;
         });
 
