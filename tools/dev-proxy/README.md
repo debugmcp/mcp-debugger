@@ -81,9 +81,9 @@ Once connected, three additional tools are available:
 
 | Tool | Description |
 |------|-------------|
-| `dev_restart_debugger` | Kill and restart the backend. Pass `rebuild: true` to build first. |
-| `dev_rebuild_and_restart` | Run `npm run build` then restart the backend. |
-| `dev_server_status` | Check backend state, PID, uptime, transport, project root, and port. |
+| `dev_restart_debugger` | Kill and restart the backend. Pass `rebuild: true` to build first, and optionally replace backend environment overrides with `env`. |
+| `dev_rebuild_and_restart` | Run `npm run build` then restart the backend; also accepts replacement backend `env` overrides. |
+| `dev_server_status` | Check backend state, PID, uptime, transport, project root, port, and display-safe environment overrides. |
 
 All regular mcp-debugger tools (create_debug_session, set_breakpoint, etc.) are forwarded transparently to the backend.
 
@@ -97,11 +97,33 @@ Environment variables (all optional):
 | `DEV_PROXY_BUILD_CMD` | `npm run build` | Build command to run |
 | `DEV_PROXY_ROOT` | Auto-detected | Project root directory |
 | `DEV_PROXY_BACKEND_TRANSPORT` | `http` | Backend transport: `http` (default), `sse` (legacy/deprecated), or `stdio` |
+| `DEV_PROXY_BACKEND_CMD` | Source CLI | Custom backend command, including `docker run ...` commands |
+| `DEBUG_MCP_NO_REDACT` | unset | Set on the stable proxy process to `1` or `true` to disable status-value redaction |
+
+### Backend environment overrides
+
+Both restart tools accept an optional `env` object for diagnostic settings such as `DAP_TRACE=1`
+or `DEBUG_MCP_LOG_LEVEL=debug`. Supplying `env` replaces the persistent override set, omitting it
+preserves the current set, and passing `{}` clears it. Overrides are merged into every subsequent
+backend spawn but are not passed to the build command. Proxy-controlled values required for clean
+shutdown take precedence.
+
+`dev_server_status` returns the active set as `backendEnvOverrides`. Display values are passed
+through the shared sensitive-name and credential-shape redactors, with details in
+`backendEnvRedaction`; the actual values passed to the backend are unchanged. If the shared package
+has not been built yet, status fails closed and masks every override. To inspect raw values, start
+the stable proxy itself with `DEBUG_MCP_NO_REDACT=1`; setting that variable only in the backend
+override map does not disable supervisor-side status redaction.
+
+For a custom `docker run` backend, the proxy injects a reserved ownership label and removes matching
+containers during stop and restart. This gives stdio containers, which publish no port, the same
+cleanup guarantee as HTTP and SSE backends.
 
 ## Workflow
 
 1. Make code changes to mcp-debugger
-2. Call `dev_rebuild_and_restart` (or `dev_restart_debugger` with `rebuild: true`)
+2. Call `dev_rebuild_and_restart` (or `dev_restart_debugger` with `rebuild: true`), optionally with
+   replacement diagnostic `env` overrides
 3. Continue using debug tools — they now run the updated code
 
 If the backend crashes:

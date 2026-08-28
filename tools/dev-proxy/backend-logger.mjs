@@ -23,12 +23,20 @@
 let LineBuffer;
 let sanitizeStderr;
 let sanitizeStderrTail;
+let sanitizeEnvForLogging;
+let redactSecretsInString;
 
 /** False when @debugmcp/shared dist was unavailable and fallbacks are active. */
 export let sharedUtilsLoaded = true;
 
 try {
-  ({ LineBuffer, sanitizeStderr, sanitizeStderrTail } = await import('@debugmcp/shared'));
+  ({
+    LineBuffer,
+    sanitizeStderr,
+    sanitizeStderrTail,
+    sanitizeEnvForLogging,
+    redactSecretsInString,
+  } = await import('@debugmcp/shared'));
 } catch {
   // Shared dist not built yet — degrade to line buffering without redaction
   // so the proxy can still bootstrap. dev-proxy.mjs logs a warning when it
@@ -67,6 +75,85 @@ try {
 }
 
 export { sanitizeStderrTail };
+
+function setOwnProperty(target, key, value) {
+  Object.defineProperty(target, key, {
+    value,
+    enumerable: true,
+    writable: true,
+    configurable: true,
+  });
+}
+
+/**
+ * Whether the stable proxy process explicitly opted out of display redaction.
+ * Backend overrides are intentionally not consulted: allowing a restarted
+ * child to disable supervisor-side masking would expose secrets in status.
+ *
+ * @param {NodeJS.ProcessEnv | Record<string, string | undefined>} env
+ */
+export function isProxyRedactionDisabled(env = process.env) {
+  const value = env.DEBUG_MCP_NO_REDACT?.trim().toLowerCase();
+  return value === '1' || value === 'true';
+}
+
+/**
+ * Make backend environment overrides safe to return from dev_server_status.
+ * The real override map is never mutated. On an unbuilt checkout, where the
+ * shared sanitizer cannot be loaded, fail closed by masking every value.
+ *
+ * @param {Record<string, string>} env
+ * @param {object} [opts]
+ * @param {boolean} [opts.redactionDisabled]
+ * @param {boolean} [opts.sharedAvailable] Injectable for bootstrap tests.
+ */
+export function sanitizeBackendEnvOverrides(env, opts = {}) {
+  const {
+    redactionDisabled = isProxyRedactionDisabled(),
+    sharedAvailable = sharedUtilsLoaded,
+  } = opts;
+  const values = {};
+  const redactedVariables = [];
+
+  if (redactionDisabled) {
+    for (const [key, value] of Object.entries(env)) {
+      setOwnProperty(values, key, value);
+    }
+    return {
+      values,
+      redaction: { enabled: false, redactedVariables, mode: 'disabled' },
+    };
+  }
+
+  if (!sharedAvailable) {
+    for (const key of Object.keys(env)) {
+      setOwnProperty(values, key, '[REDACTED]');
+      redactedVariables.push(key);
+    }
+    redactedVariables.sort();
+    return {
+      values,
+      redaction: { enabled: true, redactedVariables, mode: 'fail-closed' },
+    };
+  }
+
+  const nameSanitized = sanitizeEnvForLogging(env);
+  for (const [key, originalValue] of Object.entries(env)) {
+    const valueAfterNamePass = nameSanitized[key];
+    const displayValue =
+      valueAfterNamePass === originalValue
+        ? redactSecretsInString(originalValue).value
+        : valueAfterNamePass;
+    setOwnProperty(values, key, displayValue);
+    if (displayValue !== originalValue) redactedVariables.push(key);
+  }
+  redactedVariables.sort();
+
+  return {
+    values,
+    redaction: { enabled: true, redactedVariables, mode: 'shared' },
+  };
+}
 
 /**
  * Create a logger for one backend output stream. Each logger owns its own

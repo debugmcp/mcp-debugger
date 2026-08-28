@@ -35,10 +35,27 @@ import {
   UnsubscribeRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { spawn, execSync } from 'child_process';
+import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import path from 'path';
-import { installShutdownHandlers, killChildGracefully } from './shutdown.mjs';
-import { createBackendLogger, sanitizeStderrTail, sharedUtilsLoaded } from './backend-logger.mjs';
+import {
+  installShutdownHandlers,
+  isIntentionalTransportAbort,
+  killChildGracefully,
+} from './shutdown.mjs';
+import {
+  createBackendLogger,
+  sanitizeBackendEnvOverrides,
+  sanitizeStderrTail,
+  sharedUtilsLoaded,
+} from './backend-logger.mjs';
+import {
+  addDockerOwnershipLabel,
+  isDockerRunInvocation,
+  removeOwnedDockerContainers,
+} from './docker-backend.mjs';
+import { buildBackendEnvironment, updateBackendEnvOverrides } from './backend-env.mjs';
+import { LifecycleQueue } from './lifecycle-queue.mjs';
 import { isBackendUnavailableError, dedupeMcpErrorPrefix, assertBackendAvailable } from './tool-error.mjs';
 
 // ---------------------------------------------------------------------------
@@ -140,42 +157,75 @@ class BackendManager {
     this.startedAt = null;
     /** @type {'http' | 'sse' | 'stdio'} */
     this.backendTransport = BACKEND_TRANSPORT;
+    /** @type {Record<string, string>} */
+    this.backendEnvOverrides = {};
+    /** Per-transport intentional-close state; handlers capture their own generation. */
+    this.transportCloseState = null;
+    /** Child exits requested by stop() are normal, not crashes. */
+    this.expectedChildExit = false;
+    /** Initial start, restart tools, and shutdown must never overlap. */
+    this.lifecycleQueue = new LifecycleQueue();
+    /** Unique owner for Docker containers started by this stable proxy process. */
+    this.dockerOwnerId = `${process.pid}-${randomUUID()}`;
   }
 
   // ---- Command computation ------------------------------------------------
 
   _computeBackendCommand() {
+    let invocation;
     if (BACKEND_CMD) {
-      return parseCommandString(BACKEND_CMD);
-    }
-
-    const entryPoint = path.join(PROJECT_ROOT, 'dist', 'index.js');
-
-    if (this.backendTransport === 'stdio') {
-      return { command: process.execPath, args: [entryPoint, 'stdio'] };
-    } else if (this.backendTransport === 'sse') {
-      return { command: process.execPath, args: [entryPoint, 'sse', '--port', String(BACKEND_PORT)] };
+      invocation = parseCommandString(BACKEND_CMD);
     } else {
-      // http (default): Streamable HTTP transport
-      return { command: process.execPath, args: [entryPoint, 'http', '--port', String(BACKEND_PORT)] };
+      const entryPoint = path.join(PROJECT_ROOT, 'dist', 'index.js');
+
+      if (this.backendTransport === 'stdio') {
+        invocation = { command: process.execPath, args: [entryPoint, 'stdio'] };
+      } else if (this.backendTransport === 'sse') {
+        invocation = { command: process.execPath, args: [entryPoint, 'sse', '--port', String(BACKEND_PORT)] };
+      } else {
+        // http (default): Streamable HTTP transport
+        invocation = { command: process.execPath, args: [entryPoint, 'http', '--port', String(BACKEND_PORT)] };
+      }
     }
+
+    return addDockerOwnershipLabel(invocation, this.dockerOwnerId);
+  }
+
+  _buildBackendEnv({ forceStdinClose = false } = {}) {
+    return buildBackendEnvironment(
+      process.env,
+      this.backendEnvOverrides,
+      forceStdinClose ? { MCP_EXIT_ON_STDIN_CLOSE: '1' } : {}
+    );
   }
 
   // ---- Public API ----------------------------------------------------------
 
-  async start() {
+  start() {
+    return this.lifecycleQueue.run(() => this._start());
+  }
+
+  async _start() {
     if (this.state === 'running' || this.state === 'starting') {
       log(`Backend already ${this.state}, skipping start`);
       return;
     }
 
     this.state = 'starting';
+    this.expectedChildExit = false;
     const { command, args } = this._computeBackendCommand();
 
     if (this.backendTransport === 'stdio') {
       // Stdio mode: StdioClientTransport spawns the child and owns its stdin/stdout
       log(`Starting backend in stdio mode: ${command} ${args.join(' ')}`);
-      await this._connectClient(command, args);
+      try {
+        await this._connectClient(command, args);
+      } catch (err) {
+        await this._killDockerContainer();
+        this.state = 'stopped';
+        this.startedAt = null;
+        throw err;
+      }
     } else {
       // HTTP / SSE mode: we spawn the child manually, wait for health, then connect
       log(`Starting backend (${this.backendTransport}) on port ${BACKEND_PORT}...`);
@@ -189,20 +239,21 @@ class BackendManager {
       this.child = spawn(command, args, {
         cwd: PROJECT_ROOT,
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, MCP_EXIT_ON_STDIN_CLOSE: '1' },
+        env: this._buildBackendEnv({ forceStdinClose: true }),
       });
 
       attachBackendLogger(this.child.stdout);
       attachBackendLogger(this.child.stderr);
 
+      const spawnedChild = this.child;
       this.child.on('exit', (code, signal) => {
         log(`Backend exited (code=${code}, signal=${signal})`);
-        this._onChildExit();
+        this._onChildExit(spawnedChild);
       });
 
       this.child.on('error', (err) => {
         log(`Backend spawn error: ${err.message}`);
-        this._onChildExit();
+        this._onChildExit(spawnedChild);
       });
 
       // Wait for /health to respond, then connect MCP Client (HTTP or SSE)
@@ -229,13 +280,30 @@ class BackendManager {
     log(`Backend running (PID=${pid}, transport=${this.backendTransport})`);
   }
 
-  async stop() {
-    if (this.state === 'stopped') return;
+  stop() {
+    return this.lifecycleQueue.run(() => this._stop());
+  }
+
+  async _stop() {
+    if (this.state === 'stopped') {
+      await this._killDockerContainer();
+      return;
+    }
 
     log('Stopping backend...');
+    this.expectedChildExit = true;
 
     // For stdio mode, grab the PID before closing (close clears the process ref)
     const stdioPid = this.stdioTransport?.pid ?? null;
+
+    // The outer MCP SDK gives a stdio server roughly two seconds to exit after
+    // its stdin closes. The inner StdioClientTransport can itself wait longer
+    // than that before killing a detached Docker CLI, so remove the labeled
+    // container first and let that close the inner transport promptly.
+    if (this.backendTransport === 'stdio') {
+      if (this.transportCloseState) this.transportCloseState.expected = true;
+      await this._killDockerContainer();
+    }
 
     // Close MCP client first (for stdio, this also kills the child via AbortController)
     await this._disconnectClient();
@@ -248,16 +316,26 @@ class BackendManager {
       await this._forceKillPid(stdioPid);
     }
 
+    // A killed Docker CLI can detach without stopping its container. Ownership
+    // labels give every transport, including stdio, an exact cleanup handle.
+    await this._killDockerContainer();
+
     this.stdioTransport = null;
     this.state = 'stopped';
     this.startedAt = null;
     log('Backend stopped');
   }
 
-  async restart() {
-    this.state = 'restarting';
-    await this.stop();
-    await this.start();
+  restart() {
+    return this.lifecycleQueue.run(async () => {
+      this.state = 'restarting';
+      await this._stop();
+      await this._start();
+    });
+  }
+
+  applyEnvUpdate(args) {
+    this.backendEnvOverrides = updateBackendEnvOverrides(this.backendEnvOverrides, args);
   }
 
   rebuild() {
@@ -307,6 +385,7 @@ class BackendManager {
         ? (this.stdioTransport?.pid ?? null)
         : (this.child?.pid ?? null);
 
+    const sanitizedEnv = sanitizeBackendEnvOverrides(this.backendEnvOverrides);
     return {
       state: this.state,
       pid,
@@ -316,16 +395,19 @@ class BackendManager {
       buildCmd: BUILD_CMD,
       backendTransport: this.backendTransport,
       backendCmd: BACKEND_CMD || null,
+      backendEnvOverrides: sanitizedEnv.values,
+      backendEnvRedaction: sanitizedEnv.redaction,
     };
   }
 
   // ---- Internal helpers ----------------------------------------------------
 
-  _onChildExit() {
+  _onChildExit(exitedChild) {
     // Used for HTTP / SSE modes (manually spawned child)
+    if (this.child !== exitedChild) return;
     this.child = null;
-    this.mcpClient = null;
-    if (this.state !== 'restarting' && this.state !== 'stopped') {
+    if (!this.expectedChildExit && this.state === 'running') {
+      this.mcpClient = null;
       this.state = 'stopped';
       this.startedAt = null;
       log('Backend crashed — use dev_restart_debugger to restart');
@@ -354,6 +436,8 @@ class BackendManager {
   }
 
   async _connectClient(command, args) {
+    const closeState = { expected: false };
+    this.transportCloseState = closeState;
     this.mcpClient = new Client({ name: 'dev-proxy', version: '1.0.0' });
 
     // Relay backend resource notifications (resources/updated, list_changed)
@@ -374,7 +458,7 @@ class BackendManager {
         command,
         args,
         cwd: PROJECT_ROOT,
-        env: { ...process.env },
+        env: this._buildBackendEnv(),
         stderr: 'pipe',
       });
 
@@ -384,15 +468,18 @@ class BackendManager {
       attachBackendLogger(transport.stderr);
 
       transport.onerror = (err) => {
-        log(`Stdio transport error: ${err.message}`);
+        if (!this._shouldSuppressTransportError(closeState, err)) {
+          log(`Stdio transport error: ${err.message}`);
+        }
       };
 
       transport.onclose = () => {
         log('Stdio transport closed');
-        if (this.state === 'running') {
+        if (!closeState.expected && this.transportCloseState === closeState && this.state === 'running') {
           this.state = 'stopped';
           this.startedAt = null;
           log('Backend crashed — use dev_restart_debugger to restart');
+          this._killDockerContainer().catch(() => {});
         }
       };
 
@@ -404,12 +491,14 @@ class BackendManager {
       const transport = new StreamableHTTPClientTransport(mcpUrl);
 
       transport.onerror = (err) => {
-        log(`HTTP transport error: ${err.message}`);
+        if (!this._shouldSuppressTransportError(closeState, err)) {
+          log(`HTTP transport error: ${err.message}`);
+        }
       };
 
       transport.onclose = () => {
         log('HTTP transport closed');
-        if (this.state === 'running') {
+        if (!closeState.expected && this.transportCloseState === closeState && this.state === 'running') {
           this.state = 'stopped';
           this.startedAt = null;
           log('Killing orphaned child process after HTTP transport close');
@@ -443,12 +532,14 @@ class BackendManager {
       });
 
       transport.onerror = (err) => {
-        log(`SSE transport error: ${err.message}`);
+        if (!this._shouldSuppressTransportError(closeState, err)) {
+          log(`SSE transport error: ${err.message}`);
+        }
       };
 
       transport.onclose = () => {
         log('SSE transport closed');
-        if (this.state === 'running') {
+        if (!closeState.expected && this.transportCloseState === closeState && this.state === 'running') {
           this.state = 'stopped';
           this.startedAt = null;
           log('Killing orphaned child process after SSE transport close');
@@ -463,13 +554,19 @@ class BackendManager {
 
   async _disconnectClient() {
     if (this.mcpClient) {
+      const client = this.mcpClient;
+      if (this.transportCloseState) this.transportCloseState.expected = true;
       try {
-        await this.mcpClient.close();
+        await client.close();
       } catch (err) {
         log(`Ignoring client close error: ${err.message}`);
       }
-      this.mcpClient = null;
+      if (this.mcpClient === client) this.mcpClient = null;
     }
+  }
+
+  _shouldSuppressTransportError(closeState, err) {
+    return closeState.expected && isIntentionalTransportAbort(err);
   }
 
   async _killChild() {
@@ -559,23 +656,22 @@ class BackendManager {
   }
 
   async _killDockerContainer() {
-    // Only relevant when the backend command is "docker run ..."
-    if (!BACKEND_CMD || !BACKEND_CMD.match(/^docker\s+run/)) return;
+    if (!BACKEND_CMD) return;
+    const invocation = parseCommandString(BACKEND_CMD);
+    if (!isDockerRunInvocation(invocation)) return;
 
     try {
-      const ids = execSync(
-        `docker ps -q --filter publish=${BACKEND_PORT}`,
-        { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-      ).trim();
-
-      for (const id of ids.split('\n').filter(Boolean)) {
-        log(`Killing Docker container ${id} on port ${BACKEND_PORT}`);
-        try { execSync(`docker kill ${id}`, { stdio: 'ignore' }); } catch { /* already dead */ }
-      }
-
-      if (ids) await new Promise((r) => setTimeout(r, 1000));
+      const removed = removeOwnedDockerContainers({
+        dockerCommand: invocation.command,
+        ownerId: this.dockerOwnerId,
+        port: BACKEND_PORT,
+        includeLegacyPort: this.backendTransport !== 'stdio',
+        log,
+      });
+      return removed.ownedIds.length + removed.legacyIds.length;
     } catch {
       // docker not available or no containers — proceed
+      return 0;
     }
   }
 }
@@ -596,7 +692,14 @@ const DEV_TOOLS = [
           type: 'boolean',
           description: `If true, run "${BUILD_CMD}" before restarting (default: false)`,
         },
+        env: {
+          type: 'object',
+          description:
+            'Replace the persistent backend environment overrides. Omit to preserve them; pass {} to clear them.',
+          additionalProperties: { type: 'string' },
+        },
       },
+      additionalProperties: false,
     },
   },
   {
@@ -605,13 +708,21 @@ const DEV_TOOLS = [
       `Run "${BUILD_CMD}" then restart the mcp-debugger backend (${BACKEND_TRANSPORT} mode). Use after making code changes.`,
     inputSchema: {
       type: 'object',
-      properties: {},
+      properties: {
+        env: {
+          type: 'object',
+          description:
+            'Replace the persistent backend environment overrides. Omit to preserve them; pass {} to clear them.',
+          additionalProperties: { type: 'string' },
+        },
+      },
+      additionalProperties: false,
     },
   },
   {
     name: 'dev_server_status',
     description:
-      'Get the current status of the mcp-debugger backend (state, PID, uptime, tool count, port).',
+      'Get the current status of the mcp-debugger backend (state, PID, uptime, transport, project root, port, and display-safe environment overrides).',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -623,6 +734,7 @@ async function handleDevTool(backend, server, name, args) {
   switch (name) {
     case 'dev_restart_debugger': {
       try {
+        backend.applyEnvUpdate(args);
         if (args?.rebuild) {
           const buildOutput = await backend.rebuildAndRestart();
           await server.sendToolListChanged();
@@ -664,6 +776,7 @@ async function handleDevTool(backend, server, name, args) {
 
     case 'dev_rebuild_and_restart': {
       try {
+        backend.applyEnvUpdate(args);
         const buildOutput = await backend.rebuildAndRestart();
         await server.sendToolListChanged();
         return {

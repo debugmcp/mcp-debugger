@@ -501,7 +501,7 @@ Each session also exposes its captured output as an MCP resource (`debug://sessi
 **Dev proxy only** (these 3 tools are injected by the dev proxy process itself, not by the main mcp-debugger server):
 - `dev_restart_debugger` - Restart the backend (pass `rebuild: true` to build first)
 - `dev_rebuild_and_restart` - Run `npm run build` then restart the backend
-- `dev_server_status` - Check backend state, PID, uptime, tool count
+- `dev_server_status` - Check backend state, PID, uptime, transport, project root, port, and display-safe backend environment overrides
 
 ### Troubleshooting MCP Connection
 - **If server shows "Failed to connect"**:
