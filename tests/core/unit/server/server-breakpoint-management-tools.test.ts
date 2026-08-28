@@ -245,6 +245,220 @@ describe('Server Breakpoint Management Tools', () => {
         }
       })).rejects.toThrow(/breakpointId|file/);
     });
+
+    it('normalizes a bare Go function name before removal and discloses it (issue #550)', async () => {
+      mockSessionManager.getSessionPolicy.mockReturnValue({
+        name: 'go',
+        normalizeFunctionBreakpointName: (name: string) =>
+          name === 'main'
+            ? { name: 'main.main', note: "Auto-qualified function breakpoint 'main' to 'main.main'" }
+            : undefined
+      });
+      mockSessionManager.listFunctionBreakpoints.mockReturnValue([
+        { id: 'fn-1', functionName: 'main.main', verified: true },
+        { id: 'fn-2', functionName: 'main.main', verified: false }
+      ]);
+      mockSessionManager.removeBreakpoint.mockImplementation(async (_sessionId: string, id: string) => ({
+        removed: { id, functionName: 'main.main', verified: id === 'fn-1' },
+        warning: id === 'fn-2' ? 'adapter resync pending' : undefined
+      }));
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'remove_breakpoint',
+          arguments: { sessionId: 'test-session', function: 'main' }
+        }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      expect(content.removed).toHaveLength(2);
+      expect(content.requestedName).toBe('main');
+      expect(content.functionName).toBe('main.main');
+      // The set-time "auto-qualified … never binds" note is create-path
+      // text; a removal only carries the removal's own warnings.
+      expect(content.warning).toBe('adapter resync pending');
+      expect(mockSessionManager.removeBreakpoint).toHaveBeenCalledWith('test-session', 'fn-1');
+      expect(mockSessionManager.removeBreakpoint).toHaveBeenCalledWith('test-session', 'fn-2');
+    });
+
+    it('removes a record stored under the literal bare name even when the policy rewrites it', async () => {
+      mockSessionManager.getSessionPolicy.mockReturnValue({
+        name: 'go',
+        normalizeFunctionBreakpointName: (name: string) =>
+          name === 'main' ? { name: 'main.main', note: 'Auto-qualified to main.main' } : undefined
+      });
+      mockSessionManager.listFunctionBreakpoints.mockReturnValue([
+        { id: 'fn-bare', functionName: 'main', verified: false }
+      ]);
+      mockSessionManager.removeBreakpoint.mockResolvedValue({
+        removed: { id: 'fn-bare', functionName: 'main', verified: false }
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'remove_breakpoint',
+          arguments: { sessionId: 'test-session', function: 'main' }
+        }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      expect(content.removed).toHaveLength(1);
+      expect(content.requestedName).toBe('main');
+      expect(content.functionName).toBe('main.main');
+      expect(mockSessionManager.removeBreakpoint).toHaveBeenCalledWith('test-session', 'fn-bare');
+    });
+
+    it('removes with the same name set_breakpoint stored, driven by the real GoAdapterPolicy (issue #550)', async () => {
+      const { GoAdapterPolicy } = await import('@debugmcp/shared');
+      mockSessionManager.getSessionPolicy.mockReturnValue(GoAdapterPolicy);
+      // Echo whatever name the set path stores, so the round-trip proves the
+      // two handlers agree through the policy rather than through a stub.
+      mockSessionManager.setFunctionBreakpoint.mockImplementation(
+        async (_sessionId: string, { functionName }: { functionName: string }) => ({
+          breakpoint: { id: 'fn-rt', functionName, verified: false }
+        })
+      );
+
+      const setResult = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'set_breakpoint',
+          arguments: { sessionId: 'test-session', function: 'main' }
+        }
+      });
+      const setContent = JSON.parse(setResult.content[0].text);
+      expect(setContent.success).toBe(true);
+      const storedName = setContent.functionName as string;
+      expect(storedName).toBe('main.main');
+
+      mockSessionManager.listFunctionBreakpoints.mockReturnValue([
+        { id: 'fn-rt', functionName: storedName, verified: false }
+      ]);
+      mockSessionManager.removeBreakpoint.mockResolvedValue({
+        removed: { id: 'fn-rt', functionName: storedName, verified: false }
+      });
+
+      const removeResult = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'remove_breakpoint',
+          arguments: { sessionId: 'test-session', function: 'main' }
+        }
+      });
+      const removeContent = JSON.parse(removeResult.content[0].text);
+      expect(removeContent.success).toBe(true);
+      expect(removeContent.removed).toHaveLength(1);
+      expect(removeContent.functionName).toBe(storedName);
+      expect(removeContent.requestedName).toBe('main');
+      expect(mockSessionManager.removeBreakpoint).toHaveBeenCalledWith('test-session', 'fn-rt');
+    });
+
+    it('continues to remove a directly qualified function name', async () => {
+      mockSessionManager.getSessionPolicy.mockReturnValue({
+        name: 'go',
+        normalizeFunctionBreakpointName: () => undefined
+      });
+      mockSessionManager.listFunctionBreakpoints.mockReturnValue([
+        { id: 'fn-1', functionName: 'main.main', verified: true }
+      ]);
+      mockSessionManager.removeBreakpoint.mockResolvedValue({
+        removed: { id: 'fn-1', functionName: 'main.main', verified: true }
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'remove_breakpoint',
+          arguments: { sessionId: 'test-session', function: 'main.main' }
+        }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      expect(content.requestedName).toBeUndefined();
+      expect(content.functionName).toBe('main.main');
+      expect(mockSessionManager.removeBreakpoint).toHaveBeenCalledWith('test-session', 'fn-1');
+    });
+
+    it('names the requested and normalized function when no breakpoint matches', async () => {
+      mockSessionManager.getSessionPolicy.mockReturnValue({
+        name: 'go',
+        normalizeFunctionBreakpointName: (name: string) =>
+          name === 'main' ? { name: 'main.main', note: 'Auto-qualified to main.main' } : undefined
+      });
+      mockSessionManager.listFunctionBreakpoints.mockReturnValue([]);
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'remove_breakpoint',
+          arguments: { sessionId: 'test-session', function: 'main' }
+        }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(false);
+      expect(content.error).toContain('main');
+      expect(content.error).toContain('main.main');
+      expect(content.requestedName).toBe('main');
+      expect(content.functionName).toBe('main.main');
+      expect(content.warning).toBeUndefined();
+    });
+
+    it('offers the package-qualification hint when a bare name with no rewrite matches nothing', async () => {
+      mockSessionManager.getSessionPolicy.mockReturnValue({
+        name: 'go',
+        normalizeFunctionBreakpointName: () => undefined,
+        functionBreakpointNameHint: (name: string) =>
+          name.includes('.') ? undefined : `for func ${name} in package main use 'main.${name}'`
+      });
+      mockSessionManager.listFunctionBreakpoints.mockReturnValue([
+        { id: 'fn-1', functionName: 'main.compute', verified: true }
+      ]);
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'remove_breakpoint',
+          arguments: { sessionId: 'test-session', function: 'compute' }
+        }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(false);
+      expect(content.error).toBe('No function breakpoint found for compute');
+      expect(content.functionName).toBe('compute');
+      expect(content.requestedName).toBeUndefined();
+      expect(content.warning).toContain("use 'main.compute'");
+      expect(mockSessionManager.removeBreakpoint).not.toHaveBeenCalled();
+    });
+
+    it('preserves a directly qualified name in no-match diagnostics', async () => {
+      mockSessionManager.getSessionPolicy.mockReturnValue({
+        name: 'go',
+        normalizeFunctionBreakpointName: () => undefined
+      });
+      mockSessionManager.listFunctionBreakpoints.mockReturnValue([]);
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'remove_breakpoint',
+          arguments: { sessionId: 'test-session', function: 'main.main' }
+        }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(false);
+      expect(content.error).toBe('No function breakpoint found for main.main');
+      expect(content.requestedName).toBeUndefined();
+      expect(content.functionName).toBe('main.main');
+      expect(content.warning).toBeUndefined();
+    });
   });
 
   describe('clear_breakpoints', () => {
