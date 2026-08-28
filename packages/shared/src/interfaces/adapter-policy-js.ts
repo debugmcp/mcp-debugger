@@ -188,16 +188,26 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
     };
 
     // js-debug can expose a genuinely empty Local scope while the useful
-    // binding lives in Closure or Module on the same frame. Try every scope
+    // binding lives in Closure or Module on the same frame. Try those scopes
     // in usefulness order before the session layer walks down to a caller.
+    const isLocalLike = (scope: DebugProtocol.Scope): boolean =>
+      scope.name === 'Local' || scope.name === 'Locals' ||
+      scope.name.startsWith('Local:') || scope.name.startsWith('Block:');
     const scopeGroups: Array<(scope: DebugProtocol.Scope) => boolean> = [
-      scope => scope.name === 'Local' || scope.name === 'Locals' ||
-        scope.name.startsWith('Local:') || scope.name.startsWith('Block:'),
+      isLocalLike,
       scope => scope.name === 'Closure' || scope.name.startsWith('Closure:') ||
         scope.name.startsWith('Closure '),
-      scope => scope.name === 'Script' || scope.name.toLowerCase() === 'module',
-      scope => scope.name.toLowerCase().includes('global')
+      scope => scope.name === 'Script' || scope.name.toLowerCase() === 'module'
     ];
+    // Global is a last resort only for frames that expose no Local scope at
+    // all (top-level script frames). It must never be a fall-through past an
+    // empty Local: js-debug marks Global expensive but the session layer
+    // still fetches it, so Node's ~140 globals would be reported as locals
+    // and the non-empty result would keep the issue #468 walk-down to the
+    // caller frame from ever running.
+    if (!frameScopes.some(isLocalLike)) {
+      scopeGroups.push(scope => scope.name.toLowerCase().includes('global'));
+    }
 
     for (const matches of scopeGroups) {
       for (const scope of frameScopes.filter(matches)) {

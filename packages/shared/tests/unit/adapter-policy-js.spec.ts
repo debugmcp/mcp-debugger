@@ -186,6 +186,48 @@ describe('JsDebugAdapterPolicy', () => {
 
       const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
 
+      // A Local scope exists (even if only V8 internals survive filtering), so
+      // Global is off the table: an empty answer lets the session layer walk
+      // down to the caller frame instead of reporting Node's globals.
+      expect(result).toEqual([]);
+    });
+
+    it('does not fall through to Global past an empty Local scope (issue #548 review)', () => {
+      const scopes: Record<number, DebugProtocol.Scope[]> = {
+        1: [
+          { name: 'Local', variablesReference: 100, expensive: false },
+          { name: 'Closure (tick)', variablesReference: 200, expensive: false },
+          { name: 'Module', variablesReference: 300, expensive: false },
+          { name: 'Global', variablesReference: 400, expensive: true },
+        ],
+      };
+      const vars: Record<number, DebugProtocol.Variable[]> = {
+        100: [],
+        200: [],
+        300: [],
+        400: [
+          { name: 'process', value: 'Process', variablesReference: 1 },
+          { name: 'fetch', value: 'ƒ fetch()', variablesReference: 0 },
+        ],
+      };
+
+      expect(JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars)).toEqual([]);
+    });
+
+    it('uses Global only for a frame that exposes no Local scope at all', () => {
+      const scopes: Record<number, DebugProtocol.Scope[]> = {
+        1: [
+          { name: 'Script', variablesReference: 100, expensive: false },
+          { name: 'Global', variablesReference: 200, expensive: true },
+        ],
+      };
+      const vars: Record<number, DebugProtocol.Variable[]> = {
+        100: [],
+        200: [{ name: 'globalValue', value: '9', variablesReference: 0 }],
+      };
+
+      const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
+
       expect(result.map(variable => variable.name)).toEqual(['globalValue']);
     });
 

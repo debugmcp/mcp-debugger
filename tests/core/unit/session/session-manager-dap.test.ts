@@ -1248,6 +1248,55 @@ describe('SessionManager - DAP Operations', () => {
       expect(result.anchorNote).toMatch(/Module/);
     });
 
+    it('ranks the canonical scope by policy preference, not adapter scope order (issue #548 review)', async () => {
+      const session = await createPausedSession();
+      (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
+
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(
+        async (command: string, args?: { variablesReference?: number }) => {
+          if (command === 'stackTrace') {
+            return {
+              success: true,
+              body: {
+                stackFrames: [
+                  { id: 1, name: 'tick', source: { path: '/workspace/pause_test.js' }, line: 4, column: 1 }
+                ]
+              }
+            };
+          }
+          if (command === 'scopes') {
+            // Closure listed ahead of Local: Local is still the canonical
+            // scope, so a populated Local must produce no fallback note.
+            return {
+              success: true,
+              body: {
+                scopes: [
+                  { name: 'Closure (tick)', variablesReference: 200, expensive: false },
+                  { name: 'Local', variablesReference: 100, expensive: false },
+                  { name: 'Module', variablesReference: 300, expensive: false }
+                ]
+              }
+            };
+          }
+          if (command === 'variables') {
+            const byReference: Record<number, Array<Record<string, unknown>>> = {
+              100: [{ name: 'i', value: '3', type: 'number', variablesReference: 0 }],
+              200: [{ name: 'captured', value: '7', type: 'number', variablesReference: 0 }],
+              300: [{ name: 'counter', value: '46', type: 'number', variablesReference: 0 }]
+            };
+            return { success: true, body: { variables: byReference[args?.variablesReference ?? 0] ?? [] } };
+          }
+          return { success: true };
+        }
+      );
+
+      const result = await sessionManager.getLocalVariables(session.id);
+
+      expect(result.variables.map(variable => variable.name)).toEqual(['i']);
+      expect(result.scopeName).toBe('Local');
+      expect(result.anchorNote).toBeUndefined();
+    });
+
     it('treats a Ruby %self-only native frame as empty and walks to user locals (issue #549)', async () => {
       const session = await createPausedSession();
       (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => RubyAdapterPolicy;
@@ -1966,6 +2015,7 @@ describe('SessionManager - DAP Operations', () => {
             body: {
               threads: [
                 { id: 4, name: 'Signal Dispatcher' },
+                null,
                 { id: 'invalid', name: 'invalid entry' },
                 { id: 2, name: '' }
               ]
@@ -1980,6 +2030,26 @@ describe('SessionManager - DAP Operations', () => {
       expect(result.threadId).toBe(4);
       expect(result.note).toMatch(/thread 2 has frames/);
       expect(dependencies.mockProxyManager.getCurrentThreadId()).toBe(1);
+    });
+
+    it('treats an explicit threadId of 0 as a real thread, not as "use the current one"', async () => {
+      // js-debug reports its main thread as id 0; `threadId || current` used
+      // to redirect that request to the current thread.
+      const session = await createPausedSession(); // currentThreadId = 1
+      const requested: number[] = [];
+      dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: { threadId?: number }) => {
+        if (command === 'stackTrace') {
+          requested.push(args?.threadId as number);
+          return { success: true, body: { stackFrames: args?.threadId === 0 ? [READY_FRAME] : [] } };
+        }
+        return { success: true, body: {} };
+      });
+
+      const result = await sessionManager.getStackTraceDetailed(session.id, 0);
+
+      expect(requested).toEqual([0]);
+      expect(result.frames).toHaveLength(1);
+      expect(result.threadId).toBe(0);
     });
 
     it('returns an honest empty result with a note when no thread reports frames', async () => {

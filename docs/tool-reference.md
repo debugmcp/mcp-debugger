@@ -784,12 +784,14 @@ Gets local variables by traversing all stack frames and their scopes, then using
 
 **Language-Specific Behavior:**
 - **Python**: Looks for "Locals" scope, filters out `__builtins__`, special variables, and internal debugger variables
-- **JavaScript**: Looks for "Local", "Local:", or "Block:" scopes, filters out `this`, `__proto__`, and V8 internals
+- **JavaScript**: Reads the "Local" (or "Local:"/"Block:") scope; when it is empty, falls through to a "Closure" scope, then "Module"/"Script", on the same frame (the response's `note` says which scope was used). "Global" is consulted only for top-level frames that expose no Local scope at all — never as a fall-through, so Node's globals are not reported as locals. Filters out `this`, `__proto__`, and V8 internals
+- **Ruby**: Reads rdbg's "Local variables" scope, hiding the `%self` pseudo-variable unless `includeSpecial: true`; a frame whose only local is `%self` (a native `[C]` frame) counts as empty
 - **Other Languages**: Falls back to generic behavior (first non-global scope)
 
 **Notes:**
 - Session must be paused at a breakpoint for this tool to work
-- The tool traverses all frames in the call stack and collects scopes/variables from each, then uses the adapter policy to extract relevant locals (the reported frame is still the top frame)
+- The tool traverses all frames in the call stack and collects scopes/variables from each, then uses the adapter policy to extract relevant locals
+- When the top frame has no usable locals (a runtime/stdlib frame, a `sleep`), the response anchors to the first lower frame that does, `frame` names that frame, and `note` explains the switch; `note` also reports a same-frame scope fallback (e.g. JavaScript Local → Module). Pass `names` to disable the frame walk-down
 - When `includeSpecial` is true, all variables including internals are returned
 - This is especially useful for AI agents that need quick access to current local state
 

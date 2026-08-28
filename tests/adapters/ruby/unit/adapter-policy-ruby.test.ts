@@ -208,6 +208,27 @@ describe('RubyAdapterPolicy hooks', () => {
       .toEqual(variables[7]);
   });
 
+  it('keeps rdbg %return and %raised visible while hiding %self (issue #549 review)', () => {
+    const frames = [{ id: 1, name: 'Object#compute', file: 'app.rb', line: 12 }];
+    const scopes: Record<number, DebugProtocol.Scope[]> = {
+      1: [
+        { name: 'Local variables', presentationHint: 'locals', variablesReference: 9, expensive: false }
+      ]
+    };
+    const variables = {
+      9: [
+        { name: '%self', value: 'main', type: 'Object' },
+        { name: '%return', value: '42', type: 'Integer' },
+        { name: '%raised', value: '#<RuntimeError: boom>', type: 'RuntimeError' }
+      ]
+    };
+
+    // The value the user stepped out (or was thrown) to see must not be
+    // filtered away — and a %return-only frame must not count as empty.
+    expect(RubyAdapterPolicy.extractLocalVariables!(frames, scopes, variables))
+      .toEqual([variables[9][1], variables[9][2]]);
+  });
+
   it('filters Ruby-internal and gem frames', () => {
     const frames = [
       { id: 1, name: 'block in main', file: '/workspace/app.rb', line: 5 },

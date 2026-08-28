@@ -196,6 +196,12 @@ export abstract class SessionManagerData extends SessionManagerCore {
    * Go runtime frames), the top unfiltered frame is kept so the agent always
    * has a frameId to anchor scopes/evaluate, and `hiddenFrameCount` +
    * `allFramesInternal` let the response say what was hidden.
+   *
+   * Thread contract: `opts.ensureStackReady` is the caller's permission to
+   * re-anchor — an empty stack then gets the bounded readiness retry and may
+   * switch to a sibling thread that has frames (the implicit MCP path, which
+   * resolved `threadId` itself). Without it, an explicitly requested thread
+   * is never re-anchored: an empty answer is only *described* (issue #553).
    */
   async getStackTraceDetailed(
     sessionId: string,
@@ -354,81 +360,74 @@ export abstract class SessionManagerData extends SessionManagerCore {
     };
   }
 
+  /**
+   * Explain an explicitly requested thread that reported no frames (issue
+   * #553): name it, and point at a frame-bearing sibling when one exists.
+   * Only describes — never adopts — so the caller's thread stays the anchor.
+   */
   private async describeFramelessThread(
     sessionId: string,
     proxyManager: IProxyManager,
     threadId: number
   ): Promise<string> {
-    let threads: DebugProtocol.Thread[] = [];
-    try {
-      const response = await proxyManager.sendDapRequest<DebugProtocol.ThreadsResponse>('threads', {});
-      threads = Array.isArray(response?.body?.threads) ? response.body.threads : [];
-    } catch (error) {
-      this.logger.warn(
-        `[SM getStackTrace ${sessionId}] Could not list alternatives for frameless thread ${threadId}: ${error instanceof Error ? error.message : String(error)}`
+    const threads = await this.listThreadsForScan(sessionId, proxyManager) ?? [];
+    const label = (id: number, name?: string): string => (name ? `${id} (${name})` : String(id));
+    const requestedLabel = label(threadId, threads.find(thread => thread?.id === threadId)?.name);
+
+    const alternative = await this.scanThreadsForFrames(sessionId, proxyManager, threadId, threads);
+    if (alternative) {
+      return (
+        `Thread ${requestedLabel} reported no stack frames; thread ${label(alternative.threadId, alternative.threadName)} has frames. ` +
+        `Try get_stack_trace with threadId ${alternative.threadId}.`
       );
     }
-
-    const requested = threads.find(thread => thread.id === threadId);
-    const requestedLabel = requested?.name
-      ? `${threadId} (${requested.name})`
-      : String(threadId);
-
-    for (const thread of threads) {
-      if (typeof thread.id !== 'number' || thread.id === threadId) {
-        continue;
-      }
-      try {
-        const frames = await this.requestRawStackFrames(sessionId, proxyManager, thread.id);
-        if (frames.length > 0) {
-          const alternativeLabel = thread.name
-            ? `${thread.id} (${thread.name})`
-            : String(thread.id);
-          return (
-            `Thread ${requestedLabel} reported no stack frames; thread ${alternativeLabel} has frames. ` +
-            `Try get_stack_trace with threadId ${thread.id}.`
-          );
-        }
-      } catch {
-        // Some runtime/native threads reject stackTrace; keep looking.
-      }
-    }
-
+    // Don't assert a cause: a native/runtime thread and the transient
+    // stack-not-materialized race right after a stop give the same answer.
     return (
-      `Thread ${requestedLabel} reported no stack frames; it may be a native/runtime thread. ` +
-      'Try get_stack_trace with another threadId from list_threads.'
+      `Thread ${requestedLabel} reported no stack frames (it may be a native/runtime thread, or its stack may not have materialized yet). ` +
+      'Retry, or try get_stack_trace with another threadId from list_threads.'
     );
+  }
+
+  /** One DAP `threads` request; null when the adapter rejects it. */
+  private async listThreadsForScan(
+    sessionId: string,
+    proxyManager: IProxyManager
+  ): Promise<DebugProtocol.Thread[] | null> {
+    try {
+      const response = await proxyManager.sendDapRequest<DebugProtocol.ThreadsResponse>('threads', {});
+      const threads = response?.body?.threads;
+      return Array.isArray(threads) ? threads : null;
+    } catch (err) {
+      this.logger.warn(`[SM getStackTrace ${sessionId}] Thread scan could not list threads: ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    }
   }
 
   /**
    * Probe the other stopped threads for one that reports stack frames.
    * Probe failures on individual threads are not fatal — runtime threads may
-   * reject stackTrace outright.
+   * reject stackTrace outright. Pass `threads` to reuse an already-fetched
+   * thread list instead of issuing a second `threads` request.
    */
   private async scanThreadsForFrames(
     sessionId: string,
     proxyManager: IProxyManager,
-    excludeThreadId: number
-  ): Promise<{ threadId: number; frames: DebugProtocol.StackFrame[] } | null> {
-    let threads: DebugProtocol.Thread[] | undefined;
-    try {
-      const response = await proxyManager.sendDapRequest<DebugProtocol.ThreadsResponse>('threads', {});
-      threads = response?.body?.threads;
-    } catch (err) {
-      this.logger.warn(`[SM getStackTrace ${sessionId}] Thread scan could not list threads: ${err instanceof Error ? err.message : String(err)}`);
+    excludeThreadId: number,
+    threads?: DebugProtocol.Thread[]
+  ): Promise<{ threadId: number; threadName?: string; frames: DebugProtocol.StackFrame[] } | null> {
+    const candidates = threads ?? await this.listThreadsForScan(sessionId, proxyManager);
+    if (!candidates) {
       return null;
     }
-    if (!Array.isArray(threads)) {
-      return null;
-    }
-    for (const thread of threads) {
+    for (const thread of candidates) {
       if (!thread || typeof thread.id !== 'number' || thread.id === excludeThreadId) {
         continue;
       }
       try {
         const frames = await this.requestRawStackFrames(sessionId, proxyManager, thread.id);
         if (frames.length > 0) {
-          return { threadId: thread.id, frames };
+          return { threadId: thread.id, threadName: thread.name, frames };
         }
       } catch {
         // This thread rejected stackTrace — keep scanning.
@@ -481,7 +480,13 @@ export abstract class SessionManagerData extends SessionManagerCore {
     variables: Variable[];
     frame: { name: string; file: string; line: number } | null;
     scopeName: string | null;
-    /** Set when the top frame had no locals and a lower frame was anchored instead (issue #468). */
+    /**
+     * Explains any departure from "the top frame's local scope": the top
+     * frame had no locals and a lower frame was anchored instead (issue
+     * #468), and/or a sibling scope on the anchor frame supplied the
+     * variables because the canonical local scope was empty (issue #548).
+     * Both notes may apply; they are joined with '; '.
+     */
     anchorNote?: string;
     truncation?: VariableTruncationSummary;
   }> {
@@ -580,9 +585,13 @@ export abstract class SessionManagerData extends SessionManagerCore {
             scopeName === canonicalName ||
             scopeName.startsWith(canonicalName + ' ') ||
             (canonicalName.endsWith(':') && scopeName.startsWith(canonicalName));
-          const canonicalScope = anchorScopes.find(scope =>
-            canonicalNames.some(canonicalName => matchesCanonicalName(scope.name, canonicalName))
-          );
+          // Rank by the policy's preference order, not the adapter's scope
+          // order: an adapter listing e.g. "Closure (fn)" ahead of "Local"
+          // must not make Closure the canonical scope and Local the
+          // "fallback", or the note below would misreport every call.
+          const canonicalScope = canonicalNames
+            .map(canonicalName => anchorScopes.find(scope => matchesCanonicalName(scope.name, canonicalName)))
+            .find((scope): scope is DebugProtocol.Scope => scope !== undefined);
           const returnedVars = new Set(vars);
           const contributingScope = vars.length > 0
             ? anchorScopes.find(scope =>
