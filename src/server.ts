@@ -1154,7 +1154,7 @@ export class DebugMcpServer {
           { name: 'list_debug_sessions', description: 'List all active debugging sessions. Paused sessions include lastStop with the reason for the most recent stop (e.g. "breakpoint" vs "exception")', inputSchema: { type: 'object', properties: {} } },
           { name: 'set_breakpoint', description: 'Set a breakpoint. Setting breakpoints on non-executable lines (structural, declarative) may lead to unexpected behavior', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: 'Path to the source file or Java FQCN. For Java, passing a fully-qualified class name (e.g. "com.example.MyClass" or "com.example.Outer$Inner") is preferred — it works reliably with all classloaders including custom classloaders. Alternatively, use absolute file paths.' }, line: { type: 'number', description: 'Line number where to set breakpoint. Executable statements (assignments, function calls, conditionals, returns) work best. Structural lines (function/class definitions), declarative lines (imports), or non-executable lines (comments, blank lines) may cause unexpected stepping behavior' }, ...setBreakpointExtraProps, condition: { type: 'string', description: 'Optional expression: only break (or log) when it evaluates truthy' }, logMessage: { type: 'string', description: 'Create a logpoint: instead of pausing, log this message when the line is hit. Expressions in {curly braces} are interpolated (e.g. "order={orderId} total={total}"). Messages arrive in get_output while the program runs at full speed. Supported by the Python, JavaScript, Go, Rust, and mock adapters; not by Java, .NET, or Ruby' }, suspendPolicy: { type: 'string', enum: ['all', 'thread'], description: 'Suspend policy when breakpoint is hit: "all" suspends all threads (default), "thread" only suspends the event thread. Only supported by the Java/JDI adapter.' } }, required: setBreakpointRequired } },
           { name: 'list_breakpoints', description: 'List all breakpoints in a session with their verified state and adapter-assigned ids. Session-global function breakpoints appear separately as functionBreakpoints (omitted when filtering by file). Works before launch (queued, verified=false), while running or paused, and after the program exits', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: 'Optional: only list breakpoints in this file' } }, required: ['sessionId'] } },
-          { name: 'remove_breakpoint', description: 'Remove a breakpoint by breakpointId (returned by set_breakpoint / list_breakpoints), by function name, or by file + line (removes all breakpoints at that location). Takes effect immediately while the program is running or paused; also works after the program exits, before a relaunch', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, breakpointId: { type: 'string', description: 'Breakpoint id from set_breakpoint or list_breakpoints. Takes precedence over file + line' }, function: { type: 'string', description: 'Alternative addressing: remove all function breakpoints with this symbol name' }, file: { type: 'string', description: 'Alternative addressing: source file path (use together with line)' }, line: { type: 'number', description: 'Alternative addressing: line number (use together with file)' } }, required: ['sessionId'] } },
+          { name: 'remove_breakpoint', description: 'Remove a breakpoint by breakpointId (returned by set_breakpoint / list_breakpoints), by function name, or by file + line (removes all breakpoints at that location). Takes effect immediately while the program is running or paused; also works after the program exits, before a relaunch', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, breakpointId: { type: 'string', description: 'Breakpoint id from set_breakpoint or list_breakpoints. Takes precedence over file + line' }, function: { type: 'string', description: 'Alternative addressing: remove all function breakpoints with this symbol name. Applies the same per-language rewrite as set_breakpoint (e.g. a bare Go "main" matches the stored "main.main"); the response reports the effective name as functionName and, when rewritten, the original as requestedName' }, file: { type: 'string', description: 'Alternative addressing: source file path (use together with line)' }, line: { type: 'number', description: 'Alternative addressing: line number (use together with file)' } }, required: ['sessionId'] } },
           { name: 'clear_breakpoints', description: 'Remove all breakpoints in a session, or all breakpoints in one file. Clearing zero breakpoints is success. Takes effect immediately while the program is running or paused', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: 'Optional: only clear breakpoints in this file' } }, required: ['sessionId'] } },
           { name: 'start_debugging', description: 'Start debugging a script', inputSchema: {
               type: 'object', 
@@ -1643,46 +1643,53 @@ export class DebugMcpServer {
               try {
                 let removed: Array<Breakpoint | FunctionBreakpoint>;
                 let warning: string | undefined;
-                let requestedFunctionName: string | undefined;
-                let effectiveFunctionName: string | undefined;
+                // Function-addressed removal discloses names the way
+                // set_breakpoint does: `functionName` is always the effective
+                // name, `requestedName` appears only when a policy rewrite
+                // changed it (issue #550).
+                let functionDisclosure: { functionName: string; requestedName?: string } | undefined;
                 if (!args.breakpointId && args.function !== undefined) {
+                  const requestedName = args.function;
                   // Use the same policy-certain rewrite as set_breakpoint so
                   // the name the caller supplied can remove the normalized
-                  // record that was stored (issue #550).
-                  const normalized = this.normalizeFunctionBreakpointName(
-                    args.sessionId,
-                    args.function
-                  );
-                  const effectiveName = normalized?.name ?? args.function;
-                  if (normalized) {
-                    requestedFunctionName = args.function;
-                    effectiveFunctionName = effectiveName;
-                  }
+                  // record that was stored (issue #550). The literal name is
+                  // matched too — a record stored un-rewritten (policy lookup
+                  // failure, or set through another path) stays removable.
+                  const normalized = this.normalizeFunctionBreakpointName(args.sessionId, requestedName);
+                  const effectiveName = normalized?.name ?? requestedName;
+                  functionDisclosure = {
+                    functionName: effectiveName,
+                    ...(normalized ? { requestedName } : {})
+                  };
                   const matches = this.sessionManager
                     .listFunctionBreakpoints(args.sessionId)
-                    .filter((bp) => bp.functionName === effectiveName);
+                    .filter((bp) => bp.functionName === effectiveName || bp.functionName === requestedName);
                   removed = [];
-                  const warnings: string[] = normalized?.note ? [normalized.note] : [];
+                  const warnings: string[] = [];
                   for (const bp of matches) {
                     const res = await this.removeBreakpoint(args.sessionId, bp.id);
                     if (res.removed) removed.push(res.removed);
                     if (res.warning) warnings.push(res.warning);
                   }
-                  warning = warnings.length > 0 ? warnings.join('; ') : undefined;
                   if (removed.length === 0) {
+                    // Same per-adapter name advisory set_breakpoint gives
+                    // (issues #303/#308), so a bare Go name that never matched
+                    // learns the package-qualified form it should use.
+                    const nameHint = normalized
+                      ? undefined
+                      : this.getFunctionBreakpointNameHint(args.sessionId, effectiveName);
+                    if (nameHint) warnings.push(nameHint);
                     result = { content: [{ type: 'text', text: JSON.stringify({
                       success: false,
                       error: normalized
-                        ? `No function breakpoint found for ${args.function} (normalized to ${effectiveName})`
-                        : `No function breakpoint found for ${args.function}`,
-                      ...(normalized ? {
-                        requestedName: args.function,
-                        functionName: effectiveName,
-                        warning: normalized.note
-                      } : {})
+                        ? `No function breakpoint found for ${requestedName} (normalized to ${effectiveName})`
+                        : `No function breakpoint found for ${requestedName}`,
+                      ...functionDisclosure,
+                      warning: warnings.length > 0 ? warnings.join('; ') : undefined
                     }) }] };
                     break;
                   }
+                  warning = warnings.length > 0 ? warnings.join('; ') : undefined;
                 } else if (args.breakpointId) {
                   const res = await this.removeBreakpoint(args.sessionId, args.breakpointId);
                   removed = res.removed ? [res.removed] : [];
@@ -1710,10 +1717,7 @@ export class DebugMcpServer {
                   success: true,
                   removed,
                   message: `Removed ${removed.length} breakpoint(s)`,
-                  ...(requestedFunctionName !== undefined ? {
-                    requestedName: requestedFunctionName,
-                    functionName: effectiveFunctionName
-                  } : {}),
+                  ...(functionDisclosure ?? {}),
                   warning
                 }) }] };
               } catch (error) {
