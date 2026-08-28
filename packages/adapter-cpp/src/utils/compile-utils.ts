@@ -244,27 +244,23 @@ async function promoteStagedOutput(
   fileSystem: ArtifactFileSystem,
   logger?: CompileLogger
 ): Promise<string> {
-  if (platform === 'win32') {
-    try {
-      await fileSystem.unlink(outputPath);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
-        logger?.warn?.(
-          `[compile-utils] Canonical executable is in use; launching managed rebuild ${stagedPath}`
-        );
-        return stagedPath;
-      }
-    }
-  }
-
+  // Rename straight over the canonical path: on POSIX that is an atomic
+  // replace, and on Windows fs.rename maps to MoveFileEx(REPLACE_EXISTING),
+  // which replaces an unlocked target and fails on one a running debuggee
+  // still holds. Never unlink the canonical executable first — a rename
+  // failure after that would destroy the last good build, the exact loss
+  // this staging scheme exists to prevent.
   try {
     await fileSystem.rename(stagedPath, outputPath);
     return outputPath;
   } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code;
+    const reason = error instanceof Error ? error.message : String(error);
+    const lockHint = platform === 'win32' ? ' (still locked by a running debuggee?)' : '';
     logger?.warn?.(
-      `[compile-utils] Could not promote rebuilt executable; launching managed rebuild ${stagedPath}: ${
-        error instanceof Error ? error.message : String(error)
-      }`
+      `[compile-utils] Could not replace ${outputPath}${lockHint}; launching managed rebuild ${stagedPath}: ${
+        code ? `${code}: ` : ''
+      }${reason}`
     );
     return stagedPath;
   }
@@ -302,7 +298,19 @@ export async function prepareSourceBinary(
     fileSystem = artifactFileSystem
   } = options;
 
-  await fileSystem.mkdir(path.dirname(outputPath), { recursive: true });
+  const outputDir = path.dirname(outputPath);
+  try {
+    await fileSystem.mkdir(outputDir, { recursive: true });
+  } catch (error) {
+    // Keep the { success, error } contract so the caller reports this as a
+    // compile failure rather than escaping a raw errno from the transform.
+    return {
+      success: false,
+      error: `Could not create output directory ${outputDir}: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    };
+  }
   const currentOutput = await findNewestCompiledOutput(outputPath, fileSystem);
   if (
     !forceRebuild &&

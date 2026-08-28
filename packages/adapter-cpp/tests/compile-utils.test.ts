@@ -413,15 +413,23 @@ describe('compile-utils', () => {
         await fs.writeFile(stagedPath, 'rebuilt binary');
         return { success: true, binaryPath: stagedPath };
       });
+      // A running debuggee makes MoveFileEx over the canonical exe fail; the
+      // canonical must never be unlinked as a workaround, or a rename failure
+      // after that would lose the last good build.
+      const unlinked: string[] = [];
+      const logger = { warn: vi.fn() };
       const lockedFileSystem = {
         mkdir: fs.mkdir.bind(fs),
         readdir: fs.readdir.bind(fs),
-        rename: fs.rename.bind(fs),
-        stat: fs.stat.bind(fs),
-        unlink: async (filePath: string) => {
-          if (filePath === outputPath) {
+        rename: async (from: string, to: string) => {
+          if (to === outputPath) {
             throw Object.assign(new Error('locked'), { code: 'EPERM' });
           }
+          return fs.rename(from, to);
+        },
+        stat: fs.stat.bind(fs),
+        unlink: async (filePath: string) => {
+          unlinked.push(filePath);
           return fs.unlink(filePath);
         }
       };
@@ -431,12 +439,15 @@ describe('compile-utils', () => {
         outputPath,
         forceRebuild: true,
         platform: 'win32',
+        logger,
         compile,
         fileSystem: lockedFileSystem
       });
 
       expect(rebuilt.success).toBe(true);
       expect(rebuilt.binaryPath).toMatch(/hello\.debug-mcp-.+\.exe$/);
+      expect(unlinked).not.toContain(outputPath);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('EPERM'));
       await expect(fs.readFile(outputPath, 'utf8')).resolves.toBe('running binary');
       await expect(fs.readFile(rebuilt.binaryPath!, 'utf8')).resolves.toBe('rebuilt binary');
 
@@ -455,6 +466,30 @@ describe('compile-utils', () => {
         binaryPath: rebuilt.binaryPath,
         compiled: false
       });
+    });
+
+    it('reports a failed output-directory creation instead of throwing', async () => {
+      const compile = vi.fn();
+      const readOnlyFileSystem = {
+        mkdir: vi.fn(async () => Promise.reject(Object.assign(new Error('read-only'), { code: 'EACCES' }))),
+        readdir: fs.readdir.bind(fs),
+        rename: fs.rename.bind(fs),
+        stat: fs.stat.bind(fs),
+        unlink: fs.unlink.bind(fs)
+      };
+
+      const result = await prepareSourceBinary({
+        sourcePath,
+        outputPath,
+        forceRebuild: true,
+        platform: 'linux',
+        compile,
+        fileSystem: readOnlyFileSystem
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/Could not create output directory .*read-only/);
+      expect(compile).not.toHaveBeenCalled();
     });
 
     it('leaves the previous artifact intact when compilation fails', async () => {
