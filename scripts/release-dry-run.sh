@@ -91,6 +91,15 @@ else
   fail "CHANGELOG missing [Unreleased] section at top"
 fi
 
+# Fragments must have been collated into CHANGELOG.md before tagging, or their
+# entries silently miss the release notes (issue #546).
+PENDING_FRAGMENTS=$(find changelog.d -name '*.md' ! -name 'README.md' 2>/dev/null | wc -l | tr -d ' ')
+if [ "$PENDING_FRAGMENTS" = "0" ]; then
+  pass "changelog.d/ has no uncollated fragments"
+else
+  fail "changelog.d/ still holds $PENDING_FRAGMENTS fragment(s) — run 'pnpm changelog:collate'"
+fi
+
 # --- 3. Build succeeds ---
 echo ""
 echo "── Build ──"

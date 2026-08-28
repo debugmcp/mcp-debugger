@@ -271,7 +271,12 @@ which appends a `Signed-off-by: Your Name <you@example.com>` trailer. If you for
    - Update documentation if needed
    - Add tests for new functionality
    - Run linting and fix any issues
-   - Update CHANGELOG.md if applicable
+   - Add a changelog fragment if the change is user-visible — a new file at
+     `changelog.d/<issue-number>.<category>.md` holding the entry text. Do **not** edit
+     `CHANGELOG.md` directly; fragments are collated into it at release time. See
+     [`changelog.d/README.md`](changelog.d/README.md). CI requires one for changes under
+     `src/`, `packages/`, or `tools/` (test-only changes are exempt; apply the
+     `no-changelog` label for a PR that genuinely needs no entry).
 
 2. **PR Guidelines**:
    - Use the PR template

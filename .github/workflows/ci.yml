@@ -186,11 +186,14 @@ jobs:
   lint:
     name: Lint Code
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-    
+      with:
+        # Full history so the changelog gate can diff against the PR base.
+        fetch-depth: 0
+
     - name: Setup pnpm
       uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
       # version comes from package.json "packageManager" (issue #478)
@@ -217,6 +220,22 @@ jobs:
     
     - name: Check for personal information
       run: pnpm run check:all-personal-paths
+
+    - name: Validate changelog fragments
+      run: pnpm run changelog:check
+
+    # A user-visible change must carry a changelog fragment, or its entry never
+    # reaches the release notes (issues #546, #462). Test-only changes are exempt
+    # automatically; apply the 'no-changelog' label for genuine no-op PRs.
+    - name: Require a changelog fragment
+      if: github.event_name == 'pull_request'
+      run: |
+        CHANGED_FILES="$(git diff --name-only \
+          "origin/${{ github.base_ref }}...${{ github.event.pull_request.head.sha }}")"
+        export CHANGED_FILES
+        node scripts/changelog-fragments.mjs --ci
+      env:
+        PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
 
   # Separate job for container tests on Linux only
   container-tests:
