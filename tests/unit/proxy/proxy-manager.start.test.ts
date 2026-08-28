@@ -2,7 +2,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import path from 'path';
 import { pathToFileURL } from 'url';
-import { ProxyManager } from '../../../src/proxy/proxy-manager.js';
+import {
+  DEFAULT_PROXY_INITIALIZATION_TIMEOUT_MS,
+  ProxyManager
+} from '../../../src/proxy/proxy-manager.js';
 import { createInitialState } from '../../../src/dap-core/index.js';
 import type { ProxyConfig } from '../../../src/proxy/proxy-config.js';
 import { DebugLanguage, type IProxyProcess, type IProxyProcessLauncher, type IFileSystem, type ILogger, type IDebugAdapter, type AdapterLaunchBarrier } from '@debugmcp/shared';
@@ -551,6 +554,38 @@ describe('ProxyManager.start', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('accepts an injected initialization deadline while production keeps 30 seconds (issue #511)', async () => {
+    expect(DEFAULT_PROXY_INITIALIZATION_TIMEOUT_MS).toBe(30000);
+    vi.useFakeTimers();
+    proxyManager = new ProxyManager(
+      null,
+      proxyProcessLauncher,
+      fileSystem,
+      logger,
+      undefined,
+      { initializationTimeoutMs: 1250 }
+    );
+    fakeProcess.sendCommand.mockImplementation((cmd: any) => {
+      if (cmd.cmd === 'init') {
+        setTimeout(() => {
+          fakeProcess.emit('message', {
+            type: 'status',
+            status: 'init_received',
+            sessionId: cmd.sessionId
+          });
+        }, 0);
+      }
+    });
+
+    const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+    const rejection = expect(startPromise).rejects.toThrow(
+      /Debug proxy initialization did not complete within 1\.25s/
+    );
+    await vi.advanceTimersByTimeAsync(1300);
+    await vi.runOnlyPendingTimersAsync();
+    await rejection;
   });
 
   it('names the stalled handshake request and adapter PID when init times out after progress (issue #493)', async () => {
