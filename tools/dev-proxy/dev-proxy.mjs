@@ -611,7 +611,7 @@ const DEV_TOOLS = [
   {
     name: 'dev_server_status',
     description:
-      'Get the current status of the mcp-debugger backend (state, PID, uptime, tool count, port).',
+      'Get the current status of the mcp-debugger backend (state, PID, uptime, transport, project root, port).',
     inputSchema: {
       type: 'object',
       properties: {},
