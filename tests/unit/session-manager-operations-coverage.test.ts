@@ -2217,7 +2217,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(mockAdapter.transformLaunchConfig).toHaveBeenCalled();
     });
 
-    it('should handle transformAttachConfig errors gracefully', async () => {
+    it('should propagate transformAttachConfig errors without starting an untransformed attach', async () => {
       const mockAdapter = {
         supportsAttach: vi.fn().mockReturnValue(true),
         transformAttachConfig: vi.fn().mockImplementation(() => {
@@ -2239,10 +2239,34 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       );
 
       expect(result.success).toBe(false);
+      expect(result.error).toContain('Attach config transformation failed');
+      expect(mockAdapter.resolveExecutablePath).not.toHaveBeenCalled();
       // Should have logged the warning about transformAttachConfig failure
       expect(mockLogger.warn).toHaveBeenCalledWith(
         expect.stringContaining('transformAttachConfig failed')
       );
+    });
+
+    it('should propagate transformLaunchConfig errors without starting an untransformed launch', async () => {
+      const mockAdapter = {
+        transformLaunchConfig: vi.fn().mockRejectedValue(new Error('C/C++ compile failed: denied')),
+        resolveExecutablePath: vi.fn().mockRejectedValue(new Error('must not run'))
+      };
+
+      mockDependencies.adapterRegistry.create.mockResolvedValue(mockAdapter);
+      mockSession.language = 'cpp';
+      mockSession.state = SessionState.CREATED;
+
+      const result = await operations.startDebugging(
+        'test-session',
+        '/work/main.cpp',
+        [],
+        { forceRebuild: true }
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('C/C++ compile failed: denied');
+      expect(mockAdapter.resolveExecutablePath).not.toHaveBeenCalled();
     });
   });
 

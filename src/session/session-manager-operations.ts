@@ -286,9 +286,13 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         // Call transformAttachConfig for attach operations
         transformedLaunchConfig = adapter.transformAttachConfig(genericLaunchConfig as GenericAttachConfig);
         this.logger.info(`[SessionManager] Using attach config for ${session.language}`);
-      } else {
+      } else if (typeof adapter.transformLaunchConfig === 'function') {
         // Call transformLaunchConfig for launch operations
         transformedLaunchConfig = await adapter.transformLaunchConfig(genericLaunchConfig as GenericLaunchConfig);
+      } else {
+        // Keep compatibility with minimal/legacy adapters that declare no
+        // transform. This is distinct from a declared transform rejecting.
+        transformedLaunchConfig = genericLaunchConfig as LanguageSpecificLaunchConfig;
       }
     } catch (error) {
       this.logger.warn(
@@ -296,7 +300,11 @@ export abstract class SessionManagerOperations extends SessionManagerData {
           error instanceof Error ? error.message : String(error)
         }`
       );
-      transformedLaunchConfig = undefined;
+      // A transform can perform required work (such as compiling a C++ source
+      // file) or reject invalid attach arguments. Forwarding the generic
+      // configuration after that failure starts the adapter with inputs known
+      // to be wrong and hides the actionable error (issue #552).
+      throw error;
     }
 
     // Attach transforms may strip adapterConfig keys (issue #450) — record the
