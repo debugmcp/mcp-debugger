@@ -116,6 +116,13 @@ interface ProxyRuntimeEnvironment {
   cwd: () => string;
 }
 
+/** Internal construction options. Production uses the 30-second default;
+ * resilience tests inject a shorter deadline so deterministic stalls do not
+ * add 30 seconds apiece to the suite (issue #511). */
+export interface ProxyManagerOptions {
+  initializationTimeoutMs?: number;
+}
+
 /** Minimal emitter surface shared by IProxyProcess and its stderr stream. */
 interface RemovableEmitter {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -128,6 +135,8 @@ const DEFAULT_RUNTIME_ENVIRONMENT: ProxyRuntimeEnvironment = {
   moduleUrl: import.meta.url,
   cwd: () => process.cwd()
 };
+
+export const DEFAULT_PROXY_INITIALIZATION_TIMEOUT_MS = 30000;
 
 /**
  * Concrete implementation of ProxyManager
@@ -178,6 +187,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       }
     | undefined;
   private readonly runtimeEnv: ProxyRuntimeEnvironment;
+  private readonly initializationTimeoutMs: number;
   private activeLaunchBarrier: AdapterLaunchBarrier | null = null;
   private activeLaunchBarrierRequestId: string | null = null;
   private proxyMessageCounter = 0;
@@ -207,10 +217,17 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     private proxyProcessLauncher: IProxyProcessLauncher,
     private fileSystem: IFileSystem,
     private logger: ILogger,
-    runtimeEnv: ProxyRuntimeEnvironment = DEFAULT_RUNTIME_ENVIRONMENT
+    runtimeEnv: ProxyRuntimeEnvironment = DEFAULT_RUNTIME_ENVIRONMENT,
+    options: ProxyManagerOptions = {}
   ) {
     super();
     this.runtimeEnv = runtimeEnv;
+    this.initializationTimeoutMs =
+      typeof options.initializationTimeoutMs === 'number' &&
+      Number.isFinite(options.initializationTimeoutMs) &&
+      options.initializationTimeoutMs > 0
+        ? options.initializationTimeoutMs
+        : DEFAULT_PROXY_INITIALIZATION_TIMEOUT_MS;
     // Safety handler: prevents Node.js from throwing when 'error' is emitted
     // after all named listeners have been removed (e.g., late IPC messages from
     // a child process that hasn't fully exited yet).
@@ -330,14 +347,15 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         cleanup();
-        const error = new Error(ErrorMessages.proxyInitTimeout(30, this.initProgress)) as Error & {
+        const timeoutSeconds = this.initializationTimeoutMs / 1000;
+        const error = new Error(ErrorMessages.proxyInitTimeout(timeoutSeconds, this.initProgress)) as Error & {
           initProgress?: ProxyInitProgress;
         };
         // Structured copy of the facts behind the message, for the tool
         // result's error payload (issue #493).
         error.initProgress = { ...this.initProgress };
         reject(error);
-      }, 30000);
+      }, this.initializationTimeoutMs);
 
       const cleanup = () => {
         clearTimeout(timeout);
