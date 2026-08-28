@@ -1643,13 +1643,26 @@ export class DebugMcpServer {
               try {
                 let removed: Array<Breakpoint | FunctionBreakpoint>;
                 let warning: string | undefined;
+                let requestedFunctionName: string | undefined;
+                let effectiveFunctionName: string | undefined;
                 if (!args.breakpointId && args.function !== undefined) {
-                  // Remove by function name (issue #271 phase 3)
+                  // Use the same policy-certain rewrite as set_breakpoint so
+                  // the name the caller supplied can remove the normalized
+                  // record that was stored (issue #550).
+                  const normalized = this.normalizeFunctionBreakpointName(
+                    args.sessionId,
+                    args.function
+                  );
+                  const effectiveName = normalized?.name ?? args.function;
+                  if (normalized) {
+                    requestedFunctionName = args.function;
+                    effectiveFunctionName = effectiveName;
+                  }
                   const matches = this.sessionManager
                     .listFunctionBreakpoints(args.sessionId)
-                    .filter((bp) => bp.functionName === args.function);
+                    .filter((bp) => bp.functionName === effectiveName);
                   removed = [];
-                  const warnings: string[] = [];
+                  const warnings: string[] = normalized?.note ? [normalized.note] : [];
                   for (const bp of matches) {
                     const res = await this.removeBreakpoint(args.sessionId, bp.id);
                     if (res.removed) removed.push(res.removed);
@@ -1659,7 +1672,14 @@ export class DebugMcpServer {
                   if (removed.length === 0) {
                     result = { content: [{ type: 'text', text: JSON.stringify({
                       success: false,
-                      error: `No function breakpoint found for ${args.function}`
+                      error: normalized
+                        ? `No function breakpoint found for ${args.function} (normalized to ${effectiveName})`
+                        : `No function breakpoint found for ${args.function}`,
+                      ...(normalized ? {
+                        requestedName: args.function,
+                        functionName: effectiveName,
+                        warning: normalized.note
+                      } : {})
                     }) }] };
                     break;
                   }
@@ -1690,6 +1710,10 @@ export class DebugMcpServer {
                   success: true,
                   removed,
                   message: `Removed ${removed.length} breakpoint(s)`,
+                  ...(requestedFunctionName !== undefined ? {
+                    requestedName: requestedFunctionName,
+                    functionName: effectiveFunctionName
+                  } : {}),
                   warning
                 }) }] };
               } catch (error) {
