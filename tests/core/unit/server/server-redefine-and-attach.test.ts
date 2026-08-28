@@ -432,6 +432,32 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
   });
 
   describe('attach warning join (issue #450)', () => {
+    it('preserves structured diagnostics on a failed attach (issue #551)', async () => {
+      const diagnosticData = {
+        initProgress: { transportConnected: true, pendingRequest: 'initialize' },
+        proxyLogPath: '/tmp/logs/session/proxy-session.log'
+      };
+      mockSessionManager.attachToProcess.mockResolvedValue({
+        success: false,
+        state: 'error',
+        error: 'Failed to attach: initialize stalled',
+        data: diagnosticData
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'attach_to_process',
+          arguments: { sessionId: 'test-session', port: 45999 }
+        }
+      });
+
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload.success).toBe(false);
+      expect(payload.message).toContain('initialize stalled');
+      expect(payload.data).toEqual(diagnosticData);
+    });
+
     it('surfaces data.warning at the top level of the attach_to_process response', async () => {
       mockSessionManager.attachToProcess.mockResolvedValue({
         success: true,

@@ -971,13 +971,14 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         },
       };
     } catch (error) {
+      const diagnosticData = this.collectProxyFailureDiagnostics(session, error);
+      const initProgress = diagnosticData.initProgress as Record<string, unknown> | undefined;
+      const proxyLogPath = diagnosticData.proxyLogPath as string | undefined;
+
       // Attempt to capture proxy log tail for debugging initialization failures
       let proxyLogTail: string | undefined;
-      let proxyLogPath: string | undefined;
       try {
-        const latestSession = this._getSessionById(sessionId);
-        if (latestSession.logDir) {
-          proxyLogPath = path.join(latestSession.logDir, `proxy-${sessionId}.log`);
+        if (proxyLogPath) {
           const logExists = await this.fileSystem.pathExists(proxyLogPath);
           if (logExists) {
             const logContent = await this.fileSystem.readFile(proxyLogPath, 'utf-8');
@@ -992,9 +993,6 @@ export abstract class SessionManagerOperations extends SessionManagerData {
           logReadError instanceof Error ? logReadError.message : String(logReadError)
         }>>`;
       }
-
-      // Structured init-progress facts from a proxy init timeout (issue #493)
-      const initProgress = (error as { initProgress?: Record<string, unknown> })?.initProgress;
 
       // Comprehensive error capture for debugging Windows CI issues
       const errorDetails: Record<string, unknown> = {
@@ -1072,17 +1070,6 @@ export abstract class SessionManagerOperations extends SessionManagerData {
           errorType,
           errorCode,
         };
-      }
-
-      // Surface the diagnosis in the tool result, not just the server log
-      // (issue #493): which init stage stalled, and where the full proxy log
-      // lives — the agent reading the error has no other way to these facts.
-      const diagnosticData: Record<string, unknown> = {};
-      if (initProgress) {
-        diagnosticData.initProgress = initProgress;
-      }
-      if (proxyLogPath) {
-        diagnosticData.proxyLogPath = proxyLogPath;
       }
 
       return {
@@ -3058,6 +3045,9 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       };
     } catch (error) {
       this.logger.error(`[SessionManager] Failed to attach to process for session ${sessionId}:`, error);
+      // Capture initialization diagnostics before teardown, which can clear
+      // the proxy and its per-run log directory (issue #551).
+      const diagnosticData = this.collectProxyFailureDiagnostics(session, error);
       // Never leave a live proxy chain behind a failed attach — e.g.
       // ProxyManager.start()'s init timeout rejects after the worker was
       // spawned (issue #337). Idempotent with the verify-failure teardown
@@ -3069,9 +3059,32 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       return {
         success: false,
         state: SessionState.ERROR,
-        error: `Failed to attach: ${message}`
+        error: `Failed to attach: ${message}`,
+        ...(Object.keys(diagnosticData).length > 0 ? { data: diagnosticData } : {})
       };
     }
+  }
+
+  /**
+   * Collect display-safe pointers to proxy initialization diagnostics while
+   * the session still owns its current proxy run.
+   */
+  private collectProxyFailureDiagnostics(
+    session: ManagedSession,
+    error: unknown
+  ): Record<string, unknown> {
+    const diagnostics: Record<string, unknown> = {};
+    const initProgress = (error as { initProgress?: Record<string, unknown> } | null)
+      ?.initProgress;
+
+    if (initProgress) {
+      diagnostics.initProgress = initProgress;
+    }
+    if (session.logDir) {
+      diagnostics.proxyLogPath = path.join(session.logDir, `proxy-${session.id}.log`);
+    }
+
+    return diagnostics;
   }
 
   /**
