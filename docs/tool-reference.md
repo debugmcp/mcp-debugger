@@ -543,11 +543,14 @@ Gets the current call stack.
 
 **Parameters:**
 - `sessionId` (string, required): The ID of the debug session.
+- `threadId` (number, optional): Inspect a specific thread from `list_threads`. A frame-bearing explicit thread becomes the anchor for follow-up scopes, locals, and evaluation calls.
+- `includeInternals` (boolean, optional): Include runtime/framework frames. Defaults to `false`.
 
 **Response:**
 ```json
 {
   "success": true,
+  "threadId": 1,
   "stackFrames": [
     {
       "id": 3,
@@ -577,9 +580,11 @@ Gets the current call stack.
 
 **Notes:**
 - Stack frames are ordered from innermost (current) to outermost
+- `threadId` identifies the thread represented by `stackFrames`, or the explicitly queried thread when the stack is empty. `lastStop.threadId`, when present, remains the thread reported by the original stop event.
 - Frame IDs are used with `get_scopes`
 - Internal/runtime frames (e.g. Node.js internals, Go `/runtime/`, `System.*`) are filtered out by default; pass `includeInternals: true` to see them. When any frames were hidden, the response additionally carries `hiddenFrames` (count) and a `note` explaining how to reveal them.
 - The filtered stack is never empty when the adapter reported frames: if *every* frame is internal (e.g. a goroutine paused inside the Go runtime), the top internal frame is kept so `get_scopes`/`evaluate_expression` still have a valid `frameId`, and the `note` says so.
+- When an explicit thread reports no frames, the response remains anchored to that thread and its `note` suggests a frame-bearing alternative when one is available.
 
 ---
 
@@ -780,12 +785,14 @@ Gets local variables by traversing all stack frames and their scopes, then using
 
 **Language-Specific Behavior:**
 - **Python**: Looks for "Locals" scope, filters out `__builtins__`, special variables, and internal debugger variables
-- **JavaScript**: Looks for "Local", "Local:", or "Block:" scopes, filters out `this`, `__proto__`, and V8 internals
+- **JavaScript**: Reads the "Local" (or "Local:"/"Block:") scope; when it is empty, falls through to a "Closure" scope, then "Module"/"Script", on the same frame (the response's `note` says which scope was used). "Global" is consulted only for top-level frames that expose no Local scope at all — never as a fall-through, so Node's globals are not reported as locals. Filters out `this`, `__proto__`, and V8 internals
+- **Ruby**: Reads rdbg's "Local variables" scope, hiding the `%self` pseudo-variable unless `includeSpecial: true`; a frame whose only local is `%self` (a native `[C]` frame) counts as empty
 - **Other Languages**: Falls back to generic behavior (first non-global scope)
 
 **Notes:**
 - Session must be paused at a breakpoint for this tool to work
-- The tool traverses all frames in the call stack and collects scopes/variables from each, then uses the adapter policy to extract relevant locals (the reported frame is still the top frame)
+- The tool traverses all frames in the call stack and collects scopes/variables from each, then uses the adapter policy to extract relevant locals
+- When the top frame has no usable locals (a runtime/stdlib frame, a `sleep`), the response anchors to the first lower frame that does, `frame` names that frame, and `note` explains the switch; `note` also reports a same-frame scope fallback (e.g. JavaScript Local → Module). Pass `names` to disable the frame walk-down
 - When `includeSpecial` is true, all variables including internals are returned
 - This is especially useful for AI agents that need quick access to current local state
 

@@ -30,6 +30,8 @@ import {
  */
 export interface StackTraceResult {
   frames: StackFrame[];
+  /** Thread whose stack is represented by `frames` (or was queried when empty). */
+  threadId?: number;
   totalFrameCount: number;
   hiddenFrameCount: number;
   allFramesInternal: boolean;
@@ -42,8 +44,15 @@ export interface StackTraceResult {
   note?: string;
 }
 
-function emptyStackTraceResult(note?: string): StackTraceResult {
-  return { frames: [], totalFrameCount: 0, hiddenFrameCount: 0, allFramesInternal: false, ...(note ? { note } : {}) };
+function emptyStackTraceResult(note?: string, threadId?: number): StackTraceResult {
+  return {
+    frames: [],
+    totalFrameCount: 0,
+    hiddenFrameCount: 0,
+    allFramesInternal: false,
+    ...(typeof threadId === 'number' ? { threadId } : {}),
+    ...(note ? { note } : {})
+  };
 }
 
 /**
@@ -187,6 +196,12 @@ export abstract class SessionManagerData extends SessionManagerCore {
    * Go runtime frames), the top unfiltered frame is kept so the agent always
    * has a frameId to anchor scopes/evaluate, and `hiddenFrameCount` +
    * `allFramesInternal` let the response say what was hidden.
+   *
+   * Thread contract: `opts.ensureStackReady` is the caller's permission to
+   * re-anchor — an empty stack then gets the bounded readiness retry and may
+   * switch to a sibling thread that has frames (the implicit MCP path, which
+   * resolved `threadId` itself). Without it, an explicitly requested thread
+   * is never re-anchored: an empty answer is only *described* (issue #553).
    */
   async getStackTraceDetailed(
     sessionId: string,
@@ -200,14 +215,14 @@ export abstract class SessionManagerData extends SessionManagerCore {
 
     if (!session.proxyManager || !session.proxyManager.isRunning()) {
       this.logger.warn(`[SM getStackTrace ${sessionId}] No active proxy.`);
-      return emptyStackTraceResult('No active debug process for this session.');
+      return emptyStackTraceResult('No active debug process for this session.', threadId);
     }
     if (session.state !== SessionState.PAUSED) {
       this.logger.warn(`[SM getStackTrace ${sessionId}] Session not paused. State: ${session.state}.`);
-      return emptyStackTraceResult(`Session is not paused (state: ${session.state}); stack traces are only available while paused.`);
+      return emptyStackTraceResult(`Session is not paused (state: ${session.state}); stack traces are only available while paused.`, threadId);
     }
 
-    const currentThreadForRequest = threadId || currentThreadId;
+    const currentThreadForRequest = threadId ?? currentThreadId;
     if (typeof currentThreadForRequest !== 'number') {
       this.logger.warn(`[SM getStackTrace ${sessionId}] No effective thread ID to use.`);
       return emptyStackTraceResult('No stopped thread is known for this session.');
@@ -217,6 +232,7 @@ export abstract class SessionManagerData extends SessionManagerCore {
     try {
       let rawFrames = await this.requestRawStackFrames(sessionId, proxyManager, currentThreadForRequest);
       let note: string | undefined;
+      let resultThreadId = currentThreadForRequest;
 
       // A PAUSED session answering with zero frames is nearly always a
       // transient adapter race (netcoredbg materializes the managed stack a
@@ -227,6 +243,12 @@ export abstract class SessionManagerData extends SessionManagerCore {
         const ready = await this.waitForReadyStack(sessionId, session, proxyManager, currentThreadForRequest);
         rawFrames = ready.frames;
         note = ready.note;
+        resultThreadId = ready.threadId;
+      } else if (rawFrames.length === 0 && typeof threadId === 'number') {
+        // An explicit thread request must remain anchored to that thread, but
+        // a silent empty success is not actionable. Inspect other threads only
+        // to offer a concrete alternative; never adopt it here (issue #553).
+        note = await this.describeFramelessThread(sessionId, proxyManager, threadId);
       }
 
       let frames: StackFrame[] = rawFrames.map((sf: DebugProtocol.StackFrame) => ({
@@ -255,7 +277,14 @@ export abstract class SessionManagerData extends SessionManagerCore {
       }
 
       this.logger.info(`[SM getStackTrace ${sessionId}] Parsed stack frames (top 3):`, frames.slice(0,3).map(f => ({name:f.name, file:f.file, line:f.line})));
-      return { frames, totalFrameCount, hiddenFrameCount: totalFrameCount - frames.length, allFramesInternal, ...(note ? { note } : {}) };
+      return {
+        frames,
+        threadId: resultThreadId,
+        totalFrameCount,
+        hiddenFrameCount: totalFrameCount - frames.length,
+        allFramesInternal,
+        ...(note ? { note } : {})
+      };
     } catch (error) {
       this.logger.error(`[SM getStackTrace ${sessionId}] Error getting stack trace:`, error);
       throw error instanceof Error ? error : new Error(String(error));
@@ -301,16 +330,16 @@ export abstract class SessionManagerData extends SessionManagerCore {
     session: { state: SessionState },
     proxyManager: IProxyManager,
     threadId: number
-  ): Promise<{ frames: DebugProtocol.StackFrame[]; note?: string }> {
+  ): Promise<{ frames: DebugProtocol.StackFrame[]; threadId: number; note?: string }> {
     const deadline = Date.now() + this.pausedStackReadyTimeoutMs;
     while (Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, this.pausedStackReadyIntervalMs));
       if (session.state !== SessionState.PAUSED) {
-        return { frames: [], note: 'The session left the paused state while waiting for the stack; it is no longer paused.' };
+        return { frames: [], threadId, note: 'The session left the paused state while waiting for the stack; it is no longer paused.' };
       }
       const frames = await this.requestRawStackFrames(sessionId, proxyManager, threadId);
       if (frames.length > 0) {
-        return { frames };
+        return { frames, threadId };
       }
       const scanned = await this.scanThreadsForFrames(sessionId, proxyManager, threadId);
       if (scanned) {
@@ -318,6 +347,7 @@ export abstract class SessionManagerData extends SessionManagerCore {
         this.logger.info(`[SM getStackTrace ${sessionId}] Thread ${threadId} stayed frameless; adopted thread ${scanned.threadId} which has a stack.`);
         return {
           frames: scanned.frames,
+          threadId: scanned.threadId,
           note: `The stopped thread ${threadId} reported no stack frames; switched to thread ${scanned.threadId}, which has one.`
         };
       }
@@ -325,39 +355,79 @@ export abstract class SessionManagerData extends SessionManagerCore {
     this.logger.warn(`[SM getStackTrace ${sessionId}] Stack stayed empty for ${this.pausedStackReadyTimeoutMs}ms while paused (threadId ${threadId}).`);
     return {
       frames: [],
+      threadId,
       note: `The stopped thread reported no stack frames within ${this.pausedStackReadyTimeoutMs}ms; the target may be paused in native code. Try get_stack_trace with a threadId from list_threads, or continue_execution followed by pause_execution to re-anchor the session on a reportable thread.`
     };
   }
 
   /**
-   * Probe the other stopped threads for one that reports stack frames.
-   * Probe failures on individual threads are not fatal — runtime threads may
-   * reject stackTrace outright.
+   * Explain an explicitly requested thread that reported no frames (issue
+   * #553): name it, and point at a frame-bearing sibling when one exists.
+   * Only describes — never adopts — so the caller's thread stays the anchor.
    */
-  private async scanThreadsForFrames(
+  private async describeFramelessThread(
     sessionId: string,
     proxyManager: IProxyManager,
-    excludeThreadId: number
-  ): Promise<{ threadId: number; frames: DebugProtocol.StackFrame[] } | null> {
-    let threads: DebugProtocol.Thread[] | undefined;
+    threadId: number
+  ): Promise<string> {
+    const threads = await this.listThreadsForScan(sessionId, proxyManager) ?? [];
+    const label = (id: number, name?: string): string => (name ? `${id} (${name})` : String(id));
+    const requestedLabel = label(threadId, threads.find(thread => thread?.id === threadId)?.name);
+
+    const alternative = await this.scanThreadsForFrames(sessionId, proxyManager, threadId, threads);
+    if (alternative) {
+      return (
+        `Thread ${requestedLabel} reported no stack frames; thread ${label(alternative.threadId, alternative.threadName)} has frames. ` +
+        `Try get_stack_trace with threadId ${alternative.threadId}.`
+      );
+    }
+    // Don't assert a cause: a native/runtime thread and the transient
+    // stack-not-materialized race right after a stop give the same answer.
+    return (
+      `Thread ${requestedLabel} reported no stack frames (it may be a native/runtime thread, or its stack may not have materialized yet). ` +
+      'Retry, or try get_stack_trace with another threadId from list_threads.'
+    );
+  }
+
+  /** One DAP `threads` request; null when the adapter rejects it. */
+  private async listThreadsForScan(
+    sessionId: string,
+    proxyManager: IProxyManager
+  ): Promise<DebugProtocol.Thread[] | null> {
     try {
       const response = await proxyManager.sendDapRequest<DebugProtocol.ThreadsResponse>('threads', {});
-      threads = response?.body?.threads;
+      const threads = response?.body?.threads;
+      return Array.isArray(threads) ? threads : null;
     } catch (err) {
       this.logger.warn(`[SM getStackTrace ${sessionId}] Thread scan could not list threads: ${err instanceof Error ? err.message : String(err)}`);
       return null;
     }
-    if (!Array.isArray(threads)) {
+  }
+
+  /**
+   * Probe the other stopped threads for one that reports stack frames.
+   * Probe failures on individual threads are not fatal — runtime threads may
+   * reject stackTrace outright. Pass `threads` to reuse an already-fetched
+   * thread list instead of issuing a second `threads` request.
+   */
+  private async scanThreadsForFrames(
+    sessionId: string,
+    proxyManager: IProxyManager,
+    excludeThreadId: number,
+    threads?: DebugProtocol.Thread[]
+  ): Promise<{ threadId: number; threadName?: string; frames: DebugProtocol.StackFrame[] } | null> {
+    const candidates = threads ?? await this.listThreadsForScan(sessionId, proxyManager);
+    if (!candidates) {
       return null;
     }
-    for (const thread of threads) {
+    for (const thread of candidates) {
       if (!thread || typeof thread.id !== 'number' || thread.id === excludeThreadId) {
         continue;
       }
       try {
         const frames = await this.requestRawStackFrames(sessionId, proxyManager, thread.id);
         if (frames.length > 0) {
-          return { threadId: thread.id, frames };
+          return { threadId: thread.id, threadName: thread.name, frames };
         }
       } catch {
         // This thread rejected stackTrace — keep scanning.
@@ -410,7 +480,13 @@ export abstract class SessionManagerData extends SessionManagerCore {
     variables: Variable[];
     frame: { name: string; file: string; line: number } | null;
     scopeName: string | null;
-    /** Set when the top frame had no locals and a lower frame was anchored instead (issue #468). */
+    /**
+     * Explains any departure from "the top frame's local scope": the top
+     * frame had no locals and a lower frame was anchored instead (issue
+     * #468), and/or a sibling scope on the anchor frame supplied the
+     * variables because the canonical local scope was empty (issue #548).
+     * Both notes may apply; they are joined with '; '.
+     */
     anchorNote?: string;
     truncation?: VariableTruncationSummary;
   }> {
@@ -488,7 +564,11 @@ export abstract class SessionManagerData extends SessionManagerCore {
       // Step 5: Extract local variables using the adapter policy. Policies
       // anchor to the first frame of the list they receive, so extraction is
       // parameterized by anchor: slicing the frame list re-anchors it.
-      const extractAt = (frames: StackFrame[]): { localVars: Variable[]; scopeName: string | null } => {
+      const extractAt = (frames: StackFrame[]): {
+        localVars: Variable[];
+        scopeName: string | null;
+        scopeNote?: string;
+      } => {
         const anchor = frames[0];
         if (policy.extractLocalVariables) {
           const vars = policy.extractLocalVariables(frames, scopesMap, variablesMap, includeSpecial);
@@ -501,10 +581,35 @@ export abstract class SessionManagerData extends SessionManagerCore {
             ? ([] as string[]).concat(policy.getLocalScopeName())
             : [];
           const anchorScopes = scopesMap[anchor.id] || [];
-          const matchedScope = anchorScopes.find(s =>
-            canonicalNames.some(c => s.name === c || s.name.startsWith(c + ' '))
-          );
-          return { localVars: vars, scopeName: matchedScope?.name ?? canonicalNames[0] ?? null };
+          const matchesCanonicalName = (scopeName: string, canonicalName: string): boolean =>
+            scopeName === canonicalName ||
+            scopeName.startsWith(canonicalName + ' ') ||
+            (canonicalName.endsWith(':') && scopeName.startsWith(canonicalName));
+          // Rank by the policy's preference order, not the adapter's scope
+          // order: an adapter listing e.g. "Closure (fn)" ahead of "Local"
+          // must not make Closure the canonical scope and Local the
+          // "fallback", or the note below would misreport every call.
+          const canonicalScope = canonicalNames
+            .map(canonicalName => anchorScopes.find(scope => matchesCanonicalName(scope.name, canonicalName)))
+            .find((scope): scope is DebugProtocol.Scope => scope !== undefined);
+          const returnedVars = new Set(vars);
+          const contributingScope = vars.length > 0
+            ? anchorScopes.find(scope =>
+                (variablesMap[scope.variablesReference] || []).some(variable => returnedVars.has(variable))
+              )
+            : undefined;
+          const matchedScope = contributingScope ?? canonicalScope;
+          const scopeNote = contributingScope && canonicalScope && contributingScope !== canonicalScope
+            ? (
+                `The ${canonicalScope.name} scope on frame '${anchor.name}' had no usable local variables; ` +
+                `showing ${contributingScope.name} from the same frame instead`
+              )
+            : undefined;
+          return {
+            localVars: vars,
+            scopeName: matchedScope?.name ?? canonicalNames[0] ?? null,
+            ...(scopeNote ? { scopeNote } : {})
+          };
         }
         // Fallback: use first non-global scope from the anchor frame
         const anchorScopes = scopesMap[anchor.id] || [];
@@ -515,7 +620,7 @@ export abstract class SessionManagerData extends SessionManagerCore {
       };
 
       let anchorIndex = 0;
-      let { localVars, scopeName } = extractAt(stackFrames);
+      let { localVars, scopeName, scopeNote } = extractAt(stackFrames);
 
       // A pause inside a runtime/stdlib frame (blocking syscall, sleep) puts
       // an empty-locals frame on top while the user frame sits just below —
@@ -530,6 +635,7 @@ export abstract class SessionManagerData extends SessionManagerCore {
             anchorIndex = k;
             localVars = attempt.localVars;
             scopeName = attempt.scopeName;
+            scopeNote = attempt.scopeNote;
             this.logger.info(
               `[SM getLocalVariables ${sessionId}] Top frame '${topFrame.name}' had no locals; anchored to frame #${k} '${stackFrames[k].name}'.`
             );
@@ -571,6 +677,17 @@ export abstract class SessionManagerData extends SessionManagerCore {
           : undefined
       ]);
 
+      const anchorNotes: string[] = [];
+      if (anchorIndex > 0) {
+        anchorNotes.push(
+          `Top frame '${topFrame.name}' has no local variables (runtime/stdlib frame); ` +
+          `showing frame #${anchorIndex} '${anchorFrame.name}' instead`
+        );
+      }
+      if (scopeNote) {
+        anchorNotes.push(scopeNote);
+      }
+
       return {
         variables: cappedLocals.variables,
         frame: {
@@ -579,13 +696,7 @@ export abstract class SessionManagerData extends SessionManagerCore {
           line: anchorFrame.line
         },
         scopeName,
-        ...(anchorIndex > 0
-          ? {
-              anchorNote:
-                `Top frame '${topFrame.name}' has no local variables (runtime/stdlib frame); ` +
-                `showing frame #${anchorIndex} '${anchorFrame.name}' instead`
-            }
-          : {}),
+        ...(anchorNotes.length > 0 ? { anchorNote: anchorNotes.join('; ') } : {}),
         ...(truncation ? { truncation } : {})
       };
       

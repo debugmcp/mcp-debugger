@@ -886,8 +886,10 @@ export class DebugMcpServer {
     // anchor to it — this is the escape hatch when the session anchored to a
     // frameless thread.
     if (typeof threadId === 'number') {
-      // No ensureStackReady scan here: the caller asked about THIS thread,
-      // so an empty answer for it is the honest one (no silent re-anchor).
+      // No ensureStackReady here: the caller asked about THIS thread, so an
+      // empty answer for it is the honest one — the session layer may look
+      // at sibling threads to *suggest* an alternative in `note` (issue
+      // #553), but never silently re-anchors to one.
       const result = await this.sessionManager.getStackTraceDetailed(
         sessionId, threadId, includeInternals
       );
@@ -2170,6 +2172,7 @@ export class DebugMcpServer {
                   success: true,
                   stackFrames: stackTrace.frames,
                   count: stackTrace.frames.length,
+                  ...(typeof stackTrace.threadId === 'number' ? { threadId: stackTrace.threadId } : {}),
                   includeInternals,
                   stopReason: lastStop?.reason,
                   lastStop

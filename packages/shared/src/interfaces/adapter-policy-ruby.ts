@@ -21,7 +21,8 @@ export const RubyAdapterPolicy: AdapterPolicy = {
   extractLocalVariables: (
     stackFrames: StackFrame[],
     scopes: Record<number, DebugProtocol.Scope[]>,
-    variables: Record<number, Variable[]>
+    variables: Record<number, Variable[]>,
+    includeSpecial: boolean = false
   ): Variable[] => {
     if (!stackFrames || stackFrames.length === 0) {
       return [];
@@ -43,7 +44,16 @@ export const RubyAdapterPolicy: AdapterPolicy = {
       return [];
     }
 
-    return variables[localScope.variablesReference] || [];
+    const localVariables = variables[localScope.variablesReference] || [];
+    // rdbg injects %self (the receiver, rdbg's `this`) into every frame,
+    // including native [C] frames. Hide it by default so a %self-only frame
+    // counts as empty and the core walk-down can reach the real Ruby frame
+    // below it (issue #549). Only %self: rdbg's other %-pseudo-variables —
+    // %return after a step-out, %raised at an exception stop — carry the
+    // value the user paused to see and must stay visible.
+    return includeSpecial
+      ? localVariables
+      : localVariables.filter(variable => variable.name !== '%self');
   },
   getLocalScopeName: (): string[] => {
     return ['Local variables'];

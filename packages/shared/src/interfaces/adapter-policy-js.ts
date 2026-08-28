@@ -150,68 +150,82 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
       return [];
     }
     
-    // Find the "Local" scope (JavaScript may use "Local", "Local: functionName", etc.)
-    let localScope = frameScopes.find(scope => 
-      scope.name === 'Local' || 
-      scope.name === 'Locals' ||
-      scope.name.startsWith('Local:') ||
-      scope.name.startsWith('Block:')
-    );
-    
-    // Fallback: when debugging top-level scripts, js-debug reports "Script" or "Global" scopes
-    if (!localScope) {
-      localScope = frameScopes.find(scope => 
-        scope.name === 'Script' ||
-        scope.name === 'Module' ||
-        scope.name === 'module' ||
-        scope.name.toLowerCase().includes('global')
-      );
+    const variablesForScope = (scope: DebugProtocol.Scope): Variable[] => {
+      let scopeVariables = variables[scope.variablesReference] || [];
+
+      // Filter out special variables unless requested. A scope containing
+      // only these entries is still empty for normal local inspection, so
+      // sibling scopes remain eligible (issue #548).
+      if (!includeSpecial) {
+        scopeVariables = scopeVariables.filter(v => {
+          const name = v.name;
+
+          // Skip 'this' unless explicitly requested
+          if (name === 'this') {
+            return false;
+          }
+
+          // Skip prototype chain variables
+          if (name === '__proto__' || name === 'prototype') {
+            return false;
+          }
+
+          // Skip internal V8/Node variables
+          if (name.startsWith('[[') && name.endsWith(']]')) {
+            return false;
+          }
+
+          // Skip debugger internals
+          if (name.startsWith('$') || name.startsWith('_$')) {
+            return false;
+          }
+
+          return true;
+        });
+      }
+
+      return scopeVariables;
+    };
+
+    // js-debug can expose a genuinely empty Local scope while the useful
+    // binding lives in Closure or Module on the same frame. Try those scopes
+    // in usefulness order before the session layer walks down to a caller.
+    const isLocalLike = (scope: DebugProtocol.Scope): boolean =>
+      scope.name === 'Local' || scope.name === 'Locals' ||
+      scope.name.startsWith('Local:') || scope.name.startsWith('Block:');
+    const scopeGroups: Array<(scope: DebugProtocol.Scope) => boolean> = [
+      isLocalLike,
+      scope => scope.name === 'Closure' || scope.name.startsWith('Closure:') ||
+        scope.name.startsWith('Closure '),
+      scope => scope.name === 'Script' || scope.name.toLowerCase() === 'module'
+    ];
+    // Global is a last resort only for frames that expose no Local scope at
+    // all (top-level script frames). It must never be a fall-through past an
+    // empty Local: js-debug marks Global expensive but the session layer
+    // still fetches it, so Node's ~140 globals would be reported as locals
+    // and the non-empty result would keep the issue #468 walk-down to the
+    // caller frame from ever running.
+    if (!frameScopes.some(isLocalLike)) {
+      scopeGroups.push(scope => scope.name.toLowerCase().includes('global'));
     }
-    
-    if (!localScope) {
-      return [];
+
+    for (const matches of scopeGroups) {
+      for (const scope of frameScopes.filter(matches)) {
+        const scopeVariables = variablesForScope(scope);
+        if (scopeVariables.length > 0) {
+          return scopeVariables;
+        }
+      }
     }
-    
-    // Get the variables for this scope
-    let localVars = variables[localScope.variablesReference] || [];
-    
-    // Filter out special variables unless requested
-    if (!includeSpecial) {
-      localVars = localVars.filter(v => {
-        const name = v.name;
-        
-        // Skip 'this' unless explicitly requested
-        if (name === 'this') {
-          return false;
-        }
-        
-        // Skip prototype chain variables
-        if (name === '__proto__' || name === 'prototype') {
-          return false;
-        }
-        
-        // Skip internal V8/Node variables
-        if (name.startsWith('[[') && name.endsWith(']]')) {
-          return false;
-        }
-        
-        // Skip debugger internals
-        if (name.startsWith('$') || name.startsWith('_$')) {
-          return false;
-        }
-        
-        return true;
-      });
-    }
-    
-    return localVars;
+
+    return [];
   },
   
   /**
    * JavaScript uses various local scope names
    */
   getLocalScopeName: (): string[] => {
-    return ['Local', 'Locals', 'Local:', 'Block:', 'Script', 'Module', 'module', 'Global'];
+    return ['Local', 'Locals', 'Local:', 'Block:', 'Closure', 'Closure:', 'Script', 'Module', 'module', 'Global'];
   },
   
   getDapAdapterConfiguration: () => {

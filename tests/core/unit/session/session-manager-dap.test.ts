@@ -3,7 +3,13 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
-import { DebugLanguage, SessionState, RustAdapterPolicy } from '@debugmcp/shared';
+import {
+  DebugLanguage,
+  JsDebugAdapterPolicy,
+  RubyAdapterPolicy,
+  RustAdapterPolicy,
+  SessionState
+} from '@debugmcp/shared';
 import { createMockDependencies } from './session-manager-test-utils.js';
 import { ErrorMessages } from '../../../../src/utils/error-messages.js';
 import { ProxyNotRunningError } from '../../../../src/errors/debug-errors.js';
@@ -1193,6 +1199,162 @@ describe('SessionManager - DAP Operations', () => {
       expect(result.anchorNote).toMatch(/'main'/);
     });
 
+    it('uses a useful sibling JS scope before walking down frames (issue #548)', async () => {
+      const session = await createPausedSession();
+      (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
+
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(
+        async (command: string, args?: { variablesReference?: number }) => {
+          if (command === 'stackTrace') {
+            return {
+              success: true,
+              body: {
+                stackFrames: [
+                  { id: 1, name: 'interval callback', source: { path: '/workspace/pause_test.js' }, line: 4, column: 1 }
+                ]
+              }
+            };
+          }
+          if (command === 'scopes') {
+            return {
+              success: true,
+              body: {
+                scopes: [
+                  { name: 'Local', variablesReference: 100, expensive: false },
+                  { name: 'Module', variablesReference: 200, expensive: false },
+                  { name: 'Global', variablesReference: 300, expensive: true }
+                ]
+              }
+            };
+          }
+          if (command === 'variables') {
+            const byReference: Record<number, Array<Record<string, unknown>>> = {
+              100: [],
+              200: [{ name: 'counter', value: '46', type: 'number', variablesReference: 0 }],
+              300: [{ name: 'process', value: 'Process', type: 'object', variablesReference: 1 }]
+            };
+            return { success: true, body: { variables: byReference[args?.variablesReference ?? 0] ?? [] } };
+          }
+          return { success: true };
+        }
+      );
+
+      const result = await sessionManager.getLocalVariables(session.id, false, ['counter']);
+
+      expect(result.variables.map(variable => variable.name)).toEqual(['counter']);
+      expect(result.frame).toEqual(expect.objectContaining({ name: 'interval callback' }));
+      expect(result.scopeName).toBe('Module');
+      expect(result.anchorNote).toMatch(/Local/);
+      expect(result.anchorNote).toMatch(/Module/);
+    });
+
+    it('ranks the canonical scope by policy preference, not adapter scope order (issue #548 review)', async () => {
+      const session = await createPausedSession();
+      (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
+
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(
+        async (command: string, args?: { variablesReference?: number }) => {
+          if (command === 'stackTrace') {
+            return {
+              success: true,
+              body: {
+                stackFrames: [
+                  { id: 1, name: 'tick', source: { path: '/workspace/pause_test.js' }, line: 4, column: 1 }
+                ]
+              }
+            };
+          }
+          if (command === 'scopes') {
+            // Closure listed ahead of Local: Local is still the canonical
+            // scope, so a populated Local must produce no fallback note.
+            return {
+              success: true,
+              body: {
+                scopes: [
+                  { name: 'Closure (tick)', variablesReference: 200, expensive: false },
+                  { name: 'Local', variablesReference: 100, expensive: false },
+                  { name: 'Module', variablesReference: 300, expensive: false }
+                ]
+              }
+            };
+          }
+          if (command === 'variables') {
+            const byReference: Record<number, Array<Record<string, unknown>>> = {
+              100: [{ name: 'i', value: '3', type: 'number', variablesReference: 0 }],
+              200: [{ name: 'captured', value: '7', type: 'number', variablesReference: 0 }],
+              300: [{ name: 'counter', value: '46', type: 'number', variablesReference: 0 }]
+            };
+            return { success: true, body: { variables: byReference[args?.variablesReference ?? 0] ?? [] } };
+          }
+          return { success: true };
+        }
+      );
+
+      const result = await sessionManager.getLocalVariables(session.id);
+
+      expect(result.variables.map(variable => variable.name)).toEqual(['i']);
+      expect(result.scopeName).toBe('Local');
+      expect(result.anchorNote).toBeUndefined();
+    });
+
+    it('treats a Ruby %self-only native frame as empty and walks to user locals (issue #549)', async () => {
+      const session = await createPausedSession();
+      (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => RubyAdapterPolicy;
+
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(
+        async (command: string, args?: { frameId?: number; variablesReference?: number }) => {
+          if (command === 'stackTrace') {
+            return {
+              success: true,
+              body: {
+                stackFrames: [
+                  { id: 1, name: '[C] Kernel#sleep', source: { path: '/workspace/long_running.rb' }, line: 13, column: 1 },
+                  { id: 2, name: 'block in <main>', source: { path: '/workspace/long_running.rb' }, line: 13, column: 1 }
+                ]
+              }
+            };
+          }
+          if (command === 'scopes') {
+            return {
+              success: true,
+              body: {
+                scopes: [{
+                  name: 'Local variables',
+                  presentationHint: 'locals',
+                  variablesReference: args?.frameId === 1 ? 100 : 200,
+                  expensive: false
+                }]
+              }
+            };
+          }
+          if (command === 'variables') {
+            return {
+              success: true,
+              body: {
+                variables: args?.variablesReference === 100
+                  ? [{ name: '%self', value: 'main', type: 'Object', variablesReference: 1 }]
+                  : [
+                      { name: '%self', value: 'main', type: 'Object', variablesReference: 1 },
+                      { name: 'counter', value: '37', type: 'Integer', variablesReference: 0 }
+                    ]
+              }
+            };
+          }
+          return { success: true };
+        }
+      );
+
+      const result = await sessionManager.getLocalVariables(session.id);
+      expect(result.variables.map(variable => variable.name)).toEqual(['counter']);
+      expect(result.frame).toEqual(expect.objectContaining({ name: 'block in <main>' }));
+      expect(result.anchorNote).toMatch(/Kernel#sleep/);
+
+      const withSpecial = await sessionManager.getLocalVariables(session.id, true);
+      expect(withSpecial.variables.map(variable => variable.name)).toEqual(['%self']);
+      expect(withSpecial.frame).toEqual(expect.objectContaining({ name: '[C] Kernel#sleep' }));
+      expect(withSpecial.anchorNote).toBeUndefined();
+    });
+
     it('does not walk down when an explicit names filter is set (issue #468)', async () => {
       const session = await createPausedSession();
 
@@ -1787,8 +1949,107 @@ describe('SessionManager - DAP Operations', () => {
 
       expect(result.frames.map(f => f.name)).toEqual(['Program.Main']);
       expect(result.note).toMatch(/thread 2/);
+      expect((result as unknown as { threadId?: number }).threadId).toBe(2);
       // The frame-bearing thread is adopted so scopes/evaluate anchor to it.
       expect(dependencies.mockProxyManager.getCurrentThreadId()).toBe(2);
+    });
+
+    it('explains an explicitly requested frameless thread without adopting an alternative (issue #553)', async () => {
+      const session = await createPausedSession(); // currentThreadId = 1
+      dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: { threadId?: number }) => {
+        if (command === 'stackTrace') {
+          return { success: true, body: { stackFrames: args?.threadId === 2 ? [READY_FRAME] : [] } };
+        }
+        if (command === 'threads') {
+          return {
+            success: true,
+            body: {
+              threads: [
+                { id: 1, name: 'main' },
+                { id: 2, name: 'Finalizer' },
+                { id: 4, name: 'Signal Dispatcher' }
+              ]
+            }
+          };
+        }
+        return { success: true, body: {} };
+      });
+
+      const result = await sessionManager.getStackTraceDetailed(session.id, 4);
+
+      expect(result.frames).toEqual([]);
+      expect((result as unknown as { threadId?: number }).threadId).toBe(4);
+      expect(result.note).toMatch(/Thread 4 \(Signal Dispatcher\)/);
+      expect(result.note).toMatch(/thread 2 \(Finalizer\)/);
+      expect(dependencies.mockProxyManager.getCurrentThreadId()).toBe(1);
+    });
+
+    it('still explains an explicit frameless thread when alternatives cannot be listed', async () => {
+      const session = await createPausedSession();
+      dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+        if (command === 'stackTrace') {
+          return { success: true, body: { stackFrames: [] } };
+        }
+        if (command === 'threads') {
+          throw new Error('thread enumeration unavailable');
+        }
+        return { success: true, body: {} };
+      });
+
+      const result = await sessionManager.getStackTraceDetailed(session.id, 4);
+
+      expect(result.threadId).toBe(4);
+      expect(result.note).toMatch(/Thread 4 reported no stack frames/);
+      expect(result.note).toMatch(/another threadId from list_threads/);
+    });
+
+    it('skips invalid thread entries and suggests an unnamed frame-bearing thread', async () => {
+      const session = await createPausedSession();
+      dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: { threadId?: number }) => {
+        if (command === 'stackTrace') {
+          return { success: true, body: { stackFrames: args?.threadId === 2 ? [READY_FRAME] : [] } };
+        }
+        if (command === 'threads') {
+          return {
+            success: true,
+            body: {
+              threads: [
+                { id: 4, name: 'Signal Dispatcher' },
+                null,
+                { id: 'invalid', name: 'invalid entry' },
+                { id: 2, name: '' }
+              ]
+            }
+          };
+        }
+        return { success: true, body: {} };
+      });
+
+      const result = await sessionManager.getStackTraceDetailed(session.id, 4);
+
+      expect(result.threadId).toBe(4);
+      expect(result.note).toMatch(/thread 2 has frames/);
+      expect(dependencies.mockProxyManager.getCurrentThreadId()).toBe(1);
+    });
+
+    it('treats an explicit threadId of 0 as a real thread, not as "use the current one"', async () => {
+      // js-debug reports its main thread as id 0; `threadId || current` used
+      // to redirect that request to the current thread.
+      const session = await createPausedSession(); // currentThreadId = 1
+      const requested: number[] = [];
+      dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: { threadId?: number }) => {
+        if (command === 'stackTrace') {
+          requested.push(args?.threadId as number);
+          return { success: true, body: { stackFrames: args?.threadId === 0 ? [READY_FRAME] : [] } };
+        }
+        return { success: true, body: {} };
+      });
+
+      const result = await sessionManager.getStackTraceDetailed(session.id, 0);
+
+      expect(requested).toEqual([0]);
+      expect(result.frames).toHaveLength(1);
+      expect(result.threadId).toBe(0);
     });
 
     it('returns an honest empty result with a note when no thread reports frames', async () => {

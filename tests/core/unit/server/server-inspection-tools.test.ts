@@ -198,6 +198,43 @@ describe('Server Inspection Tools Tests', () => {
       expect(content.note).toBeUndefined();
     });
 
+    it('echoes the inspected thread and frameless-thread note (issue #553)', async () => {
+      const mockSession = {
+        lastStop: { reason: 'pause', threadId: 1 },
+        proxyManager: {
+          getCurrentThreadId: vi.fn().mockReturnValue(1),
+          setCurrentThreadId: vi.fn()
+        }
+      };
+      mockSessionManager.getSession.mockReturnValue(mockSession);
+      mockSessionManager.getStackTraceDetailed.mockResolvedValue({
+        frames: [],
+        totalFrameCount: 0,
+        hiddenFrameCount: 0,
+        allFramesInternal: false,
+        threadId: 4,
+        note: 'Thread 4 (Signal Dispatcher) reported no stack frames; thread 2 (Finalizer) has frames.'
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'get_stack_trace',
+          arguments: { sessionId: 'test-session', threadId: 4 }
+        }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      expect(content.threadId).toBe(4);
+      expect(content.lastStop.threadId).toBe(1);
+      expect(content.note).toMatch(/Signal Dispatcher/);
+      expect(mockSessionManager.getStackTraceDetailed).toHaveBeenCalledWith(
+        'test-session', 4, false
+      );
+      expect(mockSession.proxyManager.setCurrentThreadId).not.toHaveBeenCalled();
+    });
+
     it('annotates hidden internal frames with a count and how to reveal them (issue #346)', async () => {
       const mockSession = {
         proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(1) }
