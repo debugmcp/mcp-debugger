@@ -3,6 +3,7 @@ import express from 'express';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { IncomingMessage, ServerResponse } from 'http';
 import { DebugMcpServer } from '../server.js';
+import { attachSharedFileTransport } from '../utils/logger.js';
 import { SSEOptions } from './setup.js';
 import { watchStdinForParentExit } from './stdin-watchdog.js';
 import type { ProcessLike } from '../interfaces/process-interfaces.js';
@@ -201,6 +202,12 @@ export async function handleSSECommand(
   
   if (options.logLevel) {
     logger.level = options.logLevel;
+  }
+  if (options.logFile) {
+    // The CLI logger is created before option parsing. Attach the requested
+    // shared transport before this module's first warning so its lifecycle
+    // lines land beside the DebugMcpServer logs (issue #533).
+    attachSharedFileTransport(logger, options.logFile);
   }
   
   const port = parseInt(options.port, 10);

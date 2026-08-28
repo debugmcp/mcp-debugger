@@ -13,8 +13,8 @@ const __dirname = path.dirname(__filename);
 const bootstrapLogPrefix = `[Bootstrap ${new Date().toISOString()}]`;
 
 // Simple logging function - just use stderr
-function logBootstrapActivity(message) {
-  console.error(`${bootstrapLogPrefix} ${message}`);
+function logBootstrapActivity(message, level = 'INFO') {
+  console.error(`[${level}] ${bootstrapLogPrefix} ${message}`);
 }
 
 // NOTE: No SIGTERM/SIGINT/disconnect handlers here. The worker module
@@ -34,7 +34,7 @@ setInterval(() => {
   // Send SIGTERM (not process.exit) so the worker's signal handler fires
   // and runs auto-detach before exit.
   if (shouldExitAsOrphanFromEnv(process.ppid, process.env)) {
-    logBootstrapActivity('Process orphaned (ppid=1 outside container), sending SIGTERM...');
+    logBootstrapActivity('Process orphaned (ppid=1 outside container), sending SIGTERM...', 'WARN');
     process.kill(process.pid, 'SIGTERM');
   }
 }, 10000);
@@ -59,7 +59,7 @@ logBootstrapActivity(`Bootstrap script started. CWD: ${process.cwd()}`);
     
     // Verify the chosen file exists
     if (!fs.existsSync(proxyPath)) {
-      logBootstrapActivity(`ERROR: Proxy file not found at ${proxyPath}`);
+      logBootstrapActivity(`Proxy file not found at ${proxyPath}`, 'ERROR');
       process.exit(1);
     }
     
@@ -77,12 +77,12 @@ logBootstrapActivity(`Bootstrap script started. CWD: ${process.cwd()}`);
       logBootstrapActivity(`Dynamic import of ${useBundle ? 'bundled' : 'unbundled'} proxy succeeded.`);
     } catch (importError) {
       const errorMessage = importError instanceof Error ? `${importError.name}: ${importError.message}\n${importError.stack}` : String(importError);
-      logBootstrapActivity(`ERROR during dynamic import of proxy: ${errorMessage}`);
+      logBootstrapActivity(`Error during dynamic import of proxy: ${errorMessage}`, 'ERROR');
       throw importError;
     }
   } catch (e) {
     const errorMessage = e instanceof Error ? `${e.name}: ${e.message}\n${e.stack}` : String(e);
-    logBootstrapActivity(`ERROR during proxy bootstrap: ${errorMessage}`);
+    logBootstrapActivity(`Error during proxy bootstrap: ${errorMessage}`, 'ERROR');
     process.exit(1); 
   }
 })();
