@@ -5,11 +5,15 @@ import { FakeCurrentProcess } from '../../test-utils/mocks/fake-current-process.
 import type { Logger as WinstonLoggerType } from 'winston';
 import { DebugMcpServer } from '../../../src/server.js';
 import { EventEmitter } from 'events';
+import { attachSharedFileTransport } from '../../../src/utils/logger.js';
 
 // Mock modules
 vi.mock('../../../src/server.js');
 vi.mock('@modelcontextprotocol/sdk/server/sse.js');
 vi.mock('express');
+vi.mock('../../../src/utils/logger.js', () => ({
+  attachSharedFileTransport: vi.fn(),
+}));
 
 // Import mocked module
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
@@ -638,6 +642,38 @@ describe('SSE Command Handler', () => {
 
       // Verify process did not exit
       expect(mockExitProcess).not.toHaveBeenCalled();
+    });
+
+    it('attaches --log-file to the CLI logger before emitting SSE lifecycle lines (issue #533)', async () => {
+      const mockListen = vi.fn((_port: number, callback: Function) => {
+        callback();
+        return mockServer;
+      });
+      vi.mocked(express).mockReturnValue({
+        use: vi.fn(),
+        get: vi.fn(),
+        post: vi.fn(),
+        listen: mockListen,
+        sseTransports: new Map()
+      } as any);
+
+      await handleSSECommand(
+        { port: '4001', logLevel: 'debug', logFile: '/tmp/sse-command-533.log' },
+        {
+          logger: mockLogger,
+          serverFactory: mockServerFactory,
+          exitProcess: mockExitProcess,
+          proc: fakeProc
+        }
+      );
+
+      expect(attachSharedFileTransport).toHaveBeenCalledWith(
+        mockLogger,
+        '/tmp/sse-command-533.log'
+      );
+      expect(vi.mocked(attachSharedFileTransport).mock.invocationCallOrder[0]).toBeLessThan(
+        (mockLogger.warn as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]
+      );
     });
 
     it('shuts down gracefully when stdin ends and MCP_EXIT_ON_STDIN_CLOSE=1 (issue #122)', async () => {
