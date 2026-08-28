@@ -14,7 +14,12 @@
 import { describe, it, expect } from 'vitest';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore -- plain-JS module without type declarations
-import { createBackendLogger, sanitizeStderrTail } from '../../../tools/dev-proxy/backend-logger.mjs';
+import {
+  createBackendLogger,
+  isProxyRedactionDisabled,
+  sanitizeBackendEnvOverrides,
+  sanitizeStderrTail,
+} from '../../../tools/dev-proxy/backend-logger.mjs';
 
 const REDACTED = '[REDACTED — line contained sensitive data]';
 
@@ -120,5 +125,77 @@ describe('dev-proxy sanitizeStderrTail re-export', () => {
     expect(out).toContain('line 29');
     expect(out).not.toContain('line 0\n');
     expect(out).toContain('(last 5 of 30 lines)');
+  });
+});
+
+describe('dev-proxy backend environment status redaction', () => {
+  it('keeps benign diagnostic overrides readable', () => {
+    const env = {
+      DAP_TRACE: '1',
+      DEBUG_MCP_LOG_LEVEL: 'debug',
+      DAP_TRACE_FILE: '/tmp/dap-trace.ndjson',
+    };
+
+    const result = sanitizeBackendEnvOverrides(env, { redactionDisabled: false });
+
+    expect(result.values).toEqual(env);
+    expect(result.redaction).toEqual({
+      enabled: true,
+      redactedVariables: [],
+      mode: 'shared',
+    });
+  });
+
+  it('masks sensitive names and secret-shaped values under benign names', () => {
+    const env = {
+      OPENAI_API_KEY: 'opaque-but-sensitive',
+      DIAGNOSTIC_VALUE: `ghp_${'x'.repeat(30)}`,
+      SAFE: 'visible',
+    };
+
+    const result = sanitizeBackendEnvOverrides(env, { redactionDisabled: false });
+
+    expect(result.values).toEqual({
+      OPENAI_API_KEY: '[REDACTED]',
+      DIAGNOSTIC_VALUE: '<redacted:github-pat>',
+      SAFE: 'visible',
+    });
+    expect(result.redaction.redactedVariables).toEqual(['DIAGNOSTIC_VALUE', 'OPENAI_API_KEY']);
+    expect(env.OPENAI_API_KEY).toBe('opaque-but-sensitive');
+    expect(env.DIAGNOSTIC_VALUE).toContain('ghp_');
+  });
+
+  it('honors only the stable proxy process opt-out', () => {
+    expect(isProxyRedactionDisabled({ DEBUG_MCP_NO_REDACT: ' true ' })).toBe(true);
+    expect(isProxyRedactionDisabled({ DEBUG_MCP_NO_REDACT: '0' })).toBe(false);
+
+    const backendOverrides = {
+      DEBUG_MCP_NO_REDACT: '1',
+      API_TOKEN: 'still-mask-this',
+    };
+    const masked = sanitizeBackendEnvOverrides(backendOverrides, {
+      redactionDisabled: isProxyRedactionDisabled({}),
+    });
+    expect(masked.values.API_TOKEN).toBe('[REDACTED]');
+
+    const raw = sanitizeBackendEnvOverrides(backendOverrides, {
+      redactionDisabled: isProxyRedactionDisabled({ DEBUG_MCP_NO_REDACT: '1' }),
+    });
+    expect(raw.values).toEqual(backendOverrides);
+    expect(raw.redaction.mode).toBe('disabled');
+  });
+
+  it('fails closed when shared redaction utilities are unavailable', () => {
+    const result = sanitizeBackendEnvOverrides(
+      { DAP_TRACE: '1', SAFE: 'visible' },
+      { redactionDisabled: false, sharedAvailable: false }
+    );
+
+    expect(result.values).toEqual({ DAP_TRACE: '[REDACTED]', SAFE: '[REDACTED]' });
+    expect(result.redaction).toEqual({
+      enabled: true,
+      redactedVariables: ['DAP_TRACE', 'SAFE'],
+      mode: 'fail-closed',
+    });
   });
 });

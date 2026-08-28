@@ -32,6 +32,20 @@ export const KILL_GRACE_MS = 5000;
 export const FORCE_KILL_BAIL_MS = 2000;
 
 /**
+ * True only for the AbortError family emitted when an MCP HTTP/SSE transport
+ * is intentionally closed. Callers must additionally require an intentional
+ * close latch; this predicate alone must never hide a live transport failure.
+ *
+ * @param {unknown} err
+ */
+export function isIntentionalTransportAbort(err) {
+  const candidate = /** @type {{ name?: unknown, message?: unknown }} */ (err);
+  const name = String(candidate?.name ?? '').toLowerCase();
+  const message = String(candidate?.message ?? err ?? '').toLowerCase();
+  return name === 'aborterror' || message.includes('aborterror') || message.includes('operation was aborted');
+}
+
+/**
  * Install handlers that shut the proxy down when the MCP client disconnects.
  *
  * @param {object} deps

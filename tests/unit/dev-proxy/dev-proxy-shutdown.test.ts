@@ -12,7 +12,11 @@ import { describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'events';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore -- plain-JS module without type declarations
-import { installShutdownHandlers, killChildGracefully } from '../../../tools/dev-proxy/shutdown.mjs';
+import {
+  installShutdownHandlers,
+  isIntentionalTransportAbort,
+  killChildGracefully,
+} from '../../../tools/dev-proxy/shutdown.mjs';
 
 interface FakeProc extends EventEmitter {
   exit: ReturnType<typeof vi.fn>;
@@ -266,5 +270,17 @@ describe('dev-proxy killChildGracefully', () => {
     });
 
     expect(forceKill).toHaveBeenCalledWith(child.pid);
+  });
+});
+
+describe('dev-proxy intentional transport abort detection', () => {
+  it('recognizes SDK AbortError variants from intentional HTTP/SSE close', () => {
+    expect(isIntentionalTransportAbort(new DOMException('This operation was aborted', 'AbortError'))).toBe(true);
+    expect(isIntentionalTransportAbort(new Error('SSE stream disconnected: AbortError'))).toBe(true);
+  });
+
+  it('does not classify unrelated transport failures as intentional aborts', () => {
+    expect(isIntentionalTransportAbort(new Error('ECONNRESET'))).toBe(false);
+    expect(isIntentionalTransportAbort(new Error('SSE stream disconnected unexpectedly'))).toBe(false);
   });
 });
