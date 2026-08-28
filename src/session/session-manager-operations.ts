@@ -24,7 +24,7 @@ import { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';
 import { ProxyConfig } from '../proxy/proxy-config.js';
 import { MIRROR_EXPOSE_COMMAND, MIRROR_UNEXPOSE_COMMAND } from '../proxy/dap-proxy-interfaces.js';
-import { ErrorMessages } from '../utils/error-messages.js';
+import { ErrorMessages, ProxyInitProgress } from '../utils/error-messages.js';
 import { checkLaunchToolchain } from '../utils/language-availability.js';
 import { didYouMean } from '../utils/did-you-mean.js';
 import { resolveStatement } from '../utils/breakpoint-resolver.js';
@@ -971,13 +971,13 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         },
       };
     } catch (error) {
+      const diagnosticData = this.collectProxyFailureDiagnostics(session, error);
+      const { initProgress, proxyLogPath } = diagnosticData;
+
       // Attempt to capture proxy log tail for debugging initialization failures
       let proxyLogTail: string | undefined;
-      let proxyLogPath: string | undefined;
       try {
-        const latestSession = this._getSessionById(sessionId);
-        if (latestSession.logDir) {
-          proxyLogPath = path.join(latestSession.logDir, `proxy-${sessionId}.log`);
+        if (proxyLogPath) {
           const logExists = await this.fileSystem.pathExists(proxyLogPath);
           if (logExists) {
             const logContent = await this.fileSystem.readFile(proxyLogPath, 'utf-8');
@@ -992,9 +992,6 @@ export abstract class SessionManagerOperations extends SessionManagerData {
           logReadError instanceof Error ? logReadError.message : String(logReadError)
         }>>`;
       }
-
-      // Structured init-progress facts from a proxy init timeout (issue #493)
-      const initProgress = (error as { initProgress?: Record<string, unknown> })?.initProgress;
 
       // Comprehensive error capture for debugging Windows CI issues
       const errorDetails: Record<string, unknown> = {
@@ -1072,17 +1069,6 @@ export abstract class SessionManagerOperations extends SessionManagerData {
           errorType,
           errorCode,
         };
-      }
-
-      // Surface the diagnosis in the tool result, not just the server log
-      // (issue #493): which init stage stalled, and where the full proxy log
-      // lives — the agent reading the error has no other way to these facts.
-      const diagnosticData: Record<string, unknown> = {};
-      if (initProgress) {
-        diagnosticData.initProgress = initProgress;
-      }
-      if (proxyLogPath) {
-        diagnosticData.proxyLogPath = proxyLogPath;
       }
 
       return {
@@ -3065,13 +3051,41 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       await this.stopProxyPreservingSession(session);
       this._updateSessionState(session, SessionState.ERROR);
 
+      // Surface the same structured diagnostics the launch path returns
+      // (issue #551). Teardown only clears the proxy handle; logDir and the
+      // error's initProgress survive it, so this reads after the teardown
+      // and can never keep it from running.
+      const diagnosticData = this.collectProxyFailureDiagnostics(session, error);
       const message = error instanceof Error ? error.message : String(error);
       return {
         success: false,
         state: SessionState.ERROR,
-        error: `Failed to attach: ${message}`
+        error: `Failed to attach: ${message}`,
+        ...(Object.keys(diagnosticData).length > 0 ? { data: diagnosticData } : {})
       };
     }
+  }
+
+  /**
+   * Pointers to proxy initialization diagnostics for a failed launch/attach
+   * (issue #493 / #551): which init stage stalled (from the timeout error) and
+   * where the proxy log for the session's current run lives.
+   */
+  private collectProxyFailureDiagnostics(
+    session: ManagedSession,
+    error: unknown
+  ): { initProgress?: ProxyInitProgress; proxyLogPath?: string } {
+    const diagnostics: { initProgress?: ProxyInitProgress; proxyLogPath?: string } = {};
+    const initProgress = (error as { initProgress?: ProxyInitProgress } | null)?.initProgress;
+
+    if (initProgress) {
+      diagnostics.initProgress = initProgress;
+    }
+    if (session.logDir) {
+      diagnostics.proxyLogPath = path.join(session.logDir, `proxy-${session.id}.log`);
+    }
+
+    return diagnostics;
   }
 
   /**

@@ -1536,6 +1536,67 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       (operations as unknown as { attachPauseStopTimeoutMs: number }).attachPauseStopTimeoutMs = 50;
     });
 
+    it('returns init progress and proxy log path when proxy initialization fails (issue #551)', async () => {
+      const initProgress = {
+        transportConnected: true,
+        pendingCommand: 'initialize'
+      };
+      const initError = Object.assign(
+        new Error('Debug proxy initialization did not complete within 30s'),
+        { initProgress }
+      );
+      mockSession.proxyManager = undefined;
+      mockSession.logDir = path.join('/tmp', 'logs', 'test-session', 'run-123');
+      vi.spyOn(operations as any, 'startProxyManager').mockRejectedValue(initError);
+      // Teardown (which only clears the proxy handle) must still run on the
+      // failure path; the diagnostics come from the error and logDir.
+      const stopSpy = vi.spyOn(operations as any, 'stopProxyPreservingSession')
+        .mockImplementation(async (session: typeof mockSession) => {
+          session.proxyManager = undefined;
+        });
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 45999,
+        host: '127.0.0.1'
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.data).toEqual({
+        initProgress,
+        proxyLogPath: path.join('/tmp', 'logs', 'test-session', 'run-123', 'proxy-test-session.log')
+      });
+      expect(stopSpy).toHaveBeenCalled();
+    });
+
+    it('returns an available proxy log path even when init progress is absent', async () => {
+      mockSession.proxyManager = undefined;
+      mockSession.logDir = path.join('/tmp', 'logs', 'test-session', 'run-456');
+      vi.spyOn(operations as any, 'startProxyManager').mockRejectedValue(new Error('adapter exited'));
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 45999,
+        host: '127.0.0.1'
+      });
+
+      expect(result.data).toEqual({
+        proxyLogPath: path.join('/tmp', 'logs', 'test-session', 'run-456', 'proxy-test-session.log')
+      });
+    });
+
+    it('does not invent structured diagnostics for an ordinary pre-log failure', async () => {
+      mockSession.proxyManager = undefined;
+      mockSession.logDir = undefined;
+      vi.spyOn(operations as any, 'startProxyManager').mockRejectedValue(new Error('bad attach config'));
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 45999,
+        host: '127.0.0.1'
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.data).toBeUndefined();
+    });
+
     it('warns and proceeds when the registry lacks getFactoryMetadata (attach gate self-disabled)', async () => {
       delete (mockDependencies.adapterRegistry as Record<string, unknown>).getFactoryMetadata;
       mockProxyManager.sendDapRequest.mockImplementation(async (command: string) =>

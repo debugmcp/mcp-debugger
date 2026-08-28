@@ -1352,13 +1352,21 @@ export class DebugMcpServer {
                     adapterConfig: args.adapterConfig,
                   });
 
+                  // Forward the attach payload the same way attach_to_process
+                  // does: structured failure diagnostics (initProgress /
+                  // proxyLogPath, issue #551) and the dropped-adapterConfig
+                  // warning (issue #450) must reach this entry point too.
+                  const attachData = attachResult.data as { warning?: string } | undefined;
+                  const attachWarning = attachResult.success ? attachData?.warning : undefined;
                   result = { content: [{ type: 'text', text: JSON.stringify({
                     success: attachResult.success,
                     sessionId: sessionInfo.id,
                     state: attachResult.state,
                     message: attachResult.success
                       ? `Created and attached ${sessionInfo.language} debug session: ${sessionInfo.name}`
-                      : `Created session but attach failed: ${attachResult.error || 'Unknown error'}`
+                      : `Created session but attach failed: ${attachResult.error || 'Unknown error'}`,
+                    ...(attachData ? { data: attachData } : {}),
+                    ...(attachWarning ? { warning: attachWarning } : {})
                   }) }] };
                 } catch (error) {
                   this.logger.error('session:attach-failed', {
