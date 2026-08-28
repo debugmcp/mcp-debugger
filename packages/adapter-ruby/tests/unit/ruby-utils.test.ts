@@ -113,9 +113,65 @@ describe('version probes', () => {
 });
 
 describe('buildRdbgInvocation platform behavior', () => {
-  it('returns the command unchanged for non-shim paths on Windows', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rdbg-invocation-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('runs an existing extensionless script through Ruby on Windows and preserves arguments', () => {
+    const scriptPath = path.join(tmpDir, 'rdbg');
+    fs.writeFileSync(scriptPath, '#!/usr/bin/env ruby');
+
+    expect(buildRdbgInvocation(
+      scriptPath,
+      ['--open', '--port', '12345', '-c', '--', 'example.rb'],
+      'C:\\Ruby34-x64\\bin\\ruby.exe',
+      'win32'
+    )).toEqual({
+      command: 'C:\\Ruby34-x64\\bin\\ruby.exe',
+      args: [scriptPath, '--open', '--port', '12345', '-c', '--', 'example.rb']
+    });
+  });
+
+  it.each(['bat', 'cmd'])('runs the sibling extensionless script for a .%s shim on Windows', (extension) => {
+    const scriptPath = path.join(tmpDir, 'rdbg');
+    const shimPath = `${scriptPath}.${extension}`;
+    fs.writeFileSync(scriptPath, '#!/usr/bin/env ruby');
+    fs.writeFileSync(shimPath, '@echo off');
+
+    expect(buildRdbgInvocation(shimPath, ['--version'], undefined, 'win32')).toEqual({
+      command: 'ruby',
+      args: [scriptPath, '--version']
+    });
+  });
+
+  it('returns Windows executables unchanged', () => {
     expect(buildRdbgInvocation('C:\\tools\\rdbg.exe', ['--version'], undefined, 'win32')).toEqual({
       command: 'C:\\tools\\rdbg.exe',
+      args: ['--version']
+    });
+  });
+
+  it('returns a missing extensionless Windows path unchanged', () => {
+    const missingPath = path.join(tmpDir, 'missing-rdbg');
+
+    expect(buildRdbgInvocation(missingPath, ['--version'], undefined, 'win32')).toEqual({
+      command: missingPath,
+      args: ['--version']
+    });
+  });
+
+  it('passes an existing extensionless script through unchanged off Windows', () => {
+    const scriptPath = path.join(tmpDir, 'rdbg');
+    fs.writeFileSync(scriptPath, '#!/usr/bin/env ruby');
+
+    expect(buildRdbgInvocation(scriptPath, ['--version'], undefined, 'linux')).toEqual({
+      command: scriptPath,
       args: ['--version']
     });
   });
