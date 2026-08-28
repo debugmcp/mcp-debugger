@@ -1,17 +1,21 @@
 # Dev Proxy for mcp-debugger
 
-A lightweight MCP proxy that sits between Claude Code and mcp-debugger, allowing the backend to be restarted without losing your Claude Code conversation.
+A lightweight MCP proxy that sits between an MCP client and a source checkout of mcp-debugger,
+allowing the backend to be rebuilt and restarted without disconnecting the client.
 
 ## Why?
 
-When developing mcp-debugger, code changes require rebuilding and restarting the server. Claude Code spawns MCP servers as child processes with no restart/reconnect capability — the only option is restarting Claude Code entirely, losing conversation context.
+When developing mcp-debugger, code changes require rebuilding and restarting the server. MCP
+clients normally own the stdio server process, so replacing that process disconnects the active
+session. The proxy keeps the client-facing stdio process stable while it replaces the backend.
 
-This proxy solves that by maintaining a stable stdio connection to Claude Code while managing the mcp-debugger backend as a restartable Streamable HTTP child process (the default; legacy SSE and stdio backends are also supported via `DEV_PROXY_BACKEND_TRANSPORT`).
+The backend is a restartable Streamable HTTP child process by default. Legacy SSE and stdio
+backends are also supported through `DEV_PROXY_BACKEND_TRANSPORT`.
 
 ## Architecture
 
 ```
-Claude Code <--stdio--> dev-proxy.mjs (stable, never restarts)
+MCP client  <--stdio--> dev-proxy.mjs (stable, never restarts)
                               |
                   Streamable HTTP (MCP protocol)
             (or legacy SSE / stdio, per DEV_PROXY_BACKEND_TRANSPORT)
@@ -24,18 +28,52 @@ Claude Code <--stdio--> dev-proxy.mjs (stable, never restarts)
 ### 1. Build the project first
 
 ```bash
-npm run build
+pnpm build
 ```
 
-### 2. Configure Claude Code to use the proxy
+### 2. Configure your MCP client with absolute paths
+
+Use absolute paths for both the proxy script and `DEV_PROXY_ROOT`. This keeps the source checkout
+unambiguous when a desktop or IDE client launches the server with a different working directory.
+
+#### Codex CLI, desktop, and IDE
+
+The Codex CLI writes the shared MCP configuration used by the ChatGPT desktop app, Codex CLI,
+and Codex IDE extension on the same host:
 
 ```bash
-claude mcp add-json mcp-debugger '{"type":"stdio","command":"node","args":["tools/dev-proxy/dev-proxy.mjs"]}'
+codex mcp add mcp-debugger --env DEV_PROXY_ROOT=/absolute/path/to/mcp-debugger -- node /absolute/path/to/mcp-debugger/tools/dev-proxy/dev-proxy.mjs
+codex mcp list
 ```
 
-### 3. Restart Claude Code once
+If you prefer to edit `~/.codex/config.toml` (or a trusted project's `.codex/config.toml`), add:
 
-After this one-time restart, all future restarts happen via the `dev_rebuild_and_restart` tool — no more restarting Claude Code.
+```toml
+[mcp_servers.mcp-debugger]
+command = "node"
+args = ["/absolute/path/to/mcp-debugger/tools/dev-proxy/dev-proxy.mjs"]
+
+[mcp_servers.mcp-debugger.env]
+DEV_PROXY_ROOT = "/absolute/path/to/mcp-debugger"
+```
+
+You can also add the same stdio command and environment variable through **Settings → MCP
+servers** in the desktop app or **gear menu → MCP servers** in the IDE extension. See the
+[official Codex MCP documentation](https://developers.openai.com/codex/mcp).
+
+#### Claude Code
+
+```bash
+claude mcp add-json mcp-debugger '{"type":"stdio","command":"node","args":["/absolute/path/to/mcp-debugger/tools/dev-proxy/dev-proxy.mjs"],"env":{"DEV_PROXY_ROOT":"/absolute/path/to/mcp-debugger"}}'
+```
+
+Quote paths according to your shell when the checkout path contains spaces.
+
+### 3. Restart the MCP client once
+
+Restart the active desktop client or IDE extension, or start a new CLI session. In Codex, use
+`/mcp` to verify the live connection. After this one-time client restart, use
+`dev_rebuild_and_restart` for source changes without replacing the stable proxy process.
 
 ## Dev Tools
 
@@ -45,7 +83,7 @@ Once connected, three additional tools are available:
 |------|-------------|
 | `dev_restart_debugger` | Kill and restart the backend. Pass `rebuild: true` to build first. |
 | `dev_rebuild_and_restart` | Run `npm run build` then restart the backend. |
-| `dev_server_status` | Check backend state, PID, uptime, tool count, port. |
+| `dev_server_status` | Check backend state, PID, uptime, transport, project root, and port. |
 
 All regular mcp-debugger tools (create_debug_session, set_breakpoint, etc.) are forwarded transparently to the backend.
 
@@ -73,7 +111,8 @@ If the backend crashes:
 ## Troubleshooting
 
 - **Backend won't start**: Check that `npm run build` succeeds and port 3001 is free
-- **Tools not showing up**: The proxy caches the tool list on startup. Restart to refresh.
+- **Tools not showing up**: Run `codex mcp list` to verify the saved entry, then restart the active
+  desktop client or IDE extension (or start a new CLI session) so it loads the new server.
 - **Port conflict**: Set `DEV_PROXY_PORT` to a different port
 - **All logs go to stderr**: stdout is reserved for the MCP JSON-RPC protocol. Backend logs are prefixed with `[backend]`, proxy logs with `[dev-proxy]`.
 
