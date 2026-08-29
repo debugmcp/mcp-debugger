@@ -60,6 +60,42 @@ fi
 echo "✅ Lint passed!"
 echo ""
 
+# Type-only checks (no build needed, ~15 s). The clean build below is still the
+# authoritative compile; this just fails fast on type errors, and the ratchet blocks new
+# type errors in tests (issue #562). Runs the very command CI runs, so a green working
+# tree cannot mean a red required check.
+
+# The ratchet validates the working tree against the working-tree baseline, but CI
+# validates the pushed commit. An uncommitted baseline therefore passes here and fails
+# there — which is exactly the state the hook's own remediation hint leaves you in.
+if ! git diff --quiet HEAD -- tests/typecheck-baseline.json; then
+    echo ""
+    echo "❌ tests/typecheck-baseline.json is modified but not committed."
+    echo "💡 Commit it: the ratchet check that runs in CI reads the pushed commit, not your working tree."
+    echo ""
+    exit 1
+fi
+
+echo "🧮 Running typecheck (sources + test ratchet)..."
+if ! pnpm run typecheck:all > "$PRE_PUSH_LOG" 2>&1; then
+    echo ""
+    echo "❌ Typecheck failed! Push blocked to prevent broken code on GitHub."
+    echo "💡 Reproduce with 'pnpm run typecheck:all'."
+    echo "💡 If a test's error count changed on purpose, run 'pnpm run typecheck:tests:update' and commit the baseline."
+    echo ""
+    # The ratchet reports summary-first, so a plain tail shows only the last file's
+    # diagnostics. Print its header and every per-file "before -> after" line instead.
+    grep -E "gained type errors|FEWER errors than|-> [0-9]+|error TS[0-9]+:" "$PRE_PUSH_LOG" | head -40 || true
+    echo ""
+    echo "Full log: $PRE_PUSH_LOG"
+    # Keep log on failure so user can inspect
+    trap - EXIT
+    exit 1
+fi
+
+echo "✅ Typecheck passed!"
+echo ""
+
 # Clean build to ensure no stale artifacts
 echo "🔨 Running clean build to ensure fresh compilation..."
 if ! (npm run clean > "$PRE_PUSH_LOG" 2>&1 && npm run build >> "$PRE_PUSH_LOG" 2>&1); then

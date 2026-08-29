@@ -8,7 +8,8 @@
  */
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
+import { isMain } from './lib/is-main.mjs';
 
 /** Keep a Changelog categories, in the order they must appear in a release. */
 export const CATEGORIES = ['added', 'changed', 'deprecated', 'removed', 'fixed', 'security'];
@@ -250,7 +251,7 @@ function runCi() {
 
 const MODES = { '--check': runCheck, '--collate': runCollate, '--ci': runCi };
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMain(import.meta.url)) {
   const mode = process.argv[2] ?? '--check';
   const run = MODES[mode];
   if (!run) {

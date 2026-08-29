@@ -1,0 +1,35 @@
+{
+  // Type-only program covering every first-party source file in one pass (issue #562).
+  //
+  // `--noEmit` skips declaration-emit diagnostics, so `tsc -b -f .` in `build` stays the
+  // authoritative compile; this is the seconds-long check that runs in `lint` CI and pre-push.
+  // `composite: false` is what keeps TS6307 ("not listed within the file list of project")
+  // out of the results, and the `./`-relative `paths` below resolve packages to their TS
+  // sources so this runs on a fresh clone with no `dist/` — they need no `baseUrl`, which is
+  // deprecated in TypeScript 6 (TS5101).
+  //
+  // One wildcard entry rather than a row per adapter: a per-package registration site is
+  // one more thing to forget when adding an adapter, and a missing row fails quietly —
+  // resolving to a stale `dist/index.d.ts` locally and to TS2307 in the no-build CI job.
+  // It covers the same eleven `@debugmcp/*` workspace packages `vitest.config.ts` aliases
+  // (the `@` -> `src` alias is not mirrored; nothing outside tests uses it).
+  //
+  // `lib` is pinned because the default for target ES2022 drags in DOM: Node/vitest code
+  // would be checked against browser globals, and lib.dom's `Body.json()` returning `any`
+  // silently masked two real errors in the tests.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": false,
+    "incremental": false,
+    "noEmit": true,
+    "declaration": false,
+    "sourceMap": false,
+    "rootDir": ".",
+    "lib": ["ES2022"],
+    "paths": {
+      "@debugmcp/*": ["./packages/*/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*", "packages/*/src/**/*"],
+  "exclude": ["node_modules", "**/dist/**", "**/*.test.ts", "**/*.spec.ts"]
+}
