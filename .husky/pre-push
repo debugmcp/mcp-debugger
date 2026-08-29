@@ -62,12 +62,13 @@ echo ""
 
 # Type-only checks (no build needed, a few seconds). The clean build below is still the
 # authoritative compile; this just fails fast on type errors, and the ratchet blocks new
-# type errors in tests (issue #562).
+# type errors in tests (issue #562). `--strict` matches CI, so a baseline left stale by
+# a test fix is caught here rather than going red after the push.
 echo "🧮 Running typecheck (sources + test ratchet)..."
-if ! (pnpm run typecheck && pnpm run typecheck:tests) > "$PRE_PUSH_LOG" 2>&1; then
+if ! (pnpm run typecheck && pnpm run typecheck:tests -- --strict) > "$PRE_PUSH_LOG" 2>&1; then
     echo ""
     echo "❌ Typecheck failed! Push blocked to prevent broken code on GitHub."
-    echo "💡 Run 'pnpm run typecheck:all' to see all errors."
+    echo "💡 Reproduce with 'pnpm run typecheck' and 'pnpm run typecheck:tests -- --strict'."
     echo "💡 If a test's error count changed on purpose, run 'pnpm run typecheck:tests:update' and commit the baseline."
     echo ""
     tail -20 "$PRE_PUSH_LOG"

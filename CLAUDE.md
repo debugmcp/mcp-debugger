@@ -135,7 +135,8 @@ npm run check:all-personal-paths  # Check all files
 Note: the root `tsc -p tsconfig.json` checks nothing (it is a solution-style config with
 `"files": []`), which is why `typecheck` uses `tsconfig.typecheck.json` (#562). Any PR that
 touches test files must run `npm run typecheck:tests:update` and commit the refreshed
-`tests/typecheck-baseline.json` — CI runs the ratchet with `--strict`.
+`tests/typecheck-baseline.json` — both pre-push and CI run the ratchet with `--strict`,
+which fails when a count goes *down* too, so the baseline can never drift from reality.
 
 ### Docker
 

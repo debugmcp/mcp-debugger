@@ -31,7 +31,12 @@ const PROJECT = 'tsconfig.spec.json';
 /** Recorded per-file error counts, relative to the repo root. */
 const BASELINE_FILE = 'tests/typecheck-baseline.json';
 
-/** `path/to/file.ts(12,34): error TS2345: message` — continuation lines never match. */
+/**
+ * `path/to/file.ts(12,34): error TS2345: message`.
+ *
+ * tsc's related-information lines are indented, but `(.+?)` eats leading whitespace
+ * happily — what actually excludes them is that they carry no `error TSnnnn:` token.
+ */
 const DIAGNOSTIC = /^(.+?)\((\d+),(\d+)\): error (TS\d+): (.*)$/;
 
 /** How many diagnostics to echo per regressed file before summarising the rest. */
@@ -103,10 +108,14 @@ export function parseDiagnostics(output, root) {
   return byFile;
 }
 
-/** Repo-relative, forward-slash form of a path tsc reported. */
+/**
+ * Repo-relative, forward-slash form of a path tsc reported.
+ *
+ * Splits on both separators rather than `path.sep`, so a Windows-style path stays
+ * normalised even when the comparison runs on Linux CI.
+ */
 function normalise(file, root) {
-  const absolute = path.isAbsolute(file) ? file : path.resolve(root, file);
-  return path.relative(root, absolute).split(path.sep).join('/');
+  return path.relative(root, path.resolve(root, file)).split(/[\\/]/).join('/');
 }
 
 /**
@@ -130,6 +139,22 @@ export function compare(current, baseline) {
   return { regressed: regressed.sort(), improved: improved.sort() };
 }
 
+/**
+ * The gate itself: what a comparison means for this run.
+ *
+ * `regressed` wins over `stale` — new errors are the thing worth reporting first.
+ * Only `--strict` (CI) treats a shrunken count as a failure; locally it is just a hint.
+ *
+ * @param {{ regressed: string[], improved: string[] }} comparison from `compare`
+ * @param {boolean} strict whether a stale baseline should fail
+ * @returns {'regressed' | 'stale' | 'ok'}
+ */
+export function verdict(comparison, strict) {
+  if (comparison.regressed.length > 0) return 'regressed';
+  if (strict && comparison.improved.length > 0) return 'stale';
+  return 'ok';
+}
+
 /** Read the baseline, or exit with a pointer to `typecheck:tests:update`. */
 function readBaseline(root) {
   const file = path.join(root, BASELINE_FILE);
@@ -137,11 +162,29 @@ function readBaseline(root) {
     fail(`Missing ${BASELINE_FILE}. Create it with: pnpm run typecheck:tests:update`);
   }
 
+  let parsed;
   try {
-    return JSON.parse(fs.readFileSync(file, 'utf-8'));
+    parsed = JSON.parse(fs.readFileSync(file, 'utf-8'));
   } catch (error) {
     fail(`${BASELINE_FILE} is not valid JSON.\n${describe(error)}`);
   }
+
+  // Valid JSON of the wrong shape would otherwise read as "every file regressed", or
+  // throw a raw TypeError out of `compare`. Reject it as a broken check (exit 2), not
+  // as a failed one (exit 1).
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    fail(`${BASELINE_FILE} must be a JSON object of "file": count pairs, got ${kindOf(parsed)}.`);
+  }
+  for (const [entry, count] of Object.entries(parsed)) {
+    if (!Number.isInteger(count) || count < 0) {
+      fail(
+        `${BASELINE_FILE} has a bad entry for '${entry}': expected a non-negative integer, ` +
+        `got ${JSON.stringify(count)}. Re-record it with: pnpm run typecheck:tests:update`
+      );
+    }
+  }
+
+  return parsed;
 }
 
 /**
@@ -173,6 +216,13 @@ function totalBaseline(baseline) {
 function fail(message) {
   console.error(`typecheck:tests: ${message}`);
   process.exit(2);
+}
+
+/** Coarse type name for an error message: `null`, `an array`, `a number`, ... */
+function kindOf(value) {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'an array';
+  return `a ${typeof value}`;
 }
 
 /** Human-readable form of a thrown value. */
@@ -208,9 +258,11 @@ function main(root, argv) {
   }
 
   const baseline = readBaseline(root);
-  const { regressed, improved } = compare(current, baseline);
+  const comparison = compare(current, baseline);
+  const { regressed, improved } = comparison;
+  const outcome = verdict(comparison, strict);
 
-  if (regressed.length > 0) {
+  if (outcome === 'regressed') {
     console.error(`\ntypecheck:tests: ${regressed.length} file(s) gained type errors.\n`);
     for (const file of regressed) {
       const lines = current.get(file) ?? [];
@@ -227,7 +279,7 @@ function main(root, argv) {
     process.exit(1);
   }
 
-  if (strict && improved.length > 0) {
+  if (outcome === 'stale') {
     console.error(
       `\ntypecheck:tests: ${improved.length} file(s) have FEWER errors than ${BASELINE_FILE} records.\n`
     );
