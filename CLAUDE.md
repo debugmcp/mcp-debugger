@@ -199,9 +199,10 @@ The codebase follows a **layered architecture with dependency injection** and **
 
 ### Core Components
 
-1. **MCP Server Layer** (`src/server.ts`, `src/index.ts`)
+1. **MCP Server Layer** (`src/server.ts`, `src/server/`, `src/index.ts`)
    - Entry point for MCP protocol communication
-   - Handles tool registration and routing
+   - `src/server.ts` is the composition root (`DebugMcpServer`: dependencies, lifecycle, session validation, breakpoint gating, the public facade methods); it implements `ToolContext` and passes itself to the handlers
+   - `src/server/` holds the tool schemas (`tool-schemas.ts`), argument coercion (`tool-arguments.ts`), the tools/call dispatch wrapper (`tool-dispatch.ts` over `handlers/index.ts`), one handler module per tool family (`handlers/*.ts`), and the resource (`output-resources.ts`) and prompt (`prompts.ts`) handlers
    - Supports STDIO and Streamable HTTP transport modes (legacy SSE deprecated)
    - Dynamically discovers available language adapters
 

@@ -2,6 +2,16 @@
  * Shared test helpers and mock setup for server tests
  */
 import { vi } from 'vitest';
+import {
+  ListToolsRequestSchema,
+  CallToolRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
+  SubscribeRequestSchema,
+  UnsubscribeRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema
+} from '@modelcontextprotocol/sdk/types.js';
 import { createMockLogger } from '../../../test-utils/helpers/test-dependencies.js';
 import { createMockAdapterRegistry } from '../../../test-utils/mocks/mock-adapter-registry.js';
 
@@ -141,30 +151,39 @@ export function createMockStdioTransport() {
   return {};
 }
 
+/**
+ * Find the handler registered for a request schema. Lookup is by schema
+ * identity rather than registration position, so the registration order in
+ * src/server.ts (tools, resources, prompts) is not a hidden test contract;
+ * @modelcontextprotocol/sdk/types.js is never mocked, so the identity is safe.
+ */
+function findHandler(mockServer: any, schema: unknown) {
+  const call = mockServer.setRequestHandler.mock.calls.find(
+    ([registered]: [unknown, unknown]) => registered === schema
+  );
+  return call?.[1];
+}
+
 export function getToolHandlers(mockServer: any) {
-  const handlers = mockServer.setRequestHandler.mock.calls;
   return {
-    listToolsHandler: handlers[0]?.[1], // First handler is for ListToolsRequestSchema
-    callToolHandler: handlers[1]?.[1]   // Second handler is for CallToolRequestSchema
+    listToolsHandler: findHandler(mockServer, ListToolsRequestSchema),
+    callToolHandler: findHandler(mockServer, CallToolRequestSchema)
   };
 }
 
-// Resource handlers are registered by registerResources() right after the two
-// tool handlers, in this order (issue #218).
+// Debuggee-output resource handlers (issue #218).
 export function getResourceHandlers(mockServer: any) {
-  const handlers = mockServer.setRequestHandler.mock.calls;
   return {
-    listResourcesHandler: handlers[2]?.[1],
-    readResourceHandler: handlers[3]?.[1],
-    subscribeHandler: handlers[4]?.[1],
-    unsubscribeHandler: handlers[5]?.[1]
+    listResourcesHandler: findHandler(mockServer, ListResourcesRequestSchema),
+    readResourceHandler: findHandler(mockServer, ReadResourceRequestSchema),
+    subscribeHandler: findHandler(mockServer, SubscribeRequestSchema),
+    unsubscribeHandler: findHandler(mockServer, UnsubscribeRequestSchema)
   };
 }
 
 export function getPromptHandlers(mockServer: any) {
-  const handlers = mockServer.setRequestHandler.mock.calls;
   return {
-    listPromptsHandler: handlers[6]?.[1],
-    getPromptHandler: handlers[7]?.[1]
+    listPromptsHandler: findHandler(mockServer, ListPromptsRequestSchema),
+    getPromptHandler: findHandler(mockServer, GetPromptRequestSchema)
   };
 }
