@@ -23,9 +23,8 @@ import { ManagedSession, ToolchainValidationState } from './session-store.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';
 import { ProxyConfig } from '../proxy/proxy-config.js';
-import { proxyLogPathFor } from '../proxy/proxy-log-path.js';
 import { MIRROR_EXPOSE_COMMAND, MIRROR_UNEXPOSE_COMMAND } from '../proxy/dap-proxy-interfaces.js';
-import { ErrorMessages, ProxyInitProgress } from '../utils/error-messages.js';
+import { ErrorMessages } from '../utils/error-messages.js';
 import { checkLaunchToolchain } from '../utils/language-availability.js';
 import { didYouMean } from '../utils/did-you-mean.js';
 import { resolveStatement } from '../utils/breakpoint-resolver.js';
@@ -33,6 +32,7 @@ import { normalizeBreakpointMessage } from '../utils/breakpoint-message.js';
 import { consumeChildSourced } from '../utils/child-origin-events.js';
 import { SessionManagerData } from './session-manager-data.js';
 import { AdapterLease } from '../adapters/adapter-lease.js';
+import { logProxyFailure } from './launch/proxy-failure-diagnostics.js';
 import { CustomLaunchRequestArguments, DebugResult } from './session-manager-core.js';
 import {
   AdapterConfig,
@@ -1167,56 +1167,13 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         },
       };
     } catch (error) {
-      const diagnosticData = this.collectProxyFailureDiagnostics(session, error);
-      const { initProgress, proxyLogPath } = diagnosticData;
-
-      // Attempt to capture proxy log tail for debugging initialization failures
-      let proxyLogTail: string | undefined;
-      try {
-        if (proxyLogPath) {
-          const logExists = await this.fileSystem.pathExists(proxyLogPath);
-          if (logExists) {
-            const logContent = await this.fileSystem.readFile(proxyLogPath, 'utf-8');
-            const logLines = logContent.split(/\r?\n/);
-            const tailLineCount = 80;
-            const startIndex = Math.max(0, logLines.length - tailLineCount);
-            proxyLogTail = logLines.slice(startIndex).join('\n');
-          }
-        }
-      } catch (logReadError) {
-        proxyLogTail = `<<Failed to read proxy log: ${
-          logReadError instanceof Error ? logReadError.message : String(logReadError)
-        }>>`;
-      }
-
-      // Comprehensive error capture for debugging Windows CI issues
-      const errorDetails: Record<string, unknown> = {
-        type: error?.constructor?.name || 'Unknown',
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : 'No stack available',
-        code: (error as Record<string, unknown>)?.code,
-        errno: (error as Record<string, unknown>)?.errno,
-        syscall: (error as Record<string, unknown>)?.syscall,
-        path: (error as Record<string, unknown>)?.path,
-        toString: error?.toString ? error.toString() : 'No toString',
-        initProgress,
-        proxyLogPath,
-        proxyLogTail
-      };
-
-      // Try to capture raw error object
-      try {
-        errorDetails.raw = JSON.stringify(error);
-      } catch {
-        errorDetails.raw = 'Error not JSON serializable';
-      }
-
-      // Log comprehensive error details
-      this.logger.error(
-        `[SessionManager] Detailed error in startDebugging for session ${sessionId}:`,
-        errorDetails
+      const diagnosticData = await logProxyFailure(
+        { logger: this.logger, fileSystem: this.fileSystem },
+        session,
+        error,
+        'startDebugging'
       );
-      
+
       const errorMessage = error instanceof Error ? error.message : String(error);
 
       const toolchainValidation =
@@ -3248,10 +3205,18 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       this._updateSessionState(session, SessionState.ERROR);
 
       // Surface the same structured diagnostics the launch path returns
-      // (issue #551). Teardown only clears the proxy handle; logDir and the
-      // error's initProgress survive it, so this reads after the teardown
-      // and can never keep it from running.
-      const diagnosticData = this.collectProxyFailureDiagnostics(session, error);
+      // (issue #551) and log the same full failure record it logs, proxy-log
+      // tail included (issue #561) — an attach that dies during proxy
+      // initialization used to leave the adapter's own complaint unreadable.
+      // Teardown only clears the proxy handle; logDir and the error's
+      // initProgress survive it, so this reads after the teardown and can
+      // never keep it from running.
+      const diagnosticData = await logProxyFailure(
+        { logger: this.logger, fileSystem: this.fileSystem },
+        session,
+        error,
+        'attachToProcess'
+      );
       const message = error instanceof Error ? error.message : String(error);
       return {
         success: false,
@@ -3260,28 +3225,6 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         ...(Object.keys(diagnosticData).length > 0 ? { data: diagnosticData } : {})
       };
     }
-  }
-
-  /**
-   * Pointers to proxy initialization diagnostics for a failed launch/attach
-   * (issue #493 / #551): which init stage stalled (from the timeout error) and
-   * where the proxy log for the session's current run lives.
-   */
-  private collectProxyFailureDiagnostics(
-    session: ManagedSession,
-    error: unknown
-  ): { initProgress?: ProxyInitProgress; proxyLogPath?: string } {
-    const diagnostics: { initProgress?: ProxyInitProgress; proxyLogPath?: string } = {};
-    const initProgress = (error as { initProgress?: ProxyInitProgress } | null)?.initProgress;
-
-    if (initProgress) {
-      diagnostics.initProgress = initProgress;
-    }
-    if (session.logDir) {
-      diagnostics.proxyLogPath = proxyLogPathFor(session.logDir, session.id);
-    }
-
-    return diagnostics;
   }
 
   /**
