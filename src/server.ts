@@ -23,7 +23,7 @@ import {
 } from './errors/debug-errors.js';
 import { SessionManager, SessionManagerConfig } from './session/session-manager.js';
 import { StackTraceResult } from './session/session-manager-data.js';
-import { buildTruncationNotice, VariableTruncationSummary } from './session/variable-caps.js';
+import { VariableTruncationSummary } from './session/variable-caps.js';
 import { createProductionDependencies } from './container/dependencies.js';
 import { ContainerConfig } from './container/types.js';
 import {
@@ -33,7 +33,6 @@ import {
     Breakpoint,
     FunctionBreakpoint,
     SessionLifecycleState,
-    SessionState,
     IEnvironment,
     ILogger,
     ExceptionBreakMode,
@@ -93,6 +92,17 @@ import {
   handlePause,
   handleListThreads
 } from './server/handlers/execution-tools.js';
+import {
+  getVariablesTool,
+  getStackTraceTool,
+  getScopesTool,
+  evaluateExpressionTool,
+  getSourceContextTool,
+  getLocalVariablesTool,
+  handleEvaluateExpression,
+  handleGetSourceContext,
+  handleGetLocalVariables
+} from './server/handlers/inspection-tools.js';
 
 export { coerceToolArguments };
 export type { SetBreakpointRequest };
@@ -957,136 +967,27 @@ export class DebugMcpServer implements ToolContext {
               break;
             }
             case 'get_variables': {
-              if (!args.sessionId || args.scope === undefined) {
-                throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameters');
-              }
-              this.enforceExplicitNames('get_variables', args.names);
-
-              try {
-                const { variables, truncation } = await this.getVariablesDetailed(args.sessionId, args.scope, args.names);
-
-                // Log variable inspection (truncate large values)
-                const truncatedVars = variables.map(v => ({
-                  name: v.name,
-                  type: v.type,
-                  value: v.value.length > 200 ? v.value.substring(0, 200) + '... (truncated)' : v.value
-                }));
-                
-                this.logger.info('debug:variables', {
-                  sessionId: args.sessionId,
-                  sessionName: this.getSessionName(args.sessionId),
-                  variablesReference: args.scope,
-                  variableCount: variables.length,
-                  variables: truncatedVars.slice(0, 10), // Log first 10 variables
-                  timestamp: Date.now()
-                });
-                
-                const redaction = this.redactionSummary(variables);
-                const notFound = args.names
-                  ? args.names.filter(name => !variables.some(v => v.name === name))
-                  : undefined;
-                const truncationInfo = truncation
-                  ? { ...truncation, notice: buildTruncationNotice(truncation, variables) }
-                  : undefined;
-                result = { content: [{ type: 'text', text: JSON.stringify({ success: true, variables, count: variables.length, variablesReference: args.scope, ...(notFound !== undefined ? { notFound } : {}), ...(redaction ? { redaction } : {}), ...(truncationInfo ? { truncation: truncationInfo } : {}) }) }] };
-              } catch (error) {
-                // Handle validation errors specifically
-                if (error instanceof SessionTerminatedError ||
-                    error instanceof SessionNotFoundError ||
-                    error instanceof ProxyNotRunningError) {
-                  result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-                } else {
-                  // Re-throw unexpected errors
-                  throw error;
-                }
-              }
+              result = await getVariablesTool(this, args, toolName);
               break;
             }
             case 'get_stack_trace': {
-              if (!args.sessionId) {
-                throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
-              }
-              
-              try {
-                // Default to false for cleaner output
-                const includeInternals = args.includeInternals ?? false;
-                const stackTrace = await this.getStackTrace(args.sessionId, includeInternals, args.threadId);
-                const lastStop = this.sessionManager.getSession(args.sessionId)?.lastStop;
-                const payload: Record<string, unknown> = {
-                  success: true,
-                  stackFrames: stackTrace.frames,
-                  count: stackTrace.frames.length,
-                  ...(typeof stackTrace.threadId === 'number' ? { threadId: stackTrace.threadId } : {}),
-                  includeInternals,
-                  stopReason: lastStop?.reason,
-                  lastStop
-                };
-                // Anything the result needs explaining (not paused, stack came
-                // from a different thread, all threads frameless) plus the
-                // issue #346 hidden-frames disclosure share the note field.
-                const notes: string[] = [];
-                if (stackTrace.note) {
-                  notes.push(stackTrace.note);
-                }
-                if (stackTrace.hiddenFrameCount > 0) {
-                  payload.hiddenFrames = stackTrace.hiddenFrameCount;
-                  notes.push(stackTrace.allFramesInternal
-                    ? `All ${stackTrace.totalFrameCount} frames are internal/runtime frames; showing the top internal frame so scopes and evaluate still work. Pass includeInternals: true to see the full stack.`
-                    : `${stackTrace.hiddenFrameCount} internal frame(s) hidden — pass includeInternals: true to see them.`);
-                }
-                if (notes.length > 0) {
-                  payload.note = notes.join(' ');
-                }
-                result = { content: [{ type: 'text', text: JSON.stringify(payload) }] };
-              } catch (error) {
-                // Handle validation errors specifically
-                if (error instanceof SessionTerminatedError ||
-                    error instanceof SessionNotFoundError ||
-                    error instanceof ProxyNotRunningError) {
-                  result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-                } else if (error instanceof Error && !(error instanceof McpError)) {
-                  // DAP-level failures (e.g. "Child session not ready ...")
-                  // must surface as errors, not as an empty-but-successful
-                  // stack trace (issue #124).
-                  result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-                } else {
-                  // Re-throw unexpected errors
-                  throw error;
-                }
-              }
+              result = await getStackTraceTool(this, args, toolName);
               break;
             }
             case 'get_scopes': {
-              if (!args.sessionId || args.frameId === undefined) {
-                throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameters');
-              }
-              
-              try {
-                const scopes = await this.getScopes(args.sessionId, args.frameId);
-                result = { content: [{ type: 'text', text: JSON.stringify({ success: true, scopes }) }] };
-              } catch (error) {
-                // Handle validation errors specifically
-                if (error instanceof SessionTerminatedError ||
-                    error instanceof SessionNotFoundError ||
-                    error instanceof ProxyNotRunningError) {
-                  result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-                } else {
-                  // Re-throw unexpected errors
-                  throw error;
-                }
-              }
+              result = await getScopesTool(this, args, toolName);
               break;
             }
             case 'evaluate_expression': {
-              result = await this.handleEvaluateExpression(args as { sessionId: string; expression: string; frameId?: number; timeout?: number });
+              result = await evaluateExpressionTool(this, args, toolName);
               break;
             }
             case 'get_source_context': {
-              result = await this.handleGetSourceContext(args as { sessionId: string; file: string; line: number; linesContext?: number });
+              result = await getSourceContextTool(this, args, toolName);
               break;
             }
             case 'get_local_variables': {
-              result = await this.handleGetLocalVariables(args as { sessionId: string; includeSpecial?: boolean; names?: string[] });
+              result = await getLocalVariablesTool(this, args, toolName);
               break;
             }
             case 'get_output': {
@@ -1278,277 +1179,19 @@ export class DebugMcpServer implements ToolContext {
     return handleListThreads(this, args);
   }
 
-  private async handleEvaluateExpression(args: { sessionId: string, expression: string, frameId?: number, timeout?: number }): Promise<ServerResult> {
-    try {
-      // Validate session
-      this.validateSession(args.sessionId);
-
-      // Check expression length (sanity check)
-      if (args.expression.length > 10240) {
-        throw new McpError(McpErrorCode.InvalidParams, 'Expression too long (max 10KB)');
-      }
-
-      // Call SessionManager's evaluateExpression method (no context is passed here;
-      // the adapter policy chooses the DAP evaluate context)
-      const result = await this.sessionManager.evaluateExpression(
-        args.sessionId,
-        args.expression,
-        args.frameId,
-        // Context is chosen by the adapter policy inside SessionManager
-        args.timeout
-      );
-      
-      // Log for audit trail
-      this.logger.info('tool:evaluate_expression', {
-        sessionId: args.sessionId,
-        sessionName: this.getSessionName(args.sessionId),
-        expression: args.expression.substring(0, 100), // Truncate for logging
-        success: result.success,
-        hasResult: !!result.result,
-        timestamp: Date.now()
-      });
-      
-      // Return formatted response
-      return { 
-        content: [{ 
-          type: 'text', 
-          text: JSON.stringify(result) 
-        }] 
-      };
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      
-      // Log the error
-      this.logger.error('tool:evaluate_expression:error', {
-        sessionId: args.sessionId,
-        expression: args.expression.substring(0, 100),
-        error: errorMessage,
-        timestamp: Date.now()
-      });
-      
-      // Handle session state errors specifically
-      if (error instanceof McpError && 
-          (error.message.includes('terminated') || 
-           error.message.includes('closed') || 
-           error.message.includes('not found') ||
-           error.message.includes('not paused'))) {
-        return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-      } else if (error instanceof McpError) {
-        throw error;
-      } else {
-        // Wrap unexpected errors
-        throw new McpError(McpErrorCode.InternalError, `Failed to evaluate expression: ${errorMessage}`);
-      }
-    }
+  /** @internal test seam; removed in PR 6 */
+  private async handleEvaluateExpression(args: { sessionId: string, expression: string, frameId?: number, timeout?: number }): Promise<ToolResult> {
+    return handleEvaluateExpression(this, args);
   }
 
-  private async handleGetSourceContext(args: { sessionId: string, file: string, line: number, linesContext?: number }): Promise<ServerResult> {
-    try {
-      // Validate session
-      this.validateSession(args.sessionId);
-      
-      // Check file exists for immediate feedback
-      const fileCheck = await this.fileChecker.checkExists(args.file);
-      if (!fileCheck.exists) {
-        throw this.fileNotFoundError('Source file', args.file, fileCheck);
-      }
-      
-      this.logger.info(`Source context requested for session: ${args.sessionId}, file: ${fileCheck.effectivePath}, line: ${args.line}`);
-      
-      // Get line context using the line reader
-      const contextLines = args.linesContext ?? 5; // Default to 5 lines of context
-      const lineContext = await this.lineReader.getLineContext(
-        fileCheck.effectivePath,
-        args.line,
-        { contextLines }
-      );
-      
-      if (!lineContext) {
-        // File might be binary or unreadable
-        return { 
-          content: [{ 
-            type: 'text', 
-            text: JSON.stringify({ 
-              success: false, 
-              error: 'Could not read source context. File may be binary or inaccessible.',
-              file: args.file,
-              line: args.line
-            }) 
-          }] 
-        };
-      }
-      
-      // Log source context request
-      this.logger.info('debug:source_context', {
-        sessionId: args.sessionId,
-        sessionName: this.getSessionName(args.sessionId),
-        file: args.file,
-        line: args.line,
-        contextLines: contextLines,
-        timestamp: Date.now()
-      });
-      
-      return { 
-        content: [{ 
-          type: 'text', 
-          text: JSON.stringify({ 
-            success: true,
-            file: args.file,
-            line: args.line,
-            lineContent: lineContext.lineContent,
-            surrounding: lineContext.surrounding,
-            contextLines: contextLines
-          }) 
-        }] 
-      };
-    } catch (error) {
-      this.logger.error('Failed to get source context', { error });
-      if (error instanceof SessionTerminatedError ||
-          error instanceof SessionNotFoundError ||
-          error instanceof ProxyNotRunningError) {
-        return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-      }
-      if (error instanceof McpError) throw error;
-      throw new McpError(McpErrorCode.InternalError, `Failed to get source context: ${(error as Error).message}`);
-    }
+  /** @internal test seam; removed in PR 6 */
+  private async handleGetSourceContext(args: { sessionId: string, file: string, line: number, linesContext?: number }): Promise<ToolResult> {
+    return handleGetSourceContext(this, args);
   }
 
-  private async handleGetLocalVariables(args: { sessionId: string; includeSpecial?: boolean; names?: string[] }): Promise<ServerResult> {
-    this.enforceExplicitNames('get_local_variables', args.names);
-    try {
-      // Validate session
-      this.validateSession(args.sessionId);
-
-      // Get local variables using the new convenience method
-      const result = await this.getLocalVariables(
-        args.sessionId,
-        args.includeSpecial ?? false,
-        args.names
-      );
-      
-      // Log for debugging
-      this.logger.info('tool:get_local_variables', {
-        sessionId: args.sessionId,
-        sessionName: this.getSessionName(args.sessionId),
-        includeSpecial: args.includeSpecial ?? false,
-        variableCount: result.variables.length,
-        frame: result.frame,
-        scopeName: result.scopeName,
-        timestamp: Date.now()
-      });
-      
-      // Format response
-      const response: Record<string, unknown> = {
-        success: true,
-        variables: result.variables,
-        count: result.variables.length
-      };
-
-      const redaction = this.redactionSummary(result.variables);
-      if (redaction) {
-        response.redaction = redaction;
-      }
-
-      // Size-guard advisory (issues #356/#359): say explicitly that data was
-      // cut and how to fetch the rest, instead of silently dropping it.
-      if (result.truncation) {
-        response.truncation = {
-          ...result.truncation,
-          notice: buildTruncationNotice(result.truncation, result.variables)
-        };
-      }
-
-      if (args.names) {
-        response.notFound = args.names.filter(
-          name => !result.variables.some(v => v.name === name)
-        );
-      }
-
-      // Include frame information if available
-      if (result.frame) {
-        response.frame = result.frame;
-      }
-
-      // Include scope name if available
-      if (result.scopeName) {
-        response.scopeName = result.scopeName;
-      }
-
-      // The tool walked down past an empty runtime/stdlib top frame — say so,
-      // since `frame` no longer names the top of the stack (issue #468).
-      if (result.anchorNote) {
-        response.note = result.anchorNote;
-      }
-
-      // Surface adapter warnings embedded in the scope name — e.g. Delve
-      // reports "Locals (warning: optimized function)" when the debuggee was
-      // built with optimizations, which typically means missing variables.
-      const warningMatch = result.scopeName?.match(/\(warning:[^)]*\)/i);
-      if (warningMatch) {
-        response.warning =
-          `The debug adapter reported the locals scope as "${result.scopeName}". ` +
-          'This usually means the target was compiled with optimizations, so variables may be missing or unreadable. ' +
-          'For Go, rebuild the binary with -gcflags="all=-N -l" (exec mode) or launch the .go source directly (debug mode).';
-      }
-
-      // Add helpful messages for edge cases
-      if (result.variables.length === 0) {
-        if (!result.frame) {
-          // Distinguish "not paused" from "paused but the anchored thread has
-          // no frames" — the latter used to claim the debugger may not be
-          // paused while list_debug_sessions said paused (issue #465).
-          const sessionState = this.sessionManager.getSession(args.sessionId)?.state;
-          response.message = sessionState === SessionState.PAUSED
-            ? 'The session is paused, but the anchored thread reported no stack frames. ' +
-              'Try get_stack_trace with a threadId from list_threads, or continue_execution ' +
-              'followed by pause_execution to re-anchor on a reportable thread.'
-            : 'No stack frames available. The debugger may not be paused.';
-        } else if (!result.scopeName) {
-          response.message = 'No local scope found in the current frame.';
-        } else {
-          response.message = `The ${result.scopeName} scope is empty.`;
-        }
-      }
-      
-      return { 
-        content: [{ 
-          type: 'text', 
-          text: JSON.stringify(response) 
-        }] 
-      };
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      
-      // Log the error
-      this.logger.error('tool:get_local_variables:error', {
-        sessionId: args.sessionId,
-        error: errorMessage,
-        timestamp: Date.now()
-      });
-      
-      // Handle session state errors specifically
-      if (error instanceof McpError &&
-          (error.message.includes('terminated') ||
-           error.message.includes('closed') ||
-           error.message.includes('not found') ||
-           error.message.includes('not paused'))) {
-        // A terminated session is a normal end state (e.g. a step_out ran the
-        // program to completion) — explain that instead of implying misuse.
-        const message = error.message.includes('terminated')
-          ? 'The program has terminated, so no frames or variables exist. Use restart_debugging to run it again.'
-          : 'Cannot get local variables. The session must be paused at a breakpoint.';
-        return { content: [{ type: 'text', text: JSON.stringify({
-          success: false,
-          error: error.message,
-          message
-        }) }] };
-      } else if (error instanceof McpError) {
-        throw error;
-      } else {
-        // Wrap unexpected errors
-        throw new McpError(McpErrorCode.InternalError, `Failed to get local variables: ${errorMessage}`);
-      }
-    }
+  /** @internal test seam; removed in PR 6 */
+  private async handleGetLocalVariables(args: { sessionId: string; includeSpecial?: boolean; names?: string[] }): Promise<ToolResult> {
+    return handleGetLocalVariables(this, args);
   }
 
   private async handleListSupportedLanguages(): Promise<ServerResult> {
