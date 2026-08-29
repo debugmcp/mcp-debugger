@@ -1,6 +1,8 @@
 /**
- * Debug operations for session management including starting, stepping,
- * continuing, and breakpoint management.
+ * Session operations facade. Launch, attach and detach live here; breakpoint,
+ * execution, evaluation, JVM hot-swap and DAP-mirror operations delegate to the
+ * collaborators under src/session/{breakpoints,execution,inspection,jvm,mirror}/
+ * through OperationsContext (see operations-context.ts).
  */
 import {
   Breakpoint,
