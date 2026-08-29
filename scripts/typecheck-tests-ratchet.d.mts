@@ -6,6 +6,13 @@
 /** Why a tsc run cannot be trusted, or `null` when it can. */
 export function unusableRunReason(status: number | null, output: string): string | null;
 
+/** Why an all-clear run cannot be trusted, or `null` when it can. */
+export function emptyRunReason(
+  currentFiles: number,
+  baselineFiles: number,
+  allowEmpty: boolean
+): string | null;
+
 /** Group tsc diagnostics by the repo-relative, forward-slash file that produced them. */
 export function parseDiagnostics(output: string, root: string): Map<string, string[]>;
 

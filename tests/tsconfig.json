@@ -11,5 +11,15 @@
   // exists so tooling that resolves the *nearest* tsconfig finds the same settings.
   "extends": "../tsconfig.spec.json",
   "include": ["./**/*"],
-  "exclude": ["./fixtures/**", "./manual/**", "./reports/**"]
+  // `exclude` replaces the parent list rather than adding to it, so the inherited
+  // node_modules / dist / coverage entries have to be repeated here.
+  "exclude": [
+    "node_modules",
+    "**/node_modules/**",
+    "**/dist/**",
+    "coverage",
+    "./fixtures/**",
+    "./manual/**",
+    "./reports/**"
+  ]
 }

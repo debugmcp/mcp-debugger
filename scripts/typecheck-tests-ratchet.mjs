@@ -19,6 +19,9 @@
  *   (default)  fail when any file's count differs from its baseline — up (new type errors)
  *              or down (a stale baseline that must be re-recorded and committed).
  *   --update   rewrite the baseline from the current run.
+ *   --allow-empty  with --update only: permit recording an empty baseline. A run that
+ *              finds nothing is normally a broken program, not a clean suite, so it is
+ *              rejected unless this says otherwise.
  *
  * Exit codes: 0 clean, 1 ratchet failure, 2 the check could not be run.
  */
@@ -43,7 +46,16 @@ const BASELINE_FILE = 'tests/typecheck-baseline.json';
  */
 const DIAGNOSTIC = /^(.+?)\((\d+),(\d+)\): error (TS\d+): (.*)$/;
 
-/** TS1xxx is the grammar/parse band. One of these and tsc never reaches the semantic pass. */
+/**
+ * The TS1000-1999 grammar/syntax band.
+ *
+ * Deliberately the whole band, not just the parser's own errors: a few of these are
+ * emitted by the checker and do *not* truncate the semantic pass (TS1205 under
+ * `isolatedModules`, TS1259/TS1192 interop, TS1149 casing). Matching them too fails
+ * closed — it can abort a run that would in fact have been comparable, which is the
+ * safe direction, since the alternative is comparing a run that silently checked
+ * nothing.
+ */
 const SYNTAX_ERROR = /\berror TS1\d{3}:/;
 
 /** The only trees this ratchet owns: everything else is a broken check, not a failed one. */
@@ -61,8 +73,10 @@ const MAX_LINES_PER_FILE = 20;
  * - A status other than 0 (clean) or 2 (diagnostics emitted) means tsc did not complete. A
  *   config error exits 1, and on Windows a tsc terminated from outside reports
  *   `{status: 1, signal: null}` after printing a clean prefix of real diagnostics.
- * - A parse error (TS1xxx) stops tsc before the semantic pass, so the baselined errors are
- *   simply never reported and `--update` would happily record a one-entry baseline.
+ * - A grammar/syntax diagnostic (TS1xxx). tsc skips semantic checking entirely when any
+ *   file fails to parse, so the baselined errors are never reported and `--update` would
+ *   happily record a one-entry baseline. See {@link SYNTAX_ERROR} for why the rule spans
+ *   the whole band rather than only the parser's own errors.
  *
  * @param {number | null} status tsc's exit status
  * @param {string} output combined stdout/stderr
@@ -79,8 +93,9 @@ export function unusableRunReason(status, output) {
   const syntax = output.split(/\r?\n/).filter(line => SYNTAX_ERROR.test(line));
   if (syntax.length > 0) {
     return (
-      `tsc reported a syntax error, so no semantic check ran and the recorded errors would ` +
-      `look like progress. Fix the parse error first:\n\n${syntax.slice(0, 10).join('\n')}`
+      `tsc reported a grammar/syntax diagnostic (TS1xxx). Because tsc skips semantic ` +
+      `checking when any file fails to parse, this run cannot be compared against the ` +
+      `baseline — fix that diagnostic first:\n\n${syntax.slice(0, 10).join('\n')}`
     );
   }
 
@@ -218,10 +233,44 @@ export function verdict(comparison) {
   return 'ok';
 }
 
-/** Read the baseline, or exit with a pointer to `typecheck:tests:update`. */
-function readBaseline(root) {
+/**
+ * Why an all-clear run cannot be trusted, or `null` when it can.
+ *
+ * A status-0 run with no diagnostics at all is indistinguishable from a spec program that
+ * stopped matching the test trees — a broken `include`, an `exclude` that grew too wide.
+ * Nothing about that is a parse error, so {@link unusableRunReason} lets it through, and
+ * every baselined file then reads as improved: the gate says "refresh the baseline", the
+ * refresh records `{}`, and CI goes green with nothing type-checked.
+ *
+ * @param {number} currentFiles files with diagnostics in this run
+ * @param {number} baselineFiles files recorded in the baseline
+ * @param {boolean} allowEmpty caller passed `--allow-empty`
+ * @returns {string | null} message for `fail`, or null
+ */
+export function emptyRunReason(currentFiles, baselineFiles, allowEmpty) {
+  if (currentFiles > 0 || baselineFiles === 0 || allowEmpty) return null;
+
+  return (
+    `tsc reported no errors at all, but ${BASELINE_FILE} records ${baselineFiles} file(s). ` +
+    `That is far more likely to be a program that no longer includes the test trees than a ` +
+    `suite that became type-clean at once. Check what the program actually covers:\n` +
+    `  npx tsc -p ${PROJECT} --listFilesOnly | grep -c '/tests/'\n` +
+    `If the debt genuinely reached zero, record that explicitly:\n` +
+    `  pnpm run typecheck:tests:update -- --allow-empty`
+  );
+}
+
+/**
+ * Read the baseline, or exit with a pointer to `typecheck:tests:update`.
+ *
+ * @param {string} root repo root
+ * @param {{ required?: boolean }} [options] `required: false` for `--update`, which is
+ *   allowed to run before the baseline exists
+ */
+function readBaseline(root, { required = true } = {}) {
   const file = path.join(root, BASELINE_FILE);
   if (!fs.existsSync(file)) {
+    if (!required) return {};
     fail(`Missing ${BASELINE_FILE}. Create it with: pnpm run typecheck:tests:update`);
   }
 
@@ -242,7 +291,8 @@ function readBaseline(root) {
     if (!Number.isInteger(count) || count < 0) {
       fail(
         `${BASELINE_FILE} has a bad entry for '${entry}': expected a non-negative integer, ` +
-        `got ${JSON.stringify(count)}. Re-record it with: pnpm run typecheck:tests:update`
+        `got ${JSON.stringify(count)}. Delete the file and re-record it with: ` +
+        `pnpm run typecheck:tests:update`
       );
     }
   }
@@ -307,13 +357,17 @@ function describe(error) {
 
 function main(root, argv) {
   const update = argv.includes('--update');
+  const allowEmpty = argv.includes('--allow-empty');
   // pnpm forwards the `--` separator itself (`pnpm run typecheck:tests -- --update`).
-  const unknown = argv.filter(arg => !['--', '--update'].includes(arg));
+  const unknown = argv.filter(arg => !['--', '--update', '--allow-empty'].includes(arg));
   if (unknown.length > 0) {
     fail(
       `Unknown argument(s): ${unknown.join(' ')}. ` +
-      `Usage: node scripts/typecheck-tests-ratchet.mjs [--update]`
+      `Usage: node scripts/typecheck-tests-ratchet.mjs [--update [--allow-empty]]`
     );
+  }
+  if (allowEmpty && !update) {
+    fail('--allow-empty only means anything with --update; the gate never records a baseline.');
   }
 
   const current = parseDiagnostics(runTsc(root), root);
@@ -327,6 +381,12 @@ function main(root, argv) {
     );
   }
 
+  // Read before writing, so `--update` is held to the same floor the gate is.
+  const baseline = readBaseline(root, { required: !update });
+
+  const empty = emptyRunReason(current.size, Object.keys(baseline).length, allowEmpty);
+  if (empty) fail(empty);
+
   if (update) {
     writeBaseline(root, current);
     console.log(
@@ -336,7 +396,6 @@ function main(root, argv) {
     return;
   }
 
-  const baseline = readBaseline(root);
   const comparison = compare(current, baseline);
   const { regressed, improved } = comparison;
   const outcome = verdict(comparison);

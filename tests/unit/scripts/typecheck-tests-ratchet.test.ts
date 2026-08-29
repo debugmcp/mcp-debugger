@@ -3,6 +3,7 @@ import path from 'path';
 import { pathToFileURL } from 'url';
 import {
   compare,
+  emptyRunReason,
   isTestTreePath,
   parseDiagnostics,
   pathsOutsideTestTrees,
@@ -235,14 +236,92 @@ describe('unusableRunReason', () => {
     expect(unusableRunReason(null, DIAGNOSTICS)).toMatch(/did not complete/);
   });
 
-  it('rejects a TS1xxx syntax error, which skips the semantic pass entirely', () => {
+  it('rejects a parse error, which skips the semantic pass entirely', () => {
     const output: string = 'tests/unit/a.test.ts(3,4): error TS1005: \';\' expected.';
 
-    expect(unusableRunReason(2, output)).toMatch(/syntax error/);
+    expect(unusableRunReason(2, output)).toMatch(/grammar\/syntax diagnostic/);
+  });
+
+  it('rejects the whole TS1xxx band, not just parse errors — the rule fails closed', () => {
+    // TS1205 is emitted by the checker under isolatedModules and does NOT truncate the
+    // semantic pass, so this aborts a run that would in fact have been comparable. That is
+    // the safe direction: the alternative is comparing a run that silently checked nothing.
+    const output: string =
+      'tests/unit/a.test.ts(1,10): error TS1205: Re-exporting a type when isolatedModules is enabled requires using export type.';
+
+    expect(unusableRunReason(2, output)).toMatch(/grammar\/syntax diagnostic/);
   });
 
   it('rejects a non-zero exit that reported nothing parseable', () => {
     expect(unusableRunReason(2, 'error TS5083: Cannot read file.')).toMatch(/without reporting/);
+  });
+});
+
+interface EmptyRunCase {
+  name: string;
+  currentFiles: number;
+  baselineFiles: number;
+  allowEmpty: boolean;
+  blocked: boolean;
+}
+
+const EMPTY_RUN_CASES: EmptyRunCase[] = [
+  {
+    name: 'blocks an all-clear run while the baseline still records files',
+    currentFiles: 0,
+    baselineFiles: 92,
+    allowEmpty: false,
+    blocked: true
+  },
+  {
+    name: 'lets --allow-empty through for the day the debt really reaches zero',
+    currentFiles: 0,
+    baselineFiles: 92,
+    allowEmpty: true,
+    blocked: false
+  },
+  {
+    name: 'allows an empty run against an empty baseline',
+    currentFiles: 0,
+    baselineFiles: 0,
+    allowEmpty: false,
+    blocked: false
+  },
+  {
+    name: 'allows the first --update, when no baseline exists yet',
+    currentFiles: 12,
+    baselineFiles: 0,
+    allowEmpty: false,
+    blocked: false
+  },
+  {
+    name: 'says nothing about an ordinary run with diagnostics',
+    currentFiles: 92,
+    baselineFiles: 92,
+    allowEmpty: false,
+    blocked: false
+  }
+];
+
+describe('emptyRunReason', () => {
+  for (const testCase of EMPTY_RUN_CASES) {
+    it(testCase.name, () => {
+      const reason: string | null = emptyRunReason(
+        testCase.currentFiles,
+        testCase.baselineFiles,
+        testCase.allowEmpty
+      );
+
+      if (testCase.blocked) expect(reason).toMatch(/no errors at all/);
+      else expect(reason).toBeNull();
+    });
+  }
+
+  it('points at the include-coverage check and the explicit override', () => {
+    const reason: string = String(emptyRunReason(0, 92, false));
+
+    expect(reason).toContain('--listFilesOnly');
+    expect(reason).toContain('--allow-empty');
   });
 });
 
