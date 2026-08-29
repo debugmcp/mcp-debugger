@@ -6,91 +6,17 @@ import { IFileSystem, ILogger } from '../../../../src/interfaces/external-depend
 import { createMockLogger, createMockFileSystem } from '../../../test-utils/helpers/test-dependencies.js';
 import { MockProxyManager } from '../../../test-utils/mocks/mock-proxy-manager.js';
 import { IDebugAdapter } from '@debugmcp/shared';
-import { DebugLanguage } from '@debugmcp/shared';
+import { FakeDebugAdapter } from '../../../test-utils/fakes/fake-debug-adapter.js';
 
 describe('ProxyManagerFactory', () => {
   let mockProxyProcessLauncher: IProxyProcessLauncher;
   let mockFileSystem: IFileSystem;
   let mockLogger: ILogger;
 
-  // Helper function to create a mock debug adapter
+  // One compile-checked fake instead of a 75-line uncast literal, which had drifted into
+  // a sync transformLaunchConfig and two members the interface no longer declares.
   function createMockDebugAdapter(): IDebugAdapter {
-    return {
-      language: DebugLanguage.MOCK,
-      name: 'Mock Debug Adapter',
-      
-      // Lifecycle methods
-      initialize: vi.fn().mockResolvedValue(undefined),
-      dispose: vi.fn().mockResolvedValue(undefined),
-      
-      // State management
-      getState: vi.fn().mockReturnValue('ready'),
-      isReady: vi.fn().mockReturnValue(true),
-      getCurrentThreadId: vi.fn().mockReturnValue(1),
-      
-      // Environment validation
-      validateEnvironment: vi.fn().mockResolvedValue({ valid: true, errors: [], warnings: [] }),
-      getRequiredDependencies: vi.fn().mockReturnValue([]),
-      
-      // Executable management
-      resolveExecutablePath: vi.fn().mockResolvedValue('mock-executable'),
-      getDefaultExecutableName: vi.fn().mockReturnValue('mock'),
-      getExecutableSearchPaths: vi.fn().mockReturnValue([]),
-      
-      // Adapter configuration
-      buildAdapterCommand: vi.fn().mockImplementation((config) => ({
-        command: config.executablePath || 'node',
-        args: ['mock-adapter.js', '--port', String(config.adapterPort)],
-        env: {}
-      })),
-      getAdapterModuleName: vi.fn().mockReturnValue('mock-adapter'),
-      getAdapterInstallCommand: vi.fn().mockReturnValue('echo "Mock adapter built-in"'),
-      
-      // Debug configuration
-      transformLaunchConfig: vi.fn().mockImplementation(config => config),
-      getDefaultLaunchConfig: vi.fn().mockReturnValue({}),
-      
-      // Path translation
-      translateScriptPath: vi.fn().mockImplementation(path => path),
-      translateBreakpointPath: vi.fn().mockImplementation(path => path),
-      
-      // DAP protocol operations
-      sendDapRequest: vi.fn().mockResolvedValue({}),
-      handleDapEvent: vi.fn(),
-      handleDapResponse: vi.fn(),
-      
-      // Connection management
-      connect: vi.fn().mockResolvedValue(undefined),
-      disconnect: vi.fn().mockResolvedValue(undefined),
-      isConnected: vi.fn().mockReturnValue(true),
-      
-      // Error handling
-      getInstallationInstructions: vi.fn().mockReturnValue('Mock adapter needs no installation'),
-      getMissingExecutableError: vi.fn().mockReturnValue('Mock executable not found'),
-      translateErrorMessage: vi.fn().mockImplementation(err => err.message),
-      
-      // Feature support
-      supportsFeature: vi.fn().mockReturnValue(true),
-      getFeatureRequirements: vi.fn().mockReturnValue([]),
-      getCapabilities: vi.fn().mockReturnValue({}),
-      
-      // EventEmitter methods
-      on: vi.fn(),
-      off: vi.fn(),
-      emit: vi.fn(),
-      removeListener: vi.fn(),
-      once: vi.fn(),
-      removeAllListeners: vi.fn(),
-      setMaxListeners: vi.fn(),
-      getMaxListeners: vi.fn().mockReturnValue(10),
-      listeners: vi.fn().mockReturnValue([]),
-      rawListeners: vi.fn().mockReturnValue([]),
-      listenerCount: vi.fn().mockReturnValue(0),
-      prependListener: vi.fn(),
-      prependOnceListener: vi.fn(),
-      eventNames: vi.fn().mockReturnValue([]),
-      addListener: vi.fn()
-    } as unknown as IDebugAdapter;
+    return new FakeDebugAdapter({ name: 'Mock Debug Adapter' });
   }
 
   beforeEach(() => {

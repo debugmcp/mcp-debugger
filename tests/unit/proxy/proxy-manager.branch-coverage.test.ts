@@ -5,13 +5,13 @@ import { createInitialState } from '../../../src/dap-core/index.js';
 import * as dapCore from '../../../src/dap-core/index.js';
 import {
   DebugLanguage,
-  type IDebugAdapter,
   type IFileSystem,
   type ILogger,
   type IProxyProcess,
   type IProxyProcessLauncher,
   type AdapterLaunchBarrier
 } from '@debugmcp/shared';
+import { FakeDebugAdapter } from '../../test-utils/fakes/fake-debug-adapter.js';
 
 class StubProxyProcess extends EventEmitter implements IProxyProcess {
   pid = 9999;
@@ -245,12 +245,9 @@ describe('ProxyManager branch coverage scenarios', () => {
       waitUntilReady: vi.fn(),
       dispose: vi.fn()
     };
-    const adapter: IDebugAdapter = {
-      language: DebugLanguage.JAVASCRIPT,
-      validateEnvironment: vi.fn(),
-      resolveExecutablePath: vi.fn(),
-      createLaunchBarrier: vi.fn().mockReturnValue(barrier)
-    } as unknown as IDebugAdapter;
+    const adapter = new FakeDebugAdapter({
+      language: DebugLanguage.JAVASCRIPT
+    }).withLaunchBarrier(barrier);
 
     manager = new ProxyManager(adapter, launcher, fileSystem, logger);
     proxyProcess = new StubProxyProcess();
@@ -300,12 +297,9 @@ describe('ProxyManager branch coverage scenarios', () => {
       waitUntilReady: vi.fn(),
       dispose: vi.fn()
     };
-    const adapter: IDebugAdapter = {
-      language: DebugLanguage.JAVASCRIPT,
-      validateEnvironment: vi.fn(),
-      resolveExecutablePath: vi.fn(),
-      createLaunchBarrier: vi.fn().mockReturnValue(barrier)
-    } as unknown as IDebugAdapter;
+    const adapter = new FakeDebugAdapter({
+      language: DebugLanguage.JAVASCRIPT
+    }).withLaunchBarrier(barrier);
 
     manager = new ProxyManager(adapter, launcher, fileSystem, logger);
     proxyProcess = new StubProxyProcess();

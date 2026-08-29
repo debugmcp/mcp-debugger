@@ -105,23 +105,6 @@ export function createMockSessionManager() {
 }
 
 /**
- * Create a mock adapter registry with all methods
- */
-export function createMockAdapterRegistry() {
-  return {
-    getSupportedLanguages: vi.fn().mockReturnValue(['python', 'mock']),
-    listLanguages: vi.fn().mockResolvedValue(['python', 'mock']),
-    listAvailableAdapters: vi.fn().mockResolvedValue(['python', 'mock']),
-    isLanguageSupported: vi.fn().mockReturnValue(true),
-    create: vi.fn().mockResolvedValue(null),
-    register: vi.fn(),
-    getAdapter: vi.fn().mockResolvedValue(null),
-    hasAdapter: vi.fn().mockReturnValue(false),
-    listAdapters: vi.fn().mockReturnValue([])
-  };
-}
-
-/**
  * Create a mock WhichCommandFinder that always works
  */
 export function createMockWhichFinder() {

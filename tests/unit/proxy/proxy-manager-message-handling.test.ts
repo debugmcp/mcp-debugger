@@ -12,7 +12,8 @@ import path from 'path';
 import { pathToFileURL } from 'url';
 import { TestProxyManager } from '../test-utils/test-proxy-manager.js';
 import { ProxyConfig } from '../../../src/proxy/proxy-config.js';
-import { DebugLanguage, type IDebugAdapter, type IProxyProcess } from '@debugmcp/shared';
+import { DebugLanguage, type IProxyProcess } from '@debugmcp/shared';
+import { FakeDebugAdapter } from '../../test-utils/fakes/fake-debug-adapter.js';
 import { createMockLogger, createMockFileSystem } from '../test-utils/mock-factories.js';
 import { ProxyManager } from '../../../src/proxy/proxy-manager.js';
 import { createInitialState } from '../../../src/dap-core/index.js';
@@ -880,14 +881,14 @@ describe('ProxyManager Message Handling', () => {
     });
 
     it('throws when adapter validation fails during spawn preparation', async () => {
-      const adapter = {
+      const adapter = new FakeDebugAdapter({
         language: DebugLanguage.JAVASCRIPT,
-        validateEnvironment: vi.fn().mockResolvedValue({
+        validateEnvironment: async () => ({
           valid: false,
-          errors: [{ message: 'bad env' }],
+          errors: [{ code: 'ENV_INVALID', message: 'bad env', recoverable: false }],
           warnings: []
         })
-      } as unknown as IDebugAdapter;
+      });
 
       const logger = createMockLogger();
       const fileSystem = createMockFileSystem();
@@ -927,15 +928,12 @@ describe('ProxyManager Message Handling', () => {
         waitUntilReady: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn()
       };
-      const createLaunchBarrier = vi.fn().mockReturnValue(barrier);
-
-      const adapter = {
+      const adapter = new FakeDebugAdapter({
         language: DebugLanguage.JAVASCRIPT,
-        validateEnvironment: vi.fn().mockResolvedValue({ valid: true, errors: [], warnings: [] }),
-        resolveExecutablePath: vi.fn().mockResolvedValue('/usr/bin/node'),
-        getAdapterModuleName: () => 'js-debug',
-        createLaunchBarrier
-      } as unknown as IDebugAdapter;
+        resolveExecutablePath: async () => '/usr/bin/node',
+        getAdapterModuleName: () => 'js-debug'
+      }).withLaunchBarrier(barrier);
+      const createLaunchBarrier = adapter.createLaunchBarrier;
 
       const proxyManager = new ProxyManager(
         adapter,
@@ -981,12 +979,10 @@ describe('ProxyManager Message Handling', () => {
         dispose: vi.fn()
       };
 
-      const adapter = {
+      const adapter = new FakeDebugAdapter({
         language: DebugLanguage.JAVASCRIPT,
-        validateEnvironment: vi.fn().mockResolvedValue({ valid: true, errors: [], warnings: [] }),
-        resolveExecutablePath: vi.fn().mockResolvedValue('/usr/bin/node'),
-        createLaunchBarrier: vi.fn().mockReturnValue(barrier)
-      } as unknown as IDebugAdapter;
+        resolveExecutablePath: async () => '/usr/bin/node'
+      }).withLaunchBarrier(barrier);
 
       const proxyManager = new ProxyManager(
         adapter,
@@ -1032,12 +1028,10 @@ describe('ProxyManager Message Handling', () => {
         dispose: vi.fn()
       };
 
-      const adapter = {
+      const adapter = new FakeDebugAdapter({
         language: DebugLanguage.JAVASCRIPT,
-        validateEnvironment: vi.fn().mockResolvedValue({ valid: true, errors: [], warnings: [] }),
-        resolveExecutablePath: vi.fn().mockResolvedValue('/usr/bin/node'),
-        createLaunchBarrier: vi.fn().mockReturnValue(barrier)
-      } as unknown as IDebugAdapter;
+        resolveExecutablePath: async () => '/usr/bin/node'
+      }).withLaunchBarrier(barrier);
 
       const proxyManager = new ProxyManager(
         adapter,
@@ -1094,12 +1088,10 @@ describe('ProxyManager Message Handling', () => {
         dispose: vi.fn()
       };
 
-      const adapter = {
+      const adapter = new FakeDebugAdapter({
         language: DebugLanguage.JAVASCRIPT,
-        validateEnvironment: vi.fn().mockResolvedValue({ valid: true, errors: [], warnings: [] }),
-        resolveExecutablePath: vi.fn().mockResolvedValue('/usr/bin/node'),
-        createLaunchBarrier: vi.fn().mockReturnValue(barrier)
-      } as unknown as IDebugAdapter;
+        resolveExecutablePath: async () => '/usr/bin/node'
+      }).withLaunchBarrier(barrier);
 
       const proxyManager = new ProxyManager(
         adapter,
