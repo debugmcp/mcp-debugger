@@ -82,7 +82,7 @@ export async function reresolveAnchors(
     } catch (error) {
       ctx.logger.warn(
         `[SessionManager] Could not re-read ${file} for anchor re-resolution: ${
-          error instanceof Error ? error.message : String(error)
+          getErrorMessage(error)
         }`
       );
     }

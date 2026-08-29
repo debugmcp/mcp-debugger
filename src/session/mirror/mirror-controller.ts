@@ -72,7 +72,7 @@ export class MirrorController {
       return {
         success: false,
         state: session.state,
-        error: withTimeoutHint(error instanceof Error ? error.message : String(error))
+        error: withTimeoutHint(getErrorMessage(error))
       };
     }
   }
@@ -111,7 +111,7 @@ export class MirrorController {
       return {
         success: false,
         state: session.state,
-        error: withTimeoutHint(error instanceof Error ? error.message : String(error))
+        error: withTimeoutHint(getErrorMessage(error))
       };
     }
   }

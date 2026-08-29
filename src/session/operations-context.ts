@@ -70,9 +70,13 @@ export interface OperationsContext {
    */
   selectPolicy(language: string | DebugLanguage): AdapterPolicy;
   /**
-   * The session store's policy lookup, which THROWS for an unknown language.
-   * Distinct from `selectPolicy` on purpose: the launch-time function
-   * breakpoint warning has always read the store's, behind a try/catch.
+   * The session store's policy lookup (`sessionStore.selectPolicy`). Both
+   * lookups resolve through `getPolicyForLanguage`, which falls back to the
+   * default policy rather than throwing — the distinction is the SEAM, not the
+   * result: tests override `selectPolicy` on the facade instance and may hand
+   * the store a double without `selectPolicy` at all, so every moved call keeps
+   * the source it always had (the launch-time function-breakpoint warning reads
+   * the store's, behind a try/catch).
    */
   selectStorePolicy(language: DebugLanguage): AdapterPolicy;
 
@@ -99,7 +103,7 @@ export type AnchorContext = Pick<OperationsContext, 'logger' | 'fileSystem'>;
 /** Breakpoint tooling: the store, the wire, and both policy sources. */
 export type BreakpointContext = Pick<
   OperationsContext,
-  'logger' | 'fileSystem' | 'getSession' | 'selectPolicy' | 'selectStorePolicy'
+  'logger' | 'getSession' | 'selectPolicy' | 'selectStorePolicy'
 >;
 
 /** Stepping / continue / pause / threads. */

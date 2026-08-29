@@ -124,7 +124,7 @@ export class RedefineClassesController {
       this.ctx.logger.error(`[SM redefineClasses ${sessionId}] Error: ${error}`);
       return {
         success: false,
-        error: withTimeoutHint(error instanceof Error ? error.message : String(error)),
+        error: withTimeoutHint(getErrorMessage(error)),
       };
     }
   }

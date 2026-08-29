@@ -211,7 +211,7 @@ export class BreakpointController {
         `[SessionManager] Error sending setBreakpoints to proxy for session ${sessionId}:`,
         error
       );
-      const message = error instanceof Error ? error.message : String(error);
+      const message = getErrorMessage(error);
       return { synced: false, warning: this.buildLiveSyncWarning(session, message) };
     }
   }
@@ -328,7 +328,7 @@ export class BreakpointController {
         `[SessionManager] Error sending setFunctionBreakpoints to proxy for session ${sessionId}:`,
         error
       );
-      const message = error instanceof Error ? error.message : String(error);
+      const message = getErrorMessage(error);
       return { synced: false, warning: this.buildLiveSyncWarning(session, message) };
     }
   }

@@ -121,7 +121,7 @@ export class ExecutionController {
         successMessage,
       });
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       this.ctx.logger.error(`[SM ${logTag} ${sessionId}] Error during step:`, error);
       this.ctx.updateState(session, SessionState.ERROR);
       return { success: false, error: errorMessage, state: session.state };
@@ -236,7 +236,7 @@ export class ExecutionController {
       proxyManager
         .sendDapRequest(options.command, { threadId: options.threadId })
         .catch((error: unknown) => {
-          const errorMessage = error instanceof Error ? error.message : String(error);
+          const errorMessage = getErrorMessage(error);
           this.ctx.logger.error(
             `[SM ${options.logTag} ${sessionId}] Error during step request:`,
             error
@@ -294,7 +294,7 @@ export class ExecutionController {
     } catch (error) {
       // Revert to PAUSED — the VM didn't actually resume
       this.ctx.updateState(session, SessionState.PAUSED);
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       this.ctx.logger.error(
         `[SessionManager continue] Error sending 'continue' to proxy for session ${sessionId}: ${errorMessage}`
       );
@@ -494,7 +494,7 @@ export class ExecutionController {
         })
         .catch((error: unknown) => {
           session.pausePending = false;
-          const errorMessage = error instanceof Error ? error.message : String(error);
+          const errorMessage = getErrorMessage(error);
           this.ctx.logger.error(
             `[SessionManager pause] Error sending 'pause' for session ${sessionId}: ${errorMessage}`
           );

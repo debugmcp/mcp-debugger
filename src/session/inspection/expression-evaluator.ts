@@ -156,7 +156,7 @@ export class ExpressionEvaluator {
           };
         }
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorMessage = getErrorMessage(error);
         this.ctx.logger.error(
           `[SM evaluateExpression ${sessionId}] Error getting stack trace for default frame:`,
           error
@@ -252,7 +252,7 @@ export class ExpressionEvaluator {
         return { success: false, error: 'No response body from debug adapter' };
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
 
       // Log the error
       this.ctx.logger.error('debug:evaluate', {
