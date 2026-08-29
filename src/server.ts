@@ -10,17 +10,11 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
-  ListResourcesRequestSchema,
-  ReadResourceRequestSchema,
-  SubscribeRequestSchema,
-  UnsubscribeRequestSchema,
-  ListPromptsRequestSchema,
-  GetPromptRequestSchema,
   ErrorCode as McpErrorCode,
   McpError,
   ServerResult,
 } from '@modelcontextprotocol/sdk/types.js';
-import { buildServerInstructions, buildDebuggingWorkflowPrompt } from './skill-content.js';
+import { buildServerInstructions } from './skill-content.js';
 import {
   SessionNotFoundError,
   SessionTerminatedError,
@@ -71,6 +65,8 @@ import { assertLineContent, resolveStatement, stripTrailingComment } from './uti
 import { coerceToolArguments, ToolArguments } from './server/tool-arguments.js';
 import { extractPayloadSuccess, sanitizeRequest } from './server/tool-result.js';
 import { buildToolDefinitions } from './server/tool-schemas.js';
+import { OutputResourceNotifier, registerResourceHandlers } from './server/output-resources.js';
+import { registerPromptHandlers } from './server/prompts.js';
 
 export { coerceToolArguments };
 
@@ -152,15 +148,8 @@ export class DebugMcpServer {
   private environment: IEnvironment;
 
   // Debuggee-output resource subscriptions (issue #218).
-  // URIs subscribed via resources/subscribe; updated-pings are debounced so
-  // notification volume is independent of debuggee output volume.
-  private static readonly OUTPUT_UPDATE_DEBOUNCE_MS = 150;
-  private subscribedUris = new Set<string>();
-  private outputUpdateTimers = new Map<string, NodeJS.Timeout>();
+  private outputResources: OutputResourceNotifier;
   private validationCache = new ValidationResultCache();
-  private handleOutputCaptured = (sessionId: string): void => {
-    this.scheduleOutputResourceUpdated(sessionId);
-  };
 
   // Get supported languages from adapter registry
   private async getSupportedLanguagesAsync(): Promise<string[]> {
@@ -917,11 +906,12 @@ export class DebugMcpServer {
     };
     
     this.sessionManager = new SessionManager(sessionManagerConfig, dependencies);
+    this.outputResources = new OutputResourceNotifier(this.server, this.logger);
 
     this.registerTools();
-    this.registerResources();
-    this.registerPrompts();
-    this.sessionManager.on('output-captured', this.handleOutputCaptured);
+    registerResourceHandlers(this.server, this.sessionManager, this.outputResources);
+    registerPromptHandlers(this.server, this.environment);
+    this.sessionManager.on('output-captured', this.outputResources.handleOutputCaptured);
     this.server.onerror = (error) => {
       this.logger.error('Server error', { error });
     };
@@ -1055,7 +1045,7 @@ export class DebugMcpServer {
               });
 
               // A new output resource is now listable (issue #218)
-              this.notifyResourceListChanged();
+              this.outputResources.notifyListChanged();
 
               // Check if attach mode is requested (host/port provided)
               const isAttachMode = args.port !== undefined;
@@ -1711,10 +1701,8 @@ export class DebugMcpServer {
                 });
 
                 // The session's output resource is gone (issue #218)
-                const outputUri = this.outputResourceUri(args.sessionId);
-                this.subscribedUris.delete(outputUri);
-                this.clearOutputUpdateTimer(outputUri);
-                this.notifyResourceListChanged();
+                this.outputResources.forgetSession(args.sessionId);
+                this.outputResources.notifyListChanged();
               }
               
               result = { content: [{ type: 'text', text: JSON.stringify({ success: closed, message: closed ? `Closed debug session: ${args.sessionId}` : `Failed to close debug session: ${args.sessionId}` }) }] };
@@ -2021,142 +2009,6 @@ export class DebugMcpServer {
         }
       }
     );
-  }
-
-  // ===== Debuggee-output resources (issue #218) =====
-
-  private outputResourceUri(sessionId: string): string {
-    return `debug://sessions/${sessionId}/output`;
-  }
-
-  /** Returns the sessionId encoded in a debug output resource URI, or undefined. */
-  private parseOutputResourceUri(uri: string): string | undefined {
-    const match = /^debug:\/\/sessions\/([^/]+)\/output$/.exec(uri);
-    return match?.[1];
-  }
-
-  /**
-   * Registers MCP resource handlers. Each debug session exposes its captured
-   * debuggee output as debug://sessions/{id}/output — a verbatim console
-   * transcript (all categories interleaved, in arrival order). Clients may
-   * subscribe to receive coalesced resources/updated pings as output arrives;
-   * structured/cursor access is available via the get_output tool.
-   */
-  private registerResources(): void {
-    this.server.setRequestHandler(ListResourcesRequestSchema, async () => {
-      const sessions = this.sessionManager.getAllSessions();
-      return {
-        resources: sessions.map(session => ({
-          uri: this.outputResourceUri(session.id),
-          name: `Debuggee output — ${session.name}`,
-          description: `stdout/stderr/console output captured for ${session.language} debug session '${session.name}'`,
-          mimeType: 'text/plain'
-        }))
-      };
-    });
-
-    this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-      const uri = request.params.uri;
-      const sessionId = this.parseOutputResourceUri(uri);
-      const session = sessionId ? this.sessionManager.getSession(sessionId) : undefined;
-      if (!session) {
-        throw new McpError(McpErrorCode.InvalidParams, `Unknown resource: ${uri}`);
-      }
-      return {
-        contents: [{
-          uri,
-          mimeType: 'text/plain',
-          // Empty until the first launch creates the buffer
-          text: session.outputBuffer?.renderText() ?? ''
-        }]
-      };
-    });
-
-    this.server.setRequestHandler(SubscribeRequestSchema, async (request) => {
-      const uri = request.params.uri;
-      const sessionId = this.parseOutputResourceUri(uri);
-      if (!sessionId || !this.sessionManager.getSession(sessionId)) {
-        throw new McpError(McpErrorCode.InvalidParams, `Unknown resource: ${uri}`);
-      }
-      this.subscribedUris.add(uri);
-      return {};
-    });
-
-    this.server.setRequestHandler(UnsubscribeRequestSchema, async (request) => {
-      const uri = request.params.uri;
-      this.subscribedUris.delete(uri);
-      this.clearOutputUpdateTimer(uri);
-      return {};
-    });
-  }
-
-  /**
-   * Registers MCP prompt handlers. The single `debugging-workflow` prompt
-   * serves the condensed debugging skill in-band so any connected agent can
-   * pull workflow guidance without a separate skill install (the full skill
-   * with per-language references ships in skills/debugging/).
-   */
-  private registerPrompts(): void {
-    const promptDescriptor = {
-      name: 'debugging-workflow',
-      description:
-        'How to debug effectively with mcp-debugger: session golden path, root-cause discipline, attach/remote recipes, and per-language quirks.'
-    };
-
-    this.server.setRequestHandler(ListPromptsRequestSchema, async () => ({
-      prompts: [promptDescriptor]
-    }));
-
-    this.server.setRequestHandler(GetPromptRequestSchema, async (request) => {
-      if (request.params.name !== promptDescriptor.name) {
-        throw new McpError(McpErrorCode.InvalidParams, `Unknown prompt: ${request.params.name}`);
-      }
-      return {
-        description: promptDescriptor.description,
-        messages: [
-          {
-            role: 'user' as const,
-            content: { type: 'text' as const, text: buildDebuggingWorkflowPrompt(getBpAddressingMode(this.environment)) }
-          }
-        ]
-      };
-    });
-  }
-
-  /**
-   * Throttled resources/updated ping for a session's output resource: the
-   * first captured event after a quiet period arms a timer; everything that
-   * arrives inside the window rides the same ping.
-   */
-  private scheduleOutputResourceUpdated(sessionId: string): void {
-    const uri = this.outputResourceUri(sessionId);
-    if (!this.subscribedUris.has(uri) || this.outputUpdateTimers.has(uri)) {
-      return;
-    }
-    const timer = setTimeout(() => {
-      this.outputUpdateTimers.delete(uri);
-      this.server.sendResourceUpdated({ uri }).catch((error: unknown) => {
-        // Not connected yet / transport gone — nothing to notify, not an error.
-        this.logger.debug(`[Server] Failed to send resources/updated for ${uri}`, { error });
-      });
-    }, DebugMcpServer.OUTPUT_UPDATE_DEBOUNCE_MS);
-    timer.unref?.();
-    this.outputUpdateTimers.set(uri, timer);
-  }
-
-  private clearOutputUpdateTimer(uri: string): void {
-    const timer = this.outputUpdateTimers.get(uri);
-    if (timer) {
-      clearTimeout(timer);
-      this.outputUpdateTimers.delete(uri);
-    }
-  }
-
-  /** Fire-and-forget resources/list_changed (sessions appeared/disappeared). */
-  private notifyResourceListChanged(): void {
-    this.server.sendResourceListChanged().catch((error: unknown) => {
-      this.logger.debug('[Server] Failed to send resources/list_changed', { error });
-    });
   }
 
   private async handleListDebugSessions(): Promise<ServerResult> {
@@ -2720,11 +2572,8 @@ export class DebugMcpServer {
     // Tear down output-resource bookkeeping (issue #218): pending debounce
     // timers and the SessionManager listener must not outlive the server
     // (the test suite runs with a strict leak guard).
-    for (const uri of this.outputUpdateTimers.keys()) {
-      this.clearOutputUpdateTimer(uri);
-    }
-    this.subscribedUris.clear();
-    this.sessionManager.removeListener('output-captured', this.handleOutputCaptured);
+    this.outputResources.dispose();
+    this.sessionManager.removeListener('output-captured', this.outputResources.handleOutputCaptured);
     this.logger.info('Debug MCP Server stopped');
     // Last: detach this server's logger from the shared file transport so
     // per-session servers in HTTP mode don't accumulate on it (issue #404).
