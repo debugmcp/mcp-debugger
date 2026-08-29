@@ -31,6 +31,11 @@ import { resolveStatement } from '../utils/breakpoint-resolver.js';
 import { normalizeBreakpointMessage } from '../utils/breakpoint-message.js';
 import { consumeChildSourced } from '../utils/child-origin-events.js';
 import { SessionManagerData } from './session-manager-data.js';
+import {
+  resolveDapTimeoutOverride,
+  truncateForLog,
+  withTimeoutHint
+} from './dap-request-helpers.js';
 import { AdapterLease } from '../adapters/adapter-lease.js';
 import { logProxyFailure } from './launch/proxy-failure-diagnostics.js';
 import { CustomLaunchRequestArguments, DebugResult } from './session-manager-core.js';
@@ -2510,14 +2515,6 @@ export abstract class SessionManagerOperations extends SessionManagerData {
   }
 
   /**
-   * Helper method to truncate long strings for logging
-   */
-  private truncateForLog(value: string, maxLength: number = 1000): string {
-    if (!value) return '';
-    return value.length > maxLength ? value.substring(0, maxLength) + '... (truncated)' : value;
-  }
-
-  /**
    * The "variable name" an evaluate expression stands for, for name-based
    * redaction (issue #237): the whole expression when it is itself a
    * sensitive name, otherwise its final dot-segment — so `config.password`
@@ -2530,44 +2527,6 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     }
     const lastDot = trimmed.lastIndexOf('.');
     return lastDot >= 0 ? trimmed.slice(lastDot + 1) : trimmed;
-  }
-
-  /** Upper bound for caller-supplied per-request DAP timeouts (10 minutes). */
-  private static readonly MAX_DAP_TIMEOUT_MS = 600000;
-
-  /**
-   * Validate and clamp a caller-supplied per-request DAP timeout override (ms).
-   * Returns { error } for invalid values, { timeoutMs } with the (possibly
-   * clamped) override, or {} when no override was given.
-   */
-  private resolveDapTimeoutOverride(
-    timeoutMs: number | undefined,
-    logContext: string
-  ): { error?: string; timeoutMs?: number } {
-    if (timeoutMs === undefined) {
-      return {};
-    }
-    if (typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-      return {
-        error: `Invalid 'timeout': must be a positive number of milliseconds (got ${timeoutMs})`
-      };
-    }
-    if (timeoutMs > SessionManagerOperations.MAX_DAP_TIMEOUT_MS) {
-      this.logger.warn(
-        `[${logContext}] 'timeout' ${timeoutMs}ms exceeds the maximum; clamping to ${SessionManagerOperations.MAX_DAP_TIMEOUT_MS}ms`
-      );
-      return { timeoutMs: SessionManagerOperations.MAX_DAP_TIMEOUT_MS };
-    }
-    return { timeoutMs };
-  }
-
-  /** Append the 'timeout' tool-arg hint to DAP timeout failures. */
-  private withTimeoutHint(errorMessage: string): string {
-    if (!/timed out|did not respond/i.test(errorMessage)) {
-      return errorMessage;
-    }
-    const separator = errorMessage.trimEnd().endsWith('.') ? ' ' : '. ';
-    return `${errorMessage}${separator}${ErrorMessages.dapRequestTimeoutHint()}`;
   }
 
   /**
@@ -2593,7 +2552,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     // adapter policy pick the context its debugger understands.
     const context = this.selectPolicy(session.language).getEvaluateContext?.() ?? 'variables';
     this.logger.info(
-      `[SM evaluateExpression ${sessionId}] Entered. Expression: "${this.truncateForLog(
+      `[SM evaluateExpression ${sessionId}] Entered. Expression: "${truncateForLog(
         expression,
         100
       )}", frameId: ${frameId}, context: ${context}, state: ${session.state}`
@@ -2605,9 +2564,10 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       return { success: false, error: 'Expression cannot be empty' };
     }
 
-    const timeoutOverride = this.resolveDapTimeoutOverride(
+    const timeoutOverride = resolveDapTimeoutOverride(
       timeoutMs,
-      `SM evaluateExpression ${sessionId}`
+      `SM evaluateExpression ${sessionId}`,
+      this.logger
     );
     if (timeoutOverride.error) {
       this.logger.warn(`[SM evaluateExpression ${sessionId}] ${timeoutOverride.error}`);
@@ -2681,7 +2641,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     try {
       // Send DAP evaluate request
       this.logger.info(
-        `[SM evaluateExpression ${sessionId}] Sending DAP 'evaluate' request. Expression: "${this.truncateForLog(
+        `[SM evaluateExpression ${sessionId}] Sending DAP 'evaluate' request. Expression: "${truncateForLog(
           expression,
           100
         )}", frameId: ${frameId}, context: ${context}`
@@ -2741,10 +2701,10 @@ export abstract class SessionManagerOperations extends SessionManagerData {
           event: 'expression',
           sessionId,
           sessionName: session.name,
-          expression: this.truncateForLog(expression, 100),
+          expression: truncateForLog(expression, 100),
           frameId,
           context,
-          result: this.truncateForLog(result.result || '', 1000),
+          result: truncateForLog(result.result || '', 1000),
           type: result.type,
           variablesReference: result.variablesReference,
           namedVariables: result.namedVariables,
@@ -2753,7 +2713,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         });
 
         this.logger.info(
-          `[SM evaluateExpression ${sessionId}] Evaluation successful. Result: "${this.truncateForLog(
+          `[SM evaluateExpression ${sessionId}] Evaluation successful. Result: "${truncateForLog(
             result.result || '',
             200
           )}", Type: ${result.type}, VarRef: ${result.variablesReference}`
@@ -2772,7 +2732,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         event: 'error',
         sessionId,
         sessionName: session.name,
-        expression: this.truncateForLog(expression, 100),
+        expression: truncateForLog(expression, 100),
         frameId,
         context,
         error: errorMessage,
@@ -2793,7 +2753,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         userError = `Invalid frame context: ${errorMessage}`;
       }
 
-      return { success: false, error: this.withTimeoutHint(userError) };
+      return { success: false, error: withTimeoutHint(userError) };
   }
 }
 
@@ -3335,9 +3295,10 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       `[SM redefineClasses ${sessionId}] classesDir: "${classesDir}", since: ${sinceTimestamp}`
     );
 
-    const timeoutOverride = this.resolveDapTimeoutOverride(
+    const timeoutOverride = resolveDapTimeoutOverride(
       timeoutMs,
-      `SM redefineClasses ${sessionId}`
+      `SM redefineClasses ${sessionId}`,
+      this.logger
     );
     if (timeoutOverride.error) {
       this.logger.warn(`[SM redefineClasses ${sessionId}] ${timeoutOverride.error}`);
@@ -3407,7 +3368,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       this.logger.error(`[SM redefineClasses ${sessionId}] Error: ${error}`);
       return {
         success: false,
-        error: this.withTimeoutHint(error instanceof Error ? error.message : String(error)),
+        error: withTimeoutHint(error instanceof Error ? error.message : String(error)),
       };
     }
   }
@@ -3448,7 +3409,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       return {
         success: false,
         state: session.state,
-        error: this.withTimeoutHint(error instanceof Error ? error.message : String(error))
+        error: withTimeoutHint(error instanceof Error ? error.message : String(error))
       };
     }
   }
@@ -3487,7 +3448,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       return {
         success: false,
         state: session.state,
-        error: this.withTimeoutHint(error instanceof Error ? error.message : String(error))
+        error: withTimeoutHint(error instanceof Error ? error.message : String(error))
       };
     }
   }
