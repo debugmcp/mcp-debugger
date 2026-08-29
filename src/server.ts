@@ -103,6 +103,7 @@ import {
   handleGetSourceContext,
   handleGetLocalVariables
 } from './server/handlers/inspection-tools.js';
+import { getOutputTool } from './server/handlers/output-tools.js';
 
 export { coerceToolArguments };
 export type { SetBreakpointRequest };
@@ -991,7 +992,7 @@ export class DebugMcpServer implements ToolContext {
               break;
             }
             case 'get_output': {
-              result = await this.handleGetOutput(args as { sessionId: string; since?: number; limit?: number });
+              result = await getOutputTool(this, args, toolName);
               break;
             }
             case 'list_supported_languages': {
@@ -1069,31 +1070,6 @@ export class DebugMcpServer implements ToolContext {
   public redactionSummary(items: Array<{ redacted?: boolean }>): { masked: number; notice: string } | undefined {
     const masked = items.filter(item => item.redacted).length;
     return masked > 0 ? { masked, notice: REDACTION_NOTICE } : undefined;
-  }
-
-  private async handleGetOutput(args: { sessionId: string; since?: number; limit?: number }): Promise<ServerResult> {
-    // Deliberately no validateSession(): that rejects TERMINATED sessions, but
-    // reading output after the program finished is the primary use case.
-    // Output stays readable until close_debug_session removes the session.
-    const session = this.sessionManager.getSession(args.sessionId);
-    if (!session) {
-      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: `Session not found: ${args.sessionId}` }) }] };
-    }
-    const since = Math.max(0, args.since ?? 0);
-    const limit = Math.min(Math.max(1, args.limit ?? 100), 1000);
-    const read = session.outputBuffer
-      ? session.outputBuffer.read(since, limit)
-      : { entries: [], nextSince: since, hasMore: false, dropped: 0 }; // session created but never launched
-    const redaction = this.redactionSummary(read.entries);
-    return { content: [{ type: 'text', text: JSON.stringify({
-      success: true,
-      sessionId: args.sessionId,
-      entries: read.entries,
-      nextSince: read.nextSince,
-      hasMore: read.hasMore,
-      dropped: read.dropped,
-      ...(redaction ? { redaction } : {})
-    }) }] };
   }
 
   /** @internal test seam; removed in PR 6 */
