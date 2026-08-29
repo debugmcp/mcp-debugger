@@ -24,13 +24,15 @@ import { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';
 import { ProxyConfig } from '../proxy/proxy-config.js';
 import { MIRROR_EXPOSE_COMMAND, MIRROR_UNEXPOSE_COMMAND } from '../proxy/dap-proxy-interfaces.js';
-import { ErrorMessages, ProxyInitProgress } from '../utils/error-messages.js';
+import { ErrorMessages } from '../utils/error-messages.js';
 import { checkLaunchToolchain } from '../utils/language-availability.js';
 import { didYouMean } from '../utils/did-you-mean.js';
 import { resolveStatement } from '../utils/breakpoint-resolver.js';
 import { normalizeBreakpointMessage } from '../utils/breakpoint-message.js';
 import { consumeChildSourced } from '../utils/child-origin-events.js';
 import { SessionManagerData } from './session-manager-data.js';
+import { AdapterLease } from '../adapters/adapter-lease.js';
+import { logProxyFailure } from './launch/proxy-failure-diagnostics.js';
 import { CustomLaunchRequestArguments, DebugResult } from './session-manager-core.js';
 import {
   AdapterConfig,
@@ -106,6 +108,45 @@ export interface UnexposeSessionResult {
 }
 
 /**
+ * The seven positional arguments `startProxyManager` has always taken, named.
+ * They are threaded through the launch preparation unchanged; giving them a
+ * type is what lets the preparation split into steps without each step growing
+ * its own six-argument signature.
+ */
+interface ProxyLaunchRequest {
+  scriptPath: string;
+  scriptArgs?: string[];
+  dapLaunchArgs?: Partial<CustomLaunchRequestArguments>;
+  dryRunSpawn?: boolean;
+  adapterLaunchConfig?: Record<string, unknown>;
+  breakOnExceptions?: ExceptionBreakMode;
+}
+
+/**
+ * What a launch computes before it has an adapter — the inputs every later
+ * step reads. `adapterConfig` is handed to the registry to create the adapter
+ * and then updated in place with the resolved executable path, exactly as the
+ * single long method did.
+ */
+interface LaunchInputs {
+  sessionLogDir: string;
+  adapterPort: number;
+  initialBreakpoints: NonNullable<ProxyConfig['initialBreakpoints']>;
+  initialFunctionBreakpoints: NonNullable<ProxyConfig['initialFunctionBreakpoints']>;
+  effectiveLaunchArgs: Partial<CustomLaunchRequestArguments>;
+  isAttachMode: boolean;
+  genericLaunchConfig: Record<string, unknown>;
+  adapterExtraKeys: string[];
+  adapterConfig: AdapterConfig;
+}
+
+/** The two products of adapter-side preparation: what to start, and what to return. */
+interface AdapterLaunchPlan {
+  launchConfig: LanguageSpecificLaunchConfig;
+  proxyConfig: ProxyConfig;
+}
+
+/**
  * Debug operations functionality for session management
  */
 export abstract class SessionManagerOperations extends SessionManagerData {
@@ -157,12 +198,70 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     adapterLaunchConfig?: Record<string, unknown>,
     breakOnExceptions?: ExceptionBreakMode
   ): Promise<LanguageSpecificLaunchConfig> {
-    const sessionId = session.id;
-    
+    const request: ProxyLaunchRequest = {
+      scriptPath,
+      scriptArgs,
+      dapLaunchArgs,
+      dryRunSpawn,
+      adapterLaunchConfig,
+      breakOnExceptions
+    };
+
     // Log entrance for Windows CI debugging
     this.logger.info(
-      `[SessionManager] Entering startProxyManager for session ${sessionId}, dryRunSpawn: ${dryRunSpawn}, scriptPath: ${scriptPath}`
+      `[SessionManager] Entering startProxyManager for session ${session.id}, dryRunSpawn: ${dryRunSpawn}, scriptPath: ${scriptPath}`
     );
+
+    const inputs = await this.prepareLaunchInputs(session, request);
+
+    // The lease owns the adapter until `transferTo` hands it to the ProxyManager:
+    // every throw before that point disposes it here, returning its registry
+    // slot. After the transfer the release is a no-op and the ProxyManager's
+    // teardown owns disposal — both callers' catches stop `session.proxyManager`,
+    // and `ProxyManager.cleanup()` disposes the adapter from there. Same
+    // behaviour as the `adapterOwnedByProxy` boolean it replaces (#557); the
+    // difference is that the boolean had to be assigned at one point and
+    // consulted from one catch, so the next throw site added outside that window
+    // would have silently reopened the leak.
+    const lease = await AdapterLease.acquire(
+      this.adapterRegistry,
+      session.language,
+      inputs.adapterConfig,
+      this.logger
+    );
+    try {
+      const plan = await this.prepareAdapterLaunch(session, lease.adapter, inputs, request);
+
+      // Create and start ProxyManager with the adapter. Ownership moves here:
+      // ProxyManager.cleanup() becomes the disposer and release() below is a
+      // no-op.
+      const proxyManager = lease.transferTo(this.proxyManagerFactory);
+      session.proxyManager = proxyManager;
+
+      // Set up event handlers
+      this.setupProxyEventHandlers(session, proxyManager, inputs.effectiveLaunchArgs);
+
+      // Start the proxy
+      await proxyManager.start(plan.proxyConfig);
+
+      return plan.launchConfig;
+    } finally {
+      await lease.release();
+    }
+  }
+
+  /**
+   * Everything the launch needs before an adapter exists: this run's log
+   * directory, a free adapter port, the breakpoint snapshots, and the generic
+   * launch configuration the adapter will transform. Nothing here allocates a
+   * registry slot, so a failure needs no cleanup.
+   */
+  private async prepareLaunchInputs(
+    session: ManagedSession,
+    request: ProxyLaunchRequest
+  ): Promise<LaunchInputs> {
+    const sessionId = session.id;
+    const { scriptPath, scriptArgs, dapLaunchArgs, adapterLaunchConfig } = request;
 
     // Create session log directory
     const sessionLogDir = path.join(this.logDirBase, sessionId, `run-${Date.now()}`);
@@ -276,245 +375,303 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       attachMode: isAttachMode,
     };
 
-    const adapter = await this.adapterRegistry.create(session.language, adapterConfig);
+    return {
+      sessionLogDir,
+      adapterPort,
+      initialBreakpoints,
+      initialFunctionBreakpoints,
+      effectiveLaunchArgs,
+      isAttachMode,
+      genericLaunchConfig,
+      adapterExtraKeys,
+      adapterConfig
+    };
+  }
 
-    // Until session.proxyManager owns the adapter, a throw below must release
-    // its registry slot (see the catch at the end of this method).
-    let adapterOwnedByProxy = false;
+  /**
+   * Everything that needs the adapter, in the order the adapters depend on:
+   * transform the configuration, record which attach keys the transform
+   * dropped, settle the toolchain verdict, resolve the executable, then
+   * assemble the proxy configuration. Runs inside the lease, so any step here
+   * may throw without stranding the adapter's registry slot.
+   */
+  private async prepareAdapterLaunch(
+    session: ManagedSession,
+    adapter: IDebugAdapter,
+    inputs: LaunchInputs,
+    request: ProxyLaunchRequest
+  ): Promise<AdapterLaunchPlan> {
+    const transformedLaunchConfig = await this.transformAdapterConfig(session, adapter, inputs);
+
+    this.recordAttachKeyDiff(session, adapter, inputs, transformedLaunchConfig);
+
+    this.applyToolchainValidation(session.id, adapter);
+
+    const resolvedExecutablePath = await this.resolveAdapterExecutable(session, adapter, inputs);
+
+    // Update adapter config with resolved executable path
+    inputs.adapterConfig.executablePath = resolvedExecutablePath;
+
+    return this.buildAdapterLaunchPlan(
+      session,
+      adapter,
+      inputs,
+      request,
+      transformedLaunchConfig,
+      resolvedExecutablePath
+    );
+  }
+
+  /**
+   * Turn the generic configuration into the adapter's language-specific form.
+   */
+  private async transformAdapterConfig(
+    session: ManagedSession,
+    adapter: IDebugAdapter,
+    inputs: LaunchInputs
+  ): Promise<LanguageSpecificLaunchConfig> {
+    const { isAttachMode, genericLaunchConfig } = inputs;
     try {
-      // isAttachMode already detected above
-
-      let transformedLaunchConfig: LanguageSpecificLaunchConfig;
-      try {
-        if (isAttachMode && adapter.supportsAttach && adapter.supportsAttach() && adapter.transformAttachConfig) {
-          // Call transformAttachConfig for attach operations
-          transformedLaunchConfig = adapter.transformAttachConfig(genericLaunchConfig as GenericAttachConfig);
-          this.logger.info(`[SessionManager] Using attach config for ${session.language}`);
-        } else {
-          // Call transformLaunchConfig for launch operations
-          transformedLaunchConfig = await adapter.transformLaunchConfig(genericLaunchConfig as GenericLaunchConfig);
-        }
-      } catch (error) {
-        this.logger.warn(
-          `[SessionManager] transform${isAttachMode ? 'Attach' : 'Launch'}Config failed for ${session.language}: ${
-            error instanceof Error ? error.message : String(error)
-          }`
-        );
-        // A transform can perform required work (such as compiling a C++ source
-        // file) or reject invalid attach arguments. Forwarding the generic
-        // configuration after that failure starts the adapter with inputs known
-        // to be wrong and hides the actionable error (issue #552). A toolchain
-        // verdict recorded before the rejection (CPP/RUST_MSVC_BEHAVIOR=error
-        // rejects from inside the transform) still becomes the structured
-        // MSVC_TOOLCHAIN_DETECTED sentinel rather than a bare error.
-        this.applyToolchainValidation(sessionId, adapter);
-        throw error;
+      if (isAttachMode && adapter.supportsAttach && adapter.supportsAttach() && adapter.transformAttachConfig) {
+        // Call transformAttachConfig for attach operations
+        const transformedAttachConfig = adapter.transformAttachConfig(genericLaunchConfig as GenericAttachConfig);
+        this.logger.info(`[SessionManager] Using attach config for ${session.language}`);
+        return transformedAttachConfig;
       }
-
-      // Attach transforms may strip adapterConfig keys (issue #450) — record the
-      // drops so attachToProcess can warn the caller. Keys the transform kept but
-      // the adapter doesn't declare in supportedAttachKeys are forwarded to the
-      // debug adapter as-is, and recorded separately so the caller learns they
-      // weren't recognized (issue #466) — never deleted, so upstream debugger
-      // capabilities stay reachable without an mcp-debugger release. Both records
-      // are assigned unconditionally so a prior attach's record never leaks.
-      if (isAttachMode) {
-        const supportedKeys = adapter.supportedAttachKeys;
-        // A typo of a supported key is the likeliest caller mistake — annotate
-        // both buckets with an edit-distance suggestion when a list is declared.
-        const describeKey = (key: string): string => {
-          const suggestion = supportedKeys ? didYouMean(key, supportedKeys) : null;
-          return suggestion ? `${key} (did you mean ${suggestion}?)` : key;
-        };
-
-        const dropped: string[] = [];
-        const forwardedUnknown: string[] = [];
-        for (const key of adapterExtraKeys) {
-          if (!(key in transformedLaunchConfig)) {
-            dropped.push(describeKey(key));
-          } else if (supportedKeys && !supportedKeys.includes(key)) {
-            forwardedUnknown.push(describeKey(key));
-          }
-        }
-
-        if (dropped.length > 0) {
-          this.logger.warn(
-            `[SessionManager] ${session.language} attach transform dropped adapterConfig key(s) for session ${sessionId}: ${dropped.join(', ')}`
-          );
-        }
-        if (forwardedUnknown.length > 0) {
-          this.logger.warn(
-            `[SessionManager] ${session.language} attach forwarded unrecognized adapterConfig key(s) for session ${sessionId}: ${forwardedUnknown.join(', ')}`
-          );
-        }
-        session.attachDroppedConfigKeys = dropped.length > 0 ? dropped : undefined;
-        session.attachForwardedUnknownConfigKeys = forwardedUnknown.length > 0 ? forwardedUnknown : undefined;
-      }
-
-      this.applyToolchainValidation(sessionId, adapter);
-
-      // Use the adapter to resolve the executable path. Direct-connect attach
-      // sessions (e.g. Ruby/rdbg, Python/debugpy) spawn no local process, so no
-      // toolchain lookup runs — a nominal, unverified name keeps the proxy init
-      // payload (which requires a non-empty string) satisfied (issue #331).
-      const isDirectConnectAttach = isAttachMode && adapter.usesDirectConnectForAttach?.() === true;
-
-      let resolvedExecutablePath: string;
-      if (isDirectConnectAttach) {
-        resolvedExecutablePath =
-          session.executablePath || adapter.getDefaultExecutableName?.() || session.language;
-        this.logger.info(
-          `[SessionManager] Direct-connect attach for ${session.language}; skipping executable resolution`
-        );
-      } else {
-        try {
-          resolvedExecutablePath = await adapter.resolveExecutablePath(session.executablePath);
-          this.logger.info(`[SessionManager] Adapter resolved executable path: ${resolvedExecutablePath}`);
-        } catch (error) {
-          const msg = error instanceof Error ? error.message : String(error);
-          this.logger.error(
-            `[SessionManager] Failed to resolve executable for ${session.language}:`,
-            msg
-          );
-
-          // Convert to appropriate error type based on language
-          if (session.language === 'python' && msg.includes('not found')) {
-            throw new PythonNotFoundError(session.executablePath || 'python');
-          }
-
-          // On launch, adapters with an attach mode may still work without the
-          // local toolchain — point the user at attach_to_process (issue #331)
-          const attachHint =
-            !isAttachMode && adapter.supportsAttach?.()
-              ? ` ${ErrorMessages.attachMayStillWork(session.language)}`
-              : '';
-
-          throw new DebugSessionCreationError(
-            `Failed to resolve ${session.language} executable: ${msg}${attachHint}`,
-            error instanceof Error ? error : undefined
-          );
-        }
-      }
-
-      // Update adapter config with resolved executable path
-      adapterConfig.executablePath = resolvedExecutablePath;
-
-      // Build adapter command using the adapter. Direct-connect attach sessions
-      // (e.g. Ruby/rdbg) have no adapter process to spawn, so no command is built;
-      // the adapter policy connects straight to the attach host/port instead.
-      const adapterCommand =
-        isAttachMode && adapter.usesDirectConnectForAttach?.()
-          ? undefined
-          : adapter.buildAdapterCommand(adapterConfig);
-
-      const launchConfigData: LanguageSpecificLaunchConfig = { ...transformedLaunchConfig };
-
-      const stopOnEntryProvided = typeof dapLaunchArgs?.stopOnEntry === 'boolean';
-
-      // Let adapter policy override stopOnEntry default when user hasn't specified it.
-      // E.g., Go/Delve needs stopOnEntry=false to avoid "unknown goroutine" issues.
-      if (!stopOnEntryProvided) {
-        const adapterPolicy = this.selectPolicy(session.language);
-        const policyDefaults = adapterPolicy.getInitializationBehavior?.();
-        /* istanbul ignore next -- adapter-specific: Go/Delve stopOnEntry override */
-        if (typeof policyDefaults?.defaultStopOnEntry === 'boolean') {
-          launchConfigData.stopOnEntry = policyDefaults.defaultStopOnEntry;
-        }
-      }
-
-      this.logger.info(
-        `[SessionManager] Launch config stopOnEntry adjustments for ${sessionId}: base=${String(
-          transformedLaunchConfig.stopOnEntry
-        )}, final=${String(launchConfigData.stopOnEntry)}, userProvided=${String(
-          dapLaunchArgs?.stopOnEntry
-        )}`
-      );
-
-      const stopOnEntryFlag =
-        typeof launchConfigData?.stopOnEntry === 'boolean'
-          ? launchConfigData.stopOnEntry
-          : effectiveLaunchArgs.stopOnEntry;
-
-      const justMyCodeFlag =
-        typeof launchConfigData?.justMyCode === 'boolean'
-          ? launchConfigData.justMyCode
-          : effectiveLaunchArgs.justMyCode;
-
-      // Create ProxyConfig
-      const programFromLaunchConfig =
-        typeof launchConfigData?.program === 'string' && launchConfigData.program.length > 0
-          ? launchConfigData.program
-          : scriptPath;
-
-      const argsFromLaunchConfig = Array.isArray(launchConfigData?.args)
-        ? (launchConfigData!.args as unknown[]).filter((arg): arg is string => typeof arg === 'string')
-        : Array.isArray(scriptArgs)
-          ? [...scriptArgs]
-          : [];
-
-      const normalizedScriptArgs = argsFromLaunchConfig.length > 0 ? argsFromLaunchConfig : undefined;
-
-      if (initialBreakpoints.length) {
-        this.logger.info(
-          `[SessionManager] Initial breakpoints for ${sessionId}:`,
-          initialBreakpoints.map(bp => ({ file: bp.file, line: bp.line }))
-        );
-      }
-
-      const proxyConfig: ProxyConfig = {
-        sessionId,
-        language: session.language, // Add language from session
-        executablePath: resolvedExecutablePath,
-        adapterHost: '127.0.0.1',
-        adapterPort,
-        logDir: sessionLogDir,
-        scriptPath: programFromLaunchConfig,
-        scriptArgs: normalizedScriptArgs,
-        stopOnEntry: stopOnEntryFlag,
-        justMyCode: justMyCodeFlag,
-        initialBreakpoints,
-        initialFunctionBreakpoints,
-        dryRunSpawn: dryRunSpawn === true,
-        // ILogger doesn't declare level, but the injected logger is the winston
-        // instance whose level already resolves CLI --log-level and
-        // DEBUG_MCP_LOG_LEVEL (issue #403); mocks without it fall back to the
-        // worker's legacy default.
-        logLevel: (this.logger as { level?: string }).level,
-        breakOnExceptions,
-        launchConfig: launchConfigData,
-        adapterCommand, // Pass the adapter command
-        attachMode: isAttachMode,
-      };
-
-      // Create and start ProxyManager with the adapter
-      const proxyManager = this.proxyManagerFactory.create(adapter);
-      session.proxyManager = proxyManager;
-      adapterOwnedByProxy = true;
-
-      // Set up event handlers
-      this.setupProxyEventHandlers(session, proxyManager, effectiveLaunchArgs);
-
-      // Start the proxy
-      await proxyManager.start(proxyConfig);
-
-      return launchConfigData;
+      // Call transformLaunchConfig for launch operations
+      return await adapter.transformLaunchConfig(genericLaunchConfig as GenericLaunchConfig);
     } catch (error) {
-      // ProxyManager.cleanup() is the only caller of adapter.dispose(), so a
-      // throw before session.proxyManager took ownership — a rejected
-      // transform (issue #552), the MSVC sentinel, an unresolved executable —
-      // would otherwise strand the registry slot until "Maximum adapter
-      // instances reached". Same duck-typed guard as ProxyManager.cleanup().
-      if (!adapterOwnedByProxy && typeof adapter.dispose === 'function') {
-        await adapter.dispose().catch((disposeError: unknown) => {
-          this.logger.warn(
-            `[SessionManager] Failed to dispose adapter after launch setup error for session ${sessionId}: ${
-              disposeError instanceof Error ? disposeError.message : String(disposeError)
-            }`
-          );
-        });
-      }
+      this.logger.warn(
+        `[SessionManager] transform${isAttachMode ? 'Attach' : 'Launch'}Config failed for ${session.language}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      // A transform can perform required work (such as compiling a C++ source
+      // file) or reject invalid attach arguments. Forwarding the generic
+      // configuration after that failure starts the adapter with inputs known
+      // to be wrong and hides the actionable error (issue #552). A toolchain
+      // verdict recorded before the rejection (CPP/RUST_MSVC_BEHAVIOR=error
+      // rejects from inside the transform) still becomes the structured
+      // MSVC_TOOLCHAIN_DETECTED sentinel rather than a bare error.
+      this.applyToolchainValidation(session.id, adapter);
       throw error;
     }
+  }
+
+  /**
+   * Attach transforms may strip adapterConfig keys (issue #450) — record the
+   * drops so attachToProcess can warn the caller. Keys the transform kept but
+   * the adapter doesn't declare in supportedAttachKeys are forwarded to the
+   * debug adapter as-is, and recorded separately so the caller learns they
+   * weren't recognized (issue #466) — never deleted, so upstream debugger
+   * capabilities stay reachable without an mcp-debugger release. Both records
+   * are assigned unconditionally so a prior attach's record never leaks.
+   */
+  private recordAttachKeyDiff(
+    session: ManagedSession,
+    adapter: IDebugAdapter,
+    inputs: LaunchInputs,
+    transformedLaunchConfig: LanguageSpecificLaunchConfig
+  ): void {
+    if (!inputs.isAttachMode) {
+      return;
+    }
+    const sessionId = session.id;
+    const supportedKeys = adapter.supportedAttachKeys;
+    // A typo of a supported key is the likeliest caller mistake — annotate
+    // both buckets with an edit-distance suggestion when a list is declared.
+    const describeKey = (key: string): string => {
+      const suggestion = supportedKeys ? didYouMean(key, supportedKeys) : null;
+      return suggestion ? `${key} (did you mean ${suggestion}?)` : key;
+    };
+
+    const dropped: string[] = [];
+    const forwardedUnknown: string[] = [];
+    for (const key of inputs.adapterExtraKeys) {
+      if (!(key in transformedLaunchConfig)) {
+        dropped.push(describeKey(key));
+      } else if (supportedKeys && !supportedKeys.includes(key)) {
+        forwardedUnknown.push(describeKey(key));
+      }
+    }
+
+    if (dropped.length > 0) {
+      this.logger.warn(
+        `[SessionManager] ${session.language} attach transform dropped adapterConfig key(s) for session ${sessionId}: ${dropped.join(', ')}`
+      );
+    }
+    if (forwardedUnknown.length > 0) {
+      this.logger.warn(
+        `[SessionManager] ${session.language} attach forwarded unrecognized adapterConfig key(s) for session ${sessionId}: ${forwardedUnknown.join(', ')}`
+      );
+    }
+    session.attachDroppedConfigKeys = dropped.length > 0 ? dropped : undefined;
+    session.attachForwardedUnknownConfigKeys = forwardedUnknown.length > 0 ? forwardedUnknown : undefined;
+  }
+
+  /**
+   * Use the adapter to resolve the executable path. Direct-connect attach
+   * sessions (e.g. Ruby/rdbg, Python/debugpy) spawn no local process, so no
+   * toolchain lookup runs — a nominal, unverified name keeps the proxy init
+   * payload (which requires a non-empty string) satisfied (issue #331).
+   */
+  private async resolveAdapterExecutable(
+    session: ManagedSession,
+    adapter: IDebugAdapter,
+    inputs: LaunchInputs
+  ): Promise<string> {
+    const isDirectConnectAttach = inputs.isAttachMode && adapter.usesDirectConnectForAttach?.() === true;
+
+    if (isDirectConnectAttach) {
+      const resolvedExecutablePath =
+        session.executablePath || adapter.getDefaultExecutableName?.() || session.language;
+      this.logger.info(
+        `[SessionManager] Direct-connect attach for ${session.language}; skipping executable resolution`
+      );
+      return resolvedExecutablePath;
+    }
+
+    try {
+      const resolvedExecutablePath = await adapter.resolveExecutablePath(session.executablePath);
+      this.logger.info(`[SessionManager] Adapter resolved executable path: ${resolvedExecutablePath}`);
+      return resolvedExecutablePath;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `[SessionManager] Failed to resolve executable for ${session.language}:`,
+        msg
+      );
+
+      // Convert to appropriate error type based on language
+      if (session.language === 'python' && msg.includes('not found')) {
+        throw new PythonNotFoundError(session.executablePath || 'python');
+      }
+
+      // On launch, adapters with an attach mode may still work without the
+      // local toolchain — point the user at attach_to_process (issue #331)
+      const attachHint =
+        !inputs.isAttachMode && adapter.supportsAttach?.()
+          ? ` ${ErrorMessages.attachMayStillWork(session.language)}`
+          : '';
+
+      throw new DebugSessionCreationError(
+        `Failed to resolve ${session.language} executable: ${msg}${attachHint}`,
+        error instanceof Error ? error : undefined
+      );
+    }
+  }
+
+  /**
+   * Assemble the adapter spawn command, the final launch configuration and the
+   * ProxyConfig the worker is started with.
+   */
+  private buildAdapterLaunchPlan(
+    session: ManagedSession,
+    adapter: IDebugAdapter,
+    inputs: LaunchInputs,
+    request: ProxyLaunchRequest,
+    transformedLaunchConfig: LanguageSpecificLaunchConfig,
+    resolvedExecutablePath: string
+  ): AdapterLaunchPlan {
+    const sessionId = session.id;
+    const { scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn, breakOnExceptions } = request;
+    const {
+      sessionLogDir,
+      adapterPort,
+      initialBreakpoints,
+      initialFunctionBreakpoints,
+      effectiveLaunchArgs,
+      isAttachMode
+    } = inputs;
+
+    // Build adapter command using the adapter. Direct-connect attach sessions
+    // (e.g. Ruby/rdbg) have no adapter process to spawn, so no command is built;
+    // the adapter policy connects straight to the attach host/port instead.
+    const adapterCommand =
+      isAttachMode && adapter.usesDirectConnectForAttach?.()
+        ? undefined
+        : adapter.buildAdapterCommand(inputs.adapterConfig);
+
+    const launchConfigData: LanguageSpecificLaunchConfig = { ...transformedLaunchConfig };
+
+    const stopOnEntryProvided = typeof dapLaunchArgs?.stopOnEntry === 'boolean';
+
+    // Let adapter policy override stopOnEntry default when user hasn't specified it.
+    // E.g., Go/Delve needs stopOnEntry=false to avoid "unknown goroutine" issues.
+    if (!stopOnEntryProvided) {
+      const adapterPolicy = this.selectPolicy(session.language);
+      const policyDefaults = adapterPolicy.getInitializationBehavior?.();
+      /* istanbul ignore next -- adapter-specific: Go/Delve stopOnEntry override */
+      if (typeof policyDefaults?.defaultStopOnEntry === 'boolean') {
+        launchConfigData.stopOnEntry = policyDefaults.defaultStopOnEntry;
+      }
+    }
+
+    this.logger.info(
+      `[SessionManager] Launch config stopOnEntry adjustments for ${sessionId}: base=${String(
+        transformedLaunchConfig.stopOnEntry
+      )}, final=${String(launchConfigData.stopOnEntry)}, userProvided=${String(
+        dapLaunchArgs?.stopOnEntry
+      )}`
+    );
+
+    const stopOnEntryFlag =
+      typeof launchConfigData?.stopOnEntry === 'boolean'
+        ? launchConfigData.stopOnEntry
+        : effectiveLaunchArgs.stopOnEntry;
+
+    const justMyCodeFlag =
+      typeof launchConfigData?.justMyCode === 'boolean'
+        ? launchConfigData.justMyCode
+        : effectiveLaunchArgs.justMyCode;
+
+    // Create ProxyConfig
+    const programFromLaunchConfig =
+      typeof launchConfigData?.program === 'string' && launchConfigData.program.length > 0
+        ? launchConfigData.program
+        : scriptPath;
+
+    const argsFromLaunchConfig = Array.isArray(launchConfigData?.args)
+      ? (launchConfigData!.args as unknown[]).filter((arg): arg is string => typeof arg === 'string')
+      : Array.isArray(scriptArgs)
+        ? [...scriptArgs]
+        : [];
+
+    const normalizedScriptArgs = argsFromLaunchConfig.length > 0 ? argsFromLaunchConfig : undefined;
+
+    if (initialBreakpoints.length) {
+      this.logger.info(
+        `[SessionManager] Initial breakpoints for ${sessionId}:`,
+        initialBreakpoints.map(bp => ({ file: bp.file, line: bp.line }))
+      );
+    }
+
+    const proxyConfig: ProxyConfig = {
+      sessionId,
+      language: session.language, // Add language from session
+      executablePath: resolvedExecutablePath,
+      adapterHost: '127.0.0.1',
+      adapterPort,
+      logDir: sessionLogDir,
+      scriptPath: programFromLaunchConfig,
+      scriptArgs: normalizedScriptArgs,
+      stopOnEntry: stopOnEntryFlag,
+      justMyCode: justMyCodeFlag,
+      initialBreakpoints,
+      initialFunctionBreakpoints,
+      dryRunSpawn: dryRunSpawn === true,
+      // ILogger doesn't declare level, but the injected logger is the winston
+      // instance whose level already resolves CLI --log-level and
+      // DEBUG_MCP_LOG_LEVEL (issue #403); mocks without it fall back to the
+      // worker's legacy default.
+      logLevel: (this.logger as { level?: string }).level,
+      breakOnExceptions,
+      launchConfig: launchConfigData,
+      adapterCommand, // Pass the adapter command
+      attachMode: isAttachMode,
+    };
+
+    return { launchConfig: launchConfigData, proxyConfig };
   }
 
   /**
@@ -1013,56 +1170,13 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         },
       };
     } catch (error) {
-      const diagnosticData = this.collectProxyFailureDiagnostics(session, error);
-      const { initProgress, proxyLogPath } = diagnosticData;
-
-      // Attempt to capture proxy log tail for debugging initialization failures
-      let proxyLogTail: string | undefined;
-      try {
-        if (proxyLogPath) {
-          const logExists = await this.fileSystem.pathExists(proxyLogPath);
-          if (logExists) {
-            const logContent = await this.fileSystem.readFile(proxyLogPath, 'utf-8');
-            const logLines = logContent.split(/\r?\n/);
-            const tailLineCount = 80;
-            const startIndex = Math.max(0, logLines.length - tailLineCount);
-            proxyLogTail = logLines.slice(startIndex).join('\n');
-          }
-        }
-      } catch (logReadError) {
-        proxyLogTail = `<<Failed to read proxy log: ${
-          logReadError instanceof Error ? logReadError.message : String(logReadError)
-        }>>`;
-      }
-
-      // Comprehensive error capture for debugging Windows CI issues
-      const errorDetails: Record<string, unknown> = {
-        type: error?.constructor?.name || 'Unknown',
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : 'No stack available',
-        code: (error as Record<string, unknown>)?.code,
-        errno: (error as Record<string, unknown>)?.errno,
-        syscall: (error as Record<string, unknown>)?.syscall,
-        path: (error as Record<string, unknown>)?.path,
-        toString: error?.toString ? error.toString() : 'No toString',
-        initProgress,
-        proxyLogPath,
-        proxyLogTail
-      };
-
-      // Try to capture raw error object
-      try {
-        errorDetails.raw = JSON.stringify(error);
-      } catch {
-        errorDetails.raw = 'Error not JSON serializable';
-      }
-
-      // Log comprehensive error details
-      this.logger.error(
-        `[SessionManager] Detailed error in startDebugging for session ${sessionId}:`,
-        errorDetails
+      const diagnosticData = await logProxyFailure(
+        { logger: this.logger, fileSystem: this.fileSystem },
+        session,
+        error,
+        'startDebugging'
       );
-      
+
       const errorMessage = error instanceof Error ? error.message : String(error);
 
       const toolchainValidation =
@@ -3094,10 +3208,18 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       this._updateSessionState(session, SessionState.ERROR);
 
       // Surface the same structured diagnostics the launch path returns
-      // (issue #551). Teardown only clears the proxy handle; logDir and the
-      // error's initProgress survive it, so this reads after the teardown
-      // and can never keep it from running.
-      const diagnosticData = this.collectProxyFailureDiagnostics(session, error);
+      // (issue #551) and log the same full failure record it logs, proxy-log
+      // tail included (issue #561) — an attach that dies during proxy
+      // initialization used to leave the adapter's own complaint unreadable.
+      // Teardown only clears the proxy handle; logDir and the error's
+      // initProgress survive it, so this reads after the teardown and can
+      // never keep it from running.
+      const diagnosticData = await logProxyFailure(
+        { logger: this.logger, fileSystem: this.fileSystem },
+        session,
+        error,
+        'attachToProcess'
+      );
       const message = error instanceof Error ? error.message : String(error);
       return {
         success: false,
@@ -3106,28 +3228,6 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         ...(Object.keys(diagnosticData).length > 0 ? { data: diagnosticData } : {})
       };
     }
-  }
-
-  /**
-   * Pointers to proxy initialization diagnostics for a failed launch/attach
-   * (issue #493 / #551): which init stage stalled (from the timeout error) and
-   * where the proxy log for the session's current run lives.
-   */
-  private collectProxyFailureDiagnostics(
-    session: ManagedSession,
-    error: unknown
-  ): { initProgress?: ProxyInitProgress; proxyLogPath?: string } {
-    const diagnostics: { initProgress?: ProxyInitProgress; proxyLogPath?: string } = {};
-    const initProgress = (error as { initProgress?: ProxyInitProgress } | null)?.initProgress;
-
-    if (initProgress) {
-      diagnostics.initProgress = initProgress;
-    }
-    if (session.logDir) {
-      diagnostics.proxyLogPath = path.join(session.logDir, `proxy-${session.id}.log`);
-    }
-
-    return diagnostics;
   }
 
   /**

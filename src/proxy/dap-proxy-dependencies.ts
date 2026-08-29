@@ -4,9 +4,9 @@
 
 import { spawn } from 'child_process';
 import fs from 'fs-extra';
-import path from 'path';
 import { MinimalDapClient } from './minimal-dap.js';
 import { DapMirrorServer } from './dap-mirror-server.js';
+import { proxyLogPathFor } from './proxy-log-path.js';
 import { createLogger, redirectProxyLoggers } from '../utils/logger.js';
 import {
   DapProxyDependencies,
@@ -28,7 +28,7 @@ export function createProductionDependencies(
   // payload (CLI --log-level / DEBUG_MCP_LOG_LEVEL, issue #403); legacy parents
   // that send no level keep the historical 'debug'.
   const loggerFactory: ILoggerFactory = async (sessionId: string, logDir: string, level?: string) => {
-    const logPath = path.join(logDir, `proxy-${sessionId}.log`);
+    const logPath = proxyLogPathFor(logDir, sessionId);
     return createLogger(`dap-proxy:${sessionId}`, {
       level: level ?? 'debug',
       file: logPath
