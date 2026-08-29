@@ -9,6 +9,7 @@
  * record and reality can disagree (a dead worker takes its listener with it)
  * and the worker no-ops safely on a redundant request.
  */
+import { getErrorMessage } from '../../errors/debug-errors.js';
 import { MIRROR_EXPOSE_COMMAND, MIRROR_UNEXPOSE_COMMAND } from '../../proxy/dap-proxy-interfaces.js';
 import { withTimeoutHint } from '../dap-request-helpers.js';
 import type { SessionState } from '@debugmcp/shared';

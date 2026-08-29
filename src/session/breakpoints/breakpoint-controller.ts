@@ -9,6 +9,7 @@
  * is reported as a `warning`, never thrown, because the stored set is still
  * correct and gets re-applied on the next launch.
  */
+import { getErrorMessage } from '../../errors/debug-errors.js';
 import { v4 as uuidv4 } from 'uuid';
 import {
   Breakpoint,

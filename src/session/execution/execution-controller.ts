@@ -10,6 +10,7 @@
  * `pending: true` success rather than a failure, and the operation completes
  * asynchronously afterwards.
  */
+import { getErrorMessage } from '../../errors/debug-errors.js';
 import {
   NO_DEBUG_TARGET_MARKER,
   SessionLifecycleState,

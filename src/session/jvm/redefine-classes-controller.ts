@@ -9,6 +9,7 @@
  * is load-bearing and is why this lives next to the breakpoint controller
  * rather than inside it.
  */
+import { getErrorMessage } from '../../errors/debug-errors.js';
 import { resolveDapTimeoutOverride, withTimeoutHint } from '../dap-request-helpers.js';
 import { reresolveAnchors, type AnchorResolution } from '../breakpoints/anchor-resolution.js';
 import type { BreakpointController } from '../breakpoints/breakpoint-controller.js';

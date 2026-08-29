@@ -7,6 +7,7 @@
  * an arbitrary program value straight to the caller, so the secret-redaction
  * hook (issue #237) runs before anything, including the logs, sees the result.
  */
+import { getErrorMessage } from '../../errors/debug-errors.js';
 import {
   buildRedactionNotice,
   isSensitiveName,

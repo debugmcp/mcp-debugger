@@ -10,6 +10,7 @@
  * A free function rather than a method because both callers live in different
  * collaborators and it needs nothing but a filesystem and a logger.
  */
+import { getErrorMessage } from '../../errors/debug-errors.js';
 import { resolveStatement } from '../../utils/breakpoint-resolver.js';
 import type { Breakpoint } from '@debugmcp/shared';
 import type { ManagedSession } from '../session-store.js';
