@@ -2,8 +2,8 @@
  * Execution control tools: step_over / step_into / step_out (one handler
  * keyed by toolName), continue_execution, pause_execution, list_threads.
  */
-import { ErrorCode as McpErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
+import { requireSessionId } from '../tool-validation.js';
 import {
   failureResult,
   rethrowAsMcpError,
@@ -12,9 +12,7 @@ import {
 } from '../tool-result.js';
 
 export const stepTool: ToolHandler = async (ctx, args, toolName) => {
-  if (!args.sessionId) {
-    throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
-  }
+  requireSessionId(args);
 
   try {
     let stepResult: { success: boolean; state: string; error?: string; data?: unknown; };
@@ -90,9 +88,7 @@ export const stepTool: ToolHandler = async (ctx, args, toolName) => {
 };
 
 export const continueExecutionTool: ToolHandler = async (ctx, args) => {
-  if (!args.sessionId) {
-    throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
-  }
+  requireSessionId(args);
 
   try {
     const continueResult = await ctx.continueExecution(args.sessionId);
@@ -140,8 +136,6 @@ export async function handleListThreads(ctx: ToolContext, args: { sessionId: str
 }
 
 export const listThreadsTool: ToolHandler = async (ctx, args) => {
-  if (!args.sessionId) {
-    throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
-  }
+  requireSessionId(args);
   return await handleListThreads(ctx, args as { sessionId: string });
 };

@@ -12,6 +12,7 @@ import {
 } from '../../utils/bp-addressing.js';
 import type { ToolArguments } from '../tool-arguments.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
+import { requireSessionId } from '../tool-validation.js';
 import { sessionErrorResultOrThrow, type ToolResult } from '../tool-result.js';
 
 /** set_breakpoint arguments once the entry guard has established sessionId. */
@@ -245,9 +246,7 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: SetBreakpointArgs
 }
 
 export const listBreakpointsTool: ToolHandler = async (ctx, args) => {
-  if (!args.sessionId) {
-    throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameter: sessionId');
-  }
+  requireSessionId(args);
   try {
     const breakpoints = ctx.listBreakpoints(args.sessionId, args.file);
     // Function breakpoints are session-global, so a file filter
@@ -269,9 +268,7 @@ export const listBreakpointsTool: ToolHandler = async (ctx, args) => {
 };
 
 export const removeBreakpointTool: ToolHandler = async (ctx, args) => {
-  if (!args.sessionId) {
-    throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameter: sessionId');
-  }
+  requireSessionId(args);
   if (!args.breakpointId && args.function === undefined && (!args.file || args.line === undefined)) {
     throw new McpError(
       McpErrorCode.InvalidParams,
@@ -361,9 +358,7 @@ export const removeBreakpointTool: ToolHandler = async (ctx, args) => {
 };
 
 export const clearBreakpointsTool: ToolHandler = async (ctx, args) => {
-  if (!args.sessionId) {
-    throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameter: sessionId');
-  }
+  requireSessionId(args);
   try {
     const res = await ctx.clearBreakpoints(args.sessionId, args.file);
     return { content: [{ type: 'text', text: JSON.stringify({

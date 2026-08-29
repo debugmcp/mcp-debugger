@@ -6,6 +6,7 @@ import { ErrorCode as McpErrorCode, McpError } from '@modelcontextprotocol/sdk/t
 import { SessionState } from '@debugmcp/shared';
 import { buildTruncationNotice } from '../../session/variable-caps.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
+import { enforceExplicitNames, requireSessionId } from '../tool-validation.js';
 import {
   failureResult,
   rethrowAsMcpError,
@@ -18,7 +19,7 @@ export const getVariablesTool: ToolHandler = async (ctx, args) => {
   if (!args.sessionId || args.scope === undefined) {
     throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameters');
   }
-  ctx.enforceExplicitNames('get_variables', args.names);
+  enforceExplicitNames(ctx.environment, 'get_variables', args.names);
 
   try {
     const { variables, truncation } = await ctx.getVariablesDetailed(args.sessionId, args.scope, args.names);
@@ -54,9 +55,7 @@ export const getVariablesTool: ToolHandler = async (ctx, args) => {
 };
 
 export const getStackTraceTool: ToolHandler = async (ctx, args) => {
-  if (!args.sessionId) {
-    throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
-  }
+  requireSessionId(args);
 
   try {
     // Default to false for cleaner output
@@ -248,7 +247,7 @@ export const getSourceContextTool: ToolHandler = async (ctx, args) => {
 };
 
 export async function handleGetLocalVariables(ctx: ToolContext, args: { sessionId: string; includeSpecial?: boolean; names?: string[] }): Promise<ToolResult> {
-  ctx.enforceExplicitNames('get_local_variables', args.names);
+  enforceExplicitNames(ctx.environment, 'get_local_variables', args.names);
   try {
     // Validate session
     ctx.validateSession(args.sessionId);

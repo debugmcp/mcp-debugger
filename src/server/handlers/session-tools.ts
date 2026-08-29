@@ -8,17 +8,13 @@ import { UnsupportedLanguageError } from '../../errors/debug-errors.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import { checkLaunchToolchain } from '../../utils/language-availability.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
+import { assertPlainObjectArg, requireSessionId } from '../tool-validation.js';
 import type { ToolResult } from '../tool-result.js';
 
 export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
   // Validate before creating the session so a bad argument does
   // not leave an orphan session behind (issue #336).
-  if (args.adapterConfig !== undefined) {
-    const cfg = args.adapterConfig;
-    if (cfg === null || typeof cfg !== 'object' || Array.isArray(cfg)) {
-      throw new McpError(McpErrorCode.InvalidParams, 'adapterConfig must be an object when provided');
-    }
-  }
+  assertPlainObjectArg(args.adapterConfig, 'adapterConfig');
 
   // Ensure requested language is among dynamically supported ones
   const supported = await ctx.getSupportedLanguagesAsync();
@@ -190,9 +186,7 @@ export const listDebugSessionsTool: ToolHandler = async (ctx) => {
 };
 
 export const closeDebugSessionTool: ToolHandler = async (ctx, args) => {
-  if (!args.sessionId) {
-    throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
-  }
+  requireSessionId(args);
 
   const sessionName = ctx.getSessionName(args.sessionId);
   const closed = await ctx.closeDebugSession(args.sessionId);

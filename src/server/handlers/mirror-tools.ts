@@ -1,9 +1,9 @@
 /**
  * DAP mirror tools: expose_session, unexpose_session (issue #217).
  */
-import { ErrorCode as McpErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { isContainerMode } from '../../utils/container-path-utils.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
+import { requireSessionId } from '../tool-validation.js';
 import { rethrowAsMcpError, sessionErrorToResult, type ToolResult } from '../tool-result.js';
 
 export async function handleExposeSession(ctx: ToolContext, sessionId: string): Promise<ToolResult> {
@@ -47,9 +47,7 @@ export async function handleExposeSession(ctx: ToolContext, sessionId: string): 
 }
 
 export const exposeSessionTool: ToolHandler = async (ctx, args) => {
-  if (!args.sessionId) {
-    throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
-  }
+  requireSessionId(args);
   return await handleExposeSession(ctx, args.sessionId);
 };
 
@@ -77,8 +75,6 @@ export async function handleUnexposeSession(ctx: ToolContext, sessionId: string)
 }
 
 export const unexposeSessionTool: ToolHandler = async (ctx, args) => {
-  if (!args.sessionId) {
-    throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
-  }
+  requireSessionId(args);
   return await handleUnexposeSession(ctx, args.sessionId);
 };

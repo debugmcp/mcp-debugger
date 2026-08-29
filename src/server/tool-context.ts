@@ -79,17 +79,7 @@ export interface ToolContext {
     functionName: string
   ): { name: string; note: string } | undefined;
 
-  // ---- intake validation and result shaping ----
-  validateBreakOnExceptions(value: string | undefined): ExceptionBreakMode | undefined;
-  normalizeStartDebuggingArgs(
-    dapLaunchArgs: Partial<DebugProtocol.LaunchRequestArguments> | undefined,
-    topLevelBreakOnExceptions: string | undefined
-  ): {
-    dapLaunchArgs: Partial<DebugProtocol.LaunchRequestArguments> | undefined;
-    breakOnExceptions: string | undefined;
-    warnings: string[];
-  };
-  enforceExplicitNames(toolName: string, names: string[] | undefined): void;
+  // ---- result shaping ----
   redactionSummary(items: Array<{ redacted?: boolean }>): { masked: number; notice: string } | undefined;
 
   // ---- public facade (unchanged signatures) ----

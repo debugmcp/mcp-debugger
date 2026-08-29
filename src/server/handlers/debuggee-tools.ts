@@ -4,6 +4,12 @@
  */
 import { ErrorCode as McpErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { ToolHandler } from '../tool-context.js';
+import {
+  assertPlainObjectArg,
+  normalizeStartDebuggingArgs,
+  requireSessionId,
+  validateBreakOnExceptions
+} from '../tool-validation.js';
 import { sessionErrorResultOrThrow } from '../tool-result.js';
 
 export const startDebuggingTool: ToolHandler = async (ctx, args) => {
@@ -12,14 +18,9 @@ export const startDebuggingTool: ToolHandler = async (ctx, args) => {
   }
 
   try {
-    if (args.adapterLaunchConfig !== undefined) {
-      const cfg = args.adapterLaunchConfig;
-      if (cfg === null || typeof cfg !== 'object' || Array.isArray(cfg)) {
-        throw new McpError(McpErrorCode.InvalidParams, 'adapterLaunchConfig must be an object when provided');
-      }
-    }
+    assertPlainObjectArg(args.adapterLaunchConfig, 'adapterLaunchConfig');
 
-    const intake = ctx.normalizeStartDebuggingArgs(args.dapLaunchArgs, args.breakOnExceptions);
+    const intake = normalizeStartDebuggingArgs(args.dapLaunchArgs, args.breakOnExceptions);
     const debugResult = await ctx.startDebugging(
       args.sessionId,
       args.scriptPath,
@@ -27,7 +28,7 @@ export const startDebuggingTool: ToolHandler = async (ctx, args) => {
       intake.dapLaunchArgs,
       args.dryRunSpawn,
       args.adapterLaunchConfig,
-      ctx.validateBreakOnExceptions(intake.breakOnExceptions)
+      validateBreakOnExceptions(intake.breakOnExceptions)
     );
     const responsePayload: Record<string, unknown> = {
       success: debugResult.success,
@@ -54,9 +55,7 @@ export const startDebuggingTool: ToolHandler = async (ctx, args) => {
 };
 
 export const restartDebuggingTool: ToolHandler = async (ctx, args) => {
-  if (!args.sessionId) {
-    throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameter: sessionId');
-  }
+  requireSessionId(args);
   try {
     const debugResult = await ctx.restartDebugging(args.sessionId);
     const responsePayload: Record<string, unknown> = {
@@ -86,17 +85,10 @@ export const restartDebuggingTool: ToolHandler = async (ctx, args) => {
 };
 
 export const attachToProcessTool: ToolHandler = async (ctx, args) => {
-  if (!args.sessionId) {
-    throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
-  }
+  requireSessionId(args);
 
   try {
-    if (args.adapterConfig !== undefined) {
-      const cfg = args.adapterConfig;
-      if (cfg === null || typeof cfg !== 'object' || Array.isArray(cfg)) {
-        throw new McpError(McpErrorCode.InvalidParams, 'adapterConfig must be an object when provided');
-      }
-    }
+    assertPlainObjectArg(args.adapterConfig, 'adapterConfig');
 
     ctx.logger.info('Attach to process requested', {
       sessionId: args.sessionId,
@@ -114,7 +106,7 @@ export const attachToProcessTool: ToolHandler = async (ctx, args) => {
       sourcePaths: args.sourcePaths,
       stopOnEntry: args.stopOnEntry,
       justMyCode: args.justMyCode,
-      breakOnExceptions: ctx.validateBreakOnExceptions(args.breakOnExceptions),
+      breakOnExceptions: validateBreakOnExceptions(args.breakOnExceptions),
       adapterConfig: args.adapterConfig
     });
 
@@ -145,9 +137,7 @@ export const attachToProcessTool: ToolHandler = async (ctx, args) => {
 };
 
 export const detachFromProcessTool: ToolHandler = async (ctx, args) => {
-  if (!args.sessionId) {
-    throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
-  }
+  requireSessionId(args);
 
   try {
     ctx.logger.info('Detach from process requested', {
