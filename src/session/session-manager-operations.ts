@@ -8,10 +8,6 @@ import {
   SessionState,
   SessionLifecycleState,
   sanitizePayloadForLogging,
-  isSensitiveName,
-  redactVariableValue,
-  redactSecretsDeep,
-  buildRedactionNotice,
   type ExceptionBreakMode
 } from '@debugmcp/shared';
 import { ManagedSession, ToolchainValidationState } from './session-store.js';
@@ -26,11 +22,14 @@ import { SessionManagerData } from './session-manager-data.js';
 import type { OperationsContext } from './operations-context.js';
 import {
   resolveDapTimeoutOverride,
-  truncateForLog,
   withTimeoutHint
 } from './dap-request-helpers.js';
 import { BreakpointController } from './breakpoints/breakpoint-controller.js';
 import { ExecutionController } from './execution/execution-controller.js';
+import {
+  ExpressionEvaluator,
+  type EvaluateResult
+} from './inspection/expression-evaluator.js';
 import { reresolveAnchors } from './breakpoints/anchor-resolution.js';
 import {
   buildLogpointDowngradeLaunchWarning,
@@ -52,21 +51,8 @@ import {
 } from '../errors/debug-errors.js';
 import { McpError } from '@modelcontextprotocol/sdk/types.js';
 
-/**
- * Result type for evaluate expression operations
- */
-export interface EvaluateResult {
-  success: boolean;
-  result?: string;
-  type?: string;
-  variablesReference?: number;
-  namedVariables?: number;
-  indexedVariables?: number;
-  presentationHint?: DebugProtocol.VariablePresentationHint;
-  error?: string;
-  /** Present when secret-shaped content was masked in `result` (issue #237) */
-  redaction?: { rules: string[]; notice: string };
-}
+/** Result type for evaluate expression operations. */
+export type { EvaluateResult } from './inspection/expression-evaluator.js';
 
 export interface RedefineClassesResult {
   success: boolean;
@@ -246,6 +232,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
   protected readonly opsContext: OperationsContext = this.buildOperationsContext();
   protected readonly breakpoints = new BreakpointController(this.opsContext);
   protected readonly execution = new ExecutionController(this.opsContext);
+  protected readonly evaluator = new ExpressionEvaluator(this.opsContext);
 
   protected async startProxyManager(
     session: ManagedSession,
@@ -1503,31 +1490,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
   }
 
   /**
-   * The "variable name" an evaluate expression stands for, for name-based
-   * redaction (issue #237): the whole expression when it is itself a
-   * sensitive name, otherwise its final dot-segment — so `config.password`
-   * is treated like the variable `password`.
-   */
-  protected static expressionNameForRedaction(expression: string): string {
-    const trimmed = expression.trim();
-    if (isSensitiveName(trimmed)) {
-      return trimmed;
-    }
-    const lastDot = trimmed.lastIndexOf('.');
-    return lastDot >= 0 ? trimmed.slice(lastDot + 1) : trimmed;
-  }
-
-  /**
-   * Evaluate an expression in the context of the current debug session.
-   * The debugger must be paused for evaluation to work.
-   * Expressions CAN and SHOULD be able to modify program state (this is a feature).
-   *
-   * @param sessionId - The session ID
-   * @param expression - The expression to evaluate
-   * @param frameId - Optional stack frame ID for context (defaults to current frame)
-   * @param timeoutMs - Optional per-request timeout override (ms) for the DAP
-   *   evaluate request (default 30s, max 600000). Issue #142.
-   * @returns Evaluation result with value, type, and optional variable reference
+   * Evaluate an expression in the paused debuggee's frame.
    */
   async evaluateExpression(
     sessionId: string,
@@ -1535,215 +1498,8 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     frameId?: number,
     timeoutMs?: number
   ): Promise<EvaluateResult> {
-    const session = this._getSessionById(sessionId);
-    // Some debuggers (rdbg) reject the default 'variables' context; let the
-    // adapter policy pick the context its debugger understands.
-    const context = this.selectPolicy(session.language).getEvaluateContext?.() ?? 'variables';
-    this.logger.info(
-      `[SM evaluateExpression ${sessionId}] Entered. Expression: "${truncateForLog(
-        expression,
-        100
-      )}", frameId: ${frameId}, context: ${context}, state: ${session.state}`
-    );
-
-    // Basic sanity checks
-    if (!expression || expression.trim().length === 0) {
-      this.logger.warn(`[SM evaluateExpression ${sessionId}] Empty expression provided`);
-      return { success: false, error: 'Expression cannot be empty' };
-    }
-
-    const timeoutOverride = resolveDapTimeoutOverride(
-      timeoutMs,
-      `SM evaluateExpression ${sessionId}`,
-      this.logger
-    );
-    if (timeoutOverride.error) {
-      this.logger.warn(`[SM evaluateExpression ${sessionId}] ${timeoutOverride.error}`);
-      return { success: false, error: timeoutOverride.error };
-    }
-
-    // Validate session state
-    if (!session.proxyManager || !session.proxyManager.isRunning()) {
-      this.logger.warn(`[SM evaluateExpression ${sessionId}] No active proxy or proxy not running`);
-      return { success: false, error: 'No active debug session' };
-    }
-
-    if (session.state !== SessionState.PAUSED) {
-      this.logger.warn(
-        `[SM evaluateExpression ${sessionId}] Cannot evaluate: session not paused. State: ${session.state}`
-      );
-      return {
-        success: false,
-        error: 'Cannot evaluate: debugger not paused. Ensure the debugger is stopped at a breakpoint.',
-      };
-    }
-
-    // Handle frameId - get current frame from stack trace if not provided
-    if (frameId === undefined) {
-      try {
-        const threadId = session.proxyManager.getCurrentThreadId();
-        if (typeof threadId !== 'number') {
-          this.logger.warn(
-            `[SM evaluateExpression ${sessionId}] No current thread ID to get stack trace`
-          );
-          return {
-            success: false,
-            error: 'Unable to find thread for evaluation. Ensure the debugger is paused at a breakpoint.',
-          };
-        }
-
-        this.logger.info(
-          `[SM evaluateExpression ${sessionId}] No frameId provided, getting current frame from stack trace`
-        );
-        const stackResponse = await session.proxyManager.sendDapRequest<DebugProtocol.StackTraceResponse>(
-          'stackTrace',
-          {
-            threadId,
-            startFrame: 0,
-            levels: 1, // We only need the first frame
-          }
-        );
-
-        if (stackResponse?.body?.stackFrames && stackResponse.body.stackFrames.length > 0) {
-          frameId = stackResponse.body.stackFrames[0].id;
-          this.logger.info(
-            `[SM evaluateExpression ${sessionId}] Using current frame ID: ${frameId} from stack trace`
-          );
-        } else {
-          this.logger.warn(`[SM evaluateExpression ${sessionId}] No stack frames available`);
-          return {
-            success: false,
-            error: 'No active stack frame. Ensure the debugger is paused at a breakpoint.',
-          };
-        }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        this.logger.error(
-          `[SM evaluateExpression ${sessionId}] Error getting stack trace for default frame:`,
-          error
-        );
-        return { success: false, error: `Unable to determine current frame: ${errorMessage}` };
-      }
-    }
-
-    try {
-      // Send DAP evaluate request
-      this.logger.info(
-        `[SM evaluateExpression ${sessionId}] Sending DAP 'evaluate' request. Expression: "${truncateForLog(
-          expression,
-          100
-        )}", frameId: ${frameId}, context: ${context}`
-      );
-
-      // Conditional 3-arg call: only pass options when an override is present,
-      // so the default path keeps its exact 2-arg contract.
-      const evaluateArgs = { expression, frameId, context };
-      const response = timeoutOverride.timeoutMs !== undefined
-        ? await session.proxyManager.sendDapRequest<DebugProtocol.EvaluateResponse>(
-            'evaluate', evaluateArgs, { timeoutMs: timeoutOverride.timeoutMs })
-        : await session.proxyManager.sendDapRequest<DebugProtocol.EvaluateResponse>(
-            'evaluate', evaluateArgs);
-
-      // Log raw response in debug mode — scrubbed, the raw body carries
-      // unredacted values (issue #237)
-      this.logger.debug(
-        `[SM evaluateExpression ${sessionId}] DAP evaluate raw response:`,
-        this.redactionEnabled() ? redactSecretsDeep(response).value : response
-      );
-
-      // Process response
-      if (response && response.body) {
-        const body = response.body;
-
-        // Note: debugpy automatically truncates collections at 300 items for performance
-        const result: EvaluateResult = {
-          success: true,
-          result: body.result || '', // Default to empty string if no result
-          type: body.type, // Optional, can be undefined
-          variablesReference: body.variablesReference || 0, // Default to 0 (no children)
-          namedVariables: body.namedVariables,
-          indexedVariables: body.indexedVariables,
-          presentationHint: body.presentationHint,
-        };
-
-        // Redaction hook (issue #237), placed above the logs below so they
-        // only ever see masked values. The expression's final dot-segment
-        // counts as the "variable name" so `config.password` is treated like
-        // the variable `password` would be.
-        if (this.redactionEnabled() && result.result) {
-          const redacted = redactVariableValue(
-            SessionManagerOperations.expressionNameForRedaction(expression),
-            result.result
-          );
-          if (redacted.redacted) {
-            result.result = redacted.value;
-            result.redaction = {
-              rules: redacted.hits.map(hit => hit.ruleId),
-              notice: buildRedactionNotice(redacted.hits)
-            };
-          }
-        }
-
-        // Log the evaluation result with structured logging
-        this.logger.info('debug:evaluate', {
-          event: 'expression',
-          sessionId,
-          sessionName: session.name,
-          expression: truncateForLog(expression, 100),
-          frameId,
-          context,
-          result: truncateForLog(result.result || '', 1000),
-          type: result.type,
-          variablesReference: result.variablesReference,
-          namedVariables: result.namedVariables,
-          indexedVariables: result.indexedVariables,
-          timestamp: Date.now(),
-        });
-
-        this.logger.info(
-          `[SM evaluateExpression ${sessionId}] Evaluation successful. Result: "${truncateForLog(
-            result.result || '',
-            200
-          )}", Type: ${result.type}, VarRef: ${result.variablesReference}`
-        );
-
-        return result;
-      } else {
-        this.logger.warn(`[SM evaluateExpression ${sessionId}] No body in evaluate response`);
-        return { success: false, error: 'No response body from debug adapter' };
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-
-      // Log the error
-      this.logger.error('debug:evaluate', {
-        event: 'error',
-        sessionId,
-        sessionName: session.name,
-        expression: truncateForLog(expression, 100),
-        frameId,
-        context,
-        error: errorMessage,
-        timestamp: Date.now(),
-      });
-
-      this.logger.error(`[SM evaluateExpression ${sessionId}] Error evaluating expression:`, error);
-
-      // Determine error type for better user feedback
-      let userError = errorMessage;
-      if (errorMessage.includes('SyntaxError')) {
-        userError = `Syntax error in expression: ${errorMessage}`;
-      } else if (errorMessage.includes('NameError')) {
-        userError = `Name not found: ${errorMessage}`;
-      } else if (errorMessage.includes('TypeError')) {
-        userError = `Type error: ${errorMessage}`;
-      } else if (errorMessage.includes('frame')) {
-        userError = `Invalid frame context: ${errorMessage}`;
-      }
-
-      return { success: false, error: withTimeoutHint(userError) };
+    return this.evaluator.evaluateExpression(sessionId, expression, frameId, timeoutMs);
   }
-}
 
   /**
    * Attach to a running process for debugging
