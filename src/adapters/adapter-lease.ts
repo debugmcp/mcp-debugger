@@ -24,10 +24,14 @@
  * remembering to set anything. (`await using` would express this directly, but
  * the project's `lib` has no `ESNext.Disposable`.)
  *
- * After a transfer, `ProxyManager.cleanup()` is the disposer, exactly as before.
+ * The lease covers only the setup window. After a transfer the ProxyManager is
+ * the owner, and disposal happens through its teardown — `ProxyManager.cleanup()`
+ * calls `adapter.dispose()`, which the callers' catches reach by stopping
+ * `session.proxyManager` — exactly as before.
  */
 import type { AdapterConfig, IAdapterRegistry, IDebugAdapter } from '@debugmcp/shared';
 import type { ILogger, IProxyManagerFactory } from '../interfaces/external-dependencies.js';
+import { getErrorMessage } from '../errors/debug-errors.js';
 import type { IProxyManager } from '../proxy/proxy-manager.js';
 
 /**
@@ -65,11 +69,6 @@ export class AdapterLease {
     return new AdapterLease(adapter, logger, config.sessionId);
   }
 
-  /** True while this lease is still responsible for disposing the adapter. */
-  get isHeld(): boolean {
-    return this.state === 'held';
-  }
-
   /** Which of the three ownership states this lease is in. */
   getState(): AdapterLeaseState {
     return this.state;
@@ -96,11 +95,14 @@ export class AdapterLease {
    * Dispose the adapter if this lease still owns it. Idempotent, and a no-op
    * after a transfer, so it is safe as the sole `finally` of a setup block.
    *
-   * Never throws. A failing `dispose()` is swallowed with a warning: the setup
-   * error that sent us here is the one worth reporting, and a teardown failure
-   * replacing it from inside a `finally` would hide the actual cause. Both
-   * failure shapes are caught — a rejected promise and a *synchronous* throw,
-   * which a bare `.catch()` on the returned promise would have let escape.
+   * **Never throws, and that is load-bearing**: this is the `finally` of
+   * `startProxyManager`, so anything escaping here replaces the setup error
+   * that sent us there with a teardown error — hiding the cause the caller was
+   * about to report. So every step is inside the guard, not just the call:
+   * a missing or nullish adapter (a partial registry double), a `dispose()`
+   * that throws *synchronously* (no promise ever exists, so `.catch()` on the
+   * result would never run), a rejected `dispose()`, and a logger that throws
+   * while reporting one of those.
    */
   async release(): Promise<void> {
     if (this.state !== 'held') {
@@ -108,21 +110,34 @@ export class AdapterLease {
     }
     this.state = 'released';
 
-    // Duck-typed for parity with ProxyManager.cleanup(), whose adapter handle
-    // is likewise optional-shaped.
-    const disposable = this.adapter as { dispose?: () => Promise<void> };
-    if (typeof disposable.dispose !== 'function') {
-      return;
-    }
-
     try {
+      // Duck-typed for parity with ProxyManager.cleanup(), whose adapter handle
+      // is likewise optional-shaped — and read inside the guard, because the
+      // property access itself throws if the adapter is nullish.
+      const disposable = this.adapter as { dispose?: () => Promise<void> } | undefined;
+      if (typeof disposable?.dispose !== 'function') {
+        return;
+      }
       await disposable.dispose();
     } catch (disposeError: unknown) {
+      this.warnDisposeFailed(disposeError);
+    }
+  }
+
+  /**
+   * Report a failed disposal. Guarded in turn: a logger that throws must not
+   * become the failure `release()` promises never to raise, and there is
+   * nowhere left to report it.
+   */
+  private warnDisposeFailed(disposeError: unknown): void {
+    try {
       this.logger.warn(
-        `[SessionManager] Failed to dispose adapter after launch setup error for session ${this.sessionId}: ${
-          disposeError instanceof Error ? disposeError.message : String(disposeError)
-        }`
+        `[SessionManager] Failed to dispose adapter after launch setup error for session ${
+          this.sessionId
+        }: ${getErrorMessage(disposeError)}`
       );
+    } catch {
+      // Deliberately empty — see above.
     }
   }
 }

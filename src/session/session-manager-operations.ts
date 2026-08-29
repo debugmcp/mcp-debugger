@@ -113,7 +113,7 @@ export interface UnexposeSessionResult {
  * type is what lets the preparation split into steps without each step growing
  * its own six-argument signature.
  */
-export interface ProxyLaunchRequest {
+interface ProxyLaunchRequest {
   scriptPath: string;
   scriptArgs?: string[];
   dapLaunchArgs?: Partial<CustomLaunchRequestArguments>;
@@ -128,7 +128,7 @@ export interface ProxyLaunchRequest {
  * and then updated in place with the resolved executable path, exactly as the
  * single long method did.
  */
-export interface LaunchInputs {
+interface LaunchInputs {
   sessionLogDir: string;
   adapterPort: number;
   initialBreakpoints: NonNullable<ProxyConfig['initialBreakpoints']>;
@@ -141,7 +141,7 @@ export interface LaunchInputs {
 }
 
 /** The two products of adapter-side preparation: what to start, and what to return. */
-export interface AdapterLaunchPlan {
+interface AdapterLaunchPlan {
   launchConfig: LanguageSpecificLaunchConfig;
   proxyConfig: ProxyConfig;
 }
@@ -214,12 +214,15 @@ export abstract class SessionManagerOperations extends SessionManagerData {
 
     const inputs = await this.prepareLaunchInputs(session, request);
 
-    // The lease owns the adapter — and its registry slot — until a ProxyManager
-    // takes it, so every throw in the body lands in one `finally` that gives the
-    // slot back. Same behaviour as the `adapterOwnedByProxy` boolean it replaces
-    // (#557); the difference is that the boolean had to be assigned at one point
-    // and consulted from one catch, so the next throw site added outside that
-    // window would have silently reopened the leak.
+    // The lease owns the adapter until `transferTo` hands it to the ProxyManager:
+    // every throw before that point disposes it here, returning its registry
+    // slot. After the transfer the release is a no-op and the ProxyManager's
+    // teardown owns disposal — both callers' catches stop `session.proxyManager`,
+    // and `ProxyManager.cleanup()` disposes the adapter from there. Same
+    // behaviour as the `adapterOwnedByProxy` boolean it replaces (#557); the
+    // difference is that the boolean had to be assigned at one point and
+    // consulted from one catch, so the next throw site added outside that window
+    // would have silently reopened the leak.
     const lease = await AdapterLease.acquire(
       this.adapterRegistry,
       session.language,

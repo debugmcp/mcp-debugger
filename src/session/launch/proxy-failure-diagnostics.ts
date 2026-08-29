@@ -16,13 +16,22 @@
  * Both paths now call `logProxyFailure`, which is why it lives here rather than
  * in either one.
  */
+import { sanitizeStderrTail } from '@debugmcp/shared';
 import type { ManagedSession } from '../session-store.js';
 import type { IFileSystem, ILogger } from '../../interfaces/external-dependencies.js';
 import type { ProxyInitProgress } from '../../utils/error-messages.js';
+import { getErrorMessage } from '../../errors/debug-errors.js';
 import { proxyLogPathFor } from '../../proxy/proxy-log-path.js';
 
 /** How many trailing proxy-log lines are worth reading after a failure. */
 const PROXY_LOG_TAIL_LINES = 80;
+
+/**
+ * Character cap on the tail. Generous on purpose: it exists so a proxy log with
+ * one pathological multi-megabyte line cannot blow up the record, not to trim a
+ * normal 80-line tail, which is a few kilobytes.
+ */
+const PROXY_LOG_TAIL_CHARS = 64 * 1024;
 
 /** The pointers a failed launch/attach returns to the caller (issue #493 / #551). */
 export interface ProxyFailureDiagnostics {
@@ -36,7 +45,7 @@ export interface ProxyFailureDiagnostics {
  */
 export interface ProxyFailureLogDeps {
   logger: ILogger;
-  fileSystem: Pick<IFileSystem, 'pathExists' | 'readFile'>;
+  fileSystem: Pick<IFileSystem, 'readFile'>;
 }
 
 /** The two operations that can fail this way, named as they appear in the log. */
@@ -52,13 +61,23 @@ export function collectProxyFailureDiagnostics(
   error: unknown
 ): ProxyFailureDiagnostics {
   const diagnostics: ProxyFailureDiagnostics = {};
-  const initProgress = (error as { initProgress?: ProxyInitProgress } | null)?.initProgress;
 
-  if (initProgress) {
-    diagnostics.initProgress = initProgress;
-  }
+  // The log path comes from the session, not from the error, so it is derived
+  // FIRST: it is the pointer that survives a hostile error object, and losing
+  // it would drop `data` from the tool result entirely.
   if (session.logDir) {
     diagnostics.proxyLogPath = proxyLogPathFor(session.logDir, session.id);
+  }
+
+  // The error, by contrast, is a value that has already misbehaved once — a
+  // throwing getter or a Proxy trap here must cost only this one field.
+  try {
+    const initProgress = (error as { initProgress?: ProxyInitProgress } | null)?.initProgress;
+    if (initProgress) {
+      diagnostics.initProgress = initProgress;
+    }
+  } catch {
+    // Unreadable init progress: report the pointer we do have.
   }
 
   return diagnostics;
@@ -67,30 +86,41 @@ export function collectProxyFailureDiagnostics(
 /**
  * Read the last `tailLineCount` lines of the proxy log, if there is one.
  *
- * Never throws: a failure to read the log is itself reported *as* the tail, so
- * the setup error that sent us here still reaches the log intact.
+ * Reads straight through rather than asking `pathExists` first: the proxy is
+ * still writing (and may rotate) this file, so an exists-then-read pair can
+ * report "no log" for a file that appeared a millisecond later, and spends a
+ * second syscall to do it. `ENOENT` — the answer that check was buying — is
+ * simply the "no log yet" case.
+ *
+ * The tail goes through `sanitizeStderrTail`, which redacts secret-shaped lines
+ * (issue #237's corpus) as well as tailing. The proxy log carries raw adapter
+ * argv and DAP `output` bodies, so an attach token or an env secret can be
+ * sitting in the very lines a failure makes interesting — copying those
+ * un-redacted into the server log is exactly the leak the shared sanitizer
+ * exists to prevent.
+ *
+ * Never throws: any other read failure is reported *as* the tail, so the setup
+ * error that sent us here still reaches the log intact.
  */
 export async function readProxyLogTail(
-  fileSystem: Pick<IFileSystem, 'pathExists' | 'readFile'>,
+  fileSystem: Pick<IFileSystem, 'readFile'>,
   proxyLogPath: string | undefined,
   tailLineCount: number = PROXY_LOG_TAIL_LINES
 ): Promise<string | undefined> {
+  if (!proxyLogPath) {
+    return undefined;
+  }
   try {
-    if (!proxyLogPath) {
-      return undefined;
-    }
-    const logExists = await fileSystem.pathExists(proxyLogPath);
-    if (!logExists) {
-      return undefined;
-    }
     const logContent = await fileSystem.readFile(proxyLogPath, 'utf-8');
-    const logLines = logContent.split(/\r?\n/);
-    const startIndex = Math.max(0, logLines.length - tailLineCount);
-    return logLines.slice(startIndex).join('\n');
+    return sanitizeStderrTail(logContent, {
+      maxLines: tailLineCount,
+      maxChars: PROXY_LOG_TAIL_CHARS
+    });
   } catch (logReadError) {
-    return `<<Failed to read proxy log: ${
-      logReadError instanceof Error ? logReadError.message : String(logReadError)
-    }>>`;
+    if ((logReadError as NodeJS.ErrnoException)?.code === 'ENOENT') {
+      return undefined;
+    }
+    return `<<Failed to read proxy log: ${getErrorMessage(logReadError)}>>`;
   }
 }
 
@@ -105,7 +135,7 @@ export function buildProxyFailureErrorDetails(
 ): Record<string, unknown> {
   const errorDetails: Record<string, unknown> = {
     type: error?.constructor?.name || 'Unknown',
-    message: error instanceof Error ? error.message : String(error),
+    message: getErrorMessage(error),
     stack: error instanceof Error ? error.stack : 'No stack available',
     code: (error as Record<string, unknown>)?.code,
     errno: (error as Record<string, unknown>)?.errno,
@@ -133,7 +163,7 @@ export function buildProxyFailureErrorDetails(
  */
 function describeErrorSafely(error: unknown): string {
   try {
-    return error instanceof Error ? error.message : String(error);
+    return getErrorMessage(error);
   } catch {
     return '<<error could not be described>>';
   }

@@ -278,7 +278,9 @@ From the `handleInitCommand` method:
 
 3. **Logger Creation**
    ```typescript
-   const logPath = path.join(payload.logDir, `proxy-${payload.sessionId}.log`);
+   // proxyLogPathFor is the single home for this name (src/proxy/proxy-log-path.ts);
+   // the session layer's failure diagnostics read the log back through it.
+   const logPath = proxyLogPathFor(payload.logDir, payload.sessionId);
    this.logger = await this.dependencies.loggerFactory(payload.sessionId, payload.logDir);
    ```
 

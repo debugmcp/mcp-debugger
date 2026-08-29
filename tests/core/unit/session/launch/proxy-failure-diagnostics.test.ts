@@ -14,23 +14,22 @@ import {
   logProxyFailure,
   readProxyLogTail
 } from '../../../../../src/session/launch/proxy-failure-diagnostics.js';
-import type { IFileSystem, ILogger } from '../../../../../src/interfaces/external-dependencies.js';
 import type { ProxyInitProgress } from '../../../../../src/utils/error-messages.js';
+import { createMockLogger } from '../../../../test-utils/helpers/test-dependencies.js';
+import { createMockFileSystem } from '../../../../unit/test-utils/mock-factories.js';
 
 const initProgress: ProxyInitProgress = { transportConnected: true, pendingCommand: 'initialize' };
 
 const runDir = path.join('/tmp', 'logs', 'sess-1', 'run-1');
 const proxyLogPath = path.join(runDir, 'proxy-sess-1.log');
 
-function createLogger() {
-  return { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() } satisfies ILogger;
+/** A winston log file: every line newline-TERMINATED, so the text ends in a newline. */
+function logFile(lines: string[]): string {
+  return lines.map((line) => `${line}\n`).join('');
 }
 
-function createFileSystem() {
-  return {
-    pathExists: vi.fn<IFileSystem['pathExists']>(async () => true),
-    readFile: vi.fn<IFileSystem['readFile']>(async () => '')
-  };
+function enoent(): NodeJS.ErrnoException {
+  return Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
 }
 
 describe('collectProxyFailureDiagnostics', () => {
@@ -49,6 +48,21 @@ describe('collectProxyFailureDiagnostics', () => {
     ).toEqual({ proxyLogPath });
   });
 
+  it('keeps the session-derived pointer when the error refuses to be read', () => {
+    // The log path comes from the session and the init progress from the error;
+    // a hostile error must cost only the field that depends on it, or the tool
+    // result loses `data` entirely.
+    const hostile = {
+      get initProgress(): never {
+        throw new Error('initProgress getter exploded');
+      }
+    };
+
+    expect(collectProxyFailureDiagnostics({ id: 'sess-1', logDir: runDir }, hostile)).toEqual({
+      proxyLogPath
+    });
+  });
+
   it('invents nothing for a failure that happened before a log directory existed', () => {
     expect(
       collectProxyFailureDiagnostics({ id: 'sess-1', logDir: undefined }, new Error('bad config'))
@@ -61,42 +75,64 @@ describe('collectProxyFailureDiagnostics', () => {
 });
 
 describe('readProxyLogTail', () => {
-  it('returns only the last N lines, so a long log cannot swamp the record', async () => {
-    const fileSystem = createFileSystem();
+  it('returns only the last N content lines, so a long log cannot swamp the record', async () => {
+    const fileSystem = createMockFileSystem();
     const allLines = Array.from({ length: 200 }, (_, i) => `line ${i + 1}`);
-    fileSystem.readFile.mockResolvedValue(allLines.join('\n'));
+    fileSystem.readFile.mockResolvedValue(logFile(allLines));
 
     const tail = await readProxyLogTail(fileSystem, proxyLogPath, 80);
 
-    expect(tail?.split('\n')).toHaveLength(80);
-    expect(tail).toContain('line 200');
-    expect(tail).not.toContain('line 120\n');
+    // 80 lines of CONTENT: the file's trailing newline is a terminator, not a line.
+    const tailLines = tail!.split('\n');
+    expect(tailLines).toHaveLength(80);
+    expect(tailLines[0]).toBe('line 121');
+    expect(tailLines[79]).toContain('line 200');
+    // The shared tailer labels what it dropped.
+    expect(tail).toContain('(last 80 of 200 lines)');
   });
 
   it('splits CRLF logs, so a Windows proxy log is not one giant line', async () => {
-    const fileSystem = createFileSystem();
-    fileSystem.readFile.mockResolvedValue('first\r\nsecond\r\nthird');
+    const fileSystem = createMockFileSystem();
+    fileSystem.readFile.mockResolvedValue('first\r\nsecond\r\nthird\r\n');
 
-    expect(await readProxyLogTail(fileSystem, proxyLogPath, 2)).toBe('second\nthird');
+    expect(await readProxyLogTail(fileSystem, proxyLogPath, 2)).toBe(
+      'second\nthird (last 2 of 3 lines)'
+    );
+  });
+
+  it('redacts secret-shaped lines instead of copying them into the server log', async () => {
+    const fileSystem = createMockFileSystem();
+    // The proxy log carries raw adapter argv and DAP output bodies, so the lines
+    // a failure makes interesting are exactly the ones that can hold a token.
+    fileSystem.readFile.mockResolvedValue(
+      logFile(['[Worker] spawning adapter', '[Worker] argv: --token=super-secret-value'])
+    );
+
+    const tail = await readProxyLogTail(fileSystem, proxyLogPath);
+
+    expect(tail).toContain('[Worker] spawning adapter');
+    expect(tail).not.toContain('super-secret-value');
+    expect(tail).toContain('[REDACTED');
   });
 
   it('reads nothing when there is no path to read', async () => {
-    const fileSystem = createFileSystem();
+    const fileSystem = createMockFileSystem();
 
     expect(await readProxyLogTail(fileSystem, undefined)).toBeUndefined();
-    expect(fileSystem.pathExists).not.toHaveBeenCalled();
-  });
-
-  it('reads nothing when the proxy never got as far as writing its log', async () => {
-    const fileSystem = createFileSystem();
-    fileSystem.pathExists.mockResolvedValue(false);
-
-    expect(await readProxyLogTail(fileSystem, proxyLogPath)).toBeUndefined();
     expect(fileSystem.readFile).not.toHaveBeenCalled();
   });
 
-  it('reports a read failure as the tail rather than throwing over the real error', async () => {
-    const fileSystem = createFileSystem();
+  it('reads nothing when the proxy never got as far as writing its log', async () => {
+    const fileSystem = createMockFileSystem();
+    // ENOENT is the answer an exists-check would have bought, one syscall later
+    // and with a rotation race in between.
+    fileSystem.readFile.mockRejectedValue(enoent());
+
+    expect(await readProxyLogTail(fileSystem, proxyLogPath)).toBeUndefined();
+  });
+
+  it('reports any other read failure as the tail rather than throwing over the real error', async () => {
+    const fileSystem = createMockFileSystem();
     fileSystem.readFile.mockRejectedValue(new Error('permission denied'));
 
     expect(await readProxyLogTail(fileSystem, proxyLogPath)).toBe(
@@ -149,8 +185,8 @@ describe('buildProxyFailureErrorDetails', () => {
 
 describe('logProxyFailure', () => {
   it('names the failing operation in the log line', async () => {
-    const logger = createLogger();
-    const fileSystem = createFileSystem();
+    const logger = createMockLogger();
+    const fileSystem = createMockFileSystem();
 
     await logProxyFailure(
       { logger, fileSystem },
@@ -166,8 +202,8 @@ describe('logProxyFailure', () => {
   });
 
   it('keeps the launch literal the existing suites pin', async () => {
-    const logger = createLogger();
-    const fileSystem = createFileSystem();
+    const logger = createMockLogger();
+    const fileSystem = createMockFileSystem();
 
     await logProxyFailure(
       { logger, fileSystem },
@@ -183,8 +219,8 @@ describe('logProxyFailure', () => {
   });
 
   it('survives an error object whose toString throws, rather than rejecting', async () => {
-    const logger = createLogger();
-    const fileSystem = createFileSystem();
+    const logger = createMockLogger();
+    const fileSystem = createMockFileSystem();
     // Both callers await this from inside a catch that is about to return
     // {success:false}; a throw here would turn a reported failure into a
     // rejection out of the tool call.
@@ -216,10 +252,39 @@ describe('logProxyFailure', () => {
     );
   });
 
+  it('survives an error whose initProgress getter throws, keeping the log path', async () => {
+    const logger = createMockLogger();
+    const fileSystem = createMockFileSystem();
+    const hostile = Object.defineProperty(new Error('proxy init timed out'), 'initProgress', {
+      get(): never {
+        throw new Error('initProgress getter exploded');
+      }
+    });
+
+    const diagnostics = await logProxyFailure(
+      { logger, fileSystem },
+      { id: 'sess-1', logDir: runDir },
+      hostile,
+      'attachToProcess'
+    );
+
+    // The hostile field costs itself and nothing else: the record is the full
+    // one, not the degraded fallback.
+    expect(diagnostics).toEqual({ proxyLogPath });
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('Detailed error in attachToProcess'),
+      expect.objectContaining({
+        message: 'proxy init timed out',
+        proxyLogPath,
+        initProgress: undefined
+      })
+    );
+  });
+
   it('survives a logger that throws, since there is nowhere left to report it', async () => {
-    const logger = createLogger();
-    const fileSystem = createFileSystem();
-    logger.error.mockImplementation(() => {
+    const logger = createMockLogger();
+    const fileSystem = createMockFileSystem();
+    vi.mocked(logger.error).mockImplementation(() => {
       throw new Error('transport closed');
     });
 
@@ -234,9 +299,9 @@ describe('logProxyFailure', () => {
   });
 
   it('logs the proxy log tail but returns only the pointers', async () => {
-    const logger = createLogger();
-    const fileSystem = createFileSystem();
-    fileSystem.readFile.mockResolvedValue('adapter said: could not open port');
+    const logger = createMockLogger();
+    const fileSystem = createMockFileSystem();
+    fileSystem.readFile.mockResolvedValue(logFile(['adapter said: could not open port']));
     const error = Object.assign(new Error('proxy init timed out'), { initProgress });
 
     const diagnostics = await logProxyFailure(

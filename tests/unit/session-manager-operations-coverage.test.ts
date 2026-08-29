@@ -1024,7 +1024,6 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     it('captures proxy log tail when initialization throws', async () => {
       mockSession.logDir = '/tmp/session-logs';
-      mockDependencies.fileSystem.pathExists.mockResolvedValueOnce(true);
       mockDependencies.fileSystem.readFile.mockResolvedValueOnce('first line\nsecond line\nthird line');
 
       vi.spyOn(operations as any, 'startProxyManager').mockRejectedValue(new Error('Proxy failed to initialize'));
@@ -1033,10 +1032,12 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('Proxy failed to initialize');
-      expect(mockDependencies.fileSystem.pathExists).toHaveBeenCalledWith(
-        path.join('/tmp/session-logs', 'proxy-test-session.log')
+      // The tail is read straight through — no exists-then-read pair, which
+      // raced the proxy still writing (and rotating) this very file.
+      expect(mockDependencies.fileSystem.readFile).toHaveBeenCalledWith(
+        path.join('/tmp/session-logs', 'proxy-test-session.log'),
+        'utf-8'
       );
-      expect(mockDependencies.fileSystem.readFile).toHaveBeenCalled();
       expect(mockProxyManager.stop).toHaveBeenCalled();
       expect(mockSession.proxyManager).toBeUndefined();
       expect(mockLogger.error).toHaveBeenCalledWith(

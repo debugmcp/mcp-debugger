@@ -16,6 +16,7 @@ import path from 'path';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
 import { DebugLanguage, SessionState } from '@debugmcp/shared';
 import type { ProxyInitProgress } from '../../../../src/utils/error-messages.js';
+import { proxyLogFileName } from '../../../../src/proxy/proxy-log-path.js';
 import { createMockDependencies } from './session-manager-test-utils.js';
 
 const initProgress: ProxyInitProgress = { transportConnected: true, pendingCommand: 'initialize' };
@@ -83,7 +84,9 @@ describe('SessionManager - attach failure diagnostics (issue #561)', () => {
     const { session, result } = await attachAgainstADyingProxy('log content');
 
     const { proxyLogPath } = result.data as { proxyLogPath: string };
-    expect(path.basename(proxyLogPath)).toBe(`proxy-${session.id}.log`);
+    // Named by the same helper the proxy's own logger uses, so a rename cannot
+    // leave the diagnostics pointing at a file nothing writes.
+    expect(path.basename(proxyLogPath)).toBe(proxyLogFileName(session.id));
     expect(dependencies.mockFileSystem.readFile).toHaveBeenCalledWith(proxyLogPath, 'utf-8');
   });
 
