@@ -5,7 +5,8 @@
  * response when the live adapter cannot do logpoints.
  */
 import { describe, it, expect } from 'vitest';
-import { SessionManager } from '../../../../src/session/session-manager.js';
+import { buildLogpointDowngradeLaunchWarning } from '../../../../src/session/breakpoints/launch-warnings.js';
+import type { ManagedSession } from '../../../../src/session/session-store.js';
 
 type BuilderSession = {
   language: string;
@@ -14,11 +15,11 @@ type BuilderSession = {
 };
 
 function build(session: BuilderSession): string | undefined {
-  // The builder reads only session state, so invoking it off the prototype
-  // with a bare receiver keeps this a pure unit test.
-  return (SessionManager.prototype as unknown as {
-    buildLogpointDowngradeLaunchWarning(s: BuilderSession): string | undefined;
-  }).buildLogpointDowngradeLaunchWarning.call({}, session);
+  // The builder is a free function over session state, so a bare literal
+  // standing in for the three fields it reads keeps this a pure unit test.
+  return buildLogpointDowngradeLaunchWarning(
+    session as unknown as Pick<ManagedSession, 'breakpoints' | 'adapterCapabilities' | 'language'>
+  );
 }
 
 const logpoint = { file: '/proj/examples/ruby/fizzbuzz.rb', line: 16, logMessage: 'value={value}' };

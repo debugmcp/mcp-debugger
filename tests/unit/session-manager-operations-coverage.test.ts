@@ -22,6 +22,15 @@ import {
   DebugSessionCreationError
 } from '../../src/errors/debug-errors';
 import { createEnvironmentMock } from '../test-utils/mocks/environment';
+import type { ExecutionController } from '../../src/session/execution/execution-controller';
+
+/**
+ * The collaborators the operations facade delegates to. They are protected
+ * fields, so reaching them from a test needs the usual cast.
+ */
+function internals(ops: SessionManagerOperations): { execution: ExecutionController } {
+  return ops as unknown as { execution: ExecutionController };
+}
 
 describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () => {
   let operations: SessionManagerOperations;
@@ -484,7 +493,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     it('handles stepOut when internal execution rejects', async () => {
       mockSession.state = SessionState.PAUSED;
-      const execSpy = vi.spyOn(operations as any, '_executeStepOperation').mockRejectedValue(new Error('internal failure'));
+      const execSpy = vi.spyOn(internals(operations).execution, 'executeStep').mockRejectedValue(new Error('internal failure'));
 
       const result = await operations.stepOut('test-session');
 
@@ -1464,11 +1473,11 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     });
   });
 
-  describe('_executeStepOperation behaviour', () => {
+  describe('executeStep behaviour', () => {
     it('returns failure when proxy manager unavailable', async () => {
       const session = { ...mockSession, proxyManager: undefined, state: SessionState.PAUSED } as any;
 
-      const result = await (operations as any)._executeStepOperation(session, session.id, {
+      const result = await internals(operations).execution.executeStep(session, session.id, {
         command: 'next',
         threadId: 1,
         logTag: 'stepOver',
@@ -1491,7 +1500,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       };
       const session = { ...mockSession, proxyManager: proxyStub, state: SessionState.PAUSED } as any;
 
-      const promise = (operations as any)._executeStepOperation(session, session.id, {
+      const promise = internals(operations).execution.executeStep(session, session.id, {
         command: 'next',
         threadId: 1,
         logTag: 'stepOver',
@@ -1504,7 +1513,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       const result = await promise;
 
       expect(result.success).toBe(true);
-      expect(result.data?.message).toBe('Step completed.');
+      expect((result.data as { message?: string }).message).toBe('Step completed.');
       expect(proxyStub.off).toHaveBeenCalledWith('stopped', expect.any(Function));
       expect(proxyStub.sendDapRequest).toHaveBeenCalledWith('next', { threadId: 1 });
       expect(mockSessionStore.updateState).toHaveBeenCalledWith(session.id, SessionState.RUNNING);
