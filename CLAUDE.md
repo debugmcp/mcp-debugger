@@ -135,10 +135,19 @@ npm run check:all-personal-paths  # Check all files
 ```
 
 Note: the root `tsc -p tsconfig.json` checks nothing (it is a solution-style config with
-`"files": []`), which is why `typecheck` uses `tsconfig.typecheck.json` (#562). Any PR that
-touches test files must run `npm run typecheck:tests:update` and commit the refreshed
-`tests/typecheck-baseline.json` — the ratchet has one mode and it fails when a count goes
-*down* too, so the baseline can never drift from reality.
+`"files": []`), which is why `typecheck` uses `tsconfig.typecheck.json` (#562).
+
+The test ratchet has one mode, and it fails in both directions:
+
+- **A count went UP** — you introduced type errors. Fix them. Re-recording the baseline
+  is the exception, not the remedy: do it only when the new errors are genuinely
+  unavoidable (say, an existing pattern the PR merely extends), and say so in the PR.
+- **A count went DOWN, or a test file was removed** — that is progress, but the baseline
+  is now stale. Run `npm run typecheck:tests:update` and commit
+  `tests/typecheck-baseline.json` in the same PR.
+
+Failing on a decrease is what keeps the recorded numbers honest; the ceiling only ever
+moves down.
 
 ### Docker
 
@@ -295,7 +304,10 @@ A dual-state overlay (`SessionLifecycleState` + `ExecutionState`) is derived fro
 
 ## Development Guidelines
 
-1. **TypeScript Strict Mode**: All code must pass TypeScript strict mode checks
+1. **TypeScript Strict Mode**: `src/` and `packages/*/src` are strict-clean — `npm run typecheck`
+   must report zero errors. Tests are strict too but are *ratcheted*: they carry a
+   recorded per-file backlog in `tests/typecheck-baseline.json` that may only shrink
+   (see Code Quality above)
 2. **Monorepo Management**: Use pnpm workspaces for package management (`pnpm install`, not `npm install`)
 3. **Build Order**: Packages must build in order: shared → adapters → main server. This is managed by `scripts/build-packages.cjs`
 4. **Test Coverage**: Maintain >90% test coverage
