@@ -1,8 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import path from 'path';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore -- plain-JS module without type declarations
-import { compare, parseDiagnostics, verdict } from '../../../scripts/typecheck-tests-ratchet.mjs';
+import { pathToFileURL } from 'url';
+import {
+  compare,
+  isTestTreePath,
+  parseDiagnostics,
+  pathsOutsideTestTrees,
+  unusableRunReason,
+  verdict
+} from '../../../scripts/typecheck-tests-ratchet.mjs';
+import type { RatchetComparison } from '../../../scripts/typecheck-tests-ratchet.mjs';
+import { isSameEntry } from '../../../scripts/lib/is-main.mjs';
 
 /**
  * A repo root that is genuinely absolute on whichever platform runs this:
@@ -86,42 +94,37 @@ describe('compare', () => {
 
 interface VerdictCase {
   name: string;
-  regressed: string[];
-  improved: string[];
-  strict: boolean;
-  expected: string;
+  comparison: RatchetComparison;
+  expected: 'regressed' | 'stale' | 'ok';
 }
 
 const VERDICT_CASES: VerdictCase[] = [
-  { name: 'clean run passes locally', regressed: [], improved: [], strict: false, expected: 'ok' },
-  { name: 'clean run passes in CI', regressed: [], improved: [], strict: true, expected: 'ok' },
   {
-    name: 'new errors fail locally',
-    regressed: ['a.test.ts'], improved: [], strict: false, expected: 'regressed'
+    name: 'a clean run passes',
+    comparison: { regressed: [], improved: [] },
+    expected: 'ok'
   },
   {
-    name: 'new errors fail in CI',
-    regressed: ['a.test.ts'], improved: [], strict: true, expected: 'regressed'
+    name: 'new errors fail',
+    comparison: { regressed: ['a.test.ts'], improved: [] },
+    expected: 'regressed'
   },
   {
-    name: 'a shrunken count is only a hint locally',
-    regressed: [], improved: ['a.test.ts'], strict: false, expected: 'ok'
-  },
-  {
-    name: 'a shrunken count is a stale baseline in CI',
-    regressed: [], improved: ['a.test.ts'], strict: true, expected: 'stale'
+    name: 'a shrunken count fails as a stale baseline — there is no lenient mode',
+    comparison: { regressed: [], improved: ['a.test.ts'] },
+    expected: 'stale'
   },
   {
     name: 'new errors are reported ahead of a stale baseline',
-    regressed: ['b.test.ts'], improved: ['a.test.ts'], strict: true, expected: 'regressed'
+    comparison: { regressed: ['b.test.ts'], improved: ['a.test.ts'] },
+    expected: 'regressed'
   }
 ];
 
 describe('verdict', () => {
   for (const testCase of VERDICT_CASES) {
     it(testCase.name, () => {
-      const comparison = { regressed: testCase.regressed, improved: testCase.improved };
-      expect(verdict(comparison, testCase.strict)).toBe(testCase.expected);
+      expect(verdict(testCase.comparison)).toBe(testCase.expected);
     });
   }
 });
@@ -136,10 +139,7 @@ describe('parseDiagnostics', () => {
   });
 
   it('normalises backslash separators even where the platform separator is /', () => {
-    const parsed = parseDiagnostics(
-      'tests\\unit\\b.test.ts(1,1): error TS7006: nope',
-      ROOT
-    );
+    const parsed = parseDiagnostics('tests\\unit\\b.test.ts(1,1): error TS7006: nope', ROOT);
 
     expect([...parsed.keys()]).toEqual(['tests/unit/b.test.ts']);
   });
@@ -176,5 +176,100 @@ describe('parseDiagnostics', () => {
 
     expect(parsed.get('tests/unit/a.test.ts')).toHaveLength(2);
     expect(parsed.get('tests/unit/b.test.ts')).toHaveLength(1);
+  });
+});
+
+describe('pathsOutsideTestTrees', () => {
+  const OWNED: string[] = [
+    'tests/unit/a.test.ts',
+    'tests/core/unit/server/b.test.ts',
+    'packages/adapter-go/tests/unit/c.test.ts'
+  ];
+  const FOREIGN: string[] = [
+    'tsconfig.spec.json',
+    'src/session/session-manager.ts',
+    'packages/shared/src/index.ts',
+    '../outside-the-repo/d.ts',
+    'testsuite/not-really-tests.ts'
+  ];
+
+  for (const owned of OWNED) {
+    it(`owns ${owned}`, () => {
+      expect(isTestTreePath(owned)).toBe(true);
+    });
+  }
+
+  for (const foreign of FOREIGN) {
+    it(`disowns ${foreign}`, () => {
+      expect(isTestTreePath(foreign)).toBe(false);
+    });
+  }
+
+  it('reports every foreign key, sorted, and nothing else', () => {
+    expect(pathsOutsideTestTrees([...OWNED, ...FOREIGN])).toEqual([...FOREIGN].sort());
+  });
+
+  it('is empty for a run confined to the test trees', () => {
+    expect(pathsOutsideTestTrees(OWNED)).toEqual([]);
+  });
+});
+
+describe('unusableRunReason', () => {
+  const DIAGNOSTICS: string = 'tests/unit/a.test.ts(3,4): error TS2345: nope';
+
+  it('accepts a clean run', () => {
+    expect(unusableRunReason(0, '')).toBeNull();
+  });
+
+  it('accepts the normal case: exit 2 with diagnostics', () => {
+    expect(unusableRunReason(2, DIAGNOSTICS)).toBeNull();
+  });
+
+  it('rejects exit 1 even when a clean prefix of diagnostics was printed', () => {
+    // An externally terminated tsc on Windows reports {status: 1, signal: null}; taking its
+    // truncated output at face value would read as a large improvement.
+    expect(unusableRunReason(1, DIAGNOSTICS)).toMatch(/neither 0 .* nor 2/);
+  });
+
+  it('rejects a null status', () => {
+    expect(unusableRunReason(null, DIAGNOSTICS)).toMatch(/did not complete/);
+  });
+
+  it('rejects a TS1xxx syntax error, which skips the semantic pass entirely', () => {
+    const output: string = 'tests/unit/a.test.ts(3,4): error TS1005: \';\' expected.';
+
+    expect(unusableRunReason(2, output)).toMatch(/syntax error/);
+  });
+
+  it('rejects a non-zero exit that reported nothing parseable', () => {
+    expect(unusableRunReason(2, 'error TS5083: Cannot read file.')).toMatch(/without reporting/);
+  });
+});
+
+describe('isSameEntry', () => {
+  const linked: string = path.resolve('/link/scripts/ratchet.mjs');
+  const real: string = path.resolve('/real/scripts/ratchet.mjs');
+  const other: string = path.resolve('/real/scripts/other.mjs');
+
+  /** Stands in for `fs.realpathSync`: `/link/...` is a symlink (or junction) to `/real/...`. */
+  const resolve = (target: string): string => (target === linked ? real : target);
+
+  it('matches when argv[1] reaches the module through a symlink', () => {
+    // Node hands out a realpath-resolved import.meta.url but leaves argv[1] as typed, so the
+    // old `import.meta.url === pathToFileURL(argv[1]).href` idiom silently skipped main().
+    expect(isSameEntry(pathToFileURL(real).href, linked, resolve)).toBe(true);
+    expect(pathToFileURL(real).href === pathToFileURL(linked).href).toBe(false);
+  });
+
+  it('matches the plain, unlinked case', () => {
+    expect(isSameEntry(pathToFileURL(real).href, real, resolve)).toBe(true);
+  });
+
+  it('does not match a different entry point', () => {
+    expect(isSameEntry(pathToFileURL(real).href, other, resolve)).toBe(false);
+  });
+
+  it('does not match when there is no entry point at all', () => {
+    expect(isSameEntry(pathToFileURL(real).href, undefined, resolve)).toBe(false);
   });
 });

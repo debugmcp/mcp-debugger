@@ -117,9 +117,11 @@ npm run typecheck
 
 # Type-check the tests against the per-file ratchet in tests/typecheck-baseline.json
 npm run typecheck:tests
-npm run typecheck:tests:update  # re-record the baseline after changing test files
+npm run typecheck:tests:update  # re-record the baseline (see the note below)
 npm run typecheck:tests:raw     # raw tsc output for tsconfig.spec.json
-npm run typecheck:all           # both of the above
+
+# Both of the above. This is the exact command CI and pre-push run.
+npm run typecheck:all
 
 # Lint code
 npm run lint
@@ -135,8 +137,8 @@ npm run check:all-personal-paths  # Check all files
 Note: the root `tsc -p tsconfig.json` checks nothing (it is a solution-style config with
 `"files": []`), which is why `typecheck` uses `tsconfig.typecheck.json` (#562). Any PR that
 touches test files must run `npm run typecheck:tests:update` and commit the refreshed
-`tests/typecheck-baseline.json` — both pre-push and CI run the ratchet with `--strict`,
-which fails when a count goes *down* too, so the baseline can never drift from reality.
+`tests/typecheck-baseline.json` — the ratchet has one mode and it fails when a count goes
+*down* too, so the baseline can never drift from reality.
 
 ### Docker
 

@@ -10,11 +10,14 @@
  * number would let a new error hide behind an unrelated fix, and moving errors between files
  * would go unnoticed. A per-file map localises the failure to the file that regressed.
  *
+ * Known limitation: the unit is a per-file *count*, so a same-file, same-count swap — one
+ * error fixed and a different one introduced in the same file — is invisible. The burn-down
+ * surfaces it (the count has to reach zero eventually); per-diagnostic fingerprints are the
+ * upgrade path if the burn-down stalls.
+ *
  * Modes:
- *   (default)  fail when a file has MORE errors than its baseline, or when a file with no
- *              baseline entry has any errors at all.
- *   --strict   additionally fail when a count went DOWN or a baselined file is gone, so CI
- *              forces the baseline to be refreshed rather than silently drifting.
+ *   (default)  fail when any file's count differs from its baseline — up (new type errors)
+ *              or down (a stale baseline that must be re-recorded and committed).
  *   --update   rewrite the baseline from the current run.
  *
  * Exit codes: 0 clean, 1 ratchet failure, 2 the check could not be run.
@@ -23,7 +26,8 @@ import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
 import { createRequire } from 'module';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
+import { isMain } from './lib/is-main.mjs';
 
 /** Project that pairs the sources with the tests. */
 const PROJECT = 'tsconfig.spec.json';
@@ -39,14 +43,56 @@ const BASELINE_FILE = 'tests/typecheck-baseline.json';
  */
 const DIAGNOSTIC = /^(.+?)\((\d+),(\d+)\): error (TS\d+): (.*)$/;
 
+/** TS1xxx is the grammar/parse band. One of these and tsc never reaches the semantic pass. */
+const SYNTAX_ERROR = /\berror TS1\d{3}:/;
+
+/** The only trees this ratchet owns: everything else is a broken check, not a failed one. */
+const TEST_TREES = [/^tests\//, /^packages\/[^/]+\/tests\//];
+
 /** How many diagnostics to echo per regressed file before summarising the rest. */
 const MAX_LINES_PER_FILE = 20;
 
 /**
- * Type-check `tsconfig.spec.json` and return tsc's raw diagnostic text.
+ * Why this tsc run cannot be trusted, or `null` when it can.
  *
- * Errors are the expected outcome here (tsc exits 2), so a non-zero status is only fatal
- * when nothing parseable came back — that means tsc itself failed rather than the code.
+ * Two ways a run looks successful but is not, both of which would read as *fewer* errors and
+ * therefore as progress:
+ *
+ * - A status other than 0 (clean) or 2 (diagnostics emitted) means tsc did not complete. A
+ *   config error exits 1, and on Windows a tsc terminated from outside reports
+ *   `{status: 1, signal: null}` after printing a clean prefix of real diagnostics.
+ * - A parse error (TS1xxx) stops tsc before the semantic pass, so the baselined errors are
+ *   simply never reported and `--update` would happily record a one-entry baseline.
+ *
+ * @param {number | null} status tsc's exit status
+ * @param {string} output combined stdout/stderr
+ * @returns {string | null} message for `fail`, or null when the run is usable
+ */
+export function unusableRunReason(status, output) {
+  if (status !== 0 && status !== 2) {
+    return (
+      `tsc exited ${status}, which is neither 0 (clean) nor 2 (diagnostics emitted), so the ` +
+      `check did not complete.\n\n${output.trim()}`
+    );
+  }
+
+  const syntax = output.split(/\r?\n/).filter(line => SYNTAX_ERROR.test(line));
+  if (syntax.length > 0) {
+    return (
+      `tsc reported a syntax error, so no semantic check ran and the recorded errors would ` +
+      `look like progress. Fix the parse error first:\n\n${syntax.slice(0, 10).join('\n')}`
+    );
+  }
+
+  if (status !== 0 && !output.split(/\r?\n/).some(line => DIAGNOSTIC.test(line))) {
+    return `tsc exited ${status} without reporting any parseable error.\n\n${output.trim()}`;
+  }
+
+  return null;
+}
+
+/**
+ * Type-check `tsconfig.spec.json` and return tsc's raw diagnostic text.
  *
  * @param {string} root repo root
  * @returns {string} combined stdout/stderr
@@ -75,10 +121,8 @@ function runTsc(root) {
   }
 
   const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
-  const reportedErrors = output.split(/\r?\n/).some(line => DIAGNOSTIC.test(line));
-  if (result.status !== 0 && !reportedErrors) {
-    fail(`tsc exited ${result.status} without reporting any parseable error.\n\n${output.trim()}`);
-  }
+  const reason = unusableRunReason(result.status, output);
+  if (reason) fail(reason);
 
   return output;
 }
@@ -118,6 +162,25 @@ function normalise(file, root) {
   return path.relative(root, path.resolve(root, file)).split(/[\\/]/).join('/');
 }
 
+/** Does this key name a file in a tree the ratchet owns? */
+export function isTestTreePath(file) {
+  return TEST_TREES.some(tree => tree.test(file));
+}
+
+/**
+ * Keys that name something outside `tests/` and a package's own `tests/` directory.
+ *
+ * A diagnostic anchored to `tsconfig.spec.json` (a config error such as TS5023/TS5101), to
+ * `src/**`, or to a `../` path outside the repo is not a test that regressed — it is the
+ * check itself being broken, and baselining it with `--update` would hide the breakage.
+ *
+ * @param {Iterable<string>} keys normalised paths
+ * @returns {string[]} the offenders, sorted
+ */
+export function pathsOutsideTestTrees(keys) {
+  return [...keys].filter(key => !isTestTreePath(key)).sort();
+}
+
 /**
  * Compare the current run against the baseline.
  *
@@ -142,16 +205,16 @@ export function compare(current, baseline) {
 /**
  * The gate itself: what a comparison means for this run.
  *
- * `regressed` wins over `stale` — new errors are the thing worth reporting first.
- * Only `--strict` (CI) treats a shrunken count as a failure; locally it is just a hint.
+ * `regressed` wins over `stale` — new errors are the thing worth reporting first. A count
+ * that went *down* is progress, but it fails too: the baseline is now a lie, and letting it
+ * pass is how CI and the working tree drift apart.
  *
  * @param {{ regressed: string[], improved: string[] }} comparison from `compare`
- * @param {boolean} strict whether a stale baseline should fail
  * @returns {'regressed' | 'stale' | 'ok'}
  */
-export function verdict(comparison, strict) {
+export function verdict(comparison) {
   if (comparison.regressed.length > 0) return 'regressed';
-  if (strict && comparison.improved.length > 0) return 'stale';
+  if (comparison.improved.length > 0) return 'stale';
   return 'ok';
 }
 
@@ -182,6 +245,14 @@ function readBaseline(root) {
         `got ${JSON.stringify(count)}. Re-record it with: pnpm run typecheck:tests:update`
       );
     }
+  }
+
+  const foreign = pathsOutsideTestTrees(Object.keys(parsed));
+  if (foreign.length > 0) {
+    fail(
+      `${BASELINE_FILE} records ${foreign.length} path(s) outside tests/** and ` +
+      `packages/*/tests/**:\n${foreign.map(key => `  ${key}`).join('\n')}`
+    );
   }
 
   return parsed;
@@ -236,17 +307,25 @@ function describe(error) {
 
 function main(root, argv) {
   const update = argv.includes('--update');
-  const strict = argv.includes('--strict');
-  // pnpm forwards the `--` separator itself (`pnpm run typecheck:tests -- --strict`).
-  const unknown = argv.filter(arg => !['--', '--update', '--strict'].includes(arg));
+  // pnpm forwards the `--` separator itself (`pnpm run typecheck:tests -- --update`).
+  const unknown = argv.filter(arg => !['--', '--update'].includes(arg));
   if (unknown.length > 0) {
     fail(
       `Unknown argument(s): ${unknown.join(' ')}. ` +
-      `Usage: node scripts/typecheck-tests-ratchet.mjs [--update] [--strict]`
+      `Usage: node scripts/typecheck-tests-ratchet.mjs [--update]`
     );
   }
 
   const current = parseDiagnostics(runTsc(root), root);
+
+  const foreign = pathsOutsideTestTrees(current.keys());
+  if (foreign.length > 0) {
+    fail(
+      `tsc reported errors outside tests/** and packages/*/tests/**, which means the check ` +
+      `itself is broken rather than a test having regressed:\n` +
+      foreign.map(key => `  ${key}: ${current.get(key)?.[0] ?? ''}`).join('\n')
+    );
+  }
 
   if (update) {
     writeBaseline(root, current);
@@ -260,7 +339,7 @@ function main(root, argv) {
   const baseline = readBaseline(root);
   const comparison = compare(current, baseline);
   const { regressed, improved } = comparison;
-  const outcome = verdict(comparison, strict);
+  const outcome = verdict(comparison);
 
   if (outcome === 'regressed') {
     console.error(`\ntypecheck:tests: ${regressed.length} file(s) gained type errors.\n`);
@@ -273,7 +352,8 @@ function main(root, argv) {
       }
     }
     console.error(
-      `\nFix the new errors, or — if they are unavoidable — re-record the baseline with:\n` +
+      `\nFix the new errors — that is the point of the ratchet. Re-record the baseline only\n` +
+      `when the errors are genuinely unavoidable:\n` +
       `  pnpm run typecheck:tests:update\n`
     );
     process.exit(1);
@@ -293,15 +373,12 @@ function main(root, argv) {
     process.exit(1);
   }
 
-  const stale = improved.length > 0
-    ? ` (${improved.length} file(s) improved — run typecheck:tests:update)`
-    : '';
   console.log(
     `typecheck:tests: ${totalCurrent(current)} error(s) across ${current.size} file(s); ` +
-    `baseline ${totalBaseline(baseline)} across ${Object.keys(baseline).length}.${stale}`
+    `baseline ${totalBaseline(baseline)} across ${Object.keys(baseline).length}.`
   );
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMain(import.meta.url)) {
   main(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), process.argv.slice(2));
 }
