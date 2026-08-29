@@ -52,17 +52,6 @@ type AdapterMethods = Exclude<
 type Impl<K extends AdapterMethods> = NonNullable<IDebugAdapter[K]>;
 
 /**
- * `sendDapRequest` is the one generic member (`<T extends DebugProtocol.Response>`), and
- * vitest's `Mock<T>` collapses a generic signature to a single instantiation — so a bare mock
- * does not satisfy `implements IDebugAdapter`. Intersecting the mock with the interface's own
- * signature restores the generic call; the cast at the field is that restoration and nothing
- * more. Callers still get the full mock API (`mockResolvedValue`, call assertions).
- */
-type DapRequestMock =
-  Mock<(command: string, args?: unknown) => Promise<DebugProtocol.Response>> &
-  IDebugAdapter['sendDapRequest'];
-
-/**
  * Constructor overrides. Each entry is an *implementation* typed against the real interface —
  * not a bare `vi.fn()` — so a wrong argument list or return type is a compile error at the
  * call site rather than a silent no-op at runtime.
@@ -103,8 +92,11 @@ export class FakeDebugAdapter extends EventEmitter implements IDebugAdapter {
   getRequiredDependencies = vi.fn<Impl<'getRequiredDependencies'>>((): DependencyInfo[] => []);
 
   // ===== Executable management =====
+  // `||`, not `??`: an empty preferred path is not a path. Real adapters fall back to a PATH
+  // search on '', and the proxy worker's init-payload validation rejects an empty
+  // executablePath — so returning '' verbatim would be a fake of something that cannot happen.
   resolveExecutablePath = vi.fn<Impl<'resolveExecutablePath'>>(
-    async (preferredPath?: string) => preferredPath ?? 'fake-executable'
+    async (preferredPath?: string) => preferredPath || 'fake-executable'
   );
   getDefaultExecutableName = vi.fn<Impl<'getDefaultExecutableName'>>(() => 'fake');
   getExecutableSearchPaths = vi.fn<Impl<'getExecutableSearchPaths'>>((): string[] => []);
@@ -132,9 +124,17 @@ export class FakeDebugAdapter extends EventEmitter implements IDebugAdapter {
   );
 
   // ===== DAP protocol operations =====
-  sendDapRequest = vi.fn(
-    async (): Promise<DebugProtocol.Response> => ({}) as DebugProtocol.Response
-  ) as DapRequestMock;
+  // A plain method, not a mock: `sendDapRequest` is the interface's only generic member, and
+  // vitest's `Mock<T>` collapses a generic signature to one instantiation — making it a mock
+  // costs an intersection type and a cast. Nothing needs it: ProxyManager never calls
+  // `adapter.sendDapRequest`, and the DAP-request assertions in these suites are all on
+  // ProxyManager. Reach for `vi.spyOn(adapter, 'sendDapRequest')` if that ever changes.
+  async sendDapRequest<T extends DebugProtocol.Response>(
+    _command: string,
+    _args?: unknown
+  ): Promise<T> {
+    return {} as T;
+  }
   handleDapEvent = vi.fn<Impl<'handleDapEvent'>>(() => {});
   handleDapResponse = vi.fn<Impl<'handleDapResponse'>>(() => {});
 
@@ -158,16 +158,23 @@ export class FakeDebugAdapter extends EventEmitter implements IDebugAdapter {
   getCapabilities = vi.fn<Impl<'getCapabilities'>>((): AdapterCapabilities => ({}));
 
   // ===== Optional members =====
-  // Deliberately left undefined: production code reaches them through optional calls, and a
-  // double that always defines them can only ever exercise the defined branch.
-  createLaunchBarrier?: Mock<Impl<'createLaunchBarrier'>>;
-  supportsAttach?: Mock<Impl<'supportsAttach'>>;
-  supportsDetach?: Mock<Impl<'supportsDetach'>>;
-  usesDirectConnectForAttach?: Mock<Impl<'usesDirectConnectForAttach'>>;
-  transformAttachConfig?: Mock<Impl<'transformAttachConfig'>>;
-  getDefaultAttachConfig?: Mock<Impl<'getDefaultAttachConfig'>>;
+  // Genuinely ABSENT until opted in: production code reaches them through optional calls
+  // (`adapter.supportsAttach?.()`), and a double that always defines them can only ever
+  // exercise the defined branch.
+  //
+  // `declare` is load-bearing. Under ES2022 class-field *define* semantics an uninitialised
+  // field is emitted as an own property set to undefined — which would make
+  // `'supportsAttach' in adapter` true and list every optional member in `Object.keys`, the
+  // opposite of what this block promises. `declare` emits no field at all, so the property
+  // exists only once a builder or an override assigns it.
+  declare createLaunchBarrier?: Mock<Impl<'createLaunchBarrier'>>;
+  declare supportsAttach?: Mock<Impl<'supportsAttach'>>;
+  declare supportsDetach?: Mock<Impl<'supportsDetach'>>;
+  declare usesDirectConnectForAttach?: Mock<Impl<'usesDirectConnectForAttach'>>;
+  declare transformAttachConfig?: Mock<Impl<'transformAttachConfig'>>;
+  declare getDefaultAttachConfig?: Mock<Impl<'getDefaultAttachConfig'>>;
   /** Interface-readonly; mutable here so `withAttachSupport()` can set it. */
-  supportedAttachKeys?: readonly string[];
+  declare supportedAttachKeys?: readonly string[];
 
   constructor(overrides: FakeDebugAdapterOverrides = {}) {
     super();
@@ -233,6 +240,13 @@ export class FakeDebugAdapter extends EventEmitter implements IDebugAdapter {
    * make `vi.resetAllMocks()` silently revert the test's behaviour to the fake's production
    * default. Constructing with the override makes a reset restore the override.
    *
+   * An explicitly-undefined value is skipped rather than installed. `Object.keys` cannot tell
+   * `{ transformAttachConfig: undefined }` from an omitted key, and `vi.fn(undefined)` is a
+   * perfectly truthy mock returning undefined — so a conditional override
+   * (`{ transformAttachConfig: cond ? fn : undefined }`) would turn an optional member that
+   * must stay absent into one the session layer's
+   * `supportsAttach() && transformAttachConfig` chain happily calls.
+   *
    * The keys are only known dynamically here, so the per-key correlation between `K` and
    * `Impl<K>` — enforced on `FakeDebugAdapterOverrides` at the call site — cannot be carried
    * through `Object.keys`. The two casts below are that erasure and nothing more.
@@ -241,7 +255,9 @@ export class FakeDebugAdapter extends EventEmitter implements IDebugAdapter {
     for (const key of Object.keys(overrides) as Array<keyof FakeDebugAdapterOverrides>) {
       if (key === 'language' || key === 'name' || key === 'supportedAttachKeys') continue;
 
-      const impl = overrides[key] as (...args: never[]) => unknown;
+      const impl = overrides[key] as ((...args: never[]) => unknown) | undefined;
+      if (impl === undefined) continue;
+
       (this as Record<string, unknown>)[key] = vi.fn(impl);
     }
   }

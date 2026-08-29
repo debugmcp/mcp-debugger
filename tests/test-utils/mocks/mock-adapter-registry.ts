@@ -62,14 +62,26 @@ export function createMockAdapterRegistry(
     // IDebugAdapter, so the compiler now catches the drift this block used to carry
     // (a sync transformLaunchConfig, the long-removed translateScriptPath /
     // translateBreakpointPath, and 15 inert EventEmitter stubs in place of a real emitter).
-    create: vi.fn<IAdapterRegistry['create']>(
-      async (language, config) =>
-        options.createAdapter?.(language, config) ??
-        new FakeDebugAdapter({
-          language: language as DebugLanguage,
-          name: `${language} Debug Adapter`
-        })
-    ),
+    create: vi.fn<IAdapterRegistry['create']>(async (language, config) => {
+      // Branch on the option, not on the result: `createAdapter` returns a Promise, which is
+      // never nullish, so a `??` fallback here would be dead code the moment the option is
+      // supplied. Awaiting it also lets a stub that resolves nothing fail here, with the
+      // language named, instead of as a TypeError deep inside startProxyManager.
+      if (options.createAdapter) {
+        const adapter = await options.createAdapter(language, config);
+        if (!adapter) {
+          throw new Error(
+            `createMockAdapterRegistry: createAdapter returned no adapter for ${language}`
+          );
+        }
+        return adapter;
+      }
+
+      return new FakeDebugAdapter({
+        language: language as DebugLanguage,
+        name: `${language} Debug Adapter`
+      });
+    }),
 
     register: vi.fn().mockResolvedValue(undefined),
 
