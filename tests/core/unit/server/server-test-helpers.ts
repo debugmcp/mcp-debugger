@@ -13,6 +13,7 @@ import {
   GetPromptRequestSchema
 } from '@modelcontextprotocol/sdk/types.js';
 import { DebugMcpServer } from '../../../../src/server.js';
+import type { ToolContext } from '../../../../src/server/tool-context.js';
 import { createMockLogger } from '../../../test-utils/helpers/test-dependencies.js';
 import { createMockAdapterRegistry } from '../../../test-utils/mocks/mock-adapter-registry.js';
 
@@ -163,7 +164,9 @@ export function createMockStdioTransport() {
  * assignment afterwards), which is how these tests stub fileChecker,
  * lineReader and validateSession.
  */
-export function createMockToolContext(overrides: Record<string, unknown> = {}): any {
+export function createMockToolContext(
+  overrides: Partial<Record<keyof ToolContext, unknown>> = {}
+): DebugMcpServer {
   const server = new DebugMcpServer({ logLevel: 'info', logFile: '/tmp/test.log' });
   const adapterRegistry = createMockAdapterRegistry();
   Object.assign(server, {

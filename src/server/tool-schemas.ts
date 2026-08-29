@@ -54,6 +54,13 @@ export const TOOL_NAMES = [
 
 export type ToolName = (typeof TOOL_NAMES)[number];
 
+const TOOL_NAME_SET: ReadonlySet<string> = new Set(TOOL_NAMES);
+
+/** Narrow an incoming tools/call name to the advertised set. */
+export function isToolName(name: string): name is ToolName {
+  return TOOL_NAME_SET.has(name);
+}
+
 /** A tools/list entry, with its name constrained to the advertised set. */
 export type ToolDefinition = Tool & { name: ToolName };
 

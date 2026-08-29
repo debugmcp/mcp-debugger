@@ -65,4 +65,4 @@ export const TOOL_HANDLERS: Readonly<Record<ToolName, ToolHandler>> = Object.fre
   get_output: getOutputTool,
   list_supported_languages: listSupportedLanguagesTool,
   redefine_classes: redefineClassesTool
-});
+} satisfies Record<ToolName, ToolHandler>);
