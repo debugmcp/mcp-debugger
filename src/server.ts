@@ -104,6 +104,7 @@ import {
   handleGetLocalVariables
 } from './server/handlers/inspection-tools.js';
 import { getOutputTool } from './server/handlers/output-tools.js';
+import { exposeSessionTool, unexposeSessionTool } from './server/handlers/mirror-tools.js';
 
 export { coerceToolArguments };
 export type { SetBreakpointRequest };
@@ -932,17 +933,11 @@ export class DebugMcpServer implements ToolContext {
               break;
             }
             case 'expose_session': {
-              if (!args.sessionId) {
-                throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
-              }
-              result = await this.handleExposeSession(args.sessionId);
+              result = await exposeSessionTool(this, args, toolName);
               break;
             }
             case 'unexpose_session': {
-              if (!args.sessionId) {
-                throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
-              }
-              result = await this.handleUnexposeSession(args.sessionId);
+              result = await unexposeSessionTool(this, args, toolName);
               break;
             }
             case 'close_debug_session': {
@@ -1075,79 +1070,6 @@ export class DebugMcpServer implements ToolContext {
   /** @internal test seam; removed in PR 6 */
   private async handlePause(args: { sessionId: string; threadId?: number }): Promise<ToolResult> {
     return handlePause(this, args);
-  }
-
-  private async handleExposeSession(sessionId: string): Promise<ServerResult> {
-    try {
-      this.validateSession(sessionId);
-      const result = await this.sessionManager.exposeSession(sessionId);
-      if (!result.success) {
-        return { content: [{ type: 'text', text: JSON.stringify({
-          success: false,
-          state: result.state,
-          error: result.error
-        }) }] };
-      }
-      let message =
-        `Session exposed for IDE attach at ${result.host}:${result.port}. ` +
-        `VS Code: add a launch.json config {"name": "Mirror: agent debug session", ` +
-        `"type": "<your language's debug type, e.g. python>", "request": "attach", ` +
-        `"debugServer": ${result.port}, "mirrorToken": "${result.token}"} and start it. ` +
-        `The mirror is inspect-only; execution control stays with this session. ` +
-        `Full guidance: docs/tool-reference.md#expose_session.`;
-      if (isContainerMode(this.environment)) {
-        message +=
-          ' Note: this server runs inside a container — the mirror listens on the ' +
-          "container's loopback and is not reachable from your host IDE without extra " +
-          'networking (e.g. docker run --network host on Linux, or a socat/ssh forward ' +
-          'into the container).';
-      }
-      return { content: [{ type: 'text', text: JSON.stringify({
-        success: true,
-        state: result.state,
-        host: result.host,
-        port: result.port,
-        token: result.token,
-        message
-      }) }] };
-    } catch (error) {
-      this.logger.error('Failed to expose session', { error });
-      if (error instanceof SessionTerminatedError ||
-          error instanceof SessionNotFoundError ||
-          error instanceof ProxyNotRunningError) {
-        return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-      }
-      if (error instanceof McpError) throw error;
-      throw new McpError(McpErrorCode.InternalError, `Failed to expose session: ${(error as Error).message}`);
-    }
-  }
-
-  private async handleUnexposeSession(sessionId: string): Promise<ServerResult> {
-    try {
-      this.validateSession(sessionId);
-      const result = await this.sessionManager.unexposeSession(sessionId);
-      const message = !result.success
-        ? undefined
-        : result.wasExposed
-          ? `Mirror endpoint closed${typeof result.closedClients === 'number' ? ` (${result.closedClients} client${result.closedClients === 1 ? '' : 's'} disconnected)` : ''}`
-          : 'Session was not exposed — nothing to close';
-      return { content: [{ type: 'text', text: JSON.stringify({
-        success: result.success,
-        state: result.state,
-        ...(result.wasExposed !== undefined ? { wasExposed: result.wasExposed } : {}),
-        ...(message ? { message } : {}),
-        ...(result.error ? { error: result.error } : {})
-      }) }] };
-    } catch (error) {
-      this.logger.error('Failed to unexpose session', { error });
-      if (error instanceof SessionTerminatedError ||
-          error instanceof SessionNotFoundError ||
-          error instanceof ProxyNotRunningError) {
-        return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-      }
-      if (error instanceof McpError) throw error;
-      throw new McpError(McpErrorCode.InternalError, `Failed to unexpose session: ${(error as Error).message}`);
-    }
   }
 
   /** @internal test seam; removed in PR 6 */
