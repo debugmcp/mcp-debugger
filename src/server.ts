@@ -58,15 +58,6 @@ import {
   LanguageMetadata
 } from './server/language-discovery.js';
 import type { ToolContext, SetBreakpointRequest } from './server/tool-context.js';
-import type { ToolResult } from './server/tool-result.js';
-import { handleListDebugSessions } from './server/handlers/session-tools.js';
-import { handlePause, handleListThreads } from './server/handlers/execution-tools.js';
-import {
-  handleEvaluateExpression,
-  handleGetSourceContext,
-  handleGetLocalVariables
-} from './server/handlers/inspection-tools.js';
-import { handleListSupportedLanguages } from './server/handlers/language-tools.js';
 import { registerToolHandlers } from './server/tool-dispatch.js';
 
 export { coerceToolArguments } from './server/tool-arguments.js';
@@ -714,41 +705,6 @@ export class DebugMcpServer implements ToolContext {
       : '';
     return new McpError(McpErrorCode.InvalidParams,
       `${label} not found: '${originalPath}'\nLooked for: '${fileCheck.effectivePath}'${fileCheck.errorMessage ? `\nError: ${fileCheck.errorMessage}` : ''}${containerHint}`);
-  }
-
-  /** @internal test seam; removed in PR 6 */
-  private async handleListDebugSessions(): Promise<ToolResult> {
-    return handleListDebugSessions(this);
-  }
-
-  /** @internal test seam; removed in PR 6 */
-  private async handlePause(args: { sessionId: string; threadId?: number }): Promise<ToolResult> {
-    return handlePause(this, args);
-  }
-
-  /** @internal test seam; removed in PR 6 */
-  private async handleListThreads(args: { sessionId: string }): Promise<ToolResult> {
-    return handleListThreads(this, args);
-  }
-
-  /** @internal test seam; removed in PR 6 */
-  private async handleEvaluateExpression(args: { sessionId: string, expression: string, frameId?: number, timeout?: number }): Promise<ToolResult> {
-    return handleEvaluateExpression(this, args);
-  }
-
-  /** @internal test seam; removed in PR 6 */
-  private async handleGetSourceContext(args: { sessionId: string, file: string, line: number, linesContext?: number }): Promise<ToolResult> {
-    return handleGetSourceContext(this, args);
-  }
-
-  /** @internal test seam; removed in PR 6 */
-  private async handleGetLocalVariables(args: { sessionId: string; includeSpecial?: boolean; names?: string[] }): Promise<ToolResult> {
-    return handleGetLocalVariables(this, args);
-  }
-
-  /** @internal test seam; removed in PR 6 */
-  private async handleListSupportedLanguages(): Promise<ToolResult> {
-    return handleListSupportedLanguages(this);
   }
 
   /**

@@ -12,6 +12,7 @@ import {
   ListPromptsRequestSchema,
   GetPromptRequestSchema
 } from '@modelcontextprotocol/sdk/types.js';
+import { DebugMcpServer } from '../../../../src/server.js';
 import { createMockLogger } from '../../../test-utils/helpers/test-dependencies.js';
 import { createMockAdapterRegistry } from '../../../test-utils/mocks/mock-adapter-registry.js';
 
@@ -149,6 +150,28 @@ export function createMockSessionManager(mockAdapterRegistry: any) {
 
 export function createMockStdioTransport() {
   return {};
+}
+
+/**
+ * A live ToolContext for the handler tests in ./handlers.
+ *
+ * It is a real DebugMcpServer — which is what implements ToolContext — with
+ * its session manager and logger swapped for mocks, rather than a hand-rolled
+ * object literal: the handlers read their dependencies off the context at call
+ * time, and a literal would be free to drift away from the interface they
+ * program against. Any member can be replaced through `overrides` (or by
+ * assignment afterwards), which is how these tests stub fileChecker,
+ * lineReader and validateSession.
+ */
+export function createMockToolContext(overrides: Record<string, unknown> = {}): any {
+  const server = new DebugMcpServer({ logLevel: 'info', logFile: '/tmp/test.log' });
+  const adapterRegistry = createMockAdapterRegistry();
+  Object.assign(server, {
+    sessionManager: createMockSessionManager(adapterRegistry),
+    logger: createMockLogger(),
+    ...overrides
+  });
+  return server;
 }
 
 /**
