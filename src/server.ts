@@ -8,11 +8,8 @@
  */
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
-  ListToolsRequestSchema,
-  CallToolRequestSchema,
   ErrorCode as McpErrorCode,
   McpError,
-  ServerResult,
 } from '@modelcontextprotocol/sdk/types.js';
 import { buildServerInstructions } from './skill-content.js';
 import {
@@ -53,57 +50,22 @@ import {
 import { isRedactionEnabled } from './utils/redaction-mode.js';
 import { getVariableAccessMode, requiresExplicitNames } from './utils/variable-access.js';
 import { assertLineContent, resolveStatement, stripTrailingComment } from './utils/breakpoint-resolver.js';
-import { coerceToolArguments, ToolArguments } from './server/tool-arguments.js';
-import { extractPayloadSuccess, sanitizeRequest } from './server/tool-result.js';
-import { buildToolDefinitions } from './server/tool-schemas.js';
 import { OutputResourceNotifier, registerResourceHandlers } from './server/output-resources.js';
 import { registerPromptHandlers } from './server/prompts.js';
 import { discoverSupportedLanguages, buildLanguageMetadata, LanguageMetadata } from './server/language-discovery.js';
 import type { ToolContext, SetBreakpointRequest } from './server/tool-context.js';
 import type { ToolResult } from './server/tool-result.js';
+import { handleListDebugSessions } from './server/handlers/session-tools.js';
+import { handlePause, handleListThreads } from './server/handlers/execution-tools.js';
 import {
-  createDebugSessionTool,
-  listDebugSessionsTool,
-  closeDebugSessionTool,
-  handleListDebugSessions
-} from './server/handlers/session-tools.js';
-import {
-  startDebuggingTool,
-  restartDebuggingTool,
-  attachToProcessTool,
-  detachFromProcessTool,
-  redefineClassesTool
-} from './server/handlers/debuggee-tools.js';
-import {
-  setBreakpointTool,
-  listBreakpointsTool,
-  removeBreakpointTool,
-  clearBreakpointsTool
-} from './server/handlers/breakpoint-tools.js';
-import {
-  stepTool,
-  continueExecutionTool,
-  pauseExecutionTool,
-  listThreadsTool,
-  handlePause,
-  handleListThreads
-} from './server/handlers/execution-tools.js';
-import {
-  getVariablesTool,
-  getStackTraceTool,
-  getScopesTool,
-  evaluateExpressionTool,
-  getSourceContextTool,
-  getLocalVariablesTool,
   handleEvaluateExpression,
   handleGetSourceContext,
   handleGetLocalVariables
 } from './server/handlers/inspection-tools.js';
-import { getOutputTool } from './server/handlers/output-tools.js';
-import { exposeSessionTool, unexposeSessionTool } from './server/handlers/mirror-tools.js';
-import { listSupportedLanguagesTool, handleListSupportedLanguages } from './server/handlers/language-tools.js';
+import { handleListSupportedLanguages } from './server/handlers/language-tools.js';
+import { registerToolHandlers } from './server/tool-dispatch.js';
 
-export { coerceToolArguments };
+export { coerceToolArguments } from './server/tool-arguments.js';
 export type { SetBreakpointRequest };
 
 /**
@@ -848,171 +810,7 @@ export class DebugMcpServer implements ToolContext {
   }
 
   private registerTools(): void {
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => {
-      this.logger.debug('Handling ListToolsRequest');
-      
-      // Get supported languages dynamically - deferred until request time
-      const supportedLanguages = await this.getSupportedLanguagesAsync();
-      
-      return { tools: buildToolDefinitions({ supportedLanguages, environment: this.environment }) };
-    });
-
-    this.server.setRequestHandler(
-      CallToolRequestSchema,
-      async (request): Promise<ServerResult> => {
-        const toolName = request.params.name;
-        const args = coerceToolArguments((request.params.arguments ?? {}) as Record<string, unknown>) as ToolArguments;
-
-        // Log tool call with structured logging
-        this.logger.info('tool:call', {
-          tool: toolName,
-          sessionId: args.sessionId,
-          sessionName: args.sessionId ? this.getSessionName(args.sessionId) : undefined,
-          request: sanitizeRequest(args as Record<string, unknown>),
-          timestamp: Date.now()
-        });
-
-        try {
-          let result: ServerResult;
-          
-          switch (toolName) {
-            case 'create_debug_session': {
-              result = await createDebugSessionTool(this, args, toolName);
-              break;
-            }
-            case 'list_debug_sessions': {
-              result = await listDebugSessionsTool(this, args, toolName);
-              break;
-            }
-            case 'set_breakpoint': {
-              result = await setBreakpointTool(this, args, toolName);
-              break;
-            }
-            case 'list_breakpoints': {
-              result = await listBreakpointsTool(this, args, toolName);
-              break;
-            }
-            case 'remove_breakpoint': {
-              result = await removeBreakpointTool(this, args, toolName);
-              break;
-            }
-            case 'clear_breakpoints': {
-              result = await clearBreakpointsTool(this, args, toolName);
-              break;
-            }
-            case 'start_debugging': {
-              result = await startDebuggingTool(this, args, toolName);
-              break;
-            }
-            case 'restart_debugging': {
-              result = await restartDebuggingTool(this, args, toolName);
-              break;
-            }
-            case 'attach_to_process': {
-              result = await attachToProcessTool(this, args, toolName);
-              break;
-            }
-            case 'detach_from_process': {
-              result = await detachFromProcessTool(this, args, toolName);
-              break;
-            }
-            case 'expose_session': {
-              result = await exposeSessionTool(this, args, toolName);
-              break;
-            }
-            case 'unexpose_session': {
-              result = await unexposeSessionTool(this, args, toolName);
-              break;
-            }
-            case 'close_debug_session': {
-              result = await closeDebugSessionTool(this, args, toolName);
-              break;
-            }
-            case 'step_over':
-            case 'step_into':
-            case 'step_out': {
-              result = await stepTool(this, args, toolName);
-              break;
-            }
-            case 'continue_execution': {
-              result = await continueExecutionTool(this, args, toolName);
-              break;
-            }
-            case 'pause_execution': {
-              result = await pauseExecutionTool(this, args, toolName);
-              break;
-            }
-            case 'list_threads': {
-              result = await listThreadsTool(this, args, toolName);
-              break;
-            }
-            case 'get_variables': {
-              result = await getVariablesTool(this, args, toolName);
-              break;
-            }
-            case 'get_stack_trace': {
-              result = await getStackTraceTool(this, args, toolName);
-              break;
-            }
-            case 'get_scopes': {
-              result = await getScopesTool(this, args, toolName);
-              break;
-            }
-            case 'evaluate_expression': {
-              result = await evaluateExpressionTool(this, args, toolName);
-              break;
-            }
-            case 'get_source_context': {
-              result = await getSourceContextTool(this, args, toolName);
-              break;
-            }
-            case 'get_local_variables': {
-              result = await getLocalVariablesTool(this, args, toolName);
-              break;
-            }
-            case 'get_output': {
-              result = await getOutputTool(this, args, toolName);
-              break;
-            }
-            case 'list_supported_languages': {
-              result = await listSupportedLanguagesTool(this, args, toolName);
-              break;
-            }
-            case 'redefine_classes': {
-              result = await redefineClassesTool(this, args, toolName);
-              break;
-            }
-            default:
-              throw new McpError(McpErrorCode.MethodNotFound, `Unknown tool: ${toolName}`);
-          }
-          
-          // Log tool response; success mirrors the payload's own success flag (issue #397)
-          this.logger.info('tool:response', {
-            tool: toolName,
-            sessionId: args.sessionId,
-            sessionName: args.sessionId ? this.getSessionName(args.sessionId) : undefined,
-            success: extractPayloadSuccess(result),
-            timestamp: Date.now()
-          });
-          
-          return result;
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          
-          // Log tool error
-          this.logger.error('tool:error', {
-            tool: toolName,
-            sessionId: args.sessionId,
-            sessionName: args.sessionId ? this.getSessionName(args.sessionId) : undefined,
-            error: errorMessage,
-            timestamp: Date.now()
-          });
-          
-          if (error instanceof McpError) throw error;
-          throw new McpError(McpErrorCode.InternalError, `Failed to execute tool ${toolName}: ${errorMessage}`);
-        }
-      }
-    );
+    registerToolHandlers(this.server, this);
   }
 
   /** @internal test seam; removed in PR 6 */
