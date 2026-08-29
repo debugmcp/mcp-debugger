@@ -23,6 +23,7 @@ import { ManagedSession, ToolchainValidationState } from './session-store.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';
 import { ProxyConfig } from '../proxy/proxy-config.js';
+import { proxyLogPathFor } from '../proxy/proxy-log-path.js';
 import { MIRROR_EXPOSE_COMMAND, MIRROR_UNEXPOSE_COMMAND } from '../proxy/dap-proxy-interfaces.js';
 import { ErrorMessages, ProxyInitProgress } from '../utils/error-messages.js';
 import { checkLaunchToolchain } from '../utils/language-availability.js';
@@ -3124,7 +3125,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       diagnostics.initProgress = initProgress;
     }
     if (session.logDir) {
-      diagnostics.proxyLogPath = path.join(session.logDir, `proxy-${session.id}.log`);
+      diagnostics.proxyLogPath = proxyLogPathFor(session.logDir, session.id);
     }
 
     return diagnostics;

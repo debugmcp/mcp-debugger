@@ -26,6 +26,7 @@ import {
 import type { IDapMirrorServer, MirrorEndpoint } from './dap-mirror-server.js';
 import { CallbackRequestTracker } from './dap-proxy-request-tracker.js';
 import { GenericAdapterManager, AdapterStdioSource } from './dap-proxy-adapter-manager.js';
+import { proxyLogPathFor } from './proxy-log-path.js';
 import { DapConnectionManager } from './dap-proxy-connection-manager.js';
 import { 
   validateProxyInitPayload
@@ -315,7 +316,7 @@ export class DapProxyWorker {
 
     try {
       // Create logger
-      const logPath = path.join(payload.logDir, `proxy-${payload.sessionId}.log`);
+      const logPath = proxyLogPathFor(payload.logDir, payload.sessionId);
       await this.dependencies.fileSystem.ensureDir(path.dirname(logPath));
       this.logger = await this.dependencies.loggerFactory(payload.sessionId, payload.logDir, payload.logLevel);
       this.logger.info(`[Worker] DAP Proxy worker initialized for session ${payload.sessionId}`);
