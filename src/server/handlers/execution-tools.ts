@@ -3,13 +3,13 @@
  * keyed by toolName), continue_execution, pause_execution, list_threads.
  */
 import { ErrorCode as McpErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
-import {
-  SessionNotFoundError,
-  SessionTerminatedError,
-  ProxyNotRunningError
-} from '../../errors/debug-errors.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
-import type { ToolResult } from '../tool-result.js';
+import {
+  failureResult,
+  rethrowAsMcpError,
+  sessionErrorToResult,
+  type ToolResult
+} from '../tool-result.js';
 
 export const stepTool: ToolHandler = async (ctx, args, toolName) => {
   if (!args.sessionId) {
@@ -76,18 +76,16 @@ export const stepTool: ToolHandler = async (ctx, args, toolName) => {
 
     return { content: [{ type: 'text', text: JSON.stringify(response) }] };
   } catch (error) {
-    // Handle validation errors specifically
-    if (error instanceof SessionTerminatedError ||
-        error instanceof SessionNotFoundError ||
-        error instanceof ProxyNotRunningError) {
-      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-    } else if (error instanceof Error) {
-      // Handle other expected errors (like "Failed to step over")
-      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-    } else {
-      // Re-throw unexpected errors
-      throw error;
+    // Typed session errors and other expected Errors (like "Failed to step
+    // over") both report as {success: false}; only non-Error throws escape.
+    const sessionResult = sessionErrorToResult(error, 'typed');
+    if (sessionResult) {
+      return sessionResult;
     }
+    if (error instanceof Error) {
+      return failureResult(error.message);
+    }
+    throw error;
   }
 };
 
@@ -100,18 +98,16 @@ export const continueExecutionTool: ToolHandler = async (ctx, args) => {
     const continueResult = await ctx.continueExecution(args.sessionId);
     return { content: [{ type: 'text', text: JSON.stringify({ success: continueResult, message: continueResult ? 'Continued execution' : 'Failed to continue execution' }) }] };
   } catch (error) {
-    // Handle validation errors specifically
-    if (error instanceof SessionTerminatedError ||
-        error instanceof SessionNotFoundError ||
-        error instanceof ProxyNotRunningError) {
-      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-    } else if (error instanceof Error) {
-      // Handle other expected errors
-      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-    } else {
-      // Re-throw unexpected errors
-      throw error;
+    // Same contract as the step tools: typed session errors and other
+    // expected Errors report as {success: false}; non-Errors escape.
+    const sessionResult = sessionErrorToResult(error, 'typed');
+    if (sessionResult) {
+      return sessionResult;
     }
+    if (error instanceof Error) {
+      return failureResult(error.message);
+    }
+    throw error;
   }
 };
 
@@ -122,13 +118,8 @@ export async function handlePause(ctx: ToolContext, args: { sessionId: string; t
     return { content: [{ type: 'text', text: JSON.stringify(result) }] };
   } catch (error) {
     ctx.logger.error('Failed to pause execution', { error });
-    if (error instanceof SessionTerminatedError ||
-        error instanceof SessionNotFoundError ||
-        error instanceof ProxyNotRunningError) {
-      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-    }
-    if (error instanceof McpError) throw error;
-    throw new McpError(McpErrorCode.InternalError, `Failed to pause execution: ${(error as Error).message}`);
+    return sessionErrorToResult(error, 'typed') ??
+      rethrowAsMcpError(error, 'Failed to pause execution');
   }
 }
 
@@ -143,13 +134,8 @@ export async function handleListThreads(ctx: ToolContext, args: { sessionId: str
     return { content: [{ type: 'text', text: JSON.stringify({ success: true, threads }) }] };
   } catch (error) {
     ctx.logger.error('Failed to list threads', { error });
-    if (error instanceof SessionTerminatedError ||
-        error instanceof SessionNotFoundError ||
-        error instanceof ProxyNotRunningError) {
-      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-    }
-    if (error instanceof McpError) throw error;
-    throw new McpError(McpErrorCode.InternalError, `Failed to list threads: ${(error as Error).message}`);
+    return sessionErrorToResult(error, 'typed') ??
+      rethrowAsMcpError(error, 'Failed to list threads');
   }
 }
 

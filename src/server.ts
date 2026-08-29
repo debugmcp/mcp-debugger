@@ -226,22 +226,6 @@ export class DebugMcpServer implements ToolContext {
     }
   }
 
-  /**
-   * Shared catch for the breakpoint management tools: session-lifecycle
-   * failures become {success: false} results (same contract as
-   * set_breakpoint's catch); everything else re-throws.
-   * @internal ToolContext service.
-   */
-  public handleBreakpointToolError(error: unknown): ToolResult {
-    if (error instanceof McpError &&
-        (error.message.includes('terminated') ||
-         error.message.includes('closed') ||
-         (error.message.includes('not found') && error.message.includes('Session')))) {
-      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-    }
-    throw error;
-  }
-
   /** @internal ToolContext service. */
   public validateBreakOnExceptions(value: string | undefined): ExceptionBreakMode | undefined {
     if (value === undefined) {

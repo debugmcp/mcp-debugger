@@ -12,7 +12,7 @@ import {
 } from '../../utils/bp-addressing.js';
 import type { ToolArguments } from '../tool-arguments.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
-import type { ToolResult } from '../tool-result.js';
+import { sessionErrorResultOrThrow, type ToolResult } from '../tool-result.js';
 
 /** set_breakpoint arguments once the entry guard has established sessionId. */
 type SetBreakpointArgs = ToolArguments & { sessionId: string };
@@ -125,7 +125,7 @@ async function setFunctionBreakpointBranch(ctx: ToolContext, args: SetBreakpoint
       warning: warnings.length > 0 ? warnings.join('; ') : undefined
     }) }] };
   } catch (error) {
-    return ctx.handleBreakpointToolError(error);
+    return sessionErrorResultOrThrow(error, 'session-state');
   }
 }
 
@@ -238,16 +238,9 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: SetBreakpointArgs
     });
     return result;
   } catch (error) {
-    // Handle session state errors specifically
-    if (error instanceof McpError && 
-        (error.message.includes('terminated') || 
-         error.message.includes('closed') || 
-         (error.message.includes('not found') && error.message.includes('Session')))) {
-      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-    } else {
-      // Re-throw all other errors (including file validation errors)
-      throw error;
-    }
+    // Session-lifecycle failures become {success: false}; everything else
+    // (including file validation errors) is re-thrown.
+    return sessionErrorResultOrThrow(error, 'session-state');
   }
 }
 
@@ -271,7 +264,7 @@ export const listBreakpointsTool: ToolHandler = async (ctx, args) => {
         : {})
     }) }] };
   } catch (error) {
-    return ctx.handleBreakpointToolError(error);
+    return sessionErrorResultOrThrow(error, 'session-state');
   }
 };
 
@@ -363,7 +356,7 @@ export const removeBreakpointTool: ToolHandler = async (ctx, args) => {
       warning
     }) }] };
   } catch (error) {
-    return ctx.handleBreakpointToolError(error);
+    return sessionErrorResultOrThrow(error, 'session-state');
   }
 };
 
@@ -381,6 +374,6 @@ export const clearBreakpointsTool: ToolHandler = async (ctx, args) => {
       warning: res.warning
     }) }] };
   } catch (error) {
-    return ctx.handleBreakpointToolError(error);
+    return sessionErrorResultOrThrow(error, 'session-state');
   }
 };

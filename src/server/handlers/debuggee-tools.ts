@@ -4,6 +4,7 @@
  */
 import { ErrorCode as McpErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { ToolHandler } from '../tool-context.js';
+import { sessionErrorResultOrThrow } from '../tool-result.js';
 
 export const startDebuggingTool: ToolHandler = async (ctx, args) => {
   if (!args.sessionId || !args.scriptPath) {
@@ -46,16 +47,9 @@ export const startDebuggingTool: ToolHandler = async (ctx, args) => {
     }
     return { content: [{ type: 'text', text: JSON.stringify(responsePayload) }] };
   } catch (error) {
-    // Handle session state errors specifically
-    if (error instanceof McpError && 
-        (error.message.includes('terminated') || 
-         error.message.includes('closed') || 
-         (error.message.includes('not found') && error.message.includes('Session')))) {
-      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message, state: 'stopped' }) }] };
-    } else {
-      // Re-throw all other errors (including file validation errors)
-      throw error;
-    }
+    // Session-lifecycle failures become {success: false}; everything else
+    // (including file validation errors) is re-thrown.
+    return sessionErrorResultOrThrow(error, 'session-state', { state: 'stopped' });
   }
 };
 
@@ -87,7 +81,7 @@ export const restartDebuggingTool: ToolHandler = async (ctx, args) => {
     }
     return { content: [{ type: 'text', text: JSON.stringify(responsePayload) }] };
   } catch (error) {
-    return ctx.handleBreakpointToolError(error);
+    return sessionErrorResultOrThrow(error, 'session-state');
   }
 };
 
@@ -146,18 +140,7 @@ export const attachToProcessTool: ToolHandler = async (ctx, args) => {
     return { content: [{ type: 'text', text: JSON.stringify(responsePayload) }] };
   } catch (error) {
     // Handle session state errors specifically
-    if (error instanceof McpError &&
-        (error.message.includes('terminated') ||
-         error.message.includes('closed') ||
-         (error.message.includes('not found') && error.message.includes('Session')))) {
-      return { content: [{ type: 'text', text: JSON.stringify({
-        success: false,
-        error: error.message,
-        state: 'stopped'
-      }) }] };
-    } else {
-      throw error;
-    }
+    return sessionErrorResultOrThrow(error, 'session-state', { state: 'stopped' });
   }
 };
 
@@ -192,18 +175,7 @@ export const detachFromProcessTool: ToolHandler = async (ctx, args) => {
     return { content: [{ type: 'text', text: JSON.stringify(responsePayload) }] };
   } catch (error) {
     // Handle session state errors specifically
-    if (error instanceof McpError &&
-        (error.message.includes('terminated') ||
-         error.message.includes('closed') ||
-         (error.message.includes('not found') && error.message.includes('Session')))) {
-      return { content: [{ type: 'text', text: JSON.stringify({
-        success: false,
-        error: error.message,
-        state: 'stopped'
-      }) }] };
-    } else {
-      throw error;
-    }
+    return sessionErrorResultOrThrow(error, 'session-state', { state: 'stopped' });
   }
 };
 

@@ -2,14 +2,9 @@
  * DAP mirror tools: expose_session, unexpose_session (issue #217).
  */
 import { ErrorCode as McpErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
-import {
-  SessionNotFoundError,
-  SessionTerminatedError,
-  ProxyNotRunningError
-} from '../../errors/debug-errors.js';
 import { isContainerMode } from '../../utils/container-path-utils.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
-import type { ToolResult } from '../tool-result.js';
+import { rethrowAsMcpError, sessionErrorToResult, type ToolResult } from '../tool-result.js';
 
 export async function handleExposeSession(ctx: ToolContext, sessionId: string): Promise<ToolResult> {
   try {
@@ -46,13 +41,8 @@ export async function handleExposeSession(ctx: ToolContext, sessionId: string): 
     }) }] };
   } catch (error) {
     ctx.logger.error('Failed to expose session', { error });
-    if (error instanceof SessionTerminatedError ||
-        error instanceof SessionNotFoundError ||
-        error instanceof ProxyNotRunningError) {
-      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-    }
-    if (error instanceof McpError) throw error;
-    throw new McpError(McpErrorCode.InternalError, `Failed to expose session: ${(error as Error).message}`);
+    return sessionErrorToResult(error, 'typed') ??
+      rethrowAsMcpError(error, 'Failed to expose session');
   }
 }
 
@@ -81,13 +71,8 @@ export async function handleUnexposeSession(ctx: ToolContext, sessionId: string)
     }) }] };
   } catch (error) {
     ctx.logger.error('Failed to unexpose session', { error });
-    if (error instanceof SessionTerminatedError ||
-        error instanceof SessionNotFoundError ||
-        error instanceof ProxyNotRunningError) {
-      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-    }
-    if (error instanceof McpError) throw error;
-    throw new McpError(McpErrorCode.InternalError, `Failed to unexpose session: ${(error as Error).message}`);
+    return sessionErrorToResult(error, 'typed') ??
+      rethrowAsMcpError(error, 'Failed to unexpose session');
   }
 }
 

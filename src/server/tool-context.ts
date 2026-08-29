@@ -78,7 +78,6 @@ export interface ToolContext {
     sessionId: string,
     functionName: string
   ): { name: string; note: string } | undefined;
-  handleBreakpointToolError(error: unknown): ToolResult;
 
   // ---- intake validation and result shaping ----
   validateBreakOnExceptions(value: string | undefined): ExceptionBreakMode | undefined;
