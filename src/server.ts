@@ -778,7 +778,7 @@ export class DebugMcpServer implements ToolContext {
     this.sessionManager = new SessionManager(sessionManagerConfig, dependencies);
     this.outputResources = new OutputResourceNotifier(this.server, this.logger);
 
-    this.registerTools();
+    registerToolHandlers(this.server, this);
     registerResourceHandlers(this.server, this.sessionManager, this.outputResources);
     registerPromptHandlers(this.server, this.environment);
     this.sessionManager.on('output-captured', this.outputResources.handleOutputCaptured);
@@ -807,10 +807,6 @@ export class DebugMcpServer implements ToolContext {
       : '';
     return new McpError(McpErrorCode.InvalidParams,
       `${label} not found: '${originalPath}'\nLooked for: '${fileCheck.effectivePath}'${fileCheck.errorMessage ? `\nError: ${fileCheck.errorMessage}` : ''}${containerHint}`);
-  }
-
-  private registerTools(): void {
-    registerToolHandlers(this.server, this);
   }
 
   /** @internal test seam; removed in PR 6 */

@@ -55,6 +55,7 @@ vi.mock('../../../../src/session/session-manager.js', () => ({
 
 // Import the schema we need to check against
 import { ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { registerToolHandlers } from '../../../../src/server/tool-dispatch.js';
 
 // Helper function to extract tools from server
 async function getToolsFromServer(server: DebugMcpServer): Promise<Array<{
@@ -66,8 +67,8 @@ async function getToolsFromServer(server: DebugMcpServer): Promise<Array<{
     required?: string[];
   };
 }>> {
-  // The server has a private registerTools method that sets up handlers
-  // We need to capture what it registers
+  // Tool registration lives in src/server/tool-dispatch.ts; re-run it against
+  // the live server to capture the tools/list handler it registers
   let capturedHandler: unknown = null;
   
   // Spy on setRequestHandler
@@ -83,7 +84,7 @@ async function getToolsFromServer(server: DebugMcpServer): Promise<Array<{
   );
   
   // Re-register tools to capture them
-  (server as unknown as { registerTools(): void }).registerTools();
+  registerToolHandlers(server.server, server);
   
   // Check if we captured the handler
   if (!capturedHandler) {
