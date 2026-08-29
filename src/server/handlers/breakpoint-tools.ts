@@ -58,6 +58,8 @@ export const setBreakpointTool: ToolHandler = async (ctx, args) => {
 /**
  * Function-breakpoint branch of set_breakpoint (the `function` parameter).
  */
+// Module-private: callers must already have run setBreakpointTool's entry guard,
+// which is what makes the `args as SetBreakpointArgs` narrowing sound.
 async function setFunctionBreakpointBranch(ctx: ToolContext, args: SetBreakpointArgs): Promise<ToolResult> {
   // Function breakpoints are session-global symbols — no file,
   // no line, no content anchor, no logpoint, no suspend policy
@@ -130,6 +132,7 @@ async function setFunctionBreakpointBranch(ctx: ToolContext, args: SetBreakpoint
 /**
  * Line / statement branch of set_breakpoint.
  */
+// Module-private: see setFunctionBreakpointBranch — the entry guard has run.
 async function setLineBreakpointBranch(ctx: ToolContext, args: SetBreakpointArgs): Promise<ToolResult> {
   try {
     // Logpoint gating (issue #235): hard error for known-unsupported

@@ -779,6 +779,11 @@ export class DebugMcpServer implements ToolContext {
     this.outputResources = new OutputResourceNotifier(this.server, this.logger);
 
     registerToolHandlers(this.server, this);
+    // Tool handlers read every dependency live through `ctx` (=== this) at call
+    // time; the resource and prompt layers capture `sessionManager` and
+    // `environment` here instead. Both fields are readonly, so production never
+    // observes the difference — but a test that swaps `sessionManager` after
+    // construction sees the swap in tool handlers only, not in resource handlers.
     registerResourceHandlers(this.server, this.sessionManager, this.outputResources);
     registerPromptHandlers(this.server, this.environment);
     this.sessionManager.on('output-captured', this.outputResources.handleOutputCaptured);
