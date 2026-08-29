@@ -14,13 +14,11 @@ import { ManagedSession, ToolchainValidationState } from './session-store.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';
 import { ProxyConfig } from '../proxy/proxy-config.js';
-import { MIRROR_EXPOSE_COMMAND, MIRROR_UNEXPOSE_COMMAND } from '../proxy/dap-proxy-interfaces.js';
 import { ErrorMessages } from '../utils/error-messages.js';
 import { checkLaunchToolchain } from '../utils/language-availability.js';
 import { didYouMean } from '../utils/did-you-mean.js';
 import { SessionManagerData } from './session-manager-data.js';
 import type { OperationsContext } from './operations-context.js';
-import { withTimeoutHint } from './dap-request-helpers.js';
 import { BreakpointController } from './breakpoints/breakpoint-controller.js';
 import { ExecutionController } from './execution/execution-controller.js';
 import {
@@ -31,6 +29,11 @@ import {
   RedefineClassesController,
   type RedefineClassesResult
 } from './jvm/redefine-classes-controller.js';
+import {
+  MirrorController,
+  type ExposeSessionResult,
+  type UnexposeSessionResult
+} from './mirror/mirror-controller.js';
 import { reresolveAnchors } from './breakpoints/anchor-resolution.js';
 import {
   buildLogpointDowngradeLaunchWarning,
@@ -58,24 +61,11 @@ export type { EvaluateResult } from './inspection/expression-evaluator.js';
 /** Result type for redefine_classes (JVM hot swap). */
 export type { RedefineClassesResult } from './jvm/redefine-classes-controller.js';
 
-/** Result of expose_session (issue #217). */
-export interface ExposeSessionResult {
-  success: boolean;
-  state: SessionState;
-  host?: string;
-  port?: number;
-  token?: string;
-  error?: string;
-}
-
-/** Result of unexpose_session (issue #217). */
-export interface UnexposeSessionResult {
-  success: boolean;
-  state: SessionState;
-  wasExposed?: boolean;
-  closedClients?: number;
-  error?: string;
-}
+/** Result types for expose_session / unexpose_session (issue #217). */
+export type {
+  ExposeSessionResult,
+  UnexposeSessionResult
+} from './mirror/mirror-controller.js';
 
 /**
  * The seven positional arguments `startProxyManager` has always taken, named.
@@ -215,6 +205,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
   protected readonly execution = new ExecutionController(this.opsContext);
   protected readonly evaluator = new ExpressionEvaluator(this.opsContext);
   protected readonly hotSwap = new RedefineClassesController(this.opsContext, this.breakpoints);
+  protected readonly mirror = new MirrorController(this.opsContext);
 
   protected async startProxyManager(
     session: ManagedSession,
@@ -2023,82 +2014,16 @@ export abstract class SessionManagerOperations extends SessionManagerData {
   }
 
   /**
-   * Expose the session's live DAP connection as a read-only mirror endpoint
-   * for IDE attach (issue #217). Idempotent: the worker returns the existing
-   * endpoint (token unrotated) when already exposed. Allowed while RUNNING
-   * as well as PAUSED — a paused-only gate would race the debuggee anyway.
+   * Open a read-only DAP mirror endpoint for IDE attach (issue #217).
    */
   async exposeSession(sessionId: string): Promise<ExposeSessionResult> {
-    const session = this._getSessionById(sessionId);
-
-    if (!session.proxyManager || !session.proxyManager.isRunning()) {
-      return {
-        success: false,
-        state: session.state,
-        error: 'No active debug session to expose — start_debugging or attach_to_process first'
-      };
-    }
-
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const response = await session.proxyManager.sendDapRequest<any>(MIRROR_EXPOSE_COMMAND, {});
-      const body = response?.body;
-      if (!body || typeof body.port !== 'number' || typeof body.token !== 'string') {
-        return { success: false, state: session.state, error: 'Malformed mirrorExpose response from debug proxy' };
-      }
-      const host = typeof body.host === 'string' ? body.host : '127.0.0.1';
-      this.sessionStore.update(sessionId, {
-        exposure: { host, port: body.port, token: body.token, exposedAt: Date.now() }
-      });
-      // The token is an attach capability — log the endpoint, never the token.
-      this.logger.info(`[SM exposeSession ${sessionId}] Mirror listening on ${host}:${body.port}`);
-      return { success: true, state: session.state, host, port: body.port, token: body.token };
-    } catch (error) {
-      this.logger.error(`[SM exposeSession ${sessionId}] Error: ${error}`);
-      return {
-        success: false,
-        state: session.state,
-        error: withTimeoutHint(error instanceof Error ? error.message : String(error))
-      };
-    }
+    return this.mirror.exposeSession(sessionId);
   }
 
   /**
-   * Close the session's mirror endpoint (issue #217). A no-op success when
-   * not exposed — the caller's desired end-state holds either way.
+   * Close the session's mirror endpoint (issue #217).
    */
   async unexposeSession(sessionId: string): Promise<UnexposeSessionResult> {
-    const session = this._getSessionById(sessionId);
-    const hadRecord = session.exposure !== undefined;
-
-    if (!session.proxyManager || !session.proxyManager.isRunning()) {
-      // Worker gone => listener gone; just clear any stale record.
-      if (hadRecord) {
-        this.sessionStore.update(sessionId, { exposure: undefined });
-      }
-      return { success: true, state: session.state, wasExposed: false };
-    }
-
-    try {
-      // Always forward even without a parent record — record and reality can
-      // disagree, and the worker no-ops safely.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const response = await session.proxyManager.sendDapRequest<any>(MIRROR_UNEXPOSE_COMMAND, {});
-      this.sessionStore.update(sessionId, { exposure: undefined });
-      const body = response?.body;
-      return {
-        success: true,
-        state: session.state,
-        wasExposed: body?.closed === true || hadRecord,
-        ...(typeof body?.closedClients === 'number' ? { closedClients: body.closedClients } : {})
-      };
-    } catch (error) {
-      this.logger.error(`[SM unexposeSession ${sessionId}] Error: ${error}`);
-      return {
-        success: false,
-        state: session.state,
-        error: withTimeoutHint(error instanceof Error ? error.message : String(error))
-      };
-    }
+    return this.mirror.unexposeSession(sessionId);
   }
 }
