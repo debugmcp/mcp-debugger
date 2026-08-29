@@ -7,6 +7,7 @@ import { requireSessionId } from '../tool-validation.js';
 import { readLineContext } from './shared.js';
 import {
   failureResult,
+  jsonResult,
   rethrowAsMcpError,
   sessionErrorToResult,
   type ToolResult
@@ -56,7 +57,7 @@ export const stepTool: ToolHandler = async (ctx, args, toolName) => {
       }
     }
 
-    return { content: [{ type: 'text', text: JSON.stringify(response) }] };
+    return jsonResult(response);
   } catch (error) {
     // Typed session errors and other expected Errors (like "Failed to step
     // over") both report as {success: false}; only non-Error throws escape.
@@ -76,7 +77,7 @@ export const continueExecutionTool: ToolHandler = async (ctx, args) => {
 
   try {
     const continueResult = await ctx.continueExecution(args.sessionId);
-    return { content: [{ type: 'text', text: JSON.stringify({ success: continueResult, message: continueResult ? 'Continued execution' : 'Failed to continue execution' }) }] };
+    return jsonResult({ success: continueResult, message: continueResult ? 'Continued execution' : 'Failed to continue execution' });
   } catch (error) {
     // Same contract as the step tools: typed session errors and other
     // expected Errors report as {success: false}; non-Errors escape.
@@ -95,7 +96,7 @@ export async function handlePause(ctx: ToolContext, args: { sessionId: string; t
   try {
     ctx.validateSession(args.sessionId);
     const result = await ctx.sessionManager.pause(args.sessionId, args.threadId);
-    return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    return jsonResult(result);
   } catch (error) {
     ctx.logger.error('Failed to pause execution', { error });
     return sessionErrorToResult(error, 'typed') ??
@@ -111,7 +112,7 @@ export async function handleListThreads(ctx: ToolContext, args: { sessionId: str
   try {
     ctx.validateSession(args.sessionId);
     const threads = await ctx.sessionManager.listThreads(args.sessionId);
-    return { content: [{ type: 'text', text: JSON.stringify({ success: true, threads }) }] };
+    return jsonResult({ success: true, threads });
   } catch (error) {
     ctx.logger.error('Failed to list threads', { error });
     return sessionErrorToResult(error, 'typed') ??

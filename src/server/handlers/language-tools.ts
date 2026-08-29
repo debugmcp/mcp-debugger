@@ -5,7 +5,7 @@ import { ErrorCode as McpErrorCode, McpError } from '@modelcontextprotocol/sdk/t
 import { getDisabledLanguages } from '../../utils/language-config.js';
 import { probeLanguageEntry, LanguageModes } from '../../utils/language-availability.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
-import type { ToolResult } from '../tool-result.js';
+import { jsonResult, type ToolResult } from '../tool-result.js';
 
 /**
  * Entry in the list_supported_languages 'available' array.
@@ -87,13 +87,13 @@ export async function handleListSupportedLanguages(ctx: ToolContext): Promise<To
     // Also build simple metadata array for backward compatibility with previous payload shape
     const languageMetadata = await ctx.getLanguageMetadata();
 
-    return { content: [{ type: 'text', text: JSON.stringify({
+    return jsonResult({
       success: true,
       installed,
       available,
       languages: languageMetadata, // backward-compatible field with display info
       count: installed.length
-    }) }] };
+    });
   } catch (error) {
     ctx.logger.error('Failed to list supported languages', { error });
     throw new McpError(McpErrorCode.InternalError, `Failed to list supported languages: ${(error as Error).message}`);

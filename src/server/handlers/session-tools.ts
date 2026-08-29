@@ -11,7 +11,7 @@ import { isContainerRuntime } from '../language-discovery.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { assertPlainObjectArg, requireSessionId } from '../tool-validation.js';
 import { attachWarning } from './shared.js';
-import type { ToolResult } from '../tool-result.js';
+import { jsonResult, type ToolResult } from '../tool-result.js';
 
 export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
   // Validate before creating the session so a bad argument does
@@ -57,10 +57,10 @@ export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
       // even when the local toolchain probe failed. 'spawn' attach
       // shares the failing toolchain; 'none' has no attach at all.
       if (attachMechanism !== 'direct-connect') {
-        return { content: [{ type: 'text', text: JSON.stringify({
+        return jsonResult({
           success: false,
           error: ErrorMessages.launchUnavailable(requested, launchGate.reason)
-        }) }] };
+        });
       }
       ctx.logger.warn(
         `[Server] create_debug_session(${requested}): launch toolchain unavailable (${launchGate.reason}); ` +
@@ -115,7 +115,7 @@ export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
       // warning (issue #450) must reach this entry point too.
       const attachData = attachResult.data as { warning?: string } | undefined;
       const warning = attachWarning(attachResult);
-      return { content: [{ type: 'text', text: JSON.stringify({
+      return jsonResult({
         success: attachResult.success,
         sessionId: sessionInfo.id,
         state: attachResult.state,
@@ -124,7 +124,7 @@ export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
           : `Created session but attach failed: ${attachResult.error || 'Unknown error'}`,
         ...(attachData ? { data: attachData } : {}),
         ...(warning ? { warning } : {})
-      }) }] };
+      });
     } catch (error) {
       ctx.logger.error('session:attach-failed', {
         sessionId: sessionInfo.id,
@@ -132,20 +132,20 @@ export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
         timestamp: Date.now()
       });
 
-      return { content: [{ type: 'text', text: JSON.stringify({
+      return jsonResult({
         success: false,
         sessionId: sessionInfo.id,
         state: 'error',
         message: `Created session but failed to attach: ${error instanceof Error ? error.message : String(error)}`
-      }) }] };
+      });
     }
   } else {
     // Launch mode: just create the session
-    return { content: [{ type: 'text', text: JSON.stringify({
+    return jsonResult({
       success: true,
       sessionId: sessionInfo.id,
       message: `Created ${sessionInfo.language} debug session: ${sessionInfo.name}`
-    }) }] };
+    });
   }
 };
 
@@ -175,7 +175,7 @@ export async function handleListDebugSessions(ctx: ToolContext): Promise<ToolRes
       }
       return mappedSession;
     });
-    return { content: [{ type: 'text', text: JSON.stringify({ success: true, sessions: sessionData, count: sessionData.length }) }] };
+    return jsonResult({ success: true, sessions: sessionData, count: sessionData.length });
   } catch (error) {
     ctx.logger.error('Failed to list debug sessions', { error });
     throw new McpError(McpErrorCode.InternalError, `Failed to list debug sessions: ${(error as Error).message}`);
@@ -205,5 +205,5 @@ export const closeDebugSessionTool: ToolHandler = async (ctx, args) => {
     ctx.outputResources.notifyListChanged();
   }
 
-  return { content: [{ type: 'text', text: JSON.stringify({ success: closed, message: closed ? `Closed debug session: ${args.sessionId}` : `Failed to close debug session: ${args.sessionId}` }) }] };
+  return jsonResult({ success: closed, message: closed ? `Closed debug session: ${args.sessionId}` : `Failed to close debug session: ${args.sessionId}` });
 };

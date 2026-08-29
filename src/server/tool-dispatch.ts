@@ -14,7 +14,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { coerceToolArguments, ToolArguments } from './tool-arguments.js';
 import { extractPayloadSuccess, sanitizeRequest } from './tool-result.js';
-import { buildToolDefinitions } from './tool-schemas.js';
+import { buildToolDefinitions, type ToolName } from './tool-schemas.js';
 import type { ToolContext } from './tool-context.js';
 import { TOOL_HANDLERS } from './handlers/index.js';
 
@@ -47,7 +47,7 @@ export function registerToolHandlers(server: Server, ctx: ToolContext): void {
         if (!Object.hasOwn(TOOL_HANDLERS, toolName)) {
           throw new McpError(McpErrorCode.MethodNotFound, `Unknown tool: ${toolName}`);
         }
-        const result = await TOOL_HANDLERS[toolName](ctx, args, toolName);
+        const result = await TOOL_HANDLERS[toolName as ToolName](ctx, args, toolName);
         
         // Log tool response; success mirrors the payload's own success flag (issue #397)
         ctx.logger.info('tool:response', {

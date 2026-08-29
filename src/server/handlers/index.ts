@@ -3,6 +3,7 @@
  * original switch in src/server.ts.
  */
 import type { ToolHandler } from '../tool-context.js';
+import type { ToolName } from '../tool-schemas.js';
 import { createDebugSessionTool, listDebugSessionsTool, closeDebugSessionTool } from './session-tools.js';
 import {
   setBreakpointTool,
@@ -30,7 +31,12 @@ import {
 import { getOutputTool } from './output-tools.js';
 import { listSupportedLanguagesTool } from './language-tools.js';
 
-export const TOOL_HANDLERS: Readonly<Record<string, ToolHandler>> = Object.freeze({
+/**
+ * Keyed by ToolName, so this table cannot drift from the advertised schema
+ * list: a tool without a handler and a handler under a misspelled name are
+ * both compile errors.
+ */
+export const TOOL_HANDLERS: Readonly<Record<ToolName, ToolHandler>> = Object.freeze({
   create_debug_session: createDebugSessionTool,
   list_debug_sessions: listDebugSessionsTool,
   set_breakpoint: setBreakpointTool,

@@ -14,6 +14,49 @@ import {
 } from '../utils/bp-addressing.js';
 import { getVariableAccessMode, requiresExplicitNames } from '../utils/variable-access.js';
 
+/**
+ * Every tool this server advertises, in the order tools/list reports them.
+ * This list is the tool name space: buildToolDefinitions pins each schema's
+ * `name` to it and handlers/index.ts keys TOOL_HANDLERS by it, so a typo or a
+ * tool without a handler is a compile error rather than a runtime
+ * `Unknown tool`.
+ */
+export const TOOL_NAMES = [
+  'create_debug_session',
+  'list_supported_languages',
+  'list_debug_sessions',
+  'set_breakpoint',
+  'list_breakpoints',
+  'remove_breakpoint',
+  'clear_breakpoints',
+  'start_debugging',
+  'restart_debugging',
+  'attach_to_process',
+  'detach_from_process',
+  'expose_session',
+  'unexpose_session',
+  'close_debug_session',
+  'step_over',
+  'step_into',
+  'step_out',
+  'continue_execution',
+  'pause_execution',
+  'list_threads',
+  'get_variables',
+  'get_local_variables',
+  'get_stack_trace',
+  'get_scopes',
+  'evaluate_expression',
+  'get_source_context',
+  'get_output',
+  'redefine_classes',
+] as const;
+
+export type ToolName = (typeof TOOL_NAMES)[number];
+
+/** A tools/list entry, with its name constrained to the advertised set. */
+export type ToolDefinition = Tool & { name: ToolName };
+
 export function getPathDescription(environment: IEnvironment, parameterName: string): string {
   if (isContainerMode(environment)) {
     return `Path to the ${parameterName}. Use paths relative to the project root (e.g., examples/python/script.py). The server resolves these against the workspace mount.`;
@@ -30,7 +73,7 @@ export interface BuildToolDefinitionsOptions {
   environment: IEnvironment;
 }
 
-export function buildToolDefinitions(options: BuildToolDefinitionsOptions): Tool[] {
+export function buildToolDefinitions(options: BuildToolDefinitionsOptions): ToolDefinition[] {
   const { supportedLanguages, environment } = options;
 
   // Generate dynamic descriptions for path parameters

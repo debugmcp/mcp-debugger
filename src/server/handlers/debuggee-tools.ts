@@ -11,7 +11,7 @@ import {
   requireSessionId,
   validateBreakOnExceptions
 } from '../tool-validation.js';
-import { sessionErrorResultOrThrow } from '../tool-result.js';
+import { jsonResult, prettyJsonResult, sessionErrorResultOrThrow } from '../tool-result.js';
 
 export const startDebuggingTool: ToolHandler = async (ctx, args) => {
   if (!args.sessionId || !args.scriptPath) {
@@ -47,7 +47,7 @@ export const startDebuggingTool: ToolHandler = async (ctx, args) => {
     if (debugResult.success && startWarnings.length > 0) {
       responsePayload.warning = startWarnings.join('; ');
     }
-    return { content: [{ type: 'text', text: JSON.stringify(responsePayload) }] };
+    return jsonResult(responsePayload);
   } catch (error) {
     // Session-lifecycle failures become {success: false}; everything else
     // (including file validation errors) is re-thrown.
@@ -79,7 +79,7 @@ export const restartDebuggingTool: ToolHandler = async (ctx, args) => {
         responsePayload.warning = restartWarning;
       }
     }
-    return { content: [{ type: 'text', text: JSON.stringify(responsePayload) }] };
+    return jsonResult(responsePayload);
   } catch (error) {
     return sessionErrorResultOrThrow(error, 'session-state');
   }
@@ -130,7 +130,7 @@ export const attachToProcessTool: ToolHandler = async (ctx, args) => {
       }
     }
 
-    return { content: [{ type: 'text', text: JSON.stringify(responsePayload) }] };
+    return jsonResult(responsePayload);
   } catch (error) {
     // Handle session state errors specifically
     return sessionErrorResultOrThrow(error, 'session-state', { state: 'stopped' });
@@ -163,7 +163,7 @@ export const detachFromProcessTool: ToolHandler = async (ctx, args) => {
       responsePayload.data = detachResult.data;
     }
 
-    return { content: [{ type: 'text', text: JSON.stringify(responsePayload) }] };
+    return jsonResult(responsePayload);
   } catch (error) {
     // Handle session state errors specifically
     return sessionErrorResultOrThrow(error, 'session-state', { state: 'stopped' });
@@ -177,7 +177,5 @@ export const redefineClassesTool: ToolHandler = async (ctx, args) => {
     (args.sinceTimestamp as number) || 0,
     args.timeout
   );
-  return {
-    content: [{ type: 'text' as const, text: JSON.stringify(redefineResult, null, 2) }],
-  };
+  return prettyJsonResult(redefineResult);
 };

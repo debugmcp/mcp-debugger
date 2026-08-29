@@ -9,6 +9,7 @@ import { enforceExplicitNames, requireSessionId } from '../tool-validation.js';
 import { variablePayloadExtras } from './shared.js';
 import {
   failureResult,
+  jsonResult,
   rethrowAsMcpError,
   sessionErrorResultOrThrow,
   sessionErrorToResult,
@@ -40,7 +41,7 @@ export const getVariablesTool: ToolHandler = async (ctx, args) => {
       timestamp: Date.now()
     });
 
-    return { content: [{ type: 'text', text: JSON.stringify({ success: true, variables, count: variables.length, variablesReference: args.scope, ...variablePayloadExtras(variables, args.names, truncation) }) }] };
+    return jsonResult({ success: true, variables, count: variables.length, variablesReference: args.scope, ...variablePayloadExtras(variables, args.names, truncation) });
   } catch (error) {
     // Typed session errors report as {success: false}; anything else escapes.
     return sessionErrorResultOrThrow(error, 'typed');
@@ -80,7 +81,7 @@ export const getStackTraceTool: ToolHandler = async (ctx, args) => {
     if (notes.length > 0) {
       payload.note = notes.join(' ');
     }
-    return { content: [{ type: 'text', text: JSON.stringify(payload) }] };
+    return jsonResult(payload);
   } catch (error) {
     const sessionResult = sessionErrorToResult(error, 'typed');
     if (sessionResult) {
@@ -104,7 +105,7 @@ export const getScopesTool: ToolHandler = async (ctx, args) => {
 
   try {
     const scopes = await ctx.getScopes(args.sessionId, args.frameId);
-    return { content: [{ type: 'text', text: JSON.stringify({ success: true, scopes }) }] };
+    return jsonResult({ success: true, scopes });
   } catch (error) {
     // Typed session errors report as {success: false}; anything else escapes.
     return sessionErrorResultOrThrow(error, 'typed');
@@ -142,12 +143,7 @@ export async function handleEvaluateExpression(ctx: ToolContext, args: { session
     });
 
     // Return formatted response
-    return { 
-      content: [{ 
-        type: 'text', 
-        text: JSON.stringify(result) 
-      }] 
-    };
+    return jsonResult(result);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
 
@@ -192,17 +188,12 @@ export async function handleGetSourceContext(ctx: ToolContext, args: { sessionId
 
     if (!lineContext) {
       // File might be binary or unreadable
-      return { 
-        content: [{ 
-          type: 'text', 
-          text: JSON.stringify({ 
-            success: false, 
-            error: 'Could not read source context. File may be binary or inaccessible.',
-            file: args.file,
-            line: args.line
-          }) 
-        }] 
-      };
+      return jsonResult({
+        success: false,
+        error: 'Could not read source context. File may be binary or inaccessible.',
+        file: args.file,
+        line: args.line
+      });
     }
 
     // Log source context request
@@ -215,19 +206,14 @@ export async function handleGetSourceContext(ctx: ToolContext, args: { sessionId
       timestamp: Date.now()
     });
 
-    return { 
-      content: [{ 
-        type: 'text', 
-        text: JSON.stringify({ 
-          success: true,
-          file: args.file,
-          line: args.line,
-          lineContent: lineContext.lineContent,
-          surrounding: lineContext.surrounding,
-          contextLines: contextLines
-        }) 
-      }] 
-    };
+    return jsonResult({
+      success: true,
+      file: args.file,
+      line: args.line,
+      lineContent: lineContext.lineContent,
+      surrounding: lineContext.surrounding,
+      contextLines: contextLines
+    });
   } catch (error) {
     ctx.logger.error('Failed to get source context', { error });
     return sessionErrorToResult(error, 'typed') ??
@@ -330,12 +316,7 @@ export async function handleGetLocalVariables(ctx: ToolContext, args: { sessionI
       }
     }
 
-    return { 
-      content: [{ 
-        type: 'text', 
-        text: JSON.stringify(response) 
-      }] 
-    };
+    return jsonResult(response);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
 

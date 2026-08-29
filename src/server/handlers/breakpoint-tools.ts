@@ -14,7 +14,7 @@ import type { ToolArguments } from '../tool-arguments.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { requireSessionId } from '../tool-validation.js';
 import { readLineContext } from './shared.js';
-import { sessionErrorResultOrThrow, type ToolResult } from '../tool-result.js';
+import { jsonResult, sessionErrorResultOrThrow, type ToolResult } from '../tool-result.js';
 
 /** set_breakpoint arguments once the entry guard has established sessionId. */
 type SetBreakpointArgs = ToolArguments & { sessionId: string };
@@ -114,7 +114,7 @@ async function setFunctionBreakpointBranch(ctx: ToolContext, args: SetBreakpoint
     });
 
     const warnings = [breakpoint.message, fnGate.warning, normalized?.note, nameHint, syncWarning].filter(Boolean);
-    return { content: [{ type: 'text', text: JSON.stringify({
+    return jsonResult({
       success: true,
       breakpointId: breakpoint.id,
       ...(normalized ? { requestedName: args.function } : {}),
@@ -125,7 +125,7 @@ async function setFunctionBreakpointBranch(ctx: ToolContext, args: SetBreakpoint
       boundLine: breakpoint.boundLine,
       message: breakpoint.message || `Function breakpoint set on ${breakpoint.functionName}`,
       warning: warnings.length > 0 ? warnings.join('; ') : undefined
-    }) }] };
+    });
   } catch (error) {
     return sessionErrorResultOrThrow(error, 'session-state');
   }
@@ -184,7 +184,7 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: SetBreakpointArgs
       : undefined;
 
     const warnings = [breakpoint.message, logPointGate.warning, syncWarning, snapWarning].filter(Boolean);
-    const result: ToolResult = { content: [{ type: 'text', text: JSON.stringify({
+    const result: ToolResult = jsonResult({
       success: true,
       breakpointId: breakpoint.id,
       file: breakpoint.file,
@@ -200,7 +200,7 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: SetBreakpointArgs
       warning: warnings.length > 0 ? warnings.join('; ') : undefined,
       // Include context if available
       context: context || undefined
-    }) }] };
+    });
     const contentEntry = Array.isArray(result.content) ? result.content[0] : undefined;
     const textContent = contentEntry && typeof (contentEntry as { text?: unknown }).text === 'string'
       ? (contentEntry as { text: string }).text
@@ -234,14 +234,14 @@ export const listBreakpointsTool: ToolHandler = async (ctx, args) => {
     const functionBreakpoints = args.file === undefined
       ? ctx.sessionManager.listFunctionBreakpoints(args.sessionId)
       : [];
-    return { content: [{ type: 'text', text: JSON.stringify({
+    return jsonResult({
       success: true,
       breakpoints,
       count: breakpoints.length,
       ...(args.file === undefined
         ? { functionBreakpoints, functionCount: functionBreakpoints.length }
         : {})
-    }) }] };
+    });
   } catch (error) {
     return sessionErrorResultOrThrow(error, 'session-state');
   }
@@ -294,14 +294,14 @@ export const removeBreakpointTool: ToolHandler = async (ctx, args) => {
           ? undefined
           : ctx.getFunctionBreakpointNameHint(args.sessionId, effectiveName);
         if (nameHint) warnings.push(nameHint);
-        return { content: [{ type: 'text', text: JSON.stringify({
+        return jsonResult({
           success: false,
           error: normalized
             ? `No function breakpoint found for ${requestedName} (normalized to ${effectiveName})`
             : `No function breakpoint found for ${requestedName}`,
           ...functionDisclosure,
           warning: warnings.length > 0 ? warnings.join('; ') : undefined
-        }) }] };
+        });
       }
       warning = warnings.length > 0 ? warnings.join('; ') : undefined;
     } else if (args.breakpointId) {
@@ -309,29 +309,29 @@ export const removeBreakpointTool: ToolHandler = async (ctx, args) => {
       removed = res.removed ? [res.removed] : [];
       warning = res.warning;
       if (removed.length === 0) {
-        return { content: [{ type: 'text', text: JSON.stringify({
+        return jsonResult({
           success: false,
           error: `No breakpoint found with id ${args.breakpointId}`
-        }) }] };
+        });
       }
     } else {
       const res = await ctx.removeBreakpointsByLocation(args.sessionId, args.file!, args.line!);
       removed = res.removed;
       warning = res.warning;
       if (removed.length === 0) {
-        return { content: [{ type: 'text', text: JSON.stringify({
+        return jsonResult({
           success: false,
           error: `No breakpoint found at ${args.file}:${args.line}`
-        }) }] };
+        });
       }
     }
-    return { content: [{ type: 'text', text: JSON.stringify({
+    return jsonResult({
       success: true,
       removed,
       message: `Removed ${removed.length} breakpoint(s)`,
       ...(functionDisclosure ?? {}),
       warning
-    }) }] };
+    });
   } catch (error) {
     return sessionErrorResultOrThrow(error, 'session-state');
   }
@@ -341,13 +341,13 @@ export const clearBreakpointsTool: ToolHandler = async (ctx, args) => {
   requireSessionId(args);
   try {
     const res = await ctx.clearBreakpoints(args.sessionId, args.file);
-    return { content: [{ type: 'text', text: JSON.stringify({
+    return jsonResult({
       success: true,
       cleared: res.cleared,
       files: res.files,
       message: `Cleared ${res.cleared} breakpoint(s)`,
       warning: res.warning
-    }) }] };
+    });
   } catch (error) {
     return sessionErrorResultOrThrow(error, 'session-state');
   }

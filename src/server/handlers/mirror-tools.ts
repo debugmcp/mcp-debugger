@@ -4,18 +4,18 @@
 import { isContainerMode } from '../../utils/container-path-utils.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { requireSessionId } from '../tool-validation.js';
-import { rethrowAsMcpError, sessionErrorToResult, type ToolResult } from '../tool-result.js';
+import { jsonResult, rethrowAsMcpError, sessionErrorToResult, type ToolResult } from '../tool-result.js';
 
 export async function handleExposeSession(ctx: ToolContext, sessionId: string): Promise<ToolResult> {
   try {
     ctx.validateSession(sessionId);
     const result = await ctx.sessionManager.exposeSession(sessionId);
     if (!result.success) {
-      return { content: [{ type: 'text', text: JSON.stringify({
+      return jsonResult({
         success: false,
         state: result.state,
         error: result.error
-      }) }] };
+      });
     }
     let message =
       `Session exposed for IDE attach at ${result.host}:${result.port}. ` +
@@ -31,14 +31,14 @@ export async function handleExposeSession(ctx: ToolContext, sessionId: string): 
         'networking (e.g. docker run --network host on Linux, or a socat/ssh forward ' +
         'into the container).';
     }
-    return { content: [{ type: 'text', text: JSON.stringify({
+    return jsonResult({
       success: true,
       state: result.state,
       host: result.host,
       port: result.port,
       token: result.token,
       message
-    }) }] };
+    });
   } catch (error) {
     ctx.logger.error('Failed to expose session', { error });
     return sessionErrorToResult(error, 'typed') ??
@@ -60,13 +60,13 @@ export async function handleUnexposeSession(ctx: ToolContext, sessionId: string)
       : result.wasExposed
         ? `Mirror endpoint closed${typeof result.closedClients === 'number' ? ` (${result.closedClients} client${result.closedClients === 1 ? '' : 's'} disconnected)` : ''}`
         : 'Session was not exposed — nothing to close';
-    return { content: [{ type: 'text', text: JSON.stringify({
+    return jsonResult({
       success: result.success,
       state: result.state,
       ...(result.wasExposed !== undefined ? { wasExposed: result.wasExposed } : {}),
       ...(message ? { message } : {}),
       ...(result.error ? { error: result.error } : {})
-    }) }] };
+    });
   } catch (error) {
     ctx.logger.error('Failed to unexpose session', { error });
     return sessionErrorToResult(error, 'typed') ??
