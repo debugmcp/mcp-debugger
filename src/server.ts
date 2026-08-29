@@ -74,6 +74,13 @@ import {
   closeDebugSessionTool,
   handleListDebugSessions
 } from './server/handlers/session-tools.js';
+import {
+  startDebuggingTool,
+  restartDebuggingTool,
+  attachToProcessTool,
+  detachFromProcessTool,
+  redefineClassesTool
+} from './server/handlers/debuggee-tools.js';
 
 export { coerceToolArguments };
 export type { SetBreakpointRequest };
@@ -1224,205 +1231,19 @@ export class DebugMcpServer implements ToolContext {
               break;
             }
             case 'start_debugging': {
-              if (!args.sessionId || !args.scriptPath) {
-                throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameters');
-              }
-              
-              try {
-                if (args.adapterLaunchConfig !== undefined) {
-                  const cfg = args.adapterLaunchConfig;
-                  if (cfg === null || typeof cfg !== 'object' || Array.isArray(cfg)) {
-                    throw new McpError(McpErrorCode.InvalidParams, 'adapterLaunchConfig must be an object when provided');
-                  }
-                }
-
-                const intake = this.normalizeStartDebuggingArgs(args.dapLaunchArgs, args.breakOnExceptions);
-                const debugResult = await this.startDebugging(
-                  args.sessionId,
-                  args.scriptPath,
-                  args.args,
-                  intake.dapLaunchArgs,
-                  args.dryRunSpawn,
-                  args.adapterLaunchConfig,
-                  this.validateBreakOnExceptions(intake.breakOnExceptions)
-                );
-                const responsePayload: Record<string, unknown> = {
-                  success: debugResult.success,
-                  state: debugResult.state,
-                  message: debugResult.error ? debugResult.error : (debugResult.data as Record<string, unknown>)?.message || `Operation status for ${args.scriptPath}`,
-                };
-                if (debugResult.data) {
-                  responsePayload.data = debugResult.data;
-                }
-                // Top-level warning join (set_breakpoint pattern): intake
-                // normalization notes (issue #305) plus any session-manager
-                // warning (unbound function breakpoints, issue #308).
-                const dataWarning = (debugResult.data as { warning?: string } | undefined)?.warning;
-                const startWarnings = [...intake.warnings, dataWarning].filter(Boolean);
-                if (debugResult.success && startWarnings.length > 0) {
-                  responsePayload.warning = startWarnings.join('; ');
-                }
-                result = { content: [{ type: 'text', text: JSON.stringify(responsePayload) }] };
-              } catch (error) {
-                // Handle session state errors specifically
-                if (error instanceof McpError && 
-                    (error.message.includes('terminated') || 
-                     error.message.includes('closed') || 
-                     (error.message.includes('not found') && error.message.includes('Session')))) {
-                  result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message, state: 'stopped' }) }] };
-                } else {
-                  // Re-throw all other errors (including file validation errors)
-                  throw error;
-                }
-              }
+              result = await startDebuggingTool(this, args, toolName);
               break;
             }
             case 'restart_debugging': {
-              if (!args.sessionId) {
-                throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameter: sessionId');
-              }
-              try {
-                const debugResult = await this.restartDebugging(args.sessionId);
-                const responsePayload: Record<string, unknown> = {
-                  success: debugResult.success,
-                  state: debugResult.state,
-                  message: debugResult.error
-                    ? debugResult.error
-                    : (debugResult.data as Record<string, unknown>)?.message || 'Debugging restarted',
-                };
-                if (debugResult.error) {
-                  responsePayload.error = debugResult.error;
-                }
-                if (debugResult.data) {
-                  responsePayload.data = debugResult.data;
-                  // Surface the merged restart warning (stale anchors and/or
-                  // unbound function breakpoints) at the top level too —
-                  // same discoverability as set_breakpoint/start_debugging.
-                  const restartWarning = (debugResult.data as { warning?: string }).warning;
-                  if (debugResult.success && restartWarning) {
-                    responsePayload.warning = restartWarning;
-                  }
-                }
-                result = { content: [{ type: 'text', text: JSON.stringify(responsePayload) }] };
-              } catch (error) {
-                result = this.handleBreakpointToolError(error);
-              }
+              result = await restartDebuggingTool(this, args, toolName);
               break;
             }
             case 'attach_to_process': {
-              if (!args.sessionId) {
-                throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
-              }
-
-              try {
-                if (args.adapterConfig !== undefined) {
-                  const cfg = args.adapterConfig;
-                  if (cfg === null || typeof cfg !== 'object' || Array.isArray(cfg)) {
-                    throw new McpError(McpErrorCode.InvalidParams, 'adapterConfig must be an object when provided');
-                  }
-                }
-
-                this.logger.info('Attach to process requested', {
-                  sessionId: args.sessionId,
-                  port: args.port,
-                  host: args.host,
-                  processId: args.processId
-                });
-
-                const attachResult = await this.sessionManager.attachToProcess(args.sessionId, {
-                  port: args.port,
-                  host: args.host,
-                  processId: args.processId,
-                  timeout: args.timeout,
-                  verifyTimeout: args.verifyTimeout,
-                  sourcePaths: args.sourcePaths,
-                  stopOnEntry: args.stopOnEntry,
-                  justMyCode: args.justMyCode,
-                  breakOnExceptions: this.validateBreakOnExceptions(args.breakOnExceptions),
-                  adapterConfig: args.adapterConfig
-                });
-
-                const responsePayload: Record<string, unknown> = {
-                  success: attachResult.success,
-                  state: attachResult.state,
-                  message: attachResult.error ||
-                    (attachResult.data as Record<string, unknown>)?.message ||
-                    'Attach operation completed'
-                };
-
-                if (attachResult.data) {
-                  responsePayload.data = attachResult.data;
-                  // Surface the dropped-adapterConfig-keys warning (issue
-                  // #450) at the top level too — same discoverability as
-                  // set_breakpoint/start_debugging/restart_debugging.
-                  const attachWarning = (attachResult.data as { warning?: string }).warning;
-                  if (attachResult.success && attachWarning) {
-                    responsePayload.warning = attachWarning;
-                  }
-                }
-
-                result = { content: [{ type: 'text', text: JSON.stringify(responsePayload) }] };
-              } catch (error) {
-                // Handle session state errors specifically
-                if (error instanceof McpError &&
-                    (error.message.includes('terminated') ||
-                     error.message.includes('closed') ||
-                     (error.message.includes('not found') && error.message.includes('Session')))) {
-                  result = { content: [{ type: 'text', text: JSON.stringify({
-                    success: false,
-                    error: error.message,
-                    state: 'stopped'
-                  }) }] };
-                } else {
-                  throw error;
-                }
-              }
+              result = await attachToProcessTool(this, args, toolName);
               break;
             }
             case 'detach_from_process': {
-              if (!args.sessionId) {
-                throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
-              }
-
-              try {
-                this.logger.info('Detach from process requested', {
-                  sessionId: args.sessionId,
-                  terminateProcess: args.terminateProcess
-                });
-
-                const detachResult = await this.sessionManager.detachFromProcess(
-                  args.sessionId,
-                  args.terminateProcess ?? false
-                );
-
-                const responsePayload: Record<string, unknown> = {
-                  success: detachResult.success,
-                  state: detachResult.state,
-                  message: detachResult.error ||
-                    (detachResult.data as Record<string, unknown>)?.message ||
-                    'Detach operation completed'
-                };
-
-                if (detachResult.data) {
-                  responsePayload.data = detachResult.data;
-                }
-
-                result = { content: [{ type: 'text', text: JSON.stringify(responsePayload) }] };
-              } catch (error) {
-                // Handle session state errors specifically
-                if (error instanceof McpError &&
-                    (error.message.includes('terminated') ||
-                     error.message.includes('closed') ||
-                     (error.message.includes('not found') && error.message.includes('Session')))) {
-                  result = { content: [{ type: 'text', text: JSON.stringify({
-                    success: false,
-                    error: error.message,
-                    state: 'stopped'
-                  }) }] };
-                } else {
-                  throw error;
-                }
-              }
+              result = await detachFromProcessTool(this, args, toolName);
               break;
             }
             case 'expose_session': {
@@ -1702,15 +1523,7 @@ export class DebugMcpServer implements ToolContext {
               break;
             }
             case 'redefine_classes': {
-              const redefineResult = await this.sessionManager.redefineClasses(
-                args.sessionId as string,
-                args.classesDir as string,
-                (args.sinceTimestamp as number) || 0,
-                args.timeout
-              );
-              result = {
-                content: [{ type: 'text' as const, text: JSON.stringify(redefineResult, null, 2) }],
-              };
+              result = await redefineClassesTool(this, args, toolName);
               break;
             }
             default:
