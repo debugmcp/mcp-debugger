@@ -51,7 +51,12 @@ import { getVariableAccessMode } from './utils/variable-access.js';
 import { assertLineContent, resolveStatement, stripTrailingComment } from './utils/breakpoint-resolver.js';
 import { OutputResourceNotifier, registerResourceHandlers } from './server/output-resources.js';
 import { registerPromptHandlers } from './server/prompts.js';
-import { discoverSupportedLanguages, buildLanguageMetadata, LanguageMetadata } from './server/language-discovery.js';
+import {
+  discoverSupportedLanguages,
+  buildLanguageMetadata,
+  isContainerRuntime,
+  LanguageMetadata
+} from './server/language-discovery.js';
 import type { ToolContext, SetBreakpointRequest } from './server/tool-context.js';
 import type { ToolResult } from './server/tool-result.js';
 import { handleListDebugSessions } from './server/handlers/session-tools.js';
@@ -231,8 +236,7 @@ export class DebugMcpServer implements ToolContext {
     // Validate language support using dynamic discovery
     const supported = await this.getSupportedLanguagesAsync();
     const requested = params.language as unknown as string;
-    const isContainer = process.env.MCP_CONTAINER === 'true';
-    const allowInContainer = isContainer && requested === DebugLanguage.PYTHON; // ensure python allowed in container
+    const allowInContainer = isContainerRuntime() && requested === DebugLanguage.PYTHON; // ensure python allowed in container
     if (isLanguageDisabled(requested)) {
       throw new McpError(
         McpErrorCode.InvalidParams,

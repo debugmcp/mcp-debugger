@@ -9,6 +9,17 @@ import { getDisabledLanguages } from '../utils/language-config.js';
 
 export const DEFAULT_LANGUAGES = Object.freeze([DebugLanguage.PYTHON, DebugLanguage.MOCK] as const);
 
+/**
+ * Whether this process is the container runtime, read LIVE from the
+ * environment on every call. Deliberately not isContainerMode(environment):
+ * IEnvironment snapshots process.env at construction, and both the container
+ * preload path and the tests that stub MCP_CONTAINER do so after the server
+ * exists.
+ */
+export function isContainerRuntime(): boolean {
+  return process.env.MCP_CONTAINER === 'true';
+}
+
 export function getDefaultLanguages(): string[] {
   return [...DEFAULT_LANGUAGES];
 }
@@ -54,7 +65,7 @@ export async function discoverSupportedLanguages(
       const langs = await maybeList.call(adapterRegistry);
       if (Array.isArray(langs) && langs.length > 0) {
         const normalized =
-          process.env.MCP_CONTAINER === 'true' ? ensureLanguage(langs, DebugLanguage.PYTHON) : langs;
+          isContainerRuntime() ? ensureLanguage(langs, DebugLanguage.PYTHON) : langs;
         return filter(normalized);
       }
     } catch (e) {
@@ -65,13 +76,13 @@ export async function discoverSupportedLanguages(
   const langs = adapterRegistry.getSupportedLanguages?.() || [];
   if (langs.length > 0) {
     // In container runtime, ensure python is advertised even if not yet registered (preload may be async)
-    if (process.env.MCP_CONTAINER === 'true') {
+    if (isContainerRuntime()) {
       return filter(ensureLanguage(langs, DebugLanguage.PYTHON));
     }
     return filter(langs);
   }
   // Final fallback to known defaults for UX (ensure python listed in container)
-  if (process.env.MCP_CONTAINER === 'true') {
+  if (isContainerRuntime()) {
     return filter(ensureLanguage(getDefaultLanguages(), DebugLanguage.PYTHON));
   }
   return filter(getDefaultLanguages());

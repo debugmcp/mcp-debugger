@@ -7,6 +7,7 @@ import { DebugLanguage, DebugSessionInfo } from '@debugmcp/shared';
 import { UnsupportedLanguageError } from '../../errors/debug-errors.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import { checkLaunchToolchain } from '../../utils/language-availability.js';
+import { isContainerRuntime } from '../language-discovery.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { assertPlainObjectArg, requireSessionId } from '../tool-validation.js';
 import { attachWarning } from './shared.js';
@@ -21,8 +22,7 @@ export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
   const supported = await ctx.getSupportedLanguagesAsync();
   const lang = (args.language || DebugLanguage.PYTHON) as DebugLanguage;
   const requested = lang as unknown as string;
-  const isContainer = process.env.MCP_CONTAINER === 'true';
-  const allowInContainer = isContainer && requested === DebugLanguage.PYTHON;
+  const allowInContainer = isContainerRuntime() && requested === DebugLanguage.PYTHON;
   if (!allowInContainer && !supported.includes(lang)) {
     throw new UnsupportedLanguageError(lang, supported);
   }
