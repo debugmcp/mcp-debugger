@@ -4,9 +4,9 @@
  */
 import { ErrorCode as McpErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { SessionState } from '@debugmcp/shared';
-import { buildTruncationNotice } from '../../session/variable-caps.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { enforceExplicitNames, requireSessionId } from '../tool-validation.js';
+import { variablePayloadExtras } from './shared.js';
 import {
   failureResult,
   rethrowAsMcpError,
@@ -40,14 +40,7 @@ export const getVariablesTool: ToolHandler = async (ctx, args) => {
       timestamp: Date.now()
     });
 
-    const redaction = ctx.redactionSummary(variables);
-    const notFound = args.names
-      ? args.names.filter(name => !variables.some(v => v.name === name))
-      : undefined;
-    const truncationInfo = truncation
-      ? { ...truncation, notice: buildTruncationNotice(truncation, variables) }
-      : undefined;
-    return { content: [{ type: 'text', text: JSON.stringify({ success: true, variables, count: variables.length, variablesReference: args.scope, ...(notFound !== undefined ? { notFound } : {}), ...(redaction ? { redaction } : {}), ...(truncationInfo ? { truncation: truncationInfo } : {}) }) }] };
+    return { content: [{ type: 'text', text: JSON.stringify({ success: true, variables, count: variables.length, variablesReference: args.scope, ...variablePayloadExtras(variables, args.names, truncation) }) }] };
   } catch (error) {
     // Typed session errors report as {success: false}; anything else escapes.
     return sessionErrorResultOrThrow(error, 'typed');
@@ -277,24 +270,18 @@ export async function handleGetLocalVariables(ctx: ToolContext, args: { sessionI
       count: result.variables.length
     };
 
-    const redaction = ctx.redactionSummary(result.variables);
-    if (redaction) {
-      response.redaction = redaction;
-    }
-
-    // Size-guard advisory (issues #356/#359): say explicitly that data was
+    // Same three decorations get_variables carries, in this tool's own order:
+    // the size-guard advisory (issues #356/#359) says explicitly that data was
     // cut and how to fetch the rest, instead of silently dropping it.
-    if (result.truncation) {
-      response.truncation = {
-        ...result.truncation,
-        notice: buildTruncationNotice(result.truncation, result.variables)
-      };
+    const extras = variablePayloadExtras(result.variables, args.names, result.truncation);
+    if (extras.redaction) {
+      response.redaction = extras.redaction;
     }
-
-    if (args.names) {
-      response.notFound = args.names.filter(
-        name => !result.variables.some(v => v.name === name)
-      );
+    if (extras.truncation) {
+      response.truncation = extras.truncation;
+    }
+    if (extras.notFound) {
+      response.notFound = extras.notFound;
     }
 
     // Include frame information if available

@@ -3,6 +3,7 @@
  */
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import type { ToolResult } from '../tool-result.js';
+import { redactionSummary } from './shared.js';
 
 export async function handleGetOutput(ctx: ToolContext, args: { sessionId: string; since?: number; limit?: number }): Promise<ToolResult> {
   // Deliberately no validateSession(): that rejects TERMINATED sessions, but
@@ -17,7 +18,7 @@ export async function handleGetOutput(ctx: ToolContext, args: { sessionId: strin
   const read = session.outputBuffer
     ? session.outputBuffer.read(since, limit)
     : { entries: [], nextSince: since, hasMore: false, dropped: 0 }; // session created but never launched
-  const redaction = ctx.redactionSummary(read.entries);
+  const redaction = redactionSummary(read.entries);
   return { content: [{ type: 'text', text: JSON.stringify({
     success: true,
     sessionId: args.sessionId,

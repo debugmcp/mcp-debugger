@@ -4,6 +4,7 @@
  */
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { requireSessionId } from '../tool-validation.js';
+import { readLineContext } from './shared.js';
 import {
   failureResult,
   rethrowAsMcpError,
@@ -49,26 +50,9 @@ export const stepTool: ToolHandler = async (ctx, args, toolName) => {
       response.location = location;
 
       // Try to get line context
-      try {
-        const lineContext = await ctx.lineReader.getLineContext(
-          location.file,
-          location.line,
-          { contextLines: 2 }
-        );
-
-        if (lineContext) {
-          response.context = {
-            lineContent: lineContext.lineContent,
-            surrounding: lineContext.surrounding
-          };
-        }
-      } catch (contextError) {
-        // Log but don't fail if we can't get context
-        ctx.logger.debug('Could not get line context for step result', {
-          file: location.file,
-          line: location.line,
-          error: contextError
-        });
+      const context = await readLineContext(ctx, location.file, location.line, 'step result');
+      if (context) {
+        response.context = context;
       }
     }
 

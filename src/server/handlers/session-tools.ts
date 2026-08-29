@@ -9,6 +9,7 @@ import { ErrorMessages } from '../../utils/error-messages.js';
 import { checkLaunchToolchain } from '../../utils/language-availability.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { assertPlainObjectArg, requireSessionId } from '../tool-validation.js';
+import { attachWarning } from './shared.js';
 import type { ToolResult } from '../tool-result.js';
 
 export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
@@ -113,7 +114,7 @@ export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
       // proxyLogPath, issue #551) and the dropped-adapterConfig
       // warning (issue #450) must reach this entry point too.
       const attachData = attachResult.data as { warning?: string } | undefined;
-      const attachWarning = attachResult.success ? attachData?.warning : undefined;
+      const warning = attachWarning(attachResult);
       return { content: [{ type: 'text', text: JSON.stringify({
         success: attachResult.success,
         sessionId: sessionInfo.id,
@@ -122,7 +123,7 @@ export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
           ? `Created and attached ${sessionInfo.language} debug session: ${sessionInfo.name}`
           : `Created session but attach failed: ${attachResult.error || 'Unknown error'}`,
         ...(attachData ? { data: attachData } : {}),
-        ...(attachWarning ? { warning: attachWarning } : {})
+        ...(warning ? { warning } : {})
       }) }] };
     } catch (error) {
       ctx.logger.error('session:attach-failed', {

@@ -79,9 +79,6 @@ export interface ToolContext {
     functionName: string
   ): { name: string; note: string } | undefined;
 
-  // ---- result shaping ----
-  redactionSummary(items: Array<{ redacted?: boolean }>): { masked: number; notice: string } | undefined;
-
   // ---- public facade (unchanged signatures) ----
   createDebugSession(params: { language: DebugLanguage; name?: string; executablePath?: string; }): Promise<DebugSessionInfo>;
   startDebugging(

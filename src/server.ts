@@ -32,8 +32,7 @@ import {
     SessionLifecycleState,
     IEnvironment,
     ILogger,
-    ExceptionBreakMode,
-    REDACTION_NOTICE
+    ExceptionBreakMode
 } from '@debugmcp/shared';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';
@@ -716,17 +715,6 @@ export class DebugMcpServer implements ToolContext {
   /** @internal test seam; removed in PR 6 */
   private async handleListDebugSessions(): Promise<ToolResult> {
     return handleListDebugSessions(this);
-  }
-
-  /**
-   * Top-level `redaction` notice object for tool results (issue #237):
-   * present when any returned item carries the session layer's `redacted`
-   * flag, so the agent learns why values changed and how to opt out.
-   * @internal ToolContext service.
-   */
-  public redactionSummary(items: Array<{ redacted?: boolean }>): { masked: number; notice: string } | undefined {
-    const masked = items.filter(item => item.redacted).length;
-    return masked > 0 ? { masked, notice: REDACTION_NOTICE } : undefined;
   }
 
   /** @internal test seam; removed in PR 6 */

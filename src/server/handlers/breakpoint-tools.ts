@@ -13,6 +13,7 @@ import {
 import type { ToolArguments } from '../tool-arguments.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { requireSessionId } from '../tool-validation.js';
+import { readLineContext } from './shared.js';
 import { sessionErrorResultOrThrow, type ToolResult } from '../tool-result.js';
 
 /** set_breakpoint arguments once the entry guard has established sessionId. */
@@ -168,28 +169,7 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: SetBreakpointArgs
     });
 
     // Try to get line context for the breakpoint
-    let context;
-    try {
-      const lineContext = await ctx.lineReader.getLineContext(
-        breakpoint.file,
-        breakpoint.line,
-        { contextLines: 2 }
-      );
-
-      if (lineContext) {
-        context = {
-          lineContent: lineContext.lineContent,
-          surrounding: lineContext.surrounding
-        };
-      }
-    } catch (contextError) {
-      // Log but don't fail if we can't get context
-      ctx.logger.debug('Could not get line context for breakpoint', { 
-        file: breakpoint.file, 
-        line: breakpoint.line, 
-        error: contextError 
-      });
-    }
+    const context = await readLineContext(ctx, breakpoint.file, breakpoint.line, 'breakpoint');
 
     // Loud snapping (issue #271): if the adapter bound the
     // breakpoint to a different line than requested, say so
