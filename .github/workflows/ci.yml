@@ -218,8 +218,8 @@ jobs:
     - name: Run ESLint
       run: pnpm run lint
 
-    # Type-only checks, no build needed (~30 s). `tsc -b -f .` in `build` stays the
-    # authoritative compile; these catch type errors before the 3-minute build job.
+    # Type-only checks: no build needed, a few seconds each. `tsc -b -f .` in `build`
+    # stays the authoritative compile; these catch type errors before the build job does.
     - name: Type-check sources
       run: pnpm run typecheck
 

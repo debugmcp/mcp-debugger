@@ -2,7 +2,7 @@
   // Type-only program covering every first-party source file in one pass (issue #562).
   //
   // `--noEmit` skips declaration-emit diagnostics, so `tsc -b -f .` in `build` stays the
-  // authoritative compile; this is the fast (~15 s) check that runs in `lint` CI and pre-push.
+  // authoritative compile; this is the seconds-long check that runs in `lint` CI and pre-push.
   // `composite: false` is what keeps TS6307 ("not listed within the file list of project")
   // out of the results, and the `./`-relative `paths` below resolve packages to their TS
   // sources so this runs on a fresh clone with no `dist/` — they need no `baseUrl`, which is
