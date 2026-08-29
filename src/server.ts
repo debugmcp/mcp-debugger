@@ -36,6 +36,7 @@ import {
     SessionLifecycleState,
     SessionState,
     IEnvironment,
+    ILogger,
     ExceptionBreakMode,
     REDACTION_NOTICE
 } from '@debugmcp/shared';
@@ -68,8 +69,11 @@ import { buildToolDefinitions } from './server/tool-schemas.js';
 import { OutputResourceNotifier, registerResourceHandlers } from './server/output-resources.js';
 import { registerPromptHandlers } from './server/prompts.js';
 import { discoverSupportedLanguages, buildLanguageMetadata, LanguageMetadata } from './server/language-discovery.js';
+import type { ToolContext, SetBreakpointRequest } from './server/tool-context.js';
+import type { ToolResult } from './server/tool-result.js';
 
 export { coerceToolArguments };
+export type { SetBreakpointRequest };
 
 /**
  * Configuration options for the Debug MCP Server
@@ -93,40 +97,28 @@ interface AvailableLanguage {
 }
 
 /**
- * Request shape for DebugMcpServer.setBreakpoint (issue #271).
- */
-export interface SetBreakpointRequest {
-  sessionId: string;
-  file: string;
-  /** 1-based target line (required unless statement is given) */
-  line?: number;
-  /** Assert the target line's trimmed content before setting (assert/content modes) */
-  expectedContent?: string;
-  /** Content anchor: whole-line trimmed-equality match (content mode) */
-  statement?: string;
-  /** Disambiguates a multi-match statement to the closest occurrence */
-  nearLine?: number;
-  condition?: string;
-  logMessage?: string;
-  suspendPolicy?: 'all' | 'thread';
-}
-
-/**
  * Main Debug MCP Server class
  */
-export class DebugMcpServer {
+export class DebugMcpServer implements ToolContext {
   public server: Server;
-  private sessionManager: SessionManager;
-  private logger;
+  /** @internal ToolContext dependency; read live by the tool handlers. */
+  public readonly sessionManager: SessionManager;
+  /** @internal ToolContext dependency; read live by the tool handlers. */
+  public readonly logger: ILogger;
   /** Detaches this server's logger from the shared file transport on stop() (issue #404). */
   private readonly disposeLogger?: () => void;
-  private fileChecker: SimpleFileChecker;
-  private lineReader: LineReader;
-  private environment: IEnvironment;
+  /** @internal ToolContext dependency; read live by the tool handlers. */
+  public readonly fileChecker: SimpleFileChecker;
+  /** @internal ToolContext dependency; read live by the tool handlers. */
+  public readonly lineReader: LineReader;
+  /** @internal ToolContext dependency; read live by the tool handlers. */
+  public readonly environment: IEnvironment;
 
   // Debuggee-output resource subscriptions (issue #218).
-  private outputResources: OutputResourceNotifier;
-  private validationCache = new ValidationResultCache();
+  /** @internal ToolContext dependency; read live by the tool handlers. */
+  public readonly outputResources: OutputResourceNotifier;
+  /** @internal ToolContext dependency; read live by the tool handlers. */
+  public readonly validationCache = new ValidationResultCache();
 
   /** @internal Language discovery is a ToolContext service; see src/server/language-discovery.ts. */
   public async getSupportedLanguagesAsync(): Promise<string[]> {
@@ -140,8 +132,9 @@ export class DebugMcpServer {
 
   /**
    * Validate session exists and is not terminated
+   * @internal ToolContext service.
    */
-  private validateSession(sessionId: string): void {
+  public validateSession(sessionId: string): void {
     const session = this.sessionManager.getSession(sessionId);
     if (!session) {
       // Typed subclass of McpError (same code/message) so per-tool catch blocks
@@ -160,8 +153,9 @@ export class DebugMcpServer {
    * supportsLogPoints is false — is a hard error; known-supported passes;
    * unknown support passes with a warning and is re-checked against the
    * adapter's real capabilities at launch (drift warning).
+   * @internal ToolContext service.
    */
-  private validateLogPointSupport(sessionId: string): { warning?: string } {
+  public validateLogPointSupport(sessionId: string): { warning?: string } {
     const session = this.sessionManager.getSession(sessionId);
     const liveCaps = session?.adapterCapabilities;
     const policy = this.sessionManager.getSessionPolicy(sessionId);
@@ -191,8 +185,9 @@ export class DebugMcpServer {
    * verdict is checked FIRST. The policy encodes what the adapter and our
    * plumbing can actually deliver, so an explicit policy false must beat
    * whatever the live capabilities claim.
+   * @internal ToolContext service.
    */
-  private validateFunctionBreakpointSupport(sessionId: string): { warning?: string } {
+  public validateFunctionBreakpointSupport(sessionId: string): { warning?: string } {
     const session = this.sessionManager.getSession(sessionId);
     const liveCaps = session?.adapterCapabilities;
     const policy = this.sessionManager.getSessionPolicy(sessionId);
@@ -225,8 +220,9 @@ export class DebugMcpServer {
   /**
    * Per-adapter function-breakpoint name advisory (issues #303/#308).
    * Swallows policy-lookup failures — a hint must never break the set path.
+   * @internal ToolContext service.
    */
-  private getFunctionBreakpointNameHint(sessionId: string, functionName: string): string | undefined {
+  public getFunctionBreakpointNameHint(sessionId: string, functionName: string): string | undefined {
     try {
       return this.sessionManager.getSessionPolicy(sessionId).functionBreakpointNameHint?.(functionName);
     } catch {
@@ -237,8 +233,9 @@ export class DebugMcpServer {
   /**
    * Policy-certain function-breakpoint name rewrite (issue #467). Swallows
    * policy-lookup failures — normalization must never break the set path.
+   * @internal ToolContext service.
    */
-  private normalizeFunctionBreakpointName(
+  public normalizeFunctionBreakpointName(
     sessionId: string,
     functionName: string
   ): { name: string; note: string } | undefined {
@@ -253,8 +250,9 @@ export class DebugMcpServer {
    * Shared catch for the breakpoint management tools: session-lifecycle
    * failures become {success: false} results (same contract as
    * set_breakpoint's catch); everything else re-throws.
+   * @internal ToolContext service.
    */
-  private handleBreakpointToolError(error: unknown): { content: [{ type: 'text'; text: string }] } {
+  public handleBreakpointToolError(error: unknown): ToolResult {
     if (error instanceof McpError &&
         (error.message.includes('terminated') ||
          error.message.includes('closed') ||
@@ -264,7 +262,8 @@ export class DebugMcpServer {
     throw error;
   }
 
-  private validateBreakOnExceptions(value: string | undefined): ExceptionBreakMode | undefined {
+  /** @internal ToolContext service. */
+  public validateBreakOnExceptions(value: string | undefined): ExceptionBreakMode | undefined {
     if (value === undefined) {
       return undefined;
     }
@@ -303,8 +302,9 @@ export class DebugMcpServer {
    * - Other never-valid nested keys are stripped with a warning.
    * Fixing at intake also cures restart_debugging replay, which snapshots the
    * post-intake values into session.lastLaunch downstream.
+   * @internal ToolContext service.
    */
-  private normalizeStartDebuggingArgs(
+  public normalizeStartDebuggingArgs(
     dapLaunchArgs: Partial<DebugProtocol.LaunchRequestArguments> | undefined,
     topLevelBreakOnExceptions: string | undefined
   ): {
@@ -809,8 +809,9 @@ export class DebugMcpServer {
 
   /**
    * Get session name for logging
+   * @internal ToolContext service.
    */
-  private getSessionName(sessionId: string): string {
+  public getSessionName(sessionId: string): string {
     try {
       const session = this.sessionManager.getSession(sessionId);
       return session?.name || 'Unknown Session';
@@ -819,7 +820,8 @@ export class DebugMcpServer {
     }
   }
 
-  private fileNotFoundError(label: string, originalPath: string, fileCheck: FileExistenceResult): McpError {
+  /** @internal ToolContext service. */
+  public fileNotFoundError(label: string, originalPath: string, fileCheck: FileExistenceResult): McpError {
     const containerHint = isContainerMode(this.environment)
       ? `\nHint: Ensure the Docker volume mount maps your project root to ${getWorkspaceRoot(this.environment)} (e.g., -v /path/to/project:${getWorkspaceRoot(this.environment)})`
       : '';
@@ -1938,8 +1940,9 @@ export class DebugMcpServer {
    * Least-privilege enforcement (issue #237): in explicit mode, bulk scope
    * dumps are disabled — the tools require a non-empty names filter, and the
    * error teaches the correct call shape.
+   * @internal ToolContext service.
    */
-  private enforceExplicitNames(toolName: string, names: string[] | undefined): void {
+  public enforceExplicitNames(toolName: string, names: string[] | undefined): void {
     if (!requiresExplicitNames(getVariableAccessMode(this.environment))) {
       return;
     }
@@ -1957,8 +1960,9 @@ export class DebugMcpServer {
    * Top-level `redaction` notice object for tool results (issue #237):
    * present when any returned item carries the session layer's `redacted`
    * flag, so the agent learns why values changed and how to opt out.
+   * @internal ToolContext service.
    */
-  private redactionSummary(items: Array<{ redacted?: boolean }>): { masked: number; notice: string } | undefined {
+  public redactionSummary(items: Array<{ redacted?: boolean }>): { masked: number; notice: string } | undefined {
     const masked = items.filter(item => item.redacted).length;
     return masked > 0 ? { masked, notice: REDACTION_NOTICE } : undefined;
   }
