@@ -18,7 +18,6 @@ import { buildServerInstructions } from './skill-content.js';
 import {
   SessionNotFoundError,
   SessionTerminatedError,
-  UnsupportedLanguageError,
   UnsupportedFeatureError,
   ProxyNotRunningError
 } from './errors/debug-errors.js';
@@ -45,10 +44,8 @@ import path from 'path';
 import { SimpleFileChecker, createSimpleFileChecker, FileExistenceResult } from './utils/simple-file-checker.js';
 import { LineReader, createLineReader } from './utils/line-reader.js';
 import { getDisabledLanguages, isLanguageDisabled } from './utils/language-config.js';
-import { ErrorMessages } from './utils/error-messages.js';
 import {
   probeLanguageEntry,
-  checkLaunchToolchain,
   ValidationResultCache,
   LanguageModes
 } from './utils/language-availability.js';
@@ -71,6 +68,12 @@ import { registerPromptHandlers } from './server/prompts.js';
 import { discoverSupportedLanguages, buildLanguageMetadata, LanguageMetadata } from './server/language-discovery.js';
 import type { ToolContext, SetBreakpointRequest } from './server/tool-context.js';
 import type { ToolResult } from './server/tool-result.js';
+import {
+  createDebugSessionTool,
+  listDebugSessionsTool,
+  closeDebugSessionTool,
+  handleListDebugSessions
+} from './server/handlers/session-tools.js';
 
 export { coerceToolArguments };
 export type { SetBreakpointRequest };
@@ -859,151 +862,11 @@ export class DebugMcpServer implements ToolContext {
           
           switch (toolName) {
             case 'create_debug_session': {
-              // Validate before creating the session so a bad argument does
-              // not leave an orphan session behind (issue #336).
-              if (args.adapterConfig !== undefined) {
-                const cfg = args.adapterConfig;
-                if (cfg === null || typeof cfg !== 'object' || Array.isArray(cfg)) {
-                  throw new McpError(McpErrorCode.InvalidParams, 'adapterConfig must be an object when provided');
-                }
-              }
-
-              // Ensure requested language is among dynamically supported ones
-              const supported = await this.getSupportedLanguagesAsync();
-              const lang = (args.language || DebugLanguage.PYTHON) as DebugLanguage;
-              const requested = lang as unknown as string;
-              const isContainer = process.env.MCP_CONTAINER === 'true';
-              const allowInContainer = isContainer && requested === DebugLanguage.PYTHON;
-              if (!allowInContainer && !supported.includes(lang)) {
-                throw new UnsupportedLanguageError(lang, supported);
-              }
-
-              // Fail fast when the adapter can't do ANYTHING here (issue
-              // #360). A failed launch-toolchain probe alone must not block
-              // session creation: the caller may intend to attach (with or
-              // without a port at create time), and direct-connect attach
-              // needs no local toolchain — e.g. ruby attach works in the
-              // container image without a launch toolchain. Launch itself is
-              // still gated at start_debugging.
-              {
-                const launchGate = await checkLaunchToolchain(
-                  requested,
-                  this.getAdapterRegistry(),
-                  this.validationCache,
-                  this.logger
-                );
-                if (!launchGate.available) {
-                  const registry = this.getAdapterRegistry();
-                  const attachMechanism = await (async () => {
-                    try {
-                      const factory = typeof registry?.getFactory === 'function'
-                        ? await registry.getFactory(requested)
-                        : undefined;
-                      return factory?.getMetadata?.().modes?.attach ?? 'none';
-                    } catch {
-                      return 'none';
-                    }
-                  })();
-                  // 'direct-connect' attach runs inside the debuggee — usable
-                  // even when the local toolchain probe failed. 'spawn' attach
-                  // shares the failing toolchain; 'none' has no attach at all.
-                  if (attachMechanism !== 'direct-connect') {
-                    result = { content: [{ type: 'text', text: JSON.stringify({
-                      success: false,
-                      error: ErrorMessages.launchUnavailable(requested, launchGate.reason)
-                    }) }] };
-                    break;
-                  }
-                  this.logger.warn(
-                    `[Server] create_debug_session(${requested}): launch toolchain unavailable (${launchGate.reason}); ` +
-                      `allowing session creation because direct-connect attach remains usable.`
-                  );
-                }
-              }
-
-              const sessionInfo = await this.createDebugSession({
-                language: lang,
-                name: args.name,
-                executablePath: args.executablePath
-              });
-
-              // Log session creation
-              this.logger.info('session:created', {
-                sessionId: sessionInfo.id,
-                sessionName: sessionInfo.name,
-                language: sessionInfo.language,
-                executablePath: args.executablePath,
-                timestamp: Date.now()
-              });
-
-              // A new output resource is now listable (issue #218)
-              this.outputResources.notifyListChanged();
-
-              // Check if attach mode is requested (host/port provided)
-              const isAttachMode = args.port !== undefined;
-
-              if (isAttachMode) {
-                // Attach mode: immediately attach to the running process
-                this.logger.info('session:attach-mode', {
-                  sessionId: sessionInfo.id,
-                  host: args.host || 'localhost',
-                  port: args.port,
-                  timestamp: Date.now()
-                });
-
-                try {
-                  const attachResult = await this.sessionManager.attachToProcess(sessionInfo.id, {
-                    port: args.port as number,
-                    host: (args.host as string) || 'localhost',
-                    timeout: (args.timeout as number) || 30000,
-                    stopOnEntry: args.stopOnEntry,
-                    verifyTimeout: args.verifyTimeout,
-                    adapterConfig: args.adapterConfig,
-                  });
-
-                  // Forward the attach payload the same way attach_to_process
-                  // does: structured failure diagnostics (initProgress /
-                  // proxyLogPath, issue #551) and the dropped-adapterConfig
-                  // warning (issue #450) must reach this entry point too.
-                  const attachData = attachResult.data as { warning?: string } | undefined;
-                  const attachWarning = attachResult.success ? attachData?.warning : undefined;
-                  result = { content: [{ type: 'text', text: JSON.stringify({
-                    success: attachResult.success,
-                    sessionId: sessionInfo.id,
-                    state: attachResult.state,
-                    message: attachResult.success
-                      ? `Created and attached ${sessionInfo.language} debug session: ${sessionInfo.name}`
-                      : `Created session but attach failed: ${attachResult.error || 'Unknown error'}`,
-                    ...(attachData ? { data: attachData } : {}),
-                    ...(attachWarning ? { warning: attachWarning } : {})
-                  }) }] };
-                } catch (error) {
-                  this.logger.error('session:attach-failed', {
-                    sessionId: sessionInfo.id,
-                    error: error instanceof Error ? error.message : String(error),
-                    timestamp: Date.now()
-                  });
-
-                  result = { content: [{ type: 'text', text: JSON.stringify({
-                    success: false,
-                    sessionId: sessionInfo.id,
-                    state: 'error',
-                    message: `Created session but failed to attach: ${error instanceof Error ? error.message : String(error)}`
-                  }) }] };
-                }
-              } else {
-                // Launch mode: just create the session
-                result = { content: [{ type: 'text', text: JSON.stringify({
-                  success: true,
-                  sessionId: sessionInfo.id,
-                  message: `Created ${sessionInfo.language} debug session: ${sessionInfo.name}`
-                }) }] };
-              }
-
+              result = await createDebugSessionTool(this, args, toolName);
               break;
             }
             case 'list_debug_sessions': {
-              result = await this.handleListDebugSessions();
+              result = await listDebugSessionsTool(this, args, toolName);
               break;
             }
             case 'set_breakpoint': {
@@ -1577,27 +1440,7 @@ export class DebugMcpServer implements ToolContext {
               break;
             }
             case 'close_debug_session': {
-              if (!args.sessionId) {
-                throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
-              }
-
-              const sessionName = this.getSessionName(args.sessionId);
-              const closed = await this.closeDebugSession(args.sessionId);
-
-              if (closed) {
-                // Log session closure
-                this.logger.info('session:closed', {
-                  sessionId: args.sessionId,
-                  sessionName: sessionName,
-                  timestamp: Date.now()
-                });
-
-                // The session's output resource is gone (issue #218)
-                this.outputResources.forgetSession(args.sessionId);
-                this.outputResources.notifyListChanged();
-              }
-              
-              result = { content: [{ type: 'text', text: JSON.stringify({ success: closed, message: closed ? `Closed debug session: ${args.sessionId}` : `Failed to close debug session: ${args.sessionId}` }) }] };
+              result = await closeDebugSessionTool(this, args, toolName);
               break;
             }
             case 'step_over':
@@ -1903,37 +1746,9 @@ export class DebugMcpServer implements ToolContext {
     );
   }
 
-  private async handleListDebugSessions(): Promise<ServerResult> {
-    try {
-      const sessionsInfo: DebugSessionInfo[] = this.sessionManager.getAllSessions();
-      const sessionData = sessionsInfo.map((session: DebugSessionInfo) => {
-        const mappedSession: Record<string, unknown> = { 
-            id: session.id, 
-            name: session.name, 
-            language: session.language as DebugLanguage, 
-            state: session.state, 
-            createdAt: session.createdAt.toISOString(),
-        };
-        if (session.updatedAt) {
-            mappedSession.updatedAt = session.updatedAt.toISOString();
-        }
-        if (session.lastStop) {
-            mappedSession.lastStop = session.lastStop;
-        }
-        if (session.exitCode !== undefined) {
-            mappedSession.exitCode = session.exitCode;
-        }
-        if (session.exposure) {
-            // Mirror endpoint host/port; the token never leaves expose_session.
-            mappedSession.exposure = session.exposure;
-        }
-        return mappedSession;
-      });
-      return { content: [{ type: 'text', text: JSON.stringify({ success: true, sessions: sessionData, count: sessionData.length }) }] };
-    } catch (error) {
-      this.logger.error('Failed to list debug sessions', { error });
-      throw new McpError(McpErrorCode.InternalError, `Failed to list debug sessions: ${(error as Error).message}`);
-    }
+  /** @internal test seam; removed in PR 6 */
+  private async handleListDebugSessions(): Promise<ToolResult> {
+    return handleListDebugSessions(this);
   }
 
   /**
