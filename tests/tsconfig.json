@@ -1,0 +1,15 @@
+{
+  // Owns `tests/**` for the editor (issue #562).
+  //
+  // Without a tsconfig on the path from a test file to the repo root, tsserver drops every
+  // test into an inferred project — no `paths`, no `types`, different libs — so the editor
+  // and `pnpm run typecheck:tests` disagree about the same file (measured: 162 editor errors
+  // vs 39 from the ratchet for one proxy test). This re-points the editor at the very program
+  // the ratchet checks.
+  //
+  // The ratchet itself still runs `../tsconfig.spec.json` from the repo root; this file only
+  // exists so tooling that resolves the *nearest* tsconfig finds the same settings.
+  "extends": "../tsconfig.spec.json",
+  "include": ["./**/*"],
+  "exclude": ["./fixtures/**", "./manual/**", "./reports/**"]
+}

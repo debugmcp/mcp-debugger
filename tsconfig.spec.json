@@ -6,6 +6,10 @@
   // (`../../src/session/session-manager-operations`) — hence `moduleResolution: "Bundler"`
   // instead of the NodeNext used for shipped source.
   //
+  // `tests/fixtures` and `tests/manual` are excluded because Vitest never runs them:
+  // fixtures are debuggee programs compiled by their own tsconfig, and tests/manual holds
+  // hand-run scripts. Type-checking them only produced baseline entries nobody would act on.
+  //
   // This config is expected to report errors: they are ratcheted per file in
   // `tests/typecheck-baseline.json` rather than gating outright.
   "extends": "./tsconfig.typecheck.json",
@@ -24,6 +28,8 @@
     "node_modules",
     "**/dist/**",
     "coverage",
+    "tests/fixtures/**",
+    "tests/manual/**",
     "tests/reports/**"
   ]
 }

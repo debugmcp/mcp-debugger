@@ -8,8 +8,15 @@
   // sources so this runs on a fresh clone with no `dist/` — they need no `baseUrl`, which is
   // deprecated in TypeScript 6 (TS5101).
   //
-  // `paths` mirrors the workspace aliases in `vitest.config.ts` exactly, so what type-checks
-  // here is what the test runner resolves at runtime.
+  // One wildcard entry rather than a row per adapter: a per-package registration site is
+  // one more thing to forget when adding an adapter, and a missing row fails quietly —
+  // resolving to a stale `dist/index.d.ts` locally and to TS2307 in the no-build CI job.
+  // It covers the same eleven `@debugmcp/*` workspace packages `vitest.config.ts` aliases
+  // (the `@` -> `src` alias is not mirrored; nothing outside tests uses it).
+  //
+  // `lib` is pinned because the default for target ES2022 drags in DOM: Node/vitest code
+  // would be checked against browser globals, and lib.dom's `Body.json()` returning `any`
+  // silently masked two real errors in the tests.
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "composite": false,
@@ -18,18 +25,9 @@
     "declaration": false,
     "sourceMap": false,
     "rootDir": ".",
+    "lib": ["ES2022"],
     "paths": {
-      "@debugmcp/shared": ["./packages/shared/src/index.ts"],
-      "@debugmcp/codelldb-common": ["./packages/codelldb-common/src/index.ts"],
-      "@debugmcp/adapter-mock": ["./packages/adapter-mock/src/index.ts"],
-      "@debugmcp/adapter-python": ["./packages/adapter-python/src/index.ts"],
-      "@debugmcp/adapter-ruby": ["./packages/adapter-ruby/src/index.ts"],
-      "@debugmcp/adapter-javascript": ["./packages/adapter-javascript/src/index.ts"],
-      "@debugmcp/adapter-go": ["./packages/adapter-go/src/index.ts"],
-      "@debugmcp/adapter-rust": ["./packages/adapter-rust/src/index.ts"],
-      "@debugmcp/adapter-java": ["./packages/adapter-java/src/index.ts"],
-      "@debugmcp/adapter-dotnet": ["./packages/adapter-dotnet/src/index.ts"],
-      "@debugmcp/adapter-cpp": ["./packages/adapter-cpp/src/index.ts"]
+      "@debugmcp/*": ["./packages/*/src/index.ts"]
     }
   },
   "include": ["src/**/*", "packages/*/src/**/*"],
