@@ -67,21 +67,9 @@ import { extractPayloadSuccess, sanitizeRequest } from './server/tool-result.js'
 import { buildToolDefinitions } from './server/tool-schemas.js';
 import { OutputResourceNotifier, registerResourceHandlers } from './server/output-resources.js';
 import { registerPromptHandlers } from './server/prompts.js';
+import { discoverSupportedLanguages, buildLanguageMetadata, LanguageMetadata } from './server/language-discovery.js';
 
 export { coerceToolArguments };
-
-const DEFAULT_LANGUAGES = Object.freeze([DebugLanguage.PYTHON, DebugLanguage.MOCK] as const);
-
-function getDefaultLanguages(): string[] {
-  return [...DEFAULT_LANGUAGES];
-}
-
-function ensureLanguage(
-  languages: readonly string[],
-  language: string
-): string[] {
-  return languages.includes(language) ? [...languages] : [...languages, language];
-}
 
 /**
  * Configuration options for the Debug MCP Server
@@ -89,17 +77,6 @@ function ensureLanguage(
 export interface DebugMcpServerOptions {
   logLevel?: string;
   logFile?: string;
-}
-
-/**
- * Language metadata for supported languages
- */
-interface LanguageMetadata {
-  id: string;
-  displayName: string;
-  version: string;
-  requiresExecutable: boolean;
-  defaultExecutable?: string;
 }
 
 /**
@@ -151,101 +128,14 @@ export class DebugMcpServer {
   private outputResources: OutputResourceNotifier;
   private validationCache = new ValidationResultCache();
 
-  // Get supported languages from adapter registry
-  private async getSupportedLanguagesAsync(): Promise<string[]> {
-    const disabled = getDisabledLanguages();
-    const filter = (langs: readonly string[]) => this.filterDisabledLanguages(langs, disabled);
-    const adapterRegistry = this.getAdapterRegistry();
-    // Guard against undefined registry in certain test environments
-    if (!adapterRegistry) {
-      return filter(getDefaultLanguages());
-    }
-    // Prefer dynamic discovery. listLanguages is on IAdapterRegistry (issue
-    // #435 part 4); the runtime guard stays for partial registry doubles.
-    const maybeList = adapterRegistry.listLanguages;
-    if (typeof maybeList === 'function') {
-      try {
-        const langs = await maybeList.call(adapterRegistry);
-        if (Array.isArray(langs) && langs.length > 0) {
-          const normalized =
-            process.env.MCP_CONTAINER === 'true' ? ensureLanguage(langs, DebugLanguage.PYTHON) : langs;
-          return filter(normalized);
-        }
-      } catch (e) {
-        this.logger.warn('Dynamic adapter language discovery failed, falling back to registered languages', { error: (e as Error)?.message });
-      }
-    }
-    // Fallback to already-registered factories (may be empty until first use)
-    const langs = adapterRegistry.getSupportedLanguages?.() || [];
-    if (langs.length > 0) {
-      // In container runtime, ensure python is advertised even if not yet registered (preload may be async)
-      if (process.env.MCP_CONTAINER === 'true') {
-        return filter(ensureLanguage(langs, DebugLanguage.PYTHON));
-      }
-      return filter(langs);
-    }
-    // Final fallback to known defaults for UX (ensure python listed in container)
-    if (process.env.MCP_CONTAINER === 'true') {
-      return filter(ensureLanguage(getDefaultLanguages(), DebugLanguage.PYTHON));
-    }
-    return filter(getDefaultLanguages());
+  /** @internal Language discovery is a ToolContext service; see src/server/language-discovery.ts. */
+  public async getSupportedLanguagesAsync(): Promise<string[]> {
+    return discoverSupportedLanguages(this.getAdapterRegistry(), this.logger);
   }
 
-  // Get language metadata for all supported languages
-  private async getLanguageMetadata(): Promise<LanguageMetadata[]> {
-    const languages = await this.getSupportedLanguagesAsync();
-
-    // Hardcoded metadata fallback; adapters could provide this via registry in the future
-    return languages.map((lang: string) => {
-      switch (lang) {
-        case DebugLanguage.PYTHON:
-          return {
-            id: DebugLanguage.PYTHON,
-            displayName: 'Python',
-            version: '1.0.0',
-            requiresExecutable: true,
-            defaultExecutable: 'python'
-          };
-        case DebugLanguage.RUBY:
-          return {
-            id: DebugLanguage.RUBY,
-            displayName: 'Ruby',
-            version: '1.0.0',
-            requiresExecutable: true,
-            defaultExecutable: 'ruby'
-          };
-        case DebugLanguage.MOCK:
-          return {
-            id: DebugLanguage.MOCK,
-            displayName: 'Mock',
-            version: '1.0.0',
-            requiresExecutable: false
-          };
-        case DebugLanguage.JAVASCRIPT:
-          return {
-            id: DebugLanguage.JAVASCRIPT,
-            displayName: 'JavaScript/TypeScript',
-            version: '1.0.0',
-            requiresExecutable: true,
-            defaultExecutable: 'node'
-          };
-        case DebugLanguage.CPP:
-          return {
-            id: DebugLanguage.CPP,
-            displayName: 'C/C++',
-            version: '1.0.0',
-            requiresExecutable: true,
-            defaultExecutable: 'g++'
-          };
-        default:
-          return {
-            id: lang,
-            displayName: lang.charAt(0).toUpperCase() + lang.slice(1),
-            version: '1.0.0',
-            requiresExecutable: true
-          };
-      }
-    });
+  /** @internal Language metadata is a ToolContext service; see src/server/language-discovery.ts. */
+  public async getLanguageMetadata(): Promise<LanguageMetadata[]> {
+    return buildLanguageMetadata(await this.getSupportedLanguagesAsync());
   }
 
   /**
@@ -2586,16 +2476,5 @@ export class DebugMcpServer {
    */
   public getAdapterRegistry() {
     return this.sessionManager.adapterRegistry;
-  }
-
-  private filterDisabledLanguages(
-    languages: readonly string[],
-    disabled?: Set<string>,
-  ): string[] {
-    const disabledSet = disabled ?? getDisabledLanguages();
-    if (!disabledSet.size) {
-      return [...languages];
-    }
-    return languages.filter((lang) => !disabledSet.has(lang));
   }
 }
