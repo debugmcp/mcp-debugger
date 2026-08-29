@@ -16,6 +16,11 @@ import {
 } from '../../../../../src/errors/debug-errors.js';
 import { createMockToolContext } from '../server-test-helpers.js';
 
+// DebugMcpServer builds its dependencies in the constructor; mock the container
+// so createMockToolContext() never opens a real logger transport or session dir.
+vi.mock('../../../../../src/container/dependencies.js');
+vi.mock('../../../../../src/session/session-manager.js');
+
 describe('execution tool handlers', () => {
   let ctx: any;
 

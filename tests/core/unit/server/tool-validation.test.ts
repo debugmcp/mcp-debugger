@@ -114,13 +114,11 @@ describe('enforceExplicitNames', () => {
 
     expect(() => enforceExplicitNames(environment, 'get_variables', ['user'])).not.toThrow();
     for (const names of [undefined, []]) {
-      try {
-        enforceExplicitNames(environment, 'get_variables', names);
-        expect.unreachable('should have thrown');
-      } catch (error) {
-        expect((error as McpError).code).toBe(McpErrorCode.InvalidParams);
-        expect((error as McpError).message).toContain('get_variables requires "names"');
-      }
+      const call = () => enforceExplicitNames(environment, 'get_variables', names);
+      expect(call).toThrow(McpError);
+      // McpError renders its code into the message, so this pins both.
+      expect(call).toThrow(`MCP error ${McpErrorCode.InvalidParams}`);
+      expect(call).toThrow('get_variables requires "names"');
     }
   });
 });

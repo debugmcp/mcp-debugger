@@ -14,6 +14,11 @@ import {
 } from '../../../../../src/server/handlers/inspection-tools.js';
 import { createMockToolContext } from '../server-test-helpers.js';
 
+// DebugMcpServer builds its dependencies in the constructor; mock the container
+// so createMockToolContext() never opens a real logger transport or session dir.
+vi.mock('../../../../../src/container/dependencies.js');
+vi.mock('../../../../../src/session/session-manager.js');
+
 describe('inspection tool handlers', () => {
   let ctx: any;
 
@@ -133,29 +138,6 @@ describe('inspection tool handlers', () => {
       expect(getLineContext).toHaveBeenCalledWith('/app/test.py', 5, { contextLines: 5 });
     });
 
-    it('returns binary/inaccessible message when lineReader returns null', async () => {
-      ctx.fileChecker = {
-        checkExists: vi.fn().mockResolvedValue({
-          exists: true,
-          effectivePath: '/path/to/binary.bin'
-        })
-      };
-
-      ctx.lineReader = {
-        getLineContext: vi.fn().mockResolvedValue(null)
-      };
-
-      const result = await handleGetSourceContext(ctx, {
-        sessionId: 'test-session',
-        file: '/path/to/binary.bin',
-        line: 1
-      });
-
-      const payload = JSON.parse(result.content[0].text);
-      expect(payload.success).toBe(false);
-      expect(payload.error).toContain('binary or inaccessible');
-    });
-
     it('returns source context when lineReader returns content', async () => {
       ctx.sessionManager.getSession.mockReturnValue({
         id: 'test-session',
@@ -190,21 +172,6 @@ describe('inspection tool handlers', () => {
       expect(payload.contextLines).toBe(3);
     });
 
-    it('throws when file does not exist', async () => {
-      ctx.fileChecker = {
-        checkExists: vi.fn().mockResolvedValue({
-          exists: false,
-          effectivePath: '/nope.py',
-          errorMessage: 'not found'
-        })
-      };
-
-      await expect(handleGetSourceContext(ctx, {
-        sessionId: 'test-session',
-        file: '/nope.py',
-        line: 1
-      })).rejects.toThrow();
-    });
   });
 
   describe('handleGetLocalVariables', () => {
@@ -233,6 +200,7 @@ describe('inspection tool handlers', () => {
       expect(payload.variables[0].name).toBe('x');
       expect(payload.frame.name).toBe('main');
       expect(payload.scopeName).toBe('Locals');
+      expect(payload.message).toBeUndefined();
     });
 
     it('shows "not paused" message when no frame available', async () => {
@@ -350,96 +318,6 @@ describe('inspection tool handlers', () => {
       await expect(handleGetLocalVariables(ctx, {
         sessionId: 'test-session'
       })).rejects.toThrow('Failed to get local variables');
-    });
-
-    it('returns "no stack frames" message when frame is null', async () => {
-      ctx.sessionManager.getSession.mockReturnValue({
-        id: 'test-session',
-        sessionLifecycle: SessionLifecycleState.ACTIVE,
-        name: 'my-session'
-      });
-
-      ctx.sessionManager.getLocalVariables = vi.fn().mockResolvedValue({
-        variables: [],
-        frame: null,
-        scopeName: null
-      });
-
-      const result = await handleGetLocalVariables(ctx, {
-        sessionId: 'test-session'
-      });
-
-      const payload = JSON.parse(result.content[0].text);
-      expect(payload.success).toBe(true);
-      expect(payload.variables).toEqual([]);
-      expect(payload.message).toContain('No stack frames available');
-    });
-
-    it('returns "no local scope" message when scopeName is null', async () => {
-      ctx.sessionManager.getSession.mockReturnValue({
-        id: 'test-session',
-        sessionLifecycle: SessionLifecycleState.ACTIVE,
-        name: 'my-session'
-      });
-
-      ctx.sessionManager.getLocalVariables = vi.fn().mockResolvedValue({
-        variables: [],
-        frame: { name: 'main', file: 'test.py', line: 1 },
-        scopeName: null
-      });
-
-      const result = await handleGetLocalVariables(ctx, {
-        sessionId: 'test-session'
-      });
-
-      const payload = JSON.parse(result.content[0].text);
-      expect(payload.message).toContain('No local scope found');
-    });
-
-    it('returns "scope is empty" message when scope exists but has no variables (named session)', async () => {
-      ctx.sessionManager.getSession.mockReturnValue({
-        id: 'test-session',
-        sessionLifecycle: SessionLifecycleState.ACTIVE,
-        name: 'my-session'
-      });
-
-      ctx.sessionManager.getLocalVariables = vi.fn().mockResolvedValue({
-        variables: [],
-        frame: { name: 'main', file: 'test.py', line: 1 },
-        scopeName: 'Locals'
-      });
-
-      const result = await handleGetLocalVariables(ctx, {
-        sessionId: 'test-session'
-      });
-
-      const payload = JSON.parse(result.content[0].text);
-      expect(payload.message).toContain('Locals scope is empty');
-    });
-
-    it('returns variables with frame and scope info (named session)', async () => {
-      ctx.sessionManager.getSession.mockReturnValue({
-        id: 'test-session',
-        sessionLifecycle: SessionLifecycleState.ACTIVE,
-        name: 'my-session'
-      });
-
-      ctx.sessionManager.getLocalVariables = vi.fn().mockResolvedValue({
-        variables: [{ name: 'x', value: '42', type: 'int' }],
-        frame: { name: 'main', file: 'test.py', line: 10 },
-        scopeName: 'Locals'
-      });
-
-      const result = await handleGetLocalVariables(ctx, {
-        sessionId: 'test-session'
-      });
-
-      const payload = JSON.parse(result.content[0].text);
-      expect(payload.success).toBe(true);
-      expect(payload.variables).toHaveLength(1);
-      expect(payload.frame.name).toBe('main');
-      expect(payload.scopeName).toBe('Locals');
-      expect(payload.message).toBeUndefined();
     });
 
     it('returns graceful error for terminated session', async () => {

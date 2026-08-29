@@ -11,6 +11,11 @@ import {
 } from '../../../../../src/server/handlers/shared.js';
 import { createMockToolContext } from '../server-test-helpers.js';
 
+// DebugMcpServer builds its dependencies in the constructor; mock the container
+// so createMockToolContext() never opens a real logger transport or session dir.
+vi.mock('../../../../../src/container/dependencies.js');
+vi.mock('../../../../../src/session/session-manager.js');
+
 function variable(name: string, overrides: Partial<Variable> = {}): Variable {
   return { name, value: '1', type: 'int', expandable: false, ...overrides };
 }

@@ -7,6 +7,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { handleListSupportedLanguages } from '../../../../../src/server/handlers/language-tools.js';
 import { createMockToolContext } from '../server-test-helpers.js';
 
+// DebugMcpServer builds its dependencies in the constructor; mock the container
+// so createMockToolContext() never opens a real logger transport or session dir.
+vi.mock('../../../../../src/container/dependencies.js');
+vi.mock('../../../../../src/session/session-manager.js');
+
 describe('handleListSupportedLanguages', () => {
   let ctx: any;
 
