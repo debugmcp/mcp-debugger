@@ -27,6 +27,12 @@ describe('variablePayloadExtras', () => {
     expect('notFound' in extras).toBe(true);
   });
 
+  it('emits notFound: [] for an EMPTY filter — [] is truthy, so the key must still appear', () => {
+    const extras = variablePayloadExtras([variable('x')], [], undefined);
+
+    expect('notFound' in extras).toBe(true);
+    expect(extras.notFound).toEqual([]);
+  });
   it('lists only the names that were not returned', () => {
     const extras = variablePayloadExtras([variable('x')], ['x', 'missing'], undefined);
     expect(extras.notFound).toEqual(['missing']);

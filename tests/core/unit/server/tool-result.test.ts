@@ -62,6 +62,18 @@ describe('sniff: typed', () => {
     expect(error.message).toContain('Cannot pause: no active proxy for session s1');
   });
 
+  it('converts SessionTerminatedError and SessionNotFoundError under typed', () => {
+    for (const error of [new SessionTerminatedError('s1'), new SessionNotFoundError('s1')]) {
+      expect(payload(sessionErrorToResult(error, 'typed')!)).toEqual({
+        success: false,
+        error: error.message
+      });
+      expect(payload(sessionErrorResultOrThrow(error, 'typed'))).toEqual({
+        success: false,
+        error: error.message
+      });
+    }
+  });
   it('does NOT convert a look-alike McpError that is not one of the typed classes', () => {
     const error = new McpError(McpErrorCode.InvalidRequest, 'Session is terminated: s1');
     expect(isTypedSessionError(error)).toBe(false);
