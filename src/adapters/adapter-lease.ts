@@ -4,32 +4,42 @@
  *
  * The registry caps concurrent adapters per language (`maxInstancesPerLanguage`,
  * `adapter-registry.ts`) and releases a slot only when the adapter emits
- * 'disposed'. Ownership used to be a *time window* inside `startProxyManager`
- * guarded by a `let adapterOwnedByProxy = false` flag: every `throw` between
+ * 'disposed'. Ownership was a *time window* inside `startProxyManager` guarded
+ * by a `let adapterOwnedByProxy = false` flag: every `throw` between
  * `registry.create()` and `session.proxyManager = …` had to be caught by one
- * catch that consulted the flag. A new early-return or a new throw site added
- * outside that window leaked a registry slot, and ten leaks turned every
- * subsequent launch of that language into "Maximum adapter instances (10)
- * reached" — a failure whose message says nothing about the real error that
- * caused it (issue #552 review, issue #561).
+ * catch that consulted the flag. That flag closed a real leak (#557, from the
+ * #552 review) — a rejected transform used to strand the slot, and ten stranded
+ * slots turned every later launch of that language into "Maximum adapter
+ * instances (10) reached", a message that says nothing about the error that
+ * actually caused it.
  *
- * A lease makes the window an object instead of a flag. Acquire it, do the
- * setup inside `try`, hand ownership to the ProxyManager with `transferTo`,
- * and `release()` in `finally`. Release after a transfer is a no-op, so the
- * one `finally` covers every path: a throw anywhere in the body disposes, a
- * successful transfer does not, and neither depends on remembering to set a
- * flag. (`await using` would express this directly, but the project's `lib`
- * has no `ESNext.Disposable`.)
+ * The lease is *behaviour-equivalent to that flag on every path*. What it
+ * changes is that correctness stops being a discipline: the flag has to be
+ * assigned at exactly one point and consulted from exactly one catch, so the
+ * next `throw` site added outside that window silently reopens the leak.
+ * Acquire the lease, do the setup inside `try`, hand ownership to the
+ * ProxyManager with `transferTo`, and `release()` in `finally`. Release after a
+ * transfer is a no-op, so the one `finally` covers every path: a throw anywhere
+ * in the body disposes, a successful transfer does not, and neither depends on
+ * remembering to set anything. (`await using` would express this directly, but
+ * the project's `lib` has no `ESNext.Disposable`.)
  *
  * After a transfer, `ProxyManager.cleanup()` is the disposer, exactly as before.
  */
 import type { AdapterConfig, IAdapterRegistry, IDebugAdapter } from '@debugmcp/shared';
-import type { ILogger } from '../interfaces/external-dependencies.js';
-import type { IProxyManagerFactory } from '../factories/proxy-manager-factory.js';
+import type { ILogger, IProxyManagerFactory } from '../interfaces/external-dependencies.js';
 import type { IProxyManager } from '../proxy/proxy-manager.js';
 
+/**
+ * Where the adapter's ownership currently sits. Three states, not a boolean:
+ * 'transferred' and 'released' are both "not ours any more", but confusing them
+ * is how a caller ends up looking for a disposed adapter inside a running proxy,
+ * so the error a misuse raises names which one actually happened.
+ */
+export type AdapterLeaseState = 'held' | 'transferred' | 'released';
+
 export class AdapterLease {
-  private held = true;
+  private state: AdapterLeaseState = 'held';
 
   private constructor(
     /** The leased adapter. Valid whether or not the lease is still held. */
@@ -57,7 +67,12 @@ export class AdapterLease {
 
   /** True while this lease is still responsible for disposing the adapter. */
   get isHeld(): boolean {
-    return this.held;
+    return this.state === 'held';
+  }
+
+  /** Which of the three ownership states this lease is in. */
+  getState(): AdapterLeaseState {
+    return this.state;
   }
 
   /**
@@ -67,13 +82,13 @@ export class AdapterLease {
    * leaves the lease held, so the caller's `finally` still disposes.
    */
   transferTo(factory: IProxyManagerFactory): IProxyManager {
-    if (!this.held) {
+    if (this.state !== 'held') {
       throw new Error(
-        `Adapter lease for session ${this.sessionId} was already transferred or released`
+        `Adapter lease for session ${this.sessionId} was already ${this.state}`
       );
     }
     const proxyManager = factory.create(this.adapter);
-    this.held = false;
+    this.state = 'transferred';
     return proxyManager;
   }
 
@@ -81,27 +96,33 @@ export class AdapterLease {
    * Dispose the adapter if this lease still owns it. Idempotent, and a no-op
    * after a transfer, so it is safe as the sole `finally` of a setup block.
    *
-   * A failing `dispose()` is swallowed with a warning: the setup error that
-   * sent us here is the one worth reporting, and masking it with a teardown
-   * failure would hide the actual cause.
+   * Never throws. A failing `dispose()` is swallowed with a warning: the setup
+   * error that sent us here is the one worth reporting, and a teardown failure
+   * replacing it from inside a `finally` would hide the actual cause. Both
+   * failure shapes are caught — a rejected promise and a *synchronous* throw,
+   * which a bare `.catch()` on the returned promise would have let escape.
    */
   async release(): Promise<void> {
-    if (!this.held) {
+    if (this.state !== 'held') {
       return;
     }
-    this.held = false;
+    this.state = 'released';
 
     // Duck-typed for parity with ProxyManager.cleanup(), whose adapter handle
     // is likewise optional-shaped.
     const disposable = this.adapter as { dispose?: () => Promise<void> };
-    if (typeof disposable.dispose === 'function') {
-      await disposable.dispose().catch((disposeError: unknown) => {
-        this.logger.warn(
-          `[SessionManager] Failed to dispose adapter after launch setup error for session ${this.sessionId}: ${
-            disposeError instanceof Error ? disposeError.message : String(disposeError)
-          }`
-        );
-      });
+    if (typeof disposable.dispose !== 'function') {
+      return;
+    }
+
+    try {
+      await disposable.dispose();
+    } catch (disposeError: unknown) {
+      this.logger.warn(
+        `[SessionManager] Failed to dispose adapter after launch setup error for session ${this.sessionId}: ${
+          disposeError instanceof Error ? disposeError.message : String(disposeError)
+        }`
+      );
     }
   }
 }

@@ -182,6 +182,57 @@ describe('logProxyFailure', () => {
     );
   });
 
+  it('survives an error object whose toString throws, rather than rejecting', async () => {
+    const logger = createLogger();
+    const fileSystem = createFileSystem();
+    // Both callers await this from inside a catch that is about to return
+    // {success:false}; a throw here would turn a reported failure into a
+    // rejection out of the tool call.
+    const hostile = {
+      get message(): string {
+        throw new Error('message getter exploded');
+      },
+      toString(): string {
+        throw new Error('toString exploded');
+      }
+    };
+
+    const diagnostics = await logProxyFailure(
+      { logger, fileSystem },
+      { id: 'sess-1', logDir: runDir },
+      hostile,
+      'attachToProcess'
+    );
+
+    // The pointers still reach the caller, and the log still names the failure.
+    expect(diagnostics).toEqual({ proxyLogPath });
+    expect(logger.error).toHaveBeenCalledWith(
+      '[SessionManager] Detailed error in attachToProcess for session sess-1:',
+      expect.objectContaining({
+        message: '<<error could not be described>>',
+        proxyLogPath,
+        diagnosticsUnavailable: expect.stringContaining('exploded')
+      })
+    );
+  });
+
+  it('survives a logger that throws, since there is nowhere left to report it', async () => {
+    const logger = createLogger();
+    const fileSystem = createFileSystem();
+    logger.error.mockImplementation(() => {
+      throw new Error('transport closed');
+    });
+
+    await expect(
+      logProxyFailure(
+        { logger, fileSystem },
+        { id: 'sess-1', logDir: runDir },
+        new Error('attach failed'),
+        'attachToProcess'
+      )
+    ).resolves.toEqual({ proxyLogPath });
+  });
+
   it('logs the proxy log tail but returns only the pointers', async () => {
     const logger = createLogger();
     const fileSystem = createFileSystem();

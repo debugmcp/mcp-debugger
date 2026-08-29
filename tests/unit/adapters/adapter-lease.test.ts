@@ -50,6 +50,7 @@ describe('AdapterLease', () => {
       expect(registry.create).toHaveBeenCalledWith('python', config);
       expect(lease.adapter).toBe(adapter);
       expect(lease.isHeld).toBe(true);
+      expect(lease.getState()).toBe('held');
     });
 
     it('propagates a registry failure without producing a lease', async () => {
@@ -101,6 +102,25 @@ describe('AdapterLease', () => {
       );
     });
 
+    it('swallows a dispose that throws synchronously, which a bare .catch() would miss', async () => {
+      const adapter = new FakeDebugAdapter();
+      // The interface declares `dispose(): Promise<void>`, so violating it takes
+      // a cast — and that violation IS the case under test: a synchronous throw
+      // means no promise ever exists, so `dispose().catch(...)` never runs, and
+      // from the caller's `finally` the throw would replace the setup error that
+      // sent us there.
+      adapter.dispose = vi.fn(() => {
+        throw new Error('adapter handle was already torn down');
+      }) as unknown as FakeDebugAdapter['dispose'];
+      const logger = createLogger();
+      const lease = await AdapterLease.acquire(createRegistry(adapter), 'python', config, logger);
+
+      await expect(lease.release()).resolves.toBeUndefined();
+      expect(logger.warn).toHaveBeenCalledWith(
+        '[SessionManager] Failed to dispose adapter after launch setup error for session sess-1: adapter handle was already torn down'
+      );
+    });
+
     it('tolerates a partial adapter double that defines no dispose', async () => {
       const adapter = new FakeDebugAdapter();
       // The production guard is duck-typed because partial doubles (and any
@@ -143,17 +163,24 @@ describe('AdapterLease', () => {
       lease.transferTo(createFactory());
 
       expect(() => lease.transferTo(createFactory())).toThrow(
-        'Adapter lease for session sess-1 was already transferred or released'
+        'Adapter lease for session sess-1 was already transferred'
       );
+      expect(lease.getState()).toBe('transferred');
     });
 
-    it('refuses a transfer after release, when the adapter is already disposed', async () => {
+    it('refuses a transfer after release, and says so — the adapter is disposed, not in use', async () => {
       const adapter = new FakeDebugAdapter();
       const lease = await AdapterLease.acquire(createRegistry(adapter), 'python', config, createLogger());
 
       await lease.release();
 
-      expect(() => lease.transferTo(createFactory())).toThrow(/already transferred or released/);
+      // The two refusals must read differently: "transferred" sends you looking
+      // for a live adapter inside a running proxy, "released" tells you it is
+      // already disposed.
+      expect(() => lease.transferTo(createFactory())).toThrow(
+        'Adapter lease for session sess-1 was already released'
+      );
+      expect(lease.getState()).toBe('released');
     });
 
     it('keeps the lease held when the factory throws, so the finally still disposes', async () => {

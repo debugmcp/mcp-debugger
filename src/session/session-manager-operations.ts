@@ -216,10 +216,10 @@ export abstract class SessionManagerOperations extends SessionManagerData {
 
     // The lease owns the adapter — and its registry slot — until a ProxyManager
     // takes it, so every throw in the body lands in one `finally` that gives the
-    // slot back. The boolean this replaces had to be kept in sync by hand, and
-    // any throw site added outside its window leaked a slot until launches of
-    // that language failed with "Maximum adapter instances (10) reached"
-    // (issue #552 review, issue #561).
+    // slot back. Same behaviour as the `adapterOwnedByProxy` boolean it replaces
+    // (#557); the difference is that the boolean had to be assigned at one point
+    // and consulted from one catch, so the next throw site added outside that
+    // window would have silently reopened the leak.
     const lease = await AdapterLease.acquire(
       this.adapterRegistry,
       session.language,
