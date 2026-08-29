@@ -51,9 +51,7 @@ import {
 } from './utils/language-availability.js';
 import { isContainerMode, getWorkspaceRoot } from './utils/container-path-utils.js';
 import {
-  BP_ADDRESSING_ENV_KEY,
   getBpAddressingMode,
-  supportsExpectedContent,
   supportsStatementAnchors,
   supportsLoudSnapping
 } from './utils/bp-addressing.js';
@@ -81,6 +79,12 @@ import {
   detachFromProcessTool,
   redefineClassesTool
 } from './server/handlers/debuggee-tools.js';
+import {
+  setBreakpointTool,
+  listBreakpointsTool,
+  removeBreakpointTool,
+  clearBreakpointsTool
+} from './server/handlers/breakpoint-tools.js';
 
 export { coerceToolArguments };
 export type { SetBreakpointRequest };
@@ -877,357 +881,19 @@ export class DebugMcpServer implements ToolContext {
               break;
             }
             case 'set_breakpoint': {
-              const isFunctionBp = args.function !== undefined;
-              if (!args.sessionId || (!isFunctionBp && (!args.file || (args.line === undefined && args.statement === undefined)))) {
-                throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameters');
-              }
-
-              // Addressing-mode gating (issue #271): reject params outside the
-              // configured mode even though the schema omits them — a client
-              // replaying a cached schema must not slip features into a
-              // restricted server. Checked on the raw args so unknown params
-              // are caught too.
-              const bpMode = getBpAddressingMode(this.environment);
-              if (args.expectedContent !== undefined && !supportsExpectedContent(bpMode)) {
-                throw new McpError(
-                  McpErrorCode.InvalidParams,
-                  `expectedContent is disabled (${BP_ADDRESSING_ENV_KEY}=${bpMode}). Use plain line addressing.`
-                );
-              }
-              if ((args.statement !== undefined || args.nearLine !== undefined) && !supportsStatementAnchors(bpMode)) {
-                throw new McpError(
-                  McpErrorCode.InvalidParams,
-                  `statement addressing is disabled (${BP_ADDRESSING_ENV_KEY}=${bpMode}). Use line addressing.`
-                );
-              }
-              if (isFunctionBp && !supportsStatementAnchors(bpMode)) {
-                throw new McpError(
-                  McpErrorCode.InvalidParams,
-                  `function breakpoints are disabled (${BP_ADDRESSING_ENV_KEY}=${bpMode}). Use line addressing.`
-                );
-              }
-
-              if (isFunctionBp) {
-                // Function breakpoints are session-global symbols — no file,
-                // no line, no content anchor, no logpoint, no suspend policy
-                // (DAP FunctionBreakpoint supports name + condition only).
-                if (args.file !== undefined) {
-                  throw new McpError(McpErrorCode.InvalidParams,
-                    'Function breakpoints are not file-scoped; omit file. The adapter resolves the symbol name across the whole program.');
-                }
-                if (args.line !== undefined || args.statement !== undefined ||
-                    args.expectedContent !== undefined || args.nearLine !== undefined) {
-                  throw new McpError(McpErrorCode.InvalidParams,
-                    'Provide function alone (optionally with condition) — it cannot be combined with line, statement, expectedContent, or nearLine.');
-                }
-                if (args.logMessage !== undefined) {
-                  throw new McpError(McpErrorCode.InvalidParams,
-                    'logMessage is not supported on function breakpoints (DAP has no logpoint form for them); use a line or statement breakpoint.');
-                }
-                if (args.suspendPolicy !== undefined) {
-                  throw new McpError(McpErrorCode.InvalidParams,
-                    'suspendPolicy is not supported on function breakpoints.');
-                }
-
-                try {
-                  const fnGate = this.validateFunctionBreakpointSupport(args.sessionId);
-                  // Policy-certain rewrite (issue #467): a name the adapter can
-                  // never bind as given (go bare 'main') is corrected instead
-                  // of stored as a permanently-dead breakpoint; the warning
-                  // says the rewrite happened.
-                  const normalized = this.normalizeFunctionBreakpointName(args.sessionId, args.function!);
-                  const effectiveName = normalized?.name ?? args.function!;
-                  // Per-adapter name advisory (issues #303/#308): warn at set
-                  // time about names the adapter is known to mis-resolve
-                  // (rust bare 'main' -> CRT entry) or never bind (go bare
-                  // identifiers). Advisory only — the breakpoint is still set.
-                  const nameHint = normalized
-                    ? undefined
-                    : this.getFunctionBreakpointNameHint(args.sessionId, effectiveName);
-                  const { breakpoint, warning: syncWarning } = await this.setFunctionBreakpoint(
-                    args.sessionId, effectiveName, args.condition
-                  );
-
-                  this.logger.info('debug:breakpoint', {
-                    event: 'set',
-                    sessionId: args.sessionId,
-                    sessionName: this.getSessionName(args.sessionId),
-                    breakpointId: breakpoint.id,
-                    functionName: breakpoint.functionName,
-                    verified: breakpoint.verified,
-                    timestamp: Date.now()
-                  });
-
-                  const warnings = [breakpoint.message, fnGate.warning, normalized?.note, nameHint, syncWarning].filter(Boolean);
-                  result = { content: [{ type: 'text', text: JSON.stringify({
-                    success: true,
-                    breakpointId: breakpoint.id,
-                    ...(normalized ? { requestedName: args.function } : {}),
-                    functionName: breakpoint.functionName,
-                    condition: breakpoint.condition,
-                    verified: breakpoint.verified,
-                    boundFile: breakpoint.boundFile,
-                    boundLine: breakpoint.boundLine,
-                    message: breakpoint.message || `Function breakpoint set on ${breakpoint.functionName}`,
-                    warning: warnings.length > 0 ? warnings.join('; ') : undefined
-                  }) }] };
-                } catch (error) {
-                  result = this.handleBreakpointToolError(error);
-                }
-                break;
-              }
-
-              try {
-                // Logpoint gating (issue #235): hard error for known-unsupported
-                // adapters; a warning when support is unknown pre-launch.
-                const logPointGate = args.logMessage !== undefined
-                  ? this.validateLogPointSupport(args.sessionId)
-                  : {};
-
-                const { breakpoint, warning: syncWarning } = await this.setBreakpoint({
-                  sessionId: args.sessionId,
-                  // Non-function path: the entry guard above ensures file is set
-                  file: args.file!,
-                  line: args.line,
-                  expectedContent: args.expectedContent,
-                  statement: args.statement,
-                  nearLine: args.nearLine,
-                  condition: args.condition,
-                  suspendPolicy: args.suspendPolicy,
-                  logMessage: args.logMessage
-                });
-
-                // Log breakpoint event
-                this.logger.info('debug:breakpoint', {
-                  event: 'set',
-                  sessionId: args.sessionId,
-                  sessionName: this.getSessionName(args.sessionId),
-                  breakpointId: breakpoint.id,
-                  file: breakpoint.file,
-                  line: breakpoint.line,
-                  verified: breakpoint.verified,
-                  timestamp: Date.now()
-                });
-                
-                // Try to get line context for the breakpoint
-                let context;
-                try {
-                  const lineContext = await this.lineReader.getLineContext(
-                    breakpoint.file,
-                    breakpoint.line,
-                    { contextLines: 2 }
-                  );
-                  
-                  if (lineContext) {
-                    context = {
-                      lineContent: lineContext.lineContent,
-                      surrounding: lineContext.surrounding
-                    };
-                  }
-                } catch (contextError) {
-                  // Log but don't fail if we can't get context
-                  this.logger.debug('Could not get line context for breakpoint', { 
-                    file: breakpoint.file, 
-                    line: breakpoint.line, 
-                    error: contextError 
-                  });
-                }
-                
-                // Loud snapping (issue #271): if the adapter bound the
-                // breakpoint to a different line than requested, say so
-                // prominently instead of silently reporting the moved line.
-                const snapped =
-                  breakpoint.requestedLine !== undefined &&
-                  breakpoint.line !== breakpoint.requestedLine;
-                const snapWarning = snapped
-                  ? `Breakpoint moved by the debugger: requested line ${breakpoint.requestedLine}, bound to line ${breakpoint.line}${
-                      context ? `: \`${context.lineContent.trim()}\`` : ''
-                    }`
-                  : undefined;
-
-                const warnings = [breakpoint.message, logPointGate.warning, syncWarning, snapWarning].filter(Boolean);
-                result = { content: [{ type: 'text', text: JSON.stringify({
-                  success: true,
-                  breakpointId: breakpoint.id,
-                  file: breakpoint.file,
-                  line: breakpoint.line,
-                  requestedLine: breakpoint.requestedLine,
-                  anchor: breakpoint.anchor,
-                  content: context?.lineContent,
-                  verified: breakpoint.verified,
-                  logMessage: breakpoint.logMessage,
-                  message: snapWarning || breakpoint.message || `${breakpoint.logMessage !== undefined ? 'Logpoint' : 'Breakpoint'} set at ${breakpoint.file}:${breakpoint.line}`,
-                  // Warn on adapter validation messages, sync failures, snaps,
-                  // and unknown logpoint support
-                  warning: warnings.length > 0 ? warnings.join('; ') : undefined,
-                  // Include context if available
-                  context: context || undefined
-                }) }] };
-                const contentEntry = Array.isArray(result.content) ? result.content[0] : undefined;
-                const textContent = contentEntry && typeof (contentEntry as { text?: unknown }).text === 'string'
-                  ? (contentEntry as { text: string }).text
-                  : undefined;
-                let parsedResponse: Record<string, unknown> | null = null;
-                if (typeof textContent === 'string') {
-                  try {
-                    parsedResponse = JSON.parse(textContent) as Record<string, unknown>;
-                  } catch {
-                    parsedResponse = null;
-                  }
-                }
-                this.logger.info('tool:set_breakpoint:result', {
-                  sessionId: args.sessionId,
-                  response: parsedResponse
-                });
-              } catch (error) {
-                // Handle session state errors specifically
-                if (error instanceof McpError && 
-                    (error.message.includes('terminated') || 
-                     error.message.includes('closed') || 
-                     (error.message.includes('not found') && error.message.includes('Session')))) {
-                  result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-                } else {
-                  // Re-throw all other errors (including file validation errors)
-                  throw error;
-                }
-              }
+              result = await setBreakpointTool(this, args, toolName);
               break;
             }
             case 'list_breakpoints': {
-              if (!args.sessionId) {
-                throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameter: sessionId');
-              }
-              try {
-                const breakpoints = this.listBreakpoints(args.sessionId, args.file);
-                // Function breakpoints are session-global, so a file filter
-                // deliberately excludes them (issue #271 phase 3).
-                const functionBreakpoints = args.file === undefined
-                  ? this.sessionManager.listFunctionBreakpoints(args.sessionId)
-                  : [];
-                result = { content: [{ type: 'text', text: JSON.stringify({
-                  success: true,
-                  breakpoints,
-                  count: breakpoints.length,
-                  ...(args.file === undefined
-                    ? { functionBreakpoints, functionCount: functionBreakpoints.length }
-                    : {})
-                }) }] };
-              } catch (error) {
-                result = this.handleBreakpointToolError(error);
-              }
+              result = await listBreakpointsTool(this, args, toolName);
               break;
             }
             case 'remove_breakpoint': {
-              if (!args.sessionId) {
-                throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameter: sessionId');
-              }
-              if (!args.breakpointId && args.function === undefined && (!args.file || args.line === undefined)) {
-                throw new McpError(
-                  McpErrorCode.InvalidParams,
-                  'Provide breakpointId, function, or file and line together'
-                );
-              }
-              try {
-                let removed: Array<Breakpoint | FunctionBreakpoint>;
-                let warning: string | undefined;
-                // Function-addressed removal discloses names the way
-                // set_breakpoint does: `functionName` is always the effective
-                // name, `requestedName` appears only when a policy rewrite
-                // changed it (issue #550).
-                let functionDisclosure: { functionName: string; requestedName?: string } | undefined;
-                if (!args.breakpointId && args.function !== undefined) {
-                  const requestedName = args.function;
-                  // Use the same policy-certain rewrite as set_breakpoint so
-                  // the name the caller supplied can remove the normalized
-                  // record that was stored (issue #550). The literal name is
-                  // matched too — a record stored un-rewritten (policy lookup
-                  // failure, or set through another path) stays removable.
-                  const normalized = this.normalizeFunctionBreakpointName(args.sessionId, requestedName);
-                  const effectiveName = normalized?.name ?? requestedName;
-                  functionDisclosure = {
-                    functionName: effectiveName,
-                    ...(normalized ? { requestedName } : {})
-                  };
-                  const matches = this.sessionManager
-                    .listFunctionBreakpoints(args.sessionId)
-                    .filter((bp) => bp.functionName === effectiveName || bp.functionName === requestedName);
-                  removed = [];
-                  const warnings: string[] = [];
-                  for (const bp of matches) {
-                    const res = await this.removeBreakpoint(args.sessionId, bp.id);
-                    if (res.removed) removed.push(res.removed);
-                    if (res.warning) warnings.push(res.warning);
-                  }
-                  if (removed.length === 0) {
-                    // Same per-adapter name advisory set_breakpoint gives
-                    // (issues #303/#308), so a bare Go name that never matched
-                    // learns the package-qualified form it should use.
-                    const nameHint = normalized
-                      ? undefined
-                      : this.getFunctionBreakpointNameHint(args.sessionId, effectiveName);
-                    if (nameHint) warnings.push(nameHint);
-                    result = { content: [{ type: 'text', text: JSON.stringify({
-                      success: false,
-                      error: normalized
-                        ? `No function breakpoint found for ${requestedName} (normalized to ${effectiveName})`
-                        : `No function breakpoint found for ${requestedName}`,
-                      ...functionDisclosure,
-                      warning: warnings.length > 0 ? warnings.join('; ') : undefined
-                    }) }] };
-                    break;
-                  }
-                  warning = warnings.length > 0 ? warnings.join('; ') : undefined;
-                } else if (args.breakpointId) {
-                  const res = await this.removeBreakpoint(args.sessionId, args.breakpointId);
-                  removed = res.removed ? [res.removed] : [];
-                  warning = res.warning;
-                  if (removed.length === 0) {
-                    result = { content: [{ type: 'text', text: JSON.stringify({
-                      success: false,
-                      error: `No breakpoint found with id ${args.breakpointId}`
-                    }) }] };
-                    break;
-                  }
-                } else {
-                  const res = await this.removeBreakpointsByLocation(args.sessionId, args.file!, args.line!);
-                  removed = res.removed;
-                  warning = res.warning;
-                  if (removed.length === 0) {
-                    result = { content: [{ type: 'text', text: JSON.stringify({
-                      success: false,
-                      error: `No breakpoint found at ${args.file}:${args.line}`
-                    }) }] };
-                    break;
-                  }
-                }
-                result = { content: [{ type: 'text', text: JSON.stringify({
-                  success: true,
-                  removed,
-                  message: `Removed ${removed.length} breakpoint(s)`,
-                  ...(functionDisclosure ?? {}),
-                  warning
-                }) }] };
-              } catch (error) {
-                result = this.handleBreakpointToolError(error);
-              }
+              result = await removeBreakpointTool(this, args, toolName);
               break;
             }
             case 'clear_breakpoints': {
-              if (!args.sessionId) {
-                throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameter: sessionId');
-              }
-              try {
-                const res = await this.clearBreakpoints(args.sessionId, args.file);
-                result = { content: [{ type: 'text', text: JSON.stringify({
-                  success: true,
-                  cleared: res.cleared,
-                  files: res.files,
-                  message: `Cleared ${res.cleared} breakpoint(s)`,
-                  warning: res.warning
-                }) }] };
-              } catch (error) {
-                result = this.handleBreakpointToolError(error);
-              }
+              result = await clearBreakpointsTool(this, args, toolName);
               break;
             }
             case 'start_debugging': {
