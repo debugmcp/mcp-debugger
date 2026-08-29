@@ -16,6 +16,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { DebugMcpServer } from '../../../../src/server.js';
+import { TOOL_NAMES } from '../../../../src/server/tool-schemas.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
 import { createProductionDependencies } from '../../../../src/container/dependencies.js';
 import {
@@ -85,6 +86,14 @@ describe('Server tool/resource/prompt list snapshot fence', () => {
         const tools = await listToolsHandler({ method: 'tools/list', params: {} });
         const resources = await listResourcesHandler({ method: 'resources/list', params: {} });
         const prompts = await listPromptsHandler({ method: 'prompts/list', params: {} });
+
+        // The other half of the name fence. buildToolDefinitions' return type
+        // rejects a name outside TOOL_NAMES at compile time, but nothing there
+        // requires every ToolName to HAVE a schema — a tool with a handler and
+        // no schema would be dispatchable yet unadvertised. This pins
+        // membership AND order, for every gating mode.
+        expect((tools as { tools: Array<{ name: string }> }).tools.map((tool) => tool.name))
+          .toEqual([...TOOL_NAMES]);
 
         const snapshot = JSON.stringify({ tools, resources, prompts }, null, 2) + '\n';
         await expect(snapshot).toMatchFileSnapshot(

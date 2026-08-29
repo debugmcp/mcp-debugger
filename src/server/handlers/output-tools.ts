@@ -2,7 +2,7 @@
  * Debuggee output tool: get_output.
  */
 import type { ToolContext, ToolHandler } from '../tool-context.js';
-import { jsonResult, type ToolResult } from '../tool-result.js';
+import { failureResult, jsonResult, type ToolResult } from '../tool-result.js';
 import { redactionSummary } from './shared.js';
 
 export async function handleGetOutput(ctx: ToolContext, args: { sessionId: string; since?: number; limit?: number }): Promise<ToolResult> {
@@ -11,7 +11,7 @@ export async function handleGetOutput(ctx: ToolContext, args: { sessionId: strin
   // Output stays readable until close_debug_session removes the session.
   const session = ctx.sessionManager.getSession(args.sessionId);
   if (!session) {
-    return jsonResult({ success: false, error: `Session not found: ${args.sessionId}` });
+    return failureResult(`Session not found: ${args.sessionId}`);
   }
   const since = Math.max(0, args.since ?? 0);
   const limit = Math.min(Math.max(1, args.limit ?? 100), 1000);

@@ -40,7 +40,7 @@ import { SimpleFileChecker, createSimpleFileChecker, FileExistenceResult } from 
 import { LineReader, createLineReader } from './utils/line-reader.js';
 import { isLanguageDisabled } from './utils/language-config.js';
 import { ValidationResultCache } from './utils/language-availability.js';
-import { isContainerMode, getWorkspaceRoot } from './utils/container-path-utils.js';
+import { isContainerMode, isContainerRuntime, getWorkspaceRoot } from './utils/container-path-utils.js';
 import {
   getBpAddressingMode,
   supportsStatementAnchors,
@@ -54,7 +54,6 @@ import { registerPromptHandlers } from './server/prompts.js';
 import {
   discoverSupportedLanguages,
   buildLanguageMetadata,
-  isContainerRuntime,
   LanguageMetadata
 } from './server/language-discovery.js';
 import type { ToolContext, SetBreakpointRequest } from './server/tool-context.js';

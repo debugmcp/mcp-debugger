@@ -15,11 +15,15 @@ import {
 import { getVariableAccessMode, requiresExplicitNames } from '../utils/variable-access.js';
 
 /**
- * Every tool this server advertises, in the order tools/list reports them.
- * This list is the tool name space: buildToolDefinitions pins each schema's
- * `name` to it and handlers/index.ts keys TOOL_HANDLERS by it, so a typo or a
- * tool without a handler is a compile error rather than a runtime
- * `Unknown tool`.
+ * The tool name space. Compile time: buildToolDefinitions' return type rejects
+ * a schema whose name is not in this list, handlers/index.ts must supply a
+ * handler for every name and only for these names, and isToolName narrows an
+ * incoming tools/call name against it.
+ *
+ * What the types do NOT enforce is the other direction — that every name here
+ * actually has a schema, and in this order. The tool-list snapshot fence
+ * (tests/core/unit/server/server-tool-list-snapshot.test.ts) asserts that for
+ * every gating mode.
  */
 export const TOOL_NAMES = [
   'create_debug_session',

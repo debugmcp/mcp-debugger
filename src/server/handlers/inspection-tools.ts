@@ -188,9 +188,7 @@ export async function handleGetSourceContext(ctx: ToolContext, args: { sessionId
 
     if (!lineContext) {
       // File might be binary or unreadable
-      return jsonResult({
-        success: false,
-        error: 'Could not read source context. File may be binary or inaccessible.',
+      return failureResult('Could not read source context. File may be binary or inaccessible.', {
         file: args.file,
         line: args.line
       });

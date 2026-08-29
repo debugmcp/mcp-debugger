@@ -6,19 +6,9 @@
  */
 import { DebugLanguage, IAdapterRegistry, ILogger } from '@debugmcp/shared';
 import { getDisabledLanguages } from '../utils/language-config.js';
+import { isContainerRuntime } from '../utils/container-path-utils.js';
 
 export const DEFAULT_LANGUAGES = Object.freeze([DebugLanguage.PYTHON, DebugLanguage.MOCK] as const);
-
-/**
- * Whether this process is the container runtime, read LIVE from the
- * environment on every call. Deliberately not isContainerMode(environment):
- * IEnvironment snapshots process.env at construction, and both the container
- * preload path and the tests that stub MCP_CONTAINER do so after the server
- * exists.
- */
-export function isContainerRuntime(): boolean {
-  return process.env.MCP_CONTAINER === 'true';
-}
 
 export function getDefaultLanguages(): string[] {
   return [...DEFAULT_LANGUAGES];

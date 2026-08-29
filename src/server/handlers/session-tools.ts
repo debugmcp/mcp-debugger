@@ -2,16 +2,15 @@
  * Session lifecycle tools: create_debug_session, list_debug_sessions,
  * close_debug_session.
  */
-import { ErrorCode as McpErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { DebugLanguage, DebugSessionInfo } from '@debugmcp/shared';
 import { UnsupportedLanguageError } from '../../errors/debug-errors.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import { checkLaunchToolchain } from '../../utils/language-availability.js';
-import { isContainerRuntime } from '../language-discovery.js';
+import { isContainerRuntime } from '../../utils/container-path-utils.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { assertPlainObjectArg, requireSessionId } from '../tool-validation.js';
 import { attachWarning } from './shared.js';
-import { jsonResult, type ToolResult } from '../tool-result.js';
+import { failureResult, jsonResult, rethrowAsMcpError, type ToolResult } from '../tool-result.js';
 
 export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
   // Validate before creating the session so a bad argument does
@@ -57,10 +56,7 @@ export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
       // even when the local toolchain probe failed. 'spawn' attach
       // shares the failing toolchain; 'none' has no attach at all.
       if (attachMechanism !== 'direct-connect') {
-        return jsonResult({
-          success: false,
-          error: ErrorMessages.launchUnavailable(requested, launchGate.reason)
-        });
+        return failureResult(ErrorMessages.launchUnavailable(requested, launchGate.reason));
       }
       ctx.logger.warn(
         `[Server] create_debug_session(${requested}): launch toolchain unavailable (${launchGate.reason}); ` +
@@ -113,7 +109,7 @@ export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
       // does: structured failure diagnostics (initProgress /
       // proxyLogPath, issue #551) and the dropped-adapterConfig
       // warning (issue #450) must reach this entry point too.
-      const attachData = attachResult.data as { warning?: string } | undefined;
+      const attachData = attachResult.data;
       const warning = attachWarning(attachResult);
       return jsonResult({
         success: attachResult.success,
@@ -178,7 +174,7 @@ export async function handleListDebugSessions(ctx: ToolContext): Promise<ToolRes
     return jsonResult({ success: true, sessions: sessionData, count: sessionData.length });
   } catch (error) {
     ctx.logger.error('Failed to list debug sessions', { error });
-    throw new McpError(McpErrorCode.InternalError, `Failed to list debug sessions: ${(error as Error).message}`);
+    rethrowAsMcpError(error, 'Failed to list debug sessions');
   }
 }
 

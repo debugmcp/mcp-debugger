@@ -8,6 +8,7 @@
 import { ErrorCode as McpErrorCode, McpError, ServerResult } from '@modelcontextprotocol/sdk/types.js';
 import path from 'path';
 import {
+  getErrorMessage,
   SessionNotFoundError,
   SessionTerminatedError,
   ProxyNotRunningError
@@ -49,7 +50,11 @@ export function failureResult(message: string, extra?: Record<string, unknown>):
  */
 export type SessionErrorSniff = 'typed' | 'session-state' | 'session-state-or-not-paused';
 
-/** The typed session-lifecycle errors thrown by the session layer. */
+/**
+ * The typed session-lifecycle errors thrown by the session layer.
+ * @internal exported for the dialect tests; handlers go through
+ * sessionErrorToResult / sessionErrorResultOrThrow.
+ */
 export function isTypedSessionError(
   error: unknown
 ): error is SessionTerminatedError | SessionNotFoundError | ProxyNotRunningError {
@@ -58,7 +63,10 @@ export function isTypedSessionError(
     error instanceof ProxyNotRunningError;
 }
 
-/** The string-sniffing dialects, applied to McpError messages only. */
+/**
+ * The string-sniffing dialects, applied to McpError messages only.
+ * @internal exported for the dialect tests; see isTypedSessionError.
+ */
 export function isSessionStateError(
   error: unknown,
   sniff: Exclude<SessionErrorSniff, 'typed'>
@@ -115,10 +123,7 @@ export function rethrowAsMcpError(error: unknown, prefix: string): never {
   if (error instanceof McpError) {
     throw error;
   }
-  throw new McpError(
-    McpErrorCode.InternalError,
-    `${prefix}: ${error instanceof Error ? error.message : String(error)}`
-  );
+  throw new McpError(McpErrorCode.InternalError, `${prefix}: ${getErrorMessage(error)}`);
 }
 
 /**

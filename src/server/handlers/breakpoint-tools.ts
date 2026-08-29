@@ -10,14 +10,10 @@ import {
   supportsExpectedContent,
   supportsStatementAnchors
 } from '../../utils/bp-addressing.js';
-import type { ToolArguments } from '../tool-arguments.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
-import { requireSessionId } from '../tool-validation.js';
+import { requireSessionId, type WithSessionId } from '../tool-validation.js';
 import { readLineContext } from './shared.js';
-import { jsonResult, sessionErrorResultOrThrow, type ToolResult } from '../tool-result.js';
-
-/** set_breakpoint arguments once the entry guard has established sessionId. */
-type SetBreakpointArgs = ToolArguments & { sessionId: string };
+import { failureResult, jsonResult, sessionErrorResultOrThrow, type ToolResult } from '../tool-result.js';
 
 export const setBreakpointTool: ToolHandler = async (ctx, args) => {
   const isFunctionBp = args.function !== undefined;
@@ -51,10 +47,10 @@ export const setBreakpointTool: ToolHandler = async (ctx, args) => {
   }
 
   if (isFunctionBp) {
-    return setFunctionBreakpointBranch(ctx, args as SetBreakpointArgs);
+    return setFunctionBreakpointBranch(ctx, args as WithSessionId);
   }
 
-  return setLineBreakpointBranch(ctx, args as SetBreakpointArgs);
+  return setLineBreakpointBranch(ctx, args as WithSessionId);
 };
 
 /**
@@ -62,7 +58,7 @@ export const setBreakpointTool: ToolHandler = async (ctx, args) => {
  */
 // Module-private: callers must already have run setBreakpointTool's entry guard,
 // which is what makes the `args as SetBreakpointArgs` narrowing sound.
-async function setFunctionBreakpointBranch(ctx: ToolContext, args: SetBreakpointArgs): Promise<ToolResult> {
+async function setFunctionBreakpointBranch(ctx: ToolContext, args: WithSessionId): Promise<ToolResult> {
   // Function breakpoints are session-global symbols — no file,
   // no line, no content anchor, no logpoint, no suspend policy
   // (DAP FunctionBreakpoint supports name + condition only).
@@ -135,7 +131,7 @@ async function setFunctionBreakpointBranch(ctx: ToolContext, args: SetBreakpoint
  * Line / statement branch of set_breakpoint.
  */
 // Module-private: see setFunctionBreakpointBranch — the entry guard has run.
-async function setLineBreakpointBranch(ctx: ToolContext, args: SetBreakpointArgs): Promise<ToolResult> {
+async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): Promise<ToolResult> {
   try {
     // Logpoint gating (issue #235): hard error for known-unsupported
     // adapters; a warning when support is unknown pre-launch.
@@ -294,14 +290,15 @@ export const removeBreakpointTool: ToolHandler = async (ctx, args) => {
           ? undefined
           : ctx.getFunctionBreakpointNameHint(args.sessionId, effectiveName);
         if (nameHint) warnings.push(nameHint);
-        return jsonResult({
-          success: false,
-          error: normalized
+        return failureResult(
+          normalized
             ? `No function breakpoint found for ${requestedName} (normalized to ${effectiveName})`
             : `No function breakpoint found for ${requestedName}`,
-          ...functionDisclosure,
-          warning: warnings.length > 0 ? warnings.join('; ') : undefined
-        });
+          {
+            ...functionDisclosure,
+            warning: warnings.length > 0 ? warnings.join('; ') : undefined
+          }
+        );
       }
       warning = warnings.length > 0 ? warnings.join('; ') : undefined;
     } else if (args.breakpointId) {
@@ -309,20 +306,14 @@ export const removeBreakpointTool: ToolHandler = async (ctx, args) => {
       removed = res.removed ? [res.removed] : [];
       warning = res.warning;
       if (removed.length === 0) {
-        return jsonResult({
-          success: false,
-          error: `No breakpoint found with id ${args.breakpointId}`
-        });
+        return failureResult(`No breakpoint found with id ${args.breakpointId}`);
       }
     } else {
       const res = await ctx.removeBreakpointsByLocation(args.sessionId, args.file!, args.line!);
       removed = res.removed;
       warning = res.warning;
       if (removed.length === 0) {
-        return jsonResult({
-          success: false,
-          error: `No breakpoint found at ${args.file}:${args.line}`
-        });
+        return failureResult(`No breakpoint found at ${args.file}:${args.line}`);
       }
     }
     return jsonResult({

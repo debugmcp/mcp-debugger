@@ -19,6 +19,19 @@ export function isContainerMode(environment: IEnvironment): boolean {
 }
 
 /**
+ * The same check without an IEnvironment, read live from process.env.
+ *
+ * Production never changes MCP_CONTAINER after start, so this and
+ * isContainerMode always agree there; the difference matters only to tests,
+ * which stub the variable after a ProcessEnvironment (which snapshots
+ * process.env at construction) already exists. Callers that hold an
+ * IEnvironment should prefer isContainerMode.
+ */
+export function isContainerRuntime(): boolean {
+  return process.env.MCP_CONTAINER === 'true';
+}
+
+/**
  * Get the workspace root directory for container mode
  * @throws Error if in container mode but MCP_WORKSPACE_ROOT is not set
  */

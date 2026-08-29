@@ -122,5 +122,5 @@ export async function handleListThreads(ctx: ToolContext, args: { sessionId: str
 
 export const listThreadsTool: ToolHandler = async (ctx, args) => {
   requireSessionId(args);
-  return await handleListThreads(ctx, args as { sessionId: string });
+  return await handleListThreads(ctx, args);
 };

@@ -11,7 +11,12 @@ import { getVariableAccessMode, requiresExplicitNames } from '../utils/variable-
 import type { ToolArguments } from './tool-arguments.js';
 
 /** Arguments whose sessionId has been established by requireSessionId. */
-export type WithSessionId<T extends ToolArguments = ToolArguments> = T & { sessionId: string };
+export type WithSessionId = ToolArguments & { sessionId: string };
+
+/** A non-null, non-array object — what the pass-through config bags must be. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
 
 /**
  * The single-parameter sessionId guard for every tool that needs one. The
@@ -31,12 +36,10 @@ export function requireSessionId(args: ToolArguments): asserts args is WithSessi
  * allowed — these arguments are all optional.
  */
 export function assertPlainObjectArg(value: unknown, parameterName: string): void {
-  if (value === undefined) {
+  if (value === undefined || isPlainObject(value)) {
     return;
   }
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new McpError(McpErrorCode.InvalidParams, `${parameterName} must be an object when provided`);
-  }
+  throw new McpError(McpErrorCode.InvalidParams, `${parameterName} must be an object when provided`);
 }
 
 export function validateBreakOnExceptions(value: string | undefined): ExceptionBreakMode | undefined {
@@ -89,7 +92,7 @@ export function normalizeStartDebuggingArgs(
 } {
   const warnings: string[] = [];
   let breakOnExceptions = topLevelBreakOnExceptions;
-  if (dapLaunchArgs === null || typeof dapLaunchArgs !== 'object' || Array.isArray(dapLaunchArgs)) {
+  if (!isPlainObject(dapLaunchArgs)) {
     return { dapLaunchArgs, breakOnExceptions, warnings };
   }
   const cleaned: Record<string, unknown> = { ...dapLaunchArgs };

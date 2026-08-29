@@ -32,9 +32,10 @@ import { getOutputTool } from './output-tools.js';
 import { listSupportedLanguagesTool } from './language-tools.js';
 
 /**
- * Keyed by ToolName, so this table cannot drift from the advertised schema
- * list: a tool without a handler and a handler under a misspelled name are
- * both compile errors.
+ * Keyed by ToolName: a name in TOOL_NAMES with no handler here, and a handler
+ * under a name that is not in TOOL_NAMES, are both compile errors. Whether
+ * that name also reaches tools/list is a separate question — see the note on
+ * TOOL_NAMES in ../tool-schemas.ts.
  */
 export const TOOL_HANDLERS: Readonly<Record<ToolName, ToolHandler>> = Object.freeze({
   create_debug_session: createDebugSessionTool,
