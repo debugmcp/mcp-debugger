@@ -37,8 +37,7 @@ export function failureResult(message: string, extra?: Record<string, unknown>):
 }
 
 /**
- * How a catch block recognizes "the session is gone / not usable" — the two
- * dialects in this server are NOT interchangeable and must never be unified:
+ * How a catch block recognizes "the session is gone / not usable".
  *
  * - 'typed'  matches the typed error classes, so ProxyNotRunningError counts
  *            (its message, `Cannot X: no active proxy...`, matches no sniff).
@@ -47,6 +46,14 @@ export function failureResult(message: string, extra?: Record<string, unknown>):
  * - 'session-state-or-not-paused' is the looser sniff used by
  *            evaluate_expression and get_local_variables: bare `not found`
  *            counts, and so does `not paused`.
+ *
+ * These reproduce the pre-existing per-site sniffs byte for byte, including
+ * their over-matches (a message that merely echoes user text) and their dead
+ * branches (nothing in the server throws a 'closed' or a 'not paused'
+ * McpError today). They differ where it counts -- ProxyNotRunningError is
+ * invisible to both string dialects -- so they stay parameterised rather than
+ * merged; unify them only together with a move to error-code classification
+ * (follow-up).
  */
 export type SessionErrorSniff = 'typed' | 'session-state' | 'session-state-or-not-paused';
 

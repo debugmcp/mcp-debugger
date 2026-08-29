@@ -55,7 +55,7 @@ graph TB
 - **Purpose**: Entry point for MCP protocol communication
 - **Key Files**: 
   - `src/server.ts` - `DebugMcpServer`, the composition root: dependencies, lifecycle, session validation, breakpoint gating and the public facade methods; implements `ToolContext`
-  - `src/server/` - tool schemas (`tool-schemas.ts`), argument coercion (`tool-arguments.ts`), the tools/call dispatch wrapper (`tool-dispatch.ts` over `handlers/index.ts`), one handler module per tool family (`handlers/*.ts`), and the resource (`output-resources.ts`) and prompt (`prompts.ts`) handlers
+  - `src/server/` - tool schemas (`tool-schemas.ts`), argument coercion (`tool-arguments.ts`), the tools/call dispatch wrapper (`tool-dispatch.ts` over `handlers/index.ts`), argument validation (`tool-validation.ts`), result envelopes and the session-error catch helpers (`tool-result.ts`), one handler module per tool family (`handlers/*.ts`) over their shared helpers (`handlers/shared.ts`), and the resource (`output-resources.ts`) and prompt (`prompts.ts`) handlers
   - `src/index.ts` - CLI entry point with subcommands (stdio, http, sse [deprecated], check-rust-binary)
 - **Responsibilities**:
   - Handle MCP tool registration and routing

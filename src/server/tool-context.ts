@@ -4,8 +4,9 @@
  * DebugMcpServer implements it and passes itself, so handlers read every
  * dependency (sessionManager, logger, fileChecker, ...) from the live server
  * at call time rather than from copies captured at construction — the
- * server-coverage tests swap those fields on a constructed server and expect
- * the handlers to see the swap.
+ * handler tests (tests/core/unit/server/handlers/*.test.ts) assign
+ * ctx.lineReader, ctx.fileChecker and ctx.validateSession on an
+ * already-constructed context and expect the handlers to see the swap.
  *
  * Type-only imports throughout; this module never imports src/server.ts.
  */

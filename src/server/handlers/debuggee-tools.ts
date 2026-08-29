@@ -49,8 +49,13 @@ export const startDebuggingTool: ToolHandler = async (ctx, args) => {
     }
     return jsonResult(responsePayload);
   } catch (error) {
-    // Session-lifecycle failures become {success: false}; everything else
-    // (including file validation errors) is re-thrown.
+    // The 'session-state' sniff reads the McpError MESSAGE: terminated,
+    // closed, or ('not found' AND 'Session') becomes {success: false};
+    // everything else is re-thrown. Being a message sniff it also catches
+    // errors that merely echo user text -- a script path containing
+    // "Sessions" makes "Script file not found: ..." match -- so it is wider
+    // than "session-lifecycle failures only". Preserved verbatim from before
+    // the extraction; classifying by error code instead is a follow-up.
     return sessionErrorResultOrThrow(error, 'session-state', { state: 'stopped' });
   }
 };

@@ -215,8 +215,9 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): P
     });
     return result;
   } catch (error) {
-    // Session-lifecycle failures become {success: false}; everything else
-    // (including file validation errors) is re-thrown.
+    // Message-sniffed session state -> {success: false}, everything else
+    // re-thrown; the sniff is wider than its name suggests (see the note in
+    // debuggee-tools.ts, start_debugging).
     return sessionErrorResultOrThrow(error, 'session-state');
   }
 }

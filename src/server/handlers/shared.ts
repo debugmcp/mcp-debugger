@@ -57,10 +57,11 @@ export function redactionSummary(
 /**
  * The three optional decorations a variables payload carries: the names that
  * were asked for but not returned, the redaction notice, and the size-guard
- * summary with its advisory (issues #356/#359). Returned as separate fields
- * rather than a ready-made spread because get_variables and
- * get_local_variables place them at different points in their payloads and
- * the key order of both must not change.
+ * summary with its advisory (issues #356/#359). Each is an independent
+ * optional field, so a caller can splice them in one at a time: get_variables
+ * spreads the whole object at the tail of its payload while
+ * get_local_variables assigns the three in a different order. Neither key
+ * order may change.
  */
 export function variablePayloadExtras(
   variables: Variable[],
