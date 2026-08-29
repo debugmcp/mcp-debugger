@@ -85,6 +85,14 @@ import {
   removeBreakpointTool,
   clearBreakpointsTool
 } from './server/handlers/breakpoint-tools.js';
+import {
+  stepTool,
+  continueExecutionTool,
+  pauseExecutionTool,
+  listThreadsTool,
+  handlePause,
+  handleListThreads
+} from './server/handlers/execution-tools.js';
 
 export { coerceToolArguments };
 export type { SetBreakpointRequest };
@@ -933,118 +941,19 @@ export class DebugMcpServer implements ToolContext {
             case 'step_over':
             case 'step_into':
             case 'step_out': {
-              if (!args.sessionId) {
-                throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
-              }
-
-              try {
-                let stepResult: { success: boolean; state: string; error?: string; data?: unknown; };
-                if (toolName === 'step_over') {
-                  stepResult = await this.stepOver(args.sessionId);
-                } else if (toolName === 'step_into') {
-                  stepResult = await this.stepInto(args.sessionId);
-                } else {
-                  stepResult = await this.stepOut(args.sessionId);
-                }
-
-                // Build response with location and line context if available
-                const stepType = toolName.replace('step_', '').replace('_', ' ');
-                const resultData = stepResult.data as { message?: string; location?: { file: string; line: number; column?: number }; pending?: boolean } | undefined;
-                const response: Record<string, unknown> = {
-                  success: stepResult.success,
-                  message: `Stepped ${stepType}`,
-                  state: stepResult.state
-                };
-
-                // A pending step means the program is still executing (e.g. stepping
-                // over a long-running call); report that truthfully instead of "Stepped".
-                if (resultData?.pending) {
-                  response.pending = true;
-                  if (resultData.message) {
-                    response.message = resultData.message;
-                  }
-                }
-
-                // Extract location from result data
-                const location = resultData?.location;
-
-                if (location) {
-                  response.location = location;
-
-                  // Try to get line context
-                  try {
-                    const lineContext = await this.lineReader.getLineContext(
-                      location.file,
-                      location.line,
-                      { contextLines: 2 }
-                    );
-
-                    if (lineContext) {
-                      response.context = {
-                        lineContent: lineContext.lineContent,
-                        surrounding: lineContext.surrounding
-                      };
-                    }
-                  } catch (contextError) {
-                    // Log but don't fail if we can't get context
-                    this.logger.debug('Could not get line context for step result', {
-                      file: location.file,
-                      line: location.line,
-                      error: contextError
-                    });
-                  }
-                }
-
-                result = { content: [{ type: 'text', text: JSON.stringify(response) }] };
-              } catch (error) {
-                // Handle validation errors specifically
-                if (error instanceof SessionTerminatedError ||
-                    error instanceof SessionNotFoundError ||
-                    error instanceof ProxyNotRunningError) {
-                  result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-                } else if (error instanceof Error) {
-                  // Handle other expected errors (like "Failed to step over")
-                  result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-                } else {
-                  // Re-throw unexpected errors
-                  throw error;
-                }
-              }
+              result = await stepTool(this, args, toolName);
               break;
             }
             case 'continue_execution': {
-              if (!args.sessionId) {
-                throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
-              }
-              
-              try {
-                const continueResult = await this.continueExecution(args.sessionId);
-                result = { content: [{ type: 'text', text: JSON.stringify({ success: continueResult, message: continueResult ? 'Continued execution' : 'Failed to continue execution' }) }] };
-              } catch (error) {
-                // Handle validation errors specifically
-                if (error instanceof SessionTerminatedError ||
-                    error instanceof SessionNotFoundError ||
-                    error instanceof ProxyNotRunningError) {
-                  result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-                } else if (error instanceof Error) {
-                  // Handle other expected errors
-                  result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-                } else {
-                  // Re-throw unexpected errors
-                  throw error;
-                }
-              }
+              result = await continueExecutionTool(this, args, toolName);
               break;
             }
             case 'pause_execution': {
-              result = await this.handlePause(args as { sessionId: string; threadId?: number });
+              result = await pauseExecutionTool(this, args, toolName);
               break;
             }
             case 'list_threads': {
-              if (!args.sessionId) {
-                throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
-              }
-              result = await this.handleListThreads(args as { sessionId: string });
+              result = await listThreadsTool(this, args, toolName);
               break;
             }
             case 'get_variables': {
@@ -1286,21 +1195,9 @@ export class DebugMcpServer implements ToolContext {
     }) }] };
   }
 
-  private async handlePause(args: { sessionId: string; threadId?: number }): Promise<ServerResult> {
-    try {
-      this.validateSession(args.sessionId);
-      const result = await this.sessionManager.pause(args.sessionId, args.threadId);
-      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
-    } catch (error) {
-      this.logger.error('Failed to pause execution', { error });
-      if (error instanceof SessionTerminatedError ||
-          error instanceof SessionNotFoundError ||
-          error instanceof ProxyNotRunningError) {
-        return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-      }
-      if (error instanceof McpError) throw error;
-      throw new McpError(McpErrorCode.InternalError, `Failed to pause execution: ${(error as Error).message}`);
-    }
+  /** @internal test seam; removed in PR 6 */
+  private async handlePause(args: { sessionId: string; threadId?: number }): Promise<ToolResult> {
+    return handlePause(this, args);
   }
 
   private async handleExposeSession(sessionId: string): Promise<ServerResult> {
@@ -1376,21 +1273,9 @@ export class DebugMcpServer implements ToolContext {
     }
   }
 
-  private async handleListThreads(args: { sessionId: string }): Promise<ServerResult> {
-    try {
-      this.validateSession(args.sessionId);
-      const threads = await this.sessionManager.listThreads(args.sessionId);
-      return { content: [{ type: 'text', text: JSON.stringify({ success: true, threads }) }] };
-    } catch (error) {
-      this.logger.error('Failed to list threads', { error });
-      if (error instanceof SessionTerminatedError ||
-          error instanceof SessionNotFoundError ||
-          error instanceof ProxyNotRunningError) {
-        return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-      }
-      if (error instanceof McpError) throw error;
-      throw new McpError(McpErrorCode.InternalError, `Failed to list threads: ${(error as Error).message}`);
-    }
+  /** @internal test seam; removed in PR 6 */
+  private async handleListThreads(args: { sessionId: string }): Promise<ToolResult> {
+    return handleListThreads(this, args);
   }
 
   private async handleEvaluateExpression(args: { sessionId: string, expression: string, frameId?: number, timeout?: number }): Promise<ServerResult> {
