@@ -10,10 +10,32 @@ This document provides detailed design information for the major components of t
 |-------|------|----------------|
 | `SessionManagerCore` | `src/session/session-manager-core.ts` | Lifecycle, state management, event handler setup/cleanup, dependency injection |
 | `SessionManagerData` | `src/session/session-manager-data.ts` | Data retrieval: variables, stack traces, scopes, local variables; `selectPolicy()` |
-| `SessionManagerOperations` | `src/session/session-manager-operations.ts` | Debug operations: start, step, continue, pause, breakpoints, attach/detach, evaluate |
+| `SessionManagerOperations` | `src/session/session-manager-operations.ts` | Debug operations. Launch and attach live here; the rest are one-line delegates to the collaborators below |
 | `SessionManager` | `src/session/session-manager.ts` | Thin facade that extends `SessionManagerOperations` and implements `handleAutoContinue` |
 
 The inheritance chain is: `SessionManagerCore` -> `SessionManagerData` -> `SessionManagerOperations` -> `SessionManager`.
+
+`SessionManagerOperations` is itself a facade over per-slice collaborators, wired
+as protected fields and reached at call time (`this.breakpoints.…`) so each one
+can be spied on or replaced:
+
+| Collaborator | File | Responsibility |
+|-------|------|----------------|
+| `BreakpointController` | `src/session/breakpoints/breakpoint-controller.ts` | Set/remove/clear breakpoints; the replace-all DAP re-sends and the live-sync warning |
+| `reresolveAnchors` | `src/session/breakpoints/anchor-resolution.ts` | Re-resolve statement anchors against the current source (restart and JVM hot swap) |
+| launch warnings | `src/session/breakpoints/launch-warnings.ts` | Pure builders: unbound-at-exit, logpoint downgrade, unbound function breakpoints |
+| `ExecutionController` | `src/session/execution/execution-controller.ts` | Stepping (table-driven over `STEP_KINDS`), continue, pause, thread list |
+| `ExpressionEvaluator` | `src/session/inspection/expression-evaluator.ts` | `evaluate_expression`, including frame resolution and secret redaction |
+| `RedefineClassesController` | `src/session/jvm/redefine-classes-controller.ts` | JVM hot swap plus the post-swap anchor re-resolution and breakpoint re-send |
+| `MirrorController` | `src/session/mirror/mirror-controller.ts` | `expose_session` / `unexpose_session` |
+
+They see the facade through `OperationsContext`
+(`src/session/operations-context.ts`), whose members are late-bound arrows and
+getters — never captured references — so reassigning a facade method or writing
+a tunable on a live instance is visible to the collaborators. Each collaborator's
+constructor takes the narrowest `Pick<>` slice of that context it uses.
+Shared per-request DAP helpers (timeout override validation, the timeout hint,
+log truncation) live in `src/session/dap-request-helpers.ts`.
 
 ### Overview
 SessionManager is the central orchestrator for all debug sessions. It implements a facade pattern, providing a simplified interface for complex debugging operations while managing the lifecycle of ProxyManager instances.
