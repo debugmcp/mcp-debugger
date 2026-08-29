@@ -5,16 +5,18 @@
  * store already holds.
  */
 import { describe, it, expect } from 'vitest';
-import { SessionManager } from '../../../../src/session/session-manager.js';
+import { buildUnboundBreakpointExitWarning } from '../../../../src/session/breakpoints/launch-warnings.js';
+import type { ManagedSession } from '../../../../src/session/session-store.js';
 
 type BuilderSession = {
   breakpoints: Map<string, { file: string; line: number; verified: boolean; message?: string }>;
 };
 
 function build(session: BuilderSession): string | undefined {
-  return (SessionManager.prototype as unknown as {
-    buildUnboundBreakpointExitWarning(s: BuilderSession): string | undefined;
-  }).buildUnboundBreakpointExitWarning.call({}, session);
+  // The builder is a free function over the breakpoint store alone.
+  return buildUnboundBreakpointExitWarning(
+    session as unknown as Pick<ManagedSession, 'breakpoints'>
+  );
 }
 
 describe('buildUnboundBreakpointExitWarning', () => {
