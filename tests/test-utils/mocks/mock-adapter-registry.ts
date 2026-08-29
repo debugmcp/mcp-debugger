@@ -6,11 +6,23 @@
 import { vi } from 'vitest';
 import { IAdapterRegistry, AdapterInfo } from '@debugmcp/shared';
 import { DebugLanguage } from '@debugmcp/shared';
+import { FakeDebugAdapter } from '../fakes/fake-debug-adapter.js';
+
+/** Options for {@link createMockAdapterRegistry}. */
+export interface MockAdapterRegistryOptions {
+  /**
+   * Replace what `create()` hands back. Defaults to a {@link FakeDebugAdapter} for the
+   * requested language.
+   */
+  createAdapter?: IAdapterRegistry['create'];
+}
 
 /**
  * Create a standard mock adapter registry with default behavior
  */
-export function createMockAdapterRegistry(): IAdapterRegistry {
+export function createMockAdapterRegistry(
+  options: MockAdapterRegistryOptions = {}
+): IAdapterRegistry {
   const supportedLanguages = ['python', 'mock'];
   
   // Create realistic adapter info
@@ -46,83 +58,31 @@ export function createMockAdapterRegistry(): IAdapterRegistry {
       supportedLanguages.includes(lang)
     ),
     
-    create: vi.fn().mockImplementation(async (language: string, _config?: unknown) => ({
-      language: language as DebugLanguage,
-      name: `${language} Debug Adapter`,
-      
-      // IDebugAdapter lifecycle methods
-      initialize: vi.fn().mockResolvedValue(undefined),
-      dispose: vi.fn().mockResolvedValue(undefined),
-      
-      // State management
-      getState: vi.fn().mockReturnValue('ready'),
-      isReady: vi.fn().mockReturnValue(true),
-      getCurrentThreadId: vi.fn().mockReturnValue(1),
-      
-      // Environment validation
-      validateEnvironment: vi.fn().mockResolvedValue({ valid: true, errors: [], warnings: [] }),
-      getRequiredDependencies: vi.fn().mockReturnValue([]),
-      
-      // Executable management
-      resolveExecutablePath: vi.fn().mockResolvedValue('mock-executable'),
-      getDefaultExecutableName: vi.fn().mockReturnValue('mock'),
-      getExecutableSearchPaths: vi.fn().mockReturnValue([]),
-      
-      // Adapter configuration - THIS IS THE CRITICAL METHOD
-      buildAdapterCommand: vi.fn().mockImplementation((config) => ({
-        command: config.executablePath || 'node',
-        args: ['mock-adapter.js', '--port', String(config.adapterPort)],
-        env: {}
-      })),
-      getAdapterModuleName: vi.fn().mockReturnValue('mock-adapter'),
-      getAdapterInstallCommand: vi.fn().mockReturnValue('echo "Mock adapter built-in"'),
-      
-      // Debug configuration
-      transformLaunchConfig: vi.fn().mockImplementation(config => config),
-      getDefaultLaunchConfig: vi.fn().mockReturnValue({}),
-      
-      // Path translation
-      translateScriptPath: vi.fn().mockImplementation(path => path),
-      translateBreakpointPath: vi.fn().mockImplementation(path => path),
-      
-      // DAP protocol operations
-      sendDapRequest: vi.fn().mockResolvedValue({}),
-      handleDapEvent: vi.fn(),
-      handleDapResponse: vi.fn(),
-      
-      // Connection management
-      connect: vi.fn().mockResolvedValue(undefined),
-      disconnect: vi.fn().mockResolvedValue(undefined),
-      isConnected: vi.fn().mockReturnValue(true),
-      
-      // Error handling
-      getInstallationInstructions: vi.fn().mockReturnValue('Mock adapter needs no installation'),
-      getMissingExecutableError: vi.fn().mockReturnValue('Mock executable not found'),
-      translateErrorMessage: vi.fn().mockImplementation(err => err.message),
-      
-      // Feature support
-      supportsFeature: vi.fn().mockReturnValue(true),
-      getFeatureRequirements: vi.fn().mockReturnValue([]),
-      getCapabilities: vi.fn().mockReturnValue({}),
-      
-      // EventEmitter methods
-      on: vi.fn(),
-      off: vi.fn(),
-      emit: vi.fn(),
-      removeListener: vi.fn(),
-      once: vi.fn(),
-      removeAllListeners: vi.fn(),
-      setMaxListeners: vi.fn(),
-      getMaxListeners: vi.fn().mockReturnValue(10),
-      listeners: vi.fn().mockReturnValue([]),
-      rawListeners: vi.fn().mockReturnValue([]),
-      listenerCount: vi.fn().mockReturnValue(0),
-      prependListener: vi.fn(),
-      prependOnceListener: vi.fn(),
-      eventNames: vi.fn().mockReturnValue([]),
-      addListener: vi.fn()
-    })),
-    
+    // One conformant fake, not a re-typed literal: FakeDebugAdapter implements
+    // IDebugAdapter, so the compiler now catches the drift this block used to carry
+    // (a sync transformLaunchConfig, the long-removed translateScriptPath /
+    // translateBreakpointPath, and 15 inert EventEmitter stubs in place of a real emitter).
+    create: vi.fn<IAdapterRegistry['create']>(async (language, config) => {
+      // Branch on the option, not on the result: `createAdapter` returns a Promise, which is
+      // never nullish, so a `??` fallback here would be dead code the moment the option is
+      // supplied. Awaiting it also lets a stub that resolves nothing fail here, with the
+      // language named, instead of as a TypeError deep inside startProxyManager.
+      if (options.createAdapter) {
+        const adapter = await options.createAdapter(language, config);
+        if (!adapter) {
+          throw new Error(
+            `createMockAdapterRegistry: createAdapter returned no adapter for ${language}`
+          );
+        }
+        return adapter;
+      }
+
+      return new FakeDebugAdapter({
+        language: language as DebugLanguage,
+        name: `${language} Debug Adapter`
+      });
+    }),
+
     register: vi.fn().mockResolvedValue(undefined),
 
     unregister: vi.fn().mockReturnValue(true),

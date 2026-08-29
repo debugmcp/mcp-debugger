@@ -111,6 +111,7 @@ tests/
 ├── stress/                    # Stress tests (SSE stress, cross-transport parity)
 │
 ├── test-utils/                # Shared test utilities
+│   ├── fakes/                 # Compile-checked fakes (classes that `implements` an interface)
 │   ├── fixtures/              # Script fixtures (python-scripts.ts)
 │   ├── helpers/               # Port manager, test dependencies, coverage tools
 │   └── mocks/                 # Mock DAP client, logger, processes, adapters, etc.
@@ -165,6 +166,7 @@ packages/
 
 `tests/test-utils/` provides reusable infrastructure:
 
+- **`fakes/fake-debug-adapter.ts`** — conformant `IDebugAdapter` double (see *Fakes vs mocks* below)
 - **`helpers/port-manager.ts`** — allocates unique ports to avoid conflicts between parallel tests
 - **`helpers/test-dependencies.ts`** — creates dependency injection containers pre-wired for testing
 - **`mocks/dap-client.ts`** — mock DAP client for simulating debugger communication
@@ -172,6 +174,17 @@ packages/
 - **`mocks/mock-proxy-manager.ts`** — mock proxy manager with controllable behavior
 - **`mocks/child-process.ts`**, **`mocks/net.ts`** — mock Node.js built-ins
 - **`fixtures/python-scripts.ts`** — Python script content for test fixtures
+
+### Fakes vs mocks
+
+A **fake** (`test-utils/fakes/`) is a class that `implements` a production interface, so the
+compiler rejects it the moment the interface moves — use one for the big behavioural interfaces
+whose doubles otherwise drift, `IDebugAdapter` (`fakes/fake-debug-adapter.ts`) and `IProxyManager`
+(`mocks/mock-proxy-manager.ts`, which predates the directory). A **mock** (`test-utils/mocks/`) is
+a `vi.fn` bag for a narrow seam, where an untyped literal costs little and reads more directly.
+
+Reach for a fake rather than hand-rolling an `as unknown as SomeInterface` literal: that cast
+silences exactly the divergence the double exists to avoid.
 
 ## Writing Tests
 

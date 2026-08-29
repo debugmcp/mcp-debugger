@@ -8,7 +8,8 @@ import {
 } from '../../../src/proxy/proxy-manager.js';
 import { createInitialState } from '../../../src/dap-core/index.js';
 import type { ProxyConfig } from '../../../src/proxy/proxy-config.js';
-import { DebugLanguage, type IProxyProcess, type IProxyProcessLauncher, type IFileSystem, type ILogger, type IDebugAdapter, type AdapterLaunchBarrier } from '@debugmcp/shared';
+import { DebugLanguage, type IProxyProcess, type IProxyProcessLauncher, type IFileSystem, type ILogger, type AdapterLaunchBarrier } from '@debugmcp/shared';
+import { FakeDebugAdapter } from '../../test-utils/fakes/fake-debug-adapter.js';
 
 class FakeProxyProcess extends EventEmitter implements IProxyProcess {
   pid = 4242;
@@ -302,15 +303,14 @@ describe('ProxyManager.start', () => {
   });
 
   it('fails to start when adapter environment validation fails', async () => {
-    const adapter = {
+    const adapter = new FakeDebugAdapter({
       language: DebugLanguage.PYTHON,
-      validateEnvironment: vi.fn().mockResolvedValue({
+      validateEnvironment: async () => ({
         valid: false,
-        errors: [{ message: 'Missing Python runtime' }],
+        errors: [{ code: 'PYTHON_MISSING', message: 'Missing Python runtime', recoverable: false }],
         warnings: []
-      }),
-      resolveExecutablePath: vi.fn()
-    } as unknown as IDebugAdapter;
+      })
+    });
 
     proxyManager = new ProxyManager(
       adapter,
@@ -331,15 +331,12 @@ describe('ProxyManager.start', () => {
   });
 
   it('fails to start when executable resolution throws', async () => {
-    const adapter = {
+    const adapter = new FakeDebugAdapter({
       language: DebugLanguage.PYTHON,
-      validateEnvironment: vi.fn().mockResolvedValue({
-        valid: true,
-        errors: [],
-        warnings: []
-      }),
-      resolveExecutablePath: vi.fn().mockRejectedValue(new Error('resolution failed'))
-    } as unknown as IDebugAdapter;
+      resolveExecutablePath: async () => {
+        throw new Error('resolution failed');
+      }
+    });
 
     proxyManager = new ProxyManager(
       adapter,
@@ -360,13 +357,7 @@ describe('ProxyManager.start', () => {
   });
 
   it('validates the user-configured interpreter, not an auto-detected one (issue #106)', async () => {
-    const validateEnvironment = vi.fn().mockResolvedValue({ valid: true, errors: [], warnings: [] });
-    const resolveExecutablePath = vi.fn();
-    const adapter = {
-      language: DebugLanguage.PYTHON,
-      validateEnvironment,
-      resolveExecutablePath
-    } as unknown as IDebugAdapter;
+    const adapter = new FakeDebugAdapter({ language: DebugLanguage.PYTHON });
 
     proxyManager = new ProxyManager(
       adapter,
@@ -384,19 +375,22 @@ describe('ProxyManager.start', () => {
     await proxyManager.start(config);
 
     // The configured venv interpreter must be the one validated for debugpy.
-    expect(validateEnvironment).toHaveBeenCalledWith('/project/.venv/bin/python');
+    expect(adapter.validateEnvironment).toHaveBeenCalledWith('/project/.venv/bin/python');
     // A provided path is used directly — no auto-detection fallback.
-    expect(resolveExecutablePath).not.toHaveBeenCalled();
+    expect(adapter.resolveExecutablePath).not.toHaveBeenCalled();
   });
 
   it('skips environment probing for direct-connect attach sessions (issue #331)', async () => {
-    const adapter = {
+    const adapter = new FakeDebugAdapter({
       language: DebugLanguage.RUBY,
-      validateEnvironment: vi.fn().mockRejectedValue(new Error('should not be called')),
-      resolveExecutablePath: vi.fn().mockRejectedValue(new Error('should not be called')),
-      usesDirectConnectForAttach: vi.fn().mockReturnValue(true),
-      getDefaultExecutableName: vi.fn().mockReturnValue('ruby')
-    } as unknown as IDebugAdapter;
+      validateEnvironment: async () => {
+        throw new Error('should not be called');
+      },
+      resolveExecutablePath: async () => {
+        throw new Error('should not be called');
+      },
+      getDefaultExecutableName: () => 'ruby'
+    }).withAttachSupport({ directConnect: true });
 
     proxyManager = new ProxyManager(
       adapter,
@@ -423,12 +417,8 @@ describe('ProxyManager.start', () => {
   });
 
   it('still probes the environment for attach sessions on spawn-mode adapters', async () => {
-    const adapter = {
-      language: DebugLanguage.PYTHON,
-      validateEnvironment: vi.fn().mockResolvedValue({ valid: true, errors: [], warnings: [] }),
-      resolveExecutablePath: vi.fn(),
-      usesDirectConnectForAttach: vi.fn().mockReturnValue(false)
-    } as unknown as IDebugAdapter;
+    const adapter = new FakeDebugAdapter({ language: DebugLanguage.PYTHON })
+      .withAttachSupport({ directConnect: false });
 
     proxyManager = new ProxyManager(
       adapter,
@@ -1390,12 +1380,9 @@ describe('ProxyManager.start', () => {
         waitUntilReady: vi.fn().mockResolvedValue(undefined),
         dispose: vi.fn()
       };
-      const adapter = {
-        language: DebugLanguage.JAVASCRIPT,
-        validateEnvironment: vi.fn(),
-        resolveExecutablePath: vi.fn(),
-        createLaunchBarrier: vi.fn().mockReturnValue(barrier)
-      } as unknown as IDebugAdapter;
+      const adapter = new FakeDebugAdapter({
+        language: DebugLanguage.JAVASCRIPT
+      }).withLaunchBarrier(barrier);
 
       const manager = new ProxyManager(adapter, proxyProcessLauncher, fileSystem, logger);
       (manager as unknown as { proxyProcess: IProxyProcess | null }).proxyProcess = fakeProcess;
@@ -1436,11 +1423,10 @@ describe('ProxyManager.start', () => {
   });
 
   it('emits lifecycle events when adapter-driven statuses arrive', async () => {
-    const adapter = {
+    const adapter = new FakeDebugAdapter({
       language: DebugLanguage.PYTHON,
-      validateEnvironment: vi.fn().mockResolvedValue({ valid: true, errors: [], warnings: [] }),
-      resolveExecutablePath: vi.fn().mockResolvedValue('python-auto')
-    } as unknown as IDebugAdapter;
+      resolveExecutablePath: async () => 'python-auto'
+    });
 
     proxyManager = new ProxyManager(
       adapter,
@@ -2102,11 +2088,10 @@ describe('ProxyManager helpers', () => {
   });
 
   it('prepares spawn context using adapter resolution and cloned environment', async () => {
-    const adapter = {
+    const adapter = new FakeDebugAdapter({
       language: DebugLanguage.JAVASCRIPT,
-      validateEnvironment: vi.fn().mockResolvedValue({ valid: true, errors: [], warnings: [] }),
-      resolveExecutablePath: vi.fn().mockResolvedValue('/usr/bin/node')
-    } as unknown as IDebugAdapter;
+      resolveExecutablePath: async () => '/usr/bin/node'
+    });
 
     const runtimeEnv = {
       moduleUrl: pathToFileURL(path.join(process.cwd(), 'fake', 'src', 'proxy', 'proxy-manager.ts')).href,
@@ -2141,15 +2126,14 @@ describe('ProxyManager helpers', () => {
   });
 
   it('throws when adapter validation fails during spawn context preparation', async () => {
-    const adapter = {
+    const adapter = new FakeDebugAdapter({
       language: DebugLanguage.PYTHON,
-      validateEnvironment: vi.fn().mockResolvedValue({
+      validateEnvironment: async () => ({
         valid: false,
-        errors: [{ message: 'Python missing' }],
+        errors: [{ code: 'PYTHON_MISSING', message: 'Python missing', recoverable: false }],
         warnings: []
-      }),
-      resolveExecutablePath: vi.fn()
-    } as unknown as IDebugAdapter;
+      })
+    });
 
     const runtimeEnv = {
       moduleUrl: pathToFileURL(path.join(process.cwd(), 'fake', 'src', 'proxy', 'proxy-manager.ts')).href,
