@@ -42,12 +42,8 @@ import { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';
 import { SimpleFileChecker, createSimpleFileChecker, FileExistenceResult } from './utils/simple-file-checker.js';
 import { LineReader, createLineReader } from './utils/line-reader.js';
-import { getDisabledLanguages, isLanguageDisabled } from './utils/language-config.js';
-import {
-  probeLanguageEntry,
-  ValidationResultCache,
-  LanguageModes
-} from './utils/language-availability.js';
+import { isLanguageDisabled } from './utils/language-config.js';
+import { ValidationResultCache } from './utils/language-availability.js';
 import { isContainerMode, getWorkspaceRoot } from './utils/container-path-utils.js';
 import {
   getBpAddressingMode,
@@ -105,6 +101,7 @@ import {
 } from './server/handlers/inspection-tools.js';
 import { getOutputTool } from './server/handlers/output-tools.js';
 import { exposeSessionTool, unexposeSessionTool } from './server/handlers/mirror-tools.js';
+import { listSupportedLanguagesTool, handleListSupportedLanguages } from './server/handlers/language-tools.js';
 
 export { coerceToolArguments };
 export type { SetBreakpointRequest };
@@ -115,19 +112,6 @@ export type { SetBreakpointRequest };
 export interface DebugMcpServerOptions {
   logLevel?: string;
   logFile?: string;
-}
-
-/**
- * Entry in the list_supported_languages 'available' array.
- * 'installed' keeps its historical meaning (adapter package loadable);
- * 'modes' carries per-mode availability with reasons (issue #331).
- */
-interface AvailableLanguage {
-  language: string;
-  package: string;
-  installed: boolean;
-  description?: string;
-  modes: LanguageModes;
 }
 
 /**
@@ -991,7 +975,7 @@ export class DebugMcpServer implements ToolContext {
               break;
             }
             case 'list_supported_languages': {
-              result = await this.handleListSupportedLanguages();
+              result = await listSupportedLanguagesTool(this, args, toolName);
               break;
             }
             case 'redefine_classes': {
@@ -1092,84 +1076,9 @@ export class DebugMcpServer implements ToolContext {
     return handleGetLocalVariables(this, args);
   }
 
-  private async handleListSupportedLanguages(): Promise<ServerResult> {
-    try {
-      const adapterRegistry = this.getAdapterRegistry();
-      // Get installed languages via dynamic registry if available
-      const installed = await this.getSupportedLanguagesAsync();
-
-      // Also surface known adapters with install status if available from registry
-      let baseEntries: Array<{ language: string; package: string; installed: boolean; description?: string; attach: 'none' | 'direct-connect' | 'spawn' }> =
-        installed.map(lang => ({
-          language: lang,
-          package: `@debugmcp/adapter-${lang}`,
-          installed: true,
-          attach: 'none' as const
-        }));
-
-      // listAvailableAdapters/getFactory are on IAdapterRegistry (issue #435
-      // part 4); the runtime guards stay for partial registry doubles.
-      if (adapterRegistry && typeof adapterRegistry.listAvailableAdapters === 'function') {
-        try {
-          const meta = await adapterRegistry.listAvailableAdapters();
-          baseEntries = meta.map(m => ({
-            language: m.name,
-            package: m.packageName,
-            installed: m.installed,
-            description: m.description,
-            attach: m.attach ?? 'none'
-          }));
-        } catch (e) {
-          this.logger.warn('Failed to query detailed adapter metadata; returning installed list only', { error: (e as Error)?.message });
-        }
-      }
-
-      // Shared per-entry probe (issue #435): doctor consumes the same
-      // function, so the two views cannot drift apart. Probes run in
-      // parallel — on a cold cache each may import an adapter package and
-      // spawn a toolchain check, and this call should pay the max, not the
-      // sum (the doctor path already runs them concurrently).
-      const disabledSet = getDisabledLanguages();
-      const available: AvailableLanguage[] = await Promise.all(
-        baseEntries.map(async (entry) => {
-          const probe = await probeLanguageEntry(
-            {
-              language: entry.language,
-              packageName: entry.package,
-              installed: entry.installed,
-              attach: entry.attach
-            },
-            {
-              registry: adapterRegistry,
-              disabledSet,
-              runValidate: (language, validate) => this.validationCache.get(language, validate),
-              logger: this.logger
-            }
-          );
-          return {
-            language: entry.language,
-            package: entry.package,
-            installed: entry.installed,
-            description: entry.description,
-            modes: probe.modes
-          };
-        })
-      );
-
-      // Also build simple metadata array for backward compatibility with previous payload shape
-      const languageMetadata = await this.getLanguageMetadata();
-
-      return { content: [{ type: 'text', text: JSON.stringify({
-        success: true,
-        installed,
-        available,
-        languages: languageMetadata, // backward-compatible field with display info
-        count: installed.length
-      }) }] };
-    } catch (error) {
-      this.logger.error('Failed to list supported languages', { error });
-      throw new McpError(McpErrorCode.InternalError, `Failed to list supported languages: ${(error as Error).message}`);
-    }
+  /** @internal test seam; removed in PR 6 */
+  private async handleListSupportedLanguages(): Promise<ToolResult> {
+    return handleListSupportedLanguages(this);
   }
 
   /**
