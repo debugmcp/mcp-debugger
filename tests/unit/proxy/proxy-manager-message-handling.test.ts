@@ -933,7 +933,6 @@ describe('ProxyManager Message Handling', () => {
         resolveExecutablePath: async () => '/usr/bin/node',
         getAdapterModuleName: () => 'js-debug'
       }).withLaunchBarrier(barrier);
-      const createLaunchBarrier = adapter.createLaunchBarrier;
 
       const proxyManager = new ProxyManager(
         adapter,
@@ -952,7 +951,7 @@ describe('ProxyManager Message Handling', () => {
 
       const response = await proxyManager.sendDapRequest('launch', { foo: 'bar' });
 
-      expect(createLaunchBarrier).toHaveBeenCalledWith('launch', { foo: 'bar' });
+      expect(adapter.createLaunchBarrier).toHaveBeenCalledWith('launch', { foo: 'bar' });
       expect(barrier.onRequestSent).toHaveBeenCalled();
       expect(barrier.waitUntilReady).toHaveBeenCalled();
       expect(sendCommand).toHaveBeenCalledWith(

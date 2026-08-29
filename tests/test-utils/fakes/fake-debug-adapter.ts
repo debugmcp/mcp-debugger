@@ -181,6 +181,9 @@ export class FakeDebugAdapter extends EventEmitter implements IDebugAdapter {
 
   /**
    * Opt into the attach members as a set, the way a real attach-capable adapter declares them.
+   *
+   * The builder wins: it replaces any same-member constructor override, so pass attach
+   * behaviour through `options` rather than through the constructor.
    */
   withAttachSupport(options: FakeAttachSupportOptions = {}): this {
     this.supportsAttach = vi.fn<Impl<'supportsAttach'>>(() => true);
@@ -204,6 +207,8 @@ export class FakeDebugAdapter extends EventEmitter implements IDebugAdapter {
   /**
    * Opt into `createLaunchBarrier`, returning `barrier` for every request. Pass `undefined`
    * to define the member but decline the barrier — the "adapter offers none" branch.
+   *
+   * The builder wins: it replaces any `createLaunchBarrier` passed to the constructor.
    */
   withLaunchBarrier(barrier: AdapterLaunchBarrier | undefined): this {
     this.createLaunchBarrier = vi.fn<Impl<'createLaunchBarrier'>>(() => barrier);
@@ -222,6 +227,12 @@ export class FakeDebugAdapter extends EventEmitter implements IDebugAdapter {
   /**
    * Install the constructor's method overrides.
    *
+   * Each override REPLACES the member with a fresh `vi.fn(impl)` rather than calling
+   * `mockImplementation` on the default one. That matters after a reset: vitest's `mockReset`
+   * restores the implementation a mock was *constructed* with, so overriding in place would
+   * make `vi.resetAllMocks()` silently revert the test's behaviour to the fake's production
+   * default. Constructing with the override makes a reset restore the override.
+   *
    * The keys are only known dynamically here, so the per-key correlation between `K` and
    * `Impl<K>` — enforced on `FakeDebugAdapterOverrides` at the call site — cannot be carried
    * through `Object.keys`. The two casts below are that erasure and nothing more.
@@ -231,16 +242,7 @@ export class FakeDebugAdapter extends EventEmitter implements IDebugAdapter {
       if (key === 'language' || key === 'name' || key === 'supportedAttachKeys') continue;
 
       const impl = overrides[key] as (...args: never[]) => unknown;
-      const current: unknown = this[key];
-
-      if (typeof current === 'function' && 'mockImplementation' in current) {
-        // Required member: keep the existing mock identity so a caller that captured it
-        // before overriding still observes the calls.
-        (current as Mock).mockImplementation(impl);
-      } else {
-        // Optional member being opted into: create the mock now.
-        (this as Record<string, unknown>)[key] = vi.fn(impl);
-      }
+      (this as Record<string, unknown>)[key] = vi.fn(impl);
     }
   }
 }

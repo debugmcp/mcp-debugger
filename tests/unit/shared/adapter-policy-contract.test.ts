@@ -35,78 +35,120 @@ interface PinnedCapabilities {
   supportsFunctionBreakpoints: boolean | undefined;
   /** Static logpoint verdict; `undefined` means "unknown, re-check live". */
   supportsLogPoints: boolean | undefined;
+  /** Out-of-band function-breakpoint delivery; `undefined` means the standard DAP request. */
+  functionBreakpointsVia: 'dap' | 'cdp' | undefined;
+  /** Whether verified:false at launch is by design rather than a warning. */
+  functionBreakpointsBindLate: boolean | undefined;
   childSessionStrategy: ChildSessionStrategy;
   requiresCommandQueueing: boolean;
+  /**
+   * Break-on-exception mode applied to LAUNCH sessions when the user named none.
+   * `undefined` means the policy deliberately declines a default.
+   */
+  defaultExceptionBreakMode: ExceptionBreakMode | undefined;
 }
 
 /**
- * What each language's policy declares today. `javascript -> 'js-debug'` is the one place a
- * policy name deviates from its language; ruby is the one adapter with no static
- * function-breakpoint verdict, and ruby/java/dotnet are the three that reject logpoints.
+ * What each language's policy declares today. Every field is pinned for every language — the
+ * `undefined`s included — so an adapter that starts declaring one fails a test instead of
+ * quietly switching an assertion off.
+ *
+ * The deviations worth knowing: `javascript -> 'js-debug'` is the one policy name that differs
+ * from its language, and the only policy delivering function breakpoints over CDP; ruby is the
+ * only adapter with no static function-breakpoint verdict and the only one declining a default
+ * exception mode; ruby/java/dotnet are the three that reject logpoints; js and java are the two
+ * that bind function breakpoints late.
  */
 const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
   [DebugLanguage.PYTHON]: {
     policyName: 'python',
     supportsFunctionBreakpoints: true,
     supportsLogPoints: true,
+    functionBreakpointsVia: undefined,
+    functionBreakpointsBindLate: undefined,
     childSessionStrategy: 'none',
-    requiresCommandQueueing: false
+    requiresCommandQueueing: false,
+    defaultExceptionBreakMode: 'uncaught'
   },
   [DebugLanguage.RUBY]: {
     policyName: 'ruby',
     supportsFunctionBreakpoints: undefined,
     supportsLogPoints: false,
+    functionBreakpointsVia: undefined,
+    functionBreakpointsBindLate: undefined,
     childSessionStrategy: 'none',
-    requiresCommandQueueing: false
+    requiresCommandQueueing: false,
+    defaultExceptionBreakMode: undefined
   },
   [DebugLanguage.JAVASCRIPT]: {
     policyName: 'js-debug',
     supportsFunctionBreakpoints: true,
     supportsLogPoints: true,
+    functionBreakpointsVia: 'cdp',
+    functionBreakpointsBindLate: true,
     childSessionStrategy: 'launchWithPendingTarget',
-    requiresCommandQueueing: true
+    requiresCommandQueueing: true,
+    defaultExceptionBreakMode: 'uncaught'
   },
   [DebugLanguage.RUST]: {
     policyName: 'rust',
     supportsFunctionBreakpoints: true,
     supportsLogPoints: true,
+    functionBreakpointsVia: undefined,
+    functionBreakpointsBindLate: undefined,
     childSessionStrategy: 'none',
-    requiresCommandQueueing: false
+    requiresCommandQueueing: false,
+    defaultExceptionBreakMode: 'uncaught'
   },
   [DebugLanguage.GO]: {
     policyName: 'go',
     supportsFunctionBreakpoints: true,
     supportsLogPoints: true,
+    functionBreakpointsVia: undefined,
+    functionBreakpointsBindLate: undefined,
     childSessionStrategy: 'none',
-    requiresCommandQueueing: false
+    requiresCommandQueueing: false,
+    defaultExceptionBreakMode: 'uncaught'
   },
   [DebugLanguage.JAVA]: {
     policyName: 'java',
     supportsFunctionBreakpoints: true,
     supportsLogPoints: false,
+    functionBreakpointsVia: undefined,
+    functionBreakpointsBindLate: true,
     childSessionStrategy: 'none',
-    requiresCommandQueueing: false
+    requiresCommandQueueing: false,
+    defaultExceptionBreakMode: 'uncaught'
   },
   [DebugLanguage.DOTNET]: {
     policyName: 'dotnet',
     supportsFunctionBreakpoints: true,
     supportsLogPoints: false,
+    functionBreakpointsVia: undefined,
+    functionBreakpointsBindLate: undefined,
     childSessionStrategy: 'none',
-    requiresCommandQueueing: false
+    requiresCommandQueueing: false,
+    defaultExceptionBreakMode: 'uncaught'
   },
   [DebugLanguage.CPP]: {
     policyName: 'cpp',
     supportsFunctionBreakpoints: true,
     supportsLogPoints: true,
+    functionBreakpointsVia: undefined,
+    functionBreakpointsBindLate: undefined,
     childSessionStrategy: 'none',
-    requiresCommandQueueing: false
+    requiresCommandQueueing: false,
+    defaultExceptionBreakMode: 'uncaught'
   },
   [DebugLanguage.MOCK]: {
     policyName: 'mock',
     supportsFunctionBreakpoints: true,
     supportsLogPoints: true,
+    functionBreakpointsVia: undefined,
+    functionBreakpointsBindLate: undefined,
     childSessionStrategy: 'none',
-    requiresCommandQueueing: false
+    requiresCommandQueueing: false,
+    defaultExceptionBreakMode: 'uncaught'
   }
 };
 
@@ -174,6 +216,9 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
   });
 
   it('only claims a function-breakpoint delivery quirk when it supports them at all', () => {
+    expect(policy.functionBreakpointsVia).toBe(pinned.functionBreakpointsVia);
+    expect(policy.functionBreakpointsBindLate).toBe(pinned.functionBreakpointsBindLate);
+
     // 'cdp' delivery means our proxy arms them out of band, and bind-late means verified:false
     // at launch is expected — both are refinements of "supported", not substitutes for it.
     if (policy.functionBreakpointsVia === 'cdp') {
@@ -197,11 +242,17 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
     expect(Array.isArray(filters?.uncaught)).toBe(true);
     expect(Array.isArray(filters?.all)).toBe(true);
 
+    // Pinned for every language, ruby's deliberate `undefined` included — guarding this on
+    // "if defined" is how it would stop testing anything the day a policy dropped the field.
+    expect(behavior.defaultExceptionBreakMode).toBe(pinned.defaultExceptionBreakMode);
+
     if (behavior.defaultExceptionBreakMode !== undefined) {
       // Only launch sessions get a default, and 'uncaught' is the only sane one — 'all' would
       // pause on routine caught exceptions, 'none' is what omitting the field already means
-      // (and names no filter list at all).
+      // (and names no filter list at all, which is why the mode has to be one of the two the
+      // block above proved are arrays).
       expect(behavior.defaultExceptionBreakMode).toBe('uncaught');
+      expect(Array.isArray(filters?.uncaught)).toBe(true);
     }
   });
 
