@@ -2,21 +2,17 @@
  * Debug operations for session management including starting, stepping,
  * continuing, and breakpoint management.
  */
-import { v4 as uuidv4 } from 'uuid';
 import {
   Breakpoint,
   FunctionBreakpoint,
   SessionState,
   SessionLifecycleState,
   sanitizePayloadForLogging,
-  toSourceBreakpoint,
-  toFunctionBreakpoint,
   isSensitiveName,
   redactVariableValue,
   redactSecretsDeep,
   buildRedactionNotice,
   NO_DEBUG_TARGET_MARKER,
-  type AdapterPolicy,
   type ExceptionBreakMode
 } from '@debugmcp/shared';
 import { ManagedSession, ToolchainValidationState } from './session-store.js';
@@ -27,15 +23,19 @@ import { MIRROR_EXPOSE_COMMAND, MIRROR_UNEXPOSE_COMMAND } from '../proxy/dap-pro
 import { ErrorMessages } from '../utils/error-messages.js';
 import { checkLaunchToolchain } from '../utils/language-availability.js';
 import { didYouMean } from '../utils/did-you-mean.js';
-import { resolveStatement } from '../utils/breakpoint-resolver.js';
-import { normalizeBreakpointMessage } from '../utils/breakpoint-message.js';
-import { consumeChildSourced } from '../utils/child-origin-events.js';
 import { SessionManagerData } from './session-manager-data.js';
+import type { OperationsContext } from './operations-context.js';
 import {
   resolveDapTimeoutOverride,
   truncateForLog,
   withTimeoutHint
 } from './dap-request-helpers.js';
+import { BreakpointController } from './breakpoints/breakpoint-controller.js';
+import { reresolveAnchors } from './breakpoints/anchor-resolution.js';
+import {
+  buildLogpointDowngradeLaunchWarning,
+  buildUnboundBreakpointExitWarning
+} from './breakpoints/launch-warnings.js';
 import { AdapterLease } from '../adapters/adapter-lease.js';
 import { logProxyFailure } from './launch/proxy-failure-diagnostics.js';
 import { CustomLaunchRequestArguments, DebugResult } from './session-manager-core.js';
@@ -193,6 +193,60 @@ export abstract class SessionManagerOperations extends SessionManagerData {
    */
   protected stepGraceMs = 5000;
   protected pauseGraceMs = 5000;
+
+  /**
+   * The view of this facade that the operation collaborators get. Every member
+   * is late bound (arrows for methods, getters for fields and tunables) so that
+   * reassigning `selectPolicy` or writing `stepGraceMs` on a live instance —
+   * which the tests do — is seen by the collaborators too.
+   */
+  protected buildOperationsContext(): OperationsContext {
+    // An arrow rather than a `this` alias, so each getter below resolves the
+    // facade when it is read instead of closing over a snapshot.
+    const facade = () => this;
+    return {
+      get logger() { return facade().logger; },
+      get fileSystem() { return facade().fileSystem; },
+      get adapterRegistry() { return facade().adapterRegistry; },
+      get proxyManagerFactory() { return facade().proxyManagerFactory; },
+      get launchValidationCache() { return facade().launchValidationCache; },
+      get logDirBase() { return facade().logDirBase; },
+      get defaultDapLaunchArgs() { return facade().defaultDapLaunchArgs; },
+      get dryRunTimeoutMs() { return facade().dryRunTimeoutMs; },
+      tunables: {
+        get attachVerifyTimeoutMs() { return facade().attachVerifyTimeoutMs; },
+        get attachVerifyIntervalMs() { return facade().attachVerifyIntervalMs; },
+        get attachPauseStopTimeoutMs() { return facade().attachPauseStopTimeoutMs; },
+        get stepGraceMs() { return facade().stepGraceMs; },
+        get pauseGraceMs() { return facade().pauseGraceMs; }
+      },
+      getSession: (sessionId) => this._getSessionById(sessionId),
+      updateSession: (sessionId, updates) => this.sessionStore.update(sessionId, updates),
+      updateState: (session, newState) => this._updateSessionState(session, newState),
+      selectPolicy: (language) => this.selectPolicy(language),
+      selectStorePolicy: (language) => this.sessionStore.selectPolicy(language),
+      findFreePort: () => this.findFreePort(),
+      setupProxyEventHandlers: (session, proxyManager, effectiveLaunchArgs) =>
+        this.setupProxyEventHandlers(session, proxyManager, effectiveLaunchArgs),
+      cleanupProxyEventHandlers: (session, proxyManager) =>
+        this.cleanupProxyEventHandlers(session, proxyManager),
+      stopProxyPreservingSession: (session) => this.stopProxyPreservingSession(session),
+      closeSession: (sessionId) => this.closeSession(sessionId),
+      getStackTrace: (sessionId, threadId, includeInternals) =>
+        this.getStackTrace(sessionId, threadId, includeInternals),
+      redactionEnabled: () => this.redactionEnabled()
+    };
+  }
+
+  /**
+   * The collaborators the debug operations are split across. Field
+   * initializers rather than constructor wiring: they carry no state of their
+   * own beyond the context, so there is nothing to sequence. Call sites always
+   * go through the field (`this.breakpoints.syncBreakpointsForFile(...)`) and
+   * never capture a method off it, so a test can spy on any of them.
+   */
+  protected readonly opsContext: OperationsContext = this.buildOperationsContext();
+  protected readonly breakpoints = new BreakpointController(this.opsContext);
 
   protected async startProxyManager(
     session: ManagedSession,
@@ -1110,14 +1164,14 @@ export abstract class SessionManagerOperations extends SessionManagerData {
           (finalState === SessionState.RUNNING || finalState === SessionState.PAUSED)) {
         const files = [...new Set(Array.from(finalSession.breakpoints.values()).map(bp => bp.file))];
         for (const file of files) {
-          await this.syncBreakpointsForFile(finalSession, file);
+          await this.breakpoints.syncBreakpointsForFile(finalSession, file);
         }
       }
       // Same re-sync for function breakpoints (issue #271 phase 3): the
       // worker's initial send's responses never reach this store either.
       if ((finalSession.functionBreakpoints?.size ?? 0) > 0 &&
           (finalState === SessionState.RUNNING || finalState === SessionState.PAUSED)) {
-        await this.syncFunctionBreakpoints(finalSession);
+        await this.breakpoints.syncFunctionBreakpoints(finalSession);
       }
 
       // Unbound-at-launch warning (issue #308): the verified state is fresh
@@ -1125,7 +1179,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       // reported here instead of failing silently at "the program never
       // stopped". Suppressed for bind-late adapters (js/java), where
       // unverified-at-launch is the designed deferral path.
-      const fnBpWarning = this.buildFunctionBreakpointLaunchWarning(finalSession);
+      const fnBpWarning = this.breakpoints.functionBreakpointLaunchWarning(finalSession);
 
       // Ran-to-completion with breakpoints that never bound (issue #467):
       // state "stopped" where the caller expected "paused" is only
@@ -1133,12 +1187,12 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       // per-breakpoint diagnostics right here where the caller is looking.
       const unboundAtExitWarning =
         finalState === SessionState.STOPPED
-          ? this.buildUnboundBreakpointExitWarning(finalSession)
+          ? buildUnboundBreakpointExitWarning(finalSession)
           : undefined;
 
       // Logpoint-downgrade verdict (issue #469): the deferred set_breakpoint
       // warning promised a launch-time answer — deliver it on this response.
-      const logpointWarning = this.buildLogpointDowngradeLaunchWarning(finalSession);
+      const logpointWarning = buildLogpointDowngradeLaunchWarning(finalSession);
 
       // Adapter degradation notes (issue #441) accumulate on the session as
       // annotated output events arrive; joining here is best-effort — a note
@@ -1293,7 +1347,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       // Content anchors re-resolve BEFORE the relaunch snapshots
       // initialBreakpoints, so breakpoints survive the edit that was the
       // point of the session (issue #271).
-      const anchorResolution = await this.reresolveAnchors(session);
+      const anchorResolution = await reresolveAnchors(session, this.opsContext);
 
       const spec = session.lastLaunch;
       this.logger.info(
@@ -1350,101 +1404,9 @@ export abstract class SessionManagerOperations extends SessionManagerData {
   }
 
   /**
-   * Re-resolve statement-anchored breakpoints against the current file
-   * contents (fresh read — deliberately not the server's LineReader cache).
-   * The breakpoint's current line doubles as the nearLine hint so duplicate
-   * statements re-anchor to the nearest occurrence of where the breakpoint
-   * last was. Anchors that no longer match keep their stale line and warn:
-   * failing the restart would block the edit-relaunch loop, and dropping the
-   * breakpoint would destroy user state (issue #271).
+   * Set a line breakpoint. Delegates to the breakpoint controller, which owns
+   * the store and the DAP re-send.
    */
-  private async reresolveAnchors(session: ManagedSession): Promise<
-    | {
-        moved: Array<{ breakpointId: string; file: string; from: number; to: number; statement: string; candidates?: number[] }>;
-        stale: Array<{ breakpointId: string; file: string; line: number; statement: string; reason: string }>;
-      }
-    | undefined
-  > {
-    const anchored = Array.from(session.breakpoints.values()).filter(
-      (bp): bp is Breakpoint & { anchor: { statement: string; nearLine?: number } } => bp.anchor !== undefined
-    );
-    if (anchored.length === 0) {
-      return undefined;
-    }
-
-    const moved: Array<{ breakpointId: string; file: string; from: number; to: number; statement: string; candidates?: number[] }> = [];
-    const stale: Array<{ breakpointId: string; file: string; line: number; statement: string; reason: string }> = [];
-
-    const byFile = new Map<string, typeof anchored>();
-    for (const bp of anchored) {
-      const group = byFile.get(bp.file);
-      if (group) {
-        group.push(bp);
-      } else {
-        byFile.set(bp.file, [bp]);
-      }
-    }
-
-    for (const [file, bps] of byFile) {
-      let lines: string[] | null = null;
-      try {
-        const content = await this.fileSystem.readFile(file, 'utf8');
-        lines = content.split(/\r?\n/);
-      } catch (error) {
-        this.logger.warn(
-          `[SessionManager] Could not re-read ${file} for anchor re-resolution: ${
-            error instanceof Error ? error.message : String(error)
-          }`
-        );
-      }
-
-      for (const bp of bps) {
-        if (!lines) {
-          stale.push({
-            breakpointId: bp.id,
-            file,
-            line: bp.line,
-            statement: bp.anchor.statement,
-            reason: 'file unreadable',
-          });
-          continue;
-        }
-        const resolution = resolveStatement(lines, bp.anchor.statement, file, bp.line);
-        if (resolution.ok) {
-          if (resolution.line !== bp.line) {
-            moved.push({
-              breakpointId: bp.id,
-              file,
-              from: bp.line,
-              to: resolution.line,
-              statement: bp.anchor.statement,
-              // The bp's old line doubles as nearLine here, so the ambiguity
-              // error can never fire on this path — a multi-match proximity
-              // pick must be flagged instead of passing as unambiguous
-              // (issue #379).
-              ...(resolution.candidates !== undefined ? { candidates: resolution.candidates } : {}),
-            });
-            this.logger.info(
-              `[SessionManager] Anchor re-resolved: breakpoint ${bp.id} moved ${bp.line} -> ${resolution.line} ("${bp.anchor.statement}")`
-            );
-            bp.line = resolution.line;
-            bp.requestedLine = resolution.line;
-          }
-        } else {
-          stale.push({
-            breakpointId: bp.id,
-            file,
-            line: bp.line,
-            statement: bp.anchor.statement,
-            reason: 'statement not found',
-          });
-        }
-      }
-    }
-
-    return { moved, stale };
-  }
-
   async setBreakpoint(
     sessionId: string,
     bp: {
@@ -1461,190 +1423,11 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       anchor?: { statement: string; nearLine?: number };
     }
   ): Promise<{ breakpoint: Breakpoint; warning?: string }> {
-    const session = this._getSessionById(sessionId);
-
-    // Check if session is terminated
-    if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
-      throw new SessionTerminatedError(sessionId);
-    }
-
-    const bpId = uuidv4();
-
-    this.logger.info(
-      `[SessionManager setBreakpoint] Using validated file path "${bp.file}" for session ${sessionId}`
-    );
-
-    const newBreakpoint: Breakpoint = {
-      id: bpId,
-      file: bp.file,
-      line: bp.line,
-      condition: bp.condition,
-      suspendPolicy: bp.suspendPolicy,
-      logMessage: bp.logMessage,
-      verified: false
-    };
-    if (bp.requestedLine !== undefined) {
-      newBreakpoint.requestedLine = bp.requestedLine;
-    }
-    if (bp.anchor !== undefined) {
-      newBreakpoint.anchor = bp.anchor;
-    }
-
-    if (!session.breakpoints) session.breakpoints = new Map();
-    session.breakpoints.set(bpId, newBreakpoint);
-    this.logger.info(
-      `[SessionManager] Breakpoint ${bpId} queued for ${bp.file}:${bp.line} in session ${sessionId}.`
-    );
-
-    const sync = await this.syncBreakpointsForFile(session, bp.file);
-    return { breakpoint: newBreakpoint, warning: sync.warning };
-  }
-
-  /**
-   * Re-send the session's full breakpoint set for one file to the adapter
-   * (DAP setBreakpoints is replace-all per file) and merge the response back
-   * into the stored breakpoints (positional match). No-op unless the proxy is
-   * live and the session is RUNNING or PAUSED. Never throws: a DAP failure is
-   * logged and reported via `warning` — the store remains the source of truth
-   * and the set is re-applied on the next launch.
-   */
-  protected async syncBreakpointsForFile(
-    session: ManagedSession,
-    file: string,
-    options?: { forceFreshEcho?: boolean }
-  ): Promise<{ synced: boolean; warning?: string }> {
-    const sessionId = session.id;
-    if (
-      !session.proxyManager ||
-      !session.proxyManager.isRunning() ||
-      (session.state !== SessionState.RUNNING && session.state !== SessionState.PAUSED)
-    ) {
-      return { synced: false };
-    }
-
-    // Collect ALL breakpoints for this source file (DAP setBreakpoints is replace-all)
-    const allBpsForFile = Array.from(session.breakpoints.values())
-      .filter(bp => bp.file === file);
-
-    try {
-      this.logger.info(
-        `[SessionManager] Active proxy for session ${sessionId}, sending ${allBpsForFile.length} breakpoint(s) for ${file}.`
-      );
-      const response =
-        await session.proxyManager.sendDapRequest<DebugProtocol.SetBreakpointsResponse>(
-          'setBreakpoints',
-          {
-            source: { path: file },
-            breakpoints: allBpsForFile.map(toSourceBreakpoint),
-            // Reserved key, stripped by the proxy before the adapter sees
-            // it: asks a child-mirroring proxy for an authoritative echo
-            // even when the set is unchanged (issue #500).
-            ...(options?.forceFreshEcho === true ? { __mcpForceFreshEcho: true } : {}),
-          }
-        );
-      if (
-        response &&
-        response.body &&
-        response.body.breakpoints
-      ) {
-        const responseBps = response.body.breakpoints;
-        // For child-mirroring adapters (js-debug), setBreakpoints responses
-        // come from the parent session, which owns no runtime: its verified
-        // flags are pessimistic and its ids belong to a different id space
-        // than the child events that carry the real verification. Treat the
-        // child as authoritative — never let a parent response downgrade
-        // verified state or clobber child adapter ids.
-        const childAuthoritative =
-          !!this.selectPolicy(session.language)?.getDapClientBehavior?.().mirrorBreakpointsToChild;
-        // A response the proxy marked child-sourced (issue #500) carries the
-        // child session's own answer — the authoritative one — so it stamps
-        // fully instead of upgrade-only.
-        const childSourced = consumeChildSourced(response);
-        // Update ALL breakpoints from response (positional match)
-        for (let i = 0; i < Math.min(responseBps.length, allBpsForFile.length); i++) {
-          const bpInfo = responseBps[i];
-          const keepChildState =
-            childAuthoritative && !childSourced && allBpsForFile[i].verified === true;
-          if (childAuthoritative && childSourced) {
-            allBpsForFile[i].verified = bpInfo.verified;
-            // Only a VERIFIED child id enters the store: stub ids are
-            // unstable across the pending→bound transition (issue #495).
-            if (bpInfo.verified === true && typeof bpInfo.id === 'number') {
-              allBpsForFile[i].adapterId = bpInfo.id;
-            }
-          } else if (childAuthoritative) {
-            allBpsForFile[i].verified = allBpsForFile[i].verified || bpInfo.verified;
-          } else {
-            allBpsForFile[i].verified = bpInfo.verified;
-            allBpsForFile[i].adapterId = bpInfo.id ?? allBpsForFile[i].adapterId;
-          }
-          allBpsForFile[i].line = bpInfo.line || allBpsForFile[i].line;
-          if (!keepChildState) {
-            // Normalize before storing (issue #471): raw l10n keys like
-            // js-debug's "breakpoint.provisionalBreakpoint" must never sit in
-            // the store, and a provisional note must not survive verification.
-            allBpsForFile[i].message = normalizeBreakpointMessage(
-              bpInfo.message,
-              allBpsForFile[i].verified
-            );
-          }
-          // Enhance "no symbols" message for .NET with PDB format guidance
-          if (bpInfo.message && session.language === 'dotnet' &&
-              bpInfo.message.toLowerCase().includes('no symbols')) {
-            allBpsForFile[i].message += ' (Hint: netcoredbg requires Portable PDB format. Compile with /debug:portable or convert with Pdb2Pdb.)';
-          }
-          this.logger.info(
-            `[SessionManager] Breakpoint ${allBpsForFile[i].id} response received. Verified: ${allBpsForFile[i].verified}${
-              bpInfo.message ? `, Message: ${bpInfo.message}` : ''
-            }`
-          );
-
-          // Log breakpoint verification with structured logging
-          if (allBpsForFile[i].verified) {
-            this.logger.info('debug:breakpoint', {
-              event: 'verified',
-              sessionId: sessionId,
-              sessionName: session.name,
-              breakpointId: allBpsForFile[i].id,
-              file: allBpsForFile[i].file,
-              line: allBpsForFile[i].line,
-              verified: true,
-              timestamp: Date.now(),
-            });
-          }
-        }
-      }
-      return { synced: true };
-    } catch (error) {
-      this.logger.error(
-        `[SessionManager] Error sending setBreakpoints to proxy for session ${sessionId}:`,
-        error
-      );
-      const message = error instanceof Error ? error.message : String(error);
-      return { synced: false, warning: this.buildLiveSyncWarning(session, message) };
-    }
-  }
-
-  /**
-   * Compose the live-sync failure warning. For ruby attach sessions whose
-   * error is rdbg's "<path> is not available", append topology guidance
-   * (issue #357): the path was rejected on the debug TARGET's filesystem
-   * (e.g. container server + host rdbg, or vice versa) — expected behavior,
-   * not a debugger fault. Same hint-append style as the netcoredbg
-   * no-symbols guidance above.
-   */
-  private buildLiveSyncWarning(session: ManagedSession, message: string): string {
-    let warning = `Breakpoint state updated, but live sync failed: ${message}`;
-    if (session.attachMode && session.language === 'ruby' && /is not available/.test(message)) {
-      warning += ' (Hint: attach sessions send breakpoint paths to the remote debugger verbatim; the path must be valid on the debug target\'s filesystem. Use target-side paths, or pass localfsMap in the attach config to map local paths to remote ones.)';
-    }
-    return warning;
+    return this.breakpoints.setBreakpoint(sessionId, bp);
   }
 
   /**
    * Set a function (symbol-addressed) breakpoint (issue #271 phase 3).
-   * Session-global — no file. Queued like line breakpoints when no debuggee
-   * is live; synced immediately otherwise.
    */
   async setFunctionBreakpoint(
     sessionId: string,
@@ -1653,330 +1436,38 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       condition?: string;
     }
   ): Promise<{ breakpoint: FunctionBreakpoint; warning?: string }> {
-    const session = this._getSessionById(sessionId);
-
-    if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
-      throw new SessionTerminatedError(sessionId);
-    }
-
-    const newBreakpoint: FunctionBreakpoint = {
-      id: uuidv4(),
-      functionName: bp.functionName,
-      condition: bp.condition,
-      verified: false
-    };
-
-    if (!session.functionBreakpoints) session.functionBreakpoints = new Map();
-    session.functionBreakpoints.set(newBreakpoint.id, newBreakpoint);
-    this.logger.info(
-      `[SessionManager] Function breakpoint ${newBreakpoint.id} queued for ${bp.functionName} in session ${sessionId}.`
-    );
-
-    const sync = await this.syncFunctionBreakpoints(session);
-    return { breakpoint: newBreakpoint, warning: sync.warning };
-  }
-
-  /**
-   * Re-send the session's FULL function-breakpoint set to the adapter (DAP
-   * setFunctionBreakpoints is replace-all for the whole session, not per
-   * file). Same live-session guard and never-throws contract as
-   * syncBreakpointsForFile.
-   */
-  protected async syncFunctionBreakpoints(
-    session: ManagedSession
-  ): Promise<{ synced: boolean; warning?: string }> {
-    const sessionId = session.id;
-    if (
-      !session.proxyManager ||
-      !session.proxyManager.isRunning() ||
-      (session.state !== SessionState.RUNNING && session.state !== SessionState.PAUSED)
-    ) {
-      return { synced: false };
-    }
-
-    const allFnBps = Array.from(session.functionBreakpoints.values());
-
-    try {
-      this.logger.info(
-        `[SessionManager] Active proxy for session ${sessionId}, sending ${allFnBps.length} function breakpoint(s).`
-      );
-      const response =
-        await session.proxyManager.sendDapRequest<DebugProtocol.SetFunctionBreakpointsResponse>(
-          'setFunctionBreakpoints',
-          { breakpoints: allFnBps.map(toFunctionBreakpoint) }
-        );
-      const responseBps = response?.body?.breakpoints;
-      if (responseBps) {
-        // Positional match, same DAP guarantee as setBreakpoints
-        for (let i = 0; i < Math.min(responseBps.length, allFnBps.length); i++) {
-          const bpInfo = responseBps[i];
-          allFnBps[i].verified = bpInfo.verified;
-          allFnBps[i].adapterId = bpInfo.id ?? allFnBps[i].adapterId;
-          allFnBps[i].message = bpInfo.message;
-          if (typeof bpInfo.line === 'number') {
-            allFnBps[i].boundLine = bpInfo.line;
-          }
-          if (bpInfo.source?.path) {
-            allFnBps[i].boundFile = bpInfo.source.path;
-          }
-          if (allFnBps[i].verified) {
-            this.logger.info('debug:breakpoint', {
-              event: 'verified',
-              sessionId,
-              sessionName: session.name,
-              breakpointId: allFnBps[i].id,
-              functionName: allFnBps[i].functionName,
-              line: allFnBps[i].boundLine,
-              verified: true,
-              timestamp: Date.now(),
-            });
-          }
-        }
-      }
-      return { synced: true };
-    } catch (error) {
-      this.logger.error(
-        `[SessionManager] Error sending setFunctionBreakpoints to proxy for session ${sessionId}:`,
-        error
-      );
-      const message = error instanceof Error ? error.message : String(error);
-      return { synced: false, warning: this.buildLiveSyncWarning(session, message) };
-    }
-  }
-
-  /**
-   * Launch-time unbound-function-breakpoint warning (issue #308). Called
-   * after the post-launch re-sync, when verified state is fresh. Returns
-   * undefined for bind-late policies (js/java) — unverified-at-launch is
-   * their designed deferral, not a failure.
-   */
-  /**
-   * Ran-to-completion unbound-breakpoint warning (issue #467). Built only
-   * when the launch ends in STOPPED: at that point an unverified breakpoint
-   * never bound and never will, for bind-late adapters too — so this is a
-   * zero-false-positive moment to surface the per-breakpoint diagnostics the
-   * store already holds (e.g. the path-remap suggestion CodeLLDB puts in
-   * `message`).
-   */
-  protected buildUnboundBreakpointExitWarning(session: ManagedSession): string | undefined {
-    const unbound = Array.from(session.breakpoints.values()).filter(bp => !bp.verified);
-    if (unbound.length === 0) {
-      return undefined;
-    }
-    const parts = unbound.map(bp => {
-      // Some stamp paths store the raw js-debug l10n key — translate it
-      // rather than showing 'breakpoint.provisionalBreakpoint' (issue #471).
-      const message = normalizeBreakpointMessage(bp.message, bp.verified);
-      return `${path.basename(bp.file)}:${bp.line}${message ? ` (${message})` : ''}`;
-    });
-    return (
-      `${unbound.length} breakpoint(s) never bound during this run: ${parts.join('; ')}. ` +
-      `The program ran to completion without stopping there — check the file path and line, ` +
-      `or list_breakpoints for the full per-breakpoint state`
-    );
-  }
-
-  /**
-   * Launch-time logpoint-downgrade warning (issue #469). A logpoint accepted
-   * pre-launch under unknown policy support ("it will be validated against
-   * the adapter's capabilities at launch") gets its promised verdict here:
-   * when the live adapter does not advertise supportsLogPoints, the logpoint
-   * has been silently downgraded to a pausing breakpoint — say so in the
-   * start_debugging response instead of only in the server log.
-   */
-  protected buildLogpointDowngradeLaunchWarning(session: ManagedSession): string | undefined {
-    const caps = session.adapterCapabilities;
-    if (!caps || caps.supportsLogPoints === true) {
-      return undefined;
-    }
-    const downgraded: string[] = [];
-    for (const bp of session.breakpoints.values()) {
-      if (bp.logMessage !== undefined) {
-        downgraded.push(`${path.basename(bp.file)}:${bp.line}`);
-      }
-    }
-    if (downgraded.length === 0) {
-      return undefined;
-    }
-    return (
-      `Logpoint(s) at ${downgraded.join(', ')} were downgraded to pausing breakpoints: ` +
-      `the ${session.language} adapter does not advertise supportsLogPoints, so the ` +
-      `logMessage will not be logged and the program will PAUSE at those lines instead ` +
-      `of running through them`
-    );
-  }
-
-  protected buildFunctionBreakpointLaunchWarning(session: ManagedSession): string | undefined {
-    if ((session.functionBreakpoints?.size ?? 0) === 0) {
-      return undefined;
-    }
-    let policy: AdapterPolicy | undefined;
-    try {
-      policy = this.sessionStore.selectPolicy(session.language);
-    } catch {
-      policy = undefined;
-    }
-    if (policy?.functionBreakpointsBindLate === true) {
-      return undefined;
-    }
-    const parts: string[] = [];
-    for (const bp of session.functionBreakpoints.values()) {
-      if (bp.verified) {
-        continue;
-      }
-      const hint = policy?.functionBreakpointNameHint?.(bp.functionName) ?? bp.message;
-      parts.push(`'${bp.functionName}'${hint ? ` (${hint})` : ''}`);
-    }
-    if (parts.length === 0) {
-      return undefined;
-    }
-    return (
-      `Function breakpoint(s) not bound at launch: ${parts.join('; ')}. ` +
-      `The adapter could not resolve the name, so the program will not stop there — ` +
-      `check the symbol name; list_breakpoints shows the current state`
-    );
+    return this.breakpoints.setFunctionBreakpoint(sessionId, bp);
   }
 
   /**
    * Remove one breakpoint by its id (the id returned by setBreakpoint).
-   * The removal always takes effect in the session's breakpoint store; if the
-   * debuggee is live the file's remaining set is re-sent immediately.
-   * Deliberately works after the debuggee exits — the surviving set is
-   * re-applied on the next launch. Checks line and function breakpoints
-   * alike (shared UUID namespace).
    */
   async removeBreakpoint(
     sessionId: string,
     breakpointId: string
   ): Promise<{ removed?: Breakpoint | FunctionBreakpoint; warning?: string }> {
-    const session = this._getSessionById(sessionId);
-
-    const functionBreakpoint = session.functionBreakpoints?.get(breakpointId);
-    if (functionBreakpoint) {
-      session.functionBreakpoints.delete(breakpointId);
-      this.logger.info('debug:breakpoint', {
-        event: 'removed',
-        sessionId,
-        sessionName: session.name,
-        breakpointId,
-        functionName: functionBreakpoint.functionName,
-        timestamp: Date.now(),
-      });
-      const { warning } = await this.syncFunctionBreakpoints(session);
-      return { removed: functionBreakpoint, warning };
-    }
-
-    const breakpoint = session.breakpoints.get(breakpointId);
-    if (!breakpoint) {
-      return { removed: undefined };
-    }
-
-    session.breakpoints.delete(breakpointId);
-    this.logger.info('debug:breakpoint', {
-      event: 'removed',
-      sessionId,
-      sessionName: session.name,
-      breakpointId,
-      file: breakpoint.file,
-      line: breakpoint.line,
-      timestamp: Date.now(),
-    });
-
-    const { warning } = await this.syncBreakpointsForFile(session, breakpoint.file);
-    return { removed: breakpoint, warning };
+    return this.breakpoints.removeBreakpoint(sessionId, breakpointId);
   }
 
   /**
-   * Remove ALL breakpoints at a file:line location (duplicates at one line —
-   * e.g. with different conditions — are removed together; DAP replace-all
-   * semantics cannot distinguish them anyway). Same lifecycle behavior as
-   * removeBreakpoint.
+   * Remove ALL breakpoints at a file:line location.
    */
   async removeBreakpointsByLocation(
     sessionId: string,
     file: string,
     line: number
   ): Promise<{ removed: Breakpoint[]; warning?: string }> {
-    const session = this._getSessionById(sessionId);
-
-    const removed = Array.from(session.breakpoints.values())
-      .filter(bp => bp.file === file && bp.line === line);
-    if (removed.length === 0) {
-      return { removed: [] };
-    }
-
-    for (const bp of removed) {
-      session.breakpoints.delete(bp.id);
-      this.logger.info('debug:breakpoint', {
-        event: 'removed',
-        sessionId,
-        sessionName: session.name,
-        breakpointId: bp.id,
-        file: bp.file,
-        line: bp.line,
-        timestamp: Date.now(),
-      });
-    }
-
-    const { warning } = await this.syncBreakpointsForFile(session, file);
-    return { removed, warning };
+    return this.breakpoints.removeBreakpointsByLocation(sessionId, file, line);
   }
 
   /**
    * Remove all of the session's breakpoints, or all breakpoints in one file.
-   * Clearing zero breakpoints is success, not an error. Works in every
-   * lifecycle state; live sessions get one empty/remaining setBreakpoints
-   * re-send per affected file.
    */
   async clearBreakpoints(
     sessionId: string,
     file?: string
   ): Promise<{ cleared: number; files: string[]; warning?: string }> {
-    const session = this._getSessionById(sessionId);
-
-    const toClear = Array.from(session.breakpoints.values())
-      .filter(bp => file === undefined || bp.file === file);
-    const files = [...new Set(toClear.map(bp => bp.file))];
-
-    // Function breakpoints are not file-scoped: only an unscoped clear
-    // touches them (issue #271 phase 3).
-    const fnToClear = file === undefined
-      ? Array.from(session.functionBreakpoints?.values() ?? [])
-      : [];
-
-    for (const bp of toClear) {
-      session.breakpoints.delete(bp.id);
-    }
-    for (const bp of fnToClear) {
-      session.functionBreakpoints.delete(bp.id);
-    }
-    if (toClear.length > 0 || fnToClear.length > 0) {
-      this.logger.info('debug:breakpoint', {
-        event: 'cleared',
-        sessionId,
-        sessionName: session.name,
-        cleared: toClear.length + fnToClear.length,
-        files,
-        functionBreakpoints: fnToClear.length,
-        timestamp: Date.now(),
-      });
-    }
-
-    const warnings: string[] = [];
-    for (const clearedFile of files) {
-      const { warning } = await this.syncBreakpointsForFile(session, clearedFile);
-      if (warning) warnings.push(warning);
-    }
-    if (fnToClear.length > 0) {
-      const { warning } = await this.syncFunctionBreakpoints(session);
-      if (warning) warnings.push(warning);
-    }
-
-    return {
-      cleared: toClear.length + fnToClear.length,
-      files,
-      ...(warnings.length > 0 ? { warning: warnings.join('; ') } : {})
-    };
+    return this.breakpoints.clearBreakpoints(sessionId, file);
   }
 
   async stepOver(sessionId: string): Promise<DebugResult> {
@@ -3111,16 +2602,16 @@ export abstract class SessionManagerOperations extends SessionManagerData {
           // empty echo, and pre-attach breakpoints were already registered
           // via its pending-target queue — without a fresh echo their
           // verified state is unrecoverable (issue #500).
-          await this.syncBreakpointsForFile(session, file, { forceFreshEcho: true });
+          await this.breakpoints.syncBreakpointsForFile(session, file, { forceFreshEcho: true });
         }
       }
       if ((session.functionBreakpoints?.size ?? 0) > 0) {
-        await this.syncFunctionBreakpoints(session);
+        await this.breakpoints.syncFunctionBreakpoints(session);
       }
       // Unverified-at-attach function breakpoints get the same launch-style
       // warning (issue #308); bind-late adapters (js/java) stay suppressed
       // inside the builder.
-      const attachFnBpWarning = this.buildFunctionBreakpointLaunchWarning(session);
+      const attachFnBpWarning = this.breakpoints.functionBreakpointLaunchWarning(session);
 
       const attachData: Record<string, unknown> = {
         message: attachConfig.processId
@@ -3333,11 +2824,11 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       let anchorResolution: RedefineClassesResult['anchorResolution'];
       const syncWarnings: string[] = [];
       if ((body.redefinedCount ?? 0) > 0) {
-        anchorResolution = await this.reresolveAnchors(session);
+        anchorResolution = await reresolveAnchors(session, this.opsContext);
         if (anchorResolution && anchorResolution.moved.length > 0) {
           const movedFiles = [...new Set(anchorResolution.moved.map(m => m.file))];
           for (const file of movedFiles) {
-            const { warning } = await this.syncBreakpointsForFile(session, file);
+            const { warning } = await this.breakpoints.syncBreakpointsForFile(session, file);
             if (warning) {
               syncWarnings.push(warning);
             }
