@@ -57,7 +57,7 @@ export const setBreakpointTool: ToolHandler = async (ctx, args) => {
  * Function-breakpoint branch of set_breakpoint (the `function` parameter).
  */
 // Module-private: callers must already have run setBreakpointTool's entry guard,
-// which is what makes the `args as SetBreakpointArgs` narrowing sound.
+// which is what makes the `args as WithSessionId` narrowing sound.
 async function setFunctionBreakpointBranch(ctx: ToolContext, args: WithSessionId): Promise<ToolResult> {
   // Function breakpoints are session-global symbols — no file,
   // no line, no content anchor, no logpoint, no suspend policy
