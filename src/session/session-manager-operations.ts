@@ -20,16 +20,17 @@ import { checkLaunchToolchain } from '../utils/language-availability.js';
 import { didYouMean } from '../utils/did-you-mean.js';
 import { SessionManagerData } from './session-manager-data.js';
 import type { OperationsContext } from './operations-context.js';
-import {
-  resolveDapTimeoutOverride,
-  withTimeoutHint
-} from './dap-request-helpers.js';
+import { withTimeoutHint } from './dap-request-helpers.js';
 import { BreakpointController } from './breakpoints/breakpoint-controller.js';
 import { ExecutionController } from './execution/execution-controller.js';
 import {
   ExpressionEvaluator,
   type EvaluateResult
 } from './inspection/expression-evaluator.js';
+import {
+  RedefineClassesController,
+  type RedefineClassesResult
+} from './jvm/redefine-classes-controller.js';
 import { reresolveAnchors } from './breakpoints/anchor-resolution.js';
 import {
   buildLogpointDowngradeLaunchWarning,
@@ -54,28 +55,8 @@ import { McpError } from '@modelcontextprotocol/sdk/types.js';
 /** Result type for evaluate expression operations. */
 export type { EvaluateResult } from './inspection/expression-evaluator.js';
 
-export interface RedefineClassesResult {
-  success: boolean;
-  redefined?: string[];
-  redefinedCount?: number;
-  skippedNotLoaded?: number;
-  failedCount?: number;
-  failed?: Array<{ fqcn: string; error: string }>;
-  scannedFiles?: number;
-  newestTimestamp?: number;
-  /** Breakpoints re-planted after redefine (issue #370). */
-  replantedBreakpoints?: number;
-  /**
-   * Statement-anchored breakpoints re-resolved against the new source after
-   * the hot-swap (issue #464) — same shape restart_debugging returns.
-   */
-  anchorResolution?: {
-    moved: Array<{ breakpointId: string; file: string; from: number; to: number; statement: string; candidates?: number[] }>;
-    stale: Array<{ breakpointId: string; file: string; line: number; statement: string; reason: string }>;
-  };
-  warning?: string;
-  error?: string;
-}
+/** Result type for redefine_classes (JVM hot swap). */
+export type { RedefineClassesResult } from './jvm/redefine-classes-controller.js';
 
 /** Result of expose_session (issue #217). */
 export interface ExposeSessionResult {
@@ -233,6 +214,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
   protected readonly breakpoints = new BreakpointController(this.opsContext);
   protected readonly execution = new ExecutionController(this.opsContext);
   protected readonly evaluator = new ExpressionEvaluator(this.opsContext);
+  protected readonly hotSwap = new RedefineClassesController(this.opsContext, this.breakpoints);
 
   protected async startProxyManager(
     session: ManagedSession,
@@ -2028,93 +2010,16 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     }
   }
 
+  /**
+   * Hot-swap changed classes into a running JVM (Java only).
+   */
   async redefineClasses(
     sessionId: string,
     classesDir: string,
     sinceTimestamp: number = 0,
     timeoutMs?: number
   ): Promise<RedefineClassesResult> {
-    const session = this._getSessionById(sessionId);
-    this.logger.info(
-      `[SM redefineClasses ${sessionId}] classesDir: "${classesDir}", since: ${sinceTimestamp}`
-    );
-
-    const timeoutOverride = resolveDapTimeoutOverride(
-      timeoutMs,
-      `SM redefineClasses ${sessionId}`,
-      this.logger
-    );
-    if (timeoutOverride.error) {
-      this.logger.warn(`[SM redefineClasses ${sessionId}] ${timeoutOverride.error}`);
-      return { success: false, error: timeoutOverride.error };
-    }
-
-    if (!session.proxyManager || !session.proxyManager.isRunning()) {
-      return { success: false, error: 'No active debug session' };
-    }
-
-    try {
-      const redefineArgs = { classesDir, sinceTimestamp };
-      const response = timeoutOverride.timeoutMs !== undefined
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ? await session.proxyManager.sendDapRequest<any>(
-            'redefineClasses', redefineArgs, { timeoutMs: timeoutOverride.timeoutMs })
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        : await session.proxyManager.sendDapRequest<any>(
-            'redefineClasses', redefineArgs);
-
-      const body = response?.body;
-      if (!body) {
-        return { success: false, error: 'No response body from redefineClasses' };
-      }
-
-      // Statement anchors are content identities and a hot-swap invalidates
-      // line numbers (issue #464): re-resolve them against the new source —
-      // which IS what is on disk in the edit -> recompile -> hot-swap loop —
-      // and re-send the affected files so the JDI replant binds the moved
-      // lines against the new line table. Ordered after the redefine
-      // response, i.e. after vm.redefineClasses, by construction.
-      let anchorResolution: RedefineClassesResult['anchorResolution'];
-      const syncWarnings: string[] = [];
-      if ((body.redefinedCount ?? 0) > 0) {
-        anchorResolution = await reresolveAnchors(session, this.opsContext);
-        if (anchorResolution && anchorResolution.moved.length > 0) {
-          const movedFiles = [...new Set(anchorResolution.moved.map(m => m.file))];
-          for (const file of movedFiles) {
-            const { warning } = await this.breakpoints.syncBreakpointsForFile(session, file);
-            if (warning) {
-              syncWarnings.push(warning);
-            }
-          }
-        }
-        if (anchorResolution && anchorResolution.stale.length > 0) {
-          syncWarnings.push(
-            `${anchorResolution.stale.length} statement-anchored breakpoint(s) could not be re-resolved ` +
-            `against the new source and keep their previous line — see anchorResolution.stale`
-          );
-        }
-      }
-
-      return {
-        success: true,
-        redefined: body.redefined,
-        redefinedCount: body.redefinedCount,
-        skippedNotLoaded: body.skippedNotLoaded,
-        failedCount: body.failedCount,
-        failed: body.failed,
-        scannedFiles: body.scannedFiles,
-        newestTimestamp: body.newestTimestamp,
-        replantedBreakpoints: body.replantedBreakpoints,
-        ...(anchorResolution ? { anchorResolution } : {}),
-        ...(syncWarnings.length > 0 ? { warning: syncWarnings.join('; ') } : {}),
-      };
-    } catch (error) {
-      this.logger.error(`[SM redefineClasses ${sessionId}] Error: ${error}`);
-      return {
-        success: false,
-        error: withTimeoutHint(error instanceof Error ? error.message : String(error)),
-      };
-    }
+    return this.hotSwap.redefineClasses(sessionId, classesDir, sinceTimestamp, timeoutMs);
   }
 
   /**
