@@ -3,6 +3,7 @@
  * original switch in src/server.ts.
  */
 import type { ToolHandler } from '../tool-context.js';
+import type { ToolName } from '../tool-schemas.js';
 import { createDebugSessionTool, listDebugSessionsTool, closeDebugSessionTool } from './session-tools.js';
 import {
   setBreakpointTool,
@@ -30,7 +31,13 @@ import {
 import { getOutputTool } from './output-tools.js';
 import { listSupportedLanguagesTool } from './language-tools.js';
 
-export const TOOL_HANDLERS: Readonly<Record<string, ToolHandler>> = Object.freeze({
+/**
+ * Keyed by ToolName: a name in TOOL_NAMES with no handler here, and a handler
+ * under a name that is not in TOOL_NAMES, are both compile errors. Whether
+ * that name also reaches tools/list is a separate question — see the note on
+ * TOOL_NAMES in ../tool-schemas.ts.
+ */
+export const TOOL_HANDLERS: Readonly<Record<ToolName, ToolHandler>> = Object.freeze({
   create_debug_session: createDebugSessionTool,
   list_debug_sessions: listDebugSessionsTool,
   set_breakpoint: setBreakpointTool,
@@ -59,4 +66,4 @@ export const TOOL_HANDLERS: Readonly<Record<string, ToolHandler>> = Object.freez
   get_output: getOutputTool,
   list_supported_languages: listSupportedLanguagesTool,
   redefine_classes: redefineClassesTool
-});
+} satisfies Record<ToolName, ToolHandler>);

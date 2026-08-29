@@ -14,7 +14,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { coerceToolArguments, ToolArguments } from './tool-arguments.js';
 import { extractPayloadSuccess, sanitizeRequest } from './tool-result.js';
-import { buildToolDefinitions } from './tool-schemas.js';
+import { buildToolDefinitions, isToolName } from './tool-schemas.js';
 import type { ToolContext } from './tool-context.js';
 import { TOOL_HANDLERS } from './handlers/index.js';
 
@@ -44,7 +44,7 @@ export function registerToolHandlers(server: Server, ctx: ToolContext): void {
       });
 
       try {
-        if (!Object.hasOwn(TOOL_HANDLERS, toolName)) {
+        if (!isToolName(toolName)) {
           throw new McpError(McpErrorCode.MethodNotFound, `Unknown tool: ${toolName}`);
         }
         const result = await TOOL_HANDLERS[toolName](ctx, args, toolName);

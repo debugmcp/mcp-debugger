@@ -12,6 +12,8 @@ import {
   ListPromptsRequestSchema,
   GetPromptRequestSchema
 } from '@modelcontextprotocol/sdk/types.js';
+import { DebugMcpServer } from '../../../../src/server.js';
+import { createProductionDependencies } from '../../../../src/container/dependencies.js';
 import { createMockLogger } from '../../../test-utils/helpers/test-dependencies.js';
 import { createMockAdapterRegistry } from '../../../test-utils/mocks/mock-adapter-registry.js';
 
@@ -149,6 +151,40 @@ export function createMockSessionManager(mockAdapterRegistry: any) {
 
 export function createMockStdioTransport() {
   return {};
+}
+
+/**
+ * A live ToolContext for the handler tests in ./handlers.
+ *
+ * It is a real DebugMcpServer — which is what implements ToolContext — with
+ * its session manager and logger swapped for mocks, rather than a hand-rolled
+ * object literal: the handlers read their dependencies off the context at call
+ * time, and a literal would be free to drift away from the interface they
+ * program against. Tests replace further members (fileChecker, lineReader,
+ * validateSession) by assigning to the returned context, which is exactly what
+ * the live-read contract is there for.
+ *
+ * The caller MUST vi.mock the dependency container: DebugMcpServer builds its
+ * real dependencies in the constructor, and an unmocked one opens winston's
+ * shared file transport (and a session log dir) per construction, none of
+ * which is ever stopped.
+ */
+export function createMockToolContext(): DebugMcpServer {
+  if (!vi.isMockFunction(createProductionDependencies)) {
+    throw new Error(
+      'createMockToolContext requires the test file to vi.mock ../src/container/dependencies.js — ' +
+      'otherwise every call opens a real winston file transport that is never closed.'
+    );
+  }
+  vi.mocked(createProductionDependencies).mockReturnValue(
+    createMockDependencies() as unknown as ReturnType<typeof createProductionDependencies>
+  );
+  const server = new DebugMcpServer({ logLevel: 'info' });
+  Object.assign(server, {
+    sessionManager: createMockSessionManager(createMockAdapterRegistry()),
+    logger: createMockLogger()
+  });
+  return server;
 }
 
 /**

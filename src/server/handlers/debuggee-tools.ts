@@ -4,6 +4,14 @@
  */
 import { ErrorCode as McpErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { ToolHandler } from '../tool-context.js';
+import { attachWarning } from './shared.js';
+import {
+  assertPlainObjectArg,
+  normalizeStartDebuggingArgs,
+  requireSessionId,
+  validateBreakOnExceptions
+} from '../tool-validation.js';
+import { jsonResult, prettyJsonResult, sessionErrorResultOrThrow } from '../tool-result.js';
 
 export const startDebuggingTool: ToolHandler = async (ctx, args) => {
   if (!args.sessionId || !args.scriptPath) {
@@ -11,14 +19,9 @@ export const startDebuggingTool: ToolHandler = async (ctx, args) => {
   }
 
   try {
-    if (args.adapterLaunchConfig !== undefined) {
-      const cfg = args.adapterLaunchConfig;
-      if (cfg === null || typeof cfg !== 'object' || Array.isArray(cfg)) {
-        throw new McpError(McpErrorCode.InvalidParams, 'adapterLaunchConfig must be an object when provided');
-      }
-    }
+    assertPlainObjectArg(args.adapterLaunchConfig, 'adapterLaunchConfig');
 
-    const intake = ctx.normalizeStartDebuggingArgs(args.dapLaunchArgs, args.breakOnExceptions);
+    const intake = normalizeStartDebuggingArgs(args.dapLaunchArgs, args.breakOnExceptions);
     const debugResult = await ctx.startDebugging(
       args.sessionId,
       args.scriptPath,
@@ -26,7 +29,7 @@ export const startDebuggingTool: ToolHandler = async (ctx, args) => {
       intake.dapLaunchArgs,
       args.dryRunSpawn,
       args.adapterLaunchConfig,
-      ctx.validateBreakOnExceptions(intake.breakOnExceptions)
+      validateBreakOnExceptions(intake.breakOnExceptions)
     );
     const responsePayload: Record<string, unknown> = {
       success: debugResult.success,
@@ -44,25 +47,21 @@ export const startDebuggingTool: ToolHandler = async (ctx, args) => {
     if (debugResult.success && startWarnings.length > 0) {
       responsePayload.warning = startWarnings.join('; ');
     }
-    return { content: [{ type: 'text', text: JSON.stringify(responsePayload) }] };
+    return jsonResult(responsePayload);
   } catch (error) {
-    // Handle session state errors specifically
-    if (error instanceof McpError && 
-        (error.message.includes('terminated') || 
-         error.message.includes('closed') || 
-         (error.message.includes('not found') && error.message.includes('Session')))) {
-      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message, state: 'stopped' }) }] };
-    } else {
-      // Re-throw all other errors (including file validation errors)
-      throw error;
-    }
+    // The 'session-state' sniff reads the McpError MESSAGE: terminated,
+    // closed, or ('not found' AND 'Session') becomes {success: false};
+    // everything else is re-thrown. Being a message sniff it also catches
+    // errors that merely echo user text -- a script path containing
+    // "Sessions" makes "Script file not found: ..." match -- so it is wider
+    // than "session-lifecycle failures only". Preserved verbatim from before
+    // the extraction; classifying by error code instead is a follow-up.
+    return sessionErrorResultOrThrow(error, 'session-state', { state: 'stopped' });
   }
 };
 
 export const restartDebuggingTool: ToolHandler = async (ctx, args) => {
-  if (!args.sessionId) {
-    throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameter: sessionId');
-  }
+  requireSessionId(args);
   try {
     const debugResult = await ctx.restartDebugging(args.sessionId);
     const responsePayload: Record<string, unknown> = {
@@ -85,24 +84,17 @@ export const restartDebuggingTool: ToolHandler = async (ctx, args) => {
         responsePayload.warning = restartWarning;
       }
     }
-    return { content: [{ type: 'text', text: JSON.stringify(responsePayload) }] };
+    return jsonResult(responsePayload);
   } catch (error) {
-    return ctx.handleBreakpointToolError(error);
+    return sessionErrorResultOrThrow(error, 'session-state');
   }
 };
 
 export const attachToProcessTool: ToolHandler = async (ctx, args) => {
-  if (!args.sessionId) {
-    throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
-  }
+  requireSessionId(args);
 
   try {
-    if (args.adapterConfig !== undefined) {
-      const cfg = args.adapterConfig;
-      if (cfg === null || typeof cfg !== 'object' || Array.isArray(cfg)) {
-        throw new McpError(McpErrorCode.InvalidParams, 'adapterConfig must be an object when provided');
-      }
-    }
+    assertPlainObjectArg(args.adapterConfig, 'adapterConfig');
 
     ctx.logger.info('Attach to process requested', {
       sessionId: args.sessionId,
@@ -120,7 +112,7 @@ export const attachToProcessTool: ToolHandler = async (ctx, args) => {
       sourcePaths: args.sourcePaths,
       stopOnEntry: args.stopOnEntry,
       justMyCode: args.justMyCode,
-      breakOnExceptions: ctx.validateBreakOnExceptions(args.breakOnExceptions),
+      breakOnExceptions: validateBreakOnExceptions(args.breakOnExceptions),
       adapterConfig: args.adapterConfig
     });
 
@@ -137,34 +129,21 @@ export const attachToProcessTool: ToolHandler = async (ctx, args) => {
       // Surface the dropped-adapterConfig-keys warning (issue
       // #450) at the top level too — same discoverability as
       // set_breakpoint/start_debugging/restart_debugging.
-      const attachWarning = (attachResult.data as { warning?: string }).warning;
-      if (attachResult.success && attachWarning) {
-        responsePayload.warning = attachWarning;
+      const warning = attachWarning(attachResult);
+      if (warning) {
+        responsePayload.warning = warning;
       }
     }
 
-    return { content: [{ type: 'text', text: JSON.stringify(responsePayload) }] };
+    return jsonResult(responsePayload);
   } catch (error) {
     // Handle session state errors specifically
-    if (error instanceof McpError &&
-        (error.message.includes('terminated') ||
-         error.message.includes('closed') ||
-         (error.message.includes('not found') && error.message.includes('Session')))) {
-      return { content: [{ type: 'text', text: JSON.stringify({
-        success: false,
-        error: error.message,
-        state: 'stopped'
-      }) }] };
-    } else {
-      throw error;
-    }
+    return sessionErrorResultOrThrow(error, 'session-state', { state: 'stopped' });
   }
 };
 
 export const detachFromProcessTool: ToolHandler = async (ctx, args) => {
-  if (!args.sessionId) {
-    throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
-  }
+  requireSessionId(args);
 
   try {
     ctx.logger.info('Detach from process requested', {
@@ -189,21 +168,10 @@ export const detachFromProcessTool: ToolHandler = async (ctx, args) => {
       responsePayload.data = detachResult.data;
     }
 
-    return { content: [{ type: 'text', text: JSON.stringify(responsePayload) }] };
+    return jsonResult(responsePayload);
   } catch (error) {
     // Handle session state errors specifically
-    if (error instanceof McpError &&
-        (error.message.includes('terminated') ||
-         error.message.includes('closed') ||
-         (error.message.includes('not found') && error.message.includes('Session')))) {
-      return { content: [{ type: 'text', text: JSON.stringify({
-        success: false,
-        error: error.message,
-        state: 'stopped'
-      }) }] };
-    } else {
-      throw error;
-    }
+    return sessionErrorResultOrThrow(error, 'session-state', { state: 'stopped' });
   }
 };
 
@@ -214,7 +182,5 @@ export const redefineClassesTool: ToolHandler = async (ctx, args) => {
     (args.sinceTimestamp as number) || 0,
     args.timeout
   );
-  return {
-    content: [{ type: 'text' as const, text: JSON.stringify(redefineResult, null, 2) }],
-  };
+  return prettyJsonResult(redefineResult);
 };

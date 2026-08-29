@@ -4,8 +4,9 @@
  * DebugMcpServer implements it and passes itself, so handlers read every
  * dependency (sessionManager, logger, fileChecker, ...) from the live server
  * at call time rather than from copies captured at construction — the
- * server-coverage tests swap those fields on a constructed server and expect
- * the handlers to see the swap.
+ * handler tests (tests/core/unit/server/handlers/*.test.ts) assign
+ * ctx.lineReader, ctx.fileChecker and ctx.validateSession on an
+ * already-constructed context and expect the handlers to see the swap.
  *
  * Type-only imports throughout; this module never imports src/server.ts.
  */
@@ -78,20 +79,6 @@ export interface ToolContext {
     sessionId: string,
     functionName: string
   ): { name: string; note: string } | undefined;
-  handleBreakpointToolError(error: unknown): ToolResult;
-
-  // ---- intake validation and result shaping ----
-  validateBreakOnExceptions(value: string | undefined): ExceptionBreakMode | undefined;
-  normalizeStartDebuggingArgs(
-    dapLaunchArgs: Partial<DebugProtocol.LaunchRequestArguments> | undefined,
-    topLevelBreakOnExceptions: string | undefined
-  ): {
-    dapLaunchArgs: Partial<DebugProtocol.LaunchRequestArguments> | undefined;
-    breakOnExceptions: string | undefined;
-    warnings: string[];
-  };
-  enforceExplicitNames(toolName: string, names: string[] | undefined): void;
-  redactionSummary(items: Array<{ redacted?: boolean }>): { masked: number; notice: string } | undefined;
 
   // ---- public facade (unchanged signatures) ----
   createDebugSession(params: { language: DebugLanguage; name?: string; executablePath?: string; }): Promise<DebugSessionInfo>;

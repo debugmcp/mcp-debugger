@@ -867,7 +867,7 @@ describe('Server Control Tools Tests', () => {
           name: 'list_threads',
           arguments: {}
         }
-      })).rejects.toThrow('Missing required sessionId');
+      })).rejects.toThrow('Missing required parameter: sessionId');
     });
   });
 });

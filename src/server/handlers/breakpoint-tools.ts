@@ -10,12 +10,10 @@ import {
   supportsExpectedContent,
   supportsStatementAnchors
 } from '../../utils/bp-addressing.js';
-import type { ToolArguments } from '../tool-arguments.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
-import type { ToolResult } from '../tool-result.js';
-
-/** set_breakpoint arguments once the entry guard has established sessionId. */
-type SetBreakpointArgs = ToolArguments & { sessionId: string };
+import { requireSessionId, type WithSessionId } from '../tool-validation.js';
+import { readLineContext } from './shared.js';
+import { failureResult, jsonResult, sessionErrorResultOrThrow, type ToolResult } from '../tool-result.js';
 
 export const setBreakpointTool: ToolHandler = async (ctx, args) => {
   const isFunctionBp = args.function !== undefined;
@@ -49,18 +47,18 @@ export const setBreakpointTool: ToolHandler = async (ctx, args) => {
   }
 
   if (isFunctionBp) {
-    return setFunctionBreakpointBranch(ctx, args as SetBreakpointArgs);
+    return setFunctionBreakpointBranch(ctx, args as WithSessionId);
   }
 
-  return setLineBreakpointBranch(ctx, args as SetBreakpointArgs);
+  return setLineBreakpointBranch(ctx, args as WithSessionId);
 };
 
 /**
  * Function-breakpoint branch of set_breakpoint (the `function` parameter).
  */
 // Module-private: callers must already have run setBreakpointTool's entry guard,
-// which is what makes the `args as SetBreakpointArgs` narrowing sound.
-async function setFunctionBreakpointBranch(ctx: ToolContext, args: SetBreakpointArgs): Promise<ToolResult> {
+// which is what makes the `args as WithSessionId` narrowing sound.
+async function setFunctionBreakpointBranch(ctx: ToolContext, args: WithSessionId): Promise<ToolResult> {
   // Function breakpoints are session-global symbols — no file,
   // no line, no content anchor, no logpoint, no suspend policy
   // (DAP FunctionBreakpoint supports name + condition only).
@@ -112,7 +110,7 @@ async function setFunctionBreakpointBranch(ctx: ToolContext, args: SetBreakpoint
     });
 
     const warnings = [breakpoint.message, fnGate.warning, normalized?.note, nameHint, syncWarning].filter(Boolean);
-    return { content: [{ type: 'text', text: JSON.stringify({
+    return jsonResult({
       success: true,
       breakpointId: breakpoint.id,
       ...(normalized ? { requestedName: args.function } : {}),
@@ -123,9 +121,9 @@ async function setFunctionBreakpointBranch(ctx: ToolContext, args: SetBreakpoint
       boundLine: breakpoint.boundLine,
       message: breakpoint.message || `Function breakpoint set on ${breakpoint.functionName}`,
       warning: warnings.length > 0 ? warnings.join('; ') : undefined
-    }) }] };
+    });
   } catch (error) {
-    return ctx.handleBreakpointToolError(error);
+    return sessionErrorResultOrThrow(error, 'session-state');
   }
 }
 
@@ -133,7 +131,7 @@ async function setFunctionBreakpointBranch(ctx: ToolContext, args: SetBreakpoint
  * Line / statement branch of set_breakpoint.
  */
 // Module-private: see setFunctionBreakpointBranch — the entry guard has run.
-async function setLineBreakpointBranch(ctx: ToolContext, args: SetBreakpointArgs): Promise<ToolResult> {
+async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): Promise<ToolResult> {
   try {
     // Logpoint gating (issue #235): hard error for known-unsupported
     // adapters; a warning when support is unknown pre-launch.
@@ -167,28 +165,7 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: SetBreakpointArgs
     });
 
     // Try to get line context for the breakpoint
-    let context;
-    try {
-      const lineContext = await ctx.lineReader.getLineContext(
-        breakpoint.file,
-        breakpoint.line,
-        { contextLines: 2 }
-      );
-
-      if (lineContext) {
-        context = {
-          lineContent: lineContext.lineContent,
-          surrounding: lineContext.surrounding
-        };
-      }
-    } catch (contextError) {
-      // Log but don't fail if we can't get context
-      ctx.logger.debug('Could not get line context for breakpoint', { 
-        file: breakpoint.file, 
-        line: breakpoint.line, 
-        error: contextError 
-      });
-    }
+    const context = await readLineContext(ctx, breakpoint.file, breakpoint.line, 'breakpoint');
 
     // Loud snapping (issue #271): if the adapter bound the
     // breakpoint to a different line than requested, say so
@@ -203,7 +180,7 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: SetBreakpointArgs
       : undefined;
 
     const warnings = [breakpoint.message, logPointGate.warning, syncWarning, snapWarning].filter(Boolean);
-    const result: ToolResult = { content: [{ type: 'text', text: JSON.stringify({
+    const result: ToolResult = jsonResult({
       success: true,
       breakpointId: breakpoint.id,
       file: breakpoint.file,
@@ -219,7 +196,7 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: SetBreakpointArgs
       warning: warnings.length > 0 ? warnings.join('; ') : undefined,
       // Include context if available
       context: context || undefined
-    }) }] };
+    });
     const contentEntry = Array.isArray(result.content) ? result.content[0] : undefined;
     const textContent = contentEntry && typeof (contentEntry as { text?: unknown }).text === 'string'
       ? (contentEntry as { text: string }).text
@@ -238,23 +215,15 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: SetBreakpointArgs
     });
     return result;
   } catch (error) {
-    // Handle session state errors specifically
-    if (error instanceof McpError && 
-        (error.message.includes('terminated') || 
-         error.message.includes('closed') || 
-         (error.message.includes('not found') && error.message.includes('Session')))) {
-      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-    } else {
-      // Re-throw all other errors (including file validation errors)
-      throw error;
-    }
+    // Message-sniffed session state -> {success: false}, everything else
+    // re-thrown; the sniff is wider than its name suggests (see the note in
+    // debuggee-tools.ts, start_debugging).
+    return sessionErrorResultOrThrow(error, 'session-state');
   }
 }
 
 export const listBreakpointsTool: ToolHandler = async (ctx, args) => {
-  if (!args.sessionId) {
-    throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameter: sessionId');
-  }
+  requireSessionId(args);
   try {
     const breakpoints = ctx.listBreakpoints(args.sessionId, args.file);
     // Function breakpoints are session-global, so a file filter
@@ -262,23 +231,21 @@ export const listBreakpointsTool: ToolHandler = async (ctx, args) => {
     const functionBreakpoints = args.file === undefined
       ? ctx.sessionManager.listFunctionBreakpoints(args.sessionId)
       : [];
-    return { content: [{ type: 'text', text: JSON.stringify({
+    return jsonResult({
       success: true,
       breakpoints,
       count: breakpoints.length,
       ...(args.file === undefined
         ? { functionBreakpoints, functionCount: functionBreakpoints.length }
         : {})
-    }) }] };
+    });
   } catch (error) {
-    return ctx.handleBreakpointToolError(error);
+    return sessionErrorResultOrThrow(error, 'session-state');
   }
 };
 
 export const removeBreakpointTool: ToolHandler = async (ctx, args) => {
-  if (!args.sessionId) {
-    throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameter: sessionId');
-  }
+  requireSessionId(args);
   if (!args.breakpointId && args.function === undefined && (!args.file || args.line === undefined)) {
     throw new McpError(
       McpErrorCode.InvalidParams,
@@ -324,14 +291,15 @@ export const removeBreakpointTool: ToolHandler = async (ctx, args) => {
           ? undefined
           : ctx.getFunctionBreakpointNameHint(args.sessionId, effectiveName);
         if (nameHint) warnings.push(nameHint);
-        return { content: [{ type: 'text', text: JSON.stringify({
-          success: false,
-          error: normalized
+        return failureResult(
+          normalized
             ? `No function breakpoint found for ${requestedName} (normalized to ${effectiveName})`
             : `No function breakpoint found for ${requestedName}`,
-          ...functionDisclosure,
-          warning: warnings.length > 0 ? warnings.join('; ') : undefined
-        }) }] };
+          {
+            ...functionDisclosure,
+            warning: warnings.length > 0 ? warnings.join('; ') : undefined
+          }
+        );
       }
       warning = warnings.length > 0 ? warnings.join('; ') : undefined;
     } else if (args.breakpointId) {
@@ -339,48 +307,40 @@ export const removeBreakpointTool: ToolHandler = async (ctx, args) => {
       removed = res.removed ? [res.removed] : [];
       warning = res.warning;
       if (removed.length === 0) {
-        return { content: [{ type: 'text', text: JSON.stringify({
-          success: false,
-          error: `No breakpoint found with id ${args.breakpointId}`
-        }) }] };
+        return failureResult(`No breakpoint found with id ${args.breakpointId}`);
       }
     } else {
       const res = await ctx.removeBreakpointsByLocation(args.sessionId, args.file!, args.line!);
       removed = res.removed;
       warning = res.warning;
       if (removed.length === 0) {
-        return { content: [{ type: 'text', text: JSON.stringify({
-          success: false,
-          error: `No breakpoint found at ${args.file}:${args.line}`
-        }) }] };
+        return failureResult(`No breakpoint found at ${args.file}:${args.line}`);
       }
     }
-    return { content: [{ type: 'text', text: JSON.stringify({
+    return jsonResult({
       success: true,
       removed,
       message: `Removed ${removed.length} breakpoint(s)`,
       ...(functionDisclosure ?? {}),
       warning
-    }) }] };
+    });
   } catch (error) {
-    return ctx.handleBreakpointToolError(error);
+    return sessionErrorResultOrThrow(error, 'session-state');
   }
 };
 
 export const clearBreakpointsTool: ToolHandler = async (ctx, args) => {
-  if (!args.sessionId) {
-    throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameter: sessionId');
-  }
+  requireSessionId(args);
   try {
     const res = await ctx.clearBreakpoints(args.sessionId, args.file);
-    return { content: [{ type: 'text', text: JSON.stringify({
+    return jsonResult({
       success: true,
       cleared: res.cleared,
       files: res.files,
       message: `Cleared ${res.cleared} breakpoint(s)`,
       warning: res.warning
-    }) }] };
+    });
   } catch (error) {
-    return ctx.handleBreakpointToolError(error);
+    return sessionErrorResultOrThrow(error, 'session-state');
   }
 };

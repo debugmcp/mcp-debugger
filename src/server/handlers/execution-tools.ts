@@ -2,19 +2,19 @@
  * Execution control tools: step_over / step_into / step_out (one handler
  * keyed by toolName), continue_execution, pause_execution, list_threads.
  */
-import { ErrorCode as McpErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
-import {
-  SessionNotFoundError,
-  SessionTerminatedError,
-  ProxyNotRunningError
-} from '../../errors/debug-errors.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
-import type { ToolResult } from '../tool-result.js';
+import { requireSessionId } from '../tool-validation.js';
+import { readLineContext } from './shared.js';
+import {
+  failureResult,
+  jsonResult,
+  rethrowAsMcpError,
+  sessionErrorToResult,
+  type ToolResult
+} from '../tool-result.js';
 
 export const stepTool: ToolHandler = async (ctx, args, toolName) => {
-  if (!args.sessionId) {
-    throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
-  }
+  requireSessionId(args);
 
   try {
     let stepResult: { success: boolean; state: string; error?: string; data?: unknown; };
@@ -51,67 +51,44 @@ export const stepTool: ToolHandler = async (ctx, args, toolName) => {
       response.location = location;
 
       // Try to get line context
-      try {
-        const lineContext = await ctx.lineReader.getLineContext(
-          location.file,
-          location.line,
-          { contextLines: 2 }
-        );
-
-        if (lineContext) {
-          response.context = {
-            lineContent: lineContext.lineContent,
-            surrounding: lineContext.surrounding
-          };
-        }
-      } catch (contextError) {
-        // Log but don't fail if we can't get context
-        ctx.logger.debug('Could not get line context for step result', {
-          file: location.file,
-          line: location.line,
-          error: contextError
-        });
+      const context = await readLineContext(ctx, location.file, location.line, 'step result');
+      if (context) {
+        response.context = context;
       }
     }
 
-    return { content: [{ type: 'text', text: JSON.stringify(response) }] };
+    return jsonResult(response);
   } catch (error) {
-    // Handle validation errors specifically
-    if (error instanceof SessionTerminatedError ||
-        error instanceof SessionNotFoundError ||
-        error instanceof ProxyNotRunningError) {
-      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-    } else if (error instanceof Error) {
-      // Handle other expected errors (like "Failed to step over")
-      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-    } else {
-      // Re-throw unexpected errors
-      throw error;
+    // Typed session errors and other expected Errors (like "Failed to step
+    // over") both report as {success: false}; only non-Error throws escape.
+    const sessionResult = sessionErrorToResult(error, 'typed');
+    if (sessionResult) {
+      return sessionResult;
     }
+    if (error instanceof Error) {
+      return failureResult(error.message);
+    }
+    throw error;
   }
 };
 
 export const continueExecutionTool: ToolHandler = async (ctx, args) => {
-  if (!args.sessionId) {
-    throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
-  }
+  requireSessionId(args);
 
   try {
     const continueResult = await ctx.continueExecution(args.sessionId);
-    return { content: [{ type: 'text', text: JSON.stringify({ success: continueResult, message: continueResult ? 'Continued execution' : 'Failed to continue execution' }) }] };
+    return jsonResult({ success: continueResult, message: continueResult ? 'Continued execution' : 'Failed to continue execution' });
   } catch (error) {
-    // Handle validation errors specifically
-    if (error instanceof SessionTerminatedError ||
-        error instanceof SessionNotFoundError ||
-        error instanceof ProxyNotRunningError) {
-      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-    } else if (error instanceof Error) {
-      // Handle other expected errors
-      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-    } else {
-      // Re-throw unexpected errors
-      throw error;
+    // Same contract as the step tools: typed session errors and other
+    // expected Errors report as {success: false}; non-Errors escape.
+    const sessionResult = sessionErrorToResult(error, 'typed');
+    if (sessionResult) {
+      return sessionResult;
     }
+    if (error instanceof Error) {
+      return failureResult(error.message);
+    }
+    throw error;
   }
 };
 
@@ -119,16 +96,11 @@ export async function handlePause(ctx: ToolContext, args: { sessionId: string; t
   try {
     ctx.validateSession(args.sessionId);
     const result = await ctx.sessionManager.pause(args.sessionId, args.threadId);
-    return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    return jsonResult(result);
   } catch (error) {
     ctx.logger.error('Failed to pause execution', { error });
-    if (error instanceof SessionTerminatedError ||
-        error instanceof SessionNotFoundError ||
-        error instanceof ProxyNotRunningError) {
-      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-    }
-    if (error instanceof McpError) throw error;
-    throw new McpError(McpErrorCode.InternalError, `Failed to pause execution: ${(error as Error).message}`);
+    return sessionErrorToResult(error, 'typed') ??
+      rethrowAsMcpError(error, 'Failed to pause execution');
   }
 }
 
@@ -140,22 +112,15 @@ export async function handleListThreads(ctx: ToolContext, args: { sessionId: str
   try {
     ctx.validateSession(args.sessionId);
     const threads = await ctx.sessionManager.listThreads(args.sessionId);
-    return { content: [{ type: 'text', text: JSON.stringify({ success: true, threads }) }] };
+    return jsonResult({ success: true, threads });
   } catch (error) {
     ctx.logger.error('Failed to list threads', { error });
-    if (error instanceof SessionTerminatedError ||
-        error instanceof SessionNotFoundError ||
-        error instanceof ProxyNotRunningError) {
-      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-    }
-    if (error instanceof McpError) throw error;
-    throw new McpError(McpErrorCode.InternalError, `Failed to list threads: ${(error as Error).message}`);
+    return sessionErrorToResult(error, 'typed') ??
+      rethrowAsMcpError(error, 'Failed to list threads');
   }
 }
 
 export const listThreadsTool: ToolHandler = async (ctx, args) => {
-  if (!args.sessionId) {
-    throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
-  }
-  return await handleListThreads(ctx, args as { sessionId: string });
+  requireSessionId(args);
+  return await handleListThreads(ctx, args);
 };

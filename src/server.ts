@@ -32,8 +32,7 @@ import {
     SessionLifecycleState,
     IEnvironment,
     ILogger,
-    ExceptionBreakMode,
-    REDACTION_NOTICE
+    ExceptionBreakMode
 } from '@debugmcp/shared';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';
@@ -41,28 +40,23 @@ import { SimpleFileChecker, createSimpleFileChecker, FileExistenceResult } from 
 import { LineReader, createLineReader } from './utils/line-reader.js';
 import { isLanguageDisabled } from './utils/language-config.js';
 import { ValidationResultCache } from './utils/language-availability.js';
-import { isContainerMode, getWorkspaceRoot } from './utils/container-path-utils.js';
+import { isContainerMode, isContainerRuntime, getWorkspaceRoot } from './utils/container-path-utils.js';
 import {
   getBpAddressingMode,
   supportsStatementAnchors,
   supportsLoudSnapping
 } from './utils/bp-addressing.js';
 import { isRedactionEnabled } from './utils/redaction-mode.js';
-import { getVariableAccessMode, requiresExplicitNames } from './utils/variable-access.js';
+import { getVariableAccessMode } from './utils/variable-access.js';
 import { assertLineContent, resolveStatement, stripTrailingComment } from './utils/breakpoint-resolver.js';
 import { OutputResourceNotifier, registerResourceHandlers } from './server/output-resources.js';
 import { registerPromptHandlers } from './server/prompts.js';
-import { discoverSupportedLanguages, buildLanguageMetadata, LanguageMetadata } from './server/language-discovery.js';
-import type { ToolContext, SetBreakpointRequest } from './server/tool-context.js';
-import type { ToolResult } from './server/tool-result.js';
-import { handleListDebugSessions } from './server/handlers/session-tools.js';
-import { handlePause, handleListThreads } from './server/handlers/execution-tools.js';
 import {
-  handleEvaluateExpression,
-  handleGetSourceContext,
-  handleGetLocalVariables
-} from './server/handlers/inspection-tools.js';
-import { handleListSupportedLanguages } from './server/handlers/language-tools.js';
+  discoverSupportedLanguages,
+  buildLanguageMetadata,
+  LanguageMetadata
+} from './server/language-discovery.js';
+import type { ToolContext, SetBreakpointRequest } from './server/tool-context.js';
 import { registerToolHandlers } from './server/tool-dispatch.js';
 
 export { coerceToolArguments } from './server/tool-arguments.js';
@@ -226,115 +220,13 @@ export class DebugMcpServer implements ToolContext {
     }
   }
 
-  /**
-   * Shared catch for the breakpoint management tools: session-lifecycle
-   * failures become {success: false} results (same contract as
-   * set_breakpoint's catch); everything else re-throws.
-   * @internal ToolContext service.
-   */
-  public handleBreakpointToolError(error: unknown): ToolResult {
-    if (error instanceof McpError &&
-        (error.message.includes('terminated') ||
-         error.message.includes('closed') ||
-         (error.message.includes('not found') && error.message.includes('Session')))) {
-      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-    }
-    throw error;
-  }
-
-  /** @internal ToolContext service. */
-  public validateBreakOnExceptions(value: string | undefined): ExceptionBreakMode | undefined {
-    if (value === undefined) {
-      return undefined;
-    }
-    if (value !== 'uncaught' && value !== 'all' && value !== 'none') {
-      throw new McpError(
-        McpErrorCode.InvalidParams,
-        `breakOnExceptions must be one of 'uncaught', 'all', 'none' (got '${value}')`
-      );
-    }
-    return value;
-  }
-
-  /**
-   * Top-level start_debugging parameters that have no meaning inside
-   * dapLaunchArgs. Deliberately excludes keys that are legitimate DAP launch
-   * arguments (program, cwd, args, env, stopOnEntry, justMyCode, ...) —
-   * compiled languages pass the binary as dapLaunchArgs.program.
-   * breakOnExceptions is handled separately (honored as an alias).
-   */
-  private static readonly NEVER_VALID_DAP_LAUNCH_KEYS = [
-    'dryRunSpawn',
-    'sessionId',
-    'scriptPath',
-    'adapterLaunchConfig',
-    'dapLaunchArgs'
-  ] as const;
-
-  /**
-   * Intake normalization for start_debugging (issue #305). dapLaunchArgs is
-   * declared additionalProperties:true, so a top-level parameter nested there
-   * by mistake used to ride through the launch-config merge as a junk DAP key
-   * adapters silently ignore — a silent behavioral failure. Now:
-   * - dapLaunchArgs.breakOnExceptions is honored as an alias for the
-   *   top-level parameter (top-level wins when both are given), stripped from
-   *   the forwarded launch args, and reported via a warning.
-   * - Other never-valid nested keys are stripped with a warning.
-   * Fixing at intake also cures restart_debugging replay, which snapshots the
-   * post-intake values into session.lastLaunch downstream.
-   * @internal ToolContext service.
-   */
-  public normalizeStartDebuggingArgs(
-    dapLaunchArgs: Partial<DebugProtocol.LaunchRequestArguments> | undefined,
-    topLevelBreakOnExceptions: string | undefined
-  ): {
-    dapLaunchArgs: Partial<DebugProtocol.LaunchRequestArguments> | undefined;
-    breakOnExceptions: string | undefined;
-    warnings: string[];
-  } {
-    const warnings: string[] = [];
-    let breakOnExceptions = topLevelBreakOnExceptions;
-    if (dapLaunchArgs === null || typeof dapLaunchArgs !== 'object' || Array.isArray(dapLaunchArgs)) {
-      return { dapLaunchArgs, breakOnExceptions, warnings };
-    }
-    const cleaned: Record<string, unknown> = { ...dapLaunchArgs };
-    if ('breakOnExceptions' in cleaned) {
-      const nested = cleaned.breakOnExceptions;
-      delete cleaned.breakOnExceptions;
-      if (topLevelBreakOnExceptions === undefined) {
-        breakOnExceptions = nested as string;
-        warnings.push(
-          `breakOnExceptions is a top-level start_debugging parameter, not a dapLaunchArgs key — honored as '${String(nested)}' this time; pass it at the top level`
-        );
-      } else {
-        warnings.push(
-          `breakOnExceptions was passed both top-level ('${topLevelBreakOnExceptions}') and inside dapLaunchArgs ('${String(nested)}'); the top-level value wins and the nested key was ignored`
-        );
-      }
-    }
-    for (const key of DebugMcpServer.NEVER_VALID_DAP_LAUNCH_KEYS) {
-      if (key in cleaned) {
-        delete cleaned[key];
-        warnings.push(
-          `'${key}' is a top-level start_debugging parameter and has no meaning inside dapLaunchArgs — ignored; pass it at the top level`
-        );
-      }
-    }
-    return {
-      dapLaunchArgs: cleaned as Partial<DebugProtocol.LaunchRequestArguments>,
-      breakOnExceptions,
-      warnings
-    };
-  }
-
   // Core business logic methods — delegated to by the MCP tool dispatch handler
   // (CallToolRequestSchema); public so they are also accessible for testing/external use
   public async createDebugSession(params: { language: DebugLanguage; name?: string; executablePath?: string; }): Promise<DebugSessionInfo> {
     // Validate language support using dynamic discovery
     const supported = await this.getSupportedLanguagesAsync();
     const requested = params.language as unknown as string;
-    const isContainer = process.env.MCP_CONTAINER === 'true';
-    const allowInContainer = isContainer && requested === DebugLanguage.PYTHON; // ensure python allowed in container
+    const allowInContainer = isContainerRuntime() && requested === DebugLanguage.PYTHON; // ensure python allowed in container
     if (isLanguageDisabled(requested)) {
       throw new McpError(
         McpErrorCode.InvalidParams,
@@ -812,72 +704,6 @@ export class DebugMcpServer implements ToolContext {
       : '';
     return new McpError(McpErrorCode.InvalidParams,
       `${label} not found: '${originalPath}'\nLooked for: '${fileCheck.effectivePath}'${fileCheck.errorMessage ? `\nError: ${fileCheck.errorMessage}` : ''}${containerHint}`);
-  }
-
-  /** @internal test seam; removed in PR 6 */
-  private async handleListDebugSessions(): Promise<ToolResult> {
-    return handleListDebugSessions(this);
-  }
-
-  /**
-   * Least-privilege enforcement (issue #237): in explicit mode, bulk scope
-   * dumps are disabled — the tools require a non-empty names filter, and the
-   * error teaches the correct call shape.
-   * @internal ToolContext service.
-   */
-  public enforceExplicitNames(toolName: string, names: string[] | undefined): void {
-    if (!requiresExplicitNames(getVariableAccessMode(this.environment))) {
-      return;
-    }
-    if (!names || names.length === 0) {
-      throw new McpError(
-        McpErrorCode.InvalidParams,
-        `${toolName} requires "names" in least-privilege mode (DEBUG_MCP_VARIABLE_ACCESS=explicit): ` +
-        `pass the exact variable names you need, e.g. names:["user","order_total"]. ` +
-        `Unfiltered scope dumps are disabled by this server's configuration.`
-      );
-    }
-  }
-
-  /**
-   * Top-level `redaction` notice object for tool results (issue #237):
-   * present when any returned item carries the session layer's `redacted`
-   * flag, so the agent learns why values changed and how to opt out.
-   * @internal ToolContext service.
-   */
-  public redactionSummary(items: Array<{ redacted?: boolean }>): { masked: number; notice: string } | undefined {
-    const masked = items.filter(item => item.redacted).length;
-    return masked > 0 ? { masked, notice: REDACTION_NOTICE } : undefined;
-  }
-
-  /** @internal test seam; removed in PR 6 */
-  private async handlePause(args: { sessionId: string; threadId?: number }): Promise<ToolResult> {
-    return handlePause(this, args);
-  }
-
-  /** @internal test seam; removed in PR 6 */
-  private async handleListThreads(args: { sessionId: string }): Promise<ToolResult> {
-    return handleListThreads(this, args);
-  }
-
-  /** @internal test seam; removed in PR 6 */
-  private async handleEvaluateExpression(args: { sessionId: string, expression: string, frameId?: number, timeout?: number }): Promise<ToolResult> {
-    return handleEvaluateExpression(this, args);
-  }
-
-  /** @internal test seam; removed in PR 6 */
-  private async handleGetSourceContext(args: { sessionId: string, file: string, line: number, linesContext?: number }): Promise<ToolResult> {
-    return handleGetSourceContext(this, args);
-  }
-
-  /** @internal test seam; removed in PR 6 */
-  private async handleGetLocalVariables(args: { sessionId: string; includeSpecial?: boolean; names?: string[] }): Promise<ToolResult> {
-    return handleGetLocalVariables(this, args);
-  }
-
-  /** @internal test seam; removed in PR 6 */
-  private async handleListSupportedLanguages(): Promise<ToolResult> {
-    return handleListSupportedLanguages(this);
   }
 
   /**

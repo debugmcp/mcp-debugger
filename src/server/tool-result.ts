@@ -1,10 +1,18 @@
 /**
- * Tool result shape and the request/response plumbing helpers shared by the
- * CallTool dispatch: request sanitizing for logs and payload-success
- * extraction for the tool:response log line.
+ * Tool result shape and the plumbing every handler shares: the JSON result
+ * envelopes, the catch-block helpers that turn session-lifecycle failures into
+ * {success: false} payloads, and the request/response helpers used by the
+ * CallTool dispatch (request sanitizing for logs, payload-success extraction
+ * for the tool:response log line).
  */
-import { ServerResult } from '@modelcontextprotocol/sdk/types.js';
+import { ErrorCode as McpErrorCode, McpError, ServerResult } from '@modelcontextprotocol/sdk/types.js';
 import path from 'path';
+import {
+  getErrorMessage,
+  SessionNotFoundError,
+  SessionTerminatedError,
+  ProxyNotRunningError
+} from '../errors/debug-errors.js';
 
 /** The single text-content result every tool handler produces. */
 export type ToolResult = { content: [{ type: 'text'; text: string }] };
@@ -17,6 +25,112 @@ export function jsonResult(payload: unknown): ToolResult {
 /** Wrap a JSON-serializable payload as a pretty-printed (2-space) tool result. */
 export function prettyJsonResult(payload: unknown): ToolResult {
   return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
+}
+
+/**
+ * The standard failure payload: {success: false, error} plus any tool-specific
+ * fields, which follow `error` so key order matches the hand-written literals
+ * these helpers replaced.
+ */
+export function failureResult(message: string, extra?: Record<string, unknown>): ToolResult {
+  return jsonResult({ success: false, error: message, ...extra });
+}
+
+/**
+ * How a catch block recognizes "the session is gone / not usable".
+ *
+ * - 'typed'  matches the typed error classes, so ProxyNotRunningError counts
+ *            (its message, `Cannot X: no active proxy...`, matches no sniff).
+ * - 'session-state' string-sniffs an McpError the way the breakpoint and
+ *            launch tools do: terminated / closed / (not found AND Session).
+ * - 'session-state-or-not-paused' is the looser sniff used by
+ *            evaluate_expression and get_local_variables: bare `not found`
+ *            counts, and so does `not paused`.
+ *
+ * These reproduce the pre-existing per-site sniffs byte for byte, including
+ * their over-matches (a message that merely echoes user text) and their dead
+ * branches (nothing in the server throws a 'closed' or a 'not paused'
+ * McpError today). They differ where it counts -- ProxyNotRunningError is
+ * invisible to both string dialects -- so they stay parameterised rather than
+ * merged; unify them only together with a move to error-code classification
+ * (follow-up).
+ */
+export type SessionErrorSniff = 'typed' | 'session-state' | 'session-state-or-not-paused';
+
+/**
+ * The typed session-lifecycle errors thrown by the session layer.
+ * @internal exported for the dialect tests; handlers go through
+ * sessionErrorToResult / sessionErrorResultOrThrow.
+ */
+export function isTypedSessionError(
+  error: unknown
+): error is SessionTerminatedError | SessionNotFoundError | ProxyNotRunningError {
+  return error instanceof SessionTerminatedError ||
+    error instanceof SessionNotFoundError ||
+    error instanceof ProxyNotRunningError;
+}
+
+/**
+ * The string-sniffing dialects, applied to McpError messages only.
+ * @internal exported for the dialect tests; see isTypedSessionError.
+ */
+export function isSessionStateError(
+  error: unknown,
+  sniff: Exclude<SessionErrorSniff, 'typed'>
+): error is McpError {
+  if (!(error instanceof McpError)) {
+    return false;
+  }
+  if (error.message.includes('terminated') || error.message.includes('closed')) {
+    return true;
+  }
+  if (sniff === 'session-state-or-not-paused') {
+    return error.message.includes('not found') || error.message.includes('not paused');
+  }
+  return error.message.includes('not found') && error.message.includes('Session');
+}
+
+/**
+ * A {success: false} result for a session-lifecycle failure, or undefined when
+ * the error is not one under this dialect (the caller applies its own fallback).
+ */
+export function sessionErrorToResult(
+  error: unknown,
+  sniff: SessionErrorSniff,
+  extra?: Record<string, unknown>
+): ToolResult | undefined {
+  const matched = sniff === 'typed'
+    ? isTypedSessionError(error)
+    : isSessionStateError(error, sniff);
+  return matched ? failureResult((error as Error).message, extra) : undefined;
+}
+
+/**
+ * sessionErrorToResult with the most common fallback: re-throw anything the
+ * dialect does not recognize.
+ */
+export function sessionErrorResultOrThrow(
+  error: unknown,
+  sniff: SessionErrorSniff,
+  extra?: Record<string, unknown>
+): ToolResult {
+  const result = sessionErrorToResult(error, sniff, extra);
+  if (result) {
+    return result;
+  }
+  throw error;
+}
+
+/**
+ * Fallback for the tools that report unexpected failures as an MCP protocol
+ * error: an McpError passes through untouched, anything else is wrapped as
+ * InternalError with the tool's own prefix.
+ */
+export function rethrowAsMcpError(error: unknown, prefix: string): never {
+  if (error instanceof McpError) {
+    throw error;
+  }
+  throw new McpError(McpErrorCode.InternalError, `${prefix}: ${getErrorMessage(error)}`);
 }
 
 /**

@@ -4,20 +4,23 @@
  */
 import { ErrorCode as McpErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { SessionState } from '@debugmcp/shared';
-import {
-  SessionNotFoundError,
-  SessionTerminatedError,
-  ProxyNotRunningError
-} from '../../errors/debug-errors.js';
-import { buildTruncationNotice } from '../../session/variable-caps.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
-import type { ToolResult } from '../tool-result.js';
+import { enforceExplicitNames, requireSessionId } from '../tool-validation.js';
+import { variablePayloadExtras } from './shared.js';
+import {
+  failureResult,
+  jsonResult,
+  rethrowAsMcpError,
+  sessionErrorResultOrThrow,
+  sessionErrorToResult,
+  type ToolResult
+} from '../tool-result.js';
 
 export const getVariablesTool: ToolHandler = async (ctx, args) => {
   if (!args.sessionId || args.scope === undefined) {
     throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameters');
   }
-  ctx.enforceExplicitNames('get_variables', args.names);
+  enforceExplicitNames(ctx.environment, 'get_variables', args.names);
 
   try {
     const { variables, truncation } = await ctx.getVariablesDetailed(args.sessionId, args.scope, args.names);
@@ -38,31 +41,15 @@ export const getVariablesTool: ToolHandler = async (ctx, args) => {
       timestamp: Date.now()
     });
 
-    const redaction = ctx.redactionSummary(variables);
-    const notFound = args.names
-      ? args.names.filter(name => !variables.some(v => v.name === name))
-      : undefined;
-    const truncationInfo = truncation
-      ? { ...truncation, notice: buildTruncationNotice(truncation, variables) }
-      : undefined;
-    return { content: [{ type: 'text', text: JSON.stringify({ success: true, variables, count: variables.length, variablesReference: args.scope, ...(notFound !== undefined ? { notFound } : {}), ...(redaction ? { redaction } : {}), ...(truncationInfo ? { truncation: truncationInfo } : {}) }) }] };
+    return jsonResult({ success: true, variables, count: variables.length, variablesReference: args.scope, ...variablePayloadExtras(variables, args.names, truncation) });
   } catch (error) {
-    // Handle validation errors specifically
-    if (error instanceof SessionTerminatedError ||
-        error instanceof SessionNotFoundError ||
-        error instanceof ProxyNotRunningError) {
-      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-    } else {
-      // Re-throw unexpected errors
-      throw error;
-    }
+    // Typed session errors report as {success: false}; anything else escapes.
+    return sessionErrorResultOrThrow(error, 'typed');
   }
 };
 
 export const getStackTraceTool: ToolHandler = async (ctx, args) => {
-  if (!args.sessionId) {
-    throw new McpError(McpErrorCode.InvalidParams, 'Missing required sessionId');
-  }
+  requireSessionId(args);
 
   try {
     // Default to false for cleaner output
@@ -94,22 +81,20 @@ export const getStackTraceTool: ToolHandler = async (ctx, args) => {
     if (notes.length > 0) {
       payload.note = notes.join(' ');
     }
-    return { content: [{ type: 'text', text: JSON.stringify(payload) }] };
+    return jsonResult(payload);
   } catch (error) {
-    // Handle validation errors specifically
-    if (error instanceof SessionTerminatedError ||
-        error instanceof SessionNotFoundError ||
-        error instanceof ProxyNotRunningError) {
-      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-    } else if (error instanceof Error && !(error instanceof McpError)) {
+    const sessionResult = sessionErrorToResult(error, 'typed');
+    if (sessionResult) {
+      return sessionResult;
+    }
+    if (error instanceof Error && !(error instanceof McpError)) {
       // DAP-level failures (e.g. "Child session not ready ...")
       // must surface as errors, not as an empty-but-successful
       // stack trace (issue #124).
-      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-    } else {
-      // Re-throw unexpected errors
-      throw error;
+      return failureResult(error.message);
     }
+    // Re-throw unexpected errors
+    throw error;
   }
 };
 
@@ -120,17 +105,10 @@ export const getScopesTool: ToolHandler = async (ctx, args) => {
 
   try {
     const scopes = await ctx.getScopes(args.sessionId, args.frameId);
-    return { content: [{ type: 'text', text: JSON.stringify({ success: true, scopes }) }] };
+    return jsonResult({ success: true, scopes });
   } catch (error) {
-    // Handle validation errors specifically
-    if (error instanceof SessionTerminatedError ||
-        error instanceof SessionNotFoundError ||
-        error instanceof ProxyNotRunningError) {
-      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-    } else {
-      // Re-throw unexpected errors
-      throw error;
-    }
+    // Typed session errors report as {success: false}; anything else escapes.
+    return sessionErrorResultOrThrow(error, 'typed');
   }
 };
 
@@ -165,12 +143,7 @@ export async function handleEvaluateExpression(ctx: ToolContext, args: { session
     });
 
     // Return formatted response
-    return { 
-      content: [{ 
-        type: 'text', 
-        text: JSON.stringify(result) 
-      }] 
-    };
+    return jsonResult(result);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
 
@@ -183,18 +156,8 @@ export async function handleEvaluateExpression(ctx: ToolContext, args: { session
     });
 
     // Handle session state errors specifically
-    if (error instanceof McpError && 
-        (error.message.includes('terminated') || 
-         error.message.includes('closed') || 
-         error.message.includes('not found') ||
-         error.message.includes('not paused'))) {
-      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-    } else if (error instanceof McpError) {
-      throw error;
-    } else {
-      // Wrap unexpected errors
-      throw new McpError(McpErrorCode.InternalError, `Failed to evaluate expression: ${errorMessage}`);
-    }
+    return sessionErrorToResult(error, 'session-state-or-not-paused') ??
+      rethrowAsMcpError(error, 'Failed to evaluate expression');
   }
 }
 
@@ -225,17 +188,10 @@ export async function handleGetSourceContext(ctx: ToolContext, args: { sessionId
 
     if (!lineContext) {
       // File might be binary or unreadable
-      return { 
-        content: [{ 
-          type: 'text', 
-          text: JSON.stringify({ 
-            success: false, 
-            error: 'Could not read source context. File may be binary or inaccessible.',
-            file: args.file,
-            line: args.line
-          }) 
-        }] 
-      };
+      return failureResult('Could not read source context. File may be binary or inaccessible.', {
+        file: args.file,
+        line: args.line
+      });
     }
 
     // Log source context request
@@ -248,28 +204,18 @@ export async function handleGetSourceContext(ctx: ToolContext, args: { sessionId
       timestamp: Date.now()
     });
 
-    return { 
-      content: [{ 
-        type: 'text', 
-        text: JSON.stringify({ 
-          success: true,
-          file: args.file,
-          line: args.line,
-          lineContent: lineContext.lineContent,
-          surrounding: lineContext.surrounding,
-          contextLines: contextLines
-        }) 
-      }] 
-    };
+    return jsonResult({
+      success: true,
+      file: args.file,
+      line: args.line,
+      lineContent: lineContext.lineContent,
+      surrounding: lineContext.surrounding,
+      contextLines: contextLines
+    });
   } catch (error) {
     ctx.logger.error('Failed to get source context', { error });
-    if (error instanceof SessionTerminatedError ||
-        error instanceof SessionNotFoundError ||
-        error instanceof ProxyNotRunningError) {
-      return { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-    }
-    if (error instanceof McpError) throw error;
-    throw new McpError(McpErrorCode.InternalError, `Failed to get source context: ${(error as Error).message}`);
+    return sessionErrorToResult(error, 'typed') ??
+      rethrowAsMcpError(error, 'Failed to get source context');
   }
 }
 
@@ -278,7 +224,7 @@ export const getSourceContextTool: ToolHandler = async (ctx, args) => {
 };
 
 export async function handleGetLocalVariables(ctx: ToolContext, args: { sessionId: string; includeSpecial?: boolean; names?: string[] }): Promise<ToolResult> {
-  ctx.enforceExplicitNames('get_local_variables', args.names);
+  enforceExplicitNames(ctx.environment, 'get_local_variables', args.names);
   try {
     // Validate session
     ctx.validateSession(args.sessionId);
@@ -308,24 +254,18 @@ export async function handleGetLocalVariables(ctx: ToolContext, args: { sessionI
       count: result.variables.length
     };
 
-    const redaction = ctx.redactionSummary(result.variables);
-    if (redaction) {
-      response.redaction = redaction;
-    }
-
-    // Size-guard advisory (issues #356/#359): say explicitly that data was
+    // Same three decorations get_variables carries, in this tool's own order:
+    // the size-guard advisory (issues #356/#359) says explicitly that data was
     // cut and how to fetch the rest, instead of silently dropping it.
-    if (result.truncation) {
-      response.truncation = {
-        ...result.truncation,
-        notice: buildTruncationNotice(result.truncation, result.variables)
-      };
+    const extras = variablePayloadExtras(result.variables, args.names, result.truncation);
+    if (extras.redaction) {
+      response.redaction = extras.redaction;
     }
-
-    if (args.names) {
-      response.notFound = args.names.filter(
-        name => !result.variables.some(v => v.name === name)
-      );
+    if (extras.truncation) {
+      response.truncation = extras.truncation;
+    }
+    if (extras.notFound) {
+      response.notFound = extras.notFound;
     }
 
     // Include frame information if available
@@ -374,12 +314,7 @@ export async function handleGetLocalVariables(ctx: ToolContext, args: { sessionI
       }
     }
 
-    return { 
-      content: [{ 
-        type: 'text', 
-        text: JSON.stringify(response) 
-      }] 
-    };
+    return jsonResult(response);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
 
@@ -390,28 +325,14 @@ export async function handleGetLocalVariables(ctx: ToolContext, args: { sessionI
       timestamp: Date.now()
     });
 
-    // Handle session state errors specifically
-    if (error instanceof McpError &&
-        (error.message.includes('terminated') ||
-         error.message.includes('closed') ||
-         error.message.includes('not found') ||
-         error.message.includes('not paused'))) {
-      // A terminated session is a normal end state (e.g. a step_out ran the
-      // program to completion) — explain that instead of implying misuse.
-      const message = error.message.includes('terminated')
-        ? 'The program has terminated, so no frames or variables exist. Use restart_debugging to run it again.'
-        : 'Cannot get local variables. The session must be paused at a breakpoint.';
-      return { content: [{ type: 'text', text: JSON.stringify({
-        success: false,
-        error: error.message,
-        message
-      }) }] };
-    } else if (error instanceof McpError) {
-      throw error;
-    } else {
-      // Wrap unexpected errors
-      throw new McpError(McpErrorCode.InternalError, `Failed to get local variables: ${errorMessage}`);
-    }
+    // Handle session state errors specifically. A terminated session is a
+    // normal end state (e.g. a step_out ran the program to completion) —
+    // explain that instead of implying misuse.
+    const stateMessage = errorMessage.includes('terminated')
+      ? 'The program has terminated, so no frames or variables exist. Use restart_debugging to run it again.'
+      : 'Cannot get local variables. The session must be paused at a breakpoint.';
+    return sessionErrorToResult(error, 'session-state-or-not-paused', { message: stateMessage }) ??
+      rethrowAsMcpError(error, 'Failed to get local variables');
   }
 }
 
