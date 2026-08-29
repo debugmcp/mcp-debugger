@@ -1,0 +1,37 @@
+{
+  // Type-only program covering every first-party source file in one pass (issue #562).
+  //
+  // `--noEmit` skips declaration-emit diagnostics, so `tsc -b -f .` in `build` stays the
+  // authoritative compile; this is the fast (~15 s) check that runs in `lint` CI and pre-push.
+  // `composite: false` is what keeps TS6307 ("not listed within the file list of project")
+  // out of the results, and the `./`-relative `paths` below resolve packages to their TS
+  // sources so this runs on a fresh clone with no `dist/` — they need no `baseUrl`, which is
+  // deprecated in TypeScript 6 (TS5101).
+  //
+  // `paths` mirrors the workspace aliases in `vitest.config.ts` exactly, so what type-checks
+  // here is what the test runner resolves at runtime.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": false,
+    "incremental": false,
+    "noEmit": true,
+    "declaration": false,
+    "sourceMap": false,
+    "rootDir": ".",
+    "paths": {
+      "@debugmcp/shared": ["./packages/shared/src/index.ts"],
+      "@debugmcp/codelldb-common": ["./packages/codelldb-common/src/index.ts"],
+      "@debugmcp/adapter-mock": ["./packages/adapter-mock/src/index.ts"],
+      "@debugmcp/adapter-python": ["./packages/adapter-python/src/index.ts"],
+      "@debugmcp/adapter-ruby": ["./packages/adapter-ruby/src/index.ts"],
+      "@debugmcp/adapter-javascript": ["./packages/adapter-javascript/src/index.ts"],
+      "@debugmcp/adapter-go": ["./packages/adapter-go/src/index.ts"],
+      "@debugmcp/adapter-rust": ["./packages/adapter-rust/src/index.ts"],
+      "@debugmcp/adapter-java": ["./packages/adapter-java/src/index.ts"],
+      "@debugmcp/adapter-dotnet": ["./packages/adapter-dotnet/src/index.ts"],
+      "@debugmcp/adapter-cpp": ["./packages/adapter-cpp/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*", "packages/*/src/**/*"],
+  "exclude": ["node_modules", "**/dist/**", "**/*.test.ts", "**/*.spec.ts"]
+}

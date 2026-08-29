@@ -60,6 +60,23 @@ fi
 echo "✅ Lint passed!"
 echo ""
 
+# Type-only checks (no build needed, a few seconds). The clean build below is still the
+# authoritative compile; this just fails fast on type errors, and the ratchet blocks new
+# type errors in tests (issue #562).
+echo "🧮 Running typecheck (sources + test ratchet)..."
+if ! (pnpm run typecheck && pnpm run typecheck:tests) > "$PRE_PUSH_LOG" 2>&1; then
+    echo ""
+    echo "❌ Typecheck failed! Push blocked to prevent broken code on GitHub."
+    echo "💡 Run 'pnpm run typecheck:all' to see all errors."
+    echo "💡 If a test's error count changed on purpose, run 'pnpm run typecheck:tests:update' and commit the baseline."
+    echo ""
+    tail -20 "$PRE_PUSH_LOG"
+    exit 1
+fi
+
+echo "✅ Typecheck passed!"
+echo ""
+
 # Clean build to ensure no stale artifacts
 echo "🔨 Running clean build to ensure fresh compilation..."
 if ! (npm run clean > "$PRE_PUSH_LOG" 2>&1 && npm run build >> "$PRE_PUSH_LOG" 2>&1); then

@@ -112,6 +112,15 @@ npm run test:e2e:smoke
 ### Code Quality
 
 ```bash
+# Type-check the shipped sources (src + packages/*/src, no build needed)
+npm run typecheck
+
+# Type-check the tests against the per-file ratchet in tests/typecheck-baseline.json
+npm run typecheck:tests
+npm run typecheck:tests:update  # re-record the baseline after changing test files
+npm run typecheck:tests:raw     # raw tsc output for tsconfig.spec.json
+npm run typecheck:all           # both of the above
+
 # Lint code
 npm run lint
 
@@ -122,6 +131,11 @@ npm run lint:fix
 npm run check:personal-paths
 npm run check:all-personal-paths  # Check all files
 ```
+
+Note: the root `tsc -p tsconfig.json` checks nothing (it is a solution-style config with
+`"files": []`), which is why `typecheck` uses `tsconfig.typecheck.json` (#562). Any PR that
+touches test files must run `npm run typecheck:tests:update` and commit the refreshed
+`tests/typecheck-baseline.json` — CI runs the ratchet with `--strict`.
 
 ### Docker
 

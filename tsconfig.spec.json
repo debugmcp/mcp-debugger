@@ -1,36 +1,29 @@
 {
-  "extends": "./tsconfig.json",
+  // Source + tests, for the test-typing ratchet (`pnpm run typecheck:tests`, issue #562).
+  //
+  // Inherits the type-only program from `tsconfig.typecheck.json` and adds the test trees.
+  // Tests are resolved by Vitest, not Node, so they import extensionless specifiers
+  // (`../../src/session/session-manager-operations`) — hence `moduleResolution: "Bundler"`
+  // instead of the NodeNext used for shipped source.
+  //
+  // This config is expected to report errors: they are ratcheted per file in
+  // `tests/typecheck-baseline.json` rather than gating outright.
+  "extends": "./tsconfig.typecheck.json",
   "compilerOptions": {
-    "rootDir": ".",
-    "outDir": "./dist",
     "module": "ES2022",
     "moduleResolution": "Bundler",
-    "target": "ES2022",
-    "lib": ["ES2022"],
-    "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "types": ["vitest/globals", "node"],
-    "strict": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "paths": {
-      "@debugmcp/shared": ["packages/shared/src"],
-      "@debugmcp/shared/*": ["packages/shared/src/*"],
-      "@debugmcp/adapter-mock": ["packages/adapter-mock/src"],
-      "@debugmcp/adapter-mock/*": ["packages/adapter-mock/src/*"],
-      "@debugmcp/adapter-python": ["packages/adapter-python/src"],
-      "@debugmcp/adapter-python/*": ["packages/adapter-python/src/*"]
-    }
+    "types": ["vitest/globals", "node"]
   },
   "include": [
     "src/**/*",
-    "tests/**/*"
+    "packages/*/src/**/*",
+    "tests/**/*",
+    "packages/*/tests/**/*"
   ],
   "exclude": [
     "node_modules",
-    "dist",
-    "coverage"
+    "**/dist/**",
+    "coverage",
+    "tests/reports/**"
   ]
 }
