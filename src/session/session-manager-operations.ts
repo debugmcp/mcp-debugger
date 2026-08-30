@@ -35,7 +35,12 @@ import {
 import { ProxyLauncher } from './launch/proxy-launcher.js';
 import { DebugLauncher } from './launch/debug-launcher.js';
 import { AttachController } from './attach/attach-controller.js';
-import { CustomLaunchRequestArguments, DebugResult, StepResultData } from './session-manager-core.js';
+import {
+  CustomLaunchRequestArguments,
+  DebugResult,
+  PauseResultData,
+  StepResultData
+} from './session-manager-core.js';
 
 /** Result types for function-breakpoint name resolution and by-name removal (issue #559). */
 export type {
@@ -309,7 +314,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
   }
 
   /** Pause a running debuggee. */
-  async pause(sessionId: string, threadId?: number): Promise<DebugResult> {
+  async pause(sessionId: string, threadId?: number): Promise<DebugResult<PauseResultData>> {
     return this.execution.pause(sessionId, threadId);
   }
 

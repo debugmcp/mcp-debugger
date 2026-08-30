@@ -501,9 +501,9 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       // marker and the session completes the step asynchronously.
       expect(result.success).toBe(true);
       expect(result.state).toBe(SessionState.RUNNING);
-      const data = result.data as { message?: string; pending?: boolean };
-      expect(data.pending).toBe(true);
-      expect(data.message).toContain('still executing');
+      const data = result.data;
+      expect(data?.pending).toBe(true);
+      expect(data?.message).toContain('still executing');
 
       vi.useRealTimers();
     });
@@ -1650,7 +1650,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       const result = await promise;
 
       expect(result.success).toBe(true);
-      expect((result.data as { message?: string }).message).toBe('Step completed.');
+      expect(result.data?.message).toBe('Step completed.');
       expect(proxyStub.off).toHaveBeenCalledWith('stopped', expect.any(Function));
       expect(proxyStub.sendDapRequest).toHaveBeenCalledWith('next', { threadId: 1 });
       expect(mockSessionStore.updateState).toHaveBeenCalledWith(session.id, SessionState.RUNNING);
@@ -3470,9 +3470,9 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       emitStopped();
       const result = await promise;
 
-      const data = result.data as { stopReason?: string; rawStopReason?: string };
-      expect(data.stopReason).toBe('pause');
-      expect(data.rawStopReason).toBe('exception');
+      const data = result.data;
+      expect(data?.stopReason).toBe('pause');
+      expect(data?.rawStopReason).toBe('exception');
     });
 
     it('does not echo a stale stop recorded before the pause was requested', async () => {
@@ -3488,8 +3488,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       emitStopped();
       const result = await promise;
 
-      const data = result.data as { stopReason?: string };
-      expect(data.stopReason).toBeUndefined();
+      const data = result.data;
+      expect(data?.stopReason).toBeUndefined();
     });
 
     it('flags the in-flight pause for stop-reason normalization (pausePending)', async () => {
@@ -3544,9 +3544,9 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       const result = await operations.pause('test-session');
 
-      const data = result.data as { message?: string; stopReason?: string };
-      expect(data.message).toBe('Already paused');
-      expect(data.stopReason).toBe('breakpoint');
+      const data = result.data;
+      expect(data?.message).toBe('Already paused');
+      expect(data?.stopReason).toBe('breakpoint');
     });
 
     it('reports state PAUSED when stopped arrives before the pause response resolves (netcoredbg ordering)', async () => {
@@ -3598,9 +3598,9 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         // PAUSED asynchronously when the stop lands.
         expect(result.success).toBe(true);
         expect(result.state).toBe(SessionState.RUNNING);
-        const data = result.data as { message?: string; pending?: boolean };
-        expect(data.pending).toBe(true);
-        expect(data.message).toContain("no 'stopped' event");
+        const data = result.data;
+        expect(data?.pending).toBe(true);
+        expect(data?.message).toContain("no 'stopped' event");
       } finally {
         vi.useRealTimers();
       }

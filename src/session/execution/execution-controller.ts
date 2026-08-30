@@ -20,7 +20,7 @@ import { DebugProtocol } from '@vscode/debugprotocol';
 import { ProxyNotRunningError, SessionTerminatedError } from '../../errors/debug-errors.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import type { ManagedSession } from '../session-store.js';
-import type { DebugResult, StepResultData } from '../session-manager-core.js';
+import type { DebugResult, PauseResultData, StepResultData } from '../session-manager-core.js';
 import type { ExecutionContext } from '../operations-context.js';
 
 /** What distinguishes the three step flavours: everything else is shared. */
@@ -303,7 +303,7 @@ export class ExecutionController {
     }
   }
 
-  async pause(sessionId: string, threadId?: number): Promise<DebugResult> {
+  async pause(sessionId: string, threadId?: number): Promise<DebugResult<PauseResultData>> {
     const session = this.ctx.getSession(sessionId);
 
     if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
@@ -377,7 +377,7 @@ export class ExecutionController {
     // the core handleStopped listener. Adapters differ on whether the event
     // arrives before or after the response, so listen for it (registered
     // BEFORE sending the request) and only settle once the stop is observed.
-    return new Promise<DebugResult>((resolve, reject) => {
+    return new Promise<DebugResult<PauseResultData>>((resolve, reject) => {
       let settled = false;
       let stopEventSeen = false;
 
@@ -389,7 +389,7 @@ export class ExecutionController {
         clearTimeout(timeout);
       };
 
-      const settle = (result: DebugResult) => {
+      const settle = (result: DebugResult<PauseResultData>) => {
         if (settled) {
           return;
         }
@@ -421,12 +421,7 @@ export class ExecutionController {
         this.ctx.logger.info(
           `[SessionManager pause] Paused session ${sessionId}. Current state: ${session.state}`
         );
-        const data: {
-          message: string;
-          stopReason?: string;
-          rawStopReason?: string;
-          location?: { file: string; line: number; column?: number };
-        } = { message: 'Paused' };
+        const data: PauseResultData = { message: 'Paused' };
         // Only report the stop reason when handleStopped recorded a NEW stop
         // for this pause — never echo a stale earlier stop.
         if (session.lastStop && session.lastStop !== lastStopBefore) {
@@ -483,7 +478,7 @@ export class ExecutionController {
           // registered (e.g. during the threads-discovery await), the state is
           // already PAUSED and no further event will arrive.
           if (session.state === SessionState.PAUSED && !stopEventSeen) {
-            const raceData: { message: string; stopReason?: string; rawStopReason?: string } = { message: 'Paused' };
+            const raceData: PauseResultData = { message: 'Paused' };
             if (session.lastStop && session.lastStop !== lastStopBefore) {
               raceData.stopReason = session.lastStop.reason;
               if (session.lastStop.rawReason) {

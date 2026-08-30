@@ -56,6 +56,12 @@ export type DebugResultData = ProxyFailureDiagnostics & {
   message?: string;
   /** Advisory notes joined by the operation (unbound breakpoints, dropped keys, ...). */
   warning?: string;
+  /**
+   * The debuggee is still running and the operation completes asynchronously.
+   * Shared rather than step-specific: `pause` reports it too when its grace
+   * window elapses before a `stopped` event arrives.
+   */
+  pending?: boolean;
   [key: string]: unknown;
 };
 
@@ -63,8 +69,18 @@ export type DebugResultData = ProxyFailureDiagnostics & {
 export type StepResultData = DebugResultData & {
   message: string;
   location?: { file: string; line: number; column?: number };
-  /** The debuggee is still running; the step completes asynchronously. */
-  pending?: boolean;
+};
+
+/**
+ * What a pause returns. `stopReason`/`rawStopReason` are present only when
+ * this pause's own stop was recorded (never a stale earlier one), and
+ * `location` only when the stack was readable by the time it settled.
+ */
+export type PauseResultData = DebugResultData & {
+  message: string;
+  stopReason?: string;
+  rawStopReason?: string;
+  location?: { file: string; line: number; column?: number };
 };
 
 /** What a successful attach returns on top of the common fields. */

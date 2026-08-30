@@ -17,6 +17,7 @@ export type {
   DebugResult,
   DebugResultData,
   StepResultData,
+  PauseResultData,
   AttachResultData
 } from './session-manager-core.js';
 
