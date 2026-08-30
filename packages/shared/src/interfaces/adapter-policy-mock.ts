@@ -4,7 +4,8 @@
  * Encodes mock adapter behaviors for testing purposes.
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import type { AdapterPolicy, AdapterSpecificState, CommandHandling } from './adapter-policy.js';
+import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction } from './adapter-policy.js';
+import { emptyLocalVariableExtraction, extractionFromScope } from './adapter-policy.js';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior } from './dap-client-behavior.js';
 
@@ -36,24 +37,24 @@ export const MockAdapterPolicy: AdapterPolicy = {
     stackFrames: StackFrame[],
     scopes: Record<number, DebugProtocol.Scope[]>,
     variables: Record<number, Variable[]>
-  ): Variable[] => {
+  ): LocalVariableExtraction => {
     // Get the top frame
     if (!stackFrames || stackFrames.length === 0) {
-      return [];
+      return emptyLocalVariableExtraction();
     }
     
     const topFrame = stackFrames[0];
     const frameScopes = scopes[topFrame.id];
     
     if (!frameScopes || frameScopes.length === 0) {
-      return [];
+      return emptyLocalVariableExtraction();
     }
     
     // Find the first scope (mock adapter has simple scopes)
     const localScope = frameScopes[0];
 
     // Return all variables for mock adapter
-    return variables[localScope.variablesReference] || [];
+    return extractionFromScope(localScope, variables[localScope.variablesReference] || []);
   },
   
   /**

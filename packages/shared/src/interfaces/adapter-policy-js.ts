@@ -6,12 +6,67 @@
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import * as path from 'path';
-import type { AdapterPolicy, AdapterSpecificState, CommandHandling, StopReasonContext } from './adapter-policy.js';
-import { resolveExceptionFilters } from './adapter-policy.js';
+import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction, QueuedDapCommand, StopReasonContext } from './adapter-policy.js';
+import { emptyLocalVariableExtraction, extractionFromScope, resolveExceptionFilters } from './adapter-policy.js';
 import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
-import { toSourceBreakpoint, type BreakpointFields } from '../utils/to-source-breakpoint.js';
+import { toSourceBreakpoint } from '../utils/to-source-breakpoint.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
+
+/**
+ * Every js-debug scope name this adapter knows, grouped by kind.
+ *
+ * Single source of truth for the two places that each used to hold their own
+ * copy: the extractor's predicates and `getLocalScopeName()` (which the
+ * session layer then matches against to name the reported scope). Commit
+ * 4f469d71 shipped a false-note bug precisely because those two disagreed —
+ * the extractor learned the exact `Block` name and the reported list did not.
+ * A spec test asserts the list is exactly this table, flattened.
+ *
+ * A name ending in ':' matches as a prefix (`Block:loop`); every other name
+ * matches exactly. Two historical spellings are matched by the predicates but
+ * not spelled out here: `Closure (fn)` (the session layer's canonical
+ * `name + ' '` rule covers it) and `module` in any other casing (the module
+ * predicate compares case-insensitively).
+ */
+export const JS_SCOPE_KINDS = {
+  local: ['Local', 'Locals', 'Local:'],
+  block: ['Block', 'Catch Block', 'With Block', 'Block:'],
+  closure: ['Closure', 'Closure:'],
+  module: ['Script', 'Module', 'module'],
+  global: ['Global']
+} as const;
+
+/** Exact match, or prefix match for a name written with a trailing ':'. */
+function matchesScopeNames(scope: DebugProtocol.Scope, names: readonly string[]): boolean {
+  return names.some(name =>
+    name.endsWith(':') ? scope.name.startsWith(name) : scope.name === name
+  );
+}
+
+const isLocalScope = (scope: DebugProtocol.Scope): boolean =>
+  matchesScopeNames(scope, JS_SCOPE_KINDS.local);
+/**
+ * js-debug names a lexical block scope exactly 'Block' (and 'Catch Block' /
+ * 'With Block'); only some legacy builds use the 'Block:<label>' form. That is
+ * where `let`/`const` bindings declared inside a `for` body or a `catch (e)`
+ * live (issue #558).
+ */
+const isBlockScope = (scope: DebugProtocol.Scope): boolean =>
+  matchesScopeNames(scope, JS_SCOPE_KINDS.block);
+/**
+ * "Local-like" is local OR block: either proves the frame is a real
+ * function/block frame rather than a top-level script frame, which is what the
+ * Global gate turns on.
+ */
+const isLocalLikeScope = (scope: DebugProtocol.Scope): boolean =>
+  isLocalScope(scope) || isBlockScope(scope);
+const isClosureScope = (scope: DebugProtocol.Scope): boolean =>
+  matchesScopeNames(scope, JS_SCOPE_KINDS.closure) || scope.name.startsWith('Closure ');
+const isModuleScope = (scope: DebugProtocol.Scope): boolean =>
+  matchesScopeNames(scope, JS_SCOPE_KINDS.module) || scope.name.toLowerCase() === 'module';
+const isGlobalScope = (scope: DebugProtocol.Scope): boolean =>
+  scope.name.toLowerCase().includes('global');
 
 /**
  * JavaScript-specific adapter state
@@ -19,7 +74,7 @@ import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from '
 export interface JsAdapterState extends AdapterSpecificState {
   initializeResponded: boolean;
   startSent: boolean;
-  pendingCommands: Array<{ requestId: string; dapCommand: string; dapArgs?: unknown }>;
+  pendingCommands: QueuedDapCommand[];
 }
 
 export const JsDebugAdapterPolicy: AdapterPolicy = {
@@ -137,17 +192,17 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
     scopes: Record<number, DebugProtocol.Scope[]>,
     variables: Record<number, Variable[]>,
     includeSpecial: boolean = false
-  ): Variable[] => {
+  ): LocalVariableExtraction => {
     // Get the top frame
     if (!stackFrames || stackFrames.length === 0) {
-      return [];
+      return emptyLocalVariableExtraction();
     }
     
     const topFrame = stackFrames[0];
     const frameScopes = scopes[topFrame.id];
     
     if (!frameScopes || frameScopes.length === 0) {
-      return [];
+      return emptyLocalVariableExtraction();
     }
     
     const variablesForScope = (scope: DebugProtocol.Scope): Variable[] => {
@@ -187,45 +242,121 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
       return scopeVariables;
     };
 
-    // js-debug can expose a genuinely empty Local scope while the useful
-    // binding lives in Closure or Module on the same frame. Try those scopes
-    // in usefulness order before the session layer walks down to a caller.
-    const isLocalLike = (scope: DebugProtocol.Scope): boolean =>
-      scope.name === 'Local' || scope.name === 'Locals' ||
-      scope.name.startsWith('Local:') || scope.name.startsWith('Block:');
-    const scopeGroups: Array<(scope: DebugProtocol.Scope) => boolean> = [
-      isLocalLike,
-      scope => scope.name === 'Closure' || scope.name.startsWith('Closure:') ||
-        scope.name.startsWith('Closure '),
-      scope => scope.name === 'Script' || scope.name.toLowerCase() === 'module'
+    // The local-like group COLLECTS: a frame stopped inside a block has both
+    // kinds of scope and either one alone is a wrong answer — reporting only
+    // the block hides the function's parameters and outer locals, reporting
+    // only the function hides the loop variable the user stopped to look at.
+    // V8 lists block scopes innermost-first and ahead of Local, so taking them
+    // in adapter order reads like the language's own shadowing rules
+    // (issue #558). The later groups stay first-match fall-throughs.
+    const collected: Variable[] = [];
+    const collectedRefs: number[] = [];
+    const seenRefs = new Set<number>();
+    const collect = (scope: DebugProtocol.Scope): void => {
+      // Two scopes can share a variablesReference; collecting it twice would
+      // duplicate its variables and double-count its truncation.
+      if (seenRefs.has(scope.variablesReference)) {
+        return;
+      }
+      const scopeVariables = variablesForScope(scope);
+      // A scope that supplied nothing is not a contributing scope: listing its
+      // ref would misattribute another scope's truncation (issue #438).
+      if (scopeVariables.length === 0) {
+        return;
+      }
+      seenRefs.add(scope.variablesReference);
+      // Push in a loop, not `push(...)`: a spread of a very large scope is a
+      // call with that many arguments and blows the stack.
+      for (const variable of scopeVariables) {
+        collected.push(variable);
+      }
+      collectedRefs.push(scope.variablesReference);
+    };
+
+    const localScopes = frameScopes.filter(isLocalScope);
+    for (const scope of frameScopes.filter(isLocalLikeScope)) {
+      collect(scope);
+    }
+    // ESM top-level: js-debug gives a `for (let i...)` or `catch (e)` at module
+    // top level a Block scope with NO Local scope beneath it, and the module's
+    // own consts live in Script/Module. Before block scopes were recognised at
+    // all, such a frame reported those module bindings; collecting only the
+    // block would silently drop them. So when there is no Local scope, the
+    // first Script/Module scope is the frame's base and joins the merge.
+    if (localScopes.length === 0 && collectedRefs.length > 0) {
+      // First module-like scope that has something to show, as the
+      // fall-through below picks it.
+      const baseScope = frameScopes.find(
+        (scope) => isModuleScope(scope) && variablesForScope(scope).length > 0
+      );
+      if (baseScope) {
+        collect(baseScope);
+      }
+    }
+    if (collected.length > 0) {
+      // Keep a Local scope that exists on the frame nameable even when it
+      // contributed nothing — emptied by the `this`-only filter or by a
+      // pushed-down `names` filter. Without its ref the session layer cannot
+      // see that its canonical scope took part and reports the block with a
+      // note blaming Local, which is not what happened (issue #558).
+      for (const scope of localScopes) {
+        if (!seenRefs.has(scope.variablesReference)) {
+          seenRefs.add(scope.variablesReference);
+          collectedRefs.push(scope.variablesReference);
+        }
+      }
+      return { variables: collected, scopeRefs: collectedRefs };
+    }
+
+    // Nothing local-like had anything to show. js-debug can expose a genuinely
+    // empty Local scope while the useful binding lives in Closure or Module on
+    // the same frame; try those in usefulness order before the session layer
+    // walks down to a caller.
+    const fallbackGroups: Array<(scope: DebugProtocol.Scope) => boolean> = [
+      isClosureScope,
+      isModuleScope
     ];
-    // Global is a last resort only for frames that expose no Local scope at
-    // all (top-level script frames). It must never be a fall-through past an
-    // empty Local: js-debug marks Global expensive but the session layer
+    // Global is a last resort only for frames that expose no Local or block
+    // scope at all (top-level script frames). It must never be a fall-through
+    // past an empty Local: js-debug marks Global expensive but the session layer
     // still fetches it, so Node's ~140 globals would be reported as locals
     // and the non-empty result would keep the issue #468 walk-down to the
     // caller frame from ever running.
-    if (!frameScopes.some(isLocalLike)) {
-      scopeGroups.push(scope => scope.name.toLowerCase().includes('global'));
+    if (!frameScopes.some(isLocalLikeScope)) {
+      fallbackGroups.push(isGlobalScope);
     }
 
-    for (const matches of scopeGroups) {
+    for (const matches of fallbackGroups) {
       for (const scope of frameScopes.filter(matches)) {
         const scopeVariables = variablesForScope(scope);
         if (scopeVariables.length > 0) {
-          return scopeVariables;
+          return extractionFromScope(scope, scopeVariables);
         }
       }
     }
 
-    return [];
+    return emptyLocalVariableExtraction();
   },
   
   /**
-   * JavaScript uses various local scope names
+   * Every scope name this adapter reads, in the preference order the session
+   * layer uses to pick the scope it reports.
+   *
+   * Derived from JS_SCOPE_KINDS so it cannot drift from the extractor's
+   * predicates. The order matters: 'Local' first means a frame with a Local
+   * scope still reports 'Local' after the issue #558 block merge, while a
+   * block-only frame (ESM top-level `for (let i...)`) matches its own block by
+   * name rather than falling through to Module and drawing a note about a
+   * scope that was never consulted.
    */
   getLocalScopeName: (): string[] => {
-    return ['Local', 'Locals', 'Local:', 'Block:', 'Closure', 'Closure:', 'Script', 'Module', 'module', 'Global'];
+    return [
+      ...JS_SCOPE_KINDS.local,
+      ...JS_SCOPE_KINDS.block,
+      ...JS_SCOPE_KINDS.closure,
+      ...JS_SCOPE_KINDS.module,
+      ...JS_SCOPE_KINDS.global
+    ];
   },
   
   getDapAdapterConfiguration: () => {
@@ -269,12 +400,8 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
    * This includes the strict initialization sequence required by js-debug.
    */
   performHandshake: async (context) => {
-    const { proxyManager, sessionId, dapLaunchArgs, scriptPath, scriptArgs, breakpoints, launchConfig, breakOnExceptions } = context;
-    
-    // Type assertion for proxyManager since we use 'unknown' in the interface
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const pm = proxyManager as any; // Will be IProxyManager in actual usage
-    
+    const { proxyManager: pm, sessionId, dapLaunchArgs, scriptPath, scriptArgs, breakpoints, launchConfig, breakOnExceptions } = context;
+
     if (!pm || !pm.isRunning()) {
       console.warn(
         `[JsDebugAdapterPolicy] performHandshake skipped: proxy manager not running for session ${sessionId}`
@@ -289,11 +416,8 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
     // window below (#242).
     let initializedSeen = false;
     let notifyInitialized: (() => void) | null = null;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const onInitialized = (event: any) => {
-      // Handle both event object and string formats
-      const eventName = typeof event === 'string' ? event : event?.event;
-      if (eventName === 'initialized') {
+    const onInitialized = (event: string) => {
+      if (event === 'initialized') {
         initializedSeen = true;
         pm.removeListener('dap-event', onInitialized);
         notifyInitialized?.();
@@ -353,9 +477,7 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
       // Group queued breakpoints by file, mapping via the shared
       // toSourceBreakpoint so no per-breakpoint field is dropped (#235)
       const grouped: Map<string, DebugProtocol.SourceBreakpoint[]> = new Map();
-      for (const bp of breakpoints.values()) {
-        // Type assertion for bp since it's 'unknown' in the interface
-        const breakpoint = bp as { file: string } & BreakpointFields;
+      for (const breakpoint of breakpoints.values()) {
         const arr = grouped.get(breakpoint.file) || [];
         arr.push(toSourceBreakpoint(breakpoint));
         grouped.set(breakpoint.file, arr);
@@ -634,12 +756,9 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
   /**
    * Process queued commands in JavaScript-specific order
    */
-  processQueuedCommands: (
-    commands: unknown[]
-  ): unknown[] => {
-    // Cast to the expected type for internal processing
-    const typedCommands = commands as Array<{ requestId: string; dapCommand: string; dapArgs?: unknown }>;
-    
+  processQueuedCommands: <T extends QueuedDapCommand>(
+    typedCommands: T[]
+  ): T[] => {
     // Group commands by type for proper ordering
     const isConfig = (cmd: string) => [
       'setBreakpoints',

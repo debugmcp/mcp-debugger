@@ -28,10 +28,11 @@ describe('PythonAdapterPolicy', () => {
       variables as any
     );
 
-    expect(locals).toEqual([
+    expect(locals.variables).toEqual([
       { name: 'value', value: '10' },
       { name: '__name__', value: '__main__' }
     ]);
+    expect(locals.scopeRefs).toEqual([1]);
   });
 
   it('resolves executable path using precedence rules', () => {

@@ -78,7 +78,9 @@ describe('JsDebugAdapterPolicy', () => {
       variables as any
     );
 
-    expect(locals).toEqual([{ name: 'foo', value: '1' }]);
+    expect(locals.variables).toEqual([{ name: 'foo', value: '1' }]);
+    // Global is on the frame but contributed nothing.
+    expect(locals.scopeRefs).toEqual([1]);
 
     const withSpecial = JsDebugAdapterPolicy.extractLocalVariables(
       frames as any,
@@ -86,7 +88,7 @@ describe('JsDebugAdapterPolicy', () => {
       variables as any,
       true
     );
-    expect(withSpecial.map(variable => variable.name)).toContain('this');
+    expect(withSpecial.variables.map(variable => variable.name)).toContain('this');
   });
 
   it('determines command queueing based on initialization state', () => {
@@ -185,7 +187,7 @@ describe('JsDebugAdapterPolicy', () => {
 
       const handshakePromise = JsDebugAdapterPolicy.performHandshake(context as any);
       await Promise.resolve();
-      events.emit('dap-event', { event: 'initialized' });
+      events.emit('dap-event', 'initialized', {});
       await vi.advanceTimersByTimeAsync(0);
       await handshakePromise;
       vi.useRealTimers();
@@ -226,7 +228,7 @@ describe('JsDebugAdapterPolicy', () => {
 
       const handshakePromise = JsDebugAdapterPolicy.performHandshake(context as any);
       await Promise.resolve();
-      events.emit('dap-event', { event: 'initialized' });
+      events.emit('dap-event', 'initialized', {});
       await vi.advanceTimersByTimeAsync(0);
       await handshakePromise;
       vi.useRealTimers();
@@ -247,7 +249,7 @@ describe('JsDebugAdapterPolicy', () => {
         // processed; the handshake must not burn its 10s window when that happens.
         const sendDapRequest = vi.fn().mockImplementation((cmd: string) => {
           if (cmd === 'initialize') {
-            events.emit('dap-event', { event: 'initialized' });
+            events.emit('dap-event', 'initialized', {});
           }
           return Promise.resolve({});
         });

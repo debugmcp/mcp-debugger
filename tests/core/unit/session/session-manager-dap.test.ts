@@ -718,11 +718,12 @@ describe('SessionManager - DAP Operations', () => {
       });
 
       // The js handshake waits (10s) for a DAP 'initialized' event; satisfy it
-      // synchronously. setBreakpoints gets parent-style responses: never
+      // synchronously, with the (event, body) pair ProxyManager really emits.
+      // setBreakpoints gets parent-style responses: never
       // verified, parent id space (7, 8, ...)
       dependencies.mockProxyManager.setDapRequestHandler(async (command, args) => {
         if (command === 'initialize') {
-          dependencies.mockProxyManager.simulateEvent('dap-event', { event: 'initialized' });
+          dependencies.mockProxyManager.simulateEvent('dap-event', 'initialized', {});
         }
         if (command === 'setBreakpoints') {
           return {
@@ -886,7 +887,7 @@ describe('SessionManager - DAP Operations', () => {
       });
       dependencies.mockProxyManager.setDapRequestHandler(async (command, args) => {
         if (command === 'initialize') {
-          dependencies.mockProxyManager.simulateEvent('dap-event', { event: 'initialized' });
+          dependencies.mockProxyManager.simulateEvent('dap-event', 'initialized', {});
         }
         if (command === 'setBreakpoints') {
           return {
@@ -1246,6 +1247,296 @@ describe('SessionManager - DAP Operations', () => {
       expect(result.scopeName).toBe('Module');
       expect(result.anchorNote).toMatch(/Local/);
       expect(result.anchorNote).toMatch(/Module/);
+    });
+
+    it('returns a JS for-body block binding alongside the function locals (issue #558)', async () => {
+      const session = await createPausedSession();
+      (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
+
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(
+        async (command: string, args?: { variablesReference?: number }) => {
+          if (command === 'stackTrace') {
+            return {
+              success: true,
+              body: {
+                stackFrames: [
+                  { id: 1, name: 'sum', source: { path: '/workspace/app.js' }, line: 7, column: 3 }
+                ]
+              }
+            };
+          }
+          if (command === 'scopes') {
+            // js-debug's scope chain for a stop inside `for (let i ...)`:
+            // the block comes first and is named exactly 'Block'.
+            return {
+              success: true,
+              body: {
+                scopes: [
+                  { name: 'Block', variablesReference: 100, expensive: false },
+                  { name: 'Local', variablesReference: 200, expensive: false },
+                  { name: 'Closure', variablesReference: 300, expensive: false },
+                  { name: 'Global', variablesReference: 400, expensive: true }
+                ]
+              }
+            };
+          }
+          if (command === 'variables') {
+            const byReference: Record<number, Array<Record<string, unknown>>> = {
+              100: [{ name: 'i', value: '3', type: 'number', variablesReference: 0 }],
+              200: [
+                { name: 'total', value: '6', type: 'number', variablesReference: 0 },
+                { name: 'items', value: 'Array(4)', type: 'object', variablesReference: 5 }
+              ],
+              300: [{ name: 'captured', value: '1', type: 'number', variablesReference: 0 }],
+              400: [{ name: 'process', value: 'Process', type: 'object', variablesReference: 6 }]
+            };
+            return { success: true, body: { variables: byReference[args?.variablesReference ?? 0] ?? [] } };
+          }
+          return { success: true };
+        }
+      );
+
+      const result = await sessionManager.getLocalVariables(session.id);
+
+      // Before #558 this returned only [total, items]: 'i' was invisible
+      // because the policy matched block scopes as 'Block:'-prefixed.
+      expect(result.variables.map(variable => variable.name)).toEqual(['i', 'total', 'items']);
+      // The frame's own locals reached the caller, so the canonical scope is
+      // still the honest name and there is nothing to explain.
+      expect(result.scopeName).toBe('Local');
+      expect(result.anchorNote).toBeUndefined();
+    });
+
+    // A block-only frame is what js-debug produces for an ESM top-level
+    // `for (let i...)` or `catch (e)`: Block, but no Local at all. The block's
+    // bindings merge with the module's own consts (which is what this frame
+    // reported before block scopes were recognised), and the session layer
+    // names the BLOCK — naming the next canonical match would emit a note
+    // blaming a scope that was never the fallback (#558 review).
+    it.each([
+      ['Block', 'Block'],
+      ['Block:loop', 'Block:loop']
+    ])('merges a %s-only ESM frame with its module scope and names the block (issue #558)', async (scopeName, expectedName) => {
+      const session = await createPausedSession();
+      (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
+
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(
+        async (command: string, args?: { variablesReference?: number }) => {
+          if (command === 'stackTrace') {
+            return {
+              success: true,
+              body: {
+                stackFrames: [
+                  { id: 1, name: '<top>', source: { path: '/workspace/app.mjs' }, line: 3, column: 3 }
+                ]
+              }
+            };
+          }
+          if (command === 'scopes') {
+            return {
+              success: true,
+              body: {
+                scopes: [
+                  { name: scopeName, variablesReference: 100, expensive: false },
+                  { name: 'Module', variablesReference: 300, expensive: false },
+                  { name: 'Global', variablesReference: 400, expensive: true }
+                ]
+              }
+            };
+          }
+          if (command === 'variables') {
+            const byReference: Record<number, Array<Record<string, unknown>>> = {
+              100: [{ name: 'i', value: '3', type: 'number', variablesReference: 0 }],
+              300: [{ name: 'moduleValue', value: '7', type: 'number', variablesReference: 0 }],
+              400: [{ name: 'process', value: 'Process', type: 'object', variablesReference: 6 }]
+            };
+            return { success: true, body: { variables: byReference[args?.variablesReference ?? 0] ?? [] } };
+          }
+          return { success: true };
+        }
+      );
+
+      const result = await sessionManager.getLocalVariables(session.id);
+
+      expect(result.variables.map(variable => variable.name)).toEqual(['i', 'moduleValue']);
+      expect(result.scopeName).toBe(expectedName);
+      expect(result.anchorNote).toBeUndefined();
+    });
+
+    it('merges nested block scopes and the module base on an ESM frame (issue #558)', async () => {
+      const session = await createPausedSession();
+      (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
+
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(
+        async (command: string, args?: { variablesReference?: number }) => {
+          if (command === 'stackTrace') {
+            return {
+              success: true,
+              body: {
+                stackFrames: [
+                  { id: 1, name: '<top>', source: { path: '/workspace/app.mjs' }, line: 9, column: 5 }
+                ]
+              }
+            };
+          }
+          if (command === 'scopes') {
+            // A `catch (e)` inside a `for (let i...)` at ESM top level.
+            return {
+              success: true,
+              body: {
+                scopes: [
+                  { name: 'Catch Block', variablesReference: 100, expensive: false },
+                  { name: 'Block', variablesReference: 150, expensive: false },
+                  { name: 'Module', variablesReference: 300, expensive: false },
+                  { name: 'Global', variablesReference: 400, expensive: true }
+                ]
+              }
+            };
+          }
+          if (command === 'variables') {
+            const byReference: Record<number, Array<Record<string, unknown>>> = {
+              100: [{ name: 'e', value: 'Error: boom', type: 'object', variablesReference: 0 }],
+              150: [{ name: 'i', value: '3', type: 'number', variablesReference: 0 }],
+              300: [{ name: 'total', value: '6', type: 'number', variablesReference: 0 }],
+              400: [{ name: 'process', value: 'Process', type: 'object', variablesReference: 7 }]
+            };
+            return { success: true, body: { variables: byReference[args?.variablesReference ?? 0] ?? [] } };
+          }
+          return { success: true };
+        }
+      );
+
+      const result = await sessionManager.getLocalVariables(session.id);
+
+      // Every block, innermost first, then the module base. Before the
+      // collecting group this returned only ['e'] plus a note blaming Block.
+      expect(result.variables.map(variable => variable.name)).toEqual(['e', 'i', 'total']);
+      expect(result.scopeName).toBe('Block');
+      expect(result.anchorNote).toBeUndefined();
+    });
+
+    // When Local exists but supplies nothing, its ref is still reported so the
+    // canonical scope stays nameable: 'Local' with no note, never a note
+    // blaming Local for a fall-through that did not happen (#558 review).
+    it.each([
+      [
+        'a names filter that matches only the block binding',
+        false,
+        ['i'] as string[] | undefined,
+        [{ name: 'total', value: '6', type: 'number', variablesReference: 0 }],
+        // The names filter is pushed down into the per-scope fetch, so Local
+        // comes back empty for this call.
+        true
+      ],
+      [
+        'a Local scope holding only `this`',
+        false,
+        undefined,
+        [{ name: 'this', value: 'Object', type: 'object', variablesReference: 9 }],
+        false
+      ]
+    ])('reports scopeName Local with no note for %s (issue #558)', async (
+      _label, includeSpecial, names, localVars, filterLocal
+    ) => {
+      const session = await createPausedSession();
+      (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
+
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(
+        async (command: string, args?: { variablesReference?: number }) => {
+          if (command === 'stackTrace') {
+            return {
+              success: true,
+              body: {
+                stackFrames: [
+                  { id: 1, name: 'sum', source: { path: '/workspace/app.js' }, line: 7, column: 3 }
+                ]
+              }
+            };
+          }
+          if (command === 'scopes') {
+            return {
+              success: true,
+              body: {
+                scopes: [
+                  { name: 'Block', variablesReference: 100, expensive: false },
+                  { name: 'Local', variablesReference: 200, expensive: false }
+                ]
+              }
+            };
+          }
+          if (command === 'variables') {
+            if (args?.variablesReference === 100) {
+              return {
+                success: true,
+                body: { variables: [{ name: 'i', value: '3', type: 'number', variablesReference: 0 }] }
+              };
+            }
+            return { success: true, body: { variables: filterLocal ? [] : localVars } };
+          }
+          return { success: true };
+        }
+      );
+
+      const result = await sessionManager.getLocalVariables(session.id, includeSpecial, names);
+
+      expect(result.variables.map(variable => variable.name)).toEqual(['i']);
+      expect(result.scopeName).toBe('Local');
+      expect(result.anchorNote).toBeUndefined();
+    });
+
+    it('reports truncation from every merged scope, not just the first (issues #438/#558)', async () => {
+      const session = await createPausedSession();
+      (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
+
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(
+        async (command: string, args?: { variablesReference?: number }) => {
+          if (command === 'stackTrace') {
+            return {
+              success: true,
+              body: {
+                stackFrames: [
+                  { id: 1, name: 'sum', source: { path: '/workspace/app.js' }, line: 7, column: 3 }
+                ]
+              }
+            };
+          }
+          if (command === 'scopes') {
+            return {
+              success: true,
+              body: {
+                scopes: [
+                  { name: 'Block', variablesReference: 100, expensive: false },
+                  { name: 'Local', variablesReference: 200, expensive: false }
+                ]
+              }
+            };
+          }
+          if (command === 'variables') {
+            // One over-long value in EACH merged scope, so a single-ref
+            // attribution would under-report by exactly one.
+            return {
+              success: true,
+              body: {
+                variables: [
+                  {
+                    name: args?.variablesReference === 100 ? 'i' : 'total',
+                    value: 'z'.repeat(5000),
+                    type: 'string',
+                    variablesReference: 0
+                  }
+                ]
+              }
+            };
+          }
+          return { success: true };
+        }
+      );
+
+      const result = await sessionManager.getLocalVariables(session.id);
+
+      expect(result.variables.map(variable => variable.name)).toEqual(['i', 'total']);
+      expect(result.variables.every(variable => variable.truncated === true)).toBe(true);
+      expect(result.truncation).toEqual({ omittedCount: 0, valueTruncatedCount: 2 });
     });
 
     it('ranks the canonical scope by policy preference, not adapter scope order (issue #548 review)', async () => {

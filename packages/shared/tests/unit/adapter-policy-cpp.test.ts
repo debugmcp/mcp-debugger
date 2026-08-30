@@ -86,7 +86,10 @@ describe('CppAdapterPolicy', () => {
         ]
       };
       const filtered = CppAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
-      expect(filtered.map((v) => v.name)).toEqual(['count']);
+      expect(filtered.variables.map((v) => v.name)).toEqual(['count']);
+      // The scope that supplied them is named, so the session layer can
+      // report the adapter's own label and attribute truncation to it.
+      expect(filtered.scopeRefs).toEqual([9]);
     });
   });
 

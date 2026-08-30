@@ -11,7 +11,8 @@ import {
   DebugLanguage,
   Breakpoint,
   FunctionBreakpoint,
-  redactVariableValue
+  redactVariableValue,
+  extractionFromScope
 } from '@debugmcp/shared';
 import { SessionManagerCore } from './session-manager-core.js';
 import { IProxyManager } from '../proxy/proxy-manager.js';
@@ -566,12 +567,13 @@ export abstract class SessionManagerData extends SessionManagerCore {
       // parameterized by anchor: slicing the frame list re-anchors it.
       const extractAt = (frames: StackFrame[]): {
         localVars: Variable[];
+        scopeRefs: number[];
         scopeName: string | null;
         scopeNote?: string;
       } => {
         const anchor = frames[0];
         if (policy.extractLocalVariables) {
-          const vars = policy.extractLocalVariables(frames, scopesMap, variablesMap, includeSpecial);
+          const extraction = policy.extractLocalVariables(frames, scopesMap, variablesMap, includeSpecial);
 
           // Report the ACTUAL scope name the adapter returned, not the policy's
           // canonical name — adapters may annotate it (e.g. Delve's "Locals
@@ -592,12 +594,25 @@ export abstract class SessionManagerData extends SessionManagerCore {
           const canonicalScope = canonicalNames
             .map(canonicalName => anchorScopes.find(scope => matchesCanonicalName(scope.name, canonicalName)))
             .find((scope): scope is DebugProtocol.Scope => scope !== undefined);
-          const returnedVars = new Set(vars);
-          const contributingScope = vars.length > 0
-            ? anchorScopes.find(scope =>
-                (variablesMap[scope.variablesReference] || []).some(variable => returnedVars.has(variable))
-              )
-            : undefined;
+          // The policy names the scopes it SELECTED. When the canonical scope
+          // is among them it stays the reported one even if a sibling was
+          // merged in ahead of it (js-debug's Block + Local, issue #558):
+          // 'Local' with no note is the honest answer for a frame whose own
+          // local scope took part — which is why a policy lists a selected
+          // scope that happened to contribute no variables (all filtered, or
+          // emptied by the `names` filter) rather than dropping it.
+          // Otherwise the FIRST REF the policy listed is what the caller got;
+          // read in scopeRefs order, not adapter order, because the policy's
+          // order is the presentation order it promised.
+          // No `variables.length > 0` guard: the contract is "no variables
+          // implies no scopeRefs" (invariants 11/12, enforced by
+          // extractionFromScope), so an empty result lists nothing to match.
+          const contributingScope =
+            canonicalScope && extraction.scopeRefs.includes(canonicalScope.variablesReference)
+              ? canonicalScope
+              : extraction.scopeRefs
+                  .map(ref => anchorScopes.find(scope => scope.variablesReference === ref))
+                  .find((scope): scope is DebugProtocol.Scope => scope !== undefined);
           const matchedScope = contributingScope ?? canonicalScope;
           const scopeNote = contributingScope && canonicalScope && contributingScope !== canonicalScope
             ? (
@@ -606,7 +621,8 @@ export abstract class SessionManagerData extends SessionManagerCore {
               )
             : undefined;
           return {
-            localVars: vars,
+            localVars: extraction.variables,
+            scopeRefs: extraction.scopeRefs,
             scopeName: matchedScope?.name ?? canonicalNames[0] ?? null,
             ...(scopeNote ? { scopeNote } : {})
           };
@@ -614,13 +630,26 @@ export abstract class SessionManagerData extends SessionManagerCore {
         // Fallback: use first non-global scope from the anchor frame
         const anchorScopes = scopesMap[anchor.id] || [];
         const localScope = anchorScopes.find(s => !s.name.toLowerCase().includes('global'));
-        return localScope
-          ? { localVars: variablesMap[localScope.variablesReference] || [], scopeName: localScope.name }
-          : { localVars: [], scopeName: null };
+        if (!localScope) {
+          return { localVars: [], scopeRefs: [], scopeName: null };
+        }
+        // Built through the shared helper so this branch obeys the same
+        // "no variables implies no scopeRefs" rule the policies do — naming a
+        // scope that supplied nothing would let its truncation summary reach
+        // a response none of its variables did (issue #438).
+        const fallback = extractionFromScope(
+          localScope,
+          variablesMap[localScope.variablesReference] || []
+        );
+        return {
+          localVars: fallback.variables,
+          scopeRefs: fallback.scopeRefs,
+          scopeName: localScope.name
+        };
       };
 
       let anchorIndex = 0;
-      let { localVars, scopeName, scopeNote } = extractAt(stackFrames);
+      let { localVars, scopeRefs, scopeName, scopeNote } = extractAt(stackFrames);
 
       // A pause inside a runtime/stdlib frame (blocking syscall, sleep) puts
       // an empty-locals frame on top while the user frame sits just below —
@@ -634,6 +663,7 @@ export abstract class SessionManagerData extends SessionManagerCore {
           if (attempt.localVars.length > 0) {
             anchorIndex = k;
             localVars = attempt.localVars;
+            scopeRefs = attempt.scopeRefs;
             scopeName = attempt.scopeName;
             scopeNote = attempt.scopeNote;
             this.logger.info(
@@ -645,20 +675,17 @@ export abstract class SessionManagerData extends SessionManagerCore {
       }
       const anchorFrame = stackFrames[anchorIndex];
       
-      // Attribute per-scope truncation to the scopes whose variables
-      // actually reached the caller (issue #438): every policy returns
-      // variablesMap[ref] at most .filter()ed, so object identity survives
-      // extraction. Cuts in fan-out scopes the policy discarded
-      // (Global/Closure) never reached the response and must not be
-      // reported as cuts in it. Computed before the names filter so an
-      // explicit-names request cannot break the attribution.
-      const returnedVars = new Set(localVars);
-      const contributingSummaries: Array<VariableTruncationSummary | undefined> = [];
-      for (const [ref, vars] of Object.entries(variablesMap)) {
-        if (vars.some(v => returnedVars.has(v))) {
-          contributingSummaries.push(truncationByScope.get(Number(ref)));
-        }
-      }
+      // Attribute per-scope truncation to the scopes the policy SELECTED
+      // (issue #438): it names them in the extraction's scopeRefs, so nothing
+      // has to be reconstructed from object identity. Cuts in the fan-out
+      // scopes the policy discarded (Global/Closure, and every lower frame's)
+      // never reached the response and must not be reported as cuts in it.
+      // A selected scope that contributed no variables normally has no summary
+      // either, so listing it to keep it nameable (issue #558) is free.
+      // Read before the names filter so an explicit-names request cannot
+      // break the attribution.
+      const contributingSummaries: Array<VariableTruncationSummary | undefined> =
+        scopeRefs.map(ref => truncationByScope.get(ref));
 
       if (names) {
         localVars = localVars.filter(v => names.includes(v.name));
