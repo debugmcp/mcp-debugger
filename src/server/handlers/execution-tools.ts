@@ -3,6 +3,7 @@
  * keyed by toolName), continue_execution, pause_execution, list_threads.
  */
 import type { ToolContext, ToolHandler } from '../tool-context.js';
+import type { DebugResult, StepResultData } from '../../session/session-manager-core.js';
 import { requireSessionId } from '../tool-validation.js';
 import { readLineContext } from './shared.js';
 import {
@@ -17,7 +18,7 @@ export const stepTool: ToolHandler = async (ctx, args, toolName) => {
   requireSessionId(args);
 
   try {
-    let stepResult: { success: boolean; state: string; error?: string; data?: unknown; };
+    let stepResult: DebugResult<StepResultData>;
     if (toolName === 'step_over') {
       stepResult = await ctx.stepOver(args.sessionId);
     } else if (toolName === 'step_into') {
@@ -28,7 +29,7 @@ export const stepTool: ToolHandler = async (ctx, args, toolName) => {
 
     // Build response with location and line context if available
     const stepType = toolName.replace('step_', '').replace('_', ' ');
-    const resultData = stepResult.data as { message?: string; location?: { file: string; line: number; column?: number }; pending?: boolean } | undefined;
+    const resultData = stepResult.data;
     const response: Record<string, unknown> = {
       success: stepResult.success,
       message: `Stepped ${stepType}`,

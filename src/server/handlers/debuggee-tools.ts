@@ -34,7 +34,7 @@ export const startDebuggingTool: ToolHandler = async (ctx, args) => {
     const responsePayload: Record<string, unknown> = {
       success: debugResult.success,
       state: debugResult.state,
-      message: debugResult.error ? debugResult.error : (debugResult.data as Record<string, unknown>)?.message || `Operation status for ${args.scriptPath}`,
+      message: debugResult.error ? debugResult.error : debugResult.data?.message || `Operation status for ${args.scriptPath}`,
     };
     if (debugResult.data) {
       responsePayload.data = debugResult.data;
@@ -42,7 +42,7 @@ export const startDebuggingTool: ToolHandler = async (ctx, args) => {
     // Top-level warning join (set_breakpoint pattern): intake
     // normalization notes (issue #305) plus any session-manager
     // warning (unbound function breakpoints, issue #308).
-    const dataWarning = (debugResult.data as { warning?: string } | undefined)?.warning;
+    const dataWarning = debugResult.data?.warning;
     const startWarnings = [...intake.warnings, dataWarning].filter(Boolean);
     if (debugResult.success && startWarnings.length > 0) {
       responsePayload.warning = startWarnings.join('; ');
@@ -69,7 +69,7 @@ export const restartDebuggingTool: ToolHandler = async (ctx, args) => {
       state: debugResult.state,
       message: debugResult.error
         ? debugResult.error
-        : (debugResult.data as Record<string, unknown>)?.message || 'Debugging restarted',
+        : debugResult.data?.message || 'Debugging restarted',
     };
     if (debugResult.error) {
       responsePayload.error = debugResult.error;
@@ -79,7 +79,7 @@ export const restartDebuggingTool: ToolHandler = async (ctx, args) => {
       // Surface the merged restart warning (stale anchors and/or
       // unbound function breakpoints) at the top level too —
       // same discoverability as set_breakpoint/start_debugging.
-      const restartWarning = (debugResult.data as { warning?: string }).warning;
+      const restartWarning = debugResult.data.warning;
       if (debugResult.success && restartWarning) {
         responsePayload.warning = restartWarning;
       }
@@ -120,7 +120,7 @@ export const attachToProcessTool: ToolHandler = async (ctx, args) => {
       success: attachResult.success,
       state: attachResult.state,
       message: attachResult.error ||
-        (attachResult.data as Record<string, unknown>)?.message ||
+        attachResult.data?.message ||
         'Attach operation completed'
     };
 
@@ -160,7 +160,7 @@ export const detachFromProcessTool: ToolHandler = async (ctx, args) => {
       success: detachResult.success,
       state: detachResult.state,
       message: detachResult.error ||
-        (detachResult.data as Record<string, unknown>)?.message ||
+        detachResult.data?.message ||
         'Detach operation completed'
     };
 

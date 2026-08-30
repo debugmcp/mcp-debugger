@@ -7,6 +7,7 @@ import { REDACTION_NOTICE, Variable } from '@debugmcp/shared';
 import type { LineContext } from '../../utils/line-reader.js';
 import { buildTruncationNotice, VariableTruncationSummary } from '../../session/variable-caps.js';
 import type { ToolContext } from '../tool-context.js';
+import type { DebugResult } from '../../session/session-manager-core.js';
 
 /** The line-context slice the breakpoint and step payloads embed. */
 export type EmbeddedLineContext = Pick<LineContext, 'lineContent' | 'surrounding'>;
@@ -92,9 +93,7 @@ export function variablePayloadExtras(
  * successful attach, where it is advisory rather than the failure itself.
  */
 export function attachWarning(
-  attachResult: { success: boolean; data?: unknown }
+  attachResult: Pick<DebugResult, 'success' | 'data'>
 ): string | undefined {
-  return attachResult.success
-    ? (attachResult.data as { warning?: string } | undefined)?.warning
-    : undefined;
+  return attachResult.success ? attachResult.data?.warning : undefined;
 }
