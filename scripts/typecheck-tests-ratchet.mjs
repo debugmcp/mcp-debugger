@@ -23,7 +23,10 @@
  *              For runs that cannot commit a refreshed baseline — Dependabot's, where a
  *              better @types package can make the suite type-cleaner and the bot has no
  *              way to re-record. Never for pre-push or a human PR: a decrease nobody
- *              records is how the baseline and the tree drift apart.
+ *              records is how the baseline and the tree drift apart. Under GITHUB_ACTIONS
+ *              it prints a ::warning annotation and a step-summary line, because the PR
+ *              it passes may auto-merge and leave main's baseline stale until a human PR
+ *              refreshes it -- loud is the whole mitigation.
  *   --update   rewrite the baseline from the current run.
  *   --allow-empty  with --update only: permit recording an empty baseline. A run that
  *              finds nothing is normally a broken program, not a clean suite, so it is
@@ -282,6 +285,41 @@ export function emptyRunReason(currentFiles, baselineFiles, allowEmpty) {
 }
 
 /**
+ * The GitHub Actions annotation for a baseline this run has just outgrown.
+ *
+ * `--allow-improvement` passes a run whose test suite got type-cleaner, and the PR that
+ * earns it (Dependabot's) can auto-merge -- with `GITHUB_TOKEN`, which suppresses push CI
+ * on main, so nothing downstream notices. The next human PR and every developer's pre-push
+ * then fail on a baseline nobody touched. There is no token here to push a refresh to the
+ * bot's branch, so the mitigation is to be impossible to miss instead: an annotation on
+ * the baseline file itself, plus a line in the job summary.
+ *
+ * @param {string[]} improved files whose counts went down
+ * @param {{ githubActions?: boolean }} [options]
+ * @returns {string | null} the `::warning` line, or null when there is nothing to say
+ */
+export function staleBaselineAnnotation(improved, { githubActions = false } = {}) {
+  if (!githubActions || improved.length === 0) return null;
+
+  return (
+    `::warning file=${BASELINE_FILE}::Baseline is stale after this bump: ${improved.length} ` +
+    `file(s) now have fewer type errors than recorded. Run 'pnpm run typecheck:tests:update' ` +
+    `and commit ${BASELINE_FILE} in the next PR.`
+  );
+}
+
+/** Append a line to the job summary, if this run has one. Never fatal. */
+function appendStepSummary(line) {
+  const file = process.env.GITHUB_STEP_SUMMARY;
+  if (!file) return;
+  try {
+    fs.appendFileSync(file, `${line}\n`);
+  } catch (error) {
+    console.error(`typecheck:tests: could not write the step summary: ${describe(error)}`);
+  }
+}
+
+/**
  * Read the baseline, or exit with a pointer to `typecheck:tests:update`.
  *
  * @param {string} root repo root
@@ -469,6 +507,19 @@ function main(root, argv) {
       `  pnpm run typecheck:tests:update\n` +
       `and commit ${BASELINE_FILE}.\n`
     );
+    // If this PR auto-merges, main's baseline is stale from here until a human
+    // PR refreshes it, and no push CI will say so. Make the run itself say it.
+    const annotation = staleBaselineAnnotation(improved, {
+      githubActions: process.env.GITHUB_ACTIONS === 'true'
+    });
+    if (annotation) {
+      console.log(annotation);
+      appendStepSummary(
+        `> [!WARNING]\n> \`${BASELINE_FILE}\` is stale after this bump: ${improved.length} ` +
+        `file(s) now have fewer type errors than recorded. Run ` +
+        `\`pnpm run typecheck:tests:update\` and commit it in the next PR.`
+      );
+    }
   }
 
   console.log(

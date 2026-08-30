@@ -34,6 +34,12 @@ export function compare(
   baseline: Record<string, number>
 ): RatchetComparison;
 
+/** The GitHub Actions `::warning` for a baseline this run outgrew, or null. */
+export function staleBaselineAnnotation(
+  improved: string[],
+  options?: { githubActions?: boolean }
+): string | null;
+
 /** What a comparison means for this run. */
 export function verdict(
   comparison: RatchetComparison,

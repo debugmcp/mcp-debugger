@@ -7,6 +7,7 @@ import {
   isTestTreePath,
   parseDiagnostics,
   pathsOutsideTestTrees,
+  staleBaselineAnnotation,
   unusableRunReason,
   verdict
 } from '../../../scripts/typecheck-tests-ratchet.mjs';
@@ -159,6 +160,35 @@ describe('verdict', () => {
   it('defaults to the strict gate when no options are passed', () => {
     // Pre-push and every human PR call it this way; leniency must be opt-in.
     expect(verdict({ regressed: [], improved: ['a.test.ts'] })).toBe('stale');
+  });
+});
+
+describe('staleBaselineAnnotation', () => {
+  // The only thing standing between a Dependabot bump that auto-merges on a
+  // type-cleaner suite and a baseline nobody refreshes until it breaks the
+  // next human PR. It has to be loud, and it has to name the fix.
+  const IMPROVED: string[] = ['tests/unit/a.test.ts', 'tests/unit/b.test.ts'];
+
+  it('annotates the baseline file itself, with the count and the remedy', () => {
+    const annotation: string = String(staleBaselineAnnotation(IMPROVED, { githubActions: true }));
+
+    expect(annotation.startsWith('::warning file=tests/typecheck-baseline.json::')).toBe(true);
+    expect(annotation).toContain('2 file(s)');
+    expect(annotation).toContain('pnpm run typecheck:tests:update');
+  });
+
+  it('is a single line — a ::warning cannot carry one', () => {
+    expect(String(staleBaselineAnnotation(IMPROVED, { githubActions: true })))
+      .not.toContain('\n');
+  });
+
+  it('says nothing outside GitHub Actions, where no one would render it', () => {
+    expect(staleBaselineAnnotation(IMPROVED)).toBeNull();
+    expect(staleBaselineAnnotation(IMPROVED, { githubActions: false })).toBeNull();
+  });
+
+  it('says nothing when the baseline is not stale', () => {
+    expect(staleBaselineAnnotation([], { githubActions: true })).toBeNull();
   });
 });
 

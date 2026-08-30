@@ -149,8 +149,16 @@ The test ratchet fails in both directions:
 
 Failing on a decrease is what keeps the recorded numbers honest; the ceiling only ever
 moves down. The one exception is `--allow-improvement`, which warns on a decrease instead
-of failing: CI passes it only for Dependabot's own PRs, which cannot commit a refreshed
-baseline. Never use it locally or on a human PR.
+of failing: CI passes it only for PRs *authored by* Dependabot, which cannot commit a
+refreshed baseline. Never use it locally or on a human PR.
+
+That exception has a known cost, accepted deliberately: a Dependabot PR whose bump makes
+the suite type-cleaner can auto-merge with a stale `tests/typecheck-baseline.json`, and
+auto-merge pushes with `GITHUB_TOKEN`, which suppresses push CI on main — so nothing
+downstream refreshes it. **The next human PR is the documented remedy**: it will fail the
+ratchet on a decrease, and `npm run typecheck:tests:update` + committing the baseline is
+the fix. To make that predictable rather than a surprise, the dependabot run prints a
+`::warning` annotation on the baseline file and a job-summary line saying exactly this.
 
 If the script refuses to read `tests/typecheck-baseline.json` at all (invalid JSON, the
 wrong shape, a negative or non-integer count, a path outside the test trees), it exits 2
