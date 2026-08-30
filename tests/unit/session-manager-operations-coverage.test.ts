@@ -3700,19 +3700,19 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(data?.stopReason).toBeUndefined();
     });
 
-    it('flags the in-flight pause for stop-reason normalization (pausePending)', async () => {
+    it('flags the in-flight pause for stop-reason normalization', async () => {
       mockSession.state = SessionState.RUNNING;
       mockProxyManager.sendDapRequest.mockResolvedValue({});
 
       const promise = operations.pause('test-session', 1);
       await vi.waitFor(() => {
-        expect(mockSession.pausePending).toBe(true);
+        expect(mockSession.pauseIntent).toEqual(expect.objectContaining({ source: 'user' }));
       });
       emitStopped();
       await promise;
     });
 
-    it('clears pausePending when the pause request fails', async () => {
+    it('clears pause intent when the pause request fails', async () => {
       mockSession.state = SessionState.RUNNING;
       mockProxyManager.sendDapRequest.mockImplementation((command: string) => {
         if (command === 'pause') {
@@ -3722,7 +3722,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       });
 
       await expect(operations.pause('test-session', 1)).rejects.toThrow('pause not supported');
-      expect(mockSession.pausePending).toBe(false);
+      expect(mockSession.pauseIntent).toBeUndefined();
     });
 
     it('returns a structured failure (not a rejection) when the pause has no debug target (issue #513)', async () => {
@@ -3743,7 +3743,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result.success).toBe(false);
       expect(result.error).toMatch(/no debug target/);
       expect(result.state).toBe(SessionState.RUNNING);
-      expect(mockSession.pausePending).toBe(false);
+      expect(mockSession.pauseIntent).toBeUndefined();
     });
 
     it('includes the last stop reason when already paused', async () => {
@@ -3791,7 +3791,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result.state).toBe(SessionState.PAUSED);
     });
 
-    it('leaves pausePending false when the stop happened during thread discovery (issue #574)', async () => {
+    it('leaves pause intent clear when the stop happened during thread discovery (issue #574)', async () => {
       mockSession.state = SessionState.RUNNING;
       mockProxyManager.sendDapRequest.mockImplementation((command: string) => {
         if (command === 'threads') {
@@ -3808,10 +3808,10 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       await operations.pause('test-session');
 
-      expect(mockSession.pausePending).toBe(false);
+      expect(mockSession.pauseIntent).toBeUndefined();
     });
 
-    it('arms pausePending for a stop that auto-continued during thread discovery (issue #574)', async () => {
+    it('arms pause intent for a stop that auto-continued during thread discovery (issue #574)', async () => {
       // The other half of the rule. A js-debug entry stop with pre-launch
       // function breakpoints is auto-continued, so the session is RUNNING
       // again by the time discovery resolves — and handleStopped cleared the
@@ -3822,12 +3822,12 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockProxyManager.sendDapRequest.mockImplementation((command: string) => {
         if (command === 'threads') {
           mockSession.state = SessionState.PAUSED;   // the entry stop lands
-          mockSession.pausePending = false;          // handleStopped clears it
+          mockSession.pauseIntent = undefined;       // handleStopped clears it
           mockSession.state = SessionState.RUNNING;  // auto-continued
           return Promise.resolve({ body: { threads: [{ id: 3, name: 'Main' }] } });
         }
         if (command === 'pause') {
-          armedWhenPauseSent = mockSession.pausePending;
+          armedWhenPauseSent = mockSession.pauseIntent !== undefined;
         }
         return Promise.resolve({});
       });
@@ -4048,7 +4048,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         .rejects.toBeInstanceOf(SessionTerminatedError);
       // Never armed: the flag is set after these checks, and normalization
       // reads it as `=== true`.
-      expect(mockSession.pausePending).not.toBe(true);
+      expect(mockSession.pauseIntent).toBeUndefined();
     });
 
     it('fails with ProxyNotRunningError when only the proxy handle is cleared during discovery (issue #574)', async () => {
@@ -4066,7 +4066,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       await expect(operations.pause('test-session'))
         .rejects.toBeInstanceOf(ProxyNotRunningError);
-      expect(mockSession.pausePending).not.toBe(true);
+      expect(mockSession.pauseIntent).toBeUndefined();
     });
 
     it('reports a pending pause when no stopped event arrives within the grace window', async () => {
