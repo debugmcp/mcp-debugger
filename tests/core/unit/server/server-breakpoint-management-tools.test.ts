@@ -290,11 +290,6 @@ describe('Server Breakpoint Management Tools', () => {
       // rewritten record removable under the name it was created with. (The
       // set half of the same contract is pinned in
       // server-function-breakpoint-gating.test.ts.)
-      mockSessionManager.resolveFunctionBreakpointName.mockReturnValue({
-        requestedName: 'main',
-        effectiveName: 'main.main',
-        normalized: { name: 'main.main', note: 'Auto-qualified to main.main' }
-      });
       mockSessionManager.removeFunctionBreakpointsByName.mockResolvedValue({
         removed: [{ id: 'fn-rt', functionName: 'main.main', verified: false }],
         functionName: 'main.main',
