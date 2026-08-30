@@ -4,6 +4,7 @@
  * and debounced resources/updated pings driven by 'output-captured'.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import path from 'node:path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { McpError } from '@modelcontextprotocol/sdk/types.js';
@@ -95,6 +96,27 @@ describe('Server Output Resources Tests', () => {
       });
       expect(result.resources[0].name).toContain('alpha');
     });
+
+    it('lists a proxy-log resource only after a launch creates a run directory', async () => {
+      mockSessionManager.getAllSessions.mockReturnValue([
+        { id: 'sess-1', name: 'not launched', language: 'python' },
+        { id: 'sess-2', name: 'launched', language: 'mock' }
+      ]);
+      mockSessionManager.getSession.mockImplementation((sessionId: string) =>
+        sessionId === 'sess-2'
+          ? mockSession({ id: 'sess-2', logDir: path.join('/logs', 'sess-2', 'run-123') })
+          : mockSession({ id: 'sess-1', logDir: undefined })
+      );
+
+      const { listResourcesHandler } = getResourceHandlers(mockServer);
+      const result = await listResourcesHandler({ method: 'resources/list', params: {} });
+
+      expect(result.resources.map((resource: { uri: string }) => resource.uri)).toEqual([
+        'debug://sessions/sess-1/output',
+        'debug://sessions/sess-2/output',
+        'debug://sessions/sess-2/proxy-log'
+      ]);
+    });
   });
 
   describe('resources/read', () => {
@@ -127,6 +149,42 @@ describe('Server Output Resources Tests', () => {
       });
 
       expect(result.contents[0].text).toBe('');
+    });
+
+    it('routes proxy-log reads through the bounded sanitizer', async () => {
+      const logDir = path.join('/logs', 'sess-1', 'run-123');
+      mockSessionManager.getSession.mockReturnValue(mockSession({ logDir }));
+      const lines = Array.from({ length: 100 }, (_, index) => `line ${index + 1}`);
+      lines[98] = '[Worker] argv: --token=super-secret-value';
+      mockDependencies.fileSystem.readTail.mockResolvedValue(lines.join('\n'));
+
+      const { readResourceHandler } = getResourceHandlers(mockServer);
+      const result = await readResourceHandler({
+        method: 'resources/read',
+        params: { uri: 'debug://sessions/sess-1/proxy-log' }
+      });
+
+      expect(mockDependencies.fileSystem.readTail).toHaveBeenCalledWith(
+        path.join(logDir, 'proxy-sess-1.log'),
+        64 * 1024
+      );
+      expect(result.contents[0]).toMatchObject({
+        uri: 'debug://sessions/sess-1/proxy-log',
+        mimeType: 'text/plain'
+      });
+      expect(result.contents[0].text).toContain('line 100');
+      expect(result.contents[0].text).toContain('[REDACTED');
+      expect(result.contents[0].text).not.toContain('super-secret-value');
+    });
+
+    it('rejects a proxy-log URI before the session has a run directory', async () => {
+      mockSessionManager.getSession.mockReturnValue(mockSession({ logDir: undefined }));
+      const { readResourceHandler } = getResourceHandlers(mockServer);
+
+      await expect(readResourceHandler({
+        method: 'resources/read',
+        params: { uri: 'debug://sessions/sess-1/proxy-log' }
+      })).rejects.toBeInstanceOf(McpError);
     });
 
     it('rejects unknown URIs and unknown sessions', async () => {
@@ -178,6 +236,14 @@ describe('Server Output Resources Tests', () => {
     it('rejects subscribing to an unknown session', async () => {
       mockSessionManager.getSession.mockReturnValue(undefined);
       await expect(subscribe('debug://sessions/ghost/output')).rejects.toBeInstanceOf(McpError);
+    });
+
+    it('keeps subscriptions output-resource-only', async () => {
+      mockSessionManager.getSession.mockReturnValue(
+        mockSession({ logDir: path.join('/logs', 'sess-1', 'run-123') })
+      );
+
+      await expect(subscribe('debug://sessions/sess-1/proxy-log')).rejects.toBeInstanceOf(McpError);
     });
 
     it('stops pinging after unsubscribe, cancelling any pending timer', async () => {

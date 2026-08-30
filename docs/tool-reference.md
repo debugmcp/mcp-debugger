@@ -108,7 +108,7 @@ Lists all active debugging sessions.
 - `"stopped"`: Session stopped (program terminated)
 - `"error"`: Session encountered an error
 
-Errored sessions include optional `diagnostics` with the current launch attempt's `proxyLogPath`. The record is retained for proxy initialization failures and for proxy/adapter deaths after initialization, and is cleared when a new launch or attach attempt begins.
+Errored sessions include optional `diagnostics` with the current launch attempt's server-host `proxyLogPath` and remote-safe `proxyLogResource`. The record is retained for proxy initialization failures and for proxy/adapter deaths after initialization, and is cleared when a new launch or attach attempt begins.
 
 ---
 
@@ -988,6 +988,8 @@ Each session also exposes its captured output as an MCP resource:
 - **`resources/list`** enumerates one output resource per session; the list changes on session create/close (`notifications/resources/list_changed`).
 - **`resources/subscribe`** to a session's URI to receive `notifications/resources/updated` pings as output arrives. Pings are coalesced (~150 ms), so notification volume is independent of how fast the debuggee prints — on a ping, re-read the resource or call `get_output` with your cursor.
 - Subscriptions are tracked per server instance and cleaned up when the session closes.
+
+After a launch or attach creates its run directory, `resources/list` also includes `debug://sessions/{sessionId}/proxy-log`. Reading it returns at most the final 64 KiB, sanitized and trimmed to 80 lines. It is a point-in-time diagnostic resource and is intentionally not subscribable; output remains the only resource that emits update notifications.
 
 ---
 

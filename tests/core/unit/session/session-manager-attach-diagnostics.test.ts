@@ -76,7 +76,8 @@ describe('SessionManager - attach failure diagnostics (issue #561)', () => {
 
     expect(result.data).toEqual({
       initProgress,
-      proxyLogPath: expect.stringContaining('proxy-')
+      proxyLogPath: expect.stringContaining('proxy-'),
+      proxyLogResource: expect.stringMatching(/^debug:\/\/sessions\/.+\/proxy-log$/)
     });
   });
 

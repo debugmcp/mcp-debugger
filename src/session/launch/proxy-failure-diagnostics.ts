@@ -22,6 +22,7 @@ import type { IFileSystem, ILogger } from '../../interfaces/external-dependencie
 import type { ProxyInitProgress } from '../../utils/error-messages.js';
 import { getErrorMessage, SessionNotFoundError } from '../../errors/debug-errors.js';
 import { proxyLogPathFor } from '../../proxy/session-log-layout.js';
+import { proxyLogResourceUri } from '../session-resource-uris.js';
 
 /** How many trailing proxy-log lines are worth reporting after a failure. */
 const PROXY_LOG_TAIL_LINES = 80;
@@ -71,6 +72,7 @@ export function collectProxyFailureDiagnostics(
   // it would drop `data` from the tool result entirely.
   if (session.logDir) {
     diagnostics.proxyLogPath = proxyLogPathFor(session.logDir, session.id);
+    diagnostics.proxyLogResource = proxyLogResourceUri(session.id);
   }
 
   // The error, by contrast, is a value that has already misbehaved once — a
@@ -148,6 +150,7 @@ export function buildProxyFailureErrorDetails(
     toString: error?.toString ? error.toString() : 'No toString',
     initProgress: diagnostics.initProgress,
     proxyLogPath: diagnostics.proxyLogPath,
+    proxyLogResource: diagnostics.proxyLogResource,
     proxyLogTail
   };
 

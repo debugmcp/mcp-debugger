@@ -95,7 +95,8 @@ describe('SessionManager - proxy exit mapping (issue #258)', () => {
     expect(session?.state).toBe(SessionState.ERROR);
     expect(session?.lastProxyExit).toEqual({ code: 134, signal: undefined, expected: false });
     expect(session?.failureDiagnostics).toEqual({
-      proxyLogPath: path.join(session!.logDir!, `proxy-${sessionId}.log`)
+      proxyLogPath: path.join(session!.logDir!, `proxy-${sessionId}.log`),
+      proxyLogResource: `debug://sessions/${sessionId}/proxy-log`
     });
     expect(sessionManager.getAllSessions().find(({ id }) => id === sessionId)?.diagnostics).toEqual(
       session?.failureDiagnostics

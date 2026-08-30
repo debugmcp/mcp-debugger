@@ -651,7 +651,12 @@ export class DebugMcpServer implements ToolContext {
     // `environment` here instead. Both fields are readonly, so production never
     // observes the difference — but a test that swaps `sessionManager` after
     // construction sees the swap in tool handlers only, not in resource handlers.
-    registerResourceHandlers(this.server, this.sessionManager, this.outputResources);
+    registerResourceHandlers(
+      this.server,
+      this.sessionManager,
+      this.outputResources,
+      dependencies.fileSystem
+    );
     registerPromptHandlers(this.server, this.environment);
     this.sessionManager.on('output-captured', this.outputResources.handleOutputCaptured);
     this.server.onerror = (error) => {
