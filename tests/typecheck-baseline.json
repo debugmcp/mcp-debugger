@@ -20,7 +20,7 @@
   "packages/adapter-rust/tests/rust-adapter.test.ts": 6,
   "packages/adapter-rust/tests/rust-debug-adapter.toolchain.test.ts": 26,
   "packages/shared/tests/unit/adapter-policy-cpp.test.ts": 3,
-  "packages/shared/tests/unit/adapter-policy-js.spec.ts": 15,
+  "packages/shared/tests/unit/adapter-policy-js.spec.ts": 7,
   "packages/shared/tests/unit/adapter-policy-rust.test.ts": 32,
   "tests/adapters/go/unit/go-debug-adapter.test.ts": 2,
   "tests/adapters/go/unit/go-utils.test.ts": 6,

@@ -14,6 +14,61 @@ import { toSourceBreakpoint } from '../utils/to-source-breakpoint.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
 
 /**
+ * Every js-debug scope name this adapter knows, grouped by kind.
+ *
+ * Single source of truth for the two places that each used to hold their own
+ * copy: the extractor's predicates and `getLocalScopeName()` (which the
+ * session layer then matches against to name the reported scope). Commit
+ * 4f469d71 shipped a false-note bug precisely because those two disagreed —
+ * the extractor learned the exact `Block` name and the reported list did not.
+ * A spec test asserts the list is exactly this table, flattened.
+ *
+ * A name ending in ':' matches as a prefix (`Block:loop`); every other name
+ * matches exactly. Two historical spellings are matched by the predicates but
+ * deliberately absent here because the session layer's canonical matcher
+ * already covers them: `Closure (fn)` (its `name + ' '` rule) and a
+ * case-insensitive `module`.
+ */
+export const JS_SCOPE_KINDS = {
+  local: ['Local', 'Locals', 'Local:'],
+  block: ['Block', 'Catch Block', 'With Block', 'Block:'],
+  closure: ['Closure', 'Closure:'],
+  module: ['Script', 'Module', 'module'],
+  global: ['Global']
+} as const;
+
+/** Exact match, or prefix match for a name written with a trailing ':'. */
+function matchesScopeNames(scope: DebugProtocol.Scope, names: readonly string[]): boolean {
+  return names.some(name =>
+    name.endsWith(':') ? scope.name.startsWith(name) : scope.name === name
+  );
+}
+
+const isLocalScope = (scope: DebugProtocol.Scope): boolean =>
+  matchesScopeNames(scope, JS_SCOPE_KINDS.local);
+/**
+ * js-debug names a lexical block scope exactly 'Block' (and 'Catch Block' /
+ * 'With Block'); only some legacy builds use the 'Block:<label>' form. That is
+ * where `let`/`const` bindings declared inside a `for` body or a `catch (e)`
+ * live (issue #558).
+ */
+const isBlockScope = (scope: DebugProtocol.Scope): boolean =>
+  matchesScopeNames(scope, JS_SCOPE_KINDS.block);
+/**
+ * "Local-like" is local OR block: either proves the frame is a real
+ * function/block frame rather than a top-level script frame, which is what the
+ * Global gate turns on.
+ */
+const isLocalLikeScope = (scope: DebugProtocol.Scope): boolean =>
+  isLocalScope(scope) || isBlockScope(scope);
+const isClosureScope = (scope: DebugProtocol.Scope): boolean =>
+  matchesScopeNames(scope, JS_SCOPE_KINDS.closure) || scope.name.startsWith('Closure ');
+const isModuleScope = (scope: DebugProtocol.Scope): boolean =>
+  matchesScopeNames(scope, JS_SCOPE_KINDS.module) || scope.name.toLowerCase() === 'module';
+const isGlobalScope = (scope: DebugProtocol.Scope): boolean =>
+  scope.name.toLowerCase().includes('global');
+
+/**
  * JavaScript-specific adapter state
  */
 export interface JsAdapterState extends AdapterSpecificState {
@@ -187,59 +242,75 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
       return scopeVariables;
     };
 
-    // js-debug names a lexical block scope exactly 'Block' (and 'Catch Block'
-    // / 'With Block'); only some legacy builds use the 'Block:<label>' form
-    // this originally matched. That is where `let`/`const` bindings declared
-    // inside a `for` body or a `catch (e)` live (issue #558).
-    const isBlockScope = (scope: DebugProtocol.Scope): boolean =>
-      scope.name === 'Block' || scope.name === 'Catch Block' ||
-      scope.name === 'With Block' || scope.name.startsWith('Block:');
-    const isLocalScope = (scope: DebugProtocol.Scope): boolean =>
-      scope.name === 'Local' || scope.name === 'Locals' ||
-      scope.name.startsWith('Local:');
-    // "Local-like" is local OR block: both prove the frame is a real
-    // function/block frame rather than a top-level script frame, which is what
-    // the Global gate below turns on.
-    const isLocalLike = (scope: DebugProtocol.Scope): boolean =>
-      isLocalScope(scope) || isBlockScope(scope);
+    // The local-like group COLLECTS: a frame stopped inside a block has both
+    // kinds of scope and either one alone is a wrong answer — reporting only
+    // the block hides the function's parameters and outer locals, reporting
+    // only the function hides the loop variable the user stopped to look at.
+    // V8 lists block scopes innermost-first and ahead of Local, so taking them
+    // in adapter order reads like the language's own shadowing rules
+    // (issue #558). The later groups stay first-match fall-throughs.
+    const collected: Variable[] = [];
+    const collectedRefs: number[] = [];
+    const seenRefs = new Set<number>();
+    const collect = (scope: DebugProtocol.Scope): void => {
+      // Two scopes can share a variablesReference; collecting it twice would
+      // duplicate its variables and double-count its truncation.
+      if (seenRefs.has(scope.variablesReference)) {
+        return;
+      }
+      const scopeVariables = variablesForScope(scope);
+      // A scope that supplied nothing is not a contributing scope: listing its
+      // ref would misattribute another scope's truncation (issue #438).
+      if (scopeVariables.length === 0) {
+        return;
+      }
+      seenRefs.add(scope.variablesReference);
+      // Push in a loop, not `push(...)`: a spread of a very large scope is a
+      // call with that many arguments and blows the stack.
+      for (const variable of scopeVariables) {
+        collected.push(variable);
+      }
+      collectedRefs.push(scope.variablesReference);
+    };
 
-    // A frame stopped inside a block has BOTH kinds of scope, and either one
-    // alone is a wrong answer: reporting only the block hides the function's
-    // parameters and outer locals, reporting only the function hides the loop
-    // variable the user stopped to look at. V8 lists block scopes innermost
-    // first and ahead of Local, so merging in that order reads like the
-    // language's own shadowing rules. The session layer keeps calling this
-    // 'Local' with no note, because the frame's own locals did reach the
-    // caller (issue #558).
-    const blockScopes = frameScopes.filter(isBlockScope);
-    const localScope = frameScopes.find(isLocalScope);
-    if (localScope && blockScopes.length > 0) {
-      const mergedVariables: Variable[] = [];
-      const mergedScopeRefs: number[] = [];
-      for (const scope of [...blockScopes, localScope]) {
-        const scopeVariables = variablesForScope(scope);
-        // A scope that supplied nothing is not a contributing scope: listing
-        // its ref would misattribute another scope's truncation (issue #438).
-        if (scopeVariables.length > 0) {
-          mergedVariables.push(...scopeVariables);
-          mergedScopeRefs.push(scope.variablesReference);
+    const localScopes = frameScopes.filter(isLocalScope);
+    for (const scope of frameScopes.filter(isLocalLikeScope)) {
+      collect(scope);
+    }
+    // ESM top-level: js-debug gives a `for (let i...)` or `catch (e)` at module
+    // top level a Block scope with NO Local scope beneath it, and the module's
+    // own consts live in Script/Module. Before block scopes were recognised at
+    // all, such a frame reported those module bindings; collecting only the
+    // block would silently drop them. So when there is no Local scope, the
+    // first Script/Module scope is the frame's base and joins the merge.
+    if (localScopes.length === 0 && collectedRefs.length > 0) {
+      const baseScope = frameScopes.find(isModuleScope);
+      if (baseScope) {
+        collect(baseScope);
+      }
+    }
+    if (collected.length > 0) {
+      // Keep a Local scope that exists on the frame nameable even when it
+      // contributed nothing — emptied by the `this`-only filter or by a
+      // pushed-down `names` filter. Without its ref the session layer cannot
+      // see that its canonical scope took part and reports the block with a
+      // note blaming Local, which is not what happened (issue #558).
+      for (const scope of localScopes) {
+        if (!seenRefs.has(scope.variablesReference)) {
+          seenRefs.add(scope.variablesReference);
+          collectedRefs.push(scope.variablesReference);
         }
       }
-      if (mergedVariables.length > 0) {
-        return { variables: mergedVariables, scopeRefs: mergedScopeRefs };
-      }
-      // Both were empty — fall through to the sibling scopes below, exactly
-      // as an empty Local alone does.
+      return { variables: collected, scopeRefs: collectedRefs };
     }
 
-    // js-debug can expose a genuinely empty Local scope while the useful
-    // binding lives in Closure or Module on the same frame. Try those scopes
-    // in usefulness order before the session layer walks down to a caller.
-    const scopeGroups: Array<(scope: DebugProtocol.Scope) => boolean> = [
-      isLocalLike,
-      scope => scope.name === 'Closure' || scope.name.startsWith('Closure:') ||
-        scope.name.startsWith('Closure '),
-      scope => scope.name === 'Script' || scope.name.toLowerCase() === 'module'
+    // Nothing local-like had anything to show. js-debug can expose a genuinely
+    // empty Local scope while the useful binding lives in Closure or Module on
+    // the same frame; try those in usefulness order before the session layer
+    // walks down to a caller.
+    const fallbackGroups: Array<(scope: DebugProtocol.Scope) => boolean> = [
+      isClosureScope,
+      isModuleScope
     ];
     // Global is a last resort only for frames that expose no Local or block
     // scope at all (top-level script frames). It must never be a fall-through
@@ -247,11 +318,11 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
     // still fetches it, so Node's ~140 globals would be reported as locals
     // and the non-empty result would keep the issue #468 walk-down to the
     // caller frame from ever running.
-    if (!frameScopes.some(isLocalLike)) {
-      scopeGroups.push(scope => scope.name.toLowerCase().includes('global'));
+    if (!frameScopes.some(isLocalLikeScope)) {
+      fallbackGroups.push(isGlobalScope);
     }
 
-    for (const matches of scopeGroups) {
+    for (const matches of fallbackGroups) {
       for (const scope of frameScopes.filter(matches)) {
         const scopeVariables = variablesForScope(scope);
         if (scopeVariables.length > 0) {
@@ -264,17 +335,24 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
   },
   
   /**
-   * JavaScript uses various local scope names.
+   * Every scope name this adapter reads, in the preference order the session
+   * layer uses to pick the scope it reports.
    *
-   * The exact block names sit right after the Local forms: 'Local' still wins
-   * whenever the frame has a Local scope (so the issue #558 merge keeps
-   * reporting 'Local' with no note), while a block-only frame - an ESM
-   * top-level `for (let i...)` or `catch (e)`, which has Block but no Local -
-   * now matches its own scope by name instead of falling through to Module
-   * and drawing a note about a scope that was never consulted.
+   * Derived from JS_SCOPE_KINDS so it cannot drift from the extractor's
+   * predicates. The order matters: 'Local' first means a frame with a Local
+   * scope still reports 'Local' after the issue #558 block merge, while a
+   * block-only frame (ESM top-level `for (let i...)`) matches its own block by
+   * name rather than falling through to Module and drawing a note about a
+   * scope that was never consulted.
    */
   getLocalScopeName: (): string[] => {
-    return ['Local', 'Locals', 'Local:', 'Block', 'Catch Block', 'With Block', 'Block:', 'Closure', 'Closure:', 'Script', 'Module', 'module', 'Global'];
+    return [
+      ...JS_SCOPE_KINDS.local,
+      ...JS_SCOPE_KINDS.block,
+      ...JS_SCOPE_KINDS.closure,
+      ...JS_SCOPE_KINDS.module,
+      ...JS_SCOPE_KINDS.global
+    ];
   },
   
   getDapAdapterConfiguration: () => {

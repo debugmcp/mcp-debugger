@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import { JsDebugAdapterPolicy } from '../../src/interfaces/adapter-policy-js.js';
+import { JsDebugAdapterPolicy, JS_SCOPE_KINDS } from '../../src/interfaces/adapter-policy-js.js';
 import type { Variable } from '../../src/models/index.js';
 
 function createStackFrame(id: number, file: string): DebugProtocol.StackFrame & { file: string } {
@@ -91,11 +91,11 @@ describe('JsDebugAdapterPolicy', () => {
           },
         ],
       };
-      const vars: Record<number, DebugProtocol.Variable[]> = {
+      const vars: Record<number, Variable[]> = {
         100: [
-          { name: 'this', value: 'ignored', variablesReference: 0 },
-          { name: '__proto__', value: 'ignored', variablesReference: 0 },
-          { name: 'value', value: '42', variablesReference: 0 },
+          v('this', 'ignored'),
+          v('__proto__', 'ignored'),
+          v('value', '42'),
         ],
       };
       const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
@@ -113,10 +113,10 @@ describe('JsDebugAdapterPolicy', () => {
           },
         ],
       };
-      const vars: Record<number, DebugProtocol.Variable[]> = {
+      const vars: Record<number, Variable[]> = {
         200: [
-          { name: 'this', value: 'context', variablesReference: 0 },
-          { name: 'value', value: '42', variablesReference: 0 },
+          v('this', 'context'),
+          v('value', '42'),
         ],
       };
       const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars, true);
@@ -131,10 +131,10 @@ describe('JsDebugAdapterPolicy', () => {
           { name: 'Global', variablesReference: 300, expensive: true },
         ],
       };
-      const vars: Record<number, DebugProtocol.Variable[]> = {
+      const vars: Record<number, Variable[]> = {
         100: [],
-        200: [{ name: 'counter', value: '46', variablesReference: 0 }],
-        300: [{ name: 'process', value: 'Process', variablesReference: 1 }],
+        200: [v('counter', '46')],
+        300: [v('process', 'Process')],
       };
 
       const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
@@ -150,10 +150,10 @@ describe('JsDebugAdapterPolicy', () => {
           { name: 'Closure (replay)', variablesReference: 200, expensive: false },
         ],
       };
-      const vars: Record<number, DebugProtocol.Variable[]> = {
+      const vars: Record<number, Variable[]> = {
         100: [],
-        200: [{ name: 'captured', value: '7', variablesReference: 0 }],
-        300: [{ name: 'process', value: 'Process', variablesReference: 1 }],
+        200: [v('captured', '7')],
+        300: [v('process', 'Process')],
       };
 
       const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
@@ -168,9 +168,9 @@ describe('JsDebugAdapterPolicy', () => {
           { name: 'Module', variablesReference: 200, expensive: false },
         ],
       };
-      const vars: Record<number, DebugProtocol.Variable[]> = {
-        100: [{ name: 'localValue', value: '1', variablesReference: 0 }],
-        200: [{ name: 'moduleValue', value: '2', variablesReference: 0 }],
+      const vars: Record<number, Variable[]> = {
+        100: [v('localValue', '1')],
+        200: [v('moduleValue', '2')],
       };
 
       const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
@@ -186,9 +186,9 @@ describe('JsDebugAdapterPolicy', () => {
           { name: 'Global', variablesReference: 200, expensive: true },
         ],
       };
-      const vars: Record<number, DebugProtocol.Variable[]> = {
-        100: [{ name: '[[Scopes]]', value: 'internal', variablesReference: 1 }],
-        200: [{ name: 'globalValue', value: '9', variablesReference: 0 }],
+      const vars: Record<number, Variable[]> = {
+        100: [v('[[Scopes]]', 'internal')],
+        200: [v('globalValue', '9')],
       };
 
       const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
@@ -208,13 +208,13 @@ describe('JsDebugAdapterPolicy', () => {
           { name: 'Global', variablesReference: 400, expensive: true },
         ],
       };
-      const vars: Record<number, DebugProtocol.Variable[]> = {
+      const vars: Record<number, Variable[]> = {
         100: [],
         200: [],
         300: [],
         400: [
-          { name: 'process', value: 'Process', variablesReference: 1 },
-          { name: 'fetch', value: 'ƒ fetch()', variablesReference: 0 },
+          v('process', 'Process'),
+          v('fetch', 'ƒ fetch()'),
         ],
       };
 
@@ -228,9 +228,9 @@ describe('JsDebugAdapterPolicy', () => {
           { name: 'Global', variablesReference: 200, expensive: true },
         ],
       };
-      const vars: Record<number, DebugProtocol.Variable[]> = {
+      const vars: Record<number, Variable[]> = {
         100: [],
-        200: [{ name: 'globalValue', value: '9', variablesReference: 0 }],
+        200: [v('globalValue', '9')],
       };
 
       const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
@@ -357,6 +357,154 @@ describe('JsDebugAdapterPolicy', () => {
         .toEqual({ variables: [], scopeRefs: [] });
     });
 
+    it('merges every block on a frame with no Local scope at all (issue #558)', () => {
+      // A `catch (e)` inside a `for (let i...)` with nothing below it. The
+      // collecting group takes both blocks; before it, only the first
+      // non-empty block was returned and `i` was dropped.
+      const scopes: Record<number, DebugProtocol.Scope[]> = {
+        1: [
+          { name: 'Catch Block', variablesReference: 100, expensive: false },
+          { name: 'Block', variablesReference: 150, expensive: false },
+        ],
+      };
+      const vars: Record<number, Variable[]> = {
+        100: [v('e', 'Error: boom')],
+        150: [v('i', '3')],
+      };
+
+      const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
+
+      expect(result.variables.map(variable => variable.name)).toEqual(['e', 'i']);
+      expect(result.scopeRefs).toEqual([100, 150]);
+    });
+
+    it('adds the module scope as the base when an ESM frame has blocks but no Local (issue #558)', () => {
+      // js-debug gives an ESM top-level `for (let i...)` a Block scope with no
+      // Local beneath it; the module's own consts are the frame's real base
+      // and are what this frame reported before blocks were recognised.
+      const scopes: Record<number, DebugProtocol.Scope[]> = {
+        1: [
+          { name: 'Block', variablesReference: 100, expensive: false },
+          { name: 'Module', variablesReference: 300, expensive: false },
+          { name: 'Global', variablesReference: 400, expensive: true },
+        ],
+      };
+      const vars: Record<number, Variable[]> = {
+        100: [v('a', '1')],
+        300: [v('total', '6'), v('xs', 'Array(4)')],
+        400: [v('globalThis', '{}')],
+      };
+
+      const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
+
+      expect(result.variables.map(variable => variable.name)).toEqual(['a', 'total', 'xs']);
+      expect(result.scopeRefs).toEqual([100, 300]);
+    });
+
+    it('leaves the module scope out of the merge when the frame HAS a Local scope', () => {
+      // Module stays a fall-through-only scope for ordinary function frames:
+      // the base rule is specific to ESM top-level frames.
+      const scopes: Record<number, DebugProtocol.Scope[]> = {
+        1: [
+          { name: 'Block', variablesReference: 100, expensive: false },
+          { name: 'Local', variablesReference: 200, expensive: false },
+          { name: 'Module', variablesReference: 300, expensive: false },
+        ],
+      };
+      const vars: Record<number, Variable[]> = {
+        100: [v('i', '3')],
+        200: [v('total', '6')],
+        300: [v('moduleValue', '7')],
+      };
+
+      const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
+
+      expect(result.variables.map(variable => variable.name)).toEqual(['i', 'total']);
+      expect(result.scopeRefs).toEqual([100, 200]);
+    });
+
+    it('returns a populated Block-only frame without reaching Global (issue #558)', () => {
+      const scopes: Record<number, DebugProtocol.Scope[]> = {
+        1: [
+          { name: 'Block', variablesReference: 100, expensive: false },
+          { name: 'Global', variablesReference: 400, expensive: true },
+        ],
+      };
+      const vars: Record<number, Variable[]> = {
+        100: [v('a', '1')],
+        400: [v('globalValue', '9')],
+      };
+
+      const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
+
+      expect(result.variables.map(variable => variable.name)).toEqual(['a']);
+      expect(result.scopeRefs).toEqual([100]);
+    });
+
+    it('keeps an empty Local scope in scopeRefs so it stays nameable (issue #558)', () => {
+      // Local holds only `this`, which the default filter drops. It supplied
+      // no variables, but it IS the scope the session layer must report, so
+      // its ref has to survive - otherwise the response names the block and
+      // adds a note blaming Local for a fall-through that never happened.
+      const scopes: Record<number, DebugProtocol.Scope[]> = {
+        1: [
+          { name: 'Block', variablesReference: 100, expensive: false },
+          { name: 'Local', variablesReference: 200, expensive: false },
+        ],
+      };
+      const vars: Record<number, Variable[]> = {
+        100: [v('i', '3')],
+        200: [v('this', 'Object')],
+      };
+
+      const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
+
+      expect(result.variables.map(variable => variable.name)).toEqual(['i']);
+      expect(result.scopeRefs).toEqual([100, 200]);
+    });
+
+    it('never lists a shared variablesReference twice', () => {
+      // Two sibling scopes pointing at one reference would otherwise duplicate
+      // the variables and double-count that scope's truncation.
+      const scopes: Record<number, DebugProtocol.Scope[]> = {
+        1: [
+          { name: 'Block', variablesReference: 100, expensive: false },
+          { name: 'Catch Block', variablesReference: 100, expensive: false },
+        ],
+      };
+      const vars: Record<number, Variable[]> = {
+        100: [v('i', '3')],
+      };
+
+      const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
+
+      expect(result.variables.map(variable => variable.name)).toEqual(['i']);
+      expect(result.scopeRefs).toEqual([100]);
+    });
+
+    it('may select a DIFFERENT scope under includeSpecial:false - not a superset (issue #548)', () => {
+      // Intended behaviour, and the reason the contract does not claim
+      // includeSpecial:true is a superset: with only `this` in Local, the
+      // default filter empties it and the useful binding in Closure is the
+      // honest answer; asking for special variables makes Local non-empty
+      // again and Local wins. The two answers are about different scopes.
+      const scopes: Record<number, DebugProtocol.Scope[]> = {
+        1: [
+          { name: 'Local', variablesReference: 100, expensive: false },
+          { name: 'Closure', variablesReference: 200, expensive: false },
+        ],
+      };
+      const vars: Record<number, Variable[]> = {
+        100: [v('this', 'Object')],
+        200: [v('captured', '1')],
+      };
+
+      expect(JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars))
+        .toEqual({ variables: [vars[200][0]], scopeRefs: [200] });
+      expect(JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars, true))
+        .toEqual({ variables: [vars[100][0]], scopeRefs: [100] });
+    });
+
     it('returns no locals when every useful same-frame scope is empty', () => {
       const scopes: Record<number, DebugProtocol.Scope[]> = {
         1: [
@@ -368,6 +516,53 @@ describe('JsDebugAdapterPolicy', () => {
       };
 
       expect(JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, {})).toEqual({ variables: [], scopeRefs: [] });
+    });
+  });
+
+  describe('scope-name table', () => {
+    const frame = createStackFrame(1, '/workspace/app.js');
+
+    it('reports exactly the names its extractor matches (issue #558 regression class)', () => {
+      // The extractor's predicates and getLocalScopeName() both read
+      // JS_SCOPE_KINDS. Commit 4f469d71 shipped a false-note bug because those
+      // two disagreed, so pin that they cannot: the reported list IS the table
+      // flattened, in the session layer's preference order.
+      expect(JsDebugAdapterPolicy.getLocalScopeName!()).toEqual([
+        ...JS_SCOPE_KINDS.local,
+        ...JS_SCOPE_KINDS.block,
+        ...JS_SCOPE_KINDS.closure,
+        ...JS_SCOPE_KINDS.module,
+        ...JS_SCOPE_KINDS.global
+      ]);
+    });
+
+    it('names every local-like scope it will merge, and merges every one it names', () => {
+      const reported = JsDebugAdapterPolicy.getLocalScopeName!() as string[];
+      const localLike = [...JS_SCOPE_KINDS.local, ...JS_SCOPE_KINDS.block];
+
+      for (const name of localLike) {
+        expect(reported).toContain(name);
+
+        // And the extractor really treats a scope of that name as local-like:
+        // a Global sibling must stay out of reach for every one of them.
+        const concrete = name.endsWith(':') ? `${name}label` : name;
+        const scopes: Record<number, DebugProtocol.Scope[]> = {
+          1: [
+            { name: concrete, variablesReference: 100, expensive: false },
+            { name: 'Global', variablesReference: 400, expensive: true }
+          ]
+        };
+        const result = JsDebugAdapterPolicy.extractLocalVariables!(
+          [frame],
+          scopes,
+          { 100: [v('bound', '1')], 400: [v('globalValue', '9')] }
+        );
+        expect(result, concrete).toEqual({ variables: [v('bound', '1')], scopeRefs: [100] });
+      }
+
+      // Local ranks ahead of every block form, which is what keeps the merge
+      // reporting 'Local' with no note.
+      expect(reported.indexOf('Local')).toBeLessThan(reported.indexOf('Block'));
     });
   });
 

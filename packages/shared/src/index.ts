@@ -196,7 +196,7 @@ export {
   emptyLocalVariableExtraction,
   extractionFromScope
 } from './interfaces/adapter-policy.js';
-export { JsDebugAdapterPolicy } from './interfaces/adapter-policy-js.js';
+export { JsDebugAdapterPolicy, JS_SCOPE_KINDS } from './interfaces/adapter-policy-js.js';
 export { PythonAdapterPolicy } from './interfaces/adapter-policy-python.js';
 export { RubyAdapterPolicy } from './interfaces/adapter-policy-ruby.js';
 export { RustAdapterPolicy } from './interfaces/adapter-policy-rust.js';
