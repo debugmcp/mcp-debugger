@@ -34,6 +34,36 @@ export interface BreakpointSyncOutcome {
   warning?: string;
 }
 
+/**
+ * The name a function-breakpoint request actually addresses, plus everything
+ * the adapter policy had to say about the name the caller supplied.
+ *
+ * `effectiveName` is what the store is keyed on and what the response
+ * discloses; `normalized` is set only when a policy-certain rewrite changed
+ * the name (issue #467), and `hint` only when there was no rewrite and the
+ * policy still has an advisory about the name (issues #303/#308).
+ */
+export interface FunctionBreakpointNameResolution {
+  requestedName: string;
+  effectiveName: string;
+  normalized?: { name: string; note: string };
+  hint?: string;
+}
+
+/**
+ * Outcome of a by-name function-breakpoint removal. `functionName` is always
+ * the effective name; `requestedName` is present only when a policy rewrite
+ * changed it (issue #550). `hint` is the policy advisory that explains why
+ * nothing matched, and is set only when `removed` is empty.
+ */
+export interface FunctionBreakpointRemoval {
+  removed: FunctionBreakpoint[];
+  functionName: string;
+  requestedName?: string;
+  warning?: string;
+  hint?: string;
+}
+
 export class BreakpointController {
   constructor(private readonly ctx: BreakpointContext) {}
 
@@ -234,9 +264,60 @@ export class BreakpointController {
   }
 
   /**
+   * Resolve the function-breakpoint name a request addresses, through the
+   * session's adapter policy (issue #559 — the set and remove paths share one
+   * answer, so a name that was rewritten on the way in is removable on the way
+   * out). Never throws: a policy lookup that fails degrades to "no policy", so
+   * a name advisory can never break a breakpoint request. The hint is skipped
+   * when a rewrite already happened — the rewrite note says everything the
+   * caller needs.
+   */
+  resolveFunctionBreakpointName(
+    sessionId: string,
+    requestedName: string
+  ): FunctionBreakpointNameResolution {
+    const normalized = this.functionBreakpointNameRewrite(sessionId, requestedName);
+    const effectiveName = normalized?.name ?? requestedName;
+    const hint = normalized
+      ? undefined
+      : this.functionBreakpointNameHint(sessionId, effectiveName);
+    return { requestedName, effectiveName, normalized, hint };
+  }
+
+  /** Policy-certain function-breakpoint name rewrite (issue #467). */
+  private functionBreakpointNameRewrite(
+    sessionId: string,
+    functionName: string
+  ): { name: string; note: string } | undefined {
+    try {
+      return this.sessionPolicy(sessionId).normalizeFunctionBreakpointName?.(functionName);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Per-adapter function-breakpoint name advisory (issues #303/#308). */
+  private functionBreakpointNameHint(
+    sessionId: string,
+    functionName: string
+  ): string | undefined {
+    try {
+      return this.sessionPolicy(sessionId).functionBreakpointNameHint?.(functionName);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** The store's policy for a session's language — throws for an unknown id. */
+  private sessionPolicy(sessionId: string): AdapterPolicy {
+    return this.ctx.selectStorePolicy(this.ctx.getSession(sessionId).language);
+  }
+
+  /**
    * Set a function (symbol-addressed) breakpoint (issue #271 phase 3).
    * Session-global — no file. Queued like line breakpoints when no debuggee
-   * is live; synced immediately otherwise.
+   * is live; synced immediately otherwise. The name is stored exactly as
+   * given: the caller resolves it through resolveFunctionBreakpointName first.
    */
   async setFunctionBreakpoint(
     sessionId: string,
@@ -424,6 +505,57 @@ export class BreakpointController {
 
     const { warning } = await this.syncBreakpointsForFile(session, breakpoint.file);
     return { removed: breakpoint, warning };
+  }
+
+  /**
+   * Remove every function breakpoint a name addresses, in ONE DAP re-send
+   * (issue #559). The literal name is matched alongside the policy-resolved
+   * one, so a record stored un-rewritten (policy lookup failure, or set
+   * through another path) stays removable.
+   *
+   * Removing the matches one at a time would re-send the session's whole
+   * function-breakpoint set per match (setFunctionBreakpoints is replace-all
+   * for the session), joining N copies of any live-sync warning and leaving
+   * the debuggee armed with the not-yet-deleted duplicates in between. Every
+   * match is therefore deleted from the store first and the surviving set
+   * re-sent once.
+   */
+  async removeFunctionBreakpointsByName(
+    sessionId: string,
+    requestedName: string
+  ): Promise<FunctionBreakpointRemoval> {
+    const session = this.ctx.getSession(sessionId);
+    const { effectiveName, normalized, hint } = this.resolveFunctionBreakpointName(
+      sessionId,
+      requestedName
+    );
+    // `functionName` is always the effective name; `requestedName` is
+    // disclosed only when a policy rewrite changed it (issue #550).
+    const disclosure = {
+      functionName: effectiveName,
+      ...(normalized ? { requestedName } : {})
+    };
+
+    const removed = Array.from(session.functionBreakpoints?.values() ?? [])
+      .filter(bp => bp.functionName === effectiveName || bp.functionName === requestedName);
+    if (removed.length === 0) {
+      return { removed, ...disclosure, hint };
+    }
+
+    for (const bp of removed) {
+      session.functionBreakpoints.delete(bp.id);
+      this.ctx.logger.info('debug:breakpoint', {
+        event: 'removed',
+        sessionId,
+        sessionName: session.name,
+        breakpointId: bp.id,
+        functionName: bp.functionName,
+        timestamp: Date.now(),
+      });
+    }
+
+    const { warning } = await this.syncFunctionBreakpoints(session);
+    return { removed, ...disclosure, warning };
   }
 
   /**
