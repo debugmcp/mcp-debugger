@@ -28,6 +28,7 @@ import { normalizeBreakpointMessage } from '../utils/breakpoint-message.js';
 import { consumeChildOrigin } from '../utils/child-origin-events.js';
 import { isPidAlive } from '../utils/jvm-orphan-reaper.js';
 import { IAdapterRegistry } from '@debugmcp/shared';
+import type { ProxyFailureDiagnostics } from './launch/proxy-failure-diagnostics.js';
 
 // Custom launch arguments interface extending DebugProtocol.LaunchRequestArguments
 export interface CustomLaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
@@ -35,11 +36,47 @@ export interface CustomLaunchRequestArguments extends DebugProtocol.LaunchReques
   justMyCode?: boolean;
 }
 
-export interface DebugResult {
+/**
+ * The `data` bag a debug operation returns alongside its state.
+ *
+ * An open bag with typed common fields rather than a discriminated union:
+ * `startDebugging` alone returns three shapes (dry run, launch, toolchain
+ * refusal) and `restartDebugging` spreads whatever the launch produced, so a
+ * union would force narrowing at every server read for no gain. Naming the
+ * fields every reader actually touches — `message`, `warning`, and the proxy
+ * failure pointers — is what lets the server handlers read them directly
+ * instead of casting.
+ *
+ * Written as a `type`, not an `interface`, on purpose: only a type alias gets
+ * the implicit index signature that makes a `ProxyFailureDiagnostics` value
+ * assignable here.
+ */
+export type DebugResultData = ProxyFailureDiagnostics & {
+  /** Human-readable status for the tool result. */
+  message?: string;
+  /** Advisory notes joined by the operation (unbound breakpoints, dropped keys, ...). */
+  warning?: string;
+  [key: string]: unknown;
+};
+
+/** What a step operation returns: `message` is always set, plus where it landed. */
+export type StepResultData = DebugResultData & {
+  message: string;
+  location?: { file: string; line: number; column?: number };
+  /** The debuggee is still running; the step completes asynchronously. */
+  pending?: boolean;
+};
+
+/** What a successful attach returns on top of the common fields. */
+export type AttachResultData = DebugResultData & {
+  attachConfig?: unknown;
+};
+
+export interface DebugResult<TData extends DebugResultData = DebugResultData> {
   success: boolean;
   state: SessionState;
   error?: string;
-  data?: unknown;
+  data?: TData;
   canContinue?: boolean;
   // Machine-readable error identity for tests and callers (avoid string assertions)
   errorType?: string; // e.g., 'PythonNotFoundError'

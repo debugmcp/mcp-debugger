@@ -565,7 +565,7 @@ export class DebugLauncher {
         }
         // Join rather than clobber: startDebugging may already have set a
         // warning (unbound function breakpoints, issue #308).
-        const priorWarning = (result.data as { warning?: string } | undefined)?.warning;
+        const priorWarning = result.data?.warning;
         const staleWarning = staleCount > 0
           ? `${staleCount} statement anchor(s) no longer match the current file; those breakpoints kept their previous lines — re-set them if the target moved.`
           : undefined;
@@ -575,7 +575,7 @@ export class DebugLauncher {
           : undefined;
         const warnings = [priorWarning, staleWarning, ambiguousWarning].filter(Boolean);
         result.data = {
-          ...((result.data as object) ?? {}),
+          ...(result.data ?? {}),
           breakpointsReapplied: this.ctx.getSession(sessionId).breakpoints.size,
           // Each launch starts a fresh output buffer: tell the caller to
           // reset its get_output cursor to since=0.

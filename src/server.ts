@@ -19,6 +19,7 @@ import {
   ProxyNotRunningError
 } from './errors/debug-errors.js';
 import { SessionManager, SessionManagerConfig } from './session/session-manager.js';
+import type { DebugResult, StepResultData } from './session/session-manager-core.js';
 import { StackTraceResult } from './session/session-manager-data.js';
 import { VariableTruncationSummary } from './session/variable-caps.js';
 import { createProductionDependencies } from './container/dependencies.js';
@@ -234,7 +235,7 @@ export class DebugMcpServer implements ToolContext {
     dryRunSpawn?: boolean,
     adapterLaunchConfig?: Record<string, unknown>,
     breakOnExceptions?: ExceptionBreakMode
-  ): Promise<{ success: boolean; state: string; error?: string; data?: unknown; errorType?: string; errorCode?: number; }> {
+  ): Promise<DebugResult> {
     this.validateSession(sessionId);
 
     // Check script file exists for immediate feedback
@@ -258,7 +259,7 @@ export class DebugMcpServer implements ToolContext {
     return result;
   }
 
-  public async restartDebugging(sessionId: string): Promise<{ success: boolean; state: string; error?: string; data?: unknown }> {
+  public async restartDebugging(sessionId: string): Promise<DebugResult> {
     // Deliberately no validateSession(): a finished debuggee is
     // lifecycle-TERMINATED, and restarting after exit is the primary use
     // case (cf. handleGetOutput). Session existence is still enforced.
@@ -565,7 +566,7 @@ export class DebugMcpServer implements ToolContext {
     return true;
   }
 
-  public async stepOver(sessionId: string): Promise<{ success: boolean; state: string; error?: string; data?: unknown; }> {
+  public async stepOver(sessionId: string): Promise<DebugResult<StepResultData>> {
     this.validateSession(sessionId);
     const result = await this.sessionManager.stepOver(sessionId);
     if (!result.success) {
@@ -574,7 +575,7 @@ export class DebugMcpServer implements ToolContext {
     return result;
   }
 
-  public async stepInto(sessionId: string): Promise<{ success: boolean; state: string; error?: string; data?: unknown; }> {
+  public async stepInto(sessionId: string): Promise<DebugResult<StepResultData>> {
     this.validateSession(sessionId);
     const result = await this.sessionManager.stepInto(sessionId);
     if (!result.success) {
@@ -583,7 +584,7 @@ export class DebugMcpServer implements ToolContext {
     return result;
   }
 
-  public async stepOut(sessionId: string): Promise<{ success: boolean; state: string; error?: string; data?: unknown; }> {
+  public async stepOut(sessionId: string): Promise<DebugResult<StepResultData>> {
     this.validateSession(sessionId);
     const result = await this.sessionManager.stepOut(sessionId);
     if (!result.success) {

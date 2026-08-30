@@ -24,6 +24,7 @@ import type {
   Variable
 } from '@debugmcp/shared';
 import type { SessionManager } from '../session/session-manager.js';
+import type { DebugResult, StepResultData } from '../session/session-manager-core.js';
 import type { StackTraceResult } from '../session/session-manager-data.js';
 import type { VariableTruncationSummary } from '../session/variable-caps.js';
 import type { SimpleFileChecker, FileExistenceResult } from '../utils/simple-file-checker.js';
@@ -85,8 +86,8 @@ export interface ToolContext {
     dryRunSpawn?: boolean,
     adapterLaunchConfig?: Record<string, unknown>,
     breakOnExceptions?: ExceptionBreakMode
-  ): Promise<{ success: boolean; state: string; error?: string; data?: unknown; errorType?: string; errorCode?: number; }>;
-  restartDebugging(sessionId: string): Promise<{ success: boolean; state: string; error?: string; data?: unknown }>;
+  ): Promise<DebugResult>;
+  restartDebugging(sessionId: string): Promise<DebugResult>;
   closeDebugSession(sessionId: string): Promise<boolean>;
   setFunctionBreakpoint(
     sessionId: string,
@@ -113,9 +114,9 @@ export interface ToolContext {
     truncation?: VariableTruncationSummary;
   }>;
   continueExecution(sessionId: string): Promise<boolean>;
-  stepOver(sessionId: string): Promise<{ success: boolean; state: string; error?: string; data?: unknown; }>;
-  stepInto(sessionId: string): Promise<{ success: boolean; state: string; error?: string; data?: unknown; }>;
-  stepOut(sessionId: string): Promise<{ success: boolean; state: string; error?: string; data?: unknown; }>;
+  stepOver(sessionId: string): Promise<DebugResult<StepResultData>>;
+  stepInto(sessionId: string): Promise<DebugResult<StepResultData>>;
+  stepOut(sessionId: string): Promise<DebugResult<StepResultData>>;
 }
 
 /**

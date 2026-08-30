@@ -33,11 +33,17 @@ const PROXY_LOG_TAIL_LINES = 80;
  */
 const PROXY_LOG_TAIL_CHARS = 64 * 1024;
 
-/** The pointers a failed launch/attach returns to the caller (issue #493 / #551). */
-export interface ProxyFailureDiagnostics {
+/**
+ * The pointers a failed launch/attach returns to the caller (issue #493 / #551).
+ *
+ * A `type` rather than an `interface` because these pointers are returned *as*
+ * a `DebugResult.data` bag: only a type alias gets the implicit index signature
+ * that makes it assignable to `DebugResultData`.
+ */
+export type ProxyFailureDiagnostics = {
   initProgress?: ProxyInitProgress;
   proxyLogPath?: string;
-}
+};
 
 /**
  * What `logProxyFailure` needs. Declared here, as the narrowest possible slice,

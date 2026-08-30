@@ -35,7 +35,7 @@ import {
 import { ProxyLauncher } from './launch/proxy-launcher.js';
 import { DebugLauncher } from './launch/debug-launcher.js';
 import { AttachController } from './attach/attach-controller.js';
-import { CustomLaunchRequestArguments, DebugResult } from './session-manager-core.js';
+import { CustomLaunchRequestArguments, DebugResult, StepResultData } from './session-manager-core.js';
 
 /** Result types for function-breakpoint name resolution and by-name removal (issue #559). */
 export type {
@@ -286,17 +286,17 @@ export abstract class SessionManagerOperations extends SessionManagerData {
   }
 
   /** Step over the current line. */
-  async stepOver(sessionId: string): Promise<DebugResult> {
+  async stepOver(sessionId: string): Promise<DebugResult<StepResultData>> {
     return this.execution.stepOver(sessionId);
   }
 
   /** Step into the call on the current line. */
-  async stepInto(sessionId: string): Promise<DebugResult> {
+  async stepInto(sessionId: string): Promise<DebugResult<StepResultData>> {
     return this.execution.stepInto(sessionId);
   }
 
   /** Step out of the current frame. */
-  async stepOut(sessionId: string): Promise<DebugResult> {
+  async stepOut(sessionId: string): Promise<DebugResult<StepResultData>> {
     return this.execution.stepOut(sessionId);
   }
 

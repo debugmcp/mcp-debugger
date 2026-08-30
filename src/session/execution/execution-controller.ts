@@ -20,7 +20,7 @@ import { DebugProtocol } from '@vscode/debugprotocol';
 import { ProxyNotRunningError, SessionTerminatedError } from '../../errors/debug-errors.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import type { ManagedSession } from '../session-store.js';
-import type { DebugResult } from '../session-manager-core.js';
+import type { DebugResult, StepResultData } from '../session-manager-core.js';
 import type { ExecutionContext } from '../operations-context.js';
 
 /** What distinguishes the three step flavours: everything else is shared. */
@@ -70,15 +70,15 @@ export interface StepOperationOptions {
 export class ExecutionController {
   constructor(private readonly ctx: ExecutionContext) {}
 
-  async stepOver(sessionId: string): Promise<DebugResult> {
+  async stepOver(sessionId: string): Promise<DebugResult<StepResultData>> {
     return this.step(sessionId, 'stepOver');
   }
 
-  async stepInto(sessionId: string): Promise<DebugResult> {
+  async stepInto(sessionId: string): Promise<DebugResult<StepResultData>> {
     return this.step(sessionId, 'stepInto');
   }
 
-  async stepOut(sessionId: string): Promise<DebugResult> {
+  async stepOut(sessionId: string): Promise<DebugResult<StepResultData>> {
     return this.step(sessionId, 'stepOut');
   }
 
@@ -86,7 +86,7 @@ export class ExecutionController {
    * The preamble the three step flavours share: liveness and paused-ness
    * checks, the current thread, and the error handling around the wait.
    */
-  private async step(sessionId: string, kind: StepKindName): Promise<DebugResult> {
+  private async step(sessionId: string, kind: StepKindName): Promise<DebugResult<StepResultData>> {
     const { command, operation, logTag, successMessage } = STEP_KINDS[kind];
     const session = this.ctx.getSession(sessionId);
 
@@ -137,7 +137,7 @@ export class ExecutionController {
     session: ManagedSession,
     sessionId: string,
     options: StepOperationOptions
-  ): Promise<DebugResult> {
+  ): Promise<DebugResult<StepResultData>> {
     const proxyManager = session.proxyManager;
 
     if (!proxyManager) {
@@ -163,7 +163,7 @@ export class ExecutionController {
         clearTimeout(timeout);
       };
 
-      const settle = (result: DebugResult) => {
+      const settle = (result: DebugResult<StepResultData>) => {
         if (settled) {
           return;
         }
@@ -174,7 +174,7 @@ export class ExecutionController {
 
       const success = (message: string, location?: { file: string; line: number; column?: number }) => {
         this.ctx.logger.info(`[SM ${options.logTag} ${sessionId}] ${message} Current state: ${session.state}`);
-        const data: { message: string; location?: { file: string; line: number; column?: number } } = { message };
+        const data: StepResultData = { message };
         if (location) {
           data.location = location;
         }
