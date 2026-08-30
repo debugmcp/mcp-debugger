@@ -15,6 +15,7 @@ describe('ProxyManager sendInitWithRetry', () => {
     pathExists: vi.fn(),
     exists: vi.fn(),
     readFile: vi.fn(),
+    readTail: vi.fn(),
     writeFile: vi.fn(),
     readdir: vi.fn(),
     stat: vi.fn(),

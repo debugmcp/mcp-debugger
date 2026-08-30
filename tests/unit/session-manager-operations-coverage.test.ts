@@ -103,6 +103,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       },
       fileSystem: {
         readFile: vi.fn(),
+        readTail: vi.fn(),
         exists: vi.fn(),
         pathExists: vi.fn().mockResolvedValue(true),
         ensureDir: vi.fn().mockResolvedValue(undefined),
@@ -973,7 +974,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockSession.proxyManager = dryRunProxy;
       mockSession.state = SessionState.INITIALIZING;
       mockSession.logDir = '/tmp/session-logs';
-      mockDependencies.fileSystem.readFile.mockResolvedValueOnce('adapter never answered');
+      mockDependencies.fileSystem.readTail.mockResolvedValueOnce('adapter never answered');
 
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockResolvedValue(undefined);
       vi.spyOn(internals(operations).launcher, 'waitForDryRunCompletion').mockResolvedValue(false);
@@ -1059,7 +1060,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     it('captures proxy log tail when initialization throws', async () => {
       mockSession.logDir = '/tmp/session-logs';
-      mockDependencies.fileSystem.readFile.mockResolvedValueOnce('first line\nsecond line\nthird line');
+      mockDependencies.fileSystem.readTail.mockResolvedValueOnce('first line\nsecond line\nthird line');
 
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockRejectedValue(new Error('Proxy failed to initialize'));
 
@@ -1069,9 +1070,9 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result.error).toContain('Proxy failed to initialize');
       // The tail is read straight through — no exists-then-read pair, which
       // raced the proxy still writing (and rotating) this very file.
-      expect(mockDependencies.fileSystem.readFile).toHaveBeenCalledWith(
+      expect(mockDependencies.fileSystem.readTail).toHaveBeenCalledWith(
         path.join('/tmp/session-logs', 'proxy-test-session.log'),
-        'utf-8'
+        64 * 1024
       );
       expect(mockProxyManager.stop).toHaveBeenCalled();
       expect(mockSession.proxyManager).toBeUndefined();
@@ -1187,7 +1188,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     it('records log read failure when tail cannot be captured', async () => {
       mockSession.logDir = '/tmp/session-logs';
       mockDependencies.fileSystem.pathExists.mockResolvedValueOnce(true);
-      mockDependencies.fileSystem.readFile.mockRejectedValueOnce(new Error('permission denied'));
+      mockDependencies.fileSystem.readTail.mockRejectedValueOnce(new Error('permission denied'));
 
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockRejectedValue(new Error('Proxy start error'));
 
@@ -1231,7 +1232,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockSession.proxyManager = undefined;
       mockSession.state = SessionState.CREATED;
       mockSession.logDir = '/tmp/session-logs';
-      mockDependencies.fileSystem.readFile.mockResolvedValue('adapter crash details');
+      mockDependencies.fileSystem.readTail.mockResolvedValue('adapter crash details');
 
       const proxyStub: any = {
         ...mockProxyManager,

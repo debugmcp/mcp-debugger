@@ -135,6 +135,7 @@ export function createMockFileSystem() {
     pathExists: vi.fn().mockResolvedValue(true),
     writeFile: vi.fn().mockResolvedValue(undefined),
     readFile: vi.fn().mockResolvedValue(''),
+    readTail: vi.fn().mockResolvedValue(''),
     stat: vi.fn().mockResolvedValue({
       isFile: () => true,
       isDirectory: () => false,

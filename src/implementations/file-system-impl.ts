@@ -3,12 +3,33 @@
  */
 import fs from 'fs-extra';
 import { Stats } from 'fs';
+import { open } from 'node:fs/promises';
 import { IFileSystem } from '@debugmcp/shared';
 
 export class FileSystemImpl implements IFileSystem {
   // Basic fs operations
   async readFile(path: string, encoding?: BufferEncoding): Promise<string> {
     return fs.readFile(path, encoding || 'utf-8');
+  }
+
+  async readTail(path: string, maxBytes: number): Promise<string> {
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) {
+      throw new RangeError('maxBytes must be a non-negative safe integer');
+    }
+    if (maxBytes === 0) {
+      return '';
+    }
+
+    const file = await open(path, 'r');
+    try {
+      const { size } = await file.stat();
+      const length = Math.min(size, maxBytes);
+      const buffer = Buffer.alloc(length);
+      const { bytesRead } = await file.read(buffer, 0, length, size - length);
+      return buffer.subarray(0, bytesRead).toString('utf8');
+    } finally {
+      await file.close();
+    }
   }
 
   async writeFile(path: string, data: string | Buffer): Promise<void> {

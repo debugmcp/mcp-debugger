@@ -182,6 +182,7 @@ function createMockFileSystem(): IFileSystem {
     pathExists: async () => true,
     writeFile: async () => {},
     readFile: async () => '',
+    readTail: async () => '',
     stat: async () => ({ isFile: () => true } as any),
     ensureDirSync: () => {}
   };

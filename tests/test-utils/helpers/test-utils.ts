@@ -36,6 +36,7 @@ export function createMockFileSystem(): IFileSystem {
     pathExists: vi.fn().mockResolvedValue(true),
     ensureDir: vi.fn().mockResolvedValue(undefined),
     readFile: vi.fn().mockResolvedValue(''),
+    readTail: vi.fn().mockResolvedValue(''),
     writeFile: vi.fn().mockResolvedValue(undefined),
     remove: vi.fn().mockResolvedValue(undefined),
     copy: vi.fn().mockResolvedValue(undefined),

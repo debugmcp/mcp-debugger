@@ -3,6 +3,9 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import fsExtra from 'fs-extra';
+import { mkdtemp, rm, writeFile as writeNodeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
 // Mock fs-extra before importing FileSystemImpl
 vi.mock('fs-extra', () => {
@@ -97,6 +100,26 @@ describe('FileSystemImpl', () => {
       (fsExtra.readFile as any).mockRejectedValue(new Error('File not found'));
       
       await expect(fileSystem.readFile('/missing/file')).rejects.toThrow('File not found');
+    });
+  });
+
+  describe('readTail', () => {
+    it('reads no more than the requested bytes from the end of a file', async () => {
+      const directory = await mkdtemp(path.join(os.tmpdir(), 'mcp-read-tail-'));
+      const file = path.join(directory, 'proxy.log');
+      try {
+        await writeNodeFile(file, '0123456789', 'utf8');
+
+        await expect(fileSystem.readTail(file, 4)).resolves.toBe('6789');
+        await expect(fileSystem.readTail(file, 64)).resolves.toBe('0123456789');
+        await expect(fileSystem.readTail(file, 0)).resolves.toBe('');
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    it('rejects an invalid byte cap before opening the file', async () => {
+      await expect(fileSystem.readTail('/unused', -1)).rejects.toThrow(RangeError);
     });
   });
 

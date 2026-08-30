@@ -9,6 +9,7 @@ import { Stats } from 'fs';
 // Mock file system
 const createMockFileSystem = (): IFileSystem => ({
   readFile: vi.fn(),
+  readTail: vi.fn(),
   writeFile: vi.fn(),
   exists: vi.fn(),
   mkdir: vi.fn(),

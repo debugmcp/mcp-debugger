@@ -21,6 +21,8 @@ export interface IProxyManager {
 export interface IFileSystem {
   // Basic fs operations
   readFile(path: string, encoding?: BufferEncoding): Promise<string>;
+  /** Read at most `maxBytes` from the end of a file as UTF-8 text. */
+  readTail(path: string, maxBytes: number): Promise<string>;
   writeFile(path: string, data: string | Buffer): Promise<void>;
   exists(path: string): Promise<boolean>;
   mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
