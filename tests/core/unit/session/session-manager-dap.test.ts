@@ -1248,6 +1248,64 @@ describe('SessionManager - DAP Operations', () => {
       expect(result.anchorNote).toMatch(/Module/);
     });
 
+    it('returns a JS for-body block binding alongside the function locals (issue #558)', async () => {
+      const session = await createPausedSession();
+      (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
+
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(
+        async (command: string, args?: { variablesReference?: number }) => {
+          if (command === 'stackTrace') {
+            return {
+              success: true,
+              body: {
+                stackFrames: [
+                  { id: 1, name: 'sum', source: { path: '/workspace/app.js' }, line: 7, column: 3 }
+                ]
+              }
+            };
+          }
+          if (command === 'scopes') {
+            // js-debug's scope chain for a stop inside `for (let i ...)`:
+            // the block comes first and is named exactly 'Block'.
+            return {
+              success: true,
+              body: {
+                scopes: [
+                  { name: 'Block', variablesReference: 100, expensive: false },
+                  { name: 'Local', variablesReference: 200, expensive: false },
+                  { name: 'Closure', variablesReference: 300, expensive: false },
+                  { name: 'Global', variablesReference: 400, expensive: true }
+                ]
+              }
+            };
+          }
+          if (command === 'variables') {
+            const byReference: Record<number, Array<Record<string, unknown>>> = {
+              100: [{ name: 'i', value: '3', type: 'number', variablesReference: 0 }],
+              200: [
+                { name: 'total', value: '6', type: 'number', variablesReference: 0 },
+                { name: 'items', value: 'Array(4)', type: 'object', variablesReference: 5 }
+              ],
+              300: [{ name: 'captured', value: '1', type: 'number', variablesReference: 0 }],
+              400: [{ name: 'process', value: 'Process', type: 'object', variablesReference: 6 }]
+            };
+            return { success: true, body: { variables: byReference[args?.variablesReference ?? 0] ?? [] } };
+          }
+          return { success: true };
+        }
+      );
+
+      const result = await sessionManager.getLocalVariables(session.id);
+
+      // Before #558 this returned only [total, items]: 'i' was invisible
+      // because the policy matched block scopes as 'Block:'-prefixed.
+      expect(result.variables.map(variable => variable.name)).toEqual(['i', 'total', 'items']);
+      // The frame's own locals reached the caller, so the canonical scope is
+      // still the honest name and there is nothing to explain.
+      expect(result.scopeName).toBe('Local');
+      expect(result.anchorNote).toBeUndefined();
+    });
+
     it('ranks the canonical scope by policy preference, not adapter scope order (issue #548 review)', async () => {
       const session = await createPausedSession();
       (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
