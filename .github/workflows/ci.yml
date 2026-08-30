@@ -5,6 +5,13 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main ]
+    # 'labeled'/'unlabeled' on top of the defaults so the "Require a changelog
+    # fragment" gate below re-evaluates when the 'no-changelog' label is added
+    # or removed. `gh pr create --label` sets labels in a follow-up API call,
+    # which races the 'opened' event: the gate could read an empty label list
+    # and fail a PR that was correctly labelled a second later (issue #580).
+    # Cost: label churn on a PR re-runs the whole workflow.
+    types: [ opened, synchronize, reopened, labeled, unlabeled ]
   workflow_dispatch:  # on-demand run when main lands commits without a push event
                       # (auto-merge pushes with GITHUB_TOKEN, which suppresses triggers)
 
