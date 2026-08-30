@@ -21,6 +21,9 @@ export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
   const supported = await ctx.getSupportedLanguagesAsync();
   const lang = (args.language || DebugLanguage.PYTHON) as DebugLanguage;
   const requested = lang as unknown as string;
+  // Reads MCP_CONTAINER live rather than through the IEnvironment in scope: the
+  // gating tests stub it with `vi.stubEnv` after a ProcessEnvironment has already
+  // snapshotted process.env, so only the live read sees them.
   const allowInContainer = isContainerRuntime() && requested === DebugLanguage.PYTHON;
   if (!allowInContainer && !supported.includes(lang)) {
     throw new UnsupportedLanguageError(lang, supported);

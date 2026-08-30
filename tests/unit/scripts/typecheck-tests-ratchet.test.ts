@@ -7,6 +7,7 @@ import {
   isTestTreePath,
   parseDiagnostics,
   pathsOutsideTestTrees,
+  staleBaselineAnnotation,
   unusableRunReason,
   verdict
 } from '../../../scripts/typecheck-tests-ratchet.mjs';
@@ -96,7 +97,9 @@ describe('compare', () => {
 interface VerdictCase {
   name: string;
   comparison: RatchetComparison;
-  expected: 'regressed' | 'stale' | 'ok';
+  /** Omitted means the strict gate; `true` is the --allow-improvement run. */
+  allowImprovement?: boolean;
+  expected: 'regressed' | 'stale' | 'stale-allowed' | 'ok';
 }
 
 const VERDICT_CASES: VerdictCase[] = [
@@ -111,7 +114,7 @@ const VERDICT_CASES: VerdictCase[] = [
     expected: 'regressed'
   },
   {
-    name: 'a shrunken count fails as a stale baseline — there is no lenient mode',
+    name: 'a shrunken count fails as a stale baseline',
     comparison: { regressed: [], improved: ['a.test.ts'] },
     expected: 'stale'
   },
@@ -119,15 +122,74 @@ const VERDICT_CASES: VerdictCase[] = [
     name: 'new errors are reported ahead of a stale baseline',
     comparison: { regressed: ['b.test.ts'], improved: ['a.test.ts'] },
     expected: 'regressed'
+  },
+  {
+    name: '--allow-improvement downgrades a shrunken count to a warning',
+    comparison: { regressed: [], improved: ['a.test.ts'] },
+    allowImprovement: true,
+    expected: 'stale-allowed'
+  },
+  {
+    name: '--allow-improvement still fails new errors — the whole point of the ratchet',
+    comparison: { regressed: ['a.test.ts'], improved: [] },
+    allowImprovement: true,
+    expected: 'regressed'
+  },
+  {
+    name: '--allow-improvement reports the regression, not the improvement, when both happened',
+    comparison: { regressed: ['b.test.ts'], improved: ['a.test.ts'] },
+    allowImprovement: true,
+    expected: 'regressed'
+  },
+  {
+    name: '--allow-improvement changes nothing about a clean run',
+    comparison: { regressed: [], improved: [] },
+    allowImprovement: true,
+    expected: 'ok'
   }
 ];
 
 describe('verdict', () => {
   for (const testCase of VERDICT_CASES) {
     it(testCase.name, () => {
-      expect(verdict(testCase.comparison)).toBe(testCase.expected);
+      expect(verdict(testCase.comparison, { allowImprovement: testCase.allowImprovement }))
+        .toBe(testCase.expected);
     });
   }
+
+  it('defaults to the strict gate when no options are passed', () => {
+    // Pre-push and every human PR call it this way; leniency must be opt-in.
+    expect(verdict({ regressed: [], improved: ['a.test.ts'] })).toBe('stale');
+  });
+});
+
+describe('staleBaselineAnnotation', () => {
+  // The only thing standing between a Dependabot bump that auto-merges on a
+  // type-cleaner suite and a baseline nobody refreshes until it breaks the
+  // next human PR. It has to be loud, and it has to name the fix.
+  const IMPROVED: string[] = ['tests/unit/a.test.ts', 'tests/unit/b.test.ts'];
+
+  it('annotates the baseline file itself, with the count and the remedy', () => {
+    const annotation: string = String(staleBaselineAnnotation(IMPROVED, { githubActions: true }));
+
+    expect(annotation.startsWith('::warning file=tests/typecheck-baseline.json::')).toBe(true);
+    expect(annotation).toContain('2 file(s)');
+    expect(annotation).toContain('pnpm run typecheck:tests:update');
+  });
+
+  it('is a single line — a ::warning cannot carry one', () => {
+    expect(String(staleBaselineAnnotation(IMPROVED, { githubActions: true })))
+      .not.toContain('\n');
+  });
+
+  it('says nothing outside GitHub Actions, where no one would render it', () => {
+    expect(staleBaselineAnnotation(IMPROVED)).toBeNull();
+    expect(staleBaselineAnnotation(IMPROVED, { githubActions: false })).toBeNull();
+  });
+
+  it('says nothing when the baseline is not stale', () => {
+    expect(staleBaselineAnnotation([], { githubActions: true })).toBeNull();
+  });
 });
 
 describe('parseDiagnostics', () => {

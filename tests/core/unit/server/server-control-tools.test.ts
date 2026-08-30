@@ -581,6 +581,81 @@ describe('Server Control Tools Tests', () => {
     });
 
     it.each([
+      ['step_over', 'stepOver', 'Stepped over'],
+      ['step_into', 'stepInto', 'Stepped into'],
+      ['step_out', 'stepOut', 'Stepped out']
+    ])('keeps the %s wording for an ordinary stop that carries a message (issue #574)', async (toolName, methodName, expectedMessage) => {
+      // The other direction of the state gate. The controller ALWAYS sets
+      // data.message ('Step completed.'), so surfacing it unconditionally
+      // would have replaced "Stepped over" on every successful step; only a
+      // terminal state may override the wording.
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: 'ACTIVE'
+      });
+      mockSessionManager[methodName].mockResolvedValue({
+        success: true,
+        state: 'paused',
+        data: {
+          message: 'Step completed.',
+          location: { file: '/app/main.py', line: 12, column: 1 }
+        }
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: toolName,
+          arguments: { sessionId: 'test-session' }
+        }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      expect(content.message).toBe(expectedMessage);
+      expect(content.location).toEqual({ file: '/app/main.py', line: 12, column: 1 });
+      expect(content.pending).toBeUndefined();
+    });
+
+    it.each([
+      { toolName: 'step_over', methodName: 'stepOver', state: 'stopped' },
+      { toolName: 'step_into', methodName: 'stepInto', state: 'stopped' },
+      { toolName: 'step_out', methodName: 'stepOut', state: 'stopped' },
+      // ERROR, not STOPPED, is where the core puts an unexpected adapter exit
+      // (non-zero code, or none at all) — so a step that died with the proxy
+      // lands here, and the gate has to cover it too.
+      { toolName: 'step_over', methodName: 'stepOver', state: 'error' },
+      { toolName: 'step_into', methodName: 'stepInto', state: 'error' },
+      { toolName: 'step_out', methodName: 'stepOut', state: 'error' }
+    ])('surfaces the controller message when $toolName ended the session in $state (issue #574)', async ({ toolName, methodName, state }) => {
+      // A step the debuggee did not survive settles with 'Step completed as
+      // session terminated.' and no `pending` marker. The hard-coded
+      // "Stepped over" used to overwrite it, leaving `state` the only clue.
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: 'ACTIVE'
+      });
+      mockSessionManager[methodName].mockResolvedValue({
+        success: true,
+        state,
+        data: { message: 'Step completed as session terminated.' }
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: toolName,
+          arguments: { sessionId: 'test-session' }
+        }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      expect(content.message).toBe('Step completed as session terminated.');
+      expect(content.pending).toBeUndefined();
+    });
+
+    it.each([
       ['step_over', 'stepOver'],
       ['step_into', 'stepInto'],
       ['step_out', 'stepOut']

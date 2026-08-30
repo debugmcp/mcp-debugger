@@ -20,6 +20,7 @@ import { IDebugAdapter, AdapterConfig } from '@debugmcp/shared';
 import type { AdapterMetadata as SharedAdapterMetadata, AdapterManifestEntry, FactoryLoadResult } from '@debugmcp/shared';
 import { AdapterLoader } from './adapter-loader.js';
 import type { AdapterMetadata } from './adapter-loader.js';
+import { isContainerRuntime } from '../utils/container-path-utils.js';
 
 /**
  * Default registry configuration
@@ -62,7 +63,7 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
     // keep legacy behavior in tests). Read from the raw config param, not
     // this.config, so an unset field still falls back to the env check.
     this.dynamicEnabled = Boolean(
-      config.enableDynamicLoading ?? (process.env.MCP_CONTAINER === 'true')
+      config.enableDynamicLoading ?? isContainerRuntime()
     );
 
     // Safety handler: prevent crash from async dispose error events

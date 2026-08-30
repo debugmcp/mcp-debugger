@@ -23,26 +23,32 @@ export function truncateForLog(value: string, maxLength: number = 1000): string 
 }
 
 /**
- * Validate and clamp a caller-supplied per-request DAP timeout override (ms).
+ * Validate and clamp a caller-supplied per-request millisecond override.
  * Returns { error } for invalid values, { timeoutMs } with the (possibly
  * clamped) override, or {} when no override was given.
+ *
+ * `keyName` names the tool argument in both messages. It defaults to the
+ * 'timeout' every DAP-request tool uses; attach's own verification window
+ * ('verifyTimeout') is not a DAP timeout but is validated and clamped by the
+ * same rules, and had grown a hand-written copy of them.
  */
 export function resolveDapTimeoutOverride(
   timeoutMs: number | undefined,
   logContext: string,
-  logger: ILogger
+  logger: ILogger,
+  keyName: string = 'timeout'
 ): { error?: string; timeoutMs?: number } {
   if (timeoutMs === undefined) {
     return {};
   }
   if (typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     return {
-      error: `Invalid 'timeout': must be a positive number of milliseconds (got ${timeoutMs})`
+      error: `Invalid '${keyName}': must be a positive number of milliseconds (got ${timeoutMs})`
     };
   }
   if (timeoutMs > MAX_DAP_TIMEOUT_MS) {
     logger.warn(
-      `[${logContext}] 'timeout' ${timeoutMs}ms exceeds the maximum; clamping to ${MAX_DAP_TIMEOUT_MS}ms`
+      `[${logContext}] '${keyName}' ${timeoutMs}ms exceeds the maximum; clamping to ${MAX_DAP_TIMEOUT_MS}ms`
     );
     return { timeoutMs: MAX_DAP_TIMEOUT_MS };
   }

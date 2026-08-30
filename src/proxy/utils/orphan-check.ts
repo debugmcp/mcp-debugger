@@ -20,6 +20,8 @@ export function shouldExitAsOrphanFromEnv(
   ppid: number,
   env: NodeJS.ProcessEnv = process.env
 ): boolean {
+  // Reads MCP_CONTAINER directly on purpose: this runs in the proxy worker
+  // against a plain env record, with no IEnvironment and no process to read.
   const inContainer = env.MCP_CONTAINER === 'true';
   return shouldExitAsOrphan(ppid, inContainer);
 }

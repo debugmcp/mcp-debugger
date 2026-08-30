@@ -14,6 +14,7 @@ import {
   FakeDebugAdapter,
   type DefinedAttachMembers
 } from '../../../test-utils/fakes/fake-debug-adapter.js';
+import { internals } from '../../../test-utils/helpers/operations-internals.js';
 import type { ManagedSession } from '../../../../src/session/session-store.js';
 import type {
   ExceptionBreakMode,
@@ -26,30 +27,6 @@ class TestableSessionManagerOperations extends SessionManagerOperations {
   protected async handleAutoContinue(_sessionId: string): Promise<void> {
     // no-op for tests
   }
-}
-
-/**
- * `ProxyLauncher.start` as these tests drive it. Two loosenings that the
- * pre-extraction `(ops as any)` cast hid, made explicit: spies resolve `undefined`
- * for a launch config nothing downstream reads, and `dapLaunchArgs` takes the
- * attach shape (`request`/`host`/`port`) that production passes through an
- * `as Partial<CustomLaunchRequestArguments>` cast of its own.
- */
-interface ProxyLauncherView {
-  start(
-    session: ManagedSession,
-    scriptPath: string,
-    scriptArgs?: string[],
-    dapLaunchArgs?: Record<string, unknown>,
-    dryRunSpawn?: boolean,
-    adapterLaunchConfig?: Record<string, unknown>,
-    breakOnExceptions?: ExceptionBreakMode
-  ): Promise<LanguageSpecificLaunchConfig | void>;
-}
-
-/** The proxy launcher is a protected collaborator; reaching it needs the usual cast. */
-function internals(ops: SessionManagerOperations): { proxyLauncher: ProxyLauncherView } {
-  return ops as unknown as { proxyLauncher: ProxyLauncherView };
 }
 
 /**
@@ -164,12 +141,10 @@ describe('SessionManagerOperations attach modes', () => {
     });
     mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
-    await internals(operations).proxyLauncher.start(
-      mockSession,
-      'attach://remote',
-      undefined,
-      { request: 'attach', host: '127.0.0.1', port: 12345 }
-    );
+    await internals(operations).proxyLauncher.start(mockSession, {
+      scriptPath: 'attach://remote',
+      dapLaunchArgs: { request: 'attach', host: '127.0.0.1', port: 12345 }
+    });
 
     expect(adapterStub.resolveExecutablePath).not.toHaveBeenCalled();
     expect(adapterStub.buildAdapterCommand).not.toHaveBeenCalled();
@@ -187,12 +162,10 @@ describe('SessionManagerOperations attach modes', () => {
     }).withAttachSupport();
     mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
-    await internals(operations).proxyLauncher.start(
-      mockSession,
-      'attach://remote',
-      undefined,
-      { request: 'attach', port: 5005 }
-    );
+    await internals(operations).proxyLauncher.start(mockSession, {
+      scriptPath: 'attach://remote',
+      dapLaunchArgs: { request: 'attach', port: 5005 }
+    });
 
     expect(adapterStub.resolveExecutablePath).toHaveBeenCalled();
     expect(adapterStub.buildAdapterCommand).toHaveBeenCalled();
@@ -308,14 +281,12 @@ describe('SessionManagerOperations attach modes', () => {
       });
       mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
-      await internals(operations).proxyLauncher.start(
-        mockSession,
-        'script.rb',
-        undefined,
-        {},
-        false,
-        { request: 'attach', __attachMode: true, foo: 1 }
-      );
+      await internals(operations).proxyLauncher.start(mockSession, {
+        scriptPath: 'script.rb',
+        dapLaunchArgs: {},
+        dryRunSpawn: false,
+        adapterLaunchConfig: { request: 'attach', __attachMode: true, foo: 1 }
+      });
 
       // The launcher merges the caller's adapter extras into the generic config,
       // so the recorded argument carries keys GenericLaunchConfig does not name.
@@ -578,7 +549,7 @@ describe('SessionManagerOperations attach modes', () => {
     mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
     await expect(
-      internals(operations).proxyLauncher.start(mockSession, 'script.rb')
+      internals(operations).proxyLauncher.start(mockSession, { scriptPath: 'script.rb' })
     ).rejects.toThrow(/attach_to_process/);
   });
 
@@ -593,7 +564,7 @@ describe('SessionManagerOperations attach modes', () => {
     mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
     const failure = await internals(operations).proxyLauncher
-      .start(mockSession, 'main.go')
+      .start(mockSession, { scriptPath: 'main.go' })
       .then(
         () => {
           throw new Error('expected ProxyLauncher.start to reject');

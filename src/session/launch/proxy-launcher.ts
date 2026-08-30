@@ -32,10 +32,13 @@ import type { ProxyLaunchContext } from '../operations-context.js';
 
 
 /**
- * The seven positional arguments `ProxyLauncher.start` has always taken, named.
- * They are threaded through the launch preparation unchanged; giving them a
- * type is what lets the preparation split into steps without each step growing
- * its own six-argument signature.
+ * Everything `start()` needs about the launch, as one object.
+ *
+ * It was seven positional parameters, six of them optional, which is how
+ * `debug-launcher`'s dry-run call came to end three arguments early with
+ * nothing at the call site to say whether that was deliberate. Named fields
+ * make an omission legible. The same type is threaded through the launch
+ * preparation unchanged, so no step needs a six-argument signature of its own.
  */
 export interface ProxyLaunchRequest {
   scriptPath: string;
@@ -75,25 +78,11 @@ export class ProxyLauncher {
 
   async start(
     session: ManagedSession,
-    scriptPath: string,
-    scriptArgs?: string[],
-    dapLaunchArgs?: Partial<CustomLaunchRequestArguments>,
-    dryRunSpawn?: boolean,
-    adapterLaunchConfig?: Record<string, unknown>,
-    breakOnExceptions?: ExceptionBreakMode
+    request: ProxyLaunchRequest
   ): Promise<LanguageSpecificLaunchConfig> {
-    const request: ProxyLaunchRequest = {
-      scriptPath,
-      scriptArgs,
-      dapLaunchArgs,
-      dryRunSpawn,
-      adapterLaunchConfig,
-      breakOnExceptions
-    };
-
     // Log entrance for Windows CI debugging
     this.ctx.logger.info(
-      `[SessionManager] Entering ProxyLauncher.start for session ${session.id}, dryRunSpawn: ${dryRunSpawn}, scriptPath: ${scriptPath}`
+      `[SessionManager] Entering ProxyLauncher.start for session ${session.id}, dryRunSpawn: ${request.dryRunSpawn}, scriptPath: ${request.scriptPath}`
     );
 
     const inputs = await this.prepareLaunchInputs(session, request);

@@ -88,6 +88,8 @@ export async function checkContainerWorkspace(
     // Only the exact string 'true' enables container mode — a truthy-looking
     // near-miss (MCP_CONTAINER=1/TRUE/yes) is precisely the misconfiguration
     // a doctor run should call out rather than bless as "host mode".
+    // Reads MCP_CONTAINER directly on purpose: the near-miss warning needs
+    // the raw value, which neither helper's boolean can carry.
     const rawValue = environment.get('MCP_CONTAINER');
     if (rawValue !== undefined && rawValue !== '') {
       return [

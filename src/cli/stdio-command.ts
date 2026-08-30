@@ -102,6 +102,8 @@ export async function handleStdioCommand(
     // unexpectedly in detached `docker run` setups and the server must stay
     // alive; rely on transport close or signals there (see c251b3ff).
     stdin.on('end', () => {
+      // Reads MCP_CONTAINER directly on purpose: `proc` is the injected
+      // ProcessLike this command is tested against, not an IEnvironment.
       if (proc.env.MCP_CONTAINER === 'true') {
         logger.warn('[MCP] Stdin ended; ignoring in container mode and waiting for transport close or signal.');
         return;

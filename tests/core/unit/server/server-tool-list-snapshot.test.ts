@@ -2,12 +2,16 @@
  * Tool-schema snapshot fence for the src/server.ts extraction.
  *
  * Pins the exact tools/list, resources/list and prompts/list payloads for
- * every DEBUG_MCP_BP_ADDRESSING x DEBUG_MCP_VARIABLE_ACCESS combination the
- * server accepts (see src/utils/bp-addressing.ts and
- * src/utils/variable-access.ts). The snapshots were recorded from the
- * pre-split server.ts and must stay byte-identical through every commit that
- * moves code into src/server/ — a diff here means a description, key order,
- * or gating rule drifted.
+ * every DEBUG_MCP_BP_ADDRESSING x DEBUG_MCP_VARIABLE_ACCESS x MCP_CONTAINER
+ * combination the server accepts (see src/utils/bp-addressing.ts,
+ * src/utils/variable-access.ts and src/utils/container-path-utils.ts). The
+ * `container-unset` snapshots were recorded from the pre-split server.ts and
+ * must stay byte-identical through every commit that moves code into
+ * src/server/ — a diff here means a description, key order, or gating rule
+ * drifted. Container mode earns a full axis rather than a spot check because
+ * it rewrites every path-parameter description (getPathDescription in
+ * tool-schemas.ts): without it, half the advertised schema text went
+ * unfenced (issue #579).
  *
  * Environment is stubbed with vi.stubEnv the way the gating tests do: the
  * mock environment from createMockDependencies reads process.env live.
@@ -39,6 +43,9 @@ const BP_ADDRESSING_MODES: ReadonlyArray<string | undefined> = [undefined, 'line
 
 /** Every value getVariableAccessMode() accepts, plus unset (falls back to 'open'). */
 const VARIABLE_ACCESS_MODES: ReadonlyArray<string | undefined> = [undefined, 'open', 'explicit'];
+
+/** 'true' is the only MCP_CONTAINER value that enables container mode; unset is host mode. */
+const CONTAINER_MODES: ReadonlyArray<string | undefined> = [undefined, 'true'];
 
 /** Fixed session fixture so the resource descriptors are deterministic. */
 const SESSION_FIXTURE = [
@@ -73,10 +80,15 @@ describe('Server tool/resource/prompt list snapshot fence', () => {
 
   for (const bpMode of BP_ADDRESSING_MODES) {
     for (const vaMode of VARIABLE_ACCESS_MODES) {
-      it(`DEBUG_MCP_BP_ADDRESSING=${label(bpMode)} DEBUG_MCP_VARIABLE_ACCESS=${label(vaMode)}`, async () => {
+      for (const containerMode of CONTAINER_MODES) {
+      const name =
+        `DEBUG_MCP_BP_ADDRESSING=${label(bpMode)} ` +
+        `DEBUG_MCP_VARIABLE_ACCESS=${label(vaMode)} ` +
+        `MCP_CONTAINER=${label(containerMode)}`;
+      it(name, async () => {
         vi.stubEnv('DEBUG_MCP_BP_ADDRESSING', bpMode);
         vi.stubEnv('DEBUG_MCP_VARIABLE_ACCESS', vaMode);
-        vi.stubEnv('MCP_CONTAINER', undefined);
+        vi.stubEnv('MCP_CONTAINER', containerMode);
 
         new DebugMcpServer();
         const { listToolsHandler } = getToolHandlers(mockServer);
@@ -97,9 +109,10 @@ describe('Server tool/resource/prompt list snapshot fence', () => {
 
         const snapshot = JSON.stringify({ tools, resources, prompts }, null, 2) + '\n';
         await expect(snapshot).toMatchFileSnapshot(
-          `./__snapshots__/tool-list/bp-${label(bpMode)}.va-${label(vaMode)}.json`
+          `./__snapshots__/tool-list/bp-${label(bpMode)}.va-${label(vaMode)}.container-${label(containerMode)}.json`
         );
       });
+      }
     }
   }
 });

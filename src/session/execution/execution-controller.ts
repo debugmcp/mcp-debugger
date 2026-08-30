@@ -9,6 +9,28 @@
  * deadline on the debuggee: it converts "still running" into an honest
  * `pending: true` success rather than a failure, and the operation completes
  * asynchronously afterwards.
+ *
+ * THE SETTLE CONTRACT (issue #574). Two rules:
+ *
+ * 1. The stop path owns the settle. Once a `stopped` event has been observed,
+ *    no other path may answer — not the grace timer, not a rejected request.
+ *    Reading where the debuggee landed takes a DAP round trip, and every one
+ *    of those paths would otherwise report, with more or less confidence,
+ *    that the thing that demonstrably happened did not.
+ *
+ *    One deliberate asymmetry, and the reason rule 2 exists: pause's ended
+ *    handler stands down for the stop path, because its wording ('Session
+ *    ended before pause took effect') contradicts a stop that was observed.
+ *    executeStep's do not — 'Step completed as session terminated./exited.'
+ *    is already what rule 2 would have the stop path say, so letting them
+ *    answer first is the same answer, sooner. Both ends obey rule 2; they
+ *    differ only in which path is allowed to deliver it.
+ * 2. Ended-at-settle. Whoever does settle reads `session.state` at settle
+ *    time. A session that reached a terminal state (STOPPED or ERROR) while
+ *    the answer was being assembled is reported as ended — terminal state,
+ *    ended wording, the stop reason if one was recorded, and no location,
+ *    because there is no longer a stack to have read. Rule 1 without rule 2 is
+ *    how "Paused" came to be returned alongside `state: 'stopped'`.
  */
 import { getErrorMessage } from '../../errors/debug-errors.js';
 import {
@@ -61,6 +83,24 @@ const STEP_KINDS = {
 } as const satisfies Record<string, StepKind>;
 
 export type StepKindName = keyof typeof STEP_KINDS;
+
+/**
+ * Is the session over?
+ *
+ * A function rather than an inline comparison because `pause()` asks twice,
+ * either side of an await, and an inline check would be narrowed away by
+ * control-flow analysis — which cannot see that the core mutates the session
+ * while the await is in flight.
+ */
+function isTerminated(session: ManagedSession): boolean {
+  return session.sessionLifecycle === SessionLifecycleState.TERMINATED;
+}
+
+/**
+ * Rule 2's wording for pause: the pause took effect, and the session ended
+ * before the stack that would say where could be read.
+ */
+const PAUSED_THEN_ENDED_MESSAGE = 'Paused; the session ended before the stack could be read';
 
 /** The per-step options `executeStep` waits on. */
 export interface StepOperationOptions {
@@ -157,8 +197,17 @@ export class ExecutionController {
       options.terminatedMessage ?? 'Step completed as session terminated.';
     const exitedMessage = options.exitedMessage ?? 'Step completed as session exited.';
 
+    // Rule 2's wording for this step flavour: the step landed, but the stack
+    // read that would say where outlived the session.
+    const endedDuringReadMessage =
+      `${options.successMessage.replace(/\.$/, '')}; the session ended before the stack could be read`;
+
     return new Promise((resolve) => {
       let settled = false;
+      // Rule 1's flag: "a stop has been observed, the stop path owns the
+      // settle". Set as the first statement of onStopped, so every other path
+      // can tell "nothing stopped" from "stopped, still resolving where".
+      let stopSeen = false;
 
       const cleanup = () => {
         proxyManager.off('stopped', onStopped);
@@ -190,7 +239,13 @@ export class ExecutionController {
         });
       };
 
+      /** Rule 2: has the session reached a terminal state by settle time? */
+      const sessionEnded = () =>
+        session.state === SessionState.STOPPED || session.state === SessionState.ERROR;
+
       const onStopped = async () => {
+        stopSeen = true;
+        clearTimeout(timeout);
         // Try to get current location from stack trace
         let location: StopLocation | undefined;
         try {
@@ -211,6 +266,13 @@ export class ExecutionController {
           // Log but don't fail the step operation if we can't get location
           this.ctx.logger.debug(`[SM ${options.logTag} ${sessionId}] Could not capture location:`, error);
         }
+        // Rule 2. An ended event that reached the listeners below has already
+        // settled with its own wording; this covers the endings that did not
+        // (handlers torn down by the core, an exit mapped straight to ERROR).
+        if (sessionEnded()) {
+          success(endedDuringReadMessage);
+          return;
+        }
         success(options.successMessage, location);
       };
 
@@ -219,6 +281,20 @@ export class ExecutionController {
       const onExit = () => success(exitedMessage);
 
       const timeout = setTimeout(() => {
+        // Rule 1: the stop already arrived, so onStopped owns the settle and
+        // will report where it landed. "Still executing" from here would be a
+        // lie the caller has no way to correct.
+        // Trade-off: past this point the answer is bounded by the stackTrace
+        // round trip (a 30s DAP request timeout plus the proxy's 5s parent
+        // margin) rather than by this 5s window. Worth it — a slow truthful
+        // answer beats a fast wrong one — but it IS the ceiling, which is why
+        // the stand-down is logged.
+        if (stopSeen) {
+          this.ctx.logger.debug(
+            `[SM ${options.logTag} ${sessionId}] Grace window elapsed but the stop is already being resolved; standing down`
+          );
+          return;
+        }
         this.ctx.logger.info(
           `[SM ${options.logTag} ${sessionId}] Step still running after ${this.ctx.tunables.stepGraceMs}ms grace window; completing asynchronously`
         );
@@ -243,6 +319,15 @@ export class ExecutionController {
         .sendDapRequest(options.command, { threadId: options.threadId })
         .catch((error: unknown) => {
           const errorMessage = getErrorMessage(error);
+          // Rule 1. A proxy that dies just after the stop rejects the still
+          // pending step request; failing the call would deny a step that
+          // demonstrably landed. The stop path settles, under rule 2.
+          if (stopSeen) {
+            this.ctx.logger.debug(
+              `[SM ${options.logTag} ${sessionId}] Step request rejected after the stop was observed; standing down: ${errorMessage}`
+            );
+            return;
+          }
           this.ctx.logger.error(
             `[SM ${options.logTag} ${sessionId}] Error during step request:`,
             error
@@ -311,7 +396,7 @@ export class ExecutionController {
   async pause(sessionId: string, threadId?: number): Promise<DebugResult<PauseResultData>> {
     const session = this.ctx.getSession(sessionId);
 
-    if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
+    if (isTerminated(session)) {
       throw new SessionTerminatedError(sessionId);
     }
 
@@ -340,6 +425,15 @@ export class ExecutionController {
     }
 
     this.ctx.logger.debug(`[SessionManager] pauseExecution: sending DAP pause for session=${sessionId} currentState=${session.state}`);
+
+    // Snapshot the current lastStop so result paths can tell whether the stop
+    // they observe belongs to THIS pause (handleStopped replaces the object)
+    // rather than reporting a stale earlier stop. Taken BEFORE the
+    // threads-discovery await below: a stop delivered during that await has
+    // already replaced session.lastStop, so a snapshot taken afterwards would
+    // compare this pause's own stop against itself and report no reason at
+    // all — the very case the post-response race branch exists for (#574).
+    const lastStopBefore = session.lastStop;
     // DAP pause request: threadId 0 should pause all threads per DAP spec,
     // but some adapters (e.g. netcoredbg) reject threadId=0 with E_INVALIDARG.
     // When no explicit threadId is provided, discover one via a threads request.
@@ -366,16 +460,34 @@ export class ExecutionController {
       }
     }
 
+    // Re-check after the await: the session can close, terminate or exit
+    // while the threads request is in flight, and the listener registration
+    // below would then throw a TypeError on a null handle instead of the
+    // failure the pre-flight checks report for the same condition (#574).
+    // Lifecycle first, and in the same order as the pre-flight checks: the
+    // core flips the lifecycle to TERMINATED for exactly the endings that
+    // also clear the handle, and 'session is over' is the more useful of the
+    // two answers.
+    if (isTerminated(session)) {
+      throw new SessionTerminatedError(sessionId);
+    }
     const proxyManager = session.proxyManager;
+    if (!proxyManager || !proxyManager.isRunning()) {
+      throw new ProxyNotRunningError(sessionId, 'pause');
+    }
 
-    // Snapshot the current lastStop so result paths can tell whether the stop
-    // they observe belongs to THIS pause (handleStopped replaces the object)
-    // rather than reporting a stale earlier stop.
-    const lastStopBefore = session.lastStop;
     // Flag the in-flight pause so policy stop-reason normalization can use it
-    // (e.g. CodeLLDB reports pauses as 'exception'/SIGSTOP). handleStopped
-    // clears it on every stop; clear it here too on error/terminate paths.
-    session.pausePending = true;
+    // (e.g. CodeLLDB reports pauses as 'exception'/SIGSTOP). Armed AFTER
+    // discovery, and only while the session is still running: an unrelated
+    // stop landing during that await (a js-debug entry stop auto-continued by
+    // pre-launch function breakpoints) would otherwise clear the flag before
+    // the pause was even sent, and this pause's own stop would normalize
+    // without it — reported as 'step' rather than 'pause' (#574). A stop that
+    // landed during discovery and stayed leaves it unarmed, which is exactly
+    // what the post-response race branch below wants; a session that
+    // auto-continued back to RUNNING arms it. handleStopped clears it on
+    // every stop; the settle paths below clear it where no stop is coming.
+    session.pausePending = session.state === SessionState.RUNNING;
 
     // The pause response only acknowledges the request; the state transition
     // to PAUSED happens when the asynchronous 'stopped' event is handled by
@@ -387,7 +499,7 @@ export class ExecutionController {
       let stopEventSeen = false;
 
       const cleanup = () => {
-        proxyManager.off('stopped', onStopped);
+        proxyManager.off('stopped', settleFromStop);
         proxyManager.off('terminated', onEnded);
         proxyManager.off('exited', onEnded);
         proxyManager.off('exit', onEnded);
@@ -403,10 +515,14 @@ export class ExecutionController {
         resolve(result);
       };
 
-      const onStopped = async () => {
-        stopEventSeen = true;
-        // Try to get current location from stack trace
-        let location: StopLocation | undefined;
+      /**
+       * Where the debuggee came to rest. Both settle paths that mean "this
+       * pause took effect" need it — the event path and the post-response
+       * race branch — so it lives outside onStopped rather than inside it
+       * (#574): the race branch used to return a bare `{message:'Paused'}`
+       * where the event path returned a location.
+       */
+      const readStopLocation = async (): Promise<StopLocation | undefined> => {
         try {
           // Wait a brief moment for state to settle after stopped event
           await new Promise(resolve => setTimeout(resolve, 10));
@@ -414,7 +530,7 @@ export class ExecutionController {
           const stackFrames = await this.ctx.getStackTrace(sessionId);
           if (stackFrames && stackFrames.length > 0) {
             const topFrame = stackFrames[0];
-            location = {
+            return {
               file: topFrame.file,
               line: topFrame.line,
               column: topFrame.column
@@ -423,25 +539,75 @@ export class ExecutionController {
         } catch (error) {
           this.ctx.logger.debug(`[SessionManager pause ${sessionId}] Could not capture location:`, error);
         }
+        return undefined;
+      };
+
+      /** Rule 2: has the session reached a terminal state by settle time? */
+      const sessionEnded = () =>
+        session.state === SessionState.STOPPED || session.state === SessionState.ERROR;
+
+      /** The stop reason, but only when handleStopped recorded a NEW one for THIS pause. */
+      const ownStopReason = (): Pick<PauseResultData, 'stopReason' | 'rawStopReason'> => {
+        if (!session.lastStop || session.lastStop === lastStopBefore) {
+          return {};
+        }
+        return {
+          stopReason: session.lastStop.reason,
+          ...(session.lastStop.rawReason ? { rawStopReason: session.lastStop.rawReason } : {})
+        };
+      };
+
+      /**
+       * The answer for "this pause took effect", under both rules. Every path
+       * that observed the stop routes through here, so the ended-at-settle
+       * check cannot be forgotten by one of them.
+       */
+      const stopResult = (location?: StopLocation): DebugResult<PauseResultData> => {
+        if (sessionEnded()) {
+          // Rule 2. The pause landed and the session ended before the stack
+          // could be read: say both, and offer no location, rather than
+          // pairing 'Paused' with a terminal state.
+          return {
+            success: true,
+            state: session.state,
+            data: { message: PAUSED_THEN_ENDED_MESSAGE, ...ownStopReason() }
+          };
+        }
+        return {
+          success: true,
+          state: session.state,
+          data: {
+            message: 'Paused',
+            ...ownStopReason(),
+            ...(location ? { location } : {})
+          }
+        };
+      };
+
+      /**
+       * The one stop path. Registered as the 'stopped' listener AND called by
+       * the post-response race branch, which used to re-implement it by hand
+       * and drifted from it twice (#574).
+       */
+      const settleFromStop = async () => {
+        stopEventSeen = true;
+        const location = await readStopLocation();
         this.ctx.logger.info(
           `[SessionManager pause] Paused session ${sessionId}. Current state: ${session.state}`
         );
-        const data: PauseResultData = { message: 'Paused' };
-        // Only report the stop reason when handleStopped recorded a NEW stop
-        // for this pause — never echo a stale earlier stop.
-        if (session.lastStop && session.lastStop !== lastStopBefore) {
-          data.stopReason = session.lastStop.reason;
-          if (session.lastStop.rawReason) {
-            data.rawStopReason = session.lastStop.rawReason;
-          }
-        }
-        if (location) {
-          data.location = location;
-        }
-        settle({ success: true, state: session.state, data });
+        settle(stopResult(location));
       };
 
       const onEnded = () => {
+        // Rule 1: a stop was observed, so the pause DID take effect and this
+        // message would be false. The stop path settles, and rule 2 makes it
+        // report the ending.
+        if (stopEventSeen) {
+          this.ctx.logger.debug(
+            `[SessionManager pause] Session ended while the observed stop was being resolved; standing down for the stop path`
+          );
+          return;
+        }
         session.pausePending = false;
         settle({
           success: true,
@@ -451,6 +617,18 @@ export class ExecutionController {
       };
 
       const timeout = setTimeout(() => {
+        // Rule 1: the stop WAS observed, the stop path is still resolving
+        // where it landed. "No 'stopped' event within Ns" would be false, and
+        // would drop the stopReason and location it is about to report.
+        // Trade-off: past this point the answer is bounded by the stackTrace
+        // round trip (a 30s DAP request timeout plus the proxy's 5s parent
+        // margin) rather than by this window — hence the log line.
+        if (stopEventSeen) {
+          this.ctx.logger.debug(
+            `[SessionManager pause] Grace window elapsed but the stop is already being resolved; standing down`
+          );
+          return;
+        }
         this.ctx.logger.info(
           `[SessionManager pause] No stopped event within ${this.ctx.tunables.pauseGraceMs}ms grace window in session ${sessionId}; completing asynchronously`
         );
@@ -468,34 +646,50 @@ export class ExecutionController {
         });
       }, this.ctx.tunables.pauseGraceMs);
 
-      proxyManager.on('stopped', onStopped);
+      proxyManager.on('stopped', settleFromStop);
       proxyManager.on('terminated', onEnded);
       proxyManager.on('exited', onEnded);
       proxyManager.on('exit', onEnded);
 
       proxyManager
         .sendDapRequest('pause', { threadId: effectiveThreadId })
-        .then(() => {
+        .then(async () => {
           this.ctx.logger.info(
             `[SessionManager pause] DAP 'pause' sent for session ${sessionId}. Waiting for stopped event.`
           );
-          // Guard: if the stopped event fired before the listeners above were
+          // If the stopped event fired before the listeners above were
           // registered (e.g. during the threads-discovery await), the state is
-          // already PAUSED and no further event will arrive.
+          // already PAUSED and no further event will arrive — so this is the
+          // stop path, and runs it rather than a copy of it (#574).
           if (session.state === SessionState.PAUSED && !stopEventSeen) {
-            const raceData: PauseResultData = { message: 'Paused' };
-            if (session.lastStop && session.lastStop !== lastStopBefore) {
-              raceData.stopReason = session.lastStop.reason;
-              if (session.lastStop.rawReason) {
-                raceData.rawStopReason = session.lastStop.rawReason;
-              }
-            }
-            settle({ success: true, state: session.state, data: raceData });
+            await settleFromStop();
           }
         })
         .catch((error: unknown) => {
-          session.pausePending = false;
           const errorMessage = getErrorMessage(error);
+          // Rule 1. A proxy that dies just after the stop rejects the still
+          // pending pause, and an adapter asked to pause an already stopped
+          // target can answer failure outright. Neither unmakes the stop.
+          if (stopEventSeen) {
+            this.ctx.logger.debug(
+              `[SessionManager pause] Pause request rejected after the stop was observed; standing down: ${errorMessage}`
+            );
+            return;
+          }
+          if (session.state === SessionState.PAUSED) {
+            // Same situation, seen from the other side: the stop landed during
+            // discovery, so no 'stopped' listener will ever fire. Left alone
+            // the grace timer would eventually settle this — after a full
+            // pauseGraceMs, with `pending: true` and "no 'stopped' event
+            // within Ns", both false for a session that is demonstrably
+            // paused. Running the stop path answers now, and correctly.
+            this.ctx.logger.debug(
+              `[SessionManager pause] Pause request rejected but the session is already paused; reporting the stop: ${errorMessage}`
+            );
+            void settleFromStop();
+            return;
+          }
+          session.pausePending = false;
           this.ctx.logger.error(
             `[SessionManager pause] Error sending 'pause' for session ${sessionId}: ${errorMessage}`
           );

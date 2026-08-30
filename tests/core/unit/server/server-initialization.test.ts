@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { DebugMcpServer } from '../../../../src/server.js';
+import { TOOL_NAMES } from '../../../../src/server/tool-schemas.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
 import { createProductionDependencies } from '../../../../src/container/dependencies.js';
 import path from 'path';
@@ -123,29 +124,13 @@ describe('Server Initialization Tests', () => {
       
       expect(result.tools).toBeDefined();
       expect(result.tools.length).toBeGreaterThan(0);
-      
-      // Check that all required tools are present
+
+      // Derived from the schema module, not hand-maintained: the list of
+      // toContain() calls this replaces named 20 of the 28 advertised tools
+      // and had stopped growing with them (issue #579).
       const toolNames = result.tools.map((t: any) => t.name);
-      expect(toolNames).toContain('create_debug_session');
-      expect(toolNames).toContain('list_debug_sessions');
-      expect(toolNames).toContain('set_breakpoint');
-      expect(toolNames).toContain('list_breakpoints');
-      expect(toolNames).toContain('remove_breakpoint');
-      expect(toolNames).toContain('clear_breakpoints');
-      expect(toolNames).toContain('start_debugging');
-      expect(toolNames).toContain('restart_debugging');
-      expect(toolNames).toContain('close_debug_session');
-      expect(toolNames).toContain('step_over');
-      expect(toolNames).toContain('step_into');
-      expect(toolNames).toContain('step_out');
-      expect(toolNames).toContain('continue_execution');
-      expect(toolNames).toContain('pause_execution');
-      expect(toolNames).toContain('get_variables');
-      expect(toolNames).toContain('get_stack_trace');
-      expect(toolNames).toContain('get_scopes');
-      expect(toolNames).toContain('evaluate_expression');
-      expect(toolNames).toContain('get_source_context');
-      expect(toolNames).toContain('get_output');
+      expect(toolNames).toEqual(expect.arrayContaining([...TOOL_NAMES]));
+      expect(toolNames).toHaveLength(TOOL_NAMES.length);
     });
 
     it('should handle unknown tool error', async () => {

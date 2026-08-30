@@ -119,6 +119,7 @@ npm run typecheck
 npm run typecheck:tests
 npm run typecheck:tests:update  # re-record the baseline (see the note below)
 npm run typecheck:tests:raw     # raw tsc output for tsconfig.spec.json
+npm run typecheck:tests -- --allow-improvement  # CI/Dependabot only (see the note below)
 
 # Both of the above. This is the exact command CI and pre-push run.
 npm run typecheck:all
@@ -137,7 +138,7 @@ npm run check:all-personal-paths  # Check all files
 Note: the root `tsc -p tsconfig.json` checks nothing (it is a solution-style config with
 `"files": []`), which is why `typecheck` uses `tsconfig.typecheck.json` (#562).
 
-The test ratchet has one mode, and it fails in both directions:
+The test ratchet fails in both directions:
 
 - **A count went UP** — you introduced type errors. Fix them. Re-recording the baseline
   is the exception, not the remedy: do it only when the new errors are genuinely
@@ -147,7 +148,22 @@ The test ratchet has one mode, and it fails in both directions:
   `tests/typecheck-baseline.json` in the same PR.
 
 Failing on a decrease is what keeps the recorded numbers honest; the ceiling only ever
-moves down.
+moves down. The one exception is `--allow-improvement`, which warns on a decrease instead
+of failing: CI passes it only for PRs *authored by* Dependabot, which cannot commit a
+refreshed baseline. Never use it locally or on a human PR.
+
+That exception has a known cost, accepted deliberately: a Dependabot PR whose bump makes
+the suite type-cleaner can auto-merge with a stale `tests/typecheck-baseline.json`, and
+auto-merge pushes with `GITHUB_TOKEN`, which suppresses push CI on main — so nothing
+downstream refreshes it. **The next human PR is the documented remedy**: it will fail the
+ratchet on a decrease, and `npm run typecheck:tests:update` + committing the baseline is
+the fix. To make that predictable rather than a surprise, the dependabot run prints a
+`::warning` annotation on the baseline file and a job-summary line saying exactly this.
+
+If the script refuses to read `tests/typecheck-baseline.json` at all (invalid JSON, the
+wrong shape, a negative or non-integer count, a path outside the test trees), it exits 2
+and tells you to **delete the file first**: `--update` reads the baseline before writing
+one, so a corrupt file blocks its own repair.
 
 ### Docker
 
@@ -219,7 +235,7 @@ The codebase follows a **layered architecture with dependency injection** and **
      - `SessionManagerOperations` (`session-manager-operations.ts`): Debug operations facade (~350 lines): the tunables, the `OperationsContext` wiring, the collaborator fields, and one-line delegates — no operation body lives here any more
      - `SessionManager` (`session-manager.ts`): Final composition class that extends SessionManagerOperations. Implements `handleAutoContinue(sessionId)` which auto-continues past entry breakpoints when `stopOnEntry=false`
    - `SessionManagerOperations` is itself a facade over per-slice collaborators, wired as protected fields and always reached at call time (`this.breakpoints.…`):
-     - `launch/proxy-launcher.ts` (`ProxyLauncher.start`, the seven-argument proxy launch both launch and attach go through): adapter creation under an `AdapterLease`, the configuration transform, executable resolution, `ProxyConfig` assembly; `launch/proxy-failure-diagnostics.ts` (`failProxySetup`/`logProxyFailure`): the shared failure teardown and record
+     - `launch/proxy-launcher.ts` (`ProxyLauncher.start(session, request)`, the one proxy launch both launch and attach go through): adapter creation under an `AdapterLease`, the configuration transform, executable resolution, `ProxyConfig` assembly; `launch/proxy-failure-diagnostics.ts` (`failProxySetup`/`logProxyFailure`): the shared failure teardown and record
      - `launch/debug-launcher.ts` (`DebugLauncher`): `startDebugging` (dry runs included), `restartDebugging`; `launch/launch-readiness.ts` (`waitForLaunchReadiness`): the post-handshake wait for the first stop / configured / termination
      - `attach/attach-controller.ts` (`AttachController`): `attachToProcess`, `detachFromProcess`; `attach/attach-verification.ts` (`verifyAttachThreads`, `pauseAfterAttach`): the thread poll and post-attach pause that make PAUSED real before it is reported
      - `breakpoints/breakpoint-controller.ts` (`BreakpointController`): set/remove/clear plus the replace-all DAP re-sends

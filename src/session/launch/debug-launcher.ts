@@ -188,7 +188,16 @@ export class DebugLauncher {
         sessionWithSetup._dryRunHandlerSetup = true;
 
         // Start the proxy manager
-        await this.proxyLauncher.start(session, scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn, adapterLaunchConfig);
+        // No breakOnExceptions: a dry run reports the spawn command and stops
+        // before the adapter connection, so setExceptionBreakpoints never runs
+        // and the mode would be inert. Same reason lastLaunch skips dry runs.
+        await this.proxyLauncher.start(session, {
+          scriptPath,
+          scriptArgs,
+          dapLaunchArgs,
+          dryRunSpawn,
+          adapterLaunchConfig,
+        });
         this.ctx.logger.info(`[SessionManager] ProxyManager started for session ${sessionId}`);
         
         // Check if already completed before waiting
@@ -307,7 +316,14 @@ export class DebugLauncher {
       session.effectiveBreakOnExceptions = effectiveBreakOnExceptions;
 
       // Start the proxy manager
-      const launchConfigData = await this.proxyLauncher.start(session, scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn, adapterLaunchConfig, effectiveBreakOnExceptions);
+      const launchConfigData = await this.proxyLauncher.start(session, {
+        scriptPath,
+        scriptArgs,
+        dapLaunchArgs,
+        dryRunSpawn,
+        adapterLaunchConfig,
+        breakOnExceptions: effectiveBreakOnExceptions,
+      });
       this.ctx.logger.info(`[SessionManager] ProxyManager started for session ${sessionId}`);
 
       // Perform language-specific handshake if required

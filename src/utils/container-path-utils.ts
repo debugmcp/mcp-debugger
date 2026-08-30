@@ -12,20 +12,23 @@
 import { IEnvironment } from '@debugmcp/shared';
 
 /**
- * Check if the application is running in container mode
+ * Check if the application is running in container mode.
+ *
+ * Reads the injected snapshot. Prefer this whenever an IEnvironment is in
+ * scope: a test can hand it a fixed map instead of mutating the process.
  */
 export function isContainerMode(environment: IEnvironment): boolean {
   return environment.get('MCP_CONTAINER') === 'true';
 }
 
 /**
- * The same check without an IEnvironment, read live from process.env.
+ * The same check, read live from process.env instead of from a snapshot.
  *
- * Production never changes MCP_CONTAINER after start, so this and
- * isContainerMode always agree there; the difference matters only to tests,
- * which stub the variable after a ProcessEnvironment (which snapshots
- * process.env at construction) already exists. Callers that hold an
- * IEnvironment should prefer isContainerMode.
+ * Production never changes MCP_CONTAINER after start, so the two always agree
+ * there; the difference is that a ProcessEnvironment snapshots process.env at
+ * construction, so a test using `vi.stubEnv` after one exists is seen only by
+ * this form. Some callers hold an IEnvironment and use this anyway, for
+ * exactly that reason — each says so at the call site.
  */
 export function isContainerRuntime(): boolean {
   return process.env.MCP_CONTAINER === 'true';

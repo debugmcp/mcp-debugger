@@ -5,6 +5,10 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main ]
+    # Default types only. Adding 'labeled'/'unlabeled' would re-run the WHOLE
+    # matrix per label event - Dependabot applies each of its default labels
+    # twice at creation, so 3-5 simultaneous full runs per bot PR - to fix a
+    # race the gate itself now avoids by reading labels live (issue #580).
   workflow_dispatch:  # on-demand run when main lands commits without a push event
                       # (auto-merge pushes with GITHUB_TOKEN, which suppresses triggers)
 
@@ -187,6 +191,13 @@ jobs:
     name: Lint Code
     runs-on: ubuntu-latest
 
+    # The changelog gate reads the PR's labels live (issue #580); the
+    # workflow-level token grants contents:read only, which does not cover the
+    # pull-requests API `gh pr view` calls.
+    permissions:
+      contents: read
+      pull-requests: read
+
     steps:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -224,8 +235,26 @@ jobs:
     #
     # Deliberately the same command a developer runs locally and pre-push runs, so a
     # green working tree cannot mean a red required check (issue #562).
+    # Keyed on the PR's AUTHOR, not github.actor: the actor is whoever triggered
+    # this particular run, so a human reopening a Dependabot PR, running
+    # `gh pr update-branch` on it, or pushing to the bot branch would take the
+    # strict path and reproduce the failure the split exists to avoid (#581).
     - name: Type-check sources and tests
+      if: github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]'
       run: pnpm run typecheck:all
+
+    # Dependabot cannot re-record the ratchet baseline, so a bump that makes the
+    # suite type-CLEANER (a better @types package) would otherwise fail its own
+    # PR on a stale baseline it has no way to refresh. Increases and newly
+    # erroring files still fail; a decrease warns (issue #581). The ratchet
+    # raises a ::warning annotation and a job-summary line when that happens,
+    # because this PR can auto-merge with GITHUB_TOKEN — which suppresses push
+    # CI on main — leaving the baseline stale until a human PR refreshes it.
+    - name: Type-check sources and tests (dependabot)
+      if: github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]'
+      run: |
+        pnpm run typecheck
+        pnpm run typecheck:tests -- --allow-improvement
     
     - name: Check for personal information
       run: pnpm run check:all-personal-paths
@@ -236,15 +265,33 @@ jobs:
     # A user-visible change must carry a changelog fragment, or its entry never
     # reaches the release notes (issues #546, #462). Test-only changes are exempt
     # automatically; apply the 'no-changelog' label for genuine no-op PRs.
+    #
+    # Labels are read LIVE rather than from the event payload: `gh pr create
+    # --label` applies labels in a follow-up API call, so the payload of the
+    # 'opened' event this job runs from can still show none, failing a PR that
+    # was correctly labelled a second later (issue #580). By the time this step
+    # runs the label is there. A label added LATER still needs a re-run, but
+    # "Re-run failed jobs" now picks it up instead of needing an empty push.
+    # `gh pr view` needs only read access, and works for fork PRs.
     - name: Require a changelog fragment
       if: github.event_name == 'pull_request'
       run: |
+        # Without pipefail the pipeline below reports `paste`'s status, so an
+        # auth or API failure from `gh` would read as "this PR has no labels"
+        # and fail the PR for the wrong reason. An unlabelled PR still yields
+        # an empty string, which is a legitimate answer.
+        set -o pipefail
         CHANGED_FILES="$(git diff --name-only \
           "origin/${{ github.base_ref }}...${{ github.event.pull_request.head.sha }}")"
         export CHANGED_FILES
+        PR_LABELS="$(gh pr view "${{ github.event.pull_request.number }}" \
+          --repo "${{ github.repository }}" --json labels -q '.labels[].name' | paste -sd, -)" \
+          || { echo "::error::Could not read the PR's labels; refusing to guess."; exit 1; }
+        export PR_LABELS
+        echo "Labels read live: ${PR_LABELS:-<none>}"
         node scripts/changelog-fragments.mjs --ci
       env:
-        PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        GH_TOKEN: ${{ github.token }}
 
   # Separate job for container tests on Linux only
   container-tests:
