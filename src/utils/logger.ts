@@ -7,6 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { SafeFileTransport } from './safe-file-transport.js';
+import { isContainerRuntime } from './container-path-utils.js';
 
 /**
  * Logger configuration options.
@@ -189,10 +190,10 @@ export function createLogger(namespace: string, options: LoggerOptions = {}): Wi
 
   // In container runtime, centralize logs under /app/logs for easier collection.
   // Single process per container, so the fixed (non-pid) name is safe there.
-  if (process.env.MCP_CONTAINER === 'true') {
+  if (isContainerRuntime()) {
     projectRootDefaultLogPath = '/app/logs/debug-mcp-server.log';
   }
-  const usingDefaultHostPath = !options.file && process.env.MCP_CONTAINER !== 'true';
+  const usingDefaultHostPath = !options.file && !isContainerRuntime();
   const logFilePath = options.file || projectRootDefaultLogPath;
 
   try {

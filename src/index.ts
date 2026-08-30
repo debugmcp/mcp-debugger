@@ -53,6 +53,7 @@ import {
 import { handleStdioCommand } from './cli/stdio-command.js';
 import { handleCheckRustBinaryCommand } from './cli/commands/check-rust-binary.js';
 import { getVersion } from './cli/version.js';
+import { isContainerRuntime } from './utils/container-path-utils.js';
 import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
@@ -73,7 +74,7 @@ export function createDebugMcpServer(options: ServerOptions): DebugMcpServer {
  */
 try {
   // In containers, always emit an early breadcrumb so we can diagnose startup before logger/CLI
-  if (process.env.MCP_CONTAINER === 'true') {
+  if (isContainerRuntime()) {
     const logDir = '/app/logs';
     try {
       fs.mkdirSync(logDir, { recursive: true });

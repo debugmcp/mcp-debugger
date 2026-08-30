@@ -12,7 +12,12 @@
 import { IEnvironment } from '@debugmcp/shared';
 
 /**
- * Check if the application is running in container mode
+ * Check if the application is running in container mode.
+ *
+ * The injected-environment form, and the one to reach for whenever the caller
+ * already holds an IEnvironment: it reads whatever that environment was
+ * constructed with, so a test can hand it a fixed map instead of mutating the
+ * process. See isContainerRuntime for the callers that have no IEnvironment.
  */
 export function isContainerMode(environment: IEnvironment): boolean {
   return environment.get('MCP_CONTAINER') === 'true';
@@ -21,11 +26,19 @@ export function isContainerMode(environment: IEnvironment): boolean {
 /**
  * The same check without an IEnvironment, read live from process.env.
  *
- * Production never changes MCP_CONTAINER after start, so this and
- * isContainerMode always agree there; the difference matters only to tests,
- * which stub the variable after a ProcessEnvironment (which snapshots
- * process.env at construction) already exists. Callers that hold an
- * IEnvironment should prefer isContainerMode.
+ * For the layers that run before or beneath dependency injection — the CLI
+ * entry point, the logger, the container factory itself — where there is no
+ * IEnvironment to consult. Production never changes MCP_CONTAINER after
+ * start, so this and isContainerMode always agree there; the difference
+ * matters only to tests, which stub the variable after a ProcessEnvironment
+ * (which snapshots process.env at construction) already exists. Callers that
+ * hold an IEnvironment should prefer isContainerMode.
+ *
+ * Neither form fits a caller that was handed some *other* environment-shaped
+ * object (the injected ProcessLike in cli/stdio-command.ts, the plain env
+ * record in proxy/utils/orphan-check.ts) or that needs the raw value rather
+ * than the boolean (the near-miss warning in the doctor's platform checks);
+ * those read the variable directly on purpose.
  */
 export function isContainerRuntime(): boolean {
   return process.env.MCP_CONTAINER === 'true';
