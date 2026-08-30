@@ -269,12 +269,6 @@ export class BreakpointController {
   }
 
   /**
-   * Re-send the session's FULL function-breakpoint set to the adapter (DAP
-   * setFunctionBreakpoints is replace-all for the whole session, not per
-   * file). Same live-session guard and never-throws contract as
-   * syncBreakpointsForFile.
-   */
-  /**
    * Re-send every stored breakpoint at the live debuggee: the line
    * breakpoints file by file (replace-all per file), then the function
    * breakpoints (replace-all per session). This is the belt-and-braces
@@ -301,6 +295,12 @@ export class BreakpointController {
     }
   }
 
+  /**
+   * Re-send the session's FULL function-breakpoint set to the adapter (DAP
+   * setFunctionBreakpoints is replace-all for the whole session, not per
+   * file). Same live-session guard and never-throws contract as
+   * syncBreakpointsForFile.
+   */
   async syncFunctionBreakpoints(session: ManagedSession): Promise<BreakpointSyncOutcome> {
     const sessionId = session.id;
     if (
