@@ -15,6 +15,12 @@ import {
   type ToolResult
 } from '../tool-result.js';
 
+/** The states that mean the step outlived its session (issue #574). */
+const SESSION_OVER: ReadonlySet<SessionState> = new Set([
+  SessionState.STOPPED,
+  SessionState.ERROR
+]);
+
 export const stepTool: ToolHandler = async (ctx, args, toolName) => {
   requireSessionId(args);
 
@@ -44,12 +50,15 @@ export const stepTool: ToolHandler = async (ctx, args, toolName) => {
       if (resultData.message) {
         response.message = resultData.message;
       }
-    } else if (stepResult.state === SessionState.STOPPED && resultData?.message) {
+    } else if (SESSION_OVER.has(stepResult.state) && resultData?.message) {
       // A step the debuggee did not survive completes with "Step completed as
       // session terminated./exited." and no `pending` marker. Gated on the
-      // terminal state rather than a blanket `??` so the ordinary stop keeps
+      // terminal states rather than a blanket `??` so the ordinary stop keeps
       // its "Stepped over" wording — but leaving it hard-coded here made
-      // `state` the only clue that the program is gone (issue #574).
+      // `state` the only clue that the program is gone (issue #574). ERROR
+      // belongs here as much as STOPPED: the core maps an unexpected adapter
+      // exit (non-zero, or no code at all) to ERROR, so a step that died with
+      // the proxy lands there rather than in STOPPED.
       response.message = resultData.message;
     }
 

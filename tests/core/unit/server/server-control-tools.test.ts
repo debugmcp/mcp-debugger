@@ -618,10 +618,16 @@ describe('Server Control Tools Tests', () => {
     });
 
     it.each([
-      ['step_over', 'stepOver'],
-      ['step_into', 'stepInto'],
-      ['step_out', 'stepOut']
-    ])('surfaces the controller message when %s ended the session (issue #574)', async (toolName, methodName) => {
+      { toolName: 'step_over', methodName: 'stepOver', state: 'stopped' },
+      { toolName: 'step_into', methodName: 'stepInto', state: 'stopped' },
+      { toolName: 'step_out', methodName: 'stepOut', state: 'stopped' },
+      // ERROR, not STOPPED, is where the core puts an unexpected adapter exit
+      // (non-zero code, or none at all) — so a step that died with the proxy
+      // lands here, and the gate has to cover it too.
+      { toolName: 'step_over', methodName: 'stepOver', state: 'error' },
+      { toolName: 'step_into', methodName: 'stepInto', state: 'error' },
+      { toolName: 'step_out', methodName: 'stepOut', state: 'error' }
+    ])('surfaces the controller message when $toolName ended the session in $state (issue #574)', async ({ toolName, methodName, state }) => {
       // A step the debuggee did not survive settles with 'Step completed as
       // session terminated.' and no `pending` marker. The hard-coded
       // "Stepped over" used to overwrite it, leaving `state` the only clue.
@@ -631,7 +637,7 @@ describe('Server Control Tools Tests', () => {
       });
       mockSessionManager[methodName].mockResolvedValue({
         success: true,
-        state: 'stopped',
+        state,
         data: { message: 'Step completed as session terminated.' }
       });
 

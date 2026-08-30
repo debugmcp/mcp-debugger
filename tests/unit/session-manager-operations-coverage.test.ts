@@ -1618,6 +1618,97 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(mockSessionStore.updateState).toHaveBeenCalledWith(session.id, SessionState.RUNNING);
     });
 
+    it('reports a step whose session ended during the stack read as ended (issue #574)', async () => {
+      // The ending did not reach these listeners — the core tore them down,
+      // or mapped an unexpected exit straight to ERROR. Ended-at-settle still
+      // has to notice, or the caller is told 'Step completed.' about a
+      // session that is over, with a location read from nothing.
+      vi.useFakeTimers();
+      try {
+        const handlers: Record<string, Function> = {};
+        const proxyStub: any = {
+          on: vi.fn((event: string, handler: Function) => {
+            handlers[event] = handler;
+            return proxyStub;
+          }),
+          off: vi.fn(() => proxyStub),
+          sendDapRequest: vi.fn().mockResolvedValue(undefined),
+        };
+        const session = { ...mockSession, proxyManager: proxyStub, state: SessionState.PAUSED } as any;
+
+        let releaseStack: (frames: unknown[]) => void = () => {};
+        const stackRead = new Promise<unknown[]>(resolve => { releaseStack = resolve; });
+        vi.spyOn(operations, 'getStackTrace').mockReturnValue(stackRead as never);
+
+        const promise = internals(operations).execution.executeStep(session, session.id, {
+          command: 'next',
+          threadId: 1,
+          logTag: 'stepOver',
+          successMessage: 'Step completed.',
+        });
+
+        handlers['stopped']?.();
+        await vi.advanceTimersByTimeAsync(10);  // into the held stack read
+        session.state = SessionState.STOPPED;   // the core, with no event left to deliver
+        releaseStack([{ file: '/app/main.py', line: 42, column: 5 }]);
+
+        const result = await promise;
+
+        expect(result.success).toBe(true);
+        expect(result.state).toBe(SessionState.STOPPED);
+        expect(result.data?.message)
+          .toBe('Step completed; the session ended before the stack could be read');
+        expect(result.data?.location).toBeUndefined();
+        expect(result.data?.pending).toBeUndefined();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not fail a step whose request dies with the proxy after the stop (issue #574)', async () => {
+      // The step landed; the proxy died before answering the request. Failing
+      // the call would deny a step that demonstrably happened.
+      vi.useFakeTimers();
+      try {
+        const handlers: Record<string, Function> = {};
+        let rejectStep: (error: Error) => void = () => {};
+        const proxyStub: any = {
+          on: vi.fn((event: string, handler: Function) => {
+            handlers[event] = handler;
+            return proxyStub;
+          }),
+          off: vi.fn(() => proxyStub),
+          sendDapRequest: vi.fn(() => new Promise((_resolve, reject) => { rejectStep = reject; })),
+        };
+        const session = { ...mockSession, proxyManager: proxyStub, state: SessionState.PAUSED } as any;
+
+        let releaseStack: (frames: unknown[]) => void = () => {};
+        const stackRead = new Promise<unknown[]>(resolve => { releaseStack = resolve; });
+        vi.spyOn(operations, 'getStackTrace').mockReturnValue(stackRead as never);
+
+        const promise = internals(operations).execution.executeStep(session, session.id, {
+          command: 'next',
+          threadId: 1,
+          logTag: 'stepOver',
+          successMessage: 'Step completed.',
+        });
+
+        handlers['stopped']?.();
+        await vi.advanceTimersByTimeAsync(10);
+        rejectStep(new Error('Proxy exited'));
+        await vi.advanceTimersByTimeAsync(0);
+        releaseStack([{ file: '/app/main.py', line: 42, column: 5 }]);
+
+        const result = await promise;
+
+        expect(result.success).toBe(true);
+        expect(result.data?.message).toBe('Step completed.');
+        expect(result.data?.location).toEqual({ file: '/app/main.py', line: 42, column: 5 });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('does not report a pending step when the stop arrived and the stack read is still in flight (issue #574)', async () => {
       // The stop landed inside the grace window but waitForReadyStack is still
       // polling when the 5s timer fires. Without the stopSeen guard the timer
@@ -3594,10 +3685,12 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockSession.state = SessionState.RUNNING;
       mockProxyManager.sendDapRequest.mockImplementation((command: string) => {
         if (command === 'threads') {
-          // handleStopped has already run and cleared the flag by the time the
-          // discovery request resolves; arming it afterwards stranded it true.
+          // The stop lands and STAYS: handleStopped has already run and
+          // cleared the flag by the time discovery resolves. The flag is
+          // armed after discovery and only for a still-RUNNING session, so
+          // nothing re-arms it here. (The mock deliberately does not clear
+          // the flag itself — that would hide a regression.)
           mockSession.state = SessionState.PAUSED;
-          mockSession.pausePending = false;
           return Promise.resolve({ body: { threads: [{ id: 3, name: 'Main' }] } });
         }
         return Promise.resolve({});
@@ -3606,6 +3699,37 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       await operations.pause('test-session');
 
       expect(mockSession.pausePending).toBe(false);
+    });
+
+    it('arms pausePending for a stop that auto-continued during thread discovery (issue #574)', async () => {
+      // The other half of the rule. A js-debug entry stop with pre-launch
+      // function breakpoints is auto-continued, so the session is RUNNING
+      // again by the time discovery resolves — and handleStopped cleared the
+      // flag on the way past. Arming before discovery meant THIS pause's own
+      // stop was normalized without the flag, i.e. reported as 'step'.
+      mockSession.state = SessionState.RUNNING;
+      let armedWhenPauseSent: boolean | undefined;
+      mockProxyManager.sendDapRequest.mockImplementation((command: string) => {
+        if (command === 'threads') {
+          mockSession.state = SessionState.PAUSED;   // the entry stop lands
+          mockSession.pausePending = false;          // handleStopped clears it
+          mockSession.state = SessionState.RUNNING;  // auto-continued
+          return Promise.resolve({ body: { threads: [{ id: 3, name: 'Main' }] } });
+        }
+        if (command === 'pause') {
+          armedWhenPauseSent = mockSession.pausePending;
+        }
+        return Promise.resolve({});
+      });
+
+      const promise = operations.pause('test-session');
+      await vi.waitFor(() => {
+        expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('pause', { threadId: 3 });
+      });
+      emitStopped();
+      await promise;
+
+      expect(armedWhenPauseSent).toBe(true);
     });
 
     it('reports the same stopReason and location from the race branch as from the event path (issue #574)', async () => {
@@ -3684,30 +3808,112 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       }
     });
 
-    it('lets the race branch outrank a terminate that arrives during its stack read (issue #574)', async () => {
-      // Same window, different claimant: "Session ended before pause took
-      // effect" is false for a pause that demonstrably took effect, so the
-      // path holding the settle keeps it.
+    it('reports a terminate during the stack read as ended, not as a plain Paused (issue #574)', async () => {
+      // Same window, different claimant. "Session ended before pause took
+      // effect" is false for a pause that demonstrably took effect — but so
+      // is a bare 'Paused', because by settle time the session is STOPPED and
+      // there is no stack left to have read. Ended-at-settle says both.
       vi.useFakeTimers();
       try {
         const { release } = holdOpenRaceBranchStackRead();
 
         const promise = operations.pause('test-session');
         await vi.advanceTimersByTimeAsync(10);   // into the held stack read
+        // Exactly what the core does on 'terminated': terminal state first,
+        // then the handle is dropped.
+        mockSession.state = SessionState.STOPPED;
+        mockSession.proxyManager = null;
         emit('terminated');
         await vi.advanceTimersByTimeAsync(5000);
         release();
 
-        expectRaceBranchResult(await promise);
+        const result = await promise;
+
+        expect(result.success).toBe(true);
+        expect(result.state).toBe(SessionState.STOPPED);
+        expect(result.data?.message).toBe('Paused; the session ended before the stack could be read');
+        expect(result.data?.stopReason).toBe('pause');
+        expect(result.data?.rawStopReason).toBe('exception');
+        expect(result.data?.location).toBeUndefined();
+        expect(result.data?.pending).toBeUndefined();
       } finally {
         vi.useRealTimers();
       }
     });
 
-    it('fails with ProxyNotRunningError when the session terminates during thread discovery (issue #574)', async () => {
+    it('does not reject a pause whose request dies with the proxy after the stop (issue #574)', async () => {
+      // ProxyManager.handleProxyExit rejects the in-flight pause and emits
+      // 'exit'. onEnded stands down for the stop path, so the rejection used
+      // to be the only claimant left and surfaced as
+      // "Failed to pause execution: Proxy exited" for a pause that worked.
+      vi.useFakeTimers();
+      try {
+        mockSession.state = SessionState.RUNNING;
+        let rejectPause: (error: Error) => void = () => {};
+        mockProxyManager.sendDapRequest.mockImplementation((command: string) => {
+          if (command === 'pause') {
+            return new Promise((_resolve, reject) => { rejectPause = reject; });
+          }
+          return Promise.resolve({ body: { threads: [{ id: 1, name: 'Main' }] } });
+        });
+        let releaseStack: (frames: unknown[]) => void = () => {};
+        const stackRead = new Promise<unknown[]>(resolve => { releaseStack = resolve; });
+        vi.spyOn(operations, 'getStackTrace').mockReturnValue(stackRead as never);
+
+        const promise = operations.pause('test-session', 1);
+        await vi.advanceTimersByTimeAsync(0);
+        mockSession.lastStop = { reason: 'pause', threadId: 1, timestamp: Date.now() };
+        emitStopped();
+        await vi.advanceTimersByTimeAsync(10);   // into the held stack read
+
+        // The proxy dies: an unexpected exit maps to ERROR, the pending
+        // request rejects, and 'exit' is emitted.
+        mockSession.state = SessionState.ERROR;
+        rejectPause(new Error('Proxy exited'));
+        emit('exit');
+        await vi.advanceTimersByTimeAsync(0);
+        releaseStack([{ file: '/app/main.py', line: 3, column: 1 }]);
+
+        const result = await promise;
+
+        expect(result.success).toBe(true);
+        expect(result.state).toBe(SessionState.ERROR);
+        expect(result.data?.message).toBe('Paused; the session ended before the stack could be read');
+        expect(result.data?.stopReason).toBe('pause');
+        expect(result.data?.location).toBeUndefined();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('fails with SessionTerminatedError when the session terminates during thread discovery (issue #574)', async () => {
       mockSession.state = SessionState.RUNNING;
-      // The core clears session.proxyManager on terminate/exit/close. Reading
-      // the stale handle from before the await registered listeners on null.
+      // What the core actually does on terminate/exit/close: STOPPED, which
+      // mapLegacyState turns into lifecycle TERMINATED, and the handle is
+      // dropped. The pre-flight check calls that SessionTerminatedError, so
+      // the post-await re-check must not rename it to a proxy problem.
+      mockProxyManager.sendDapRequest.mockImplementation((command: string) => {
+        if (command === 'threads') {
+          mockSession.state = SessionState.STOPPED;
+          mockSession.sessionLifecycle = SessionLifecycleState.TERMINATED;
+          mockSession.proxyManager = null;
+          return Promise.resolve({ body: { threads: [{ id: 3, name: 'Main' }] } });
+        }
+        return Promise.resolve({});
+      });
+
+      await expect(operations.pause('test-session'))
+        .rejects.toBeInstanceOf(SessionTerminatedError);
+      // Never armed: the flag is set after these checks, and normalization
+      // reads it as `=== true`.
+      expect(mockSession.pausePending).not.toBe(true);
+    });
+
+    it('fails with ProxyNotRunningError when only the proxy handle is cleared during discovery (issue #574)', async () => {
+      mockSession.state = SessionState.RUNNING;
+      // A session-preserving proxy stop: the handle goes, the lifecycle does
+      // not. Reading the stale handle from before the await used to register
+      // listeners on null and throw a TypeError.
       mockProxyManager.sendDapRequest.mockImplementation((command: string) => {
         if (command === 'threads') {
           mockSession.proxyManager = null;
@@ -3718,7 +3924,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       await expect(operations.pause('test-session'))
         .rejects.toBeInstanceOf(ProxyNotRunningError);
-      expect(mockSession.pausePending).toBe(false);
+      expect(mockSession.pausePending).not.toBe(true);
     });
 
     it('reports a pending pause when no stopped event arrives within the grace window', async () => {
