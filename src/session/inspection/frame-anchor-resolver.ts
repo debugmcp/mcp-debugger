@@ -84,7 +84,7 @@ export class FrameAnchorResolver {
 
     const effectiveThreadId = threadId ?? currentThreadId;
     if (typeof effectiveThreadId !== 'number') {
-      this.ctx.logger.warn(`[FrameAnchor ${sessionId}] No effective thread ID.`);
+      this.ctx.logger.warn(`[FrameAnchor ${sessionId}] No effective thread ID to use.`);
       return emptyResult('No stopped thread is known for this session.');
     }
 
@@ -140,7 +140,7 @@ export class FrameAnchorResolver {
         ...(note ? { note } : {})
       };
     } catch (error) {
-      this.ctx.logger.error(`[FrameAnchor ${sessionId}] Error resolving stack:`, error);
+      this.ctx.logger.error(`[FrameAnchor ${sessionId}] Error getting stack trace:`, error);
       throw error instanceof Error ? error : new Error(String(error));
     }
   }
@@ -159,6 +159,10 @@ export class FrameAnchorResolver {
       throw new Error(response.message || `DAP 'stackTrace' request failed`);
     }
     if (!response?.body?.stackFrames) {
+      this.ctx.logger.warn(
+        `[FrameAnchor ${sessionId}] No stackFrames in response body. Response:`,
+        response
+      );
       throw new Error(`DAP 'stackTrace' response did not include stack frames`);
     }
     return response.body.stackFrames;

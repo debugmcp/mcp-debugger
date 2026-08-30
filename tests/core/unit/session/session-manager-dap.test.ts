@@ -1186,6 +1186,43 @@ describe('SessionManager - DAP Operations', () => {
       expect(result.anchorNote).toMatch(/'main'/);
     });
 
+    it('logs an expected failed scope probe at debug while walking to a usable frame (#599)', async () => {
+      const session = await createPausedSession(sessionManager, dependencies);
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(
+        async (command: string, args?: { frameId?: number; variablesReference?: number }) => {
+          if (command === 'stackTrace') {
+            return { success: true, body: { stackFrames: [
+              { id: 1, name: 'runtime wait', source: undefined, line: 0, column: 0 },
+              { id: 2, name: 'main', source: { path: '/work/main.cpp' }, line: 12, column: 1 }
+            ] } };
+          }
+          if (command === 'scopes') {
+            if (args?.frameId === 1) throw new Error('frame has no inspectable scopes');
+            return { success: true, body: { scopes: [
+              { name: 'Local', variablesReference: 200, expensive: false }
+            ] } };
+          }
+          if (command === 'variables') {
+            return { success: true, body: { variables: [
+              { name: 'counter', value: '3', type: 'int', variablesReference: 0 }
+            ] } };
+          }
+          return { success: true, body: {} };
+        }
+      );
+
+      const result = await sessionManager.getLocalVariables(session.id);
+
+      expect(result.variables).toEqual([expect.objectContaining({ name: 'counter' })]);
+      expect(dependencies.mockLogger.debug).toHaveBeenCalledWith(
+        expect.stringContaining('Frame 1 did not provide scopes: frame has no inspectable scopes')
+      );
+      expect(dependencies.mockLogger.error).not.toHaveBeenCalledWith(
+        expect.stringContaining('Error getting scopes'),
+        expect.anything()
+      );
+    });
+
     it('uses a useful sibling JS scope before walking down frames (issue #548)', async () => {
       const session = await createPausedSession(sessionManager, dependencies);
       (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
