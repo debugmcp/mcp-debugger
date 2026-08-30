@@ -155,9 +155,6 @@ export type AttachContext = Pick<
   | 'tunables'
 >;
 
-/** Anchor re-resolution reads the file from disk and narrates what moved. */
-export type AnchorContext = Pick<OperationsContext, 'logger' | 'fileSystem'>;
-
 /** Breakpoint tooling: the store, the wire, and both policy sources. */
 export type BreakpointContext = Pick<
   OperationsContext,
