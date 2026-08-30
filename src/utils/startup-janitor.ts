@@ -21,6 +21,7 @@
 import * as fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { isSessionRunDirectoryName } from '../proxy/session-log-layout.js';
 import { scanProcessArgs, type ProcessScanOptions, type ScannedProcess } from './process-scan.js';
 import { reapOrphanJvms, parseArgs, type ReapResult as JvmReapResult, type ReapOptions as JvmReapOptions } from './jvm-orphan-reaper.js';
 import { reapOrphanProxies, parseProxyArgs, parseJsDebugAdapterArgs, type ReapResult as ProxyReapResult, type ReapOptions as ProxyReapOptions } from './proxy-orphan-reaper.js';
@@ -165,7 +166,7 @@ export async function sweepStaleSessionRuns(opts: SweepOptions = {}): Promise<Sw
       continue; // not a directory, or vanished
     }
     for (const runName of runNames) {
-      if (!runName.startsWith('run-')) continue;
+      if (!isSessionRunDirectoryName(runName)) continue;
       const runPath = path.join(sessionPath, runName);
       try {
         const stat = await fsp.stat(runPath);

@@ -26,7 +26,7 @@ import {
 import type { IDapMirrorServer, MirrorEndpoint } from './dap-mirror-server.js';
 import { CallbackRequestTracker } from './dap-proxy-request-tracker.js';
 import { GenericAdapterManager, AdapterStdioSource } from './dap-proxy-adapter-manager.js';
-import { proxyLogPathFor } from './proxy-log-path.js';
+import { dapTracePathFor, proxyLogPathFor } from './session-log-layout.js';
 import { DapConnectionManager } from './dap-proxy-connection-manager.js';
 import { 
   validateProxyInitPayload
@@ -178,7 +178,7 @@ export class DapProxyWorker {
       if (flag !== '1' && flag !== 'true') {
         return undefined;
       }
-      const tracePath = path.join(logDir, `dap-trace-${sessionId}.ndjson`);
+      const tracePath = dapTracePathFor(logDir, sessionId);
       process.env.DAP_TRACE_FILE = tracePath;
       return tracePath;
     });

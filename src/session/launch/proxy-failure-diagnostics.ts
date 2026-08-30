@@ -21,7 +21,7 @@ import type { ManagedSession } from '../session-store.js';
 import type { IFileSystem, ILogger } from '../../interfaces/external-dependencies.js';
 import type { ProxyInitProgress } from '../../utils/error-messages.js';
 import { getErrorMessage, SessionNotFoundError } from '../../errors/debug-errors.js';
-import { proxyLogPathFor } from '../../proxy/proxy-log-path.js';
+import { proxyLogPathFor } from '../../proxy/session-log-layout.js';
 
 /** How many trailing proxy-log lines are worth reading after a failure. */
 const PROXY_LOG_TAIL_LINES = 80;
