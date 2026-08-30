@@ -90,7 +90,9 @@ describe('SessionManager - proxy exit mapping (issue #258)', () => {
 
     dependencies.mockProxyManager.simulateEvent('exit', 134, undefined, false);
 
-    expect(sessionManager.getSession(sessionId)?.state).toBe(SessionState.ERROR);
+    const session = sessionManager.getSession(sessionId);
+    expect(session?.state).toBe(SessionState.ERROR);
+    expect(session?.lastProxyExit).toEqual({ code: 134, signal: undefined, expected: false });
   });
 
   it('keeps the legacy mapping when expected is absent: clean proxy exit → STOPPED', async () => {

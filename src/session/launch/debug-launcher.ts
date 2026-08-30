@@ -164,6 +164,11 @@ export class DebugLauncher {
       sessionLifecycle: SessionLifecycleState.ACTIVE,
       attachMode: false,
     });
+    // Per-attempt terminal evidence. A prior program/proxy exit must not
+    // influence whether this launch is reported as successful.
+    session.exitCode = undefined;
+    session.lastProxyExit = undefined;
+    session.lastProxyError = undefined;
     this.ctx.logger.info(`[SessionManager] Session ${sessionId} lifecycle state set to ACTIVE`);
 
     // Record the launch spec for restart_debugging BEFORE attempting the
@@ -367,6 +372,33 @@ export class DebugLauncher {
       // Re-fetch session to get the most up-to-date state
       const finalSession = this.ctx.getSession(sessionId);
       const finalState = finalSession.state;
+
+      // Readiness resolves on terminal events as well as a usable debugger.
+      // Do not turn an adapter/proxy crash into a successful start merely
+      // because the wait completed. STOPPED remains a truthful success for a
+      // program that ran to completion; infrastructure failures map to ERROR.
+      if (finalState === SessionState.ERROR) {
+        const proxyExit = finalSession.lastProxyExit;
+        const exitDescription = proxyExit
+          ? `code=${proxyExit.code ?? 'null'}${proxyExit.signal ? `, signal=${proxyExit.signal}` : ''}`
+          : undefined;
+        const errorMessage = finalSession.lastProxyError ??
+          (exitDescription
+            ? `Debug proxy exited unexpectedly during launch (${exitDescription})`
+            : 'Debug proxy entered an error state during launch');
+        const diagnosticData = await failProxySetup(
+          this.ctx,
+          finalSession,
+          new Error(errorMessage),
+          'startDebugging'
+        );
+        return {
+          success: false,
+          state: SessionState.ERROR,
+          error: errorMessage,
+          ...(Object.keys(diagnosticData).length > 0 ? { data: diagnosticData } : {})
+        };
+      }
 
       // Belt-and-braces re-sync (issues #236/#439, function breakpoints
       // #271 phase 3): the store is normally already stamped by the worker's

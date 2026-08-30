@@ -1031,6 +1031,7 @@ export abstract class SessionManagerCore extends EventEmitter {
     const handleError = (error: Error) => {
       this.logger.debug(`[SessionManager] 'error' event handler called for session ${sessionId}`);
       this.logger.error(`[ProxyManager ${sessionId}] Error:`, error);
+      session.lastProxyError = error.message;
       this._updateSessionState(session, SessionState.ERROR);
 
       // Clean up listeners since proxy is in error state
@@ -1053,6 +1054,7 @@ export abstract class SessionManagerCore extends EventEmitter {
     const handleExit = (code: number | null, signal?: string, expected?: boolean) => {
       this.logger.debug(`[SessionManager] handleExit: session=${sessionId} currentState=${session.state} code=${code} signal=${signal} expected=${expected}`);
       this.logger.info(`[ProxyManager ${sessionId}] Exit: code=${code}, signal=${signal}, expected=${expected}`);
+      session.lastProxyExit = { code, signal, expected };
       if (session.state !== SessionState.STOPPED && session.state !== SessionState.ERROR) {
         if (expected === true) {
           // Orderly debuggee termination (issue #258): the worker saw a

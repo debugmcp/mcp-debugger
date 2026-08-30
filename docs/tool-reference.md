@@ -1187,6 +1187,8 @@ Session-lifecycle failures (unknown/terminated session, proxy not running) are a
 3. **File not found**: When setting breakpoints in non-existent files
 4. **Invalid scope**: When passing wrong variablesReference to get_variables
 
+`start_debugging` reports `success: false` when the proxy or adapter enters an `error` state during readiness and includes available proxy-log diagnostics. A program that exits cleanly before the debugger pauses is still a successful result with `state: "stopped"`.
+
 ---
 
 ## Best Practices
