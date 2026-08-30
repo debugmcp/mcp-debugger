@@ -7,7 +7,7 @@ import {
   readLineContext,
   redactionSummary,
   variablePayloadExtras,
-  attachWarning
+  successWarning
 } from '../../../../../src/server/handlers/shared.js';
 import { createMockToolContext } from '../server-test-helpers.js';
 
@@ -68,15 +68,15 @@ describe('redactionSummary', () => {
   });
 });
 
-describe('attachWarning', () => {
+describe('successWarning', () => {
   it('reports the data warning of a successful attach', () => {
-    expect(attachWarning({ success: true, data: { warning: 'dropped foo' } })).toBe('dropped foo');
+    expect(successWarning({ success: true, data: { warning: 'dropped foo' } })).toBe('dropped foo');
   });
 
   it('stays silent on failure, and when there is no data or no warning', () => {
-    expect(attachWarning({ success: false, data: { warning: 'dropped foo' } })).toBeUndefined();
-    expect(attachWarning({ success: true })).toBeUndefined();
-    expect(attachWarning({ success: true, data: {} })).toBeUndefined();
+    expect(successWarning({ success: false, data: { warning: 'dropped foo' } })).toBeUndefined();
+    expect(successWarning({ success: true })).toBeUndefined();
+    expect(successWarning({ success: true, data: {} })).toBeUndefined();
   });
 });
 

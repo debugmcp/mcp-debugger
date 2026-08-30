@@ -88,12 +88,18 @@ export function variablePayloadExtras(
 }
 
 /**
- * The attach warning (dropped adapterConfig keys, issue #450) both attach
- * entry points lift to the top level of their response — reported only for a
- * successful attach, where it is advisory rather than the failure itself.
+ * The advisory warning an operation's result carries, lifted to the top level
+ * of the tool response — reported only on success, where it is advice rather
+ * than the failure itself. On a failure the error is the message, and echoing
+ * a warning beside it just competes with it.
+ *
+ * Shared by the two attach entry points (dropped adapterConfig keys, issue
+ * #450) and by restart_debugging (stale anchors and unbound function
+ * breakpoints), which is why it is named for the rule it applies rather than
+ * for the first caller that needed it.
  */
-export function attachWarning(
-  attachResult: Pick<DebugResult, 'success' | 'data'>
+export function successWarning(
+  result: Pick<DebugResult, 'success' | 'data'>
 ): string | undefined {
-  return attachResult.success ? attachResult.data?.warning : undefined;
+  return result.success ? result.data?.warning : undefined;
 }

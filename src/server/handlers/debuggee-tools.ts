@@ -4,7 +4,7 @@
  */
 import { ErrorCode as McpErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { ToolHandler } from '../tool-context.js';
-import { attachWarning } from './shared.js';
+import { successWarning } from './shared.js';
 import {
   assertPlainObjectArg,
   normalizeStartDebuggingArgs,
@@ -79,8 +79,8 @@ export const restartDebuggingTool: ToolHandler = async (ctx, args) => {
       // Surface the merged restart warning (stale anchors and/or
       // unbound function breakpoints) at the top level too —
       // same discoverability as set_breakpoint/start_debugging.
-      const restartWarning = debugResult.data.warning;
-      if (debugResult.success && restartWarning) {
+      const restartWarning = successWarning(debugResult);
+      if (restartWarning) {
         responsePayload.warning = restartWarning;
       }
     }
@@ -129,7 +129,7 @@ export const attachToProcessTool: ToolHandler = async (ctx, args) => {
       // Surface the dropped-adapterConfig-keys warning (issue
       // #450) at the top level too — same discoverability as
       // set_breakpoint/start_debugging/restart_debugging.
-      const warning = attachWarning(attachResult);
+      const warning = successWarning(attachResult);
       if (warning) {
         responsePayload.warning = warning;
       }
