@@ -19,6 +19,7 @@ import type { DebugProtocol } from '@vscode/debugprotocol';
 import {
   DebugLanguage,
   DefaultAdapterPolicy,
+  emptyLocalVariableExtraction,
   getPolicyForLanguage,
   resolveExceptionFilters,
   type AdapterPolicy,
@@ -158,8 +159,12 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
 
 const LANGUAGES = Object.values(DebugLanguage);
 
-/** What every policy must return when it cannot name a scope it read locals from. */
-const EMPTY_EXTRACTION: LocalVariableExtraction = { variables: [], scopeRefs: [] };
+/**
+ * What every policy must return when it cannot name a scope it read locals
+ * from. Taken from the shipped helper rather than restated here, so a change
+ * to the empty shape cannot pass this file while breaking its callers.
+ */
+const EMPTY_EXTRACTION: LocalVariableExtraction = emptyLocalVariableExtraction();
 
 /** `getLocalScopeName()` may return one name or several; callers treat both as a list. */
 function normaliseScopeNames(policy: AdapterPolicy): string[] {
@@ -412,14 +417,27 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
       expect(extract([anchor, caller])).toEqual(extract([anchor]));
     });
 
-    it('never hides a variable that includeSpecial:false already returned', () => {
+    it('only widens the names it returns when includeSpecial does not change the scope', () => {
       const plainResult = extract([anchor], false);
       const specialResult = extract([anchor], true);
 
-      for (const variable of plainResult.variables) {
-        expect(specialResult.variables).toContain(variable);
+      // `includeSpecial` governs which NAMES survive from the scopes a policy
+      // selects - not which scopes it selects. A policy may legitimately land
+      // on a different scope when its anchor scope is empty after filtering
+      // (js-debug falls through an all-`this` Local to Closure, issue #548),
+      // and then the two calls answer about different scopes and are not
+      // comparable. Where the selected scopes ARE the same, the special result
+      // has to be a superset.
+      if (specialResult.scopeRefs.join() === plainResult.scopeRefs.join()) {
+        for (const variable of plainResult.variables) {
+          expect(specialResult.variables).toContain(variable);
+        }
+        expect(specialResult.variables.length).toBeGreaterThanOrEqual(plainResult.variables.length);
+      } else {
+        // The escape hatch is only available to a policy that actually moved
+        // scope, never to one that just dropped variables on the floor.
+        expect(specialResult.scopeRefs.length).toBeGreaterThan(0);
       }
-      expect(specialResult.variables.length).toBeGreaterThanOrEqual(plainResult.variables.length);
     });
 
     it('reports no scope when the scope held no variables', () => {
