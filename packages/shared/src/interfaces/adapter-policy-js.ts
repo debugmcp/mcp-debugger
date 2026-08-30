@@ -6,8 +6,8 @@
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import * as path from 'path';
-import type { AdapterPolicy, AdapterSpecificState, CommandHandling, StopReasonContext } from './adapter-policy.js';
-import { resolveExceptionFilters } from './adapter-policy.js';
+import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction, StopReasonContext } from './adapter-policy.js';
+import { emptyLocalVariableExtraction, extractionFromScope, resolveExceptionFilters } from './adapter-policy.js';
 import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
 import { toSourceBreakpoint, type BreakpointFields } from '../utils/to-source-breakpoint.js';
@@ -137,17 +137,17 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
     scopes: Record<number, DebugProtocol.Scope[]>,
     variables: Record<number, Variable[]>,
     includeSpecial: boolean = false
-  ): Variable[] => {
+  ): LocalVariableExtraction => {
     // Get the top frame
     if (!stackFrames || stackFrames.length === 0) {
-      return [];
+      return emptyLocalVariableExtraction();
     }
     
     const topFrame = stackFrames[0];
     const frameScopes = scopes[topFrame.id];
     
     if (!frameScopes || frameScopes.length === 0) {
-      return [];
+      return emptyLocalVariableExtraction();
     }
     
     const variablesForScope = (scope: DebugProtocol.Scope): Variable[] => {
@@ -213,12 +213,12 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
       for (const scope of frameScopes.filter(matches)) {
         const scopeVariables = variablesForScope(scope);
         if (scopeVariables.length > 0) {
-          return scopeVariables;
+          return extractionFromScope(scope, scopeVariables);
         }
       }
     }
 
-    return [];
+    return emptyLocalVariableExtraction();
   },
   
   /**

@@ -185,7 +185,10 @@ describe('RubyAdapterPolicy hooks', () => {
     };
 
     const locals = RubyAdapterPolicy.extractLocalVariables!(frames, scopes, variables);
-    expect(locals).toEqual([{ name: 'counter', value: '3', type: 'Integer' }]);
+    expect(locals.variables).toEqual([{ name: 'counter', value: '3', type: 'Integer' }]);
+    // Only the local scope is reported — the Global scope on the same
+    // frame contributed nothing and must not be attributed.
+    expect(locals.scopeRefs).toEqual([7]);
   });
 
   it('filters rdbg pseudo-variables unless includeSpecial is requested (issue #549)', () => {
@@ -202,9 +205,9 @@ describe('RubyAdapterPolicy hooks', () => {
       ]
     };
 
-    expect(RubyAdapterPolicy.extractLocalVariables!(frames, scopes, variables))
+    expect(RubyAdapterPolicy.extractLocalVariables!(frames, scopes, variables).variables)
       .toEqual([{ name: 'counter', value: '3', type: 'Integer' }]);
-    expect(RubyAdapterPolicy.extractLocalVariables!(frames, scopes, variables, true))
+    expect(RubyAdapterPolicy.extractLocalVariables!(frames, scopes, variables, true).variables)
       .toEqual(variables[7]);
   });
 
@@ -225,7 +228,7 @@ describe('RubyAdapterPolicy hooks', () => {
 
     // The value the user stepped out (or was thrown) to see must not be
     // filtered away — and a %return-only frame must not count as empty.
-    expect(RubyAdapterPolicy.extractLocalVariables!(frames, scopes, variables))
+    expect(RubyAdapterPolicy.extractLocalVariables!(frames, scopes, variables).variables)
       .toEqual([variables[9][1], variables[9][2]]);
   });
 
@@ -322,14 +325,14 @@ describe('RubyAdapterPolicy behavior surface', () => {
   });
 
   it('returns empty locals when frames or scopes are missing', () => {
-    expect(RubyAdapterPolicy.extractLocalVariables!([], {}, {})).toEqual([]);
+    expect(RubyAdapterPolicy.extractLocalVariables!([], {}, {})).toEqual({ variables: [], scopeRefs: [] });
     const frames = [{ id: 1, name: 'f', file: 'a.rb', line: 1 }];
-    expect(RubyAdapterPolicy.extractLocalVariables!(frames, { 1: [] }, {})).toEqual([]);
+    expect(RubyAdapterPolicy.extractLocalVariables!(frames, { 1: [] }, {})).toEqual({ variables: [], scopeRefs: [] });
     expect(RubyAdapterPolicy.extractLocalVariables!(
       frames,
       { 1: [{ name: 'Global variables', variablesReference: 9, expensive: false }] },
       {}
-    )).toEqual([]);
+    )).toEqual({ variables: [], scopeRefs: [] });
   });
 });
 

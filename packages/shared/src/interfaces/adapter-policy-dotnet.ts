@@ -34,7 +34,8 @@
  * terminateDebuggee is always false when detaching from attached processes.
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import type { AdapterPolicy, AdapterSpecificState, CommandHandling, StopReasonContext } from './adapter-policy.js';
+import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction, StopReasonContext } from './adapter-policy.js';
+import { emptyLocalVariableExtraction, extractionFromScope } from './adapter-policy.js';
 import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
@@ -96,16 +97,16 @@ export const DotnetAdapterPolicy: AdapterPolicy = {
     scopes: Record<number, DebugProtocol.Scope[]>,
     variables: Record<number, Variable[]>,
     includeSpecial: boolean = false
-  ): Variable[] => {
+  ): LocalVariableExtraction => {
     if (!stackFrames || stackFrames.length === 0) {
-      return [];
+      return emptyLocalVariableExtraction();
     }
 
     const topFrame = stackFrames[0];
     const frameScopes = scopes[topFrame.id];
 
     if (!frameScopes || frameScopes.length === 0) {
-      return [];
+      return emptyLocalVariableExtraction();
     }
 
     // netcoredbg uses "Locals" for local variables scope
@@ -114,7 +115,7 @@ export const DotnetAdapterPolicy: AdapterPolicy = {
     );
 
     if (!localScope) {
-      return [];
+      return emptyLocalVariableExtraction();
     }
 
     let localVars = variables[localScope.variablesReference] || [];
@@ -142,7 +143,7 @@ export const DotnetAdapterPolicy: AdapterPolicy = {
       });
     }
 
-    return localVars;
+    return extractionFromScope(localScope, localVars);
   },
 
   /**

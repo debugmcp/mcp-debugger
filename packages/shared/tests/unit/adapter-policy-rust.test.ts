@@ -47,7 +47,8 @@ describe('RustAdapterPolicy', () => {
         ]
       };
       const filtered = RustAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
-      expect(filtered.map(v => v.name)).toEqual(['app']);
+      expect(filtered.variables.map(v => v.name)).toEqual(['app']);
+      expect(filtered.scopeRefs).toEqual([42]);
     });
 
     it('returns special variables when includeSpecial is true', () => {
@@ -61,7 +62,7 @@ describe('RustAdapterPolicy', () => {
         ]
       };
       const result = RustAdapterPolicy.extractLocalVariables!([frame], scopes, vars, true);
-      expect(result).toHaveLength(2);
+      expect(result.variables).toHaveLength(2);
     });
   });
 

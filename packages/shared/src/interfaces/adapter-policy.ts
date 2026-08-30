@@ -65,6 +65,50 @@ export interface StopReasonContext {
   functionBreakpointCount: number;
 }
 
+/**
+ * Result of AdapterPolicy.extractLocalVariables.
+ *
+ * `variables` is what the caller shows the user. `scopeRefs` names the
+ * `variablesReference` of every scope on the ANCHOR frame that contributed to
+ * it, in the order the variables appear — so the session layer can report the
+ * adapter's own scope name (e.g. Delve's `Locals (warning: optimized
+ * function)`) and attribute per-scope truncation without reconstructing the
+ * attribution from object identity.
+ *
+ * Refs, not names: the caller already holds the anchor frame's scope objects
+ * and needs the object, not a copy of its label. Plural, because a policy may
+ * legitimately merge sibling scopes (js-debug's `Block` + `Local`, issue
+ * #558). An empty `variables` list must carry an empty `scopeRefs`.
+ */
+export interface LocalVariableExtraction {
+  /** The extracted local variables, in presentation order. */
+  variables: Variable[];
+  /**
+   * `variablesReference` of every anchor-frame scope that contributed a
+   * variable, in the same order. Empty when `variables` is empty.
+   */
+  scopeRefs: number[];
+}
+
+/** The "no locals here" result: no variables, and therefore no scopes. */
+export function emptyLocalVariableExtraction(): LocalVariableExtraction {
+  return { variables: [], scopeRefs: [] };
+}
+
+/**
+ * Build an extraction from a single scope. Reports no scope ref when the
+ * variable list is empty, keeping the "empty implies no refs" invariant that
+ * lets the caller treat a ref list as "these scopes reached the response".
+ */
+export function extractionFromScope(
+  scope: DebugProtocol.Scope,
+  variables: Variable[]
+): LocalVariableExtraction {
+  return variables.length > 0
+    ? { variables, scopeRefs: [scope.variablesReference] }
+    : emptyLocalVariableExtraction();
+}
+
 export interface AdapterPolicy {
   /**
    * Identifying name for diagnostics (e.g., 'default', 'js-debug')
@@ -248,14 +292,15 @@ export interface AdapterPolicy {
    * @param scopes A map of frame IDs to their scopes
    * @param variables A map of scope references to their variables
    * @param includeSpecial Whether to include special/internal variables
-   * @returns The extracted local variables
+   * @returns The extracted local variables plus the anchor-frame scopes that
+   *   contributed them (see LocalVariableExtraction)
    */
   extractLocalVariables?(
     stackFrames: StackFrame[],
     scopes: Record<number, DebugProtocol.Scope[]>,
     variables: Record<number, Variable[]>,
     includeSpecial?: boolean
-  ): Variable[];
+  ): LocalVariableExtraction;
 
   /**
    * Get the scope name(s) that contain local variables for this language.

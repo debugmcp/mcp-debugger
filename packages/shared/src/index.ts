@@ -184,9 +184,15 @@ export type {
   AdapterSpecificState,
   CommandHandling,
   AdapterSpawnPayload,
-  AdapterSpawnConfig
+  AdapterSpawnConfig,
+  LocalVariableExtraction
 } from './interfaces/adapter-policy.js';
-export { DefaultAdapterPolicy, resolveExceptionFilters } from './interfaces/adapter-policy.js';
+export {
+  DefaultAdapterPolicy,
+  resolveExceptionFilters,
+  emptyLocalVariableExtraction,
+  extractionFromScope
+} from './interfaces/adapter-policy.js';
 export { JsDebugAdapterPolicy } from './interfaces/adapter-policy-js.js';
 export { PythonAdapterPolicy } from './interfaces/adapter-policy-python.js';
 export { RubyAdapterPolicy } from './interfaces/adapter-policy-ruby.js';

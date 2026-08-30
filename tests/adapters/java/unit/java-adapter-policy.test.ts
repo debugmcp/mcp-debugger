@@ -270,32 +270,32 @@ describe('JavaAdapterPolicy', () => {
   describe('extractLocalVariables', () => {
     it('should return empty array when no stack frames', () => {
       const result = JavaAdapterPolicy.extractLocalVariables([], {}, {});
-      expect(result).toEqual([]);
+      expect(result).toEqual({ variables: [], scopeRefs: [] });
     });
 
     it('should return empty array when stack frames is null', () => {
       const result = JavaAdapterPolicy.extractLocalVariables(null as any, {}, {});
-      expect(result).toEqual([]);
+      expect(result).toEqual({ variables: [], scopeRefs: [] });
     });
 
     it('should return empty array when no scopes for top frame', () => {
       const stackFrames = [{ id: 1, name: 'main', file: 'Main.java', line: 10 }];
       const result = JavaAdapterPolicy.extractLocalVariables(stackFrames, {}, {});
-      expect(result).toEqual([]);
+      expect(result).toEqual({ variables: [], scopeRefs: [] });
     });
 
     it('should return empty array when scopes is empty', () => {
       const stackFrames = [{ id: 1, name: 'main', file: 'Main.java', line: 10 }];
       const scopes = { 1: [] };
       const result = JavaAdapterPolicy.extractLocalVariables(stackFrames, scopes, {});
-      expect(result).toEqual([]);
+      expect(result).toEqual({ variables: [], scopeRefs: [] });
     });
 
     it('should return empty array when no Locals scope', () => {
       const stackFrames = [{ id: 1, name: 'main', file: 'Main.java', line: 10 }];
       const scopes = { 1: [{ name: 'Globals', variablesReference: 100 }] };
       const result = JavaAdapterPolicy.extractLocalVariables(stackFrames, scopes as any, {});
-      expect(result).toEqual([]);
+      expect(result).toEqual({ variables: [], scopeRefs: [] });
     });
 
     it('should extract variables from Locals scope', () => {
@@ -303,8 +303,9 @@ describe('JavaAdapterPolicy', () => {
       const scopes = { 1: [{ name: 'Locals', variablesReference: 100 }] };
       const variables = { 100: [{ name: 'x', value: '42', type: 'int' }] };
       const result = JavaAdapterPolicy.extractLocalVariables(stackFrames, scopes as any, variables as any);
-      expect(result).toHaveLength(1);
-      expect(result[0].name).toBe('x');
+      expect(result.variables).toHaveLength(1);
+      expect(result.variables[0].name).toBe('x');
+      expect(result.scopeRefs).toEqual([100]);
     });
 
     it('should also recognize Local scope name', () => {
@@ -312,8 +313,8 @@ describe('JavaAdapterPolicy', () => {
       const scopes = { 1: [{ name: 'Local', variablesReference: 100 }] };
       const variables = { 100: [{ name: 'y', value: '10', type: 'int' }] };
       const result = JavaAdapterPolicy.extractLocalVariables(stackFrames, scopes as any, variables as any);
-      expect(result).toHaveLength(1);
-      expect(result[0].name).toBe('y');
+      expect(result.variables).toHaveLength(1);
+      expect(result.variables[0].name).toBe('y');
     });
 
     it('should return empty array when variables not found for scope', () => {
@@ -321,7 +322,7 @@ describe('JavaAdapterPolicy', () => {
       const scopes = { 1: [{ name: 'Locals', variablesReference: 100 }] };
       const variables = { 200: [{ name: 'z', value: '5', type: 'int' }] }; // Different ref
       const result = JavaAdapterPolicy.extractLocalVariables(stackFrames, scopes as any, variables as any);
-      expect(result).toEqual([]);
+      expect(result).toEqual({ variables: [], scopeRefs: [] });
     });
   });
 

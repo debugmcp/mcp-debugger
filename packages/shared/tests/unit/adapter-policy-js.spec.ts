@@ -72,7 +72,7 @@ describe('JsDebugAdapterPolicy', () => {
 
     it('returns empty array when no frames', () => {
       const result = JsDebugAdapterPolicy.extractLocalVariables!([], {}, {});
-      expect(result).toEqual([]);
+      expect(result).toEqual({ variables: [], scopeRefs: [] });
     });
 
     it('filters out special variables by default', () => {
@@ -93,8 +93,8 @@ describe('JsDebugAdapterPolicy', () => {
         ],
       };
       const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
-      expect(result).toHaveLength(1);
-      expect(result[0].name).toBe('value');
+      expect(result.variables).toHaveLength(1);
+      expect(result.variables[0].name).toBe('value');
     });
 
     it('includes special variables when requested', () => {
@@ -114,7 +114,7 @@ describe('JsDebugAdapterPolicy', () => {
         ],
       };
       const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars, true);
-      expect(result).toHaveLength(2);
+      expect(result.variables).toHaveLength(2);
     });
 
     it('falls through an empty Local scope to Module on the same frame (issue #548)', () => {
@@ -133,7 +133,7 @@ describe('JsDebugAdapterPolicy', () => {
 
       const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
 
-      expect(result.map(variable => variable.name)).toEqual(['counter']);
+      expect(result.variables.map(variable => variable.name)).toEqual(['counter']);
     });
 
     it('prefers Closure over Global when Local is empty (issue #548)', () => {
@@ -152,7 +152,7 @@ describe('JsDebugAdapterPolicy', () => {
 
       const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
 
-      expect(result.map(variable => variable.name)).toEqual(['captured']);
+      expect(result.variables.map(variable => variable.name)).toEqual(['captured']);
     });
 
     it('keeps a non-empty Local scope ahead of sibling scopes', () => {
@@ -169,7 +169,8 @@ describe('JsDebugAdapterPolicy', () => {
 
       const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
 
-      expect(result.map(variable => variable.name)).toEqual(['localValue']);
+      expect(result.variables.map(variable => variable.name)).toEqual(['localValue']);
+      expect(result.scopeRefs).toEqual([100]);
     });
 
     it('filters V8 internals before falling through to Global', () => {
@@ -189,7 +190,7 @@ describe('JsDebugAdapterPolicy', () => {
       // A Local scope exists (even if only V8 internals survive filtering), so
       // Global is off the table: an empty answer lets the session layer walk
       // down to the caller frame instead of reporting Node's globals.
-      expect(result).toEqual([]);
+      expect(result).toEqual({ variables: [], scopeRefs: [] });
     });
 
     it('does not fall through to Global past an empty Local scope (issue #548 review)', () => {
@@ -211,7 +212,7 @@ describe('JsDebugAdapterPolicy', () => {
         ],
       };
 
-      expect(JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars)).toEqual([]);
+      expect(JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars)).toEqual({ variables: [], scopeRefs: [] });
     });
 
     it('uses Global only for a frame that exposes no Local scope at all', () => {
@@ -228,7 +229,7 @@ describe('JsDebugAdapterPolicy', () => {
 
       const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
 
-      expect(result.map(variable => variable.name)).toEqual(['globalValue']);
+      expect(result.variables.map(variable => variable.name)).toEqual(['globalValue']);
     });
 
     it('returns no locals when every useful same-frame scope is empty', () => {
@@ -241,7 +242,7 @@ describe('JsDebugAdapterPolicy', () => {
         ],
       };
 
-      expect(JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, {})).toEqual([]);
+      expect(JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, {})).toEqual({ variables: [], scopeRefs: [] });
     });
   });
 

@@ -11,8 +11,10 @@ import type {
   AdapterSpawnPayload,
   AdapterSpecificState,
   CommandHandling,
+  LocalVariableExtraction,
   StopReasonContext
 } from './adapter-policy.js';
+import { emptyLocalVariableExtraction, extractionFromScope } from './adapter-policy.js';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
 
@@ -102,16 +104,16 @@ export function extractLldbLocalVariables(
   scopes: Record<number, DebugProtocol.Scope[]>,
   variables: Record<number, Variable[]>,
   includeSpecial: boolean = false
-): Variable[] {
+): LocalVariableExtraction {
   if (!stackFrames || stackFrames.length === 0) {
-    return [];
+    return emptyLocalVariableExtraction();
   }
 
   const topFrame = stackFrames[0];
   const frameScopes = scopes[topFrame.id];
 
   if (!frameScopes || frameScopes.length === 0) {
-    return [];
+    return emptyLocalVariableExtraction();
   }
 
   const localScope = frameScopes.find((scope) =>
@@ -119,7 +121,7 @@ export function extractLldbLocalVariables(
   );
 
   if (!localScope) {
-    return [];
+    return emptyLocalVariableExtraction();
   }
 
   let localVars = variables[localScope.variablesReference] || [];
@@ -142,7 +144,7 @@ export function extractLldbLocalVariables(
     });
   }
 
-  return localVars;
+  return extractionFromScope(localScope, localVars);
 }
 
 /**

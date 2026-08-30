@@ -78,7 +78,9 @@ describe('JsDebugAdapterPolicy', () => {
       variables as any
     );
 
-    expect(locals).toEqual([{ name: 'foo', value: '1' }]);
+    expect(locals.variables).toEqual([{ name: 'foo', value: '1' }]);
+    // Global is on the frame but contributed nothing.
+    expect(locals.scopeRefs).toEqual([1]);
 
     const withSpecial = JsDebugAdapterPolicy.extractLocalVariables(
       frames as any,
@@ -86,7 +88,7 @@ describe('JsDebugAdapterPolicy', () => {
       variables as any,
       true
     );
-    expect(withSpecial.map(variable => variable.name)).toContain('this');
+    expect(withSpecial.variables.map(variable => variable.name)).toContain('this');
   });
 
   it('determines command queueing based on initialization state', () => {

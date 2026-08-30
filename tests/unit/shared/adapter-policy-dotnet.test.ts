@@ -50,10 +50,11 @@ describe('DotnetAdapterPolicy', () => {
       frames as any, scopes as any, variables as any
     );
 
-    expect(locals).toEqual([
+    expect(locals.variables).toEqual([
       { name: 'x', value: '42' },
       { name: 'y', value: 'hello' }
     ]);
+    expect(locals.scopeRefs).toEqual([10]);
   });
 
   it('filters compiler-generated variables by default', () => {
@@ -77,7 +78,7 @@ describe('DotnetAdapterPolicy', () => {
       frames as any, scopes as any, variables as any
     );
 
-    expect(locals).toEqual([
+    expect(locals.variables).toEqual([
       { name: 'x', value: '42' },
       { name: 'realVar', value: 'keep' }
     ]);
@@ -99,28 +100,28 @@ describe('DotnetAdapterPolicy', () => {
       frames as any, scopes as any, variables as any, true
     );
 
-    expect(locals).toHaveLength(2);
+    expect(locals.variables).toHaveLength(2);
   });
 
   it('returns empty array when no stack frames', () => {
     const locals = DotnetAdapterPolicy.extractLocalVariables(
       [], {} as any, {} as any
     );
-    expect(locals).toEqual([]);
+    expect(locals).toEqual({ variables: [], scopeRefs: [] });
   });
 
   it('returns empty array when no scopes for frame', () => {
     const locals = DotnetAdapterPolicy.extractLocalVariables(
       [{ id: 1 }] as any, {} as any, {} as any
     );
-    expect(locals).toEqual([]);
+    expect(locals).toEqual({ variables: [], scopeRefs: [] });
   });
 
   it('returns empty array when scopes array is empty', () => {
     const locals = DotnetAdapterPolicy.extractLocalVariables(
       [{ id: 1 }] as any, { 1: [] } as any, {} as any
     );
-    expect(locals).toEqual([]);
+    expect(locals).toEqual({ variables: [], scopeRefs: [] });
   });
 
   it('returns empty array when no Locals scope found', () => {
@@ -129,7 +130,7 @@ describe('DotnetAdapterPolicy', () => {
       { 1: [{ name: 'Globals', variablesReference: 10 }] } as any,
       { 10: [{ name: 'x', value: '1' }] } as any
     );
-    expect(locals).toEqual([]);
+    expect(locals).toEqual({ variables: [], scopeRefs: [] });
   });
 
   it('returns empty array when variables for scope are missing', () => {
@@ -138,7 +139,7 @@ describe('DotnetAdapterPolicy', () => {
       { 1: [{ name: 'Locals', variablesReference: 99 }] } as any,
       {} as any
     );
-    expect(locals).toEqual([]);
+    expect(locals).toEqual({ variables: [], scopeRefs: [] });
   });
 
   // ===== Scope and configuration =====

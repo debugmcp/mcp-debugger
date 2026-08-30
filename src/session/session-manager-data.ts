@@ -566,12 +566,13 @@ export abstract class SessionManagerData extends SessionManagerCore {
       // parameterized by anchor: slicing the frame list re-anchors it.
       const extractAt = (frames: StackFrame[]): {
         localVars: Variable[];
+        scopeRefs: number[];
         scopeName: string | null;
         scopeNote?: string;
       } => {
         const anchor = frames[0];
         if (policy.extractLocalVariables) {
-          const vars = policy.extractLocalVariables(frames, scopesMap, variablesMap, includeSpecial);
+          const extraction = policy.extractLocalVariables(frames, scopesMap, variablesMap, includeSpecial);
 
           // Report the ACTUAL scope name the adapter returned, not the policy's
           // canonical name — adapters may annotate it (e.g. Delve's "Locals
@@ -592,12 +593,16 @@ export abstract class SessionManagerData extends SessionManagerCore {
           const canonicalScope = canonicalNames
             .map(canonicalName => anchorScopes.find(scope => matchesCanonicalName(scope.name, canonicalName)))
             .find((scope): scope is DebugProtocol.Scope => scope !== undefined);
-          const returnedVars = new Set(vars);
-          const contributingScope = vars.length > 0
-            ? anchorScopes.find(scope =>
-                (variablesMap[scope.variablesReference] || []).some(variable => returnedVars.has(variable))
-              )
-            : undefined;
+          // The policy names the scopes it drew from. When the canonical
+          // scope is among them it stays the reported one even if a sibling
+          // was merged in ahead of it (js-debug's Block + Local, issue #558):
+          // 'Local' with no note is the honest answer for a frame whose own
+          // locals reached the caller. Otherwise the first listed anchor
+          // scope is what the caller actually got.
+          const contributingScope =
+            canonicalScope && extraction.scopeRefs.includes(canonicalScope.variablesReference)
+              ? canonicalScope
+              : anchorScopes.find(scope => extraction.scopeRefs.includes(scope.variablesReference));
           const matchedScope = contributingScope ?? canonicalScope;
           const scopeNote = contributingScope && canonicalScope && contributingScope !== canonicalScope
             ? (
@@ -606,7 +611,8 @@ export abstract class SessionManagerData extends SessionManagerCore {
               )
             : undefined;
           return {
-            localVars: vars,
+            localVars: extraction.variables,
+            scopeRefs: extraction.scopeRefs,
             scopeName: matchedScope?.name ?? canonicalNames[0] ?? null,
             ...(scopeNote ? { scopeNote } : {})
           };
@@ -615,12 +621,16 @@ export abstract class SessionManagerData extends SessionManagerCore {
         const anchorScopes = scopesMap[anchor.id] || [];
         const localScope = anchorScopes.find(s => !s.name.toLowerCase().includes('global'));
         return localScope
-          ? { localVars: variablesMap[localScope.variablesReference] || [], scopeName: localScope.name }
-          : { localVars: [], scopeName: null };
+          ? {
+              localVars: variablesMap[localScope.variablesReference] || [],
+              scopeRefs: [localScope.variablesReference],
+              scopeName: localScope.name
+            }
+          : { localVars: [], scopeRefs: [], scopeName: null };
       };
 
       let anchorIndex = 0;
-      let { localVars, scopeName, scopeNote } = extractAt(stackFrames);
+      let { localVars, scopeRefs, scopeName, scopeNote } = extractAt(stackFrames);
 
       // A pause inside a runtime/stdlib frame (blocking syscall, sleep) puts
       // an empty-locals frame on top while the user frame sits just below —
@@ -634,6 +644,7 @@ export abstract class SessionManagerData extends SessionManagerCore {
           if (attempt.localVars.length > 0) {
             anchorIndex = k;
             localVars = attempt.localVars;
+            scopeRefs = attempt.scopeRefs;
             scopeName = attempt.scopeName;
             scopeNote = attempt.scopeNote;
             this.logger.info(
@@ -646,19 +657,14 @@ export abstract class SessionManagerData extends SessionManagerCore {
       const anchorFrame = stackFrames[anchorIndex];
       
       // Attribute per-scope truncation to the scopes whose variables
-      // actually reached the caller (issue #438): every policy returns
-      // variablesMap[ref] at most .filter()ed, so object identity survives
-      // extraction. Cuts in fan-out scopes the policy discarded
+      // actually reached the caller (issue #438): the policy names them in
+      // the extraction's scopeRefs, so nothing has to be reconstructed from
+      // object identity. Cuts in fan-out scopes the policy discarded
       // (Global/Closure) never reached the response and must not be
-      // reported as cuts in it. Computed before the names filter so an
+      // reported as cuts in it. Read before the names filter so an
       // explicit-names request cannot break the attribution.
-      const returnedVars = new Set(localVars);
-      const contributingSummaries: Array<VariableTruncationSummary | undefined> = [];
-      for (const [ref, vars] of Object.entries(variablesMap)) {
-        if (vars.some(v => returnedVars.has(v))) {
-          contributingSummaries.push(truncationByScope.get(Number(ref)));
-        }
-      }
+      const contributingSummaries: Array<VariableTruncationSummary | undefined> =
+        scopeRefs.map(ref => truncationByScope.get(ref));
 
       if (names) {
         localVars = localVars.filter(v => names.includes(v.name));
