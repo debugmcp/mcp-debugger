@@ -7,6 +7,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { DebugMcpServer } from '../../src/server';
 import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import { SessionLifecycleState } from '@debugmcp/shared';
+import { createProductionDependencies } from '../../src/container/dependencies.js';
+import { createMockDependencies } from '../core/unit/server/server-test-helpers.js';
+
+// The same preamble the sibling suites under tests/core/unit/server/ use.
+// DebugMcpServer builds its dependencies in the constructor, so every
+// construction here used to open winston's shared file transport and a session
+// log directory that nothing ever closed: ~10 MaxListenersExceededWarning lines
+// per run and a /tmp/test.log that grew with it (issue #578).
+vi.mock('../../src/container/dependencies.js');
+vi.mock('../../src/session/session-manager.js');
 
 describe('Server Coverage - Error Paths and Edge Cases', () => {
   let server: DebugMcpServer;
@@ -22,11 +32,12 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       debug: vi.fn()
     };
 
-    // Create server instance
-    server = new DebugMcpServer({
-      logLevel: 'info',
-      logFile: '/tmp/test.log'
-    });
+    // Create server instance. No logFile: with the container mocked the option
+    // is inert, and naming a path here is what made this suite write one.
+    vi.mocked(createProductionDependencies).mockReturnValue(
+      createMockDependencies() as unknown as ReturnType<typeof createProductionDependencies>
+    );
+    server = new DebugMcpServer({ logLevel: 'info' });
 
     // Mock the session manager
     mockSessionManager = {
