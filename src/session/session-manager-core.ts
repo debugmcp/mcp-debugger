@@ -230,6 +230,11 @@ export abstract class SessionManagerCore extends EventEmitter {
   }
 
   protected _updateSessionState(session: ManagedSession, newState: SessionState): void {
+    if (newState === SessionState.PAUSED && !session.lastStop) {
+      throw new Error(
+        `Invariant violation: session ${session.id} cannot enter PAUSED without lastStop`
+      );
+    }
     if (session.state === newState) return;
     this.logger.info(`[SM _updateSessionState ${session.id}] State change: ${session.state} -> ${newState}`);
     
@@ -543,12 +548,28 @@ export abstract class SessionManagerCore extends EventEmitter {
       // Handle auto-continue for stopOnEntry=false
       if (shouldAutoContinue) {
         this.logger.info(`[ProxyManager ${sessionId}] Auto-continuing (stopOnEntry=false) [reason=${reason}, firstStop=${isFirstStop}]`);
-        // Must set PAUSED synchronously before handleAutoContinue, because
-        // continue() requires session.state === SessionState.PAUSED.
+        // continue() requires PAUSED. Record the transient stop first so the
+        // state invariant remains true even while auto-continue is in flight.
+        const autoContinuedStop = {
+          reason,
+          ...(reason !== rawReason ? { rawReason } : {}),
+          threadId,
+          timestamp: Date.now(),
+          ...(body?.description ? { description: body.description } : {}),
+          ...(body?.text ? { text: body.text } : {})
+        };
+        session.lastStop = autoContinuedStop;
         this._updateSessionState(session, SessionState.PAUSED);
-        this.handleAutoContinue(sessionId).catch(err => {
-          this.logger.error(`[ProxyManager ${sessionId}] Error auto-continuing:`, err);
-        });
+        this.handleAutoContinue(sessionId)
+          .then(() => {
+            // Do not erase a newer user-visible stop that raced the continue.
+            if (session.state === SessionState.RUNNING && session.lastStop === autoContinuedStop) {
+              session.lastStop = undefined;
+            }
+          })
+          .catch(err => {
+            this.logger.error(`[ProxyManager ${sessionId}] Error auto-continuing:`, err);
+          });
       } else {
         // Record why we stopped so it stays queryable after the fact
         // (list_debug_sessions / get_stack_trace, issue #214). Auto-continued

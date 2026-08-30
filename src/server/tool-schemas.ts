@@ -164,7 +164,7 @@ export function buildToolDefinitions(options: BuildToolDefinitionsOptions): Tool
       }
     },
     { name: 'restart_debugging', description: 'Restart the debuggee: terminate the current program (if still running) and relaunch it with the same configuration as the last start_debugging. All current breakpoints are re-applied automatically. The get_output buffer starts fresh — read from since=0 after a restart. Works while running, paused, or after the program has exited. Not available for attach sessions or sessions never launched', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] } },
-    { name: 'attach_to_process', description: 'Attach to a running process for debugging. After the attach handshake the target is verified by polling for threads; if none are reported within verifyTimeout (~20s default) the attach fails and the debug proxy is torn down', inputSchema: {
+    { name: 'attach_to_process', description: 'Attach to a running process for debugging. After the handshake the target is verified by polling for threads; if none are reported within verifyTimeout (~20s default) the attach fails and the proxy is torn down. When a requested post-attach pause is accepted but no stopped event arrives within its bounded wait, returns state "running" with pending:true; the late event alone changes the session to "paused"', inputSchema: {
         type: 'object',
         properties: {
           sessionId: { type: 'string', description: 'Debug session ID' },

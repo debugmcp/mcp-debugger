@@ -2373,6 +2373,21 @@ describe('SessionManager - DAP Operations', () => {
         ._updateSessionState(managed, SessionState.RUNNING);
     }
 
+    it('rejects any PAUSED transition that has no recorded stop (#598)', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+      const managed = sessionManager.getSession(session.id)!;
+      const updateState = () =>
+        (sessionManager as unknown as {
+          _updateSessionState: (s: unknown, st: SessionState) => void;
+        })._updateSessionState(managed, SessionState.PAUSED);
+
+      expect(updateState).toThrow(/cannot enter PAUSED without lastStop/);
+      expect(managed.state).not.toBe(SessionState.PAUSED);
+    });
+
     it('stops retrying when the session leaves PAUSED mid-wait', async () => {
       const session = await createPausedSession(sessionManager, dependencies);
       setShortReadyWindow();
