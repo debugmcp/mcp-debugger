@@ -437,26 +437,21 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
       const handleExit = (code: number | null, signal?: string) => {
         cleanup();
-        if (this.isDryRun && code === 0) {
-          // Normal exit for dry run
-          resolve();
-        } else {
-          let errorMessage = `Proxy exited during initialization. Code: ${code}, Signal: ${signal}`;
-          if (this.stderrBuffer.length > 0) {
-            // Cap what gets embedded in the user-facing error — the full
-            // buffer is already in the logs (issue #146).
-            const lines = this.stderrBuffer.slice(-10);
-            let text = lines.join('\n');
-            if (text.length > 2000) {
-              text = '…' + text.slice(-2000);
-            }
-            const label = this.stderrBuffer.length > lines.length
-              ? ` (last ${lines.length} of ${this.stderrBuffer.length} lines)`
-              : '';
-            errorMessage += `\nStderr output${label}:\n${text}`;
+        let errorMessage = `Proxy exited during initialization. Code: ${code}, Signal: ${signal}`;
+        if (this.stderrBuffer.length > 0) {
+          // Cap what gets embedded in the user-facing error — the full
+          // buffer is already in the logs (issue #146).
+          const lines = this.stderrBuffer.slice(-10);
+          let text = lines.join('\n');
+          if (text.length > 2000) {
+            text = '…' + text.slice(-2000);
           }
-          reject(new Error(errorMessage));
+          const label = this.stderrBuffer.length > lines.length
+            ? ` (last ${lines.length} of ${this.stderrBuffer.length} lines)`
+            : '';
+          errorMessage += `\nStderr output${label}:\n${text}`;
         }
+        reject(new Error(errorMessage));
       };
 
       this.once('initialized', handleInitialized);
@@ -1033,7 +1028,14 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
     // Handle exit
     track(proc, 'exit', (code: number | null, signal: string | null) => {
-      this.logger.info(`[ProxyManager] Proxy exited. Code: ${code}, Signal: ${signal}`);
+      const expectedDryRunExit =
+        this.isDryRun && code === 0 && this.dryRunCompleteReceived;
+      const exitMessage = `[ProxyManager] Proxy exited. Code: ${code}, Signal: ${signal}`;
+      if (expectedDryRunExit) {
+        this.logger.debug(exitMessage);
+      } else {
+        this.logger.info(exitMessage);
+      }
 
       this.lastExitDetails = {
         code,
@@ -1045,7 +1047,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       // everInitialized, not isInitialized: stop() runs cleanup() (which
       // resets isInitialized) before this event fires, so the reset flag
       // would report every orderly shutdown as a pre-init death (issue #530)
-      if (!this.everInitialized) {
+      if (!this.everInitialized && !expectedDryRunExit) {
         this.logger.error(
           `[ProxyManager] Proxy exited before initialization. code=${code} signal=${signal} stderrLines=${this.stderrBuffer.length}`,
           this.stderrBuffer
@@ -1435,18 +1437,6 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   private handleProxyExit(code: number | null, signal: string | null): void {
     this.activeLaunchBarrier?.onProxyExit(code, signal);
     this.clearActiveLaunchBarrier();
-
-    if (this.isDryRun && code === 0 && !this.dryRunCompleteReceived) {
-      const fallbackCommand = this.dryRunCommandSnapshot ?? '(command unavailable)';
-      const fallbackScript = this.dryRunScriptPath ?? '';
-      this.logger.warn(
-        `[ProxyManager] Dry run proxy exited without reporting completion; synthesizing dry-run-complete event.`
-      );
-      this.dryRunCompleteReceived = true;
-      this.dryRunCommandSnapshot = fallbackCommand;
-      this.dryRunScriptPath = fallbackScript;
-      this.emit('dry-run-complete', fallbackCommand, fallbackScript);
-    }
 
     // Clean up pending requests
     this.pendingDapRequests.forEach(pending => {

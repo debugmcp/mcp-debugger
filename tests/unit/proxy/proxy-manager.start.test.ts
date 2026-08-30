@@ -647,7 +647,7 @@ describe('ProxyManager.start', () => {
     }
   });
 
-  it('resolves when dry-run proxy exits cleanly before reporting completion', async () => {
+  it('rejects when a dry-run proxy exits cleanly without reporting completion', async () => {
     fakeProcess.sendCommand.mockImplementation((cmd: any) => {
       if (cmd.cmd === 'init') {
         setTimeout(() => {
@@ -663,7 +663,13 @@ describe('ProxyManager.start', () => {
       }
     });
 
-    await expect(proxyManager.start({ ...baseConfig, dryRunSpawn: true })).resolves.toBeUndefined();
+    await expect(proxyManager.start({ ...baseConfig, dryRunSpawn: true })).rejects.toThrow(
+      /Proxy exited during initialization\. Code: 0/
+    );
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('exited before initialization'),
+      expect.any(Array)
+    );
   });
 
   it('rejects when proxy exits during initialization with captured stderr', async () => {
@@ -1192,6 +1198,22 @@ describe('ProxyManager.start', () => {
       expect(preInitErrors.length).toBe(1);
     });
 
+    it('logs an acknowledged clean dry-run exit at debug without a pre-init error', async () => {
+      await proxyManager.start(baseConfig);
+      (logger.debug as ReturnType<typeof vi.fn>).mockClear();
+      (logger.error as ReturnType<typeof vi.fn>).mockClear();
+
+      fakeProcess.emit('exit', 0, null);
+
+      expect(logger.debug).toHaveBeenCalledWith(
+        '[ProxyManager] Proxy exited. Code: 0, Signal: null'
+      );
+      expect(logger.error).not.toHaveBeenCalledWith(
+        expect.stringContaining('exited before initialization'),
+        expect.anything()
+      );
+    });
+
     it('cleanup rejects all pending requests and clears launch barrier', () => {
       const pendingReject = vi.fn();
       (proxyManager as unknown as { pendingDapRequests: Map<string, any> }).pendingDapRequests.set('req-1', {
@@ -1323,7 +1345,7 @@ describe('ProxyManager.start', () => {
   });
 
   describe('handleProxyExit', () => {
-    it('emits synthesized dry-run completion when exit occurs without prior notification', () => {
+    it('does not synthesize dry-run completion from a clean exit', () => {
       const dryRunListener = vi.fn();
       proxyManager.on('dry-run-complete', dryRunListener);
 
@@ -1334,8 +1356,8 @@ describe('ProxyManager.start', () => {
 
       (proxyManager as unknown as { handleProxyExit: (code: number | null, signal: string | null) => void }).handleProxyExit(0, null);
 
-      expect(proxyManager.hasDryRunCompleted()).toBe(true);
-      expect(dryRunListener).toHaveBeenCalledWith('cmd', 'script');
+      expect(proxyManager.hasDryRunCompleted()).toBe(false);
+      expect(dryRunListener).not.toHaveBeenCalled();
     });
 
     it('rejects pending requests and emits exit event for non-dry-run exits', () => {
