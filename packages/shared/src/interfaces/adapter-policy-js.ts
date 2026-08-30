@@ -25,9 +25,9 @@ import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from '
  *
  * A name ending in ':' matches as a prefix (`Block:loop`); every other name
  * matches exactly. Two historical spellings are matched by the predicates but
- * deliberately absent here because the session layer's canonical matcher
- * already covers them: `Closure (fn)` (its `name + ' '` rule) and a
- * case-insensitive `module`.
+ * not spelled out here: `Closure (fn)` (the session layer's canonical
+ * `name + ' '` rule covers it) and `module` in any other casing (the module
+ * predicate compares case-insensitively).
  */
 export const JS_SCOPE_KINDS = {
   local: ['Local', 'Locals', 'Local:'],
@@ -284,7 +284,11 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
     // block would silently drop them. So when there is no Local scope, the
     // first Script/Module scope is the frame's base and joins the merge.
     if (localScopes.length === 0 && collectedRefs.length > 0) {
-      const baseScope = frameScopes.find(isModuleScope);
+      // First module-like scope that has something to show, as the
+      // fall-through below picks it.
+      const baseScope = frameScopes.find(
+        (scope) => isModuleScope(scope) && variablesForScope(scope).length > 0
+      );
       if (baseScope) {
         collect(baseScope);
       }
