@@ -1,0 +1,721 @@
+{
+  "tools": {
+    "tools": [
+      {
+        "name": "create_debug_session",
+        "description": "Create a new debugging session. Provide host and port to attach to a running process; omit them for launch mode",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "language": {
+              "type": "string",
+              "enum": [
+                "python",
+                "mock"
+              ],
+              "description": "Programming language for debugging"
+            },
+            "name": {
+              "type": "string",
+              "description": "Optional session name"
+            },
+            "executablePath": {
+              "type": "string",
+              "description": "Path to language executable (optional, will auto-detect if not provided)"
+            },
+            "host": {
+              "type": "string",
+              "description": "Host to attach to for remote debugging (optional, triggers attach mode)"
+            },
+            "port": {
+              "type": "number",
+              "description": "Debug port to attach to for remote debugging (optional, triggers attach mode)"
+            },
+            "timeout": {
+              "type": "number",
+              "description": "Connection timeout in milliseconds for attach mode (default: 30000)"
+            },
+            "verifyTimeout": {
+              "type": "number",
+              "description": "Attach mode only: how long to wait (ms) for the debugger to report at least one thread after attaching before failing the attach (default: 20000, max: 600000)"
+            },
+            "adapterConfig": {
+              "type": "object",
+              "description": "Attach mode only: adapter-specific attach configuration merged into the attach config (see attach_to_process)",
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "language"
+          ]
+        }
+      },
+      {
+        "name": "list_supported_languages",
+        "description": "List all supported debugging languages with metadata",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      {
+        "name": "list_debug_sessions",
+        "description": "List all active debugging sessions. Paused sessions include lastStop with the reason for the most recent stop (e.g. \"breakpoint\" vs \"exception\")",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      {
+        "name": "set_breakpoint",
+        "description": "Set a breakpoint. Setting breakpoints on non-executable lines (structural, declarative) may lead to unexpected behavior",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "file": {
+              "type": "string",
+              "description": "Path to the source file or Java FQCN. For Java, passing a fully-qualified class name (e.g. \"com.example.MyClass\" or \"com.example.Outer$Inner\") is preferred — it works reliably with all classloaders including custom classloaders. Alternatively, use absolute file paths."
+            },
+            "line": {
+              "type": "number",
+              "description": "Line number where to set breakpoint. Executable statements (assignments, function calls, conditionals, returns) work best. Structural lines (function/class definitions), declarative lines (imports), or non-executable lines (comments, blank lines) may cause unexpected stepping behavior"
+            },
+            "expectedContent": {
+              "type": "string",
+              "description": "Optional assertion: text you expect on the target line — a distinctive substring is enough (leading/trailing whitespace and trailing //- or #-comments are ignored). If it does not match, the breakpoint is NOT set and the error shows the actual content of that line and its neighbors — use this to catch stale or off-by-one line numbers before they cause confusing behavior"
+            },
+            "statement": {
+              "type": "string",
+              "description": "Address by content instead of line number: the text of the target line, like an Edit-tool match — a distinctive substring is enough (leading/trailing whitespace and trailing //- or #-comments are ignored; an exact whole-line match always wins over substring matches). Preferred over line — it can only land on a line containing your text (an inexact or multi-candidate match adds a warning to the response) and survives file edits across restart_debugging. If the text appears on multiple lines, the error lists every match; add nearLine to pick one. Provide statement OR line, not both"
+            },
+            "nearLine": {
+              "type": "number",
+              "description": "With statement only: when the statement text appears on multiple lines, bind to the match closest to this line"
+            },
+            "function": {
+              "type": "string",
+              "description": "Address by symbol name instead of file location: break on entry to this function/method (DAP function breakpoint). No file or line needed — names survive edits better than both. Composes with condition only. Supported by Python, Go, Rust, .NET, Java, and JavaScript adapters. JavaScript names are dotted runtime paths (e.g. \"handler\" or \"obj.method\") bound to the current function value: top-level function declarations of the main module bind at launch; functions in modules loaded later bind at the next pause"
+            },
+            "condition": {
+              "type": "string",
+              "description": "Optional expression: only break (or log) when it evaluates truthy"
+            },
+            "logMessage": {
+              "type": "string",
+              "description": "Create a logpoint: instead of pausing, log this message when the line is hit. Expressions in {curly braces} are interpolated (e.g. \"order={orderId} total={total}\"). Messages arrive in get_output while the program runs at full speed. Supported by the Python, JavaScript, Go, Rust, and mock adapters; not by Java, .NET, or Ruby"
+            },
+            "suspendPolicy": {
+              "type": "string",
+              "enum": [
+                "all",
+                "thread"
+              ],
+              "description": "Suspend policy when breakpoint is hit: \"all\" suspends all threads (default), \"thread\" only suspends the event thread. Only supported by the Java/JDI adapter."
+            }
+          },
+          "required": [
+            "sessionId"
+          ]
+        }
+      },
+      {
+        "name": "list_breakpoints",
+        "description": "List all breakpoints in a session with their verified state and adapter-assigned ids. Session-global function breakpoints appear separately as functionBreakpoints (omitted when filtering by file). Works before launch (queued, verified=false), while running or paused, and after the program exits",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "file": {
+              "type": "string",
+              "description": "Optional: only list breakpoints in this file"
+            }
+          },
+          "required": [
+            "sessionId"
+          ]
+        }
+      },
+      {
+        "name": "remove_breakpoint",
+        "description": "Remove a breakpoint by breakpointId (returned by set_breakpoint / list_breakpoints), by function name, or by file + line (removes all breakpoints at that location). Takes effect immediately while the program is running or paused; also works after the program exits, before a relaunch",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "breakpointId": {
+              "type": "string",
+              "description": "Breakpoint id from set_breakpoint or list_breakpoints. Takes precedence over file + line"
+            },
+            "function": {
+              "type": "string",
+              "description": "Alternative addressing: remove all function breakpoints with this symbol name. Applies the same per-language rewrite as set_breakpoint (e.g. a bare Go \"main\" matches the stored \"main.main\"); the response reports the effective name as functionName and, when rewritten, the original as requestedName"
+            },
+            "file": {
+              "type": "string",
+              "description": "Alternative addressing: source file path (use together with line)"
+            },
+            "line": {
+              "type": "number",
+              "description": "Alternative addressing: line number (use together with file)"
+            }
+          },
+          "required": [
+            "sessionId"
+          ]
+        }
+      },
+      {
+        "name": "clear_breakpoints",
+        "description": "Remove all breakpoints in a session, or all breakpoints in one file. Clearing zero breakpoints is success. Takes effect immediately while the program is running or paused",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "file": {
+              "type": "string",
+              "description": "Optional: only clear breakpoints in this file"
+            }
+          },
+          "required": [
+            "sessionId"
+          ]
+        }
+      },
+      {
+        "name": "start_debugging",
+        "description": "Start debugging a script",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "scriptPath": {
+              "type": "string",
+              "description": "Path to the script. Use paths relative to the project root (e.g., examples/python/script.py). The server resolves these against the workspace mount."
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "dapLaunchArgs": {
+              "type": "object",
+              "properties": {
+                "stopOnEntry": {
+                  "type": "boolean"
+                },
+                "justMyCode": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": true
+            },
+            "dryRunSpawn": {
+              "type": "boolean"
+            },
+            "breakOnExceptions": {
+              "type": "string",
+              "enum": [
+                "uncaught",
+                "all",
+                "none"
+              ],
+              "description": "Break when exceptions are thrown: \"uncaught\" pauses at uncaught exceptions at the crash site instead of terminating the session; \"all\" also pauses on caught/raised exceptions (language-dependent). Launch sessions default to \"uncaught\" (Ruby is the exception — rdbg has no uncaught-only filter, so it stays \"none\"); pass \"none\" to opt out and let crashing scripts run to termination"
+            },
+            "adapterLaunchConfig": {
+              "type": "object",
+              "description": "Optional adapter-specific launch configuration overrides",
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "sessionId",
+            "scriptPath"
+          ]
+        }
+      },
+      {
+        "name": "restart_debugging",
+        "description": "Restart the debuggee: terminate the current program (if still running) and relaunch it with the same configuration as the last start_debugging. All current breakpoints are re-applied automatically. The get_output buffer starts fresh — read from since=0 after a restart. Works while running, paused, or after the program has exited. Not available for attach sessions or sessions never launched",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId"
+          ]
+        }
+      },
+      {
+        "name": "attach_to_process",
+        "description": "Attach to a running process for debugging. After the attach handshake the target is verified by polling for threads; if none are reported within verifyTimeout (~20s default) the attach fails and the debug proxy is torn down",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "description": "Debug session ID"
+            },
+            "port": {
+              "type": "number",
+              "description": "Debug port to attach to"
+            },
+            "host": {
+              "type": "string",
+              "description": "Host to attach to (default: localhost)"
+            },
+            "processId": {
+              "type": [
+                "number",
+                "string"
+              ],
+              "description": "Process ID (for local attach, language-specific)"
+            },
+            "timeout": {
+              "type": "number",
+              "description": "Connection timeout in milliseconds (default: 30000)"
+            },
+            "verifyTimeout": {
+              "type": "number",
+              "description": "How long to wait (ms) for the debugger to report at least one thread after attaching before failing the attach (default: 20000, max: 600000). Decrease for fast failure-by-design probes; increase for targets that are exceptionally slow to become debuggable"
+            },
+            "sourcePaths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Source paths for code mapping"
+            },
+            "stopOnEntry": {
+              "type": "boolean",
+              "description": "Stop on entry after attaching"
+            },
+            "justMyCode": {
+              "type": "boolean",
+              "description": "Only debug user code (skip library code)"
+            },
+            "breakOnExceptions": {
+              "type": "string",
+              "enum": [
+                "uncaught",
+                "all",
+                "none"
+              ],
+              "description": "Break when exceptions are thrown: \"uncaught\" pauses at uncaught exceptions at the crash site; \"all\" also pauses on caught/raised exceptions (language-dependent). Default \"none\" — attach sessions never apply a language default (unlike launch)"
+            },
+            "adapterConfig": {
+              "type": "object",
+              "description": "Adapter-specific attach configuration merged into the attach config before the adapter transforms it (e.g. C/C++/LLDB: program — the binary path for symbol resolution when /proc/<pid>/maps paths are not openable, as in a kubectl-debug ephemeral container — or initCommands like \"settings set target.exec-search-paths /proc/<pid>/root\"). Reserved keys request/__attachMode are ignored; set stopOnEntry via the top-level parameter. Keys the adapter does not recognize are still forwarded to the debugger and named in the response warning — a near-miss of a supported key gets a did-you-mean suggestion. js-debug pins its attach orchestration keys (address/port/continueOnAttach/attachExistingChildren) over caller values; its autoAttachChildProcesses defaults to false on attach — child processes the target forks run undebugged (set it true to auto-attach children; only one child can be adopted at a time, further children are resumed undebugged)",
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "sessionId"
+          ]
+        }
+      },
+      {
+        "name": "detach_from_process",
+        "description": "Detach from the debugged process without terminating it",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "description": "Debug session ID"
+            },
+            "terminateProcess": {
+              "type": "boolean",
+              "description": "Whether to terminate the process on detach (default: false)"
+            }
+          },
+          "required": [
+            "sessionId"
+          ]
+        }
+      },
+      {
+        "name": "expose_session",
+        "description": "Expose a debug session as a read-only DAP mirror endpoint on 127.0.0.1 so an IDE (e.g. VS Code) can attach as a second debug client and inspect live state: threads, stack, scopes, variables, evaluate. Returns host, port, and a session token the IDE must include as \"mirrorToken\" in its attach configuration. The mirror never drives execution — continue/step/pause and breakpoint changes are rejected; control stays with this MCP session. Requires an active session (launched or attached); works while running or paused. Calling it again returns the same endpoint. The endpoint closes on unexpose_session, close_debug_session, restart, or debuggee exit",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId"
+          ]
+        }
+      },
+      {
+        "name": "unexpose_session",
+        "description": "Close a session's DAP mirror endpoint and disconnect any attached IDE clients. Succeeds as a no-op if the session is not exposed",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId"
+          ]
+        }
+      },
+      {
+        "name": "close_debug_session",
+        "description": "Close a debugging session",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId"
+          ]
+        }
+      },
+      {
+        "name": "step_over",
+        "description": "Step over the current line. Waits briefly for the program to stop; if the step is still executing after ~5s (e.g. stepping over a long-running call), returns success with state \"running\" and pending:true — the session becomes \"paused\" when the step completes (check list_debug_sessions, or call pause_execution to interrupt)",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId"
+          ]
+        }
+      },
+      {
+        "name": "step_into",
+        "description": "Step into the current call. Waits briefly for the program to stop; if the step is still executing after ~5s, returns success with state \"running\" and pending:true — the session becomes \"paused\" when the step completes",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId"
+          ]
+        }
+      },
+      {
+        "name": "step_out",
+        "description": "Step out of the current function. Waits briefly for the program to stop; if the step is still executing after ~5s (e.g. the rest of the function is long-running), returns success with state \"running\" and pending:true — the session becomes \"paused\" when the step completes",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId"
+          ]
+        }
+      },
+      {
+        "name": "continue_execution",
+        "description": "Continue execution. Returns immediately after the adapter acknowledges; does not wait for the next stop. When the program stops again the session state becomes \"paused\" — check list_debug_sessions or get_stack_trace, whose lastStop/stopReason tells you why it stopped (e.g. \"breakpoint\" vs \"exception\"). Use get_output to read the program's stdout/stderr",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId"
+          ]
+        }
+      },
+      {
+        "name": "pause_execution",
+        "description": "Pause a running program. Waits briefly for the stop; if the program cannot stop within ~5s (e.g. blocked in native code, or an idle server waiting for input), returns success with pending:true and the session reports \"paused\" the next time the program runs code. Fails with an actionable error if the session has no debuggable target to pause (e.g. a js attach whose target session was never adopted or has ended)",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "threadId": {
+              "type": "number",
+              "description": "Thread ID to pause. If omitted or 0, pauses all threads."
+            }
+          },
+          "required": [
+            "sessionId"
+          ]
+        }
+      },
+      {
+        "name": "list_threads",
+        "description": "List all threads in the debugged process",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId"
+          ]
+        }
+      },
+      {
+        "name": "get_variables",
+        "description": "Get variables (scope is variablesReference: number). Responses are size-guarded: oversized values are cut (truncated:true) and very large scopes return a capped list with a truncation notice — pass names:[...] to fetch specific variables in full",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "scope": {
+              "type": "number",
+              "description": "The variablesReference number from a StackFrame or Variable"
+            },
+            "names": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Only return variables with these exact names (case-sensitive). Requested names missing from the scope are listed in the response's notFound. Required: this server runs in least-privilege mode (DEBUG_MCP_VARIABLE_ACCESS=explicit) — unfiltered scope dumps are disabled."
+            }
+          },
+          "required": [
+            "sessionId",
+            "scope",
+            "names"
+          ]
+        }
+      },
+      {
+        "name": "get_local_variables",
+        "description": "Get local variables for the current stack frame. This is a convenience tool that returns just the local variables without needing to traverse stack->scopes->variables manually. Responses are size-guarded: oversized values are cut (truncated:true) and very large scopes return a capped list with a truncation notice — pass names:[...] to fetch specific variables in full",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "includeSpecial": {
+              "type": "boolean",
+              "description": "Include special/internal variables like this, __proto__, __builtins__, etc. Default: false"
+            },
+            "names": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Only return variables with these exact names (case-sensitive). Requested names missing from the scope are listed in the response's notFound. Required: this server runs in least-privilege mode (DEBUG_MCP_VARIABLE_ACCESS=explicit) — unfiltered scope dumps are disabled."
+            }
+          },
+          "required": [
+            "sessionId",
+            "names"
+          ]
+        }
+      },
+      {
+        "name": "get_stack_trace",
+        "description": "Get stack trace. The response includes stopReason — why the session is paused (e.g. \"breakpoint\" vs \"exception\"). Internal/runtime frames are filtered by default; when any are hidden the response carries hiddenFrames and a note (the top frame is always kept even if internal, so frameId anchors keep working)",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "includeInternals": {
+              "type": "boolean",
+              "description": "Include internal/framework frames (e.g., Node.js internals). Default: false for cleaner output."
+            },
+            "threadId": {
+              "type": "number",
+              "description": "Inspect a specific thread (ids from list_threads). When that thread reports frames it becomes the anchor for follow-up scopes/locals/evaluate calls — the escape hatch when the session is anchored to a frameless thread"
+            }
+          },
+          "required": [
+            "sessionId"
+          ]
+        }
+      },
+      {
+        "name": "get_scopes",
+        "description": "Get scopes for a stack frame",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "frameId": {
+              "type": "number",
+              "description": "The ID of the stack frame from a stackTrace response"
+            }
+          },
+          "required": [
+            "sessionId",
+            "frameId"
+          ]
+        }
+      },
+      {
+        "name": "evaluate_expression",
+        "description": "Evaluate expression in the current debug context. Expressions can read and modify program state. Waits up to 30s for the result by default; pass timeout for long-running expressions",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "expression": {
+              "type": "string"
+            },
+            "frameId": {
+              "type": "number",
+              "description": "Optional stack frame ID for evaluation context. Must be a frame ID from a get_stack_trace response. If not provided, uses the current (top) frame automatically"
+            },
+            "timeout": {
+              "type": "number",
+              "description": "Max time (ms) to wait for the evaluation to complete (default: 30000, max: 600000). On expiry the request fails but the expression may keep executing in the debuggee. Note: your MCP client may enforce its own overall request timeout"
+            }
+          },
+          "required": [
+            "sessionId",
+            "expression"
+          ]
+        }
+      },
+      {
+        "name": "get_source_context",
+        "description": "Get source context around a specific line in a file",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "file": {
+              "type": "string",
+              "description": "Path to the source file. Use paths relative to the project root (e.g., examples/python/script.py). The server resolves these against the workspace mount."
+            },
+            "line": {
+              "type": "number",
+              "description": "Line number to get context for"
+            },
+            "linesContext": {
+              "type": "number",
+              "description": "Number of lines before and after to include (default: 5)"
+            }
+          },
+          "required": [
+            "sessionId",
+            "file",
+            "line"
+          ]
+        }
+      },
+      {
+        "name": "get_output",
+        "description": "Get debuggee output (stdout/stderr/console) captured for a session. Buffered per launch (last 1000 entries; adapter telemetry and known adapter-internal diagnostics — e.g. LLDB DWARF-parser noise — filtered out). Works while the program is running and after it finishes, until the session is closed. Pass since=nextSince from the previous response to fetch only new output",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "since": {
+              "type": "number",
+              "description": "Only return entries with seq greater than this cursor (use nextSince from the previous response). Default: 0 = from the start of the buffer"
+            },
+            "limit": {
+              "type": "number",
+              "description": "Maximum entries to return (default: 100, max: 1000). hasMore:true in the response means more entries are available"
+            }
+          },
+          "required": [
+            "sessionId"
+          ]
+        }
+      },
+      {
+        "name": "redefine_classes",
+        "description": "Hot-swap changed Java classes into a running JVM. Scans a classes directory for .class files modified after sinceTimestamp, matches them against loaded classes in the target JVM, and redefines them using JDI. Returns which classes were redefined and the newest file timestamp (pass as sinceTimestamp on next call for incremental updates). Statement-anchored breakpoints are re-resolved against the new source after the swap (anchorResolution reports moved/stale). Only works with Java debug sessions.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "classesDir": {
+              "type": "string",
+              "description": "Absolute path to compiled classes directory (e.g. build/classes/java/main/)"
+            },
+            "sinceTimestamp": {
+              "type": "number",
+              "description": "Unix timestamp (ms). Only redefine .class files modified after this time. 0 or omitted = all files."
+            },
+            "timeout": {
+              "type": "number",
+              "description": "Max time (ms) to wait for the redefinition to complete (default: 30000, max: 600000). Increase when hot-swapping many classes at once"
+            }
+          },
+          "required": [
+            "sessionId",
+            "classesDir"
+          ]
+        }
+      }
+    ]
+  },
+  "resources": {
+    "resources": [
+      {
+        "uri": "debug://sessions/sess-1/output",
+        "name": "Debuggee output — alpha",
+        "description": "stdout/stderr/console output captured for python debug session 'alpha'",
+        "mimeType": "text/plain"
+      },
+      {
+        "uri": "debug://sessions/sess-2/output",
+        "name": "Debuggee output — beta",
+        "description": "stdout/stderr/console output captured for mock debug session 'beta'",
+        "mimeType": "text/plain"
+      }
+    ]
+  },
+  "prompts": {
+    "prompts": [
+      {
+        "name": "debugging-workflow",
+        "description": "How to debug effectively with mcp-debugger: session golden path, root-cause discipline, attach/remote recipes, and per-language quirks."
+      }
+    ]
+  }
+}

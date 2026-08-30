@@ -1,5 +1,5 @@
 /**
- * Comprehensive MCP Debugger Test - All 25 Tools x All Languages
+ * Comprehensive MCP Debugger Test - Every Advertised Tool x All Languages
  *
  * Broad coverage of MCP tools across available language adapters.
  * Produces a detailed matrix report (PASS/FAIL/SKIP per tool per language).
@@ -14,6 +14,7 @@ import path from 'path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
+import { TOOL_NAMES } from '../../src/server/tool-schemas.js';
 import {
   ROOT,
   PYTHON_SCRIPT, JS_SCRIPT, RUST_SCRIPT, GO_SCRIPT, DOTNET_SCRIPT, JAVA_SCRIPT, JAVA_CLASS_DIR, RUBY_SCRIPT, CPP_SCRIPT,
@@ -73,35 +74,16 @@ const LANGUAGES: LangDef[] = [
     outputMarker: 'CPP_DEBUG_MARKER' },  // launchScript set in beforeAll after build; same output tier as rust (#223)
 ];
 
-/* ---------- all 25 tools ---------- */
+/* ---------- every advertised tool ---------- */
 
-const ALL_TOOLS = [
-  'list_supported_languages',
-  'create_debug_session',
-  'list_debug_sessions',
-  'set_breakpoint',
-  'list_breakpoints',
-  'remove_breakpoint',
-  'clear_breakpoints',
-  'get_source_context',
-  'start_debugging',
-  'restart_debugging',
-  'get_stack_trace',
-  'get_scopes',
-  'get_variables',
-  'get_local_variables',
-  'evaluate_expression',
-  'step_over',
-  'step_into',
-  'step_out',
-  'continue_execution',
-  'pause_execution',
-  'list_threads',
-  'get_output',
-  'attach_to_process',
-  'detach_from_process',
-  'close_debug_session',
-];
+/**
+ * The matrix rows. Derived from the server's own tool list rather than
+ * hand-maintained: the literal this replaces had drifted to 25 of the 28
+ * advertised tools, so three were missing from the report with nothing to
+ * say so (issue #579). Tools this suite does not exercise show as PENDING —
+ * which is the honest reading, and the reason to keep the list derived.
+ */
+const ALL_TOOLS: readonly string[] = [...TOOL_NAMES];
 
 /* ---------- test suite ---------- */
 
