@@ -129,6 +129,9 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
 
   // Adapters are loaded dynamically on-demand by the AdapterRegistry via AdapterLoader.
   // In container runtime, pre-register known adapters using dynamic import (fire-and-forget)
+  // Reads MCP_CONTAINER live rather than through the IEnvironment in scope: the
+  // gating tests stub it with `vi.stubEnv` after a ProcessEnvironment has already
+  // snapshotted process.env, so only the live read sees them.
   if (isContainerRuntime()) {
     const tryRegister = (lang: 'mock' | 'python' | 'javascript' | 'ruby' | 'rust' | 'go' | 'java' | 'cpp', factoryName: string) => {
       if (isLanguageDisabled(lang)) {

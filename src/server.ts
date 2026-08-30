@@ -198,7 +198,10 @@ export class DebugMcpServer implements ToolContext {
     // Validate language support using dynamic discovery
     const supported = await this.getSupportedLanguagesAsync();
     const requested = params.language as unknown as string;
-    const allowInContainer = isContainerRuntime() && requested === DebugLanguage.PYTHON; // ensure python allowed in container
+    // Reads MCP_CONTAINER live rather than through the IEnvironment in scope: the
+    // gating tests stub it with `vi.stubEnv` after a ProcessEnvironment has already
+    // snapshotted process.env, so only the live read sees them.
+    const allowInContainer = isContainerRuntime() && requested === DebugLanguage.PYTHON;
     if (isLanguageDisabled(requested)) {
       throw new McpError(
         McpErrorCode.InvalidParams,

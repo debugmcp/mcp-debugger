@@ -19,9 +19,13 @@ import type { LanguageSpecificLaunchConfig } from '@debugmcp/shared';
  * except `dapLaunchArgs`, which takes the attach shape (`request`, `host`,
  * `port`, `__attachMode`) and the adapter extras that production passes
  * through an `as Partial<CustomLaunchRequestArguments>` cast of its own.
- * Anything renamed in `ProxyLaunchRequest` still fails the call sites here.
+ * Anything renamed in `ProxyLaunchRequest` still fails the call sites here —
+ * including `dapLaunchArgs` itself: `keyof Pick<...>` requires the key to
+ * exist, where a bare `Omit<..., 'dapLaunchArgs'>` would silently accept a
+ * field that had been renamed out from under it.
  */
-export type ProxyLaunchRequestView = Omit<ProxyLaunchRequest, 'dapLaunchArgs'> & {
+export type ProxyLaunchRequestView =
+  Omit<ProxyLaunchRequest, keyof Pick<ProxyLaunchRequest, 'dapLaunchArgs'>> & {
   dapLaunchArgs?: Record<string, unknown>;
 };
 

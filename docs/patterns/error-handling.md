@@ -138,7 +138,7 @@ async startDebugging(
   
   try {
     // Start the proxy manager
-    await this.proxyLauncher.start(session, scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn);
+    await this.proxyLauncher.start(session, { scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn });
     
     // ... rest of logic
     
