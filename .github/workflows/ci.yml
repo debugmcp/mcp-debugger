@@ -5,13 +5,10 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main ]
-    # 'labeled'/'unlabeled' on top of the defaults so the "Require a changelog
-    # fragment" gate below re-evaluates when the 'no-changelog' label is added
-    # or removed. `gh pr create --label` sets labels in a follow-up API call,
-    # which races the 'opened' event: the gate could read an empty label list
-    # and fail a PR that was correctly labelled a second later (issue #580).
-    # Cost: label churn on a PR re-runs the whole workflow.
-    types: [ opened, synchronize, reopened, labeled, unlabeled ]
+    # Default types only. Adding 'labeled'/'unlabeled' would re-run the WHOLE
+    # matrix per label event - Dependabot applies each of its default labels
+    # twice at creation, so 3-5 simultaneous full runs per bot PR - to fix a
+    # race the gate itself now avoids by reading labels live (issue #580).
   workflow_dispatch:  # on-demand run when main lands commits without a push event
                       # (auto-merge pushes with GITHUB_TOKEN, which suppresses triggers)
 
@@ -194,6 +191,13 @@ jobs:
     name: Lint Code
     runs-on: ubuntu-latest
 
+    # The changelog gate reads the PR's labels live (issue #580); the
+    # workflow-level token grants contents:read only, which does not cover the
+    # pull-requests API `gh pr view` calls.
+    permissions:
+      contents: read
+      pull-requests: read
+
     steps:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -254,15 +258,27 @@ jobs:
     # A user-visible change must carry a changelog fragment, or its entry never
     # reaches the release notes (issues #546, #462). Test-only changes are exempt
     # automatically; apply the 'no-changelog' label for genuine no-op PRs.
+    #
+    # Labels are read LIVE rather than from the event payload: `gh pr create
+    # --label` applies labels in a follow-up API call, so the payload of the
+    # 'opened' event this job runs from can still show none, failing a PR that
+    # was correctly labelled a second later (issue #580). By the time this step
+    # runs the label is there. A label added LATER still needs a re-run, but
+    # "Re-run failed jobs" now picks it up instead of needing an empty push.
+    # `gh pr view` needs only read access, and works for fork PRs.
     - name: Require a changelog fragment
       if: github.event_name == 'pull_request'
       run: |
         CHANGED_FILES="$(git diff --name-only \
           "origin/${{ github.base_ref }}...${{ github.event.pull_request.head.sha }}")"
         export CHANGED_FILES
+        PR_LABELS="$(gh pr view "${{ github.event.pull_request.number }}" \
+          --repo "${{ github.repository }}" --json labels -q '.labels[].name' | paste -sd, -)"
+        export PR_LABELS
+        echo "Labels read live: ${PR_LABELS:-<none>}"
         node scripts/changelog-fragments.mjs --ci
       env:
-        PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        GH_TOKEN: ${{ github.token }}
 
   # Separate job for container tests on Linux only
   container-tests:
