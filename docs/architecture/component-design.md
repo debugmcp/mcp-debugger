@@ -40,8 +40,11 @@ a tunable on a live instance is visible to the collaborators. Each collaborator'
 constructor takes the narrowest `Pick<>` slice of that context it uses;
 collaborator-to-collaborator dependencies are constructor arguments
 (`DebugLauncher(ctx, proxyLauncher, breakpoints)`,
-`AttachController(ctx, proxyLauncher, breakpoints)`) and are called at call time,
-never captured, so tests can spy on any of them.
+`AttachController(ctx, proxyLauncher, breakpoints)`) held as captured instance
+references — their methods resolve at call time, so instance spies intercept,
+but reassigning a collaborator field after construction is not observed.
+`DebugLauncher` owns the restart reentrancy guard, and `restartDebugging`
+replays through `DebugLauncher.startDebugging` itself, not the facade's method.
 Shared per-request DAP helpers (timeout override validation, the timeout hint,
 log truncation) live in `src/session/dap-request-helpers.ts`.
 
