@@ -536,7 +536,7 @@ export class BreakpointController {
       ...(normalized ? { requestedName } : {})
     };
 
-    const removed = Array.from(session.functionBreakpoints?.values() ?? [])
+    const removed = Array.from(session.functionBreakpoints.values())
       .filter(bp => bp.functionName === effectiveName || bp.functionName === requestedName);
     if (removed.length === 0) {
       return { removed, ...disclosure, hint };
