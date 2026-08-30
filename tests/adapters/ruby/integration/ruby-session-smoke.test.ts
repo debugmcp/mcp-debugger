@@ -9,6 +9,7 @@ import { RubyAdapterFactory } from '@debugmcp/adapter-ruby';
 const createDependencies = (): AdapterDependencies => ({
   fileSystem: {
     readFile: async () => '',
+    readTail: async () => '',
     writeFile: async () => {},
     exists: async () => false,
     mkdir: async () => {},

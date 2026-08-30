@@ -33,6 +33,12 @@ describe('JsDebugAdapterPolicy', () => {
 
   describe('normalizeStopReason', () => {
     const normalize = JsDebugAdapterPolicy.normalizeStopReason!;
+    const pauseContext = (pausePending: boolean) => ({
+      pausePending,
+      ...(pausePending ? { pauseSource: 'user' as const } : {}),
+      lineBreakpointCount: 0,
+      functionBreakpointCount: 0
+    });
     // js-debug uses the same body for explicit pauses and genuine steps
     const jsDebugPauseBody = {
       reason: 'step',
@@ -42,17 +48,17 @@ describe('JsDebugAdapterPolicy', () => {
     } as DebugProtocol.StoppedEvent['body'];
 
     it("maps a 'step' stop to 'pause' while a pause request is in flight", () => {
-      expect(normalize('step', jsDebugPauseBody, { pausePending: true })).toBe('pause');
+      expect(normalize('step', jsDebugPauseBody, pauseContext(true))).toBe('pause');
     });
 
     it("leaves a genuine 'step' stop untouched when no pause is pending", () => {
-      expect(normalize('step', jsDebugPauseBody, { pausePending: false })).toBeUndefined();
+      expect(normalize('step', jsDebugPauseBody, pauseContext(false))).toBeUndefined();
     });
 
     it('never touches other reasons, even while a pause is pending', () => {
-      expect(normalize('breakpoint', { reason: 'breakpoint' }, { pausePending: true })).toBeUndefined();
-      expect(normalize('pause', { reason: 'pause' }, { pausePending: true })).toBeUndefined();
-      expect(normalize('exception', { reason: 'exception' }, { pausePending: true })).toBeUndefined();
+      expect(normalize('breakpoint', { reason: 'breakpoint' }, pauseContext(true))).toBeUndefined();
+      expect(normalize('pause', { reason: 'pause' }, pauseContext(true))).toBeUndefined();
+      expect(normalize('exception', { reason: 'exception' }, pauseContext(true))).toBeUndefined();
     });
   });
 
@@ -221,7 +227,7 @@ describe('JsDebugAdapterPolicy', () => {
       expect(JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars)).toEqual({ variables: [], scopeRefs: [] });
     });
 
-    it('uses Global only for a frame that exposes no Local scope at all', () => {
+    it('keeps Global explicit when a frame exposes no Local scope (#595)', () => {
       const scopes: Record<number, DebugProtocol.Scope[]> = {
         1: [
           { name: 'Script', variablesReference: 100, expensive: false },
@@ -235,7 +241,10 @@ describe('JsDebugAdapterPolicy', () => {
 
       const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
 
-      expect(result.variables.map(variable => variable.name)).toEqual(['globalValue']);
+      expect(result.variables).toEqual([]);
+      expect(result.scopeRefs).toEqual([]);
+      expect(result.note).toContain('get_scopes');
+      expect(result.note).toContain('get_variables');
     });
 
     it('merges a for-body Block scope ahead of the function locals (issue #558)', () => {
@@ -531,8 +540,7 @@ describe('JsDebugAdapterPolicy', () => {
         ...JS_SCOPE_KINDS.local,
         ...JS_SCOPE_KINDS.block,
         ...JS_SCOPE_KINDS.closure,
-        ...JS_SCOPE_KINDS.module,
-        ...JS_SCOPE_KINDS.global
+        ...JS_SCOPE_KINDS.module
       ]);
     });
 
@@ -597,7 +605,10 @@ describe('JsDebugAdapterPolicy', () => {
         { requestId: '3', dapCommand: 'configurationDone' },
         { requestId: '4', dapCommand: 'threads' },
       ];
-      const ordered = JsDebugAdapterPolicy.processQueuedCommands!(commands);
+      const ordered = JsDebugAdapterPolicy.processQueuedCommands!(
+        commands,
+        JsDebugAdapterPolicy.createInitialState()
+      );
       expect(ordered.map(c => c.dapCommand)).toEqual([
         'setBreakpoints',
         'configurationDone',
@@ -681,6 +692,7 @@ describe('JsDebugAdapterPolicy', () => {
   describe('getAdapterSpawnConfig', () => {
     it('returns spawn configuration when adapterCommand provided', () => {
       const spawn = JsDebugAdapterPolicy.getAdapterSpawnConfig!({
+        executablePath: '/usr/bin/node',
         adapterCommand: {
           command: '/usr/bin/node',
           args: ['vsDebugServer.cjs', '5678', '127.0.0.1'],
@@ -689,6 +701,7 @@ describe('JsDebugAdapterPolicy', () => {
         adapterHost: '127.0.0.1',
         adapterPort: 5678,
         logDir: '/tmp/session',
+        scriptPath: '/workspace/app.js'
       });
 
       expect(spawn).toMatchObject({

@@ -8,6 +8,7 @@ import { GoAdapterFactory } from '@debugmcp/adapter-go';
 const createDependencies = (): AdapterDependencies => ({
   fileSystem: {
     readFile: async () => '',
+    readTail: async () => '',
     writeFile: async () => {},
     exists: async () => false,
     mkdir: async () => {},
