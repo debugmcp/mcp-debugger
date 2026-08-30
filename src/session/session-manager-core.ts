@@ -7,6 +7,7 @@ import {
   SessionState, SessionLifecycleState, DebugLanguage, DebugSessionInfo, mapLegacyState,
   AdapterPolicy, SessionOutputEntry, redactSecretsInString
 } from '@debugmcp/shared';
+import type { StackFrame } from '@debugmcp/shared';
 import { isRedactionEnabled } from '../utils/redaction-mode.js';
 import { ValidationResultCache } from '../utils/language-availability.js';
 import { SessionStore, ManagedSession } from './session-store.js';
@@ -28,6 +29,7 @@ import { normalizeBreakpointMessage } from '../utils/breakpoint-message.js';
 import { consumeChildOrigin } from '../utils/child-origin-events.js';
 import { isPidAlive } from '../utils/jvm-orphan-reaper.js';
 import { IAdapterRegistry } from '@debugmcp/shared';
+import type { ProxyFailureDiagnostics } from './launch/proxy-failure-diagnostics.js';
 
 // Custom launch arguments interface extending DebugProtocol.LaunchRequestArguments
 export interface CustomLaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
@@ -35,11 +37,69 @@ export interface CustomLaunchRequestArguments extends DebugProtocol.LaunchReques
   justMyCode?: boolean;
 }
 
-export interface DebugResult {
+/**
+ * The `data` bag a debug operation returns alongside its state.
+ *
+ * An open bag with typed common fields rather than a discriminated union:
+ * `startDebugging` alone returns three shapes (dry run, launch, toolchain
+ * refusal) and `restartDebugging` spreads whatever the launch produced, so a
+ * union would force narrowing at every server read for no gain. Naming the
+ * fields every reader actually touches — `message`, `warning`, and the proxy
+ * failure pointers — is what lets the server handlers read them directly
+ * instead of casting.
+ */
+export type DebugResultData = ProxyFailureDiagnostics & {
+  /** Human-readable status for the tool result. */
+  message?: string;
+  /** Advisory notes joined by the operation (unbound breakpoints, dropped keys, ...). */
+  warning?: string;
+  /**
+   * The debuggee is still running and the operation completes asynchronously.
+   * Shared rather than step-specific: `pause` reports it too when its grace
+   * window elapses before a `stopped` event arrives.
+   */
+  pending?: boolean;
+  [key: string]: unknown;
+};
+
+/**
+ * Where the debuggee is stopped, as a result payload reports it.
+ *
+ * Always derived from the top `StackFrame`, so it is defined as that frame's
+ * location fields rather than restated: `column` is optional on `StackFrame`
+ * too, so the wire shape is exactly what the five hand-copied literals this
+ * replaces produced.
+ */
+export type StopLocation = Pick<StackFrame, 'file' | 'line' | 'column'>;
+
+/** What a step operation returns: `message` is always set, plus where it landed. */
+export type StepResultData = DebugResultData & {
+  message: string;
+  location?: StopLocation;
+};
+
+/**
+ * What a pause returns. `stopReason`/`rawStopReason` are present only when
+ * this pause's own stop was recorded (never a stale earlier one), and
+ * `location` only when the stack was readable by the time it settled.
+ */
+export type PauseResultData = DebugResultData & {
+  message: string;
+  stopReason?: string;
+  rawStopReason?: string;
+  location?: StopLocation;
+};
+
+/** What a successful attach returns on top of the common fields. */
+export type AttachResultData = DebugResultData & {
+  attachConfig?: unknown;
+};
+
+export interface DebugResult<TData extends DebugResultData = DebugResultData> {
   success: boolean;
   state: SessionState;
   error?: string;
-  data?: unknown;
+  data?: TData;
   canContinue?: boolean;
   // Machine-readable error identity for tests and callers (avoid string assertions)
   errorType?: string; // e.g., 'PythonNotFoundError'

@@ -4,12 +4,30 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { DebugMcpServer } from '../../src/server';
 import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import { SessionLifecycleState } from '@debugmcp/shared';
+import { createProductionDependencies } from '../../src/container/dependencies.js';
+import { SessionManager } from '../../src/session/session-manager.js';
+import {
+  createMockDependencies,
+  createMockServer,
+  getResourceHandlers
+} from '../core/unit/server/server-test-helpers.js';
+
+// The same preamble the sibling suites under tests/core/unit/server/ use.
+// DebugMcpServer builds its dependencies in the constructor, so every
+// construction here used to open winston's shared file transport and a session
+// log directory that nothing ever closed: ~10 MaxListenersExceededWarning lines
+// per run and a /tmp/test.log that grew with it (issue #578).
+vi.mock('@modelcontextprotocol/sdk/server/index.js');
+vi.mock('../../src/container/dependencies.js');
+vi.mock('../../src/session/session-manager.js');
 
 describe('Server Coverage - Error Paths and Edge Cases', () => {
   let server: DebugMcpServer;
+  let mockServer: any;
   let mockSessionManager: any;
   let mockLogger: any;
 
@@ -21,12 +39,6 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       warn: vi.fn(),
       debug: vi.fn()
     };
-
-    // Create server instance
-    server = new DebugMcpServer({
-      logLevel: 'info',
-      logFile: '/tmp/test.log'
-    });
 
     // Mock the session manager
     mockSessionManager = {
@@ -61,8 +73,26 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       }
     };
 
-    // Replace the session manager with our mock
-    (server as any).sessionManager = mockSessionManager;
+    // Everything the server needs is wired BEFORE construction. The session
+    // manager especially: the constructor hands it to registerResourceHandlers
+    // by reference (see the trap documented in src/server.ts), so a suite that
+    // built the server first and swapped `(server as any).sessionManager`
+    // afterwards left the resource handlers bound to the automocked instance —
+    // whose getAllSessions() returns undefined, and resources/list throws.
+    // Tool handlers read the context live and did not notice; resources do.
+    vi.mocked(createProductionDependencies).mockReturnValue(
+      createMockDependencies() as unknown as ReturnType<typeof createProductionDependencies>
+    );
+    mockServer = createMockServer();
+    vi.mocked(Server).mockImplementation(function () { return mockServer as any; });
+    // `function`, not an arrow: the implementation is invoked with `new`.
+    vi.mocked(SessionManager).mockImplementation(function () {
+      return mockSessionManager as unknown as SessionManager;
+    });
+
+    // No logFile: with the container mocked the option is inert, and naming a
+    // path here is what made this suite write one.
+    server = new DebugMcpServer({ logLevel: 'info' });
     (server as any).logger = mockLogger;
   });
 
@@ -542,6 +572,24 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       mockSessionManager.closeAllSessions.mockRejectedValue(new Error('Cleanup failed'));
       
       await expect(server.stop()).rejects.toThrow('Cleanup failed');
+    });
+  });
+
+  describe('Resource Handler Wiring', () => {
+    it('binds resources/list to the session manager the tests drive', async () => {
+      mockSessionManager.getAllSessions.mockReturnValue([
+        { id: 'sess-1', name: 'alpha', language: 'python' }
+      ]);
+
+      const { listResourcesHandler } = getResourceHandlers(mockServer);
+      const result = await listResourcesHandler({ method: 'resources/list', params: {} });
+
+      expect(mockSessionManager.getAllSessions).toHaveBeenCalled();
+      expect(result.resources).toHaveLength(1);
+      expect(result.resources[0]).toMatchObject({
+        uri: 'debug://sessions/sess-1/output',
+        mimeType: 'text/plain'
+      });
     });
   });
 

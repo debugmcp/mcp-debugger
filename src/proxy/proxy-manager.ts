@@ -27,6 +27,7 @@ import type {
   ProxyDapResponseMessage,
   ProxyMessage
 } from '../dap-core/types.js';
+import { disposeAdapterQuietly } from '../adapters/adapter-disposal.js';
 import { ErrorMessages, ProxyInitProgress } from '../utils/error-messages.js';
 import { ProxyConfig } from './proxy-config.js';
 import type { BreakpointSyncResult, FunctionBreakpointSyncResult } from './dap-proxy-interfaces.js';
@@ -1482,11 +1483,18 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     // Clear adapter-provided launch barriers
     this.clearActiveLaunchBarrier();
 
-    // Dispose the adapter so AdapterRegistry releases the instance slot
-    if (this.adapter && typeof this.adapter.dispose === 'function') {
-      this.adapter.dispose().catch(err => {
-        this.logger.warn(`[ProxyManager] Error disposing adapter during cleanup: ${err instanceof Error ? err.message : String(err)}`);
-      });
+    // Dispose the adapter so AdapterRegistry releases the instance slot.
+    // Fire-and-forget because cleanup() is synchronous and runs on the exit
+    // path, but through the shared helper, which AWAITS dispose() inside its
+    // own guard: the `dispose().catch(...)` this replaces could not see a
+    // dispose that threw synchronously, and that throw escaped mid-teardown
+    // (issue #573).
+    if (this.adapter) {
+      void disposeAdapterQuietly(
+        this.adapter,
+        this.logger,
+        '[ProxyManager] Error disposing adapter during cleanup'
+      );
       this.adapter = null;
     }
 

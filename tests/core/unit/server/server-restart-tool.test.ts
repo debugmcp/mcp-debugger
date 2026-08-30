@@ -83,6 +83,49 @@ describe('restart_debugging tool', () => {
     expect(mockSessionManager.restartDebugging).toHaveBeenCalledWith('test-session');
   });
 
+  it('lifts the restart warning to the top level of a successful result', async () => {
+    mockSessionManager.getSession.mockReturnValue({
+      id: 'test-session',
+      sessionLifecycle: 'terminated'
+    });
+    mockSessionManager.restartDebugging.mockResolvedValue({
+      success: true,
+      state: 'paused',
+      data: { breakpointsReapplied: 1, warning: '1 statement anchor(s) no longer match' }
+    });
+
+    const result = await callToolHandler({
+      method: 'tools/call',
+      params: { name: 'restart_debugging', arguments: { sessionId: 'test-session' } }
+    });
+
+    const content = JSON.parse(result.content[0].text);
+    expect(content.warning).toBe('1 statement anchor(s) no longer match');
+    expect(content.data.warning).toBe('1 statement anchor(s) no longer match');
+  });
+
+  it('withholds the warning on a failed restart, where the error is the message', async () => {
+    mockSessionManager.getSession.mockReturnValue({
+      id: 'test-session',
+      sessionLifecycle: 'active'
+    });
+    mockSessionManager.restartDebugging.mockResolvedValue({
+      success: false,
+      state: 'error',
+      error: 'relaunch failed',
+      data: { warning: 'advice that must not compete with the error' }
+    });
+
+    const result = await callToolHandler({
+      method: 'tools/call',
+      params: { name: 'restart_debugging', arguments: { sessionId: 'test-session' } }
+    });
+
+    const content = JSON.parse(result.content[0].text);
+    expect(content.warning).toBeUndefined();
+    expect(content.error).toBe('relaunch failed');
+  });
+
   it('surfaces SessionManager refusals as failed results', async () => {
     mockSessionManager.getSession.mockReturnValue({
       id: 'test-session',

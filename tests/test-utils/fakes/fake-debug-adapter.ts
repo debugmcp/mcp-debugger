@@ -192,23 +192,33 @@ export class FakeDebugAdapter extends EventEmitter implements IDebugAdapter {
    * The builder wins: it replaces any same-member constructor override, so pass attach
    * behaviour through `options` rather than through the constructor.
    */
-  withAttachSupport(options: FakeAttachSupportOptions = {}): this {
-    this.supportsAttach = vi.fn<Impl<'supportsAttach'>>(() => true);
-    this.supportsDetach = vi.fn<Impl<'supportsDetach'>>(() => options.detach ?? true);
-    this.usesDirectConnectForAttach = vi.fn<Impl<'usesDirectConnectForAttach'>>(
-      () => options.directConnect ?? false
-    );
-    this.transformAttachConfig = vi.fn<Impl<'transformAttachConfig'>>(
-      options.transform ??
-        ((config: GenericAttachConfig): LanguageSpecificAttachConfig => ({ ...config }))
-    );
-    this.getDefaultAttachConfig = vi.fn<Impl<'getDefaultAttachConfig'>>(
-      (): Partial<GenericAttachConfig> => ({})
-    );
+  withAttachSupport(options: FakeAttachSupportOptions = {}): this & DefinedAttachMembers {
+    // Built as one object typed `DefinedAttachMembers`, then assigned — the shape
+    // `withExtras` uses. The five members are optional on the class (a fake that
+    // never opted in must not define them), so the return type has to say they are
+    // present now, or callers need a non-null assertion to read
+    // `adapter.transformAttachConfig.mock`. Stating that with `as` would assert
+    // exactly what the assignments do, and would keep compiling if one were
+    // dropped; naming the object's type instead makes a missing member a TS2741
+    // here rather than an `undefined` at the call site.
+    const members: DefinedAttachMembers = {
+      supportsAttach: vi.fn<Impl<'supportsAttach'>>(() => true),
+      supportsDetach: vi.fn<Impl<'supportsDetach'>>(() => options.detach ?? true),
+      usesDirectConnectForAttach: vi.fn<Impl<'usesDirectConnectForAttach'>>(
+        () => options.directConnect ?? false
+      ),
+      transformAttachConfig: vi.fn<Impl<'transformAttachConfig'>>(
+        options.transform ??
+          ((config: GenericAttachConfig): LanguageSpecificAttachConfig => ({ ...config }))
+      ),
+      getDefaultAttachConfig: vi.fn<Impl<'getDefaultAttachConfig'>>(
+        (): Partial<GenericAttachConfig> => ({})
+      )
+    };
     if (options.supportedAttachKeys !== undefined) {
       this.supportedAttachKeys = options.supportedAttachKeys;
     }
-    return this;
+    return Object.assign(this, members);
   }
 
   /**
@@ -262,3 +272,15 @@ export class FakeDebugAdapter extends EventEmitter implements IDebugAdapter {
     }
   }
 }
+
+/** The attach members {@link FakeDebugAdapter.withAttachSupport} defines. */
+export type DefinedAttachMembers = Required<
+  Pick<
+    FakeDebugAdapter,
+    | 'supportsAttach'
+    | 'supportsDetach'
+    | 'usesDirectConnectForAttach'
+    | 'transformAttachConfig'
+    | 'getDefaultAttachConfig'
+  >
+>;

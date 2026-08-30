@@ -7,11 +7,20 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SessionManagerOperations } from '../../../../src/session/session-manager-operations.js';
-import { SessionLifecycleState, SessionState } from '@debugmcp/shared';
+import { DebugLanguage, SessionLifecycleState, SessionState } from '@debugmcp/shared';
 import { DebugSessionCreationError } from '../../../../src/errors/debug-errors.js';
 import { createEnvironmentMock } from '../../../test-utils/mocks/environment.js';
+import {
+  FakeDebugAdapter,
+  type DefinedAttachMembers
+} from '../../../test-utils/fakes/fake-debug-adapter.js';
 import type { ManagedSession } from '../../../../src/session/session-store.js';
-import type { ExceptionBreakMode, LanguageSpecificLaunchConfig } from '@debugmcp/shared';
+import type {
+  ExceptionBreakMode,
+  GenericAttachConfig,
+  LanguageSpecificAttachConfig,
+  LanguageSpecificLaunchConfig
+} from '@debugmcp/shared';
 
 class TestableSessionManagerOperations extends SessionManagerOperations {
   protected async handleAutoContinue(_sessionId: string): Promise<void> {
@@ -41,6 +50,31 @@ interface ProxyLauncherView {
 /** The proxy launcher is a protected collaborator; reaching it needs the usual cast. */
 function internals(ops: SessionManagerOperations): { proxyLauncher: ProxyLauncherView } {
   return ops as unknown as { proxyLauncher: ProxyLauncherView };
+}
+
+/**
+ * The adapter shape most of these tests want: Ruby-flavoured, attach-capable and
+ * direct-connect, so the launcher skips executable resolution and builds no adapter
+ * command. Built on the conformant fake, so every member is the one `IDebugAdapter`
+ * declares -- the hand-rolled literals this replaces were only ever checked by the
+ * `any`-typed registry mock they were handed to.
+ */
+function makeDirectConnectRubyAdapter(
+  overrides: {
+    transform?: (cfg: GenericAttachConfig) => LanguageSpecificAttachConfig;
+    supportedAttachKeys?: readonly string[];
+    resolveExecutablePath?: (preferredPath?: string) => Promise<string>;
+  } = {}
+): FakeDebugAdapter & DefinedAttachMembers {
+  return new FakeDebugAdapter({
+    language: DebugLanguage.RUBY,
+    getDefaultExecutableName: () => 'ruby',
+    resolveExecutablePath: overrides.resolveExecutablePath
+  }).withAttachSupport({
+    directConnect: true,
+    transform: overrides.transform,
+    supportedAttachKeys: overrides.supportedAttachKeys
+  });
 }
 
 describe('SessionManagerOperations attach modes', () => {
@@ -108,11 +142,7 @@ describe('SessionManagerOperations attach modes', () => {
       environment: createEnvironmentMock(),
       networkManager: { findFreePort: vi.fn().mockResolvedValue(9000) },
       adapterRegistry: {
-        create: vi.fn(),
-        getAdapterPolicy: vi.fn().mockReturnValue({
-          name: 'default',
-          getInitializationBehavior: () => ({})
-        })
+        create: vi.fn()
       }
     };
 
@@ -127,14 +157,11 @@ describe('SessionManagerOperations attach modes', () => {
   });
 
   it('skips executable resolution for direct-connect attach and builds no adapter command', async () => {
-    const adapterStub = {
-      resolveExecutablePath: vi.fn().mockRejectedValue(new Error('ruby not found')),
-      buildAdapterCommand: vi.fn(),
-      usesDirectConnectForAttach: vi.fn().mockReturnValue(true),
-      supportsAttach: vi.fn().mockReturnValue(true),
-      transformAttachConfig: vi.fn().mockImplementation((cfg: unknown) => cfg),
-      getDefaultExecutableName: vi.fn().mockReturnValue('ruby')
-    };
+    const adapterStub = makeDirectConnectRubyAdapter({
+      resolveExecutablePath: async () => {
+        throw new Error('ruby not found');
+      }
+    });
     mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
     await internals(operations).proxyLauncher.start(
@@ -153,12 +180,11 @@ describe('SessionManagerOperations attach modes', () => {
 
   it('still resolves the local toolchain for spawn-mode attach', async () => {
     mockSession.language = 'java';
-    const adapterStub = {
-      resolveExecutablePath: vi.fn().mockResolvedValue('java'),
-      buildAdapterCommand: vi.fn().mockReturnValue({ command: 'java', args: [] }),
-      supportsAttach: vi.fn().mockReturnValue(true),
-      transformAttachConfig: vi.fn().mockImplementation((cfg: unknown) => cfg)
-    };
+    const adapterStub = new FakeDebugAdapter({
+      language: DebugLanguage.JAVA,
+      resolveExecutablePath: async () => 'java',
+      buildAdapterCommand: () => ({ command: 'java', args: [] })
+    }).withAttachSupport();
     mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
     await internals(operations).proxyLauncher.start(
@@ -198,14 +224,7 @@ describe('SessionManagerOperations attach modes', () => {
     mockDependencies.adapterRegistry.getFactoryMetadata = vi
       .fn()
       .mockResolvedValue({ modes: { launch: true, attach: 'direct-connect' } });
-    const adapterStub = {
-      resolveExecutablePath: vi.fn(),
-      buildAdapterCommand: vi.fn(),
-      usesDirectConnectForAttach: vi.fn().mockReturnValue(true),
-      supportsAttach: vi.fn().mockReturnValue(true),
-      transformAttachConfig: vi.fn().mockImplementation((cfg: unknown) => cfg),
-      getDefaultExecutableName: vi.fn().mockReturnValue('ruby')
-    };
+    const adapterStub = makeDirectConnectRubyAdapter();
     mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
     // Only the gate is under test — let the post-start attach verification fail fast
     mockProxyManager.start.mockRejectedValue(new Error('stop here'));
@@ -223,22 +242,11 @@ describe('SessionManagerOperations attach modes', () => {
   });
 
   describe('adapterConfig passthrough (issue #336)', () => {
-    function makeDirectConnectAdapter() {
-      return {
-        resolveExecutablePath: vi.fn(),
-        buildAdapterCommand: vi.fn(),
-        usesDirectConnectForAttach: vi.fn().mockReturnValue(true),
-        supportsAttach: vi.fn().mockReturnValue(true),
-        transformAttachConfig: vi.fn().mockImplementation((cfg: unknown) => cfg),
-        getDefaultExecutableName: vi.fn().mockReturnValue('ruby')
-      };
-    }
-
     it('attachToProcess merges adapterConfig into the config handed to transformAttachConfig', async () => {
       mockDependencies.adapterRegistry.getFactoryMetadata = vi
         .fn()
         .mockResolvedValue({ modes: { launch: true, attach: 'direct-connect' } });
-      const adapterStub = makeDirectConnectAdapter();
+      const adapterStub = makeDirectConnectRubyAdapter();
       mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
       const result = await operations.attachToProcess('test-session', {
@@ -274,7 +282,7 @@ describe('SessionManagerOperations attach modes', () => {
       mockDependencies.adapterRegistry.getFactoryMetadata = vi
         .fn()
         .mockResolvedValue({ modes: { launch: true, attach: 'direct-connect' } });
-      const adapterStub = makeDirectConnectAdapter();
+      const adapterStub = makeDirectConnectRubyAdapter();
       mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
       await operations.attachToProcess('test-session', {
@@ -291,12 +299,13 @@ describe('SessionManagerOperations attach modes', () => {
     });
 
     it('strips request/__attachMode from launch-path adapterLaunchConfig too', async () => {
-      const adapterStub = {
-        resolveExecutablePath: vi.fn().mockResolvedValue('ruby'),
-        buildAdapterCommand: vi.fn().mockReturnValue({ command: 'rdbg', args: [] }),
-        supportsAttach: vi.fn().mockReturnValue(false),
-        transformLaunchConfig: vi.fn().mockImplementation(async (cfg: unknown) => cfg)
-      };
+      const adapterStub = new FakeDebugAdapter({
+        language: DebugLanguage.RUBY,
+        resolveExecutablePath: async () => 'ruby',
+        buildAdapterCommand: () => ({ command: 'rdbg', args: [] }),
+        // Declared but answering "no": not the same as never being asked.
+        supportsAttach: () => false
+      });
       mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
       await internals(operations).proxyLauncher.start(
@@ -308,7 +317,9 @@ describe('SessionManagerOperations attach modes', () => {
         { request: 'attach', __attachMode: true, foo: 1 }
       );
 
-      const cfg = adapterStub.transformLaunchConfig.mock.calls[0][0];
+      // The launcher merges the caller's adapter extras into the generic config,
+      // so the recorded argument carries keys GenericLaunchConfig does not name.
+      const cfg = adapterStub.transformLaunchConfig.mock.calls[0][0] as Record<string, unknown>;
       expect(cfg.foo).toBe(1);
       expect(cfg.request).not.toBe('attach');
       expect(cfg.__attachMode).toBeUndefined();
@@ -320,18 +331,10 @@ describe('SessionManagerOperations attach modes', () => {
 
   describe('dropped adapterConfig keys warning (issue #450)', () => {
     function makeDirectConnectAdapter(
-      transform: (cfg: unknown) => unknown,
+      transform: (cfg: GenericAttachConfig) => LanguageSpecificAttachConfig,
       supportedAttachKeys?: readonly string[]
     ) {
-      return {
-        resolveExecutablePath: vi.fn(),
-        buildAdapterCommand: vi.fn(),
-        usesDirectConnectForAttach: vi.fn().mockReturnValue(true),
-        supportsAttach: vi.fn().mockReturnValue(true),
-        transformAttachConfig: vi.fn().mockImplementation(transform),
-        getDefaultExecutableName: vi.fn().mockReturnValue('ruby'),
-        ...(supportedAttachKeys ? { supportedAttachKeys } : {})
-      };
+      return makeDirectConnectRubyAdapter({ transform, supportedAttachKeys });
     }
 
     beforeEach(() => {
@@ -355,7 +358,7 @@ describe('SessionManagerOperations attach modes', () => {
       });
 
       expect(result.success).toBe(true);
-      const warning = (result.data as { warning?: string }).warning;
+      const warning = result.data?.warning;
       expect(warning).toContain('localRoot');
       expect(warning).toContain('remoteRoot');
       expect(warning).not.toContain('keepMe');
@@ -376,7 +379,7 @@ describe('SessionManagerOperations attach modes', () => {
       });
 
       expect(result.success).toBe(true);
-      expect((result.data as { warning?: string }).warning).toBeUndefined();
+      expect(result.data?.warning).toBeUndefined();
     });
 
     it('ignores dropped top-level attach params — only adapterConfig keys are the caller contract', async () => {
@@ -395,7 +398,7 @@ describe('SessionManagerOperations attach modes', () => {
       });
 
       expect(result.success).toBe(true);
-      expect((result.data as { warning?: string }).warning).toBeUndefined();
+      expect(result.data?.warning).toBeUndefined();
     });
 
     it('forwards keys outside supportedAttachKeys with a did-you-mean warning (issue #466)', async () => {
@@ -413,7 +416,7 @@ describe('SessionManagerOperations attach modes', () => {
       });
 
       expect(result.success).toBe(true);
-      const warning = (result.data as { warning?: string }).warning;
+      const warning = result.data?.warning;
       expect(warning).toContain('not recognized by mcp-debugger were forwarded to the ruby adapter as-is');
       expect(warning).toContain('pathMapping (did you mean pathMappings?)');
       expect(warning).not.toContain('were ignored');
@@ -439,7 +442,7 @@ describe('SessionManagerOperations attach modes', () => {
       });
 
       expect(result.success).toBe(true);
-      const warning = (result.data as { warning?: string }).warning;
+      const warning = result.data?.warning;
       expect(warning).toContain('were ignored: alsoSupported');
       expect(warning).not.toContain('keepMe');
     });
@@ -462,7 +465,7 @@ describe('SessionManagerOperations attach modes', () => {
       });
 
       expect(result.success).toBe(true);
-      const warning = (result.data as { warning?: string }).warning ?? '';
+      const warning = result.data?.warning ?? '';
       expect(warning).toContain('were ignored: localRoot');
       expect(warning).toContain('forwarded to the ruby adapter as-is: mystery');
       expect(warning.indexOf('; ')).toBeGreaterThan(0);
@@ -479,7 +482,7 @@ describe('SessionManagerOperations attach modes', () => {
         stopOnEntry: false,
         adapterConfig: { localRoot: 'C:\\x' }
       });
-      expect((first.data as { warning?: string }).warning).toContain('localRoot');
+      expect(first.data?.warning).toContain('localRoot');
 
       // Simulate detach + re-attach with a clean adapterConfig
       mockSession.proxyManager = undefined;
@@ -492,27 +495,16 @@ describe('SessionManagerOperations attach modes', () => {
         port: 12345,
         stopOnEntry: false
       });
-      expect((second.data as { warning?: string }).warning).toBeUndefined();
+      expect(second.data?.warning).toBeUndefined();
     });
   });
 
   describe('post-attach breakpoint re-sync (issue #500)', () => {
-    function makeDirectConnectAdapter() {
-      return {
-        resolveExecutablePath: vi.fn(),
-        buildAdapterCommand: vi.fn(),
-        usesDirectConnectForAttach: vi.fn().mockReturnValue(true),
-        supportsAttach: vi.fn().mockReturnValue(true),
-        transformAttachConfig: vi.fn().mockImplementation((cfg: unknown) => cfg),
-        getDefaultExecutableName: vi.fn().mockReturnValue('ruby')
-      };
-    }
-
     beforeEach(() => {
       mockDependencies.adapterRegistry.getFactoryMetadata = vi
         .fn()
         .mockResolvedValue({ modes: { launch: true, attach: 'direct-connect' } });
-      mockDependencies.adapterRegistry.create.mockResolvedValue(makeDirectConnectAdapter());
+      mockDependencies.adapterRegistry.create.mockResolvedValue(makeDirectConnectRubyAdapter());
     });
 
     it('re-sends every queued breakpoint file with forceFreshEcho after a successful attach', async () => {
@@ -577,12 +569,12 @@ describe('SessionManagerOperations attach modes', () => {
   });
 
   it('appends an attach hint when launch executable resolution fails on an attach-capable adapter', async () => {
-    const adapterStub = {
-      resolveExecutablePath: vi.fn().mockRejectedValue(new Error('ruby not found')),
-      buildAdapterCommand: vi.fn(),
-      supportsAttach: vi.fn().mockReturnValue(true),
-      transformLaunchConfig: vi.fn().mockImplementation(async (cfg: unknown) => cfg)
-    };
+    const adapterStub = new FakeDebugAdapter({
+      language: DebugLanguage.RUBY,
+      resolveExecutablePath: async () => {
+        throw new Error('ruby not found');
+      }
+    }).withAttachSupport();
     mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
     await expect(
@@ -592,11 +584,12 @@ describe('SessionManagerOperations attach modes', () => {
 
   it('omits the attach hint when the adapter has no attach support', async () => {
     mockSession.language = 'go';
-    const adapterStub = {
-      resolveExecutablePath: vi.fn().mockRejectedValue(new Error('go not found')),
-      buildAdapterCommand: vi.fn(),
-      transformLaunchConfig: vi.fn().mockImplementation(async (cfg: unknown) => cfg)
-    };
+    const adapterStub = new FakeDebugAdapter({
+      language: DebugLanguage.GO,
+      resolveExecutablePath: async () => {
+        throw new Error('go not found');
+      }
+    });
     mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
     const failure = await internals(operations).proxyLauncher

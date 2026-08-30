@@ -26,12 +26,12 @@
  *
  * The lease covers only the setup window. After a transfer the ProxyManager is
  * the owner, and disposal happens through its teardown — `ProxyManager.cleanup()`
- * calls `adapter.dispose()`, which the callers' catches reach by stopping
- * `session.proxyManager` — exactly as before.
+ * disposes through the same `disposeAdapterQuietly` helper, which the callers'
+ * catches reach by stopping `session.proxyManager` — exactly as before.
  */
 import type { AdapterConfig, IAdapterRegistry, IDebugAdapter } from '@debugmcp/shared';
 import type { ILogger, IProxyManagerFactory } from '../interfaces/external-dependencies.js';
-import { getErrorMessage } from '../errors/debug-errors.js';
+import { disposeAdapterQuietly } from './adapter-disposal.js';
 import type { IProxyManager } from '../proxy/proxy-manager.js';
 
 /**
@@ -98,11 +98,9 @@ export class AdapterLease {
    * **Never throws, and that is load-bearing**: this is the `finally` of
    * `ProxyLauncher.start`, so anything escaping here replaces the setup error
    * that sent us there with a teardown error — hiding the cause the caller was
-   * about to report. So every step is inside the guard, not just the call:
-   * a missing or nullish adapter (a partial registry double), a `dispose()`
-   * that throws *synchronously* (no promise ever exists, so `.catch()` on the
-   * result would never run), a rejected `dispose()`, and a logger that throws
-   * while reporting one of those.
+   * about to report. `disposeAdapterQuietly` is what makes that true (issue
+   * #573); the state flips to 'released' before it runs, so a failed disposal
+   * still ends the lease rather than leaving it to be retried.
    */
   async release(): Promise<void> {
     if (this.state !== 'held') {
@@ -110,34 +108,10 @@ export class AdapterLease {
     }
     this.state = 'released';
 
-    try {
-      // Duck-typed for parity with ProxyManager.cleanup(), whose adapter handle
-      // is likewise optional-shaped — and read inside the guard, because the
-      // property access itself throws if the adapter is nullish.
-      const disposable = this.adapter as { dispose?: () => Promise<void> } | undefined;
-      if (typeof disposable?.dispose !== 'function') {
-        return;
-      }
-      await disposable.dispose();
-    } catch (disposeError: unknown) {
-      this.warnDisposeFailed(disposeError);
-    }
-  }
-
-  /**
-   * Report a failed disposal. Guarded in turn: a logger that throws must not
-   * become the failure `release()` promises never to raise, and there is
-   * nowhere left to report it.
-   */
-  private warnDisposeFailed(disposeError: unknown): void {
-    try {
-      this.logger.warn(
-        `[SessionManager] Failed to dispose adapter after launch setup error for session ${
-          this.sessionId
-        }: ${getErrorMessage(disposeError)}`
-      );
-    } catch {
-      // Deliberately empty — see above.
-    }
+    await disposeAdapterQuietly(
+      this.adapter,
+      this.logger,
+      `[SessionManager] Failed to dispose adapter after launch setup error for session ${this.sessionId}`
+    );
   }
 }

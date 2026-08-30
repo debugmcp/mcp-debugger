@@ -9,7 +9,7 @@ import { checkLaunchToolchain } from '../../utils/language-availability.js';
 import { isContainerRuntime } from '../../utils/container-path-utils.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { assertPlainObjectArg, requireSessionId } from '../tool-validation.js';
-import { attachWarning } from './shared.js';
+import { successWarning } from './shared.js';
 import { failureResult, jsonResult, rethrowAsMcpError, type ToolResult } from '../tool-result.js';
 
 export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
@@ -110,7 +110,7 @@ export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
       // proxyLogPath, issue #551) and the dropped-adapterConfig
       // warning (issue #450) must reach this entry point too.
       const attachData = attachResult.data;
-      const warning = attachWarning(attachResult);
+      const warning = successWarning(attachResult);
       return jsonResult({
         success: attachResult.success,
         sessionId: sessionInfo.id,

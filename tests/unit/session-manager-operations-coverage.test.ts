@@ -6,7 +6,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import path from 'path';
 import { SessionManagerOperations } from '../../src/session/session-manager-operations';
-import { SessionLifecycleState, SessionState } from '@debugmcp/shared';
+import { DebugLanguage, SessionLifecycleState, SessionState } from '@debugmcp/shared';
 
 /** Concrete subclass for testing the abstract SessionManagerOperations */
 class TestableSessionManagerOperations extends SessionManagerOperations {
@@ -22,6 +22,7 @@ import {
   DebugSessionCreationError
 } from '../../src/errors/debug-errors';
 import { createEnvironmentMock } from '../test-utils/mocks/environment';
+import { FakeDebugAdapter } from '../test-utils/fakes/fake-debug-adapter';
 import type { ExecutionController } from '../../src/session/execution/execution-controller';
 import type { DebugLauncher } from '../../src/session/launch/debug-launcher';
 import type { ManagedSession } from '../../src/session/session-store';
@@ -149,20 +150,16 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         findFreePort: vi.fn().mockResolvedValue(9000)
       },
       adapterRegistry: {
-        create: vi.fn().mockResolvedValue({
-          transformLaunchConfig: vi.fn(async (config: unknown) => config),
-          buildAdapterCommand: vi.fn().mockReturnValue('python -m debugpy'),
-          resolveExecutablePath: vi.fn().mockResolvedValue('python'),
-          dispose: vi.fn().mockResolvedValue(undefined)
-        }),
+        create: vi.fn().mockResolvedValue(
+          new FakeDebugAdapter({
+            language: DebugLanguage.PYTHON,
+            resolveExecutablePath: async () => 'python'
+          })
+        ),
         // Implementation (not mockResolvedValue) so it survives mock resets;
         // undefined metadata lets the attach-'none' gate fall through while
         // still being exercised (issue #435 part 4 review).
-        getFactoryMetadata: vi.fn(async () => undefined),
-        getAdapterPolicy: vi.fn().mockReturnValue({
-          name: 'python',
-          getInitializationBehavior: () => ({})
-        })
+        getFactoryMetadata: vi.fn(async () => undefined)
       }
     };
 
@@ -187,12 +184,12 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     });
 
     it('raises PythonNotFoundError when adapter cannot resolve interpreter', async () => {
-      const adapterStub = {
-        transformLaunchConfig: vi.fn(async (config: unknown) => config),
-        resolveExecutablePath: vi.fn().mockRejectedValue(new Error('python not found')),
-        buildAdapterCommand: vi.fn(),
-        dispose: vi.fn().mockResolvedValue(undefined)
-      };
+      const adapterStub = new FakeDebugAdapter({
+        language: DebugLanguage.PYTHON,
+        resolveExecutablePath: async () => {
+          throw new Error('python not found');
+        }
+      });
       mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
       await expect(
@@ -205,12 +202,12 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     it('disposes the adapter when the launch transform rejects', async () => {
       mockSession.language = 'cpp';
-      const adapterStub = {
-        transformLaunchConfig: vi.fn().mockRejectedValue(new Error('C/C++ compile failed: boom')),
-        resolveExecutablePath: vi.fn(),
-        buildAdapterCommand: vi.fn(),
-        dispose: vi.fn().mockResolvedValue(undefined)
-      };
+      const adapterStub = new FakeDebugAdapter({
+        language: DebugLanguage.CPP,
+        transformLaunchConfig: async () => {
+          throw new Error('C/C++ compile failed: boom');
+        }
+      });
       mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
       await expect(
@@ -228,13 +225,15 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         toolchain: 'msvc',
         message: 'MSVC binaries are not supported by CodeLLDB'
       };
-      const adapterStub = {
-        transformLaunchConfig: vi.fn().mockRejectedValue(new Error(validation.message)),
-        consumeLastToolchainValidation: vi.fn().mockReturnValue(validation),
-        resolveExecutablePath: vi.fn(),
-        buildAdapterCommand: vi.fn(),
-        dispose: vi.fn().mockResolvedValue(undefined)
-      };
+      const adapterStub = new FakeDebugAdapter({
+        language: DebugLanguage.CPP,
+        transformLaunchConfig: async () => {
+          throw new Error(validation.message);
+        }
+        // The toolchain verdict is duck-typed by the launcher, not an
+        // IDebugAdapter member, so it is attached as an extra rather than
+        // smuggled in through a cast.
+      }).withExtras({ consumeLastToolchainValidation: vi.fn(() => validation) });
       mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
       let capturedError: unknown;
@@ -261,13 +260,12 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         toolchain: 'msvc',
         message: 'stale verdict from a previous launch'
       } as any;
-      const adapterStub = {
-        transformLaunchConfig: vi.fn().mockRejectedValue(new Error('C/C++ compile failed: syntax error')),
-        consumeLastToolchainValidation: vi.fn().mockReturnValue(undefined),
-        resolveExecutablePath: vi.fn(),
-        buildAdapterCommand: vi.fn(),
-        dispose: vi.fn().mockResolvedValue(undefined)
-      };
+      const adapterStub = new FakeDebugAdapter({
+        language: DebugLanguage.CPP,
+        transformLaunchConfig: async () => {
+          throw new Error('C/C++ compile failed: syntax error');
+        }
+      }).withExtras({ consumeLastToolchainValidation: vi.fn(() => undefined) });
       mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
       await expect(
@@ -281,12 +279,12 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     it('wraps unresolved executable errors for non-python languages', async () => {
       mockSession.language = 'javascript';
-      const adapterStub = {
-        transformLaunchConfig: vi.fn(async (config: unknown) => config),
-        resolveExecutablePath: vi.fn().mockRejectedValue(new Error('node missing')),
-        buildAdapterCommand: vi.fn(),
-        dispose: vi.fn().mockResolvedValue(undefined)
-      };
+      const adapterStub = new FakeDebugAdapter({
+        language: DebugLanguage.JAVASCRIPT,
+        resolveExecutablePath: async () => {
+          throw new Error('node missing');
+        }
+      });
       mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
       await expect(
@@ -365,12 +363,10 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         message: 'MSVC binaries have limited support'
       };
 
-      const adapterStub = {
-        transformLaunchConfig: vi.fn().mockResolvedValue({ program: 'debug.exe' }),
-        consumeLastToolchainValidation: vi.fn().mockReturnValue(validation),
-        resolveExecutablePath: vi.fn(),
-        buildAdapterCommand: vi.fn()
-      };
+      const adapterStub = new FakeDebugAdapter({
+        language: DebugLanguage.RUST,
+        transformLaunchConfig: async () => ({ program: 'debug.exe' })
+      }).withExtras({ consumeLastToolchainValidation: vi.fn(() => validation) });
       mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
       let capturedError: unknown;
@@ -505,9 +501,9 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       // marker and the session completes the step asynchronously.
       expect(result.success).toBe(true);
       expect(result.state).toBe(SessionState.RUNNING);
-      const data = result.data as { message?: string; pending?: boolean };
-      expect(data.pending).toBe(true);
-      expect(data.message).toContain('still executing');
+      const data = result.data;
+      expect(data?.pending).toBe(true);
+      expect(data?.message).toContain('still executing');
 
       vi.useRealTimers();
     });
@@ -1654,7 +1650,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       const result = await promise;
 
       expect(result.success).toBe(true);
-      expect((result.data as { message?: string }).message).toBe('Step completed.');
+      expect(result.data?.message).toBe('Step completed.');
       expect(proxyStub.off).toHaveBeenCalledWith('stopped', expect.any(Function));
       expect(proxyStub.sendDapRequest).toHaveBeenCalledWith('next', { threadId: 1 });
       expect(mockSessionStore.updateState).toHaveBeenCalledWith(session.id, SessionState.RUNNING);
@@ -1756,12 +1752,13 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     let mockAdapter: any;
 
     beforeEach(() => {
-      mockAdapter = {
-        supportsAttach: vi.fn().mockReturnValue(true),
-        transformAttachConfig: vi.fn().mockReturnValue({ type: 'java', request: 'attach', host: 'localhost', port: 5005 }),
-        buildAdapterCommand: vi.fn().mockReturnValue({ command: 'java', args: ['-jar', 'debug.jar'] }),
-        resolveExecutablePath: vi.fn().mockResolvedValue('java')
-      };
+      mockAdapter = new FakeDebugAdapter({
+        language: DebugLanguage.JAVA,
+        buildAdapterCommand: () => ({ command: 'java', args: ['-jar', 'debug.jar'] }),
+        resolveExecutablePath: async () => 'java'
+      }).withAttachSupport({
+        transform: () => ({ type: 'java', request: 'attach', host: 'localhost', port: 5005 })
+      });
       mockDependencies.adapterRegistry.create.mockResolvedValue(mockAdapter);
       mockSession.language = 'java';
       mockSession.state = SessionState.CREATED;
@@ -2476,13 +2473,14 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     // Note: startDebugging returns { success: false, ... } on error, not throw
 
     it('should detect attach mode from request field', async () => {
-      const mockAdapter = {
-        supportsAttach: vi.fn().mockReturnValue(true),
-        transformAttachConfig: vi.fn().mockReturnValue({ type: 'java', request: 'attach' }),
-        transformLaunchConfig: vi.fn().mockResolvedValue({}),
+      const mockAdapter = new FakeDebugAdapter({
+        language: DebugLanguage.JAVA,
+        transformLaunchConfig: async () => ({}),
         // Throw after config transform to exit fast
-        resolveExecutablePath: vi.fn().mockRejectedValue(new Error('early_exit'))
-      };
+        resolveExecutablePath: async () => {
+          throw new Error('early_exit');
+        }
+      }).withAttachSupport({ transform: () => ({ type: 'java', request: 'attach' }) });
 
       mockDependencies.adapterRegistry.create.mockResolvedValue(mockAdapter);
       mockSession.language = 'java';
@@ -2502,12 +2500,13 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     });
 
     it('should detect attach mode from __attachMode flag', async () => {
-      const mockAdapter = {
-        supportsAttach: vi.fn().mockReturnValue(true),
-        transformAttachConfig: vi.fn().mockReturnValue({ type: 'java', request: 'attach' }),
-        transformLaunchConfig: vi.fn().mockResolvedValue({}),
-        resolveExecutablePath: vi.fn().mockRejectedValue(new Error('early_exit'))
-      };
+      const mockAdapter = new FakeDebugAdapter({
+        language: DebugLanguage.JAVA,
+        transformLaunchConfig: async () => ({}),
+        resolveExecutablePath: async () => {
+          throw new Error('early_exit');
+        }
+      }).withAttachSupport({ transform: () => ({ type: 'java', request: 'attach' }) });
 
       mockDependencies.adapterRegistry.create.mockResolvedValue(mockAdapter);
       mockSession.language = 'java';
@@ -2527,15 +2526,18 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     it('should not set program/cwd/args in attach mode', async () => {
       let capturedConfig: Record<string, unknown> | null = null;
-      const mockAdapter = {
-        supportsAttach: vi.fn().mockReturnValue(true),
-        transformAttachConfig: vi.fn().mockImplementation((config) => {
+      const mockAdapter = new FakeDebugAdapter({
+        language: DebugLanguage.JAVA,
+        transformLaunchConfig: async () => ({}),
+        resolveExecutablePath: async () => {
+          throw new Error('early_exit');
+        }
+      }).withAttachSupport({
+        transform: (config) => {
           capturedConfig = config;
           return { type: 'java', request: 'attach' };
-        }),
-        transformLaunchConfig: vi.fn().mockResolvedValue({}),
-        resolveExecutablePath: vi.fn().mockRejectedValue(new Error('early_exit'))
-      };
+        }
+      });
 
       mockDependencies.adapterRegistry.create.mockResolvedValue(mockAdapter);
       mockSession.language = 'java';
@@ -2556,11 +2558,14 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     });
 
     it('should fall back to transformLaunchConfig when adapter does not support attach', async () => {
-      const mockAdapter = {
-        supportsAttach: vi.fn().mockReturnValue(false), // Does not support attach
-        transformLaunchConfig: vi.fn().mockResolvedValue({ type: 'python' }),
-        resolveExecutablePath: vi.fn().mockRejectedValue(new Error('early_exit'))
-      };
+      const mockAdapter = new FakeDebugAdapter({
+        language: DebugLanguage.PYTHON,
+        supportsAttach: () => false, // Does not support attach
+        transformLaunchConfig: async () => ({ type: 'python' }),
+        resolveExecutablePath: async () => {
+          throw new Error('early_exit');
+        }
+      });
 
       mockDependencies.adapterRegistry.create.mockResolvedValue(mockAdapter);
       mockSession.language = 'python';
@@ -2579,14 +2584,17 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     });
 
     it('should propagate transformAttachConfig errors without starting an untransformed attach', async () => {
-      const mockAdapter = {
-        supportsAttach: vi.fn().mockReturnValue(true),
-        transformAttachConfig: vi.fn().mockImplementation(() => {
+      const mockAdapter = new FakeDebugAdapter({
+        language: DebugLanguage.JAVA,
+        transformLaunchConfig: async () => ({}),
+        resolveExecutablePath: async () => {
+          throw new Error('early_exit');
+        }
+      }).withAttachSupport({
+        transform: () => {
           throw new Error('Attach config transformation failed');
-        }),
-        transformLaunchConfig: vi.fn().mockResolvedValue({}),
-        resolveExecutablePath: vi.fn().mockRejectedValue(new Error('early_exit'))
-      };
+        }
+      });
 
       mockDependencies.adapterRegistry.create.mockResolvedValue(mockAdapter);
       mockSession.language = 'java';
@@ -2609,11 +2617,15 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     });
 
     it('should propagate transformLaunchConfig errors without starting an untransformed launch', async () => {
-      const mockAdapter = {
-        transformLaunchConfig: vi.fn().mockRejectedValue(new Error('C/C++ compile failed: denied')),
-        resolveExecutablePath: vi.fn().mockRejectedValue(new Error('must not run')),
-        dispose: vi.fn().mockResolvedValue(undefined)
-      };
+      const mockAdapter = new FakeDebugAdapter({
+        language: DebugLanguage.CPP,
+        transformLaunchConfig: async () => {
+          throw new Error('C/C++ compile failed: denied');
+        },
+        resolveExecutablePath: async () => {
+          throw new Error('must not run');
+        }
+      });
 
       mockDependencies.adapterRegistry.create.mockResolvedValue(mockAdapter);
       mockSession.language = 'cpp';
@@ -2639,12 +2651,15 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         toolchain: 'msvc',
         message: 'MSVC binaries are not supported by CodeLLDB'
       };
-      const mockAdapter = {
-        transformLaunchConfig: vi.fn().mockRejectedValue(new Error(validation.message)),
-        consumeLastToolchainValidation: vi.fn().mockReturnValue(validation),
-        resolveExecutablePath: vi.fn().mockRejectedValue(new Error('must not run')),
-        dispose: vi.fn().mockResolvedValue(undefined)
-      };
+      const mockAdapter = new FakeDebugAdapter({
+        language: DebugLanguage.CPP,
+        transformLaunchConfig: async () => {
+          throw new Error(validation.message);
+        },
+        resolveExecutablePath: async () => {
+          throw new Error('must not run');
+        }
+      }).withExtras({ consumeLastToolchainValidation: vi.fn(() => validation) });
 
       mockDependencies.adapterRegistry.create.mockResolvedValue(mockAdapter);
       mockSession.language = 'cpp';
@@ -3150,7 +3165,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('disconnect', {
         terminateDebuggee: false
       });
-      expect(result.data.message).toContain('process still running');
+      expect(result.data?.message).toContain('process still running');
     });
 
     it('detachFromProcess should survive proxyManager being nulled during disconnect (race condition)', async () => {
@@ -3203,7 +3218,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       const result = await operations.detachFromProcess('test-session', true);
 
       expect(result.success).toBe(true);
-      expect(result.data.message).toContain('terminated process');
+      expect(result.data?.message).toContain('terminated process');
       // Should NOT have sent disconnect with terminateDebuggee=false
       expect(mockProxyManager.sendDapRequest).not.toHaveBeenCalledWith('disconnect', {
         terminateDebuggee: false
@@ -3455,9 +3470,9 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       emitStopped();
       const result = await promise;
 
-      const data = result.data as { stopReason?: string; rawStopReason?: string };
-      expect(data.stopReason).toBe('pause');
-      expect(data.rawStopReason).toBe('exception');
+      const data = result.data;
+      expect(data?.stopReason).toBe('pause');
+      expect(data?.rawStopReason).toBe('exception');
     });
 
     it('does not echo a stale stop recorded before the pause was requested', async () => {
@@ -3473,8 +3488,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       emitStopped();
       const result = await promise;
 
-      const data = result.data as { stopReason?: string };
-      expect(data.stopReason).toBeUndefined();
+      const data = result.data;
+      expect(data?.stopReason).toBeUndefined();
     });
 
     it('flags the in-flight pause for stop-reason normalization (pausePending)', async () => {
@@ -3529,9 +3544,9 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       const result = await operations.pause('test-session');
 
-      const data = result.data as { message?: string; stopReason?: string };
-      expect(data.message).toBe('Already paused');
-      expect(data.stopReason).toBe('breakpoint');
+      const data = result.data;
+      expect(data?.message).toBe('Already paused');
+      expect(data?.stopReason).toBe('breakpoint');
     });
 
     it('reports state PAUSED when stopped arrives before the pause response resolves (netcoredbg ordering)', async () => {
@@ -3583,9 +3598,9 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         // PAUSED asynchronously when the stop lands.
         expect(result.success).toBe(true);
         expect(result.state).toBe(SessionState.RUNNING);
-        const data = result.data as { message?: string; pending?: boolean };
-        expect(data.pending).toBe(true);
-        expect(data.message).toContain("no 'stopped' event");
+        const data = result.data;
+        expect(data?.pending).toBe(true);
+        expect(data?.message).toContain("no 'stopped' event");
       } finally {
         vi.useRealTimers();
       }

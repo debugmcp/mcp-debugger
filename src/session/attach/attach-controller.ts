@@ -17,7 +17,7 @@ import {
   type ExceptionBreakMode
 } from '@debugmcp/shared';
 import { ErrorMessages } from '../../utils/error-messages.js';
-import type { CustomLaunchRequestArguments, DebugResult } from '../session-manager-core.js';
+import type { AttachResultData, CustomLaunchRequestArguments, DebugResult } from '../session-manager-core.js';
 import type { AttachContext } from '../operations-context.js';
 import type { BreakpointController } from '../breakpoints/breakpoint-controller.js';
 import { failProxySetup, sessionRemovedDuringTeardown } from '../launch/proxy-failure-diagnostics.js';
@@ -48,7 +48,7 @@ export class AttachController {
       breakOnExceptions?: ExceptionBreakMode;
       adapterConfig?: Record<string, unknown>;
     }
-  ): Promise<DebugResult> {
+  ): Promise<DebugResult<AttachResultData>> {
     const session = this.ctx.getSession(sessionId);
     this.ctx.logger.info(
       `[SessionManager] Attempting to attach to process for session ${sessionId}`,
@@ -272,7 +272,7 @@ export class AttachController {
       // inside the builder.
       const attachFnBpWarning = this.breakpoints.functionBreakpointLaunchWarning(session);
 
-      const attachData: Record<string, unknown> = {
+      const attachData: AttachResultData = {
         message: attachConfig.processId
           ? `Attached to process PID ${attachConfig.processId}`
           : `Attached to process at ${attachConfig.host || 'localhost'}:${attachConfig.port}`,

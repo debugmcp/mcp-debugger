@@ -77,7 +77,7 @@
   "tests/unit/proxy/minimal-dap.test.ts": 2,
   "tests/unit/proxy/proxy-manager.handshake.test.ts": 1,
   "tests/unit/proxy/proxy-manager.start.test.ts": 39,
-  "tests/unit/session-manager-operations-coverage.test.ts": 30,
+  "tests/unit/session-manager-operations-coverage.test.ts": 26,
   "tests/unit/shared/adapter-policy-dotnet.test.ts": 49,
   "tests/unit/shared/adapter-policy-go.test.ts": 59,
   "tests/unit/shared/adapter-policy-js.test.ts": 24,

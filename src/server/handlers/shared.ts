@@ -7,6 +7,7 @@ import { REDACTION_NOTICE, Variable } from '@debugmcp/shared';
 import type { LineContext } from '../../utils/line-reader.js';
 import { buildTruncationNotice, VariableTruncationSummary } from '../../session/variable-caps.js';
 import type { ToolContext } from '../tool-context.js';
+import type { DebugResult } from '../../session/session-manager-core.js';
 
 /** The line-context slice the breakpoint and step payloads embed. */
 export type EmbeddedLineContext = Pick<LineContext, 'lineContent' | 'surrounding'>;
@@ -87,14 +88,18 @@ export function variablePayloadExtras(
 }
 
 /**
- * The attach warning (dropped adapterConfig keys, issue #450) both attach
- * entry points lift to the top level of their response — reported only for a
- * successful attach, where it is advisory rather than the failure itself.
+ * The advisory warning an operation's result carries, lifted to the top level
+ * of the tool response — reported only on success, where it is advice rather
+ * than the failure itself. On a failure the error is the message, and echoing
+ * a warning beside it just competes with it.
+ *
+ * Shared by the two attach entry points (dropped adapterConfig keys, issue
+ * #450) and by restart_debugging (stale anchors and unbound function
+ * breakpoints), which is why it is named for the rule it applies rather than
+ * for the first caller that needed it.
  */
-export function attachWarning(
-  attachResult: { success: boolean; data?: unknown }
+export function successWarning(
+  result: Pick<DebugResult, 'success' | 'data'>
 ): string | undefined {
-  return attachResult.success
-    ? (attachResult.data as { warning?: string } | undefined)?.warning
-    : undefined;
+  return result.success ? result.data?.warning : undefined;
 }

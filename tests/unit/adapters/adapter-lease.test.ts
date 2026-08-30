@@ -146,13 +146,21 @@ describe('AdapterLease', () => {
 
     it('tolerates a partial adapter double that defines no dispose', async () => {
       const adapter = new FakeDebugAdapter();
-      // The production guard is duck-typed because partial doubles (and any
-      // adapter predating the member) reach it; model exactly that shape.
+      // `dispose()` is required by IDebugAdapter, so this shape is a violation
+      // — and since #573 dropped the duck-typed guard, calling it raises a
+      // TypeError. That is reported as a failed disposal (the slot really was
+      // not returned) and must still not escape the caller's `finally`.
       delete (adapter as Partial<FakeDebugAdapter>).dispose;
-      const lease = await leaseFor(adapter);
+      const logger = createMockLogger();
+      const lease = await leaseFor(adapter, logger);
 
       await expect(lease.release()).resolves.toBeUndefined();
       expect(lease.getState()).toBe('released');
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining(
+          '[SessionManager] Failed to dispose adapter after launch setup error for session sess-1'
+        )
+      );
     });
 
     it('tolerates a registry double that resolves no adapter at all', async () => {

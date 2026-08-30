@@ -14,7 +14,12 @@ export type {
   SessionManagerDependencies, 
   SessionManagerConfig,
   CustomLaunchRequestArguments,
-  DebugResult
+  DebugResult,
+  DebugResultData,
+  StepResultData,
+  PauseResultData,
+  AttachResultData,
+  StopLocation
 } from './session-manager-core.js';
 
 export type { EvaluateResult } from './session-manager-operations.js';
