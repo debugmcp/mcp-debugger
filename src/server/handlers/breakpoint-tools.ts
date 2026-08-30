@@ -89,7 +89,7 @@ async function setFunctionBreakpointBranch(ctx: ToolContext, args: WithSessionId
     // and removable under one name, and the per-adapter advisory (issues
     // #303/#308 — rust bare 'main' -> CRT entry) rides along. Both are
     // reported in the warning; neither blocks the request.
-    const { effectiveName, normalized, hint: nameHint } =
+    const { requestedName, effectiveName, normalized, hint: nameHint } =
       ctx.sessionManager.resolveFunctionBreakpointName(args.sessionId, args.function!);
     const { breakpoint, warning: syncWarning } = await ctx.setFunctionBreakpoint(
       args.sessionId, effectiveName, args.condition
@@ -109,7 +109,9 @@ async function setFunctionBreakpointBranch(ctx: ToolContext, args: WithSessionId
     return jsonResult({
       success: true,
       breakpointId: breakpoint.id,
-      ...(normalized ? { requestedName: args.function } : {}),
+      // Disclosed only when a policy rewrite changed the name (issue #550);
+      // an undefined value drops the key.
+      requestedName: normalized ? requestedName : undefined,
       functionName: breakpoint.functionName,
       condition: breakpoint.condition,
       verified: breakpoint.verified,
@@ -271,7 +273,10 @@ export const removeBreakpointTool: ToolHandler = async (ctx, args) => {
       }
       removed = res.removed;
       warning = res.warning;
-      functionDisclosure = functionNameDisclosure(res);
+      functionDisclosure = {
+        functionName: res.functionName,
+        requestedName: res.normalized ? res.requestedName : undefined
+      };
     } else if (args.breakpointId) {
       const res = await ctx.removeBreakpoint(args.sessionId, args.breakpointId);
       removed = res.removed ? [res.removed] : [];
@@ -300,33 +305,22 @@ export const removeBreakpointTool: ToolHandler = async (ctx, args) => {
 };
 
 /**
- * How a function-addressed removal names itself: `functionName` is always the
- * effective name, `requestedName` appears only when a policy rewrite changed
- * it (issue #550). Shared by the success and not-found payloads.
- */
-function functionNameDisclosure(
-  res: FunctionBreakpointRemoval
-): { functionName: string; requestedName?: string } {
-  return {
-    functionName: res.functionName,
-    ...(res.requestedName !== undefined ? { requestedName: res.requestedName } : {})
-  };
-}
-
-/**
- * The not-found payload for a function-addressed removal. `warning` carries
- * the same per-adapter name advisory set_breakpoint gives (issues #303/#308),
- * so a bare Go name that never matched learns the package-qualified form it
- * should use.
+ * The not-found payload for a function-addressed removal. `functionName` is
+ * always the effective name and `requestedName` appears only when a policy
+ * rewrite changed it (issue #550), the same disclosure the success payload
+ * makes. `warning` carries the per-adapter name advisory set_breakpoint gives
+ * (issues #303/#308), so a bare Go name that never matched learns the
+ * package-qualified form it should use.
  */
 function functionRemovalNotFoundResult(res: FunctionBreakpointRemoval): ToolResult {
   return failureResult(
-    res.requestedName !== undefined
+    res.normalized
       ? `No function breakpoint found for ${res.requestedName} (normalized to ${res.functionName})`
       : `No function breakpoint found for ${res.functionName}`,
     {
-      ...functionNameDisclosure(res),
-      warning: res.hint
+      functionName: res.functionName,
+      requestedName: res.normalized ? res.requestedName : undefined,
+      warning: res.warning
     }
   );
 }

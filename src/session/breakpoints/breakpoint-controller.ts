@@ -18,7 +18,8 @@ import {
   SessionState,
   toFunctionBreakpoint,
   toSourceBreakpoint,
-  type AdapterPolicy
+  type AdapterPolicy,
+  type DebugLanguage
 } from '@debugmcp/shared';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import { SessionTerminatedError } from '../../errors/debug-errors.js';
@@ -51,17 +52,22 @@ export interface FunctionBreakpointNameResolution {
 }
 
 /**
- * Outcome of a by-name function-breakpoint removal. `functionName` is always
- * the effective name; `requestedName` is present only when a policy rewrite
- * changed it (issue #550). `hint` is the policy advisory that explains why
- * nothing matched, and is set only when `removed` is empty.
+ * Outcome of a by-name function-breakpoint removal, in the same vocabulary as
+ * the name resolution it is built from: `functionName` is the effective name,
+ * `requestedName` is what the caller asked for, and `normalized` is set only
+ * when a policy-certain rewrite changed the name — which is the condition the
+ * response discloses `requestedName` on (issue #550).
+ *
+ * `warning` is the one advisory channel: the live-sync failure on the success
+ * path, and on the not-found path the policy advisory that explains why
+ * nothing matched (issues #303/#308).
  */
 export interface FunctionBreakpointRemoval {
   removed: FunctionBreakpoint[];
   functionName: string;
-  requestedName?: string;
+  requestedName: string;
+  normalized?: { name: string; note: string };
   warning?: string;
-  hint?: string;
 }
 
 export class BreakpointController {
@@ -267,50 +273,51 @@ export class BreakpointController {
    * Resolve the function-breakpoint name a request addresses, through the
    * session's adapter policy (issue #559 — the set and remove paths share one
    * answer, so a name that was rewritten on the way in is removable on the way
-   * out). Never throws: a policy lookup that fails degrades to "no policy", so
-   * a name advisory can never break a breakpoint request. The hint is skipped
-   * when a rewrite already happened — the rewrite note says everything the
-   * caller needs.
+   * out). Throws only for an unknown session id, like every other entry point
+   * here; policy failures are swallowed, so a name advisory can never break a
+   * breakpoint request. The hint is skipped when a rewrite already happened —
+   * the rewrite note says everything the caller needs, and the hook therefore
+   * only ever sees the requested name.
    */
   resolveFunctionBreakpointName(
     sessionId: string,
     requestedName: string
   ): FunctionBreakpointNameResolution {
-    const normalized = this.functionBreakpointNameRewrite(sessionId, requestedName);
-    const effectiveName = normalized?.name ?? requestedName;
+    const { language } = this.ctx.getSession(sessionId);
+    // Policy-certain rewrite (issue #467), then the per-adapter advisory
+    // (issues #303/#308) for the names that got none.
+    const normalized = this.policyHook(language, (policy) =>
+      policy.normalizeFunctionBreakpointName?.(requestedName)
+    );
     const hint = normalized
       ? undefined
-      : this.functionBreakpointNameHint(sessionId, effectiveName);
-    return { requestedName, effectiveName, normalized, hint };
+      : this.policyHook(language, (policy) =>
+          policy.functionBreakpointNameHint?.(requestedName)
+        );
+    return {
+      requestedName,
+      effectiveName: normalized?.name ?? requestedName,
+      normalized,
+      hint
+    };
   }
 
-  /** Policy-certain function-breakpoint name rewrite (issue #467). */
-  private functionBreakpointNameRewrite(
-    sessionId: string,
-    functionName: string
-  ): { name: string; note: string } | undefined {
+  /**
+   * Read one thing off a language's adapter policy, degrading to undefined
+   * when the store's lookup throws (unknown language) OR the hook itself
+   * does. Neither a name advisory nor a launch warning is worth failing a
+   * request over, so both failures collapse to the same "no policy" answer
+   * the callers already handle.
+   */
+  private policyHook<T>(
+    language: DebugLanguage,
+    read: (policy: AdapterPolicy) => T | undefined
+  ): T | undefined {
     try {
-      return this.sessionPolicy(sessionId).normalizeFunctionBreakpointName?.(functionName);
+      return read(this.ctx.selectStorePolicy(language));
     } catch {
       return undefined;
     }
-  }
-
-  /** Per-adapter function-breakpoint name advisory (issues #303/#308). */
-  private functionBreakpointNameHint(
-    sessionId: string,
-    functionName: string
-  ): string | undefined {
-    try {
-      return this.sessionPolicy(sessionId).functionBreakpointNameHint?.(functionName);
-    } catch {
-      return undefined;
-    }
-  }
-
-  /** The store's policy for a session's language — throws for an unknown id. */
-  private sessionPolicy(sessionId: string): AdapterPolicy {
-    return this.ctx.selectStorePolicy(this.ctx.getSession(sessionId).language);
   }
 
   /**
@@ -444,18 +451,15 @@ export class BreakpointController {
 
   /**
    * The launch-time unbound-function-breakpoint warning, with the policy
-   * resolved from the session store. The store's lookup throws for an unknown
-   * language, and a warning is never worth failing a launch over, so the throw
-   * degrades to "no policy" — which is also what the pure builder expects.
+   * resolved from the session store. The lookup goes through the same guard
+   * the name hooks use, so an unknown language degrades to "no policy" —
+   * which is exactly what the pure builder expects.
    */
   functionBreakpointLaunchWarning(session: ManagedSession): string | undefined {
-    let policy: AdapterPolicy | undefined;
-    try {
-      policy = this.ctx.selectStorePolicy(session.language);
-    } catch {
-      policy = undefined;
-    }
-    return buildFunctionBreakpointLaunchWarning(session, policy);
+    return buildFunctionBreakpointLaunchWarning(
+      session,
+      this.policyHook(session.language, (policy) => policy)
+    );
   }
 
   /**
@@ -474,15 +478,7 @@ export class BreakpointController {
 
     const functionBreakpoint = session.functionBreakpoints?.get(breakpointId);
     if (functionBreakpoint) {
-      session.functionBreakpoints.delete(breakpointId);
-      this.ctx.logger.info('debug:breakpoint', {
-        event: 'removed',
-        sessionId,
-        sessionName: session.name,
-        breakpointId,
-        functionName: functionBreakpoint.functionName,
-        timestamp: Date.now(),
-      });
+      this.deleteFunctionBreakpointRecord(session, sessionId, functionBreakpoint);
       const { warning } = await this.syncFunctionBreakpoints(session);
       return { removed: functionBreakpoint, warning };
     }
@@ -529,33 +525,51 @@ export class BreakpointController {
       sessionId,
       requestedName
     );
-    // `functionName` is always the effective name; `requestedName` is
-    // disclosed only when a policy rewrite changed it (issue #550).
-    const disclosure = {
-      functionName: effectiveName,
-      ...(normalized ? { requestedName } : {})
-    };
+    // The resolution's own vocabulary, forwarded rather than re-encoded: the
+    // caller discloses `requestedName` only when `normalized` says a rewrite
+    // happened, the same rule set_breakpoint applies (issue #550).
+    const disclosure = { functionName: effectiveName, requestedName, normalized };
 
     const removed = Array.from(session.functionBreakpoints.values())
-      .filter(bp => bp.functionName === effectiveName || bp.functionName === requestedName);
+      .filter(bp => bp.functionName === effectiveName || bp.functionName === requestedName)
+      // The order list_breakpoints reports function breakpoints in; the
+      // store's insertion order is not part of the contract.
+      .sort((a, b) => a.functionName.localeCompare(b.functionName));
     if (removed.length === 0) {
-      return { removed, ...disclosure, hint };
+      // The policy advisory IS the warning here — it is what explains why
+      // nothing matched (issues #303/#308).
+      return { removed, ...disclosure, warning: hint || undefined };
     }
 
     for (const bp of removed) {
-      session.functionBreakpoints.delete(bp.id);
-      this.ctx.logger.info('debug:breakpoint', {
-        event: 'removed',
-        sessionId,
-        sessionName: session.name,
-        breakpointId: bp.id,
-        functionName: bp.functionName,
-        timestamp: Date.now(),
-      });
+      this.deleteFunctionBreakpointRecord(session, sessionId, bp);
     }
 
     const { warning } = await this.syncFunctionBreakpoints(session);
     return { removed, ...disclosure, warning };
+  }
+
+  /**
+   * Delete one function-breakpoint record from the store and log the removal.
+   * The by-id and the by-name path are the only producers of function-breakpoint
+   * 'removed' records and must produce the identical record. The DAP re-send
+   * stays with the caller: setFunctionBreakpoints is replace-all for the whole
+   * session, so a batch removal deletes every match first and sends once.
+   */
+  private deleteFunctionBreakpointRecord(
+    session: ManagedSession,
+    sessionId: string,
+    bp: FunctionBreakpoint
+  ): void {
+    session.functionBreakpoints.delete(bp.id);
+    this.ctx.logger.info('debug:breakpoint', {
+      event: 'removed',
+      sessionId,
+      sessionName: session.name,
+      breakpointId: bp.id,
+      functionName: bp.functionName,
+      timestamp: Date.now(),
+    });
   }
 
   /**

@@ -19,8 +19,13 @@ import {
   type AdapterPolicy
 } from '@debugmcp/shared';
 import { SessionManager } from '../../../../src/session/session-manager.js';
+import { SessionNotFoundError } from '../../../../src/errors/debug-errors.js';
 import type { SessionStore } from '../../../../src/session/session-store.js';
-import { createMockDependencies } from './session-manager-test-utils.js';
+import {
+  createMockDependencies,
+  createPausedSession,
+  overridePolicy as overrideStorePolicy
+} from './session-manager-test-utils.js';
 
 describe('SessionManager - function breakpoint names (#559)', () => {
   let sessionManager: SessionManager;
@@ -44,18 +49,9 @@ describe('SessionManager - function breakpoint names (#559)', () => {
     dependencies.mockProxyManager.reset();
   });
 
-  /**
-   * Overlay policy hooks on the session store's lookup — the source the name
-   * resolution reads, and the one the launch-warning tests override the same
-   * way.
-   */
+  /** Overlay policy hooks on the session store's lookup (shared recipe). */
   function overridePolicy(overrides: Partial<AdapterPolicy>): void {
-    const store = (sessionManager as unknown as { sessionStore: SessionStore }).sessionStore;
-    const original = store.selectPolicy.bind(store);
-    vi.spyOn(store, 'selectPolicy').mockImplementation((language: DebugLanguage) => ({
-      ...original(language),
-      ...overrides
-    }));
+    overrideStorePolicy(sessionManager, overrides);
   }
 
   function createSession() {
@@ -66,13 +62,8 @@ describe('SessionManager - function breakpoint names (#559)', () => {
   }
 
   /** A session with a live, paused debuggee — the state that syncs to DAP. */
-  async function createLiveSession() {
-    const session = await createSession();
-    await sessionManager.startDebugging(session.id, 'test.py');
-    await vi.runAllTimersAsync();
-    dependencies.mockProxyManager.simulateStopped(1, 'entry');
-    dependencies.mockProxyManager.dapRequestCalls = [];
-    return session;
+  function createLiveSession() {
+    return createPausedSession(sessionManager, dependencies);
   }
 
   function functionBreakpointRequests() {
@@ -106,13 +97,39 @@ describe('SessionManager - function breakpoint names (#559)', () => {
 
       expect(result.removed).toHaveLength(3);
       expect(result.functionName).toBe('compute');
-      expect(result.requestedName).toBeUndefined();
+      // The removal speaks the resolution's vocabulary: the caller's name
+      // always, and `normalized` only when a rewrite happened — that, not a
+      // missing requestedName, is what the response discloses on.
+      expect(result.requestedName).toBe('compute');
+      expect(result.normalized).toBeUndefined();
       // The whole point of the fix: three matches, one replace-all re-send,
       // and it already carries only the survivor — no window in which a
       // not-yet-deleted duplicate is still armed.
       expect(functionBreakpointRequests()).toHaveLength(1);
       expect(namesInRequest(0)).toEqual(['survivor']);
       expect(storedFunctionNames(session.id)).toEqual(['survivor']);
+    });
+
+    it('reports the matches in name order, not store insertion order', async () => {
+      // Ordering is only observable when the literal and the rewritten name
+      // both match, so this is the multi-match case with a rewrite.
+      overridePolicy({
+        normalizeFunctionBreakpointName: (name: string) =>
+          name === 'main' ? { name: 'main.main', note: 'Auto-qualified to main.main' } : undefined
+      });
+      const session = await createLiveSession();
+      // Stored normalized-first: the response must not leak that order. The
+      // pre-#559 removal built its matches from listFunctionBreakpoints,
+      // which sorts by functionName; this one sorts the same way.
+      await sessionManager.setFunctionBreakpoint(session.id, { functionName: 'main.main' });
+      await sessionManager.setFunctionBreakpoint(session.id, { functionName: 'main' });
+      dependencies.mockProxyManager.dapRequestCalls = [];
+
+      const result = await sessionManager.removeFunctionBreakpointsByName(session.id, 'main');
+
+      expect(result.removed.map((bp) => bp.functionName)).toEqual(['main', 'main.main']);
+      expect(functionBreakpointRequests()).toHaveLength(1);
+      expect(storedFunctionNames(session.id)).toEqual([]);
     });
 
     it('logs one removal record per breakpoint', async () => {
@@ -171,8 +188,9 @@ describe('SessionManager - function breakpoint names (#559)', () => {
       expect(result.removed).toEqual([]);
       expect(result.functionName).toBe('main.main');
       expect(result.requestedName).toBe('main');
+      expect(result.normalized).toEqual({ name: 'main.main', note: 'Auto-qualified to main.main' });
       // A rewrite explains itself; the advisory hint is for names that got none.
-      expect(result.hint).toBeUndefined();
+      expect(result.warning).toBeUndefined();
     });
 
     it('offers the policy hint when an un-rewritten name matches nothing', async () => {
@@ -186,8 +204,9 @@ describe('SessionManager - function breakpoint names (#559)', () => {
 
       expect(result.removed).toEqual([]);
       expect(result.functionName).toBe('compute');
-      expect(result.requestedName).toBeUndefined();
-      expect(result.hint).toBe("for func compute in package main use 'main.compute'");
+      expect(result.requestedName).toBe('compute');
+      expect(result.normalized).toBeUndefined();
+      expect(result.warning).toBe("for func compute in package main use 'main.compute'");
     });
 
     it('removes a record stored under the literal name the policy rewrites', async () => {
@@ -256,6 +275,14 @@ describe('SessionManager - function breakpoint names (#559)', () => {
         note: 'Auto-qualified to main.main'
       });
       expect(resolution.hint).toBeUndefined();
+    });
+
+    it('throws for an unknown session id', () => {
+      // Policy failures are swallowed; a missing session is not one of them —
+      // the resolution reports it like every other entry point on the slice.
+      expect(() =>
+        sessionManager.resolveFunctionBreakpointName('no-such-session', 'main')
+      ).toThrow(SessionNotFoundError);
     });
 
     it('swallows a policy lookup that throws', async () => {

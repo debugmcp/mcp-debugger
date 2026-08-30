@@ -113,7 +113,8 @@ export function createMockSessionManager(mockAdapterRegistry: any) {
     })),
     removeFunctionBreakpointsByName: vi.fn(async (_sessionId: string, requestedName: string) => ({
       removed: [],
-      functionName: requestedName
+      functionName: requestedName,
+      requestedName
     })),
     listFunctionBreakpoints: vi.fn().mockReturnValue([]),
     listBreakpoints: vi.fn().mockReturnValue([]),

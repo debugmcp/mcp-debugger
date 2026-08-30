@@ -254,6 +254,7 @@ describe('Server Breakpoint Management Tools', () => {
         ],
         functionName: 'main.main',
         requestedName: 'main',
+        normalized: { name: 'main.main', note: 'Auto-qualified to main.main' },
         warning: 'adapter resync pending'
       });
 
@@ -283,39 +284,23 @@ describe('Server Breakpoint Management Tools', () => {
       expect(mockSessionManager.removeBreakpoint).not.toHaveBeenCalled();
     });
 
-    it('hands both handlers the same requested name, unresolved (issues #550/#559)', async () => {
-      // The name is the session layer's business: set and remove forward the
-      // caller's name verbatim, which is what makes a rewritten record
-      // removable under the name it was created with.
+    it("remove forwards the caller's name even when the policy would rewrite it (issues #550/#559)", async () => {
+      // The name is the session layer's business: the handler hands over what
+      // the caller typed, never the resolved name — that is what makes a
+      // rewritten record removable under the name it was created with. (The
+      // set half of the same contract is pinned in
+      // server-function-breakpoint-gating.test.ts.)
       mockSessionManager.resolveFunctionBreakpointName.mockReturnValue({
         requestedName: 'main',
         effectiveName: 'main.main',
         normalized: { name: 'main.main', note: 'Auto-qualified to main.main' }
       });
-      mockSessionManager.setFunctionBreakpoint.mockImplementation(
-        async (_sessionId: string, { functionName }: { functionName: string }) => ({
-          breakpoint: { id: 'fn-rt', functionName, verified: false }
-        })
-      );
       mockSessionManager.removeFunctionBreakpointsByName.mockResolvedValue({
         removed: [{ id: 'fn-rt', functionName: 'main.main', verified: false }],
         functionName: 'main.main',
-        requestedName: 'main'
+        requestedName: 'main',
+        normalized: { name: 'main.main', note: 'Auto-qualified to main.main' }
       });
-
-      const setResult = await callToolHandler({
-        method: 'tools/call',
-        params: {
-          name: 'set_breakpoint',
-          arguments: { sessionId: 'test-session', function: 'main' }
-        }
-      });
-      const setContent = JSON.parse(setResult.content[0].text);
-      expect(setContent.success).toBe(true);
-      expect(setContent.functionName).toBe('main.main');
-      expect(mockSessionManager.setFunctionBreakpoint).toHaveBeenCalledWith(
-        'test-session', { functionName: 'main.main', condition: undefined }
-      );
 
       const removeResult = await callToolHandler({
         method: 'tools/call',
@@ -329,9 +314,6 @@ describe('Server Breakpoint Management Tools', () => {
       expect(removeContent.removed).toHaveLength(1);
       expect(removeContent.functionName).toBe('main.main');
       expect(removeContent.requestedName).toBe('main');
-      expect(mockSessionManager.resolveFunctionBreakpointName).toHaveBeenCalledWith(
-        'test-session', 'main'
-      );
       expect(mockSessionManager.removeFunctionBreakpointsByName).toHaveBeenCalledWith(
         'test-session', 'main'
       );
@@ -340,7 +322,8 @@ describe('Server Breakpoint Management Tools', () => {
     it('continues to remove a directly qualified function name', async () => {
       mockSessionManager.removeFunctionBreakpointsByName.mockResolvedValue({
         removed: [{ id: 'fn-1', functionName: 'main.main', verified: true }],
-        functionName: 'main.main'
+        functionName: 'main.main',
+        requestedName: 'main.main'
       });
 
       const result = await callToolHandler({
@@ -364,7 +347,8 @@ describe('Server Breakpoint Management Tools', () => {
       mockSessionManager.removeFunctionBreakpointsByName.mockResolvedValue({
         removed: [],
         functionName: 'main.main',
-        requestedName: 'main'
+        requestedName: 'main',
+        normalized: { name: 'main.main', note: 'Auto-qualified to main.main' }
       });
 
       const result = await callToolHandler({
@@ -388,7 +372,8 @@ describe('Server Breakpoint Management Tools', () => {
       mockSessionManager.removeFunctionBreakpointsByName.mockResolvedValue({
         removed: [],
         functionName: 'compute',
-        hint: "for func compute in package main use 'main.compute'"
+        requestedName: 'compute',
+        warning: "for func compute in package main use 'main.compute'"
       });
 
       const result = await callToolHandler({
@@ -411,7 +396,8 @@ describe('Server Breakpoint Management Tools', () => {
     it('preserves a directly qualified name in no-match diagnostics', async () => {
       mockSessionManager.removeFunctionBreakpointsByName.mockResolvedValue({
         removed: [],
-        functionName: 'main.main'
+        functionName: 'main.main',
+        requestedName: 'main.main'
       });
 
       const result = await callToolHandler({
