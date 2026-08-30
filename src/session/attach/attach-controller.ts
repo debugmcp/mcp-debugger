@@ -22,13 +22,15 @@ import type { AttachContext } from '../operations-context.js';
 import type { BreakpointController } from '../breakpoints/breakpoint-controller.js';
 import { failProxySetup, sessionRemovedDuringTeardown } from '../launch/proxy-failure-diagnostics.js';
 import type { ProxyLauncher } from '../launch/proxy-launcher.js';
-import { pauseAfterAttach, verifyAttachThreads } from './attach-verification.js';
+import { verifyAttachThreads } from './attach-verification.js';
+import type { PauseCoordinator } from '../execution/pause-coordinator.js';
 
 export class AttachController {
   constructor(
     private readonly ctx: AttachContext,
     private readonly proxyLauncher: ProxyLauncher,
-    private readonly breakpoints: BreakpointController
+    private readonly breakpoints: BreakpointController,
+    private readonly pauseCoordinator: PauseCoordinator
   ) {}
 
   /**
@@ -233,7 +235,30 @@ export class AttachController {
         // (e.g. started suspended) — fine, no stop event will follow.
         const attachBehavior = this.ctx.selectPolicy(session.language).getAttachBehavior?.();
         if (attachBehavior?.pauseAfterAttach) {
-          await pauseAfterAttach(this.ctx, { proxyManager, attachBehavior, discoveredThreadId });
+          const pauseThreadId = attachBehavior.pauseAllThreads ? 0 : discoveredThreadId;
+          const pauseOutcome = await this.pauseCoordinator.requestPause({
+            session,
+            proxyManager,
+            threadId: pauseThreadId,
+            timeoutMs: this.ctx.tunables.attachPauseStopTimeoutMs,
+            source: 'attach'
+          });
+          if (pauseOutcome.status === 'observed') {
+            this.ctx.logger.info(
+              `[SessionManager] Observed post-attach pause (threadId=${pauseThreadId})`
+            );
+          } else if (pauseOutcome.status === 'pending') {
+            this.ctx.logger.warn(
+              `[SessionManager] No 'stopped' event within ${this.ctx.tunables.attachPauseStopTimeoutMs}ms after post-attach pause; reported state may lag the engine`
+            );
+          } else {
+            // A target started suspended may reject a redundant pause. The
+            // caller still applies the pre-existing attach state contract;
+            // issue #598 tightens that public mapping independently.
+            this.ctx.logger.info(
+              `[SessionManager] Post-attach pause not needed/accepted: ${pauseOutcome.error instanceof Error ? pauseOutcome.error.message : String(pauseOutcome.error)}`
+            );
+          }
         }
 
         this.ctx.updateState(session, SessionState.PAUSED);
