@@ -115,6 +115,25 @@ export type ProxyLaunchContext = Pick<
   | 'setupProxyEventHandlers'
 >;
 
+/**
+ * Launch-mode sessions: the toolchain gate, state and store updates, the
+ * dry-run window, the proxy-failure record (hence the filesystem) and the
+ * session-preserving teardown of a previous proxy.
+ */
+export type LaunchContext = Pick<
+  OperationsContext,
+  | 'logger'
+  | 'fileSystem'
+  | 'adapterRegistry'
+  | 'launchValidationCache'
+  | 'dryRunTimeoutMs'
+  | 'getSession'
+  | 'updateSession'
+  | 'updateState'
+  | 'selectPolicy'
+  | 'stopProxyPreservingSession'
+>;
+
 /** Anchor re-resolution reads the file from disk and narrates what moved. */
 export type AnchorContext = Pick<OperationsContext, 'logger' | 'fileSystem'>;
 

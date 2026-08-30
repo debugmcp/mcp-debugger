@@ -23,6 +23,7 @@ import {
 } from '../../src/errors/debug-errors';
 import { createEnvironmentMock } from '../test-utils/mocks/environment';
 import type { ExecutionController } from '../../src/session/execution/execution-controller';
+import type { DebugLauncher } from '../../src/session/launch/debug-launcher';
 import type { ManagedSession } from '../../src/session/session-store';
 import type { ExceptionBreakMode, LanguageSpecificLaunchConfig } from '@debugmcp/shared';
 
@@ -49,6 +50,7 @@ interface ProxyLauncherView {
 interface OperationsInternals {
   execution: ExecutionController;
   proxyLauncher: ProxyLauncherView;
+  launcher: DebugLauncher;
 }
 
 /**
@@ -992,12 +994,12 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockSession.state = SessionState.INITIALIZING;
 
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockResolvedValue(undefined);
-      vi.spyOn(operations as any, 'waitForDryRunCompletion').mockResolvedValue(false);
+      vi.spyOn(internals(operations).launcher, 'waitForDryRunCompletion').mockResolvedValue(false);
 
       const result = await operations.startDebugging('test-session', 'dry-run.py', undefined, undefined, true);
 
       expect(internals(operations).proxyLauncher.start).toHaveBeenCalledTimes(1);
-      expect((operations as any).waitForDryRunCompletion).toHaveBeenCalledWith(
+      expect(internals(operations).launcher.waitForDryRunCompletion).toHaveBeenCalledWith(
         expect.objectContaining({ id: 'test-session' }),
         expect.any(Number)
       );
@@ -1018,7 +1020,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockSession.state = SessionState.STOPPED;
       mockSessionStore.getOrThrow.mockReturnValue(mockSession);
 
-      const waitSpy = vi.spyOn(operations as any, 'waitForDryRunCompletion');
+      const waitSpy = vi.spyOn(internals(operations).launcher, 'waitForDryRunCompletion');
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = dryRunProxy as any;
       });
@@ -1283,7 +1285,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       const startProxySpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = dryRunProxy;
       });
-      const waitSpy = vi.spyOn(operations as any, 'waitForDryRunCompletion').mockResolvedValue(true);
+      const waitSpy = vi.spyOn(internals(operations).launcher, 'waitForDryRunCompletion').mockResolvedValue(true);
 
       let result: any;
       try {
@@ -1436,7 +1438,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         removeListener: vi.fn(),
       };
       const session = { ...mockSession, proxyManager: proxyStub } as any;
-      const result = await (operations as any).waitForDryRunCompletion(session, 500);
+      const result = await internals(operations).launcher.waitForDryRunCompletion(session, 500);
       expect(result).toBe(true);
       expect(proxyStub.once).not.toHaveBeenCalled();
     });
@@ -1454,7 +1456,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       };
       const session = { ...mockSession, proxyManager: proxyStub } as any;
 
-      const waitPromise = (operations as any).waitForDryRunCompletion(session, 1000);
+      const waitPromise = internals(operations).launcher.waitForDryRunCompletion(session, 1000);
       expect(capturedHandler).toBeDefined();
       capturedHandler?.();
       const result = await waitPromise;
@@ -1475,7 +1477,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       };
       const session = { ...mockSession, proxyManager: proxyStub } as any;
 
-      const waitPromise = (operations as any).waitForDryRunCompletion(session, 400);
+      const waitPromise = internals(operations).launcher.waitForDryRunCompletion(session, 400);
       await vi.advanceTimersByTimeAsync(400);
       const result = await waitPromise;
       expect(result).toBe(true);
@@ -1492,7 +1494,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       };
       const session = { ...mockSession, proxyManager: proxyStub } as any;
 
-      const waitPromise = (operations as any).waitForDryRunCompletion(session, 400);
+      const waitPromise = internals(operations).launcher.waitForDryRunCompletion(session, 400);
       await vi.advanceTimersByTimeAsync(400);
       const result = await waitPromise;
       expect(result).toBe(false);
