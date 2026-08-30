@@ -108,6 +108,49 @@ describe('SessionManager.evaluateExpression default-frame resolution', () => {
     expect(commands).toEqual(['evaluate']);
   });
 
+  it('uses and discloses the user-frame thread adopted by the shared resolver (#600)', async () => {
+    const { sessionManager, dependencies } = makeManager();
+    const session = await createRunningSession(sessionManager, dependencies);
+    (sessionManager as unknown as {
+      pausedStackReadyTimeoutMs: number;
+      pausedStackReadyIntervalMs: number;
+      selectPolicy: () => unknown;
+    }).pausedStackReadyTimeoutMs = 100;
+    (sessionManager as unknown as { pausedStackReadyIntervalMs: number })
+      .pausedStackReadyIntervalMs = 10;
+    (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => ({
+      filterStackFrames: (frames: Array<{ file?: string }>, includeInternals: boolean) =>
+        includeInternals ? frames : frames.filter((frame) => !frame.file?.includes('/runtime/'))
+    });
+    let evaluatedFrame: number | undefined;
+    dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: { threadId?: number; frameId?: number }) => {
+      if (command === 'stackTrace') {
+        if (args?.threadId === 2) {
+          return { body: { stackFrames: [{ id: 20, name: 'runtime.wait', source: { path: '/runtime/wait.js' }, line: 1, column: 1 }] } };
+        }
+        if (args?.threadId === 3) {
+          return { body: { stackFrames: [{ id: 30, name: 'handler', source: { path: '/work/app.js' }, line: 8, column: 1 }] } };
+        }
+        return { body: { stackFrames: [] } };
+      }
+      if (command === 'threads') {
+        return { body: { threads: [{ id: 1, name: 'stopped' }, { id: 2, name: 'runtime' }, { id: 3, name: 'main' }] } };
+      }
+      if (command === 'evaluate') {
+        evaluatedFrame = args?.frameId;
+        return { body: { result: '42', type: 'number', variablesReference: 0 } };
+      }
+      return { success: true, body: {} };
+    });
+
+    const result = await sessionManager.evaluateExpression(session.id, 'answer');
+
+    expect(result.success).toBe(true);
+    expect(evaluatedFrame).toBe(30);
+    expect(result.anchorNote).toMatch(/switched to thread 3/);
+    expect(dependencies.mockProxyManager.getCurrentThreadId()).toBe(3);
+  });
+
   it('fails cleanly when the paused thread reports no stack frames', async () => {
     const { sessionManager, dependencies } = makeManager();
     const session = await createRunningSession(sessionManager, dependencies);

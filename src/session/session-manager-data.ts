@@ -274,7 +274,13 @@ export abstract class SessionManagerData extends SessionManagerCore {
     
     try {
       // Step 1: Get stack trace
-      const stackFrames = await this.getStackTrace(sessionId);
+      const stackResult = await this.frameAnchorResolver.resolve(
+        sessionId,
+        undefined,
+        false,
+        { ensureStackReady: true }
+      );
+      const stackFrames = stackResult.frames;
       if (!stackFrames || stackFrames.length === 0) {
         this.logger.warn(`[SM getLocalVariables ${sessionId}] No stack frames available.`);
         return { variables: [], frame: null, scopeName: null };
@@ -472,7 +478,7 @@ export abstract class SessionManagerData extends SessionManagerCore {
           : undefined
       ]);
 
-      const anchorNotes: string[] = [];
+      const anchorNotes: string[] = stackResult.note ? [stackResult.note] : [];
       if (anchorIndex > 0) {
         anchorNotes.push(
           `Top frame '${topFrame.name}' has no local variables (runtime/stdlib frame); ` +

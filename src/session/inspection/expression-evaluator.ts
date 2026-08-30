@@ -38,6 +38,8 @@ export interface EvaluateResult {
   error?: string;
   /** Present when secret-shaped content was masked in `result` (issue #237) */
   redaction?: { rules: string[]; notice: string };
+  /** Discloses when default evaluation adopted a different stopped thread. */
+  anchorNote?: string;
 }
 
 /**
@@ -124,12 +126,19 @@ export class ExpressionEvaluator {
 
     // Resolve the same default anchor stack and locals use. An explicit
     // frameId is authoritative and deliberately bypasses the resolver.
+    let anchorNote: string | undefined;
     if (frameId === undefined) {
       try {
         this.ctx.logger.info(
           `[SM evaluateExpression ${sessionId}] No frameId provided; resolving the shared inspection anchor`
         );
-        const anchor = await this.frameAnchorResolver.resolve(sessionId);
+        const anchor = await this.frameAnchorResolver.resolve(
+          sessionId,
+          undefined,
+          false,
+          { ensureStackReady: true }
+        );
+        anchorNote = anchor.note;
         if (anchor.frames.length > 0) {
           frameId = anchor.frames[0].id;
           this.ctx.logger.info(
@@ -194,6 +203,7 @@ export class ExpressionEvaluator {
           namedVariables: body.namedVariables,
           indexedVariables: body.indexedVariables,
           presentationHint: body.presentationHint,
+          ...(anchorNote ? { anchorNote } : {})
         };
 
         // Redaction hook (issue #237), placed above the logs below so they
