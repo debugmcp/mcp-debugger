@@ -370,4 +370,30 @@ describe('ProxyManager branch coverage scenarios', () => {
     expect(logger.warn).toHaveBeenCalledWith('[ProxyManager] Error disposing adapter launch barrier', expect.any(Error));
     expect((manager as unknown as { activeLaunchBarrier: AdapterLaunchBarrier | null }).activeLaunchBarrier).toBeNull();
   });
+
+  it('cleanup swallows an adapter dispose that throws synchronously and warns (issue #573)', async () => {
+    const adapter = new FakeDebugAdapter();
+    // The interface declares `dispose(): Promise<void>`, so a synchronous throw
+    // takes a cast — and that violation IS the case under test. No promise ever
+    // exists, so the `dispose().catch(...)` this replaced never ran and the
+    // throw escaped cleanup() in the middle of teardown.
+    adapter.dispose = vi.fn(() => {
+      throw new Error('adapter handle was already torn down');
+    }) as unknown as FakeDebugAdapter['dispose'];
+    const owningManager = new ProxyManager(adapter, launcher, fileSystem, logger);
+
+    expect(() =>
+      (owningManager as unknown as { cleanup: () => void }).cleanup()
+    ).not.toThrow();
+    // The disposal is fire-and-forget; let its microtask run before asserting.
+    await Promise.resolve();
+
+    expect(adapter.dispose).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[ProxyManager] Error disposing adapter during cleanup: adapter handle was already torn down'
+    );
+    // The slot is not coming back, but the handle is dropped either way — a
+    // retained adapter would be disposed twice by the next teardown.
+    expect((owningManager as unknown as { adapter: unknown }).adapter).toBeNull();
+  });
 });
