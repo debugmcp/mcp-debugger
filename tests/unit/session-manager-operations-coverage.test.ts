@@ -992,6 +992,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       };
       mockSession.proxyManager = dryRunProxy;
       mockSession.state = SessionState.INITIALIZING;
+      mockSession.logDir = '/tmp/session-logs';
+      mockDependencies.fileSystem.readFile.mockResolvedValueOnce('adapter never answered');
 
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockResolvedValue(undefined);
       vi.spyOn(internals(operations).launcher, 'waitForDryRunCompletion').mockResolvedValue(false);
@@ -1005,6 +1007,21 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       );
       expect(result!.success).toBe(false);
       expect(result!.error).toContain('Dry run timed out');
+      // A dry run that never reports back gets the same proxy-log pointer and
+      // full failure record a thrown launch failure gets. The timeout path
+      // itself tears nothing down: the one stop() is the pre-launch teardown
+      // of the proxy this session already had.
+      expect(result!.data).toEqual({
+        proxyLogPath: path.join('/tmp/session-logs', 'proxy-test-session.log')
+      });
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Detailed error in startDebugging'),
+        expect.objectContaining({
+          message: expect.stringContaining('Dry run timed out'),
+          proxyLogTail: expect.stringContaining('adapter never answered')
+        })
+      );
+      expect(dryRunProxy.stop).toHaveBeenCalledTimes(1);
     });
 
     it('returns success immediately when dry run already completed', async () => {

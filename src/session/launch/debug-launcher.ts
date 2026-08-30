@@ -250,10 +250,24 @@ export class DebugLauncher {
               `State: ${finalSession.state}, ProxyManager active: ${!!finalSession.proxyManager}`
           );
 
+          // The same failure record and proxy-log pointers a thrown launch
+          // failure gets: the proxy log is where a dry run that never
+          // reported back usually explains itself.
+          const dryRunTimeoutError = new Error(
+            `Dry run timed out after ${this.ctx.dryRunTimeoutMs}ms. Current state: ${finalSession.state}`
+          );
+          const diagnosticData = await logProxyFailure(
+            { logger: this.ctx.logger, fileSystem: this.ctx.fileSystem },
+            session,
+            dryRunTimeoutError,
+            'startDebugging'
+          );
+
           return {
             success: false,
-            error: `Dry run timed out after ${this.ctx.dryRunTimeoutMs}ms. Current state: ${finalSession.state}`,
+            error: dryRunTimeoutError.message,
             state: finalSession.state,
+            ...(Object.keys(diagnosticData).length > 0 ? { data: diagnosticData } : {})
           };
         }
       }
