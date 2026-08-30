@@ -35,4 +35,7 @@ export function compare(
 ): RatchetComparison;
 
 /** What a comparison means for this run. */
-export function verdict(comparison: RatchetComparison): 'regressed' | 'stale' | 'ok';
+export function verdict(
+  comparison: RatchetComparison,
+  options?: { allowImprovement?: boolean }
+): 'regressed' | 'stale' | 'stale-allowed' | 'ok';

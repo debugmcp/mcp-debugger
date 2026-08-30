@@ -18,6 +18,12 @@
  * Modes:
  *   (default)  fail when any file's count differs from its baseline — up (new type errors)
  *              or down (a stale baseline that must be re-recorded and committed).
+ *   --allow-improvement  gate only: still fail on increases and on files that gained
+ *              errors from nothing, but warn instead of failing when a count went down.
+ *              For runs that cannot commit a refreshed baseline — Dependabot's, where a
+ *              better @types package can make the suite type-cleaner and the bot has no
+ *              way to re-record. Never for pre-push or a human PR: a decrease nobody
+ *              records is how the baseline and the tree drift apart.
  *   --update   rewrite the baseline from the current run.
  *   --allow-empty  with --update only: permit recording an empty baseline. A run that
  *              finds nothing is normally a broken program, not a clean suite, so it is
@@ -57,6 +63,16 @@ const DIAGNOSTIC = /^(.+?)\((\d+),(\d+)\): error (TS\d+): (.*)$/;
  * nothing.
  */
 const SYNTAX_ERROR = /\berror TS1\d{3}:/;
+
+/**
+ * What to do about a baseline this script refuses to read.
+ *
+ * Deleting first is not boilerplate: `--update` reads the baseline before writing one (so
+ * the gate's own floor applies to the refresh too), which means a corrupt file blocks its
+ * own repair. Without the delete, the obvious next command fails the same way.
+ */
+const REPAIR_BASELINE =
+  `Delete ${BASELINE_FILE} and re-record it with: pnpm run typecheck:tests:update`;
 
 /** The only trees this ratchet owns: everything else is a broken check, not a failed one. */
 const TEST_TREES = [/^tests\//, /^packages\/[^/]+\/tests\//];
@@ -224,12 +240,17 @@ export function compare(current, baseline) {
  * that went *down* is progress, but it fails too: the baseline is now a lie, and letting it
  * pass is how CI and the working tree drift apart.
  *
+ * `allowImprovement` downgrades only that second case to `stale-allowed`, which the caller
+ * reports and then passes. It never softens `regressed`: a run that cannot re-record the
+ * baseline still must not be able to add type errors.
+ *
  * @param {{ regressed: string[], improved: string[] }} comparison from `compare`
- * @returns {'regressed' | 'stale' | 'ok'}
+ * @param {{ allowImprovement?: boolean }} [options]
+ * @returns {'regressed' | 'stale' | 'stale-allowed' | 'ok'}
  */
-export function verdict(comparison) {
+export function verdict(comparison, { allowImprovement = false } = {}) {
   if (comparison.regressed.length > 0) return 'regressed';
-  if (comparison.improved.length > 0) return 'stale';
+  if (comparison.improved.length > 0) return allowImprovement ? 'stale-allowed' : 'stale';
   return 'ok';
 }
 
@@ -278,21 +299,23 @@ function readBaseline(root, { required = true } = {}) {
   try {
     parsed = JSON.parse(fs.readFileSync(file, 'utf-8'));
   } catch (error) {
-    fail(`${BASELINE_FILE} is not valid JSON.\n${describe(error)}`);
+    fail(`${BASELINE_FILE} is not valid JSON. ${REPAIR_BASELINE}\n${describe(error)}`);
   }
 
   // Valid JSON of the wrong shape would otherwise read as "every file regressed", or
   // throw a raw TypeError out of `compare`. Reject it as a broken check (exit 2), not
   // as a failed one (exit 1).
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    fail(`${BASELINE_FILE} must be a JSON object of "file": count pairs, got ${kindOf(parsed)}.`);
+    fail(
+      `${BASELINE_FILE} must be a JSON object of "file": count pairs, got ${kindOf(parsed)}. ` +
+      REPAIR_BASELINE
+    );
   }
   for (const [entry, count] of Object.entries(parsed)) {
     if (!Number.isInteger(count) || count < 0) {
       fail(
         `${BASELINE_FILE} has a bad entry for '${entry}': expected a non-negative integer, ` +
-        `got ${JSON.stringify(count)}. Delete the file and re-record it with: ` +
-        `pnpm run typecheck:tests:update`
+        `got ${JSON.stringify(count)}. ${REPAIR_BASELINE}`
       );
     }
   }
@@ -301,7 +324,7 @@ function readBaseline(root, { required = true } = {}) {
   if (foreign.length > 0) {
     fail(
       `${BASELINE_FILE} records ${foreign.length} path(s) outside tests/** and ` +
-      `packages/*/tests/**:\n${foreign.map(key => `  ${key}`).join('\n')}`
+      `packages/*/tests/**. ${REPAIR_BASELINE}\n${foreign.map(key => `  ${key}`).join('\n')}`
     );
   }
 
@@ -358,16 +381,22 @@ function describe(error) {
 function main(root, argv) {
   const update = argv.includes('--update');
   const allowEmpty = argv.includes('--allow-empty');
+  const allowImprovement = argv.includes('--allow-improvement');
   // pnpm forwards the `--` separator itself (`pnpm run typecheck:tests -- --update`).
-  const unknown = argv.filter(arg => !['--', '--update', '--allow-empty'].includes(arg));
+  const known = ['--', '--update', '--allow-empty', '--allow-improvement'];
+  const unknown = argv.filter(arg => !known.includes(arg));
   if (unknown.length > 0) {
     fail(
       `Unknown argument(s): ${unknown.join(' ')}. ` +
-      `Usage: node scripts/typecheck-tests-ratchet.mjs [--update [--allow-empty]]`
+      `Usage: node scripts/typecheck-tests-ratchet.mjs ` +
+      `[--allow-improvement | --update [--allow-empty]]`
     );
   }
   if (allowEmpty && !update) {
     fail('--allow-empty only means anything with --update; the gate never records a baseline.');
+  }
+  if (allowImprovement && update) {
+    fail('--allow-improvement only means anything for the gate; --update rewrites the baseline.');
   }
 
   const current = parseDiagnostics(runTsc(root), root);
@@ -398,7 +427,7 @@ function main(root, argv) {
 
   const comparison = compare(current, baseline);
   const { regressed, improved } = comparison;
-  const outcome = verdict(comparison);
+  const outcome = verdict(comparison, { allowImprovement });
 
   if (outcome === 'regressed') {
     console.error(`\ntypecheck:tests: ${regressed.length} file(s) gained type errors.\n`);
@@ -418,18 +447,28 @@ function main(root, argv) {
     process.exit(1);
   }
 
-  if (outcome === 'stale') {
-    console.error(
+  if (outcome === 'stale' || outcome === 'stale-allowed') {
+    // Both modes report the shrunken counts; only the strict one exits non-zero.
+    const log = outcome === 'stale' ? console.error : console.warn;
+    log(
       `\ntypecheck:tests: ${improved.length} file(s) have FEWER errors than ${BASELINE_FILE} records.\n`
     );
     for (const file of improved) {
-      console.error(`  ${file}: ${baseline[file]} -> ${current.get(file)?.length ?? 0}`);
+      log(`  ${file}: ${baseline[file]} -> ${current.get(file)?.length ?? 0}`);
     }
-    console.error(
-      `\nThat is progress, but the baseline is now stale. Refresh and commit it with:\n` +
-      `  pnpm run typecheck:tests:update\n`
+    if (outcome === 'stale') {
+      console.error(
+        `\nThat is progress, but the baseline is now stale. Refresh and commit it with:\n` +
+        `  pnpm run typecheck:tests:update\n`
+      );
+      process.exit(1);
+    }
+    log(
+      `\n--allow-improvement: passing anyway, because this run cannot commit the refresh.\n` +
+      `Someone on a writable branch should run\n` +
+      `  pnpm run typecheck:tests:update\n` +
+      `and commit ${BASELINE_FILE}.\n`
     );
-    process.exit(1);
   }
 
   console.log(

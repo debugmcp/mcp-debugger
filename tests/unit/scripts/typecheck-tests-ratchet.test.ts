@@ -96,7 +96,9 @@ describe('compare', () => {
 interface VerdictCase {
   name: string;
   comparison: RatchetComparison;
-  expected: 'regressed' | 'stale' | 'ok';
+  /** Omitted means the strict gate; `true` is the --allow-improvement run. */
+  allowImprovement?: boolean;
+  expected: 'regressed' | 'stale' | 'stale-allowed' | 'ok';
 }
 
 const VERDICT_CASES: VerdictCase[] = [
@@ -111,7 +113,7 @@ const VERDICT_CASES: VerdictCase[] = [
     expected: 'regressed'
   },
   {
-    name: 'a shrunken count fails as a stale baseline — there is no lenient mode',
+    name: 'a shrunken count fails as a stale baseline',
     comparison: { regressed: [], improved: ['a.test.ts'] },
     expected: 'stale'
   },
@@ -119,15 +121,45 @@ const VERDICT_CASES: VerdictCase[] = [
     name: 'new errors are reported ahead of a stale baseline',
     comparison: { regressed: ['b.test.ts'], improved: ['a.test.ts'] },
     expected: 'regressed'
+  },
+  {
+    name: '--allow-improvement downgrades a shrunken count to a warning',
+    comparison: { regressed: [], improved: ['a.test.ts'] },
+    allowImprovement: true,
+    expected: 'stale-allowed'
+  },
+  {
+    name: '--allow-improvement still fails new errors — the whole point of the ratchet',
+    comparison: { regressed: ['a.test.ts'], improved: [] },
+    allowImprovement: true,
+    expected: 'regressed'
+  },
+  {
+    name: '--allow-improvement reports the regression, not the improvement, when both happened',
+    comparison: { regressed: ['b.test.ts'], improved: ['a.test.ts'] },
+    allowImprovement: true,
+    expected: 'regressed'
+  },
+  {
+    name: '--allow-improvement changes nothing about a clean run',
+    comparison: { regressed: [], improved: [] },
+    allowImprovement: true,
+    expected: 'ok'
   }
 ];
 
 describe('verdict', () => {
   for (const testCase of VERDICT_CASES) {
     it(testCase.name, () => {
-      expect(verdict(testCase.comparison)).toBe(testCase.expected);
+      expect(verdict(testCase.comparison, { allowImprovement: testCase.allowImprovement }))
+        .toBe(testCase.expected);
     });
   }
+
+  it('defaults to the strict gate when no options are passed', () => {
+    // Pre-push and every human PR call it this way; leniency must be opt-in.
+    expect(verdict({ regressed: [], improved: ['a.test.ts'] })).toBe('stale');
+  });
 });
 
 describe('parseDiagnostics', () => {

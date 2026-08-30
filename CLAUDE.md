@@ -119,6 +119,7 @@ npm run typecheck
 npm run typecheck:tests
 npm run typecheck:tests:update  # re-record the baseline (see the note below)
 npm run typecheck:tests:raw     # raw tsc output for tsconfig.spec.json
+npm run typecheck:tests -- --allow-improvement  # CI/Dependabot only (see the note below)
 
 # Both of the above. This is the exact command CI and pre-push run.
 npm run typecheck:all
@@ -137,7 +138,7 @@ npm run check:all-personal-paths  # Check all files
 Note: the root `tsc -p tsconfig.json` checks nothing (it is a solution-style config with
 `"files": []`), which is why `typecheck` uses `tsconfig.typecheck.json` (#562).
 
-The test ratchet has one mode, and it fails in both directions:
+The test ratchet fails in both directions:
 
 - **A count went UP** — you introduced type errors. Fix them. Re-recording the baseline
   is the exception, not the remedy: do it only when the new errors are genuinely
@@ -147,7 +148,14 @@ The test ratchet has one mode, and it fails in both directions:
   `tests/typecheck-baseline.json` in the same PR.
 
 Failing on a decrease is what keeps the recorded numbers honest; the ceiling only ever
-moves down.
+moves down. The one exception is `--allow-improvement`, which warns on a decrease instead
+of failing: CI passes it only for Dependabot's own PRs, which cannot commit a refreshed
+baseline. Never use it locally or on a human PR.
+
+If the script refuses to read `tests/typecheck-baseline.json` at all (invalid JSON, the
+wrong shape, a negative or non-integer count, a path outside the test trees), it exits 2
+and tells you to **delete the file first**: `--update` reads the baseline before writing
+one, so a corrupt file blocks its own repair.
 
 ### Docker
 
