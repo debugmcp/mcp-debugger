@@ -38,6 +38,11 @@ export function hasCurrentPauseIntent(session: PauseIntentSession): boolean {
     session.pauseIntent.generation === (session.proxyGeneration ?? 0);
 }
 
+/** Return the current generation's intent, excluding any stale worker intent. */
+export function getCurrentPauseIntent(session: PauseIntentSession): PauseIntent | undefined {
+  return hasCurrentPauseIntent(session) ? session.pauseIntent : undefined;
+}
+
 /** Clear one current intent, optionally only if it is the expected object. */
 export function clearPauseIntent(
   session: PauseIntentSession,

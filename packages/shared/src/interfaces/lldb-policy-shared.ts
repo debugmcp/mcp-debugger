@@ -27,10 +27,10 @@ export const LLDB_LOCAL_SCOPE_NAMES = ['Local', 'Locals'] as const;
  * 1. A user-initiated pause is reported as reason 'exception': POSIX
  *    delivers it via SIGSTOP; Windows via DebugBreakProcess, whose
  *    injected break-in thread raises EXCEPTION_BREAKPOINT 0x80000003
- *    (issue #275). Map both back to 'pause' — the Windows form only
- *    while a pause request is actually in flight. Real exceptions
- *    (SIGSEGV, panics) carry other descriptions and are left untouched,
- *    even while a pause request is in flight.
+ *    (issue #275). Map both back to 'pause'. A post-attach pause may carry
+ *    any platform-specific exception detail, so its generation-scoped
+ *    intent is authoritative; public pauses retain the narrower Windows
+ *    detail checks so coincident real exceptions are not mislabeled.
  *
  * 2. An exception-filter hit (rust_panic, cpp_throw) is reported as reason
  *    'breakpoint' because CodeLLDB implements filters as internal
@@ -77,6 +77,9 @@ export function normalizeLldbStopReason(
   }
   const detail = `${body?.description ?? ''} ${body?.text ?? ''}`;
   if (/SIGSTOP/i.test(detail)) {
+    return 'pause';
+  }
+  if (context.pauseSource === 'attach') {
     return 'pause';
   }
   // Windows delivers a user-initiated pause via DebugBreakProcess: the

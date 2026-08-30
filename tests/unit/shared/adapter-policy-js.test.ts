@@ -1,8 +1,22 @@
 import { describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import { JsDebugAdapterPolicy } from '../../../packages/shared/src/interfaces/adapter-policy-js.js';
+import type { StopReasonContext } from '../../../packages/shared/src/interfaces/adapter-policy.js';
 
 describe('JsDebugAdapterPolicy', () => {
+  it('normalizes a requested attach pause while preserving real unrequested steps (#597)', () => {
+    const normalize = JsDebugAdapterPolicy.normalizeStopReason!;
+    const context = (pausePending: boolean, pauseSource?: 'user' | 'attach'): StopReasonContext => ({
+      pausePending,
+      ...(pauseSource ? { pauseSource } : {}),
+      lineBreakpointCount: 0,
+      functionBreakpointCount: 0
+    });
+
+    expect(normalize('step', { reason: 'step' }, context(true, 'attach'))).toBe('pause');
+    expect(normalize('step', { reason: 'step' }, context(false))).toBeUndefined();
+  });
+
   it('declares late-binding function breakpoints (issue #308)', () => {
     // CDP re-resolve at pauses for late-loaded modules: unverified at
     // launch is by design, so the launch-time unbound warning must skip js.

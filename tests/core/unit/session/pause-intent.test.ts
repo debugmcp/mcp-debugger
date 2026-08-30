@@ -3,6 +3,7 @@ import {
   armPauseIntent,
   beginProxyGeneration,
   clearPauseIntent,
+  getCurrentPauseIntent,
   hasCurrentPauseIntent
 } from '../../../../src/session/execution/pause-intent.js';
 
@@ -34,6 +35,8 @@ describe('generation-scoped pause intent', () => {
     } = { proxyGeneration: 4 };
     const older = armPauseIntent(session, 'user');
     const newer = armPauseIntent(session, 'attach');
+
+    expect(getCurrentPauseIntent(session)).toBe(newer);
 
     clearPauseIntent(session, older);
     expect(session.pauseIntent).toBe(newer);

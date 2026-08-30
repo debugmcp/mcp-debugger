@@ -16,7 +16,7 @@ import { OutputRingBuffer } from './output-buffer.js';
 import {
   beginProxyGeneration,
   clearPauseIntent,
-  hasCurrentPauseIntent
+  getCurrentPauseIntent
 } from './execution/pause-intent.js';
 import { DebugProtocol } from '@vscode/debugprotocol'; 
 import path from 'path';
@@ -479,8 +479,10 @@ export abstract class SessionManagerCore extends EventEmitter {
         }
         const userBreakpointIds: ReadonlySet<number> | undefined =
           lineComplete && fnComplete ? new Set([...lineIds, ...fnIds]) : undefined;
+        const pauseIntent = getCurrentPauseIntent(session);
         const normalized = policy.normalizeStopReason?.(rawReason, body, {
-          pausePending: hasCurrentPauseIntent(session),
+          pausePending: pauseIntent !== undefined,
+          ...(pauseIntent ? { pauseSource: pauseIntent.source } : {}),
           userBreakpointIds,
           functionBreakpointIds: fnComplete ? fnIds : undefined,
           lineBreakpointCount: session.breakpoints.size,
