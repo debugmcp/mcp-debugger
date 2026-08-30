@@ -255,20 +255,47 @@ default window, the window is caller-configurable (issue #143):
 
 ### DebugResult Pattern
 
-Most operations return a standardized `DebugResult`:
+Most operations return a standardized `DebugResult`, generic over the shape of
+its `data` bag (`src/session/session-manager-core.ts`):
 
 ```typescript
-interface DebugResult {
+// An open bag with the fields every reader actually touches named.
+// ProxyFailureDiagnostics (src/session/launch/proxy-failure-diagnostics.ts)
+// contributes the pointers a failed launch or attach returns.
+type DebugResultData = ProxyFailureDiagnostics & {
+  message?: string;
+  warning?: string;
+  /** Still running; the operation completes asynchronously (step and pause). */
+  pending?: boolean;
+  [key: string]: unknown;
+};
+
+interface DebugResult<TData extends DebugResultData = DebugResultData> {
   success: boolean;
   state: SessionState;
   error?: string;
-  data?: unknown;
+  data?: TData;
   canContinue?: boolean;
   // Machine-readable error identity for tests and callers (avoid string assertions)
   errorType?: string; // e.g., 'PythonNotFoundError'
   errorCode?: number; // e.g., -32602 (MCP InvalidParams)
 }
 ```
+
+An operation with a richer bag names it and instantiates the parameter —
+`StepResultData` (`location`), `PauseResultData` (`stopReason`,
+`rawStopReason`), `AttachResultData` (`attachConfig`) — so callers read the
+fields straight off the result:
+
+```typescript
+const result = await sessionManager.pause(sessionId);
+const reason = result.data?.stopReason;   // typed; no cast
+```
+
+`data` used to be `unknown`, which meant every server handler cast it back into
+a shape it invented on the spot — a cast the compiler could not check and that
+silently outlived the field it named. Add a `…ResultData` type for a new
+payload rather than widening the bag.
 
 Example usage:
 
