@@ -1655,6 +1655,51 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(proxyStub.sendDapRequest).toHaveBeenCalledWith('next', { threadId: 1 });
       expect(mockSessionStore.updateState).toHaveBeenCalledWith(session.id, SessionState.RUNNING);
     });
+
+    it('does not report a pending step when the stop arrived and the stack read is still in flight (issue #574)', async () => {
+      // The stop landed inside the grace window but waitForReadyStack is still
+      // polling when the 5s timer fires. Without the stopSeen guard the timer
+      // won the race: the caller got "still executing" and no location while
+      // onStopped was microtasks from settling with both.
+      vi.useFakeTimers();
+      try {
+        const handlers: Record<string, Function> = {};
+        const proxyStub: any = {
+          on: vi.fn((event: string, handler: Function) => {
+            handlers[event] = handler;
+            return proxyStub;
+          }),
+          off: vi.fn(() => proxyStub),
+          sendDapRequest: vi.fn().mockResolvedValue(undefined),
+        };
+        const session = { ...mockSession, proxyManager: proxyStub, state: SessionState.PAUSED } as any;
+
+        let releaseStack: (frames: unknown[]) => void = () => {};
+        const stackRead = new Promise<unknown[]>(resolve => { releaseStack = resolve; });
+        vi.spyOn(operations, 'getStackTrace').mockReturnValue(stackRead as never);
+
+        const promise = internals(operations).execution.executeStep(session, session.id, {
+          command: 'next',
+          threadId: 1,
+          logTag: 'stepOver',
+          successMessage: 'Step completed.',
+        });
+
+        handlers['stopped']?.();
+        await vi.advanceTimersByTimeAsync(10);   // the post-stop settle delay
+        await vi.advanceTimersByTimeAsync(5000); // the grace window elapses
+        releaseStack([{ file: '/app/main.py', line: 42, column: 5 }]);
+
+        const result = await promise;
+
+        expect(result.success).toBe(true);
+        expect(result.data?.pending).toBeUndefined();
+        expect(result.data?.message).toBe('Step completed.');
+        expect(result.data?.location).toEqual({ file: '/app/main.py', line: 42, column: 5 });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe('Operation Success Scenarios', () => {
@@ -3583,6 +3628,64 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result.state).toBe(SessionState.PAUSED);
     });
 
+    it('leaves pausePending false when the stop happened during thread discovery (issue #574)', async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockProxyManager.sendDapRequest.mockImplementation((command: string) => {
+        if (command === 'threads') {
+          // handleStopped has already run and cleared the flag by the time the
+          // discovery request resolves; arming it afterwards stranded it true.
+          mockSession.state = SessionState.PAUSED;
+          mockSession.pausePending = false;
+          return Promise.resolve({ body: { threads: [{ id: 3, name: 'Main' }] } });
+        }
+        return Promise.resolve({});
+      });
+
+      await operations.pause('test-session');
+
+      expect(mockSession.pausePending).toBe(false);
+    });
+
+    it('reports the same stopReason and location from the race branch as from the event path (issue #574)', async () => {
+      // A pause delivered during auto-discovery settles through the
+      // post-response guard, which used to return a bare {message:'Paused'}.
+      mockSession.state = SessionState.RUNNING;
+      const raceStop = { reason: 'pause', rawReason: 'exception', threadId: 3, timestamp: Date.now() };
+      mockProxyManager.sendDapRequest.mockImplementation((command: string) => {
+        if (command === 'threads') {
+          mockSession.state = SessionState.PAUSED;
+          mockSession.lastStop = raceStop;
+          return Promise.resolve({ body: { threads: [{ id: 3, name: 'Main' }] } });
+        }
+        return Promise.resolve({});
+      });
+      vi.spyOn(operations, 'getStackTrace')
+        .mockResolvedValue([{ file: '/app/server.rb', line: 17, column: 3 }] as never);
+
+      const result = await operations.pause('test-session');
+
+      expect(result.data?.stopReason).toBe('pause');
+      expect(result.data?.rawStopReason).toBe('exception');
+      expect(result.data?.location).toEqual({ file: '/app/server.rb', line: 17, column: 3 });
+    });
+
+    it('fails with ProxyNotRunningError when the session terminates during thread discovery (issue #574)', async () => {
+      mockSession.state = SessionState.RUNNING;
+      // The core clears session.proxyManager on terminate/exit/close. Reading
+      // the stale handle from before the await registered listeners on null.
+      mockProxyManager.sendDapRequest.mockImplementation((command: string) => {
+        if (command === 'threads') {
+          mockSession.proxyManager = null;
+          return Promise.resolve({ body: { threads: [{ id: 3, name: 'Main' }] } });
+        }
+        return Promise.resolve({});
+      });
+
+      await expect(operations.pause('test-session'))
+        .rejects.toBeInstanceOf(ProxyNotRunningError);
+      expect(mockSession.pausePending).toBe(false);
+    });
+
     it('reports a pending pause when no stopped event arrives within the grace window', async () => {
       vi.useFakeTimers();
       try {
@@ -3601,6 +3704,40 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         const data = result.data;
         expect(data?.pending).toBe(true);
         expect(data?.message).toContain("no 'stopped' event");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not report a pending pause when the stop was seen and the stack read is still in flight (issue #574)', async () => {
+      // The grace timer ignored the stopEventSeen flag the function already
+      // maintained, so a stop observed but still mid-stack-read at 5s was
+      // reported as pending with the false "no 'stopped' event" message and
+      // without stopReason/rawStopReason/location.
+      vi.useFakeTimers();
+      try {
+        mockSession.state = SessionState.RUNNING;
+        mockProxyManager.sendDapRequest.mockResolvedValue({});
+
+        let releaseStack: (frames: unknown[]) => void = () => {};
+        const stackRead = new Promise<unknown[]>(resolve => { releaseStack = resolve; });
+        vi.spyOn(operations, 'getStackTrace').mockReturnValue(stackRead as never);
+
+        const promise = operations.pause('test-session', 1);
+        await vi.advanceTimersByTimeAsync(0);    // let the pause response resolve
+        mockSession.lastStop = { reason: 'pause', threadId: 1, timestamp: Date.now() };
+        emitStopped();
+        await vi.advanceTimersByTimeAsync(10);   // the post-stop settle delay
+        await vi.advanceTimersByTimeAsync(5000); // the grace window elapses
+        releaseStack([{ file: '/app/worker.js', line: 8, column: 2 }]);
+
+        const result = await promise;
+
+        expect(result.state).toBe(SessionState.PAUSED);
+        expect(result.data?.pending).toBeUndefined();
+        expect(result.data?.message).toBe('Paused');
+        expect(result.data?.stopReason).toBe('pause');
+        expect(result.data?.location).toEqual({ file: '/app/worker.js', line: 8, column: 2 });
       } finally {
         vi.useRealTimers();
       }

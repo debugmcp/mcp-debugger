@@ -159,6 +159,13 @@ export class ExecutionController {
 
     return new Promise((resolve) => {
       let settled = false;
+      // A `stopped` event that lands inside the grace window but is still
+      // reading the stack when the timer fires would otherwise settle as
+      // "still executing" with no location, while onStopped is a few
+      // microtasks away from settling with one (issue #574). Set at the top
+      // of onStopped, so the timer can tell "nothing stopped" from "stopped,
+      // still resolving where".
+      let stopSeen = false;
 
       const cleanup = () => {
         proxyManager.off('stopped', onStopped);
@@ -191,6 +198,7 @@ export class ExecutionController {
       };
 
       const onStopped = async () => {
+        stopSeen = true;
         // Try to get current location from stack trace
         let location: StopLocation | undefined;
         try {
@@ -219,6 +227,12 @@ export class ExecutionController {
       const onExit = () => success(exitedMessage);
 
       const timeout = setTimeout(() => {
+        // The stop already arrived; onStopped owns the settle and will report
+        // where it landed. Reporting "still executing" from here would be a
+        // lie the caller has no way to correct (issue #574).
+        if (stopSeen) {
+          return;
+        }
         this.ctx.logger.info(
           `[SM ${options.logTag} ${sessionId}] Step still running after ${this.ctx.tunables.stepGraceMs}ms grace window; completing asynchronously`
         );
@@ -340,6 +354,24 @@ export class ExecutionController {
     }
 
     this.ctx.logger.debug(`[SessionManager] pauseExecution: sending DAP pause for session=${sessionId} currentState=${session.state}`);
+
+    // Snapshot the current lastStop so result paths can tell whether the stop
+    // they observe belongs to THIS pause (handleStopped replaces the object)
+    // rather than reporting a stale earlier stop. Taken BEFORE the
+    // threads-discovery await below: a stop delivered during that await has
+    // already replaced session.lastStop, so a snapshot taken afterwards would
+    // compare this pause's own stop against itself and report no reason at
+    // all — the very case the post-response race branch exists for (#574).
+    const lastStopBefore = session.lastStop;
+    // Flag the in-flight pause so policy stop-reason normalization can use it
+    // (e.g. CodeLLDB reports pauses as 'exception'/SIGSTOP). Armed before the
+    // discovery request for the same reason: a stop landing during that await
+    // must still normalize to 'pause', and arming afterwards would re-set a
+    // flag handleStopped had already cleared, stranding it true for the rest
+    // of the session (#574). handleStopped clears it on every stop; the
+    // settle paths below clear it where no stop is coming.
+    session.pausePending = true;
+
     // DAP pause request: threadId 0 should pause all threads per DAP spec,
     // but some adapters (e.g. netcoredbg) reject threadId=0 with E_INVALIDARG.
     // When no explicit threadId is provided, discover one via a threads request.
@@ -366,16 +398,16 @@ export class ExecutionController {
       }
     }
 
+    // Re-read the handle after the await: the core clears session.proxyManager
+    // when the session closes, terminates or exits, any of which can happen
+    // while the threads request is in flight. Without this the listener
+    // registration below threw a TypeError on null instead of the failure the
+    // pre-await guard reports for the same condition (#574).
     const proxyManager = session.proxyManager;
-
-    // Snapshot the current lastStop so result paths can tell whether the stop
-    // they observe belongs to THIS pause (handleStopped replaces the object)
-    // rather than reporting a stale earlier stop.
-    const lastStopBefore = session.lastStop;
-    // Flag the in-flight pause so policy stop-reason normalization can use it
-    // (e.g. CodeLLDB reports pauses as 'exception'/SIGSTOP). handleStopped
-    // clears it on every stop; clear it here too on error/terminate paths.
-    session.pausePending = true;
+    if (!proxyManager || !proxyManager.isRunning()) {
+      session.pausePending = false;
+      throw new ProxyNotRunningError(sessionId, 'pause');
+    }
 
     // The pause response only acknowledges the request; the state transition
     // to PAUSED happens when the asynchronous 'stopped' event is handled by
@@ -403,10 +435,14 @@ export class ExecutionController {
         resolve(result);
       };
 
-      const onStopped = async () => {
-        stopEventSeen = true;
-        // Try to get current location from stack trace
-        let location: StopLocation | undefined;
+      /**
+       * Where the debuggee came to rest. Both settle paths that mean "this
+       * pause took effect" need it — the event path and the post-response
+       * race branch — so it lives outside onStopped rather than inside it
+       * (#574): the race branch used to return a bare `{message:'Paused'}`
+       * where the event path returned a location.
+       */
+      const readStopLocation = async (): Promise<StopLocation | undefined> => {
         try {
           // Wait a brief moment for state to settle after stopped event
           await new Promise(resolve => setTimeout(resolve, 10));
@@ -414,7 +450,7 @@ export class ExecutionController {
           const stackFrames = await this.ctx.getStackTrace(sessionId);
           if (stackFrames && stackFrames.length > 0) {
             const topFrame = stackFrames[0];
-            location = {
+            return {
               file: topFrame.file,
               line: topFrame.line,
               column: topFrame.column
@@ -423,9 +459,11 @@ export class ExecutionController {
         } catch (error) {
           this.ctx.logger.debug(`[SessionManager pause ${sessionId}] Could not capture location:`, error);
         }
-        this.ctx.logger.info(
-          `[SessionManager pause] Paused session ${sessionId}. Current state: ${session.state}`
-        );
+        return undefined;
+      };
+
+      /** The success payload both of those paths report. */
+      const pauseData = (location?: StopLocation): PauseResultData => {
         const data: PauseResultData = { message: 'Paused' };
         // Only report the stop reason when handleStopped recorded a NEW stop
         // for this pause — never echo a stale earlier stop.
@@ -438,7 +476,16 @@ export class ExecutionController {
         if (location) {
           data.location = location;
         }
-        settle({ success: true, state: session.state, data });
+        return data;
+      };
+
+      const onStopped = async () => {
+        stopEventSeen = true;
+        const location = await readStopLocation();
+        this.ctx.logger.info(
+          `[SessionManager pause] Paused session ${sessionId}. Current state: ${session.state}`
+        );
+        settle({ success: true, state: session.state, data: pauseData(location) });
       };
 
       const onEnded = () => {
@@ -451,6 +498,13 @@ export class ExecutionController {
       };
 
       const timeout = setTimeout(() => {
+        // The stop WAS observed; onStopped is still resolving where it landed
+        // and owns the settle. Reporting "no 'stopped' event within Ns" here
+        // would be false, and would drop the stopReason and location the
+        // event path is about to report (issue #574).
+        if (stopEventSeen) {
+          return;
+        }
         this.ctx.logger.info(
           `[SessionManager pause] No stopped event within ${this.ctx.tunables.pauseGraceMs}ms grace window in session ${sessionId}; completing asynchronously`
         );
@@ -475,22 +529,20 @@ export class ExecutionController {
 
       proxyManager
         .sendDapRequest('pause', { threadId: effectiveThreadId })
-        .then(() => {
+        .then(async () => {
           this.ctx.logger.info(
             `[SessionManager pause] DAP 'pause' sent for session ${sessionId}. Waiting for stopped event.`
           );
           // Guard: if the stopped event fired before the listeners above were
           // registered (e.g. during the threads-discovery await), the state is
-          // already PAUSED and no further event will arrive.
+          // already PAUSED and no further event will arrive — so this branch
+          // has to do everything onStopped would, location included (#574).
           if (session.state === SessionState.PAUSED && !stopEventSeen) {
-            const raceData: PauseResultData = { message: 'Paused' };
-            if (session.lastStop && session.lastStop !== lastStopBefore) {
-              raceData.stopReason = session.lastStop.reason;
-              if (session.lastStop.rawReason) {
-                raceData.rawStopReason = session.lastStop.rawReason;
-              }
-            }
-            settle({ success: true, state: session.state, data: raceData });
+            // No stop event reaches our listener on this path, so nothing
+            // else here clears the flag handleStopped already cleared.
+            session.pausePending = false;
+            const location = await readStopLocation();
+            settle({ success: true, state: session.state, data: pauseData(location) });
           }
         })
         .catch((error: unknown) => {

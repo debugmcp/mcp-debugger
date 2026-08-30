@@ -584,6 +584,38 @@ describe('Server Control Tools Tests', () => {
       ['step_over', 'stepOver'],
       ['step_into', 'stepInto'],
       ['step_out', 'stepOut']
+    ])('surfaces the controller message when %s ended the session (issue #574)', async (toolName, methodName) => {
+      // A step the debuggee did not survive settles with 'Step completed as
+      // session terminated.' and no `pending` marker. The hard-coded
+      // "Stepped over" used to overwrite it, leaving `state` the only clue.
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: 'ACTIVE'
+      });
+      mockSessionManager[methodName].mockResolvedValue({
+        success: true,
+        state: 'stopped',
+        data: { message: 'Step completed as session terminated.' }
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: toolName,
+          arguments: { sessionId: 'test-session' }
+        }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      expect(content.message).toBe('Step completed as session terminated.');
+      expect(content.pending).toBeUndefined();
+    });
+
+    it.each([
+      ['step_over', 'stepOver'],
+      ['step_into', 'stepInto'],
+      ['step_out', 'stepOut']
     ])('should handle %s errors', async (toolName, methodName) => {
       // Mock getSession to return null - session not found
       mockSessionManager.getSession.mockReturnValue(null);

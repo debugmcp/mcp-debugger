@@ -2,6 +2,7 @@
  * Execution control tools: step_over / step_into / step_out (one handler
  * keyed by toolName), continue_execution, pause_execution, list_threads.
  */
+import { SessionState } from '@debugmcp/shared';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import type { DebugResult, StepResultData } from '../../session/session-manager-core.js';
 import { requireSessionId } from '../tool-validation.js';
@@ -43,6 +44,13 @@ export const stepTool: ToolHandler = async (ctx, args, toolName) => {
       if (resultData.message) {
         response.message = resultData.message;
       }
+    } else if (stepResult.state === SessionState.STOPPED && resultData?.message) {
+      // A step the debuggee did not survive completes with "Step completed as
+      // session terminated./exited." and no `pending` marker. Gated on the
+      // terminal state rather than a blanket `??` so the ordinary stop keeps
+      // its "Stepped over" wording — but leaving it hard-coded here made
+      // `state` the only clue that the program is gone (issue #574).
+      response.message = resultData.message;
     }
 
     // Extract location from result data
