@@ -192,7 +192,7 @@ export class FakeDebugAdapter extends EventEmitter implements IDebugAdapter {
    * The builder wins: it replaces any same-member constructor override, so pass attach
    * behaviour through `options` rather than through the constructor.
    */
-  withAttachSupport(options: FakeAttachSupportOptions = {}): this {
+  withAttachSupport(options: FakeAttachSupportOptions = {}): this & DefinedAttachMembers {
     this.supportsAttach = vi.fn<Impl<'supportsAttach'>>(() => true);
     this.supportsDetach = vi.fn<Impl<'supportsDetach'>>(() => options.detach ?? true);
     this.usesDirectConnectForAttach = vi.fn<Impl<'usesDirectConnectForAttach'>>(
@@ -208,7 +208,11 @@ export class FakeDebugAdapter extends EventEmitter implements IDebugAdapter {
     if (options.supportedAttachKeys !== undefined) {
       this.supportedAttachKeys = options.supportedAttachKeys;
     }
-    return this;
+    // The five members above are optional on the class because a fake that never
+    // opted in must not define them. They are defined now, and saying so is what
+    // lets a caller read `adapter.transformAttachConfig.mock` without a non-null
+    // assertion that would silently survive the builder being dropped.
+    return this as this & DefinedAttachMembers;
   }
 
   /**
@@ -262,3 +266,15 @@ export class FakeDebugAdapter extends EventEmitter implements IDebugAdapter {
     }
   }
 }
+
+/** The attach members {@link FakeDebugAdapter.withAttachSupport} defines. */
+export type DefinedAttachMembers = Required<
+  Pick<
+    FakeDebugAdapter,
+    | 'supportsAttach'
+    | 'supportsDetach'
+    | 'usesDirectConnectForAttach'
+    | 'transformAttachConfig'
+    | 'getDefaultAttachConfig'
+  >
+>;
