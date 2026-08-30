@@ -3631,6 +3631,79 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result.data?.location).toEqual({ file: '/app/server.rb', line: 17, column: 3 });
     });
 
+    /**
+     * The race branch reads the stack, which takes longer than the grace
+     * window on a slow target. Both of these hold that read open past
+     * pauseGraceMs and check that nothing else rewrites the answer.
+     */
+    const holdOpenRaceBranchStackRead = () => {
+      const raceStop = { reason: 'pause', rawReason: 'exception', threadId: 3, timestamp: Date.now() };
+      mockSession.state = SessionState.RUNNING;
+      mockProxyManager.sendDapRequest.mockImplementation((command: string) => {
+        if (command === 'threads') {
+          // The stop lands during discovery: state flips and handleStopped
+          // records it before the listeners below are ever registered.
+          mockSession.state = SessionState.PAUSED;
+          mockSession.lastStop = raceStop;
+          return Promise.resolve({ body: { threads: [{ id: 3, name: 'Main' }] } });
+        }
+        return Promise.resolve({});
+      });
+      let releaseStack: (frames: unknown[]) => void = () => {};
+      const stackRead = new Promise<unknown[]>(resolve => { releaseStack = resolve; });
+      vi.spyOn(operations, 'getStackTrace').mockReturnValue(stackRead as never);
+      return { release: () => releaseStack([{ file: '/app/server.rb', line: 17, column: 3 }]) };
+    };
+
+    const expectRaceBranchResult = (result: Awaited<ReturnType<typeof operations.pause>>) => {
+      expect(result.success).toBe(true);
+      expect(result.data?.pending).toBeUndefined();
+      expect(result.data?.message).toBe('Paused');
+      expect(result.data?.stopReason).toBe('pause');
+      expect(result.data?.rawStopReason).toBe('exception');
+      expect(result.data?.location).toEqual({ file: '/app/server.rb', line: 17, column: 3 });
+    };
+
+    it('does not report a pending pause when the race branch is still reading the stack (issue #574)', async () => {
+      // The race branch is async, but only onStopped used to set
+      // stopEventSeen — so the grace timer still saw false and settled
+      // `pending: true` with "no 'stopped' event within 5s" for a session
+      // this branch had just established is PAUSED.
+      vi.useFakeTimers();
+      try {
+        const { release } = holdOpenRaceBranchStackRead();
+
+        const promise = operations.pause('test-session');
+        await vi.advanceTimersByTimeAsync(10);   // into the held stack read
+        await vi.advanceTimersByTimeAsync(5000); // the grace window elapses
+        release();
+
+        expectRaceBranchResult(await promise);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('lets the race branch outrank a terminate that arrives during its stack read (issue #574)', async () => {
+      // Same window, different claimant: "Session ended before pause took
+      // effect" is false for a pause that demonstrably took effect, so the
+      // path holding the settle keeps it.
+      vi.useFakeTimers();
+      try {
+        const { release } = holdOpenRaceBranchStackRead();
+
+        const promise = operations.pause('test-session');
+        await vi.advanceTimersByTimeAsync(10);   // into the held stack read
+        emit('terminated');
+        await vi.advanceTimersByTimeAsync(5000);
+        release();
+
+        expectRaceBranchResult(await promise);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('fails with ProxyNotRunningError when the session terminates during thread discovery (issue #574)', async () => {
       mockSession.state = SessionState.RUNNING;
       // The core clears session.proxyManager on terminate/exit/close. Reading

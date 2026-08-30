@@ -230,6 +230,10 @@ export class ExecutionController {
         // The stop already arrived; onStopped owns the settle and will report
         // where it landed. Reporting "still executing" from here would be a
         // lie the caller has no way to correct (issue #574).
+        // Trade-off: past this point the answer is bounded by getStackTrace's
+        // own timeout (its empty-stack polling plus the DAP request timeout,
+        // ~35s worst case) rather than by this 5s window. Worth it — a slow
+        // truthful answer beats a fast wrong one — but it IS the ceiling.
         if (stopSeen) {
           return;
         }
@@ -489,6 +493,13 @@ export class ExecutionController {
       };
 
       const onEnded = () => {
+        // "before pause took effect" is false once a stop has been observed:
+        // the pause DID take effect and the session ended afterwards. The path
+        // that saw the stop owns the settle, even while it is still resolving
+        // where the debuggee landed (issue #574).
+        if (stopEventSeen) {
+          return;
+        }
         session.pausePending = false;
         settle({
           success: true,
@@ -538,6 +549,13 @@ export class ExecutionController {
           // already PAUSED and no further event will arrive — so this branch
           // has to do everything onStopped would, location included (#574).
           if (session.state === SessionState.PAUSED && !stopEventSeen) {
+            // Claim the settle BEFORE the await: its own !stopEventSeen guard
+            // has already been evaluated, and the stack read below outlives
+            // the grace window on a slow target. Without this the timer (and
+            // onEnded) still saw `false` and settled first — with `pending:
+            // true` and "no 'stopped' event within Ns" for a session this
+            // branch has just established is PAUSED (issue #574).
+            stopEventSeen = true;
             // No stop event reaches our listener on this path, so nothing
             // else here clears the flag handleStopped already cleared.
             session.pausePending = false;

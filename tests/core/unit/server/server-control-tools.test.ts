@@ -581,6 +581,43 @@ describe('Server Control Tools Tests', () => {
     });
 
     it.each([
+      ['step_over', 'stepOver', 'Stepped over'],
+      ['step_into', 'stepInto', 'Stepped into'],
+      ['step_out', 'stepOut', 'Stepped out']
+    ])('keeps the %s wording for an ordinary stop that carries a message (issue #574)', async (toolName, methodName, expectedMessage) => {
+      // The other direction of the state gate. The controller ALWAYS sets
+      // data.message ('Step completed.'), so surfacing it unconditionally
+      // would have replaced "Stepped over" on every successful step; only a
+      // terminal state may override the wording.
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: 'ACTIVE'
+      });
+      mockSessionManager[methodName].mockResolvedValue({
+        success: true,
+        state: 'paused',
+        data: {
+          message: 'Step completed.',
+          location: { file: '/app/main.py', line: 12, column: 1 }
+        }
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: toolName,
+          arguments: { sessionId: 'test-session' }
+        }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      expect(content.message).toBe(expectedMessage);
+      expect(content.location).toEqual({ file: '/app/main.py', line: 12, column: 1 });
+      expect(content.pending).toBeUndefined();
+    });
+
+    it.each([
       ['step_over', 'stepOver'],
       ['step_into', 'stepInto'],
       ['step_out', 'stepOut']
