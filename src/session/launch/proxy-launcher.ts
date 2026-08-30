@@ -93,7 +93,7 @@ export class ProxyLauncher {
 
     // Log entrance for Windows CI debugging
     this.ctx.logger.info(
-      `[SessionManager] Entering startProxyManager for session ${session.id}, dryRunSpawn: ${dryRunSpawn}, scriptPath: ${scriptPath}`
+      `[SessionManager] Entering ProxyLauncher.start for session ${session.id}, dryRunSpawn: ${dryRunSpawn}, scriptPath: ${scriptPath}`
     );
 
     const inputs = await this.prepareLaunchInputs(session, request);
@@ -151,11 +151,9 @@ export class ProxyLauncher {
     const sessionLogDir = path.join(this.ctx.logDirBase, sessionId, `run-${Date.now()}`);
     this.ctx.logger.info(`[SessionManager] Ensuring session log directory: ${sessionLogDir}`);
     try {
+      // ensureDir (fs-extra's recursive mkdir) rejects when it cannot create
+      // the directory; a follow-up existence check was a redundant stat.
       await this.ctx.fileSystem.ensureDir(sessionLogDir);
-      const dirExists = await this.ctx.fileSystem.pathExists(sessionLogDir);
-      if (!dirExists) {
-        throw new Error(`Log directory ${sessionLogDir} could not be created`);
-      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       this.ctx.logger.error(`[SessionManager] Failed to create log directory:`, err);

@@ -18,6 +18,7 @@ import type { ProxyLaunchContext } from '../../../../../src/session/operations-c
 import type { CustomLaunchRequestArguments } from '../../../../../src/session/session-manager-core.js';
 import type { ManagedSession } from '../../../../../src/session/session-store.js';
 import { MockProxyManagerFactory } from '../../../../../src/factories/proxy-manager-factory.js';
+import type { IProxyManager } from '../../../../../src/proxy/proxy-manager.js';
 import {
   DebugLanguage,
   SessionLifecycleState,
@@ -26,9 +27,11 @@ import {
   type Breakpoint,
   type ExceptionBreakMode,
   type FunctionBreakpoint,
+  type IDebugAdapter,
   type LanguageSpecificLaunchConfig
 } from '@debugmcp/shared';
 import { FakeDebugAdapter } from '../../../../test-utils/fakes/fake-debug-adapter.js';
+import { MockProxyManager } from '../../../../test-utils/mocks/mock-proxy-manager.js';
 import {
   createMockFileSystem,
   createMockLogger
@@ -37,6 +40,7 @@ import { createMockAdapterRegistry } from '../../../../test-utils/mocks/mock-ada
 
 const LOG_DIR_BASE = path.join('/tmp', 'logs');
 const SCRIPT = path.join('/work', 'app', 'script.py');
+const FAKE_EXE = path.join('/usr', 'bin', 'fake');
 
 /**
  * The attach shape (`request`/`host`/`port`) and compiled-language `program`
@@ -68,17 +72,30 @@ interface Harness {
   policy: { getInitializationBehavior: ReturnType<typeof vi.fn> };
 }
 
-function makeHarness(): Harness {
+/** What a full `start()` needs beyond the preparation steps: the adapter the registry hands out and the ProxyManager the factory builds. */
+interface HarnessOptions {
+  adapter?: IDebugAdapter;
+  proxyManager?: IProxyManager;
+}
+
+function makeHarness(options: HarnessOptions = {}): Harness {
   const logger = createMockLogger();
   const fileSystem = createMockFileSystem();
   vi.mocked(fileSystem.ensureDir).mockResolvedValue(undefined);
-  vi.mocked(fileSystem.pathExists).mockResolvedValue(true);
   const policy = { getInitializationBehavior: vi.fn(() => ({})) };
+  const { adapter, proxyManager } = options;
+  const adapterRegistry = adapter
+    ? createMockAdapterRegistry({ createAdapter: async () => adapter })
+    : createMockAdapterRegistry();
+  const proxyManagerFactory = new MockProxyManagerFactory();
+  if (proxyManager) {
+    proxyManagerFactory.createFn = () => proxyManager;
+  }
   const ctx: ProxyLaunchContext = {
     logger,
     fileSystem,
-    adapterRegistry: createMockAdapterRegistry(),
-    proxyManagerFactory: new MockProxyManagerFactory(),
+    adapterRegistry,
+    proxyManagerFactory,
     logDirBase: LOG_DIR_BASE,
     defaultDapLaunchArgs: { stopOnEntry: false, justMyCode: true },
     updateSession: vi.fn(),
@@ -227,14 +244,6 @@ describe('ProxyLauncher.prepareLaunchInputs', () => {
     expect(h.ctx.updateSession).not.toHaveBeenCalled();
     expect(h.ctx.findFreePort).not.toHaveBeenCalled();
   });
-
-  it('fails when the run directory does not exist after ensureDir', async () => {
-    vi.mocked(h.ctx.fileSystem.pathExists).mockResolvedValueOnce(false);
-
-    await expect(
-      h.launcher.prepareLaunchInputs(makeSession(), { scriptPath: SCRIPT })
-    ).rejects.toThrow(/could not be created/);
-  });
 });
 
 describe('ProxyLauncher.buildAdapterLaunchPlan', () => {
@@ -263,6 +272,9 @@ describe('ProxyLauncher.buildAdapterLaunchPlan', () => {
       breakOnExceptions
     };
     const inputs = await inputsFor(request);
+    // prepareAdapterLaunch writes the resolved executable here before the
+    // plan is built; the adapter command is built from that config.
+    inputs.adapterConfig.executablePath = FAKE_EXE;
     const transformed: LanguageSpecificLaunchConfig = {
       program: path.join('/bin', 'app'),
       // A transform is adapter code; the plan filters non-strings defensively.
@@ -272,14 +284,7 @@ describe('ProxyLauncher.buildAdapterLaunchPlan', () => {
       extra: 'kept'
     };
 
-    const plan = h.launcher.buildAdapterLaunchPlan(
-      session,
-      adapter,
-      inputs,
-      request,
-      transformed,
-      path.join('/usr', 'bin', 'fake')
-    );
+    const plan = h.launcher.buildAdapterLaunchPlan(session, adapter, inputs, request, transformed, FAKE_EXE);
 
     // The caller said stopOnEntry, so the policy default is not consulted and
     // the transform's value stands.
@@ -289,7 +294,7 @@ describe('ProxyLauncher.buildAdapterLaunchPlan', () => {
     expect(plan.proxyConfig).toEqual({
       sessionId: 'sess-1',
       language: DebugLanguage.PYTHON,
-      executablePath: path.join('/usr', 'bin', 'fake'),
+      executablePath: FAKE_EXE,
       adapterHost: '127.0.0.1',
       adapterPort: 5678,
       logDir: inputs.sessionLogDir,
@@ -304,7 +309,7 @@ describe('ProxyLauncher.buildAdapterLaunchPlan', () => {
       breakOnExceptions: 'uncaught',
       launchConfig: transformed,
       adapterCommand: {
-        command: 'node',
+        command: FAKE_EXE,
         args: ['fake-adapter.js', '--port', '5678'],
         env: {}
       },
@@ -383,5 +388,41 @@ describe('ProxyLauncher.buildAdapterLaunchPlan', () => {
     expect(plan.proxyConfig.adapterCommand).toBeUndefined();
     expect(plan.proxyConfig.attachMode).toBe(true);
     expect(plan.proxyConfig.executablePath).toBe('ruby');
+  });
+});
+
+describe('ProxyLauncher.start', () => {
+  it('builds the adapter command from the resolved executable and hands the plan to the ProxyManager', async () => {
+    const adapter = new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE });
+    const proxyManager = new MockProxyManager();
+    const h = makeHarness({ adapter, proxyManager });
+    const session = makeSession();
+
+    const launchConfig = await h.launcher.start(session, SCRIPT, ['--flag']);
+
+    // The resolved path is written into the adapter config BEFORE the command
+    // is built from it — the step a direct buildAdapterLaunchPlan call skips.
+    expect(adapter.buildAdapterCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ executablePath: FAKE_EXE })
+    );
+    expect(proxyManager.startCalls).toHaveLength(1);
+    expect(proxyManager.startCalls[0]).toMatchObject({
+      sessionId: 'sess-1',
+      executablePath: FAKE_EXE,
+      scriptPath: SCRIPT,
+      scriptArgs: ['--flag'],
+      adapterCommand: { command: FAKE_EXE, args: ['fake-adapter.js', '--port', '5678'] },
+      attachMode: false
+    });
+    // Handle assigned and handlers wired before start(), as the core relies on.
+    expect(session.proxyManager).toBe(proxyManager);
+    expect(h.ctx.setupProxyEventHandlers).toHaveBeenCalledWith(
+      session,
+      proxyManager,
+      expect.objectContaining({ justMyCode: true })
+    );
+    expect(launchConfig).toMatchObject({ program: SCRIPT, args: ['--flag'], cwd: path.dirname(SCRIPT) });
+    // Ownership moved to the ProxyManager: the lease's release is a no-op.
+    expect(adapter.dispose).not.toHaveBeenCalled();
   });
 });

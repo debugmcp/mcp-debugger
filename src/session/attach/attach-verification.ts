@@ -128,30 +128,20 @@ export async function verifyAttachThreads(
 }
 
 /**
- * Send a DAP 'threads' request bounded by a timeout so a hung request
- * cannot stall attach verification past its deadline. The underlying
- * request keeps its own lifecycle; only the wait here is bounded.
+ * Send a DAP 'threads' request bounded by the remaining verification window.
+ *
+ * The bound is passed to the request itself (`timeoutMs`, honoured end to end
+ * by the worker's request tracker) rather than raced against a local timer:
+ * a request the deadline abandons is then cancelled everywhere, instead of
+ * sitting in the ProxyManager's pending set for the verify-failure stop() to
+ * drain — a full stopDrainTimeoutMs wait ending in a spurious "still pending"
+ * warning for a request nobody was waiting on.
  */
 export async function sendThreadsRequestBounded(
   proxyManager: NonNullable<ManagedSession['proxyManager']>,
   timeoutMs: number
 ): Promise<DebugProtocol.ThreadsResponse | undefined> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      proxyManager.sendDapRequest<DebugProtocol.ThreadsResponse>('threads', {}),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new Error(`'threads' request did not respond within ${timeoutMs}ms`)),
-          timeoutMs
-        );
-      })
-    ]);
-  } finally {
-    if (timer) {
-      clearTimeout(timer);
-    }
-  }
+  return proxyManager.sendDapRequest<DebugProtocol.ThreadsResponse>('threads', {}, { timeoutMs });
 }
 
 export interface PauseAfterAttachInput {

@@ -86,7 +86,6 @@ export interface OperationsContext {
     proxyManager: IProxyManager,
     effectiveLaunchArgs: Partial<CustomLaunchRequestArguments>
   ): void;
-  cleanupProxyEventHandlers(session: ManagedSession, proxyManager: IProxyManager): void;
   stopProxyPreservingSession(session: ManagedSession): Promise<void>;
   closeSession(sessionId: string): Promise<boolean>;
   getStackTrace(
@@ -150,7 +149,6 @@ export type AttachContext = Pick<
   | 'updateState'
   | 'selectPolicy'
   | 'stopProxyPreservingSession'
-  | 'cleanupProxyEventHandlers'
   | 'closeSession'
   | 'tunables'
 >;

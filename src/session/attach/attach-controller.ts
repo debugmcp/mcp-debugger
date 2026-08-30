@@ -115,11 +115,15 @@ export class AttachController {
       );
     }
 
-    if (session.proxyManager) {
-      this.ctx.logger.warn(
-        `[SessionManager] Session ${sessionId} already has an active proxy. Terminating before attaching.`
-      );
-      // Session-preserving teardown (same landmine as startDebugging, #238)
+    if (session.proxyManager || session.pendingProxyStop) {
+      if (session.proxyManager) {
+        this.ctx.logger.warn(
+          `[SessionManager] Session ${sessionId} already has an active proxy. Terminating before attaching.`
+        );
+      }
+      // Session-preserving teardown (same landmine as startDebugging, #238);
+      // a stop() still in flight from a terminal event handler is awaited
+      // too, so the new worker never races the old one's exit (#502).
       await this.ctx.stopProxyPreservingSession(session);
     }
 
@@ -213,20 +217,11 @@ export class AttachController {
             ? ErrorMessages.attachAdapterFailed(lastFailure)
             : ErrorMessages.attachVerifyFailed(verifyTimeoutMs, lastFailure);
           this.ctx.logger.error(`[SessionManager] ${reason} — tearing down proxy for session ${sessionId}`);
-          // Tear down the proxy using the same mechanics as closeSession, but
-          // keep the session record so the failure is inspectable as ERROR.
-          try {
-            this.ctx.cleanupProxyEventHandlers(session, proxyManager);
-          } catch (cleanupError) {
-            this.ctx.logger.error(`[SessionManager] Error during listener cleanup for failed attach:`, cleanupError);
-          }
-          try {
-            await proxyManager.stop();
-          } catch (stopError) {
-            this.ctx.logger.error(`[SessionManager] Error stopping proxy for failed attach:`, stopError);
-          } finally {
-            session.proxyManager = undefined;
-          }
+          // Thrown with the proxy still attached: the catch below tears it
+          // down through failProxySetup — the session-preserving teardown,
+          // which also records lastProxyPid for the leaked-worker check
+          // (#502). Nulling the handle here first would make that teardown
+          // skip its live-proxy branch.
           throw new Error(reason);
         }
         const { threads } = verification;
@@ -267,21 +262,11 @@ export class AttachController {
       // discard — and for js-debug the child session only answered its
       // pending stub while adoption was in flight. Re-sending now, with the
       // debuggee-owning session provably live, delivers the authoritative
-      // verification. Replace-all with the identical set is idempotent;
-      // syncBreakpointsForFile never throws and no-ops unless live.
-      if (session.breakpoints.size > 0) {
-        const files = [...new Set(Array.from(session.breakpoints.values()).map(bp => bp.file))];
-        for (const file of files) {
-          // forceFreshEcho: js-debug answers a no-change re-send with an
-          // empty echo, and pre-attach breakpoints were already registered
-          // via its pending-target queue — without a fresh echo their
-          // verified state is unrecoverable (issue #500).
-          await this.breakpoints.syncBreakpointsForFile(session, file, { forceFreshEcho: true });
-        }
-      }
-      if ((session.functionBreakpoints?.size ?? 0) > 0) {
-        await this.breakpoints.syncFunctionBreakpoints(session);
-      }
+      // verification. forceFreshEcho: js-debug answers a no-change re-send
+      // with an empty echo, and pre-attach breakpoints were already
+      // registered via its pending-target queue — without a fresh echo their
+      // verified state is unrecoverable (issue #500).
+      await this.breakpoints.resyncAll(session, { forceFreshEcho: true });
       // Unverified-at-attach function breakpoints get the same launch-style
       // warning (issue #308); bind-late adapters (js/java) stay suppressed
       // inside the builder.
@@ -327,8 +312,8 @@ export class AttachController {
       this.ctx.logger.error(`[SessionManager] Failed to attach to process for session ${sessionId}:`, error);
       // Never leave a live proxy chain behind a failed attach — e.g.
       // ProxyManager.start()'s init timeout rejects after the worker was
-      // spawned (issue #337). Idempotent with the verify-failure teardown
-      // above, which already nulled session.proxyManager. Then surface the
+      // spawned (issue #337), and the verify failure above throws with the
+      // proxy still attached so this is its one teardown. Then surface the
       // same structured diagnostics the launch path returns (issue #551) and
       // log the same full failure record it logs, proxy-log tail included
       // (issue #561) — an attach that dies during proxy initialization used

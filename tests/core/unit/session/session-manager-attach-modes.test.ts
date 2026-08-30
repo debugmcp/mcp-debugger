@@ -20,8 +20,8 @@ class TestableSessionManagerOperations extends SessionManagerOperations {
 }
 
 /**
- * `ProxyLauncher.start` as these tests drive it. Two loosenings that the old
- * `(ops as any).startProxyManager` hid, made explicit: spies resolve `undefined`
+ * `ProxyLauncher.start` as these tests drive it. Two loosenings that the
+ * pre-extraction `(ops as any)` cast hid, made explicit: spies resolve `undefined`
  * for a launch config nothing downstream reads, and `dapLaunchArgs` takes the
  * attach shape (`request`/`host`/`port`) that production passes through an
  * `as Partial<CustomLaunchRequestArguments>` cast of its own.

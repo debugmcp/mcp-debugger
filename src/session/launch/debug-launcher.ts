@@ -138,13 +138,19 @@ export class DebugLauncher {
       return { success: false, state: session.state, error };
     }
 
-    if (session.proxyManager) {
+    if (session.proxyManager || session.pendingProxyStop) {
+      if (session.proxyManager) {
+        this.ctx.logger.warn(
+          `[SessionManager] Session ${sessionId} already has an active proxy. Terminating before starting new.`
+        );
+      }
       // Session-preserving teardown: closeSession here used to REMOVE the
       // session from the store, so the state update below threw
       // SessionNotFoundError and the session was silently destroyed (#238).
-      this.ctx.logger.warn(
-        `[SessionManager] Session ${sessionId} already has an active proxy. Terminating before starting new.`
-      );
+      // Not gated on a live handle alone: a terminal event handler nulls
+      // proxyManager and leaves its stop() in flight as pendingProxyStop,
+      // which this awaits too (#502) — otherwise the relaunch races the old
+      // worker's exit (a debuggee port still bound, lastProxyPid overwritten).
       await this.ctx.stopProxyPreservingSession(session);
     }
 
@@ -247,18 +253,21 @@ export class DebugLauncher {
             },
           };
         } else {
-          // Timeout occurred
+          // Timeout occurred. The state is read once: the log read below is
+          // an await, and a late dry-run-complete/exit landing during it must
+          // not leave the message and the returned state disagreeing.
           const finalSession = latestSessionState;
+          const state = finalSession.state;
           this.ctx.logger.error(
             `[SessionManager] Dry run timeout for session ${sessionId}. ` +
-              `State: ${finalSession.state}, ProxyManager active: ${!!finalSession.proxyManager}`
+              `State: ${state}, ProxyManager active: ${!!finalSession.proxyManager}`
           );
 
           // The same failure record and proxy-log pointers a thrown launch
           // failure gets: the proxy log is where a dry run that never
           // reported back usually explains itself.
           const dryRunTimeoutError = new Error(
-            `Dry run timed out after ${this.ctx.dryRunTimeoutMs}ms. Current state: ${finalSession.state}`
+            `Dry run timed out after ${this.ctx.dryRunTimeoutMs}ms. Current state: ${state}`
           );
           const diagnosticData = await logProxyFailure(
             { logger: this.ctx.logger, fileSystem: this.ctx.fileSystem },
@@ -270,7 +279,7 @@ export class DebugLauncher {
           return {
             success: false,
             error: dryRunTimeoutError.message,
-            state: finalSession.state,
+            state,
             ...(Object.keys(diagnosticData).length > 0 ? { data: diagnosticData } : {})
           };
         }
@@ -343,26 +352,14 @@ export class DebugLauncher {
       const finalSession = this.ctx.getSession(sessionId);
       const finalState = finalSession.state;
 
-      // Belt-and-braces re-sync (issues #236/#439): the worker forwards its
-      // initial setBreakpoints results via the breakpoints_synced status, so
-      // the store is normally already stamped — including for launches that
-      // are STOPPED by now (logpoint-only short programs), which this gated
-      // path can never help. A live re-sync still heals anything that
-      // changed between the snapshot and now, or a status lost to an IPC
-      // hiccup. Replace-all with the identical set is idempotent;
-      // syncBreakpointsForFile no-ops unless live.
-      if (finalSession.breakpoints.size > 0 &&
-          (finalState === SessionState.RUNNING || finalState === SessionState.PAUSED)) {
-        const files = [...new Set(Array.from(finalSession.breakpoints.values()).map(bp => bp.file))];
-        for (const file of files) {
-          await this.breakpoints.syncBreakpointsForFile(finalSession, file);
-        }
-      }
-      // Same re-sync for function breakpoints (issue #271 phase 3): the
-      // worker's initial send's responses never reach this store either.
-      if ((finalSession.functionBreakpoints?.size ?? 0) > 0 &&
-          (finalState === SessionState.RUNNING || finalState === SessionState.PAUSED)) {
-        await this.breakpoints.syncFunctionBreakpoints(finalSession);
+      // Belt-and-braces re-sync (issues #236/#439, function breakpoints
+      // #271 phase 3): the store is normally already stamped by the worker's
+      // breakpoints_synced status — including for launches that are STOPPED
+      // by now (logpoint-only short programs), which this gated path can
+      // never help — and a live re-send heals anything that changed between
+      // the snapshot and now.
+      if (finalState === SessionState.RUNNING || finalState === SessionState.PAUSED) {
+        await this.breakpoints.resyncAll(finalSession);
       }
 
       // Unbound-at-launch warning (issue #308): the verified state is fresh

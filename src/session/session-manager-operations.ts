@@ -1,7 +1,9 @@
 /**
- * Session operations facade. Launch, attach and detach live here; breakpoint,
- * execution, evaluation, JVM hot-swap and DAP-mirror operations delegate to the
- * collaborators under src/session/{breakpoints,execution,inspection,jvm,mirror}/
+ * Session operations facade: the tunables, the OperationsContext wiring, and
+ * one-line delegates. No operation body lives here — launch and attach are in
+ * src/session/{launch,attach}/ and breakpoint, execution, evaluation, JVM
+ * hot-swap and DAP-mirror operations in
+ * src/session/{breakpoints,execution,inspection,jvm,mirror}/, all reached
  * through OperationsContext (see operations-context.ts).
  */
 import {
@@ -120,8 +122,6 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       findFreePort: () => this.findFreePort(),
       setupProxyEventHandlers: (session, proxyManager, effectiveLaunchArgs) =>
         this.setupProxyEventHandlers(session, proxyManager, effectiveLaunchArgs),
-      cleanupProxyEventHandlers: (session, proxyManager) =>
-        this.cleanupProxyEventHandlers(session, proxyManager),
       stopProxyPreservingSession: (session) => this.stopProxyPreservingSession(session),
       closeSession: (sessionId) => this.closeSession(sessionId),
       getStackTrace: (sessionId, threadId, includeInternals) =>
@@ -131,11 +131,18 @@ export abstract class SessionManagerOperations extends SessionManagerData {
   }
 
   /**
-   * The collaborators the debug operations are split across. Field
-   * initializers rather than constructor wiring: they carry no state of their
-   * own beyond the context, so there is nothing to sequence. Call sites always
+   * The collaborators the debug operations are split across, as field
+   * initializers in dependency order (the launcher and the attach controller
+   * take the proxy launcher and the breakpoint controller). Call sites always
    * go through the field (`this.breakpoints.syncBreakpointsForFile(...)`) and
-   * never capture a method off it, so a test can spy on any of them.
+   * never capture a method off it, so a test can spy on any method of any of
+   * them. Collaborator-to-collaborator references ARE captured at
+   * construction: `DebugLauncher` and `AttachController` hold the
+   * `proxyLauncher` / `breakpoints` instances — their methods still resolve
+   * at call time, so instance spies work, but reassigning one of these
+   * fields after construction is not observed. `DebugLauncher` also owns
+   * state of its own (`restartingSessions`), and `restartDebugging` replays
+   * through the launcher's own `startDebugging`, not this facade's method.
    */
   protected readonly opsContext: OperationsContext = this.buildOperationsContext();
   protected readonly breakpoints = new BreakpointController(this.opsContext);

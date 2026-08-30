@@ -98,33 +98,23 @@ export function waitForLaunchReadiness(
         }
       };
 
+      // The caller decided readiness synchronously just before this call and
+      // nothing has been awaited since, so the only state worth re-checking
+      // is a launch that is already terminal — settled here before any
+      // listener is registered, so it costs no registrations to remove.
+      const currentState = ctx.getSession(sessionId).state;
+      if (currentState === SessionState.STOPPED || currentState === SessionState.ERROR) {
+        resolved = true;
+        ctx.logger.info(`[SessionManager] Session ${sessionId} already ${currentState} - skipping readiness wait`);
+        resolve();
+        return;
+      }
+
       session.proxyManager?.once('stopped', handleStopped);
       session.proxyManager?.once('adapter-configured', handleConfigured);
       session.proxyManager?.once('terminated', handleTerminated);
       session.proxyManager?.once('exited', handleExited);
       session.proxyManager?.once('exit', handleExit);
-
-      // In case the adapter already reached the desired state before listeners were attached,
-      // perform a synchronous state check to avoid waiting for an event that already fired.
-      const currentState = ctx.getSession(sessionId).state;
-      const readyNow = policy.isSessionReady
-        ? policy.isSessionReady(currentState, { stopOnEntry: dapLaunchArgs?.stopOnEntry })
-        : currentState === SessionState.PAUSED;
-      if (readyNow) {
-        resolved = true;
-        cleanup();
-        resolve();
-        return;
-      }
-
-      // Also check if already terminated/stopped
-      if (currentState === SessionState.STOPPED || currentState === SessionState.ERROR) {
-        resolved = true;
-        cleanup();
-        ctx.logger.info(`[SessionManager] Session ${sessionId} already ${currentState} - skipping readiness wait`);
-        resolve();
-        return;
-      }
 
       // Timeout after 30 seconds
       timeoutId = setTimeout(() => {

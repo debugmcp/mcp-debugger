@@ -28,8 +28,8 @@ import type { ManagedSession } from '../../src/session/session-store';
 import type { ExceptionBreakMode, LanguageSpecificLaunchConfig } from '@debugmcp/shared';
 
 /**
- * `ProxyLauncher.start` as these tests drive it. Two loosenings that the old
- * `(ops as any).startProxyManager` hid, made explicit: spies resolve `undefined`
+ * `ProxyLauncher.start` as these tests drive it. Two loosenings that the
+ * pre-extraction `(ops as any)` cast hid, made explicit: spies resolve `undefined`
  * for a launch config nothing downstream reads, and `dapLaunchArgs` takes the
  * attach shape (`request`/`host`/`port`) that production passes through an
  * `as Partial<CustomLaunchRequestArguments>` cast of its own.
@@ -277,14 +277,6 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         mockSession.id,
         expect.objectContaining({ toolchainValidation: undefined })
       );
-    });
-
-    it('throws when log directory cannot be verified after creation', async () => {
-      mockDependencies.fileSystem.pathExists.mockResolvedValueOnce(false);
-
-      await expect(
-        internals(operations).proxyLauncher.start(mockSession, 'script.py')
-      ).rejects.toThrow(/could not be created/);
     });
 
     it('wraps unresolved executable errors for non-python languages', async () => {
@@ -1174,6 +1166,36 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       );
     });
 
+    it('awaits a teardown still in flight from a terminal event before relaunching (issue #502)', async () => {
+      vi.stubEnv('CI', 'true');
+      vi.stubEnv('GITHUB_ACTIONS', undefined);
+      // A terminal event handler nulls proxyManager and leaves its stop()
+      // pending; the relaunch must wait for it even with no live handle.
+      mockSession.proxyManager = undefined;
+      let stopSettled = false;
+      mockSession.pendingProxyStop = new Promise<void>((resolve) => {
+        setImmediate(() => {
+          stopSettled = true;
+          resolve();
+        });
+      });
+      let stopSettledAtStart: boolean | undefined;
+      let pendingAtStart: unknown = 'unset';
+      const startSpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
+        stopSettledAtStart = stopSettled;
+        pendingAtStart = mockSession.pendingProxyStop;
+        throw new Error('launch aborted');
+      });
+
+      const result = await operations.startDebugging('test-session', 'test.py');
+
+      expect(startSpy).toHaveBeenCalledTimes(1);
+      expect(stopSettledAtStart).toBe(true);
+      expect(pendingAtStart).toBeUndefined();
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('launch aborted');
+    });
+
     it('records log read failure when tail cannot be captured', async () => {
       mockSession.logDir = '/tmp/session-logs';
       mockDependencies.fileSystem.pathExists.mockResolvedValueOnce(true);
@@ -1779,6 +1801,32 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(mockSessionStore.updateState.mock.calls.at(-1)?.[1]).toBe(SessionState.INITIALIZING);
     });
 
+    it('awaits a teardown still in flight from a terminal event before attaching (issue #502)', async () => {
+      mockSession.proxyManager = undefined;
+      let stopSettled = false;
+      mockSession.pendingProxyStop = new Promise<void>((resolve) => {
+        setImmediate(() => {
+          stopSettled = true;
+          resolve();
+        });
+      });
+      let stopSettledAtStart: boolean | undefined;
+      let pendingAtStart: unknown = 'unset';
+      const startSpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
+        stopSettledAtStart = stopSettled;
+        pendingAtStart = mockSession.pendingProxyStop;
+        throw new Error('attach aborted');
+      });
+
+      const result = await operations.attachToProcess('test-session', { port: 5005, host: 'localhost' });
+
+      expect(startSpy).toHaveBeenCalledTimes(1);
+      expect(stopSettledAtStart).toBe(true);
+      expect(pendingAtStart).toBeUndefined();
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('attach aborted');
+    });
+
     it('returns init progress and proxy log path when proxy initialization fails (issue #551)', async () => {
       const initProgress = {
         transportConnected: true,
@@ -1889,7 +1937,13 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       });
 
       expect(result.success).toBe(true);
-      expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('threads', {});
+      // The remaining verification window rides on the request itself, so an
+      // abandoned poll is cancelled end-to-end rather than drained at stop().
+      expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith(
+        'threads',
+        {},
+        expect.objectContaining({ timeoutMs: expect.any(Number) })
+      );
       expect(mockProxyManager.setCurrentThreadId).toHaveBeenCalledWith(2); // main thread id
       expect(mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('Discovered 3 threads')
@@ -2301,7 +2355,10 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       expect(result.success).toBe(true);
       // threads request should not be made when stopOnEntry is false
-      expect(mockProxyManager.sendDapRequest).not.toHaveBeenCalledWith('threads', {});
+      const threadsCalls = mockProxyManager.sendDapRequest.mock.calls.filter(
+        (call: unknown[]) => call[0] === 'threads'
+      );
+      expect(threadsCalls).toEqual([]);
       expect(mockProxyManager.setCurrentThreadId).not.toHaveBeenCalled();
     });
 
