@@ -54,6 +54,7 @@ const artifactFileSystem: ArtifactFileSystem = {
 };
 
 let managedArtifactSequence = 0;
+const MANAGED_OUTPUT_CLEANUP_GRACE_MS = 60_000;
 
 export function isCppSourceFile(filePath: string): boolean {
   const ext = path.extname(filePath).toLowerCase();
@@ -174,7 +175,11 @@ export function getManagedOutputPath(outputPath: string, token?: string): string
 
 function isManagedOutputName(fileName: string, outputPath: string): boolean {
   const parsed = path.parse(outputPath);
-  return fileName.startsWith(`${parsed.name}.debug-mcp-`) && fileName.endsWith(parsed.ext);
+  const prefix = `${parsed.name}.debug-mcp-`;
+  if (!fileName.startsWith(prefix) || !fileName.endsWith(parsed.ext)) {
+    return false;
+  }
+  return fileName.slice(prefix.length, fileName.length - parsed.ext.length).length > 0;
 }
 
 async function findNewestCompiledOutput(
@@ -226,6 +231,13 @@ async function removeOlderManagedOutputs(
       continue;
     }
     try {
+      const ageMs = Date.now() - (await fileSystem.stat(candidate)).mtimeMs;
+      if (ageMs < MANAGED_OUTPUT_CLEANUP_GRACE_MS) {
+        logger?.debug?.(
+          `[compile-utils] Keeping recent managed artifact ${candidate} during the concurrent-build grace window`
+        );
+        continue;
+      }
       await fileSystem.unlink(candidate);
     } catch (error) {
       logger?.debug?.(
@@ -239,11 +251,12 @@ async function removeOlderManagedOutputs(
 
 async function promoteStagedOutput(
   stagedPath: string,
+  managedPath: string,
   outputPath: string,
   platform: NodeJS.Platform,
   fileSystem: ArtifactFileSystem,
   logger?: CompileLogger
-): Promise<string> {
+): Promise<{ binaryPath?: string; error?: string }> {
   // Rename straight over the canonical path: on POSIX that is an atomic
   // replace, and on Windows fs.rename maps to MoveFileEx(REPLACE_EXISTING),
   // which replaces an unlocked target and fails on one a running debuggee
@@ -252,17 +265,26 @@ async function promoteStagedOutput(
   // this staging scheme exists to prevent.
   try {
     await fileSystem.rename(stagedPath, outputPath);
-    return outputPath;
+    return { binaryPath: outputPath };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException)?.code;
     const reason = error instanceof Error ? error.message : String(error);
     const lockHint = platform === 'win32' ? ' (still locked by a running debuggee?)' : '';
     logger?.warn?.(
-      `[compile-utils] Could not replace ${outputPath}${lockHint}; launching managed rebuild ${stagedPath}: ${
+      `[compile-utils] Could not replace ${outputPath}${lockHint}; retaining managed rebuild ${managedPath}: ${
         code ? `${code}: ` : ''
       }${reason}`
     );
-    return stagedPath;
+    try {
+      await fileSystem.rename(stagedPath, managedPath);
+      return { binaryPath: managedPath };
+    } catch (managedError) {
+      return {
+        error: `Could not finalize compiled artifact ${managedPath}: ${
+          managedError instanceof Error ? managedError.message : String(managedError)
+        }`
+      };
+    }
   }
 }
 
@@ -321,7 +343,11 @@ export async function prepareSourceBinary(
     return { success: true, binaryPath: currentOutput, compiled: false };
   }
 
-  const stagedPath = getManagedOutputPath(outputPath);
+  // The compiler writes a suffix the selector cannot recognize. Only a
+  // successful rename below publishes a reusable managed artifact, so a
+  // server/compiler crash can leave at worst an ignored *.tmp file (#560).
+  const managedPath = getManagedOutputPath(outputPath);
+  const stagedPath = `${managedPath}.tmp`;
   const result = await compile({ sourcePath, outputPath: stagedPath, logger });
   if (!result.success) {
     try {
@@ -333,13 +359,23 @@ export async function prepareSourceBinary(
   }
 
   const compiledPath = result.binaryPath ?? stagedPath;
-  const launchPath = await promoteStagedOutput(
+  const promoted = await promoteStagedOutput(
     compiledPath,
+    managedPath,
     outputPath,
     platform,
     fileSystem,
     logger
   );
+  if (!promoted.binaryPath) {
+    try {
+      await fileSystem.unlink(compiledPath);
+    } catch {
+      // Best effort: the unselectable temporary file is safe to leave behind.
+    }
+    return { success: false, error: promoted.error ?? 'Could not finalize compiled artifact' };
+  }
+  const launchPath = promoted.binaryPath;
   await removeOlderManagedOutputs(outputPath, launchPath, fileSystem, logger);
   return { success: true, binaryPath: launchPath, compiled: true };
 }
