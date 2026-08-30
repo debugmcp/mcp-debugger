@@ -149,6 +149,50 @@ Client Request → Server → SessionManager
 
 **DefaultAdapterPolicy** is a lightweight placeholder used while the proxy worker determines which concrete policy to activate. All its methods return safe no-op values. `isInitialized()` and `isConnected()` always return `false`; `matchesAdapter()` always returns `false`.
 
+### The handshake types
+
+`@debugmcp/shared` must not import from `src/`, so the three types
+`performHandshake` / `processQueuedCommands` are declared against are
+structural contracts rather than the concrete classes:
+
+```typescript
+interface HandshakeProxy {                    // IProxyManager satisfies this
+  isRunning(): boolean;                       // false once the proxy exited
+  sendDapRequest<T>(command, args?, options?): Promise<T>;
+  on(event: 'dap-event', listener: (event: string, body: unknown) => void): unknown;
+  removeListener(event: 'dap-event', listener): unknown;
+}
+
+interface HandshakeContext {
+  proxyManager: HandshakeProxy | undefined;   // absent => the handshake no-ops
+  sessionId: string;
+  dapLaunchArgs?: Record<string, unknown>;    // request: 'attach' marks attach
+  scriptPath: string;
+  scriptArgs?: string[];
+  breakpoints: ReadonlyMap<string, Breakpoint>;   // keyed by breakpoint id
+  launchConfig?: LanguageSpecificLaunchConfig;
+  breakOnExceptions?: ExceptionBreakMode;
+}
+
+interface QueuedDapCommand { requestId: string; dapCommand: string; dapArgs?: unknown }
+```
+
+Notes a policy has to know:
+
+- `proxyManager` is optional because the session layer calls the handshake
+  after `start()` may already have failed; a policy returns without doing
+  anything rather than throwing.
+- `breakpoints` is read-only and keyed by mcp-debugger's own breakpoint id —
+  the DAP `setBreakpoints` grouping by file is the policy's job.
+- Launch and attach share one handshake. `dapLaunchArgs.request === 'attach'`
+  (and/or `__attachMode: true`), plus the transformed `launchConfig.request`,
+  is what distinguishes them.
+- `processQueuedCommands` is generic in the caller's payload type
+  (`<T extends QueuedDapCommand>(commands: T[], state) => T[]`), so the proxy
+  worker's own `DapCommandPayload` — which extends `QueuedDapCommand` — comes
+  back unchanged instead of widened. A policy may only REORDER; dropping or
+  synthesizing commands would strand a pending request id.
+
 ### What `extractLocalVariables` returns
 
 ```typescript
@@ -172,7 +216,12 @@ Rules every implementation follows:
 - Return the input variable objects (filtered is fine), not copies.
 - Empty `variables` implies empty `scopeRefs`; a scope that supplied nothing is
   not a contributing scope.
-- `includeSpecial: true` returns a superset of `includeSpecial: false`.
+- `includeSpecial` governs which NAMES survive from the scopes the policy
+  selects, not which scopes it selects. A policy MAY land on a different scope
+  when its anchor scope is empty after filtering (js-debug falls through an
+  all-`this` `Local` to `Closure`, issue #548) — so `includeSpecial: true` is a
+  superset of `false` only when both calls selected the same scopes, which is
+  what the contract test asserts.
 
 Two helpers keep implementations to one line each:
 `emptyLocalVariableExtraction()` for the "nothing to read here" exits, and
@@ -189,7 +238,8 @@ whenever it is among the contributors.
 - Provides a full `performHandshake()` implementation for the js-debug multi-session setup
 - `isChildReadyEvent()` waits for `'thread'` or `'stopped'` (not `'initialized'`)
 - `filterStackFrames()` removes `<node_internals>` frames
-- `extractLocalVariables()` merges block scopes (`Block`, `Catch Block`, `With Block`) ahead of the frame's `Local` scope, innermost first, so a `let` declared in a `for` body or a `catch (e)` binding is visible alongside the function's own locals (issue #558); when `Local` is empty it falls through to `Closure`, then `Script`/`Module`, and reaches `Global` only for frames with no local or block scope at all
+- `extractLocalVariables()` treats the local-like group as a COLLECTING group: every non-empty block scope (`Block`, `Catch Block`, `With Block`, legacy `Block:<label>`) in adapter order — which V8 gives innermost-first — followed by the frame's `Local` scope (issue #558). A `Local` scope that exists but contributed nothing (only `this`, or emptied by a pushed-down `names` filter) still has its ref reported, so the session layer keeps naming it `Local` with no note. On an ESM top-level frame — blocks but no `Local` at all — the first `Script`/`Module` scope joins the merge as the frame's base, because that is what such a frame reported before block scopes were recognised; with a `Local` present, `Module` stays a fall-through-only scope. When nothing local-like yields anything, the later groups fall through first-match: `Closure`, then `Script`/`Module`, and `Global` only for frames with no local or block scope at all
+- All three places that knew JS scope names — the extractor's predicates and `getLocalScopeName()` — now read one `JS_SCOPE_KINDS` table (exported from `@debugmcp/shared`, mirroring `LLDB_LOCAL_SCOPE_NAMES`), because a disagreement between them is exactly how a false `note` shipped once
 
 **PythonAdapterPolicy**:
 - `resolveExecutablePath()` checks `PYTHON_PATH` env var, then defaults to `'python'` (Windows) or `'python3'` (Unix)
