@@ -9,9 +9,30 @@ import { ExceptionBreakMode, IEnvironment } from '@debugmcp/shared';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import { getVariableAccessMode, requiresExplicitNames } from '../utils/variable-access.js';
 import type { ToolArguments } from './tool-arguments.js';
+import type { ToolDefinition } from './tool-schemas.js';
 
 /** Arguments whose sessionId has been established by requireSessionId. */
 export type WithSessionId = ToolArguments & { sessionId: string };
+
+/**
+ * Enforce the required properties advertised for one tool before dispatch.
+ * The schema order is intentional: when several values are absent, clients
+ * receive a deterministic error naming the first missing parameter.
+ */
+export function assertRequiredToolArguments(
+  definition: Pick<ToolDefinition, 'inputSchema'>,
+  args: Record<string, unknown>
+): void {
+  for (const parameterName of definition.inputSchema.required ?? []) {
+    const value = args[parameterName];
+    if (value === undefined || value === null || value === '') {
+      throw new McpError(
+        McpErrorCode.InvalidParams,
+        `Missing required parameter: ${parameterName}`
+      );
+    }
+  }
+}
 
 /** A non-null, non-array object — what the pass-through config bags must be. */
 function isPlainObject(value: unknown): value is Record<string, unknown> {

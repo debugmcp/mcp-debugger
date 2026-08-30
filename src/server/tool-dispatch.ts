@@ -15,10 +15,19 @@ import {
 import { coerceToolArguments, ToolArguments } from './tool-arguments.js';
 import { extractPayloadSuccess, sanitizeRequest } from './tool-result.js';
 import { buildToolDefinitions, isToolName } from './tool-schemas.js';
+import { assertRequiredToolArguments } from './tool-validation.js';
 import type { ToolContext } from './tool-context.js';
 import { TOOL_HANDLERS } from './handlers/index.js';
 
 export function registerToolHandlers(server: Server, ctx: ToolContext): void {
+  // Required fields do not depend on language discovery. Build this immutable
+  // dispatch index once; tools/list can still rebuild descriptions with the
+  // dynamically discovered language enum for each request.
+  const dispatchDefinitions = new Map(
+    buildToolDefinitions({ supportedLanguages: [], environment: ctx.environment })
+      .map((definition) => [definition.name, definition] as const)
+  );
+
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     ctx.logger.debug('Handling ListToolsRequest');
     
@@ -47,6 +56,11 @@ export function registerToolHandlers(server: Server, ctx: ToolContext): void {
         if (!isToolName(toolName)) {
           throw new McpError(McpErrorCode.MethodNotFound, `Unknown tool: ${toolName}`);
         }
+        const definition = dispatchDefinitions.get(toolName);
+        if (!definition) {
+          throw new McpError(McpErrorCode.MethodNotFound, `Unknown tool: ${toolName}`);
+        }
+        assertRequiredToolArguments(definition, args as unknown as Record<string, unknown>);
         const result = await TOOL_HANDLERS[toolName](ctx, args, toolName);
         
         // Log tool response; success mirrors the payload's own success flag (issue #397)

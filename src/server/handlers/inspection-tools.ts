@@ -17,13 +17,12 @@ import {
 } from '../tool-result.js';
 
 export const getVariablesTool: ToolHandler = async (ctx, args) => {
-  if (!args.sessionId || args.scope === undefined) {
-    throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameters');
-  }
+  const sessionId = args.sessionId!;
+  const scope = args.scope!;
   enforceExplicitNames(ctx.environment, 'get_variables', args.names);
 
   try {
-    const { variables, truncation } = await ctx.getVariablesDetailed(args.sessionId, args.scope, args.names);
+    const { variables, truncation } = await ctx.getVariablesDetailed(sessionId, scope, args.names);
 
     // Log variable inspection (truncate large values)
     const truncatedVars = variables.map(v => ({
@@ -33,15 +32,15 @@ export const getVariablesTool: ToolHandler = async (ctx, args) => {
     }));
 
     ctx.logger.info('debug:variables', {
-      sessionId: args.sessionId,
-      sessionName: ctx.getSessionName(args.sessionId),
-      variablesReference: args.scope,
+      sessionId,
+      sessionName: ctx.getSessionName(sessionId),
+      variablesReference: scope,
       variableCount: variables.length,
       variables: truncatedVars.slice(0, 10), // Log first 10 variables
       timestamp: Date.now()
     });
 
-    return jsonResult({ success: true, variables, count: variables.length, variablesReference: args.scope, ...variablePayloadExtras(variables, args.names, truncation) });
+    return jsonResult({ success: true, variables, count: variables.length, variablesReference: scope, ...variablePayloadExtras(variables, args.names, truncation) });
   } catch (error) {
     // Typed session errors report as {success: false}; anything else escapes.
     return sessionErrorResultOrThrow(error, 'typed');
@@ -99,12 +98,11 @@ export const getStackTraceTool: ToolHandler = async (ctx, args) => {
 };
 
 export const getScopesTool: ToolHandler = async (ctx, args) => {
-  if (!args.sessionId || args.frameId === undefined) {
-    throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameters');
-  }
+  const sessionId = args.sessionId!;
+  const frameId = args.frameId!;
 
   try {
-    const scopes = await ctx.getScopes(args.sessionId, args.frameId);
+    const scopes = await ctx.getScopes(sessionId, frameId);
     return jsonResult({ success: true, scopes });
   } catch (error) {
     // Typed session errors report as {success: false}; anything else escapes.

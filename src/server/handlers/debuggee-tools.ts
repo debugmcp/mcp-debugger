@@ -2,7 +2,6 @@
  * Debuggee lifecycle tools: start_debugging, restart_debugging,
  * attach_to_process, detach_from_process, redefine_classes.
  */
-import { ErrorCode as McpErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { ToolHandler } from '../tool-context.js';
 import { successWarning } from './shared.js';
 import {
@@ -14,17 +13,16 @@ import {
 import { jsonResult, prettyJsonResult, sessionErrorResultOrThrow } from '../tool-result.js';
 
 export const startDebuggingTool: ToolHandler = async (ctx, args) => {
-  if (!args.sessionId || !args.scriptPath) {
-    throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameters');
-  }
+  const sessionId = args.sessionId!;
+  const scriptPath = args.scriptPath!;
 
   try {
     assertPlainObjectArg(args.adapterLaunchConfig, 'adapterLaunchConfig');
 
     const intake = normalizeStartDebuggingArgs(args.dapLaunchArgs, args.breakOnExceptions);
     const debugResult = await ctx.startDebugging(
-      args.sessionId,
-      args.scriptPath,
+      sessionId,
+      scriptPath,
       args.args,
       intake.dapLaunchArgs,
       args.dryRunSpawn,
@@ -34,7 +32,7 @@ export const startDebuggingTool: ToolHandler = async (ctx, args) => {
     const responsePayload: Record<string, unknown> = {
       success: debugResult.success,
       state: debugResult.state,
-      message: debugResult.error ? debugResult.error : debugResult.data?.message || `Operation status for ${args.scriptPath}`,
+      message: debugResult.error ? debugResult.error : debugResult.data?.message || `Operation status for ${scriptPath}`,
     };
     if (debugResult.data) {
       responsePayload.data = debugResult.data;
