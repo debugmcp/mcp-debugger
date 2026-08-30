@@ -1278,7 +1278,7 @@ export class DapProxyWorker {
     // Process commands through policy if it has a processor
     let ordered = this.commandQueue;
     if (this.adapterPolicy.processQueuedCommands) {
-      ordered = this.adapterPolicy.processQueuedCommands(this.commandQueue, this.adapterState) as DapCommandPayload[];
+      ordered = this.adapterPolicy.processQueuedCommands(this.commandQueue, this.adapterState);
     }
     
     // Clear queue after ordering

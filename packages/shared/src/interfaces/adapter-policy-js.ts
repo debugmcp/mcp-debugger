@@ -6,11 +6,11 @@
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import * as path from 'path';
-import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction, StopReasonContext } from './adapter-policy.js';
+import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction, QueuedDapCommand, StopReasonContext } from './adapter-policy.js';
 import { emptyLocalVariableExtraction, extractionFromScope, resolveExceptionFilters } from './adapter-policy.js';
 import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
-import { toSourceBreakpoint, type BreakpointFields } from '../utils/to-source-breakpoint.js';
+import { toSourceBreakpoint } from '../utils/to-source-breakpoint.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
 
 /**
@@ -308,12 +308,8 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
    * This includes the strict initialization sequence required by js-debug.
    */
   performHandshake: async (context) => {
-    const { proxyManager, sessionId, dapLaunchArgs, scriptPath, scriptArgs, breakpoints, launchConfig, breakOnExceptions } = context;
-    
-    // Type assertion for proxyManager since we use 'unknown' in the interface
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const pm = proxyManager as any; // Will be IProxyManager in actual usage
-    
+    const { proxyManager: pm, sessionId, dapLaunchArgs, scriptPath, scriptArgs, breakpoints, launchConfig, breakOnExceptions } = context;
+
     if (!pm || !pm.isRunning()) {
       console.warn(
         `[JsDebugAdapterPolicy] performHandshake skipped: proxy manager not running for session ${sessionId}`
@@ -328,11 +324,8 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
     // window below (#242).
     let initializedSeen = false;
     let notifyInitialized: (() => void) | null = null;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const onInitialized = (event: any) => {
-      // Handle both event object and string formats
-      const eventName = typeof event === 'string' ? event : event?.event;
-      if (eventName === 'initialized') {
+    const onInitialized = (event: string) => {
+      if (event === 'initialized') {
         initializedSeen = true;
         pm.removeListener('dap-event', onInitialized);
         notifyInitialized?.();
@@ -392,9 +385,7 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
       // Group queued breakpoints by file, mapping via the shared
       // toSourceBreakpoint so no per-breakpoint field is dropped (#235)
       const grouped: Map<string, DebugProtocol.SourceBreakpoint[]> = new Map();
-      for (const bp of breakpoints.values()) {
-        // Type assertion for bp since it's 'unknown' in the interface
-        const breakpoint = bp as { file: string } & BreakpointFields;
+      for (const breakpoint of breakpoints.values()) {
         const arr = grouped.get(breakpoint.file) || [];
         arr.push(toSourceBreakpoint(breakpoint));
         grouped.set(breakpoint.file, arr);
@@ -673,12 +664,9 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
   /**
    * Process queued commands in JavaScript-specific order
    */
-  processQueuedCommands: (
-    commands: unknown[]
-  ): unknown[] => {
-    // Cast to the expected type for internal processing
-    const typedCommands = commands as Array<{ requestId: string; dapCommand: string; dapArgs?: unknown }>;
-    
+  processQueuedCommands: <T extends QueuedDapCommand>(
+    typedCommands: T[]
+  ): T[] => {
     // Group commands by type for proper ordering
     const isConfig = (cmd: string) => [
       'setBreakpoints',

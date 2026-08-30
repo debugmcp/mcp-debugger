@@ -718,11 +718,12 @@ describe('SessionManager - DAP Operations', () => {
       });
 
       // The js handshake waits (10s) for a DAP 'initialized' event; satisfy it
-      // synchronously. setBreakpoints gets parent-style responses: never
+      // synchronously, with the (event, body) pair ProxyManager really emits.
+      // setBreakpoints gets parent-style responses: never
       // verified, parent id space (7, 8, ...)
       dependencies.mockProxyManager.setDapRequestHandler(async (command, args) => {
         if (command === 'initialize') {
-          dependencies.mockProxyManager.simulateEvent('dap-event', { event: 'initialized' });
+          dependencies.mockProxyManager.simulateEvent('dap-event', 'initialized', {});
         }
         if (command === 'setBreakpoints') {
           return {
@@ -886,7 +887,7 @@ describe('SessionManager - DAP Operations', () => {
       });
       dependencies.mockProxyManager.setDapRequestHandler(async (command, args) => {
         if (command === 'initialize') {
-          dependencies.mockProxyManager.simulateEvent('dap-event', { event: 'initialized' });
+          dependencies.mockProxyManager.simulateEvent('dap-event', 'initialized', {});
         }
         if (command === 'setBreakpoints') {
           return {

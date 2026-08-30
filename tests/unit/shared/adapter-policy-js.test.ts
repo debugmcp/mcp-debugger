@@ -187,7 +187,7 @@ describe('JsDebugAdapterPolicy', () => {
 
       const handshakePromise = JsDebugAdapterPolicy.performHandshake(context as any);
       await Promise.resolve();
-      events.emit('dap-event', { event: 'initialized' });
+      events.emit('dap-event', 'initialized', {});
       await vi.advanceTimersByTimeAsync(0);
       await handshakePromise;
       vi.useRealTimers();
@@ -228,7 +228,7 @@ describe('JsDebugAdapterPolicy', () => {
 
       const handshakePromise = JsDebugAdapterPolicy.performHandshake(context as any);
       await Promise.resolve();
-      events.emit('dap-event', { event: 'initialized' });
+      events.emit('dap-event', 'initialized', {});
       await vi.advanceTimersByTimeAsync(0);
       await handshakePromise;
       vi.useRealTimers();
@@ -249,7 +249,7 @@ describe('JsDebugAdapterPolicy', () => {
         // processed; the handshake must not burn its 10s window when that happens.
         const sendDapRequest = vi.fn().mockImplementation((cmd: string) => {
           if (cmd === 'initialize') {
-            events.emit('dap-event', { event: 'initialized' });
+            events.emit('dap-event', 'initialized', {});
           }
           return Promise.resolve({});
         });

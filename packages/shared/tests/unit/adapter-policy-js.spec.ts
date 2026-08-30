@@ -384,7 +384,7 @@ describe('JsDebugAdapterPolicy', () => {
         { requestId: '3', dapCommand: 'configurationDone' },
         { requestId: '4', dapCommand: 'threads' },
       ];
-      const ordered = JsDebugAdapterPolicy.processQueuedCommands!(commands) as typeof commands;
+      const ordered = JsDebugAdapterPolicy.processQueuedCommands!(commands);
       expect(ordered.map(c => c.dapCommand)).toEqual([
         'setBreakpoints',
         'configurationDone',

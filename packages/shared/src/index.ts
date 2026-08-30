@@ -185,7 +185,10 @@ export type {
   CommandHandling,
   AdapterSpawnPayload,
   AdapterSpawnConfig,
-  LocalVariableExtraction
+  LocalVariableExtraction,
+  HandshakeProxy,
+  HandshakeContext,
+  QueuedDapCommand
 } from './interfaces/adapter-policy.js';
 export {
   DefaultAdapterPolicy,

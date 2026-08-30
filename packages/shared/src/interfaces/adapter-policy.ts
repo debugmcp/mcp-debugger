@@ -13,7 +13,7 @@
  * @since 2.1.0
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import type { ExceptionBreakMode, StackFrame, Variable } from '../models/index.js';
+import type { Breakpoint, ExceptionBreakMode, StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior } from './dap-client-behavior.js';
 import type { SessionState } from '@debugmcp/shared';
 import type { LanguageSpecificLaunchConfig } from './debug-adapter.js';
@@ -107,6 +107,55 @@ export function extractionFromScope(
   return variables.length > 0
     ? { variables, scopeRefs: [scope.variablesReference] }
     : emptyLocalVariableExtraction();
+}
+
+/**
+ * The slice of the session's proxy manager a handshake is allowed to use.
+ *
+ * `@debugmcp/shared` must not import from `src/`, so this is the structural
+ * contract rather than `IProxyManager` itself — send a DAP request, ask
+ * whether the proxy is still alive, and subscribe to DAP events for the
+ * duration of the handshake. `IProxyManager` satisfies it as written; the
+ * session layer passing its own proxy manager straight in is the proof.
+ */
+export interface HandshakeProxy {
+  /** False once the proxy has exited — a handshake must stop rather than hang. */
+  isRunning(): boolean;
+  sendDapRequest<T extends DebugProtocol.Response>(
+    command: string,
+    args?: unknown,
+    options?: { timeoutMs?: number }
+  ): Promise<T>;
+  on(event: 'dap-event', listener: (event: string, body: unknown) => void): unknown;
+  removeListener(event: 'dap-event', listener: (event: string, body: unknown) => void): unknown;
+}
+
+/** Everything AdapterPolicy.performHandshake is given about the session. */
+export interface HandshakeContext {
+  /** Absent when the proxy never started; the handshake must no-op. */
+  proxyManager: HandshakeProxy | undefined;
+  sessionId: string;
+  /** Launch/attach arguments; `request: 'attach'` distinguishes the two. */
+  dapLaunchArgs?: Record<string, unknown>;
+  scriptPath: string;
+  scriptArgs?: string[];
+  /** The session's breakpoint store, keyed by breakpoint id. Read-only here. */
+  breakpoints: ReadonlyMap<string, Breakpoint>;
+  launchConfig?: LanguageSpecificLaunchConfig;
+  /** Abstract break-on-exception mode requested by the user (issue #220) */
+  breakOnExceptions?: ExceptionBreakMode;
+}
+
+/**
+ * The part of a queued DAP command a policy is allowed to reorder on. The
+ * proxy worker's own payload type carries more (session id, timeout); the
+ * generic on processQueuedCommands preserves it, so the worker gets its own
+ * payloads back rather than a widened array it has to cast.
+ */
+export interface QueuedDapCommand {
+  requestId: string;
+  dapCommand: string;
+  dapArgs?: unknown;
 }
 
 export interface AdapterPolicy {
@@ -390,17 +439,7 @@ export interface AdapterPolicy {
    * @param context Context object with session details and helper methods
    * @returns Promise that resolves when handshake is complete
    */
-  performHandshake?(context: {
-    proxyManager: unknown;  // Will be IProxyManager in implementation
-    sessionId: string;
-    dapLaunchArgs?: Record<string, unknown>;
-    scriptPath: string;
-    scriptArgs?: string[];
-    breakpoints: Map<string, unknown>;  // Will be Breakpoint in implementation
-    launchConfig?: LanguageSpecificLaunchConfig;
-    /** Abstract break-on-exception mode requested by the user (issue #220) */
-    breakOnExceptions?: ExceptionBreakMode;
-  }): Promise<void>;
+  performHandshake?(context: HandshakeContext): Promise<void>;
 
   /**
    * Determines if commands should be queued before initialization
@@ -417,15 +456,17 @@ export interface AdapterPolicy {
   shouldQueueCommand(command: string, state: AdapterSpecificState): CommandHandling;
 
   /**
-   * Process queued commands and return them in the correct order
-   * @param commands Currently queued commands (type any to handle full DapCommandPayload)
+   * Process queued commands and return them in the correct order.
+   * Generic in the caller's payload type so the worker's own
+   * DapCommandPayload survives the round trip unchanged.
+   * @param commands Currently queued commands
    * @param state Current adapter state
    * @returns Ordered array of commands to execute
    */
-  processQueuedCommands?(
-    commands: unknown[],
+  processQueuedCommands?<T extends QueuedDapCommand>(
+    commands: T[],
     state: AdapterSpecificState
-  ): unknown[];
+  ): T[];
 
   /**
    * Create initial state for this adapter
