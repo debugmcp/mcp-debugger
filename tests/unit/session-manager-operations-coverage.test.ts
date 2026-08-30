@@ -23,13 +23,40 @@ import {
 } from '../../src/errors/debug-errors';
 import { createEnvironmentMock } from '../test-utils/mocks/environment';
 import type { ExecutionController } from '../../src/session/execution/execution-controller';
+import type { ManagedSession } from '../../src/session/session-store';
+import type { ExceptionBreakMode, LanguageSpecificLaunchConfig } from '@debugmcp/shared';
+
+/**
+ * `ProxyLauncher.start` as these tests drive it. Two loosenings that the old
+ * `(ops as any).startProxyManager` hid, made explicit: spies resolve `undefined`
+ * for a launch config nothing downstream reads, and `dapLaunchArgs` takes the
+ * attach shape (`request`/`host`/`port`) that production passes through an
+ * `as Partial<CustomLaunchRequestArguments>` cast of its own.
+ */
+interface ProxyLauncherView {
+  start(
+    session: ManagedSession,
+    scriptPath: string,
+    scriptArgs?: string[],
+    dapLaunchArgs?: Record<string, unknown>,
+    dryRunSpawn?: boolean,
+    adapterLaunchConfig?: Record<string, unknown>,
+    breakOnExceptions?: ExceptionBreakMode
+  ): Promise<LanguageSpecificLaunchConfig | void>;
+}
+
+/** The collaborators these tests reach into. */
+interface OperationsInternals {
+  execution: ExecutionController;
+  proxyLauncher: ProxyLauncherView;
+}
 
 /**
  * The collaborators the operations facade delegates to. They are protected
  * fields, so reaching them from a test needs the usual cast.
  */
-function internals(ops: SessionManagerOperations): { execution: ExecutionController } {
-  return ops as unknown as { execution: ExecutionController };
+function internals(ops: SessionManagerOperations): OperationsInternals {
+  return ops as unknown as OperationsInternals;
 }
 
 describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () => {
@@ -148,12 +175,12 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     vi.clearAllMocks();
   });
 
-  describe('startProxyManager edge cases', () => {
+  describe('ProxyLauncher.start edge cases', () => {
     it('bubbles meaningful error when log directory creation fails', async () => {
       mockDependencies.fileSystem.ensureDir.mockRejectedValueOnce(new Error('disk full'));
 
       await expect(
-        (operations as any).startProxyManager(mockSession, 'script.py')
+        internals(operations).proxyLauncher.start(mockSession, 'script.py')
       ).rejects.toThrow('Failed to create session log directory: disk full');
     });
 
@@ -167,7 +194,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
       await expect(
-        (operations as any).startProxyManager(mockSession, 'script.py')
+        internals(operations).proxyLauncher.start(mockSession, 'script.py')
       ).rejects.toBeInstanceOf(PythonNotFoundError);
       // The adapter never reached a ProxyManager, so its registry slot must
       // be released here (issue #552 review).
@@ -185,7 +212,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
       await expect(
-        (operations as any).startProxyManager(mockSession, 'main.cpp')
+        internals(operations).proxyLauncher.start(mockSession, 'main.cpp')
       ).rejects.toThrow('C/C++ compile failed: boom');
       expect(adapterStub.dispose).toHaveBeenCalledTimes(1);
       expect(adapterStub.resolveExecutablePath).not.toHaveBeenCalled();
@@ -210,7 +237,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       let capturedError: unknown;
       try {
-        await (operations as any).startProxyManager(mockSession, 'msvc.exe');
+        await internals(operations).proxyLauncher.start(mockSession, 'msvc.exe');
       } catch (error) {
         capturedError = error;
       }
@@ -242,7 +269,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
       await expect(
-        (operations as any).startProxyManager(mockSession, 'main.cpp')
+        internals(operations).proxyLauncher.start(mockSession, 'main.cpp')
       ).rejects.toThrow('C/C++ compile failed: syntax error');
       expect(mockSessionStore.update).toHaveBeenCalledWith(
         mockSession.id,
@@ -254,7 +281,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockDependencies.fileSystem.pathExists.mockResolvedValueOnce(false);
 
       await expect(
-        (operations as any).startProxyManager(mockSession, 'script.py')
+        internals(operations).proxyLauncher.start(mockSession, 'script.py')
       ).rejects.toThrow(/could not be created/);
     });
 
@@ -269,7 +296,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
       await expect(
-        (operations as any).startProxyManager(mockSession, 'app.js')
+        internals(operations).proxyLauncher.start(mockSession, 'app.js')
       ).rejects.toBeInstanceOf(DebugSessionCreationError);
     });
 
@@ -301,7 +328,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         verified: false
       });
 
-      await (operations as any).startProxyManager(
+      await internals(operations).proxyLauncher.start(
         mockSession,
         'script.py',
         scriptArgs,
@@ -354,7 +381,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       let capturedError: unknown;
       try {
-        await (operations as any).startProxyManager(mockSession, 'debug.exe');
+        await internals(operations).proxyLauncher.start(mockSession, 'debug.exe');
       } catch (error) {
         capturedError = error;
       }
@@ -384,7 +411,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockSession.toolchainValidation = validation;
 
       const startProxySpy = vi
-        .spyOn(operations as any, 'startProxyManager')
+        .spyOn(internals(operations).proxyLauncher, 'start')
         .mockImplementation(async () => {
           const error = new Error('MSVC_TOOLCHAIN_DETECTED') as Error & {
             toolchainValidation?: unknown;
@@ -964,12 +991,12 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockSession.proxyManager = dryRunProxy;
       mockSession.state = SessionState.INITIALIZING;
 
-      vi.spyOn(operations as any, 'startProxyManager').mockResolvedValue(undefined);
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockResolvedValue(undefined);
       vi.spyOn(operations as any, 'waitForDryRunCompletion').mockResolvedValue(false);
 
       const result = await operations.startDebugging('test-session', 'dry-run.py', undefined, undefined, true);
 
-      expect((operations as any).startProxyManager).toHaveBeenCalledTimes(1);
+      expect(internals(operations).proxyLauncher.start).toHaveBeenCalledTimes(1);
       expect((operations as any).waitForDryRunCompletion).toHaveBeenCalledWith(
         expect.objectContaining({ id: 'test-session' }),
         expect.any(Number)
@@ -992,7 +1019,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockSessionStore.getOrThrow.mockReturnValue(mockSession);
 
       const waitSpy = vi.spyOn(operations as any, 'waitForDryRunCompletion');
-      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = dryRunProxy as any;
       });
 
@@ -1035,7 +1062,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockSession.logDir = '/tmp/session-logs';
       mockDependencies.fileSystem.readFile.mockResolvedValueOnce('first line\nsecond line\nthird line');
 
-      vi.spyOn(operations as any, 'startProxyManager').mockRejectedValue(new Error('Proxy failed to initialize'));
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockRejectedValue(new Error('Proxy failed to initialize'));
 
       const result = await operations.startDebugging('test-session', 'test.py');
 
@@ -1060,7 +1087,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockDependencies.fileSystem.pathExists.mockResolvedValueOnce(true);
       mockDependencies.fileSystem.readFile.mockRejectedValueOnce(new Error('permission denied'));
 
-      vi.spyOn(operations as any, 'startProxyManager').mockRejectedValue(new Error('Proxy start error'));
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockRejectedValue(new Error('Proxy start error'));
 
       const result = await operations.startDebugging('test-session', 'test.py');
 
@@ -1124,7 +1151,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       mockSession.proxyManager = undefined;
       mockSession.state = SessionState.CREATED;
-      const startProxySpy = vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+      const startProxySpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = proxyStub;
       });
 
@@ -1184,7 +1211,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       mockSession.proxyManager = undefined;
       mockSession.state = SessionState.CREATED;
-      const startProxySpy = vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+      const startProxySpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = proxyStub;
       });
 
@@ -1227,7 +1254,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       mockSession.proxyManager = undefined;
       mockSession.state = SessionState.CREATED;
-      const startProxySpy = vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+      const startProxySpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = proxyStub;
       });
 
@@ -1253,7 +1280,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockSession.proxyManager = undefined;
       mockSession.state = SessionState.INITIALIZING;
 
-      const startProxySpy = vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+      const startProxySpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = dryRunProxy;
       });
       const waitSpy = vi.spyOn(operations as any, 'waitForDryRunCompletion').mockResolvedValue(true);
@@ -1288,7 +1315,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockSession.proxyManager = undefined;
       mockSession.state = SessionState.INITIALIZING;
 
-      const startProxySpy = vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+      const startProxySpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = proxyStub;
         mockSession.state = SessionState.PAUSED;
       });
@@ -1332,7 +1359,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockSession.proxyManager = undefined;
       mockSession.state = SessionState.INITIALIZING;
 
-      const startProxySpy = vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+      const startProxySpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = proxyStub;
         mockSession.state = SessionState.PAUSED;
       });
@@ -1376,7 +1403,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockSession.proxyManager = undefined;
       mockSession.state = SessionState.INITIALIZING;
 
-      const startProxySpy = vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+      const startProxySpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = proxyStub;
       });
 
@@ -1642,7 +1669,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       );
       mockSession.proxyManager = undefined;
       mockSession.logDir = path.join('/tmp', 'logs', 'test-session', 'run-123');
-      vi.spyOn(operations as any, 'startProxyManager').mockRejectedValue(initError);
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockRejectedValue(initError);
       // Teardown (which only clears the proxy handle) must still run on the
       // failure path; the diagnostics come from the error and logDir.
       const stopSpy = vi.spyOn(operations as any, 'stopProxyPreservingSession')
@@ -1666,7 +1693,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     it('returns an available proxy log path even when init progress is absent', async () => {
       mockSession.proxyManager = undefined;
       mockSession.logDir = path.join('/tmp', 'logs', 'test-session', 'run-456');
-      vi.spyOn(operations as any, 'startProxyManager').mockRejectedValue(new Error('adapter exited'));
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockRejectedValue(new Error('adapter exited'));
 
       const result = await operations.attachToProcess('test-session', {
         port: 45999,
@@ -1681,7 +1708,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     it('does not invent structured diagnostics for an ordinary pre-log failure', async () => {
       mockSession.proxyManager = undefined;
       mockSession.logDir = undefined;
-      vi.spyOn(operations as any, 'startProxyManager').mockRejectedValue(new Error('bad attach config'));
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockRejectedValue(new Error('bad attach config'));
 
       const result = await operations.attachToProcess('test-session', {
         port: 45999,
@@ -1697,7 +1724,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockProxyManager.sendDapRequest.mockImplementation(async (command: string) =>
         command === 'threads' ? { body: { threads: [{ id: 1, name: 'main' }] } } : {}
       );
-      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
       });
 
@@ -1729,8 +1756,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         return {};
       });
 
-      // Mock startProxyManager to succeed and set up the proxy
-      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+      // Mock the proxy launch to succeed and set up the proxy
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
       });
 
@@ -1763,7 +1790,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         return {};
       });
 
-      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
       });
 
@@ -1787,7 +1814,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         return {};
       });
 
-      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
       });
 
@@ -1811,10 +1838,10 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     it('tears down the proxy when attach fails after the proxy was spawned (issue #337)', async () => {
       // ProxyManager.start()'s init-timeout reject (and any other throw out of
-      // startProxyManager after the proxy process exists) used to land in a
+      // ProxyLauncher.start after the proxy process exists) used to land in a
       // catch that only marked the session ERROR — leaving a live proxy chain
       // ptrace-attached to the target with no tool able to reach it.
-      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
         throw new Error('Timeout waiting for proxy initialization');
       });
@@ -1840,7 +1867,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         return {};
       });
 
-      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
       });
 
@@ -1868,7 +1895,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         return {};
       });
 
-      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
       });
 
@@ -1906,7 +1933,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         return {};
       });
 
-      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
       });
 
@@ -1944,7 +1971,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         return {};
       });
 
-      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
         return { request: 'attach', port: 5005 };
       });
@@ -1983,7 +2010,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         return {};
       });
 
-      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
       });
 
@@ -2014,7 +2041,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         return {};
       });
 
-      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
       });
 
@@ -2043,7 +2070,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         return {};
       });
 
-      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
       });
 
@@ -2074,7 +2101,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         return {};
       });
 
-      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
       });
 
@@ -2091,7 +2118,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     });
 
     it('should reject a non-positive verifyTimeout without starting a proxy', async () => {
-      const startSpy = vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+      const startSpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
       });
       mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
@@ -2117,7 +2144,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     it('should not leak verifyTimeout into the adapter attach arguments', async () => {
       // verifyTimeout is consumed by the session manager's verification loop;
       // it must not ride the config spread into the DAP attach arguments.
-      const startSpy = vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+      const startSpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
       });
       mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
@@ -2141,7 +2168,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     });
 
     it('should skip thread discovery when stopOnEntry is false', async () => {
-      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
       });
 
@@ -2168,7 +2195,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         return {};
       });
 
-      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
       });
 
@@ -2196,7 +2223,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         return {};
       });
 
-      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
       });
 
@@ -2222,7 +2249,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         return {};
       });
 
-      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
       });
 
@@ -2250,7 +2277,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         return {};
       });
 
-      vi.spyOn(operations as any, 'startProxyManager').mockImplementation(async () => {
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
       });
 

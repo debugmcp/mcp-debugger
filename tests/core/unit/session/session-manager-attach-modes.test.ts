@@ -10,11 +10,37 @@ import { SessionManagerOperations } from '../../../../src/session/session-manage
 import { SessionLifecycleState, SessionState } from '@debugmcp/shared';
 import { DebugSessionCreationError } from '../../../../src/errors/debug-errors.js';
 import { createEnvironmentMock } from '../../../test-utils/mocks/environment.js';
+import type { ManagedSession } from '../../../../src/session/session-store.js';
+import type { ExceptionBreakMode, LanguageSpecificLaunchConfig } from '@debugmcp/shared';
 
 class TestableSessionManagerOperations extends SessionManagerOperations {
   protected async handleAutoContinue(_sessionId: string): Promise<void> {
     // no-op for tests
   }
+}
+
+/**
+ * `ProxyLauncher.start` as these tests drive it. Two loosenings that the old
+ * `(ops as any).startProxyManager` hid, made explicit: spies resolve `undefined`
+ * for a launch config nothing downstream reads, and `dapLaunchArgs` takes the
+ * attach shape (`request`/`host`/`port`) that production passes through an
+ * `as Partial<CustomLaunchRequestArguments>` cast of its own.
+ */
+interface ProxyLauncherView {
+  start(
+    session: ManagedSession,
+    scriptPath: string,
+    scriptArgs?: string[],
+    dapLaunchArgs?: Record<string, unknown>,
+    dryRunSpawn?: boolean,
+    adapterLaunchConfig?: Record<string, unknown>,
+    breakOnExceptions?: ExceptionBreakMode
+  ): Promise<LanguageSpecificLaunchConfig | void>;
+}
+
+/** The proxy launcher is a protected collaborator; reaching it needs the usual cast. */
+function internals(ops: SessionManagerOperations): { proxyLauncher: ProxyLauncherView } {
+  return ops as unknown as { proxyLauncher: ProxyLauncherView };
 }
 
 describe('SessionManagerOperations attach modes', () => {
@@ -111,7 +137,7 @@ describe('SessionManagerOperations attach modes', () => {
     };
     mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
-    await (operations as any).startProxyManager(
+    await internals(operations).proxyLauncher.start(
       mockSession,
       'attach://remote',
       undefined,
@@ -135,7 +161,7 @@ describe('SessionManagerOperations attach modes', () => {
     };
     mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
-    await (operations as any).startProxyManager(
+    await internals(operations).proxyLauncher.start(
       mockSession,
       'attach://remote',
       undefined,
@@ -273,7 +299,7 @@ describe('SessionManagerOperations attach modes', () => {
       };
       mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
-      await (operations as any).startProxyManager(
+      await internals(operations).proxyLauncher.start(
         mockSession,
         'script.rb',
         undefined,
@@ -560,7 +586,7 @@ describe('SessionManagerOperations attach modes', () => {
     mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
     await expect(
-      (operations as any).startProxyManager(mockSession, 'script.rb')
+      internals(operations).proxyLauncher.start(mockSession, 'script.rb')
     ).rejects.toThrow(/attach_to_process/);
   });
 
@@ -573,11 +599,11 @@ describe('SessionManagerOperations attach modes', () => {
     };
     mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
-    const failure = await (operations as any)
-      .startProxyManager(mockSession, 'main.go')
+    const failure = await internals(operations).proxyLauncher
+      .start(mockSession, 'main.go')
       .then(
         () => {
-          throw new Error('expected startProxyManager to reject');
+          throw new Error('expected ProxyLauncher.start to reject');
         },
         (err: unknown) => err
       );

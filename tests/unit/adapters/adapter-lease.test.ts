@@ -1,6 +1,6 @@
 /**
  * `AdapterLease` replaces the `let adapterOwnedByProxy = false` flag that used
- * to decide, from a single catch at the bottom of `startProxyManager`, whether
+ * to decide, from a single catch at the bottom of the proxy launch, whether
  * a failed launch still owed the registry an `adapter.dispose()`.
  *
  * What these tests protect is the *slot accounting*: the registry allows ten
@@ -9,7 +9,7 @@
  * reached" instead of the real error. Each case is therefore stated as an
  * ownership question — who disposes, and how many times.
  *
- * `release()` is the sole `finally` of `startProxyManager`, so a second theme
+ * `release()` is the sole `finally` of `ProxyLauncher.start`, so a second theme
  * runs through the release cases: it must never throw. Anything escaping it
  * replaces the setup error the caller was about to report with a teardown one.
  */

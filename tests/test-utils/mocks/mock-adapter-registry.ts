@@ -66,7 +66,7 @@ export function createMockAdapterRegistry(
       // Branch on the option, not on the result: `createAdapter` returns a Promise, which is
       // never nullish, so a `??` fallback here would be dead code the moment the option is
       // supplied. Awaiting it also lets a stub that resolves nothing fail here, with the
-      // language named, instead of as a TypeError deep inside startProxyManager.
+      // language named, instead of as a TypeError deep inside ProxyLauncher.start.
       if (options.createAdapter) {
         const adapter = await options.createAdapter(language, config);
         if (!adapter) {

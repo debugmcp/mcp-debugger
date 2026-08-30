@@ -97,6 +97,24 @@ export interface OperationsContext {
   redactionEnabled(): boolean;
 }
 
+/**
+ * The proxy launch: adapter creation, the configuration transform, executable
+ * resolution and the ProxyManager start — launch and attach both go through it.
+ */
+export type ProxyLaunchContext = Pick<
+  OperationsContext,
+  | 'logger'
+  | 'fileSystem'
+  | 'adapterRegistry'
+  | 'proxyManagerFactory'
+  | 'logDirBase'
+  | 'defaultDapLaunchArgs'
+  | 'updateSession'
+  | 'selectPolicy'
+  | 'findFreePort'
+  | 'setupProxyEventHandlers'
+>;
+
 /** Anchor re-resolution reads the file from disk and narrates what moved. */
 export type AnchorContext = Pick<OperationsContext, 'logger' | 'fileSystem'>;
 
