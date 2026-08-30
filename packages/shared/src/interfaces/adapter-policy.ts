@@ -332,8 +332,8 @@ export interface AdapterPolicy {
    * Some languages (like JavaScript) require a specific initialization sequence.
    *
    * Contract: the SessionManager invokes this for BOTH launch
-   * (startDebugging) and attach (attachToProcess), right after
-   * startProxyManager succeeds. A policy that defines this method owns the
+   * (startDebugging) and attach (attachToProcess), right after the proxy
+   * launch (ProxyLauncher.start) succeeds. A policy that defines this method owns the
    * full DAP start sequence — initialize, configuration and the
    * launch/attach request itself; the proxy worker's built-in launch/attach
    * flow does not run for command-queueing policies. Attach is

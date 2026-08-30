@@ -77,7 +77,7 @@ flowchart TD
 ## Loading Process (Step-by-step)
 
 1) Client calls `create_debug_session` with `language = "python"`. The server validates language support and creates a session record, but does not load the adapter yet.
-2) Client calls `start_debugging`. During `startProxyManager`, `SessionManager` requests an adapter from `AdapterRegistry.create(language, config)`.
+2) Client calls `start_debugging`. During the proxy launch (`ProxyLauncher.start`), `SessionManager` requests an adapter from `AdapterRegistry.create(language, config)`.
 3) Registry checks for a registered factory. If not found:
    - If dynamic enabled, it calls `AdapterLoader.loadAdapter(language)`.
    - Otherwise throws `AdapterNotFoundError`.

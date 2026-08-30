@@ -12,9 +12,14 @@
  */
 import { getErrorMessage } from '../../errors/debug-errors.js';
 import { resolveStatement } from '../../utils/breakpoint-resolver.js';
-import type { Breakpoint } from '@debugmcp/shared';
+import type { Breakpoint, IFileSystem, ILogger } from '@debugmcp/shared';
 import type { ManagedSession } from '../session-store.js';
-import type { AnchorContext } from '../operations-context.js';
+
+/** What re-resolution needs: the file's current text, and somewhere to narrate. */
+export interface AnchorResolutionDeps {
+  logger: ILogger;
+  fileSystem: Pick<IFileSystem, 'readFile'>;
+}
 
 /** An anchor that re-resolved to a different line than the breakpoint held. */
 export interface AnchorMove {
@@ -53,7 +58,7 @@ export interface AnchorResolution {
  */
 export async function reresolveAnchors(
   session: Pick<ManagedSession, 'breakpoints'>,
-  ctx: AnchorContext
+  ctx: AnchorResolutionDeps
 ): Promise<AnchorResolution | undefined> {
   const anchored = Array.from(session.breakpoints.values()).filter(
     (bp): bp is Breakpoint & { anchor: { statement: string; nearLine?: number } } => bp.anchor !== undefined

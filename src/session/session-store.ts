@@ -124,7 +124,7 @@ export interface ManagedSession extends DebugSessionInfo {
   effectiveBreakOnExceptions?: ExceptionBreakMode;
   // Caller-provided adapterConfig keys the adapter's attach transform did not
   // carry into the DAP attach request (issue #450). Recorded per attach by
-  // startProxyManager; consumed by attachToProcess for the response warning.
+  // ProxyLauncher.start; consumed by attachToProcess for the response warning.
   attachDroppedConfigKeys?: string[];
   // Caller-provided adapterConfig keys outside the adapter's declared
   // supportedAttachKeys that were still forwarded to the debug adapter

@@ -134,12 +134,12 @@ class CustomAdapter implements IDebugAdapter {
 ### How They Work Together
 
 ```typescript
-// During session initialization (simplified from startProxyManager + startDebugging)
+// During session initialization (simplified from ProxyLauncher.start + DebugLauncher.startDebugging)
 class SessionManagerOperations {
   async startDebugging(sessionId: string) {
     const session = this.getSession(sessionId);
 
-    // startProxyManager flow:
+    // ProxyLauncher.start flow:
     // 1. Create session log directory
     // 2. Find free port for adapter
     // 3. Collect queued breakpoints

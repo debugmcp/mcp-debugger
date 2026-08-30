@@ -269,6 +269,33 @@ export class BreakpointController {
   }
 
   /**
+   * Re-send every stored breakpoint at the live debuggee: the line
+   * breakpoints file by file (replace-all per file), then the function
+   * breakpoints (replace-all per session). This is the belt-and-braces
+   * re-sync launch and attach both run once the debuggee-owning session is
+   * provably live (issues #236/#439, #500): the worker's initial send reports
+   * back through the breakpoints_synced status, and a live re-send heals a
+   * status lost to an IPC hiccup. Replace-all with the identical set is
+   * idempotent; the per-file sync never throws and no-ops unless live.
+   * `forceFreshEcho` is forwarded to every per-file send (attach needs it —
+   * see the call site).
+   */
+  async resyncAll(
+    session: ManagedSession,
+    options?: { forceFreshEcho?: boolean }
+  ): Promise<void> {
+    if (session.breakpoints.size > 0) {
+      const files = [...new Set(Array.from(session.breakpoints.values()).map((bp) => bp.file))];
+      for (const file of files) {
+        await this.syncBreakpointsForFile(session, file, options);
+      }
+    }
+    if ((session.functionBreakpoints?.size ?? 0) > 0) {
+      await this.syncFunctionBreakpoints(session);
+    }
+  }
+
+  /**
    * Re-send the session's FULL function-breakpoint set to the adapter (DAP
    * setFunctionBreakpoints is replace-all for the whole session, not per
    * file). Same live-session guard and never-throws contract as

@@ -86,7 +86,6 @@ export interface OperationsContext {
     proxyManager: IProxyManager,
     effectiveLaunchArgs: Partial<CustomLaunchRequestArguments>
   ): void;
-  cleanupProxyEventHandlers(session: ManagedSession, proxyManager: IProxyManager): void;
   stopProxyPreservingSession(session: ManagedSession): Promise<void>;
   closeSession(sessionId: string): Promise<boolean>;
   getStackTrace(
@@ -97,8 +96,62 @@ export interface OperationsContext {
   redactionEnabled(): boolean;
 }
 
-/** Anchor re-resolution reads the file from disk and narrates what moved. */
-export type AnchorContext = Pick<OperationsContext, 'logger' | 'fileSystem'>;
+/**
+ * The proxy launch: adapter creation, the configuration transform, executable
+ * resolution and the ProxyManager start — launch and attach both go through it.
+ */
+export type ProxyLaunchContext = Pick<
+  OperationsContext,
+  | 'logger'
+  | 'fileSystem'
+  | 'adapterRegistry'
+  | 'proxyManagerFactory'
+  | 'logDirBase'
+  | 'defaultDapLaunchArgs'
+  | 'updateSession'
+  | 'selectPolicy'
+  | 'findFreePort'
+  | 'setupProxyEventHandlers'
+>;
+
+/**
+ * Launch-mode sessions: the toolchain gate, state and store updates, the
+ * dry-run window, the proxy-failure record (hence the filesystem) and the
+ * session-preserving teardown of a previous proxy.
+ */
+export type LaunchContext = Pick<
+  OperationsContext,
+  | 'logger'
+  | 'fileSystem'
+  | 'adapterRegistry'
+  | 'launchValidationCache'
+  | 'dryRunTimeoutMs'
+  | 'getSession'
+  | 'updateSession'
+  | 'updateState'
+  | 'selectPolicy'
+  | 'stopProxyPreservingSession'
+>;
+
+/**
+ * Attach-mode sessions: the attach gate (registry metadata), state and store
+ * updates, the verification tunables, the proxy-failure record (hence the
+ * filesystem), and both teardowns — session-preserving on failure, closeSession
+ * on detach-with-terminate.
+ */
+export type AttachContext = Pick<
+  OperationsContext,
+  | 'logger'
+  | 'fileSystem'
+  | 'adapterRegistry'
+  | 'getSession'
+  | 'updateSession'
+  | 'updateState'
+  | 'selectPolicy'
+  | 'stopProxyPreservingSession'
+  | 'closeSession'
+  | 'tunables'
+>;
 
 /** Breakpoint tooling: the store, the wire, and both policy sources. */
 export type BreakpointContext = Pick<

@@ -20,7 +20,7 @@ import { sanitizeStderrTail } from '@debugmcp/shared';
 import type { ManagedSession } from '../session-store.js';
 import type { IFileSystem, ILogger } from '../../interfaces/external-dependencies.js';
 import type { ProxyInitProgress } from '../../utils/error-messages.js';
-import { getErrorMessage } from '../../errors/debug-errors.js';
+import { getErrorMessage, SessionNotFoundError } from '../../errors/debug-errors.js';
 import { proxyLogPathFor } from '../../proxy/proxy-log-path.js';
 
 /** How many trailing proxy-log lines are worth reading after a failure. */
@@ -50,6 +50,14 @@ export interface ProxyFailureLogDeps {
 
 /** The two operations that can fail this way, named as they appear in the log. */
 export type ProxyFailureOperation = 'startDebugging' | 'attachToProcess';
+
+/**
+ * What `failProxySetup` needs on top of the log deps: the facade's
+ * session-preserving proxy teardown.
+ */
+export interface ProxySetupFailureDeps extends ProxyFailureLogDeps {
+  stopProxyPreservingSession(session: ManagedSession): Promise<void>;
+}
 
 /**
  * Pointers to proxy initialization diagnostics for a failed launch/attach
@@ -229,4 +237,64 @@ export async function logProxyFailure(
   logSafely(deps.logger, header, errorDetails);
 
   return diagnostics;
+}
+
+/**
+ * The shared failure path for a launch or attach that died once the proxy may
+ * already exist: tear the proxy down, then log the failure and hand back the
+ * pointers for the tool result.
+ *
+ * Teardown is the session-preserving one for BOTH operations — listeners
+ * removed, the mirror record cleared with the worker that hosted it, a stop()
+ * that fails logged rather than thrown, and a teardown already in flight from
+ * a terminal event awaited. Launch used to do a bare `proxyManager.stop()`
+ * here, which left its listeners attached and let a failing stop replace the
+ * launch error with a rejection out of start_debugging.
+ *
+ * The record is written after the teardown: the proxy log is complete by then,
+ * and the teardown touches nothing the record reads (logDir and the error's
+ * initProgress survive it), so ordering it first can never keep it from
+ * running.
+ */
+export async function failProxySetup(
+  deps: ProxySetupFailureDeps,
+  session: ManagedSession,
+  error: unknown,
+  operation: ProxyFailureOperation
+): Promise<ProxyFailureDiagnostics> {
+  await deps.stopProxyPreservingSession(session);
+  return logProxyFailure(deps, session, error, operation);
+}
+
+/** What the post-teardown guard needs: the store lookup, and somewhere to say what it found. */
+export interface SessionLookupDeps {
+  logger: ILogger;
+  /** `_getSessionById` — throws SessionNotFoundError for an unknown id. */
+  getSession(sessionId: string): ManagedSession;
+}
+
+/**
+ * Whether the session was closed while `failProxySetup` was running.
+ *
+ * The teardown it awaits can take seconds (the DAP drain, a force-kill, the
+ * proxy-log read), and a `close_debug_session` / `closeAllSessions` that lands
+ * in that window removes the session from the store. The state writes a catch
+ * does next would then throw SessionNotFoundError — converting the failure
+ * that was just logged into a rejection out of the tool. Callers check this
+ * first and report the failure with the session's terminal state instead.
+ * Anything other than "not found" is re-thrown: that is a different problem.
+ */
+export function sessionRemovedDuringTeardown(deps: SessionLookupDeps, sessionId: string): boolean {
+  try {
+    deps.getSession(sessionId);
+    return false;
+  } catch (error: unknown) {
+    if (error instanceof SessionNotFoundError) {
+      deps.logger.warn(
+        `[SessionManager] Session ${sessionId} was closed while its failed setup was being torn down; reporting the failure without a state update`
+      );
+      return true;
+    }
+    throw error;
+  }
 }

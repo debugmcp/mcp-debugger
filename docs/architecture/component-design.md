@@ -10,7 +10,7 @@ This document provides detailed design information for the major components of t
 |-------|------|----------------|
 | `SessionManagerCore` | `src/session/session-manager-core.ts` | Lifecycle, state management, event handler setup/cleanup, dependency injection |
 | `SessionManagerData` | `src/session/session-manager-data.ts` | Data retrieval: variables, stack traces, scopes, local variables; `selectPolicy()` |
-| `SessionManagerOperations` | `src/session/session-manager-operations.ts` | Debug operations. Launch and attach live here; the rest are one-line delegates to the collaborators below |
+| `SessionManagerOperations` | `src/session/session-manager-operations.ts` | Debug operations facade (~350 lines): tunables, `OperationsContext` wiring, collaborator fields, one-line delegates to the collaborators below |
 | `SessionManager` | `src/session/session-manager.ts` | Thin facade that extends `SessionManagerOperations` and implements `handleAutoContinue` |
 
 The inheritance chain is: `SessionManagerCore` -> `SessionManagerData` -> `SessionManagerOperations` -> `SessionManager`.
@@ -21,6 +21,10 @@ can be spied on or replaced:
 
 | Collaborator | File | Responsibility |
 |-------|------|----------------|
+| `ProxyLauncher` | `src/session/launch/proxy-launcher.ts` | `start(session, scriptPath, …)`: the proxy launch both launch and attach go through — adapter creation under an `AdapterLease`, the configuration transform, executable resolution, `ProxyConfig` assembly, ProxyManager start |
+| failure diagnostics | `src/session/launch/proxy-failure-diagnostics.ts` | `failProxySetup` (session-preserving teardown + full failure record + result pointers, shared by launch and attach), `logProxyFailure`, the proxy-log tail |
+| `DebugLauncher` | `src/session/launch/debug-launcher.ts` | `startDebugging` (dry runs included) and `restartDebugging`; `launch/launch-readiness.ts` holds the post-handshake readiness wait |
+| `AttachController` | `src/session/attach/attach-controller.ts` | `attachToProcess` and `detachFromProcess`; `attach/attach-verification.ts` holds the thread poll (`verifyAttachThreads`) and post-attach pause (`pauseAfterAttach`) |
 | `BreakpointController` | `src/session/breakpoints/breakpoint-controller.ts` | Set/remove/clear breakpoints; the replace-all DAP re-sends and the live-sync warning |
 | `reresolveAnchors` | `src/session/breakpoints/anchor-resolution.ts` | Re-resolve statement anchors against the current source (restart and JVM hot swap) |
 | launch warnings | `src/session/breakpoints/launch-warnings.ts` | Pure builders: unbound-at-exit, logpoint downgrade, unbound function breakpoints |
@@ -33,7 +37,14 @@ They see the facade through `OperationsContext`
 (`src/session/operations-context.ts`), whose members are late-bound arrows and
 getters — never captured references — so reassigning a facade method or writing
 a tunable on a live instance is visible to the collaborators. Each collaborator's
-constructor takes the narrowest `Pick<>` slice of that context it uses.
+constructor takes the narrowest `Pick<>` slice of that context it uses;
+collaborator-to-collaborator dependencies are constructor arguments
+(`DebugLauncher(ctx, proxyLauncher, breakpoints)`,
+`AttachController(ctx, proxyLauncher, breakpoints)`) held as captured instance
+references — their methods resolve at call time, so instance spies intercept,
+but reassigning a collaborator field after construction is not observed.
+`DebugLauncher` owns the restart reentrancy guard, and `restartDebugging`
+replays through `DebugLauncher.startDebugging` itself, not the facade's method.
 Shared per-request DAP helpers (timeout override validation, the timeout hint,
 log truncation) live in `src/session/dap-request-helpers.ts`.
 

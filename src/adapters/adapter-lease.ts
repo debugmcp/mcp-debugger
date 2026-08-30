@@ -4,7 +4,7 @@
  *
  * The registry caps concurrent adapters per language (`maxInstancesPerLanguage`,
  * `adapter-registry.ts`) and releases a slot only when the adapter emits
- * 'disposed'. Ownership was a *time window* inside `startProxyManager` guarded
+ * 'disposed'. Ownership was a *time window* inside `ProxyLauncher.start` guarded
  * by a `let adapterOwnedByProxy = false` flag: every `throw` between
  * `registry.create()` and `session.proxyManager = …` had to be caught by one
  * catch that consulted the flag. That flag closed a real leak (#557, from the
@@ -96,7 +96,7 @@ export class AdapterLease {
    * after a transfer, so it is safe as the sole `finally` of a setup block.
    *
    * **Never throws, and that is load-bearing**: this is the `finally` of
-   * `startProxyManager`, so anything escaping here replaces the setup error
+   * `ProxyLauncher.start`, so anything escaping here replaces the setup error
    * that sent us there with a teardown error — hiding the cause the caller was
    * about to report. So every step is inside the guard, not just the call:
    * a missing or nullish adapter (a partial registry double), a `dispose()`
