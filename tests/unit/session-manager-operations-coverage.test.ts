@@ -397,6 +397,35 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         startProxySpy.mockRestore();
       }
     });
+
+    it('does not classify an unrelated launch failure from a stale session verdict', async () => {
+      mockSession.proxyManager = undefined as any;
+      mockSession.language = 'cpp';
+      mockSession.toolchainValidation = {
+        compatible: false,
+        behavior: 'warn',
+        toolchain: 'msvc',
+        message: 'stale verdict from an earlier launch'
+      } as any;
+
+      const startProxySpy = vi
+        .spyOn(internals(operations).proxyLauncher, 'start')
+        .mockRejectedValue(new Error('C/C++ compile failed: syntax error'));
+
+      try {
+        const result = await operations.startDebugging('test-session', 'main.cpp');
+
+        expect(result).toEqual(expect.objectContaining({
+          success: false,
+          error: 'C/C++ compile failed: syntax error',
+          state: SessionState.ERROR
+        }));
+        expect(result.error).not.toBe('MSVC_TOOLCHAIN_DETECTED');
+        expect(result.canContinue).toBeUndefined();
+      } finally {
+        startProxySpy.mockRestore();
+      }
+    });
   });
 
   describe('Operation Failures with Error Details', () => {

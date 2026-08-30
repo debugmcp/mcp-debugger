@@ -461,8 +461,7 @@ export class DebugLauncher {
       }
 
       const toolchainValidation =
-        (error as { toolchainValidation?: ToolchainValidationState })?.toolchainValidation ??
-        session.toolchainValidation;
+        (error as { toolchainValidation?: ToolchainValidationState })?.toolchainValidation;
       const incompatibleToolchain =
         Boolean(toolchainValidation) && toolchainValidation?.compatible === false;
 
