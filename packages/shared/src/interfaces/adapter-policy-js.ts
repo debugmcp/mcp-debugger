@@ -33,8 +33,7 @@ export const JS_SCOPE_KINDS = {
   local: ['Local', 'Locals', 'Local:'],
   block: ['Block', 'Catch Block', 'With Block', 'Block:'],
   closure: ['Closure', 'Closure:'],
-  module: ['Script', 'Module', 'module'],
-  global: ['Global']
+  module: ['Script', 'Module', 'module']
 } as const;
 
 /** Exact match, or prefix match for a name written with a trailing ':'. */
@@ -65,8 +64,8 @@ const isClosureScope = (scope: DebugProtocol.Scope): boolean =>
   matchesScopeNames(scope, JS_SCOPE_KINDS.closure) || scope.name.startsWith('Closure ');
 const isModuleScope = (scope: DebugProtocol.Scope): boolean =>
   matchesScopeNames(scope, JS_SCOPE_KINDS.module) || scope.name.toLowerCase() === 'module';
-const isGlobalScope = (scope: DebugProtocol.Scope): boolean =>
-  scope.name.toLowerCase().includes('global');
+const JS_NO_LOCAL_SCOPE_NOTE =
+  'This JavaScript frame exposes no Local or block scope, so get_local_variables intentionally returned no variables; use get_scopes with this frame ID, then get_variables for an explicit scope (for example Global).';
 
 /**
  * JavaScript-specific adapter state
@@ -204,6 +203,13 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
     if (!frameScopes || frameScopes.length === 0) {
       return emptyLocalVariableExtraction();
     }
+
+    // Script/Module/Global-only frames have no local-variable contract.
+    // Returning Global can dump hundreds of runtime bindings while labeling
+    // them as locals; leave scope selection explicit instead (#595).
+    if (!frameScopes.some(isLocalLikeScope)) {
+      return emptyLocalVariableExtraction(JS_NO_LOCAL_SCOPE_NOTE);
+    }
     
     const variablesForScope = (scope: DebugProtocol.Scope): Variable[] => {
       let scopeVariables = variables[scope.variablesReference] || [];
@@ -316,16 +322,6 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
       isClosureScope,
       isModuleScope
     ];
-    // Global is a last resort only for frames that expose no Local or block
-    // scope at all (top-level script frames). It must never be a fall-through
-    // past an empty Local: js-debug marks Global expensive but the session layer
-    // still fetches it, so Node's ~140 globals would be reported as locals
-    // and the non-empty result would keep the issue #468 walk-down to the
-    // caller frame from ever running.
-    if (!frameScopes.some(isLocalLikeScope)) {
-      fallbackGroups.push(isGlobalScope);
-    }
-
     for (const matches of fallbackGroups) {
       for (const scope of frameScopes.filter(matches)) {
         const scopeVariables = variablesForScope(scope);
@@ -354,8 +350,7 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
       ...JS_SCOPE_KINDS.local,
       ...JS_SCOPE_KINDS.block,
       ...JS_SCOPE_KINDS.closure,
-      ...JS_SCOPE_KINDS.module,
-      ...JS_SCOPE_KINDS.global
+      ...JS_SCOPE_KINDS.module
     ];
   },
   

@@ -105,6 +105,19 @@ describe('JsDebugAdapterPolicy', () => {
     expect(withSpecial.variables.map(variable => variable.name)).toContain('this');
   });
 
+  it('does not relabel Global as locals when no Local or block scope exists (#595)', () => {
+    const result = JsDebugAdapterPolicy.extractLocalVariables!(
+      [{ id: 9 }] as any,
+      { 9: [{ name: 'Global', variablesReference: 90, expensive: true }] } as any,
+      { 90: [{ name: 'process', value: 'Process', variablesReference: 1 }] } as any
+    );
+
+    expect(result.variables).toEqual([]);
+    expect(result.scopeRefs).toEqual([]);
+    expect(result.note).toMatch(/get_scopes/);
+    expect(result.note).toMatch(/get_variables/);
+  });
+
   it('determines command queueing based on initialization state', () => {
     const state = JsDebugAdapterPolicy.createInitialState() as any;
 
