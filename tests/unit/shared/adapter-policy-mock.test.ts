@@ -40,7 +40,7 @@ describe('MockAdapterPolicy', () => {
   });
 
   it('extracts variables using the first scope of the top frame', () => {
-    const vars = MockAdapterPolicy.extractLocalVariables?.(
+    const vars = MockAdapterPolicy.extractLocalVariables!(
       [{ id: 1 }],
       {
         1: [
@@ -58,10 +58,11 @@ describe('MockAdapterPolicy', () => {
       }
     );
 
-    expect(vars).toEqual([
+    expect(vars.variables).toEqual([
       expect.objectContaining({ name: 'foo' }),
       expect.objectContaining({ name: 'answer' })
     ]);
+    expect(vars.scopeRefs).toEqual([11]);
   });
 
   it('returns spawn config passthrough when adapterCommand provided', () => {

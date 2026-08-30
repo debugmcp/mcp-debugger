@@ -4,7 +4,8 @@
  * Encodes debugpy specific behaviors and variable handling logic.
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import type { AdapterPolicy, AdapterSpecificState, CommandHandling } from './adapter-policy.js';
+import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction } from './adapter-policy.js';
+import { emptyLocalVariableExtraction, extractionFromScope } from './adapter-policy.js';
 import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
@@ -30,17 +31,17 @@ export const PythonAdapterPolicy: AdapterPolicy = {
     scopes: Record<number, DebugProtocol.Scope[]>,
     variables: Record<number, Variable[]>,
     includeSpecial: boolean = false
-  ): Variable[] => {
+  ): LocalVariableExtraction => {
     // Get the top frame
     if (!stackFrames || stackFrames.length === 0) {
-      return [];
+      return emptyLocalVariableExtraction();
     }
     
     const topFrame = stackFrames[0];
     const frameScopes = scopes[topFrame.id];
     
     if (!frameScopes || frameScopes.length === 0) {
-      return [];
+      return emptyLocalVariableExtraction();
     }
     
     // Find the "Locals" scope (Python uses "Locals")
@@ -49,7 +50,7 @@ export const PythonAdapterPolicy: AdapterPolicy = {
     );
     
     if (!localScope) {
-      return [];
+      return emptyLocalVariableExtraction();
     }
     
     // Get the variables for this scope
@@ -82,7 +83,7 @@ export const PythonAdapterPolicy: AdapterPolicy = {
       });
     }
     
-    return localVars;
+    return extractionFromScope(localScope, localVars);
   },
   
   /**

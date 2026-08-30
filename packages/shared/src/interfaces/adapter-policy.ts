@@ -13,7 +13,7 @@
  * @since 2.1.0
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import type { ExceptionBreakMode, StackFrame, Variable } from '../models/index.js';
+import type { Breakpoint, ExceptionBreakMode, StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior } from './dap-client-behavior.js';
 import type { SessionState } from '@debugmcp/shared';
 import type { LanguageSpecificLaunchConfig } from './debug-adapter.js';
@@ -63,6 +63,99 @@ export interface StopReasonContext {
   lineBreakpointCount: number;
   /** Function-breakpoint count from the session store — always present. */
   functionBreakpointCount: number;
+}
+
+/**
+ * Result of AdapterPolicy.extractLocalVariables.
+ *
+ * `variables` is what the caller shows the user. `scopeRefs` names the
+ * `variablesReference` of every scope on the ANCHOR frame that contributed to
+ * it, in the order the variables appear — so the session layer can report the
+ * adapter's own scope name (e.g. Delve's `Locals (warning: optimized
+ * function)`) and attribute per-scope truncation without reconstructing the
+ * attribution from object identity.
+ *
+ * Refs, not names: the caller already holds the anchor frame's scope objects
+ * and needs the object, not a copy of its label. Plural, because a policy may
+ * legitimately merge sibling scopes (js-debug's `Block` + `Local`, issue
+ * #558). An empty `variables` list must carry an empty `scopeRefs`.
+ */
+export interface LocalVariableExtraction {
+  /** The extracted local variables, in presentation order. */
+  variables: Variable[];
+  /**
+   * `variablesReference` of every anchor-frame scope that contributed a
+   * variable, in the same order. Empty when `variables` is empty.
+   */
+  scopeRefs: number[];
+}
+
+/** The "no locals here" result: no variables, and therefore no scopes. */
+export function emptyLocalVariableExtraction(): LocalVariableExtraction {
+  return { variables: [], scopeRefs: [] };
+}
+
+/**
+ * Build an extraction from a single scope. Reports no scope ref when the
+ * variable list is empty, keeping the "empty implies no refs" invariant that
+ * lets the caller treat a ref list as "these scopes reached the response".
+ */
+export function extractionFromScope(
+  scope: DebugProtocol.Scope,
+  variables: Variable[]
+): LocalVariableExtraction {
+  return variables.length > 0
+    ? { variables, scopeRefs: [scope.variablesReference] }
+    : emptyLocalVariableExtraction();
+}
+
+/**
+ * The slice of the session's proxy manager a handshake is allowed to use.
+ *
+ * `@debugmcp/shared` must not import from `src/`, so this is the structural
+ * contract rather than `IProxyManager` itself — send a DAP request, ask
+ * whether the proxy is still alive, and subscribe to DAP events for the
+ * duration of the handshake. `IProxyManager` satisfies it as written; the
+ * session layer passing its own proxy manager straight in is the proof.
+ */
+export interface HandshakeProxy {
+  /** False once the proxy has exited — a handshake must stop rather than hang. */
+  isRunning(): boolean;
+  sendDapRequest<T extends DebugProtocol.Response>(
+    command: string,
+    args?: unknown,
+    options?: { timeoutMs?: number }
+  ): Promise<T>;
+  on(event: 'dap-event', listener: (event: string, body: unknown) => void): unknown;
+  removeListener(event: 'dap-event', listener: (event: string, body: unknown) => void): unknown;
+}
+
+/** Everything AdapterPolicy.performHandshake is given about the session. */
+export interface HandshakeContext {
+  /** Absent when the proxy never started; the handshake must no-op. */
+  proxyManager: HandshakeProxy | undefined;
+  sessionId: string;
+  /** Launch/attach arguments; `request: 'attach'` distinguishes the two. */
+  dapLaunchArgs?: Record<string, unknown>;
+  scriptPath: string;
+  scriptArgs?: string[];
+  /** The session's breakpoint store, keyed by breakpoint id. Read-only here. */
+  breakpoints: ReadonlyMap<string, Breakpoint>;
+  launchConfig?: LanguageSpecificLaunchConfig;
+  /** Abstract break-on-exception mode requested by the user (issue #220) */
+  breakOnExceptions?: ExceptionBreakMode;
+}
+
+/**
+ * The part of a queued DAP command a policy is allowed to reorder on. The
+ * proxy worker's own payload type carries more (session id, timeout); the
+ * generic on processQueuedCommands preserves it, so the worker gets its own
+ * payloads back rather than a widened array it has to cast.
+ */
+export interface QueuedDapCommand {
+  requestId: string;
+  dapCommand: string;
+  dapArgs?: unknown;
 }
 
 export interface AdapterPolicy {
@@ -248,14 +341,15 @@ export interface AdapterPolicy {
    * @param scopes A map of frame IDs to their scopes
    * @param variables A map of scope references to their variables
    * @param includeSpecial Whether to include special/internal variables
-   * @returns The extracted local variables
+   * @returns The extracted local variables plus the anchor-frame scopes that
+   *   contributed them (see LocalVariableExtraction)
    */
   extractLocalVariables?(
     stackFrames: StackFrame[],
     scopes: Record<number, DebugProtocol.Scope[]>,
     variables: Record<number, Variable[]>,
     includeSpecial?: boolean
-  ): Variable[];
+  ): LocalVariableExtraction;
 
   /**
    * Get the scope name(s) that contain local variables for this language.
@@ -345,17 +439,7 @@ export interface AdapterPolicy {
    * @param context Context object with session details and helper methods
    * @returns Promise that resolves when handshake is complete
    */
-  performHandshake?(context: {
-    proxyManager: unknown;  // Will be IProxyManager in implementation
-    sessionId: string;
-    dapLaunchArgs?: Record<string, unknown>;
-    scriptPath: string;
-    scriptArgs?: string[];
-    breakpoints: Map<string, unknown>;  // Will be Breakpoint in implementation
-    launchConfig?: LanguageSpecificLaunchConfig;
-    /** Abstract break-on-exception mode requested by the user (issue #220) */
-    breakOnExceptions?: ExceptionBreakMode;
-  }): Promise<void>;
+  performHandshake?(context: HandshakeContext): Promise<void>;
 
   /**
    * Determines if commands should be queued before initialization
@@ -372,15 +456,17 @@ export interface AdapterPolicy {
   shouldQueueCommand(command: string, state: AdapterSpecificState): CommandHandling;
 
   /**
-   * Process queued commands and return them in the correct order
-   * @param commands Currently queued commands (type any to handle full DapCommandPayload)
+   * Process queued commands and return them in the correct order.
+   * Generic in the caller's payload type so the worker's own
+   * DapCommandPayload survives the round trip unchanged.
+   * @param commands Currently queued commands
    * @param state Current adapter state
    * @returns Ordered array of commands to execute
    */
-  processQueuedCommands?(
-    commands: unknown[],
+  processQueuedCommands?<T extends QueuedDapCommand>(
+    commands: T[],
     state: AdapterSpecificState
-  ): unknown[];
+  ): T[];
 
   /**
    * Create initial state for this adapter

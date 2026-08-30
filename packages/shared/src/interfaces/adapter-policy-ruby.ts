@@ -1,5 +1,6 @@
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import type { AdapterPolicy, AdapterSpecificState, CommandHandling } from './adapter-policy.js';
+import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction } from './adapter-policy.js';
+import { emptyLocalVariableExtraction, extractionFromScope } from './adapter-policy.js';
 import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
@@ -23,15 +24,15 @@ export const RubyAdapterPolicy: AdapterPolicy = {
     scopes: Record<number, DebugProtocol.Scope[]>,
     variables: Record<number, Variable[]>,
     includeSpecial: boolean = false
-  ): Variable[] => {
+  ): LocalVariableExtraction => {
     if (!stackFrames || stackFrames.length === 0) {
-      return [];
+      return emptyLocalVariableExtraction();
     }
 
     const topFrame = stackFrames[0];
     const frameScopes = scopes[topFrame.id];
     if (!frameScopes || frameScopes.length === 0) {
-      return [];
+      return emptyLocalVariableExtraction();
     }
 
     // rdbg reports the scope as "Local variables"; prefer the DAP
@@ -41,7 +42,7 @@ export const RubyAdapterPolicy: AdapterPolicy = {
     );
 
     if (!localScope) {
-      return [];
+      return emptyLocalVariableExtraction();
     }
 
     const localVariables = variables[localScope.variablesReference] || [];
@@ -51,9 +52,12 @@ export const RubyAdapterPolicy: AdapterPolicy = {
     // below it (issue #549). Only %self: rdbg's other %-pseudo-variables —
     // %return after a step-out, %raised at an exception stop — carry the
     // value the user paused to see and must stay visible.
-    return includeSpecial
-      ? localVariables
-      : localVariables.filter(variable => variable.name !== '%self');
+    return extractionFromScope(
+      localScope,
+      includeSpecial
+        ? localVariables
+        : localVariables.filter(variable => variable.name !== '%self')
+    );
   },
   getLocalScopeName: (): string[] => {
     return ['Local variables'];

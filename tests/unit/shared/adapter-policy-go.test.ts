@@ -66,10 +66,11 @@ describe('GoAdapterPolicy', () => {
       frames as any, scopes as any, variables as any
     );
 
-    expect(locals).toEqual([
+    expect(locals.variables).toEqual([
       { name: 'x', value: '42' },
       { name: 'y', value: 'hello' }
     ]);
+    expect(locals.scopeRefs).toEqual([10]);
   });
 
   it('also accepts "Local" scope name', () => {
@@ -85,7 +86,7 @@ describe('GoAdapterPolicy', () => {
       frames as any, scopes as any, variables as any
     );
 
-    expect(locals).toEqual([{ name: 'x', value: '1' }]);
+    expect(locals.variables).toEqual([{ name: 'x', value: '1' }]);
   });
 
   it('extracts locals when Delve appends the optimized-function warning to the scope name', () => {
@@ -101,7 +102,7 @@ describe('GoAdapterPolicy', () => {
       frames as any, scopes as any, variables as any
     );
 
-    expect(locals).toEqual([{ name: 'counter', value: '7' }]);
+    expect(locals.variables).toEqual([{ name: 'counter', value: '7' }]);
   });
 
   it('does not match unrelated scope names that merely start with "Local"', () => {
@@ -110,7 +111,7 @@ describe('GoAdapterPolicy', () => {
       { 1: [{ name: 'Localization', variablesReference: 10 }] } as any,
       { 10: [{ name: 'x', value: '1' }] } as any
     );
-    expect(locals).toEqual([]);
+    expect(locals).toEqual({ variables: [], scopeRefs: [] });
   });
 
   it('filters underscore-prefixed variables but keeps blank identifier _', () => {
@@ -131,7 +132,7 @@ describe('GoAdapterPolicy', () => {
       frames as any, scopes as any, variables as any
     );
 
-    expect(locals).toEqual([
+    expect(locals.variables).toEqual([
       { name: 'x', value: '42' },
       { name: '_', value: 'blank' }
     ]);
@@ -153,28 +154,28 @@ describe('GoAdapterPolicy', () => {
       frames as any, scopes as any, variables as any, true
     );
 
-    expect(locals).toHaveLength(2);
+    expect(locals.variables).toHaveLength(2);
   });
 
   it('returns empty array when no stack frames', () => {
     const locals = GoAdapterPolicy.extractLocalVariables(
       [], {} as any, {} as any
     );
-    expect(locals).toEqual([]);
+    expect(locals).toEqual({ variables: [], scopeRefs: [] });
   });
 
   it('returns empty array when no scopes for frame', () => {
     const locals = GoAdapterPolicy.extractLocalVariables(
       [{ id: 1 }] as any, {} as any, {} as any
     );
-    expect(locals).toEqual([]);
+    expect(locals).toEqual({ variables: [], scopeRefs: [] });
   });
 
   it('returns empty array when scopes array is empty', () => {
     const locals = GoAdapterPolicy.extractLocalVariables(
       [{ id: 1 }] as any, { 1: [] } as any, {} as any
     );
-    expect(locals).toEqual([]);
+    expect(locals).toEqual({ variables: [], scopeRefs: [] });
   });
 
   it('returns empty array when no Locals scope found', () => {
@@ -183,7 +184,7 @@ describe('GoAdapterPolicy', () => {
       { 1: [{ name: 'Globals', variablesReference: 10 }] } as any,
       { 10: [{ name: 'x', value: '1' }] } as any
     );
-    expect(locals).toEqual([]);
+    expect(locals).toEqual({ variables: [], scopeRefs: [] });
   });
 
   it('returns empty array when variables for scope are missing', () => {
@@ -192,7 +193,7 @@ describe('GoAdapterPolicy', () => {
       { 1: [{ name: 'Locals', variablesReference: 99 }] } as any,
       {} as any
     );
-    expect(locals).toEqual([]);
+    expect(locals).toEqual({ variables: [], scopeRefs: [] });
   });
 
   // ===== Scope and configuration =====

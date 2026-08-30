@@ -353,7 +353,7 @@ To add support for a new language:
 4. **Register in root `package.json`**: Add `"@debugmcp/adapter-{language}": "workspace:*"` to `optionalDependencies`
 5. **Add Vitest alias**: Add `{ find: '@debugmcp/adapter-{language}', replacement: path.resolve(__dirname, './packages/adapter-{language}/src/index.ts') }` to `resolve.alias` in `vitest.config.ts`
 6. **Update adapter count**: Update hardcoded adapter counts in tests (`adapter-loader.test.ts`, `models.test.ts`, `tests/e2e/doctor-smoke.test.ts`)
-7. **Add Tests**: Include unit and integration tests in the package
+7. **Add Tests**: Include unit and integration tests in the package. A new adapter policy is also checked by `tests/unit/shared/adapter-policy-contract.test.ts`, which asserts the cross-policy invariants (capability pinning, and that `extractLocalVariables` returns a `LocalVariableExtraction { variables, scopeRefs }` anchored on `stackFrames[0]` — use `emptyLocalVariableExtraction()` / `extractionFromScope()` from `@debugmcp/shared` rather than building the object by hand)
 8. **Run `pnpm install`**: To link the new workspace package
 
 Example structure:

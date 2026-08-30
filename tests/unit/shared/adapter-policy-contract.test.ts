@@ -15,14 +15,19 @@
  * so it should require editing this table on purpose rather than passing silently.
  */
 import { describe, it, expect } from 'vitest';
+import type { DebugProtocol } from '@vscode/debugprotocol';
 import {
   DebugLanguage,
   DefaultAdapterPolicy,
+  emptyLocalVariableExtraction,
   getPolicyForLanguage,
   resolveExceptionFilters,
   type AdapterPolicy,
   type ChildSessionStrategy,
-  type ExceptionBreakMode
+  type ExceptionBreakMode,
+  type LocalVariableExtraction,
+  type StackFrame,
+  type Variable
 } from '@debugmcp/shared';
 
 /** The abstract break-on-exception modes `resolveExceptionFilters` accepts. */
@@ -153,6 +158,13 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
 };
 
 const LANGUAGES = Object.values(DebugLanguage);
+
+/**
+ * What every policy must return when it cannot name a scope it read locals
+ * from. Taken from the shipped helper rather than restated here, so a change
+ * to the empty shape cannot pass this file while breaking its callers.
+ */
+const EMPTY_EXTRACTION: LocalVariableExtraction = emptyLocalVariableExtraction();
 
 /** `getLocalScopeName()` may return one name or several; callers treat both as a list. */
 function normaliseScopeNames(policy: AdapterPolicy): string[] {
@@ -330,5 +342,106 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
 
   it('does not match an empty adapter command', () => {
     expect(policy.matchesAdapter({ command: '', args: [] })).toBe(false);
+  });
+
+  // ===== 11. Local-variable extraction: the edges =====
+
+  it('returns the empty extraction when there is no scope to read', () => {
+    const extract = policy.extractLocalVariables!;
+    const frame: StackFrame = { id: 1, name: 'frame', file: 'file.src', line: 1 };
+
+    // No frames at all, a frame whose scopes were never fetched, and a frame
+    // whose scope list came back empty. None of the three can name a scope, so
+    // none may report one either — `scopeRefs` is what the session layer
+    // attributes truncation to, and a ref for a scope that supplied nothing
+    // would report another scope's cuts as cuts in this response (issue #438).
+    expect(extract([], {}, {})).toEqual(EMPTY_EXTRACTION);
+    expect(extract([frame], {}, {})).toEqual(EMPTY_EXTRACTION);
+    expect(extract([frame], { [frame.id]: [] }, {})).toEqual(EMPTY_EXTRACTION);
+  });
+
+  // ===== 12. Local-variable extraction: the data contract =====
+
+  describe('local-variable extraction', () => {
+    const ANCHOR_SCOPE_REF = 500;
+    const CALLER_SCOPE_REF = 600;
+    const anchor: StackFrame = { id: 1, name: 'anchor', file: 'anchor.src', line: 10 };
+    const caller: StackFrame = { id: 2, name: 'caller', file: 'caller.src', line: 20 };
+
+    // The policy's own first choice of local-scope name, so this fixture is
+    // one every adapter recognises without the test knowing which.
+    const localScopeName = normaliseScopeNames(policy)[0];
+    const scopes: Record<number, DebugProtocol.Scope[]> = {
+      [anchor.id]: [
+        { name: localScopeName, variablesReference: ANCHOR_SCOPE_REF, expensive: false }
+      ],
+      [caller.id]: [
+        { name: localScopeName, variablesReference: CALLER_SCOPE_REF, expensive: false }
+      ]
+    };
+
+    // 'alpha' survives every policy's filter. The dunder is filtered by some
+    // (python, go, LLDB) and kept by others, which is what makes it a usable
+    // probe for the includeSpecial rule below without hard-coding a verdict.
+    const plain: Variable = { name: 'alpha', value: '1', type: 'int', expandable: false };
+    const specialish: Variable = { name: '__probe__', value: '2', type: 'int', expandable: false };
+    const variables: Record<number, Variable[]> = {
+      [ANCHOR_SCOPE_REF]: [plain, specialish],
+      [CALLER_SCOPE_REF]: [{ name: 'callerOnly', value: '3', type: 'int', expandable: false }]
+    };
+
+    const extract = (frames: StackFrame[], includeSpecial?: boolean): LocalVariableExtraction =>
+      policy.extractLocalVariables!(frames, scopes, variables, includeSpecial);
+
+    it('returns the input variable objects and names the scope they came from', () => {
+      const result = extract([anchor]);
+
+      expect(result.variables.length).toBeGreaterThan(0);
+      // Identity, not a copy: `toContain` compares by reference. The session
+      // layer no longer relies on this, but a policy that rebuilt variables
+      // would be silently dropping fields it does not know about.
+      for (const variable of result.variables) {
+        expect(variables[ANCHOR_SCOPE_REF]).toContain(variable);
+      }
+
+      expect(result.scopeRefs).toEqual([ANCHOR_SCOPE_REF]);
+      const anchorRefs = scopes[anchor.id].map((scope) => scope.variablesReference);
+      for (const ref of result.scopeRefs) {
+        expect(anchorRefs).toContain(ref);
+      }
+    });
+
+    it('anchors on the first frame and ignores the frames below it', () => {
+      // The session layer re-anchors by slicing the frame list (issue #468);
+      // that only works while a policy reads frames[0] and nothing else.
+      expect(extract([anchor, caller])).toEqual(extract([anchor]));
+    });
+
+    it('only widens the names it returns when includeSpecial does not change the scope', () => {
+      const plainResult = extract([anchor], false);
+      const specialResult = extract([anchor], true);
+
+      // `includeSpecial` governs which NAMES survive from the scopes a policy
+      // selects - not which scopes it selects. A policy may legitimately land
+      // on a different scope when its anchor scope is empty after filtering
+      // (js-debug falls through an all-`this` Local to Closure, issue #548),
+      // and then the two calls answer about different scopes and are not
+      // comparable. Where the selected scopes ARE the same, the special result
+      // has to be a superset.
+      if (specialResult.scopeRefs.join() === plainResult.scopeRefs.join()) {
+        for (const variable of plainResult.variables) {
+          expect(specialResult.variables).toContain(variable);
+        }
+        expect(specialResult.variables.length).toBeGreaterThanOrEqual(plainResult.variables.length);
+      } else {
+        // The escape hatch is only available to a policy that actually moved
+        // scope, never to one that just dropped variables on the floor.
+        expect(specialResult.scopeRefs.length).toBeGreaterThan(0);
+      }
+    });
+
+    it('reports no scope when the scope held no variables', () => {
+      expect(policy.extractLocalVariables!([anchor], scopes, {})).toEqual(EMPTY_EXTRACTION);
+    });
   });
 });
