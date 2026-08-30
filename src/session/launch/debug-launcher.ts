@@ -28,7 +28,11 @@ import {
   buildLogpointDowngradeLaunchWarning,
   buildUnboundBreakpointExitWarning
 } from '../breakpoints/launch-warnings.js';
-import { failProxySetup, logProxyFailure } from './proxy-failure-diagnostics.js';
+import {
+  failProxySetup,
+  logProxyFailure,
+  sessionRemovedDuringTeardown
+} from './proxy-failure-diagnostics.js';
 import { waitForLaunchReadiness } from './launch-readiness.js';
 import type { ProxyLauncher } from './proxy-launcher.js';
 
@@ -420,6 +424,29 @@ export class DebugLauncher {
 
       const errorMessage = error instanceof Error ? error.message : String(error);
 
+      // Normalize error identity for callers/tests
+      let errorType: string | undefined;
+      let errorCode: number | undefined;
+      if (error instanceof McpError) {
+        errorType = (error as McpError).constructor.name || 'McpError';
+        errorCode = (error as McpError).code as number | undefined;
+      } else if (error instanceof Error) {
+        errorType = error.constructor.name || 'Error';
+      }
+
+      // A close that landed during the teardown removed the session; the
+      // state writes below would throw. Report the failure as-is.
+      if (sessionRemovedDuringTeardown(this.ctx, sessionId)) {
+        return {
+          success: false,
+          error: errorMessage,
+          state: SessionState.STOPPED,
+          errorType,
+          errorCode,
+          ...(Object.keys(diagnosticData).length > 0 ? { data: diagnosticData } : {})
+        };
+      }
+
       const toolchainValidation =
         (error as { toolchainValidation?: ToolchainValidationState })?.toolchainValidation ??
         session.toolchainValidation;
@@ -433,16 +460,6 @@ export class DebugLauncher {
         });
       } else {
         this.ctx.updateState(session, SessionState.ERROR);
-      }
-
-      // Normalize error identity for callers/tests
-      let errorType: string | undefined;
-      let errorCode: number | undefined;
-      if (error instanceof McpError) {
-        errorType = (error as McpError).constructor.name || 'McpError';
-        errorCode = (error as McpError).code as number | undefined;
-      } else if (error instanceof Error) {
-        errorType = error.constructor.name || 'Error';
       }
 
       if (incompatibleToolchain && toolchainValidation) {

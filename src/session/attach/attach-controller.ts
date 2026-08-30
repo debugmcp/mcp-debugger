@@ -20,7 +20,7 @@ import { ErrorMessages } from '../../utils/error-messages.js';
 import type { CustomLaunchRequestArguments, DebugResult } from '../session-manager-core.js';
 import type { AttachContext } from '../operations-context.js';
 import type { BreakpointController } from '../breakpoints/breakpoint-controller.js';
-import { failProxySetup } from '../launch/proxy-failure-diagnostics.js';
+import { failProxySetup, sessionRemovedDuringTeardown } from '../launch/proxy-failure-diagnostics.js';
 import type { ProxyLauncher } from '../launch/proxy-launcher.js';
 import { pauseAfterAttach, verifyAttachThreads } from './attach-verification.js';
 
@@ -334,11 +334,18 @@ export class AttachController {
       // (issue #561) — an attach that dies during proxy initialization used
       // to leave the adapter's own complaint unreadable.
       const diagnosticData = await failProxySetup(this.ctx, session, error, 'attachToProcess');
-      this.ctx.updateState(session, SessionState.ERROR);
       const message = error instanceof Error ? error.message : String(error);
+      // A close that landed during the teardown removed the session; the
+      // state write would throw. Report the failure as-is.
+      const state = sessionRemovedDuringTeardown(this.ctx, sessionId)
+        ? SessionState.STOPPED
+        : SessionState.ERROR;
+      if (state === SessionState.ERROR) {
+        this.ctx.updateState(session, SessionState.ERROR);
+      }
       return {
         success: false,
-        state: SessionState.ERROR,
+        state,
         error: `Failed to attach: ${message}`,
         ...(Object.keys(diagnosticData).length > 0 ? { data: diagnosticData } : {})
       };

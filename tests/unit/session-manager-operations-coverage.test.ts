@@ -1135,6 +1135,45 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       );
     });
 
+    it('reports {success:false} instead of rejecting when the session is closed while a failed launch is torn down', async () => {
+      vi.stubEnv('CI', 'true');
+      vi.stubEnv('GITHUB_ACTIONS', undefined);
+      mockSession.proxyManager = undefined;
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+        throw new Error('Timeout waiting for proxy initialization');
+      });
+      // The teardown (DAP drain, force-kill, log read) is the window a
+      // concurrent close_debug_session lands in: model it by removing the
+      // session from the store while stopProxyPreservingSession is in flight.
+      vi.spyOn(operations as any, 'stopProxyPreservingSession')
+        .mockImplementation(async (session: typeof mockSession) => {
+          session.proxyManager = undefined;
+          mockSessionStore.getOrThrow.mockImplementation((sessionId: string) => {
+            throw new SessionNotFoundError(sessionId);
+          });
+        });
+
+      const result = await operations.startDebugging('test-session', 'test.py');
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          success: false,
+          state: SessionState.STOPPED,
+          error: 'Timeout waiting for proxy initialization'
+        })
+      );
+      // No state write after the session was gone: the last one is INITIALIZING.
+      expect(mockSessionStore.updateState.mock.calls.at(-1)?.[1]).toBe(SessionState.INITIALIZING);
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Detailed error in startDebugging'),
+        expect.anything()
+      );
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('was closed while its failed setup was being torn down')
+      );
+    });
+
     it('records log read failure when tail cannot be captured', async () => {
       mockSession.logDir = '/tmp/session-logs';
       mockDependencies.fileSystem.pathExists.mockResolvedValueOnce(true);
@@ -1709,6 +1748,35 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       (operations as unknown as { attachVerifyTimeoutMs: number }).attachVerifyTimeoutMs = 200;
       (operations as unknown as { attachVerifyIntervalMs: number }).attachVerifyIntervalMs = 10;
       (operations as unknown as { attachPauseStopTimeoutMs: number }).attachPauseStopTimeoutMs = 50;
+    });
+
+    it('reports {success:false} instead of rejecting when the session is closed while a failed attach is torn down', async () => {
+      mockSession.proxyManager = undefined;
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+        throw new Error('Timeout waiting for proxy initialization');
+      });
+      vi.spyOn(operations as any, 'stopProxyPreservingSession')
+        .mockImplementation(async (session: typeof mockSession) => {
+          session.proxyManager = undefined;
+          mockSessionStore.getOrThrow.mockImplementation((sessionId: string) => {
+            throw new SessionNotFoundError(sessionId);
+          });
+        });
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 5005,
+        host: 'localhost'
+      });
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          success: false,
+          state: SessionState.STOPPED,
+          error: 'Failed to attach: Timeout waiting for proxy initialization'
+        })
+      );
+      expect(mockSessionStore.updateState.mock.calls.at(-1)?.[1]).toBe(SessionState.INITIALIZING);
     });
 
     it('returns init progress and proxy log path when proxy initialization fails (issue #551)', async () => {
