@@ -1307,6 +1307,61 @@ describe('SessionManager - DAP Operations', () => {
       expect(result.anchorNote).toBeUndefined();
     });
 
+    // A block-only frame is what js-debug produces for an ESM top-level
+    // `for (let i...)` or `catch (e)`: Block, but no Local at all. The policy
+    // returns the block's bindings; the session layer must name THAT scope.
+    // Naming the next canonical match (Module) would emit a note blaming a
+    // scope the policy never consulted (#558 review).
+    it.each([
+      ['Block', 'Block'],
+      ['Block:loop', 'Block:loop']
+    ])('names a %s-only frame after its own scope with no note (issue #558)', async (scopeName, expectedName) => {
+      const session = await createPausedSession();
+      (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
+
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(
+        async (command: string, args?: { variablesReference?: number }) => {
+          if (command === 'stackTrace') {
+            return {
+              success: true,
+              body: {
+                stackFrames: [
+                  { id: 1, name: '<top>', source: { path: '/workspace/app.mjs' }, line: 3, column: 3 }
+                ]
+              }
+            };
+          }
+          if (command === 'scopes') {
+            return {
+              success: true,
+              body: {
+                scopes: [
+                  { name: scopeName, variablesReference: 100, expensive: false },
+                  { name: 'Module', variablesReference: 300, expensive: false },
+                  { name: 'Global', variablesReference: 400, expensive: true }
+                ]
+              }
+            };
+          }
+          if (command === 'variables') {
+            const byReference: Record<number, Array<Record<string, unknown>>> = {
+              100: [{ name: 'i', value: '3', type: 'number', variablesReference: 0 }],
+              300: [{ name: 'moduleValue', value: '7', type: 'number', variablesReference: 0 }],
+              400: [{ name: 'process', value: 'Process', type: 'object', variablesReference: 6 }]
+            };
+            return { success: true, body: { variables: byReference[args?.variablesReference ?? 0] ?? [] } };
+          }
+          return { success: true };
+        }
+      );
+
+      const result = await sessionManager.getLocalVariables(session.id);
+
+      expect(result.variables.map(variable => variable.name)).toEqual(['i']);
+      expect(result.scopeName).toBe(expectedName);
+      expect(result.anchorNote).toBeUndefined();
+    });
+
     it('ranks the canonical scope by policy preference, not adapter scope order (issue #548 review)', async () => {
       const session = await createPausedSession();
       (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;

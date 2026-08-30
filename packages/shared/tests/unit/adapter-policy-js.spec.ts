@@ -264,6 +264,24 @@ describe('JsDebugAdapterPolicy', () => {
       expect(result.scopeRefs).toEqual([100, 200]);
     });
 
+    it("merges the legacy 'Block:<label>' form the same way (issue #558)", () => {
+      const scopes: Record<number, DebugProtocol.Scope[]> = {
+        1: [
+          { name: 'Block:loop', variablesReference: 100, expensive: false },
+          { name: 'Local', variablesReference: 200, expensive: false },
+        ],
+      };
+      const vars: Record<number, Variable[]> = {
+        100: [v('i', '3')],
+        200: [v('total', '6')],
+      };
+
+      const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
+
+      expect(result.variables.map(variable => variable.name)).toEqual(['i', 'total']);
+      expect(result.scopeRefs).toEqual([100, 200]);
+    });
+
     it("merges a catch (e) binding from a 'Catch Block' scope (issue #558)", () => {
       const scopes: Record<number, DebugProtocol.Scope[]> = {
         1: [

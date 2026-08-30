@@ -599,6 +599,9 @@ export abstract class SessionManagerData extends SessionManagerCore {
           // 'Local' with no note is the honest answer for a frame whose own
           // locals reached the caller. Otherwise the first listed anchor
           // scope is what the caller actually got.
+          // No `variables.length > 0` guard: the contract is "empty variables
+          // implies empty scopeRefs" (invariants 11/12, enforced by
+          // extractionFromScope), so an empty result lists nothing to match.
           const contributingScope =
             canonicalScope && extraction.scopeRefs.includes(canonicalScope.variablesReference)
               ? canonicalScope

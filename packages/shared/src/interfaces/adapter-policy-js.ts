@@ -197,9 +197,9 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
     const isLocalScope = (scope: DebugProtocol.Scope): boolean =>
       scope.name === 'Local' || scope.name === 'Locals' ||
       scope.name.startsWith('Local:');
-    // js-debug can expose a genuinely empty Local scope while the useful
-    // binding lives in Closure or Module on the same frame. Try those scopes
-    // in usefulness order before the session layer walks down to a caller.
+    // "Local-like" is local OR block: both prove the frame is a real
+    // function/block frame rather than a top-level script frame, which is what
+    // the Global gate below turns on.
     const isLocalLike = (scope: DebugProtocol.Scope): boolean =>
       isLocalScope(scope) || isBlockScope(scope);
 
@@ -232,6 +232,9 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
       // as an empty Local alone does.
     }
 
+    // js-debug can expose a genuinely empty Local scope while the useful
+    // binding lives in Closure or Module on the same frame. Try those scopes
+    // in usefulness order before the session layer walks down to a caller.
     const scopeGroups: Array<(scope: DebugProtocol.Scope) => boolean> = [
       isLocalLike,
       scope => scope.name === 'Closure' || scope.name.startsWith('Closure:') ||
@@ -261,10 +264,17 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
   },
   
   /**
-   * JavaScript uses various local scope names
+   * JavaScript uses various local scope names.
+   *
+   * The exact block names sit right after the Local forms: 'Local' still wins
+   * whenever the frame has a Local scope (so the issue #558 merge keeps
+   * reporting 'Local' with no note), while a block-only frame - an ESM
+   * top-level `for (let i...)` or `catch (e)`, which has Block but no Local -
+   * now matches its own scope by name instead of falling through to Module
+   * and drawing a note about a scope that was never consulted.
    */
   getLocalScopeName: (): string[] => {
-    return ['Local', 'Locals', 'Local:', 'Block:', 'Closure', 'Closure:', 'Script', 'Module', 'module', 'Global'];
+    return ['Local', 'Locals', 'Local:', 'Block', 'Catch Block', 'With Block', 'Block:', 'Closure', 'Closure:', 'Script', 'Module', 'module', 'Global'];
   },
   
   getDapAdapterConfiguration: () => {
