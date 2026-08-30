@@ -10,7 +10,11 @@ import {
   RustAdapterPolicy,
   SessionState
 } from '@debugmcp/shared';
-import { createMockDependencies } from './session-manager-test-utils.js';
+import {
+  createMockDependencies,
+  createPausedSession,
+  overridePolicy
+} from './session-manager-test-utils.js';
 import { ErrorMessages } from '../../../../src/utils/error-messages.js';
 import { ProxyNotRunningError } from '../../../../src/errors/debug-errors.js';
 
@@ -38,24 +42,6 @@ describe('SessionManager - DAP Operations', () => {
     vi.clearAllMocks();
     dependencies.mockProxyManager.reset();
   });
-
-  async function createPausedSession() {
-    const session = await sessionManager.createSession({ 
-      language: DebugLanguage.MOCK,
-      executablePath: 'python'
-    });
-    
-    await sessionManager.startDebugging(session.id, 'test.py');
-    await vi.runAllTimersAsync();
-    
-    // Simulate being paused with a thread ID
-    dependencies.mockProxyManager.simulateStopped(1, 'entry');
-    
-    // Clear previous calls
-    dependencies.mockProxyManager.dapRequestCalls = [];
-    
-    return session;
-  }
 
   describe('Breakpoint Management', () => {
     it('should queue breakpoints before session starts', async () => {
@@ -990,7 +976,7 @@ describe('SessionManager - DAP Operations', () => {
 
   describe('Step Operations', () => {
     it('should handle step over correctly', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       
       const stepPromise = sessionManager.stepOver(session.id);
       await vi.runAllTimersAsync();
@@ -1005,7 +991,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('should handle step into correctly', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       
       const result = await sessionManager.stepInto(session.id);
       
@@ -1017,7 +1003,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('should handle step out correctly', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       
       const result = await sessionManager.stepOut(session.id);
       
@@ -1049,7 +1035,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('should report a pending step when the grace window elapses', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
 
       // Configure mock to not emit stopped event after step
       dependencies.mockProxyManager.sendDapRequest = vi.fn().mockResolvedValue({ success: true });
@@ -1074,7 +1060,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('should treat termination during step as a successful completion', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       
       dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (command: string) => {
         if (command === 'next') {
@@ -1095,7 +1081,7 @@ describe('SessionManager - DAP Operations', () => {
 
   describe('Variable inspection', () => {
     it('should fall back to script/global scopes when no Local scope is present', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       
       dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (command: string) => {
         switch (command) {
@@ -1150,7 +1136,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('walks down past an empty runtime top frame to the first frame with locals (issue #468)', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
 
       // A pause inside a blocking sleep: frame 0 is a stdlib frame with an
       // empty Local scope; the user frame with the loop counter is frame 1.
@@ -1201,7 +1187,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('uses a useful sibling JS scope before walking down frames (issue #548)', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
 
       dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(
@@ -1250,7 +1236,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('returns a JS for-body block binding alongside the function locals (issue #558)', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
 
       dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(
@@ -1317,7 +1303,7 @@ describe('SessionManager - DAP Operations', () => {
       ['Block', 'Block'],
       ['Block:loop', 'Block:loop']
     ])('merges a %s-only ESM frame with its module scope and names the block (issue #558)', async (scopeName, expectedName) => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
 
       dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(
@@ -1364,7 +1350,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('merges nested block scopes and the module base on an ESM frame (issue #558)', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
 
       dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(
@@ -1438,7 +1424,7 @@ describe('SessionManager - DAP Operations', () => {
     ])('reports scopeName Local with no note for %s (issue #558)', async (
       _label, includeSpecial, names, localVars, filterLocal
     ) => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
 
       dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(
@@ -1485,7 +1471,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('reports truncation from every merged scope, not just the first (issues #438/#558)', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
 
       dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(
@@ -1540,7 +1526,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('ranks the canonical scope by policy preference, not adapter scope order (issue #548 review)', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
 
       dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(
@@ -1589,7 +1575,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('treats a Ruby %self-only native frame as empty and walks to user locals (issue #549)', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => RubyAdapterPolicy;
 
       dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(
@@ -1647,7 +1633,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('does not walk down when an explicit names filter is set (issue #468)', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
 
       dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(
         async (command: string, args?: { frameId?: number; variablesReference?: number }) => {
@@ -1694,7 +1680,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('caps an enormous scope and reports truncation instead of blowing the response (issues #356/#359)', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
 
       const hugeVars = Array.from({ length: 1000 }, (_, i) => ({
         name: `v${i}`,
@@ -1734,7 +1720,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('stops fetching further scopes once the variable budget is spent (issue #356 fan-out)', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
 
       const bigScopeVars = Array.from({ length: 400 }, (_, i) => ({
         name: `g${i}`, value: `x${i}`, type: 'object', variablesReference: 0
@@ -1782,7 +1768,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('reports no truncation when only discarded fan-out scopes were cut (issue #438)', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
 
       // Global's huge values get cut during the fan-out fetch, but the
       // policy narrows the payload to the Local scope — so the response
@@ -1835,7 +1821,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('still counts cuts in the returned scope while excluding discarded scopes (issue #438)', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
 
       dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(
         async (command: string, args?: { variablesReference?: number }) => {
@@ -2205,7 +2191,7 @@ describe('SessionManager - DAP Operations', () => {
     }
 
     it('retries an empty-but-successful stack until frames appear', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       setShortReadyWindow();
       let stackTraceCalls = 0;
       dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
@@ -2224,7 +2210,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('falls back to another stopped thread when the current one stays frameless, and annotates', async () => {
-      const session = await createPausedSession(); // currentThreadId = 1
+      const session = await createPausedSession(sessionManager, dependencies); // currentThreadId = 1
       setShortReadyWindow();
       dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: { threadId?: number }) => {
         if (command === 'stackTrace') {
@@ -2246,7 +2232,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('explains an explicitly requested frameless thread without adopting an alternative (issue #553)', async () => {
-      const session = await createPausedSession(); // currentThreadId = 1
+      const session = await createPausedSession(sessionManager, dependencies); // currentThreadId = 1
       dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: { threadId?: number }) => {
         if (command === 'stackTrace') {
           return { success: true, body: { stackFrames: args?.threadId === 2 ? [READY_FRAME] : [] } };
@@ -2276,7 +2262,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('still explains an explicit frameless thread when alternatives cannot be listed', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
         if (command === 'stackTrace') {
           return { success: true, body: { stackFrames: [] } };
@@ -2295,7 +2281,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('skips invalid thread entries and suggests an unnamed frame-bearing thread', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: { threadId?: number }) => {
         if (command === 'stackTrace') {
           return { success: true, body: { stackFrames: args?.threadId === 2 ? [READY_FRAME] : [] } };
@@ -2326,7 +2312,7 @@ describe('SessionManager - DAP Operations', () => {
     it('treats an explicit threadId of 0 as a real thread, not as "use the current one"', async () => {
       // js-debug reports its main thread as id 0; `threadId || current` used
       // to redirect that request to the current thread.
-      const session = await createPausedSession(); // currentThreadId = 1
+      const session = await createPausedSession(sessionManager, dependencies); // currentThreadId = 1
       const requested: number[] = [];
       dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: { threadId?: number }) => {
         if (command === 'stackTrace') {
@@ -2344,7 +2330,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('returns an honest empty result with a note when no thread reports frames', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       setShortReadyWindow();
       dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
         if (command === 'stackTrace') {
@@ -2363,7 +2349,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('does not retry or scan without ensureStackReady (internal-caller behavior unchanged)', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
         if (command === 'stackTrace') {
           return { success: true, body: { stackFrames: [] } };
@@ -2388,7 +2374,7 @@ describe('SessionManager - DAP Operations', () => {
     }
 
     it('stops retrying when the session leaves PAUSED mid-wait', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       setShortReadyWindow();
       let stackTraceCalls = 0;
       dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
@@ -2411,7 +2397,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('annotates the not-paused empty result', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       forceRunning(session.id);
 
       const result = await sessionManager.getStackTraceDetailed(session.id);
@@ -2508,7 +2494,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('records description and text from the stopped event body on lastStop', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
 
       dependencies.mockProxyManager.simulateStopped(1, 'exception', {
         reason: 'exception',
@@ -2528,7 +2514,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('handles a stopped event without a body (lastStop has no detail fields)', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
 
       dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
 
@@ -2539,7 +2525,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('records the debuggee exit code from the exited event', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
 
       dependencies.mockProxyManager.simulateExited(1);
 
@@ -2554,7 +2540,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('leaves exitCode undefined when the exited event has no code', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
 
       dependencies.mockProxyManager.simulateExited(undefined);
 
@@ -2646,7 +2632,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('does not affect adapters without a normalizer (mock)', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
 
       dependencies.mockProxyManager.simulateStopped(1, 'exception', {
         reason: 'exception',
@@ -2790,7 +2776,7 @@ describe('SessionManager - DAP Operations', () => {
     }
 
     it('stores adapter capabilities from the adapter-capabilities event', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
 
       dependencies.mockProxyManager.simulateEvent('adapter-capabilities', capsWithExceptionInfo);
 
@@ -2798,7 +2784,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('annotates stored logpoints when live capabilities do not advertise logpoint support (issue #235)', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       const { breakpoint: bp } = await sessionManager.setBreakpoint(
         session.id, { file: 'test.py', line: 20, logMessage: 'x is {x}' }
       );
@@ -2811,7 +2797,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('leaves logpoints unannotated when live capabilities advertise support', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       await sessionManager.setBreakpoint(
         session.id, { file: 'test.py', line: 20, logMessage: 'x is {x}' }
       );
@@ -2823,7 +2809,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('requests exceptionInfo on exception stops and merges the result into lastStop', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       dependencies.mockProxyManager.simulateEvent('adapter-capabilities', capsWithExceptionInfo);
       dependencies.mockProxyManager.setDapRequestHandler(async (command) => {
         if (command === 'exceptionInfo') {
@@ -2860,7 +2846,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('does not request exceptionInfo when the adapter lacks the capability', async () => {
-      await createPausedSession();
+      await createPausedSession(sessionManager, dependencies);
       dependencies.mockProxyManager.simulateEvent('adapter-capabilities', {
         supportsExceptionInfoRequest: false
       });
@@ -2872,7 +2858,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('does not request exceptionInfo when no capabilities were captured', async () => {
-      await createPausedSession();
+      await createPausedSession(sessionManager, dependencies);
 
       dependencies.mockProxyManager.simulateStopped(1, 'exception');
       await vi.runAllTimersAsync();
@@ -2881,7 +2867,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('does not request exceptionInfo when the stop has no threadId', async () => {
-      await createPausedSession();
+      await createPausedSession(sessionManager, dependencies);
       dependencies.mockProxyManager.simulateEvent('adapter-capabilities', capsWithExceptionInfo);
 
       dependencies.mockProxyManager.simulateEvent('stopped', undefined, 'exception', undefined);
@@ -2891,7 +2877,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('swallows exceptionInfo failures and leaves lastStop intact', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       dependencies.mockProxyManager.simulateEvent('adapter-capabilities', capsWithExceptionInfo);
       dependencies.mockProxyManager.shouldFailDapRequests = true;
 
@@ -2909,7 +2895,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('does not merge a late exceptionInfo response onto a newer stop (stale-guard)', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       dependencies.mockProxyManager.simulateEvent('adapter-capabilities', capsWithExceptionInfo);
 
       let releaseExceptionInfo: (() => void) | undefined;
@@ -2938,7 +2924,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('warns when the policy filter table declares IDs the adapter does not advertise', async () => {
-      await createPausedSession();
+      await createPausedSession(sessionManager, dependencies);
 
       // Mock policy declares uncaught: ['uncaught'] and all: ['all'];
       // advertise only 'uncaught' so 'all' is drift.
@@ -2955,7 +2941,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('does not warn when the adapter advertises every declared filter', async () => {
-      await createPausedSession();
+      await createPausedSession(sessionManager, dependencies);
 
       dependencies.mockProxyManager.simulateEvent('adapter-capabilities', capsWithExceptionInfo);
 
@@ -2965,7 +2951,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('exposes capabilities-driven enrichment through getAllSessions lastStop projection', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       dependencies.mockProxyManager.simulateEvent('adapter-capabilities', capsWithExceptionInfo);
       dependencies.mockProxyManager.setDapRequestHandler(async (command) =>
         command === 'exceptionInfo'
@@ -2986,19 +2972,12 @@ describe('SessionManager - DAP Operations', () => {
     // only when the respective bookkeeping is complete; counts always are.
     function installPolicySpy() {
       const normalizeStopReason = vi.fn().mockReturnValue(undefined);
-      const store = (sessionManager as unknown as { sessionStore: { selectPolicy: unknown } }).sessionStore;
-      const original = store.selectPolicy;
-      vi.spyOn(store as { selectPolicy: (lang: string) => unknown }, 'selectPolicy').mockImplementation(
-        function (this: unknown, lang: string) {
-          const policy = (original as (lang: string) => Record<string, unknown>).call(store, lang);
-          return { ...policy, normalizeStopReason };
-        }
-      );
+      overridePolicy(sessionManager, { normalizeStopReason });
       return normalizeStopReason;
     }
 
     it('passes the line+function union, fn-bp set, and counts when bookkeeping is complete', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       const managed = sessionManager.getSession(session.id)!;
       managed.breakpoints.set('b1', { id: 'b1', file: '/a.rs', line: 3, verified: true, adapterId: 1 });
       managed.functionBreakpoints.set('f1', { id: 'f1', functionName: 'main', verified: true, adapterId: 5 });
@@ -3027,7 +3006,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('omits both id sets when a line breakpoint lacks an adapterId', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       const managed = sessionManager.getSession(session.id)!;
       managed.breakpoints.set('b1', { id: 'b1', file: '/a.rs', line: 3, verified: false });
       managed.functionBreakpoints.set('f1', { id: 'f1', functionName: 'main', verified: true, adapterId: 5 });
@@ -3052,7 +3031,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('omits the union and the fn-bp set when a function breakpoint lacks an adapterId', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       const managed = sessionManager.getSession(session.id)!;
       managed.breakpoints.set('b1', { id: 'b1', file: '/a.rs', line: 3, verified: true, adapterId: 1 });
       managed.functionBreakpoints.set('f1', { id: 'f1', functionName: 'main', verified: false });
@@ -3100,12 +3079,7 @@ describe('SessionManager - DAP Operations', () => {
       });
       await sessionManager.setFunctionBreakpoint(session.id, { functionName: 'main' });
 
-      const store = (sessionManager as unknown as { sessionStore: { selectPolicy: (lang: string) => Record<string, unknown> } }).sessionStore;
-      const original = store.selectPolicy.bind(store);
-      vi.spyOn(store, 'selectPolicy').mockImplementation((lang: string) => ({
-        ...original(lang),
-        functionBreakpointsBindLate: true
-      }));
+      overridePolicy(sessionManager, { functionBreakpointsBindLate: true });
 
       const result = await sessionManager.startDebugging(session.id, 'test.py');
       await vi.runAllTimersAsync();
@@ -3132,7 +3106,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('stamps never-bound function breakpoints and writes an output warning at exit (#308)', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       const managed = sessionManager.getSession(session.id)!;
       managed.functionBreakpoints.set('f1', { id: 'f1', functionName: 'main', verified: false });
       managed.functionBreakpoints.set('f2', { id: 'f2', functionName: 'main.main', verified: true });
@@ -3163,7 +3137,7 @@ describe('SessionManager - DAP Operations', () => {
     });
 
     it('stamps adapter ids from the pre-launch function-breakpoints-synced event', async () => {
-      const session = await createPausedSession();
+      const session = await createPausedSession(sessionManager, dependencies);
       const managed = sessionManager.getSession(session.id)!;
       managed.functionBreakpoints.set('f1', { id: 'f1', functionName: 'main', verified: false });
       managed.functionBreakpoints.set('f2', { id: 'f2', functionName: 'main', verified: false });

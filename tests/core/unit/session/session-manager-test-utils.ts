@@ -2,18 +2,19 @@
  * Shared test utilities for SessionManager tests
  */
 import { vi } from 'vitest';
-import { SessionManagerDependencies } from '../../../../src/session/session-manager.js';
+import { SessionManager, SessionManagerDependencies } from '../../../../src/session/session-manager.js';
+import type { SessionStore } from '../../../../src/session/session-store.js';
 import { MockProxyManager } from '../../../test-utils/mocks/mock-proxy-manager.js';
 import { SessionStoreFactory } from '../../../../src/factories/session-store-factory.js';
-import { 
-  IFileSystem, 
-  INetworkManager, 
+import {
+  IFileSystem,
+  INetworkManager,
   ILogger,
   IProxyManagerFactory,
   IEnvironment
 } from '../../../../src/interfaces/external-dependencies.js';
 import { createMockFileSystem, createMockLogger } from '../../../test-utils/helpers/test-utils.js';
-import { IAdapterRegistry } from '@debugmcp/shared';
+import { DebugLanguage, IAdapterRegistry, type AdapterPolicy } from '@debugmcp/shared';
 import { createMockAdapterRegistry as createCentralizedMockAdapterRegistry } from '../../../test-utils/mocks/mock-adapter-registry.js';
 
 /**
@@ -87,4 +88,55 @@ export function createMockDependencies(): SessionManagerDependencies & {
     pathUtils: mockPathUtils,
     adapterRegistry: mockAdapterRegistry
   };
+}
+
+/**
+ * Overlay hooks on the session store's adapter policy.
+ *
+ * The store's lookup is the seam the session layer reads policy from —
+ * function-breakpoint name resolution and the launch warnings both go through
+ * it — so a test that wants a policy behavior overrides it here rather than
+ * standing up a real adapter.
+ */
+export function overridePolicy(
+  sessionManager: SessionManager,
+  overrides: Partial<AdapterPolicy>
+): void {
+  const store = (sessionManager as unknown as { sessionStore: SessionStore }).sessionStore;
+  const original = store.selectPolicy.bind(store);
+  vi.spyOn(store, 'selectPolicy').mockImplementation((language: DebugLanguage) => ({
+    ...original(language),
+    ...overrides
+  }));
+}
+
+/**
+ * A session with a live, paused debuggee — the state in which breakpoint
+ * changes reach the wire. `clearDapCalls` (default true) drops the launch's
+ * own DAP traffic so a test asserts only on the requests it caused.
+ *
+ * Requires fake timers (`vi.useFakeTimers`): the launch is driven by
+ * `runAllTimersAsync`.
+ */
+export async function createPausedSession(
+  sessionManager: SessionManager,
+  dependencies: ReturnType<typeof createMockDependencies>,
+  options?: { clearDapCalls?: boolean }
+) {
+  const session = await sessionManager.createSession({
+    language: DebugLanguage.MOCK,
+    executablePath: 'python'
+  });
+
+  await sessionManager.startDebugging(session.id, 'test.py');
+  await vi.runAllTimersAsync();
+
+  // Simulate being paused with a thread ID
+  dependencies.mockProxyManager.simulateStopped(1, 'entry');
+
+  if (options?.clearDapCalls !== false) {
+    dependencies.mockProxyManager.dapRequestCalls = [];
+  }
+
+  return session;
 }
