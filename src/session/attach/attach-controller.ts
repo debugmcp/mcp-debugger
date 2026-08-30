@@ -10,7 +10,7 @@
  * is reported. A failure after the proxy exists tears it down
  * session-preservingly and reports the proxy-log pointers alongside the error.
  */
-import { MAX_DAP_TIMEOUT_MS } from '../dap-request-helpers.js';
+import { resolveDapTimeoutOverride } from '../dap-request-helpers.js';
 import {
   SessionState,
   SessionLifecycleState,
@@ -69,27 +69,18 @@ export class AttachController {
         '[SessionManager] adapterConfig.stopOnEntry reaches the adapter but does not affect post-attach pause verification; prefer the top-level stopOnEntry parameter'
       );
     }
-    let verifyTimeoutOverride = verifyTimeout;
-    if (verifyTimeoutOverride !== undefined) {
-      if (
-        typeof verifyTimeoutOverride !== 'number' ||
-        !Number.isFinite(verifyTimeoutOverride) ||
-        verifyTimeoutOverride <= 0
-      ) {
-        return {
-          success: false,
-          state: session.state,
-          error: `'verifyTimeout' must be a positive number of milliseconds, got: ${String(verifyTimeoutOverride)}`
-        };
-      }
-      const maxVerifyTimeoutMs = MAX_DAP_TIMEOUT_MS;
-      if (verifyTimeoutOverride > maxVerifyTimeoutMs) {
-        this.ctx.logger.warn(
-          `[SessionManager] verifyTimeout ${verifyTimeoutOverride}ms exceeds the maximum; clamping to ${maxVerifyTimeoutMs}ms`
-        );
-        verifyTimeoutOverride = maxVerifyTimeoutMs;
-      }
+    // Same rules as every per-request 'timeout' override: positive finite
+    // milliseconds, clamped to the shared maximum (issue #142).
+    const verifyTimeoutCheck = resolveDapTimeoutOverride(
+      verifyTimeout,
+      'SessionManager',
+      this.ctx.logger,
+      'verifyTimeout'
+    );
+    if (verifyTimeoutCheck.error) {
+      return { success: false, state: session.state, error: verifyTimeoutCheck.error };
     }
+    const verifyTimeoutOverride = verifyTimeoutCheck.timeoutMs;
 
     // Languages whose adapter declares no attach implementation fail fast,
     // before any state mutation (issue #331). Only an explicit 'none'
