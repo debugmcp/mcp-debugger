@@ -316,7 +316,7 @@ worker so the mapping cannot drift between processes.
 
 ### Before (Hardcoded)
 ```typescript
-// In session-manager-operations.ts
+// In the pre-split session-manager-operations.ts
 if (session.language === 'python') {
   // Python-specific validation
   const valid = await this.isValidPythonExecutable(executablePath);
@@ -330,8 +330,9 @@ if (session.language === 'javascript') {
 
 ### After (Policy-Based)
 ```typescript
-// In session-manager-operations.ts
-const policy = this.selectPolicy(session.language);
+// In the launch/attach collaborators (src/session/launch, src/session/attach),
+// which reach the facade through OperationsContext
+const policy = this.ctx.selectPolicy(session.language);
 
 // Validation
 if (policy.validateExecutable) {

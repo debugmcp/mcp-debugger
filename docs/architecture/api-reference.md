@@ -286,7 +286,7 @@ Full DAP capabilities declaration.
 
 Manages debug sessions and coordinates adapters with ProxyManager.
 
-**Source**: [src/session/session-manager.ts](../../src/session/session-manager.ts) (thin facade); actual implementations are in `src/session/session-manager-operations.ts`, `src/session/session-manager-data.ts`, and `src/session/session-manager-core.ts`. Session persistence is in `src/session/session-store.ts`.
+**Source**: [src/session/session-manager.ts](../../src/session/session-manager.ts) (thin facade); actual implementations are in `src/session/session-manager-core.ts`, `src/session/session-manager-data.ts`, and `src/session/session-manager-operations.ts` — the last a thin facade over the per-slice collaborators under `src/session/{launch,attach,breakpoints,execution,inspection,jvm,mirror}/`. Session persistence is in `src/session/session-store.ts`.
 
 ### Core Methods
 
