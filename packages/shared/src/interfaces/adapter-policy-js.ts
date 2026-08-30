@@ -74,7 +74,7 @@ const isGlobalScope = (scope: DebugProtocol.Scope): boolean =>
 export interface JsAdapterState extends AdapterSpecificState {
   initializeResponded: boolean;
   startSent: boolean;
-  pendingCommands: Array<{ requestId: string; dapCommand: string; dapArgs?: unknown }>;
+  pendingCommands: QueuedDapCommand[];
 }
 
 export const JsDebugAdapterPolicy: AdapterPolicy = {

@@ -38,6 +38,7 @@ import {
   sanitizeStderr,
   LineBuffer
 } from '@debugmcp/shared';
+import type { HandshakeProxy } from '@debugmcp/shared';
 
 /**
  * Events emitted by ProxyManager
@@ -77,7 +78,7 @@ export interface ProxyManagerEvents {
 }
 
 /**
- * Interface for proxy managers
+ * Interface for proxy managers.
  */
 export interface IProxyManager extends EventEmitter {
   start(config: ProxyConfig): Promise<void>;
@@ -109,6 +110,21 @@ export interface IProxyManager extends EventEmitter {
   hasDryRunCompleted(): boolean;
   getDryRunSnapshot(): { command?: string; script?: string } | undefined;
 }
+
+/** Fails to compile unless T is assignable to U. */
+type AssertAssignable<T extends U, U> = T;
+
+/**
+ * Compile-time proof that IProxyManager still satisfies the four-member
+ * contract AdapterPolicy.performHandshake is typed against.
+ *
+ * `@debugmcp/shared` cannot import this file, so HandshakeProxy is a
+ * structural contract; `extends HandshakeProxy` is not available here because
+ * EventEmitter declares an incompatible `removeListener` overload set
+ * (TS2320). This assertion gives the same guarantee: a change to either side
+ * fails HERE rather than silently at whichever policy call site notices first.
+ */
+type _IProxyManagerSatisfiesHandshakeProxy = AssertAssignable<IProxyManager, HandshakeProxy>;
 
 
 interface ProxyRuntimeEnvironment {

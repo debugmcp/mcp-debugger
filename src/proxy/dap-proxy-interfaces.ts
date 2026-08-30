@@ -5,7 +5,7 @@
 
 import { ChildProcess, SpawnOptions } from 'child_process';
 import { DebugProtocol } from '@vscode/debugprotocol';
-import type { AdapterPolicy, LanguageSpecificLaunchConfig } from '@debugmcp/shared';
+import type { AdapterPolicy, LanguageSpecificLaunchConfig, QueuedDapCommand } from '@debugmcp/shared';
 import type { IDapMirrorServerFactory } from './dap-mirror-server.js';
 
 // ===== Core Message Types =====
@@ -42,11 +42,13 @@ export interface ProxyInitPayload {
   };
 }
 
-export interface DapCommandPayload {
+/**
+ * A queued DAP command as the worker carries it: the policy-visible fields
+ * (QueuedDapCommand, which processQueuedCommands reorders) plus the transport
+ * fields only the worker needs.
+ */
+export interface DapCommandPayload extends QueuedDapCommand {
   cmd: 'dap';
-  requestId: string;
-  dapCommand: string;
-  dapArgs?: unknown;
   sessionId: string;
   /**
    * Per-request timeout override (ms) for the worker request tracker and the
