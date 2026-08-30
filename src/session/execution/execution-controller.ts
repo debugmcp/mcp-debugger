@@ -20,7 +20,12 @@ import { DebugProtocol } from '@vscode/debugprotocol';
 import { ProxyNotRunningError, SessionTerminatedError } from '../../errors/debug-errors.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import type { ManagedSession } from '../session-store.js';
-import type { DebugResult, PauseResultData, StepResultData } from '../session-manager-core.js';
+import type {
+  DebugResult,
+  PauseResultData,
+  StepResultData,
+  StopLocation
+} from '../session-manager-core.js';
 import type { ExecutionContext } from '../operations-context.js';
 
 /** What distinguishes the three step flavours: everything else is shared. */
@@ -172,7 +177,7 @@ export class ExecutionController {
         resolve(result);
       };
 
-      const success = (message: string, location?: { file: string; line: number; column?: number }) => {
+      const success = (message: string, location?: StopLocation) => {
         this.ctx.logger.info(`[SM ${options.logTag} ${sessionId}] ${message} Current state: ${session.state}`);
         const data: StepResultData = { message };
         if (location) {
@@ -187,7 +192,7 @@ export class ExecutionController {
 
       const onStopped = async () => {
         // Try to get current location from stack trace
-        let location: { file: string; line: number; column?: number } | undefined;
+        let location: StopLocation | undefined;
         try {
           // Wait a brief moment for state to settle after stopped event
           await new Promise(resolve => setTimeout(resolve, 10));
@@ -401,7 +406,7 @@ export class ExecutionController {
       const onStopped = async () => {
         stopEventSeen = true;
         // Try to get current location from stack trace
-        let location: { file: string; line: number; column?: number } | undefined;
+        let location: StopLocation | undefined;
         try {
           // Wait a brief moment for state to settle after stopped event
           await new Promise(resolve => setTimeout(resolve, 10));

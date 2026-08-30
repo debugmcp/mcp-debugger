@@ -18,7 +18,8 @@ export type {
   DebugResultData,
   StepResultData,
   PauseResultData,
-  AttachResultData
+  AttachResultData,
+  StopLocation
 } from './session-manager-core.js';
 
 export type { EvaluateResult } from './session-manager-operations.js';

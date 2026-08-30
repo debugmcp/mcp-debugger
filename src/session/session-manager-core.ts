@@ -7,6 +7,7 @@ import {
   SessionState, SessionLifecycleState, DebugLanguage, DebugSessionInfo, mapLegacyState,
   AdapterPolicy, SessionOutputEntry, redactSecretsInString
 } from '@debugmcp/shared';
+import type { StackFrame } from '@debugmcp/shared';
 import { isRedactionEnabled } from '../utils/redaction-mode.js';
 import { ValidationResultCache } from '../utils/language-availability.js';
 import { SessionStore, ManagedSession } from './session-store.js';
@@ -46,10 +47,6 @@ export interface CustomLaunchRequestArguments extends DebugProtocol.LaunchReques
  * fields every reader actually touches — `message`, `warning`, and the proxy
  * failure pointers — is what lets the server handlers read them directly
  * instead of casting.
- *
- * Written as a `type`, not an `interface`, on purpose: only a type alias gets
- * the implicit index signature that makes a `ProxyFailureDiagnostics` value
- * assignable here.
  */
 export type DebugResultData = ProxyFailureDiagnostics & {
   /** Human-readable status for the tool result. */
@@ -65,10 +62,20 @@ export type DebugResultData = ProxyFailureDiagnostics & {
   [key: string]: unknown;
 };
 
+/**
+ * Where the debuggee is stopped, as a result payload reports it.
+ *
+ * Always derived from the top `StackFrame`, so it is defined as that frame's
+ * location fields rather than restated: `column` is optional on `StackFrame`
+ * too, so the wire shape is exactly what the five hand-copied literals this
+ * replaces produced.
+ */
+export type StopLocation = Pick<StackFrame, 'file' | 'line' | 'column'>;
+
 /** What a step operation returns: `message` is always set, plus where it landed. */
 export type StepResultData = DebugResultData & {
   message: string;
-  location?: { file: string; line: number; column?: number };
+  location?: StopLocation;
 };
 
 /**
@@ -80,7 +87,7 @@ export type PauseResultData = DebugResultData & {
   message: string;
   stopReason?: string;
   rawStopReason?: string;
-  location?: { file: string; line: number; column?: number };
+  location?: StopLocation;
 };
 
 /** What a successful attach returns on top of the common fields. */
