@@ -398,7 +398,7 @@ describe('ProxyLauncher.start', () => {
     const h = makeHarness({ adapter, proxyManager });
     const session = makeSession();
 
-    const launchConfig = await h.launcher.start(session, SCRIPT, ['--flag']);
+    const launchConfig = await h.launcher.start(session, { scriptPath: SCRIPT, scriptArgs: ['--flag'] });
 
     // The resolved path is written into the adapter config BEFORE the command
     // is built from it — the step a direct buildAdapterLaunchPlan call skips.

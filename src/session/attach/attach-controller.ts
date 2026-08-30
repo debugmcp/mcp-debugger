@@ -150,15 +150,14 @@ export class AttachController {
       // user's value (possibly undefined) for read-back symmetry.
       session.effectiveBreakOnExceptions = breakOnExceptions;
 
-      const attachConfigData = await this.proxyLauncher.start(
-        session,
-        placeholderPath,
-        undefined,
-        attachLaunchArgs as Partial<CustomLaunchRequestArguments>,
-        false,
-        adapterConfig,  // merged over the attach config before transformAttachConfig (issue #336)
-        breakOnExceptions
-      );
+      const attachConfigData = await this.proxyLauncher.start(session, {
+        scriptPath: placeholderPath,
+        dapLaunchArgs: attachLaunchArgs as Partial<CustomLaunchRequestArguments>,
+        dryRunSpawn: false,
+        // merged over the attach config before transformAttachConfig (issue #336)
+        adapterLaunchConfig: adapterConfig,
+        breakOnExceptions,
+      });
 
       // Perform language-specific handshake if required, mirroring
       // startDebugging. For js-debug the whole DAP sequence — initialize,

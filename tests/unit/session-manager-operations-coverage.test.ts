@@ -23,44 +23,7 @@ import {
 } from '../../src/errors/debug-errors';
 import { createEnvironmentMock } from '../test-utils/mocks/environment';
 import { FakeDebugAdapter } from '../test-utils/fakes/fake-debug-adapter';
-import type { ExecutionController } from '../../src/session/execution/execution-controller';
-import type { DebugLauncher } from '../../src/session/launch/debug-launcher';
-import type { ManagedSession } from '../../src/session/session-store';
-import type { ExceptionBreakMode, LanguageSpecificLaunchConfig } from '@debugmcp/shared';
-
-/**
- * `ProxyLauncher.start` as these tests drive it. Two loosenings that the
- * pre-extraction `(ops as any)` cast hid, made explicit: spies resolve `undefined`
- * for a launch config nothing downstream reads, and `dapLaunchArgs` takes the
- * attach shape (`request`/`host`/`port`) that production passes through an
- * `as Partial<CustomLaunchRequestArguments>` cast of its own.
- */
-interface ProxyLauncherView {
-  start(
-    session: ManagedSession,
-    scriptPath: string,
-    scriptArgs?: string[],
-    dapLaunchArgs?: Record<string, unknown>,
-    dryRunSpawn?: boolean,
-    adapterLaunchConfig?: Record<string, unknown>,
-    breakOnExceptions?: ExceptionBreakMode
-  ): Promise<LanguageSpecificLaunchConfig | void>;
-}
-
-/** The collaborators these tests reach into. */
-interface OperationsInternals {
-  execution: ExecutionController;
-  proxyLauncher: ProxyLauncherView;
-  launcher: DebugLauncher;
-}
-
-/**
- * The collaborators the operations facade delegates to. They are protected
- * fields, so reaching them from a test needs the usual cast.
- */
-function internals(ops: SessionManagerOperations): OperationsInternals {
-  return ops as unknown as OperationsInternals;
-}
+import { internals } from '../test-utils/helpers/operations-internals';
 
 describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () => {
   let operations: SessionManagerOperations;
@@ -179,7 +142,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockDependencies.fileSystem.ensureDir.mockRejectedValueOnce(new Error('disk full'));
 
       await expect(
-        internals(operations).proxyLauncher.start(mockSession, 'script.py')
+        internals(operations).proxyLauncher.start(mockSession, { scriptPath: 'script.py' })
       ).rejects.toThrow('Failed to create session log directory: disk full');
     });
 
@@ -193,7 +156,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
       await expect(
-        internals(operations).proxyLauncher.start(mockSession, 'script.py')
+        internals(operations).proxyLauncher.start(mockSession, { scriptPath: 'script.py' })
       ).rejects.toBeInstanceOf(PythonNotFoundError);
       // The adapter never reached a ProxyManager, so its registry slot must
       // be released here (issue #552 review).
@@ -211,7 +174,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
       await expect(
-        internals(operations).proxyLauncher.start(mockSession, 'main.cpp')
+        internals(operations).proxyLauncher.start(mockSession, { scriptPath: 'main.cpp' })
       ).rejects.toThrow('C/C++ compile failed: boom');
       expect(adapterStub.dispose).toHaveBeenCalledTimes(1);
       expect(adapterStub.resolveExecutablePath).not.toHaveBeenCalled();
@@ -238,7 +201,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       let capturedError: unknown;
       try {
-        await internals(operations).proxyLauncher.start(mockSession, 'msvc.exe');
+        await internals(operations).proxyLauncher.start(mockSession, { scriptPath: 'msvc.exe' });
       } catch (error) {
         capturedError = error;
       }
@@ -269,7 +232,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
       await expect(
-        internals(operations).proxyLauncher.start(mockSession, 'main.cpp')
+        internals(operations).proxyLauncher.start(mockSession, { scriptPath: 'main.cpp' })
       ).rejects.toThrow('C/C++ compile failed: syntax error');
       expect(mockSessionStore.update).toHaveBeenCalledWith(
         mockSession.id,
@@ -288,7 +251,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
 
       await expect(
-        internals(operations).proxyLauncher.start(mockSession, 'app.js')
+        internals(operations).proxyLauncher.start(mockSession, { scriptPath: 'app.js' })
       ).rejects.toBeInstanceOf(DebugSessionCreationError);
     });
 
@@ -320,13 +283,12 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         verified: false
       });
 
-      await internals(operations).proxyLauncher.start(
-        mockSession,
-        'script.py',
+      await internals(operations).proxyLauncher.start(mockSession, {
+        scriptPath: 'script.py',
         scriptArgs,
-        dapArgs,
-        false
-      );
+        dapLaunchArgs: dapArgs,
+        dryRunSpawn: false
+      });
 
       expect(mockDependencies.fileSystem.ensureDir).toHaveBeenCalled();
       expect(mockDependencies.networkManager.findFreePort).toHaveBeenCalled();
@@ -371,7 +333,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       let capturedError: unknown;
       try {
-        await internals(operations).proxyLauncher.start(mockSession, 'debug.exe');
+        await internals(operations).proxyLauncher.start(mockSession, { scriptPath: 'debug.exe' });
       } catch (error) {
         capturedError = error;
       }
@@ -2379,7 +2341,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       });
 
       expect(result.success).toBe(true);
-      const attachLaunchArgs = startSpy.mock.calls[0][3] as Record<string, unknown>;
+      const attachLaunchArgs = startSpy.mock.calls[0][1].dapLaunchArgs as Record<string, unknown>;
       expect(attachLaunchArgs).not.toHaveProperty('verifyTimeout');
       expect(attachLaunchArgs).toMatchObject({ request: 'attach', __attachMode: true, port: 5005 });
     });
