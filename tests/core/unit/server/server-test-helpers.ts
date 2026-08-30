@@ -104,6 +104,18 @@ export function createMockSessionManager(mockAdapterRegistry: any) {
     closeAllSessions: vi.fn(),
     setBreakpoint: vi.fn(),
     setFunctionBreakpoint: vi.fn(),
+    // The session layer owns function-breakpoint names (issue #559). The
+    // defaults are the no-policy answers: the name resolves to itself, and
+    // nothing matches it.
+    resolveFunctionBreakpointName: vi.fn((_sessionId: string, requestedName: string) => ({
+      requestedName,
+      effectiveName: requestedName
+    })),
+    removeFunctionBreakpointsByName: vi.fn(async (_sessionId: string, requestedName: string) => ({
+      removed: [],
+      functionName: requestedName,
+      requestedName
+    })),
     listFunctionBreakpoints: vi.fn().mockReturnValue([]),
     listBreakpoints: vi.fn().mockReturnValue([]),
     removeBreakpoint: vi.fn().mockResolvedValue({ removed: undefined }),

@@ -242,11 +242,17 @@ describe('set_breakpoint function-name normalization (issue #467)', () => {
   }
 
   it('rewrites a policy-certain never-binding name and says so', async () => {
+    // The rewrite itself is the session layer's (issue #559); what the
+    // handler owes is the effective name on the wire and the note in the
+    // warning.
     mockSessionManager.getSessionPolicy.mockReturnValue({
       name: 'go',
-      supportsFunctionBreakpoints: true,
-      normalizeFunctionBreakpointName: (name: string) =>
-        name === 'main' ? { name: 'main.main', note: 'Auto-qualified to main.main' } : undefined
+      supportsFunctionBreakpoints: true
+    });
+    mockSessionManager.resolveFunctionBreakpointName.mockReturnValue({
+      requestedName: 'main',
+      effectiveName: 'main.main',
+      normalized: { name: 'main.main', note: 'Auto-qualified to main.main' }
     });
     mockSessionManager.setFunctionBreakpoint.mockResolvedValue({
       breakpoint: { id: 'fbp-2', functionName: 'main.main', verified: false }
@@ -261,15 +267,20 @@ describe('set_breakpoint function-name normalization (issue #467)', () => {
     expect(content.functionName).toBe('main.main');
     expect(content.requestedName).toBe('main');
     expect(content.warning).toContain('Auto-qualified');
+    expect(mockSessionManager.resolveFunctionBreakpointName).toHaveBeenCalledWith(
+      'test-session', 'main'
+    );
   });
 
   it('keeps the advisory hint for names without a certain rewrite', async () => {
     mockSessionManager.getSessionPolicy.mockReturnValue({
       name: 'go',
-      supportsFunctionBreakpoints: true,
-      normalizeFunctionBreakpointName: () => undefined,
-      functionBreakpointNameHint: (name: string) =>
-        name.includes('.') ? undefined : `bare '${name}' may never bind`
+      supportsFunctionBreakpoints: true
+    });
+    mockSessionManager.resolveFunctionBreakpointName.mockReturnValue({
+      requestedName: 'helper',
+      effectiveName: 'helper',
+      hint: "bare 'helper' may never bind"
     });
     mockSessionManager.setFunctionBreakpoint.mockResolvedValue({
       breakpoint: { id: 'fbp-3', functionName: 'helper', verified: false }

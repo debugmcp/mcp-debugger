@@ -74,11 +74,6 @@ export interface ToolContext {
   // ---- breakpoint gating ----
   validateLogPointSupport(sessionId: string): { warning?: string };
   validateFunctionBreakpointSupport(sessionId: string): { warning?: string };
-  getFunctionBreakpointNameHint(sessionId: string, functionName: string): string | undefined;
-  normalizeFunctionBreakpointName(
-    sessionId: string,
-    functionName: string
-  ): { name: string; note: string } | undefined;
 
   // ---- public facade (unchanged signatures) ----
   createDebugSession(params: { language: DebugLanguage; name?: string; executablePath?: string; }): Promise<DebugSessionInfo>;

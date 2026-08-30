@@ -191,35 +191,6 @@ export class DebugMcpServer implements ToolContext {
     };
   }
 
-  /**
-   * Per-adapter function-breakpoint name advisory (issues #303/#308).
-   * Swallows policy-lookup failures — a hint must never break the set path.
-   * @internal ToolContext service.
-   */
-  public getFunctionBreakpointNameHint(sessionId: string, functionName: string): string | undefined {
-    try {
-      return this.sessionManager.getSessionPolicy(sessionId).functionBreakpointNameHint?.(functionName);
-    } catch {
-      return undefined;
-    }
-  }
-
-  /**
-   * Policy-certain function-breakpoint name rewrite (issue #467). Swallows
-   * policy-lookup failures — normalization must never break the set path.
-   * @internal ToolContext service.
-   */
-  public normalizeFunctionBreakpointName(
-    sessionId: string,
-    functionName: string
-  ): { name: string; note: string } | undefined {
-    try {
-      return this.sessionManager.getSessionPolicy(sessionId).normalizeFunctionBreakpointName?.(functionName);
-    } catch {
-      return undefined;
-    }
-  }
-
   // Core business logic methods — delegated to by the MCP tool dispatch handler
   // (CallToolRequestSchema); public so they are also accessible for testing/external use
   public async createDebugSession(params: { language: DebugLanguage; name?: string; executablePath?: string; }): Promise<DebugSessionInfo> {

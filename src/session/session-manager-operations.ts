@@ -13,7 +13,11 @@ import {
 } from '@debugmcp/shared';
 import { SessionManagerData } from './session-manager-data.js';
 import type { OperationsContext } from './operations-context.js';
-import { BreakpointController } from './breakpoints/breakpoint-controller.js';
+import {
+  BreakpointController,
+  type FunctionBreakpointNameResolution,
+  type FunctionBreakpointRemoval
+} from './breakpoints/breakpoint-controller.js';
 import { ExecutionController } from './execution/execution-controller.js';
 import {
   ExpressionEvaluator,
@@ -32,6 +36,12 @@ import { ProxyLauncher } from './launch/proxy-launcher.js';
 import { DebugLauncher } from './launch/debug-launcher.js';
 import { AttachController } from './attach/attach-controller.js';
 import { CustomLaunchRequestArguments, DebugResult } from './session-manager-core.js';
+
+/** Result types for function-breakpoint name resolution and by-name removal (issue #559). */
+export type {
+  FunctionBreakpointNameResolution,
+  FunctionBreakpointRemoval
+} from './breakpoints/breakpoint-controller.js';
 
 /** Result type for evaluate expression operations. */
 export type { EvaluateResult } from './inspection/expression-evaluator.js';
@@ -206,6 +216,29 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     }
   ): Promise<{ breakpoint: Breakpoint; warning?: string }> {
     return this.breakpoints.setBreakpoint(sessionId, bp);
+  }
+
+  /**
+   * Resolve a function-breakpoint name through the session's adapter policy
+   * (issue #559) — the shared answer behind set_breakpoint and
+   * remove_breakpoint.
+   */
+  resolveFunctionBreakpointName(
+    sessionId: string,
+    requestedName: string
+  ): FunctionBreakpointNameResolution {
+    return this.breakpoints.resolveFunctionBreakpointName(sessionId, requestedName);
+  }
+
+  /**
+   * Remove every function breakpoint a name addresses, in one DAP re-send
+   * (issue #559).
+   */
+  async removeFunctionBreakpointsByName(
+    sessionId: string,
+    requestedName: string
+  ): Promise<FunctionBreakpointRemoval> {
+    return this.breakpoints.removeFunctionBreakpointsByName(sessionId, requestedName);
   }
 
   /**

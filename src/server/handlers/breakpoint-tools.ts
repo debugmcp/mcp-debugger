@@ -10,6 +10,7 @@ import {
   supportsExpectedContent,
   supportsStatementAnchors
 } from '../../utils/bp-addressing.js';
+import type { FunctionBreakpointRemoval } from '../../session/session-manager-operations.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { requireSessionId, type WithSessionId } from '../tool-validation.js';
 import { readLineContext } from './shared.js';
@@ -82,19 +83,14 @@ async function setFunctionBreakpointBranch(ctx: ToolContext, args: WithSessionId
 
   try {
     const fnGate = ctx.validateFunctionBreakpointSupport(args.sessionId);
-    // Policy-certain rewrite (issue #467): a name the adapter can
-    // never bind as given (go bare 'main') is corrected instead
-    // of stored as a permanently-dead breakpoint; the warning
-    // says the rewrite happened.
-    const normalized = ctx.normalizeFunctionBreakpointName(args.sessionId, args.function!);
-    const effectiveName = normalized?.name ?? args.function!;
-    // Per-adapter name advisory (issues #303/#308): warn at set
-    // time about names the adapter is known to mis-resolve
-    // (rust bare 'main' -> CRT entry) or never bind (go bare
-    // identifiers). Advisory only — the breakpoint is still set.
-    const nameHint = normalized
-      ? undefined
-      : ctx.getFunctionBreakpointNameHint(args.sessionId, effectiveName);
+    // The session layer owns the name (issue #559): the same resolution
+    // remove_breakpoint uses, so a policy-certain rewrite (issue #467 — a
+    // name the adapter can never bind as given, go bare 'main') is stored
+    // and removable under one name, and the per-adapter advisory (issues
+    // #303/#308 — rust bare 'main' -> CRT entry) rides along. Both are
+    // reported in the warning; neither blocks the request.
+    const { requestedName, effectiveName, normalized, hint: nameHint } =
+      ctx.sessionManager.resolveFunctionBreakpointName(args.sessionId, args.function!);
     const { breakpoint, warning: syncWarning } = await ctx.setFunctionBreakpoint(
       args.sessionId, effectiveName, args.condition
     );
@@ -113,7 +109,9 @@ async function setFunctionBreakpointBranch(ctx: ToolContext, args: WithSessionId
     return jsonResult({
       success: true,
       breakpointId: breakpoint.id,
-      ...(normalized ? { requestedName: args.function } : {}),
+      // Disclosed only when a policy rewrite changed the name (issue #550);
+      // an undefined value drops the key.
+      requestedName: normalized ? requestedName : undefined,
       functionName: breakpoint.functionName,
       condition: breakpoint.condition,
       verified: breakpoint.verified,
@@ -261,47 +259,24 @@ export const removeBreakpointTool: ToolHandler = async (ctx, args) => {
     // changed it (issue #550).
     let functionDisclosure: { functionName: string; requestedName?: string } | undefined;
     if (!args.breakpointId && args.function !== undefined) {
-      const requestedName = args.function;
-      // Use the same policy-certain rewrite as set_breakpoint so
-      // the name the caller supplied can remove the normalized
-      // record that was stored (issue #550). The literal name is
-      // matched too — a record stored un-rewritten (policy lookup
-      // failure, or set through another path) stays removable.
-      const normalized = ctx.normalizeFunctionBreakpointName(args.sessionId, requestedName);
-      const effectiveName = normalized?.name ?? requestedName;
+      // One session-layer call (issue #559): it resolves the name the way
+      // set_breakpoint does — so the name the caller supplied removes the
+      // normalized record that was stored (issue #550), and the literal name
+      // is matched too — deletes every match, and re-sends the surviving set
+      // ONCE (setFunctionBreakpoints is replace-all for the session).
+      const res = await ctx.sessionManager.removeFunctionBreakpointsByName(
+        args.sessionId,
+        args.function
+      );
+      if (res.removed.length === 0) {
+        return functionRemovalNotFoundResult(res);
+      }
+      removed = res.removed;
+      warning = res.warning;
       functionDisclosure = {
-        functionName: effectiveName,
-        ...(normalized ? { requestedName } : {})
+        functionName: res.functionName,
+        requestedName: res.normalized ? res.requestedName : undefined
       };
-      const matches = ctx.sessionManager
-        .listFunctionBreakpoints(args.sessionId)
-        .filter((bp) => bp.functionName === effectiveName || bp.functionName === requestedName);
-      removed = [];
-      const warnings: string[] = [];
-      for (const bp of matches) {
-        const res = await ctx.removeBreakpoint(args.sessionId, bp.id);
-        if (res.removed) removed.push(res.removed);
-        if (res.warning) warnings.push(res.warning);
-      }
-      if (removed.length === 0) {
-        // Same per-adapter name advisory set_breakpoint gives
-        // (issues #303/#308), so a bare Go name that never matched
-        // learns the package-qualified form it should use.
-        const nameHint = normalized
-          ? undefined
-          : ctx.getFunctionBreakpointNameHint(args.sessionId, effectiveName);
-        if (nameHint) warnings.push(nameHint);
-        return failureResult(
-          normalized
-            ? `No function breakpoint found for ${requestedName} (normalized to ${effectiveName})`
-            : `No function breakpoint found for ${requestedName}`,
-          {
-            ...functionDisclosure,
-            warning: warnings.length > 0 ? warnings.join('; ') : undefined
-          }
-        );
-      }
-      warning = warnings.length > 0 ? warnings.join('; ') : undefined;
     } else if (args.breakpointId) {
       const res = await ctx.removeBreakpoint(args.sessionId, args.breakpointId);
       removed = res.removed ? [res.removed] : [];
@@ -328,6 +303,27 @@ export const removeBreakpointTool: ToolHandler = async (ctx, args) => {
     return sessionErrorResultOrThrow(error, 'session-state');
   }
 };
+
+/**
+ * The not-found payload for a function-addressed removal. `functionName` is
+ * always the effective name and `requestedName` appears only when a policy
+ * rewrite changed it (issue #550), the same disclosure the success payload
+ * makes. `warning` carries the per-adapter name advisory set_breakpoint gives
+ * (issues #303/#308), so a bare Go name that never matched learns the
+ * package-qualified form it should use.
+ */
+function functionRemovalNotFoundResult(res: FunctionBreakpointRemoval): ToolResult {
+  return failureResult(
+    res.normalized
+      ? `No function breakpoint found for ${res.requestedName} (normalized to ${res.functionName})`
+      : `No function breakpoint found for ${res.functionName}`,
+    {
+      functionName: res.functionName,
+      requestedName: res.normalized ? res.requestedName : undefined,
+      warning: res.warning
+    }
+  );
+}
 
 export const clearBreakpointsTool: ToolHandler = async (ctx, args) => {
   requireSessionId(args);
