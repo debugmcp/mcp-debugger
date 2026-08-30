@@ -91,9 +91,7 @@ export type PauseResultData = DebugResultData & {
 };
 
 /** What a successful attach returns on top of the common fields. */
-export type AttachResultData = DebugResultData & {
-  attachConfig?: unknown;
-};
+export type AttachResultData = DebugResultData;
 
 export interface DebugResult<TData extends DebugResultData = DebugResultData> {
   success: boolean;
