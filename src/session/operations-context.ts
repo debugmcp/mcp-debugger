@@ -134,6 +134,27 @@ export type LaunchContext = Pick<
   | 'stopProxyPreservingSession'
 >;
 
+/**
+ * Attach-mode sessions: the attach gate (registry metadata), state and store
+ * updates, the verification tunables, the proxy-failure record (hence the
+ * filesystem), and both teardowns — session-preserving on failure, closeSession
+ * on detach-with-terminate.
+ */
+export type AttachContext = Pick<
+  OperationsContext,
+  | 'logger'
+  | 'fileSystem'
+  | 'adapterRegistry'
+  | 'getSession'
+  | 'updateSession'
+  | 'updateState'
+  | 'selectPolicy'
+  | 'stopProxyPreservingSession'
+  | 'cleanupProxyEventHandlers'
+  | 'closeSession'
+  | 'tunables'
+>;
+
 /** Anchor re-resolution reads the file from disk and narrates what moved. */
 export type AnchorContext = Pick<OperationsContext, 'logger' | 'fileSystem'>;
 
