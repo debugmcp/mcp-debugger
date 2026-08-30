@@ -22,6 +22,7 @@ import {
   withTimeoutHint
 } from '../dap-request-helpers.js';
 import type { EvaluateContext } from '../operations-context.js';
+import type { FrameAnchorResolver } from './frame-anchor-resolver.js';
 
 /**
  * Result type for evaluate expression operations
@@ -55,7 +56,10 @@ export function expressionNameForRedaction(expression: string): string {
 }
 
 export class ExpressionEvaluator {
-  constructor(private readonly ctx: EvaluateContext) {}
+  constructor(
+    private readonly ctx: EvaluateContext,
+    private readonly frameAnchorResolver: FrameAnchorResolver
+  ) {}
 
   /**
    * Evaluate an expression in the context of the current debug session.
@@ -118,42 +122,28 @@ export class ExpressionEvaluator {
       };
     }
 
-    // Handle frameId - get current frame from stack trace if not provided
+    // Resolve the same default anchor stack and locals use. An explicit
+    // frameId is authoritative and deliberately bypasses the resolver.
     if (frameId === undefined) {
       try {
-        const threadId = session.proxyManager.getCurrentThreadId();
-        if (typeof threadId !== 'number') {
-          this.ctx.logger.warn(
-            `[SM evaluateExpression ${sessionId}] No current thread ID to get stack trace`
-          );
-          return {
-            success: false,
-            error: 'Unable to find thread for evaluation. Ensure the debugger is paused at a breakpoint.',
-          };
-        }
-
         this.ctx.logger.info(
-          `[SM evaluateExpression ${sessionId}] No frameId provided, getting current frame from stack trace`
+          `[SM evaluateExpression ${sessionId}] No frameId provided; resolving the shared inspection anchor`
         );
-        const stackResponse = await session.proxyManager.sendDapRequest<DebugProtocol.StackTraceResponse>(
-          'stackTrace',
-          {
-            threadId,
-            startFrame: 0,
-            levels: 1, // We only need the first frame
-          }
-        );
-
-        if (stackResponse?.body?.stackFrames && stackResponse.body.stackFrames.length > 0) {
-          frameId = stackResponse.body.stackFrames[0].id;
+        const anchor = await this.frameAnchorResolver.resolve(sessionId);
+        if (anchor.frames.length > 0) {
+          frameId = anchor.frames[0].id;
           this.ctx.logger.info(
-            `[SM evaluateExpression ${sessionId}] Using current frame ID: ${frameId} from stack trace`
+            `[SM evaluateExpression ${sessionId}] Using shared anchor frame ID: ${frameId}`
           );
         } else {
-          this.ctx.logger.warn(`[SM evaluateExpression ${sessionId}] No stack frames available`);
+          this.ctx.logger.warn(
+            `[SM evaluateExpression ${sessionId}] No stack frame available: ${anchor.note ?? 'no detail'}`
+          );
           return {
             success: false,
-            error: 'No active stack frame. Ensure the debugger is paused at a breakpoint.',
+            error: anchor.note?.includes('No stopped thread')
+              ? 'Unable to find thread for evaluation. Ensure the debugger is paused at a breakpoint.'
+              : 'No active stack frame. Ensure the debugger is paused at a breakpoint.',
           };
         }
       } catch (error) {

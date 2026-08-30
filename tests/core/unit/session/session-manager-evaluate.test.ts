@@ -89,6 +89,25 @@ describe('SessionManager.evaluateExpression default-frame resolution', () => {
     expect(evaluateArgs[0]).toMatchObject({ frameId: 99 });
   });
 
+  it('treats an explicit frameId as authoritative without resolving a stack', async () => {
+    const { sessionManager, dependencies } = makeManager();
+    const session = await createRunningSession(sessionManager, dependencies);
+    const commands: string[] = [];
+    dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: unknown) => {
+      commands.push(command);
+      if (command === 'evaluate') {
+        expect(args).toMatchObject({ expression: 'value', frameId: 314 });
+        return { body: { result: 'ok', type: 'string', variablesReference: 0 } };
+      }
+      return { success: true, body: {} };
+    });
+
+    const result = await sessionManager.evaluateExpression(session.id, 'value', 314);
+
+    expect(result.success).toBe(true);
+    expect(commands).toEqual(['evaluate']);
+  });
+
   it('fails cleanly when the paused thread reports no stack frames', async () => {
     const { sessionManager, dependencies } = makeManager();
     const session = await createRunningSession(sessionManager, dependencies);

@@ -165,7 +165,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
   protected readonly breakpoints = new BreakpointController(this.opsContext);
   protected readonly pauseCoordinator = new PauseCoordinator(this.opsContext);
   protected readonly execution = new ExecutionController(this.opsContext, this.pauseCoordinator);
-  protected readonly evaluator = new ExpressionEvaluator(this.opsContext);
+  protected readonly evaluator = new ExpressionEvaluator(this.opsContext, this.frameAnchorResolver);
   protected readonly hotSwap = new RedefineClassesController(this.opsContext, this.breakpoints);
   protected readonly mirror = new MirrorController(this.opsContext);
   protected readonly proxyLauncher = new ProxyLauncher(this.opsContext);
