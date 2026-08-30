@@ -41,7 +41,7 @@ export async function handleExposeSession(ctx: ToolContext, sessionId: string): 
     });
   } catch (error) {
     ctx.logger.error('Failed to expose session', { error });
-    return sessionErrorToResult(error, 'typed') ??
+    return sessionErrorToResult(error) ??
       rethrowAsMcpError(error, 'Failed to expose session');
   }
 }
@@ -69,7 +69,7 @@ export async function handleUnexposeSession(ctx: ToolContext, sessionId: string)
     });
   } catch (error) {
     ctx.logger.error('Failed to unexpose session', { error });
-    return sessionErrorToResult(error, 'typed') ??
+    return sessionErrorToResult(error) ??
       rethrowAsMcpError(error, 'Failed to unexpose session');
   }
 }

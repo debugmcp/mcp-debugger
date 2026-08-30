@@ -1160,7 +1160,7 @@ Tools can return errors in two formats:
 - `-32603`: Internal error (feature not implemented, unexpected failures)
 - `-32602`: Invalid parameters (e.g., missing `sessionId`)
 
-Session-lifecycle failures (unknown/terminated session, proxy not running) are application-level failures: they return `{ "success": false, "error": "..." }` rather than an MCP transport error.
+Session-lifecycle failures (unknown/terminated session, proxy not running) are application-level failures: they return `{ "success": false, "error": "..." }` rather than an MCP transport error. Classification is based on typed lifecycle errors, never on words in an error message; an invalid path, expression, or breakpoint containing text such as `closed` or `not found` remains its original MCP error.
 
 ### MCP Error Response Format
 ```json

@@ -11,7 +11,7 @@ import { getVariableAccessMode, requiresExplicitNames } from '../utils/variable-
 import type { ToolArguments } from './tool-arguments.js';
 import type { ToolDefinition } from './tool-schemas.js';
 
-/** Arguments whose sessionId has been established by requireSessionId. */
+/** Arguments whose sessionId has been established at dispatch or by requireSessionId. */
 export type WithSessionId = ToolArguments & { sessionId: string };
 
 /**
@@ -40,17 +40,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * The up-front sessionId guard: 13 guards covering the 15 tools that have one.
- * The message came in two variants ('Missing required sessionId' and
- * 'Missing required parameter: sessionId') depending on which tool you hit;
- * they are unified here. Multi-parameter guards keep their own
- * 'Missing required parameters' message.
- *
- * Not every tool has this guard: pause_execution, evaluate_expression,
- * get_source_context, get_local_variables, get_output and redefine_classes
- * cast their arguments instead, so a missing sessionId surfaces further down
- * (as 'Session not found: undefined'). Pre-existing; guarding them changes
- * their error shape and is a follow-up.
+ * Defensive narrowing for handlers that are also invoked directly by unit
+ * tests. Production dispatch has already enforced the schema's required
+ * fields through assertRequiredToolArguments.
  */
 export function requireSessionId(args: ToolArguments): asserts args is WithSessionId {
   if (!args.sessionId) {

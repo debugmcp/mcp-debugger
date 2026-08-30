@@ -47,14 +47,7 @@ export const startDebuggingTool: ToolHandler = async (ctx, args) => {
     }
     return jsonResult(responsePayload);
   } catch (error) {
-    // The 'session-state' sniff reads the McpError MESSAGE: terminated,
-    // closed, or ('not found' AND 'Session') becomes {success: false};
-    // everything else is re-thrown. Being a message sniff it also catches
-    // errors that merely echo user text -- a script path containing
-    // "Sessions" makes "Script file not found: ..." match -- so it is wider
-    // than "session-lifecycle failures only". Preserved verbatim from before
-    // the extraction; classifying by error code instead is a follow-up.
-    return sessionErrorResultOrThrow(error, 'session-state', { state: 'stopped' });
+    return sessionErrorResultOrThrow(error, { state: 'stopped' });
   }
 };
 
@@ -84,7 +77,7 @@ export const restartDebuggingTool: ToolHandler = async (ctx, args) => {
     }
     return jsonResult(responsePayload);
   } catch (error) {
-    return sessionErrorResultOrThrow(error, 'session-state');
+    return sessionErrorResultOrThrow(error);
   }
 };
 
@@ -135,8 +128,7 @@ export const attachToProcessTool: ToolHandler = async (ctx, args) => {
 
     return jsonResult(responsePayload);
   } catch (error) {
-    // Handle session state errors specifically
-    return sessionErrorResultOrThrow(error, 'session-state', { state: 'stopped' });
+    return sessionErrorResultOrThrow(error, { state: 'stopped' });
   }
 };
 
@@ -168,8 +160,7 @@ export const detachFromProcessTool: ToolHandler = async (ctx, args) => {
 
     return jsonResult(responsePayload);
   } catch (error) {
-    // Handle session state errors specifically
-    return sessionErrorResultOrThrow(error, 'session-state', { state: 'stopped' });
+    return sessionErrorResultOrThrow(error, { state: 'stopped' });
   }
 };
 

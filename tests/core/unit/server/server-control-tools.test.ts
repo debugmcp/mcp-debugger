@@ -312,6 +312,27 @@ describe('Server Control Tools Tests', () => {
       expect(mockSessionManager.startDebugging).not.toHaveBeenCalled();
     });
 
+    it('does not turn user text containing "closed" into a session failure payload', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: 'ACTIVE'
+      });
+
+      await expect(callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'start_debugging',
+          arguments: {
+            sessionId: 'test-session',
+            scriptPath: '/path/to/test.py',
+            breakOnExceptions: 'closed'
+          }
+        }
+      })).rejects.toThrow(/breakOnExceptions must be one of/);
+
+      expect(mockSessionManager.startDebugging).not.toHaveBeenCalled();
+    });
+
     it('honors breakOnExceptions nested inside dapLaunchArgs with a warning (#305)', async () => {
       mockSessionManager.getSession.mockReturnValue({
         id: 'test-session',
