@@ -52,6 +52,14 @@ export interface ProxyFailureLogDeps {
 export type ProxyFailureOperation = 'startDebugging' | 'attachToProcess';
 
 /**
+ * What `failProxySetup` needs on top of the log deps: the facade's
+ * session-preserving proxy teardown.
+ */
+export interface ProxySetupFailureDeps extends ProxyFailureLogDeps {
+  stopProxyPreservingSession(session: ManagedSession): Promise<void>;
+}
+
+/**
  * Pointers to proxy initialization diagnostics for a failed launch/attach
  * (issue #493 / #551): which init stage stalled (from the timeout error) and
  * where the proxy log for the session's current run lives.
@@ -229,4 +237,31 @@ export async function logProxyFailure(
   logSafely(deps.logger, header, errorDetails);
 
   return diagnostics;
+}
+
+/**
+ * The shared failure path for a launch or attach that died once the proxy may
+ * already exist: tear the proxy down, then log the failure and hand back the
+ * pointers for the tool result.
+ *
+ * Teardown is the session-preserving one for BOTH operations — listeners
+ * removed, the mirror record cleared with the worker that hosted it, a stop()
+ * that fails logged rather than thrown, and a teardown already in flight from
+ * a terminal event awaited. Launch used to do a bare `proxyManager.stop()`
+ * here, which left its listeners attached and let a failing stop replace the
+ * launch error with a rejection out of start_debugging.
+ *
+ * The record is written after the teardown: the proxy log is complete by then,
+ * and the teardown touches nothing the record reads (logDir and the error's
+ * initProgress survive it), so ordering it first can never keep it from
+ * running.
+ */
+export async function failProxySetup(
+  deps: ProxySetupFailureDeps,
+  session: ManagedSession,
+  error: unknown,
+  operation: ProxyFailureOperation
+): Promise<ProxyFailureDiagnostics> {
+  await deps.stopProxyPreservingSession(session);
+  return logProxyFailure(deps, session, error, operation);
 }

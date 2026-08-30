@@ -1101,6 +1101,40 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       );
     });
 
+    it('tears a failed launch down session-preservingly: listeners, mirror record, and a failing stop', async () => {
+      mockSession.proxyManager = undefined;
+      mockSession.exposure = { host: '127.0.0.1', port: 4711, token: 't' };
+      const failingProxy = {
+        ...mockProxyManager,
+        stop: vi.fn().mockRejectedValue(new Error('stop exploded')),
+        removeListener: vi.fn()
+      };
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
+        mockSession.proxyManager = failingProxy;
+        throw new Error('Timeout waiting for proxy initialization');
+      });
+
+      // The launch error, not the teardown's: a rejecting stop() used to
+      // escape this catch and turn the reported failure into a rejection.
+      const result = await operations.startDebugging('test-session', 'test.py');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Timeout waiting for proxy initialization');
+      expect(result.state).toBe(SessionState.ERROR);
+      expect(failingProxy.stop).toHaveBeenCalledTimes(1);
+      expect(mockSession.proxyManager).toBeUndefined();
+      // The mirror listener lived in the stopped worker (issue #217).
+      expect(mockSession.exposure).toBeUndefined();
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Error stopping proxy for session test-session'),
+        'stop exploded'
+      );
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Detailed error in startDebugging'),
+        expect.objectContaining({ message: 'Timeout waiting for proxy initialization' })
+      );
+    });
+
     it('records log read failure when tail cannot be captured', async () => {
       mockSession.logDir = '/tmp/session-logs';
       mockDependencies.fileSystem.pathExists.mockResolvedValueOnce(true);

@@ -19,7 +19,7 @@ import { ErrorMessages } from '../../utils/error-messages.js';
 import type { CustomLaunchRequestArguments, DebugResult } from '../session-manager-core.js';
 import type { AttachContext } from '../operations-context.js';
 import type { BreakpointController } from '../breakpoints/breakpoint-controller.js';
-import { logProxyFailure } from '../launch/proxy-failure-diagnostics.js';
+import { failProxySetup } from '../launch/proxy-failure-diagnostics.js';
 import type { ProxyLauncher } from '../launch/proxy-launcher.js';
 import { pauseAfterAttach, verifyAttachThreads } from './attach-verification.js';
 
@@ -327,23 +327,13 @@ export class AttachController {
       // Never leave a live proxy chain behind a failed attach — e.g.
       // ProxyManager.start()'s init timeout rejects after the worker was
       // spawned (issue #337). Idempotent with the verify-failure teardown
-      // above, which already nulled session.proxyManager.
-      await this.ctx.stopProxyPreservingSession(session);
+      // above, which already nulled session.proxyManager. Then surface the
+      // same structured diagnostics the launch path returns (issue #551) and
+      // log the same full failure record it logs, proxy-log tail included
+      // (issue #561) — an attach that dies during proxy initialization used
+      // to leave the adapter's own complaint unreadable.
+      const diagnosticData = await failProxySetup(this.ctx, session, error, 'attachToProcess');
       this.ctx.updateState(session, SessionState.ERROR);
-
-      // Surface the same structured diagnostics the launch path returns
-      // (issue #551) and log the same full failure record it logs, proxy-log
-      // tail included (issue #561) — an attach that dies during proxy
-      // initialization used to leave the adapter's own complaint unreadable.
-      // Teardown only clears the proxy handle; logDir and the error's
-      // initProgress survive it, so this reads after the teardown and can
-      // never keep it from running.
-      const diagnosticData = await logProxyFailure(
-        { logger: this.ctx.logger, fileSystem: this.ctx.fileSystem },
-        session,
-        error,
-        'attachToProcess'
-      );
       const message = error instanceof Error ? error.message : String(error);
       return {
         success: false,

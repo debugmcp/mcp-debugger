@@ -28,7 +28,7 @@ import {
   buildLogpointDowngradeLaunchWarning,
   buildUnboundBreakpointExitWarning
 } from '../breakpoints/launch-warnings.js';
-import { logProxyFailure } from './proxy-failure-diagnostics.js';
+import { failProxySetup, logProxyFailure } from './proxy-failure-diagnostics.js';
 import { waitForLaunchReadiness } from './launch-readiness.js';
 import type { ProxyLauncher } from './proxy-launcher.js';
 
@@ -416,12 +416,7 @@ export class DebugLauncher {
         },
       };
     } catch (error) {
-      const diagnosticData = await logProxyFailure(
-        { logger: this.ctx.logger, fileSystem: this.ctx.fileSystem },
-        session,
-        error,
-        'startDebugging'
-      );
+      const diagnosticData = await failProxySetup(this.ctx, session, error, 'startDebugging');
 
       const errorMessage = error instanceof Error ? error.message : String(error);
 
@@ -438,11 +433,6 @@ export class DebugLauncher {
         });
       } else {
         this.ctx.updateState(session, SessionState.ERROR);
-      }
-
-      if (session.proxyManager) {
-        await session.proxyManager.stop();
-        session.proxyManager = undefined;
       }
 
       // Normalize error identity for callers/tests
