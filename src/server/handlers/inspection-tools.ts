@@ -51,6 +51,9 @@ export const getVariablesTool: ToolHandler = async (ctx, args) => {
 export const getStackTraceTool: ToolHandler = async (ctx, args) => {
   requireSessionId(args);
 
+  const failureDiagnostics = () =>
+    ctx.sessionManager.getSession(args.sessionId)?.failureDiagnostics;
+
   try {
     // Default to false for cleaner output
     const includeInternals = args.includeInternals ?? false;
@@ -63,7 +66,10 @@ export const getStackTraceTool: ToolHandler = async (ctx, args) => {
       ...(typeof stackTrace.threadId === 'number' ? { threadId: stackTrace.threadId } : {}),
       includeInternals,
       stopReason: lastStop?.reason,
-      lastStop
+      lastStop,
+      ...(stackTrace.frames.length === 0 && failureDiagnostics()
+        ? { diagnostics: failureDiagnostics() }
+        : {})
     };
     // Anything the result needs explaining (not paused, stack came
     // from a different thread, all threads frameless) plus the
@@ -85,13 +91,17 @@ export const getStackTraceTool: ToolHandler = async (ctx, args) => {
   } catch (error) {
     const sessionResult = sessionErrorToResult(error);
     if (sessionResult) {
-      return sessionResult;
+      const diagnostics = failureDiagnostics();
+      return diagnostics
+        ? sessionErrorToResult(error, { diagnostics })!
+        : sessionResult;
     }
     if (error instanceof Error && !(error instanceof McpError)) {
       // DAP-level failures (e.g. "Child session not ready ...")
       // must surface as errors, not as an empty-but-successful
       // stack trace (issue #124).
-      return failureResult(error.message);
+      const diagnostics = failureDiagnostics();
+      return failureResult(error.message, diagnostics ? { diagnostics } : undefined);
     }
     // Re-throw unexpected errors
     throw error;

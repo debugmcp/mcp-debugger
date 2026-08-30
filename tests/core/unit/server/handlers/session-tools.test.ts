@@ -32,7 +32,8 @@ describe('session tool handlers', () => {
         language: 'python',
         state: 'active',
         createdAt: now,
-        updatedAt: now
+        updatedAt: now,
+        diagnostics: { proxyLogPath: '/logs/proxy-session-1.log' }
       }]);
 
       const result = await handleListDebugSessions(ctx);
@@ -44,6 +45,9 @@ describe('session tool handlers', () => {
         id: 'session-1',
         name: 'Test Session',
         language: 'python'
+      });
+      expect(payload.sessions[0].diagnostics).toEqual({
+        proxyLogPath: '/logs/proxy-session-1.log'
       });
     });
   });

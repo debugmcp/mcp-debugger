@@ -201,6 +201,7 @@ describe('Server Inspection Tools Tests', () => {
     it('echoes the inspected thread and frameless-thread note (issue #553)', async () => {
       const mockSession = {
         lastStop: { reason: 'pause', threadId: 1 },
+        failureDiagnostics: { proxyLogPath: '/logs/proxy-test-session.log' },
         proxyManager: {
           getCurrentThreadId: vi.fn().mockReturnValue(1),
           setCurrentThreadId: vi.fn()
@@ -229,6 +230,7 @@ describe('Server Inspection Tools Tests', () => {
       expect(content.threadId).toBe(4);
       expect(content.lastStop.threadId).toBe(1);
       expect(content.note).toMatch(/Signal Dispatcher/);
+      expect(content.diagnostics).toEqual({ proxyLogPath: '/logs/proxy-test-session.log' });
       expect(mockSessionManager.getStackTraceDetailed).toHaveBeenCalledWith(
         'test-session', 4, false
       );
@@ -297,7 +299,10 @@ describe('Server Inspection Tools Tests', () => {
     });
 
     it('should handle missing proxy manager', async () => {
-      const mockSession = { proxyManager: null };
+      const mockSession = {
+        proxyManager: null,
+        failureDiagnostics: { proxyLogPath: '/logs/proxy-test-session.log' }
+      };
       mockSessionManager.getSession.mockReturnValue(mockSession);
       
       const result = await callToolHandler({
@@ -312,10 +317,12 @@ describe('Server Inspection Tools Tests', () => {
       const content = JSON.parse(result.content[0].text);
       expect(content.success).toBe(false);
       expect(content.error).toContain('no active proxy for session test-session');
+      expect(content.diagnostics).toEqual({ proxyLogPath: '/logs/proxy-test-session.log' });
     });
 
     it('should handle missing thread ID', async () => {
       const mockSession = {
+        failureDiagnostics: { proxyLogPath: '/logs/proxy-test-session.log' },
         proxyManager: {
           getCurrentThreadId: vi.fn().mockReturnValue(null)
         }
@@ -339,6 +346,7 @@ describe('Server Inspection Tools Tests', () => {
 
     it('should surface SessionManager errors as a truthful tool-level failure', async () => {
       const mockSession = {
+        failureDiagnostics: { proxyLogPath: '/logs/proxy-test-session.log' },
         proxyManager: {
           getCurrentThreadId: vi.fn().mockReturnValue(1)
         }
@@ -360,6 +368,7 @@ describe('Server Inspection Tools Tests', () => {
       const content = JSON.parse(result.content[0].text);
       expect(content.success).toBe(false);
       expect(content.error).toContain('Stack trace failed');
+      expect(content.diagnostics).toEqual({ proxyLogPath: '/logs/proxy-test-session.log' });
     });
   });
 

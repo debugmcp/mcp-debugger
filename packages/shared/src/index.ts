@@ -152,6 +152,7 @@ export type {
   SessionStopExceptionInfo,
   ExceptionBreakMode,
   SessionOutputEntry,
+  SessionFailureDiagnostics,
 
   // Debug info types
   Variable,

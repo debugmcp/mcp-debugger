@@ -108,6 +108,8 @@ Lists all active debugging sessions.
 - `"stopped"`: Session stopped (program terminated)
 - `"error"`: Session encountered an error
 
+Errored sessions include optional `diagnostics` with the current launch attempt's `proxyLogPath`. The record is retained for proxy initialization failures and for proxy/adapter deaths after initialization, and is cleared when a new launch or attach attempt begins.
+
 ---
 
 ### close_debug_session
@@ -586,6 +588,7 @@ Gets the current call stack.
 - The filtered stack is never empty when the adapter reported frames: if *every* frame is internal (e.g. a goroutine paused inside the Go runtime), the top internal frame is kept so `get_scopes`/`evaluate_expression` still have a valid `frameId`, and the `note` says so.
 - When an explicit thread reports no frames, the response remains anchored to that thread and its `note` suggests a frame-bearing alternative when one is available.
 - When the implicit stopped thread is frameless, stack, locals, and default evaluation share one resolver. It scans siblings, prefers a thread whose frames the language policy recognizes as user code over runtime-only stacks, adopts it once, and discloses the switch in `note`/`anchorNote`.
+- Failed or empty stack responses include the session's optional `diagnostics` when the proxy failed, matching `list_debug_sessions`.
 
 ---
 

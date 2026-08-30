@@ -16,7 +16,7 @@
  * Both paths now call `logProxyFailure`, which is why it lives here rather than
  * in either one.
  */
-import { sanitizeStderrTail } from '@debugmcp/shared';
+import { sanitizeStderrTail, type SessionFailureDiagnostics } from '@debugmcp/shared';
 import type { ManagedSession } from '../session-store.js';
 import type { IFileSystem, ILogger } from '../../interfaces/external-dependencies.js';
 import type { ProxyInitProgress } from '../../utils/error-messages.js';
@@ -30,7 +30,7 @@ const PROXY_LOG_TAIL_LINES = 80;
 export const PROXY_LOG_TAIL_MAX_BYTES = 64 * 1024;
 
   /** The pointers a failed launch/attach returns to the caller (issue #493 / #551). */
-  export interface ProxyFailureDiagnostics {
+  export interface ProxyFailureDiagnostics extends SessionFailureDiagnostics {
     initProgress?: ProxyInitProgress;
     proxyLogPath?: string;
   }
@@ -45,7 +45,7 @@ export interface ProxyFailureLogDeps {
 }
 
 /** The two operations that can fail this way, named as they appear in the log. */
-export type ProxyFailureOperation = 'startDebugging' | 'attachToProcess';
+export type ProxyFailureOperation = 'startDebugging' | 'attachToProcess' | 'proxyExit';
 
 /**
  * What `failProxySetup` needs on top of the log deps: the facade's

@@ -168,6 +168,9 @@ export async function handleListDebugSessions(ctx: ToolContext): Promise<ToolRes
       if (session.exitCode !== undefined) {
           mappedSession.exitCode = session.exitCode;
       }
+      if (session.diagnostics) {
+          mappedSession.diagnostics = session.diagnostics;
+      }
       if (session.exposure) {
           // Mirror endpoint host/port; the token never leaves expose_session.
           mappedSession.exposure = session.exposure;
