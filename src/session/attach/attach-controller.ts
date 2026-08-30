@@ -48,7 +48,7 @@ export class AttachController {
       breakOnExceptions?: ExceptionBreakMode;
       adapterConfig?: Record<string, unknown>;
     }
-  ): Promise<DebugResult> {
+  ): Promise<DebugResult<AttachResultData>> {
     const session = this.ctx.getSession(sessionId);
     this.ctx.logger.info(
       `[SessionManager] Attempting to attach to process for session ${sessionId}`,

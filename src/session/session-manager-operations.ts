@@ -36,6 +36,7 @@ import { ProxyLauncher } from './launch/proxy-launcher.js';
 import { DebugLauncher } from './launch/debug-launcher.js';
 import { AttachController } from './attach/attach-controller.js';
 import {
+  AttachResultData,
   CustomLaunchRequestArguments,
   DebugResult,
   PauseResultData,
@@ -353,7 +354,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       breakOnExceptions?: ExceptionBreakMode;
       adapterConfig?: Record<string, unknown>;
     }
-  ): Promise<DebugResult> {
+  ): Promise<DebugResult<AttachResultData>> {
     return this.attach.attachToProcess(sessionId, attachConfig);
   }
 
