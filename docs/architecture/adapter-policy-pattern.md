@@ -65,7 +65,7 @@ export interface AdapterPolicy {
   // === Command queueing ===
   requiresCommandQueueing(): boolean;
   shouldQueueCommand(command: string, state: AdapterSpecificState): CommandHandling;
-  processQueuedCommands?(commands: unknown[], state: AdapterSpecificState): unknown[];
+  processQueuedCommands?<T extends QueuedDapCommand>(commands: T[], state: AdapterSpecificState): T[];
 
   // === State management ===
   createInitialState(): AdapterSpecificState;
@@ -86,7 +86,7 @@ export interface AdapterPolicy {
   isInternalFrame?(frame: StackFrame): boolean;
 
   // === Variable extraction (optional) ===
-  extractLocalVariables?(stackFrames, scopes, variables, includeSpecial?): Variable[];
+  extractLocalVariables?(stackFrames, scopes, variables, includeSpecial?): LocalVariableExtraction;
   getLocalScopeName?(): string | string[];
 
   // === Session readiness (optional) ===
@@ -96,7 +96,7 @@ export interface AdapterPolicy {
   isNonFileSourceIdentifier?(sourceIdentifier: string): boolean;
 
   // === Language-specific handshake (optional) ===
-  performHandshake?(context: { proxyManager; sessionId; dapLaunchArgs?; scriptPath; ... }): Promise<void>;
+  performHandshake?(context: HandshakeContext): Promise<void>;
 }
 ```
 
@@ -149,6 +149,39 @@ Client Request → Server → SessionManager
 
 **DefaultAdapterPolicy** is a lightweight placeholder used while the proxy worker determines which concrete policy to activate. All its methods return safe no-op values. `isInitialized()` and `isConnected()` always return `false`; `matchesAdapter()` always returns `false`.
 
+### What `extractLocalVariables` returns
+
+```typescript
+interface LocalVariableExtraction {
+  variables: Variable[];   // what the user sees, in presentation order
+  scopeRefs: number[];     // variablesReference of every ANCHOR-frame scope that contributed
+}
+```
+
+The session layer (`session-manager-data.ts`) needs to know not just *what* a
+policy extracted but *where from*: it reports the adapter's own scope name
+(Delve annotates it — `Locals (warning: optimized function)`) and attributes
+per-scope truncation only to the scopes that actually reached the response
+(issue #438). `scopeRefs` says so directly, rather than the session layer
+rediscovering it by comparing variable object identity.
+
+Rules every implementation follows:
+
+- Anchor on `stackFrames[0]` and nothing else — the session layer re-anchors by
+  slicing the frame list when the top frame has no locals (issue #468).
+- Return the input variable objects (filtered is fine), not copies.
+- Empty `variables` implies empty `scopeRefs`; a scope that supplied nothing is
+  not a contributing scope.
+- `includeSpecial: true` returns a superset of `includeSpecial: false`.
+
+Two helpers keep implementations to one line each:
+`emptyLocalVariableExtraction()` for the "nothing to read here" exits, and
+`extractionFromScope(scope, variables)` for the single-scope result most
+policies produce. Returning several scopes is legitimate — the JavaScript
+policy merges block scopes with the function's `Local` scope (issue #558) — and
+needs no change in the caller: the canonical scope stays the reported one
+whenever it is among the contributors.
+
 **JsDebugAdapterPolicy** is the most complex policy:
 - `supportsReverseStartDebugging: true` and `childSessionStrategy: 'launchWithPendingTarget'`
 - Requires strict initialization sequence (tracked via `JsAdapterState` with `initializeResponded` and `startSent` flags)
@@ -156,6 +189,7 @@ Client Request → Server → SessionManager
 - Provides a full `performHandshake()` implementation for the js-debug multi-session setup
 - `isChildReadyEvent()` waits for `'thread'` or `'stopped'` (not `'initialized'`)
 - `filterStackFrames()` removes `<node_internals>` frames
+- `extractLocalVariables()` merges block scopes (`Block`, `Catch Block`, `With Block`) ahead of the frame's `Local` scope, innermost first, so a `let` declared in a `for` body or a `catch (e)` binding is visible alongside the function's own locals (issue #558); when `Local` is empty it falls through to `Closure`, then `Script`/`Module`, and reaches `Global` only for frames with no local or block scope at all
 
 **PythonAdapterPolicy**:
 - `resolveExecutablePath()` checks `PYTHON_PATH` env var, then defaults to `'python'` (Windows) or `'python3'` (Unix)
