@@ -371,7 +371,7 @@ describe('ProxyManager branch coverage scenarios', () => {
     expect((manager as unknown as { activeLaunchBarrier: AdapterLaunchBarrier | null }).activeLaunchBarrier).toBeNull();
   });
 
-  it('cleanup swallows an adapter dispose that throws synchronously and warns (issue #573)', async () => {
+  it('cleanup swallows an adapter dispose that throws synchronously and warns (issue #573)', () => {
     const adapter = new FakeDebugAdapter();
     // The interface declares `dispose(): Promise<void>`, so a synchronous throw
     // takes a cast — and that violation IS the case under test. No promise ever
@@ -382,11 +382,11 @@ describe('ProxyManager branch coverage scenarios', () => {
     }) as unknown as FakeDebugAdapter['dispose'];
     const owningManager = new ProxyManager(adapter, launcher, fileSystem, logger);
 
+    // No tick needed: the throw happens while evaluating the operand of the
+    // helper's `await`, so catch and warn both run before cleanup() returns.
     expect(() =>
       (owningManager as unknown as { cleanup: () => void }).cleanup()
     ).not.toThrow();
-    // The disposal is fire-and-forget; let its microtask run before asserting.
-    await Promise.resolve();
 
     expect(adapter.dispose).toHaveBeenCalledTimes(1);
     expect(logger.warn).toHaveBeenCalledWith(
@@ -394,6 +394,30 @@ describe('ProxyManager branch coverage scenarios', () => {
     );
     // The slot is not coming back, but the handle is dropped either way — a
     // retained adapter would be disposed twice by the next teardown.
+    expect((owningManager as unknown as { adapter: unknown }).adapter).toBeNull();
+  });
+
+  it('cleanup swallows an adapter dispose that rejects and warns (issue #573)', async () => {
+    const adapter = new FakeDebugAdapter({
+      // The other half of #573, and the half the replaced `dispose().catch(...)`
+      // did handle: an honest async failure. It is pinned separately because it
+      // settles on a later tick, so a helper that stopped awaiting would still
+      // pass the synchronous test above.
+      dispose: async () => {
+        throw new Error('dispose transport closed');
+      }
+    });
+    const owningManager = new ProxyManager(adapter, launcher, fileSystem, logger);
+
+    (owningManager as unknown as { cleanup: () => void }).cleanup();
+    expect(adapter.dispose).toHaveBeenCalledTimes(1);
+    // The disposal is fire-and-forget; let its microtasks run before asserting.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[ProxyManager] Error disposing adapter during cleanup: dispose transport closed'
+    );
     expect((owningManager as unknown as { adapter: unknown }).adapter).toBeNull();
   });
 });
