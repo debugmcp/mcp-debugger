@@ -276,11 +276,17 @@ jobs:
     - name: Require a changelog fragment
       if: github.event_name == 'pull_request'
       run: |
+        # Without pipefail the pipeline below reports `paste`'s status, so an
+        # auth or API failure from `gh` would read as "this PR has no labels"
+        # and fail the PR for the wrong reason. An unlabelled PR still yields
+        # an empty string, which is a legitimate answer.
+        set -o pipefail
         CHANGED_FILES="$(git diff --name-only \
           "origin/${{ github.base_ref }}...${{ github.event.pull_request.head.sha }}")"
         export CHANGED_FILES
         PR_LABELS="$(gh pr view "${{ github.event.pull_request.number }}" \
-          --repo "${{ github.repository }}" --json labels -q '.labels[].name' | paste -sd, -)"
+          --repo "${{ github.repository }}" --json labels -q '.labels[].name' | paste -sd, -)" \
+          || { echo "::error::Could not read the PR's labels; refusing to guess."; exit 1; }
         export PR_LABELS
         echo "Labels read live: ${PR_LABELS:-<none>}"
         node scripts/changelog-fragments.mjs --ci

@@ -10,14 +10,21 @@
  * `pending: true` success rather than a failure, and the operation completes
  * asynchronously afterwards.
  *
- * THE SETTLE CONTRACT (issue #574). Two rules, applied identically by step and
- * pause:
+ * THE SETTLE CONTRACT (issue #574). Two rules:
  *
  * 1. The stop path owns the settle. Once a `stopped` event has been observed,
- *    no other path may answer — not the grace timer, not the ended events, not
- *    a rejected request. Reading where the debuggee landed takes a DAP round
- *    trip, and every one of those paths would otherwise report, with more or
- *    less confidence, that the thing that demonstrably happened did not.
+ *    no other path may answer — not the grace timer, not a rejected request.
+ *    Reading where the debuggee landed takes a DAP round trip, and every one
+ *    of those paths would otherwise report, with more or less confidence,
+ *    that the thing that demonstrably happened did not.
+ *
+ *    One deliberate asymmetry, and the reason rule 2 exists: pause's ended
+ *    handler stands down for the stop path, because its wording ('Session
+ *    ended before pause took effect') contradicts a stop that was observed.
+ *    executeStep's do not — 'Step completed as session terminated./exited.'
+ *    is already what rule 2 would have the stop path say, so letting them
+ *    answer first is the same answer, sooner. Both ends obey rule 2; they
+ *    differ only in which path is allowed to deliver it.
  * 2. Ended-at-settle. Whoever does settle reads `session.state` at settle
  *    time. A session that reached a terminal state (STOPPED or ERROR) while
  *    the answer was being assembled is reported as ended — terminal state,
@@ -671,8 +678,11 @@ export class ExecutionController {
           }
           if (session.state === SessionState.PAUSED) {
             // Same situation, seen from the other side: the stop landed during
-            // discovery, so no listener will ever fire and the stop path has
-            // to be started from here or nothing settles at all.
+            // discovery, so no 'stopped' listener will ever fire. Left alone
+            // the grace timer would eventually settle this — after a full
+            // pauseGraceMs, with `pending: true` and "no 'stopped' event
+            // within Ns", both false for a session that is demonstrably
+            // paused. Running the stop path answers now, and correctly.
             this.ctx.logger.debug(
               `[SessionManager pause] Pause request rejected but the session is already paused; reporting the stop: ${errorMessage}`
             );

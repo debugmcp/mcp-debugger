@@ -1710,10 +1710,11 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     });
 
     it('does not report a pending step when the stop arrived and the stack read is still in flight (issue #574)', async () => {
-      // The stop landed inside the grace window but waitForReadyStack is still
-      // polling when the 5s timer fires. Without the stopSeen guard the timer
-      // won the race: the caller got "still executing" and no location while
-      // onStopped was microtasks from settling with both.
+      // The stop landed inside the grace window, but the stackTrace round
+      // trip that says WHERE is still in flight when the 5s timer fires.
+      // Without the stopSeen guard the timer won the race: the caller got
+      // "still executing" and no location while onStopped was microtasks from
+      // settling with both.
       vi.useFakeTimers();
       try {
         const handlers: Record<string, Function> = {};
@@ -3753,6 +3754,38 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result.data?.stopReason).toBe('pause');
       expect(result.data?.rawStopReason).toBe('exception');
       expect(result.data?.location).toEqual({ file: '/app/server.rb', line: 17, column: 3 });
+    });
+
+    it('reports the stop when the pause request is rejected after a stop during discovery (issue #574)', async () => {
+      // The adapter answers the pause with a failure because the target is
+      // already stopped. No 'stopped' listener will ever fire — the stop
+      // preceded registration — and the .then() race branch never runs on a
+      // rejection, so the catch is the only path left. Without its
+      // already-PAUSED branch the grace timer answers instead, a full 5s
+      // later, with `pending: true` and "no 'stopped' event within 5s": both
+      // false for a session that is demonstrably paused.
+      mockSession.state = SessionState.RUNNING;
+      const raceStop = { reason: 'pause', rawReason: 'exception', threadId: 3, timestamp: Date.now() };
+      mockProxyManager.sendDapRequest.mockImplementation((command: string) => {
+        if (command === 'threads') {
+          mockSession.state = SessionState.PAUSED;
+          mockSession.lastStop = raceStop;
+          return Promise.resolve({ body: { threads: [{ id: 3, name: 'Main' }] } });
+        }
+        return Promise.reject(new Error('Cannot pause: process is already stopped'));
+      });
+      vi.spyOn(operations, 'getStackTrace')
+        .mockResolvedValue([{ file: '/app/server.rb', line: 17, column: 3 }] as never);
+
+      const result = await operations.pause('test-session');
+
+      expect(result.success).toBe(true);
+      expect(result.state).toBe(SessionState.PAUSED);
+      expect(result.data?.message).toBe('Paused');
+      expect(result.data?.stopReason).toBe('pause');
+      expect(result.data?.rawStopReason).toBe('exception');
+      expect(result.data?.location).toEqual({ file: '/app/server.rb', line: 17, column: 3 });
+      expect(result.data?.pending).toBeUndefined();
     });
 
     /**
