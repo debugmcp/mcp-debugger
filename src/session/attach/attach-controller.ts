@@ -10,6 +10,7 @@
  * is reported. A failure after the proxy exists tears it down
  * session-preservingly and reports the proxy-log pointers alongside the error.
  */
+import { MAX_DAP_TIMEOUT_MS } from '../dap-request-helpers.js';
 import {
   SessionState,
   SessionLifecycleState,
@@ -81,7 +82,7 @@ export class AttachController {
           error: `'verifyTimeout' must be a positive number of milliseconds, got: ${String(verifyTimeoutOverride)}`
         };
       }
-      const maxVerifyTimeoutMs = 600000;
+      const maxVerifyTimeoutMs = MAX_DAP_TIMEOUT_MS;
       if (verifyTimeoutOverride > maxVerifyTimeoutMs) {
         this.ctx.logger.warn(
           `[SessionManager] verifyTimeout ${verifyTimeoutOverride}ms exceeds the maximum; clamping to ${maxVerifyTimeoutMs}ms`
