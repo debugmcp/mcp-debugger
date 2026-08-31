@@ -50,6 +50,7 @@ import { resolveCodeLLDBExecutable } from '../src/utils/codelldb-resolver.js';
 const createDependencies = (): AdapterDependencies => ({
   fileSystem: {
     readFile: vi.fn(),
+    readTail: vi.fn(),
     writeFile: vi.fn(),
     outputFile: vi.fn(),
     exists: vi.fn(),
