@@ -2602,6 +2602,26 @@ describe('SessionManager - DAP Operations', () => {
       expect(managed.pauseIntent).toBeUndefined();
     });
 
+    it('normalizes any CodeLLDB exception raised by a requested attach pause (#597)', async () => {
+      const session = await createPausedRustSession();
+      const managed = sessionManager.getSession(session.id)!;
+      managed.pauseIntent = {
+        generation: managed.proxyGeneration ?? 0,
+        source: 'attach',
+        armedAt: Date.now()
+      };
+
+      dependencies.mockProxyManager.simulateStopped(1, 'exception', {
+        reason: 'exception',
+        threadId: 1,
+        description: 'platform-specific debugger interrupt'
+      });
+
+      expect(managed.lastStop?.reason).toBe('pause');
+      expect(managed.lastStop?.rawReason).toBe('exception');
+      expect(managed.pauseIntent).toBeUndefined();
+    });
+
     it('leaves a real rust exception stop unnormalized (no rawReason)', async () => {
       const session = await createPausedRustSession();
 

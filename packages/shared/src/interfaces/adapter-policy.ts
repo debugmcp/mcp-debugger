@@ -47,8 +47,10 @@ export interface AdapterSpecificState {
  * See that method's doc comment for the completeness rules.
  */
 export interface StopReasonContext {
-  /** True while a user-initiated pause request is in flight. */
+  /** True while a current-generation pause request is in flight. */
   pausePending: boolean;
+  /** Which operation requested the pause, when pausePending is true. */
+  pauseSource?: 'user' | 'attach';
   /**
    * Adapter-assigned ids of ALL user breakpoints (line + function).
    * Present only when both bookkeepings are complete.
@@ -312,8 +314,9 @@ export interface AdapterPolicy {
    *
    * @param reason The raw DAP stop reason from the adapter
    * @param body The full stopped-event body, if available
-   * @param context context.pausePending is true while a user-initiated
-   *   pause request is in flight for this session. context.userBreakpointIds
+   * @param context context.pausePending is true while a current-generation
+   *   pause request is in flight for this session; pauseSource distinguishes
+   *   a public pause from post-attach suspension. context.userBreakpointIds
    *   holds the adapter-assigned ids of every user-set breakpoint (line and
    *   function breakpoints combined), and is only present when that
    *   bookkeeping is complete (every breakpoint of both kinds has a known
