@@ -445,6 +445,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     it('should handle continue request failure', async () => {
       mockSession.state = SessionState.PAUSED;
+      mockSession.lastStop = { reason: 'breakpoint', threadId: 1, timestamp: Date.now() };
       mockProxyManager.sendDapRequest.mockRejectedValue(new Error('Network error'));
 
       await expect(operations.continue('test-session'))
@@ -1361,10 +1362,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result?.data?.reason).toBe('entry');
     });
 
-    // Issue #255 residual: PAUSED with lastStop unset is the auto-continue
-    // transient (an entry stop being auto-continued) — the old fallback
-    // fabricated 'breakpoint' there, which is actively wrong.
-    it("reports reason 'unknown' when paused without a recorded stop and stopOnEntry is false", async () => {
+    it('records the transient entry stop before exposing PAUSED during auto-continue (#598)', async () => {
       vi.stubEnv('CI', 'true');
       vi.stubEnv('GITHUB_ACTIONS', undefined);
 
@@ -1382,9 +1380,9 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       proxyStub.removeListener.mockReturnValue(proxyStub);
       proxyStub.once.mockImplementation((event: string, handler: () => void) => {
         if (event === 'stopped') {
-          // PAUSED but no lastStop recorded — the auto-continue window
+          // Mirror core ordering: lastStop is recorded before PAUSED.
+          mockSession.lastStop = { reason: 'entry', threadId: 1, timestamp: Date.now() };
           mockSession.state = SessionState.PAUSED;
-          mockSession.lastStop = undefined;
           handler();
         }
         return proxyStub;
@@ -1405,7 +1403,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       expect(result?.success).toBe(true);
       expect(result?.state).toBe(SessionState.PAUSED);
-      expect(result?.data?.reason).toBe('unknown');
+      expect(result?.data?.reason).toBe('entry');
     });
 
     it('reports the recorded lastStop reason when paused at a real breakpoint', async () => {
@@ -2432,7 +2430,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       });
 
       expect(result.success).toBe(true);
-      expect(result.state).toBe(SessionState.PAUSED);
+      expect(result.state).toBe(SessionState.RUNNING);
+      expect(result.data?.pending).toBe(true);
       expect(threadCalls).toBeGreaterThanOrEqual(3);
       expect(mockProxyManager.setCurrentThreadId).toHaveBeenCalledWith(7);
     });
@@ -2493,7 +2492,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       });
 
       expect(result.success).toBe(true);
-      expect(result.state).toBe(SessionState.PAUSED);
+      expect(result.state).toBe(SessionState.RUNNING);
+      expect(result.data?.pending).toBe(true);
       expect(mockProxyManager.setCurrentThreadId).toHaveBeenCalledWith(9);
     });
 
@@ -2590,6 +2590,44 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       expect(result.success).toBe(true);
       expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('pause', { threadId: 1 });
+      expect(result.state).toBe(SessionState.RUNNING);
+      expect(result.data?.pending).toBe(true);
+      expect(mockSession.lastStop).toBeUndefined();
+    });
+
+    it('reports PAUSED only after the post-attach stopped event records lastStop', async () => {
+      mockSession.language = 'ruby';
+      let stopped: (() => void) | undefined;
+      mockProxyManager.on.mockImplementation((event: string, handler: () => void) => {
+        if (event === 'stopped') stopped = handler;
+        return mockProxyManager;
+      });
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          return { body: { threads: [{ id: 1, name: 'main' }] } };
+        }
+        if (command === 'pause') {
+          // The core listener is registered before the coordinator listener.
+          mockSession.lastStop = { reason: 'pause', threadId: 1, timestamp: Date.now() };
+          mockSession.state = SessionState.PAUSED;
+          stopped?.();
+        }
+        return {};
+      });
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+      });
+
+      const result = await operations.attachToProcess('test-session', {
+        port: 12345,
+        host: '127.0.0.1',
+        stopOnEntry: true
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.state).toBe(SessionState.PAUSED);
+      expect(result.data?.pending).toBeUndefined();
+      expect(mockSession.lastStop?.reason).toBe('pause');
     });
 
     it('sends a pause-all post-attach pause for java (issue #465)', async () => {

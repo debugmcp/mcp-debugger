@@ -182,6 +182,7 @@ export class AttachController {
 
       // Set session state based on stopOnEntry
       let finalState = session.state;
+      let attachPausePending = false;
 
       if (attachConfig.stopOnEntry !== false) {
         // Verify the attach actually produced a debuggable target before
@@ -248,22 +249,32 @@ export class AttachController {
               `[SessionManager] Observed post-attach pause (threadId=${pauseThreadId})`
             );
           } else if (pauseOutcome.status === 'pending') {
+            attachPausePending = true;
             this.ctx.logger.warn(
-              `[SessionManager] No 'stopped' event within ${this.ctx.tunables.attachPauseStopTimeoutMs}ms after post-attach pause; reported state may lag the engine`
+              `[SessionManager] No 'stopped' event within ${this.ctx.tunables.attachPauseStopTimeoutMs}ms after post-attach pause; returning RUNNING with pending=true`
             );
           } else {
-            // A target started suspended may reject a redundant pause. The
-            // caller still applies the pre-existing attach state contract;
-            // issue #598 tightens that public mapping independently.
             this.ctx.logger.info(
               `[SessionManager] Post-attach pause not needed/accepted: ${pauseOutcome.error instanceof Error ? pauseOutcome.error.message : String(pauseOutcome.error)}`
             );
           }
         }
 
-        this.ctx.updateState(session, SessionState.PAUSED);
-        finalState = SessionState.PAUSED;
-        this.ctx.logger.info(`[SessionManager] Set session ${sessionId} to PAUSED after attach (stopOnEntry=${attachConfig.stopOnEntry})`);
+        // A stopped event is the only evidence that the target is paused.
+        // handleStopped records lastStop before transitioning to PAUSED; a
+        // timeout or rejected redundant pause must not fabricate that state.
+        if (session.state === SessionState.PAUSED && session.lastStop) {
+          finalState = SessionState.PAUSED;
+          this.ctx.logger.info(
+            `[SessionManager] Session ${sessionId} is PAUSED after an observed attach stop`
+          );
+        } else {
+          this.ctx.updateState(session, SessionState.RUNNING);
+          finalState = SessionState.RUNNING;
+          this.ctx.logger.info(
+            `[SessionManager] Session ${sessionId} remains RUNNING until a stopped event is observed`
+          );
+        }
       } else {
         // JVM is already running (suspend=n), set RUNNING state
         this.ctx.updateState(session, SessionState.RUNNING);
@@ -290,7 +301,8 @@ export class AttachController {
       const attachData: AttachResultData = {
         message: attachConfig.processId
           ? `Attached to process PID ${attachConfig.processId}`
-          : `Attached to process at ${attachConfig.host || 'localhost'}:${attachConfig.port}`
+          : `Attached to process at ${attachConfig.host || 'localhost'}:${attachConfig.port}`,
+        ...(attachPausePending ? { pending: true } : {})
       };
       // Surface adapterConfig keys the adapter's attach transform dropped
       // (issue #450) and keys forwarded to the adapter unrecognized (issue

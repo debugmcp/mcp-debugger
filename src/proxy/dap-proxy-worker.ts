@@ -1046,7 +1046,10 @@ export class DapProxyWorker {
 
       // Update state and notify parent
       this.state = ProxyState.CONNECTED;
-      this.sendStatus('adapter_configured_and_launched');
+      this.sendStatus(
+        'adapter_configured_and_launched',
+        this.lastStop ? { lastStop: this.lastStop } : {}
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger!.error('[Worker] Error in initialized handler:', error);

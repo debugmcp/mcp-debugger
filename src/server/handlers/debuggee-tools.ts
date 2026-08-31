@@ -115,6 +115,14 @@ export const attachToProcessTool: ToolHandler = async (ctx, args) => {
         'Attach operation completed'
     };
 
+    // `pending` is part of the public tool-result contract, not merely an
+    // implementation detail in the structured data bag. A post-attach pause
+    // that has not observed its stopped event yet must therefore be visible
+    // to clients at the top level (issue #598).
+    if (attachResult.data?.pending) {
+      responsePayload.pending = true;
+    }
+
     if (attachResult.data) {
       responsePayload.data = attachResult.data;
       // Surface the dropped-adapterConfig-keys warning (issue
