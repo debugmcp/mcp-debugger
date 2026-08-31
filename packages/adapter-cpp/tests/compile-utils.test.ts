@@ -390,7 +390,7 @@ describe('compile-utils', () => {
       await fs.writeFile(outputPath, 'old binary');
       const compile = vi.fn(async ({ outputPath: stagedPath }: { outputPath: string }) => {
         expect(stagedPath).not.toBe(outputPath);
-        expect(path.extname(stagedPath)).toBe('.exe');
+        expect(stagedPath).toMatch(/\.exe\.tmp$/);
         await fs.writeFile(stagedPath, 'new binary');
         return { success: true, binaryPath: stagedPath };
       });
@@ -404,6 +404,7 @@ describe('compile-utils', () => {
       });
 
       expect(result).toMatchObject({ success: true, binaryPath: outputPath, compiled: true });
+      expect(result.binaryPath).not.toMatch(/\.tmp$/);
       await expect(fs.readFile(outputPath, 'utf8')).resolves.toBe('new binary');
     });
 
@@ -509,6 +510,8 @@ describe('compile-utils', () => {
     it('removes older managed artifacts after a successful deterministic rebuild', async () => {
       const olderManagedPath = getManagedOutputPath(outputPath, 'older');
       await fs.writeFile(olderManagedPath, 'obsolete');
+      const old = new Date(Date.now() - 120_000);
+      await fs.utimes(olderManagedPath, old, old);
       const result = await prepareSourceBinary({
         sourcePath,
         outputPath,
@@ -528,6 +531,8 @@ describe('compile-utils', () => {
       await fs.writeFile(outputPath, 'running binary');
       const olderManagedPath = getManagedOutputPath(outputPath, 'older');
       await fs.writeFile(olderManagedPath, 'obsolete but locked');
+      const old = new Date(Date.now() - 120_000);
+      await fs.utimes(olderManagedPath, old, old);
       const cleanupFailures = new Set([outputPath, olderManagedPath]);
       const logger = { debug: vi.fn() };
       const lockedFileSystem = {
@@ -586,7 +591,7 @@ describe('compile-utils', () => {
       expect(unavailableFileSystem.readdir).toHaveBeenCalledTimes(2);
     });
 
-    it('launches the staged artifact when promotion fails', async () => {
+    it('never launches the temporary artifact when both final renames fail', async () => {
       const logger = { warn: vi.fn() };
       const renameFailureFileSystem = {
         mkdir: fs.mkdir.bind(fs),
@@ -609,10 +614,54 @@ describe('compile-utils', () => {
         fileSystem: renameFailureFileSystem
       });
 
-      expect(result.success).toBe(true);
-      expect(result.binaryPath).toMatch(/hello\.debug-mcp-.+\.exe$/);
+      expect(result.success).toBe(false);
+      expect(result.binaryPath).toBeUndefined();
+      expect(result.error).toContain('Could not finalize compiled artifact');
       expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('rename denied'));
-      await expect(fs.stat(result.binaryPath!)).resolves.toBeDefined();
+      const names = await fs.readdir(path.dirname(outputPath));
+      expect(names.some((name) => name.endsWith('.tmp'))).toBe(false);
+    });
+
+    it('ignores a newer partial temporary artifact left by a crashed compiler', async () => {
+      const partialPath = `${getManagedOutputPath(outputPath, 'crashed')}.tmp`;
+      await fs.writeFile(partialPath, 'partial executable');
+      const old = new Date(Date.now() - 120_000);
+      await fs.utimes(sourcePath, old, old);
+      const compile = vi.fn(async ({ outputPath: stagedPath }: { outputPath: string }) => {
+        await fs.writeFile(stagedPath, 'complete executable');
+        return { success: true, binaryPath: stagedPath };
+      });
+
+      const result = await prepareSourceBinary({
+        sourcePath,
+        outputPath,
+        forceRebuild: false,
+        platform: 'win32',
+        compile
+      });
+
+      expect(compile).toHaveBeenCalledOnce();
+      expect(result).toMatchObject({ success: true, binaryPath: outputPath, compiled: true });
+      await expect(fs.readFile(outputPath, 'utf8')).resolves.toBe('complete executable');
+    });
+
+    it('does not delete a recent managed artifact from a concurrent rebuild', async () => {
+      const concurrentPath = getManagedOutputPath(outputPath, 'concurrent');
+      await fs.writeFile(concurrentPath, 'other completed rebuild');
+
+      const result = await prepareSourceBinary({
+        sourcePath,
+        outputPath,
+        forceRebuild: true,
+        platform: 'win32',
+        compile: vi.fn(async ({ outputPath: stagedPath }: { outputPath: string }) => {
+          await fs.writeFile(stagedPath, 'this rebuild');
+          return { success: true, binaryPath: stagedPath };
+        })
+      });
+
+      expect(result.success).toBe(true);
+      await expect(fs.readFile(concurrentPath, 'utf8')).resolves.toBe('other completed rebuild');
     });
 
     it('uses the default selection options when the canonical artifact is fresh', async () => {
