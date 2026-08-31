@@ -29,6 +29,7 @@ export function createMockDependencies() {
       ensureDir: vi.fn().mockResolvedValue(undefined),
       pathExists: vi.fn().mockResolvedValue(true),
       readFile: vi.fn().mockResolvedValue('{}'),
+      readTail: vi.fn().mockResolvedValue(''),
       writeFile: vi.fn().mockResolvedValue(undefined),
       exists: vi.fn().mockResolvedValue(true),
       mkdir: vi.fn().mockResolvedValue(undefined),

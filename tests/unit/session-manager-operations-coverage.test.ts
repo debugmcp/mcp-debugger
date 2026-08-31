@@ -993,7 +993,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       // itself tears nothing down: the one stop() is the pre-launch teardown
       // of the proxy this session already had.
       expect(result!.data).toEqual({
-        proxyLogPath: path.join('/tmp/session-logs', 'proxy-test-session.log')
+        proxyLogPath: path.join('/tmp/session-logs', 'proxy-test-session.log'),
+        proxyLogResource: 'debug://sessions/test-session/proxy-log'
       });
       expect(mockLogger.error).toHaveBeenCalledWith(
         expect.stringContaining('Detailed error in startDebugging'),
@@ -1266,7 +1267,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
           error: expect.stringContaining('code=134')
         }));
         expect(result.data).toEqual({
-          proxyLogPath: path.join('/tmp/session-logs', 'proxy-test-session.log')
+          proxyLogPath: path.join('/tmp/session-logs', 'proxy-test-session.log'),
+          proxyLogResource: 'debug://sessions/test-session/proxy-log'
         });
       } finally {
         startProxySpy.mockRestore();
@@ -2058,7 +2060,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result.success).toBe(false);
       expect(result.data).toEqual({
         initProgress,
-        proxyLogPath: path.join('/tmp', 'logs', 'test-session', 'run-123', 'proxy-test-session.log')
+        proxyLogPath: path.join('/tmp', 'logs', 'test-session', 'run-123', 'proxy-test-session.log'),
+        proxyLogResource: 'debug://sessions/test-session/proxy-log'
       });
       expect(stopSpy).toHaveBeenCalled();
     });
@@ -2074,7 +2077,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       });
 
       expect(result.data).toEqual({
-        proxyLogPath: path.join('/tmp', 'logs', 'test-session', 'run-456', 'proxy-test-session.log')
+        proxyLogPath: path.join('/tmp', 'logs', 'test-session', 'run-456', 'proxy-test-session.log'),
+        proxyLogResource: 'debug://sessions/test-session/proxy-log'
       });
     });
 

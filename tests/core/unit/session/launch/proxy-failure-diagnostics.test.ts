@@ -23,6 +23,7 @@ const initProgress: ProxyInitProgress = { transportConnected: true, pendingComma
 
 const runDir = path.join('/tmp', 'logs', 'sess-1', 'run-1');
 const proxyLogPath = path.join(runDir, 'proxy-sess-1.log');
+const proxyLogResource = 'debug://sessions/sess-1/proxy-log';
 
 /** A winston log file: every line newline-TERMINATED, so the text ends in a newline. */
 function logFile(lines: string[]): string {
@@ -39,14 +40,15 @@ describe('collectProxyFailureDiagnostics', () => {
 
     expect(collectProxyFailureDiagnostics({ id: 'sess-1', logDir: runDir }, error)).toEqual({
       initProgress,
-      proxyLogPath
+      proxyLogPath,
+      proxyLogResource
     });
   });
 
   it('still points at the proxy log when the error carries no init progress', () => {
     expect(
       collectProxyFailureDiagnostics({ id: 'sess-1', logDir: runDir }, new Error('adapter exited'))
-    ).toEqual({ proxyLogPath });
+    ).toEqual({ proxyLogPath, proxyLogResource });
   });
 
   it('keeps the session-derived pointer when the error refuses to be read', () => {
@@ -60,7 +62,8 @@ describe('collectProxyFailureDiagnostics', () => {
     };
 
     expect(collectProxyFailureDiagnostics({ id: 'sess-1', logDir: runDir }, hostile)).toEqual({
-      proxyLogPath
+      proxyLogPath,
+      proxyLogResource
     });
   });
 
@@ -241,7 +244,7 @@ describe('logProxyFailure', () => {
     );
 
     // The pointers still reach the caller, and the log still names the failure.
-    expect(diagnostics).toEqual({ proxyLogPath });
+    expect(diagnostics).toEqual({ proxyLogPath, proxyLogResource });
     expect(logger.error).toHaveBeenCalledWith(
       '[SessionManager] Detailed error in attachToProcess for session sess-1:',
       expect.objectContaining({
@@ -270,7 +273,7 @@ describe('logProxyFailure', () => {
 
     // The hostile field costs itself and nothing else: the record is the full
     // one, not the degraded fallback.
-    expect(diagnostics).toEqual({ proxyLogPath });
+    expect(diagnostics).toEqual({ proxyLogPath, proxyLogResource });
     expect(logger.error).toHaveBeenCalledWith(
       expect.stringContaining('Detailed error in attachToProcess'),
       expect.objectContaining({
@@ -295,7 +298,7 @@ describe('logProxyFailure', () => {
         new Error('attach failed'),
         'attachToProcess'
       )
-    ).resolves.toEqual({ proxyLogPath });
+    ).resolves.toEqual({ proxyLogPath, proxyLogResource });
   });
 
   it('logs the proxy log tail but returns only the pointers', async () => {
@@ -311,7 +314,7 @@ describe('logProxyFailure', () => {
       'attachToProcess'
     );
 
-    expect(diagnostics).toEqual({ initProgress, proxyLogPath });
+    expect(diagnostics).toEqual({ initProgress, proxyLogPath, proxyLogResource });
     expect(logger.error).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({ proxyLogTail: 'adapter said: could not open port' })

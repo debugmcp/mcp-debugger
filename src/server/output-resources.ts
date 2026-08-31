@@ -1,5 +1,5 @@
 /**
- * Debuggee-output resources (issue #218).
+ * Per-session debug resources (issues #218 / #571).
  *
  * Each debug session exposes its captured debuggee output as
  * debug://sessions/{id}/output — a verbatim console transcript (all categories
@@ -16,18 +16,23 @@ import {
   ErrorCode as McpErrorCode,
   McpError
 } from '@modelcontextprotocol/sdk/types.js';
-import { ILogger } from '@debugmcp/shared';
+import { ILogger, type IFileSystem } from '@debugmcp/shared';
 import type { SessionManager } from '../session/session-manager.js';
+import { proxyLogPathFor } from '../proxy/session-log-layout.js';
+import { readProxyLogTail } from '../session/launch/proxy-failure-diagnostics.js';
+import {
+  outputResourceUri,
+  parseOutputResourceUri,
+  parseProxyLogResourceUri,
+  proxyLogResourceUri
+} from '../session/session-resource-uris.js';
 
-export function outputResourceUri(sessionId: string): string {
-  return `debug://sessions/${sessionId}/output`;
-}
-
-/** Returns the sessionId encoded in a debug output resource URI, or undefined. */
-export function parseOutputResourceUri(uri: string): string | undefined {
-  const match = /^debug:\/\/sessions\/([^/]+)\/output$/.exec(uri);
-  return match?.[1];
-}
+export {
+  outputResourceUri,
+  parseOutputResourceUri,
+  parseProxyLogResourceUri,
+  proxyLogResourceUri
+} from '../session/session-resource-uris.js';
 
 /** Debounce window for resources/updated pings. */
 export const OUTPUT_UPDATE_DEBOUNCE_MS = 150;
@@ -118,32 +123,58 @@ export class OutputResourceNotifier {
 }
 
 /**
- * Registers the MCP resource handlers (resources/list, resources/read,
- * resources/subscribe, resources/unsubscribe) for the debuggee-output resources.
+ * Registers the MCP resource handlers. Only debuggee output is subscribable;
+ * the bounded proxy-log tail is an on-demand diagnostic snapshot.
  */
 export function registerResourceHandlers(
   server: Server,
   sessionManager: SessionManager,
-  notifier: OutputResourceNotifier
+  notifier: OutputResourceNotifier,
+  fileSystem: Pick<IFileSystem, 'readTail'>
 ): void {
   server.setRequestHandler(ListResourcesRequestSchema, async () => {
     const sessions = sessionManager.getAllSessions();
     return {
-      resources: sessions.map(session => ({
-        uri: outputResourceUri(session.id),
-        name: `Debuggee output — ${session.name}`,
-        description: `stdout/stderr/console output captured for ${session.language} debug session '${session.name}'`,
-        mimeType: 'text/plain'
-      }))
+      resources: sessions.flatMap(session => {
+        const resources = [{
+          uri: outputResourceUri(session.id),
+          name: `Debuggee output — ${session.name}`,
+          description: `stdout/stderr/console output captured for ${session.language} debug session '${session.name}'`,
+          mimeType: 'text/plain'
+        }];
+        if (sessionManager.getSession(session.id)?.logDir) {
+          resources.push({
+            uri: proxyLogResourceUri(session.id),
+            name: `Debug proxy log — ${session.name}`,
+            description: `Sanitized tail of the debug proxy log for ${session.language} debug session '${session.name}'`,
+            mimeType: 'text/plain'
+          });
+        }
+        return resources;
+      })
     };
   });
 
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     const uri = request.params.uri;
-    const sessionId = parseOutputResourceUri(uri);
+    const outputSessionId = parseOutputResourceUri(uri);
+    const proxyLogSessionId = parseProxyLogResourceUri(uri);
+    const sessionId = outputSessionId ?? proxyLogSessionId;
     const session = sessionId ? sessionManager.getSession(sessionId) : undefined;
     if (!session) {
       throw new McpError(McpErrorCode.InvalidParams, `Unknown resource: ${uri}`);
+    }
+    if (proxyLogSessionId) {
+      if (!session.logDir) {
+        throw new McpError(McpErrorCode.InvalidParams, `Unknown resource: ${uri}`);
+      }
+      const text = await readProxyLogTail(
+        fileSystem,
+        proxyLogPathFor(session.logDir, session.id)
+      );
+      return {
+        contents: [{ uri, mimeType: 'text/plain', text: text ?? '' }]
+      };
     }
     return {
       contents: [{
