@@ -68,10 +68,7 @@ describe('SessionManager - Integration Tests', () => {
       await vi.runAllTimersAsync();
       
       // Simulate entry stop
-      // Seed the proxy's current-thread view as a real stopped event would;
-      // auto-continue cannot issue DAP continue without that anchor.
-      dependencies.mockProxyManager.simulateStopped(1, 'entry');
-      await vi.runAllTimersAsync();
+      dependencies.mockProxyManager.simulateEvent('stopped', 1, 'entry');
       
       // Should log auto-continue message
       expect(loggerSpy).toHaveBeenCalledWith(
@@ -122,7 +119,10 @@ describe('SessionManager - Integration Tests', () => {
       await sessionManager.startDebugging(session.id, 'test.py', [], { stopOnEntry: false });
       await vi.runAllTimersAsync();
 
-      dependencies.mockProxyManager.simulateEvent('stopped', 1, 'entry');
+      // Seed the proxy's current-thread view as a real stopped event would;
+      // auto-continue cannot issue DAP continue without that anchor.
+      dependencies.mockProxyManager.simulateStopped(1, 'entry');
+      await vi.runAllTimersAsync();
 
       expect(sessionManager.getSession(session.id)?.lastStop).toBeUndefined();
     });
