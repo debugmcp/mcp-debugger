@@ -19,6 +19,7 @@ const mockSpawn = vi.mocked(spawn);
 const createMockDependencies = (): AdapterDependencies => ({
   fileSystem: {
     readFile: async () => '',
+    readTail: async () => '',
     writeFile: async () => {},
     exists: async () => false,
     mkdir: async () => {},

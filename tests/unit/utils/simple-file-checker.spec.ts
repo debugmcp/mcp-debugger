@@ -18,6 +18,7 @@ describe('SimpleFileChecker', () => {
       existsSync: vi.fn() as MockedFunction<(path: string) => boolean>,
       stat: vi.fn(),
       readFile: vi.fn(),
+      readTail: vi.fn(),
       writeFile: vi.fn(),
       exists: vi.fn(),
       mkdir: vi.fn(),
