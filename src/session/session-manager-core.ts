@@ -869,7 +869,11 @@ export abstract class SessionManagerCore extends EventEmitter {
     const handleAdapterConfigured = () => {
       this.logger.debug(`[SessionManager] 'adapter-configured' event handler called for session ${sessionId}`);
       this.logger.info(`[ProxyManager ${sessionId}] Adapter configured`);
-      if (!effectiveLaunchArgs.stopOnEntry) {
+      // Readiness is not a resume signal. Some adapters (notably rdbg) emit a
+      // real stopped event synchronously with configurationDone, before this
+      // status. Preserve that observed pause; only project RUNNING when no
+      // stop has already established the stronger state.
+      if (!effectiveLaunchArgs.stopOnEntry && session.state !== SessionState.PAUSED) {
         this._updateSessionState(session, SessionState.RUNNING);
       }
     };
