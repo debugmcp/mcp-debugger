@@ -180,7 +180,12 @@ describe('MCP Server Ruby Attach-Mode Smoke Test @requires-ruby', () => {
     });
     const attachResponse = parseSdkToolResult(attachResult);
     expect(attachResponse.success).toBe(true);
-    expect(attachResponse.state).toBe('paused');
+    expect(['paused', 'running']).toContain(attachResponse.state);
+    if (attachResponse.state === 'running') {
+      expect(attachResponse.pending).toBe(true);
+      const initialStack = await waitForPausedState(mcpClient!, sessionId);
+      expect(initialStack).not.toBeNull();
+    }
 
     // 3. Breakpoint inside the loop, then release the load suspension
     const bpResult = await callToolSafely(mcpClient!, 'set_breakpoint', {

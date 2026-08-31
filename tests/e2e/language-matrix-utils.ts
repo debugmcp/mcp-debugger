@@ -13,6 +13,7 @@ import { fileURLToPath } from 'url';
 import { execFileSync, execSync } from 'child_process';
 import { prepareJavaExample } from './java-example-utils.js';
 import { prepareCppExample, hasCppToolchain } from './cpp-example-utils.js';
+import { prepareRustExample } from './rust-example-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -109,6 +110,10 @@ export function ensureCppBuild(): string {
   return prepareCppExample('hello_world').binaryPath;
 }
 
+export async function ensureRustBuild(): Promise<string> {
+  return (await prepareRustExample('hello_world')).binaryPath;
+}
+
 /* ---------- language matrix ---------- */
 
 export interface MatrixLangDef {
@@ -150,7 +155,19 @@ export function createLanguageMatrix(): MatrixLangDef[] {
  * Run the per-language build steps (go binary, dotnet dll, java classes),
  * updating launchScript/availability in place. Call from a suite's beforeAll.
  */
-export function prepareLanguageMatrix(languages: MatrixLangDef[], log: (msg: string) => void = console.log): void {
+export async function prepareLanguageMatrix(languages: MatrixLangDef[], log: (msg: string) => void = console.log): Promise<void> {
+  const rustLang = languages.find(l => l.language === 'rust');
+  if (rustLang?.available) {
+    try {
+      rustLang.launchScript = await ensureRustBuild();
+      log(`[Setup] Rust binary compiled: ${rustLang.launchScript}`);
+    } catch (err) {
+      log(`[Setup] Rust build failed: ${err}`);
+      rustLang.available = false;
+      rustLang.skipReason = 'Rust build failed';
+    }
+  }
+
   const goLang = languages.find(l => l.language === 'go');
   if (goLang?.available) {
     try {

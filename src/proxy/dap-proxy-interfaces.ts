@@ -96,6 +96,13 @@ export interface StatusMessage extends ProxyMessage {
    * this is the only path that ever stamps verified/adapterId in the store.
    */
   breakpoints?: BreakpointSyncResult[];
+  /**
+   * A stop observed while the worker was still completing its initialization
+   * handshake. The parent normally receives the corresponding dapEvent, but
+   * this snapshot closes the initialization/event ordering gap for adapters
+   * such as rdbg that stop synchronously with configurationDone.
+   */
+  lastStop?: DebugProtocol.StoppedEvent['body'];
 }
 
 /** One entry of StatusMessage.breakpoints (issue #439). */

@@ -75,6 +75,27 @@ describe('ProxyManager Message Handling', () => {
       expect(adapterConfiguredEmitted).toBe(true);
     });
 
+    it('replays an initialization stop snapshot exactly once (issue #598)', () => {
+      const stopped = vi.fn();
+      proxyManager.on('stopped', stopped);
+
+      const statusMessage = {
+        type: 'status',
+        sessionId: 'test-session',
+        status: 'adapter_configured_and_launched',
+        lastStop: { reason: 'pause', threadId: 7, allThreadsStopped: true }
+      };
+      proxyManager.simulateMessage(statusMessage);
+      proxyManager.simulateMessage(statusMessage);
+
+      expect(stopped).toHaveBeenCalledTimes(1);
+      expect(stopped).toHaveBeenCalledWith(
+        7,
+        'pause',
+        expect.objectContaining({ reason: 'pause', threadId: 7 })
+      );
+    });
+
     it('emits adapter-capabilities exactly once per status message (issue #243)', () => {
       // Status messages run through BOTH the imperative handler and the
       // functional core; adapter_capabilities must only be emitted by the

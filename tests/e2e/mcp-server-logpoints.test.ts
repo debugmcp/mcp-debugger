@@ -58,7 +58,7 @@ describe('Logpoints e2e (set_breakpoint logMessage)', () => {
       { capabilities: {} },
     );
     await mcpClient.connect(transport);
-    prepareLanguageMatrix(LANGUAGES);
+    await prepareLanguageMatrix(LANGUAGES);
   }, 120_000);
 
   afterAll(async () => {

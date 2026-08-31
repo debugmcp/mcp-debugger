@@ -36,7 +36,7 @@ describe('restart_debugging e2e', () => {
       { capabilities: {} },
     );
     await mcpClient.connect(transport);
-    prepareLanguageMatrix(LANGUAGES);
+    await prepareLanguageMatrix(LANGUAGES);
   }, 120_000);
 
   afterAll(async () => {
