@@ -531,8 +531,7 @@ describe('JsDebugAdapterPolicy', () => {
         ...JS_SCOPE_KINDS.local,
         ...JS_SCOPE_KINDS.block,
         ...JS_SCOPE_KINDS.closure,
-        ...JS_SCOPE_KINDS.module,
-        ...JS_SCOPE_KINDS.global
+        ...JS_SCOPE_KINDS.module
       ]);
     });
 
