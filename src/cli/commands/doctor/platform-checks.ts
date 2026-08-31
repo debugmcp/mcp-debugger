@@ -5,11 +5,11 @@
  * (gates attach for the CodeLLDB-backed adapters) and the container
  * workspace mount. Pure reads — nothing here mutates the system.
  */
-import type { IEnvironment, IFileSystem } from '@debugmcp/shared';
+import type { IEnvironment, IFileSystem, IProcessManager } from '@debugmcp/shared';
 import { isContainerMode, getWorkspaceRoot } from '../../../utils/container-path-utils.js';
 
 export interface PlatformCheckResult {
-  id: 'container-mode' | 'workspace-mount' | 'yama-ptrace-scope';
+  id: 'container-mode' | 'workspace-mount' | 'yama-ptrace-scope' | 'stale-containers';
   label: string;
   status: 'ok' | 'warn' | 'broken' | 'skipped';
   detail: string;
@@ -175,4 +175,93 @@ export async function checkContainerWorkspace(
       { ...mountBase, status: 'warn', detail: `${root} exists but could not be listed` }
     ];
   }
+}
+
+/**
+ * Long-running mcp-debugger containers on the host (issue #633).
+ *
+ * A Docker-based stdio server used to outlive the client that started it, so
+ * `docker run --rm` never fired and every session leaked a container. The
+ * server now exits on a real client disconnect, but that only takes effect
+ * once the fixed image is pulled, and containers already leaked by an older
+ * image (or by a hard-killed supervisor) stay until someone removes them.
+ *
+ * Doctor cannot tell an in-use container from an orphan — an active session
+ * looks identical to a leaked one — so this reports on AGE and says so rather
+ * than claiming a verdict it cannot support. Pure read, in keeping with this
+ * module: the removal command goes in the fix hint, it is never run here.
+ */
+const STALE_CONTAINER_AGE_MS = 24 * 60 * 60 * 1000;
+
+/** `docker ps` timestamps look like `2026-08-31 20:01:34 +0000 UTC`. */
+function parseDockerTimestamp(raw: string): number | null {
+  const match = /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{4})/.exec(raw.trim());
+  if (!match) return null;
+  const parsed = Date.parse(match[1].replace(' ', 'T').replace(' ', ''));
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+export async function checkStaleContainers(
+  processManager: IProcessManager | undefined,
+  now: number = Date.now()
+): Promise<PlatformCheckResult> {
+  const base = { id: 'stale-containers' as const, label: 'stale containers' };
+
+  if (!processManager) {
+    return { ...base, status: 'skipped', detail: 'no process manager available' };
+  }
+
+  let stdout: string;
+  try {
+    // Name filter rather than an image filter: orphans from older builds show
+    // up under bare image IDs, but every one of them runs the same binary.
+    ({ stdout } = await processManager.exec(
+      'docker ps --filter ancestor=debugmcp/mcp-debugger:latest --format "{{.Names}}\t{{.CreatedAt}}"'
+    ));
+  } catch {
+    // Docker absent, daemon down, or no permission — none of which is a
+    // finding about this installation.
+    return { ...base, status: 'skipped', detail: 'docker not available' };
+  }
+
+  const containers = stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [name, created] = line.split('\t');
+      return { name, startedAt: parseDockerTimestamp(created ?? '') };
+    });
+
+  if (containers.length === 0) {
+    return { ...base, status: 'ok', detail: 'no mcp-debugger containers running' };
+  }
+
+  const stale = containers.filter(
+    (container) => container.startedAt !== null && now - container.startedAt > STALE_CONTAINER_AGE_MS
+  );
+
+  if (stale.length === 0) {
+    return {
+      ...base,
+      status: 'ok',
+      detail: `${containers.length} mcp-debugger container(s) running, none older than 24h`
+    };
+  }
+
+  const oldestDays = Math.floor(
+    (now - Math.min(...stale.map((container) => container.startedAt as number))) / 86_400_000
+  );
+
+  return {
+    ...base,
+    status: 'warn',
+    detail:
+      `${stale.length} of ${containers.length} mcp-debugger container(s) have run for over 24h ` +
+      `(oldest ${oldestDays}d) — likely orphaned by a client that exited (issue #633), ` +
+      'though an active session looks the same',
+    fixHint:
+      'Check them with `docker ps --filter ancestor=debugmcp/mcp-debugger:latest`, ' +
+      'then remove the ones you no longer need with `docker rm -f <name>`'
+  };
 }

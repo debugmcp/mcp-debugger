@@ -64,7 +64,6 @@
   "tests/unit/cli/error-handlers.test.ts": 4,
   "tests/unit/cli/http-command.test.ts": 28,
   "tests/unit/cli/sse-command.test.ts": 26,
-  "tests/unit/cli/stdio-command.test.ts": 17,
   "tests/unit/container/dependencies.test.ts": 2,
   "tests/unit/dev-proxy/backend-env.test.ts": 1,
   "tests/unit/dev-proxy/backend-logger.test.ts": 1,

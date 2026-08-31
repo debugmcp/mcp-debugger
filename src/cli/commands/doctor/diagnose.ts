@@ -10,20 +10,13 @@
  * checks, and an honest verdict where the server fails open (recorded via
  * probe.failed / probe.timedOut so the divergence is visible).
  */
-import type {
-  AdapterManifestEntry,
-  IAdapterRegistry,
-  IEnvironment,
-  IFileSystem,
-  ILogger,
-  ToolchainComponent,
-  ToolchainDescription
-} from '@debugmcp/shared';
+import type { AdapterManifestEntry, IAdapterRegistry, IEnvironment, IFileSystem, ILogger, IProcessManager, ToolchainComponent, ToolchainDescription } from '@debugmcp/shared';
 import { normalizeToolchainDescription } from '@debugmcp/shared';
 import { probeLanguageEntry, type LanguageModes } from '../../../utils/language-availability.js';
 import { getDisabledLanguages } from '../../../utils/language-config.js';
 import {
   checkContainerWorkspace,
+  checkStaleContainers,
   checkYamaPtraceScope,
   type PlatformCheckResult
 } from './platform-checks.js';
@@ -79,6 +72,8 @@ export interface DiagnoseDeps {
   env?: NodeJS.ProcessEnv;
   /** Platform for the Yama check; defaults to process.platform */
   platform?: NodeJS.Platform;
+  /** Runs `docker ps` for the stale-container check (#633); omitted = check skipped. */
+  processManager?: IProcessManager;
   timeoutMs: number;
   version: string;
   logger?: ILogger;
@@ -128,7 +123,8 @@ export async function diagnose(requested: string[], deps: DiagnoseDeps): Promise
 
   const platformChecks: PlatformCheckResult[] = [
     ...(await checkContainerWorkspace(deps.environment, deps.fileSystem)),
-    await checkYamaPtraceScope(deps.fileSystem, platform)
+    await checkYamaPtraceScope(deps.fileSystem, platform),
+    await checkStaleContainers(deps.processManager)
   ];
 
   const requestedBroken = languages.some(
