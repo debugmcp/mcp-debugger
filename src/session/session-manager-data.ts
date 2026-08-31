@@ -298,19 +298,21 @@ export abstract class SessionManagerData extends SessionManagerCore {
         }
       }
       
-      // Step 3: Collect variables for all scopes — budget-aware (issue
-      // #356): a JS attach's internal pause frame can expose scopes walking
-      // into process/global, so stop issuing DAP requests once the per-call
-      // variable budget is spent. Frames iterate top-first, so the frames
-      // that matter (whose Local scope extractLocalVariables reads) are
-      // fetched before the budget can run out. The `names` filter is pushed
-      // down so an explicit request is never starved by the budget.
+      // Step 3: Collect variables frame-by-frame — budget-aware (issue
+      // #356) and anchor-aware (issues #468/#594). Stop as soon as a frame
+      // yields usable locals; walking every async/runtime frame after the
+      // answer is already known is both wasteful and unsafe (an unrelated
+      // lower-frame formatter can hang the entire inspection). The `names`
+      // filter remains authoritative for the top frame, so explicit-name
+      // requests never walk down to a caller.
       const variablesMap: Record<number, Variable[]> = {};
       const truncationByScope = new Map<number, VariableTruncationSummary | undefined>();
       let fetchedCount = 0;
       let scopeFetchesSkipped = 0;
       const fetchBudget = maxVariablesPerCall();
-      for (const frame of stackFrames) {
+      const policy = this.selectPolicy(session.language);
+      for (let frameIndex = 0; frameIndex < stackFrames.length; frameIndex++) {
+        const frame = stackFrames[frameIndex];
         const scopes = scopesMap[frame.id];
         if (!scopes) continue;
         for (const scope of scopes) {
@@ -326,6 +328,29 @@ export abstract class SessionManagerData extends SessionManagerCore {
             variablesMap[scope.variablesReference] = detailed.variables;
           }
         }
+
+        const framesAtAnchor = stackFrames.slice(frameIndex);
+        const extraction = policy.extractLocalVariables
+          ? policy.extractLocalVariables(
+              framesAtAnchor,
+              scopesMap,
+              variablesMap,
+              includeSpecial
+            )
+          : undefined;
+        const fallbackHasVariables = !policy.extractLocalVariables && scopes.some(
+          scope =>
+            !scope.name.toLowerCase().includes('global') &&
+            (variablesMap[scope.variablesReference]?.length ?? 0) > 0
+        );
+        if (
+          names !== undefined ||
+          (extraction?.variables.length ?? 0) > 0 ||
+          fallbackHasVariables ||
+          fetchedCount >= fetchBudget
+        ) {
+          break;
+        }
       }
       if (scopeFetchesSkipped > 0) {
         this.logger.info(
@@ -333,10 +358,7 @@ export abstract class SessionManagerData extends SessionManagerCore {
         );
       }
       
-      // Step 4: Get the appropriate adapter policy
-      const policy = this.selectPolicy(session.language);
-
-      // Step 5: Extract local variables using the adapter policy. Policies
+      // Step 4: Extract local variables using the adapter policy. Policies
       // anchor to the first frame of the list they receive, so extraction is
       // parameterized by anchor: slicing the frame list re-anchors it.
       const extractAt = (frames: StackFrame[]): {

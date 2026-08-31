@@ -1149,7 +1149,8 @@ describe('SessionManager - DAP Operations', () => {
                 body: {
                   stackFrames: [
                     { id: 1, name: 'std::this_thread::sleep_for', source: { path: '/usr/include/c++/13/bits/this_thread_sleep.h' }, line: 80, column: 0 },
-                    { id: 2, name: 'main', source: { path: '/proj/examples/cpp/pause_test.cpp' }, line: 20, column: 0 }
+                    { id: 2, name: 'main', source: { path: '/proj/examples/cpp/pause_test.cpp' }, line: 20, column: 0 },
+                    { id: 3, name: 'formatter-heavy runtime frame', source: { path: '/usr/lib/runtime.cpp' }, line: 30, column: 0 }
                   ]
                 }
               };
@@ -1157,10 +1158,17 @@ describe('SessionManager - DAP Operations', () => {
               return {
                 success: true,
                 body: {
-                  scopes: [{ name: 'Local', variablesReference: args?.frameId === 2 ? 200 : 100, expensive: false }]
+                  scopes: [{
+                    name: 'Local',
+                    variablesReference: args?.frameId === 2 ? 200 : args?.frameId === 3 ? 300 : 100,
+                    expensive: false
+                  }]
                 }
               };
             case 'variables':
+              if (args?.variablesReference === 300) {
+                throw new Error('lower-frame formatter must not be queried after locals are found');
+              }
               return {
                 success: true,
                 body: {
