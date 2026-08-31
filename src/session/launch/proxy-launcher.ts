@@ -80,6 +80,11 @@ export class ProxyLauncher {
     session: ManagedSession,
     request: ProxyLaunchRequest
   ): Promise<LanguageSpecificLaunchConfig> {
+    // A verdict belongs to exactly one proxy-launch attempt. Clear the stored
+    // projection before any fallible setup so an adapter-acquire, filesystem,
+    // or transform failure cannot inherit an earlier MSVC classification.
+    this.ctx.updateSession(session.id, { toolchainValidation: undefined });
+
     // Log entrance for Windows CI debugging
     this.ctx.logger.info(
       `[SessionManager] Entering ProxyLauncher.start for session ${session.id}, dryRunSpawn: ${request.dryRunSpawn}, scriptPath: ${request.scriptPath}`
@@ -553,7 +558,9 @@ export class ProxyLauncher {
    * CPP/RUST_MSVC_BEHAVIOR=error the adapter records the verdict and then
    * rejects from inside transformLaunchConfig, and that verdict must still
    * reach the caller. Clearing on the no-verdict path keeps a previous
-   * launch's verdict from mislabeling an unrelated failure.
+   * launch's verdict from mislabeling an unrelated failure. The launch-level
+   * catch classifies only the verdict attached to the thrown sentinel; this
+   * stored copy is a projection for diagnostics, not an error discriminator.
    */
   private applyToolchainValidation(sessionId: string, adapter: IDebugAdapter): void {
     const adapterWithToolchain = adapter as {
