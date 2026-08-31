@@ -1149,7 +1149,8 @@ describe('SessionManager - DAP Operations', () => {
                 body: {
                   stackFrames: [
                     { id: 1, name: 'std::this_thread::sleep_for', source: { path: '/usr/include/c++/13/bits/this_thread_sleep.h' }, line: 80, column: 0 },
-                    { id: 2, name: 'main', source: { path: '/proj/examples/cpp/pause_test.cpp' }, line: 20, column: 0 }
+                    { id: 2, name: 'main', source: { path: '/proj/examples/cpp/pause_test.cpp' }, line: 20, column: 0 },
+                    { id: 3, name: 'formatter-heavy runtime frame', source: { path: '/usr/lib/runtime.cpp' }, line: 30, column: 0 }
                   ]
                 }
               };
@@ -1157,10 +1158,17 @@ describe('SessionManager - DAP Operations', () => {
               return {
                 success: true,
                 body: {
-                  scopes: [{ name: 'Local', variablesReference: args?.frameId === 2 ? 200 : 100, expensive: false }]
+                  scopes: [{
+                    name: 'Local',
+                    variablesReference: args?.frameId === 2 ? 200 : args?.frameId === 3 ? 300 : 100,
+                    expensive: false
+                  }]
                 }
               };
             case 'variables':
+              if (args?.variablesReference === 300) {
+                throw new Error('lower-frame formatter must not be queried after locals are found');
+              }
               return {
                 success: true,
                 body: {
@@ -2229,6 +2237,48 @@ describe('SessionManager - DAP Operations', () => {
       expect((result as unknown as { threadId?: number }).threadId).toBe(2);
       // The frame-bearing thread is adopted so scopes/evaluate anchor to it.
       expect(dependencies.mockProxyManager.getCurrentThreadId()).toBe(2);
+    });
+
+    it('prefers a policy-recognized user stack over an earlier runtime-only thread (#600)', async () => {
+      const session = await createPausedSession(sessionManager, dependencies);
+      setShortReadyWindow();
+      (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => ({
+        filterStackFrames: (frames: Array<{ file?: string }>, includeInternals: boolean) =>
+          includeInternals ? frames : frames.filter((frame) => !frame.file?.includes('/runtime/'))
+      });
+      const adopt = vi.spyOn(dependencies.mockProxyManager, 'setCurrentThreadId');
+      dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: { threadId?: number }) => {
+        if (command === 'stackTrace') {
+          if (args?.threadId === 2) {
+            return { success: true, body: { stackFrames: [{ id: 20, name: 'runtime.wait', source: { path: '/runtime/wait.cs' }, line: 1, column: 1 }] } };
+          }
+          if (args?.threadId === 3) {
+            return { success: true, body: { stackFrames: [{ id: 30, name: 'Program.Main', source: { path: '/work/Program.cs' }, line: 9, column: 1 }] } };
+          }
+          return { success: true, body: { stackFrames: [] } };
+        }
+        if (command === 'threads') {
+          return { success: true, body: { threads: [
+            { id: 1, name: 'stopped' },
+            { id: 2, name: 'runtime worker' },
+            { id: 3, name: 'main' }
+          ] } };
+        }
+        return { success: true, body: {} };
+      });
+
+      const result = await sessionManager.getStackTraceDetailed(
+        session.id,
+        undefined,
+        false,
+        { ensureStackReady: true }
+      );
+
+      expect(result.threadId).toBe(3);
+      expect(result.frames[0].name).toBe('Program.Main');
+      expect(result.note).toMatch(/switched to thread 3/);
+      expect(adopt).toHaveBeenCalledTimes(1);
+      expect(adopt).toHaveBeenCalledWith(3);
     });
 
     it('explains an explicitly requested frameless thread without adopting an alternative (issue #553)', async () => {

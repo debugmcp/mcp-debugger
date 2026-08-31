@@ -257,17 +257,51 @@ export class FrameAnchorResolver {
   } | null> {
     const candidates = threads ?? await this.listThreadsForScan(sessionId, proxyManager);
     if (!candidates) return null;
+    const session = this.ctx.getSession(sessionId);
+    const policy = this.ctx.selectPolicy(session.language);
+    let runtimeFallback: {
+      threadId: number;
+      threadName?: string;
+      frames: DebugProtocol.StackFrame[];
+    } | null = null;
     for (const thread of candidates) {
       if (!thread || typeof thread.id !== 'number' || thread.id === excludeThreadId) continue;
       try {
         const frames = await this.requestRawStackFrames(sessionId, proxyManager, thread.id);
         if (frames.length > 0) {
-          return { threadId: thread.id, threadName: thread.name, frames };
+          const candidate = { threadId: thread.id, threadName: thread.name, frames };
+          if (this.hasPolicyUserFrame(frames, policy)) {
+            return candidate;
+          }
+          runtimeFallback ??= candidate;
         }
       } catch {
         // Runtime threads may reject stackTrace; keep probing siblings.
       }
     }
-    return null;
+    return runtimeFallback;
+  }
+
+  /** Whether a policy recognizes at least one frame as user-inspectable. */
+  private hasPolicyUserFrame(
+    frames: DebugProtocol.StackFrame[],
+    policy: AdapterPolicy
+  ): boolean {
+    const mapped: StackFrame[] = frames.map((frame) => ({
+      id: frame.id,
+      name: frame.name,
+      // Empty is intentional for classification: policies commonly use a
+      // missing source to identify runtime frames.
+      file: frame.source?.path || frame.source?.name || '',
+      line: frame.line,
+      column: frame.column
+    }));
+    if (policy.isInternalFrame) {
+      return mapped.some((frame) => !policy.isInternalFrame!(frame));
+    }
+    if (policy.filterStackFrames) {
+      return policy.filterStackFrames(mapped, false).length > 0;
+    }
+    return mapped.length > 0;
   }
 }

@@ -585,6 +585,7 @@ Gets the current call stack.
 - Internal/runtime frames (e.g. Node.js internals, Go `/runtime/`, `System.*`) are filtered out by default; pass `includeInternals: true` to see them. When any frames were hidden, the response additionally carries `hiddenFrames` (count) and a `note` explaining how to reveal them.
 - The filtered stack is never empty when the adapter reported frames: if *every* frame is internal (e.g. a goroutine paused inside the Go runtime), the top internal frame is kept so `get_scopes`/`evaluate_expression` still have a valid `frameId`, and the `note` says so.
 - When an explicit thread reports no frames, the response remains anchored to that thread and its `note` suggests a frame-bearing alternative when one is available.
+- When the implicit stopped thread is frameless, stack, locals, and default evaluation share one resolver. It scans siblings, prefers a thread whose frames the language policy recognizes as user code over runtime-only stacks, adopts it once, and discloses the switch in `note`/`anchorNote`.
 
 ---
 
@@ -708,6 +709,8 @@ Gets local variables by traversing all stack frames and their scopes, then using
 
 **Size guards:** same caps and `truncation` advisory as [get_variables](#get_variables); additionally, the multi-frame scope fan-out stops issuing DAP requests once the per-call variable budget is spent (`truncation.scopesSkipped` reports scopes never fetched). Top-frame scopes are fetched first, so the locals that matter are unaffected. The `truncation` counts describe only the returned payload — values cut while fetching fan-out scopes the policy then discarded (e.g. Global/Closure) are not reported (issue #438).
 
+If the originally stopped thread has no frames, this tool uses the same user-frame-preferring adopted anchor as `get_stack_trace`. The response's `anchorNote` always names an automatic thread or lower-frame switch.
+
 **Example - Python:**
 ```json
 // Request
@@ -805,7 +808,7 @@ Evaluates an expression in the context of the current debug session.
 **Parameters:**
 - `sessionId` (string, required): The ID of the debug session.
 - `expression` (string, required): The expression to evaluate.
-- `frameId` (number, optional): Stack frame ID for context. If not provided, automatically uses the current (top) frame.
+- `frameId` (number, optional): Authoritative stack frame ID for context. If omitted, evaluation uses the same adopted top frame as `get_stack_trace` and `get_local_variables`; an automatic thread switch is returned as `anchorNote`.
 - `timeout` (number, optional): Maximum time in milliseconds to wait for the evaluation to complete (default: 30000, max: 600000). On expiry the request fails but the expression may keep executing in the debuggee.
 
 **Response:**
