@@ -6,6 +6,7 @@ describe('DebugResultData type contract (issue #590)', () => {
     expectTypeOf<keyof DebugResultData>().toEqualTypeOf<
       | 'initProgress'
       | 'proxyLogPath'
+      | 'proxyLogResource'
       | 'message'
       | 'warning'
       | 'pending'
