@@ -246,7 +246,9 @@ describe('SessionManager - Debug Session Workflow', () => {
 
       await vi.runAllTimersAsync();
       const result = await startPromise;
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
+      expect(result.state).toBe(SessionState.ERROR);
+      expect(result.error).toContain('signal=SIGKILL');
       expect(dependencies.mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('proxy exited during startup')
       );

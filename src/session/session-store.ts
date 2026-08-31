@@ -42,6 +42,13 @@ export interface ToolchainValidationState {
   binaryInfo?: Record<string, unknown>;
 }
 
+/** Terminal status reported by the proxy worker for the current launch. */
+export interface ProxyExitState {
+  code: number | null;
+  signal?: string;
+  expected?: boolean;
+}
+
 /**
  * The most recent real (non-dry-run) launch, captured as SessionManager
  * received it — scriptPath is the server-layer-resolved effective path, so a
@@ -94,6 +101,10 @@ export interface ManagedSession extends DebugSessionInfo {
   executionState?: ExecutionState;
   logDir?: string;
   toolchainValidation?: ToolchainValidationState;
+  /** Reset per launch; distinguishes a proxy crash from debuggee completion. */
+  lastProxyExit?: ProxyExitState;
+  /** Last proxy error-event message for the current launch. */
+  lastProxyError?: string;
   // True once the first 'stopped' event after launch has been observed.
   // Used by the auto-continue trigger to identify the initial entry stop
   // even when the adapter reports a non-'entry' reason (e.g., js-debug

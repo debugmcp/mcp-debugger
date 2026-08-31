@@ -1226,6 +1226,86 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
   });
 
   describe('Start Debugging Success Scenarios', () => {
+    it('returns failure with diagnostics when the proxy exits non-zero during readiness', async () => {
+      mockSession.proxyManager = undefined;
+      mockSession.state = SessionState.CREATED;
+      mockSession.logDir = '/tmp/session-logs';
+      mockDependencies.fileSystem.readFile.mockResolvedValue('adapter crash details');
+
+      const proxyStub: any = {
+        ...mockProxyManager,
+        once: vi.fn(),
+        removeListener: vi.fn(),
+        on: vi.fn(),
+        off: vi.fn(),
+        isRunning: vi.fn().mockReturnValue(true),
+        stop: vi.fn().mockResolvedValue(undefined)
+      };
+      proxyStub.on.mockReturnValue(proxyStub);
+      proxyStub.off.mockReturnValue(proxyStub);
+      proxyStub.once.mockImplementation((event: string, handler: () => void) => {
+        if (event === 'exit') {
+          mockSession.state = SessionState.ERROR;
+          mockSession.lastProxyExit = { code: 134, signal: 'SIGABRT', expected: false };
+          handler();
+        }
+        return proxyStub;
+      });
+
+      const startProxySpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
+        mockSession.proxyManager = proxyStub;
+      });
+      try {
+        const result = await operations.startDebugging('test-session', 'main.py');
+
+        expect(result).toEqual(expect.objectContaining({
+          success: false,
+          state: SessionState.ERROR,
+          error: expect.stringContaining('code=134')
+        }));
+        expect(result.data).toEqual({
+          proxyLogPath: path.join('/tmp/session-logs', 'proxy-test-session.log')
+        });
+      } finally {
+        startProxySpy.mockRestore();
+      }
+    });
+
+    it('keeps a clean code-0 program completion as a successful stopped launch', async () => {
+      mockSession.proxyManager = undefined;
+      mockSession.state = SessionState.CREATED;
+
+      const proxyStub: any = {
+        ...mockProxyManager,
+        once: vi.fn(),
+        removeListener: vi.fn(),
+        on: vi.fn(),
+        off: vi.fn(),
+        isRunning: vi.fn().mockReturnValue(true)
+      };
+      proxyStub.on.mockReturnValue(proxyStub);
+      proxyStub.off.mockReturnValue(proxyStub);
+      proxyStub.once.mockImplementation((event: string, handler: () => void) => {
+        if (event === 'exited') {
+          mockSession.state = SessionState.STOPPED;
+          mockSession.exitCode = 0;
+          handler();
+        }
+        return proxyStub;
+      });
+
+      const startProxySpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
+        mockSession.proxyManager = proxyStub;
+      });
+      try {
+        const result = await operations.startDebugging('test-session', 'main.py');
+        expect(result.success).toBe(true);
+        expect(result.state).toBe(SessionState.STOPPED);
+      } finally {
+        startProxySpy.mockRestore();
+      }
+    });
+
     it('completes handshake and waits for stop event', async () => {
       vi.stubEnv('CI', 'true');
       vi.stubEnv('GITHUB_ACTIONS', undefined);
