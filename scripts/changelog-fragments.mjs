@@ -55,6 +55,37 @@ export const SKIP_LABEL = 'no-changelog';
 const USER_VISIBLE_ROOTS = ['src/', 'packages/', 'tools/'];
 
 /**
+ * Root-level files that are user-visible despite not sitting under one of those roots.
+ *
+ * The root manifest is `private: true`, but its `dependencies` and `optionalDependencies` are
+ * exactly what `dist/index.js` and the Docker image run — registering the C/C++ adapter in
+ * `optionalDependencies` (78912fc8) shipped a whole language and the gate said nothing (#630).
+ *
+ * `pnpm-lock.yaml` is deliberately NOT here, and it is not an oversight: every dependency PR
+ * touches the lockfile, devDependency-only ones included, so gating on it would undo #629 the
+ * day after it landed. It also has no top-level keys to classify. The accepted cost is that a
+ * purely transitive change — a `pnpm.overrides` pin — goes ungated.
+ */
+const USER_VISIBLE_FILES = ['package.json'];
+
+/**
+ * Manifest keys that describe what a consumer receives. Everything else in a `package.json` is
+ * plumbing: `scripts`, `devDependencies`, `packageManager`, `workspaces`, `pnpm`.
+ *
+ * An allowlist rather than "everything but devDependencies" (#629's rule) because the root
+ * manifest carries 104 npm scripts: measured over 130 root-manifest commits, the deny-rule
+ * demands a fragment for 115 of them and this allowlist for 40 (#630).
+ *
+ * `version` is absent on purpose. A release PR bumps it across every manifest, and the
+ * changelog entry for a release is the collated section itself — requiring a *fragment* for
+ * the bump that cuts the release would be circular.
+ */
+export const SHIPPING_SURFACE_KEYS = [
+  'dependencies', 'optionalDependencies', 'peerDependencies',
+  'bin', 'main', 'exports', 'files', 'engines', 'type'
+];
+
+/**
  * Tests live inside `packages/`, so a package's test-only change would
  * otherwise trip the gate. Test churn is not user-visible.
  */
@@ -63,41 +94,27 @@ function isTestPath(file) {
 }
 
 /**
- * Which top-level manifest keys moved between two `package.json` texts, ignoring
- * `devDependencies`?
+ * Which shipping-surface keys moved between two `package.json` texts?
+ *
+ * This is the whole judgement the gate makes about a manifest: it asks what actually moved
+ * rather than trusting the file's path, so toolchain churn (a linter, a types package, a test
+ * runner) stays silent while a change to what ships does not.
  *
  * Compared with `isDeepStrictEqual` rather than by string, so a manifest whose keys a tool
  * happened to reorder does not read as a change.
  *
  * @param {string} baseText `package.json` before the change
  * @param {string} headText `package.json` after the change
- * @returns {string[]} names of the changed keys, `devDependencies` excluded; empty if none
+ * @returns {string[]} the {@link SHIPPING_SURFACE_KEYS} that differ; empty if none
  * @throws {SyntaxError} when either side is not valid JSON
  */
-export function changedManifestKeys(baseText, headText) {
+export function changedShippingKeys(baseText, headText) {
   const base = JSON.parse(baseText);
   const head = JSON.parse(headText);
-  const keys = new Set([...Object.keys(base), ...Object.keys(head)]);
-  keys.delete('devDependencies');
 
-  return [...keys].filter(key => !isDeepStrictEqual(base[key], head[key])).sort();
-}
-
-/**
- * Did this manifest change move nothing but `devDependencies`?
- *
- * Such a change is toolchain churn — a linter, a types package, a test runner — and is not
- * something a consumer of the published package can observe. Everything else in the file
- * (`dependencies`, `peerDependencies`, `bin`, `exports`, `engines`, `version`) still counts,
- * which is why this asks what actually moved rather than trusting the file's path (#629).
- *
- * @param {string} baseText `package.json` before the change
- * @param {string} headText `package.json` after the change
- * @returns {boolean}
- * @throws {SyntaxError} when either side is not valid JSON
- */
-export function isDevDependencyOnlyChange(baseText, headText) {
-  return changedManifestKeys(baseText, headText).length === 0;
+  return SHIPPING_SURFACE_KEYS
+    .filter(key => !isDeepStrictEqual(base[key], head[key]))
+    .sort();
 }
 
 /**
@@ -124,9 +141,9 @@ function manifestVerdict(file, resolveManifest) {
   if (!pair) return null;
 
   try {
-    return changedManifestKeys(pair.base, pair.head);
+    return changedShippingKeys(pair.base, pair.head);
   } catch {
-    return null;  // unparseable JSON — cannot prove this was only devDependencies
+    return null;  // unparseable JSON — cannot prove nothing shipped changed
   }
 }
 
@@ -141,8 +158,9 @@ function describeOffender(file, movedKeys) {
  *
  * `resolveManifest` is injected rather than read from git in here so the classification stays
  * pure and testable, the way `isSameEntry` in ./lib/is-main.mjs takes its path resolver.
- * Omit it and the gate behaves exactly as it did before #629: every non-test path under a
- * user-visible root is an offender.
+ * Omit it and the gate falls back to path-only classification: every non-test path under a
+ * user-visible root, plus the root manifest, is an offender. That is the strict direction, so
+ * the fallback can only ever over-report.
  *
  * @param {string[]} changedFiles repo-relative paths changed by the PR
  * @param {string[]} labels PR label names
@@ -152,11 +170,13 @@ function describeOffender(file, movedKeys) {
  */
 export function requiresFragment(changedFiles, labels = [], resolveManifest = null) {
   const candidates = changedFiles.filter(
-    file => USER_VISIBLE_ROOTS.some(root => file.startsWith(root)) && !isTestPath(file)
+    file =>
+      (USER_VISIBLE_ROOTS.some(root => file.startsWith(root)) || USER_VISIBLE_FILES.includes(file))
+      && !isTestPath(file)
   );
 
-  // A manifest whose diff moved only devDependencies is toolchain churn, not a user-visible
-  // change (#629). Remember what did move, so the failure message can say why one was kept.
+  // A manifest that moved no shipping-surface key is toolchain churn, not a user-visible
+  // change (#629, #630). Remember what did move, so the message can say why one was kept.
   const movedKeys = new Map();
   const offenders = candidates.filter(file => {
     const changed = manifestVerdict(file, resolveManifest);
@@ -170,8 +190,8 @@ export function requiresFragment(changedFiles, labels = [], resolveManifest = nu
     return {
       required: false,
       reason: candidates.length === 0
-        ? 'No changes under src/, packages/, or tools/.'
-        : 'Only devDependencies moved in the changed manifests.',
+        ? 'No changes under src/, packages/, or tools/, or to the root manifest.'
+        : 'The changed manifests moved no shipping-surface key.',
       offenders
     };
   }

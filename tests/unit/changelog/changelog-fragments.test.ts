@@ -2,9 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore -- plain-JS module without type declarations
 import {
-  changedManifestKeys,
+  changedShippingKeys,
   collateIntoChangelog,
-  isDevDependencyOnlyChange,
   parseFragmentFilename,
   readFragments,
   requiresFragment
@@ -202,39 +201,44 @@ function resolverOver(
 const RUBY_MANIFEST = 'packages/adapter-ruby/package.json';
 const GO_MANIFEST = 'packages/adapter-go/package.json';
 
-describe('changedManifestKeys / isDevDependencyOnlyChange (issue #629)', () => {
-  it('reports nothing changed when only devDependencies moved', () => {
-    const before = manifest();
+describe('changedShippingKeys (issues #629, #630)', () => {
+  it('reports nothing when only devDependencies moved', () => {
     const after = manifest({ devDependencies: { '@types/node': '^26.4.0', eslint: '^10.9.1' } });
-
-    expect(changedManifestKeys(before, after)).toEqual([]);
-    expect(isDevDependencyOnlyChange(before, after)).toBe(true);
+    expect(changedShippingKeys(manifest(), after)).toEqual([]);
   });
 
   it('names a runtime dependency bump, which a consumer of the package can observe', () => {
     const after = manifest({ dependencies: { '@debugmcp/shared': 'workspace:*', which: '^6.0.0' } });
-
-    expect(changedManifestKeys(manifest(), after)).toEqual(['dependencies']);
-    expect(isDevDependencyOnlyChange(manifest(), after)).toBe(false);
+    expect(changedShippingKeys(manifest(), after)).toEqual(['dependencies']);
   });
 
-  it('catches a version bump, so a release bump cannot slip through as toolchain churn', () => {
-    expect(changedManifestKeys(manifest(), manifest({ version: '0.25.0' }))).toEqual(['version']);
+  it('names an optionalDependencies change, which is how an adapter gets shipped (#630)', () => {
+    const after = manifest({ optionalDependencies: { '@debugmcp/adapter-cpp': 'workspace:*' } });
+    expect(changedShippingKeys(manifest(), after)).toEqual(['optionalDependencies']);
+  });
+
+  it('ignores a version bump: the release IS the changelog entry, so a fragment would be circular', () => {
+    expect(changedShippingKeys(manifest(), manifest({ version: '0.25.0' }))).toEqual([]);
+  });
+
+  it('ignores npm scripts, which no consumer of the package observes', () => {
+    const after = manifest({ scripts: { build: 'tsc -b', 'test:new': 'vitest run' } });
+    expect(changedShippingKeys(manifest(), after)).toEqual([]);
   });
 
   it('catches a key that only one side has, such as a newly published bin', () => {
-    expect(changedManifestKeys(manifest(), manifest({ bin: { rdbg: './cli.js' } }))).toEqual(['bin']);
+    expect(changedShippingKeys(manifest(), manifest({ bin: { rdbg: './cli.js' } }))).toEqual(['bin']);
   });
 
   it('ignores key reordering, comparing values rather than serialized text', () => {
     const before = JSON.stringify({ name: 'x', version: '1.0.0', dependencies: { a: '^1' } });
     const after = JSON.stringify({ dependencies: { a: '^1' }, version: '1.0.0', name: 'x' });
 
-    expect(isDevDependencyOnlyChange(before, after)).toBe(true);
+    expect(changedShippingKeys(before, after)).toEqual([]);
   });
 
   it('throws on unparseable JSON rather than reporting a silent no-change', () => {
-    expect(() => changedManifestKeys('{not json', manifest())).toThrow();
+    expect(() => changedShippingKeys('{not json', manifest())).toThrow();
   });
 });
 
@@ -265,13 +269,24 @@ describe('requiresFragment manifest carve-out (issue #629)', () => {
   });
 
   it('names the keys that kept a manifest on the list, so the failure is actionable', () => {
+    const bumped = manifest({ dependencies: { '@debugmcp/shared': 'workspace:*', which: '^6.0.0' } });
+    const result = requiresFragment(
+      [GO_MANIFEST],
+      [],
+      resolverOver({ [GO_MANIFEST]: [manifest(), bumped] })
+    );
+
+    expect(result.reason).toContain('changed: dependencies');
+  });
+
+  it('lets a release version bump through, since the release section is its own entry', () => {
     const result = requiresFragment(
       [GO_MANIFEST],
       [],
       resolverOver({ [GO_MANIFEST]: [manifest(), manifest({ version: '0.25.0' })] })
     );
 
-    expect(result.reason).toContain('changed: version');
+    expect(result.required).toBe(false);
   });
 
   it('keeps a manifest the resolver cannot place, since added or deleted is user-visible', () => {
@@ -318,6 +333,61 @@ describe('requiresFragment manifest carve-out (issue #629)', () => {
     );
 
     expect(result.required).toBe(true);
+  });
+});
+
+describe('the root manifest is gated too (issue #630)', () => {
+  const ROOT = 'package.json';
+
+  it('demands a fragment when a root runtime dependency moves', () => {
+    const after = manifest({ dependencies: { express: '^5.2.0' } });
+    const result = requiresFragment([ROOT], [], resolverOver({ [ROOT]: [manifest(), after] }));
+
+    expect(result.required).toBe(true);
+    expect(result.offenders).toEqual([ROOT]);
+    expect(result.reason).toContain('changed: dependencies');
+  });
+
+  it('demands one when an adapter is registered in optionalDependencies, the case that motivated #630', () => {
+    const after = manifest({ optionalDependencies: { '@debugmcp/adapter-cpp': 'workspace:*' } });
+    const result = requiresFragment([ROOT], [], resolverOver({ [ROOT]: [manifest(), after] }));
+
+    expect(result.required).toBe(true);
+    expect(result.reason).toContain('changed: optionalDependencies');
+  });
+
+  it('stays silent for npm-script churn, which dominates root-manifest history', () => {
+    const after = manifest({ scripts: { 'test:new': 'vitest run' } });
+    const result = requiresFragment([ROOT], [], resolverOver({ [ROOT]: [manifest(), after] }));
+
+    expect(result.required).toBe(false);
+  });
+
+  it('stays silent for a packageManager pin', () => {
+    const after = manifest({ packageManager: 'pnpm@10.34.0' });
+    const result = requiresFragment([ROOT], [], resolverOver({ [ROOT]: [manifest(), after] }));
+
+    expect(result.required).toBe(false);
+  });
+
+  it('never gates on pnpm-lock.yaml, or #629 would break again on every dependency PR', () => {
+    const devOnly = manifest({ devDependencies: { eslint: '^10.9.1' } });
+    const result = requiresFragment(
+      ['pnpm-lock.yaml', ROOT, RUBY_MANIFEST],
+      [],
+      resolverOver({ [ROOT]: [manifest(), devOnly], [RUBY_MANIFEST]: [manifest(), devOnly] })
+    );
+
+    expect(result.required).toBe(false);
+    expect(result.offenders).toEqual([]);
+  });
+
+  it('does not gate on a sibling root file such as pnpm-workspace.yaml', () => {
+    expect(requiresFragment(['pnpm-workspace.yaml', 'README.md'], []).required).toBe(false);
+  });
+
+  it('keeps the root manifest an offender under the path-only fallback', () => {
+    expect(requiresFragment([ROOT], []).required).toBe(true);
   });
 });
 
