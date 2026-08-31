@@ -23,15 +23,11 @@ import type { ProxyInitProgress } from '../../utils/error-messages.js';
 import { getErrorMessage, SessionNotFoundError } from '../../errors/debug-errors.js';
 import { proxyLogPathFor } from '../../proxy/session-log-layout.js';
 
-/** How many trailing proxy-log lines are worth reading after a failure. */
+/** How many trailing proxy-log lines are worth reporting after a failure. */
 const PROXY_LOG_TAIL_LINES = 80;
 
-/**
- * Character cap on the tail. Generous on purpose: it exists so a proxy log with
- * one pathological multi-megabyte line cannot blow up the record, not to trim a
- * normal 80-line tail, which is a few kilobytes.
- */
-const PROXY_LOG_TAIL_CHARS = 64 * 1024;
+/** Hard I/O and allocation cap applied before the log is sanitized. */
+export const PROXY_LOG_TAIL_MAX_BYTES = 64 * 1024;
 
   /** The pointers a failed launch/attach returns to the caller (issue #493 / #551). */
   export interface ProxyFailureDiagnostics {
@@ -45,7 +41,7 @@ const PROXY_LOG_TAIL_CHARS = 64 * 1024;
  */
 export interface ProxyFailureLogDeps {
   logger: ILogger;
-  fileSystem: Pick<IFileSystem, 'readFile'>;
+  fileSystem: Pick<IFileSystem, 'readTail'>;
 }
 
 /** The two operations that can fail this way, named as they appear in the log. */
@@ -94,7 +90,7 @@ export function collectProxyFailureDiagnostics(
 /**
  * Read the last `tailLineCount` lines of the proxy log, if there is one.
  *
- * Reads straight through rather than asking `pathExists` first: the proxy is
+ * Reads the bounded tail rather than asking `pathExists` first: the proxy is
  * still writing (and may rotate) this file, so an exists-then-read pair can
  * report "no log" for a file that appeared a millisecond later, and spends a
  * second syscall to do it. `ENOENT` — the answer that check was buying — is
@@ -111,7 +107,7 @@ export function collectProxyFailureDiagnostics(
  * error that sent us here still reaches the log intact.
  */
 export async function readProxyLogTail(
-  fileSystem: Pick<IFileSystem, 'readFile'>,
+  fileSystem: Pick<IFileSystem, 'readTail'>,
   proxyLogPath: string | undefined,
   tailLineCount: number = PROXY_LOG_TAIL_LINES
 ): Promise<string | undefined> {
@@ -119,10 +115,10 @@ export async function readProxyLogTail(
     return undefined;
   }
   try {
-    const logContent = await fileSystem.readFile(proxyLogPath, 'utf-8');
+    const logContent = await fileSystem.readTail(proxyLogPath, PROXY_LOG_TAIL_MAX_BYTES);
     return sanitizeStderrTail(logContent, {
       maxLines: tailLineCount,
-      maxChars: PROXY_LOG_TAIL_CHARS
+      maxChars: PROXY_LOG_TAIL_MAX_BYTES
     });
   } catch (logReadError) {
     if ((logReadError as NodeJS.ErrnoException)?.code === 'ENOENT') {
@@ -154,13 +150,6 @@ export function buildProxyFailureErrorDetails(
     proxyLogPath: diagnostics.proxyLogPath,
     proxyLogTail
   };
-
-  // Try to capture raw error object
-  try {
-    errorDetails.raw = JSON.stringify(error);
-  } catch {
-    errorDetails.raw = 'Error not JSON serializable';
-  }
 
   return errorDetails;
 }

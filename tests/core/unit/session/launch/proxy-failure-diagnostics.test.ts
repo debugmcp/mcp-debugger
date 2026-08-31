@@ -12,6 +12,7 @@ import {
   buildProxyFailureErrorDetails,
   collectProxyFailureDiagnostics,
   logProxyFailure,
+  PROXY_LOG_TAIL_MAX_BYTES,
   readProxyLogTail
 } from '../../../../../src/session/launch/proxy-failure-diagnostics.js';
 import type { ProxyInitProgress } from '../../../../../src/utils/error-messages.js';
@@ -78,7 +79,7 @@ describe('readProxyLogTail', () => {
   it('returns only the last N content lines, so a long log cannot swamp the record', async () => {
     const fileSystem = createMockFileSystem();
     const allLines = Array.from({ length: 200 }, (_, i) => `line ${i + 1}`);
-    fileSystem.readFile.mockResolvedValue(logFile(allLines));
+    fileSystem.readTail.mockResolvedValue(logFile(allLines));
 
     const tail = await readProxyLogTail(fileSystem, proxyLogPath, 80);
 
@@ -89,11 +90,12 @@ describe('readProxyLogTail', () => {
     expect(tailLines[79]).toContain('line 200');
     // The shared tailer labels what it dropped.
     expect(tail).toContain('(last 80 of 200 lines)');
+    expect(fileSystem.readTail).toHaveBeenCalledWith(proxyLogPath, PROXY_LOG_TAIL_MAX_BYTES);
   });
 
   it('splits CRLF logs, so a Windows proxy log is not one giant line', async () => {
     const fileSystem = createMockFileSystem();
-    fileSystem.readFile.mockResolvedValue('first\r\nsecond\r\nthird\r\n');
+    fileSystem.readTail.mockResolvedValue('first\r\nsecond\r\nthird\r\n');
 
     expect(await readProxyLogTail(fileSystem, proxyLogPath, 2)).toBe(
       'second\nthird (last 2 of 3 lines)'
@@ -104,7 +106,7 @@ describe('readProxyLogTail', () => {
     const fileSystem = createMockFileSystem();
     // The proxy log carries raw adapter argv and DAP output bodies, so the lines
     // a failure makes interesting are exactly the ones that can hold a token.
-    fileSystem.readFile.mockResolvedValue(
+    fileSystem.readTail.mockResolvedValue(
       logFile(['[Worker] spawning adapter', '[Worker] argv: --token=super-secret-value'])
     );
 
@@ -119,21 +121,21 @@ describe('readProxyLogTail', () => {
     const fileSystem = createMockFileSystem();
 
     expect(await readProxyLogTail(fileSystem, undefined)).toBeUndefined();
-    expect(fileSystem.readFile).not.toHaveBeenCalled();
+    expect(fileSystem.readTail).not.toHaveBeenCalled();
   });
 
   it('reads nothing when the proxy never got as far as writing its log', async () => {
     const fileSystem = createMockFileSystem();
     // ENOENT is the answer an exists-check would have bought, one syscall later
     // and with a rotation race in between.
-    fileSystem.readFile.mockRejectedValue(enoent());
+    fileSystem.readTail.mockRejectedValue(enoent());
 
     expect(await readProxyLogTail(fileSystem, proxyLogPath)).toBeUndefined();
   });
 
   it('reports any other read failure as the tail rather than throwing over the real error', async () => {
     const fileSystem = createMockFileSystem();
-    fileSystem.readFile.mockRejectedValue(new Error('permission denied'));
+    fileSystem.readTail.mockRejectedValue(new Error('permission denied'));
 
     expect(await readProxyLogTail(fileSystem, proxyLogPath)).toBe(
       '<<Failed to read proxy log: permission denied>>'
@@ -166,13 +168,11 @@ describe('buildProxyFailureErrorDetails', () => {
     expect(details.stack).toContain('spawn ENOENT');
   });
 
-  it('says so rather than throwing when the error will not serialize', () => {
+  it('does not redundantly serialize the raw error object', () => {
     const circular: Record<string, unknown> = { message: 'cycle' };
     circular.self = circular;
 
-    expect(buildProxyFailureErrorDetails(circular, {}, undefined).raw).toBe(
-      'Error not JSON serializable'
-    );
+    expect(buildProxyFailureErrorDetails(circular, {}, undefined)).not.toHaveProperty('raw');
   });
 
   it('describes a thrown non-error without pretending it has a stack', () => {
@@ -301,7 +301,7 @@ describe('logProxyFailure', () => {
   it('logs the proxy log tail but returns only the pointers', async () => {
     const logger = createMockLogger();
     const fileSystem = createMockFileSystem();
-    fileSystem.readFile.mockResolvedValue(logFile(['adapter said: could not open port']));
+    fileSystem.readTail.mockResolvedValue(logFile(['adapter said: could not open port']));
     const error = Object.assign(new Error('proxy init timed out'), { initProgress });
 
     const diagnostics = await logProxyFailure(

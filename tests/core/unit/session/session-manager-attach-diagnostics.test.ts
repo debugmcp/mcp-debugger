@@ -39,7 +39,7 @@ describe('SessionManager - attach failure diagnostics (issue #561)', () => {
   /** Attach a session whose proxy dies during initialization. */
   async function attachAgainstADyingProxy(proxyLogContent: string) {
     const session = await sessionManager.createSession({ language: DebugLanguage.MOCK });
-    vi.mocked(dependencies.mockFileSystem.readFile).mockResolvedValue(proxyLogContent);
+    vi.mocked(dependencies.mockFileSystem.readTail).mockResolvedValue(proxyLogContent);
     vi.spyOn(dependencies.mockProxyManager, 'start').mockRejectedValue(
       Object.assign(new Error('Debug proxy initialization did not complete within 30s'), {
         initProgress
@@ -87,12 +87,12 @@ describe('SessionManager - attach failure diagnostics (issue #561)', () => {
     // Named by the same helper the proxy's own logger uses, so a rename cannot
     // leave the diagnostics pointing at a file nothing writes.
     expect(path.basename(proxyLogPath)).toBe(proxyLogFileName(session.id));
-    expect(dependencies.mockFileSystem.readFile).toHaveBeenCalledWith(proxyLogPath, 'utf-8');
+    expect(dependencies.mockFileSystem.readTail).toHaveBeenCalledWith(proxyLogPath, 64 * 1024);
   });
 
   it('still reports the failure when the proxy log cannot be read', async () => {
     const session = await sessionManager.createSession({ language: DebugLanguage.MOCK });
-    vi.mocked(dependencies.mockFileSystem.readFile).mockRejectedValue(new Error('permission denied'));
+    vi.mocked(dependencies.mockFileSystem.readTail).mockRejectedValue(new Error('permission denied'));
     vi.spyOn(dependencies.mockProxyManager, 'start').mockRejectedValue(new Error('adapter exited'));
 
     const result = await sessionManager.attachToProcess(session.id, { port: 5678 });

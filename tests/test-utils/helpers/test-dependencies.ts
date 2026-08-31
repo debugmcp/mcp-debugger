@@ -79,6 +79,7 @@ export function createMockLogger(): ILogger {
 export function createMockFileSystem(): IFileSystem {
   return {
     readFile: vi.fn(),
+    readTail: vi.fn(),
     writeFile: vi.fn(),
     exists: vi.fn(),
     existsSync: vi.fn(),

@@ -43,6 +43,7 @@ import { deriveSourceMapFromBinary } from '@debugmcp/codelldb-common';
 const mockDependencies: AdapterDependencies = {
   fileSystem: {
     readFile: vi.fn(),
+    readTail: vi.fn(),
     writeFile: vi.fn(),
     outputFile: vi.fn(),
     exists: vi.fn(),
