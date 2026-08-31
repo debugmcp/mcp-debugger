@@ -121,7 +121,7 @@ async function setFunctionBreakpointBranch(ctx: ToolContext, args: WithSessionId
       warning: warnings.length > 0 ? warnings.join('; ') : undefined
     });
   } catch (error) {
-    return sessionErrorResultOrThrow(error, 'session-state');
+    return sessionErrorResultOrThrow(error);
   }
 }
 
@@ -213,10 +213,7 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): P
     });
     return result;
   } catch (error) {
-    // Message-sniffed session state -> {success: false}, everything else
-    // re-thrown; the sniff is wider than its name suggests (see the note in
-    // debuggee-tools.ts, start_debugging).
-    return sessionErrorResultOrThrow(error, 'session-state');
+    return sessionErrorResultOrThrow(error);
   }
 }
 
@@ -238,7 +235,7 @@ export const listBreakpointsTool: ToolHandler = async (ctx, args) => {
         : {})
     });
   } catch (error) {
-    return sessionErrorResultOrThrow(error, 'session-state');
+    return sessionErrorResultOrThrow(error);
   }
 };
 
@@ -300,7 +297,7 @@ export const removeBreakpointTool: ToolHandler = async (ctx, args) => {
       warning
     });
   } catch (error) {
-    return sessionErrorResultOrThrow(error, 'session-state');
+    return sessionErrorResultOrThrow(error);
   }
 };
 
@@ -337,6 +334,6 @@ export const clearBreakpointsTool: ToolHandler = async (ctx, args) => {
       warning: res.warning
     });
   } catch (error) {
-    return sessionErrorResultOrThrow(error, 'session-state');
+    return sessionErrorResultOrThrow(error);
   }
 };

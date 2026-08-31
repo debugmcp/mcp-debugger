@@ -4,6 +4,7 @@
  */
 import { ErrorCode as McpErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { SessionState } from '@debugmcp/shared';
+import { SessionTerminatedError } from '../../errors/debug-errors.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { enforceExplicitNames, requireSessionId } from '../tool-validation.js';
 import { variablePayloadExtras } from './shared.js';
@@ -43,7 +44,7 @@ export const getVariablesTool: ToolHandler = async (ctx, args) => {
     return jsonResult({ success: true, variables, count: variables.length, variablesReference: scope, ...variablePayloadExtras(variables, args.names, truncation) });
   } catch (error) {
     // Typed session errors report as {success: false}; anything else escapes.
-    return sessionErrorResultOrThrow(error, 'typed');
+    return sessionErrorResultOrThrow(error);
   }
 };
 
@@ -82,7 +83,7 @@ export const getStackTraceTool: ToolHandler = async (ctx, args) => {
     }
     return jsonResult(payload);
   } catch (error) {
-    const sessionResult = sessionErrorToResult(error, 'typed');
+    const sessionResult = sessionErrorToResult(error);
     if (sessionResult) {
       return sessionResult;
     }
@@ -106,7 +107,7 @@ export const getScopesTool: ToolHandler = async (ctx, args) => {
     return jsonResult({ success: true, scopes });
   } catch (error) {
     // Typed session errors report as {success: false}; anything else escapes.
-    return sessionErrorResultOrThrow(error, 'typed');
+    return sessionErrorResultOrThrow(error);
   }
 };
 
@@ -153,8 +154,7 @@ export async function handleEvaluateExpression(ctx: ToolContext, args: { session
       timestamp: Date.now()
     });
 
-    // Handle session state errors specifically
-    return sessionErrorToResult(error, 'session-state-or-not-paused') ??
+    return sessionErrorToResult(error) ??
       rethrowAsMcpError(error, 'Failed to evaluate expression');
   }
 }
@@ -212,7 +212,7 @@ export async function handleGetSourceContext(ctx: ToolContext, args: { sessionId
     });
   } catch (error) {
     ctx.logger.error('Failed to get source context', { error });
-    return sessionErrorToResult(error, 'typed') ??
+    return sessionErrorToResult(error) ??
       rethrowAsMcpError(error, 'Failed to get source context');
   }
 }
@@ -326,10 +326,10 @@ export async function handleGetLocalVariables(ctx: ToolContext, args: { sessionI
     // Handle session state errors specifically. A terminated session is a
     // normal end state (e.g. a step_out ran the program to completion) —
     // explain that instead of implying misuse.
-    const stateMessage = errorMessage.includes('terminated')
+    const stateMessage = error instanceof SessionTerminatedError
       ? 'The program has terminated, so no frames or variables exist. Use restart_debugging to run it again.'
       : 'Cannot get local variables. The session must be paused at a breakpoint.';
-    return sessionErrorToResult(error, 'session-state-or-not-paused', { message: stateMessage }) ??
+    return sessionErrorToResult(error, { message: stateMessage }) ??
       rethrowAsMcpError(error, 'Failed to get local variables');
   }
 }

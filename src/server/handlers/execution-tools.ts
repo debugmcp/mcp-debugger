@@ -79,7 +79,7 @@ export const stepTool: ToolHandler = async (ctx, args, toolName) => {
   } catch (error) {
     // Typed session errors and other expected Errors (like "Failed to step
     // over") both report as {success: false}; only non-Error throws escape.
-    const sessionResult = sessionErrorToResult(error, 'typed');
+    const sessionResult = sessionErrorToResult(error);
     if (sessionResult) {
       return sessionResult;
     }
@@ -99,7 +99,7 @@ export const continueExecutionTool: ToolHandler = async (ctx, args) => {
   } catch (error) {
     // Same contract as the step tools: typed session errors and other
     // expected Errors report as {success: false}; non-Errors escape.
-    const sessionResult = sessionErrorToResult(error, 'typed');
+    const sessionResult = sessionErrorToResult(error);
     if (sessionResult) {
       return sessionResult;
     }
@@ -117,7 +117,7 @@ export async function handlePause(ctx: ToolContext, args: { sessionId: string; t
     return jsonResult(result);
   } catch (error) {
     ctx.logger.error('Failed to pause execution', { error });
-    return sessionErrorToResult(error, 'typed') ??
+    return sessionErrorToResult(error) ??
       rethrowAsMcpError(error, 'Failed to pause execution');
   }
 }
@@ -133,7 +133,7 @@ export async function handleListThreads(ctx: ToolContext, args: { sessionId: str
     return jsonResult({ success: true, threads });
   } catch (error) {
     ctx.logger.error('Failed to list threads', { error });
-    return sessionErrorToResult(error, 'typed') ??
+    return sessionErrorToResult(error) ??
       rethrowAsMcpError(error, 'Failed to list threads');
   }
 }

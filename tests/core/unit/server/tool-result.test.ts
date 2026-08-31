@@ -1,16 +1,8 @@
-/**
- * The session-error catch helpers, one case per dialect row of the site table.
- *
- * The point of these tests is that the three dialects are NOT interchangeable:
- * ProxyNotRunningError converts under 'typed' but under neither string sniff,
- * a bare 'not found' converts only under the loose sniff, and each row keeps
- * its own fallback.
- */
+/** The session-error catch helpers classify only typed lifecycle failures. */
 import { describe, it, expect } from 'vitest';
 import { McpError, ErrorCode as McpErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import {
   failureResult,
-  isSessionStateError,
   isTypedSessionError,
   jsonResult,
   prettyJsonResult,
@@ -44,31 +36,31 @@ describe('tool-result envelopes', () => {
   });
 });
 
-describe('sniff: typed', () => {
+describe('typed session errors', () => {
   it('recognizes the three typed session errors', () => {
     expect(isTypedSessionError(new SessionTerminatedError('s1'))).toBe(true);
     expect(isTypedSessionError(new SessionNotFoundError('s1'))).toBe(true);
     expect(isTypedSessionError(new ProxyNotRunningError('s1', 'pause'))).toBe(true);
   });
 
-  it('converts ProxyNotRunningError, whose message matches no string sniff', () => {
+  it('converts ProxyNotRunningError', () => {
     const error = new ProxyNotRunningError('s1', 'pause');
     // McpError prefixes its own message with the JSON-RPC code; the payload
     // carries that verbatim, exactly as it always has.
-    expect(payload(sessionErrorToResult(error, 'typed')!)).toEqual({
+    expect(payload(sessionErrorToResult(error)!)).toEqual({
       success: false,
       error: error.message
     });
     expect(error.message).toContain('Cannot pause: no active proxy for session s1');
   });
 
-  it('converts SessionTerminatedError and SessionNotFoundError under typed', () => {
+  it('converts all typed lifecycle errors', () => {
     for (const error of [new SessionTerminatedError('s1'), new SessionNotFoundError('s1')]) {
-      expect(payload(sessionErrorToResult(error, 'typed')!)).toEqual({
+      expect(payload(sessionErrorToResult(error)!)).toEqual({
         success: false,
         error: error.message
       });
-      expect(payload(sessionErrorResultOrThrow(error, 'typed'))).toEqual({
+      expect(payload(sessionErrorResultOrThrow(error))).toEqual({
         success: false,
         error: error.message
       });
@@ -77,80 +69,43 @@ describe('sniff: typed', () => {
   it('does NOT convert a look-alike McpError that is not one of the typed classes', () => {
     const error = new McpError(McpErrorCode.InvalidRequest, 'Session is terminated: s1');
     expect(isTypedSessionError(error)).toBe(false);
-    expect(sessionErrorToResult(error, 'typed')).toBeUndefined();
+    expect(sessionErrorToResult(error)).toBeUndefined();
   });
 
   it('does not convert a plain Error', () => {
-    expect(sessionErrorToResult(new Error('unexpected'), 'typed')).toBeUndefined();
-  });
-});
-
-describe('sniff: session-state', () => {
-  const cases: Array<[string, boolean]> = [
-    ['Session is terminated: s1', true],
-    ['Session closed', true],
-    ['Session not found: s1', true],
-    ['Breakpoint not found', false],   // "not found" without "Session"
-    ['Session is not paused', false]   // "not paused" is the loose dialect only
-  ];
-
-  it.each(cases)('%s -> converts: %s', (message, converts) => {
-    const error = new McpError(McpErrorCode.InvalidRequest, message);
-    expect(isSessionStateError(error, 'session-state')).toBe(converts);
-    expect(sessionErrorToResult(error, 'session-state') !== undefined).toBe(converts);
+    expect(sessionErrorToResult(new Error('unexpected'))).toBeUndefined();
   });
 
-  it('does NOT convert ProxyNotRunningError even though it is an McpError', () => {
-    const error = new ProxyNotRunningError('s1', 'get stack trace');
-    expect(isSessionStateError(error, 'session-state')).toBe(false);
-    expect(sessionErrorToResult(error, 'session-state')).toBeUndefined();
-  });
-
-  it('carries the launch/attach extra after success and error', () => {
-    const error = new McpError(McpErrorCode.InvalidRequest, 'Session is terminated: s1');
-    const result = sessionErrorToResult(error, 'session-state', { state: 'stopped' })!;
-    expect(Object.keys(payload(result))).toEqual(['success', 'error', 'state']);
-    expect(payload(result).state).toBe('stopped');
-  });
-});
-
-describe('sniff: session-state-or-not-paused', () => {
-  const cases: Array<[string, boolean]> = [
-    ['Session is terminated: s1', true],
-    ['Session closed', true],
-    ['Breakpoint not found', true],    // bare "not found" counts here
-    ['Session is not paused', true],
-    ['Expression too long (max 10KB)', false]
-  ];
-
-  it.each(cases)('%s -> converts: %s', (message, converts) => {
-    const error = new McpError(McpErrorCode.InvalidRequest, message);
-    expect(isSessionStateError(error, 'session-state-or-not-paused')).toBe(converts);
-  });
-
-  it('does NOT convert ProxyNotRunningError', () => {
-    const error = new ProxyNotRunningError('s1', 'evaluate expression');
-    expect(isSessionStateError(error, 'session-state-or-not-paused')).toBe(false);
-  });
-
-  it('carries the get_local_variables explanatory message after the error', () => {
-    const error = new McpError(McpErrorCode.InvalidRequest, 'Session is terminated: s1');
-    const result = sessionErrorToResult(error, 'session-state-or-not-paused', {
+  it('carries tool-specific fields after the typed error', () => {
+    const error = new SessionTerminatedError('s1');
+    const result = sessionErrorToResult(error, {
       message: 'The program has terminated, so no frames or variables exist. Use restart_debugging to run it again.'
     })!;
     expect(Object.keys(payload(result))).toEqual(['success', 'error', 'message']);
   });
+
+  it.each([
+    'Session is terminated: s1',
+    'Session closed',
+    'Session not found: s1',
+    'Breakpoint not found',
+    'Session is not paused',
+    'user expression: conn.closed'
+  ])('does not classify user-controlled look-alike text: %s', (message) => {
+    const error = new McpError(McpErrorCode.InvalidParams, message);
+    expect(sessionErrorToResult(error)).toBeUndefined();
+  });
 });
 
 describe('sessionErrorResultOrThrow', () => {
-  it('returns the failure result when the dialect recognizes the error', () => {
-    const error = new McpError(McpErrorCode.InvalidRequest, 'Session is terminated: s1');
-    expect(payload(sessionErrorResultOrThrow(error, 'session-state')).success).toBe(false);
+  it('returns the failure result for a typed session error', () => {
+    const error = new SessionTerminatedError('s1');
+    expect(payload(sessionErrorResultOrThrow(error)).success).toBe(false);
   });
 
   it('re-throws the original error untouched otherwise', () => {
     const error = new McpError(McpErrorCode.InvalidParams, 'Breakpoint file not found');
-    expect(() => sessionErrorResultOrThrow(error, 'session-state')).toThrow(error);
+    expect(() => sessionErrorResultOrThrow(error)).toThrow(error);
   });
 });
 
