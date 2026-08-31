@@ -154,7 +154,7 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
       // stack trace (issue #124).
       await expect(sessionManager.getStackTrace(session.id)).rejects.toThrow('Timeout');
       expect(dependencies.mockLogger.error).toHaveBeenCalledWith(
-        expect.stringContaining('Error resolving stack'),
+        expect.stringContaining('Error getting stack trace'),
         expect.any(Error)
       );
     });
@@ -198,7 +198,7 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
 
       await expect(sessionManager.getStackTrace(session.id)).rejects.toThrow('did not include stack frames');
       expect(dependencies.mockLogger.error).toHaveBeenCalledWith(
-        expect.stringContaining('Error resolving stack'),
+        expect.stringContaining('Error getting stack trace'),
         expect.any(Error)
       );
     });

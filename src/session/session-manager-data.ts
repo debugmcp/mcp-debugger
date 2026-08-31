@@ -206,31 +206,55 @@ export abstract class SessionManagerData extends SessionManagerCore {
   }
 
   async getScopes(sessionId: string, frameId: number): Promise<DebugProtocol.Scope[]> {
+    return this.readScopes(sessionId, frameId, 'public');
+  }
+
+  /** Internal frame-walk probe: an unsupported/frameless candidate is expected. */
+  private async probeScopes(sessionId: string, frameId: number): Promise<DebugProtocol.Scope[]> {
+    return this.readScopes(sessionId, frameId, 'probe');
+  }
+
+  private async readScopes(
+    sessionId: string,
+    frameId: number,
+    purpose: 'public' | 'probe'
+  ): Promise<DebugProtocol.Scope[]> {
     const session = this._getSessionById(sessionId);
-    this.logger.info(`[SM getScopes ${sessionId}] Entered. frameId: ${frameId}, Current state: ${session.state}`);
+    const prefix = purpose === 'public' ? 'getScopes' : 'scopeProbe';
+    this.logger.info(`[SM ${prefix} ${sessionId}] Entered. frameId: ${frameId}, Current state: ${session.state}`);
     
     if (!session.proxyManager || !session.proxyManager.isRunning()) { 
-      this.logger.warn(`[SM getScopes ${sessionId}] No active proxy.`); 
+      this.logger.warn(`[SM ${prefix} ${sessionId}] No active proxy.`); 
       return []; 
     }
     if (session.state !== SessionState.PAUSED) { 
-      this.logger.warn(`[SM getScopes ${sessionId}] Session not paused. State: ${session.state}.`); 
+      this.logger.warn(`[SM ${prefix} ${sessionId}] Session not paused. State: ${session.state}.`); 
       return []; 
     }
     
     try {
-      this.logger.info(`[SM getScopes ${sessionId}] Sending DAP 'scopes' for frameId ${frameId}.`);
+      this.logger.info(`[SM ${prefix} ${sessionId}] Sending DAP 'scopes' for frameId ${frameId}.`);
       const response = await session.proxyManager.sendDapRequest<DebugProtocol.ScopesResponse>('scopes', { frameId });
-      this.logger.info(`[SM getScopes ${sessionId}] DAP 'scopes' response received. Body:`, response?.body);
+      this.logger.info(`[SM ${prefix} ${sessionId}] DAP 'scopes' response received. Body:`, response?.body);
+      if (response?.success === false) {
+        throw new Error(response.message || `DAP 'scopes' request failed`);
+      }
       
       if (response && response.body && response.body.scopes) {
         this.logger.info(`[SM getScopes ${sessionId}] Parsed scopes:`, response.body.scopes.map(s => ({name: s.name, ref: s.variablesReference, expensive: s.expensive })));
         return response.body.scopes;
       }
-      this.logger.warn(`[GetScopes] No scopes in response body for session ${sessionId}, frameId ${frameId}. Response:`, response);
+      const logMissing = purpose === 'public' ? this.logger.warn.bind(this.logger) : this.logger.debug.bind(this.logger);
+      logMissing(`[SM ${prefix} ${sessionId}] No scopes in response body for frameId ${frameId}.`, response);
       return [];
     } catch (error) {
-      this.logger.error(`[SM getScopes ${sessionId}] Error getting scopes:`, error);
+      if (purpose === 'public') {
+        this.logger.error(`[SM getScopes ${sessionId}] Error getting scopes:`, error);
+      } else {
+        this.logger.debug(
+          `[SM scopeProbe ${sessionId}] Frame ${frameId} did not provide scopes: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
       return [];
     }
   }
@@ -292,7 +316,7 @@ export abstract class SessionManagerData extends SessionManagerCore {
       // Step 2: Collect all scopes for all frames (may need multiple frames for closures)
       const scopesMap: Record<number, DebugProtocol.Scope[]> = {};
       for (const frame of stackFrames) {
-        const scopes = await this.getScopes(sessionId, frame.id);
+        const scopes = await this.probeScopes(sessionId, frame.id);
         if (scopes && scopes.length > 0) {
           scopesMap[frame.id] = scopes;
         }
