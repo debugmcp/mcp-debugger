@@ -49,6 +49,7 @@ import type {
   StopLocation
 } from '../session-manager-core.js';
 import type { ExecutionContext } from '../operations-context.js';
+import { armPauseIntent, clearPauseIntent } from './pause-intent.js';
 
 /** What distinguishes the three step flavours: everything else is shared. */
 interface StepKind {
@@ -487,7 +488,11 @@ export class ExecutionController {
     // what the post-response race branch below wants; a session that
     // auto-continued back to RUNNING arms it. handleStopped clears it on
     // every stop; the settle paths below clear it where no stop is coming.
-    session.pausePending = session.state === SessionState.RUNNING;
+    if (session.state === SessionState.RUNNING) {
+      armPauseIntent(session, 'user');
+    } else {
+      clearPauseIntent(session);
+    }
 
     // The pause response only acknowledges the request; the state transition
     // to PAUSED happens when the asynchronous 'stopped' event is handled by
@@ -608,7 +613,7 @@ export class ExecutionController {
           );
           return;
         }
-        session.pausePending = false;
+        clearPauseIntent(session);
         settle({
           success: true,
           state: session.state,
@@ -632,7 +637,7 @@ export class ExecutionController {
         this.ctx.logger.info(
           `[SessionManager pause] No stopped event within ${this.ctx.tunables.pauseGraceMs}ms grace window in session ${sessionId}; completing asynchronously`
         );
-        // session.pausePending stays armed on purpose: the pause was
+        // The generation-scoped pause intent stays armed on purpose: the pause was
         // delivered and the stop may land whenever the debuggee next runs
         // (e.g. an idle server, issue #513) — that late stop must still be
         // normalized to 'pause'. handleStopped clears the flag on any stop.
@@ -689,7 +694,7 @@ export class ExecutionController {
             void settleFromStop();
             return;
           }
-          session.pausePending = false;
+          clearPauseIntent(session);
           this.ctx.logger.error(
             `[SessionManager pause] Error sending 'pause' for session ${sessionId}: ${errorMessage}`
           );

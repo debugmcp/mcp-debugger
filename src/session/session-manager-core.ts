@@ -13,6 +13,11 @@ import { ValidationResultCache } from '../utils/language-availability.js';
 import { SessionStore, ManagedSession } from './session-store.js';
 import type { ToolchainValidationState } from './session-store.js';
 import { OutputRingBuffer } from './output-buffer.js';
+import {
+  beginProxyGeneration,
+  clearPauseIntent,
+  hasCurrentPauseIntent
+} from './execution/pause-intent.js';
 import { DebugProtocol } from '@vscode/debugprotocol'; 
 import path from 'path';
 import os from 'os';
@@ -262,6 +267,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       return false;
     }
     this.logger.info(`Closing debug session: ${sessionId}. Active proxy: ${session.proxyManager ? 'yes' : 'no'}`);
+    clearPauseIntent(session);
     
     if (session.proxyManager) {
       session.lastProxyPid = session.proxyManager.getProxyPid?.() ?? session.lastProxyPid;
@@ -341,6 +347,7 @@ export abstract class SessionManagerCore extends EventEmitter {
    * always released (issue #238).
    */
   protected async stopProxyPreservingSession(session: ManagedSession): Promise<void> {
+    clearPauseIntent(session);
     const proxyManager = session.proxyManager;
     if (proxyManager) {
       session.lastProxyPid = proxyManager.getProxyPid?.() ?? session.lastProxyPid;
@@ -386,6 +393,7 @@ export abstract class SessionManagerCore extends EventEmitter {
     effectiveLaunchArgs: Partial<CustomLaunchRequestArguments>
   ): void {
     const sessionId = session.id;
+    beginProxyGeneration(session);
     const handlers = new Map<string, (...args: any[]) => void>(); // eslint-disable-line @typescript-eslint/no-explicit-any -- Event handlers require flexible argument signatures to support various event types
 
     // Reset first-stop tracking for this launch — a session may be re-launched.
@@ -472,7 +480,7 @@ export abstract class SessionManagerCore extends EventEmitter {
         const userBreakpointIds: ReadonlySet<number> | undefined =
           lineComplete && fnComplete ? new Set([...lineIds, ...fnIds]) : undefined;
         const normalized = policy.normalizeStopReason?.(rawReason, body, {
-          pausePending: session.pausePending === true,
+          pausePending: hasCurrentPauseIntent(session),
           userBreakpointIds,
           functionBreakpointIds: fnComplete ? fnIds : undefined,
           lineBreakpointCount: session.breakpoints.size,
@@ -489,7 +497,7 @@ export abstract class SessionManagerCore extends EventEmitter {
           `[SessionManager ${sessionId}] Stop-reason normalization failed; keeping raw reason '${rawReason}': ${err instanceof Error ? err.message : String(err)}`
         );
       }
-      session.pausePending = false;
+      clearPauseIntent(session);
       this.logger.debug(`[SessionManager] handleStopped: session=${sessionId} currentState=${session.state} reason=${reason} threadId=${threadId}`);
       this.logger.info(`[ProxyManager ${sessionId}] Stopped event: thread=${threadId}, reason=${reason}`);
 
@@ -770,6 +778,7 @@ export abstract class SessionManagerCore extends EventEmitter {
 
     // Named function for terminated event
     const handleTerminated = () => {
+      clearPauseIntent(session);
       this.logger.debug(`[SessionManager] handleTerminated: session=${sessionId} currentState=${session.state}`);
       this.logger.info(`[ProxyManager ${sessionId}] Terminated event`);
 
@@ -806,6 +815,7 @@ export abstract class SessionManagerCore extends EventEmitter {
 
     // Named function for exited event
     const handleExited = (exitCode?: number) => {
+      clearPauseIntent(session);
       this.logger.debug(`[SessionManager] handleExited: session=${sessionId} currentState=${session.state} exitCode=${exitCode}`);
       this.logger.info(`[ProxyManager ${sessionId}] Exited event (exitCode=${exitCode})`);
       // Record the debuggee exit code so a crash (non-zero) is
@@ -1015,6 +1025,7 @@ export abstract class SessionManagerCore extends EventEmitter {
 
     // Named function for dry run complete event
     const handleDryRunComplete = (command: string, script: string) => {
+      clearPauseIntent(session);
       this.logger.debug(`[SessionManager] 'dry-run-complete' event handler called for session ${sessionId}`);
       this.logger.info(`[ProxyManager ${sessionId}] Dry run complete: ${command} ${script}`);
       this._updateSessionState(session, SessionState.STOPPED);
@@ -1029,6 +1040,7 @@ export abstract class SessionManagerCore extends EventEmitter {
 
     // Named function for error event
     const handleError = (error: Error) => {
+      clearPauseIntent(session);
       this.logger.debug(`[SessionManager] 'error' event handler called for session ${sessionId}`);
       this.logger.error(`[ProxyManager ${sessionId}] Error:`, error);
       session.lastProxyError = error.message;
@@ -1052,6 +1064,7 @@ export abstract class SessionManagerCore extends EventEmitter {
 
     // Named function for exit event
     const handleExit = (code: number | null, signal?: string, expected?: boolean) => {
+      clearPauseIntent(session);
       this.logger.debug(`[SessionManager] handleExit: session=${sessionId} currentState=${session.state} code=${code} signal=${signal} expected=${expected}`);
       this.logger.info(`[ProxyManager ${sessionId}] Exit: code=${code}, signal=${signal}, expected=${expected}`);
       session.lastProxyExit = { code, signal, expected };
@@ -1227,6 +1240,7 @@ export abstract class SessionManagerCore extends EventEmitter {
   }
 
   protected cleanupProxyEventHandlers(session: ManagedSession, proxyManager: IProxyManager): void {
+    clearPauseIntent(session);
     // Safety check to prevent double cleanup
     if (!this.sessionEventHandlers.has(session)) {
       this.logger.debug(`[SessionManager] Cleanup already performed for session ${session.id}`);
