@@ -16,7 +16,7 @@ import path from 'path';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
 import { DebugLanguage, SessionState } from '@debugmcp/shared';
 import type { ProxyInitProgress } from '../../../../src/utils/error-messages.js';
-import { proxyLogFileName } from '../../../../src/proxy/proxy-log-path.js';
+import { proxyLogFileName } from '../../../../src/proxy/session-log-layout.js';
 import { createMockDependencies } from './session-manager-test-utils.js';
 
 const initProgress: ProxyInitProgress = { transportConnected: true, pendingCommand: 'initialize' };

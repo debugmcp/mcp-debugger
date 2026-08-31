@@ -24,6 +24,7 @@ import {
 import { AdapterLease } from '../../adapters/adapter-lease.js';
 import { DebugSessionCreationError, PythonNotFoundError } from '../../errors/debug-errors.js';
 import { ProxyConfig } from '../../proxy/proxy-config.js';
+import { sessionRunDirectoryFor } from '../../proxy/session-log-layout.js';
 import { didYouMean } from '../../utils/did-you-mean.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import type { CustomLaunchRequestArguments } from '../session-manager-core.js';
@@ -142,7 +143,7 @@ export class ProxyLauncher {
     const { scriptPath, scriptArgs, dapLaunchArgs, adapterLaunchConfig } = request;
 
     // Create session log directory
-    const sessionLogDir = path.join(this.ctx.logDirBase, sessionId, `run-${Date.now()}`);
+    const sessionLogDir = sessionRunDirectoryFor(this.ctx.logDirBase, sessionId, Date.now());
     this.ctx.logger.info(`[SessionManager] Ensuring session log directory: ${sessionLogDir}`);
     try {
       // ensureDir (fs-extra's recursive mkdir) rejects when it cannot create

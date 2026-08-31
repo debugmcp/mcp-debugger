@@ -6,7 +6,7 @@ import { spawn } from 'child_process';
 import fs from 'fs-extra';
 import { MinimalDapClient } from './minimal-dap.js';
 import { DapMirrorServer } from './dap-mirror-server.js';
-import { proxyLogPathFor } from './proxy-log-path.js';
+import { proxyLogPathFor } from './session-log-layout.js';
 import { createLogger, redirectProxyLoggers } from '../utils/logger.js';
 import {
   DapProxyDependencies,

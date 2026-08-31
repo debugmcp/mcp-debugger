@@ -4,6 +4,7 @@
  * @since 2.0.0
  */
 import { EventEmitter } from 'events';
+import { adapterLogPathFor } from '../proxy/session-log-layout.js';
 import {
   IAdapterRegistry,
   IAdapterFactory,
@@ -441,7 +442,7 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
   private async createDependencies(config: AdapterConfig): Promise<AdapterDependencies> {
     const { createProductionDependencies } = await import('../container/dependencies.js');
     const logFile = config.logDir && config.sessionId
-      ? `${config.logDir}/${config.sessionId}.log`
+      ? adapterLogPathFor(config.logDir, config.sessionId)
       : undefined;
     const deps = createProductionDependencies({
       logLevel: 'debug',

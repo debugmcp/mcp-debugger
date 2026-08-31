@@ -184,6 +184,23 @@ describe('sweepStaleSessionRuns', () => {
     }
   });
 
+  it('leaves similarly-prefixed directories outside the managed layout alone', async () => {
+    const base = makeSessionsDir();
+    try {
+      const unmanagedRun = path.join(base, 'sess-3', 'run-backup');
+      fs.mkdirSync(unmanagedRun, { recursive: true });
+      fs.writeFileSync(path.join(unmanagedRun, 'notes.txt'), 'keep');
+      const old = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+      fs.utimesSync(unmanagedRun, old, old);
+
+      await sweepStaleSessionRuns({ baseDir: base });
+
+      expect(fs.existsSync(unmanagedRun)).toBe(true);
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+
   it('is silent and safe when the base dir does not exist', async () => {
     await expect(
       sweepStaleSessionRuns({ baseDir: path.join(os.tmpdir(), 'janitor-nonexistent-xyz') })
