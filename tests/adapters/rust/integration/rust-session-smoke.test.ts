@@ -8,6 +8,7 @@ import { RustAdapterFactory } from '../../../../packages/adapter-rust/src/index.
 const createDependencies = (): AdapterDependencies => ({
   fileSystem: {
     readFile: async () => '',
+    readTail: async () => '',
     writeFile: async () => {},
     exists: async () => false,
     mkdir: async () => {},
