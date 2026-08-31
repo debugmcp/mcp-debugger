@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore -- plain-JS module without type declarations
 import {
+  changedManifestKeys,
   collateIntoChangelog,
+  isDevDependencyOnlyChange,
   parseFragmentFilename,
   readFragments,
   requiresFragment
@@ -173,6 +175,149 @@ describe('requiresFragment (the CI gate)', () => {
     );
     expect(result.required).toBe(true);
     expect(result.offenders).toEqual(['packages/adapter-ruby/src/utils/ruby-utils.ts']);
+  });
+});
+
+/** Minimal adapter manifest, shaped like a real one under `packages/`. */
+function manifest(overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    name: '@debugmcp/adapter-ruby',
+    version: '0.24.2',
+    dependencies: { '@debugmcp/shared': 'workspace:*', which: '^5.0.0' },
+    devDependencies: { '@types/node': '^26.2.0', eslint: '^10.8.1' },
+    ...overrides
+  });
+}
+
+/** A resolver over a fixed `{ file: [before, after] }` map, as requiresFragment expects. */
+function resolverOver(
+  pairs: Record<string, [string, string]>
+): (file: string) => { base: string, head: string } | null {
+  return (file: string) => {
+    const pair = pairs[file];
+    return pair ? { base: pair[0], head: pair[1] } : null;
+  };
+}
+
+const RUBY_MANIFEST = 'packages/adapter-ruby/package.json';
+const GO_MANIFEST = 'packages/adapter-go/package.json';
+
+describe('changedManifestKeys / isDevDependencyOnlyChange (issue #629)', () => {
+  it('reports nothing changed when only devDependencies moved', () => {
+    const before = manifest();
+    const after = manifest({ devDependencies: { '@types/node': '^26.4.0', eslint: '^10.9.1' } });
+
+    expect(changedManifestKeys(before, after)).toEqual([]);
+    expect(isDevDependencyOnlyChange(before, after)).toBe(true);
+  });
+
+  it('names a runtime dependency bump, which a consumer of the package can observe', () => {
+    const after = manifest({ dependencies: { '@debugmcp/shared': 'workspace:*', which: '^6.0.0' } });
+
+    expect(changedManifestKeys(manifest(), after)).toEqual(['dependencies']);
+    expect(isDevDependencyOnlyChange(manifest(), after)).toBe(false);
+  });
+
+  it('catches a version bump, so a release bump cannot slip through as toolchain churn', () => {
+    expect(changedManifestKeys(manifest(), manifest({ version: '0.25.0' }))).toEqual(['version']);
+  });
+
+  it('catches a key that only one side has, such as a newly published bin', () => {
+    expect(changedManifestKeys(manifest(), manifest({ bin: { rdbg: './cli.js' } }))).toEqual(['bin']);
+  });
+
+  it('ignores key reordering, comparing values rather than serialized text', () => {
+    const before = JSON.stringify({ name: 'x', version: '1.0.0', dependencies: { a: '^1' } });
+    const after = JSON.stringify({ dependencies: { a: '^1' }, version: '1.0.0', name: 'x' });
+
+    expect(isDevDependencyOnlyChange(before, after)).toBe(true);
+  });
+
+  it('throws on unparseable JSON rather than reporting a silent no-change', () => {
+    expect(() => changedManifestKeys('{not json', manifest())).toThrow();
+  });
+});
+
+describe('requiresFragment manifest carve-out (issue #629)', () => {
+  it('lets a devDependency-only bump across several manifests through', () => {
+    const after = manifest({ devDependencies: { '@types/node': '^26.4.0', eslint: '^10.9.1' } });
+    const result = requiresFragment(
+      [RUBY_MANIFEST, GO_MANIFEST, 'pnpm-lock.yaml'],
+      [],
+      resolverOver({ [RUBY_MANIFEST]: [manifest(), after], [GO_MANIFEST]: [manifest(), after] })
+    );
+
+    expect(result.required).toBe(false);
+    expect(result.offenders).toEqual([]);
+  });
+
+  it('still demands a fragment for the one manifest that moved a runtime dependency', () => {
+    const devOnly = manifest({ devDependencies: { eslint: '^10.9.1' } });
+    const runtime = manifest({ dependencies: { which: '^6.0.0' } });
+    const result = requiresFragment(
+      [RUBY_MANIFEST, GO_MANIFEST],
+      [],
+      resolverOver({ [RUBY_MANIFEST]: [manifest(), devOnly], [GO_MANIFEST]: [manifest(), runtime] })
+    );
+
+    expect(result.required).toBe(true);
+    expect(result.offenders).toEqual([GO_MANIFEST]);
+  });
+
+  it('names the keys that kept a manifest on the list, so the failure is actionable', () => {
+    const result = requiresFragment(
+      [GO_MANIFEST],
+      [],
+      resolverOver({ [GO_MANIFEST]: [manifest(), manifest({ version: '0.25.0' })] })
+    );
+
+    expect(result.reason).toContain('changed: version');
+  });
+
+  it('keeps a manifest the resolver cannot place, since added or deleted is user-visible', () => {
+    const result = requiresFragment([RUBY_MANIFEST], [], resolverOver({}));
+    expect(result.required).toBe(true);
+  });
+
+  it('keeps a manifest whose JSON will not parse rather than guessing it is harmless', () => {
+    const result = requiresFragment(
+      [RUBY_MANIFEST],
+      [],
+      resolverOver({ [RUBY_MANIFEST]: ['{ truncated', manifest()] })
+    );
+
+    expect(result.required).toBe(true);
+  });
+
+  it('keeps a manifest when the resolver itself throws', () => {
+    const result = requiresFragment([RUBY_MANIFEST], [], () => { throw new Error('no such rev'); });
+    expect(result.required).toBe(true);
+  });
+
+  it('never clears a real source change riding alongside a devDependency bump', () => {
+    const after = manifest({ devDependencies: { eslint: '^10.9.1' } });
+    const result = requiresFragment(
+      [RUBY_MANIFEST, 'packages/adapter-ruby/src/ruby-debug-adapter.ts'],
+      [],
+      resolverOver({ [RUBY_MANIFEST]: [manifest(), after] })
+    );
+
+    expect(result.required).toBe(true);
+    expect(result.offenders).toEqual(['packages/adapter-ruby/src/ruby-debug-adapter.ts']);
+  });
+
+  it('is unchanged without a resolver, so the pre-#629 path-only behaviour still holds', () => {
+    expect(requiresFragment([RUBY_MANIFEST], []).required).toBe(true);
+  });
+
+  it('only ever inspects package.json, not every file under a package', () => {
+    const result = requiresFragment(
+      ['packages/adapter-ruby/src/index.ts'],
+      [],
+      () => { throw new Error('resolver must not be consulted for a source file'); }
+    );
+
+    expect(result.required).toBe(true);
   });
 });
 

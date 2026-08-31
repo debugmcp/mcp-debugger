@@ -8,7 +8,9 @@
  */
 import fs from 'fs';
 import path from 'path';
+import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
+import { isDeepStrictEqual } from 'util';
 import { isMain } from './lib/is-main.mjs';
 
 /** Keep a Changelog categories, in the order they must appear in a release. */
@@ -61,19 +63,117 @@ function isTestPath(file) {
 }
 
 /**
+ * Which top-level manifest keys moved between two `package.json` texts, ignoring
+ * `devDependencies`?
+ *
+ * Compared with `isDeepStrictEqual` rather than by string, so a manifest whose keys a tool
+ * happened to reorder does not read as a change.
+ *
+ * @param {string} baseText `package.json` before the change
+ * @param {string} headText `package.json` after the change
+ * @returns {string[]} names of the changed keys, `devDependencies` excluded; empty if none
+ * @throws {SyntaxError} when either side is not valid JSON
+ */
+export function changedManifestKeys(baseText, headText) {
+  const base = JSON.parse(baseText);
+  const head = JSON.parse(headText);
+  const keys = new Set([...Object.keys(base), ...Object.keys(head)]);
+  keys.delete('devDependencies');
+
+  return [...keys].filter(key => !isDeepStrictEqual(base[key], head[key])).sort();
+}
+
+/**
+ * Did this manifest change move nothing but `devDependencies`?
+ *
+ * Such a change is toolchain churn — a linter, a types package, a test runner — and is not
+ * something a consumer of the published package can observe. Everything else in the file
+ * (`dependencies`, `peerDependencies`, `bin`, `exports`, `engines`, `version`) still counts,
+ * which is why this asks what actually moved rather than trusting the file's path (#629).
+ *
+ * @param {string} baseText `package.json` before the change
+ * @param {string} headText `package.json` after the change
+ * @returns {boolean}
+ * @throws {SyntaxError} when either side is not valid JSON
+ */
+export function isDevDependencyOnlyChange(baseText, headText) {
+  return changedManifestKeys(baseText, headText).length === 0;
+}
+
+/**
+ * Classify one candidate path, given a way to read its before/after content.
+ *
+ * Returns the non-devDependency keys that moved (empty = exempt), or `null` to keep the file
+ * an offender. Every uncertain case returns `null`: a gate that errs toward silence is worse
+ * than no gate at all.
+ *
+ * @param {string} file repo-relative path
+ * @param {((file: string) => { base: string, head: string } | null) | null} resolveManifest
+ * @returns {string[] | null}
+ */
+function manifestVerdict(file, resolveManifest) {
+  if (!resolveManifest || path.basename(file) !== 'package.json') return null;
+
+  let pair;
+  try {
+    pair = resolveManifest(file);
+  } catch {
+    return null;  // resolver blew up (no git, bad rev) — do not clear the file on a guess
+  }
+  // No pair means the manifest was added or deleted: a package appeared or went away.
+  if (!pair) return null;
+
+  try {
+    return changedManifestKeys(pair.base, pair.head);
+  } catch {
+    return null;  // unparseable JSON — cannot prove this was only devDependencies
+  }
+}
+
+/** One offender line, naming the keys that kept a manifest on the list. */
+function describeOffender(file, movedKeys) {
+  const changed = movedKeys.get(file);
+  return changed ? `  ${file}  (changed: ${changed.join(', ')})` : `  ${file}`;
+}
+
+/**
  * Decide whether a pull request must add a changelog fragment.
+ *
+ * `resolveManifest` is injected rather than read from git in here so the classification stays
+ * pure and testable, the way `isSameEntry` in ./lib/is-main.mjs takes its path resolver.
+ * Omit it and the gate behaves exactly as it did before #629: every non-test path under a
+ * user-visible root is an offender.
  *
  * @param {string[]} changedFiles repo-relative paths changed by the PR
  * @param {string[]} labels PR label names
+ * @param {((file: string) => { base: string, head: string } | null) | null} [resolveManifest]
+ *   reads a changed `package.json` on both sides of the diff; `null` when unavailable
  * @returns {{ required: boolean, reason: string, offenders: string[] }}
  */
-export function requiresFragment(changedFiles, labels = []) {
-  const offenders = changedFiles.filter(
+export function requiresFragment(changedFiles, labels = [], resolveManifest = null) {
+  const candidates = changedFiles.filter(
     file => USER_VISIBLE_ROOTS.some(root => file.startsWith(root)) && !isTestPath(file)
   );
 
+  // A manifest whose diff moved only devDependencies is toolchain churn, not a user-visible
+  // change (#629). Remember what did move, so the failure message can say why one was kept.
+  const movedKeys = new Map();
+  const offenders = candidates.filter(file => {
+    const changed = manifestVerdict(file, resolveManifest);
+    if (changed === null) return true;
+    if (changed.length === 0) return false;
+    movedKeys.set(file, changed);
+    return true;
+  });
+
   if (offenders.length === 0) {
-    return { required: false, reason: 'No changes under src/, packages/, or tools/.', offenders };
+    return {
+      required: false,
+      reason: candidates.length === 0
+        ? 'No changes under src/, packages/, or tools/.'
+        : 'Only devDependencies moved in the changed manifests.',
+      offenders
+    };
   }
 
   if (changedFiles.some(file => file.startsWith(`${FRAGMENT_DIR}/`))) {
@@ -92,7 +192,7 @@ export function requiresFragment(changedFiles, labels = []) {
     required: true,
     reason:
       `These changes are user-visible but no ${FRAGMENT_DIR}/ fragment was added:\n` +
-      offenders.map(file => `  ${file}`).join('\n'),
+      offenders.map(file => describeOffender(file, movedKeys)).join('\n'),
     offenders
   };
 }
@@ -221,6 +321,58 @@ function runCollate(root) {
   console.log(`Collated ${fragments.length} fragment(s) into CHANGELOG.md [Unreleased].`);
 }
 
+/**
+ * Read one path on both sides of the diff, or `null` when it does not exist on both.
+ *
+ * `mergeBase` rather than the base branch tip mirrors the three-dot `git diff A...B` the
+ * workflow uses to build CHANGED_FILES, so this sees exactly the change the gate is judging.
+ *
+ * @param {string} mergeBase
+ * @param {string} headSha
+ * @returns {(file: string) => { base: string, head: string } | null}
+ */
+export function gitManifestResolver(mergeBase, headSha) {
+  // stderr is piped, not inherited: a manifest missing on one side is an expected outcome
+  // handled below, and letting git's `fatal:` reach the log once per file only adds noise.
+  const show = rev => execFileSync('git', ['show', rev],
+    { encoding: 'utf-8', maxBuffer: 32e6, stdio: ['ignore', 'pipe', 'pipe'] });
+
+  return file => {
+    try {
+      // A manifest missing on either side was added or deleted, which is user-visible.
+      return { base: show(`${mergeBase}:${file}`), head: show(`${headSha}:${file}`) };
+    } catch {
+      return null;
+    }
+  };
+}
+
+/**
+ * Build the manifest resolver for the CI gate, or `null` when the revisions are not known.
+ *
+ * Absent BASE_REF/HEAD_SHA — a developer running `--ci` by hand — the gate falls back to the
+ * pre-#629 path-only behaviour rather than guessing at revisions.
+ *
+ * @returns {((file: string) => { base: string, head: string } | null) | null}
+ */
+function resolverFromEnv() {
+  const baseRef = (process.env.BASE_REF || '').trim();
+  const headSha = (process.env.HEAD_SHA || '').trim();
+  if (!baseRef || !headSha) return null;
+
+  try {
+    const mergeBase = execFileSync('git', ['merge-base', baseRef, headSha],
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    return gitManifestResolver(mergeBase, headSha);
+  } catch (error) {
+    // Refusing here would fail PRs for an unrelated reason; the path-only gate is the safe
+    // fallback, since it can only ever be stricter than the manifest-aware one.
+    console.warn(`Changelog gate: could not resolve ${baseRef}...${headSha}, ` +
+      `falling back to path-only classification. (${error instanceof Error ? error.message : error})`);
+    return null;
+  }
+}
+
 /** CI gate. Reads the changed-file list and PR labels from the environment. */
 function runCi() {
   const changedFiles = (process.env.CHANGED_FILES || '')
@@ -232,7 +384,7 @@ function runCi() {
     .map(label => label.trim())
     .filter(Boolean);
 
-  const verdict = requiresFragment(changedFiles, labels);
+  const verdict = requiresFragment(changedFiles, labels, resolverFromEnv());
   if (!verdict.required) {
     console.log(`Changelog gate: ${verdict.reason}`);
     return;
