@@ -154,7 +154,7 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
       // stack trace (issue #124).
       await expect(sessionManager.getStackTrace(session.id)).rejects.toThrow('Timeout');
       expect(dependencies.mockLogger.error).toHaveBeenCalledWith(
-        expect.stringContaining('Error getting stack trace'),
+        expect.stringContaining('Error resolving stack'),
         expect.any(Error)
       );
     });
@@ -197,9 +197,9 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
       dependencies.mockProxyManager.sendDapRequest = vi.fn().mockResolvedValue({ body: null });
 
       await expect(sessionManager.getStackTrace(session.id)).rejects.toThrow('did not include stack frames');
-      expect(dependencies.mockLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('No stackFrames in response body'),
-        expect.any(Object)
+      expect(dependencies.mockLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Error resolving stack'),
+        expect.any(Error)
       );
     });
 
@@ -241,7 +241,7 @@ describe('SessionManager - Edge Cases and Error Scenarios', () => {
       const stackFrames = await sessionManager.getStackTrace(session.id);
       expect(stackFrames).toEqual([]);
       expect(dependencies.mockLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('No effective thread ID to use')
+        expect.stringContaining('No effective thread ID')
       );
     });
 

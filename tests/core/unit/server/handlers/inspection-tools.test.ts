@@ -12,6 +12,7 @@ import {
   handleGetSourceContext,
   handleGetLocalVariables
 } from '../../../../../src/server/handlers/inspection-tools.js';
+import { SessionTerminatedError } from '../../../../../src/errors/debug-errors.js';
 import { createMockToolContext } from '../server-test-helpers.js';
 
 // DebugMcpServer builds its dependencies in the constructor; mock the container
@@ -282,24 +283,19 @@ describe('inspection tool handlers', () => {
       expect(payload.warning).toBeUndefined();
     });
 
-    it('returns graceful JSON for McpError with "not paused"', async () => {
+    it('does not classify an untyped McpError from its message text', async () => {
       ctx.validateSession = vi.fn().mockImplementation(() => {
         throw new McpError(McpErrorCode.InvalidRequest, 'Session is not paused');
       });
 
-      const result = await handleGetLocalVariables(ctx, {
+      await expect(handleGetLocalVariables(ctx, {
         sessionId: 'test-session'
-      });
-      const payload = JSON.parse(result.content[0].text);
-
-      expect(payload.success).toBe(false);
-      expect(payload.error).toContain('not paused');
-      expect(payload.message).toContain('Cannot get local variables');
+      })).rejects.toThrow('Session is not paused');
     });
 
     it('explains a terminated session as a normal end state (program finished)', async () => {
       ctx.validateSession = vi.fn().mockImplementation(() => {
-        throw new McpError(McpErrorCode.InvalidRequest, 'Session is terminated: test-session');
+        throw new SessionTerminatedError('test-session');
       });
 
       const result = await handleGetLocalVariables(ctx, {
@@ -328,7 +324,7 @@ describe('inspection tool handlers', () => {
       });
 
       ctx.sessionManager.getLocalVariables = vi.fn().mockRejectedValue(
-        new McpError(McpErrorCode.InvalidRequest, 'Session is terminated: test-session')
+        new SessionTerminatedError('test-session')
       );
 
       const result = await handleGetLocalVariables(ctx, {
