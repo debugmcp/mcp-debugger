@@ -22,6 +22,8 @@ import type { AdapterMetadata as SharedAdapterMetadata, AdapterManifestEntry, Fa
 import { AdapterLoader } from './adapter-loader.js';
 import type { AdapterMetadata } from './adapter-loader.js';
 import { isContainerRuntime } from '../utils/container-path-utils.js';
+import { getErrorMessage } from '../errors/debug-errors.js';
+import { disposeAdapterSafely } from './adapter-disposal.js';
 
 /**
  * Default registry configuration
@@ -108,8 +110,8 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
     const activeSet = this.activeAdapters.get(language);
     if (activeSet) {
       for (const adapter of activeSet) {
-        adapter.dispose().catch(err => {
-          this.emit('error', new Error(`Failed to dispose adapter: ${err.message}`));
+        void disposeAdapterSafely(adapter, (error) => {
+          this.emit('error', new Error(`Failed to dispose adapter: ${getErrorMessage(error)}`));
         });
         this.clearDisposeTimer(adapter);
       }
@@ -402,8 +404,8 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
     for (const [language, activeSet] of this.activeAdapters) {
       for (const adapter of activeSet) {
         disposePromises.push(
-          adapter.dispose().catch(err => {
-            this.emit('error', new Error(`Failed to dispose adapter for ${language}: ${err.message}`));
+          disposeAdapterSafely(adapter, (error) => {
+            this.emit('error', new Error(`Failed to dispose adapter for ${language}: ${getErrorMessage(error)}`));
           })
         );
       }
@@ -470,8 +472,8 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
         this.clearDisposeTimer(adapter);
         // Start dispose timer
         const timer = setTimeout(() => {
-          adapter.dispose().catch(err => {
-            this.emit('error', new Error(`Auto-dispose failed: ${err.message}`));
+          void disposeAdapterSafely(adapter, (error) => {
+            this.emit('error', new Error(`Auto-dispose failed: ${getErrorMessage(error)}`));
           });
         }, this.config.autoDisposeTimeout);
 

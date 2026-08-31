@@ -1,6 +1,21 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AdapterRegistry, getAdapterRegistry, resetAdapterRegistry } from '../../../src/adapters/adapter-registry.js';
 import { AdapterNotFoundError, DuplicateRegistrationError, FactoryValidationError } from '@debugmcp/shared';
+import { createProductionDependencies } from '../../../src/container/dependencies.js';
+import { createMockDependencies } from '../../test-utils/helpers/test-dependencies.js';
+
+// AdapterRegistry.create() dynamically imports the production container.
+// Keep this suite on inert dependencies so repeated registry construction
+// never attaches real winston transports or accumulates process listeners.
+vi.mock('../../../src/container/dependencies.js');
+vi.mock('../../../src/utils/logger.js', () => ({
+  createLogger: vi.fn(() => ({
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn()
+  }))
+}));
 
 const createAdapterStub = () => {
   const eventHandlers = new Map<string, Array<(...args: unknown[]) => void>>();
@@ -47,6 +62,15 @@ describe('AdapterRegistry', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.stubEnv('MCP_CONTAINER', undefined);
+    const dependencies = {
+      ...createMockDependencies(),
+      environment: {
+        get: vi.fn((key: string) => process.env[key]),
+        getAll: vi.fn(() => ({ ...process.env })),
+        getCurrentWorkingDirectory: vi.fn(() => process.cwd())
+      }
+    };
+    vi.mocked(createProductionDependencies).mockReturnValue(dependencies as any);
   });
 
   it('registers and unregisters factories (with validation)', async () => {
@@ -488,10 +512,12 @@ describe('AdapterRegistry', () => {
   });
 
   describe('disposal error handling', () => {
-    it('unregister emits error when adapter disposal fails', async () => {
+    it('unregister reports a synchronous adapter disposal throw without escaping', async () => {
       const registry = new AdapterRegistry();
       const adapterStub = createAdapterStub();
-      adapterStub.dispose.mockRejectedValue(new Error('dispose failed'));
+      adapterStub.dispose.mockImplementation(() => {
+        throw new Error('dispose failed synchronously');
+      });
 
       const factory = createFactory({
         createAdapter: vi.fn().mockReturnValue(adapterStub)
@@ -514,16 +540,17 @@ describe('AdapterRegistry', () => {
       const result = registry.unregister('mock');
       expect(result).toBe(true);
 
-      // Let the async disposal error propagate
-      await new Promise(resolve => setTimeout(resolve, 10));
-      expect(errors.length).toBeGreaterThan(0);
-      expect(errors[0].message).toContain('dispose');
+      await Promise.resolve();
+      expect(errors).toHaveLength(1);
+      expect(errors[0].message).toContain('dispose failed synchronously');
     });
 
-    it('disposeAll resolves even when adapter disposal fails', async () => {
+    it('disposeAll resolves when adapter disposal throws synchronously', async () => {
       const registry = new AdapterRegistry();
       const adapterStub = createAdapterStub();
-      adapterStub.dispose.mockRejectedValue(new Error('dispose boom'));
+      adapterStub.dispose.mockImplementation(() => {
+        throw new Error('dispose boom synchronously');
+      });
 
       const factory = createFactory({
         createAdapter: vi.fn().mockReturnValue(adapterStub)
@@ -543,6 +570,39 @@ describe('AdapterRegistry', () => {
       // disposeAll should not reject
       await expect(registry.disposeAll()).resolves.toBeUndefined();
       expect(registry.getActiveAdapterCount()).toBe(0);
+    });
+
+    it('auto-dispose reports a synchronous adapter disposal throw without leaking from the timer', async () => {
+      vi.useFakeTimers();
+      try {
+        const registry = new AdapterRegistry({ autoDispose: true, autoDisposeTimeout: 10 });
+        const adapterStub = createAdapterStub();
+        adapterStub.dispose.mockImplementation(() => {
+          throw new Error('idle dispose threw synchronously');
+        });
+        const factory = createFactory({ createAdapter: vi.fn().mockReturnValue(adapterStub) });
+        const errors: Error[] = [];
+        registry.on('error', (error: Error) => errors.push(error));
+
+        await registry.register('mock', factory as any);
+        await registry.create('mock', {
+          sessionId: 's1',
+          adapterHost: '127.0.0.1',
+          adapterPort: 9000,
+          logDir: '/tmp',
+          scriptPath: '/tmp/app.js',
+          executablePath: '',
+          launchConfig: {}
+        });
+
+        adapterStub.emit('stateChanged', 'debugging', 'disconnected');
+        await vi.advanceTimersByTimeAsync(10);
+
+        expect(errors).toHaveLength(1);
+        expect(errors[0].message).toContain('idle dispose threw synchronously');
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 

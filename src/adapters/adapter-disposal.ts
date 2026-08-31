@@ -22,6 +22,27 @@
 import type { IDebugAdapter, ILogger } from '@debugmcp/shared';
 import { getErrorMessage } from '../errors/debug-errors.js';
 
+export type AdapterDisposalReporter = (error: unknown) => void;
+
+/**
+ * Dispose an adapter and report either a synchronous throw or an asynchronous
+ * rejection without ever allowing disposal or reporting to escape.
+ */
+export async function disposeAdapterSafely(
+  adapter: IDebugAdapter,
+  reporter: AdapterDisposalReporter
+): Promise<void> {
+  try {
+    await adapter.dispose();
+  } catch (disposeError: unknown) {
+    try {
+      reporter(disposeError);
+    } catch {
+      // Disposal is a terminal cleanup path; a broken reporter cannot revive it.
+    }
+  }
+}
+
 /**
  * Dispose `adapter`, reporting any failure as `"<context>: <message>"` and
  * never throwing.
@@ -37,13 +58,7 @@ export async function disposeAdapterQuietly(
   logger: ILogger,
   context: string
 ): Promise<void> {
-  try {
-    await adapter.dispose();
-  } catch (disposeError: unknown) {
-    try {
+  await disposeAdapterSafely(adapter, (disposeError) => {
       logger.warn(`${context}: ${getErrorMessage(disposeError)}`);
-    } catch {
-      // Deliberately empty — see above.
-    }
-  }
+  });
 }
