@@ -9,6 +9,7 @@ import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
 import { DebugSessionInfo, DebugLanguage, SessionState } from '@debugmcp/shared';
 import { createProductionDependencies } from '../../../../src/container/dependencies.js';
+import { SessionNotFoundError } from '../../../../src/errors/debug-errors.js';
 import {
   createMockDependencies,
   createMockServer,
@@ -740,9 +741,9 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
       expect(payload.message).toBe('No attach session to detach from');
     });
 
-    it('maps session-state McpErrors to a stopped failure payload', async () => {
+    it('maps typed session errors to a stopped failure payload', async () => {
       mockSessionManager.detachFromProcess.mockRejectedValue(
-        new McpError(McpErrorCode.InvalidParams, 'Session sess-1 not found')
+        new SessionNotFoundError('sess-1')
       );
 
       const result = await callDetach({ sessionId: 'sess-1' });
@@ -750,7 +751,7 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
 
       expect(payload).toEqual({
         success: false,
-        error: expect.stringContaining('Session sess-1 not found'),
+        error: expect.stringContaining('Session not found: sess-1'),
         state: 'stopped'
       });
     });
