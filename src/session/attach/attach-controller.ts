@@ -265,8 +265,7 @@ export class AttachController {
       const attachData: AttachResultData = {
         message: attachConfig.processId
           ? `Attached to process PID ${attachConfig.processId}`
-          : `Attached to process at ${attachConfig.host || 'localhost'}:${attachConfig.port}`,
-        attachConfig
+          : `Attached to process at ${attachConfig.host || 'localhost'}:${attachConfig.port}`
       };
       // Surface adapterConfig keys the adapter's attach transform dropped
       // (issue #450) and keys forwarded to the adapter unrecognized (issue

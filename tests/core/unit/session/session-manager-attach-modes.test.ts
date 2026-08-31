@@ -228,11 +228,14 @@ describe('SessionManagerOperations attach modes', () => {
         stopOnEntry: false, // skip the post-attach thread-verify poll
         adapterConfig: {
           program: '/proc/1/root/pricer',
-          initCommands: ['settings set target.exec-search-paths /proc/1/root']
+          initCommands: ['settings set target.exec-search-paths /proc/1/root'],
+          token: 'attach-secret-must-not-be-echoed'
         }
       });
 
       expect(result.success).toBe(true);
+      expect(JSON.stringify(result)).not.toContain('attach-secret-must-not-be-echoed');
+      expect(result.data).not.toHaveProperty('attachConfig');
       const cfg = adapterStub.transformAttachConfig.mock.calls[0][0];
       expect(cfg.program).toBe('/proc/1/root/pricer');
       expect(cfg.initCommands).toEqual(['settings set target.exec-search-paths /proc/1/root']);
