@@ -121,6 +121,7 @@ export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
         message: attachResult.success
           ? `Created and attached ${sessionInfo.language} debug session: ${sessionInfo.name}`
           : `Created session but attach failed: ${attachResult.error || 'Unknown error'}`,
+        ...(attachData?.pending ? { pending: true } : {}),
         ...(attachData ? { data: attachData } : {}),
         ...(warning ? { warning } : {})
       });
