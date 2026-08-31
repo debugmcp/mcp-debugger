@@ -19,6 +19,7 @@ import {
   type FunctionBreakpointRemoval
 } from './breakpoints/breakpoint-controller.js';
 import { ExecutionController } from './execution/execution-controller.js';
+import { PauseCoordinator } from './execution/pause-coordinator.js';
 import {
   ExpressionEvaluator,
   type EvaluateResult
@@ -162,13 +163,19 @@ export abstract class SessionManagerOperations extends SessionManagerData {
    */
   protected readonly opsContext: OperationsContext = this.buildOperationsContext();
   protected readonly breakpoints = new BreakpointController(this.opsContext);
-  protected readonly execution = new ExecutionController(this.opsContext);
+  protected readonly pauseCoordinator = new PauseCoordinator(this.opsContext);
+  protected readonly execution = new ExecutionController(this.opsContext, this.pauseCoordinator);
   protected readonly evaluator = new ExpressionEvaluator(this.opsContext);
   protected readonly hotSwap = new RedefineClassesController(this.opsContext, this.breakpoints);
   protected readonly mirror = new MirrorController(this.opsContext);
   protected readonly proxyLauncher = new ProxyLauncher(this.opsContext);
   protected readonly launcher = new DebugLauncher(this.opsContext, this.proxyLauncher, this.breakpoints);
-  protected readonly attach = new AttachController(this.opsContext, this.proxyLauncher, this.breakpoints);
+  protected readonly attach = new AttachController(
+    this.opsContext,
+    this.proxyLauncher,
+    this.breakpoints,
+    this.pauseCoordinator
+  );
 
   /**
    * Start (or dry-run) a launch-mode debug session. Delegates to the launcher,

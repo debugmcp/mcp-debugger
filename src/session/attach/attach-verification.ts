@@ -7,20 +7,15 @@
  * attach is not usable, and reporting success would be a lie (issue #124) —
  * and latches the first proxy error/exit so an adapter that dies mid-verify
  * fails fast with its own message rather than a generic "not initialized".
- * `pauseAfterAttach` then suspends targets whose debugger does not stop them
- * on attach (rdbg; js-debug with continueOnAttach), waiting for the stop to be
- * observed so the PAUSED state is real when it is reported.
+ * Post-attach suspension is coordinated separately by `PauseCoordinator` so
+ * attach and the public pause tool share one event-ordering contract.
  */
-import type { AdapterPolicy } from '@debugmcp/shared';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import type { ManagedSession } from '../session-store.js';
 import type { OperationsContext } from '../operations-context.js';
 
-/** The policy's attach behaviour, as `getAttachBehavior()` declares it. */
-export type AttachBehavior = NonNullable<ReturnType<NonNullable<AdapterPolicy['getAttachBehavior']>>>;
-
-/** Thread verification narrates its attempts; the post-attach pause reads its stop window. */
-export type AttachVerificationContext = Pick<OperationsContext, 'logger' | 'tunables'>;
+/** Thread verification narrates its attempts. */
+export type AttachVerificationContext = Pick<OperationsContext, 'logger'>;
 
 export interface AttachVerifyInput {
   proxyManager: NonNullable<ManagedSession['proxyManager']>;
@@ -142,68 +137,4 @@ export async function sendThreadsRequestBounded(
   timeoutMs: number
 ): Promise<DebugProtocol.ThreadsResponse | undefined> {
   return proxyManager.sendDapRequest<DebugProtocol.ThreadsResponse>('threads', {}, { timeoutMs });
-}
-
-export interface PauseAfterAttachInput {
-  proxyManager: NonNullable<ManagedSession['proxyManager']>;
-  /** The policy's attach behaviour; only consulted when `pauseAfterAttach` is set. */
-  attachBehavior: AttachBehavior;
-  /** The thread verification settled on; the pause targets it unless the policy pauses all. */
-  discoveredThreadId: number;
-}
-
-/**
- * Issue the explicit post-attach pause and wait (bounded by the
- * `attachPauseStopTimeoutMs` tunable) for the resulting 'stopped' event. A
- * rejected pause means the target is already stopped — fine, no stop event
- * will follow.
- */
-export async function pauseAfterAttach(
-  ctx: AttachVerificationContext,
-  input: PauseAfterAttachInput
-): Promise<void> {
-  const { proxyManager, attachBehavior, discoveredThreadId } = input;
-    let stopSettled = false;
-    let stopTimer: ReturnType<typeof setTimeout> | undefined;
-    let onStopped: (() => void) | undefined;
-    const stoppedSeen = new Promise<boolean>((resolve) => {
-      onStopped = () => {
-        if (!stopSettled) {
-          stopSettled = true;
-          if (stopTimer) clearTimeout(stopTimer);
-          resolve(true);
-        }
-      };
-      stopTimer = setTimeout(() => {
-        if (!stopSettled) {
-          stopSettled = true;
-          resolve(false);
-        }
-      }, ctx.tunables.attachPauseStopTimeoutMs);
-      proxyManager.once('stopped', onStopped);
-    });
-    try {
-      // pauseAllThreads (issue #465): threadId 0 asks the adapter for a
-      // process-wide suspend — the JDI bridge then re-anchors its
-      // stopped event to a thread that can actually report frames,
-      // instead of single-thread-suspending whichever id we picked.
-      const pauseThreadId = attachBehavior.pauseAllThreads ? 0 : discoveredThreadId;
-      await proxyManager.sendDapRequest('pause', { threadId: pauseThreadId });
-      ctx.logger.info(`[SessionManager] Sent post-attach pause (threadId=${pauseThreadId})`);
-      const stopObserved = await stoppedSeen;
-      if (!stopObserved) {
-        ctx.logger.warn(
-          `[SessionManager] No 'stopped' event within ${ctx.tunables.attachPauseStopTimeoutMs}ms after post-attach pause; reported state may lag the engine`
-        );
-      }
-    } catch (err) {
-      // Already stopped (e.g. target was started suspended) — fine.
-      ctx.logger.info(
-        `[SessionManager] Post-attach pause not needed/accepted: ${err instanceof Error ? err.message : String(err)}`
-      );
-    } finally {
-      stopSettled = true;
-      if (stopTimer) clearTimeout(stopTimer);
-      if (onStopped) proxyManager.removeListener('stopped', onStopped);
-    }
 }
