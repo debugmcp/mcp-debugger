@@ -281,17 +281,24 @@ jobs:
         # and fail the PR for the wrong reason. An unlabelled PR still yields
         # an empty string, which is a legitimate answer.
         set -o pipefail
-        CHANGED_FILES="$(git diff --name-only \
-          "origin/${{ github.base_ref }}...${{ github.event.pull_request.head.sha }}")"
+        CHANGED_FILES="$(git diff --name-only "$BASE_REF...$HEAD_SHA")"
         export CHANGED_FILES
-        PR_LABELS="$(gh pr view "${{ github.event.pull_request.number }}" \
-          --repo "${{ github.repository }}" --json labels -q '.labels[].name' | paste -sd, -)" \
+        PR_LABELS="$(gh pr view "$PR_NUMBER" \
+          --repo "$GH_REPO" --json labels -q '.labels[].name' | paste -sd, -)" \
           || { echo "::error::Could not read the PR's labels; refusing to guess."; exit 1; }
         export PR_LABELS
         echo "Labels read live: ${PR_LABELS:-<none>}"
         node scripts/changelog-fragments.mjs --ci
       env:
         GH_TOKEN: ${{ github.token }}
+        # Passed as env rather than spliced into the script body: a branch name is
+        # attacker-controlled on a fork PR, and `${{ }}` interpolates straight into the
+        # shell. The gate also reads BASE_REF/HEAD_SHA itself, to diff each changed
+        # package.json and let a devDependencies-only bump through (issue #629).
+        BASE_REF: origin/${{ github.base_ref }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        GH_REPO: ${{ github.repository }}
 
   # Separate job for container tests on Linux only
   container-tests:
