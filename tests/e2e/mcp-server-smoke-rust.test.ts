@@ -30,7 +30,14 @@ describe('MCP Server Rust Debugging Smoke Test', () => {
       args: [distEntry, '--log-level', 'info'],
       env: {
         ...process.env,
-        NODE_ENV: 'test'
+        NODE_ENV: 'test',
+        // The examples are compiled with stable-gnu on Windows. Point
+        // CodeLLDB at the matching Rust formatter scripts as well; using the
+        // host's default MSVC scripts against a GNU stdlib can hang a
+        // variables request inside lldb_providers.py.
+        ...(process.platform === 'win32'
+          ? { RUSTUP_TOOLCHAIN: 'stable-x86_64-pc-windows-gnu' }
+          : {})
       }
     });
 
@@ -206,7 +213,7 @@ describe('MCP Server Rust Debugging Smoke Test', () => {
       expect(helloEntry!.category).toBe('stdout');
       expect(outputEntries.some(e => e.output.includes('Sum of 5 and 10 is: 15'))).toBe(true);
     },
-    60000
+    120000
   );
 
   it(
@@ -335,7 +342,7 @@ describe('MCP Server Rust Debugging Smoke Test', () => {
       );
       expect(finalContinue.success).toBe(true);
     },
-    60000
+    120000
   );
 
   // Shared driver for the continue-to-completion tests below: sets one

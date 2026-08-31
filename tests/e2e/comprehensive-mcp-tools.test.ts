@@ -20,7 +20,7 @@ import {
   PYTHON_SCRIPT, JS_SCRIPT, RUST_SCRIPT, GO_SCRIPT, DOTNET_SCRIPT, JAVA_SCRIPT, JAVA_CLASS_DIR, RUBY_SCRIPT, CPP_SCRIPT,
   PYTHON_BP_LINE, JS_BP_LINE, RUST_BP_LINE, GO_BP_LINE, DOTNET_BP_LINE, JAVA_BP_LINE, RUBY_BP_LINE, CPP_BP_LINE,
   hasRust, hasGo, hasRuby, hasDotnet, hasJava, hasCpp,
-  ensureGoBuild, ensureDotnetBuild, ensureJavaBuild, ensureCppBuild
+  ensureRustBuild, ensureGoBuild, ensureDotnetBuild, ensureJavaBuild, ensureCppBuild
 } from './language-matrix-utils.js';
 
 /* ---------- result tracking ---------- */
@@ -116,6 +116,19 @@ describe(`Comprehensive MCP Debugger Test — ${ALL_TOOLS.length} Tools × ${LAN
     console.log('[Setup] MCP client connected to server');
 
     // Pre-compile languages that need it
+    const rustLang = LANGUAGES.find(l => l.language === 'rust');
+    if (rustLang?.available) {
+      try {
+        const rustBinary = await ensureRustBuild();
+        rustLang.launchScript = rustBinary;
+        console.log(`[Setup] Rust binary compiled: ${rustBinary}`);
+      } catch (err) {
+        console.log(`[Setup] Rust build failed: ${err}`);
+        rustLang.available = false;
+        rustLang.skipReason = 'Rust build failed';
+      }
+    }
+
     const goLang = LANGUAGES.find(l => l.language === 'go');
     if (goLang?.available) {
       try {

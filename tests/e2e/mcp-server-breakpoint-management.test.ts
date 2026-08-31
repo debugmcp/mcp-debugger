@@ -39,7 +39,7 @@ describe('Breakpoint management e2e (list/remove/clear)', () => {
       { capabilities: {} },
     );
     await mcpClient.connect(transport);
-    prepareLanguageMatrix(LANGUAGES);
+    await prepareLanguageMatrix(LANGUAGES);
   }, 120_000);
 
   afterAll(async () => {
