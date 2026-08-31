@@ -524,6 +524,30 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
   });
 
   describe('attach warning join (issue #450)', () => {
+    it('surfaces a pending post-attach pause at the top level (issue #598)', async () => {
+      mockSessionManager.attachToProcess.mockResolvedValue({
+        success: true,
+        state: 'running',
+        data: { message: 'Attached; pause is pending', pending: true },
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'attach_to_process',
+          arguments: { sessionId: 'test-session', port: 5678 },
+        },
+      });
+
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload).toMatchObject({
+        success: true,
+        state: 'running',
+        pending: true,
+        data: { pending: true },
+      });
+    });
+
     it('surfaces data.warning at the top level of the attach_to_process response', async () => {
       mockSessionManager.attachToProcess.mockResolvedValue({
         success: true,

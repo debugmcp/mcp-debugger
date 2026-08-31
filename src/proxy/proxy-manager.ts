@@ -230,6 +230,8 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   private dryRunScriptPath?: string;
   private adapterConfigured = false;
   private dapState: DAPSessionState | null = null;
+  /** Whether this parent has already consumed a stopped event for this run. */
+  private initializationStopSeen = false;
   private stderrBuffer: string[] = [];
   private lastExitDetails:
     | {
@@ -302,6 +304,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     this.dryRunCommandSnapshot = undefined;
     this.dryRunScriptPath = config.scriptPath;
     this.lastExitDetails = undefined;
+    this.initializationStopSeen = false;
     if (config.adapterCommand?.command) {
       const parts = [config.adapterCommand.command, ...(config.adapterCommand.args ?? [])]
         .filter((part) => typeof part === 'string' && part.length > 0);
@@ -1295,6 +1298,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         if (typeof threadIdMaybe === 'number') {
           this.currentThreadId = threadIdMaybe;
         }
+        this.initializationStopSeen = true;
         // Do not fabricate a threadId; emit undefined if adapter omitted it
         this.emit('stopped', threadIdMaybe, reason, stoppedBody as DebugProtocol.StoppedEvent['body']);
         break;
@@ -1357,6 +1361,19 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       
       case 'adapter_configured_and_launched':
         this.logger.info(`[ProxyManager] Adapter configured and launched`);
+        // Some adapters (notably rdbg) emit `stopped` synchronously with
+        // configurationDone. If that early dapEvent did not reach the parent
+        // before readiness, replay the worker's initialization snapshot. This
+        // remains a real adapter event — SessionManager records lastStop before
+        // entering PAUSED — and is deduped when the normal dapEvent arrived.
+        if (message.lastStop && !this.initializationStopSeen) {
+          this.handleDapEvent({
+            type: 'dapEvent',
+            sessionId: message.sessionId,
+            event: 'stopped',
+            body: message.lastStop
+          });
+        }
         this.adapterConfigured = true;
         this.emit('adapter-configured');
         if (!this.isInitialized) {
