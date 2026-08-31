@@ -221,7 +221,7 @@ describe('JsDebugAdapterPolicy', () => {
       expect(JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars)).toEqual({ variables: [], scopeRefs: [] });
     });
 
-    it('uses Global only for a frame that exposes no Local scope at all', () => {
+    it('never substitutes Global for a frame that exposes no Local scope', () => {
       const scopes: Record<number, DebugProtocol.Scope[]> = {
         1: [
           { name: 'Script', variablesReference: 100, expensive: false },
@@ -235,7 +235,8 @@ describe('JsDebugAdapterPolicy', () => {
 
       const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
 
-      expect(result.variables.map(variable => variable.name)).toEqual(['globalValue']);
+      expect(result).toMatchObject({ variables: [], scopeRefs: [] });
+      expect(result.note).toMatch(/get_scopes.*get_variables/);
     });
 
     it('merges a for-body Block scope ahead of the function locals (issue #558)', () => {
@@ -531,8 +532,7 @@ describe('JsDebugAdapterPolicy', () => {
         ...JS_SCOPE_KINDS.local,
         ...JS_SCOPE_KINDS.block,
         ...JS_SCOPE_KINDS.closure,
-        ...JS_SCOPE_KINDS.module,
-        ...JS_SCOPE_KINDS.global
+        ...JS_SCOPE_KINDS.module
       ]);
     });
 
