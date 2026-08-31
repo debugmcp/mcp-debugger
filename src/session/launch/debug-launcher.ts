@@ -169,6 +169,7 @@ export class DebugLauncher {
     session.exitCode = undefined;
     session.lastProxyExit = undefined;
     session.lastProxyError = undefined;
+    session.failureDiagnostics = undefined;
     this.ctx.logger.info(`[SessionManager] Session ${sessionId} lifecycle state set to ACTIVE`);
 
     // Record the launch spec for restart_debugging BEFORE attempting the
@@ -289,6 +290,9 @@ export class DebugLauncher {
             dryRunTimeoutError,
             'startDebugging'
           );
+          session.failureDiagnostics = Object.keys(diagnosticData).length > 0
+            ? diagnosticData
+            : undefined;
 
           return {
             success: false,
@@ -392,6 +396,9 @@ export class DebugLauncher {
           new Error(errorMessage),
           'startDebugging'
         );
+        finalSession.failureDiagnostics = Object.keys(diagnosticData).length > 0
+          ? diagnosticData
+          : undefined;
         return {
           success: false,
           state: SessionState.ERROR,
@@ -466,6 +473,9 @@ export class DebugLauncher {
       };
     } catch (error) {
       const diagnosticData = await failProxySetup(this.ctx, session, error, 'startDebugging');
+      session.failureDiagnostics = Object.keys(diagnosticData).length > 0
+        ? diagnosticData
+        : undefined;
 
       const errorMessage = error instanceof Error ? error.message : String(error);
 

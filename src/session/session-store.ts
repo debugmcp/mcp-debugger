@@ -33,6 +33,7 @@ import type { DebugProtocol } from '@vscode/debugprotocol';
 import { IProxyManager } from '../proxy/proxy-manager.js';
 import { OutputRingBuffer } from './output-buffer.js';
 import type { PauseIntent } from './execution/pause-intent.js';
+import type { ProxyFailureDiagnostics } from './launch/proxy-failure-diagnostics.js';
 
 export interface ToolchainValidationState {
   compatible: boolean;
@@ -106,6 +107,8 @@ export interface ManagedSession extends DebugSessionInfo {
   lastProxyExit?: ProxyExitState;
   /** Last proxy error-event message for the current launch. */
   lastProxyError?: string;
+  /** Actionable pointers retained when the current launch's proxy fails. */
+  failureDiagnostics?: ProxyFailureDiagnostics;
   // True once the first 'stopped' event after launch has been observed.
   // Used by the auto-continue trigger to identify the initial entry stop
   // even when the adapter reports a non-'entry' reason (e.g., js-debug
@@ -273,6 +276,9 @@ export class SessionStore {
       updatedAt: s.updatedAt,
       lastStop: s.lastStop,
       exitCode: s.exitCode,
+      ...(s.state === SessionState.ERROR && s.failureDiagnostics
+        ? { diagnostics: s.failureDiagnostics }
+        : {}),
       // Mirror endpoint without the token (issue #217); the isRunning gate
       // keeps the projection honest on teardown paths that skip cleanup.
       ...(s.exposure && s.proxyManager?.isRunning()

@@ -35,7 +35,11 @@ import { normalizeBreakpointMessage } from '../utils/breakpoint-message.js';
 import { consumeChildOrigin } from '../utils/child-origin-events.js';
 import { isPidAlive } from '../utils/jvm-orphan-reaper.js';
 import { IAdapterRegistry } from '@debugmcp/shared';
-import type { ProxyFailureDiagnostics } from './launch/proxy-failure-diagnostics.js';
+import {
+  collectProxyFailureDiagnostics,
+  logProxyFailure,
+  type ProxyFailureDiagnostics
+} from './launch/proxy-failure-diagnostics.js';
 import type { AnchorResolution } from './breakpoints/anchor-resolution.js';
 
 // Custom launch arguments interface extending DebugProtocol.LaunchRequestArguments
@@ -392,6 +396,35 @@ export abstract class SessionManagerCore extends EventEmitter {
     this.logger.info('All debug sessions closed');
   }
 
+  /**
+   * Persist the public failure pointers synchronously, then write the bounded
+   * structured log record in the background. EventEmitter does not await
+   * listeners, so the session projection must be complete before the handler
+   * returns. A generation guard prevents a slow log read from reviving an old
+   * launch's diagnostics after restart_debugging installs a new proxy.
+   */
+  private recordProxyFailure(session: ManagedSession, error: unknown): void {
+    const generation = session.proxyGeneration;
+    session.failureDiagnostics = collectProxyFailureDiagnostics(session, error);
+
+    void logProxyFailure(
+      { logger: this.logger, fileSystem: this.fileSystem },
+      session,
+      error,
+      'proxyExit'
+    ).then((diagnostics) => {
+      if (session.proxyGeneration === generation && session.state === SessionState.ERROR) {
+        session.failureDiagnostics = diagnostics;
+      }
+    }).catch((diagnosticsError: unknown) => {
+      // logProxyFailure is total by contract; retain the synchronously
+      // collected pointers even if a future implementation regresses that.
+      this.logger.warn(
+        `[SessionManager] Failed to finish proxy-exit diagnostics for session ${session.id}: ${diagnosticsError instanceof Error ? diagnosticsError.message : String(diagnosticsError)}`
+      );
+    });
+  }
+
   protected setupProxyEventHandlers(
     session: ManagedSession,
     proxyManager: IProxyManager,
@@ -406,6 +439,7 @@ export abstract class SessionManagerCore extends EventEmitter {
     session.lastStop = undefined;
     session.exitCode = undefined;
     session.adapterCapabilities = undefined;
+    session.failureDiagnostics = undefined;
     // Adapter degradation notes are per-launch (issue #441).
     session.adapterNotices = [];
     // Mandatory (issue #217): the relaunch's new proxyManager reports
@@ -1072,6 +1106,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       this.logger.error(`[ProxyManager ${sessionId}] Error:`, error);
       session.lastProxyError = error.message;
       this._updateSessionState(session, SessionState.ERROR);
+      this.recordProxyFailure(session, error);
 
       // Clean up listeners since proxy is in error state
       this.cleanupProxyEventHandlers(session, proxyManager);
@@ -1095,6 +1130,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       this.logger.debug(`[SessionManager] handleExit: session=${sessionId} currentState=${session.state} code=${code} signal=${signal} expected=${expected}`);
       this.logger.info(`[ProxyManager ${sessionId}] Exit: code=${code}, signal=${signal}, expected=${expected}`);
       session.lastProxyExit = { code, signal, expected };
+      const stateBeforeExit = session.state;
       if (session.state !== SessionState.STOPPED && session.state !== SessionState.ERROR) {
         if (expected === true) {
           // Orderly debuggee termination (issue #258): the worker saw a
@@ -1121,6 +1157,15 @@ export abstract class SessionManagerCore extends EventEmitter {
             this._updateSessionState(session, SessionState.ERROR);
           }
         }
+      }
+
+      if (stateBeforeExit !== SessionState.ERROR && session.state === SessionState.ERROR) {
+        const exitDescription = `code=${code ?? 'null'}${signal ? `, signal=${signal}` : ''}`;
+        const exitError = Object.assign(
+          new Error(`Debug proxy exited unexpectedly (${exitDescription})`),
+          { code, signal, expected }
+        );
+        this.recordProxyFailure(session, exitError);
       }
 
       // Clean up listeners since proxy is gone

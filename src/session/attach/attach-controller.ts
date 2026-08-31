@@ -126,6 +126,7 @@ export class AttachController {
       sessionLifecycle: SessionLifecycleState.ACTIVE,
       attachMode: true,
     });
+    session.failureDiagnostics = undefined;
 
     try {
       // For attach mode, we use a placeholder scriptPath
@@ -345,6 +346,9 @@ export class AttachController {
       // (issue #561) — an attach that dies during proxy initialization used
       // to leave the adapter's own complaint unreadable.
       const diagnosticData = await failProxySetup(this.ctx, session, error, 'attachToProcess');
+      session.failureDiagnostics = Object.keys(diagnosticData).length > 0
+        ? diagnosticData
+        : undefined;
       const message = error instanceof Error ? error.message : String(error);
       // A close that landed during the teardown removed the session; the
       // state write would throw. Report the failure as-is.

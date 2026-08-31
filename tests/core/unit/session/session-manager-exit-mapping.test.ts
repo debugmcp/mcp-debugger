@@ -11,6 +11,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
 import { DebugLanguage, SessionState } from '@debugmcp/shared';
+import path from 'node:path';
 import { createMockDependencies } from './session-manager-test-utils.js';
 
 describe('SessionManager - proxy exit mapping (issue #258)', () => {
@@ -93,6 +94,34 @@ describe('SessionManager - proxy exit mapping (issue #258)', () => {
     const session = sessionManager.getSession(sessionId);
     expect(session?.state).toBe(SessionState.ERROR);
     expect(session?.lastProxyExit).toEqual({ code: 134, signal: undefined, expected: false });
+    expect(session?.failureDiagnostics).toEqual({
+      proxyLogPath: path.join(session!.logDir!, `proxy-${sessionId}.log`)
+    });
+    expect(sessionManager.getAllSessions().find(({ id }) => id === sessionId)?.diagnostics).toEqual(
+      session?.failureDiagnostics
+    );
+
+    await vi.waitFor(() => {
+      expect(dependencies.mockLogger.error).toHaveBeenCalledWith(
+        `[SessionManager] Detailed error in proxyExit for session ${sessionId}:`,
+        expect.objectContaining({
+          message: 'Debug proxy exited unexpectedly (code=134)',
+          proxyLogPath: session?.failureDiagnostics?.proxyLogPath
+        })
+      );
+    });
+  });
+
+  it('persists the same diagnostics for a proxy error event', async () => {
+    const sessionId = await startRunningSession();
+
+    dependencies.mockProxyManager.simulateEvent('error', new Error('adapter socket closed'));
+
+    const session = sessionManager.getSession(sessionId);
+    expect(session?.state).toBe(SessionState.ERROR);
+    expect(session?.failureDiagnostics?.proxyLogPath).toBe(
+      path.join(session!.logDir!, `proxy-${sessionId}.log`)
+    );
   });
 
   it('keeps the legacy mapping when expected is absent: clean proxy exit → STOPPED', async () => {

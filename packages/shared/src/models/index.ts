@@ -370,6 +370,14 @@ export interface SessionOutputEntry {
   redacted?: boolean;
 }
 
+/** Pointers that make an errored session's proxy failure actionable. */
+export interface SessionFailureDiagnostics {
+  /** Server-host path to the current launch attempt's proxy log. */
+  proxyLogPath?: string;
+  /** MCP resource URI for remote-safe access to the proxy log, when available. */
+  proxyLogResource?: string;
+}
+
 /**
  * Public session snapshot returned by create/list operations. Unlike the
  * internal DebugSession, it carries no live handles and adds observed
@@ -386,6 +394,8 @@ export interface DebugSessionInfo {
   lastStop?: SessionStopInfo;
   /** Debuggee exit code from the DAP 'exited' event, when the adapter reports one */
   exitCode?: number;
+  /** Present when the session is in ERROR because its proxy failed. */
+  diagnostics?: SessionFailureDiagnostics;
   /**
    * Live DAP mirror endpoint from expose_session (issue #217), host/port
    * only — the attach token is returned solely by the expose_session tool.
