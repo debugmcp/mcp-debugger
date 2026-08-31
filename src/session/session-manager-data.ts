@@ -394,6 +394,14 @@ export abstract class SessionManagerData extends SessionManagerCore {
         const anchor = frames[0];
         if (policy.extractLocalVariables) {
           const extraction = policy.extractLocalVariables(frames, scopesMap, variablesMap, includeSpecial);
+          if (extraction.variables.length === 0 && extraction.note) {
+            return {
+              localVars: [],
+              scopeRefs: [],
+              scopeName: null,
+              scopeNote: extraction.note
+            };
+          }
 
           // Report the ACTUAL scope name the adapter returned, not the policy's
           // canonical name — adapters may annotate it (e.g. Delve's "Locals

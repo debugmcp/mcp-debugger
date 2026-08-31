@@ -507,7 +507,7 @@
       },
       {
         "name": "get_local_variables",
-        "description": "Get local variables for the shared inspection anchor. If the stopped thread is frameless, a sibling with policy-recognized user frames is preferred, adopted, and disclosed in anchorNote. Responses are size-guarded: oversized values are cut (truncated:true) and very large scopes return a capped list with a truncation notice — pass names:[...] to fetch specific variables in full",
+        "description": "Get local variables for the shared inspection anchor. If the stopped thread is frameless, a sibling with policy-recognized user frames is preferred, adopted, and disclosed in anchorNote. A JavaScript frame with no Local/block scope returns empty with guidance instead of mislabeling Global bindings. Responses are size-guarded; pass names:[...] to fetch specific variables in full",
         "inputSchema": {
           "type": "object",
           "properties": {

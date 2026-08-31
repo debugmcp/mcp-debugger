@@ -90,11 +90,13 @@ export interface LocalVariableExtraction {
    * variable, in the same order. Empty when `variables` is empty.
    */
   scopeRefs: number[];
+  /** Optional explanation for an intentionally empty policy result. */
+  note?: string;
 }
 
 /** The "no locals here" result: no variables, and therefore no scopes. */
-export function emptyLocalVariableExtraction(): LocalVariableExtraction {
-  return { variables: [], scopeRefs: [] };
+export function emptyLocalVariableExtraction(note?: string): LocalVariableExtraction {
+  return { variables: [], scopeRefs: [], ...(note ? { note } : {}) };
 }
 
 /**

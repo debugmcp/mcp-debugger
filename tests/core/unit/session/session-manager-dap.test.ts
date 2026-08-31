@@ -1280,6 +1280,38 @@ describe('SessionManager - DAP Operations', () => {
       expect(result.anchorNote).toMatch(/Module/);
     });
 
+    it('returns empty JS locals with guidance for a Global-only frame (#595)', async () => {
+      const session = await createPausedSession(sessionManager, dependencies);
+      (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(
+        async (command: string) => {
+          if (command === 'stackTrace') {
+            return { success: true, body: { stackFrames: [
+              { id: 1, name: '<module>', source: { path: '/workspace/app.js' }, line: 1, column: 1 }
+            ] } };
+          }
+          if (command === 'scopes') {
+            return { success: true, body: { scopes: [
+              { name: 'Global', variablesReference: 400, expensive: true }
+            ] } };
+          }
+          if (command === 'variables') {
+            return { success: true, body: { variables: [
+              { name: 'process', value: 'Process', type: 'object', variablesReference: 2 }
+            ] } };
+          }
+          return { success: true, body: {} };
+        }
+      );
+
+      const result = await sessionManager.getLocalVariables(session.id);
+
+      expect(result.variables).toEqual([]);
+      expect(result.scopeName).toBeNull();
+      expect(result.anchorNote).toMatch(/get_scopes/);
+      expect(result.anchorNote).toMatch(/get_variables/);
+    });
+
     it('returns a JS for-body block binding alongside the function locals (issue #558)', async () => {
       const session = await createPausedSession(sessionManager, dependencies);
       (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
