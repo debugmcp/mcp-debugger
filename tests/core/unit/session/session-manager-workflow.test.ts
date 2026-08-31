@@ -160,6 +160,40 @@ describe('SessionManager - Debug Session Workflow', () => {
       expect(dependencies.mockProxyManager.startCalls[0].stopOnEntry).toBe(false);
     });
 
+    it('does not overwrite an observed stop when adapter readiness arrives later (issue #598)', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+
+      dependencies.mockProxyManager.start = vi.fn().mockImplementation(async (proxyConfig) => {
+        dependencies.mockProxyManager.startCalls.push(proxyConfig);
+        (dependencies.mockProxyManager as unknown as { _isRunning: boolean })._isRunning = true;
+        process.nextTick(() => {
+          dependencies.mockProxyManager.emit('stopped', 1, 'breakpoint', {
+            reason: 'breakpoint',
+            threadId: 1,
+            allThreadsStopped: true
+          });
+          dependencies.mockProxyManager.emit('adapter-configured');
+          dependencies.mockProxyManager.emit('initialized');
+        });
+      });
+
+      const startPromise = sessionManager.startDebugging(
+        session.id,
+        'test.py',
+        [],
+        { stopOnEntry: false }
+      );
+      await vi.runAllTimersAsync();
+
+      const result = await startPromise;
+      expect(result.success).toBe(true);
+      expect(result.state).toBe(SessionState.PAUSED);
+      expect(sessionManager.getSession(session.id)?.lastStop?.reason).toBe('breakpoint');
+    });
+
     it('should handle terminated event during startup', async () => {
       const session = await sessionManager.createSession({
         language: DebugLanguage.MOCK,
@@ -249,6 +283,7 @@ describe('SessionManager - Debug Session Workflow', () => {
       expect(result.success).toBe(false);
       expect(result.state).toBe(SessionState.ERROR);
       expect(result.error).toContain('code=1');
+      expect(result.error).toContain('signal=SIGKILL');
       expect(dependencies.mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('proxy exited during startup')
       );

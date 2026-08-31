@@ -252,7 +252,7 @@
       },
       {
         "name": "attach_to_process",
-        "description": "Attach to a running process for debugging. After the attach handshake the target is verified by polling for threads; if none are reported within verifyTimeout (~20s default) the attach fails and the debug proxy is torn down",
+        "description": "Attach to a running process for debugging. After the handshake the target is verified by polling for threads; if none are reported within verifyTimeout (~20s default) the attach fails and the proxy is torn down. When a requested post-attach pause is accepted but no stopped event arrives within its bounded wait, returns state \"running\" with pending:true; the late event alone changes the session to \"paused\"",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -507,7 +507,7 @@
       },
       {
         "name": "get_local_variables",
-        "description": "Get local variables for the current stack frame. This is a convenience tool that returns just the local variables without needing to traverse stack->scopes->variables manually. Responses are size-guarded: oversized values are cut (truncated:true) and very large scopes return a capped list with a truncation notice — pass names:[...] to fetch specific variables in full",
+        "description": "Get local variables for the shared inspection anchor. If the stopped thread is frameless, a sibling with policy-recognized user frames is preferred, adopted, and disclosed in anchorNote. A JavaScript frame with no Local/block scope returns empty with guidance instead of mislabeling Global bindings. Responses are size-guarded; pass names:[...] to fetch specific variables in full",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -534,7 +534,7 @@
       },
       {
         "name": "get_stack_trace",
-        "description": "Get stack trace. The response includes stopReason — why the session is paused (e.g. \"breakpoint\" vs \"exception\"). Internal/runtime frames are filtered by default; when any are hidden the response carries hiddenFrames and a note (the top frame is always kept even if internal, so frameId anchors keep working)",
+        "description": "Get stack trace. The response includes stopReason — why the session is paused. For an implicit frameless stopped thread, a sibling with policy-recognized user frames is preferred and adopted, with the switch disclosed in note. Internal/runtime frames are filtered by default; when any are hidden the response carries hiddenFrames and a note",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -547,7 +547,7 @@
             },
             "threadId": {
               "type": "number",
-              "description": "Inspect a specific thread (ids from list_threads). When that thread reports frames it becomes the anchor for follow-up scopes/locals/evaluate calls — the escape hatch when the session is anchored to a frameless thread"
+              "description": "Inspect this exact thread (ids from list_threads). Explicit selection is authoritative and is never silently switched"
             }
           },
           "required": [
@@ -577,7 +577,7 @@
       },
       {
         "name": "evaluate_expression",
-        "description": "Evaluate expression in the current debug context. Expressions can read and modify program state. Waits up to 30s for the result by default; pass timeout for long-running expressions",
+        "description": "Evaluate expression in the current debug context. Without frameId, uses the same adopted top frame as stack and locals and discloses an automatic thread switch in anchorNote. Expressions can read and modify program state. Waits up to 30s by default",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -589,7 +589,7 @@
             },
             "frameId": {
               "type": "number",
-              "description": "Optional stack frame ID for evaluation context. Must be a frame ID from a get_stack_trace response. If not provided, uses the current (top) frame automatically"
+              "description": "Optional authoritative stack frame ID from get_stack_trace. When provided, no automatic frame/thread selection occurs"
             },
             "timeout": {
               "type": "number",
