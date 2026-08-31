@@ -249,6 +249,7 @@ describe('SessionManager - Debug Session Workflow', () => {
       expect(result.success).toBe(false);
       expect(result.state).toBe(SessionState.ERROR);
       expect(result.error).toContain('code=1');
+      expect(result.error).toContain('signal=SIGKILL');
       expect(dependencies.mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('proxy exited during startup')
       );
