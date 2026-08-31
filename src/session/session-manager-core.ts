@@ -11,6 +11,7 @@ import type { StackFrame } from '@debugmcp/shared';
 import { isRedactionEnabled } from '../utils/redaction-mode.js';
 import { ValidationResultCache } from '../utils/language-availability.js';
 import { SessionStore, ManagedSession } from './session-store.js';
+import type { ToolchainValidationState } from './session-store.js';
 import { OutputRingBuffer } from './output-buffer.js';
 import { DebugProtocol } from '@vscode/debugprotocol'; 
 import path from 'path';
@@ -30,6 +31,7 @@ import { consumeChildOrigin } from '../utils/child-origin-events.js';
 import { isPidAlive } from '../utils/jvm-orphan-reaper.js';
 import { IAdapterRegistry } from '@debugmcp/shared';
 import type { ProxyFailureDiagnostics } from './launch/proxy-failure-diagnostics.js';
+import type { AnchorResolution } from './breakpoints/anchor-resolution.js';
 
 // Custom launch arguments interface extending DebugProtocol.LaunchRequestArguments
 export interface CustomLaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
@@ -40,15 +42,13 @@ export interface CustomLaunchRequestArguments extends DebugProtocol.LaunchReques
 /**
  * The `data` bag a debug operation returns alongside its state.
  *
- * An open bag with typed common fields rather than a discriminated union:
+ * A closed set of typed common fields rather than a discriminated union:
  * `startDebugging` alone returns three shapes (dry run, launch, toolchain
  * refusal) and `restartDebugging` spreads whatever the launch produced, so a
- * union would force narrowing at every server read for no gain. Naming the
- * fields every reader actually touches — `message`, `warning`, and the proxy
- * failure pointers — is what lets the server handlers read them directly
- * instead of casting.
+ * union would force narrowing at every server read for no gain. Keeping the
+ * optional field set closed makes misspelled reads and writes fail typecheck.
  */
-export type DebugResultData = ProxyFailureDiagnostics & {
+export interface DebugResultData extends ProxyFailureDiagnostics {
   /** Human-readable status for the tool result. */
   message?: string;
   /** Advisory notes joined by the operation (unbound breakpoints, dropped keys, ...). */
@@ -59,8 +59,19 @@ export type DebugResultData = ProxyFailureDiagnostics & {
    * window elapses before a `stopped` event arrives.
    */
   pending?: boolean;
-  [key: string]: unknown;
-};
+  /** Dry-run response fields. */
+  dryRun?: boolean;
+  command?: string;
+  script?: string;
+  /** Launch result fields. */
+  reason?: string;
+  stopOnEntrySuccessful?: boolean;
+  toolchainValidation?: ToolchainValidationState;
+  /** Restart result fields. */
+  breakpointsReapplied?: number;
+  outputReset?: boolean;
+  anchorResolution?: AnchorResolution;
+}
 
 /**
  * Where the debuggee is stopped, as a result payload reports it.
