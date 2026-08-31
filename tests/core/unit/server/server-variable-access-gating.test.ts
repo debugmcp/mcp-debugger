@@ -144,8 +144,7 @@ describe('Variable access gating (issue #237)', () => {
       })).rejects.toSatisfy((error: unknown) => {
         expect(error).toBeInstanceOf(McpError);
         expect((error as McpError).code).toBe(McpErrorCode.InvalidParams);
-        expect((error as McpError).message).toContain('DEBUG_MCP_VARIABLE_ACCESS=explicit');
-        expect((error as McpError).message).toContain('names');
+        expect((error as McpError).message).toContain('Missing required parameter: names');
         return true;
       });
     });
@@ -167,7 +166,8 @@ describe('Variable access gating (issue #237)', () => {
         params: { name: 'get_local_variables', arguments: { sessionId: 'test-session' } }
       })).rejects.toSatisfy((error: unknown) => {
         expect(error).toBeInstanceOf(McpError);
-        expect((error as McpError).message).toContain('DEBUG_MCP_VARIABLE_ACCESS=explicit');
+        expect((error as McpError).code).toBe(McpErrorCode.InvalidParams);
+        expect((error as McpError).message).toContain('Missing required parameter: names');
         return true;
       });
     });

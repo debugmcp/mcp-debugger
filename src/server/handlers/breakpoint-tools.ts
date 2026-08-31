@@ -18,7 +18,7 @@ import { failureResult, jsonResult, sessionErrorResultOrThrow, type ToolResult }
 
 export const setBreakpointTool: ToolHandler = async (ctx, args) => {
   const isFunctionBp = args.function !== undefined;
-  if (!args.sessionId || (!isFunctionBp && (!args.file || (args.line === undefined && args.statement === undefined)))) {
+  if (!isFunctionBp && (!args.file || (args.line === undefined && args.statement === undefined))) {
     throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameters');
   }
 

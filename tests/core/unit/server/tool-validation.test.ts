@@ -7,12 +7,14 @@ import { IEnvironment } from '@debugmcp/shared';
 import type { ToolArguments } from '../../../../src/server/tool-arguments.js';
 import {
   assertPlainObjectArg,
+  assertRequiredToolArguments,
   enforceExplicitNames,
   NEVER_VALID_DAP_LAUNCH_KEYS,
   normalizeStartDebuggingArgs,
   requireSessionId,
   validateBreakOnExceptions
 } from '../../../../src/server/tool-validation.js';
+import type { ToolDefinition } from '../../../../src/server/tool-schemas.js';
 
 function environmentWith(values: Record<string, string>): IEnvironment {
   return {
@@ -32,6 +34,36 @@ describe('requireSessionId', () => {
     const args = raw as ToolArguments;
     expect(() => requireSessionId(args)).toThrow(McpError);
     expect(() => requireSessionId(args)).toThrow('Missing required parameter: sessionId');
+  });
+});
+
+describe('assertRequiredToolArguments', () => {
+  const definition = {
+    name: 'start_debugging',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      required: ['sessionId', 'scriptPath']
+    }
+  } as ToolDefinition;
+
+  it('reports the first missing field in schema order', () => {
+    expect(() => assertRequiredToolArguments(definition, {}))
+      .toThrow('Missing required parameter: sessionId');
+  });
+
+  it.each([undefined, null, ''])('treats %j as missing', (value) => {
+    expect(() => assertRequiredToolArguments(definition, { sessionId: value, scriptPath: '/app.py' }))
+      .toThrow('Missing required parameter: sessionId');
+  });
+
+  it('accepts zero and false as present values', () => {
+    const numericDefinition = {
+      ...definition,
+      inputSchema: { ...definition.inputSchema, required: ['line', 'stopOnEntry'] }
+    } as ToolDefinition;
+    expect(() => assertRequiredToolArguments(numericDefinition, { line: 0, stopOnEntry: false }))
+      .not.toThrow();
   });
 });
 
