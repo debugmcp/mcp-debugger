@@ -58,7 +58,7 @@ If your agent runs in a terminal, a pipeline, or a cloud sandbox — or needs to
 - 🔷 **.NET/C# debugging via netcoredbg** – Debug .NET applications with full DAP support
 - ⚙️ **C/C++ debugging via CodeLLDB** – Launch prebuilt binaries or lone source files (auto-compiled), attach by PID; core dumps and gdbserver/rr targets via config pass-through
 - 🧪 **Mock adapter for testing** – Test without external dependencies
-- 🛰️ **Out-of-IDE & remote attach** – Attach over host/port to a process on another machine or inside a container (Python via debugpy, Ruby via rdbg, Java via JDWP) with source-path mapping, or by PID for native code (C/C++) — direct-connect attach needs no local toolchain, and `list_supported_languages` reports per-mode availability with reasons
+- 🛰️ **Out-of-IDE & remote attach** – Attach over host/port to a process on another machine or inside a container (Python via debugpy, Ruby via rdbg, JavaScript via the V8 inspector, Java via JDWP) with source-path mapping, or by PID for native code (C/C++) — direct-connect attach needs no local toolchain, and `list_supported_languages` reports per-mode availability with reasons
 - 🎯 **Breakpoints that survive edits** – Address by content (`statement: "total = sum(prices)"`), by symbol (`function: "main"`), or assert line content with `expectedContent`; anchors re-resolve across `restart_debugging` and weak matches warn loudly
 - 🪵 **Logpoints** – `set_breakpoint` with `logMessage: "x={x}"` streams interpolated values into `get_output` without pausing — prod-safe value watching on hot paths
 - 🧰 **Full breakpoint lifecycle** – `list_breakpoints` / `remove_breakpoint` / `clear_breakpoints` work live mid-run; `restart_debugging` relaunches with the same config and re-applies everything in one call
@@ -160,7 +160,7 @@ claude mcp list
 ### Using Docker
 
 ```bash
-docker run -v $(pwd):/workspace debugmcp/mcp-debugger:latest
+docker run -i --rm -v $(pwd):/workspace debugmcp/mcp-debugger:latest
 ```
 
 > The Docker image debugs **Python, JavaScript, Java, Rust, and C/C++** natively (toolchains + a shared vendored CodeLLDB are included), plus the mock adapter. **Ruby is attach-only** in the image (the adapter ships without a Ruby runtime — attach to any `rdbg --open` process, local or remote). Only **Go and .NET** are disabled in the container — run those via npm/npx next to your local toolchain. Host-built Rust/C++ binaries debugged in the container get an auto-derived source map back to `/workspace`. `list_supported_languages` reports per-mode availability (`modes.launch` / `modes.attach`) with reasons. See [Docker support](./docs/docker-support.md).

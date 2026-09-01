@@ -130,8 +130,14 @@ async function validatePush(options = {}) {
     if (config.runTests) {
       if (config.runSmoke) {
         log('\n7️⃣  Running smoke tests (quick validation)...', colors.blue);
-        // Run a subset of tests for speed
-        const testCmd = 'pnpm test -- tests/unit/index.test.ts tests/core/unit/server/server.test.ts';
+        // Run a subset of tests for speed. These paths must stay real: the
+        // previous target (tests/core/unit/server/server.test.ts) was deleted in
+        // the server split, so --smoke failed on a missing file rather than on a
+        // genuine regression.
+        const testCmd =
+          'pnpm test -- tests/unit/index.test.ts ' +
+          'tests/core/unit/server/server-initialization.test.ts ' +
+          'tests/core/unit/server/server-lifecycle.test.ts';
         if (config.verbose) {
           execWithOutput(testCmd, tempDir);
         } else {

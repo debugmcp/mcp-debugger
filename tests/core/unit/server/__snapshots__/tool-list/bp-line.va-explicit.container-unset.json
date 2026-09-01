@@ -89,7 +89,7 @@
             },
             "logMessage": {
               "type": "string",
-              "description": "Create a logpoint: instead of pausing, log this message when the line is hit. Expressions in {curly braces} are interpolated (e.g. \"order={orderId} total={total}\"). Messages arrive in get_output while the program runs at full speed. Supported by the Python, JavaScript, Go, Rust, and mock adapters; not by Java, .NET, or Ruby"
+              "description": "Create a logpoint: instead of pausing, log this message when the line is hit. Expressions in {curly braces} are interpolated (e.g. \"order={orderId} total={total}\"). Messages arrive in get_output while the program runs at full speed. Supported by the Python, JavaScript, Go, Rust, C/C++, and mock adapters; not by Java, .NET, or Ruby"
             },
             "suspendPolicy": {
               "type": "string",
