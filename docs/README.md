@@ -83,3 +83,4 @@ fixed in time, not reference material.
 - [The pause that always succeeded](case-studies/js-attach-pause-and-the-smart-stepper.md) — js-debug's smart-stepper eating user pauses.
 - [The zombie worker and the frozen force-kill](case-studies/the-zombie-worker-and-the-frozen-force-kill.md)
 - [The trace that couldn't name its socket](case-studies/trace-that-couldnt-name-its-socket.md) — measure-fix-measure on the diagnostics themselves.
+- [The bug report that couldn't happen](case-studies/the-bug-report-that-couldnt-happen.md) — refuting a filed issue by setting breakpoints in the server's own dist.

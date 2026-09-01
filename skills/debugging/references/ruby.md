@@ -29,6 +29,8 @@ close_debug_session { "sessionId": "<id>" }
 
 Conditional breakpoints work: `set_breakpoint { ..., "condition": "i == 6" }`.
 
+Function breakpoints (`set_breakpoint {function: ...}`) are rejected for Ruby: rdbg advertises the DAP capability but ignores the request, so nothing would ever bind — use a line or statement breakpoint on the method body instead.
+
 **Bundler projects (Rails, RSpec):** run the target via `bundle exec` by passing `useBundler` in the adapter launch config:
 
 ```text

@@ -755,10 +755,13 @@ describe('Server Control Tools Tests', () => {
         }
       });
       
-      // The server now returns a success response with error message
+      // The failure envelope carries the reason AND the state the controller
+      // observed (issue #638).
       const content = JSON.parse(result.content[0].text);
       expect(content.success).toBe(false);
       expect(content.error).toBe('Not paused');
+      expect(content.state).toBe('error');
+      expect(content.message).toBeUndefined();
     });
   });
 
@@ -785,6 +788,30 @@ describe('Server Control Tools Tests', () => {
       const content = JSON.parse(result.content[0].text);
       expect(content.success).toBe(true);
       expect(content.message).toBe('Continued execution');
+      expect(content.state).toBe('running');
+    });
+
+    it('reports the reason and state when continue fails (issue #638)', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: 'ACTIVE'
+      });
+      mockSessionManager.continue.mockResolvedValue({
+        success: false,
+        error: 'Not paused',
+        state: 'running'
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'continue_execution',
+          arguments: { sessionId: 'test-session' }
+        }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content).toEqual({ success: false, error: 'Not paused', state: 'running' });
     });
 
     it('should handle continue errors', async () => {
