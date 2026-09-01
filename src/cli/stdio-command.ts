@@ -95,21 +95,39 @@ export async function handleStdioCommand(
     const stdin: NodeJS.ReadableStream = dependencies.stdin ?? proc.stdin;
     stdin.resume();
 
-    // Stdin EOF means the MCP client is gone — exit so we don't leak as an
-    // orphan (issue #122; on Windows a dying parent delivers no signal, and
-    // the SDK transport never notices EOF).
-    // Exception: container mode (MCP_CONTAINER=true), where stdin may close
-    // unexpectedly in detached `docker run` setups and the server must stay
-    // alive; rely on transport close or signals there (see c251b3ff).
-    stdin.on('end', () => {
+    // Stdin is the MCP transport here, so any byte on it proves a client was
+    // speaking to us — which makes a later EOF mean that client is gone.
+    // Nothing else will reap us: on Windows a dying parent delivers no signal,
+    // the SDK transport never notices EOF, and `keepAlive` above holds the
+    // event loop open, so without this the process runs forever (issue #122).
+    let sawClientTraffic = false;
+    // Additive: Node broadcasts each chunk to every 'data' listener and
+    // stdin.resume() above already put the stream in flowing mode, so this
+    // cannot starve StdioServerTransport's own reader.
+    stdin.on('data', () => { sawClientTraffic = true; });
+
+    // Container mode keeps one exception, and only one: `docker run` WITHOUT
+    // -i, where stdin is already closed before any client speaks and the
+    // server must stay alive anyway (c251b3ff, named in fa827ec2/#130).
+    // Once traffic has been seen that case is ruled out, so EOF is a real
+    // disconnect and the container must exit — otherwise `docker run --rm`
+    // never fires and every session leaks a container (issue #633).
+    const onStdinGone = (reason: string): void => {
       // Reads MCP_CONTAINER directly on purpose: `proc` is the injected
       // ProcessLike this command is tested against, not an IEnvironment.
-      if (proc.env.MCP_CONTAINER === 'true') {
-        logger.warn('[MCP] Stdin ended; ignoring in container mode and waiting for transport close or signal.');
+      if (proc.env.MCP_CONTAINER === 'true' && !sawClientTraffic) {
+        logger.warn('[MCP] Stdin closed before any client traffic; detached container, staying alive.');
         return;
       }
-      shutdownAndExit(0, 'Stdin ended; MCP client disconnected');
-    });
+      shutdownAndExit(0, reason);
+    };
+
+    // 'end' alone misses an abruptly dropped pipe. shutdownAndExit is
+    // idempotent, so the usual end-then-close pair costs nothing.
+    stdin.on('end', () => onStdinGone('Stdin ended; MCP client disconnected'));
+    stdin.on('close', () => onStdinGone('Stdin closed; MCP client disconnected'));
+    stdin.on('error', (error: Error) =>
+      onStdinGone(`Stdin error (${error.message}); MCP client disconnected`));
 
     // Add robust exit/signal diagnostics (logged to file; console output is silenced for protocol safety)
     proc.on('SIGTERM', () => {

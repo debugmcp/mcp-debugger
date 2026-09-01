@@ -8,7 +8,7 @@
  * because a hung toolchain child can otherwise keep the event loop alive
  * forever.
  */
-import type { IEnvironment, IFileSystem, ILogger } from '@debugmcp/shared';
+import type { IEnvironment, IFileSystem, ILogger, IProcessManager } from '@debugmcp/shared';
 import { createProductionDependencies } from '../../../container/dependencies.js';
 import { getVersion } from '../../version.js';
 import { diagnose, type DoctorRegistry } from './diagnose.js';
@@ -20,6 +20,8 @@ export interface DoctorDependencies {
   environment: IEnvironment;
   fileSystem: IFileSystem;
   logger: ILogger;
+  /** Runs `docker ps` for the stale-container check (#633). */
+  processManager?: IProcessManager;
   disposeLogger?: () => void;
 }
 
@@ -89,6 +91,7 @@ export async function handleDoctorCommand(
       registry,
       environment: deps.environment,
       fileSystem: deps.fileSystem,
+      processManager: deps.processManager,
       env: overrides.env,
       platform: overrides.platform,
       timeoutMs,

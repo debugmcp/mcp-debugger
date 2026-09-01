@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { Mock } from 'vitest';
 import { EventEmitter } from 'events';
 import { handleStdioCommand } from '../../../src/cli/stdio-command.js';
+import type { ServerFactoryOptions } from '../../../src/cli/stdio-command.js';
 import { FakeCurrentProcess } from '../../test-utils/mocks/fake-current-process.js';
 import type { Logger as WinstonLoggerType } from 'winston';
 import { DebugMcpServer } from '../../../src/server.js';
@@ -9,8 +11,8 @@ vi.mock('../../../src/server.js');
 
 describe('STDIO Command Handler', () => {
   let mockLogger: WinstonLoggerType;
-  let mockServerFactory: ReturnType<typeof vi.fn>;
-  let mockExitProcess: ReturnType<typeof vi.fn>;
+  let mockServerFactory: Mock<(options: ServerFactoryOptions) => DebugMcpServer>;
+  let mockExitProcess: Mock<(code: number) => void>;
   let mockServer: DebugMcpServer;
   let fakeProc: FakeCurrentProcess;
 
@@ -43,7 +45,7 @@ describe('STDIO Command Handler', () => {
     } as any;
 
     // Create mock server factory
-    mockServerFactory = vi.fn().mockReturnValue(mockServer);
+    mockServerFactory = vi.fn(() => mockServer);
 
     // Create mock exit function
     mockExitProcess = vi.fn();
@@ -222,7 +224,10 @@ describe('STDIO Command Handler', () => {
       );
     });
 
-    it('keeps running on stdin end in container mode (MCP_CONTAINER=true)', async () => {
+    // c251b3ff's case: `docker run` WITHOUT -i, where stdin is already closed
+    // before any client speaks. This must keep working exactly as before --
+    // it is the regression guard on the #633 fix below.
+    it('keeps running on stdin end in container mode when no client ever spoke', async () => {
       fakeProc.env.MCP_CONTAINER = 'true';
       const stdin = makeFakeStdin();
 
@@ -239,8 +244,81 @@ describe('STDIO Command Handler', () => {
       expect(mockExitProcess).not.toHaveBeenCalled();
       expect(mockServer.stop).not.toHaveBeenCalled();
       expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('ignoring in container mode')
+        expect.stringContaining('detached container, staying alive')
       );
+    });
+  });
+
+  describe('container stdio orphans (issue #633)', () => {
+    async function startInContainerMode() {
+      fakeProc.env.MCP_CONTAINER = 'true';
+      const stdin = makeFakeStdin();
+      await handleStdioCommand({}, {
+        logger: mockLogger,
+        serverFactory: mockServerFactory,
+        exitProcess: mockExitProcess,
+        stdin,
+        proc: fakeProc
+      });
+      return stdin;
+    }
+
+    // The leak: `docker run -i` + a client that spoke and then went away. The
+    // container must exit, or `--rm` never fires and every session leaks one.
+    it('exits when stdin ends in container mode after a client has spoken', async () => {
+      const stdin = await startInContainerMode();
+
+      stdin.emit('data', Buffer.from('{"jsonrpc":"2.0","method":"initialize","id":1}'));
+      stdin.emit('end');
+
+      await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
+      expect(mockServer.stop).toHaveBeenCalled();
+    });
+
+    it('exits on stdin close after a client has spoken, not just on end', async () => {
+      const stdin = await startInContainerMode();
+
+      stdin.emit('data', Buffer.from('{}'));
+      stdin.emit('close');
+
+      await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
+    });
+
+    it('exits on a broken stdin pipe after a client has spoken', async () => {
+      const stdin = await startInContainerMode();
+
+      stdin.emit('data', Buffer.from('{}'));
+      stdin.emit('error', new Error('EPIPE'));
+
+      await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
+      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('EPIPE'));
+    });
+
+    // end and close normally both fire; teardown must not run twice.
+    it('shuts down once when end and close both fire', async () => {
+      const stdin = await startInContainerMode();
+
+      stdin.emit('data', Buffer.from('{}'));
+      stdin.emit('end');
+      stdin.emit('close');
+
+      await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
+      expect(mockServer.stop).toHaveBeenCalledTimes(1);
+    });
+
+    it('still exits in host mode on stdin close, with no traffic needed', async () => {
+      const stdin = makeFakeStdin();
+      await handleStdioCommand({}, {
+        logger: mockLogger,
+        serverFactory: mockServerFactory,
+        exitProcess: mockExitProcess,
+        stdin,
+        proc: fakeProc
+      });
+
+      stdin.emit('close');
+
+      await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
     });
   });
 

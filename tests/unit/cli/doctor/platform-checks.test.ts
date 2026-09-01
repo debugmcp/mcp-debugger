@@ -3,10 +3,11 @@
  * All filesystem and environment access goes through injected fakes.
  */
 import { describe, it, expect, vi } from 'vitest';
-import type { IEnvironment, IFileSystem } from '@debugmcp/shared';
+import type { IEnvironment, IFileSystem, IProcessManager } from '@debugmcp/shared';
 import {
   checkYamaPtraceScope,
-  checkContainerWorkspace
+  checkContainerWorkspace,
+  checkStaleContainers
 } from '../../../../src/cli/commands/doctor/platform-checks.js';
 
 const makeFileSystem = (overrides: Partial<IFileSystem> = {}): IFileSystem =>
@@ -148,5 +149,82 @@ describe('checkContainerWorkspace', () => {
     const [, mount] = await checkContainerWorkspace(environment, fileSystem);
 
     expect(mount.status).toBe('ok');
+  });
+});
+
+describe('checkStaleContainers (issue #633)', () => {
+  const NOW = Date.parse('2026-08-31T20:00:00Z');
+  const at = (iso: string) => `${iso} +0000 UTC`;
+
+  const makeProcessManager = (stdout: string): IProcessManager =>
+    ({ exec: vi.fn().mockResolvedValue({ stdout, stderr: '' }) }) as unknown as IProcessManager;
+
+  it('is skipped when no process manager is available', async () => {
+    const result = await checkStaleContainers(undefined, NOW);
+
+    expect(result.id).toBe('stale-containers');
+    expect(result.status).toBe('skipped');
+  });
+
+  it('is skipped when docker is absent or the daemon is unreachable', async () => {
+    const processManager = ({
+      exec: vi.fn().mockRejectedValue(new Error('docker: command not found'))
+    }) as unknown as IProcessManager;
+
+    const result = await checkStaleContainers(processManager, NOW);
+
+    expect(result.status).toBe('skipped');
+    expect(result.detail).toContain('docker not available');
+  });
+
+  it('is ok when nothing is running', async () => {
+    const result = await checkStaleContainers(makeProcessManager(''), NOW);
+
+    expect(result.status).toBe('ok');
+    expect(result.detail).toContain('no mcp-debugger containers');
+  });
+
+  it('is ok when containers exist but all are younger than 24h', async () => {
+    const stdout = [
+      `keen_cori\t${at('2026-08-31 19:00:00')}`,
+      `bold_hopper\t${at('2026-08-31 04:00:00')}`
+    ].join('\n');
+
+    const result = await checkStaleContainers(makeProcessManager(stdout), NOW);
+
+    expect(result.status).toBe('ok');
+    expect(result.fixHint).toBeUndefined();
+  });
+
+  it('warns with the removal hint once a container has run over 24h', async () => {
+    const stdout = [
+      `keen_cori\t${at('2026-08-31 19:00:00')}`,
+      `stale_one\t${at('2026-08-25 12:00:00')}`
+    ].join('\n');
+
+    const result = await checkStaleContainers(makeProcessManager(stdout), NOW);
+
+    expect(result.status).toBe('warn');
+    expect(result.detail).toContain('1 of 2');
+    expect(result.detail).toContain('6d');
+    expect(result.fixHint).toContain('docker rm -f');
+  });
+
+  // Doctor cannot prove a long-lived container is orphaned; an active session
+  // looks identical. The wording must not claim more than that.
+  it('hedges rather than asserting the container is definitely orphaned', async () => {
+    const stdout = `stale_one\t${at('2026-08-25 12:00:00')}`;
+
+    const result = await checkStaleContainers(makeProcessManager(stdout), NOW);
+
+    expect(result.detail).toMatch(/likely|though an active session/);
+  });
+
+  it('ignores a container whose timestamp cannot be parsed rather than guessing its age', async () => {
+    const stdout = 'weird_one\tnot-a-timestamp';
+
+    const result = await checkStaleContainers(makeProcessManager(stdout), NOW);
+
+    expect(result.status).toBe('ok');
   });
 });
