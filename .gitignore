@@ -227,3 +227,7 @@ tests/e2e/*-results.json
 
 # Memory benchmark results (scripts/mem-bench.mjs)
 bench-results/
+
+# Python launcher build artifacts
+mcp_debugger_launcher/*.egg-info/
+mcp_debugger_launcher/dist/

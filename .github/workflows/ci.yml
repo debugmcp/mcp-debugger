@@ -92,6 +92,12 @@ jobs:
     - name: Run linting
       run: pnpm run lint
 
+    # The PyPI launcher publishes on every release but previously had zero
+    # test execution anywhere (issue #641).
+    - name: Run PyPI launcher unit tests
+      run: python -m unittest tests.test_commands -v
+      working-directory: mcp_debugger_launcher
+
     # Use test:ci-coverage which includes Python tests but excludes e2e tests
     - name: Run tests with coverage
       run: pnpm run test:ci-coverage

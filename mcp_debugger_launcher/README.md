@@ -22,25 +22,24 @@ This will install the launcher and ensure `debugpy` (required for Python debuggi
 
 ### Basic Usage
 
-The launcher takes a single positional `mode` argument, and it accepts exactly two
-values: `stdio` (the default) and `sse`.
+The launcher takes a single positional `mode` argument: `stdio` (the default),
+`http` (Streamable HTTP, recommended for remote use), or `sse` (deprecated).
 
 ```bash
 # Launch in stdio mode (default, recommended)
 debug-mcp-server
 
-# Launch in SSE mode (deprecated; see Transport Modes below)
-debug-mcp-server sse
+# Launch in Streamable HTTP mode
+debug-mcp-server http
 
-# SSE mode with custom port
-debug-mcp-server sse --port 8080
+# HTTP mode with custom port
+debug-mcp-server http --port 8080
+
+# Launch in SSE mode (DEPRECATED - use http; prints a warning)
+debug-mcp-server sse
 ```
 
-> **No `http` mode here.** The server's recommended transport is Streamable HTTP, but this
-> launcher forwards only `stdio` and `sse`. To use HTTP, invoke the server directly:
-> `npx @debugmcp/mcp-debugger http -p 3001`.
-
-`--port` only affects `sse` mode; `stdio` ignores it.
+`--port` affects `http` and `sse`; `stdio` ignores it (default port: 3001).
 
 ### Runtime Selection
 
@@ -83,12 +82,12 @@ debug-mcp-server --help
 ### For Docker mode:
 - Docker installed and running
 - The launcher will automatically pull the image if needed
-- For `stdio` the launcher runs `docker run -it --rm debugmcp/mcp-debugger:latest stdio`;
-  for `sse` it also inserts `-p <port>:<port>` before the image and appends `--port <port>`
-  after the mode (the port defaults to 3001). Either way there is **no volume mount**, so
-  the container cannot see your source tree. To debug host files under Docker, run the
-  image yourself with a mount:
-  `docker run -i --rm -v "$PWD:/workspace" debugmcp/mcp-debugger:latest stdio`
+- For `stdio` the launcher runs
+  `docker run -i --rm -v <cwd>:/workspace debugmcp/mcp-debugger:latest stdio`;
+  for `http`/`sse` it also inserts `-p <port>:<port>` before the image and appends
+  `--port <port>` after the mode (the port defaults to 3001). The current working
+  directory is mounted at `/workspace`, so files under it are debuggable inside the
+  container - launch the tool from your project root.
 
 ### For Python debugging:
 - `debugpy` is automatically installed with this package
@@ -96,10 +95,10 @@ debug-mcp-server --help
 ## Transport Modes
 
 - **stdio**: Standard input/output communication (default)
-- **sse**: Server-Sent Events mode for HTTP-based communication
-  - Default port: 3001
-  - Custom port: Use `--port` option
-  - > **Deprecated:** SSE transport is deprecated in the debug-mcp-server and will be removed in a future release; the server prints a deprecation warning at startup. This launcher currently forwards only `stdio` and `sse`, so for HTTP-based transport invoke the server's `http` subcommand directly (`mcp-debugger http -p <port>`) until the launcher adds an `http` mode.
+- **http**: Streamable HTTP transport (recommended for remote/HTTP-based use)
+  - Default port: 3001; custom port via `--port`
+- **sse**: Server-Sent Events mode
+  - > **Deprecated:** SSE transport is deprecated in the debug-mcp-server and will be removed in a future release; both the launcher and the server print a deprecation warning. Use `http` instead.
 
 ## Troubleshooting
 
