@@ -1,5 +1,12 @@
 # Windows Launcher Guide
 
+> **Archived 2026-09-01.** Every launcher this guide tells you to use --- `simple-run.cmd`,
+> `direct-launch.js`, `mcp-launcher.ps1`, `run-debug-server.cmd` --- was removed from the
+> repository. Pointing an MCP client at one of them produces the very `spawn ENOENT` the
+> guide claims to fix. Current Windows setup is in the root
+> [README](../../../README.md#-quick-start); for spawn failures start with
+> `mcp-debugger doctor` and [the troubleshooting guide](../../troubleshooting.md).
+
 This guide provides detailed information about different launcher approaches for Windows and how to troubleshoot "spawn EINVAL" errors.
 
 ## Understanding "spawn EINVAL" Errors

@@ -1,5 +1,11 @@
 # Mock Debug Adapter Design
 
+> **Archived 2026-09-01.** Its state machine, simulated behaviors and `MockAdapterConfig`
+> matched the code, but the ~60-line "Test Scenarios" section documented a `MockScenario`
+> step DSL that was never built (no such type exists anywhere in the repo), and the
+> "Performance Characteristics" table gave millisecond figures no benchmark produces.
+> For the mock adapter as it is, see [`packages/adapter-mock/README.md`](../../../packages/adapter-mock/README.md).
+
 ## Purpose
 
 The Mock Debug Adapter enables comprehensive testing of the mcp-debugger system without requiring external debuggers or language runtimes. It simulates realistic debugging scenarios while providing deterministic, controllable behavior for testing.

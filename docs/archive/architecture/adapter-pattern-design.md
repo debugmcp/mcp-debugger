@@ -1,5 +1,16 @@
 # Debug Adapter Pattern Design
 
+> **Archived 2026-09-01.** Roughly half of this document is completed 2025 migration
+> planning ("Phase 1 ... Phase 4 (COMPLETED)"), and its error-handling section describes a
+> class hierarchy that does not exist: `AdapterNotFoundError` extends `Error`, not
+> `AdapterError`; there is no `AdapterErrorCode.ADAPTER_NOT_FOUND` (the nearest is
+> `ADAPTER_NOT_INSTALLED`); and `EnvironmentInvalidError` was never written. Its sequence
+> diagrams still put the launch sequence in `SessionManagerOperations`, which now delegates
+> to `ProxyLauncher`. The surviving design rationale lives in
+> [`adapter-policy-pattern.md`](../../architecture/adapter-policy-pattern.md) and
+> [`dual-pattern-decision-guide.md`](../../architecture/dual-pattern-decision-guide.md),
+> both of which are current.
+
 ## Overview
 
 The Debug Adapter Pattern powers mcp-debugger as a multi-language debugging platform supporting 8 programming languages plus a mock adapter (Python, Ruby, JavaScript, Rust, Go, Java, .NET/C#, and C/C++). This design uses a **dual-pattern architecture** that combines two complementary adapter patterns:
