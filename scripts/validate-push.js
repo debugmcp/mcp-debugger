@@ -223,7 +223,9 @@ async function main() {
 MCP Debugger Push Validation Script
 
 This script validates your changes by testing them in a clean clone,
-simulating exactly what CI will see. It helps catch issues like:
+simulating most of what CI will see. It does NOT run lint or typecheck:all, which the
+Lint Code job and .husky/pre-push both gate on -- run those separately. It helps catch
+issues like:
 - Files that exist locally but aren't committed
 - Build artifacts that shouldn't be committed  
 - Tests that only pass with local state

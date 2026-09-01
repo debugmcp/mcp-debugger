@@ -4,28 +4,42 @@ This document describes the configuration changes made to optimize Vitest output
 
 ## Overview
 
-The default Vitest output can generate 500KB+ of console logs, which overwhelms LLM context windows. Our configuration reduces this to <50KB while preserving essential debugging information.
+The default Vitest output can generate hundreds of kilobytes of console logs, which overwhelms LLM context windows. The configuration below cuts that down sharply while preserving essential debugging information. (The size figures in this document are indicative of the original change, not a current measurement.)
 
 ## Configuration Changes
 
 ### 1. vitest.config.ts
 
-The root `vitest.config.ts` configures globals, environment, coverage, and resolve aliases. Console filtering and reporter settings are applied via npm scripts and utility wrappers rather than directly in the config file.
+The root `vitest.config.ts` owns all of this: globals, environment, resolve aliases, the three
+test projects (`unit`, `integration`, `e2e`), coverage — and both output knobs this document is
+about.
+
+- **Console filtering**: `onConsoleLog` is defined in the config file and spread into every
+  project via `sharedProjectTest`, so all three projects filter identically. Its pattern lists
+  are described under [Console Filtering](#console-filtering) below.
+- **Reporters**: `reporters: process.env.CI ? ['dot', 'json'] : ['default']`, with
+  `outputFile: { json: './test-results.json' }`. On CI the JSON report is written from the main
+  process, so it survives a fork-worker death and still records which file never reported.
+
+The npm scripts below layer `--reporter` / `--silent` overrides on top of that; they do not
+supply the filtering themselves.
 
 ### 2. NPM Scripts
 
-| Script | Description | Output Size |
-|--------|-------------|-------------|
-| `test:dot` | Minimal dot reporter | ~5KB |
-| `test:json` | JSON output to file | No console output |
-| `test:quiet` | Ultra-minimal (dot + silent) | ~3KB |
-| `test:summary` | Custom summary only | ~1KB |
-| `test:failures` | Only failed tests | Variable |
-| `test:verbose` | Full output (debugging) | ~500KB+ |
-| `test:coverage` | Standard coverage run | ~50KB |
-| `test:coverage:quiet` | Coverage with minimal output | ~10KB |
-| `test:coverage:summary` | Coverage with clean summary | ~2KB |
-| `test:coverage:json` | Coverage + JSON output | No console |
+Roughly ordered from quietest to loudest:
+
+| Script | Description |
+|--------|-------------|
+| `test:summary` | Custom summary only (`tests/test-utils/helpers/test-summary.js`) |
+| `test:coverage:summary` | Coverage summary only (`tests/test-utils/helpers/test-coverage-summary.js`) |
+| `test:quiet` | Ultra-minimal (`--reporter=dot --silent`) |
+| `test:dot` | Minimal dot reporter |
+| `test:failures` | Only failed tests (`tests/test-utils/helpers/show-failures.js`) |
+| `test:json` | JSON to `test-results.json`, no console report |
+| `test:coverage:json` | Coverage + JSON to `test-results.json` |
+| `test:coverage:quiet` | Coverage with `--reporter=dot --silent` |
+| `test:coverage` | Standard coverage run — thresholds are enforced (90% statements / 80% branches) |
+| `test:verbose` | Full output, for debugging |
 
 ### 3. Utility Scripts
 
@@ -97,7 +111,7 @@ The test setup file (`tests/vitest.setup.ts`) deletes `process.env.CONSOLE_OUTPU
 
 ## Results
 
-- Test output reduced by 90%+ (from ~500KB to <50KB)
+- Test output reduced by roughly an order of magnitude (indicative, from the original change — not re-measured since)
 - No spinner animations
 - Structured output for programmatic parsing
 - Multiple output options for different use cases

@@ -1,7 +1,7 @@
 # mcp-debugger Architecture Overview
 
-> **⚠️ DRAFT DOCUMENTATION**
-> This documentation is based on the current mcp-debugger architecture and will be refined based on real-world adapter development feedback.
+> An orientation map of the multi-language architecture: the language-agnostic
+> core, the `IDebugAdapter` contract, and the nine shipped adapters.
 
 ## From Python-Specific to Multi-Language Platform
 
@@ -14,8 +14,11 @@ The mcp-debugger has undergone a major architectural transformation, evolving fr
 The core components handle session management, process lifecycle, and DAP communication without any language-specific knowledge:
 
 - **[SessionManager](../../src/session/session-manager.ts)** - Thin public facade over the session manager hierarchy (`session-manager-core.ts` → `session-manager-data.ts` → `session-manager-operations.ts` → `session-manager.ts`)
+- **Operation collaborators** - `session-manager-operations.ts` is itself a facade of one-line delegates over per-slice collaborators under `src/session/{launch,attach,breakpoints,execution,inspection,jvm,mirror}/`, wired through [`OperationsContext`](../../src/session/operations-context.ts). See [component-design.md](./component-design.md) for the collaborator table
 - **[ProxyManager](../../src/proxy/proxy-manager.ts)** - Manages DAP proxy processes
+- **[AdapterLease](../../src/adapters/adapter-lease.ts)** - Explicit ownership of one adapter instance for the duration of a launch or attach setup, so a throw anywhere in that window gives the registry slot back (issue #557)
 - **[SessionStore](../../src/session/session-store.ts)** - In-memory session storage
+- **[session-log-layout](../../src/proxy/session-log-layout.ts)** - The naming contract for a session's on-disk logs (`proxyLogPathFor`, `sessionRunDirectoryFor`, `adapterLogPathFor`, `dapTracePathFor`)
 
 ### 2. Debug Adapter Interface
 
@@ -90,13 +93,14 @@ sequenceDiagram
     SM-->>Client: sessionInfo (adapter instance not yet created)
 
     Client->>Server: start_debugging(sessionId)
-    Server->>SM: startDebugging()
-    SM->>AR: create(language, config)
+    Server->>SM: startDebugging(sessionId, scriptPath, ...)
+    SM->>AR: create(language, config) via AdapterLease.acquire()
     AR->>Adapter: factory.create(config)
-    SM->>Adapter: validateEnvironment()
-    SM->>PM: proxyManagerFactory.create(adapter)
-    PM->>Adapter: buildAdapterCommand()
-    PM->>DAP: spawn debug adapter
+    SM->>Adapter: resolveExecutablePath()
+    SM->>Adapter: buildAdapterCommand()
+    SM->>PM: lease.transferTo(proxyManagerFactory)
+    PM->>Adapter: validateEnvironment()
+    PM->>DAP: spawn proxy worker, which spawns the debug adapter
     
     DAP-->>PM: DAP events
     PM-->>Adapter: handleDapEvent()
@@ -123,12 +127,13 @@ class ProxyManager {
     private proxyProcessLauncher: IProxyProcessLauncher,
     private fileSystem: IFileSystem,
     private logger: ILogger,
-    runtimeEnv?: ProxyRuntimeEnvironment
+    runtimeEnv?: ProxyRuntimeEnvironment,
+    options?: ProxyManagerOptions
   ) {}
 
   async start(config: ProxyConfig) {
     // adapter.buildAdapterCommand() provides the spawn command
-    // adapter.prepareSpawnContext() sets up environment/args
+    // this.prepareSpawnContext() resolves the executable, proxy script and env (ProxyManager's own private method, proxy-manager.ts:703)
     // ProxyManager spawns the proxy worker process, which in turn
     // spawns the debug adapter using the adapter-provided command
   }
@@ -191,7 +196,7 @@ The adapter pattern adds minimal overhead:
 
 The refactoring improved testability:
 
-- **1200+ passing tests** (100% success rate)
+- **Unit, integration, and end-to-end suites** across three Vitest projects (`vitest.config.ts`)
 - **Mock adapter** enables integration testing without external dependencies
 - **Type safety** throughout with TypeScript strict mode
 - **Comprehensive test coverage** for all components
@@ -259,11 +264,12 @@ async endSession(exitCode: number) {
 - Read the [Adapter Development Guide](./adapter-development-guide.md) to create your own adapter
 - Check the [API Reference](./api-reference.md) for detailed interface documentation
 - Review the [Mock Adapter](../../packages/adapter-mock/) as a working example
-- See [Migration Guide](../migration-guide.md) for upgrading from older versions
+- See the [CHANGELOG](../../CHANGELOG.md) for release history; the historical v0.10-v0.15
+  migration notes are archived at [`docs/archive/migration-guide.md`](../archive/migration-guide.md)
 
 ## Version History
 
-- **Unreleased** - C/C++ adapter, 9 adapters total
+- **v0.24.0** - C/C++ adapter, 9 adapters total; shared `@debugmcp/codelldb-common` CodeLLDB vendoring for Rust and C/C++
 - **v0.22.0** - Ruby adapter, 8 adapters total
 - **v0.19.0** - .NET/C# adapter, 7 language adapters total
 - **v0.18.0** - Go adapter, Java adapter
@@ -275,4 +281,4 @@ async endSession(exitCode: number) {
 
 ---
 
-*This documentation reflects the state of mcp-debugger after the major refactoring completed in January 2025. For the refactoring history, see [refactoring-summary.md](./refactoring-summary.md).*
+*For release-by-release history, see the [CHANGELOG](../../CHANGELOG.md).*

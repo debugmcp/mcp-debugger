@@ -7,7 +7,7 @@ The Debug MCP Server provides support for Go debugging through [Delve](https://g
 Before using the Go debugging features, ensure you have:
 
 1. **Go 1.18 or higher** installed from [go.dev/dl](https://go.dev/dl/)
-2. **Delve 0.17.0+** installed with DAP support:
+2. **Delve 1.6.0+** installed (that is when `dlv dap` landed; current releases are 1.2x):
    ```bash
    go install github.com/go-delve/delve/cmd/dlv@latest
    ```
@@ -19,21 +19,23 @@ dlv version   # Should show Delve version
 dlv dap --help # Should show DAP help (confirms DAP support)
 ```
 
+If `dlv` is not on your `PATH` (a common case when `GOPATH/bin` is not exported), point the
+server at it with the `DLV_PATH` environment variable — set it to the Delve **binary**, not
+its directory. The session's `executablePath` takes precedence over `DLV_PATH`; with neither
+set, the adapter looks for `dlv`/`dlv-dap` on `PATH` and then in `GOPATH/bin`.
+
+**Launch only.** Go has no attach implementation — `attach_to_process` fails fast with
+"Attach mode is not implemented" for Go sessions. Debug Go by launching the program,
+the test binary, or a prebuilt executable with the modes below.
+
 ## Debugging Workflow
 
 ### 1. Create a Debug Session
 
 First, create a Go debug session:
 
-```
-use_mcp_tool(
-  server_name="debug-mcp-server",
-  tool_name="create_debug_session",
-  arguments={
-    "language": "go",
-    "name": "My Go Debug Session"
-  }
-)
+```text
+create_debug_session { "language": "go", "name": "My Go Debug Session" }
 ```
 
 This returns a session ID that you'll use for all subsequent debugging commands.
@@ -52,31 +54,15 @@ The `-gcflags="all=-N -l"` flags disable optimizations and inlining, which are r
 
 Set breakpoints in your code before starting execution:
 
-```
-use_mcp_tool(
-  server_name="debug-mcp-server",
-  tool_name="set_breakpoint",
-  arguments={
-    "sessionId": "your-session-id",
-    "file": "/path/to/your/main.go",
-    "line": 15
-  }
-)
+```text
+set_breakpoint { "sessionId": "your-session-id", "file": "/path/to/your/main.go", "line": 15 }
 ```
 
 You can also set conditional breakpoints:
 
-```
-use_mcp_tool(
-  server_name="debug-mcp-server",
-  tool_name="set_breakpoint",
-  arguments={
-    "sessionId": "your-session-id",
-    "file": "/path/to/your/main.go",
-    "line": 20,
-    "condition": "x > 10"
-  }
-)
+```text
+set_breakpoint { "sessionId": "your-session-id", "file": "/path/to/your/main.go", "line": 20,
+                 "condition": "x > 10" }
 ```
 
 ### 4. Start Debugging
@@ -84,52 +70,24 @@ use_mcp_tool(
 Start debugging your Go program. You can use different launch modes:
 
 #### Debug Mode (compile and debug)
-```
-use_mcp_tool(
-  server_name="debug-mcp-server",
-  tool_name="start_debugging",
-  arguments={
-    "sessionId": "your-session-id",
-    "scriptPath": "/path/to/your/main.go",
-    "dapLaunchArgs": {
-      "mode": "debug",
-      "program": "/path/to/your/main.go",
-      "stopOnEntry": false
-    }
-  }
-)
+```text
+start_debugging { "sessionId": "your-session-id", "scriptPath": "/path/to/your/main.go",
+                  "dapLaunchArgs": { "mode": "debug", "program": "/path/to/your/main.go",
+                                     "stopOnEntry": false } }
 ```
 
 #### Exec Mode (debug pre-compiled binary)
-```
-use_mcp_tool(
-  server_name="debug-mcp-server",
-  tool_name="start_debugging",
-  arguments={
-    "sessionId": "your-session-id",
-    "scriptPath": "/path/to/your/compiled/binary",
-    "dapLaunchArgs": {
-      "mode": "exec",
-      "program": "/path/to/your/compiled/binary"
-    }
-  }
-)
+```text
+start_debugging { "sessionId": "your-session-id", "scriptPath": "/path/to/your/compiled/binary",
+                  "dapLaunchArgs": { "mode": "exec",
+                                     "program": "/path/to/your/compiled/binary" } }
 ```
 
 #### Test Mode (debug Go tests)
-```
-use_mcp_tool(
-  server_name="debug-mcp-server",
-  tool_name="start_debugging",
-  arguments={
-    "sessionId": "your-session-id",
-    "scriptPath": "/path/to/your/test/directory",
-    "dapLaunchArgs": {
-      "mode": "test",
-      "program": "/path/to/your/test/directory"
-    }
-  }
-)
+```text
+start_debugging { "sessionId": "your-session-id", "scriptPath": "/path/to/your/test/directory",
+                  "dapLaunchArgs": { "mode": "test",
+                                     "program": "/path/to/your/test/directory" } }
 ```
 
 ### 5. Control Execution
@@ -137,47 +95,23 @@ use_mcp_tool(
 When execution pauses at a breakpoint, you can:
 
 #### Step Over (execute current line and pause at next line)
-```
-use_mcp_tool(
-  server_name="debug-mcp-server",
-  tool_name="step_over",
-  arguments={
-    "sessionId": "your-session-id"
-  }
-)
+```text
+step_over { "sessionId": "your-session-id" }
 ```
 
 #### Step Into (go into functions called on current line)
-```
-use_mcp_tool(
-  server_name="debug-mcp-server",
-  tool_name="step_into",
-  arguments={
-    "sessionId": "your-session-id"
-  }
-)
+```text
+step_into { "sessionId": "your-session-id" }
 ```
 
 #### Step Out (run until exiting current function)
-```
-use_mcp_tool(
-  server_name="debug-mcp-server",
-  tool_name="step_out",
-  arguments={
-    "sessionId": "your-session-id"
-  }
-)
+```text
+step_out { "sessionId": "your-session-id" }
 ```
 
 #### Continue (run until next breakpoint)
-```
-use_mcp_tool(
-  server_name="debug-mcp-server",
-  tool_name="continue_execution",
-  arguments={
-    "sessionId": "your-session-id"
-  }
-)
+```text
+continue_execution { "sessionId": "your-session-id" }
 ```
 
 ### 6. Examine Program State
@@ -185,51 +119,26 @@ use_mcp_tool(
 When paused, you can examine the program's state:
 
 #### Get Local Variables
-```
-use_mcp_tool(
-  server_name="debug-mcp-server",
-  tool_name="get_local_variables",
-  arguments={
-    "sessionId": "your-session-id"
-  }
-)
+```text
+get_local_variables { "sessionId": "your-session-id" }
 ```
 
 #### Get Stack Trace
-```
-use_mcp_tool(
-  server_name="debug-mcp-server",
-  tool_name="get_stack_trace",
-  arguments={
-    "sessionId": "your-session-id"
-  }
-)
+```text
+get_stack_trace { "sessionId": "your-session-id" }
 ```
 
 #### Evaluate Expressions
-```
-use_mcp_tool(
-  server_name="debug-mcp-server",
-  tool_name="evaluate_expression",
-  arguments={
-    "sessionId": "your-session-id",
-    "expression": "x + y * 2"
-  }
-)
+```text
+evaluate_expression { "sessionId": "your-session-id", "expression": "x + y * 2" }
 ```
 
 ### 7. Close the Session
 
 When finished debugging, close the session:
 
-```
-use_mcp_tool(
-  server_name="debug-mcp-server",
-  tool_name="close_debug_session",
-  arguments={
-    "sessionId": "your-session-id"
-  }
-)
+```text
+close_debug_session { "sessionId": "your-session-id" }
 ```
 
 ## Go-Specific Features
@@ -252,11 +161,11 @@ Go programs use goroutines for concurrency. Delve natively handles goroutines, a
 - Internal runtime and testing frames (paths containing `/runtime/` or `/testing/`) are filtered out by default (use `includeInternals: true` in `get_stack_trace` to see them)
 - Variable inspection works within the current goroutine's stack frame
 
-Note: The MCP tools do not expose goroutine-specific commands (listing goroutines, switching between goroutines, or setting goroutine-scoped breakpoints). These are Delve-internal capabilities not surfaced through the MCP tool interface.
+Note: goroutines reach the MCP tools as DAP threads. `list_threads` returns them (Delve already hides system goroutines — the adapter forces `hideSystemGoroutines: true`), and `get_stack_trace` accepts a `threadId` from that list to inspect one specific goroutine; an explicit id is authoritative and is never silently switched. What is *not* exposed is Delve's goroutine-scoped machinery: `set_breakpoint` has no goroutine filter, and stepping and `continue_execution` take no thread argument — they act on the session's current stopped thread.
 
 ### Exception Breakpoints
 
-The Go adapter supports exception breakpoints with two built-in filters: `unrecovered-panic` (break on unrecovered panics) and `runtime-fatal-throw` (break on fatal runtime errors). Delve has no caught/uncaught distinction, so both the `uncaught` and `all` exception break modes arm the same two filters; launch sessions default to `breakOnExceptions: "uncaught"`, which arms both (attach sessions apply no default). These are declared in the adapter's capabilities and sent to Delve during session configuration. Custom exception breakpoint configuration can also be provided via `dapLaunchArgs`.
+The Go adapter supports exception breakpoints with two built-in filters: `unrecovered-panic` (break on unrecovered panics) and `runtime-fatal-throw` (break on fatal runtime errors). Delve has no caught/uncaught distinction, so both the `uncaught` and `all` exception break modes arm the same two filters; launch sessions default to `breakOnExceptions: "uncaught"`, which arms both, and launch is the only mode Go has. These are declared in the adapter's capabilities and sent to Delve during session configuration. Custom exception breakpoint configuration can also be provided via `dapLaunchArgs`.
 
 ## Debugging Tips
 
@@ -298,7 +207,8 @@ func add(a, b int) int {
 
 3. Set breakpoint at line 7 (inside `main`)
 
-4. Start debugging with `mode: "exec"` and `program: "./myprogram"`
+4. Start debugging with `mode: "exec"` and an **absolute** `scriptPath` to the built binary
+   (host mode rejects a relative path such as `./myprogram`)
 
 5. Step through the code and inspect variables
 
@@ -307,6 +217,9 @@ func add(a, b int) int {
 ### "Delve not found" error
 - Ensure Delve is installed: `go install github.com/go-delve/delve/cmd/dlv@latest`
 - Check that `dlv` is in your PATH: `which dlv`
+- If it is installed but not on `PATH` (e.g. `~/go/bin` is not exported), set `DLV_PATH` to
+  the binary — for example `export DLV_PATH="$HOME/go/bin/dlv"` — or pass `executablePath`
+  in `create_debug_session`
 - Verify DAP support: `dlv dap --help`
 
 ### "Go executable not found" error
@@ -322,6 +235,11 @@ func add(a, b int) int {
 - This is a Delve quirk when `stopOnEntry=true`
 - The adapter defaults `stopOnEntry=false` to avoid this
 - If you need to stop on entry, the error is harmless and execution continues
+
+### "Attach mode is not implemented"
+- Expected: the Go adapter declares launch support only
+- Use `start_debugging` with `mode: "exec"` against the already-built binary instead of
+  attaching to the running process
 
 ## Additional Resources
 

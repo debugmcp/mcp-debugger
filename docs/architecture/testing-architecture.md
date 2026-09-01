@@ -2,7 +2,7 @@
 
 This document explains the **design decisions and mechanisms** behind the mcp-debugger test suite. For directory layout, test commands, and file placement guidance, see [`tests/README.md`](../../tests/README.md).
 
-The project targets 90%+ coverage across a multi-process, multi-language debug server that spawns real OS processes, connects to real debug adapters via DAP, and communicates over JSON-RPC. The test suite is organized into seven categories: unit, integration, E2E, proxy, stress, manual, and validation.
+The subject is a multi-process, multi-language debug server that spawns real OS processes, connects to real debug adapters via DAP, and communicates over JSON-RPC. Two quality gates hold it: an **enforced** coverage floor (90% statements / 80% branches — see [Coverage Strategy](#coverage-strategy)) and a **type-error ratchet** over the test trees themselves (see [Type Checking the Test Suite](#type-checking-the-test-suite)). The suite is organized into seven categories: unit, integration, E2E, proxy, stress, manual, and validation.
 
 ## Testing Philosophy
 
@@ -16,13 +16,30 @@ The project targets 90%+ coverage across a multi-process, multi-language debug s
 
 ### Isolation Strategy
 
-The server spawns OS processes (proxy workers, debug adapters) that bind ports and consume system resources. Parallel test files would compete for ports, leave orphan processes, and produce flaky failures. The test suite therefore runs with:
+The server spawns OS processes (proxy workers, debug adapters) that bind ports and consume system resources. Test files that spawn those processes in parallel would compete for ports, leave orphans, and produce flaky failures. But that hazard belongs to the tests that actually spawn — which is a minority of the suite. So the isolation cost is paid **per project**, not suite-wide: `vitest.config.ts` splits the suite into three Vitest projects, selected with `--project`.
 
-- **`maxWorkers: 1`** — a single Vitest worker process
-- **`fileParallelism: false`** — test files execute serially within that worker
-- **`testTimeout: 30000`** (30 seconds) — safety net for hung processes
+| Project | What is in it | Pool settings | `testTimeout` |
+|---|---|---|---|
+| `unit` | hermetic, millisecond-scale tests — the broad include net minus the two sets below | `pool: 'forks'`, **`fileParallelism: true`**, `isolate: true`, no `maxWorkers` cap | 15 000 |
+| `integration` | `tests/**/integration/**` plus `tests/stress/**` | `pool: 'forks'`, `fileParallelism: false`, `maxWorkers: 1` | 30 000 |
+| `e2e` | `tests/e2e/**` (smoke, docker, npx) | `pool: 'forks'`, `fileParallelism: false`, `maxWorkers: 1` | 30 000 |
 
-This is a deliberate trade-off: serial execution is slower but eliminates an entire class of non-deterministic failures that would be nearly impossible to debug in CI.
+Two rationales, one per side of the split:
+
+- **The serial projects** keep the original trade-off: slower, but they eliminate a class of non-deterministic failure that is nearly impossible to debug in CI. Their 30 s ceiling is a safety net for hung processes.
+- **The parallel `unit` project** got there by removing the reason to be serial rather than by accepting the risk. The proxy init-retry and timeout paths were moved onto fake timers (`advanceTimersByTimeAsync`), so no unit test burns real backoff; the config records the unit suite dropping from ~110 s to ~10 s. `forks` is kept over `threads` for full per-file process isolation *and* because a clean re-measure put it ahead on speed (~10.5 s vs ~12.3 s). With the wall clock down to ~10 s, the 15 s ceiling fails a genuine hang far sooner than the old 30 s would.
+
+Selection is by `--project`, never by `--exclude` — Vitest silently ignores exclude globs once `projects` is set. `--project unit --project integration` is therefore the modern spelling of "everything except `tests/e2e/**`" — used directly by `test:strict` and `test:ci-coverage`, and reached the long way round by `.husky/pre-push`, which runs `test:unit` and `test:integration` back to back over the same set.
+
+### Test Ordering and the Flake Hunt
+
+Every run shuffles **file** order under a seed (`sequence.shuffle.files`, defaulting to `Date.now()`), which surfaces cross-file order dependencies in the serial projects and is harmless in the isolated unit pool. `sequence` must live at the **root** of the config — a per-project `sequence` is silently ignored under `projects` (Vitest 4.1.8) and the root value propagates to every project with no override — so the committed setting has to be safe for all three. Hence files-only: `tests: false`, because the integration and e2e suites legitimately share one live debug session across `it` blocks (create → … → close) and would break if reordered within a file.
+
+The aggressive **within-file** shuffle — what actually catches a unit test leaning on a sibling's leftover mock or env state — is applied to the `unit` project alone, by `scripts/flake-hunt.mjs` (`pnpm run test:flake`). It loops the project under fresh explicit seeds, prints each one, and exits non-zero listing the failing seeds. Any failure reproduces exactly with:
+
+```bash
+vitest run --project unit --sequence.seed=<seed> --sequence.shuffle.tests
+```
 
 ## Test Infrastructure
 
@@ -30,7 +47,7 @@ This is a deliberate trade-off: serial execution is slower but eliminates an ent
 
 **File:** `vitest.config.ts`
 
-Key settings beyond the isolation strategy above:
+Key settings beyond the isolation strategy above. Note that `coverage` and `sequence` are **global** concerns under `projects` — a per-project block for either is silently ignored — while `resolve`/`optimizeDeps` are the opposite: projects do *not* inherit them from the root, so they are spread into each one.
 
 - **Coverage**: Istanbul provider with four reporters (`text`, `json`, `html`, `json-summary`). `reportOnFailure: true` captures partial coverage even when tests fail.
 - **Console filtering**: `onConsoleLog` whitelists important patterns (FAIL, Error, AssertionError, TypeError) and suppresses noise from the server's own logging (timestamps, log levels, MCP Server messages, proxy output). Default behavior: suppress stdout, keep stderr. This keeps test output readable when server components emit verbose logs.
@@ -69,10 +86,24 @@ The singleton `portManager` tracks allocations in an in-process `Set<number>`. T
 
 ## Mock Architecture
 
-The project maintains two parallel mock systems:
+The project maintains three kinds of test double, in three places:
 
 - **Mocks** (`tests/test-utils/mocks/`) — `vi.fn()`-based objects for call tracking and assertion. Answer: "was this method called with these arguments?"
-- **Fakes** (`tests/implementations/test/`) — lightweight functional implementations with deterministic behavior. Answer: "given this input, does the system produce the right output?"
+- **Functional fakes** (`tests/implementations/test/`) — lightweight implementations with deterministic behavior. Answer: "given this input, does the system produce the right output?"
+- **Compile-checked fakes** (`tests/test-utils/fakes/`) — classes that `implements` a production interface, so the *compiler* rejects them the moment the interface moves.
+
+### Compile-Checked Fakes
+
+**File:** `tests/test-utils/fakes/fake-debug-adapter.ts`
+
+`FakeDebugAdapter` is the single conformant `IDebugAdapter` double. It exists because the suite used to hand-roll ~40 object literals shaped like a debug adapter and force each through `as unknown as IDebugAdapter` — a cast that silences exactly the divergence the double exists to catch. The literals duly drifted: a *synchronous* `transformLaunchConfig` (the interface returns a Promise), two members that no longer existed on the interface, and fifteen stubbed EventEmitter methods that never emitted anything.
+
+Two rules make it useful beyond "it compiles":
+
+- Every **required** member is a `vi.fn` with a production-shaped default, so a test states only the behavior it cares about and can still assert on the rest.
+- Every **optional** member is **absent** unless opted in (`withAttachSupport()`, `withLaunchBarrier()`). Production guards them (`adapter.supportsAttach?.()`), and a double that always defined them would only ever exercise one side of that branch.
+
+`tests/unit/test-utils/fake-debug-adapter.test.ts` pins that contract. `MockProxyManager` (`mocks/mock-proxy-manager.ts`) is the same idea for `IProxyManager` and predates the directory. The rule of thumb: reach for a fake for the big behavioral interfaces whose doubles otherwise drift, and for a `vi.fn` mock at a narrow seam where an untyped literal costs little and reads more directly. See [`tests/README.md`](../../tests/README.md) — *Fakes vs mocks*.
 
 ### The createMockDependencies() Pattern
 
@@ -109,7 +140,7 @@ Each returns a full `IAdapterRegistry` with `vi.fn()` methods. Helper functions:
 
 **`MockChildProcess` / `ChildProcessMock`** (`child-process.ts`) — `MockChildProcess` extends `EventEmitter` with `kill`, `send`, `pid`, `killed`, and streams. Helpers: `simulateExit()`, `simulateError()`, `simulateStdout()`, `simulateStderr()`, `simulateMessage()`. The outer `ChildProcessMock` wraps `spawn`, `exec`, `execSync`, `fork` with domain-specific setup methods: `setupPythonSpawnMock()`, `setupPythonVersionCheckMock()`, `setupProxySpawnMock()`.
 
-**Other mocks**: `MockLogger` (simple `vi.fn()` stubs for `info`/`error`/`debug`/`warn`), `MockCommandFinder` (per-command path mappings with call history), `createEnvironmentMock()` (defaults `MCP_CONTAINER` to `'false'` for host mode), minimal `fs-extra` and `net` mocks.
+**Other mocks**: `createMockLogger()` (simple `vi.fn()` stubs for `info`/`error`/`debug`/`warn`), `MockCommandFinder` (per-command path mappings with call history), `createEnvironmentMock()` (defaults `MCP_CONTAINER` to `'false'` for host mode), minimal `fs-extra` and `net` mocks.
 
 ### Fake Implementations
 
@@ -149,7 +180,9 @@ Cleanup: `afterAll` closes the MCP client and kills the server process. `afterEa
 
 ### STDIO Smoke Test Matrix
 
-Twenty-one per-language STDIO smoke tests: Python, Python (attach), JavaScript, JavaScript (attach), JavaScript (function breakpoints), Rust, Rust (function breakpoints), Go, Java (launch), Java (attach), Java (evaluate), Java (inner class), Java (pause), Java (event race), Java (redefine), Java (function breakpoints), .NET, Ruby, Ruby (attach), C++, C++ (attach). Each follows the standard lifecycle:
+`tests/e2e/mcp-server-smoke-*.test.ts` is the per-language STDIO matrix. Rather than a count that goes stale, the shape of the set: every supported language has a launch smoke test (Python, JavaScript, Rust, Go, Java, .NET, Ruby, C++), and some languages carry extra files next to it — `-attach` for Python, JavaScript, Java, .NET, Ruby and C++; `-function-bp` for JavaScript, Rust and Java. Read that as the smoke coverage that exists, not as the capability matrix: every adapter policy except Ruby's sets `supportsFunctionBreakpoints: true` (`packages/shared/src/interfaces/adapter-policy-*.ts`), and only three of them have a `-function-bp` file. Java carries the largest set of behavioral extras (`evaluate`, `inner-class`, `pause`, `event-race`, `redefine`). The same glob also picks up tests that are about the server rather than a language: `-restart`, `-http-stale-reap`, and the two SSE files below. `pnpm run test:e2e:smoke` runs the whole glob.
+
+Each per-language test follows the standard lifecycle:
 
 1. Create session → set breakpoint → start debugging
 2. Inspect: stack trace, scopes, variables
@@ -166,11 +199,13 @@ Two SSE test files test the SSE HTTP transport: Python over SSE (`mcp-server-smo
 
 **File:** `tests/e2e/comprehensive-mcp-tools.test.ts`
 
-Tests all 25 MCP tools across 9 languages (Python, JavaScript, Mock, Rust, Ruby, Go, Java, Dotnet, C++) where the toolchain is available. Produces a PASS/FAIL/SKIP matrix report with per-tool per-language status and timing. Toolchain detection uses `hasCommand()` checks (e.g., `rustc --version`, `go version`).
+Tests all 28 MCP tools across 9 languages (Python, JavaScript, Mock, Rust, Ruby, Go, Java, Dotnet, C++) where the toolchain is available. Produces a PASS/FAIL/SKIP matrix report with per-tool per-language status and timing. Toolchain detection uses `hasCommand()` checks (e.g., `rustc --version`, `go version`).
+
+The tool list is **derived**, not hand-maintained: the file imports `TOOL_NAMES` from `src/server/tool-schemas.ts` (`const ALL_TOOLS = [...TOOL_NAMES]`). The literal it replaced had drifted to 25 of the 28 advertised tools, so three were missing from the report with nothing to say so (issue #579). Tools the suite does not exercise now show as PENDING — the honest reading, and the reason to keep the list derived.
 
 ### Docker E2E
 
-**Files:** `tests/e2e/docker/` (4 test files: Python, JavaScript, Rust smoke tests + entrypoint validation)
+**Files:** `tests/e2e/docker/` (7 test files: Python, JavaScript, Rust, C++ and Ruby-attach / C++-attach smoke tests, plus entrypoint validation)
 
 **Utilities** (`tests/e2e/docker/docker-test-utils.ts`):
 
@@ -181,7 +216,7 @@ Tests all 25 MCP tools across 9 languages (Python, JavaScript, Mock, Rust, Ruby,
 
 ### NPX Distribution E2E
 
-**Files:** `tests/e2e/npx/` (2 test files: Python and JavaScript smoke tests)
+**Files:** `tests/e2e/npx/` (3 test files: Python, JavaScript and Rust smoke tests)
 
 **Utilities** (`tests/e2e/npx/npx-test-utils.ts`):
 
@@ -205,7 +240,7 @@ Event simulation methods are available on all major mocks:
 - `FakeProcess`: `simulateMessage(message)`, `simulateExit(code, signal)`, `simulateProcessError(error)`
 - `FakeProxyProcess`: `simulateInitialization()`, `simulateInitializationFailure(error)`
 
-All event simulation uses `process.nextTick()` or `setTimeout()` to defer emission, matching real async behavior.
+The `simulate*` methods that emit do so **synchronously** — `simulateStopped`, `simulateEvent`, `simulateError`, `simulateExit`, `simulateMessage`, `simulateProcessError`, `simulateInitialization` and `simulateInitializationFailure` all reach a bare `this.emit(...)`, with no `process.nextTick()` or `setTimeout()` deferral. Two of the listed methods emit nothing at all: `MockDapClient.simulateRequestError` records the error in a map that the `sendRequest` mock rejects from, and `simulateConnectionError` primes `connect.mockRejectedValueOnce`. (Elsewhere on `FakeProcess`, `send()` and `simulateSpawn()` *do* defer via `process.nextTick`, so the rule is per-method, not per-class.) The consequence of the synchronous ones is a sequencing rule, not a style note: the listener has to be attached before you call one, or the event lands on nobody. `FakeProxyProcessLauncher` keeps its own emission off the caller's stack — its automatic `init_received` answer wraps `simulateMessage` in `process.nextTick` rather than replying inside the `sendCommand` call. `prepareProxy(setup)` offers no such deferral: it calls `setup` immediately, at *prepare* time, before the proxy is launched and before `ProxyManager` subscribes, so a callback that wants its message seen has to defer the call itself.
 
 ### Fake Timer Usage
 
@@ -246,17 +281,62 @@ Protocol-level correctness checks. `breakpoint-messages/` contains Python script
 
 ## Coverage Strategy
 
-**Provider:** Istanbul. **Reporters:** text, json, html, json-summary (output to `./coverage/`). `reportOnFailure: true` ensures partial coverage is captured even when tests fail.
+**Provider:** Istanbul. **Reporters:** text, json, html, json-summary (output to `./coverage/`). `reportOnFailure: true` ensures partial coverage is captured even when tests fail. Coverage is configured at the **root** of `vitest.config.ts`, not per project — a per-project `coverage` block is silently ignored.
+
+**Thresholds are enforced**, and a run below them fails:
+
+| Metric | Threshold | Measured at the time it was set |
+|---|---|---|
+| Statements | 90 | 92.9 |
+| Branches | 80 | 83.0 |
+
+The margins absorb platform-specific branches (win32-only arms uncovered on Linux and vice versa). The config's own instruction is to raise them when the measured numbers move up, and never to loosen them to admit a regression.
 
 **Excluded from coverage** (with rationale):
-- Test files and type-only files (`types.ts`) — no executable logic
-- CLI entry points (`cli-entry.ts`) — process-level stdio handling, not unit-testable
-- Proxy entry point (`dap-proxy-entry.ts`) — runs as a separate process
+- Test files and type-only files (`src/container/types.ts`, `src/dap-core/types.ts`) — no executable logic
+- CLI entry points (`packages/mcp-debugger/src/cli-entry.ts`) — process-level stdio handling, not unit-testable
+- Proxy entry point (`src/proxy/dap-proxy-entry.ts`) and bootstrap (`src/proxy/proxy-bootstrap.js`) — run as a separate process
 - Mock adapter process (`mock-adapter-process.ts`) — tested via E2E, not importable
-- Module-init side-effects (`batteries-included.ts`) — static adapter imports plus a module-level side effect that registers each adapter factory into a `globalThis[GLOBAL_KEY]` registry with language-based deduplication
-- Barrel/index exports — prevent duplicate coverage counting
-- Factory pattern files with minimal logic
+- Module-init side-effects (`packages/mcp-debugger/src/batteries-included.ts`) — static adapter imports plus a module-level side effect that registers each adapter factory into a `globalThis[GLOBAL_KEY]` registry with language-based deduplication
+- Error definitions (`src/errors/debug-errors.ts`) — mostly class constructors and type guards
+- Script entry point (`packages/adapter-dotnet/src/utils/netcoredbg-bridge.ts`) — `process.argv` parsing only; the logic it wraps lives in `netcoredbg-bridge-core.ts` and is covered there
+- Barrel/index exports (`packages/shared/src/index.ts`, `packages/shared/src/models/index.ts`) — prevent duplicate coverage counting
+- Factory pattern files with minimal logic (`packages/shared/src/factories/adapter-factory.ts`)
 
 **Included:** `src/**/*.{ts,js}`, `packages/**/src/**/*.{ts,js}`.
 
 **Commands:** `npm run test:coverage` (full HTML), `npm run test:coverage:summary` (table), `npm run test:coverage:analyze` (detailed).
+
+## Type Checking the Test Suite
+
+Coverage says how much of the suite *ran*. A second, independent mechanism gates how well the suite is *typed* — because a test double that has silently drifted from the interface it stands for still runs green, and that is precisely the failure mode compile-checked fakes exist to catch.
+
+### Two TypeScript programs
+
+**`tsconfig.typecheck.json`** is a type-only program (`noEmit`, `composite: false`) covering every first-party source file — `src/**` and `packages/*/src/**` — in one pass. It exists because the root `tsconfig.json` is solution-style with `"files": []` and therefore checks nothing (issue #562). One wildcard `paths` entry, `"@debugmcp/*": ["./packages/*/src/index.ts"]`, resolves workspace packages to their TS sources, so the check runs on a fresh clone with no `dist/`; a per-adapter row would be one more thing to forget when adding an adapter, and a missing row fails quietly. `lib` is pinned to `["ES2022"]` because the default for target ES2022 drags in DOM, and `lib.dom`'s `Body.json()` returning `any` had already masked two real errors. This program must be **clean**: `pnpm run typecheck`.
+
+**`tsconfig.spec.json`** extends it and adds the test trees (`tests/**`, `packages/*/tests/**`), with `moduleResolution: "Bundler"` because tests are resolved by Vitest, not Node, and import extensionless specifiers. `tests/fixtures` and `tests/manual` are excluded — Vitest never runs them, and type-checking them only produced baseline entries nobody would act on.
+
+### The ratchet
+
+`tsconfig.spec.json` does **not** pass today, so `scripts/typecheck-tests-ratchet.mjs` (`pnpm run typecheck:tests`) gates on the **per-file** error count recorded in `tests/typecheck-baseline.json` instead of demanding zero.
+
+Per file rather than one total: the errors span nearly every test directory, so a single number would let a new error hide behind an unrelated fix, and errors moving between files would go unnoticed. The known limitation is that the unit is a per-file *count*, so a same-file, same-count swap is invisible; the burn-down surfaces it eventually, and per-diagnostic fingerprints are the upgrade path if it stalls.
+
+The gate fails in **both** directions — an increase means new type errors, and a decrease (including a removed test file) means the recorded numbers are now a lie. Only `pnpm run typecheck:tests:update` clears the second case, and the refreshed baseline must be committed in the same change. That is what keeps the ceiling monotonically falling.
+
+Three defenses around the gate itself:
+
+- **It fails closed when it cannot trust the run.** A diagnostic in the TS1000–1999 grammar band, or one anchored outside the test trees (`tsconfig.spec.json` itself, `src/**`, a `../` path), means the check is broken rather than failing — baselining it with `--update` would hide the breakage. An all-clear run is likewise treated as suspicious rather than celebrated: far more likely a program that no longer includes the test trees. Exit code 2 means "could not be run", distinct from 1, "ratchet failure".
+- **A corrupt baseline blocks its own repair**, deliberately: `--update` reads the baseline before writing one, so the gate's floor applies to the refresh too. The script's remedy is to delete the file first.
+- **`--allow-improvement` is the one loosening**, and it only downgrades the *decrease* case to a warning; increases still fail. CI passes it exclusively for PRs **authored by** `dependabot[bot]` (keyed on the PR author, not `github.actor`, so a human touching the bot's PR takes the strict path — issue #581). A Dependabot bump can make the suite type-cleaner via a better `@types` package, and the bot cannot re-record. The cost is accepted loudly: that PR may auto-merge with `GITHUB_TOKEN`, which suppresses push CI on main, so the ratchet emits a `::warning` annotation and a job-summary line saying the next human PR must refresh the baseline.
+
+### Where it runs
+
+`pnpm run typecheck:all` = `typecheck` + `typecheck:tests`, and it is deliberately the *same command* in all three places, so a green working tree cannot mean a red required check:
+
+1. **`.husky/pre-push`** — lint, then a guard that `tests/typecheck-baseline.json` is not modified-but-uncommitted (the ratchet validates the working tree; CI validates the pushed commit, so an uncommitted refresh would pass here and fail there), then `typecheck:all`, then a clean build, then `test:unit` + `test:integration`. The full e2e suite is left to CI.
+2. **The `Lint Code` CI job** — ESLint, then `typecheck:all` (or the split dependabot form), then the personal-path and changelog gates. No build needed: ~3 s for the sources, ~11 s for the ratchet.
+3. **Locally**, whenever you want the fast type-only answer without a build.
+
+`.husky/pre-commit` deliberately runs none of this — only the personal-paths check, the build-artifact/tarball guards, and an optional docstar check. Commits stay cheap; the gate is at push.

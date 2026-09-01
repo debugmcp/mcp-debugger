@@ -7,6 +7,7 @@ Thank you for your interest in contributing to mcp-debugger! We welcome contribu
 - [Code of Conduct](#code-of-conduct)
 - [Getting Started](#getting-started)
 - [Development Workflow](#development-workflow)
+- [Dev-Loop Gate](#dev-loop-gate)
 - [Code Style](#code-style)
 - [Testing](#testing)
 - [Commit Messages](#commit-messages)
@@ -75,12 +76,9 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
 
 3. **Make your changes** following our code style guidelines
 
-4. **Build and test**:
-   ```bash
-   npm run build
-   npm test
-   npm run lint
-   ```
+4. **Build and test** — run the [Dev-Loop Gate](#dev-loop-gate) below. It is the exact set of
+   checks `.husky/pre-push` and CI enforce, so passing it locally means nothing downstream
+   surprises you.
 
 5. **Commit your changes** using conventional commits (see below)
 
@@ -90,6 +88,52 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
    ```
 
 7. **Create a Pull Request** from your fork to our `main` branch
+
+## Dev-Loop Gate
+
+This is the canonical description of the checks that gate a push. `.husky/pre-push` runs all five
+steps in this order; CI's **Lint Code** job runs steps 1 and 3, and its **Build and Test** job
+covers steps 4 and 5 via `pnpm run build:ci` and `pnpm run test:ci-coverage`. Other docs should
+link here rather than restate it.
+
+**Lint Code** also runs four PR-blocking checks that pre-push does not, so a clean local gate is
+not a guarantee: `pnpm run check:all-personal-paths`, `pnpm run check:docs` (relative links that
+no longer resolve, and counts that fell behind the code), `pnpm run changelog:check`, and a
+"Require a changelog fragment" step on pull requests — a user-visible change needs a fragment
+(test-only changes are exempt automatically; label a genuine no-op PR `no-changelog`). Running
+those four before you push saves a CI round-trip.
+
+1. **Lint** — `pnpm run lint`. ESLint over `src/**/*.ts`, `packages/*/src/**/*.ts`, and
+   `scripts/**/*.{js,mjs,cjs}`. Note that `pnpm run lint:fix` is only `eslint src/**/*.ts --fix`,
+   so it does not auto-fix findings under `packages/` or `scripts/`.
+
+2. **A committed `tests/typecheck-baseline.json`** — pre-push refuses to go further while that
+   file is modified but uncommitted. The ratchet validates your working tree locally but the
+   pushed commit in CI, so an uncommitted baseline passes here and fails there.
+
+3. **Type-check** — `pnpm run typecheck:all`, which is `typecheck` (the shipped sources, via
+   `tsconfig.typecheck.json`) plus `typecheck:tests` (the per-file ratchet over the test trees).
+   `src/` and `packages/*/src` must be strict-clean. The tests carry a recorded per-file error
+   backlog that may only shrink, and the ratchet fails in **both** directions:
+   - a count went **up** — you introduced type errors; fix them;
+   - a count went **down**, or a test file was removed — that is progress, but the baseline is now
+     stale: run `pnpm run typecheck:tests:update` and commit `tests/typecheck-baseline.json` in the
+     same PR.
+
+   `pnpm run typecheck:tests:raw` prints unfiltered `tsc` output for `tsconfig.spec.json` when you
+   need to see the diagnostics themselves.
+
+4. **Clean build** — `npm run clean && npm run build`, so no stale artifact can mask a compile
+   error.
+
+5. **Tests** — `npm run test:unit && npm run test:integration`. Deliberately *not* the full suite:
+   the heavy `e2e` project (smoke, Docker, npx) runs in CI. (A tags-only push runs the reduced
+   `npm run test:ci-no-python` instead.)
+
+The **pre-commit** hook is much lighter and runs none of the above: it runs the personal-paths
+check, blocks accidentally staged build artifacts (`.js`/`.d.ts`/`.js.map` under `src/` or
+`packages/*/src/`) and `.tgz` tarballs, and runs an optional docstar check if docstar is installed.
+No tests, no build.
 
 ## 🔒 Privacy Guidelines
 
@@ -124,19 +168,17 @@ npm run check:all-personal-paths
 
 ## 🎨 Code Style
 
-We use ESLint and Prettier to maintain consistent code style.
+We use ESLint to maintain consistent code style. There is no Prettier setup in this repo —
+`eslint.config.js` is the only style tool of record.
 
 ### Setup
 
 ```bash
-# Run ESLint
+# Run ESLint (src/**, packages/*/src/**, scripts/**)
 npm run lint
 
-# Fix auto-fixable issues
+# Fix auto-fixable issues — note this covers src/**/*.ts only
 npm run lint:fix
-
-# Format code with Prettier (if configured)
-npm run format
 ```
 
 ### Guidelines
@@ -151,14 +193,13 @@ npm run format
 ### Editor Configuration
 
 We recommend configuring your editor to:
-- Format on save using Prettier
+- Apply ESLint auto-fixes on save
 - Show ESLint warnings/errors inline
 - Use the project's TypeScript version
 
 Example VS Code settings:
 ```json
 {
-  "editor.formatOnSave": true,
   "editor.codeActionsOnSave": {
     "source.fixAll.eslint": true
   },
@@ -186,9 +227,12 @@ npm run test:e2e         # End-to-end tests only
 # Run tests with coverage
 npm run test:coverage
 
-# Run a specific test file
-npx vitest run tests/unit/session/session-manager.test.ts
+# Run a specific test file (SessionManager specs live under tests/core/unit/session/)
+npx vitest run tests/core/unit/session/session-manager-state.test.ts
 ```
+
+Before pushing, run the full [Dev-Loop Gate](#dev-loop-gate) — `npm test` alone is not what CI
+and the pre-push hook check.
 
 ### Test Architecture
 
@@ -300,8 +344,8 @@ which appends a `Signed-off-by: Your Name <you@example.com>` trailer. If you for
 
 ```
 mcp-debugger/
-├── packages/               # Monorepo workspace packages
-│   ├── shared/            # Shared interfaces, types, and utilities
+├── packages/               # 17 monorepo workspace packages
+│   ├── shared/            # Shared interfaces, types, adapter policies, utilities
 │   ├── adapter-python/    # Python debug adapter (debugpy)
 │   ├── adapter-ruby/      # Ruby debug adapter (rdbg/debug gem)
 │   ├── adapter-javascript/# JavaScript/Node.js adapter (js-debug)
@@ -311,19 +355,31 @@ mcp-debugger/
 │   ├── adapter-dotnet/    # .NET/C# adapter (netcoredbg)
 │   ├── adapter-cpp/       # C/C++ adapter (CodeLLDB)
 │   ├── codelldb-common/   # Shared CodeLLDB infrastructure (Rust + C/C++ adapters)
+│   ├── codelldb-win32-x64/    # Prebuilt CodeLLDB binaries, one package per
+│   ├── codelldb-linux-x64/    # platform, published with os/cpu fields so an
+│   ├── codelldb-linux-arm64/  # install pulls only the matching payload
+│   ├── codelldb-darwin-x64/
+│   ├── codelldb-darwin-arm64/
 │   ├── adapter-mock/      # Mock adapter for testing
 │   └── mcp-debugger/      # Self-contained CLI bundle (npx distribution)
 ├── src/                    # Core server source code
-│   ├── adapters/          # Adapter loading and registry
+│   ├── adapters/          # Adapter loading, registry, and per-session leases
 │   ├── cli/               # Reusable CLI wiring (commands, setup, error handlers)
 │   ├── container/         # Dependency injection
+│   ├── dap-core/          # Pure DAP state/handler core
+│   ├── errors/            # Debug error types
+│   ├── factories/         # ProxyManager and SessionStore factories
+│   ├── implementations/   # Concrete filesystem/process/network implementations
+│   ├── interfaces/        # Interfaces for the injected dependencies
 │   ├── proxy/             # DAP proxy components
-│   ├── session/           # Session management
+│   ├── server/            # MCP tool layer: tool schemas, validation, dispatch, handlers/ (one module per tool family), resource and prompt handlers
+│   ├── session/           # Session management (core -> data -> operations -> session-manager) plus the per-operation slices launch/ attach/ breakpoints/ execution/ inspection/ jvm/ mirror/
 │   └── utils/             # Utility functions
 ├── tests/                 # Test files
 │   ├── unit/             # Unit tests
-│   ├── core/             # Core unit and integration tests
+│   ├── core/unit/        # Core unit tests (server, session, adapters, factories, utils)
 │   ├── adapters/         # Adapter-specific tests
+│   ├── integration/      # Integration tests
 │   ├── e2e/              # End-to-end tests
 │   └── test-utils/       # Shared test utilities
 ├── examples/              # Example scripts
@@ -350,12 +406,14 @@ To see mcp-debugger in action:
 
 2. **Run with a demo script**:
    ```bash
-   # Start the server in STDIO mode
+   # Start the server in STDIO mode (the default subcommand)
    node dist/index.js stdio
 
-   # Or start in SSE mode for web clients
-   node dist/index.js sse -p 3001
+   # Or start in Streamable HTTP mode for remote/web clients
+   node dist/index.js http -p 3001
    ```
+
+   The `sse` subcommand still exists but is deprecated; use `http` instead.
 
 3. **Example debugging session**:
    - Create a debug session

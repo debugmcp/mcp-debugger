@@ -11,14 +11,16 @@ This directory contains end-to-end smoke tests that verify the MCP debugger serv
 - Tests spawning from different working directories
 
 ### 2. Docker smoke tests (`docker/` subdirectory)
-- Tests containerized deployment for Python, JavaScript, and Rust
+- Tests containerized deployment across every language the image supports
 - Verifies Docker setup works end-to-end
 - Tests path translation (host paths to container paths), session lifecycle, core debug actions, and cleanup
-- Includes Docker availability check with graceful skip
-- Includes `docker-entrypoint.test.ts` for testing the Docker entrypoint script
-- Includes `docker-smoke-python.test.ts` for Python-specific container tests
-- Includes `docker-smoke-javascript.test.ts` for JavaScript-specific container tests
-- Includes `docker-smoke-rust.test.ts` for Rust-specific container tests
+- Includes a Docker availability check with graceful skip
+- `docker-entrypoint.test.ts` covers the entrypoint script itself
+- Per-language launch smoke: `docker-smoke-python.test.ts`, `docker-smoke-javascript.test.ts`,
+  `docker-smoke-rust.test.ts`, `docker-smoke-cpp.test.ts`
+- Attach-mode smoke: `docker-smoke-cpp-attach.test.ts` (attach by PID) and
+  `docker-smoke-ruby-attach.test.ts` (the image ships no Ruby runtime, so Ruby is attach-only)
+- Shared helpers live in `docker-test-utils.ts`
 
 ### 3. `mcp-server-smoke-javascript.test.ts`
 - Tests JavaScript adapter through MCP interface
@@ -94,6 +96,8 @@ This directory contains end-to-end smoke tests that verify the MCP debugger serv
 ### 17. NPX smoke tests (`npx/` subdirectory)
 - `npx-smoke-python.test.ts` - Tests Python debugging via the npx distribution
 - `npx-smoke-javascript.test.ts` - Tests JavaScript debugging via the npx distribution
+- `npx-smoke-rust.test.ts` - Tests Rust debugging via the npx distribution, which exercises
+  CodeLLDB resolution through the per-platform `@debugmcp/codelldb-*` package
 - `npx-test-utils.ts` - Shared utilities for NPX smoke tests
 
 ## Running the Tests

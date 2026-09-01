@@ -54,7 +54,11 @@ Everything below is exported from the package root (`import { ... } from '@debug
 |--------|------|-------------|
 | `AdapterDependencies` | type | Dependencies required by adapters |
 | `AdapterMetadata` | type | Metadata about an adapter implementation |
+| `AdapterModes` | type | Per-mode capability declaration: `{ launch, attach }` |
+| `AttachMechanism` | type | How an adapter implements attach: `'none'`, `'direct-connect'`, or `'spawn'` |
 | `AdapterInfo` | type | Public info about a registered adapter |
+| `AdapterManifestEntry` | type | One entry of `IAdapterRegistry.listAvailableAdapters()`: language name, package name, install state, attach mechanism |
+| `FactoryLoadResult` | type | Outcome of a non-throwing factory load (`getFactoryResult`): the factory, the load error, or dynamic loading disabled |
 | `AdapterRegistryConfig` | type | Registry configuration options |
 | `AdapterFactoryMap` | type | Map of language to factory |
 | `ActiveAdapterMap` | type | Map of language to active adapter |
@@ -110,11 +114,18 @@ An adapter factory may implement the optional `IAdapterFactory.describeToolchain
 | `CommandHandling` | type | How the adapter handles launch commands |
 | `AdapterSpawnPayload` | type | Payload describing how to spawn the debug adapter |
 | `AdapterSpawnConfig` | type | Resolved adapter spawn configuration |
+| `LocalVariableExtraction` | interface | Result of `AdapterPolicy.extractLocalVariables`: the variables plus the `variablesReference` of every anchor-frame scope that contributed one |
+| `HandshakeProxy` | interface | Structural slice of the session's proxy manager a handshake may use (send a DAP request, check liveness, subscribe to `dap-event`) |
+| `HandshakeContext` | interface | Everything `AdapterPolicy.performHandshake` is given about the session |
+| `QueuedDapCommand` | interface | The part of a queued DAP command `AdapterPolicy.processQueuedCommands` may reorder on |
 | `resolveExceptionFilters` | function | Resolve an abstract break-on-exception mode to the policy's DAP exception filter IDs |
+| `emptyLocalVariableExtraction` | function | Build the "no locals here" extraction — no variables, no scope refs, optional explanatory note |
+| `extractionFromScope` | function | Build an extraction from a single scope; reports no scope ref when the variable list is empty |
 | `DefaultAdapterPolicy` | const | Lightweight default/placeholder policy (singleton object) |
 | `PythonAdapterPolicy` | const | Python/debugpy policy |
 | `RubyAdapterPolicy` | const | Ruby/rdbg adapter policy |
 | `JsDebugAdapterPolicy` | const | JavaScript/js-debug policy |
+| `JS_SCOPE_KINDS` | const | The js-debug scope names each kind (`local`, `block`, `closure`, `module`) is recognized by |
 | `RustAdapterPolicy` | const | Rust/CodeLLDB policy |
 | `CppAdapterPolicy` | const | C/C++ / CodeLLDB policy |
 | `GoAdapterPolicy` | const | Go/Delve policy |
@@ -134,6 +145,8 @@ The language policies are singleton object constants implementing the `AdapterPo
 | `ReverseRequestResult` | type | Result of a DAP reverse request |
 | `ChildSessionConfig` | type | Configuration for DAP child sessions |
 | `AdapterLaunchBarrier` | interface | Coordination barrier for adapter launch |
+| `NO_DEBUG_TARGET_MARKER` | const | Marker text carried by every "no child session to run against" error, so the tool layer can recognize it |
+| `buildNoDebugTargetError` | function | Build that error message for a child-required command, distinguishing "never adopted" from "adopted but gone" |
 
 ### Models & Enums
 
@@ -153,6 +166,7 @@ The language policies are singleton object constants implementing the `AdapterPo
 | `SessionStopExceptionInfo` | type | Exception details attached to a stop |
 | `ExceptionBreakMode` | type | Abstract break-on-exception mode |
 | `SessionOutputEntry` | type | One captured debuggee output entry |
+| `SessionFailureDiagnostics` | type | Pointers that make an errored session's proxy failure actionable (proxy log path, MCP resource URI) |
 | `CustomLaunchRequestArguments` | type | Custom launch request args |
 | `GenericAttachConfig` | type | Base attach configuration |
 | `LanguageSpecificAttachConfig` | type | Language-specific attach config |
@@ -238,13 +252,25 @@ These helpers ensure unsanitized child-process output and environment data never
 | `toFunctionBreakpoint` | function | The single mapper to a DAP `FunctionBreakpoint` |
 | `FunctionBreakpointFields` | type | Input fields accepted by `toFunctionBreakpoint` |
 
+### Process Markers
+
+Argv marker constants shared by the code that tags child processes at spawn time and the startup reapers that recognize those tags in system-wide process scans.
+
+| Export | Kind | Description |
+|--------|------|-------------|
+| `PROXY_BOOTSTRAP_MARKER` | const | Identity substring in the proxy worker's script-path argv token |
+| `JS_DEBUG_ADAPTER_MARKER` | const | Identity substring in the js-debug DAP server's script-path argv token |
+| `OWNER_PID_ARG_PREFIX` | const | Argv prefix recording the PID of the mcp-debugger server that owned the session |
+| `SESSION_ID_ARG_PREFIX` | const | Argv prefix recording the session id |
+
 ## Package Structure
 
 ```
 src/
 ├── interfaces/     # Core contracts, adapter policies, DI interfaces
 ├── models/         # Enums, data structures, type aliases
-└── factories/      # Base factory classes
+├── factories/      # Base factory classes
+└── utils/          # Standalone helpers (sanitizers, redaction, buffers, mappers)
 ```
 
 ## Contributing
@@ -254,8 +280,9 @@ When adding new shared types:
 1. Place interfaces and policies in `src/interfaces/`
 2. Place enums, data types, and type aliases in `src/models/`
 3. Place base/factory classes in `src/factories/`
-4. Export from `src/index.ts`
-5. Add to the appropriate table in this README
+4. Place standalone helper functions in `src/utils/`
+5. Export from `src/index.ts`
+6. Add to the appropriate table in this README
 
 ## License
 

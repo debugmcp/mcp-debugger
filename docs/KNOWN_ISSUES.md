@@ -1,62 +1,75 @@
 # Known Issues
 
+Current user-facing caveats and their workarounds. Contributor notes about running the
+CI workflows locally (Act, WSL2) live in
+[Local CI/CD Testing with Act](./ACT_LOCAL_CI_TESTING.md).
+
 ## Native debugging inside Docker requires Linux-compiled binaries
 
 The Docker image ships CodeLLDB and enables Rust and C/C++ (issue #328), but container LLDB can only debug **Linux-compiled** binaries. Binaries compiled on the host (Windows/macOS, or a mismatched glibc) and mounted into the container have DWARF/symbol data the container's LLDB cannot use — breakpoints won't bind or symbols won't resolve. Either compile inside the container (the image ships `g++`; the cpp adapter's source-file launch does this automatically) or cross-compile for linux-x64. For host-compiled binaries, use a host (stdio/http) deployment where the debugger runs next to the toolchain that produced them.
 
-## Test Failures in Act Environment
+## The container needs `docker run -i`
 
-There are 3 tests that fail when running with Act (local GitHub Actions simulator) but may pass in the actual GitHub Actions CI environment. These tests use two different gating mechanisms:
-- **`describe.skipIf(SKIP_DOCKER_TESTS)`**: Skips entire test suites at the Vitest framework level based on the `SKIP_DOCKER_TESTS` environment variable (used by Docker smoke tests).
-- **Runtime platform checks** (e.g., `if (process.platform !== 'win32') { return; }`): Individual tests return early within the test body when the current platform does not match expectations (used by the Python discovery test).
+The image's default command is `stdio`, so stdin *is* the MCP transport. Once a client has
+spoken, stdin EOF means that client is gone and the server exits — which is what lets
+`docker run -i --rm ...` clean itself up (issue #633).
 
-### 1. Container Smoke Test - Timeout Issue
-- **File**: `tests/e2e/docker/docker-smoke-python.test.ts` (and other `docker-smoke-*.test.ts` files)
-- **Test**: Container-based debugging smoke tests
-- **Issue**: Tests time out in Act environment (timeouts vary: 240s for setup, 120s for main operations, 60s for simple tests)
-- **Likely Cause**: Docker operations are slower in Act's Docker-in-Docker setup
-- **Solution**: May need to increase timeout or optimize Docker image loading
+Without `-i`, stdin is closed before any client ever speaks. That is the one case the
+server deliberately keeps alive (a detached container is a supported deployment), so it
+never exits, `--rm` never fires, and every session leaves a stopped container behind.
+Always pass `-i` when the container is your MCP server:
 
-### 2. Container Test Environment Issue
-- **File**: `tests/e2e/docker/docker-smoke-python.test.ts`
-- **Issue**: Container tests may fail in Act's Docker-in-Docker environment
-- **Cause**: Volume mount complexities in nested container environments
-- **Solution**: Tests work in real Docker environments; Act limitations only
-
-### 3. Python Discovery Platform Mismatch
-- **File**: `tests/adapters/python/integration/python-discovery.test.ts`
-- **Test**: "should find Python on Windows without explicit path"
-- **Issue**: This is a Windows-only success-path discovery test that returns early on non-Windows platforms
-- **Root Cause**: Test is deliberately Windows-only; it does not mock platform or assert error messages
-- **Solution**: Test works correctly on Windows; on non-Windows platforms the test returns early without executing Windows-specific assertions
-
-## Running Tests Locally
-
-### With Act
 ```bash
-# Windows (use cmd, not PowerShell)
-scripts\act-test.cmd
-
-# Linux/macOS/WSL2
-./scripts/act-test.sh
+docker run -i --rm -v $(pwd):/workspace debugmcp/mcp-debugger:latest
 ```
 
-### WSL2 Requirements
-- Must run Act from within WSL2 on Windows
-- Docker Desktop WSL2 integration must be enabled
-- Use the sync scripts to copy files to WSL2:
-  ```bash
-  scripts\sync-to-wsl.cmd
-  ```
+## Attach is not available for every language
 
-### Direct Test Execution
-If Act continues to have issues, you can run tests directly:
-```bash
-npm test
-```
+`list_supported_languages` reports per-mode availability (`modes.launch` / `modes.attach`)
+with reasons. The gaps worth knowing up front:
 
-## Next Steps
-1. Push to GitHub to see if tests pass in real CI environment
-2. If tests pass in CI, these are Act-specific issues that can be addressed later
-3. If tests fail in CI, the error messages may provide better diagnostics
-4. Consider using Testcontainers as an alternative for container testing
+- **Rust and Go have no attach implementation.** Both adapter factories declare
+  `modes: { launch: true, attach: 'none' }`, and `attach_to_process` fails fast with
+  `Attach mode is not implemented for '<language>'` before any session state changes.
+  Use `start_debugging` to launch the program instead.
+- **C/C++ attach is attach-by-PID only.** `attach_to_process` requires a numeric
+  `processId`; a `host`/`port` target is rejected with *"C/C++ attach requires a numeric
+  processId (attach-by-PID). Name/host-based attach is not supported yet."* On Linux,
+  attaching to a process you did not start may also need `kernel.yama.ptrace_scope`
+  relaxed. See the [C/C++ guide](./cpp/README.md).
+- **.NET attach is also PID-only.** netcoredbg has no host/port attach, so `processId` is
+  required and a `host`/`port` pair is dropped — there is no remote-attach form of the
+  call. See the [.NET guide](./dotnet/README.md).
+
+Python, Ruby, JavaScript, and Java can attach to a remote target over host/port (reach it
+through a port mapping, `kubectl port-forward`, or an SSH tunnel — these debug sockets are
+unauthenticated).
+
+## Logpoints are rejected by Java, .NET, and Ruby
+
+`set_breakpoint` with `logMessage` is supported by the Python, JavaScript, Go, Rust,
+C/C++, and mock adapters. On Java, .NET, and Ruby it is a hard error
+(`Logpoints (logMessage) not supported by the <language> adapter`) rather than a
+silent downgrade: rdbg, for example, accepts `logMessage` and then ignores it, turning
+the logpoint into a *pausing* breakpoint — the opposite of what a logpoint promises
+(issue #469). On those three languages there is no non-pausing substitute: use a
+conditional breakpoint and accept the stop (on Java, `suspendPolicy: "thread"` at least
+limits the stop to one thread), or add the logging to the program itself.
+
+## Ruby attach captures no program output
+
+Ruby attach connects straight to a listening `rdbg --open` DAP socket, so there is no
+adapter process between mcp-debugger and the target and nothing to capture its stdio.
+`get_output` returns nothing for an attached Ruby session — the program's stdout/stderr
+stay on whatever terminal (or pod log) started it. Launch mode is unaffected. See the
+[Ruby guide](./ruby/README.md).
+
+## Ruby launch sessions do not break on uncaught exceptions by default
+
+Launch sessions default `breakOnExceptions` to `"uncaught"`, so a crashing program pauses
+at the crash site instead of terminating. Ruby is the exception: rdbg has no uncaught-only
+filter, so Ruby launches default to `"none"`. Pass `breakOnExceptions: "all"` explicitly to
+pause on raised exceptions in Ruby — it will also stop on caught ones.
+
+(Attach sessions never apply a language default; their `breakOnExceptions` default is
+`"none"` for every language.)

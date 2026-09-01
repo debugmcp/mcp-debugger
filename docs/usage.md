@@ -1,6 +1,6 @@
 # Using the mcp-debugger
 
-This document describes how to use the mcp-debugger with Large Language Models (LLMs) for step-through debugging, based on real testing conducted on 2025-06-11.
+This document describes how to use the mcp-debugger with Large Language Models (LLMs) for step-through debugging.
 
 ## Installation
 
@@ -115,14 +115,16 @@ if __name__ == "__main__":
 
 ### Step 2: Set Breakpoints
 
-Set a breakpoint where the bug occurs:
+Set a breakpoint where the bug occurs. In host mode the path must be absolute — a relative
+`file` or `scriptPath` is rejected with `Path must be absolute. Received: "..."` (see
+[File Paths](#file-paths) below):
 
 ```json
 // Tool: set_breakpoint
 // Request:
 {
   "sessionId": "a4d1acc8-84a8-44fe-a13e-28628c5b33c7",
-  "file": "swap_vars.py",
+  "file": "C:\\path\\to\\swap_vars.py",
   "line": 10
 }
 // Response:
@@ -143,15 +145,15 @@ Set a breakpoint where the bug occurs:
 // Request:
 {
   "sessionId": "a4d1acc8-84a8-44fe-a13e-28628c5b33c7",
-  "scriptPath": "swap_vars.py"
+  "scriptPath": "C:\\path\\to\\swap_vars.py"
 }
 // Response:
 {
   "success": true,
   "state": "paused",
-  "message": "Debugging started for swap_vars.py. Current state: paused",
+  "message": "Debugging started for C:\\path\\to\\swap_vars.py. Current state: paused",
   "data": {
-    "message": "Debugging started for swap_vars.py. Current state: paused",
+    "message": "Debugging started for C:\\path\\to\\swap_vars.py. Current state: paused",
     "reason": "breakpoint"
   }
 }
@@ -301,8 +303,7 @@ You can also evaluate arbitrary expressions in the current debug context:
   "success": true,
   "result": "True",
   "type": "bool",
-  "variablesReference": 0,
-  "message": "Evaluated expression: a == b"
+  "variablesReference": 0
 }
 ```
 
@@ -317,7 +318,6 @@ You can also evaluate arbitrary expressions in the current debug context:
 // Response:
 {
   "success": true,
-  "state": "running",
   "message": "Continued execution"
 }
 ```
@@ -347,6 +347,13 @@ You can also evaluate arbitrary expressions in the current debug context:
 - The `variablesReference` from `get_scopes` is what you pass to `get_variables`
 - This is NOT the same as the frame ID from `get_stack_trace`
 - Common mistake: Using frame ID instead of variablesReference
+
+### Variable Response Size Guards
+- Variable responses are size-guarded: oversized values are cut (the variable carries `truncated: true`) and very large scopes come back as a capped list plus a top-level `truncation` summary with an explanatory `notice`
+- Narrow the request to escape the cap: pass `names: ["a", "b"]` to `get_variables` or `get_local_variables` to fetch specific variables in full. Requested names that were not found are listed in the response's `notFound`
+
+### Stack Trace Filtering
+- `get_stack_trace` filters internal/runtime frames by default. When any are hidden the response carries `hiddenFrames` (the count) and a `note` saying so; pass `includeInternals: true` to get the full stack
 
 ### Breakpoint Behavior
 - Breakpoints initially show `"verified": false` because verification happens asynchronously by the debug adapter once the module is loaded (e.g., debugpy verifies after the script starts)
@@ -384,11 +391,11 @@ You can also evaluate arbitrary expressions in the current debug context:
 All 28 tools are fully implemented, including:
 
 - **restart_debugging**: One call terminates the current debuggee (if any) and relaunches with the same configuration; breakpoints re-apply automatically and the output buffer starts fresh (read from `since: 0`). Works while running, paused, or after the program exited; attach sessions are rejected with a clear error.
-- **list_breakpoints / remove_breakpoint / clear_breakpoints**: Full breakpoint lifecycle management. Listing shows each breakpoint's verified state and adapter-assigned id; removal (by id, or file+line) and clearing take effect immediately while the program is running or paused, and still work after the program exits so breakpoints can be adjusted before a relaunch.
+- **list_breakpoints / remove_breakpoint / clear_breakpoints**: Full breakpoint lifecycle management. Listing shows each breakpoint's verified state and adapter-assigned id; removal (by id, by function name, or by file + line) and clearing take effect immediately while the program is running or paused, and still work after the program exits so breakpoints can be adjusted before a relaunch.
 
-- **pause_execution**: Sends a DAP pause request and waits briefly (up to ~5s) for the program to stop; on a fresh stop it returns the stop reason (`data.stopReason`). If the program cannot stop within the grace window (e.g. blocked in native code), it returns success with `pending: true` and the paused state is picked up asynchronously. The session normally must be in the `running` state, but calling pause on an already paused session succeeds as a no-op.
-- **get_output**: Returns the debuggee's stdout/stderr/console output, buffered per launch from DAP output events. Cursor-based (`since`/`nextSince`) for incremental polling; output stays readable after the program exits until the session is closed. The same data is exposed as a subscribable MCP resource (`debug://sessions/{id}/output`).
-- **evaluate_expression**: Evaluates arbitrary expressions in the current debug context. When `frameId` is not specified, the server infers it by fetching the stack trace and using the topmost frame -- this works reliably only when a single frame exists or the top frame is the desired context. Callers should provide `frameId` explicitly when debugging code with multiple stack frames. Expressions with side effects are allowed (can modify program state).
+- **pause_execution**: Sends a DAP pause request and waits briefly (up to ~5s) for the program to stop; on a fresh stop it returns the stop reason (`data.stopReason`). If the program cannot stop within the grace window (e.g. blocked in native code), it returns success with `data.pending: true` and the paused state is picked up asynchronously. The session normally must be in the `running` state, but calling pause on an already paused session succeeds as a no-op.
+- **get_output**: Returns the debuggee's stdout/stderr/console output, buffered per launch from DAP output events. Cursor-based (`since`/`nextSince`) for incremental polling; output stays readable after the program exits until the session is closed. The same data is exposed as a subscribable MCP resource (`debug://sessions/{id}/output`). Once a session has launched or attached, `resources/list` also offers `debug://sessions/{id}/proxy-log` — a sanitized, bounded tail of that session's debug proxy log (at most the final 64 KiB, trimmed to 80 lines) for diagnosing a failed or misbehaving launch. It is a point-in-time snapshot and is deliberately not subscribable.
+- **evaluate_expression**: Evaluates arbitrary expressions in the current debug context. When `frameId` is omitted, the server resolves the same shared inspection anchor that `get_stack_trace` and `get_local_variables` use: the top frame of the stopped thread, or — when that thread reports no frames — a sibling thread whose frames the language policy recognizes as user code, which is then adopted and disclosed in the response's `anchorNote`. Pass `frameId` (from `get_stack_trace`) when you want a specific frame: an explicit id is authoritative and bypasses that selection entirely. `timeout` (ms, default 30000, max 600000) bounds the wait for the evaluation; on expiry the request fails but the expression may keep executing in the debuggee. Expressions with side effects are allowed (can modify program state).
 - **expose_session / unexpose_session**: Opens a read-only DAP mirror endpoint (loopback-only, token-gated) so an IDE such as VS Code can attach to the live session and inspect the paused state — threads, stack, scopes, variables, evaluate — while execution control stays with the MCP session. See [tool-reference.md](tool-reference.md#expose_session) for the VS Code `launch.json` recipe.
 
 ## Best Practices
@@ -398,7 +405,3 @@ All 28 tools are fully implemented, including:
 3. **Get scopes before variables** - You need the variablesReference to inspect variables
 4. **Handle errors gracefully** - Sessions can terminate, files might not exist
 5. **Use meaningful session names** - Helps when debugging multiple scripts
-
----
-
-*Last updated: 2026-08-19 (v0.24.0) - All 28 tools including breakpoint management, logpoints, restart_debugging, and the DAP mirror; variable responses are size-guarded (truncation field, narrow with names: [...]) and get_stack_trace may annotate hiddenFrames*

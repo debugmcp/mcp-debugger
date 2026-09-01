@@ -11,7 +11,7 @@ npx @debugmcp/mcp-debugger doctor          # or: node dist/index.js doctor (repo
 ```
 
 ```text
-mcp-debugger doctor 0.25.0 (win32-x64, node v24.14.1)
+mcp-debugger doctor <version> (win32-x64, node v24.14.1)
 
 Adapter     Runtime                                          Debug backend                             Verdict
 mock        (built-in)                                       (built-in)                                ✅ ok
@@ -41,7 +41,7 @@ Usage notes:
 - **`--json`** emits a machine-readable report (`schemaVersion: 1`) with each language's verdict, errors/warnings, launch/attach availability, raw probe details, and per-probe timing.
 - **`--timeout <ms>`** caps each language's probe (default 10000). A timed-out probe is reported as `broken` with `probe.timedOut: true`.
 - **Doctor vs the server:** `list_supported_languages` and the launch gate *fail open* — when a toolchain probe crashes, the server assumes the language is available rather than blocking a launch it could not assess. Doctor reports the same probe honestly (`broken` + `probe.failed`), so doctor may say `broken` where `list_supported_languages` says available. The verdict rails are otherwise identical: both run the same per-adapter validation.
-- **Source checkouts:** doctor reports `missing` for adapters whose `dist/` is not built. Run `pnpm install && npm run build` first.
+- **Source checkouts:** doctor reports `missing` for adapters whose `dist/` is not built. Run `pnpm install && pnpm run build` first.
 
 ## Per-language prerequisites
 
@@ -50,7 +50,7 @@ Usage notes:
 | python | Python 3.7+ | debugpy | `pip install debugpy` (same interpreter the session uses) | `PYTHON_PATH` (fallback `PYTHON_EXECUTABLE`), or `executablePath` per session |
 | javascript | Node.js 22+ | js-debug (bundled) | nothing — the VSCode Node debugger ships with the adapter | `executablePath` per session; TypeScript needs `tsx`/`ts-node` or compiled output |
 | ruby | Ruby 2.7+ (3.1+ recommended) | `debug` gem 1.7+ (`rdbg`) | `gem install debug` | `RUBY_PATH` (fallback `RUBY_EXECUTABLE`), `RDBG_PATH` |
-| go | Go 1.18+ | Delve | `go install github.com/go-delve/delve/cmd/dlv@latest` (lands in `~/go/bin` — put it on PATH) | `GOBIN` is searched first, then `GOPATH/bin`, then PATH |
+| go | Go 1.18+ | Delve | `go install github.com/go-delve/delve/cmd/dlv@latest` (lands in `~/go/bin` — put it on PATH) | `executablePath` per session, else `DLV_PATH`; if neither resolves to a real file, `dlv` is looked up on PATH, then in `GOBIN`, `GOPATH/bin`, `~/go/bin` |
 | java | JDK 21+ (`java` + `javac`) | JDI bridge (bundled, compiled on first use via `javac`) | install a JDK; **compile target code with `javac -g`** or variable inspection is empty | `JAVA_HOME`, `JDI_BRIDGE_DIR` (prebuilt bridge classes) |
 | dotnet | .NET 6+ SDK | netcoredbg | download from [Samsung releases](https://github.com/Samsung/netcoredbg/releases); Portable PDB symbols required | `NETCOREDBG_PATH`, `NETCOREDBG_X86_PATH` (x86 attach targets) |
 | rust | Rust toolchain (rustup) | CodeLLDB (vendored / platform packages) | nothing extra on a normal install; on Windows use the **GNU** toolchain (DWARF) | `CODELLDB_PATH` (used when no vendored copy resolves) |
@@ -163,35 +163,68 @@ Go and .NET are disabled in the published image via `DEBUG_MCP_DISABLE_LANGUAGES
 When a session misbehaves rather than a toolchain:
 
 - **`dryRunSpawn: true`** in `start_debugging` validates the whole spawn (adapter command, paths, environment) without starting a real debug session — the fastest way to distinguish config problems from runtime ones.
-- **`DAP_TRACE=1`** captures every DAP frame to a per-session `dap-trace-<sessionId>.ndjson` (off by default, capped at 50 MB; `DAP_TRACE_FILE=<path>` picks an explicit file). This is the ground truth for "what did the adapter actually say". Each record carries a `conn` field (`parent`, `child:<targetId>`, or `release:<targetId>`) naming the DAP connection that produced the frame — js-debug sessions interleave parent and child frames (with independent `seq` spaces) in the one file.
-- **Server log**: `logs/debug-mcp-server-<pid>.log` (working-directory-relative; `--log-file` overrides; the container writes `/app/logs/debug-mcp-server.log`). Set verbosity with `--log-level debug` or `DEBUG_MCP_LOG_LEVEL`.
-- **Per-session proxy log**: each session writes `proxy-<sessionId>.log` to the OS temp directory, at the same level as the server log — this is where adapter spawn commands, stderr, and the proxy's DAP routing decisions (DAP client, child-session manager, CDP bridges) land. Lines those modules emit before the session initializes go to the worker's per-pid server log instead.
+- **A failed `start_debugging` / `attach_to_process` carries its own pointers.** When the proxy died on the way up, the result's `data` holds `initProgress` (which initialization stage stalled), `proxyLogPath` (the on-disk path below), and `proxyLogResource` (the MCP URI below). The full record — the error's `code`/`errno`/`syscall` plus a redacted tail of the proxy log — goes to the server log; the tool result keeps only the pointers so the error itself is not buried.
+- **`DAP_TRACE=1`** captures every DAP frame to a per-session `dap-trace-<sessionId>.ndjson` in the run directory below (off by default, capped at 50 MB; `DAP_TRACE_FILE=<path>` picks an explicit file). This is the ground truth for "what did the adapter actually say". Each record carries a `conn` field (`parent`, `child:<targetId>`, or `release:<targetId>`) naming the DAP connection that produced the frame — js-debug sessions interleave parent and child frames (with independent `seq` spaces) in the one file.
+- **Server log**: `debug-mcp-server-<pid>.log` in a `logs/` directory resolved from the *module* that is running, not from the working directory: `<module-dir>/../../logs/`. In a repo checkout the module is `dist/utils/logger.js`, so the log lands in `logs/` at the repo root; in the shipped bundle the module is `<package>/dist/cli.mjs`, so it lands one level *above* the package root — `node_modules/@debugmcp/logs/` for an npm/npx install. `--log-file <path>` is honoured verbatim and overrides both; the container writes the fixed `/app/logs/debug-mcp-server.log`. Set verbosity with `--log-level debug` or `DEBUG_MCP_LOG_LEVEL`.
+- **Per-session logs**: every launch attempt gets its own run directory,
+
+  ```text
+  <os.tmpdir()>/debug-mcp-server/sessions/<sessionId>/run-<startedAt>/
+  ```
+
+  (`<dir of --log-file>/sessions/<sessionId>/run-<startedAt>/` when `--log-file` is set). `<startedAt>` is epoch milliseconds, and there is one directory **per launch attempt**, not per session: a `restart_debugging` or a second `start_debugging` on the same session writes a fresh `run-` directory and leaves the previous attempt's files beside it. Inside:
+
+  - `proxy-<sessionId>.log` — adapter spawn commands, adapter stderr, and the proxy's DAP routing decisions (DAP client, child-session manager, CDP bridges), written at the same level as the server log: the proxy inherits the server logger's level, so `--log-level` / `DEBUG_MCP_LOG_LEVEL` control this file too. Lines those modules emit before the session initializes go to the worker's per-pid server log instead.
+  - `<sessionId>.log` — the adapter's own logger, for adapters that write one.
+  - `dap-trace-<sessionId>.ndjson` — only with `DAP_TRACE=1`.
+
+  Run directories whose mtime is older than 7 days are swept at server startup — but only under the default `<os.tmpdir()>/debug-mcp-server/sessions/` tree, which is the one path the startup sweep looks at. Run directories relocated by `--log-file` are never swept; clean those up yourself.
+- **Reading those logs without filesystem access** — the container, Kubernetes, and remote-HTTP case — each session also publishes them as MCP resources:
+
+  - `debug://sessions/{id}/proxy-log` — a sanitized, bounded tail of the current run's proxy log (last 80 lines, 64 KiB max), read on demand. Not subscribable, and listed only once the session has a run directory.
+  - `debug://sessions/{id}/output` — the captured debuggee stdout/stderr transcript, subscribable via `resources/subscribe` (the `get_output` tool is the cursor-based equivalent).
 - Format details: [docs/logging-format-specification.md](./logging-format-specification.md).
 
 ## Environment variable reference
 
-The complete set of runtime-affecting variables (the [development setup guide](./development/setup-guide.md) links here as canonical):
+The runtime-affecting variables the server and its adapters read (the [development setup guide](./development/setup-guide.md) links here as canonical). Variables the server only *sets* for its own child processes are not listed.
 
 | Variable | Purpose |
 |---|---|
 | `PYTHON_PATH` / `PYTHON_EXECUTABLE` | Pin the Python interpreter (checked in that order) |
 | `RUBY_PATH` / `RUBY_EXECUTABLE` | Pin the Ruby interpreter |
 | `RDBG_PATH` | Pin the rdbg executable |
-| `GOBIN` | Searched first for `dlv` (then `GOPATH/bin`, then PATH) |
+| `DLV_PATH` | Pin the Delve executable — checked before the PATH/`GOBIN` search |
+| `GOBIN` / `GOPATH` | Searched for `dlv` after PATH (`GOBIN`, else `GOPATH/bin`, else `~/go/bin`) |
 | `JAVA_HOME` | JDK root; `bin/java` and `bin/javac` are used from here |
 | `JDI_BRIDGE_DIR` | Directory with a prebuilt `JdiDapServer.class` (skips first-use compilation) |
 | `NETCOREDBG_PATH` | Path to the netcoredbg executable |
 | `NETCOREDBG_X86_PATH` | x86 netcoredbg for attaching to 32-bit processes |
+| `PDB2PDB_PATH` | Pdb2Pdb.exe used to convert non-Portable PDBs (otherwise the copy bundled with the dotnet adapter) |
 | `CODELLDB_PATH` | CodeLLDB binary, used when no vendored copy resolves (rust + cpp) |
 | `CODELLDB_RUST_SYSROOT` | Rust sysroot root whose `lib/rustlib/etc` holds the LLDB formatter scripts — enables Rust type summaries without `rustc` (set automatically in the Docker image; issue #441) |
-| `CPP_MSVC_BEHAVIOR` | `warn` (default) \| `error` \| `continue` when a cpp target has MSVC PDB symbols |
+| `CPP_MSVC_BEHAVIOR` / `RUST_MSVC_BEHAVIOR` | `warn` (default) \| `error` \| `continue` when a cpp/rust target has MSVC PDB symbols |
+| `RUST_AUTO_SUGGEST_GNU` | `0`/`false`/`no` suppresses the "switch to the GNU toolchain" suggestion (on by default) |
+| `CARGO_BUILD_TARGET` / `RUST_TARGET` / `RUSTFLAGS` | Read only as signals that a `*-pc-windows-gnu` target is in play — gates the Windows `dlltool` warning |
+| `MCP_RUST_ALLOW_PREBUILT` / `MCP_CPP_ALLOW_PREBUILT` | `true` lets the rust/cpp adapter debug a prebuilt binary with no toolchain installed (implied by `MCP_CONTAINER=true`) |
 | `DEBUG_MCP_DISABLE_LANGUAGES` | Comma-separated languages to disable (e.g. `go,dotnet` in the Docker image) |
 | `MCP_CONTAINER` | `true` marks container mode (set by the Docker image) |
 | `MCP_WORKSPACE_ROOT` | Path-resolution root in container mode (image default `/workspace`) |
 | `DEBUG_MCP_LOG_LEVEL` | Server log level (`error`, `warn`, `info`, `debug`) |
+| `MCP_EXIT_ON_STDIN_CLOSE` | `1`/`true`: an `http`/`sse` server exits when its stdin pipe closes — a parent-death signal for supervised backends |
+| `MCP_HTTP_STALE_SESSION_MS` | Idle time before a streamless HTTP session is reaped (default `1800000`; `0` disables the reaper) |
+| `MCP_HTTP_STALE_SWEEP_INTERVAL_MS` | How often that reap sweep runs (default `60000`) |
 | `DAP_TRACE` / `DAP_TRACE_FILE` | Enable per-session DAP frame capture / choose its file |
 | `DEBUG_MCP_NO_REDACT` | Disable secret redaction in captured output (diagnosis only) |
+| `DEBUG_MCP_BP_ADDRESSING` | `content` (default) \| `assert` \| `line` — how much breakpoint addressing `set_breakpoint` exposes (modes are cumulative) |
+| `DEBUG_MCP_VARIABLE_ACCESS` | `open` (default) \| `explicit` — `explicit` makes `get_variables`/`get_local_variables` require a `names` filter |
+| `DEBUG_MCP_MAX_VARIABLES` | Per-call variable count cap (default `300`) |
+| `DEBUG_MCP_MAX_VARIABLE_VALUE_CHARS` | Per-variable value length cap (default `1024`) |
+| `DEBUG_MCP_MAX_VARIABLES_TOTAL_CHARS` | Per-call total serialized-value budget (default `262144`) |
+| `DAP_MAX_FRAME_BYTES` | Upper bound for a single DAP frame body (default 64 MB) |
+| `DEBUG_PYTHON_DISCOVERY` | `true` logs the Python interpreter discovery walk |
 | `MCP_SKIP_ORPHAN_REAPERS` | Skip the startup orphan-process scans |
+| `DEBUG_MCP_SKIP_AUTO_START` | `1` stops `dist/index.js` from auto-running `main()` on import (set by the bundled CLI shim) |
 
 ## Additional resources
 

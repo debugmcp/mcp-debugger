@@ -13,6 +13,7 @@ npm run test:integration  # Integration tests only
 npm run test:e2e          # E2E tests (builds Docker image first)
 npm run test:core         # Core system tests (tests/core/)
 npm run test:watch        # Watch mode
+npm run test:strict       # unit + integration with LEAK_GUARD_STRICT=1
 npx vitest run path/to/file.test.ts  # Single file
 ```
 
@@ -66,6 +67,33 @@ npm run test:dot       # Dot reporter
 npm run test:json      # JSON results to test-results.json
 ```
 
+### Type Checking
+
+```bash
+pnpm run typecheck               # tsc -p tsconfig.typecheck.json — src + packages/*/src, must be clean
+pnpm run typecheck:tests         # ratchet the test trees against tests/typecheck-baseline.json
+pnpm run typecheck:tests:raw     # raw tsc output for tsconfig.spec.json
+pnpm run typecheck:tests:update  # re-record the baseline
+pnpm run typecheck:all           # both — the exact command CI and pre-push run
+```
+
+See [The test-typing ratchet](#the-test-typing-ratchet) below for what the baseline is, and why
+an uncommitted one blocks your push.
+
+### Flake Hunting
+
+```bash
+npm run test:flake     # scripts/flake-hunt.mjs — repeat the unit project under fresh shuffle seeds
+```
+
+Every ordinary run already shuffles *file* order (`sequence.shuffle.files` in
+`vitest.config.ts`). The flake hunt adds `--sequence.shuffle.tests` — the within-file shuffle
+that catches a test relying on a sibling's leftover mock or env state — and prints an explicit
+seed per run, so a failure reproduces with
+`vitest run --project unit --sequence.seed=<n> --sequence.shuffle.tests`. It is unit-only on
+purpose: the integration and e2e suites deliberately share a live debug session across `it`
+blocks and would break if reordered within a file.
+
 ### GitHub Actions Locally (Act)
 
 ```bash
@@ -84,6 +112,8 @@ tests/
 │   ├── javascript/integration/# JavaScript session smoke test
 │   ├── python/unit/           # Python utils tests
 │   ├── python/integration/    # Python discovery and workflow tests
+│   ├── ruby/unit/             # Ruby adapter policy tests
+│   ├── ruby/integration/      # Ruby session smoke test
 │   └── rust/integration/      # Rust session smoke test
 │
 ├── core/unit/                 # Core system unit tests
@@ -94,14 +124,19 @@ tests/
 │   └── utils/                 # Type guards, session migration
 │
 ├── e2e/                       # End-to-end tests
-│   ├── mcp-server-smoke-*.ts  # Per-language smoke tests (python, javascript, ruby, rust, go, java, dotnet)
-│   ├── docker/                # Docker container tests (python, javascript, rust, entrypoint)
-│   └── npx/                   # NPX distribution tests (python, javascript)
+│   ├── mcp-server-smoke-*.ts  # Per-language smoke tests (python, javascript, ruby, rust, go,
+│   │                          #   java, dotnet, cpp) plus attach, function-breakpoint,
+│   │                          #   SSE, restart and stale-reap variants
+│   ├── docker/                # Docker container tests (python, javascript, rust, cpp,
+│   │                          #   cpp-attach, ruby-attach, entrypoint)
+│   └── npx/                   # NPX distribution tests (python, javascript, rust)
 │
 ├── exploratory/               # Exploratory test result snapshots (JSON)
 ├── fixtures/                  # Test data
+│   ├── adversarial-adapter/   # Scripted TCP DAP adapter that misbehaves on demand
 │   ├── debug-scripts/         # Simple mock scripts
-│   └── javascript-e2e/        # JS/TS fixtures for E2E tests
+│   ├── javascript-e2e/        # JS/TS fixtures for E2E tests
+│   └── python/                # Python debuggee scripts for attach/E2E tests
 │
 ├── implementations/test/      # Fake implementations (e.g., fake-process-launcher.ts)
 ├── integration/rust/          # Rust cross-component integration tests
@@ -116,16 +151,24 @@ tests/
 │   ├── helpers/               # Port manager, test dependencies, coverage tools
 │   └── mocks/                 # Mock DAP client, logger, processes, adapters, etc.
 │
+├── tsconfig.json              # TS config for the test trees
+├── typecheck-baseline.json    # Per-file test type-error ratchet (see below)
+│
 ├── unit/                      # Main unit test directory
 │   ├── adapter-python/        # Python debug adapter tests
-│   ├── adapters/              # Adapter loader, registry, JS/mock adapter tests
-│   ├── cli/                   # CLI command tests (stdio, sse, setup, version)
+│   ├── adapters/              # Adapter loader, registry, lease, JS/mock adapter tests
+│   ├── changelog/             # Changelog fragment validation
+│   ├── cli/                   # CLI command tests (stdio, sse, http, doctor, check-rust-binary,
+│   │                          #   setup, version)
 │   ├── container/             # Dependency injection tests
 │   ├── dap-core/              # DAP handlers and state tests
+│   ├── dev-proxy/             # Dev-proxy backend lifecycle, env and shutdown tests
 │   ├── implementations/       # Process launcher, process manager, env, filesystem, network
 │   ├── proxy/                 # Proxy manager, DAP proxy core, message parser, minimal-dap
-│   ├── shared/                # Adapter policy tests (default, python, js, go, dotnet, mock)
-│   ├── test-utils/            # Mock validation, test proxy manager
+│   ├── scripts/               # Repo tooling tests (the typecheck ratchet)
+│   ├── shared/                # Adapter policy tests (contract, default, python, js, go,
+│   │                          #   dotnet, mock) plus shared filesystem tests
+│   ├── test-utils/            # Mock validation, fake-adapter conformance, test proxy manager
 │   └── utils/                 # Error messages, logger, file checker, language config
 │
 ├── validation/                # Validation scripts (e.g., debugpy breakpoint messages)
@@ -203,11 +246,47 @@ silences exactly the divergence the double exists to avoid.
 
 ## Configuration
 
-Test configuration lives in `vitest.config.ts`:
+Test configuration lives in `vitest.config.ts`, which defines **three projects**. Subsets are
+selected with `--project`, not `--exclude` (which Vitest silently ignores once `projects` is
+set), so `--project unit --project integration` means "everything except `tests/e2e/**`".
+
+| Project | Include | Pool settings | Timeout |
+|---|---|---|---|
+| `unit` | the broad net below, minus the two sets that follow | `forks`, `fileParallelism: true`, no worker cap | 15 s |
+| `integration` | `tests/**/integration/**`, `tests/stress/**` | `forks`, `fileParallelism: false`, `maxWorkers: 1` | 30 s |
+| `e2e` | `tests/e2e/**` | `forks`, `fileParallelism: false`, `maxWorkers: 1` | 30 s |
+
+Only the process-spawning projects run serially. The hermetic `unit` project — the large
+majority of the suite — runs files in parallel.
 
 - **Setup file**: `tests/vitest.setup.ts`
-- **Test timeout**: 30 seconds
-- **Max workers**: 1 (process-spawning tests require serial execution)
-- **File parallelism**: Disabled
-- **Coverage**: Istanbul provider
-- **Include patterns**: `tests/**/*.{test,spec}.ts`, `packages/**/tests/**/*.{test,spec}.ts`
+- **Coverage**: Istanbul provider, thresholds **enforced** at 90 % statements / 80 % branches
+- **Include patterns** (the `unit` net; the `integration`/`e2e` sets are subtracted from it):
+  `tests/**/*.{test,spec}.ts`, `src/**/*.{test,spec}.ts`,
+  `packages/**/tests/**/*.{test,spec}.ts`, `packages/**/src/**/*.{test,spec}.ts`
+- **File ordering**: seeded shuffle of file order on every run (`sequence.shuffle.files`);
+  within-file shuffle is added only by `npm run test:flake`
+
+## The test-typing ratchet
+
+`tsconfig.spec.json` type-checks the test trees alongside the shipped sources. It does **not**
+pass today — the suite carries a backlog of mock/type divergences — so
+`scripts/typecheck-tests-ratchet.mjs` (`pnpm run typecheck:tests`) gates on the **per-file**
+error count recorded in `tests/typecheck-baseline.json` rather than demanding zero. Per file,
+not one total: a single number would let a new error hide behind an unrelated fix.
+
+The ratchet fails in **both** directions:
+
+- **A count went up** — you introduced type errors. Fix them.
+- **A count went down, or a test file was removed** — that is progress, but the baseline is now
+  stale. Run `pnpm run typecheck:tests:update` and commit `tests/typecheck-baseline.json` in
+  the same change.
+
+Two consequences worth knowing before you push:
+
+- **Pre-push refuses to run** while `tests/typecheck-baseline.json` is modified but uncommitted.
+  CI validates the *pushed commit*, not your working tree, so an uncommitted refresh would pass
+  locally and fail in CI. `.husky/pre-push` checks this before it runs `typecheck:all`.
+- If the ratchet cannot read the baseline at all (invalid JSON, the wrong shape, a path outside
+  the test trees) it exits 2 and tells you to **delete the file first** — `--update` reads the
+  baseline before writing one, so a corrupt file blocks its own repair.

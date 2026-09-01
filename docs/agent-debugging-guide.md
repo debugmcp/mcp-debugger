@@ -116,10 +116,10 @@ if vars.get("variablesReference"):
 # 7. Evaluate expressions
 evaluate_expression(sessionId=session_id, expression="a")  # Returns: "1"
 evaluate_expression(sessionId=session_id, expression="a + b")  # Returns: "3"
-# Note: The evaluate_expression tool uses the 'variables' context by default,
-# which is intended for watch-style evaluation. Whether state-mutating
-# expressions (e.g., "x = 5") work depends entirely on the debug adapter;
-# debugpy may or may not allow mutations in this context.
+# Note: expressions can read AND modify program state -- "a = 99" assigns,
+# and "obj.method()" runs the call in the debuggee. That is intentional:
+# it lets you test a fix in place before editing the source. Results are
+# always returned as strings, even for numbers.
 ```
 
 ## Common Issues and Solutions
@@ -186,7 +186,7 @@ if "variablesReference" in vars:
 
 ## Rust Debugging
 
-**Prerequisites**: Rust toolchain (rustc, cargo) installed. CodeLLDB debug adapter is vendored via the `build:adapter` script (run `pnpm -w -F @debugmcp/codelldb-common run build:adapter`), not during `pnpm install`.
+**Prerequisites**: Rust toolchain (rustc, cargo) installed. CodeLLDB is vendored automatically during `pnpm install` -- the root `postinstall` hook runs `pnpm vendor:adapters`. Re-vendor at any time with `pnpm vendor:adapters` (or just the LLDB copy: `pnpm --filter @debugmcp/codelldb-common run build:adapter`), or point `CODELLDB_PATH` at an existing CodeLLDB **executable** -- the resolver uses the value verbatim as the adapter path, so a directory will not work.
 
 **Testing sequence:**
 ```python
@@ -253,7 +253,8 @@ get_local_variables(sessionId=session_id)
 **Key notes:**
 - Compile target code with `javac -g` for full variable inspection
 - For breakpoints, you can use a fully-qualified class name (e.g., `"com.example.MyClass"`) instead of a file path
-- Use `dapLaunchArgs` to pass `mainClass` and `classpath`
+- `mainClass` is **derived, not passed**: the adapter reads the launch config's `program` (which defaults to `scriptPath`) and turns a `.java` path into its base name, so `/path/to/Main.java` yields `Main`. Any other `program` value is used verbatim -- pass `adapterLaunchConfig: {"program": "com.example.Main"}` when the class name does not match the file name. A `mainClass` key you pass yourself is overwritten by this derivation
+- `classpath` goes through `dapLaunchArgs` (or `adapterLaunchConfig`) and becomes the JVM's `-cp`; make it absolute -- the bridge sets no working directory for the JVM it spawns, so a relative classpath resolves against the server's cwd. The program's `args` come from `start_debugging`'s top-level `args`. The launch keys the JDI bridge actually reads are `mainClass`, `classpath`, `stopOnEntry`, `javaPath`, `vmArgs`, and `args` -- `cwd`, `env`, and `sourcePath` are forwarded to the bridge but never read
 
 **Testing sequence:**
 ```python
@@ -267,7 +268,10 @@ set_breakpoint(sessionId=session_id, file="com.example.Main", line=10)
 start_debugging(
     sessionId=session_id,
     scriptPath="/path/to/Main.java",
-    dapLaunchArgs={"mainClass": "com.example.Main", "classpath": "/path/to/classes"}
+    dapLaunchArgs={"classpath": "/path/to/classes"},
+    # mainClass comes from `program`; override it when the FQCN differs
+    # from the file name:
+    adapterLaunchConfig={"program": "com.example.Main"}
 )
 
 # 4. Inspect variables
@@ -301,16 +305,155 @@ start_debugging(
 get_local_variables(sessionId=session_id)
 ```
 
+## C/C++ Debugging
+
+**Prerequisites**: Nothing extra to debug a **prebuilt** executable -- CodeLLDB is vendored (the same copy the Rust adapter uses). A compiler on PATH (`g++`/`clang++`/`c++`, or `gcc`/`clang`/`cc` for C) is needed only when you hand the adapter a lone source file.
+
+**Key notes:**
+- One language id, `cpp`, covers both C and C++
+- Compile with **`-gdwarf-4 -O0`**. `-gdwarf-4` matters on Windows: MinGW gcc 11+ defaults to DWARF-5, whose line tables LLDB cannot read out of PE-COFF binaries
+- `scriptPath` takes either the compiled executable or a lone `.c`/`.cpp` source file; a source file is auto-compiled into a `.debug-mcp/` directory next to it and rebuilt when stale (`adapterLaunchConfig: {"forceRebuild": true}` forces it)
+- Function breakpoints are the sturdiest addressing here -- a bare `main` resolves fine
+- On Windows prefer MinGW-w64/MSYS2 g++ (DWARF). MSVC PDB fidelity is partial; `CPP_MSVC_BEHAVIOR` (`warn` default / `error` / `continue`) controls the detection warning
+- **Attach is by PID only**: `attach_to_process` with `processId`. Host/port attach is rejected with `UNSUPPORTED_OPERATION`. On Linux, mind `kernel.yama.ptrace_scope`
+
+**Testing sequence:**
+```python
+# 1. Create session
+session_id = create_debug_session(language="cpp")
+
+# 2. Set breakpoint (source file + line, or a function name)
+set_breakpoint(sessionId=session_id, file="/path/to/main.cpp", line=12)
+
+# 3. Start debugging (compiled binary, or the .cpp source to auto-compile)
+start_debugging(sessionId=session_id, scriptPath="/path/to/myapp")
+
+# 4. Inspect variables
+get_local_variables(sessionId=session_id)
+```
+
+## Breakpoint Addressing and Management
+
+`set_breakpoint` takes more than `file` + `line`. The content-addressing levers are gated
+by `DEBUG_MCP_BP_ADDRESSING` (`content`, the default, exposes everything; `assert` drops
+`statement`, `nearLine` **and** `function`, keeping `expectedContent`; `line` drops
+`expectedContent` too, leaving plain `file` + `line`) -- read the live `set_breakpoint`
+schema rather than assuming.
+
+```text
+set_breakpoint {"sessionId": "...", "file": "/abs/app.py", "statement": "total = sum(prices)"}
+set_breakpoint {"sessionId": "...", "function": "apply_bulk_discount"}
+set_breakpoint {"sessionId": "...", "file": "/abs/app.py", "line": 51,
+                "expectedContent": "total = sum(prices)"}
+```
+
+- **`statement`** addresses by content, like an Edit-tool match -- a distinctive substring
+  is enough, and an exact whole-line match beats substring matches. It can only land on a
+  line containing your text, and it survives source edits across `restart_debugging`. If
+  the text appears on several lines the error lists every match; add `nearLine` to pick
+  one. Pass `statement` **or** `line`, not both.
+- **`function`** sets a DAP function breakpoint on entry to a symbol -- no file, no line.
+  Supported by the Python, Go, Rust, C/C++, .NET, Java, and JavaScript adapters. It
+  composes with `condition` only.
+- **`expectedContent`** is an assertion, not addressing: if the target line does not
+  contain the text, the breakpoint is **not** set and the error shows what is actually on
+  that line and its neighbors -- the cheapest way to catch a stale line number.
+- **`logMessage`** turns a breakpoint into a logpoint: it never pauses, and
+  `{curly brace}` expressions are interpolated into `get_output` while the program runs at
+  full speed. Supported by the Python, JavaScript, Go, Rust, C/C++, and mock adapters;
+  **not** by Java, .NET, or Ruby.
+
+Three tools manage breakpoints after they are set. All take effect immediately while the
+program is running or paused:
+
+- `list_breakpoints {"sessionId": "..."}` -- verified state and adapter-assigned ids for
+  every breakpoint (add `file` to scope it). Session-global function breakpoints appear
+  separately as `functionBreakpoints`. Works before launch, during, and after exit.
+- `remove_breakpoint {"sessionId": "...", "breakpointId": "..."}` -- or address it by
+  `function`, or by `file` + `line` (which removes every breakpoint at that location).
+- `clear_breakpoints {"sessionId": "..."}` -- removes all of them, or all in one `file`.
+  Clearing zero breakpoints is success, not an error.
+
+## Output, Exceptions, and Restart
+
+**Read the program's own output with `get_output`.** Anything the program prints --
+`console.log`, `print`, panics, stack traces, logpoint messages -- lands there, not in the
+result of the tool that resumed it:
+
+```text
+get_output {"sessionId": "...", "since": 0}
+```
+
+It is buffered per launch (last 1000 entries), works while the program is running and
+after it exits, and is cursor-based: pass the previous response's `nextSince` as `since`
+to fetch only what is new. `hasMore: true` means the `limit` (default 100, max 1000) cut
+the page short. The same transcript is also exposed as the MCP resource
+`debug://sessions/{id}/output`, which supports `resources/subscribe` if your client would
+rather be notified than poll.
+
+**`breakOnExceptions`** (on both `start_debugging` and `attach_to_process`) decides
+whether a throw pauses the session:
+
+- `"uncaught"` -- pause at the crash site instead of letting the session terminate. This
+  is the **launch default** (Ruby is the exception: rdbg has no uncaught-only filter, so
+  it stays `"none"`).
+- `"all"` -- also pause on caught/raised exceptions. Language-dependent, and noisy in code
+  that uses exceptions for control flow.
+- `"none"` -- let a crashing program run to termination. **Attach always defaults to
+  `"none"`**; attach sessions never apply a language default.
+
+**`restart_debugging`** relaunches with the same configuration as the last
+`start_debugging` and re-applies every current breakpoint. It works while running, paused,
+or after the program exited, and is **not** available for attach sessions or sessions that
+were never launched. The output buffer starts fresh, so read from `since: 0` afterwards.
+Statement-anchored breakpoints are re-resolved against the edited source, which is what
+makes the edit / restart / re-check loop hold up.
+
+## Redaction and IDE Handoff
+
+**Secret redaction is on by default.** Credential-shaped values are masked in
+`get_variables`, `get_local_variables`, `evaluate_expression` results, and captured output,
+so a token in scope does not land in the transcript:
+
+```json
+{ "name": "gh_token", "value": "<redacted:github-pat>", "type": "str", "redacted": true }
+```
+
+Two layers do it: known token *shapes* (PATs, `sk-` keys, JWTs, PEM blocks, `Bearer`
+credentials, connection-string passwords) and *exact* sensitive variable names
+(`password`, `api_key`, ...; matching is exact after normalization, so `tokenCount` is
+untouched). Only the display is masked -- the program still holds the real value -- and a
+response that masked anything carries a `redaction` field saying so. Start the server with
+`DEBUG_MCP_NO_REDACT=1` to turn it off when the credential handling itself is what you are
+debugging. A related flag, `DEBUG_MCP_VARIABLE_ACCESS=explicit`, makes `names` required on
+`get_variables`/`get_local_variables`; the tool schema says so when it is on.
+
+**`expose_session` hands a live session to a human.** It opens a read-only DAP mirror on
+`127.0.0.1` (ephemeral port) and returns a token the IDE must send as `mirrorToken`:
+
+```text
+expose_session   {"sessionId": "..."}
+unexpose_session {"sessionId": "..."}
+```
+
+The IDE can inspect threads, stack, scopes, variables, and evaluate; continue/step/pause
+and breakpoint changes are rejected, so execution control stays with the MCP session. It
+is idempotent, and closes on `unexpose_session`, `close_debug_session`, restart, or
+debuggee exit. Two cautions: the mirror shows **raw, unredacted** values, and DAP
+`evaluate` runs arbitrary code in the debuggee -- treat the token as an execution
+capability, not a view-only credential.
+
 ## Summary
 
-The MCP Debugger is fully functional for Python, Ruby, JavaScript, Rust, Go, Java, and .NET/C#. The key insights are:
+The MCP Debugger is fully functional for Python, Ruby, JavaScript, Rust, Go, Java, .NET/C#, and C/C++. The key insights are:
 - **JavaScript**: Stack trace filtering hides internal frames; may need `continue_execution` if initially stopped at internals
 - **Python**: Use variablesReference to expand variable containers
 - **Ruby**: Supports launch and attach flows through `rdbg`; use Bundler mode for Rails and RSpec-style entrypoints
 - **Rust**: CodeLLDB adapter is vendored; the GNU toolchain is required for reliable debugging -- MSVC-built binaries may produce errors with CodeLLDB. Set `RUST_MSVC_BEHAVIOR` env var to control MSVC handling
 - **Go**: Uses Delve's native DAP support
-- **Java**: Use FQCN for breakpoints, pass `mainClass`/`classpath` via `dapLaunchArgs`
+- **Java**: Use FQCN for breakpoints; `mainClass` is derived from `program`/`scriptPath`, not passed -- send `classpath` via `dapLaunchArgs`
 - **.NET**: Requires netcoredbg; uses TCP-to-stdio bridge
+- **C/C++**: One language id (`cpp`) covers both; nothing to install for prebuilt binaries -- compile with `-gdwarf-4 -O0`. Attach is by PID only
 - **All languages**: Use actual frame IDs from `get_stack_trace` (not hardcoded 0), and ensure proper state and context for operations
 
 Following this guide will help you successfully test and use all debugging features without encountering the previously reported issues.

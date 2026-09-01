@@ -2,7 +2,11 @@
 
 ## Overview
 
-When working with LLMs on development tasks, test output can consume significant tokens due to verbose progress indicators and passing test details. This document describes the optimization implemented in `scripts/llm-env.ps1` that reduces test output by ~90% while preserving all critical debugging information.
+When working with LLMs on development tasks, test output can consume significant tokens due to verbose progress indicators and passing test details. This document describes the optimization implemented in `scripts/llm-env.ps1` that sharply reduces test output while preserving all critical debugging information.
+
+> **Windows / PowerShell only.** `scripts/llm-env.ps1` is the sole implementation — there is
+> no shell equivalent in this repo. On Linux/macOS (and in CI) use the npm scripts documented
+> in [vitest-llm-config.md](./vitest-llm-config.md) instead.
 
 ## Problem
 
@@ -51,6 +55,25 @@ npm.cmd run test:coverage -- --reporter=tap
 # - Skip all passing test output
 ```
 
+### Caveat: the rewrite changes the gate, not just the output
+
+Plain `npm test` is rewritten to `npm.cmd run test:coverage -- --reporter=tap`, and those are
+not the same check:
+
+- `test:coverage` is `vitest run --coverage`, and `vitest.config.ts` **enforces** coverage
+  thresholds (90% statements, 80% branches). A run in which every test passes can therefore
+  still exit non-zero under the wrapper, where plain `npm test` — which does not collect
+  coverage — would have passed. If the wrapper fails with a threshold error rather than a test
+  failure, that is why.
+- `test:coverage` also carries a `pretest:coverage` step (build → Docker image check → clear
+  the previous coverage output), so the wrapped run does more work than the one it replaces.
+
+The `npm test:unit` / `npm test:int` / `npm test:e2e` wrappers append `--coverage` as well, so
+the same threshold gate applies to those partial runs — and a partial run measures coverage
+over only the files that subset touches.
+
+Use `npm.cmd test` to bypass the rewrite and run the unwrapped command.
+
 ## Usage
 
 ```powershell
@@ -63,6 +86,8 @@ npm install        # Works perfectly (pass-through)
 npm test           # Automatically optimized: plain `npm test` is rewritten to
                    # `npm.cmd run test:coverage -- --reporter=tap`
                    # (targeted `npm test <args>` with extra args are forwarded directly)
+                   # NOTE: that rewrite enables coverage, whose thresholds are enforced —
+                   # see the caveat above.
 npm test:unit      # Optimized unit tests
 npm test:int       # Alias for test:integration (runs npm.cmd run test:integration -- --coverage --reporter=tap)
 npm test:e2e       # Optimized e2e tests
@@ -73,10 +98,13 @@ npm.cmd test       # Bypass optimization
 
 ## Results
 
+The figures below come from the original measurement taken when the script was introduced;
+they have not been re-measured since.
+
 ### Before Optimization
 - ~15,000+ characters of output
 - Hundreds of duplicate progress lines
-- Details for all 700+ passing tests
+- Details for every passing test (the `unit` project alone currently matches ~257 test files)
 
 ### After Optimization
 - ~1,500 characters for same test run
@@ -97,7 +125,7 @@ not ok 5 - tests/adapters/python/integration/python_debug_workflow.test.ts # tim
             error:
                 name: "AssertionError"
                 message: "expected false to be true"
-            at: "tests/integration/python_debug_workflow.test.ts:150:33"
+            at: "tests/adapters/python/integration/python_debug_workflow.test.ts:150:33"
             actual: "false"
             expected: "true"
             ...
@@ -114,7 +142,7 @@ All files          |   90.39 |    84.81 |   91.83 |   90.55 |
 
 ### TAP Filtering Logic
 
-**Note:** There are two independent TAP filtering implementations: one in `scripts/llm-env.ps1` (PowerShell, for Windows/dev use) and one in `scripts/llm-env.sh` (Bash, for CI/Linux use). Both follow the same logic but may differ in edge-case handling.
+**Note:** There is exactly one TAP filtering implementation: `scripts/llm-env.ps1` (PowerShell, for Windows dev use). There is no Bash counterpart — CI and non-Windows machines rely on the npm scripts in [vitest-llm-config.md](./vitest-llm-config.md) instead.
 
 1. Always show TAP header and test plan
 2. Track nested test structure with depth counter
@@ -130,9 +158,9 @@ All files          |   90.39 |    84.81 |   91.83 |   90.55 |
 
 ## Benefits
 
-1. **Token Efficiency**: 90% reduction in LLM token usage
+1. **Token Efficiency**: a large reduction in LLM token usage (~90% in the original measurement -- see the caveat under Results)
 2. **Debugging Focus**: Only see what needs attention
-3. **Coverage Tracking**: Maintains ability to monitor >90% requirement
+3. **Coverage Tracking**: Keeps the coverage report visible, including the enforced thresholds (90% statements / 80% branches)
 4. **Stable Format**: TAP's stability reduces maintenance
 5. **Zero Config**: Works automatically when script is sourced
 

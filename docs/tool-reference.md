@@ -1,6 +1,6 @@
 # mcp-debugger Tool Reference
 
-This document provides a complete reference for all tools available in mcp-debugger, based on real testing conducted on 2025-06-11.
+This document provides a complete reference for all tools available in mcp-debugger.
 
 ## Table of Contents
 
@@ -31,7 +31,11 @@ This document provides a complete reference for all tools available in mcp-debug
    - [evaluate_expression](#evaluate_expression)
    - [get_source_context](#get_source_context)
    - [get_output](#get_output)
-5. [Additional Tools](#additional-tools) — list_supported_languages, attach_to_process, detach_from_process, list_threads
+5. [Additional Tools](#additional-tools)
+   - [list_supported_languages](#list_supported_languages)
+   - [attach_to_process](#attach_to_process)
+   - [detach_from_process](#detach_from_process)
+   - [list_threads](#list_threads)
 6. [IDE Mirror](#ide-mirror)
    - [expose_session](#expose_session)
    - [unexpose_session](#unexpose_session)
@@ -50,6 +54,11 @@ Creates a new debugging session.
 - `language` (string, required): The programming language to debug. Languages are discovered dynamically from installed adapters. The default fallback languages (when dynamic discovery is unavailable) are `"python"` and `"mock"`. When all adapters are available, the full list is: `"python"`, `"ruby"`, `"javascript"`, `"rust"`, `"go"`, `"java"`, `"dotnet"`, `"cpp"`, `"mock"`. The actual list depends on which `@debugmcp/adapter-*` packages are discoverable at runtime. A language may be usable in one mode only — e.g. in the Docker container Ruby is attach-only (the adapter ships without a Ruby runtime; attach connects directly to a remote rdbg socket). Check `list_supported_languages` `modes` for per-mode availability; creating a session for an attach-only language is allowed, and only `start_debugging` will fail.
 - `name` (string, optional): A descriptive name for the debug session. Defaults to `"<language>-debug-<timestamp>"` (e.g., `"python-debug-1711500000000"`), built from the session language and `Date.now()`.
 - `executablePath` (string, optional): Path to the language interpreter/executable (e.g., Python interpreter path).
+- `host` (string, optional): Host to attach to for remote debugging. Defaults to `localhost`.
+- `port` (number, optional): Debug port to attach to. **Passing `port` switches the call into attach mode** — the session is created and immediately attached (see [attach_to_process](#attach_to_process) for the full attach contract). `host` alone does not trigger it.
+- `timeout` (number, optional): Attach mode only — connection timeout in milliseconds (default: `30000`).
+- `verifyTimeout` (number, optional): Attach mode only — how long to wait (ms) for the debugger to report at least one thread after attaching before failing the attach (default: `20000`, max: `600000`).
+- `adapterConfig` (object, optional): Attach mode only — adapter-specific attach configuration merged into the attach config, with the same semantics as [attach_to_process](#attach_to_process)'s `adapterConfig`.
 
 **Response:**
 ```json
@@ -71,7 +80,7 @@ Creates a new debugging session.
 **Notes:**
 - Session IDs are UUIDs in the format `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
 - Sessions start in `"created"` state
-- When a `port` parameter is provided in `create_debug_session`, the server performs an inline attach (creating the session and immediately attaching to a running process on that port)
+- When a `port` parameter is provided in `create_debug_session`, the server performs an inline attach (creating the session and immediately attaching to a running process on that port). The response then mirrors `attach_to_process`: alongside `sessionId` it carries `state`, the attach `data` payload, an optional `warning`, and — when a requested post-attach pause has not landed yet — `pending: true`
 
 ---
 
@@ -140,9 +149,12 @@ Closes an active debugging session.
 Sets a breakpoint in a source file.
 
 **Parameters:**
+
+In the shipped default addressing mode (`content`), `sessionId` is the only parameter the schema marks required: address the breakpoint by `file` + `line`, by `file` + `statement`, or by `function` alone. Restricting the mode with `DEBUG_MCP_BP_ADDRESSING=line` (or `=assert`) removes `statement`, `nearLine` and `function` from the schema, and `file` + `line` become required.
+
 - `sessionId` (string, required): The ID of the debug session.
-- `file` (string, required): Path to the source file (absolute or relative to project root).
-- `line` (number, required): Line number where to set breakpoint (1-indexed).
+- `file` (string): Path to the source file — **absolute** in host mode (a relative path is rejected with `Path must be absolute. Received: "..."`); in container mode paths are resolved against the `/workspace` mount, so a path relative to the mounted directory works there. For Java, a fully-qualified class name (e.g. `com.example.MyClass` or `com.example.Outer$Inner`) is preferred — it works reliably with every classloader.
+- `line` (number): Line number where to set breakpoint (1-indexed).
 - `statement` (string, optional): **Content addressing** — instead of `line`, pass the text of the target line, like an Edit-tool match — a distinctive substring is enough (leading/trailing whitespace and trailing `//`/`#` comments are ignored; an exact whole-line match always wins over substring matches). Can only land on a line containing your stated text — an inexact or multi-candidate match still sets the breakpoint but adds a `warning` to the response; if the text appears on multiple lines the error lists every match; anchors re-resolve across `restart_debugging` after file edits. Provide `statement` OR `line`, not both. See [Statement anchors](#statement-anchors).
 - `function` (string, optional): **Symbol addressing** — break on entry to a function/method by name (DAP function breakpoint). Session-global: no `file` or `line` at all, and names survive edits better than both. Composes with `condition` only. Supported by Python, Go, Rust, C/C++, .NET, Java, and JavaScript (JavaScript names are dotted runtime paths delivered over the CDP bridge — see [Function breakpoints](#function-breakpoints)); Ruby is accepted with a warning and validated at launch.
 - `nearLine` (number, optional): With `statement` only — when the statement text appears on multiple lines, bind to the match closest to this line (ties go to the lower line).
@@ -175,7 +187,7 @@ Sets a breakpoint in a source file.
 
 **Important Notes:**
 - Breakpoints show `"verified": false` until debugging starts
-- The response includes the absolute path even if you provide a relative path
+- The response echoes the resolved path the server actually used — in container mode that is the path with the workspace prefix applied; for attach sessions the path is passed through unchanged
 - Setting breakpoints on non-executable lines (comments, blank lines, declarations) may cause unexpected behavior
 - Executable lines that work well: assignments, function calls, conditionals, returns
 - The top-level `content` field echoes the bound line's text (same as `context.lineContent`)
@@ -238,7 +250,7 @@ Support is adapter-dependent:
 
 | Adapters | Behavior |
 |---|---|
-| Python, JavaScript/TypeScript, Go, Rust, mock | Supported — logs without pausing |
+| Python, JavaScript/TypeScript, Go, Rust, C/C++, mock | Supported — logs without pausing |
 | Java, .NET, Ruby | Not supported — `set_breakpoint` with `logMessage` fails fast with a clear error (rdbg would silently convert a logpoint into a *pausing* breakpoint, issue #469) |
 | Adapters whose support is genuinely unknown (dynamically loaded) | Accepted with a warning; validated against the adapter's live capabilities at launch — the `start_debugging` response names each logpoint downgraded to a pausing breakpoint |
 
@@ -335,7 +347,7 @@ Starts debugging a script.
 
 **Parameters:**
 - `sessionId` (string, required): The ID of the debug session.
-- `scriptPath` (string, required): Path to the script to debug.
+- `scriptPath` (string, required): Path to the script to debug. Must be **absolute** in host mode (a relative path is rejected with `Path must be absolute`); in container mode it is re-rooted under `MCP_WORKSPACE_ROOT`.
 - `args` (array of strings, optional): Command line arguments for the script.
 - `dapLaunchArgs` (object, optional): Standard DAP launch arguments:
   - `stopOnEntry` (boolean): Stop at first line
@@ -350,9 +362,9 @@ Starts debugging a script.
 {
   "success": true,
   "state": "paused",
-  "message": "Debugging started for examples/python_simple_swap/swap_vars.py. Current state: paused",
+  "message": "Debugging started for /abs/path/examples/python_simple_swap/swap_vars.py. Current state: paused",
   "data": {
-    "message": "Debugging started for examples/python_simple_swap/swap_vars.py. Current state: paused",
+    "message": "Debugging started for /abs/path/examples/python_simple_swap/swap_vars.py. Current state: paused",
     "reason": "breakpoint"
   }
 }
@@ -410,9 +422,41 @@ Steps over the current line, executing it without entering function calls.
 {
   "success": true,
   "state": "paused",
-  "message": "Stepped over"
+  "message": "Stepped over",
+  "location": { "file": "/path/app.py", "line": 11, "column": 1 },
+  "context": {
+    "lineContent": "    b = temp",
+    "surrounding": [
+      { "line": 9, "content": "    temp = a" },
+      { "line": 10, "content": "    a = b" },
+      { "line": 11, "content": "    b = temp" },
+      { "line": 12, "content": "    return a, b" },
+      { "line": 13, "content": "" }
+    ]
+  }
 }
 ```
+
+`location` and `context` are best-effort: they appear when the post-step stack trace and the source file could both be read.
+
+#### Pending steps
+
+`step_over`, `step_into`, and `step_out` share one contract. The DAP step request only acknowledges that the debugger accepted the command — where the program lands arrives later, as a `stopped` event — so each tool waits up to ~5s for it. If the step is still executing when that grace window elapses (e.g. stepping over a long-running call), the call still **succeeds**, but with `state: "running"`, a top-level `pending: true`, and no `location`:
+
+```json
+{
+  "success": true,
+  "state": "running",
+  "pending": true,
+  "message": "Step dispatched; the program is still executing after 5s (e.g. stepping over a long-running call). The session remains 'running' and will become 'paused' when the step completes. Check the session state, or call pause_execution to interrupt."
+}
+```
+
+The step is not cancelled: the session becomes `"paused"` on its own when it completes (poll `list_debug_sessions`), or call `pause_execution` to interrupt it.
+
+Once a stop has been observed, the stop path owns the answer — a step that demonstrably landed is never reported as pending afterwards, at the cost of the response then being bounded by the stack-trace round trip rather than by the ~5s window. If the debuggee ends while the step is in flight the result is still a success, with a terminal `state` and a message such as `"Step completed as session terminated."`.
+
+Stepping when the session is not paused returns `success: false` with `state` showing the session's actual state; stepping in a terminated session returns an application-level failure (see [Error Handling](#error-handling)).
 
 ---
 
@@ -428,9 +472,12 @@ Steps into function calls on the current line.
 {
   "success": true,
   "state": "paused",
-  "message": "Stepped into"
+  "message": "Stepped into",
+  "location": { "file": "/path/app.py", "line": 4, "column": 1 }
 }
 ```
+
+Same ~5s wait and `pending: true` contract as step_over — see [Pending steps](#pending-steps).
 
 ---
 
@@ -446,9 +493,12 @@ Steps out of the current function.
 {
   "success": true,
   "state": "paused",
-  "message": "Stepped out"
+  "message": "Stepped out",
+  "location": { "file": "/path/app.py", "line": 18, "column": 1 }
 }
 ```
+
+Same ~5s wait and `pending: true` contract as step_over — see [Pending steps](#pending-steps).
 
 ---
 
@@ -463,7 +513,6 @@ Continues execution until the next breakpoint or program end.
 ```json
 {
   "success": true,
-  "state": "running",
   "message": "Continued execution"
 }
 ```
@@ -480,26 +529,45 @@ Continues execution until the next breakpoint or program end.
 
 ### pause_execution
 
-Pauses a running program. The debugger sends a DAP pause request and returns immediately; the paused state is updated asynchronously when the stopped event arrives.
+Pauses a running program. The DAP pause request only acknowledges that the debugger accepted it — the stop arrives later, as an event — so the tool waits up to ~5s for that stop before answering.
 
 **Parameters:**
 - `sessionId` (string, required): The ID of the debug session.
+- `threadId` (number, optional): Thread to pause. Omitted or `0` means "all threads"; because some adapters (e.g. netcoredbg) reject `threadId: 0`, the server then asks the adapter for its thread list and pauses the first thread it reports, falling back to `0` when that request fails or returns nothing.
 
-**Response:**
+**Response** (the stop was observed inside the grace window):
+```json
+{
+  "success": true,
+  "state": "paused",
+  "data": {
+    "message": "Paused",
+    "stopReason": "pause",
+    "location": { "file": "/path/app.py", "line": 42, "column": 1 }
+  }
+}
+```
+
+**Response** (the program had not stopped when the grace window elapsed):
 ```json
 {
   "success": true,
   "state": "running",
   "data": {
-    "message": "Execution paused"
+    "message": "Pause requested; no 'stopped' event within 5s (the program may be blocked in native code or a syscall). The session will report 'paused' once the stop lands. Check the session state to confirm.",
+    "pending": true
   }
 }
 ```
 
 **Notes:**
-- The `"state"` field in the response reflects the session state at the moment the pause request is acknowledged, which is still `"running"`. The state transitions to `"paused"` asynchronously when the stopped event arrives from the debug adapter; poll `list_debug_sessions` or wait for subsequent tool calls to observe the paused state.
+- The `"state"` field is the session state at the moment the tool answers: `"paused"` once the stop has been observed, and `"running"` **only on the pending path** — the request was delivered but the program has not stopped yet. On that path, poll `list_debug_sessions` (or watch a subsequent tool call) to see the state flip to `"paused"` when the target next executes code.
+- `pending` sits inside `data` here, unlike the step tools, which hoist it to the top level of the response.
+- `data.location` is best-effort: it appears on the observed path when the post-stop stack trace could be read.
 - When the stop is observed before the tool returns, `data.stopReason` carries the (normalized) stop reason and — if the adapter reported a misleading raw reason that was normalized — `data.rawStopReason` carries the original. Example: CodeLLDB delivers an explicit pause via SIGSTOP and reports `"exception"`; the result is `stopReason: "pause", rawStopReason: "exception"`. js-debug similarly reports pauses as `"step"`. The same raw reason appears as `lastStop.rawReason` in `list_debug_sessions`. Stale stops from before the pause request are never echoed.
-- The session must be in a `"running"` state; pausing an already-paused session returns success immediately with `"Already paused"` (plus the current `stopReason`)
+- The session must be in a `"running"` state; pausing an already-paused session returns success immediately with `"Already paused"` (plus the current `stopReason`). Any other state fails with `Cannot pause in state: <state>`.
+- If the debuggee ends before the pause takes effect, the call still succeeds, reporting `"Session ended before pause took effect"`.
+- A session with no debuggable target to pause (e.g. a JavaScript attach whose target session was never adopted, or has ended) fails with an actionable error instead of hanging.
 - After pausing, you can inspect variables, evaluate expressions, and step through code
 
 ---
@@ -673,7 +741,7 @@ Gets variables within a scope.
 
 ### get_local_variables
 
-Gets local variables by traversing all stack frames and their scopes, then using the language adapter's policy to extract the relevant local variables. This is a convenience tool that collects scopes and variables across all frames (not just the top frame) so that closures and outer-scope locals are included, then returns the filtered result without needing to manually call stack→scopes→variables.
+Gets local variables for the session's shared inspection anchor. It walks down from the top frame and **stops at the first frame that yields usable locals**, then applies the language adapter's policy to that frame's scopes. Closures and outer-scope bindings come from fanning out across that one frame's scopes (Local, Block, Closure, Module), not from collecting every frame in the stack — walking past the answer is both wasteful and unsafe, since an unrelated lower-frame formatter can hang the whole inspection. When the anchor is not the top frame, `frame` names the one that was used. A convenience over calling stack→scopes→variables by hand.
 
 **Parameters:**
 - `sessionId` (string, required): The ID of the debug session.
@@ -797,7 +865,7 @@ If the originally stopped thread has no frames, this tool uses the same user-fra
 
 **Notes:**
 - Session must be paused at a breakpoint for this tool to work
-- The tool traverses all frames in the call stack and collects scopes/variables from each, then uses the adapter policy to extract relevant locals
+- The tool walks down from the top frame only until a frame yields usable locals, then uses the adapter policy to extract them from that frame's scopes
 - When the top frame has no usable locals (a runtime/stdlib frame, a `sleep`), the response anchors to the first lower frame that does, `frame` names that frame, and `note` explains the switch; `note` also reports a same-frame scope fallback (e.g. JavaScript Local → Module). Pass `names` to disable the frame walk-down
 - When `includeSpecial` is true, all variables including internals are returned
 - This is especially useful for AI agents that need quick access to current local state
@@ -906,7 +974,7 @@ Gets source code context around a specific line in a file.
 
 **Parameters:**
 - `sessionId` (string, required): The ID of the debug session.
-- `file` (string, required): Path to the source file (absolute or relative to project root).
+- `file` (string, required): Path to the source file — **absolute** in host mode (a relative path is rejected); in container mode, relative to the `/workspace` mount.
 - `line` (number, required): Line number to get context for (1-indexed).
 - `linesContext` (number, optional): Number of lines before and after to include (default: 5).
 
@@ -934,7 +1002,7 @@ Gets source code context around a specific line in a file.
 ```json
 {
   "sessionId": "a4d1acc8-84a8-44fe-a13e-28628c5b33c7",
-  "file": "test_script.py",
+  "file": "C:\\path\\to\\test_script.py",
   "line": 25,
   "linesContext": 3
 }
@@ -995,26 +1063,138 @@ After a launch or attach creates its run directory, `resources/list` also includ
 
 ## Additional Tools
 
-The following tools are also available but are not fully documented with examples here:
+### list_supported_languages
 
-- **list_supported_languages**: Lists all supported debugging languages with metadata (installed status, display name, default executable). Takes no parameters. Each entry in `available[]` carries per-mode availability (issue #331):
+Lists all supported debugging languages with metadata.
 
-  ```json
-  {
-    "language": "ruby",
-    "package": "@debugmcp/adapter-ruby",
-    "installed": true,
-    "modes": {
-      "launch": { "supported": true, "available": false, "reason": "Ruby executable not found..." },
-      "attach": { "supported": true, "available": true }
+**Parameters:** None (empty object `{}`)
+
+**Response:**
+```json
+{
+  "success": true,
+  "installed": ["python", "ruby", "mock"],
+  "available": [
+    {
+      "language": "ruby",
+      "package": "@debugmcp/adapter-ruby",
+      "installed": true,
+      "modes": {
+        "launch": { "supported": true, "available": false, "reason": "Ruby executable not found..." },
+        "attach": { "supported": true, "available": true }
+      }
     }
-  }
-  ```
+  ],
+  "languages": [
+    {
+      "id": "python",
+      "displayName": "Python",
+      "version": "1.0.0",
+      "requiresExecutable": true,
+      "defaultExecutable": "python"
+    }
+  ],
+  "count": 3
+}
+```
 
-  `supported` says whether the adapter implements the mode at all; `available` says whether it is usable in this runtime right now (with a `reason` when it isn't). Attach for Python and Ruby is a direct connection to a debugpy/rdbg DAP socket, so it stays available even when the local toolchain is missing — the container image uses exactly this to offer Ruby attach without a Ruby runtime. Disabled languages (`DEBUG_MCP_DISABLE_LANGUAGES`) stay listed with a disabled reason on both modes. `installed[]` keeps its historical meaning: adapter package loadable and not disabled.
-- **attach_to_process**: Attaches the debugger to a running process. Parameters include `sessionId`, `processId` or connection details, optionally `breakOnExceptions` (same mode semantics as on `start_debugging`, but attach never applies a language default — it stays `"none"` unless requested), and optionally `adapterConfig` — an object of adapter-specific attach extras merged into the attach config before the adapter transforms it, mirroring `start_debugging`'s `adapterLaunchConfig` (C/C++/LLDB example: `{"program": "/proc/1/root/pricer"}` for symbol resolution from a kubectl-debug ephemeral container, or `initCommands`; python example: `{"pathMappings": [{"localRoot": "/home/user/checkout/src", "remoteRoot": "/app"}]}` so breakpoints at local-checkout paths bind against a remote debugpy, issue #450). Reserved keys `request`/`__attachMode` are ignored with a warning; set `stopOnEntry` via the top-level parameter. If a requested post-attach pause is accepted but its stopped event has not arrived within the bounded wait, the response is successful with `state: "running"` and `pending: true`; the late stopped event is the only transition to `paused`, and every paused session has a `lastStop`. The response `warning` reports two distinct key outcomes (issues #450/#466): keys the adapter's attach transform genuinely drops (e.g. python's ptvsd-era `localRoot`/`remoteRoot` — use `pathMappings`) are named as **ignored**, while keys mcp-debugger doesn't recognize are **forwarded to the adapter as-is** and named with an edit-distance suggestion for near-misses (`pathMapping (did you mean pathMappings?)`) — "ignored" means dropped, "forwarded as-is" means the adapter still sees them. js-debug attach honors `adapterConfig` too: `localRoot`/`remoteRoot`/`sourceMaps`/`skipFiles`/`continueOnAttach` and other js-debug attach options reach the debugger (issue #466). Languages whose adapter has no attach implementation (`rust`, `go`, `mock`) fail fast with a clear error.
-- **detach_from_process**: Detaches the debugger from an attached process. Parameters include `sessionId` and optional `terminateProcess` flag.
-- **list_threads**: Lists all threads in the debug session. Parameters include `sessionId`.
+**Notes:**
+- `installed[]` keeps its historical meaning: adapter package loadable and not disabled. `count` is its length.
+- `available[]` carries one entry per known adapter, with per-mode availability (issue #331) and a `description` when the adapter registry supplies one. `supported` says whether the adapter implements the mode at all; `available` says whether it is usable in this runtime right now (with a `reason` when it isn't).
+- Attach for Python and Ruby is a direct connection to a debugpy/rdbg DAP socket, so it stays available even when the local toolchain is missing — the container image uses exactly this to offer Ruby attach without a Ruby runtime.
+- Disabled languages (`DEBUG_MCP_DISABLE_LANGUAGES`) stay listed with a disabled reason on both modes.
+- `languages[]` is the backward-compatible metadata shape: `id`, `displayName`, `version`, `requiresExecutable`, and `defaultExecutable` for the languages that have one (`mock` does not).
+
+---
+
+### attach_to_process
+
+Attaches the debugger to a running process. Unless you pass `stopOnEntry: false`, the target is verified after the handshake by polling for threads; if none are reported within `verifyTimeout` the attach fails and the proxy is torn down. With `stopOnEntry: false` that verification (and the post-attach pause) is skipped entirely and the session is reported as `running`.
+
+**Parameters:**
+- `sessionId` (string, required): The ID of the debug session.
+- `port` (number, optional): Debug port to attach to.
+- `host` (string, optional): Host to attach to (default: `localhost`).
+- `processId` (number or string, optional): Process ID, for local attach — language-specific. C/C++ attach is **PID-only**: a host/port attach is rejected as an unsupported operation.
+- `timeout` (number, optional): Connection timeout in milliseconds (default: `30000`).
+- `verifyTimeout` (number, optional): How long to wait (ms) for the debugger to report at least one thread after attaching before failing the attach (default: `20000`, max: `600000`). Decrease for fast failure-by-design probes; increase for targets that are exceptionally slow to become debuggable. Not used when `stopOnEntry: false` — that path performs no thread verification.
+- `sourcePaths` (string[], optional): Source paths for code mapping.
+- `stopOnEntry` (boolean, optional): Request a pause immediately after attaching. Anything but `false` — including omitting it — takes the verified path described above; `false` skips both the thread verification and the post-attach pause, and the attach returns `state: "running"`.
+- `justMyCode` (boolean, optional): Only debug user code (skip library code).
+- `breakOnExceptions` (string, optional): `"uncaught"`, `"all"`, or `"none"` — same mode semantics as on `start_debugging`, but attach never applies a language default: it stays `"none"` unless requested.
+- `adapterConfig` (object, optional): Adapter-specific attach extras, merged into the attach config before the adapter transforms it, mirroring `start_debugging`'s `adapterLaunchConfig` (C/C++/LLDB example: `{"program": "/proc/1/root/pricer"}` for symbol resolution from a kubectl-debug ephemeral container, or `initCommands`; Python example: `{"pathMappings": [{"localRoot": "/home/user/checkout/src", "remoteRoot": "/app"}]}` so breakpoints at local-checkout paths bind against a remote debugpy, issue #450). Reserved keys `request`/`__attachMode` are ignored with a warning; set `stopOnEntry` via the top-level parameter.
+
+**Response:**
+```json
+{
+  "success": true,
+  "state": "paused",
+  "message": "Attached to process at 127.0.0.1:5678",
+  "data": {
+    "message": "Attached to process at 127.0.0.1:5678"
+  }
+}
+```
+
+**Notes:**
+- `state` is `"paused"` only once a stopped event has actually been observed; otherwise the attach reports `"running"`. When a requested post-attach pause is accepted but its stopped event has not arrived within the bounded wait, the response is successful with `state: "running"` and `pending: true` (at the top level and in `data`); the late stopped event is the only transition to `paused`, and every paused session has a `lastStop`.
+- When `processId` was used, the message reads `Attached to process PID <pid>` instead.
+- The response `warning` reports two distinct `adapterConfig` key outcomes (issues #450/#466): keys the adapter's attach transform genuinely drops (e.g. Python's ptvsd-era `localRoot`/`remoteRoot` — use `pathMappings`) are named as **ignored**, while keys mcp-debugger doesn't recognize are **forwarded to the adapter as-is** and named with an edit-distance suggestion for near-misses (`pathMapping (did you mean pathMappings?)`) — "ignored" means dropped, "forwarded as-is" means the adapter still sees them. The same field also carries the launch-style warning for function breakpoints still unverified at attach (issue #308).
+- js-debug attach honors `adapterConfig` too: `localRoot`/`remoteRoot`/`sourceMaps`/`skipFiles`/`continueOnAttach` and other js-debug attach options reach the debugger (issue #466).
+- Breakpoints set before the attach are re-sent once the debuggee-owning session is provably live, so their verified state in `list_breakpoints` is authoritative.
+- Languages whose adapter has no attach implementation (`rust`, `go`, `mock`) fail fast with a clear error.
+- A failed attach reports `success: false` with the reason in `message` (`Failed to attach: ...`) and tears the proxy down, so no live proxy is left behind; `state` is then `"error"` (or `"stopped"` if the session was already gone). When the failure happened during proxy initialization, `data` carries `proxyLogPath`, `proxyLogResource`, and `initProgress` diagnostics. Session-lifecycle failures (unknown or terminated session) return the standard application-level `error` payload instead — see [Error Handling](#error-handling).
+
+---
+
+### detach_from_process
+
+Detaches the debugger from an attached process, leaving the process running.
+
+**Parameters:**
+- `sessionId` (string, required): The ID of the debug session.
+- `terminateProcess` (boolean, optional): Terminate the process on detach (default: `false`).
+
+**Response:**
+```json
+{
+  "success": true,
+  "state": "stopped",
+  "message": "Detached from process (process still running)",
+  "data": {
+    "message": "Detached from process (process still running)"
+  }
+}
+```
+
+**Notes:**
+- With `terminateProcess: true` the whole session is closed and the message reads `Detached and terminated process`.
+- Detaching sends DAP `disconnect` with `terminateDebuggee: false`, then stops the proxy; the session ends in `"stopped"` either way, so a later re-attach needs a new session.
+- Detaching a session with no active debug process reports `success: false` with `No active debug session to detach from` in `message`.
+
+---
+
+### list_threads
+
+Lists all threads in the debugged process. Thread ids from here are what `get_stack_trace`'s and `pause_execution`'s `threadId` parameters accept.
+
+**Parameters:**
+- `sessionId` (string, required): The ID of the debug session.
+
+**Response:**
+```json
+{
+  "success": true,
+  "threads": [
+    { "id": 1, "name": "MainThread" },
+    { "id": 2, "name": "worker-0" }
+  ]
+}
+```
+
+**Notes:**
+- Requires a live debug process: an unknown or terminated session, or one whose proxy is not running, returns an application-level failure (see [Error Handling](#error-handling)).
+- A failed DAP `threads` response is propagated as an error rather than flattened into an empty-but-successful list (issue #124).
 
 ---
 
@@ -1206,7 +1386,3 @@ Session-lifecycle failures (unknown/terminated session, proxy not running) are a
 3. **Get scopes before variables** - you need the variablesReference
 4. **Handle session termination** gracefully - sessions can end unexpectedly
 5. **Set breakpoints on executable lines** - avoid comments and declarations
-
----
-
-*Last updated: 2026-08-19 based on source code review of mcp-debugger v0.24.0 (28 tools)*

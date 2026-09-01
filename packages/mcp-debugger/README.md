@@ -36,6 +36,23 @@ mcp-debugger sse --port 3001
 mcp-debugger http --port 3001
 ```
 
+### Diagnose your setup
+```bash
+mcp-debugger doctor                # report every adapter (informational, always exits 0)
+mcp-debugger doctor python go      # gate the exit code on the named languages
+mcp-debugger doctor --json
+```
+
+`doctor` probes each adapter's runtime and debug backend in one pass, then prints a
+verdict per language plus the fixes for anything that needs attention. Run it first
+whenever a language is reported unavailable or a launch fails before your program
+starts. With language arguments it exits `1` when any requested language is `broken`,
+`missing`, `disabled`, or unknown (and `2` when doctor itself fails); with no arguments
+it always exits `0`. `--timeout <ms>` caps each language's probe (default 10000).
+
+See the [diagnostics guide](https://github.com/debugmcp/mcp-debugger/blob/main/docs/diagnostics.md)
+for per-language prerequisites and failure signatures.
+
 ## Batteries-Included Adapters
 
 All language adapters are bundled into the CLI package. No separate installation is needed. The following adapters are included:
@@ -63,7 +80,7 @@ All language adapters are bundled into the CLI package. No separate installation
 
 > **CodeLLDB platform note:** the CodeLLDB debug engine ships via per-platform optional dependencies (`@debugmcp/codelldb-<platform>`) — npm installs exactly the one matching your os/cpu, so Rust and C/C++ debugging work out of the box on Windows, macOS, and Linux. Installs with `--omit=optional` skip it; point `CODELLDB_PATH` at a [CodeLLDB](https://github.com/vadimcn/codelldb/releases) binary instead, or use the Docker image.
 
-**Attach without a toolchain:** direct-connect attach modes (Python `debugpy --listen`, Ruby `rdbg --open`, Java JDWP) need no local language toolchain — the debug engine runs inside the target. `list_supported_languages` reports per-mode availability with reasons.
+**Attach without a toolchain:** only **Python** (`debugpy --listen`) and **Ruby** (`rdbg --open`) attach *direct-connect* — the debug engine already runs inside the target, so the debugger host needs no Python or Ruby. JavaScript, Java, .NET and C/C++ spawn a local adapter for attach (`modes.attach: 'spawn'`) and so do need their toolchain on the debugger host — the Java JDI bridge, for instance, runs locally on the host JDK and connects out over JDWP. `list_supported_languages` reports per-mode availability with reasons.
 
 ### Useful environment variables
 
@@ -86,12 +103,20 @@ Analyzes a Rust executable to determine whether it was built with the GNU or MSV
 
 ## Options
 
-### Common options (all commands)
-- `--log-level <level>` - Set log level (error, warn, info, debug)
+### Server options (`stdio`, `sse`, `http`)
+- `-l, --log-level <level>` - Set log level (error, warn, info, debug; default: info)
 - `--log-file <path>` - Log to file instead of console
 
 ### SSE and HTTP options
 - `-p, --port <number>` - Port for SSE or HTTP mode (default: 3001)
+
+### `doctor` options
+- `[languages...]` - Languages to check and gate the exit code on (default: report all, exit 0)
+- `--json` - Emit a machine-readable report
+- `--timeout <ms>` - Per-language probe timeout in milliseconds (default: 10000)
+
+### `check-rust-binary` options
+- `--json` - Emit a machine-readable report
 
 ## Documentation
 

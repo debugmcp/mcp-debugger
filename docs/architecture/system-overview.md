@@ -56,7 +56,8 @@ graph TB
 - **Key Files**: 
   - `src/server.ts` - `DebugMcpServer`, the composition root: dependencies, lifecycle, session validation, breakpoint gating and the public facade methods; implements `ToolContext`
   - `src/server/` - tool schemas (`tool-schemas.ts`), argument coercion (`tool-arguments.ts`), the tools/call dispatch wrapper (`tool-dispatch.ts` over `handlers/index.ts`), argument validation (`tool-validation.ts`), result envelopes and the session-error catch helpers (`tool-result.ts`), one handler module per tool family (`handlers/*.ts`) over their shared helpers (`handlers/shared.ts`), and the resource (`output-resources.ts`) and prompt (`prompts.ts`) handlers
-  - `src/index.ts` - CLI entry point with subcommands (stdio, http, sse [deprecated], check-rust-binary)
+  - `src/index.ts` - CLI entry point; the five subcommands are wired in `src/cli/setup.ts`: `stdio` (default), `http` (Streamable HTTP, recommended, `-p/--port`, default 3001), `sse` (DEPRECATED — use `http`), `doctor` (toolchain self-check), `check-rust-binary`
+  - `src/server/output-resources.ts` - the MCP resource handlers: `debug://sessions/{id}/output` (subscribable plain-text transcript of captured debuggee output, coalesced `resources/updated` notifications) and `debug://sessions/{id}/proxy-log` (a sanitized, bounded tail of the session's proxy log — 64 KiB / 80 lines, on-demand snapshot, not subscribable, and listed only once the session has a log directory)
 - **Responsibilities**:
   - Handle MCP tool registration and routing
   - Manage server lifecycle and transport modes
@@ -109,12 +110,13 @@ graph TB
     'adapter-configured': () => void;
     'adapter-capabilities': (capabilities: Capabilities) => void;
     'function-breakpoints-synced': (results: FunctionBreakpointSyncResult[]) => void;
+    'breakpoints-synced': (results: BreakpointSyncResult[]) => void;
     'dap-event': (event: string, body: unknown) => void;
   }
   ```
 
 ### 4. DAP Proxy Architecture (`src/proxy/dap-proxy-*.ts`)
-The proxy system follows a three-layer architecture:
+The proxy system follows a three-layer architecture, plus a shared log-layout module:
 
 #### a. ProxyRunner (`src/proxy/dap-proxy-core.ts`)
 - **Purpose**: Orchestration/lifecycle code that centralizes worker startup, transport setup, and process-level error handling. Despite its framing, this file performs real side effects (touches `process`, timers, stdio, IPC, and exits the process).
@@ -148,6 +150,12 @@ The proxy system follows a three-layer architecture:
   - Spawns the debug adapter with proper arguments
   - Handles process monitoring and cleanup
   - Manages stdout/stderr streams
+
+#### d. Session log layout (`src/proxy/session-log-layout.ts`)
+- **Purpose**: The dependency-free naming contract for one debug session's on-disk logs, so a diagnostic path can never drift from the file that was actually written. It is bundled into the proxy worker, so it depends only on `node:path`.
+- **Functions**: `sessionRunDirectoryFor(base, sessionId, startedAt)` (one directory per launch attempt, `run-<startedAt>`), `proxyLogPathFor(runDirectory, sessionId)` (`proxy-<sessionId>.log`), `adapterLogPathFor` (`<sessionId>.log`), `dapTracePathFor` (`dap-trace-<sessionId>.ndjson`, used only when `DAP_TRACE=1`/`true` opts the session into per-frame tracing; an explicit `DAP_TRACE_FILE` overrides the path).
+- **Default base**: `<os.tmpdir()>/debug-mcp-server/sessions/<sessionId>/run-<startedAt>/` (overridable via the session manager's `logDirBase` config).
+- **Readers**: the launch failure diagnostics (`src/session/launch/proxy-failure-diagnostics.ts`) and the `debug://sessions/{id}/proxy-log` MCP resource both read the proxy log back through `proxyLogPathFor`.
 
 ## Data Flow Sequence
 
@@ -207,9 +215,9 @@ sequenceDiagram
 
 ### Core Technologies
 - **Runtime**: Node.js 22+ with ES modules
-- **Language**: TypeScript 5.x with strict mode
+- **Language**: TypeScript 6.x with strict mode (`typescript` `^6.0.2`)
 - **Protocol**: Model Context Protocol (MCP) over stdio or Streamable HTTP (legacy SSE deprecated)
-- **Debugging**: Debug Adapter Protocol (DAP) 1.51.0
+- **Debugging**: Debug Adapter Protocol (DAP), via the `@vscode/debugprotocol` types the packages depend on -- no single spec revision is pinned in this repo
 - **Testing**: Vitest with 90%+ coverage
 - **Bundling**: tsup with `noExternal` for self-contained distributions
 
@@ -255,7 +263,7 @@ node dist/index.js sse -p 3001          # SSE mode (deprecated)
 - Uses bundled versions for minimal image size
 
 ### 4. Python Launcher
-- `mcp-debugger-launcher` package provides easy installation
+- `debug-mcp-server-launcher` on PyPI provides a `debug-mcp-server` entry point
 - Auto-detects Docker or falls back to local Node.js
 
 ## Bundle Architecture

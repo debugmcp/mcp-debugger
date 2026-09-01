@@ -58,7 +58,7 @@ If your agent runs in a terminal, a pipeline, or a cloud sandbox — or needs to
 - 🔷 **.NET/C# debugging via netcoredbg** – Debug .NET applications with full DAP support
 - ⚙️ **C/C++ debugging via CodeLLDB** – Launch prebuilt binaries or lone source files (auto-compiled), attach by PID; core dumps and gdbserver/rr targets via config pass-through
 - 🧪 **Mock adapter for testing** – Test without external dependencies
-- 🛰️ **Out-of-IDE & remote attach** – Attach over host/port to a process on another machine or inside a container (Python via debugpy, Ruby via rdbg, JavaScript via the V8 inspector, Java via JDWP) with source-path mapping, or by PID for native code (C/C++) — direct-connect attach needs no local toolchain, and `list_supported_languages` reports per-mode availability with reasons
+- 🛰️ **Out-of-IDE & remote attach** – Attach over host/port to a process on another machine or inside a container (Python via debugpy, Ruby via rdbg, JavaScript via the V8 inspector, Java via JDWP) with source-path mapping, or by PID for native code (C/C++). Python and Ruby attach *direct-connect* — the debug engine already runs inside the target, so no local Python or Ruby is needed; JavaScript, Java, .NET and C/C++ spawn a local adapter instead; of those, only Java (a JDK) and .NET (netcoredbg) need a toolchain you install, since the JavaScript and C/C++ debug engines ship with the package. `list_supported_languages` reports per-mode availability with reasons
 - 🎯 **Breakpoints that survive edits** – Address by content (`statement: "total = sum(prices)"`), by symbol (`function: "main"`), or assert line content with `expectedContent`; anchors re-resolve across `restart_debugging` and weak matches warn loudly
 - 🪵 **Logpoints** – `set_breakpoint` with `logMessage: "x={x}"` streams interpolated values into `get_output` without pausing — prod-safe value watching on hot paths
 - 🧰 **Full breakpoint lifecycle** – `list_breakpoints` / `remove_breakpoint` / `clear_breakpoints` work live mid-run; `restart_debugging` relaunches with the same config and re-applies everything in one call
@@ -177,6 +177,31 @@ Or use without installation via npx:
 npx @debugmcp/mcp-debugger --help
 ```
 
+### Over the network (Streamable HTTP)
+
+`stdio` is the default and is what most clients want. When the server has to run somewhere else
+— a CI runner, a container, a Kubernetes pod — start it on a port instead:
+
+```bash
+mcp-debugger http --port 3001            # or: node dist/index.js http -p 3001
+```
+
+and point the client at it:
+
+```json
+{
+  "mcpServers": {
+    "mcp-debugger": {
+      "type": "http",
+      "url": "http://127.0.0.1:3001/mcp"
+    }
+  }
+}
+```
+
+The port defaults to 3001. `GET /health` on the same port answers a liveness check. The legacy
+`sse` subcommand still exists but is deprecated — use `http`.
+
 ## 📚 How It Works
 
 mcp-debugger exposes debugging operations as MCP tools that can be called with structured JSON parameters:
@@ -293,7 +318,7 @@ def swap_variables(a, b):
 // Request:
 {
   "sessionId": "a4d1acc8-84a8-44fe-a13e-28628c5b33c7",
-  "file": "buggy_swap.py",
+  "file": "C:\\path\\to\\buggy_swap.py",
   "line": 2
 }
 // Response:
@@ -314,15 +339,15 @@ def swap_variables(a, b):
 // Request:
 {
   "sessionId": "a4d1acc8-84a8-44fe-a13e-28628c5b33c7",
-  "scriptPath": "buggy_swap.py"
+  "scriptPath": "C:\\path\\to\\buggy_swap.py"
 }
 // Response:
 {
   "success": true,
   "state": "paused",
-  "message": "Debugging started for buggy_swap.py. Current state: paused",
+  "message": "Debugging started for C:\\path\\to\\buggy_swap.py. Current state: paused",
   "data": {
-    "message": "Debugging started for buggy_swap.py. Current state: paused",
+    "message": "Debugging started for C:\\path\\to\\buggy_swap.py. Current state: paused",
     "reason": "breakpoint"
   }
 }
@@ -390,7 +415,7 @@ Then get the local variables:
 - 🔧 [Adapter Development](./docs/architecture/adapter-development-guide.md) – Add new languages
 - 🔌 [Dynamic Loading Architecture](./docs/architecture/dynamic-loading-architecture.md) – Runtime discovery, lazy loading, caching
 - 🧩 [Adapter API Reference](./docs/architecture/adapter-api-reference.md) – Adapter, factory, loader, and registry contracts
-- 🔄 [Migration Guide](./docs/migration-guide.md) – Upgrading to v0.15.0 (dynamic loading)
+- 🔄 [CHANGELOG](./CHANGELOG.md) – Release history and upgrade notes
 - 🐍 [Python Debugging Guide](./docs/python/README.md) – Python-specific features
 - 💎 [Ruby Debugging Guide](./docs/ruby/README.md) – Ruby debugging with `rdbg`, including remote attach
 - 🔬 [Case Study: the initialize response that never came](./docs/case-studies/rdbg-initialize-response-stall.md) – mcp-debugger debugging itself to root-cause a Ruby launch stall
