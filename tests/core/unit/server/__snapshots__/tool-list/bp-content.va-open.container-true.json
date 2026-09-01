@@ -97,7 +97,7 @@
             },
             "function": {
               "type": "string",
-              "description": "Address by symbol name instead of file location: break on entry to this function/method (DAP function breakpoint). No file or line needed — names survive edits better than both. Composes with condition only. Supported by Python, Go, Rust, C/C++, .NET, Java, and JavaScript adapters. JavaScript names are dotted runtime paths (e.g. \"handler\" or \"obj.method\") bound to the current function value: top-level function declarations of the main module bind at launch; functions in modules loaded later bind at the next pause"
+              "description": "Address by symbol name instead of file location: break on entry to this function/method (DAP function breakpoint). No file or line needed — names survive edits better than both. Composes with condition only. Supported by Python, Go, Rust, C/C++, .NET, Java, and JavaScript adapters; not by Ruby (rdbg ignores the request). JavaScript names are dotted runtime paths (e.g. \"handler\" or \"obj.method\") bound to the current function value: top-level function declarations of the main module bind at launch; functions in modules loaded later bind at the next pause"
             },
             "condition": {
               "type": "string",
