@@ -539,7 +539,8 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
   supportsFeature(feature: DebugFeature): boolean {
     const supportedFeatures = [
       DebugFeature.CONDITIONAL_BREAKPOINTS,
-      DebugFeature.FUNCTION_BREAKPOINTS,
+      // FUNCTION_BREAKPOINTS deliberately absent: rdbg accepts the request and
+      // ignores it (#636).
       DebugFeature.EXCEPTION_BREAKPOINTS,
       DebugFeature.EVALUATE_FOR_HOVERS,
       DebugFeature.TERMINATE_REQUEST
@@ -570,7 +571,9 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
   getCapabilities(): AdapterCapabilities {
     return {
       supportsConfigurationDoneRequest: true,
-      supportsFunctionBreakpoints: true,
+      // rdbg advertises this capability but its handler is a no-op stub; the
+      // Ruby policy pins false and this self-report must agree (#636).
+      supportsFunctionBreakpoints: false,
       supportsConditionalBreakpoints: true,
       supportsHitConditionalBreakpoints: true,
       supportsEvaluateForHovers: true,

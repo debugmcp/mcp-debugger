@@ -51,19 +51,19 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
   readonly language = DebugLanguage.JAVA;
   readonly name = 'Java Debug Adapter (JDI)';
 
-  // Keys the JDI bridge's attach handler reads (JdiDapServer.handleAttach)
-  // plus the generic keys transformAttachConfig special-cases. Unlisted keys
-  // still reach the bridge (forwarded with a warning) — this list only powers
-  // recognition + typo suggestions (#466).
+  // Keys that do something on the attach path: what the JDI bridge's attach
+  // handler reads (JdiDapServer.handleAttach: host/hostName, port,
+  // stopOnEntry) plus generic keys the attach machinery consumes. Unlisted
+  // keys still reach the bridge (forwarded with a warning) — this list only
+  // powers recognition + typo suggestions (#466). cwd/env are deliberately
+  // absent: attach never spawns a process, so they are launch-only (#642).
   readonly supportedAttachKeys = [
     'host',
     'hostName',
     'port',
     'stopOnEntry',
     'timeout',
-    'sourcePaths',
-    'cwd',
-    'env'
+    'sourcePaths'
   ] as const;
 
   private state: AdapterState = AdapterState.UNINITIALIZED;
