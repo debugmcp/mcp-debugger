@@ -13,7 +13,8 @@ class DebugMCPLauncher:
     
     NPM_PACKAGE = "@debugmcp/mcp-debugger"
     DOCKER_IMAGE = "debugmcp/mcp-debugger:latest"
-    DEFAULT_SSE_PORT = 3001
+    DEFAULT_SSE_PORT = 3001  # shared by http and (deprecated) sse modes
+    PORTED_MODES = ("http", "sse")
     
     def __init__(self, verbose: bool = False):
         self.verbose = verbose
@@ -34,22 +35,29 @@ class DebugMCPLauncher:
         default; Docker must always pin --port to match its -p mapping.
         """
         cmd = ["npx", self.NPM_PACKAGE, mode]
-        if mode == "sse" and port:
+        if mode in self.PORTED_MODES and port:
             cmd.extend(["--port", str(port)])
         return cmd
 
-    def build_docker_command(self, mode: str = "stdio", port: Optional[int] = None) -> List[str]:
+    def build_docker_command(self, mode: str = "stdio", port: Optional[int] = None,
+                             workspace_dir: Optional[str] = None) -> List[str]:
         """Build the docker run command.
 
         Single source of truth for both the real launch and --dry-run (issue
         #345).
         """
-        cmd = ["docker", "run", "-it", "--rm"]
-        if mode == "sse":
+        # -i (not -it): stdio transport runs against pipes, and allocating a
+        # TTY against a non-TTY stdin fails ("the input device is not a TTY");
+        # -i + --rm is also the pairing that lets the container exit and clean
+        # up when the client disconnects (issue #633). The workspace mount is
+        # what makes the caller's files debuggable inside the container.
+        workspace = workspace_dir or os.getcwd()
+        cmd = ["docker", "run", "-i", "--rm", "-v", f"{workspace}:/workspace"]
+        if mode in self.PORTED_MODES:
             actual_port = port or self.DEFAULT_SSE_PORT
             cmd.extend(["-p", f"{actual_port}:{actual_port}"])
         cmd.extend([self.DOCKER_IMAGE, mode])
-        if mode == "sse":
+        if mode in self.PORTED_MODES:
             # Always forward the port the -p mapping was built with, so the
             # in-container server listens on the mapped port even when the
             # caller relied on DEFAULT_SSE_PORT.

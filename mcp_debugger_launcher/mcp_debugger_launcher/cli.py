@@ -13,8 +13,33 @@ except ImportError:
     from launcher import DebugMCPLauncher
     from detectors import RuntimeDetector
 
-# Package version - should match pyproject.toml
-__version__ = "0.11.1"
+
+def _display_command(cmd):
+    """Render an argv list as a pasteable shell command for --dry-run.
+
+    The docker mount arg embeds os.getcwd(), which contains spaces on the
+    common Windows default (C:\\Users\\First Last\\...); a bare ' '.join would
+    print a line that re-splits wrong when pasted (issue #641). Quote per the
+    host shell: list2cmdline for Windows cmd, shlex.quote for POSIX.
+    """
+    if os.name == "nt":
+        import subprocess
+        return subprocess.list2cmdline(cmd)
+    import shlex
+    return " ".join(shlex.quote(part) for part in cmd)
+
+# Version comes from the installed package metadata, so pyproject.toml (as
+# stamped by the release workflow) is the single source of truth; the
+# hardcoded predecessor had drifted six minors behind the published package
+# (issue #641). The fallback covers running straight from a source tree.
+try:
+    from importlib.metadata import PackageNotFoundError, version as _package_version
+    try:
+        __version__ = _package_version("debug-mcp-server-launcher")
+    except PackageNotFoundError:
+        __version__ = "0.0.0+source"
+except ImportError:  # pragma: no cover - importlib.metadata is stdlib on 3.8+
+    __version__ = "0.0.0+source"
 
 def print_runtime_status(runtimes: dict, verbose: bool = False):
     """Print the status of available runtimes."""
@@ -72,8 +97,8 @@ def check_debugpy():
         return True, "unknown"
 
 @click.command(context_settings=dict(help_option_names=['-h', '--help']))
-@click.argument('mode', default='stdio', type=click.Choice(['stdio', 'sse']))
-@click.option('--port', '-p', type=int, help='Port for SSE mode (default: 3001)')
+@click.argument('mode', default='stdio', type=click.Choice(['stdio', 'http', 'sse']))
+@click.option('--port', '-p', type=int, help='Port for http/sse mode (default: 3001)')
 @click.option('--docker', is_flag=True, help='Force Docker mode')
 @click.option('--npm', is_flag=True, help='Force npm/npx mode')
 @click.option('--dry-run', is_flag=True, help='Show what command would be executed')
@@ -82,16 +107,21 @@ def check_debugpy():
 def main(mode: str, port: Optional[int], docker: bool, npm: bool, 
          dry_run: bool, verbose: bool):
     """
-    Launch the debug-mcp-server in either stdio or sse mode.
-    
+    Launch the debug-mcp-server in stdio (default), http, or sse mode.
+
     \b
     Examples:
-      debug-mcp-server              # Launch in stdio mode (default)
-      debug-mcp-server sse          # Launch in SSE mode
-      debug-mcp-server sse -p 8080  # SSE mode with custom port
-      debug-mcp-server --docker     # Force Docker mode
-      debug-mcp-server --npm        # Force npm mode
+      debug-mcp-server               # Launch in stdio mode (default)
+      debug-mcp-server http          # Streamable HTTP mode (recommended for remote)
+      debug-mcp-server http -p 8080  # HTTP mode with custom port
+      debug-mcp-server sse           # SSE mode (DEPRECATED: use http)
+      debug-mcp-server --docker      # Force Docker mode
+      debug-mcp-server --npm         # Force npm mode
     """
+
+    if mode == "sse":
+        print("Warning: sse mode is deprecated - use http (Streamable HTTP) instead.", file=sys.stderr)
+        print(file=sys.stderr)
     
     # Check debugpy for backward compatibility
     debugpy_available, debugpy_version = check_debugpy()
@@ -150,7 +180,7 @@ def main(mode: str, port: Optional[int], docker: bool, npm: bool,
     
     # Display what we're going to do
     print(f"\n🎯 Mode: {mode.upper()}")
-    if mode == "sse":
+    if mode in DebugMCPLauncher.PORTED_MODES:
         actual_port = port or DebugMCPLauncher.DEFAULT_SSE_PORT
         print(f"🔌 Port: {actual_port}")
     print(f"🏃 Runtime: {runtime.upper()}")
@@ -164,7 +194,7 @@ def main(mode: str, port: Optional[int], docker: bool, npm: bool,
             # Same builder as the real launch (issue #345): dry-run output can
             # never drift from the executed command.
             cmd = launcher.build_npx_command(mode, port)
-            print(f"\n🔍 Would execute: {' '.join(cmd)}")
+            print(f"\n🔍 Would execute: {_display_command(cmd)}")
             sys.exit(0)
 
         # Check if we need to provide installation instructions
@@ -183,7 +213,7 @@ def main(mode: str, port: Optional[int], docker: bool, npm: bool,
             # Same builder as the real launch (issue #345): dry-run output can
             # never drift from the executed command.
             cmd = launcher.build_docker_command(mode, port)
-            print(f"\n🔍 Would execute: {' '.join(cmd)}")
+            print(f"\n🔍 Would execute: {_display_command(cmd)}")
             sys.exit(0)
 
         print("\n" + "─" * 40)
