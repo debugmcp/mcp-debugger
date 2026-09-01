@@ -131,8 +131,9 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
         error: 'Debugger not in valid state'
       });
 
+      // A failed step is data for the handler's envelope, not a throw (#638)
       await expect(server.stepOver('test-session'))
-        .rejects.toThrow('Debugger not in valid state');
+        .resolves.toEqual({ success: false, error: 'Debugger not in valid state' });
     });
 
     it('should handle stepInto failure', async () => {
@@ -147,7 +148,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       });
 
       await expect(server.stepInto('test-session'))
-        .rejects.toThrow('Cannot step into native code');
+        .resolves.toEqual({ success: false, error: 'Cannot step into native code' });
     });
 
     it('should handle stepOut failure', async () => {
@@ -162,7 +163,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       });
 
       await expect(server.stepOut('test-session'))
-        .rejects.toThrow('Already at top level');
+        .resolves.toEqual({ success: false, error: 'Already at top level' });
     });
 
     it('should handle continue execution failure', async () => {
@@ -177,7 +178,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       });
 
       await expect(server.continueExecution('test-session'))
-        .rejects.toThrow('Process has terminated');
+        .resolves.toEqual({ success: false, error: 'Process has terminated' });
     });
 
     it('should handle getStackTrace without proxy manager', async () => {
@@ -646,7 +647,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
     it('continueExecution resolves when session manager succeeds', async () => {
       mockSessionManager.continue.mockResolvedValue({ success: true });
 
-      await expect(server.continueExecution('test-session')).resolves.toBe(true);
+      await expect(server.continueExecution('test-session')).resolves.toEqual({ success: true });
       expect(mockSessionManager.continue).toHaveBeenCalledWith('test-session');
     });
 

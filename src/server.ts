@@ -560,40 +560,29 @@ export class DebugMcpServer implements ToolContext {
     return this.sessionManager.getLocalVariables(sessionId, includeSpecial, names);
   }
 
-  public async continueExecution(sessionId: string): Promise<boolean> {
+  // Step/continue return the controller's DebugResult verbatim, success or
+  // not — a failed result is data for the handler's envelope, which needs the
+  // state alongside the reason. Throwing `new Error(result.error)` here used
+  // to destroy everything but the message string (issue #638; pause always
+  // had it right). Typed session errors from the layers below still throw.
+  public async continueExecution(sessionId: string): Promise<DebugResult> {
     this.validateSession(sessionId);
-    const result = await this.sessionManager.continue(sessionId);
-    if (!result.success) {
-      throw new Error(result.error || 'Failed to continue execution');
-    }
-    return true;
+    return this.sessionManager.continue(sessionId);
   }
 
   public async stepOver(sessionId: string): Promise<DebugResult<StepResultData>> {
     this.validateSession(sessionId);
-    const result = await this.sessionManager.stepOver(sessionId);
-    if (!result.success) {
-      throw new Error(result.error || 'Failed to step over');
-    }
-    return result;
+    return this.sessionManager.stepOver(sessionId);
   }
 
   public async stepInto(sessionId: string): Promise<DebugResult<StepResultData>> {
     this.validateSession(sessionId);
-    const result = await this.sessionManager.stepInto(sessionId);
-    if (!result.success) {
-      throw new Error(result.error || 'Failed to step into');
-    }
-    return result;
+    return this.sessionManager.stepInto(sessionId);
   }
 
   public async stepOut(sessionId: string): Promise<DebugResult<StepResultData>> {
     this.validateSession(sessionId);
-    const result = await this.sessionManager.stepOut(sessionId);
-    if (!result.success) {
-      throw new Error(result.error || 'Failed to step out');
-    }
-    return result;
+    return this.sessionManager.stepOut(sessionId);
   }
 
   constructor(options: DebugMcpServerOptions = {}) {

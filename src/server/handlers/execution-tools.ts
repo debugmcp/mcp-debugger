@@ -34,11 +34,19 @@ export const stepTool: ToolHandler = async (ctx, args, toolName) => {
       stepResult = await ctx.stepOut(args.sessionId);
     }
 
-    // Build response with location and line context if available
     const stepType = toolName.replace('step_', '').replace('_', ' ');
+
+    // The controller's failure verdict is data, not an exception: surface the
+    // reason and the state it observed together (issue #638 — the facade used
+    // to throw here and only the message string survived).
+    if (!stepResult.success) {
+      return failureResult(stepResult.error ?? `Failed to step ${stepType}`, { state: stepResult.state });
+    }
+
+    // Build response with location and line context if available
     const resultData = stepResult.data;
     const response: Record<string, unknown> = {
-      success: stepResult.success,
+      success: true,
       message: `Stepped ${stepType}`,
       state: stepResult.state
     };
@@ -95,7 +103,12 @@ export const continueExecutionTool: ToolHandler = async (ctx, args) => {
 
   try {
     const continueResult = await ctx.continueExecution(args.sessionId);
-    return jsonResult({ success: continueResult, message: continueResult ? 'Continued execution' : 'Failed to continue execution' });
+    if (!continueResult.success) {
+      return failureResult(continueResult.error ?? 'Failed to continue execution', { state: continueResult.state });
+    }
+    // state is usually "running", but honestly reports "paused" when a
+    // breakpoint fired before the continue acknowledgement resolved.
+    return jsonResult({ success: true, message: 'Continued execution', state: continueResult.state });
   } catch (error) {
     // Same contract as the step tools: typed session errors and other
     // expected Errors report as {success: false}; non-Errors escape.
