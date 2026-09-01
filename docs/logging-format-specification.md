@@ -2,7 +2,9 @@
 
 ## Overview
 
-This document defines the structured logging format used by mcp-debugger for visualization purposes. Main server structured logs are written to `logs/debug-mcp-server-<pid>.log` in JSON format for easy parsing by the Terminal UI visualizer. The default log file name is per-process (`debug-mcp-server-<pid>.log`) because multiple server processes sharing one rotating winston log file is unsupported and busy-spins on Windows (issue #121); stale per-pid files from dead processes are cleaned up automatically after 7 days. The default log directory is derived from the module location (`<module-dir>/../../logs/` via `import.meta.url`); if that resolution fails (e.g., in test environments), the fallback is `process.cwd()/logs/`. In container mode (`MCP_CONTAINER=true`), the path is overridden to the fixed `/app/logs/debug-mcp-server.log` (a container runs a single server process). An explicit `--log-file <path>` is always honored verbatim. Note: other log files may exist alongside these (e.g., proxy process logs, rotated log files with numeric suffixes) — only the main server log follows this structured JSON specification.
+This document defines the structured logging format used by mcp-debugger for visualization purposes. Main server structured logs are written to `logs/debug-mcp-server-<pid>.log` in JSON format for easy parsing by the Terminal UI visualizer. The default log file name is per-process (`debug-mcp-server-<pid>.log`) because multiple server processes sharing one rotating winston log file is unsupported and busy-spins on Windows (issue #121); stale per-pid files from dead processes are cleaned up automatically after 7 days. The default log directory is derived from the module location (`<module-dir>/../../logs/` via `import.meta.url`); if that resolution fails (e.g., in test environments), the fallback is `process.cwd()/logs/`. In container mode (`MCP_CONTAINER=true`), the path is overridden to the fixed `/app/logs/debug-mcp-server.log` (a container runs a single server process). An explicit `--log-file <path>` is always honored verbatim. Note: only the main server log follows this structured JSON specification.
+
+**Per-session logs live elsewhere, in their own tree.** Since #572 one launch attempt gets one directory: `<sessionLogBase>/<sessionId>/run-<startedAt>/`, holding `proxy-<sessionId>.log`, `<sessionId>.log` (adapter) and, when `DAP_TRACE=1` is set, `dap-trace-<sessionId>.ndjson`. Every producer, reader and cleanup predicate derives those names from one module, `src/proxy/session-log-layout.ts` (`sessionRunDirectoryFor`, `proxyLogPathFor`, `adapterLogPathFor`, `dapTracePathFor`), so a diagnostic path cannot drift away from the file that was actually written. Read the proxy log without filesystem access through the `debug://sessions/{id}/proxy-log` MCP resource.
 
 ## Log Entry Types
 
@@ -276,7 +278,7 @@ logger.info('tool:call', {
   tool: toolName,
   sessionId: args.sessionId,
   sessionName: session?.name,
-  request: sanitizeRequest(args),
+  request: sanitizeRequest(args),   // src/server/tool-result.ts, called from tool-dispatch.ts
 });
 
 // State change logging

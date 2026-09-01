@@ -73,7 +73,9 @@ if (!session.proxyManager?.isRunning()) {
 The error handling uses a mixed strategy across three layers:
 
 1. **Implementation Layer (Backend)** - Uses typed `McpError` subclasses (e.g., `SessionNotFoundError`, `ProxyNotRunningError`) for infrastructure failures (unknown session, terminated session, proxy not running). These are defined in `src/errors/debug-errors.ts`. Operation-level failures (e.g., session not paused, missing thread ID) return structured `DebugResult` objects with `success: false` rather than throwing.
-2. **Server Layer** - The MCP server (`src/server.ts`) throws `McpError` directly for invalid parameters before reaching the session manager (e.g., missing `sessionId`) and for unexpected internal errors (wrapped as `McpError` with `InternalError`). The typed session-lifecycle errors (`SessionNotFoundError`, `SessionTerminatedError`, `ProxyNotRunningError`) -- thrown by the server's own `validateSession` pre-check and by the implementation layer -- are caught in each session-scoped tool handler and converted into a successful tool response whose JSON payload has `success: false, error: <message>` -- they are not propagated as protocol-level `McpError`. `DebugResult` failures are likewise returned as successful tool responses with `success: false`.
+2. **Server Layer** - Missing required parameters are rejected at the MCP boundary in `src/server/tool-dispatch.ts`, before handler dispatch, as an `McpError` with `InvalidParams`; unexpected internal errors are wrapped as `McpError` with `InternalError`. The typed session-lifecycle errors (`SessionNotFoundError`, `SessionTerminatedError`, `ProxyNotRunningError`) -- thrown by the server's own `validateSession` pre-check and by the implementation layer -- are converted into a *successful* tool response whose JSON payload has `success: false, error: <message>`; they are not propagated as protocol-level `McpError`. `DebugResult` failures are likewise returned as successful tool responses with `success: false`.
+
+   The conversion is not hand-written per handler. Four shared helpers in `src/server/tool-result.ts` own it -- `isTypedSessionError()`, `sessionErrorToResult()`, `sessionErrorResultOrThrow()` and `rethrowAsMcpError()` -- and the handlers themselves live in `src/server/handlers/*-tools.ts`, one module per tool family, over `src/server/handlers/shared.ts`. `src/server.ts` is a composition root: it holds `validateSession` and the public facade methods, not the request plumbing.
 3. **Client Layer** - Receives either a protocol-level MCP error (from invalid-parameter checks or unexpected internal errors) or a structured failure result with `success: false` (for typed session errors and `DebugResult` failures), depending on which layer the failure originated in
 
 ```typescript
@@ -86,21 +88,26 @@ async continue(sessionId: string): Promise<DebugResult> {
   // ... continue logic
 }
 
-// Server (catches typed session errors per-tool)
-try {
-  const continueResult = await this.continueExecution(sessionId);
-  result = { content: [{ type: 'text', text: JSON.stringify({ success: continueResult }) }] };
-} catch (error) {
-  if (error instanceof SessionTerminatedError ||
-      error instanceof SessionNotFoundError ||
-      error instanceof ProxyNotRunningError) {
-    result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-  } else if (error instanceof Error) {
-    result = { content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }] };
-  } else {
-    throw error;
+// Handler (src/server/handlers/execution-tools.ts). The classification is shared --
+// sessionErrorToResult() recognises the typed session errors -- so no handler
+// re-implements the instanceof chain.
+export const continueExecutionTool: ToolHandler = async (ctx, args) => {
+  requireSessionId(args);
+
+  try {
+    const continueResult = await ctx.continueExecution(args.sessionId);
+    return jsonResult({ success: continueResult, message: /* ... */ });
+  } catch (error) {
+    const sessionResult = sessionErrorToResult(error);
+    if (sessionResult) {
+      return sessionResult;          // typed session error -> { success: false }
+    }
+    if (error instanceof Error) {
+      return failureResult(error.message);
+    }
+    throw error;                     // non-Error escapes to the dispatch wrapper
   }
-}
+};
 
 // Client receives a successful tool response: { success: false, error: "Session not found: test-session" }
 ```

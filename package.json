@@ -103,6 +103,7 @@
     "lint:fix": "eslint src/**/*.ts --fix",
     "check:personal-paths": "node scripts/check-personal-paths.cjs",
     "check:all-personal-paths": "node scripts/check-all-personal-paths.cjs",
+    "check:docs": "node scripts/check-docs.mjs",
     "changelog:check": "node scripts/changelog-fragments.mjs --check",
     "changelog:collate": "node scripts/changelog-fragments.mjs --collate",
     "commit:safe": "scripts/safe-commit.sh",
