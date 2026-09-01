@@ -296,7 +296,9 @@ describe('RubyDebugAdapter', () => {
 
     expect(adapter.supportsFeature(DebugFeature.CONDITIONAL_BREAKPOINTS)).toBe(true);
     expect(adapter.supportsFeature(DebugFeature.DATA_BREAKPOINTS)).toBe(false);
-    expect(adapter.getCapabilities().supportsFunctionBreakpoints).toBe(true);
+    // rdbg advertises function breakpoints but its DAP handler ignores them (#636)
+    expect(adapter.supportsFeature(DebugFeature.FUNCTION_BREAKPOINTS)).toBe(false);
+    expect(adapter.getCapabilities().supportsFunctionBreakpoints).toBe(false);
 
     vi.spyOn(adapter, 'validateEnvironment').mockResolvedValue({ valid: true, errors: [], warnings: [] });
     await adapter.initialize();

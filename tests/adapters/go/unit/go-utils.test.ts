@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import { spawn } from 'child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,7 +23,11 @@ vi.mock('child_process', async (importOriginal: any) => {
 const mockSpawn = vi.mocked(spawn);
 
 describe('go-utils', () => {
-  let mockLogger: { debug: ReturnType<typeof vi.fn>; info: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
+  // Typed to the Logger shape go-utils accepts ((message: string) => void), so
+  // passing the mock into find*Executable type-checks instead of tripping the
+  // tests ratchet on Mock<Procedure | Constructable>.
+  type LogMethod = Mock<(message: string) => void>;
+  let mockLogger: { debug: LogMethod; info: LogMethod; error: LogMethod };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -109,6 +113,7 @@ describe('go-utils', () => {
         vi.stubEnv('HOME', home);
         vi.stubEnv('USERPROFILE', home);
         vi.stubEnv('PATH', '');
+        vi.stubEnv('DLV_PATH', undefined);
         vi.stubEnv('GOPATH', undefined);
         vi.stubEnv('GOBIN', undefined);
 
@@ -119,11 +124,52 @@ describe('go-utils', () => {
       it('should throw error if dlv not found', async () => {
         vi.spyOn(fs.promises, 'access').mockRejectedValue(new Error('Not found'));
         vi.stubEnv('PATH', '');
+        vi.stubEnv('DLV_PATH', undefined);
         vi.stubEnv('GOPATH', undefined);
         vi.stubEnv('GOBIN', undefined);
 
         await expect(findDelveExecutable(undefined, mockLogger))
           .rejects.toThrow('Delve (dlv) not found');
+      });
+
+      it('honors DLV_PATH when no preferred path is given (#639)', async () => {
+        const envPath = platform === 'win32' ? 'C:\\tools\\dlv.exe' : '/opt/tools/dlv';
+        vi.stubEnv('DLV_PATH', envPath);
+        vi.stubEnv('PATH', '');
+        vi.stubEnv('GOPATH', undefined);
+        vi.stubEnv('GOBIN', undefined);
+        vi.spyOn(fs.promises, 'access').mockImplementation(async (p) => {
+          if (p === envPath) return undefined;
+          throw new Error('Not found');
+        });
+
+        const result = await findDelveExecutable(undefined, mockLogger);
+        expect(result).toBe(envPath);
+        expect(mockLogger.debug).toHaveBeenCalledWith(expect.stringContaining('DLV_PATH'));
+      });
+
+      it('prefers an existing preferredPath over DLV_PATH (#639)', async () => {
+        const preferred = platform === 'win32' ? 'C:\\pref\\dlv.exe' : '/pref/dlv';
+        vi.stubEnv('DLV_PATH', platform === 'win32' ? 'C:\\tools\\dlv.exe' : '/opt/tools/dlv');
+        vi.spyOn(fs.promises, 'access').mockImplementation(async (p) => {
+          if (p === preferred) return undefined;
+          throw new Error('Not found');
+        });
+
+        const result = await findDelveExecutable(preferred, mockLogger);
+        expect(result).toBe(preferred);
+      });
+
+      it('falls through to discovery when DLV_PATH is set but missing, like a session would (#639)', async () => {
+        vi.stubEnv('DLV_PATH', platform === 'win32' ? 'C:\\gone\\dlv.exe' : '/gone/dlv');
+        vi.stubEnv('PATH', '');
+        vi.stubEnv('GOPATH', undefined);
+        vi.stubEnv('GOBIN', undefined);
+        vi.spyOn(fs.promises, 'access').mockRejectedValue(new Error('Not found'));
+
+        await expect(findDelveExecutable(undefined, mockLogger))
+          .rejects.toThrow('Delve (dlv) not found');
+        expect(mockLogger.debug).toHaveBeenCalledWith(expect.stringContaining('DLV_PATH is set but not found'));
       });
     });
   });

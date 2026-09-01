@@ -113,7 +113,7 @@ export interface ToolContext {
     anchorNote?: string;
     truncation?: VariableTruncationSummary;
   }>;
-  continueExecution(sessionId: string): Promise<boolean>;
+  continueExecution(sessionId: string): Promise<DebugResult>;
   stepOver(sessionId: string): Promise<DebugResult<StepResultData>>;
   stepInto(sessionId: string): Promise<DebugResult<StepResultData>>;
   stepOut(sessionId: string): Promise<DebugResult<StepResultData>>;
