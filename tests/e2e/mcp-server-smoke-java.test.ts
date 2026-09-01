@@ -518,4 +518,78 @@ describe('MCP Server Java Debugging Smoke Test @requires-java', () => {
     expect(terminal!.exitCode).toBe(0);
     console.log('[Java ExitCode Test] TEST PASSED — exitCode 0 surfaced');
   }, 60000);
+
+  it('applies launch cwd and env to the debuggee (issue #642)', async () => {
+    try {
+      execSync('java -version', { stdio: 'ignore' });
+      execSync('javac -version', { stdio: 'ignore' });
+    } catch {
+      console.log('[Java EnvCwd Test] Skipping — JDK not installed');
+      return;
+    }
+
+    const { sourcePath: testJavaFile, classDir: testClassDir, mainClass } = prepareJavaExample('EnvCwdTest');
+    // A directory that is definitely NOT the bridge's own working directory.
+    const requestedCwd = path.resolve(ROOT, 'examples');
+
+    const createResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: { language: 'java', name: 'java-env-cwd-test' }
+    }));
+    expect(createResponse.sessionId).toBeDefined();
+    sessionId = createResponse.sessionId as string;
+
+    const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'start_debugging',
+      arguments: {
+        sessionId,
+        scriptPath: testJavaFile,
+        args: [],
+        dapLaunchArgs: {
+          mainClass,
+          classpath: testClassDir,
+          cwd: requestedCwd,
+          env: { MCP_TEST_VAR: 'expected-642' },
+          stopOnEntry: false
+        }
+      }
+    }));
+    expect(startResponse.success).toBe(true);
+
+    // Run to completion, then read the captured output.
+    interface SessionSnapshot { id: string; state?: string }
+    let terminal: SessionSnapshot | undefined;
+    const deadline = Date.now() + 30000;
+    while (Date.now() < deadline) {
+      const listResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'list_debug_sessions',
+        arguments: {}
+      }));
+      const sessions = (listResponse.sessions ?? []) as SessionSnapshot[];
+      const snap = sessions.find(s => s.id === sessionId);
+      if (snap && (snap.state === 'stopped' || snap.state === 'error')) {
+        terminal = snap;
+        break;
+      }
+      await new Promise(r => setTimeout(r, 250));
+    }
+    expect(terminal?.state).toBe('stopped');
+
+    const outputResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'get_output',
+      arguments: { sessionId, limit: 100 }
+    }));
+    const outputText = ((outputResponse.entries ?? []) as Array<{ output?: string }>)
+      .map(e => e.output ?? '')
+      .join('');
+
+    // HARD ASSERTIONS: the env var reached the debuggee, and user.dir is the
+    // requested cwd rather than the bridge's inherited one.
+    expect(outputText).toContain('MCP_TEST_VAR=expected-642');
+    const cwdLine = outputText.split(/\r?\n/).find(l => l.startsWith('user.dir='));
+    expect(cwdLine).toBeDefined();
+    const reported = cwdLine!.slice('user.dir='.length).trim();
+    expect(path.resolve(reported).toLowerCase()).toBe(requestedCwd.toLowerCase());
+    console.log('[Java EnvCwd Test] TEST PASSED — cwd and env applied');
+  }, 60000);
 });
