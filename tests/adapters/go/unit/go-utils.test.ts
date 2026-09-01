@@ -129,7 +129,7 @@ describe('go-utils', () => {
       });
 
       it('honors DLV_PATH when no preferred path is given (#639)', async () => {
-        const envPath = platform === 'win32' ? 'C:\tools\dlv.exe' : '/opt/tools/dlv';
+        const envPath = platform === 'win32' ? 'C:\\tools\\dlv.exe' : '/opt/tools/dlv';
         vi.stubEnv('DLV_PATH', envPath);
         vi.stubEnv('PATH', '');
         vi.stubEnv('GOPATH', undefined);
@@ -145,8 +145,8 @@ describe('go-utils', () => {
       });
 
       it('prefers an existing preferredPath over DLV_PATH (#639)', async () => {
-        const preferred = platform === 'win32' ? 'C:\pref\dlv.exe' : '/pref/dlv';
-        vi.stubEnv('DLV_PATH', platform === 'win32' ? 'C:\tools\dlv.exe' : '/opt/tools/dlv');
+        const preferred = platform === 'win32' ? 'C:\\pref\\dlv.exe' : '/pref/dlv';
+        vi.stubEnv('DLV_PATH', platform === 'win32' ? 'C:\\tools\\dlv.exe' : '/opt/tools/dlv');
         vi.spyOn(fs.promises, 'access').mockImplementation(async (p) => {
           if (p === preferred) return undefined;
           throw new Error('Not found');
@@ -157,7 +157,7 @@ describe('go-utils', () => {
       });
 
       it('falls through to discovery when DLV_PATH is set but missing, like a session would (#639)', async () => {
-        vi.stubEnv('DLV_PATH', platform === 'win32' ? 'C:\gone\dlv.exe' : '/gone/dlv');
+        vi.stubEnv('DLV_PATH', platform === 'win32' ? 'C:\\gone\\dlv.exe' : '/gone/dlv');
         vi.stubEnv('PATH', '');
         vi.stubEnv('GOPATH', undefined);
         vi.stubEnv('GOBIN', undefined);
