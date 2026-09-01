@@ -73,6 +73,20 @@ export async function findDelveExecutable(
     logger?.debug?.(`[GoUtils] Preferred Delve path not found: ${preferredPath}`);
   }
 
+  // DLV_PATH: a debug session reaches this function with the env var already
+  // folded into preferredPath by the Go policy's resolveExecutablePath, so
+  // reading it here keeps bare callers (doctor's validate probe) in agreement
+  // with what a session would actually use (#639). Same tier semantics as
+  // preferredPath: use it when it exists, otherwise log and fall through.
+  const envPath = process.env.DLV_PATH;
+  if (envPath && envPath !== preferredPath) {
+    if (await fileExists(envPath)) {
+      logger?.debug?.(`[GoUtils] Using Delve from DLV_PATH: ${envPath}`);
+      return envPath;
+    }
+    logger?.debug?.(`[GoUtils] DLV_PATH is set but not found: ${envPath}`);
+  }
+
   // Try common Delve executable names
   const candidates = process.platform === 'win32'
     ? ['dlv.exe', 'dlv-dap.exe']
