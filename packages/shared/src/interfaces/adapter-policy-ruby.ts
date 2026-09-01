@@ -11,6 +11,13 @@ export const RubyAdapterPolicy: AdapterPolicy = {
   // logMessage, silently downgrading a logpoint into a pausing breakpoint —
   // the inverse of what a logpoint promises. Reject up front (issue #469).
   supportsLogPoints: false,
+  // rdbg's initialize response advertises supportsFunctionBreakpoints, but the
+  // gem's DAP handler is an acknowledge-and-ignore stub (debug 1.11.0
+  // server_dap.rb: `when 'setFunctionBreakpoints' then send_response req`) —
+  // the request succeeds on the wire and nothing ever binds. Pin false so the
+  // gate rejects up front instead of accept -> warn -> never bind; an explicit
+  // policy verdict deliberately outranks the (lying) live capabilities (#636).
+  supportsFunctionBreakpoints: false,
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
   buildChildStartArgs: () => {

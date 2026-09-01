@@ -77,7 +77,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
   },
   [DebugLanguage.RUBY]: {
     policyName: 'ruby',
-    supportsFunctionBreakpoints: undefined,
+    supportsFunctionBreakpoints: false,
     supportsLogPoints: false,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: undefined,
