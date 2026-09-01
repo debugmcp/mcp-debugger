@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import { spawn } from 'child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,7 +23,11 @@ vi.mock('child_process', async (importOriginal: any) => {
 const mockSpawn = vi.mocked(spawn);
 
 describe('go-utils', () => {
-  let mockLogger: { debug: ReturnType<typeof vi.fn>; info: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
+  // Typed to the Logger shape go-utils accepts ((message: string) => void), so
+  // passing the mock into find*Executable type-checks instead of tripping the
+  // tests ratchet on Mock<Procedure | Constructable>.
+  type LogMethod = Mock<(message: string) => void>;
+  let mockLogger: { debug: LogMethod; info: LogMethod; error: LogMethod };
 
   beforeEach(() => {
     vi.clearAllMocks();
