@@ -22,7 +22,6 @@
   "packages/shared/tests/unit/adapter-policy-cpp.test.ts": 3,
   "packages/shared/tests/unit/adapter-policy-rust.test.ts": 32,
   "tests/adapters/go/unit/go-debug-adapter.test.ts": 2,
-  "tests/adapters/go/unit/go-utils.test.ts": 6,
   "tests/adapters/java/unit/java-adapter-policy.test.ts": 55,
   "tests/adapters/python/integration/python-discovery.test.ts": 1,
   "tests/adapters/python/integration/python_debug_workflow.test.ts": 1,
