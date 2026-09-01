@@ -229,16 +229,33 @@ tcpdump -i lo0 port 5678
 
 ### 3. File System Monitoring
 
-```bash
-# Watch log directory
-watch -n 1 'ls -la logs/'
+The main server log and the per-session logs live in different places, and looking in
+the wrong one is the most common way to conclude "there are no logs".
 
-# Tail all logs
-tail -f logs/*.log
+```bash
+# Main server log (per-pid, issue #121)
+watch -n 1 'ls -la logs/'
+tail -f logs/debug-mcp-server-*.log
+
+# Per-session logs: one directory per LAUNCH ATTEMPT, under the OS temp dir.
+# Names come from src/proxy/session-log-layout.ts, so they cannot drift from
+# the files actually written.
+ls "${TMPDIR:-/tmp}"/debug-mcp-server/sessions/<sessionId>/run-*/
+#   proxy-<sessionId>.log        the DAP routing decisions
+#   <sessionId>.log              the adapter's own output
+#   dap-trace-<sessionId>.ndjson only when DAP_TRACE=1
 
 # Monitor file descriptor usage
 lsof -p $(pgrep -f "proxy-bootstrap")
 ```
+
+Reaching for the filesystem is often unnecessary. A failed `start_debugging` already
+carries the diagnostics with it (`src/session/launch/proxy-failure-diagnostics.ts`):
+`data.initProgress` says how far initialization got, and `data.proxyLogPath` plus
+`data.proxyLogResource` point at the log. The resource is the remote-safe route --
+read `debug://sessions/{id}/proxy-log` over MCP (a bounded 64 KiB / 80-line tail) when
+you have no shell in the container or pod. `debug://sessions/{id}/output` carries the
+debuggee's own stdout/stderr and supports `resources/subscribe`.
 
 ### 4. Memory Profiling
 
@@ -288,10 +305,10 @@ EventEmitter.prototype.emit = function(event: string, ...args: any[]) {
 npm test -- --reporter=verbose
 
 # Debug specific test
-DEBUG=* npm test -- tests/unit/proxy/proxy-manager.test.ts
+DEBUG=* npm test -- tests/unit/proxy/proxy-manager.start.test.ts
 
 # With Node debugging
-node --inspect-brk node_modules/.bin/vitest run tests/unit/session/session-manager.test.ts
+node --inspect-brk node_modules/.bin/vitest run tests/core/unit/session/session-manager-state.test.ts
 ```
 
 ### 2. Test Timeout Debugging
@@ -357,24 +374,45 @@ afterEach(() => {
 
 ### 2. Diagnostic Commands
 
-To add diagnostic tools, extend the `registerTools()` method in `src/server.ts`. Tools are registered via `ListToolsRequestSchema` and `CallToolRequestSchema` request handlers, not via a standalone `addTool()` API:
+Adding a tool touches three files, and the types make it impossible to do two of the three
+and forget the last one. `src/server.ts` is not one of them -- it is a composition root now,
+with no request handlers of its own.
+
+1. **Name it** in `TOOL_NAMES` (`src/server/tool-schemas.ts`). This is the tool namespace;
+   everything else is keyed off it.
+2. **Advertise it** by adding a schema to `buildToolDefinitions()` in the same file. The
+   return type rejects a schema whose name is not in `TOOL_NAMES`.
+3. **Handle it** by adding an entry to `TOOL_HANDLERS` (`src/server/handlers/index.ts`), a
+   `Readonly<Record<ToolName, ToolHandler>>`. A name in `TOOL_NAMES` with no handler, and a
+   handler under a name that is not in `TOOL_NAMES`, are both *compile* errors.
 
 ```typescript
-// Inside registerTools() in src/server.ts, add to the tools array in ListToolsRequestSchema handler:
-{ name: 'debug_diagnostics', description: 'Get diagnostic information',
-  inputSchema: { type: 'object', properties: {} } },
+// src/server/handlers/diagnostic-tools.ts
+export const debugDiagnosticsTool: ToolHandler = async (_ctx, _args) => {
+  return jsonResult({
+    pid: process.pid,
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    versions: process.versions
+  });
+};
 
-// And add a case in the CallToolRequestSchema handler's switch:
-case 'debug_diagnostics':
-  return {
-    content: [{ type: 'text', text: JSON.stringify({
-      pid: process.pid,
-      uptime: process.uptime(),
-      memory: process.memoryUsage(),
-      versions: process.versions
-    }, null, 2) }]
-  };
+// src/server/handlers/index.ts
+export const TOOL_HANDLERS: Readonly<Record<ToolName, ToolHandler>> = Object.freeze({
+  // ...
+  debug_diagnostics: debugDiagnosticsTool,
+});
 ```
+
+What the types do *not* enforce is that every name in `TOOL_NAMES` actually reaches
+`tools/list`, and in that order. The snapshot fence
+(`tests/core/unit/server/server-tool-list-snapshot.test.ts`) asserts that for every gating
+mode, so expect to run it with `-u` after a deliberate schema change -- it covers 24
+combinations of breakpoint-addressing, variable-access and container modes.
+
+Dispatch itself is `registerToolHandlers()` in `src/server/tool-dispatch.ts`: it validates
+`inputSchema.required` at the MCP boundary, looks the name up in `TOOL_HANDLERS`, and wraps
+the result. Handlers never re-implement that plumbing.
 
 ### 3. Health Checks
 
