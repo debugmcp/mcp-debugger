@@ -10,20 +10,20 @@ Mock debug adapter for testing the MCP Debugger. This package provides a fully f
 
 This package is designed to be used via pnpm workspaces within this monorepo.
 
-- Root package.json includes "@debugmcp/adapter-mock": "workspace:*"
+- Root package.json includes "@debugmcp/adapter-mock": "workspace:*" (the `workspace:*` protocol requires pnpm; npm cannot resolve it)
 - Build order ensures @debugmcp/shared builds before this package
 
 ## Build
 
-npm run build -w @debugmcp/adapter-mock
+pnpm --filter @debugmcp/adapter-mock run build
 
 ## Test
 
 - Run just this package’s tests:
-  npm test -w @debugmcp/adapter-mock
+  pnpm --filter @debugmcp/adapter-mock run test
 
 - Or run from repo root (Vitest is already configured to include packages/**):
-  npm test
+  pnpm test
 
 ## Exports
 
@@ -35,4 +35,4 @@ import type { MockAdapterConfig } from '@debugmcp/adapter-mock';
 - Primary path resolution for the mock-adapter-process uses import.meta.url when running from the compiled package.
 - A second fallback resolves the CJS bundle variant (mock-adapter-process.cjs) in the same directory as the compiled file, for the npx bundle scenario.
 - A third fallback (used only when import.meta.url resolution throws) resolves from the current working directory: packages/adapter-mock/dist/mock-adapter-process.js, for monorepo-root execution.
-- The mock-adapter-process supports a `--host` flag to specify the listening address (e.g., `--host=127.0.0.1`; defaults to `localhost`)
+- The mock-adapter-process supports a `--host` flag to specify the listening address, passed as a separate argument (e.g., `--host 127.0.0.1`); the `--host=127.0.0.1` form is not parsed and is silently ignored. Defaults to `localhost`

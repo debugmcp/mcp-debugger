@@ -1,74 +1,107 @@
 # Quickstart: mcp-debugger
 
-This guide will help you get started with `mcp-debugger` quickly, using real examples from testing conducted on 2025-06-11.
+The shortest path from nothing to a paused Python program. For the narrated version of the same
+path, see [Getting Started](./getting-started.md).
 
 ## Prerequisites
 
-- **Node.js** (v22+) and npm installed
-- **Python** (3.8+) with `debugpy` installed
-- **MCP Client** (Claude Desktop, or custom implementation)
+- **Node.js 22+** for the server
+- **Python 3.7+** with `debugpy` for this walkthrough: `python -m pip install debugpy`
+- An **MCP client**: Claude Desktop, the Claude Code CLI, or the Codex CLI
 
 ## Installation
 
-### Option 1: Using npm (when published)
+Pick one.
 
 ```bash
+# npx — nothing to install
+npx @debugmcp/mcp-debugger --help
+
+# npm, installed globally
 npm install -g @debugmcp/mcp-debugger
-```
 
-### Option 2: From Source
+# Docker. -i is required: without it the container never sees a client,
+# never exits, and --rm never fires.
+docker run -i --rm -v $(pwd):/workspace debugmcp/mcp-debugger:latest
 
-```bash
+# From source. This is a pnpm workspace — not npm install.
 git clone https://github.com/debugmcp/mcp-debugger.git
 cd mcp-debugger
 pnpm install
-npm run build
+pnpm run build
 ```
 
-## Running the Server
+## Verify
 
-### For MCP Clients (Recommended)
+```bash
+npx @debugmcp/mcp-debugger doctor          # every adapter's runtime + debug backend, with fix hints
+npx @debugmcp/mcp-debugger doctor python   # same report, exit code gated on python
+```
 
-Add to your MCP client configuration (e.g., Claude Desktop):
+Run this before anything else — it separates a broken toolchain from a broken server. `--json`
+emits a machine-readable report; `--timeout <ms>` caps each probe (default 10000).
+
+## Register with a client
+
+Claude Desktop, or any client with a JSON config:
 
 ```json
 {
   "mcpServers": {
     "mcp-debugger": {
-      "command": "node",
-      "args": ["C:/path/to/mcp-debugger/dist/index.js", "stdio", "--log-level", "debug", "--log-file", "C:/path/to/logs/debug-mcp-server.log"],  // Use dist/index.js for source builds; the npm package uses mcp-debugger CLI instead
-      "disabled": false,
-      "autoApprove": ["create_debug_session", "set_breakpoint", "start_debugging", "get_stack_trace", "get_scopes", "get_variables", "step_over", "step_into", "step_out", "continue_execution", "evaluate_expression", "close_debug_session"]
+      "command": "npx",
+      "args": ["@debugmcp/mcp-debugger", "stdio"]
     }
   }
 }
 ```
 
-### Command Line Options
+For a source build, use `"command": "node"` with
+`"args": ["/absolute/path/to/mcp-debugger/dist/index.js", "stdio"]`.
+
+Claude Code CLI:
 
 ```bash
-# Run with debugging output
-node dist/index.js stdio --log-level debug --log-file ./logs/debug.log
-
-# Run in quiet mode
-node dist/index.js stdio --log-level error
+claude mcp add-json mcp-debugger '{"type":"stdio","command":"npx","args":["@debugmcp/mcp-debugger","stdio"]}'
+claude mcp list
 ```
 
-## Quick Example: Debug a Python Script
+Codex CLI:
 
-Let's debug a simple Python script with a bug:
+```bash
+codex mcp add mcp-debugger -- npx -y @debugmcp/mcp-debugger stdio
+```
 
-### 1. Create a Test Script
+Restart the client after changing its configuration.
 
-Save this as `buggy_math.py`:
+## Transports
+
+```bash
+mcp-debugger stdio                  # default subcommand; for clients that spawn the server
+mcp-debugger http -p 3001           # Streamable HTTP, recommended for remote; endpoint /mcp
+mcp-debugger sse -p 3001            # DEPRECATED — use http
+```
+
+Console output is silenced in every mode, so add `--log-level debug --log-file ./logs/debug.log`
+when you need to see anything. To point a client at an HTTP server:
+
+```bash
+claude mcp add-json mcp-debugger '{"type":"http","url":"http://127.0.0.1:3001/mcp"}'
+```
+
+## Worked example: find a bug in a Python script
+
+Save this as `buggy_math.py` and note its **absolute** path — host mode rejects a relative
+`file` or `scriptPath`. The calls below use `/tmp/buggy_math.py`; on Windows use something
+like `C:\work\buggy_math.py`.
 
 ```python
 def calculate_average(numbers):
     total = 0
     for num in numbers:
         total += num
-    # Bug: dividing by wrong value
-    average = total / len(numbers) + 1  
+    # Bug: this adds 1 to the average
+    average = total / len(numbers) + 1
     return average
 
 numbers = [10, 20, 30, 40, 50]
@@ -76,15 +109,15 @@ result = calculate_average(numbers)
 print(f"Average: {result}")
 ```
 
-### 2. Start a Debug Session
+It prints `Average: 31.0`. The right answer is 30.0.
+
+**1. Create a session.**
+
+```
+create_debug_session {"language": "python", "name": "Debug Math Bug"}
+```
 
 ```json
-// Tool: create_debug_session
-{
-  "language": "python",
-  "name": "Debug Math Bug"
-}
-// Response:
 {
   "success": true,
   "sessionId": "550e8400-e29b-41d4-a716-446655440000",
@@ -92,142 +125,100 @@ print(f"Average: {result}")
 }
 ```
 
-### 3. Set a Breakpoint
+That `sessionId` goes into every call below.
 
-```json
-// Tool: set_breakpoint
-{
-  "sessionId": "550e8400-e29b-41d4-a716-446655440000",
-  "file": "buggy_math.py",
-  "line": 6
-}
-// Response:
-{
-  "success": true,
-  "breakpointId": "bp-123456",
-  "file": "C:\\path\\to\\buggy_math.py",
-  "line": 6,
-  "verified": false,
-  "message": "Breakpoint set at C:\\path\\to\\buggy_math.py:6"
-}
+**2. Set a breakpoint** on line 6, the buggy assignment.
+
+```
+set_breakpoint {"sessionId": "550e8400-...", "file": "/tmp/buggy_math.py", "line": 6}
 ```
 
-### 4. Start Debugging
+The response echoes `breakpointId`, the resolved `file` and `line`, `verified`, and the `content`
+of the line it landed on. If the debugger bound the breakpoint somewhere else, that arrives as a
+`warning`.
 
-```json
-// Tool: start_debugging
-{
-  "sessionId": "550e8400-e29b-41d4-a716-446655440000",
-  "scriptPath": "buggy_math.py"
-}
-// Response:
-{
-  "success": true,
-  "state": "paused",
-  "message": "Debugging started for buggy_math.py. Current state: paused",
-  "data": {
-    "message": "Debugging started for buggy_math.py. Current state: paused",
-    "reason": "breakpoint"
-  }
-}
+**3. Start the program.** Breakpoints set before launch are queued and applied automatically.
+
+```
+start_debugging {"sessionId": "550e8400-...", "scriptPath": "/tmp/buggy_math.py"}
 ```
 
-### 5. Inspect Variables
+The response's `state` becomes `"paused"` once the breakpoint is hit.
 
-First, get the stack trace:
+**4. Inspect.** The fast route is the current frame's locals:
 
-```json
-// Tool: get_stack_trace
-{
-  "sessionId": "550e8400-e29b-41d4-a716-446655440000"
-}
-// Response shows we're in calculate_average function
+```
+get_local_variables {"sessionId": "550e8400-..."}
 ```
 
-Then get scopes (use the actual `id` from the stack trace response, not a hardcoded value):
+At line 6, `numbers` is `[10, 20, 30, 40, 50]` and `total` is `150`. There is no `average` yet —
+the line has not executed.
 
-```json
-// Tool: get_scopes
-{
-  "sessionId": "550e8400-e29b-41d4-a716-446655440000",
-  "frameId": 1
-}
-// Response:
-{
-  "success": true,
-  "scopes": [
-    {
-      "name": "Locals",
-      "variablesReference": 3,
-      "expensive": false,
-      "presentationHint": "locals"
-    }
-  ]
-}
+The long form, when you need a specific frame or scope: `get_stack_trace` returns `stackFrames`
+(each with an `id`), `get_scopes` turns a frame id into scopes carrying a `variablesReference`,
+and `get_variables` reads that reference. Take every id from the responses; never hardcode one.
+
+```
+get_stack_trace {"sessionId": "550e8400-..."}
+get_scopes {"sessionId": "550e8400-...", "frameId": <id from stackFrames[0]>}
+get_variables {"sessionId": "550e8400-...", "scope": <variablesReference from that scope>}
 ```
 
-Finally, inspect the variables:
+**5. Confirm the bug** without editing the file:
 
-```json
-// Tool: get_variables
-{
-  "sessionId": "550e8400-e29b-41d4-a716-446655440000",
-  "scope": 3
-}
-// Response:
-{
-  "success": true,
-  "variables": [
-    {"name": "numbers", "value": "[10, 20, 30, 40, 50]", "type": "list"},
-    {"name": "total", "value": "150", "type": "int"},
-    {"name": "average", "value": "31.0", "type": "float"}
-  ]
-}
+```
+evaluate_expression {"sessionId": "550e8400-...", "expression": "total / len(numbers)"}
 ```
 
-### 6. Clean Up
+30.0 — so the `+ 1` on line 6 is the bug.
 
-```json
-// Tool: close_debug_session
-{
-  "sessionId": "550e8400-e29b-41d4-a716-446655440000"
-}
-// Response:
-{
-  "success": true,
-  "message": "Closed debug session: 550e8400-e29b-41d4-a716-446655440000"
-}
+**6. Step, run to the end, read what it printed.**
+
+```
+step_over {"sessionId": "550e8400-..."}
+continue_execution {"sessionId": "550e8400-..."}
+get_output {"sessionId": "550e8400-..."}
+```
+
+`get_output` returns the debuggee's captured stdout/stderr plus a `nextSince` cursor; pass it
+back as `since` to read only what is new.
+
+**7. Clean up.**
+
+```
+close_debug_session {"sessionId": "550e8400-..."}
 ```
 
 ## Key Points to Remember
 
-1. **Session IDs are UUIDs** - Always save the sessionId from create_debug_session
-2. **Get scopes before variables** - You need the variablesReference, not the frame ID
-3. **Breakpoints need executable lines** - Avoid comments and blank lines
-4. **Sessions can terminate** - Handle errors gracefully
-
-## What's Next?
-
-- Read the [Tool Reference](./tool-reference.md) for complete API documentation
-- See [Usage Guide](./usage.md) for more complex debugging scenarios
-- Check [Troubleshooting](./troubleshooting.md) if you encounter issues
+1. **Session ids are UUIDs** — save the `sessionId` from `create_debug_session`.
+2. **`get_variables` takes a `variablesReference`, not a frame id** — get one from `get_scopes`,
+   or skip both with `get_local_variables`.
+3. **Breakpoints need executable lines** — not comments, blank lines, or bare declarations.
+4. **`continue_execution` does not wait for the next stop** — check `list_debug_sessions`, or
+   `get_stack_trace`, whose `stopReason` says why the program stopped.
+5. **Host mode requires absolute paths** — a relative `file` or `scriptPath` fails with
+   `Path must be absolute. Received: "..."`. Container mode is the exception: paths are resolved
+   against the `/workspace` mount, so pass paths relative to the directory you mounted.
 
 ## Troubleshooting Quick Tips
 
-### MCP Server Not Found
-- Ensure the path in your MCP config is absolute
-- Check that the server was built (`npm run build`)
-- Verify Node.js is in your PATH
+1. **Run `mcp-debugger doctor` first.** It names the broken toolchain and prints the fix.
+2. **Server not found or won't connect**: use an absolute path, confirm a source build produced
+   `dist/index.js` (`pnpm run build`), and keep `stdio` in the args.
+3. **Python debugging not working**: `python -m pip install debugpy` for the *same* interpreter
+   the session uses, or pin it with `PYTHON_PATH` or `executablePath` on `create_debug_session`.
+4. **Session terminated unexpectedly**: rerun with `--log-level debug --log-file`, then read
+   `proxy-<sessionId>.log` under
+   `<system temp dir>/debug-mcp-server/sessions/<sessionId>/run-<timestamp>/`.
 
-### Python Debugging Not Working
-- Install debugpy: `pip install debugpy`
-- Ensure Python is in your PATH
-- Use absolute paths for script files
+More: [Troubleshooting](./troubleshooting.md) · [Diagnostics](./diagnostics.md)
 
-### Session Terminated Unexpectedly
-- Check the log file for errors
-- Ensure the Python script exists
-- Verify breakpoints are on executable lines
+## What's Next?
+
+- Read the [Tool Reference](./tool-reference.md) for every tool's parameters and response shape
+- See the [Usage Guide](./usage.md) for more involved debugging scenarios
+- Read [Getting Started](./getting-started.md) for the narrated walkthrough
 
 ---
 

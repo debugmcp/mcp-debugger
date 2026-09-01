@@ -16,9 +16,7 @@ start_debugging       {
   "sessionId": "<id>",
   "scriptPath": "/abs/path/src/com/example/Main.java",
   "dapLaunchArgs": {
-    "mainClass": "com.example.Main",
     "classpath": "/abs/path/classes",
-    "cwd": "/abs/path/project",
     "stopOnEntry": false
   }
 }
@@ -31,7 +29,18 @@ close_debug_session   {"sessionId": "<id>"}
 ```
 
 - `set_breakpoint.file` accepts either an FQCN (`"com.example.Main"`) or an absolute `.java` path. FQCNs skip host file checks entirely.
-- `dapLaunchArgs.mainClass` is required; `classpath` defaults to `"."` but is almost always needed. Also supported: `sourcePath`, `env`, `args`, `vmArgs` (e.g. `-Xmx512m`), `javaPath`. For Java, `stopOnEntry` defaults to `true` — set it `false` to run straight to your breakpoints.
+- `mainClass` is **derived from the program path**, not passed: the adapter sets it from
+  `program` (a `.java` file becomes its basename, anything else is used verbatim) and
+  overwrites any `mainClass` you supply. A `.java` `scriptPath` therefore yields the **basename**
+  (`.../com/example/Main.java` -> `Main`), which is wrong for a packaged class; to target
+  `com.example.Main`, pass the FQCN as the program itself:
+  `adapterLaunchConfig: {"program": "com.example.Main"}`. `classpath` defaults to `"."` but is
+  almost always needed. `cwd` and `env` are accepted and forwarded but have **no effect** on the
+  launched JVM (issue #642), and neither does `sourcePath`. What the bridge does apply: `args`
+  (program arguments) and `vmArgs` (e.g. `-Xmx512m`), plus `javaPath` to pick the interpreter.
+  `stopOnEntry` is effectively `false` through `start_debugging` (the session layer merges
+  `stopOnEntry: false` under your `dapLaunchArgs`) — pass it `true` explicitly if you want to pause
+  at the first line of `main()`.
 - The expression evaluator supports field access, method calls, arithmetic, and string concatenation.
 
 ## Attach / remote

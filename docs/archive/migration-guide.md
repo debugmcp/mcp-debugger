@@ -1,5 +1,11 @@
 # mcp-debugger Migration Guide
 
+> **Archived 2026-09-01.** A reverse-chronological stack of v0.10.0, v0.12.0 and v0.15.0
+> migration notes, carrying a "covers changes through v0.23.x" banner while the project was at
+> 0.24.2 — nothing about the 0.24 line (typed `DebugResult`, the proxy-log resource, the session
+> log layout) was ever added. It duplicates `CHANGELOG.md`, which is maintained. Kept for the
+> v0.15.0 dynamic-loading migration, which is the one piece not recoverable from the changelog.
+
 > **📌 UPDATED DOCUMENTATION**
 > This migration guide covers changes through v0.23.x, including dynamic adapter loading and major UX improvements.
 

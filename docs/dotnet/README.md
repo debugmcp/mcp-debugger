@@ -72,19 +72,10 @@ For .NET Framework projects, you have two options:
 
 The adapter launches the .NET program and attaches the debugger automatically.
 
-```
-use_mcp_tool(
-  tool_name="start_debugging",
-  arguments={
-    "sessionId": "your-session-id",
-    "scriptPath": "/path/to/Program.cs",
-    "dapLaunchArgs": {
-      "program": "/path/to/bin/Debug/net8.0/MyApp.dll",
-      "cwd": "/path/to/project",
-      "stopOnEntry": true
-    }
-  }
-)
+```text
+start_debugging { "sessionId": "your-session-id", "scriptPath": "/path/to/Program.cs",
+                  "dapLaunchArgs": { "program": "/path/to/bin/Debug/net8.0/MyApp.dll",
+                                     "cwd": "/path/to/project", "stopOnEntry": true } }
 ```
 
 Key launch arguments:
@@ -99,31 +90,26 @@ Key launch arguments:
 
 Connect to a running .NET process.
 
-```
-use_mcp_tool(
-  tool_name="attach_to_process",
-  arguments={
-    "sessionId": "your-session-id",
-    "processId": 12345
-  }
-)
+```text
+attach_to_process { "sessionId": "your-session-id", "processId": 12345 }
 ```
 
 Key attach arguments:
 - `processId` (required): PID of the running .NET process
+- `sourcePaths`: Directories to scan for PDB files (auto-detected from the process executable when omitted)
+
+`stopOnEntry` and `justMyCode` are also accepted as top-level parameters; netcoredbg extras such
+as `sourceFileMap` and `symbolOptions` go in `adapterConfig`.
+
+.NET attach is **PID-only** — netcoredbg has no host/port attach, so there is no remote-attach
+form of this call.
 
 ## Debugging Workflow
 
 ### 1. Create a Debug Session
 
-```
-use_mcp_tool(
-  tool_name="create_debug_session",
-  arguments={
-    "language": "dotnet",
-    "name": "My .NET Debug Session"
-  }
-)
+```text
+create_debug_session { "language": "dotnet", "name": "My .NET Debug Session" }
 ```
 
 ### 2. Compile the Project
@@ -136,71 +122,53 @@ dotnet build
 
 Set breakpoints before starting. Breakpoints must be on executable lines (assignments, method calls, conditionals) — not on blank lines, comments, or using directives.
 
-```
-use_mcp_tool(
-  tool_name="set_breakpoint",
-  arguments={
-    "sessionId": "your-session-id",
-    "file": "/path/to/Program.cs",
-    "line": 14
-  }
-)
+```text
+set_breakpoint { "sessionId": "your-session-id", "file": "/path/to/Program.cs", "line": 14 }
 ```
 
 ### 4. Start Debugging
 
-```
-use_mcp_tool(
-  tool_name="start_debugging",
-  arguments={
-    "sessionId": "your-session-id",
-    "scriptPath": "/path/to/Program.cs",
-    "dapLaunchArgs": {
-      "program": "/path/to/bin/Debug/net8.0/MyApp.dll",
-      "stopOnEntry": false
-    }
-  }
-)
+```text
+start_debugging { "sessionId": "your-session-id", "scriptPath": "/path/to/Program.cs",
+                  "dapLaunchArgs": { "program": "/path/to/bin/Debug/net8.0/MyApp.dll",
+                                     "stopOnEntry": false } }
 ```
 
 ### 5. Control Execution
 
 When paused at a breakpoint:
 
-```
+```text
 # Step over (execute current line)
-use_mcp_tool(tool_name="step_over", arguments={"sessionId": "..."})
+step_over { "sessionId": "..." }
 
 # Step into (enter method calls)
-use_mcp_tool(tool_name="step_into", arguments={"sessionId": "..."})
+step_into { "sessionId": "..." }
 
 # Step out (return from current method)
-use_mcp_tool(tool_name="step_out", arguments={"sessionId": "..."})
+step_out { "sessionId": "..." }
 
 # Continue (run until next breakpoint)
-use_mcp_tool(tool_name="continue_execution", arguments={"sessionId": "..."})
+continue_execution { "sessionId": "..." }
 ```
 
 ### 6. Examine Program State
 
-```
+```text
 # Get local variables in current frame
-use_mcp_tool(tool_name="get_local_variables", arguments={"sessionId": "..."})
+get_local_variables { "sessionId": "..." }
 
 # Get call stack
-use_mcp_tool(tool_name="get_stack_trace", arguments={"sessionId": "..."})
+get_stack_trace { "sessionId": "..." }
 
 # Evaluate an expression
-use_mcp_tool(
-  tool_name="evaluate_expression",
-  arguments={"sessionId": "...", "expression": "x + y"}
-)
+evaluate_expression { "sessionId": "...", "expression": "x + y" }
 ```
 
 ### 7. Close the Session
 
-```
-use_mcp_tool(tool_name="close_debug_session", arguments={"sessionId": "..."})
+```text
+close_debug_session { "sessionId": "..." }
 ```
 
 ## Filtered Variables

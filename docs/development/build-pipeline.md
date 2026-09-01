@@ -12,7 +12,10 @@ The `dist/` directory contains the compiled TypeScript output and is the source 
 - **`npm run build`**: Compiles TypeScript to JavaScript in `dist/` directory
   - Automatically runs `prebuild` first (cleans old artifacts)
   - Runs `postbuild` to copy necessary files (proxy bootstrap)
-- **`npm run prebuild`**: Removes entire `dist/` directory to prevent stale artifacts
+- **`npm run prebuild`**: `node scripts/clean-src-artifacts.cjs && rimraf dist && pnpm run vendor:adapters`
+  - Deletes stray `.js` / `.d.ts` / `.map` artifacts from `packages/*/src/` — stale artifacts there confuse TypeScript module resolution. Only the `packages/` tree is walked (`scripts/clean-src-artifacts.cjs` builds its root from `packages`), so the root `src/` is untouched and the legitimate `src/proxy/proxy-bootstrap.js` source is never a candidate
+  - Removes `dist/` so no stale compiled output survives
+  - Re-runs `vendor:adapters` (`pnpm run -r --if-present build:adapter`). Only three packages define that script — `adapter-java` (compiles the JDI bridge), `adapter-javascript` (vendors js-debug), and `codelldb-common` (vendors CodeLLDB) — and each skips when its artifact is already fresh, so on a warm tree this re-vendors nothing
 - **`npm run build:clean`**: Explicit clean build (same as `npm run build` due to prebuild)
 
 ### Package Build Commands
@@ -27,13 +30,13 @@ The `dist/` directory contains the compiled TypeScript output and is the source 
 The following scripts now include `npm run build` to ensure fresh artifacts:
 
 #### Test Scripts
-- **`test`**: Full test suite (unit + integration)
-- **`test:integration`**: Integration tests that use the compiled server
+- **`test`**: `pnpm run build && pnpm run pretest:docker && vitest run` — the whole Vitest run (the `unit`, `integration` and `e2e` projects)
 - **`test:e2e`**: End-to-end tests that run the actual server
 - **`test:e2e:smoke`**: Smoke tests for basic functionality
 - **`test:coverage`**: Coverage tests across all test types
-- **`test:coverage:quiet`**: Silent coverage run
 - **`test:coverage:json`**: JSON output for CI/CD
+
+Two neighbours look like they belong in that list but do not: `test:integration` (`vitest run --project integration`) and `test:coverage:quiet` (`vitest run --coverage --reporter=dot --silent`) have no `pre*` hook and no inline build, so they run against whatever `dist/` is already on disk. Build first yourself.
 
 #### Container Scripts
 - **`test:e2e:container`**: Builds fresh Docker image (includes `--no-cache`)
@@ -43,7 +46,12 @@ The following scripts now include `npm run build` to ensure fresh artifacts:
 These scripts work directly with source files or don't execute code:
 - **`test:unit`**: Unit tests run directly on TypeScript source
 - **`lint`**: Static analysis of TypeScript source
-- **`dev`**: Development mode using ts-node (no compilation)
+- **`typecheck`**: `tsc -p tsconfig.typecheck.json` over `src/` and `packages/*/src` — type-check only, no emit
+- **`typecheck:tests`**: The test-suite ratchet (`scripts/typecheck-tests-ratchet.mjs`) against `tests/typecheck-baseline.json`
+- **`typecheck:all`**: Both of the above — the exact command the `lint` CI job and the pre-push hook run
+- **`dev`**: Runs the server from source via `ts-node-esm src/index.ts` (no compilation)
+
+`typecheck:all` is the fastest gate that still answers "does this compile?" — `.husky/pre-push` budgets it at roughly 15 seconds, against minutes for a clean build. Reach for it while iterating; the clean build in the pre-push hook remains the authoritative compile.
 
 ## Common Pitfalls
 
@@ -56,11 +64,21 @@ These scripts work directly with source files or don't execute code:
 **Solution**: The build pipeline now automatically runs `npm run build` for all scripts that need it.
 
 ### 2. Path Translation in Containers
-**Problem**: Container tests expect different path handling than host tests.
-- Host mode: Absolute paths are allowed
-- Container mode: Absolute paths are rejected with an error
+**Problem**: Container tests expect different path handling than host tests. The two modes are
+asymmetric, and it is easy to state the asymmetry backwards.
 
-**Solution**: The E2E container test now correctly expects path rejection errors.
+- **Host mode** passes the path through unchanged (`resolvePathForRuntime`,
+  `src/utils/container-path-utils.ts:69`) and then **rejects anything not absolute** --
+  `SimpleFileChecker` returns `Path must be absolute. Received: "<path>"`
+  (`src/utils/simple-file-checker.ts:49`).
+- **Container mode** rejects nothing. Every path is re-rooted under `MCP_WORKSPACE_ROOT`:
+  `examples/x.py` and `/examples/x.py` both become `/workspace/examples/x.py`, and a path
+  already under the workspace root is returned as-is (the operation is idempotent).
+
+So container mode is the *permissive* one -- it is the only mode that accepts a relative path.
+
+**Solution**: the container path tests assert that re-rooting
+(`tests/unit/utils/container-path-utils.spec.ts`), not a rejection.
 
 ### 3. Manual Testing
 When manually testing changes:
@@ -91,7 +109,7 @@ The proxy bootstrap (`src/proxy/proxy-bootstrap.js`, copied to `dist/proxy/proxy
 - It needs to be a standalone executable that can be spawned independently
 - The bundled version includes all npm dependencies (fs-extra, winston, uuid, etc.)
 - This allows the application to run via npx without installing dependencies
-- Enables distribution in minimal Alpine containers without npm packages
+- Enables a runtime image that needs no npm and no dependency install — the production `Dockerfile` copies the `node` binary and the bundles into a plain `ubuntu:26.04` stage, plus the handful of packages the adapters load dynamically
 
 ### NPX Distribution
 The MCP debugger can be distributed via npm/npx:
@@ -134,7 +152,7 @@ Build artifacts are properly managed via `.gitignore`:
 Both Dockerfiles build from source inside the container:
 - `Dockerfile`: Production multi-stage build
   - Builds packages including the new tsup bundling
-  - Uses minimal Alpine runtime with only Node.js (no npm)
+  - Runtime stage is `ubuntu:26.04` (the builder is `node:26-slim`) — not Alpine; the `node` binary is copied out of the builder, and no npm or dependency install runs in the runtime stage
 - `docker/test-ubuntu.dockerfile`: Test environment build
 
 These are not affected by local `dist/` artifacts since they compile inside the container.
@@ -157,7 +175,10 @@ These are not affected by local `dist/` artifacts since they compile inside the 
 Run `npm run build` or use a test script that includes building.
 
 ### "Container test failing with path errors"
-This is now expected behavior - absolute paths are rejected in container mode.
+Check which direction the test asserts. Container mode re-roots every path under
+`MCP_WORKSPACE_ROOT` and rejects none; it is **host** mode that rejects a relative path. A
+container test failing on paths usually means `MCP_WORKSPACE_ROOT` is unset or the file is not
+under the mounted workspace -- not that the path was "too absolute".
 
 ### "Build seems stuck"
-The `prebuild` script removes the entire `dist/` directory. If it's locked by a running process, stop all Node processes first.
+The `prebuild` script removes `dist/` and then re-runs `vendor:adapters`. On a warm tree that is close to a no-op — the three `build:adapter` scripts skip when their artifacts are already fresh — but on a cold tree it downloads the CodeLLDB and js-debug payloads from GitHub releases, which can take a while. If `dist/` is locked by a running process, stop all Node processes first.

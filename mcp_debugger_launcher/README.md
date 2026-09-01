@@ -22,16 +22,25 @@ This will install the launcher and ensure `debugpy` (required for Python debuggi
 
 ### Basic Usage
 
+The launcher takes a single positional `mode` argument, and it accepts exactly two
+values: `stdio` (the default) and `sse`.
+
 ```bash
-# Launch in stdio mode (default)
+# Launch in stdio mode (default, recommended)
 debug-mcp-server
 
-# Launch in SSE mode
+# Launch in SSE mode (deprecated; see Transport Modes below)
 debug-mcp-server sse
 
 # SSE mode with custom port
 debug-mcp-server sse --port 8080
 ```
+
+> **No `http` mode here.** The server's recommended transport is Streamable HTTP, but this
+> launcher forwards only `stdio` and `sse`. To use HTTP, invoke the server directly:
+> `npx @debugmcp/mcp-debugger http -p 3001`.
+
+`--port` only affects `sse` mode; `stdio` ignores it.
 
 ### Runtime Selection
 
@@ -74,6 +83,12 @@ debug-mcp-server --help
 ### For Docker mode:
 - Docker installed and running
 - The launcher will automatically pull the image if needed
+- For `stdio` the launcher runs `docker run -it --rm debugmcp/mcp-debugger:latest stdio`;
+  for `sse` it also inserts `-p <port>:<port>` before the image and appends `--port <port>`
+  after the mode (the port defaults to 3001). Either way there is **no volume mount**, so
+  the container cannot see your source tree. To debug host files under Docker, run the
+  image yourself with a mount:
+  `docker run -i --rm -v "$PWD:/workspace" debugmcp/mcp-debugger:latest stdio`
 
 ### For Python debugging:
 - `debugpy` is automatically installed with this package

@@ -31,7 +31,7 @@ You have two ways to include the JavaScript adapter during development:
 2) Build all adapters (for contributors who want everything)
 - Run the “all adapters” helper:
   - `pnpm -w run build:adapters:all`
-- This will build mock, python, and javascript adapters in one go.
+- This will build the mock, python, ruby, and javascript adapters in one go (`build:adapters` is the same list without javascript).
 
 Notes:
 - The default CI path and `build:packages` remain light and do not force building optional adapters.

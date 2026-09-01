@@ -48,8 +48,8 @@ This guide will help you set up your development environment for working on the 
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/your-username/debug-mcp-server.git
-cd debug-mcp-server
+git clone https://github.com/debugmcp/mcp-debugger.git
+cd mcp-debugger
 ```
 
 ### 2. Install Dependencies
@@ -100,20 +100,35 @@ Most tests should pass. Some environment-specific or known-regression tests (e.g
 mcp-debugger/
 ├── packages/               # Monorepo workspace packages
 │   ├── shared/            # Shared interfaces, types, and utilities
+│   ├── codelldb-common/   # Shared CodeLLDB vendoring/resolution (rust + cpp)
 │   ├── adapter-python/    # Python debug adapter (debugpy)
 │   ├── adapter-javascript/# JavaScript/Node.js adapter (js-debug)
 │   ├── adapter-rust/      # Rust adapter (CodeLLDB)
 │   ├── adapter-go/        # Go adapter (Delve)
 │   ├── adapter-java/      # Java debug adapter (JDI)
 │   ├── adapter-dotnet/    # .NET debug adapter (netcoredbg)
+│   ├── adapter-cpp/       # C/C++ debug adapter (CodeLLDB)
 │   ├── adapter-ruby/      # Ruby debug adapter (rdbg)
 │   ├── adapter-mock/      # Mock adapter for testing
+│   ├── codelldb-darwin-arm64/  # Per-platform CodeLLDB binary packages. The
+│   ├── codelldb-darwin-x64/    # payload is git-ignored and staged only at
+│   ├── codelldb-linux-arm64/   # pack/publish time by
+│   ├── codelldb-linux-x64/     # scripts/stage-codelldb-packages.mjs
+│   ├── codelldb-win32-x64/
 │   └── mcp-debugger/      # Self-contained CLI bundle (npx distribution)
 ├── src/                    # Core server source code
+│   ├── index.ts           # Process entry point (silences console, then boots)
+│   ├── server.ts          # DebugMcpServer composition root
 │   ├── adapters/          # Adapter loading and registry
 │   ├── cli/               # CLI commands and setup
 │   ├── container/         # Dependency injection
+│   ├── dap-core/          # Functional core for DAP handling (state, handlers)
+│   ├── errors/            # Debug error types
+│   ├── factories/         # ProxyManager and SessionStore factories
+│   ├── implementations/   # Concrete file system / process / network impls
+│   ├── interfaces/        # External-dependency interfaces
 │   ├── proxy/             # DAP proxy components
+│   ├── server/            # Tool schemas, dispatch, handlers, resources, prompts
 │   ├── session/           # Session management
 │   └── utils/             # Utilities
 ├── tests/                  # Test files
@@ -130,11 +145,18 @@ mcp-debugger/
 ### Common Commands
 
 ```bash
-# Development build (watch mode)
+# Run the server straight from TypeScript source: `ts-node-esm src/index.ts`.
+# This is a one-shot run of the server, not a watch-mode build.
 npm run dev
 
 # Production build
 npm run build
+
+# Type-check the shipped sources (src + packages/*/src) — no build needed
+npm run typecheck
+
+# Type-check sources plus the test ratchet — the exact command CI and pre-push run
+npm run typecheck:all
 
 # Run all tests
 npm test
@@ -153,6 +175,9 @@ npm run lint
 
 # Fix linting issues
 npm run lint:fix
+
+# Validate the committed state in a clean clone (see ../validation-script.md)
+pnpm run validate
 ```
 
 ### Running the Server Locally
@@ -266,9 +291,7 @@ Create `.vscode/tasks.json`:
     {
       "type": "npm",
       "script": "dev",
-      "group": "build",
-      "problemMatcher": "$tsc-watch",
-      "isBackground": true,
+      "problemMatcher": [],
       "label": "npm: dev"
     },
     {
@@ -288,18 +311,22 @@ Create `.vscode/tasks.json`:
 
 ### Development Environment
 
-Create a `.env` file for development:
+**There is no `.env` support.** Nothing in `src/`, `scripts/` or `vitest.config.ts` loads one,
+and `dotenv` is not a dependency — a `.env` file you create will simply be ignored. Set variables
+in your shell, or use the CLI flags where they exist:
 
 ```bash
-# Logging
-DEBUG_MCP_LOG_LEVEL=debug
+# Logging: prefer the flags, which are read directly by the CLI
+node dist/index.js stdio --log-level debug --log-file /tmp/mcp.log
 
-# Python
-PYTHON_PATH=python
-
-# Testing
-TEST_TIMEOUT=30000
+# Or export for the process you launch
+export DEBUG_MCP_LOG_LEVEL=debug
+export PYTHON_PATH=python
 ```
+
+`TEST_TIMEOUT` is not read from the environment anywhere in the repo — where it appears it is a
+module-local constant inside an individual test file. Test timeouts are configured in
+`vitest.config.ts` (15s for the `unit` project, 30s for `integration`/`e2e`).
 
 ### Available Environment Variables
 
@@ -470,7 +497,7 @@ Update documentation when adding features:
 1. Read the [Testing Guide](./testing-guide.md) to understand the test suite
 2. Review the [Architecture Overview](../architecture/system-overview.md)
 3. Check [Contributing Guidelines](../../CONTRIBUTING.md) before submitting PRs
-4. Join the development discussion on [GitHub Issues](https://github.com/your-username/debug-mcp-server/issues)
+4. Join the development discussion on [GitHub Issues](https://github.com/debugmcp/mcp-debugger/issues)
 
 ## Getting Help
 

@@ -130,8 +130,14 @@ async function validatePush(options = {}) {
     if (config.runTests) {
       if (config.runSmoke) {
         log('\n7️⃣  Running smoke tests (quick validation)...', colors.blue);
-        // Run a subset of tests for speed
-        const testCmd = 'pnpm test -- tests/unit/index.test.ts tests/core/unit/server/server.test.ts';
+        // Run a subset of tests for speed. These paths must stay real: the
+        // previous target (tests/core/unit/server/server.test.ts) was deleted in
+        // the server split, so --smoke failed on a missing file rather than on a
+        // genuine regression.
+        const testCmd =
+          'pnpm test -- tests/unit/index.test.ts ' +
+          'tests/core/unit/server/server-initialization.test.ts ' +
+          'tests/core/unit/server/server-lifecycle.test.ts';
         if (config.verbose) {
           execWithOutput(testCmd, tempDir);
         } else {
@@ -217,7 +223,9 @@ async function main() {
 MCP Debugger Push Validation Script
 
 This script validates your changes by testing them in a clean clone,
-simulating exactly what CI will see. It helps catch issues like:
+simulating most of what CI will see. It does NOT run lint or typecheck:all, which the
+Lint Code job and .husky/pre-push both gate on -- run those separately. It helps catch
+issues like:
 - Files that exist locally but aren't committed
 - Build artifacts that shouldn't be committed  
 - Tests that only pass with local state

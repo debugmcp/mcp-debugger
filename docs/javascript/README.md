@@ -214,12 +214,15 @@ The adapter has built-in TypeScript support. When the factory validates the envi
 
 Source maps are supported automatically when debugging compiled JavaScript -- breakpoints set in `.ts` files will resolve to the correct location in the generated `.js` if source maps are present.
 
-If neither `tsx` nor `ts-node` is installed, the factory emits a warning (not an error), and you can still debug compiled `.js` files with source maps. For technical details, see [TypeScript Source Map Investigation](./typescript-source-map-investigation.md).
+If neither `tsx` nor `ts-node` is installed, the factory emits a warning (not an error), and you can still debug compiled `.js` files with source maps.
 
 ## Known Limitations
 
 - Browser/Chrome debugging not yet supported (Node.js via `pwa-node` only)
-- Remote debugging requires manual configuration
+- Remote attach works over `host`/`port` against a `node --inspect=0.0.0.0:<port>`
+  target, including pods via `kubectl port-forward` (see
+  [attach presets](../../examples/kubernetes/attach-presets.md)); the target must be
+  started with the inspector enabled, which mcp-debugger cannot do for you
 - Some advanced DAP features may not be exposed through MCP tools
 - Debuggee exit codes are captured via an injected preload (js-debug itself
   never emits a DAP `exited` event), so `exitCode` is unavailable in two
@@ -229,7 +232,7 @@ If neither `tsx` nor `ts-node` is installed, the factory emits a warning (not an
 
 ## Examples
 
-See `/examples/javascript/` for runnable examples, including:
+See `examples/javascript/` for runnable examples, including:
 
 - `simple_test.js` - Basic variable swap example
 - `pause_test.js` - Testing pause functionality

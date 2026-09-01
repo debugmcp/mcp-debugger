@@ -60,6 +60,70 @@ constructor(
 }
 ```
 
+### OperationsContext: the session-collaborator seam
+
+**Location**: `src/session/operations-context.ts`
+
+Constructor injection stops at the SessionManager boundary. Inside it, the debug
+operations live in per-slice collaborators — `ProxyLauncher`, `DebugLauncher`,
+`AttachController`, `BreakpointController`, `PauseCoordinator`,
+`ExecutionController`, `ExpressionEvaluator`, `RedefineClassesController`,
+`MirrorController` — and `OperationsContext` is what they are injected with. It
+is the primary DI seam in the codebase today.
+
+Two properties separate it from the constructor injection above:
+
+1. **Every member is late bound.** Methods are arrows that call
+   `this.<method>(...)` when invoked; data members are getters that re-read the
+   facade field. That is load-bearing rather than stylistic: tests reassign
+   `selectPolicy`, `stopProxyPreservingSession` and `closeSession` on a *live*
+   SessionManager, and write the timing tunables (`attachVerifyTimeoutMs`,
+   `stepGraceMs`, `pauseGraceMs`, …) as plain fields. A context built from
+   references captured at construction time would silently ignore all of it.
+2. **Each collaborator declares the narrowest slice it uses.** The constructor
+   parameter types are `Pick<>` aliases over `OperationsContext`, so what a
+   collaborator touches is readable from its signature and widening it is a
+   visible edit.
+
+```typescript
+// src/session/operations-context.ts (excerpt)
+export interface OperationsTunables {
+  readonly attachVerifyTimeoutMs: number;
+  readonly attachVerifyIntervalMs: number;
+  readonly attachPauseStopTimeoutMs: number;
+  readonly stepGraceMs: number;
+  readonly pauseGraceMs: number;
+}
+
+export interface OperationsContext {
+  readonly logger: ILogger;
+  readonly fileSystem: IFileSystem;
+  readonly adapterRegistry: IAdapterRegistry;
+  readonly proxyManagerFactory: IProxyManagerFactory;
+  readonly tunables: OperationsTunables;
+
+  getSession(sessionId: string): ManagedSession;
+  updateSession(sessionId: string, updates: Partial<ManagedSession>): void;
+  updateState(session: ManagedSession, newState: SessionState): void;
+  selectPolicy(language: string | DebugLanguage): AdapterPolicy;
+  // ... the rest of what collaborators are allowed to reach for
+}
+
+// A collaborator names only the slice it needs — this is MirrorController's:
+export type MirrorContext = Pick<OperationsContext, 'logger' | 'getSession' | 'updateSession'>;
+```
+
+Anything not listed on `OperationsContext` stays private to the facade: the
+interface is the allow-list. Collaborator-to-collaborator dependencies are *not*
+routed through it — they are ordinary constructor arguments
+(`DebugLauncher(ctx, proxyLauncher, breakpoints)`,
+`AttachController(ctx, proxyLauncher, breakpoints, pauseCoordinator)`) held as
+captured instance references. Their methods resolve at call time, so an instance
+spy intercepts, but reassigning a collaborator field after construction is not
+observed.
+
+`docs/architecture/component-design.md` carries the full collaborator table.
+
 ### ProxyManager Dependency Injection
 
 **Location**: `src/proxy/proxy-manager.ts`
@@ -117,6 +181,21 @@ This factory pattern allows SessionManager to create ProxyManager instances with
 ### Core External Dependencies
 
 **Location**: `packages/shared/src/interfaces/external-dependencies.ts` (defines `IFileSystem`, `IProcessManager`, `INetworkManager`, `ILogger`, `IEnvironment`) and `packages/shared/src/interfaces/process-interfaces.ts` (defines `IProxyProcessLauncher` and related IProcess/IProxyProcess types)
+
+> **Heads-up: there are two `IFileSystem` declarations.**
+> `src/interfaces/external-dependencies.ts` is an app-local near-duplicate of the
+> shared module — same `IFileSystem`, `IChildProcess`, `IProcessManager`,
+> `INetworkManager`, `IServer`, `ILogger`, `IProxyManagerFactory`, `IEnvironment`,
+> `IDependencies`, `PartialDependencies`, `ILoggerFactory`, `IChildProcessFactory`.
+> The only substantive difference is `IProxyManager`: the shared copy declares a
+> minimal placeholder (`dispose()` only), because `@debugmcp/shared` cannot import
+> from `src/`, while the app-local copy imports the real `IProxyManager` from
+> `src/proxy/proxy-manager.ts` — so its `IProxyManagerFactory` is typed against the
+> full interface. TypeScript is structural, so the two `IFileSystem`s are
+> interchangeable and nothing breaks, which is exactly why the duplication is easy
+> to miss. Most of `src/` imports the shared module; `src/adapters/adapter-lease.ts`
+> and `src/session/launch/proxy-failure-diagnostics.ts` import the app-local one, as
+> do several test helpers. Prefer `@debugmcp/shared` in new code.
 
 ```typescript
 // File system operations
@@ -253,6 +332,7 @@ export function createMockDependencies(): Dependencies {
 export function createMockFileSystem(): IFileSystem {
   return {
     readFile: vi.fn(),
+    readTail: vi.fn(),
     writeFile: vi.fn(),
     exists: vi.fn(),
     existsSync: vi.fn(),
@@ -318,44 +398,119 @@ describe('SessionManager', () => {
 
 ### Example: Testing with Fake Implementations
 
-**Location**: `tests/unit/proxy/proxy-manager-lifecycle.test.ts`
+**Location**: `tests/unit/proxy/proxy-manager.start.test.ts` and its siblings
+(`proxy-manager.handshake.test.ts`, `proxy-manager-message-handling.test.ts`,
+`proxy-manager.branch-coverage.test.ts`)
+
+Because every ProxyManager collaborator is an interface, the suite hands it a
+hand-rolled `IProxyProcessLauncher` that returns a fake `IProxyProcess` — an
+`EventEmitter` whose `sendCommand` scripts the IPC replies the manager is
+waiting for. No process is spawned; the test drives the whole handshake by
+emitting messages.
 
 ```typescript
-describe('ProxyManager', () => {
-  let proxyManager: ProxyManager;
-  let fakeLauncher: FakeProxyProcessLauncher;
+class FakeProxyProcess extends EventEmitter implements IProxyProcess {
+  pid = 4242;
+  send = vi.fn().mockReturnValue(true);
+  sendCommand = vi.fn();
+  kill = vi.fn().mockReturnValue(true);
+  waitForInitialization = vi.fn().mockResolvedValue(undefined);
+  // ... the remaining IProxyProcess members
+}
 
-  beforeEach(() => {
-    // Use fake implementation instead of mock
-    fakeLauncher = new FakeProxyProcessLauncher();
+beforeEach(() => {
+  fakeProcess = new FakeProxyProcess();
 
-    proxyManager = new ProxyManager(
-      null,  // No adapter
-      fakeLauncher,  // Fake implementation
-      createMockFileSystem(),  // Mock
-      createMockLogger()  // Mock
-    );
-  });
-
-  it('should handle proxy messages', async () => {
-    // Prepare fake to simulate behavior
-    fakeLauncher.prepareProxy((proxy) => {
-      setTimeout(() => {
-        proxy.simulateMessage({
-          type: 'status',
-          status: 'initialized'
+  // Script the reply the manager blocks on: acknowledge the init command.
+  fakeProcess.sendCommand.mockImplementation((cmd) => {
+    if (cmd.cmd === 'init') {
+      process.nextTick(() => {
+        fakeProcess.emit('message', {
+          type: 'status', status: 'init_received', sessionId: cmd.sessionId
         });
-      }, 100);
-    });
-
-    // Test uses fake behavior
-    await proxyManager.start(config);
-    // ... assertions
+      });
+    }
   });
+
+  launchProxySpy = vi.fn().mockImplementation(() => {
+    setImmediate(() => fakeProcess.emit('spawn'));
+    return fakeProcess;
+  });
+
+  // Object literals stand in for the interfaces (the real file casts each one).
+  proxyManager = new ProxyManager(
+    null,                                             // no adapter
+    { launchProxy: launchProxySpy },                  // fake launcher
+    { pathExists: vi.fn().mockResolvedValue(true) },  // stub file system
+    { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }
+  );
+});
+
+it('launches the proxy process and sends the init command', async () => {
+  await proxyManager.start(baseConfig);
+  expect(launchProxySpy).toHaveBeenCalled();
 });
 ```
 
+The suite owns its teardown too: `afterEach` calls `removeAllListeners()` on both
+the fake and the manager and flushes with a `setImmediate`, so a straggling emit
+cannot fire into whichever test the shuffled ordering runs next (issue #420).
+
+A reusable `FakeProxyProcessLauncher` also lives in
+`tests/implementations/test/fake-process-launcher.ts` for suites that would
+rather take one off the shelf.
+
 ## Advanced Patterns
+
+### Ownership as an Injected Dependency: `AdapterLease`
+
+**Location**: `src/adapters/adapter-lease.ts`
+
+Dependency injection answers "who hands me this collaborator". `AdapterLease`
+answers the next question — "who is responsible for disposing it, and until
+when" — for the one resource where getting it wrong is expensive. The adapter
+registry caps concurrent adapters per language (`maxInstancesPerLanguage`,
+default 10, in `src/adapters/adapter-registry.ts`) and frees a slot only when the
+adapter emits `disposed`, so an adapter stranded by a throw during launch setup
+leaks a slot permanently. Ten stranded slots turn every later launch of that
+language into `Maximum adapter instances (10) reached` — a message that says
+nothing about the error that actually caused it (issue #557).
+
+Ownership used to be a time window inside `ProxyLauncher.start` guarded by a
+`let adapterOwnedByProxy = false` flag: it had to be assigned at exactly one
+point and consulted from exactly one catch, so the next `throw` site added
+outside that window would silently reopen the leak. The lease is
+behaviour-equivalent on every path, and correctness stops being a discipline:
+
+```typescript
+// src/session/launch/proxy-launcher.ts (shape)
+const lease = await AdapterLease.acquire(
+  this.ctx.adapterRegistry,
+  session.language,
+  inputs.adapterConfig,
+  this.ctx.logger
+);
+try {
+  const plan = await this.prepareAdapterLaunch(session, lease.adapter, inputs, request);
+
+  // Ownership moves here: ProxyManager.cleanup() becomes the disposer,
+  // and the release below turns into a no-op.
+  const proxyManager = lease.transferTo(this.ctx.proxyManagerFactory);
+  session.proxyManager = proxyManager;
+  await proxyManager.start(plan.proxyConfig);
+
+  return plan.launchConfig;
+} finally {
+  await lease.release();  // disposes on every failure path; no-op after a transfer
+}
+```
+
+The lease tracks three states rather than a boolean — `held`, `transferred`,
+`released`. `transferred` and `released` are both "not ours any more", but
+confusing them is how a caller ends up looking for a disposed adapter inside a
+running proxy, so a misuse raises an error naming which one actually happened.
+The lease covers only the setup window; after a transfer the ProxyManager owns
+disposal.
 
 ### Partial Dependencies
 

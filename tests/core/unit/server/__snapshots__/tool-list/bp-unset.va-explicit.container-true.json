@@ -97,7 +97,7 @@
             },
             "function": {
               "type": "string",
-              "description": "Address by symbol name instead of file location: break on entry to this function/method (DAP function breakpoint). No file or line needed — names survive edits better than both. Composes with condition only. Supported by Python, Go, Rust, .NET, Java, and JavaScript adapters. JavaScript names are dotted runtime paths (e.g. \"handler\" or \"obj.method\") bound to the current function value: top-level function declarations of the main module bind at launch; functions in modules loaded later bind at the next pause"
+              "description": "Address by symbol name instead of file location: break on entry to this function/method (DAP function breakpoint). No file or line needed — names survive edits better than both. Composes with condition only. Supported by Python, Go, Rust, C/C++, .NET, Java, and JavaScript adapters. JavaScript names are dotted runtime paths (e.g. \"handler\" or \"obj.method\") bound to the current function value: top-level function declarations of the main module bind at launch; functions in modules loaded later bind at the next pause"
             },
             "condition": {
               "type": "string",
@@ -105,7 +105,7 @@
             },
             "logMessage": {
               "type": "string",
-              "description": "Create a logpoint: instead of pausing, log this message when the line is hit. Expressions in {curly braces} are interpolated (e.g. \"order={orderId} total={total}\"). Messages arrive in get_output while the program runs at full speed. Supported by the Python, JavaScript, Go, Rust, and mock adapters; not by Java, .NET, or Ruby"
+              "description": "Create a logpoint: instead of pausing, log this message when the line is hit. Expressions in {curly braces} are interpolated (e.g. \"order={orderId} total={total}\"). Messages arrive in get_output while the program runs at full speed. Supported by the Python, JavaScript, Go, Rust, C/C++, and mock adapters; not by Java, .NET, or Ruby"
             },
             "suspendPolicy": {
               "type": "string",

@@ -19,25 +19,6 @@ The event management system is designed to:
 **Location**: `src/proxy/proxy-manager.ts`
 
 ```typescript
-export interface ProxyManagerEvents {
-  // DAP events
-  'stopped': (threadId: number | undefined, reason: string, data?: DebugProtocol.StoppedEvent['body']) => void;
-  'continued': () => void;
-  'terminated': () => void;
-  'exited': () => void;
-
-  // Proxy lifecycle events
-  'initialized': () => void;
-  'init-received': () => void;
-  'error': (error: Error) => void;
-  'exit': (code: number | null, signal?: string) => void;
-
-  // Status events
-  'dry-run-complete': (command: string, script: string) => void;
-  'adapter-configured': () => void;
-  'dap-event': (event: string, body: unknown) => void;
-}
-
 // Typed event emitter methods (subset of IProxyManager)
 export interface IProxyManager extends EventEmitter {
   on<K extends keyof ProxyManagerEvents>(
@@ -52,6 +33,14 @@ export interface IProxyManager extends EventEmitter {
 }
 ```
 
+`ProxyManagerEvents` is the map of event name to listener signature that makes
+those two generics type-safe. It is deliberately **not** reproduced here: the
+signatures move (`'exited'` gained an optional `exitCode`, `'exit'` an `expected`
+flag, and `'output'`, `'breakpoint'`, `'adapter-capabilities'`,
+`'function-breakpoints-synced'` and `'breakpoints-synced'` were added), and a
+second copy only rots. Read the live definition in `src/proxy/proxy-manager.ts`;
+treat any transcription of it elsewhere in the docs as already behind.
+
 This pattern provides:
 - Type safety for event names and parameters
 - IntelliSense support in IDEs
@@ -65,9 +54,9 @@ This pattern provides:
 
 ```typescript
 // WeakMap to store event handlers for cleanup
-private sessionEventHandlers = new WeakMap<ManagedSession, Map<string, (...args: any[]) => void>>();
+protected sessionEventHandlers = new WeakMap<ManagedSession, Map<string, (...args: any[]) => void>>();
 
-private setupProxyEventHandlers(
+protected setupProxyEventHandlers(
   session: ManagedSession, 
   proxyManager: IProxyManager,
   effectiveLaunchArgs: Partial<CustomLaunchRequestArguments>
@@ -124,7 +113,7 @@ Note: WeakMap only governs the bookkeeping map's keys. It does **not** automatic
 **Location**: `src/session/session-manager-core.ts`
 
 ```typescript
-private cleanupProxyEventHandlers(session: ManagedSession, proxyManager: IProxyManager): void {
+protected cleanupProxyEventHandlers(session: ManagedSession, proxyManager: IProxyManager): void {
   // Safety check to prevent double cleanup
   if (!this.sessionEventHandlers.has(session)) {
     this.logger.debug(`[SessionManager] Cleanup already performed for session ${session.id}`);
@@ -234,7 +223,16 @@ private handleDapEvent(message: ProxyDapEventMessage): void {
       break;
     
     case 'exited':
-      this.emit('exited');
+      // The debuggee's exit code is forwarded, not dropped.
+      this.emit('exited', exitedBody?.exitCode);
+      break;
+    
+    case 'output':
+      this.emit('output', category, output);
+      break;
+    
+    case 'breakpoint':
+      this.emit('breakpoint', message.body);
       break;
     
     // Forward other events as generic DAP events
@@ -298,12 +296,12 @@ const handleError = (error: Error) => {
 
 const handleExit = (code: number | null, signal?: string) => {
   cleanup();
-  if (this.isDryRun && code === 0) {
-    // Normal exit for dry run
-    resolve();
-  } else {
-    reject(new Error(`Proxy exited during initialization. Code: ${code}, Signal: ${signal}`));
-  }
+  // Unconditional: an exit during initialization is always a failure, including a
+  // code-0 one. A clean dry run is acknowledged by an explicit dry_run_complete
+  // status, not by the process merely exiting quietly (issue #596).
+  let errorMessage = `Proxy exited during initialization. Code: ${code}, Signal: ${signal}`;
+  // ... the last few stderr lines are appended here, capped (issue #146)
+  reject(new Error(errorMessage));
 };
 ```
 
@@ -311,42 +309,52 @@ const handleExit = (code: number | null, signal?: string) => {
 
 ### One-Time Event Promises
 
-**Location**: `src/session/session-manager-operations.ts`
+**Location**: `src/session/execution/execution-controller.ts`
+
+Five events can end a step wait — `stopped`, `terminated`, `exited`, `exit`, and
+the grace-window timer — so the listeners are registered with `on` behind a
+single `settle()` once-guard rather than with `once`. `stepGraceMs` is a field on
+the `SessionManagerOperations` facade, read here through `this.ctx.tunables` so a
+test that shrinks it on a live instance is observed.
 
 ```typescript
-// Wait for stopped event, with a grace window rather than a hard deadline:
-// a step that outlives the window returns a truthful `pending` success and
-// completes asynchronously via the persistent handleStopped listener.
-return new Promise((resolve) => {
-  const timeout = setTimeout(() => {
-    this.logger.info(`[SM stepOver ${sessionId}] Step still running after grace window; completing asynchronously`);
-    resolve({
-      success: true,
-      state: session.state, // still RUNNING
-      data: {
-        message: ErrorMessages.stepStillRunning(this.stepGraceMs / 1000),
-        pending: true,
-      },
-    });
-  }, this.stepGraceMs);
-  
-  session.proxyManager?.once('stopped', () => {
-    clearTimeout(timeout);
-    this.logger.info(`[SM stepOver ${sessionId}] Step completed. Current state: ${session.state}`);
-    resolve({ success: true, state: session.state, data: { message: "Step over completed." } });
+// Wait for the stop, with a grace window rather than a hard deadline: a step
+// that outlives the window returns a truthful `pending` success and completes
+// asynchronously via the persistent handleStopped listener.
+const timeout = setTimeout(() => {
+  if (stopSeen) return; // the stop landed; the stop path owns the settle
+  this.ctx.logger.info(
+    `[SM ${options.logTag} ${sessionId}] Step still running after grace window; completing asynchronously`
+  );
+  settle({
+    success: true,
+    state: session.state, // still RUNNING
+    data: {
+      message: ErrorMessages.stepStillRunning(this.ctx.tunables.stepGraceMs / 1000),
+      pending: true,
+    },
   });
-});
+}, this.ctx.tunables.stepGraceMs);
+
+proxyManager.on('stopped', onStopped);
+proxyManager.on('terminated', onTerminated);
+proxyManager.on('exited', onExited);
+proxyManager.on('exit', onExit);
 ```
 
 ### Event Race Conditions
 
-**Location**: `src/session/session-manager-operations.ts`
+**Location**: `src/session/launch/launch-readiness.ts` (`waitForLaunchReadiness`)
 
 ```typescript
-// Wait for adapter to be configured, first stop event, or termination
-// Readiness can be satisfied by: stopped, adapter-configured, terminated, exited, or exit events.
-// Synchronous post-listener state checks avoid missing already-fired events.
-const waitForReady = new Promise<void>((resolve) => {
+// Wait for the adapter to be configured, the first stop event, or termination.
+// Readiness can be satisfied by: stopped, adapter-configured, terminated,
+// exited, or exit. The wait never rejects — every outcome resolves, including
+// the 30s ceiling, so the caller reports whatever state the session is in
+// rather than failing a launch that is merely slow.
+// `session.proxyManager` is re-read on every access: a terminal event handler
+// may null it while the wait is in flight.
+return new Promise<void>((resolve) => {
   let resolved = false;
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
@@ -363,19 +371,25 @@ const waitForReady = new Promise<void>((resolve) => {
     if (!resolved) { resolved = true; cleanup(); resolve(); }
   };
   const handleConfigured = () => {
-    if (!resolved && !dapLaunchArgs?.stopOnEntry) {
-      resolved = true; cleanup(); resolve();
-    }
+    // The adapter policy decides whether "configured and running" counts as
+    // ready; without one, it does unless the caller asked to stop on entry.
+    const readyOnRunning = policy.isSessionReady
+      ? policy.isSessionReady(SessionState.RUNNING, { stopOnEntry: dapLaunchArgs?.stopOnEntry })
+      : !dapLaunchArgs?.stopOnEntry;
+    if (!resolved && readyOnRunning) { resolved = true; cleanup(); resolve(); }
   };
-  const handleTerminated = () => {
-    if (!resolved) { resolved = true; cleanup(); resolve(); }
-  };
-  const handleExited = () => {
-    if (!resolved) { resolved = true; cleanup(); resolve(); }
-  };
-  const handleExit = () => {
-    if (!resolved) { resolved = true; cleanup(); resolve(); }
-  };
+  // handleTerminated / handleExited / handleExit follow the same shape.
+
+  // Checked BEFORE any listener is registered: the caller decided readiness
+  // synchronously just before this call and nothing has been awaited since,
+  // so the only state worth re-checking is a launch that is already terminal
+  // — and settling here costs no registrations to remove.
+  const currentState = ctx.getSession(sessionId).state;
+  if (currentState === SessionState.STOPPED || currentState === SessionState.ERROR) {
+    resolved = true;
+    resolve();
+    return;
+  }
 
   session.proxyManager?.once('stopped', handleStopped);
   session.proxyManager?.once('adapter-configured', handleConfigured);
@@ -383,17 +397,11 @@ const waitForReady = new Promise<void>((resolve) => {
   session.proxyManager?.once('exited', handleExited);
   session.proxyManager?.once('exit', handleExit);
 
-  // Synchronous post-listener state check to avoid missing already-fired events
-  const currentState = this._getSessionById(sessionId).state;
-  if (currentState === SessionState.PAUSED || currentState === SessionState.STOPPED || currentState === SessionState.ERROR) {
-    resolved = true; cleanup(); resolve(); return;
-  }
-
-  // Timeout after 30 seconds
+  // Ceiling after 30 seconds: log and resolve, never reject.
   timeoutId = setTimeout(() => {
     if (!resolved) {
       resolved = true; cleanup();
-      this.logger.warn(ErrorMessages.adapterReadyTimeout(30));
+      ctx.logger.warn(ErrorMessages.adapterReadyTimeout(30));
       resolve();
     }
   }, 30000);
@@ -404,39 +412,62 @@ const waitForReady = new Promise<void>((resolve) => {
 
 ### Testing Event Emissions
 
-**Location**: `tests/unit/proxy/proxy-manager-lifecycle.test.ts`
+**Location**: the ProxyManager unit suite — `tests/unit/proxy/proxy-manager.start.test.ts`,
+`tests/unit/proxy/proxy-manager.handshake.test.ts`,
+`tests/unit/proxy/proxy-manager-message-handling.test.ts` and
+`tests/unit/proxy/proxy-manager.branch-coverage.test.ts`
+
+Two shapes are in use. `proxy-manager-message-handling.test.ts` drives a
+`TestProxyManager` (`tests/unit/test-utils/test-proxy-manager.ts`) — a real
+`ProxyManager` with `start()`/`stop()` overridden so no process is spawned, plus
+a `simulateMessage()` that feeds the IPC handler directly. The assertion is
+simply that the right typed event came out the other side:
 
 ```typescript
-it('should emit exit event when proxy process exits', async () => {
-  // Setup
-  fakeLauncher.prepareProxy((proxy) => {
-    setTimeout(() => {
-      proxy.simulateMessage({
-        type: 'status',
-        sessionId: defaultConfig.sessionId,
-        status: 'adapter_configured_and_launched'
-      });
-    }, 50);
+it('should handle valid status messages', () => {
+  const statusMessage = {
+    type: 'status',
+    sessionId: 'test-session',
+    status: 'adapter_configured_and_launched'
+  };
+
+  let adapterConfiguredEmitted = false;
+  proxyManager.on('adapter-configured', () => {
+    adapterConfiguredEmitted = true;
   });
 
-  await proxyManager.start(defaultConfig);
+  // Simulate message from proxy process
+  proxyManager.simulateMessage(statusMessage);
 
-  // Create promise to capture event
-  const exitPromise = new Promise<{ code: number; signal?: string }>((resolve) => {
-    proxyManager.once('exit', (code, signal) => resolve({ code, signal }));
+  expect(adapterConfiguredEmitted).toBe(true);
+});
+
+it('should handle clean proxy exit', async () => {
+  let exitEmitted = false;
+  proxyManager.on('exit', () => {
+    exitEmitted = true;
   });
 
-  // Trigger event
-  const fakeProxy = fakeLauncher.getLastLaunchedProxy()!;
-  fakeProxy.simulateExit(0, 'SIGTERM');
+  await proxyManager.stop();
 
-  // Assert
-  const result = await exitPromise;
-  expect(result.code).toBe(0);
-  expect(result.signal).toBe('SIGTERM');
+  expect(exitEmitted).toBe(true);
   expect(proxyManager.isRunning()).toBe(false);
 });
 ```
+
+The three siblings reach the same events by other routes, none of them spawning
+a process either: `proxy-manager.start.test.ts` builds a real `ProxyManager`
+over a hand-rolled `FakeProxyProcess` (an `EventEmitter` implementing
+`IProxyProcess`) handed back by a `launchProxy` spy, then emits `'message'` on
+the fake to script the handshake; `proxy-manager.branch-coverage.test.ts`
+assigns a `StubProxyProcess` onto the manager's private `proxyProcess` field and
+calls the private `handleProxyMessage` directly; and
+`proxy-manager.handshake.test.ts` spies on `sendCommand` and emits
+`'init-received'` on the manager itself, driving `sendInitWithRetry`'s backoff
+under fake timers. A reusable off-the-shelf `FakeProxyProcessLauncher` — with
+`prepareProxy()`, `getLastLaunchedProxy()` and `simulateExit()` — lives in
+`tests/implementations/test/fake-process-launcher.ts` for suites that would
+rather not hand-roll one.
 
 ### Testing Event Cleanup
 

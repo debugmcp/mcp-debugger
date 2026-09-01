@@ -10,7 +10,7 @@ This document provides detailed design information for the major components of t
 |-------|------|----------------|
 | `SessionManagerCore` | `src/session/session-manager-core.ts` | Lifecycle, state management, event handler setup/cleanup, dependency injection |
 | `SessionManagerData` | `src/session/session-manager-data.ts` | Data retrieval: variables, stack traces, scopes, local variables; `selectPolicy()` |
-| `SessionManagerOperations` | `src/session/session-manager-operations.ts` | Debug operations facade (~350 lines): tunables, `OperationsContext` wiring, collaborator fields, one-line delegates to the collaborators below |
+| `SessionManagerOperations` | `src/session/session-manager-operations.ts` | Debug operations facade (~400 lines): tunables, `OperationsContext` wiring, collaborator fields, one-line delegates to the collaborators below |
 | `SessionManager` | `src/session/session-manager.ts` | Thin facade that extends `SessionManagerOperations` and implements `handleAutoContinue` |
 
 The inheritance chain is: `SessionManagerCore` -> `SessionManagerData` -> `SessionManagerOperations` -> `SessionManager`.
@@ -29,7 +29,10 @@ can be spied on or replaced:
 | `reresolveAnchors` | `src/session/breakpoints/anchor-resolution.ts` | Re-resolve statement anchors against the current source (restart and JVM hot swap) |
 | launch warnings | `src/session/breakpoints/launch-warnings.ts` | Pure builders: unbound-at-exit, logpoint downgrade, unbound function breakpoints |
 | `ExecutionController` | `src/session/execution/execution-controller.ts` | Stepping (table-driven over `STEP_KINDS`), continue, pause, thread list |
+| `PauseCoordinator` | `src/session/execution/pause-coordinator.ts` | Owns the low-level pause race shared by `pause_execution` and attach: listeners and generation-scoped intent are installed before the DAP request, and it reports one of three outcomes (`observed`, `pending`, `rejected`) for the caller to map onto its own result shape. Injected into both `ExecutionController` and `AttachController` |
+| pause intent | `src/session/execution/pause-intent.ts` | The generation-scoped pause record itself (`beginProxyGeneration`, `armPauseIntent`, `clearPauseIntent`), so a pause armed against one proxy cannot be satisfied by the next |
 | `ExpressionEvaluator` | `src/session/inspection/expression-evaluator.ts` | `evaluate_expression`, including frame resolution and secret redaction |
+| `FrameAnchorResolver` | `src/session/inspection/frame-anchor-resolver.ts` | The inspection anchor shared by stack trace, locals, and evaluation: thread selection, bounded stack readiness, sibling-thread adoption, policy frame filtering. Constructed by `SessionManagerData` and passed to `ExpressionEvaluator` |
 | `RedefineClassesController` | `src/session/jvm/redefine-classes-controller.ts` | JVM hot swap plus the post-swap anchor re-resolution and breakpoint re-send |
 | `MirrorController` | `src/session/mirror/mirror-controller.ts` | `expose_session` / `unexpose_session` |
 
@@ -40,7 +43,10 @@ a tunable on a live instance is visible to the collaborators. Each collaborator'
 constructor takes the narrowest `Pick<>` slice of that context it uses;
 collaborator-to-collaborator dependencies are constructor arguments
 (`DebugLauncher(ctx, proxyLauncher, breakpoints)`,
-`AttachController(ctx, proxyLauncher, breakpoints)`) held as captured instance
+`AttachController(ctx, proxyLauncher, breakpoints, pauseCoordinator)`,
+`ExecutionController(ctx, pauseCoordinator)`,
+`ExpressionEvaluator(ctx, frameAnchorResolver)`,
+`RedefineClassesController(ctx, breakpoints)`) held as captured instance
 references — their methods resolve at call time, so instance spies intercept,
 but reassigning a collaborator field after construction is not observed.
 `DebugLauncher` owns the restart reentrancy guard, and `restartDebugging`
@@ -92,18 +98,27 @@ class SessionManager {
   async getLocalVariables(sessionId: string, includeSpecial?: boolean): Promise<{ variables: Variable[]; frame: {...} | null; scopeName: string | null }>
 
   // Debug operations (from SessionManagerOperations)
-  async startDebugging(sessionId: string, scriptPath: string, scriptArgs?: string[], dapLaunchArgs?: Partial<CustomLaunchRequestArguments>, dryRunSpawn?: boolean, adapterLaunchConfig?: Record<string, unknown>): Promise<DebugResult>
-  async setBreakpoint(sessionId: string, file: string, line: number, condition?: string): Promise<Breakpoint>
-  async stepOver(sessionId: string): Promise<DebugResult>
-  async stepInto(sessionId: string): Promise<DebugResult>
-  async stepOut(sessionId: string): Promise<DebugResult>
+  async startDebugging(sessionId: string, scriptPath: string, scriptArgs?: string[], dapLaunchArgs?: Partial<CustomLaunchRequestArguments>, dryRunSpawn?: boolean, adapterLaunchConfig?: Record<string, unknown>, breakOnExceptions?: ExceptionBreakMode): Promise<DebugResult>
+  async restartDebugging(sessionId: string): Promise<DebugResult>
+  async setBreakpoint(sessionId: string, bp: { file: string; line: number; condition?: string; suspendPolicy?: 'all' | 'thread'; logMessage?: string; requestedLine?: number; anchor?: { statement: string; nearLine?: number } }): Promise<{ breakpoint: Breakpoint; warning?: string }>
+  async setFunctionBreakpoint(sessionId: string, bp: { functionName: string; condition?: string }): Promise<{ breakpoint: FunctionBreakpoint; warning?: string }>
+  resolveFunctionBreakpointName(sessionId: string, requestedName: string): FunctionBreakpointNameResolution
+  async removeFunctionBreakpointsByName(sessionId: string, requestedName: string): Promise<FunctionBreakpointRemoval>
+  async removeBreakpoint(sessionId: string, breakpointId: string): Promise<{ removed?: Breakpoint | FunctionBreakpoint; warning?: string }>
+  async removeBreakpointsByLocation(sessionId: string, file: string, line: number): Promise<{ removed: Breakpoint[]; warning?: string }>
+  async clearBreakpoints(sessionId: string, file?: string): Promise<{ cleared: number; files: string[]; warning?: string }>
+  async stepOver(sessionId: string): Promise<DebugResult<StepResultData>>
+  async stepInto(sessionId: string): Promise<DebugResult<StepResultData>>
+  async stepOut(sessionId: string): Promise<DebugResult<StepResultData>>
   async continue(sessionId: string): Promise<DebugResult>
-  async pause(sessionId: string): Promise<DebugResult>
+  async pause(sessionId: string, threadId?: number): Promise<DebugResult<PauseResultData>>
   async evaluateExpression(sessionId: string, expression: string, frameId?: number, timeoutMs?: number): Promise<EvaluateResult>
-  async attachToProcess(sessionId: string, attachConfig: { port?: number; host?: string; processId?: number | string; timeout?: number; sourcePaths?: string[]; stopOnEntry?: boolean; justMyCode?: boolean; verifyTimeout?: number; }): Promise<DebugResult>
+  async attachToProcess(sessionId: string, attachConfig: { port?: number; host?: string; processId?: number | string; timeout?: number; sourcePaths?: string[]; stopOnEntry?: boolean; justMyCode?: boolean; verifyTimeout?: number; breakOnExceptions?: ExceptionBreakMode; adapterConfig?: Record<string, unknown>; }): Promise<DebugResult<AttachResultData>>
   async detachFromProcess(sessionId: string, terminateProcess?: boolean): Promise<DebugResult>
   async listThreads(sessionId: string): Promise<Array<{ id: number; name: string }>>
   async redefineClasses(sessionId: string, classesDir: string, sinceTimestamp?: number, timeoutMs?: number): Promise<RedefineClassesResult>
+  async exposeSession(sessionId: string): Promise<ExposeSessionResult>
+  async unexposeSession(sessionId: string): Promise<UnexposeSessionResult>
 
   // Adapter registry (from SessionManagerCore)
   public adapterRegistry: IAdapterRegistry
@@ -311,8 +326,10 @@ From the `handleInitCommand` method:
 
 3. **Logger Creation**
    ```typescript
-   // proxyLogPathFor is the single home for this name (src/proxy/proxy-log-path.ts);
-   // the session layer's failure diagnostics read the log back through it.
+   // proxyLogPathFor is the single home for this name
+   // (src/proxy/session-log-layout.ts, the whole per-session log naming
+   // contract); the session layer's failure diagnostics read the log back
+   // through it.
    const logPath = proxyLogPathFor(payload.logDir, payload.sessionId);
    this.logger = await this.dependencies.loggerFactory(payload.sessionId, payload.logDir);
    ```

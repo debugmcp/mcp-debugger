@@ -259,6 +259,13 @@ jobs:
     - name: Check for personal information
       run: pnpm run check:all-personal-paths
 
+    # Docs here are hand-maintained -- nothing generates them -- so they drift
+    # silently. This catches the two classes a machine can catch: relative links
+    # that no longer resolve, and counts that fell behind the code ("28 tools",
+    # "eight languages"). Everything else still needs a human reviewer.
+    - name: Check documentation consistency
+      run: pnpm run check:docs
+
     - name: Validate changelog fragments
       run: pnpm run changelog:check
 

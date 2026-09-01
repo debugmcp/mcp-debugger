@@ -12,7 +12,7 @@ MCP Client → MCP Server → ProxyManager → TCP → JdiDapServer (JVM)
                                               Target JVM (via JDWP)
 ```
 
-JdiDapServer is a ~3000-line Java program that:
+JdiDapServer is a single-file Java program that:
 - Accepts DAP requests over TCP (Content-Length framed JSON)
 - Uses JDI to launch or attach to a target JVM
 - Handles deferred breakpoints via `ClassPrepareRequest` for classes not yet loaded
@@ -50,31 +50,30 @@ If you use a build tool:
 
 ### Launch Mode
 
-JDI bridge spawns the JVM and connects via JDI. The adapter derives `mainClass` from the `program` field in the launch configuration and transparently forwards `classpath`, `sourcePath`, `cwd`, `env`, and `args`.
+JDI bridge spawns the JVM and connects via JDI. The adapter derives `mainClass` from the `program` field in the launch configuration and forwards `classpath`, `vmArgs`, `javaPath`, and the program `args`.
 
-```
-use_mcp_tool(
-  tool_name="start_debugging",
-  arguments={
-    "sessionId": "your-session-id",
-    "scriptPath": "/path/to/MyProgram.java",
-    "dapLaunchArgs": {
-      "mainClass": "MyProgram",
-      "classpath": "/path/to/classes",
-      "cwd": "/path/to/project",
-      "stopOnEntry": true
-    }
-  }
-)
+Put the Java-specific keys in `start_debugging`'s `adapterLaunchConfig` — the parameter reserved for adapter-specific overrides — and leave standard DAP keys such as `stopOnEntry` in `dapLaunchArgs`. Both objects are merged into the one launch config the adapter transforms, so either container reaches the bridge; `adapterLaunchConfig` is the documented home (see [tool reference](../tool-reference.md#start_debugging)).
+
+```text
+start_debugging { "sessionId": "your-session-id",
+                  "scriptPath": "/path/to/MyProgram.java",
+                  "args": ["--verbose"],
+                  "adapterLaunchConfig": { "classpath": "/path/to/classes" },
+                  "dapLaunchArgs": { "stopOnEntry": true } }
 ```
 
 Key launch arguments:
-- `mainClass` (required): Fully qualified class name with `main()` method
-- `classpath`: Directory or classpath containing compiled `.class` files (default: `'.'`; typically needed — the JVM will not find your classes without it)
-- `cwd`: Working directory for the launched JVM
-- `stopOnEntry`: Whether to pause at the first line of `main()` (default: `true`)
+- `mainClass` is **derived, not passed**: the adapter reads the launch config's `program` (which defaults to `scriptPath`) and turns a `.java` path into its base name — `/path/to/MyProgram.java` yields `MyProgram`. Any other `program` value is used verbatim, so `"adapterLaunchConfig": {"program": "com.example.Main"}` names a fully-qualified class that does not match the file name. A `mainClass` key you pass yourself is overwritten by this derivation.
+- `classpath`: Directory or classpath containing compiled `.class` files (default: `'.'`; typically needed — the JVM will not find your classes without it). Make it **absolute**: the bridge launches the JVM in its own working directory, so a relative classpath resolves against the server's cwd, not your project.
+- `stopOnEntry`: Whether to pause at the first line of `main()`. **Through `start_debugging` the
+  effective default is `false`** — the session layer merges `{ stopOnEntry: false, justMyCode: true }`
+  underneath your `dapLaunchArgs` (`src/session/session-manager-core.ts:198`), so the Java adapter's
+  own `?? true` fallback never fires on this path. Pass `"stopOnEntry": true` explicitly to pause at
+  entry. (The adapter-level default of `true` is real but only observable when calling
+  `transformLaunchConfig` directly, as the unit tests do.)
 - `javaPath`: Path to the `java` executable (overrides auto-detection)
-- `vmArgs`: Additional JVM arguments (e.g., `-Xmx512m`)
+- `vmArgs`: Additional JVM arguments as one space-separated string (e.g., `"-Xmx512m"`)
+- Program arguments come from `start_debugging`'s top-level `args` array and are appended after the main class
 
 ### Attach Mode
 
@@ -89,50 +88,39 @@ java -agentlib:jdwp=transport=dt_socket,server=y,address=5005,suspend=y \
 - `suspend=y` pauses the JVM until a debugger attaches (recommended for debugging from the start)
 - `suspend=n` lets the JVM run immediately (useful for attaching to running servers)
 
-```
-use_mcp_tool(
-  tool_name="attach_to_process",
-  arguments={
-    "sessionId": "your-session-id",
-    "port": 5005,
-    "host": "localhost",
-    "sourcePaths": ["/path/to/source"]
-  }
-)
+```text
+attach_to_process { "sessionId": "your-session-id", "host": "localhost", "port": 5005 }
 ```
 
 Key attach arguments:
 - `port` (required): JDWP debug port
-- `host`: Target hostname (default: `localhost`)
-- `sourcePaths`: Directories containing `.java` source files for source mapping
+- `host`: Target hostname (default: `localhost`; `hostName` is accepted as an alias)
+- `stopOnEntry`: asks the bridge to suspend the VM on attach. The bridge's own default for this
+  argument is `false` (`JdiDapServer.java:342`), but you will normally see the session paused
+  anyway: `JavaAdapterPolicy` declares `getAttachBehavior: () => ({ pauseAfterAttach: true,
+  pauseAllThreads: true })`, so mcp-debugger issues a pause of its own once the attach is verified.
+
+Those three are the only keys the JDI bridge's **attach handler** reads. That is a statement about
+the bridge, not about `attach_to_process` as a whole — `verifyTimeout`, `breakOnExceptions` and
+`adapterConfig` are consumed by mcp-debugger's own attach controller before the bridge is
+involved, and never reach it. There is no source-path list to configure: breakpoints resolve
+classes from the `file` you give `set_breakpoint`, which may be a path or a fully-qualified
+class name.
 
 ## Debugging Workflow
 
 ### 1. Create a Debug Session
 
-```
-use_mcp_tool(
-  tool_name="create_debug_session",
-  arguments={
-    "language": "java",
-    "name": "My Java Debug Session"
-  }
-)
+```text
+create_debug_session { "language": "java", "name": "My Java Debug Session" }
 ```
 
 ### 2. Set Breakpoints
 
 Set breakpoints before starting/attaching. Breakpoints must be on executable lines (assignments, method calls, conditionals) — not on blank lines, comments, or declarations. Conditional breakpoints (with a `condition` expression) and exception breakpoints are also supported by the JDI bridge. On an exception stop the bridge answers the DAP `exceptionInfo` request, so `lastStop.exceptionInfo` (exception class, break mode, message, stack trace) is populated shortly after the pause.
 
-```
-use_mcp_tool(
-  tool_name="set_breakpoint",
-  arguments={
-    "sessionId": "your-session-id",
-    "file": "/path/to/MyProgram.java",
-    "line": 15
-  }
-)
+```text
+set_breakpoint { "sessionId": "your-session-id", "file": "/path/to/MyProgram.java", "line": 15 }
 ```
 
 ### 3. Start or Attach
@@ -143,41 +131,38 @@ Use `start_debugging` for launch mode or `attach_to_process` for attach mode (se
 
 When paused at a breakpoint:
 
-```
+```text
 # Step over (execute current line)
-use_mcp_tool(tool_name="step_over", arguments={"sessionId": "..."})
+step_over { "sessionId": "..." }
 
 # Step into (enter function calls)
-use_mcp_tool(tool_name="step_into", arguments={"sessionId": "..."})
+step_into { "sessionId": "..." }
 
 # Step out (return from current function)
-use_mcp_tool(tool_name="step_out", arguments={"sessionId": "..."})
+step_out { "sessionId": "..." }
 
 # Continue (run until next breakpoint)
-use_mcp_tool(tool_name="continue_execution", arguments={"sessionId": "..."})
+continue_execution { "sessionId": "..." }
 ```
 
 ### 5. Examine Program State
 
-```
+```text
 # Get local variables in current frame
-use_mcp_tool(tool_name="get_local_variables", arguments={"sessionId": "..."})
+get_local_variables { "sessionId": "..." }
 
 # Get call stack
-use_mcp_tool(tool_name="get_stack_trace", arguments={"sessionId": "..."})
+get_stack_trace { "sessionId": "..." }
 
 # Evaluate an expression (frameId is optional; defaults to top frame)
 # The evaluator supports field access, method calls, arithmetic, and string concatenation
-use_mcp_tool(
-  tool_name="evaluate_expression",
-  arguments={"sessionId": "...", "expression": "x + y", "frameId": 0}
-)
+evaluate_expression { "sessionId": "...", "expression": "x + y", "frameId": 0 }
 ```
 
 ### 6. Close the Session
 
-```
-use_mcp_tool(tool_name="close_debug_session", arguments={"sessionId": "..."})
+```text
+close_debug_session { "sessionId": "..." }
 ```
 
 ## Deferred Breakpoints
@@ -225,7 +210,7 @@ javac -g Calculator.java
 
 1. Create debug session with `language: "java"`
 2. Set breakpoint at line 4
-3. Start debugging with `mainClass: "Calculator"`, `classpath: "."`
+3. Start debugging with `scriptPath: "/abs/path/Calculator.java"` and `adapterLaunchConfig: {"classpath": "/abs/path"}` (the directory holding `Calculator.class`)
 4. When stopped at breakpoint, inspect variables: `a=10`, `b=20`
 
 ## Example: Attach Mode
@@ -240,7 +225,7 @@ java -agentlib:jdwp=transport=dt_socket,server=y,address=5005,suspend=y \
 
 1. Create debug session with `language: "java"`
 2. Set breakpoints on desired lines
-3. Attach with `port: 5005`, `host: "localhost"`, `sourcePaths: ["."]`
+3. Attach with `port: 5005`, `host: "localhost"`
 4. Continue execution to resume the suspended JVM
 5. Wait for breakpoint to fire, then inspect variables
 

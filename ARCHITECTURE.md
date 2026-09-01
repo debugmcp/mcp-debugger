@@ -4,11 +4,11 @@ mcp-debugger is a Model Context Protocol (MCP) server that bridges MCP clients (
 
 ## Monorepo Structure
 
-The project uses pnpm workspaces with 13 packages (the root workspace plus 12 under `packages/`):
+The project uses pnpm workspaces (`packages: ['packages/*']`): the root project plus 17 packages under `packages/`:
 
 ```
 packages/
-  shared/             Core interfaces and types (IDebugAdapter, IAdapterFactory)
+  shared/             Core interfaces, types and adapter policies (IDebugAdapter, IAdapterFactory)
   adapter-python/     Python debugging via debugpy
   adapter-javascript/ JavaScript/Node.js debugging via js-debug
   adapter-ruby/       Ruby debugging via rdbg
@@ -17,7 +17,12 @@ packages/
   adapter-java/       Java debugging via JDI bridge
   adapter-dotnet/     .NET/C# debugging via netcoredbg
   adapter-cpp/        C/C++ debugging via CodeLLDB
-  codelldb-common/    Shared CodeLLDB infrastructure (vendoring, transport) for the Rust and C/C++ adapters
+  codelldb-common/    Shared CodeLLDB infrastructure (vendoring, resolution, spawn glue) for the Rust and C/C++ adapters
+  codelldb-darwin-arm64/  Prebuilt CodeLLDB binaries, one package per platform. Published with
+  codelldb-darwin-x64/    `os`/`cpu` fields so an install pulls only the matching payload; the
+  codelldb-linux-arm64/   resolver in codelldb-common probes a vendored copy first, then
+  codelldb-linux-x64/     CODELLDB_PATH, then the installed platform package.
+  codelldb-win32-x64/
   adapter-mock/       Mock adapter for testing
   mcp-debugger/       Self-contained CLI bundle (npx distribution)
 ```
@@ -28,9 +33,9 @@ Build order: `shared` -> `codelldb-common` -> adapters -> `mcp-debugger` CLI bun
 
 ```
 MCP Client (Claude, etc.)
-    |  MCP Protocol (JSON-RPC over STDIO or SSE)
+    |  MCP Protocol (JSON-RPC over stdio or Streamable HTTP; legacy SSE deprecated)
     v
-MCP Server (src/server.ts)
+MCP Server (src/server.ts composition root + src/server/ tool layer)
     |  Tool routing, input validation, path resolution
     v
 SessionManager (src/session/)
@@ -52,10 +57,11 @@ Each debug session runs in a **separate process** for isolation. The ProxyManage
 
 ## Key Components
 
-- **MCP Server** (`src/server.ts`): Registers 28 MCP tools, handles STDIO and SSE transports, dynamically discovers available language adapters
-- **SessionManager** (`src/session/`): 4-class inheritance hierarchy managing session lifecycle (`CREATED` -> `INITIALIZING` -> `READY` -> `RUNNING` <-> `PAUSED` -> `STOPPED`)
-- **Adapter Registry** (`src/adapters/`): Dynamic loading of adapters on-demand via ES module imports
-- **Adapter Policies** (`src/proxy/`): Language-specific DAP behavior via the policy pattern (e.g., `PythonAdapterPolicy`, `JsDebugAdapterPolicy`)
+- **MCP Server** (`src/server.ts`): Composition root — dependency wiring, lifecycle, session validation and the facade methods the tool handlers call. It also discovers available language adapters dynamically. Transports are set up by the CLI (`src/cli/`): `stdio` (default), `http` (Streamable HTTP, recommended) and the deprecated `sse`
+- **Tool layer** (`src/server/`): The 28 tool names and schemas (`TOOL_NAMES` and `buildToolDefinitions()` in `tool-schemas.ts`), argument coercion and validation (`tool-arguments.ts`, `tool-validation.ts`), and `registerToolHandlers()` in `tool-dispatch.ts`, which dispatches through the `TOOL_HANDLERS` record in `handlers/index.ts` — one module per tool family. Resource and prompt handlers sit alongside in `output-resources.ts` and `prompts.ts`
+- **SessionManager** (`src/session/`): 4-class inheritance hierarchy (`session-manager-core` -> `session-manager-data` -> `session-manager-operations` -> `session-manager`) managing session lifecycle (`CREATED` -> `INITIALIZING` -> `READY` -> `RUNNING` <-> `PAUSED` -> `STOPPED`). `session-manager-operations.ts` is a facade of thin delegates over per-slice collaborators under `src/session/{launch,attach,breakpoints,execution,inspection,jvm,mirror}/`, wired through `OperationsContext` (`src/session/operations-context.ts`)
+- **Adapter Registry** (`src/adapters/`): Dynamic loading of adapters on-demand via ES module imports; `adapter-lease.ts` owns one adapter instance for the duration of a launch/attach setup so a failed setup cannot strand a registry slot
+- **Adapter Policies** (`packages/shared/src/interfaces/adapter-policy-*.ts`): Language-specific DAP behavior via the policy pattern (`PythonAdapterPolicy`, `JsDebugAdapterPolicy`, one per language, plus `DefaultAdapterPolicy` in `adapter-policy.ts`), selected by `getPolicyForLanguage()` in `adapter-policy-map.ts`. `src/proxy/` only consumes them — `DapProxyWorker.selectAdapterPolicy()` picks one per session
 - **Dependency Injection** (`src/container/`): Constructor injection for all major components
 
 ## Adapter Plugin Pattern

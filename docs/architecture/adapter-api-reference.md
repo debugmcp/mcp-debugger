@@ -1,6 +1,5 @@
 # Adapter API Reference
 
-Status: Unreleased (post-v0.23.0 main)
 Audience: Adapter authors and maintainers  
 Source of truth: `@debugmcp/shared` interfaces and current implementation in `src/adapters/*`
 
@@ -11,8 +10,11 @@ Contents
 - AdapterFactory (base class for factories)
 - AdapterLoader (dynamic runtime loader)
 - AdapterRegistry (runtime registry and lifecycle management)
+- Adapter ownership: AdapterLease and disposal
 - Error types and diagnostics
 - Environment variables
+
+`src/adapters/` holds four modules: `adapter-loader.ts`, `adapter-registry.ts`, and the two that own an adapter instance's lifetime once it has been created — `adapter-lease.ts` and `adapter-disposal.ts` (see [Adapter ownership](#adapter-ownership-adapterlease-and-disposal)).
 
 ## IDebugAdapter
 
@@ -253,7 +255,7 @@ Key runtime behavior
 - Introspection
   - `getSupportedLanguages(): string[]` — currently registered factories (part of the `IAdapterRegistry` interface)
   - `listLanguages(): Promise<string[]>` — returns registered languages plus the hardcoded known-adapter catalog when dynamic loading is enabled (concrete implementation method)
-  - `listAvailableAdapters(): Promise<AdapterMetadata[]>` — merges loader metadata with registered languages, marking registered languages as installed (concrete implementation method)
+  - `listAvailableAdapters(): Promise<AdapterManifestEntry[]>` — merges loader metadata with registered languages, marking registered languages as installed (concrete implementation method)
   - `getAdapterInfo(language)` / `getAllAdapterInfo()`
 - Lifecycle
   - `disposeAll()` — disposes all adapters and clears registry
@@ -262,6 +264,35 @@ Auto-dispose
 - Registry subscribes to adapter `'stateChanged'` events
 - Starts a timer when state becomes `'disconnected'` or `'error'`
 - Cancels timer if adapter becomes `'connected'` or `'debugging'` again
+
+## Adapter ownership: AdapterLease and disposal
+
+File: `src/adapters/adapter-lease.ts`
+
+The registry caps concurrent adapters per language (`maxInstancesPerLanguage`) and releases a slot only when the adapter emits `'disposed'`. `AdapterLease` makes ownership of that slot explicit for the window between `registry.create()` and handing the adapter to a `ProxyManager`, so a throw anywhere inside the window cannot strand it (issue #557).
+
+```typescript
+const lease = await AdapterLease.acquire(registry, language, config, logger);
+try {
+  // ...prepare the launch using lease.adapter...
+  const proxyManager = lease.transferTo(proxyManagerFactory); // ownership moves
+  // ...start the proxy...
+} finally {
+  await lease.release(); // no-op after a transfer; disposes on every failure path
+}
+```
+
+- `static acquire(registry, language, config, logger): Promise<AdapterLease>` — creates the adapter and takes ownership. A rejection yields no lease.
+- `readonly adapter: IDebugAdapter` — valid whether or not the lease is still held.
+- `transferTo(factory: IProxyManagerFactory): IProxyManager` — hands ownership to the ProxyManager. Throws if the lease is no longer held; ownership moves only after `factory.create` returns, so a throwing factory leaves the lease held.
+- `release(): Promise<void>` — disposes if still held. Idempotent, a no-op after a transfer, and never throws (it is a `finally` guarding the caller's real error).
+- `getState(): 'held' | 'transferred' | 'released'`.
+
+`src/session/launch/proxy-launcher.ts` is the caller — the single proxy launch that both launch and attach go through.
+
+File: `src/adapters/adapter-disposal.ts`
+
+The one way to dispose an adapter you are done with, shared by `AdapterLease.release()` and `ProxyManager.cleanup()`. It awaits `adapter.dispose()` inside a guard so that a *synchronous* throw is caught as well as a rejection, and neither disposal nor the reporting of a disposal failure can escape into a teardown path.
 
 ## Error Types and Diagnostics
 
@@ -302,16 +333,18 @@ Files
 ```
 packages/adapter-example/
   package.json
-  src/ExampleAdapter.ts
-  src/ExampleAdapterFactory.ts
+  src/example-debug-adapter.ts
+  src/example-adapter-factory.ts
   src/index.ts
   tsconfig.json
 ```
 
+File names are kebab-case, the convention used by 8 of the 9 shipped adapters (see [adapter-development-guide.md](./adapter-development-guide.md#package-structure)). Class names stay PascalCase.
+
 Entry export (`src/index.ts`)
 ```typescript
 // Named export required by the dynamic loader
-export { ExampleAdapterFactory } from './ExampleAdapterFactory.js';
+export { ExampleAdapterFactory } from './example-adapter-factory.js';
 ```
 
 Installation and discovery

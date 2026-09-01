@@ -18,7 +18,7 @@ Benefits:
 
 - Node.js 22+
 - pnpm (not npm) — the monorepo uses `workspace:*` protocol
-- TypeScript 5.9+
+- TypeScript 6.x (the root devDependency is `typescript` `^6.0.2`)
 - Familiarity with the [Debug Adapter Protocol (DAP)](https://microsoft.github.io/debug-adapter-protocol/)
 - A working debugger for the target language (e.g., Delve for Go, debugpy for Python)
 
@@ -487,7 +487,11 @@ The loader:
 - [ ] Vitest alias added in `vitest.config.ts`
 - [ ] Adapter count assertions updated in tests
 - [ ] Unit and integration tests written under `tests/adapters/<language>/`
+- [ ] The new policy passes `tests/unit/shared/adapter-policy-contract.test.ts` — the cross-policy contract that runs against the real policies via `getPolicyForLanguage`. Its pinned capability table is a deliberate duplicate of what the policies declare, so a new language means editing that table on purpose
 - [ ] `pnpm install` run to link workspace
+- [ ] `pnpm run lint` clean (`src/**` and `packages/*/src/**` are linted)
+- [ ] `pnpm run typecheck:all` clean — `typecheck` (shipped sources, must be zero errors) plus `typecheck:tests` (the per-file ratchet). Both are gated by `.husky/pre-push` and by CI's lint job
+- [ ] `tests/typecheck-baseline.json` committed if the ratchet moved. The ratchet fails in *both* directions: a count going up means new type errors to fix; a count going down (or a removed test file) means the baseline is stale — run `pnpm run typecheck:tests:update` and commit the result in the same PR
 - [ ] TypeScript builds to `dist/` (ESM)
 - [ ] Adapter discovers and loads via `list_supported_languages`
 - [ ] No stdout pollution in stdio mode

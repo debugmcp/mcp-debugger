@@ -124,46 +124,71 @@ setupGlobalErrorHandlers(
 
 ### 2. Component-Level Error Handling
 
-**Example**: SessionManager error handling (`src/session/session-manager-operations.ts`)
+**Example**: launch error handling (`src/session/launch/debug-launcher.ts`)
+
+`SessionManagerOperations.startDebugging` is a one-line delegate; the body — and
+its error handling — lives in `DebugLauncher`. The teardown is shared with attach:
+`failProxySetup` (`src/session/launch/proxy-failure-diagnostics.ts`) performs the
+session-preserving proxy teardown, writes the failure record, and returns the
+diagnostic pointers that ride back on `DebugResult.data`.
 
 ```typescript
+// DebugLauncher.startDebugging (abridged)
 async startDebugging(
-  sessionId: string, 
-  scriptPath: string, 
-  scriptArgs?: string[], 
-  dapLaunchArgs?: Partial<CustomLaunchRequestArguments>, 
-  dryRunSpawn?: boolean
+  sessionId: string,
+  scriptPath: string,
+  scriptArgs?: string[],
+  dapLaunchArgs?: Partial<CustomLaunchRequestArguments>,
+  dryRunSpawn?: boolean,
+  adapterLaunchConfig?: Record<string, unknown>,
+  breakOnExceptions?: ExceptionBreakMode
 ): Promise<DebugResult> {
-  const session = this._getSessionById(sessionId);
-  
+  const session = this.ctx.getSession(sessionId);
+
   try {
-    // Start the proxy manager
+    // Launch the proxy; adapter creation inside runs under an AdapterLease
     await this.proxyLauncher.start(session, { scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn });
-    
-    // ... rest of logic
-    
-    return { 
-      success: true, 
-      state: session.state, 
-      data: { message: `Debugging started for ${scriptPath}` } 
-    };
+
+    // ... wait for readiness, re-apply breakpoints, build the success result
+
+    return { success: true, state: session.state, data: { /* ... */ } };
   } catch (error) {
+    // Session-preserving teardown + failure record + result pointers
+    const diagnosticData = await failProxySetup(this.ctx, session, error, 'startDebugging');
+    session.failureDiagnostics =
+      Object.keys(diagnosticData).length > 0 ? diagnosticData : undefined;
+
     const errorMessage = error instanceof Error ? error.message : String(error);
-    const errorStack = error instanceof Error ? error.stack : 'No stack available';
-    
-    this.logger.error(`[SessionManager] Error during startDebugging for session ${sessionId}: ${errorMessage}. Stack: ${errorStack}`);
-    
-    this._updateSessionState(session, SessionState.ERROR);
-    
-    if (session.proxyManager) {
-      await session.proxyManager.stop();
-      session.proxyManager = undefined;
+
+    // Machine-readable error identity for callers and tests
+    let errorType: string | undefined;
+    let errorCode: number | undefined;
+    if (error instanceof McpError) {
+      errorType = error.constructor.name || 'McpError';
+      errorCode = error.code as number | undefined;
+    } else if (error instanceof Error) {
+      errorType = error.constructor.name || 'Error';
     }
-    
-    return { success: false, error: errorMessage, state: session.state };
+
+    this.ctx.updateState(session, SessionState.ERROR);
+
+    return {
+      success: false,
+      error: errorMessage,
+      state: session.state,
+      errorType,
+      errorCode,
+      ...(Object.keys(diagnosticData).length > 0 ? { data: diagnosticData } : {})
+    };
   }
 }
 ```
+
+Two paths this abridgement leaves out are worth knowing about: a `close_debug_session`
+that lands during the teardown removes the session, so the state writes are skipped and
+the failure is reported against `SessionState.STOPPED`; and an incompatible-toolchain
+failure resets the session to `CREATED` rather than `ERROR` and returns a `canContinue`
+derived from the adapter's configured behavior.
 
 ### 3. Timeout Error Handling
 
@@ -179,11 +204,17 @@ most actionable error message fires first:
    that only fires if the worker never responds at all
 
 `evaluate_expression` and `redefine_classes` expose the override as a `timeout` (ms) tool
-argument (issue #142). `SessionManagerOperations` validates it (positive, finite, clamped to
-600000) and passes `{ timeoutMs }` to `sendDapRequest`, which threads it over IPC
+argument (issue #142). `resolveDapTimeoutOverride` (`src/session/dap-request-helpers.ts`)
+validates it — positive, finite, clamped to `MAX_DAP_TIMEOUT_MS` (600000) — and the caller
+passes `{ timeoutMs }` to `sendDapRequest`, which threads it over IPC
 (`DapCommandPayload.timeoutMs`) to the worker and socket. On a timeout failure those
-operations append `ErrorMessages.dapRequestTimeoutHint()` naming the `timeout` argument.
-The margin invariant (worker fires before parent) must hold for any new override plumbing.
+operations append `ErrorMessages.dapRequestTimeoutHint()` through `withTimeoutHint()`,
+naming the `timeout` argument. These are free functions rather than methods on the session
+manager: `ExpressionEvaluator`, `RedefineClassesController` and `AttachController` each
+import what they need, which is how attach's own `verifyTimeout` window reuses this exact
+validation instead of a hand-written copy. `truncateForLog()` lives beside them so a logged
+expression or result cannot swallow a megabyte of program output. The margin invariant
+(worker fires before parent) must hold for any new override plumbing.
 
 ```typescript
 // Timeout handler. The worker/socket timeout (timeoutMs, default 30s)
@@ -199,57 +230,74 @@ setTimeout(() => {
 }, effectiveTimeoutMs);
 ```
 
-**Example**: SessionManager step operation grace window (`src/session/session-manager-operations.ts`)
+**Example**: step operation grace window (`src/session/execution/execution-controller.ts`)
 
 Note: a step that outlives the grace window is *not* an error — the debuggee may
 legitimately run for a long time (e.g. stepping over a slow call). The tool
 returns a truthful `pending` success and the step completes asynchronously via
-the persistent `handleStopped` listener in `session-manager-core.ts`.
+the persistent `handleStopped` listener in `session-manager-core.ts`. The facade
+(`session-manager-operations.ts`) holds only the `stepGraceMs` tunable; the
+`ExecutionController` reads it through `this.ctx.tunables`, so a test that shrinks
+the field on a live instance is observed.
 
 ```typescript
-return new Promise((resolve) => {
-  const timeout = setTimeout(() => {
-    this.logger.info(`[SM stepOver ${sessionId}] Step still running after grace window; completing asynchronously`);
-    resolve({
-      success: true,
-      state: session.state, // still RUNNING
-      data: {
-        message: ErrorMessages.stepStillRunning(this.stepGraceMs / 1000),
-        pending: true,
-      },
-    });
-  }, this.stepGraceMs);
-  
-  session.proxyManager?.once('stopped', () => {
-    clearTimeout(timeout);
-    this.logger.info(`[SM stepOver ${sessionId}] Step completed. Current state: ${session.state}`);
-    resolve({ success: true, state: session.state, data: { message: "Step over completed." } });
+// ExecutionController's shared step body (abridged), table-driven over STEP_KINDS
+const timeout = setTimeout(() => {
+  // The stop already arrived and is being resolved. "Still executing" from
+  // here would be a lie the caller has no way to correct.
+  if (stopSeen) return;
+  this.ctx.logger.info(
+    `[SM ${options.logTag} ${sessionId}] Step still running after ` +
+    `${this.ctx.tunables.stepGraceMs}ms grace window; completing asynchronously`
+  );
+  settle({
+    success: true,
+    state: session.state, // still RUNNING
+    data: {
+      message: ErrorMessages.stepStillRunning(this.ctx.tunables.stepGraceMs / 1000),
+      pending: true,
+    },
   });
-});
+}, this.ctx.tunables.stepGraceMs);
+
+proxyManager.on('stopped', onStopped);
+proxyManager.on('terminated', onTerminated);
+proxyManager.on('exited', onExited);
+proxyManager.on('exit', onExit);
 ```
 
-**Example**: SessionManager attach verification window (`src/session/session-manager-operations.ts`)
+**Example**: attach verification window (`src/session/attach/attach-verification.ts`,
+driven by `src/session/attach/attach-controller.ts`)
 
-After an attach handshake, DAP `threads` is polled until the debugger reports at
-least one thread. If the window elapses without threads, the attach is reported
-as a failure and the proxy is torn down (issue #124 — a debugger with no
-threads is not usable, and reporting "paused" would be a lie). Because a slow
-target (e.g. a busy or warming JVM) can legitimately need longer than the
-default window, the window is caller-configurable (issue #143):
+After an attach handshake, `verifyAttachThreads` polls DAP `threads` until the
+debugger reports at least one thread. If the window elapses without threads, the
+attach is reported as a failure and the proxy is torn down (issue #124 — a
+debugger with no threads is not usable, and reporting "paused" would be a lie).
+`verifyAttachThreads` never throws: every failure mode comes back as a result,
+and its `proxyGone` flag distinguishes "the adapter died mid-verify" from "the
+deadline passed" so the controller can pick the right message. Because a slow
+target (e.g. a busy or warming JVM) can legitimately need longer than the default
+window, the window is caller-configurable (issue #143):
 
 - The default lives in the protected, test-shrinkable field
-  `attachVerifyTimeoutMs` (20s), following the `stepGraceMs`/`pauseGraceMs`
-  field pattern. It is deliberately generous: adapter death fails fast
-  regardless (the proxy-gone latch), so the deadline only bites when the
-  adapter is alive but the target is slow to report threads — where a false
-  "attach failed" is worse than a slow genuine failure.
+  `attachVerifyTimeoutMs` (20s) on `SessionManagerOperations`, following the
+  `stepGraceMs`/`pauseGraceMs` field pattern, and reaches the controller as
+  `this.ctx.tunables.attachVerifyTimeoutMs` — a getter, so a test that writes the
+  field on a live instance is observed. It is deliberately generous: adapter
+  death fails fast regardless (the proxy-gone latch), so the deadline only bites
+  when the adapter is alive but the target is slow to report threads — where a
+  false "attach failed" is worse than a slow genuine failure.
 - Callers override it per attach via the `verifyTimeout` (ms) argument on
-  `attach_to_process` / `create_debug_session`; the value is validated
-  (positive finite number) and clamped to 10 minutes. Pass a small value for
-  fast failure-by-design probes.
+  `attach_to_process` / `create_debug_session`. The value goes through the same
+  `resolveDapTimeoutOverride` every per-request `timeout` override uses (positive
+  finite number, clamped to 10 minutes), passing `keyName: 'verifyTimeout'` so
+  both the rejection and the clamp warning name the right argument. Pass a small
+  value for fast failure-by-design probes.
 - The failure text comes from `ErrorMessages.attachVerifyFailed(timeoutMs,
   lastFailure)`, which names the `verifyTimeout` knob so a caller that hit the
-  window on a slow target knows how to retry.
+  window on a slow target knows how to retry. When the proxy-gone latch fired
+  instead, `ErrorMessages.attachAdapterFailed(lastFailure)` reports the adapter's
+  own error rather than blaming the deadline.
 
 ## Error Response Patterns
 
@@ -259,16 +307,28 @@ Most operations return a standardized `DebugResult`, generic over the shape of
 its `data` bag (`src/session/session-manager-core.ts`):
 
 ```typescript
-// An open bag with the fields every reader actually touches named.
-// ProxyFailureDiagnostics (src/session/launch/proxy-failure-diagnostics.ts)
-// contributes the pointers a failed launch or attach returns.
-type DebugResultData = ProxyFailureDiagnostics & {
+// A CLOSED set of optional fields — deliberately no index signature, so a
+// misspelled read or write fails typecheck. ProxyFailureDiagnostics
+// (src/session/launch/proxy-failure-diagnostics.ts) contributes the pointers
+// a failed launch or attach returns.
+interface DebugResultData extends ProxyFailureDiagnostics {
   message?: string;
   warning?: string;
   /** Still running; the operation completes asynchronously (step and pause). */
   pending?: boolean;
-  [key: string]: unknown;
-};
+  /** Dry-run response fields. */
+  dryRun?: boolean;
+  command?: string;
+  script?: string;
+  /** Launch result fields. */
+  reason?: string;
+  stopOnEntrySuccessful?: boolean;
+  toolchainValidation?: ToolchainValidationState;
+  /** Restart result fields. */
+  breakpointsReapplied?: number;
+  outputReset?: boolean;
+  anchorResolution?: AnchorResolution;
+}
 
 interface DebugResult<TData extends DebugResultData = DebugResultData> {
   success: boolean;
@@ -283,9 +343,11 @@ interface DebugResult<TData extends DebugResultData = DebugResultData> {
 ```
 
 An operation with a richer bag names it and instantiates the parameter —
-`StepResultData` (`location`), `PauseResultData` (`stopReason`,
-`rawStopReason`), `AttachResultData` (`attachConfig`) — so callers read the
-fields straight off the result:
+`StepResultData` (a required `message` plus `location`), `PauseResultData`
+(`message`, `stopReason`, `rawStopReason`, `location`). Not every alias adds
+fields: `AttachResultData` is a plain alias for `DebugResultData`, naming the
+attach payload without extending it. Either way callers read the fields
+straight off the result:
 
 ```typescript
 const result = await sessionManager.pause(sessionId);
@@ -516,6 +578,10 @@ it('should propagate spawn errors', async () => {
 ```
 
 ### 3. Testing Error Recovery
+
+Shape only — `fakeLauncher` here is a `FakeProxyProcessLauncher` from
+`tests/implementations/test/fake-process-launcher.ts`, whose `prepareProxy()`
+seeds the next launch with a `FakeProxyProcess` you can drive:
 
 ```typescript
 it('should clean up on error', async () => {

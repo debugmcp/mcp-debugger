@@ -61,7 +61,15 @@ set_breakpoint        {sessionId, file: "/app/app.py", line: 51}
                       # line 51 = "total = sum(prices)" in the non-bulk path
 ```
 
-Note the **container-side** breakpoint path: attach sessions send paths verbatim to the remote debugger, which resolves them against the *pod's* filesystem (`/app/app.py`, as `get_stack_trace` reports them). The python adapter has no path-mapping option — a workstation path would report `verified: false` and never bind. See [breakpoints and paths on attach](../kubernetes.md#breakpoints-and-paths-on-attach-read-this-once).
+Note the **container-side** breakpoint path: attach sessions send paths verbatim to the remote debugger, which resolves them against the *pod's* filesystem (`/app/app.py`, as `get_stack_trace` reports them). A bare workstation path reports `verified: false` and never binds. If you would rather address breakpoints by your local checkout path, map it onto the debuggee tree — the python adapter forwards debugpy's native `pathMappings` through `adapterConfig` ([#450](https://github.com/debugmcp/mcp-debugger/issues/450)):
+
+```text
+attach_to_process {sessionId, host: "127.0.0.1", port: 5678,
+                   adapterConfig: {pathMappings: [{localRoot: "<abs path to examples/sick-pod>", remoteRoot: "/app"}]}}
+set_breakpoint    {sessionId, file: "<abs path to examples/sick-pod>/app.py", line: 51}
+```
+
+(Use `localRoot`/`remoteRoot` only *inside* `pathMappings` — as top-level `adapterConfig` keys they are ptvsd-era sugar that the attach transform drops, and the attach response's `warning` names them as ignored.) See [breakpoints and paths on attach](../kubernetes.md#breakpoints-and-paths-on-attach-read-this-once).
 
 Trigger one request while the breakpoint is armed:
 
