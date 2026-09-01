@@ -5,7 +5,7 @@ import * as winston from 'winston';
 import type { Logger as WinstonLoggerType } from 'winston';
 import path from 'path';
 import fs from 'fs';
-import { fileURLToPath } from 'url';
+import os from 'os';
 import { SafeFileTransport } from './safe-file-transport.js';
 import { isContainerRuntime } from './container-path-utils.js';
 
@@ -172,29 +172,21 @@ export function createLogger(namespace: string, options: LoggerOptions = {}): Wi
     );
   }
   
-  // Handle cases where import.meta.url might be undefined (e.g., in test environments)
-  let projectRootDefaultLogPath: string;
-  try {
-    if (import.meta.url) {
-      const __filename = fileURLToPath(import.meta.url);
-      const __dirname = path.dirname(__filename);
-      projectRootDefaultLogPath = path.resolve(__dirname, '../../logs', DEFAULT_LOG_BASENAME);
-    } else {
-      // Fallback for test environments
-      projectRootDefaultLogPath = path.resolve(process.cwd(), 'logs', DEFAULT_LOG_BASENAME);
-    }
-  } catch {
-    // Fallback if import.meta.url fails
-    projectRootDefaultLogPath = path.resolve(process.cwd(), 'logs', DEFAULT_LOG_BASENAME);
-  }
+  // Default host log location: the OS temp state dir the per-session logs
+  // already use (os.tmpdir()/debug-mcp-server). The old default was derived
+  // from the module location (<module>/../../logs), which put logs inside the
+  // package tree - packages/logs/ from a source checkout's bundle, and the
+  // consumer's node_modules for an installed CLI, where the tree may even be
+  // read-only (issue #637). --log-file still overrides.
+  let defaultLogPath = path.join(os.tmpdir(), 'debug-mcp-server', DEFAULT_LOG_BASENAME);
 
   // In container runtime, centralize logs under /app/logs for easier collection.
   // Single process per container, so the fixed (non-pid) name is safe there.
   if (isContainerRuntime()) {
-    projectRootDefaultLogPath = '/app/logs/debug-mcp-server.log';
+    defaultLogPath = '/app/logs/debug-mcp-server.log';
   }
   const usingDefaultHostPath = !options.file && !isContainerRuntime();
-  const logFilePath = options.file || projectRootDefaultLogPath;
+  const logFilePath = options.file || defaultLogPath;
 
   try {
     const logDir = path.dirname(logFilePath);
