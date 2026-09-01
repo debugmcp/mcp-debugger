@@ -13,6 +13,21 @@ except ImportError:
     from launcher import DebugMCPLauncher
     from detectors import RuntimeDetector
 
+
+def _display_command(cmd):
+    """Render an argv list as a pasteable shell command for --dry-run.
+
+    The docker mount arg embeds os.getcwd(), which contains spaces on the
+    common Windows default (C:\\Users\\First Last\\...); a bare ' '.join would
+    print a line that re-splits wrong when pasted (issue #641). Quote per the
+    host shell: list2cmdline for Windows cmd, shlex.quote for POSIX.
+    """
+    if os.name == "nt":
+        import subprocess
+        return subprocess.list2cmdline(cmd)
+    import shlex
+    return " ".join(shlex.quote(part) for part in cmd)
+
 # Version comes from the installed package metadata, so pyproject.toml (as
 # stamped by the release workflow) is the single source of truth; the
 # hardcoded predecessor had drifted six minors behind the published package
@@ -179,7 +194,7 @@ def main(mode: str, port: Optional[int], docker: bool, npm: bool,
             # Same builder as the real launch (issue #345): dry-run output can
             # never drift from the executed command.
             cmd = launcher.build_npx_command(mode, port)
-            print(f"\n🔍 Would execute: {' '.join(cmd)}")
+            print(f"\n🔍 Would execute: {_display_command(cmd)}")
             sys.exit(0)
 
         # Check if we need to provide installation instructions
@@ -198,7 +213,7 @@ def main(mode: str, port: Optional[int], docker: bool, npm: bool,
             # Same builder as the real launch (issue #345): dry-run output can
             # never drift from the executed command.
             cmd = launcher.build_docker_command(mode, port)
-            print(f"\n🔍 Would execute: {' '.join(cmd)}")
+            print(f"\n🔍 Would execute: {_display_command(cmd)}")
             sys.exit(0)
 
         print("\n" + "─" * 40)
