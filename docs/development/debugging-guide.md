@@ -229,13 +229,13 @@ tcpdump -i lo0 port 5678
 
 ### 3. File System Monitoring
 
-The main server log and the per-session logs live in different places, and looking in
-the wrong one is the most common way to conclude "there are no logs".
+The main server log and the per-session logs both live under the OS temp dir
+(since #637 — the server log used to sit in the repo's `logs/`); a stale mental
+model of the old location is the most common way to conclude "there are no logs".
 
 ```bash
 # Main server log (per-pid, issue #121)
-watch -n 1 'ls -la logs/'
-tail -f logs/debug-mcp-server-*.log
+tail -f "${TMPDIR:-/tmp}"/debug-mcp-server/debug-mcp-server-*.log
 
 # Per-session logs: one directory per LAUNCH ATTEMPT, under the OS temp dir.
 # Names come from src/proxy/session-log-layout.ts, so they cannot drift from

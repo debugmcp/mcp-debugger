@@ -334,7 +334,7 @@ above when you need the wire protocol rather than the summary.
 If you encounter an issue not covered in this guide, check:
 
 1. The server log: `--log-file <path>` if you set one, otherwise
-   `logs/debug-mcp-server-<pid>.log` next to the installed server
+   `<os.tmpdir()>/debug-mcp-server/debug-mcp-server-<pid>.log`
    (`/app/logs/debug-mcp-server.log` in the container image)
 2. The per-session proxy log — see
    [Reading the Logs for a Failed Session](#reading-the-logs-for-a-failed-session) above

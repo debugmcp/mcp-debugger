@@ -91,6 +91,15 @@ describe('logger utility', () => {
     expect(path.basename(fileCall.filename)).toBe(`debug-mcp-server-${process.pid}.log`);
   });
 
+  it('defaults to the os.tmpdir()/debug-mcp-server state dir on the host (issue #637)', () => {
+    stubFs();
+
+    loggerModule.createLogger('debug-mcp:test');
+
+    const fileCall = fileTransportSpy.mock.calls[0][0] as { filename: string };
+    expect(path.dirname(fileCall.filename)).toBe(path.join(os.tmpdir(), 'debug-mcp-server'));
+  });
+
   it('honors an explicitly provided log file path verbatim', () => {
     stubFs();
     const explicit = path.join(os.tmpdir(), 'my-custom', 'server.log');
