@@ -60,9 +60,9 @@ interface PinnedCapabilities {
  *
  * The deviations worth knowing: `javascript -> 'js-debug'` is the one policy name that differs
  * from its language, and the only policy delivering function breakpoints over CDP; ruby is the
- * only adapter with no static function-breakpoint verdict and the only one declining a default
- * exception mode; ruby/java/dotnet are the three that reject logpoints; js and java are the two
- * that bind function breakpoints late.
+ * only adapter pinning function breakpoints OFF (rdbg advertises the capability but ignores the
+ * request, #636) and the only one declining a default exception mode; ruby/java/dotnet are the
+ * three that reject logpoints; js and java are the two that bind function breakpoints late.
  */
 const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
   [DebugLanguage.PYTHON]: {
