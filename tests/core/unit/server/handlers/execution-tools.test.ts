@@ -8,7 +8,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SessionLifecycleState } from '@debugmcp/shared';
 import {
   handlePause,
-  handleListThreads
+  handleListThreads,
+  stepTool,
+  continueExecutionTool
 } from '../../../../../src/server/handlers/execution-tools.js';
 import {
   SessionTerminatedError,
@@ -74,6 +76,90 @@ describe('execution tool handlers', () => {
 
       await expect(handleListThreads(ctx, { sessionId: 'test-session' }))
         .rejects.toThrow('Failed to list threads: unexpected');
+    });
+  });
+
+  describe('stepTool failure envelopes (issue #638)', () => {
+    it.each([
+      ['step_over', 'stepOver'],
+      ['step_into', 'stepInto'],
+      ['step_out', 'stepOut']
+    ] as const)('%s reports the reason and state without a fabricated "Stepped" message', async (toolName, method) => {
+      ctx.sessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+      ctx.sessionManager[method].mockResolvedValue({
+        success: false,
+        error: 'Not paused',
+        state: 'running'
+      });
+
+      const result = await stepTool(ctx, { sessionId: 'test-session' }, toolName);
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload).toEqual({ success: false, error: 'Not paused', state: 'running' });
+    });
+
+    it('keeps the success wording and state on a successful step', async () => {
+      ctx.sessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+      ctx.sessionManager.stepOver.mockResolvedValue({ success: true, state: 'paused' });
+
+      const result = await stepTool(ctx, { sessionId: 'test-session' }, 'step_over');
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.success).toBe(true);
+      expect(payload.message).toBe('Stepped over');
+      expect(payload.state).toBe('paused');
+    });
+  });
+
+  describe('continueExecutionTool envelopes (issue #638)', () => {
+    it('reports the reason and state when continue fails', async () => {
+      ctx.sessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+      ctx.sessionManager.continue.mockResolvedValue({
+        success: false,
+        error: 'No current thread ID',
+        state: 'running'
+      });
+
+      const result = await continueExecutionTool(ctx, { sessionId: 'test-session' }, 'continue_execution');
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload).toEqual({ success: false, error: 'No current thread ID', state: 'running' });
+    });
+
+    it('includes the observed state on success (can be "paused" when a breakpoint fired mid-continue)', async () => {
+      ctx.sessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+      ctx.sessionManager.continue.mockResolvedValue({ success: true, state: 'paused' });
+
+      const result = await continueExecutionTool(ctx, { sessionId: 'test-session' }, 'continue_execution');
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload).toEqual({ success: true, message: 'Continued execution', state: 'paused' });
+    });
+
+    it('still converts typed session errors into success:false results', async () => {
+      ctx.sessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+      ctx.sessionManager.continue.mockRejectedValue(new ProxyNotRunningError('test-session', 'continue'));
+
+      const result = await continueExecutionTool(ctx, { sessionId: 'test-session' }, 'continue_execution');
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.success).toBe(false);
+      expect(payload.error).toContain('no active proxy');
     });
   });
 
