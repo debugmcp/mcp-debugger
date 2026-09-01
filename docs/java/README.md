@@ -64,7 +64,7 @@ start_debugging { "sessionId": "your-session-id",
 
 Key launch arguments:
 - `mainClass` is **derived, not passed**: the adapter reads the launch config's `program` (which defaults to `scriptPath`) and turns a `.java` path into its base name — `/path/to/MyProgram.java` yields `MyProgram`. Any other `program` value is used verbatim, so `"adapterLaunchConfig": {"program": "com.example.Main"}` names a fully-qualified class that does not match the file name. A `mainClass` key you pass yourself is overwritten by this derivation.
-- `classpath`: Directory or classpath containing compiled `.class` files (default: `'.'`; typically needed — the JVM will not find your classes without it). Make it **absolute**: the bridge launches the JVM in its own working directory, so a relative classpath resolves against the server's cwd, not your project.
+- `classpath`: Directory or classpath containing compiled `.class` files (default: `'.'`; typically needed — the JVM will not find your classes without it). Absolute is safest. Since #642 the JVM runs in the launch config's `cwd` — the session layer defaults it to the script's directory when you pass none — so a relative classpath resolves against that, not against the server's install directory. `env` is applied to the JVM's environment too (a JSON `null` value removes a variable).
 - `stopOnEntry`: Whether to pause at the first line of `main()`. **Through `start_debugging` the
   effective default is `false`** — the session layer merges `{ stopOnEntry: false, justMyCode: true }`
   underneath your `dapLaunchArgs` (`src/session/session-manager-core.ts:198`), so the Java adapter's

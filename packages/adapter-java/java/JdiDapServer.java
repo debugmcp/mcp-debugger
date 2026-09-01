@@ -414,6 +414,32 @@ public class JdiDapServer {
         log("Launching: " + String.join(" ", taggedCmd));
         ProcessBuilder pb = new ProcessBuilder(taggedCmd);
         pb.redirectErrorStream(false);
+
+        // Apply the launch config's cwd and env to the debuggee (issue #642).
+        // Both were accepted and forwarded by the adapter but never read here,
+        // so the debuggee silently inherited the bridge JVM's directory and
+        // environment. A JSON null env value removes the variable.
+        String cwd = str(args, "cwd");
+        if (cwd != null && !cwd.isEmpty()) {
+            File cwdDir = new File(cwd);
+            if (!cwdDir.isDirectory()) {
+                sendErrorResponse(reqSeq, "launch", "cwd is not a directory: " + cwd);
+                return;
+            }
+            pb.directory(cwdDir);
+        }
+        Map<String, Object> env = map(args, "env");
+        if (env != null) {
+            Map<String, String> pbEnv = pb.environment();
+            for (Map.Entry<String, Object> e : env.entrySet()) {
+                if (e.getValue() == null) {
+                    pbEnv.remove(e.getKey());
+                } else {
+                    pbEnv.put(e.getKey(), String.valueOf(e.getValue()));
+                }
+            }
+        }
+
         launchedProcess = pb.start();
 
         // Issue #368: watch for debuggee exit so the real exit code is on hand
