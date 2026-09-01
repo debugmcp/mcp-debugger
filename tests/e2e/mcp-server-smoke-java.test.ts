@@ -592,4 +592,70 @@ describe('MCP Server Java Debugging Smoke Test @requires-java', () => {
     expect(path.resolve(reported).toLowerCase()).toBe(requestedCwd.toLowerCase());
     console.log('[Java EnvCwd Test] TEST PASSED — cwd and env applied');
   }, 60000);
+
+  it('defaults the debuggee cwd to the script directory when none is passed (issue #642)', async () => {
+    try {
+      execSync('java -version', { stdio: 'ignore' });
+      execSync('javac -version', { stdio: 'ignore' });
+    } catch {
+      console.log('[Java DefaultCwd Test] Skipping — JDK not installed');
+      return;
+    }
+
+    const { sourcePath: testJavaFile, classDir: testClassDir, mainClass } = prepareJavaExample('EnvCwdTest');
+
+    const createResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: { language: 'java', name: 'java-default-cwd-test' }
+    }));
+    sessionId = createResponse.sessionId as string;
+
+    // No cwd in the launch config: the session layer injects
+    // dirname(scriptPath), and since #642 the bridge actually applies it.
+    const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'start_debugging',
+      arguments: {
+        sessionId,
+        scriptPath: testJavaFile,
+        args: [],
+        dapLaunchArgs: {
+          mainClass,
+          classpath: testClassDir,
+          stopOnEntry: false
+        }
+      }
+    }));
+    expect(startResponse.success).toBe(true);
+
+    interface SessionSnapshot { id: string; state?: string }
+    let terminal: SessionSnapshot | undefined;
+    const deadline = Date.now() + 30000;
+    while (Date.now() < deadline) {
+      const listResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'list_debug_sessions',
+        arguments: {}
+      }));
+      const sessions = (listResponse.sessions ?? []) as SessionSnapshot[];
+      const snap = sessions.find(s => s.id === sessionId);
+      if (snap && (snap.state === 'stopped' || snap.state === 'error')) {
+        terminal = snap;
+        break;
+      }
+      await new Promise(r => setTimeout(r, 250));
+    }
+    expect(terminal?.state).toBe('stopped');
+
+    const outputResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'get_output',
+      arguments: { sessionId, limit: 100 }
+    }));
+    const outputText = ((outputResponse.entries ?? []) as Array<{ output?: string }>)
+      .map(e => e.output ?? '')
+      .join('');
+    const cwdLine = outputText.split(/\r?\n/).find(l => l.startsWith('user.dir='));
+    expect(cwdLine).toBeDefined();
+    const reported = cwdLine!.slice('user.dir='.length).trim();
+    expect(path.resolve(reported).toLowerCase()).toBe(path.dirname(testJavaFile).toLowerCase());
+    console.log('[Java DefaultCwd Test] TEST PASSED — debuggee ran in the script directory');
+  }, 60000);
 });
