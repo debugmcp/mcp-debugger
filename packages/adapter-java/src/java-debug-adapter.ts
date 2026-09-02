@@ -30,7 +30,7 @@ import {
 import { DebugLanguage } from '@debugmcp/shared';
 import { AdapterDependencies } from '@debugmcp/shared';
 import { findJavaExecutable, getJavaVersion, getJavaSearchPaths } from './utils/java-utils.js';
-import { resolveJdiBridgeClassDir, ensureJdiBridgeCompiled } from './utils/jdi-resolver.js';
+import { resolveJdiBridgeClassDir, ensureJdiBridge, isJdiBridgeStale } from './utils/jdi-resolver.js';
 
 /**
  * Java-specific launch configuration
@@ -169,6 +169,11 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
           code: 'JDI_BRIDGE_NOT_COMPILED',
           message: 'JDI bridge not compiled. Run: pnpm --filter @debugmcp/adapter-java run build:adapter'
         });
+      } else if (isJdiBridgeStale()) {
+        warnings.push({
+          code: 'JDI_BRIDGE_STALE',
+          message: `JDI bridge source is newer than the compiled class at ${bridgeDir}; the launch will recompile it (javac required). Or run: pnpm --filter @debugmcp/adapter-java run build:adapter`
+        });
       }
 
     } catch (error) {
@@ -215,10 +220,18 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
   // ===== Adapter Configuration =====
 
   buildAdapterCommand(config: AdapterConfig): AdapterCommand {
-    // Try to find compiled bridge, or compile on demand
-    let bridgeDir = resolveJdiBridgeClassDir();
-    if (!bridgeDir) {
-      bridgeDir = ensureJdiBridgeCompiled();
+    // Find the compiled bridge, compiling on demand — also when the shipped
+    // source is newer than the cached class (issue #646: a resolve-only path
+    // served stale bridges silently).
+    const bridge = ensureJdiBridge();
+    const bridgeDir = bridge.dir;
+    if (bridge.recompiled) {
+      this.dependencies.logger?.info(`[JavaDebugAdapter] JDI bridge source was newer than the compiled class; recompiled into ${bridgeDir}`);
+    } else if (bridge.stale) {
+      this.dependencies.logger?.warn(
+        `[JavaDebugAdapter] JDI bridge source is newer than the compiled class at ${bridgeDir} and could not be recompiled (${bridge.error ?? 'unknown reason'}); ` +
+        'running the stale bridge. Run: pnpm --filter @debugmcp/adapter-java run build:adapter'
+      );
     }
 
     if (!bridgeDir) {

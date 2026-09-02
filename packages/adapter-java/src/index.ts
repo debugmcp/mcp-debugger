@@ -11,7 +11,8 @@
 export { JavaDebugAdapter } from './java-debug-adapter.js';
 export { JavaAdapterFactory } from './java-adapter-factory.js';
 export { findJavaExecutable, getJavaVersion, getJavaSearchPaths } from './utils/java-utils.js';
-export { resolveJdiBridgeClassDir, ensureJdiBridgeCompiled } from './utils/jdi-resolver.js';
+export { resolveJdiBridgeClassDir, ensureJdiBridgeCompiled, ensureJdiBridge, isJdiBridgeStale } from './utils/jdi-resolver.js';
+export type { JdiBridgeStatus } from './utils/jdi-resolver.js';
 
 import { JavaAdapterFactory as _JavaAdapterFactory } from './java-adapter-factory.js';
 

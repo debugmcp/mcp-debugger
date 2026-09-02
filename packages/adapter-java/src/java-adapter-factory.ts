@@ -10,7 +10,7 @@ import { toolchainComponent } from '@debugmcp/shared';
 import { JavaDebugAdapter } from './java-debug-adapter.js';
 import { DebugLanguage } from '@debugmcp/shared';
 import { findJavaExecutable, getJavaVersion } from './utils/java-utils.js';
-import { resolveJdiBridgeClassDir } from './utils/jdi-resolver.js';
+import { resolveJdiBridgeClassDir, isJdiBridgeStale } from './utils/jdi-resolver.js';
 
 /**
  * The details shape validate() emits and describeToolchain() reads — keeping
@@ -21,6 +21,8 @@ type JavaToolchainDetails = {
   javaPath?: string;
   javaVersion?: string;
   jdiBridgeDir?: string;
+  /** Source newer than the compiled class; the next launch recompiles (issue #646). */
+  jdiBridgeStale?: boolean;
   platform: string;
   arch: string;
   timestamp: string;
@@ -68,10 +70,15 @@ export class JavaAdapterFactory implements IAdapterFactory {
 
     // Check JDI bridge
     const resolvedBridge = resolveJdiBridgeClassDir();
+    let jdiBridgeStale = false;
     if (!resolvedBridge) {
       warnings.push('JDI bridge not compiled. Run: pnpm --filter @debugmcp/adapter-java run build:adapter');
     } else {
       jdiBridgeDir = resolvedBridge;
+      jdiBridgeStale = isJdiBridgeStale();
+      if (jdiBridgeStale) {
+        warnings.push(`JDI bridge source is newer than the compiled class at ${resolvedBridge}; the next launch recompiles it (javac required). Or run: pnpm --filter @debugmcp/adapter-java run build:adapter`);
+      }
     }
 
     // Check Java
@@ -97,6 +104,7 @@ export class JavaAdapterFactory implements IAdapterFactory {
       javaPath,
       javaVersion,
       jdiBridgeDir,
+      jdiBridgeStale,
       platform: process.platform,
       arch: process.arch,
       timestamp: new Date().toISOString()
