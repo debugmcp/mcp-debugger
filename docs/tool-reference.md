@@ -56,6 +56,7 @@ Creates a new debugging session.
 - `executablePath` (string, optional): Path to the language interpreter/executable (e.g., Python interpreter path).
 - `host` (string, optional): Host to attach to for remote debugging. Defaults to `localhost`.
 - `port` (number, optional): Debug port to attach to. **Passing `port` switches the call into attach mode** — the session is created and immediately attached (see [attach_to_process](#attach_to_process) for the full attach contract). `host` alone does not trigger it.
+- `stopOnEntry` (boolean, optional): Attach mode only — same semantics as [attach_to_process](#attach_to_process)'s `stopOnEntry`: **omitting it pauses the target after attach** (the pause may land after the response, reported as `pending: true` and named in `message`); pass `false` to attach to a live service without stopping it.
 - `timeout` (number, optional): Attach mode only — connection timeout in milliseconds (default: `30000`).
 - `verifyTimeout` (number, optional): Attach mode only — how long to wait (ms) for the debugger to report at least one thread after attaching before failing the attach (default: `20000`, max: `600000`).
 - `adapterConfig` (object, optional): Attach mode only — adapter-specific attach configuration merged into the attach config, with the same semantics as [attach_to_process](#attach_to_process)'s `adapterConfig`.
@@ -80,7 +81,7 @@ Creates a new debugging session.
 **Notes:**
 - Session IDs are UUIDs in the format `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
 - Sessions start in `"created"` state
-- When a `port` parameter is provided in `create_debug_session`, the server performs an inline attach (creating the session and immediately attaching to a running process on that port). The response then mirrors `attach_to_process`: alongside `sessionId` it carries `state`, the attach `data` payload, an optional `warning`, and — when a requested post-attach pause has not landed yet — `pending: true`
+- When a `port` parameter is provided in `create_debug_session`, the server performs an inline attach (creating the session and immediately attaching to a running process on that port). The response then mirrors `attach_to_process`: alongside `sessionId` it carries `state`, the attach `data` payload, an optional `warning`, and — when a requested post-attach pause has not landed yet — `pending: true`, with `message` saying so (`…; post-attach pause pending — the target stops when it next executes code (pass stopOnEntry: false to attach without pausing)`)
 
 ---
 
@@ -350,7 +351,7 @@ Starts debugging a script.
 - `scriptPath` (string, required): Path to the script to debug. Must be **absolute** in host mode (a relative path is rejected with `Path must be absolute`); in container mode it is re-rooted under `MCP_WORKSPACE_ROOT`.
 - `args` (array of strings, optional): Command line arguments for the script.
 - `dapLaunchArgs` (object, optional): Standard DAP launch arguments:
-  - `stopOnEntry` (boolean): Stop at first line
+  - `stopOnEntry` (boolean): Stop at first line (default `false` — the opposite of attach, which pauses unless `stopOnEntry` is `false`)
   - `justMyCode` (boolean): Debug only user code
   - Additional DAP launch keys (`program`, `cwd`, `env`, language-specific options) pass through to the adapter. Top-level parameters do **not** belong here: a nested `breakOnExceptions` is honored as an alias (the top-level value wins if both are given) and reported via a `warning` in the response; other misplaced top-level keys (`dryRunSpawn`, `sessionId`, `scriptPath`, `adapterLaunchConfig`) are stripped with a warning instead of silently riding into the launch config.
 - `adapterLaunchConfig` (object, optional): Adapter-specific launch configuration overrides. Use this for language-specific settings that go beyond standard DAP arguments (e.g., `mainClass` and `classpath` for Java, `buildCommand` for Rust). For Rust, `_adapterSettings` passes through to CodeLLDB (issue #441) — e.g. `{"_adapterSettings": {"scriptConfig": {"lang": {"rust": {"sysroot": "/path"}}}}}` points the Rust formatter lookup at an explicit sysroot; the `CODELLDB_RUST_SYSROOT` env var does the same without per-launch config (a user-supplied `_adapterSettings` value wins over the env var).
@@ -1119,7 +1120,7 @@ Attaches the debugger to a running process. Unless you pass `stopOnEntry: false`
 - `timeout` (number, optional): Connection timeout in milliseconds (default: `30000`).
 - `verifyTimeout` (number, optional): How long to wait (ms) for the debugger to report at least one thread after attaching before failing the attach (default: `20000`, max: `600000`). Decrease for fast failure-by-design probes; increase for targets that are exceptionally slow to become debuggable. Not used when `stopOnEntry: false` — that path performs no thread verification.
 - `sourcePaths` (string[], optional): Source paths for code mapping.
-- `stopOnEntry` (boolean, optional): Request a pause immediately after attaching. Anything but `false` — including omitting it — takes the verified path described above; `false` skips both the thread verification and the post-attach pause, and the attach returns `state: "running"`.
+- `stopOnEntry` (boolean, optional): Request a pause immediately after attaching. Anything but `false` — including omitting it — takes the verified path described above; `false` skips both the thread verification and the post-attach pause, and the attach returns `state: "running"`. **Pass `false` when attaching to a live service you still need to use** — this is the opposite of `start_debugging`, whose `stopOnEntry` defaults to `false`. A pause that lands after the response is reported as `pending: true` and named in `message`.
 - `justMyCode` (boolean, optional): Only debug user code (skip library code).
 - `breakOnExceptions` (string, optional): `"uncaught"`, `"all"`, or `"none"` — same mode semantics as on `start_debugging`, but attach never applies a language default: it stays `"none"` unless requested.
 - `adapterConfig` (object, optional): Adapter-specific attach extras, merged into the attach config before the adapter transforms it, mirroring `start_debugging`'s `adapterLaunchConfig` (C/C++/LLDB example: `{"program": "/proc/1/root/pricer"}` for symbol resolution from a kubectl-debug ephemeral container, or `initCommands`; Python example: `{"pathMappings": [{"localRoot": "/home/user/checkout/src", "remoteRoot": "/app"}]}` so breakpoints at local-checkout paths bind against a remote debugpy, issue #450). Reserved keys `request`/`__attachMode` are ignored with a warning; set `stopOnEntry` via the top-level parameter.
@@ -1136,8 +1137,22 @@ Attaches the debugger to a running process. Unless you pass `stopOnEntry: false`
 }
 ```
 
+When the requested pause has not landed by the time the tool answers (an idle Node server, say — js-debug's pause lands on the next event-loop dispatch), the response says so:
+```json
+{
+  "success": true,
+  "state": "running",
+  "pending": true,
+  "message": "Attached to process at 127.0.0.1:9229; post-attach pause pending — the target stops when it next executes code (pass stopOnEntry: false to attach without pausing)",
+  "data": {
+    "message": "Attached to process at 127.0.0.1:9229; post-attach pause pending — the target stops when it next executes code (pass stopOnEntry: false to attach without pausing)",
+    "pending": true
+  }
+}
+```
+
 **Notes:**
-- `state` is `"paused"` only once a stopped event has actually been observed; otherwise the attach reports `"running"`. When a requested post-attach pause is accepted but its stopped event has not arrived within the bounded wait, the response is successful with `state: "running"` and `pending: true` (at the top level and in `data`); the late stopped event is the only transition to `paused`, and every paused session has a `lastStop`.
+- `state` is `"paused"` only once a stopped event has actually been observed; otherwise the attach reports `"running"`. When a requested post-attach pause is accepted but its stopped event has not arrived within the bounded wait, the response is successful with `state: "running"` and `pending: true` (at the top level and in `data`) and the `message` names the pending pause; the late stopped event is the only transition to `paused`, and every paused session has a `lastStop`.
 - When `processId` was used, the message reads `Attached to process PID <pid>` instead.
 - The response `warning` reports two distinct `adapterConfig` key outcomes (issues #450/#466): keys the adapter's attach transform genuinely drops (e.g. Python's ptvsd-era `localRoot`/`remoteRoot` — use `pathMappings`) are named as **ignored**, while keys mcp-debugger doesn't recognize are **forwarded to the adapter as-is** and named with an edit-distance suggestion for near-misses (`pathMapping (did you mean pathMappings?)`) — "ignored" means dropped, "forwarded as-is" means the adapter still sees them. The same field also carries the launch-style warning for function breakpoints still unverified at attach (issue #308).
 - js-debug attach honors `adapterConfig` too: `localRoot`/`remoteRoot`/`sourceMaps`/`skipFiles`/`continueOnAttach` and other js-debug attach options reach the debugger (issue #466).

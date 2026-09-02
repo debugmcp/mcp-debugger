@@ -13,7 +13,7 @@ This guide explains how to correctly use the MCP Debugger tools when testing deb
 **How it works:**
 - The multi-session architecture properly routes evaluate commands to the active debugging context
 - You can immediately evaluate expressions when stopped at breakpoints
-- When `stopOnEntry` is false (the default), the debugger auto-continues past entry breakpoints so execution advances to user code automatically
+- When `stopOnEntry` is false (the **launch** default), the debugger auto-continues past entry breakpoints so execution advances to user code automatically. Attach is the opposite: omitting `stopOnEntry` on `attach_to_process`/`create_debug_session` pauses the target (possibly a little after the response, reported as `pending: true`) — pass `stopOnEntry: false` to attach to a live service without freezing it
 
 ### Python Variable Inspection
 

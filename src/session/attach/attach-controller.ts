@@ -299,10 +299,16 @@ export class AttachController {
       // inside the builder.
       const attachFnBpWarning = this.breakpoints.functionBreakpointLaunchWarning(session);
 
+      const attachedTo = attachConfig.processId
+        ? `Attached to process PID ${attachConfig.processId}`
+        : `Attached to process at ${attachConfig.host || 'localhost'}:${attachConfig.port}`;
+      // A late-landing pause must be named in the message, not only flagged:
+      // pending:true next to state "running" reads as "nothing happened" to
+      // an agent, and the target still freezes on its next dispatch (#654).
       const attachData: AttachResultData = {
-        message: attachConfig.processId
-          ? `Attached to process PID ${attachConfig.processId}`
-          : `Attached to process at ${attachConfig.host || 'localhost'}:${attachConfig.port}`,
+        message: attachPausePending
+          ? `${attachedTo}; ${ErrorMessages.attachPausePending}`
+          : attachedTo,
         ...(attachPausePending ? { pending: true } : {})
       };
       // Surface adapterConfig keys the adapter's attach transform dropped

@@ -49,7 +49,7 @@ Compile with **`-gdwarf-4 -O0`**: full debug info, no optimization (optimized co
 attach_to_process sessionId=... processId=<pid>
 ```
 
-- The target is held paused after attach (`stopOnEntry` defaults to `true` for attach; pass `false` to resume immediately).
+- The target is held paused after attach (`stopOnEntry` defaults to `true` for attach in every language, not just C/C++; pass `false` to resume immediately).
 - `detach_from_process` leaves the target running.
 - **Linux**: `kernel.yama.ptrace_scope=1` (the default on many distros) only allows attaching to child processes. For arbitrary processes: `sudo sysctl kernel.yama.ptrace_scope=0` (temporary) or run the server with `CAP_SYS_PTRACE`.
 - **Windows**: attach requires same-or-higher privilege than the target.

@@ -119,7 +119,10 @@ export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
         sessionId: sessionInfo.id,
         state: attachResult.state,
         message: attachResult.success
-          ? `Created and attached ${sessionInfo.language} debug session: ${sessionInfo.name}`
+          ? `Created and attached ${sessionInfo.language} debug session: ${sessionInfo.name}` +
+            // The top-level message is what an agent reads; a pause that has
+            // not landed yet must be named here too, not only in data (#654).
+            (attachData?.pending ? `; ${ErrorMessages.attachPausePending}` : '')
           : `Created session but attach failed: ${attachResult.error || 'Unknown error'}`,
         ...(attachData?.pending ? { pending: true } : {}),
         ...(attachData ? { data: attachData } : {}),
