@@ -43,28 +43,32 @@ describe('typed session errors', () => {
     expect(isTypedSessionError(new ProxyNotRunningError('s1', 'pause'))).toBe(true);
   });
 
-  it('converts ProxyNotRunningError', () => {
+  it('converts ProxyNotRunningError to its plain detail, without the McpError prefix (#647)', () => {
     const error = new ProxyNotRunningError('s1', 'pause');
-    // McpError prefixes its own message with the JSON-RPC code; the payload
-    // carries that verbatim, exactly as it always has.
+    // McpError prefixes its own .message with the JSON-RPC code; that prefix is
+    // for the protocol path and must not reach the envelope.
+    expect(error.message).toBe('MCP error -32600: Cannot pause: no active proxy for session s1');
     expect(payload(sessionErrorToResult(error)!)).toEqual({
       success: false,
-      error: error.message
+      error: 'Cannot pause: no active proxy for session s1'
     });
-    expect(error.message).toContain('Cannot pause: no active proxy for session s1');
   });
 
-  it('converts all typed lifecycle errors', () => {
+  it('converts all typed lifecycle errors to their detail', () => {
     for (const error of [new SessionTerminatedError('s1'), new SessionNotFoundError('s1')]) {
+      expect(error.message).toMatch(/^MCP error -\d+: /);
       expect(payload(sessionErrorToResult(error)!)).toEqual({
         success: false,
-        error: error.message
+        error: error.detail
       });
       expect(payload(sessionErrorResultOrThrow(error))).toEqual({
         success: false,
-        error: error.message
+        error: error.detail
       });
+      expect(error.detail).not.toContain('MCP error');
     }
+    expect(new SessionTerminatedError('s1').detail).toBe('Session is terminated: s1');
+    expect(new SessionNotFoundError('s1').detail).toBe('Session not found: s1');
   });
   it('does NOT convert a look-alike McpError that is not one of the typed classes', () => {
     const error = new McpError(McpErrorCode.InvalidRequest, 'Session is terminated: s1');

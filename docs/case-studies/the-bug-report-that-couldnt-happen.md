@@ -51,7 +51,7 @@ To pin the whole chain without the MCP transport in the way, a 20-line driver im
 {"success": false, "error": "MCP error -32600: Cannot step over: no active proxy for session <id>"}
 ```
 
-— protocol plumbing leaked into an application payload (the typed session errors extend `McpError`, whose constructor bakes the prefix into `.message`; filed as [#647](https://github.com/debugmcp/mcp-debugger/issues/647)). The driver then grew an inner debug session: a real python launch of the sleep loop, so `stepTool` could be called against a genuinely RUNNING session. Standalone, it printed the same honest-but-thin envelope as probe one.
+— protocol plumbing leaked into an application payload (the typed session errors extend `McpError`, whose constructor bakes the prefix into `.message`; filed as [#647](https://github.com/debugmcp/mcp-debugger/issues/647)). The driver then grew an inner debug session: a real python launch of the sleep loop, so `stepTool` could be called against a genuinely RUNNING session. Standalone, it printed the same honest-but-thin envelope as probe one. *(Fixed since #647 landed: the envelope now reads `"error": "Cannot step over: no active proxy for session <id>"` — the prefixed quote above is what the run produced at the time.)*
 
 ## Probe three: watch the state die
 

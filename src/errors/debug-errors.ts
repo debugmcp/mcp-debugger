@@ -12,9 +12,28 @@ export { ErrorCode as McpErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import { ErrorCode as McpErrorCode } from '@modelcontextprotocol/sdk/types.js';
 
 /**
+ * Base for mcp-debugger's typed errors.
+ *
+ * McpError's constructor bakes `MCP error <code>: ` into `.message`, which is
+ * right on the JSON-RPC path (the SDK derives the wire error from it) and wrong
+ * inside a tool result envelope, where it reads like a transport failure
+ * (issue #647). The SDK keeps no copy of the plain text, so this base records
+ * it as `detail`; tool result envelopes and getErrorMessage() report that.
+ */
+export abstract class DebugError extends McpError {
+  /** The message without the SDK's `MCP error <code>: ` prefix. */
+  public readonly detail: string;
+
+  protected constructor(code: McpErrorCode, detail: string, data?: unknown) {
+    super(code, detail, data);
+    this.detail = detail;
+  }
+}
+
+/**
  * Base error for language runtime issues
  */
-export class LanguageRuntimeNotFoundError extends McpError {
+export class LanguageRuntimeNotFoundError extends DebugError {
   public readonly language: string;
   public readonly executablePath: string;
 
@@ -41,7 +60,7 @@ export class PythonNotFoundError extends LanguageRuntimeNotFoundError {
 /**
  * Session not found error
  */
-export class SessionNotFoundError extends McpError {
+export class SessionNotFoundError extends DebugError {
   public readonly sessionId: string;
 
   constructor(sessionId: string) {
@@ -57,7 +76,7 @@ export class SessionNotFoundError extends McpError {
 /**
  * Session terminated error
  */
-export class SessionTerminatedError extends McpError {
+export class SessionTerminatedError extends DebugError {
   public readonly sessionId: string;
   public readonly state: string;
 
@@ -75,7 +94,7 @@ export class SessionTerminatedError extends McpError {
 /**
  * Unsupported language error
  */
-export class UnsupportedLanguageError extends McpError {
+export class UnsupportedLanguageError extends DebugError {
   public readonly language: string;
   public readonly availableLanguages: string[];
 
@@ -94,7 +113,7 @@ export class UnsupportedLanguageError extends McpError {
  * A debug feature was requested that the session's adapter does not support
  * (e.g. a logpoint on an adapter without SourceBreakpoint.logMessage support).
  */
-export class UnsupportedFeatureError extends McpError {
+export class UnsupportedFeatureError extends DebugError {
   public readonly feature: string;
   public readonly language: string;
 
@@ -112,7 +131,7 @@ export class UnsupportedFeatureError extends McpError {
 /**
  * Proxy not running error
  */
-export class ProxyNotRunningError extends McpError {
+export class ProxyNotRunningError extends DebugError {
   public readonly sessionId: string;
   public readonly operation: string;
 
@@ -130,7 +149,7 @@ export class ProxyNotRunningError extends McpError {
 /**
  * Debug session creation error
  */
-export class DebugSessionCreationError extends McpError {
+export class DebugSessionCreationError extends DebugError {
   public readonly reason: string;
   public readonly originalError?: Error;
 
@@ -150,9 +169,13 @@ export class DebugSessionCreationError extends McpError {
 }
 
 /**
- * Helper to extract error message safely
+ * Helper to extract a user-facing error message safely. A DebugError reports
+ * its plain `detail` rather than the prefixed McpError message (issue #647).
  */
 export function getErrorMessage(error: unknown): string {
+  if (error instanceof DebugError) {
+    return error.detail;
+  }
   if (error instanceof Error) {
     return error.message;
   }
