@@ -12,6 +12,7 @@ import {
   McpError,
   ServerResult
 } from '@modelcontextprotocol/sdk/types.js';
+import { toWireError } from '../errors/debug-errors.js';
 import { coerceToolArguments, ToolArguments } from './tool-arguments.js';
 import { extractPayloadSuccess, sanitizeRequest } from './tool-result.js';
 import { buildToolDefinitions, isToolName } from './tool-schemas.js';
@@ -85,8 +86,13 @@ export function registerToolHandlers(server: Server, ctx: ToolContext): void {
           timestamp: Date.now()
         });
         
-        if (error instanceof McpError) throw error;
-        throw new McpError(McpErrorCode.InternalError, `Failed to execute tool ${toolName}: ${errorMessage}`);
+        // The JSON-RPC boundary: the SDK copies .message onto the wire and the
+        // client prefixes it again, so send the bare detail (issue #659).
+        throw toWireError(
+          error instanceof McpError
+            ? error
+            : new McpError(McpErrorCode.InternalError, `Failed to execute tool ${toolName}: ${errorMessage}`)
+        );
       }
     }
   );

@@ -1,7 +1,8 @@
 /**
  * The typed error hierarchy keeps two views of one message (issue #647):
- * `.message` carries the SDK's `MCP error <code>: ` prefix for the JSON-RPC
- * path, `.detail` is the plain text tool result envelopes report.
+ * `.message` carries the SDK's `MCP error <code>: ` prefix for logs and
+ * in-process callers, `.detail` is the plain text tool result envelopes report
+ * and the JSON-RPC boundary sends on the wire (issue #659).
  */
 import { describe, it, expect } from 'vitest';
 import { McpError } from '@modelcontextprotocol/sdk/types.js';
@@ -16,7 +17,10 @@ import {
   SessionNotFoundError,
   SessionTerminatedError,
   UnsupportedFeatureError,
-  UnsupportedLanguageError
+  UnsupportedLanguageError,
+  WireMcpError,
+  mcpErrorDetail,
+  toWireError
 } from '../../../../src/errors/debug-errors.js';
 
 describe('DebugError hierarchy', () => {
@@ -97,5 +101,35 @@ describe('DebugError hierarchy', () => {
     expect(getErrorMessage(new Error('boom'))).toBe('boom');
     expect(getErrorMessage(new McpError(McpErrorCode.InternalError, 'raw'))).toBe('MCP error -32603: raw');
     expect(getErrorMessage('text')).toBe('text');
+  });
+});
+
+describe('the JSON-RPC boundary shape (issue #659)', () => {
+  it('mcpErrorDetail strips exactly one prefix, matching the error\'s own code', () => {
+    expect(mcpErrorDetail(new McpError(McpErrorCode.InvalidParams, 'bad arg'))).toBe('bad arg');
+    expect(mcpErrorDetail(new SessionNotFoundError('s1'))).toBe('Session not found: s1');
+    // A detail that itself starts with a prefix (a client re-wrapping a wire
+    // message) keeps that one: only the layer this error added comes off.
+    expect(mcpErrorDetail(new McpError(McpErrorCode.InvalidParams, 'MCP error -32602: nested')))
+      .toBe('MCP error -32602: nested');
+  });
+
+  it('WireMcpError is an McpError whose .message is the bare detail', () => {
+    const error = new WireMcpError(McpErrorCode.InvalidParams, 'bad arg', { k: 1 });
+    expect(error).toBeInstanceOf(McpError);
+    expect(error.code).toBe(McpErrorCode.InvalidParams);
+    expect(error.message).toBe('bad arg');
+    expect(error.data).toEqual({ k: 1 });
+  });
+
+  it('toWireError keeps code, data and stack and is idempotent', () => {
+    const source = new ProxyNotRunningError('s1', 'pause');
+    const wire = toWireError(source);
+    expect(wire).toBeInstanceOf(WireMcpError);
+    expect(wire.code).toBe(source.code);
+    expect(wire.data).toEqual(source.data);
+    expect(wire.stack).toBe(source.stack);
+    expect(wire.message).toBe('Cannot pause: no active proxy for session s1');
+    expect(toWireError(wire)).toBe(wire);
   });
 });
