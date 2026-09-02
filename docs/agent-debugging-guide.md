@@ -125,7 +125,7 @@ evaluate_expression(sessionId=session_id, expression="a + b")  # Returns: "3"
 ## Common Issues and Solutions
 
 ### Issue: JavaScript shows Node.js internals in stack trace
-**Solution:** Use `continue_execution` to move past internal frames. Stack trace filtering hides internal frames by default for supported languages.
+**Solution:** Use `continue_execution` to move past internal frames. Stack trace filtering hides Node internals, `node_modules` dependency frames, and async separators by default; `includeInternals: true` shows them. A frame marked `unresolvedSource: true` is a source-map label, not a file you can open.
 
 ### Issue: Python shows "special variables" instead of actual variables
 **Solution:** This is normal hierarchical organization. Use the `variablesReference` to expand:
@@ -446,7 +446,7 @@ capability, not a view-only credential.
 ## Summary
 
 The MCP Debugger is fully functional for Python, Ruby, JavaScript, Rust, Go, Java, .NET/C#, and C/C++. The key insights are:
-- **JavaScript**: Stack trace filtering hides internal frames; may need `continue_execution` if initially stopped at internals
+- **JavaScript**: Stack trace filtering hides internal, `node_modules`, and async-separator frames; may need `continue_execution` if initially stopped at internals
 - **Python**: Use variablesReference to expand variable containers
 - **Ruby**: Supports launch and attach flows through `rdbg`; use Bundler mode for Rails and RSpec-style entrypoints
 - **Rust**: CodeLLDB adapter is vendored; the GNU toolchain is required for reliable debugging -- MSVC-built binaries may produce errors with CodeLLDB. Set `RUST_MSVC_BEHAVIOR` env var to control MSVC handling

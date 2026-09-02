@@ -4,7 +4,7 @@
 `get_stack_trace` applies language-specific stack trace filtering, hiding internal/framework frames by default so the caller sees user code first.
 
 ## Features
-- **JavaScript/Node.js**: Filters out `<node_internals>` frames by default
+- **JavaScript/Node.js**: Filters out `<node_internals>`/`node:` frames, any frame under a `node_modules` path segment (pnpm's nested layout and Windows separators included), and js-debug's sourceless async separators (`await`, `Promise.then`, `bound-anonymous-fn` at line 0) by default (issue #655)
 - **Go**: Filters out `/runtime/` and `/testing/` frames by default
 - **Java**: Filters out JDK internal frames by default
 - **.NET/C#**: Filters out `System.*` and `Microsoft.*` runtime frames and sourceless frames by default
@@ -28,10 +28,12 @@ When calling `get_stack_trace` without parameters or with `includeInternals: fal
 }
 ```
 
-For JavaScript, this will return only user code frames, filtering out Node.js internals like:
-- `<node_internals>/internal/modules/...`
-- `<node_internals>/internal/process/...`
-- etc.
+For JavaScript, this will return only user code frames, filtering out:
+- Node.js internals: `<node_internals>/internal/modules/...`, `<node_internals>/internal/process/...`
+- Dependencies: `/app/node_modules/express/lib/router/index.js`, `/app/node_modules/.pnpm/router@2.2.0/node_modules/router/lib/layer.js`
+- Async separators: `await` / `Promise.then` frames with no source and `line: 0`
+
+The match is on a `node_modules` path *segment*, so `/app/src/node_modules_helper.js` is user code, and workspace packages (which Node realpaths to their `packages/...` location) stay visible. A debuggee that is itself an installed package (`/usr/lib/node_modules/<pkg>/...`) becomes all-internal — the top frame is kept and the `note` says so (see Edge Cases).
 
 ### Including Internal Frames
 To see all frames including internals:
@@ -90,8 +92,8 @@ The filtering is implemented using the existing `AdapterPolicy` system:
 
 2. **JsDebugAdapterPolicy** (`packages/shared/src/interfaces/adapter-policy-js.ts`)
    - Implements filtering for JavaScript
-   - Identifies internal frames by checking for `<node_internals>` in the file path
-   - Keeps at least one frame if all are filtered
+   - Identifies internal frames by path: `<node_internals>`/`node:`, any `node_modules` segment, and sourceless line-0 async separators (issue #655); `frame.name` never participates
+   - No local fallback — the central `FrameAnchorResolver` guarantee below owns the all-internal case
 
 3. **GoAdapterPolicy** (`packages/shared/src/interfaces/adapter-policy-go.ts`)
    - Implements filtering for Go
@@ -117,8 +119,9 @@ The filtering is implemented using the existing `AdapterPolicy` system:
    - Turns that metadata into the `hiddenFrames` field and the `note` sentence
 
 ### Edge Cases Handled
-- **All frames internal**: The filtered stack is never empty when the adapter reported frames. `FrameAnchorResolver` keeps the top (unfiltered) frame and sets `allFramesInternal`, so `get_scopes` and `evaluate_expression` always have a valid `frameId`; the `note` says so and points at `includeInternals: true` (issue #346). This guarantee is central and applies to every language, Go and .NET included. Two policies additionally soften the result themselves — JS retains the first frame, Java returns the full unfiltered array (so a thread parked deep in JDK code still shows its stack)
+- **All frames internal**: The filtered stack is never empty when the adapter reported frames. `FrameAnchorResolver` keeps the top (unfiltered) frame and sets `allFramesInternal`, so `get_scopes` and `evaluate_expression` always have a valid `frameId`; the `note` says so and points at `includeInternals: true` (issue #346). This guarantee is central and applies to every language, Go and .NET included. One policy additionally softens the result itself — Java returns the full unfiltered array (so a thread parked deep in JDK code still shows its stack)
 - **No frames**: Returns empty array as before
+- **Unresolvable source-mapped frames** (issue #655): when the adapter reports a frame's source as not-a-file-on-this-host (DAP `sourceReference != 0` with a real-looking path — js-debug does this for a source map's `../src/x.ts` that the package never shipped), the frame carries `unresolvedSource: true` and the `note` says its `file` is a label, not an openable path. These frames are the debuggee's own code and are never hidden. On js attach this is rare now: `resolveSourceMapLocations` excludes `node_modules` by default (so dependency maps are not applied and those frames report their real `.js` path) and `cwd` is defaulted so the debuggee's own relative map sources resolve
 - **Python**: No filtering applied (Python's AdapterPolicy does not implement `filterStackFrames`)
 - **Other languages**: Any language whose AdapterPolicy implements `filterStackFrames` has filtering applied
 

@@ -108,13 +108,27 @@ export class FrameAnchorResolver {
         note = await this.describeFramelessThread(sessionId, proxyManager, threadId);
       }
 
-      let frames: StackFrame[] = rawFrames.map((frame) => ({
-        id: frame.id,
-        name: frame.name,
-        file: frame.source?.path || frame.source?.name || '<unknown_source>',
-        line: frame.line,
-        column: frame.column
-      }));
+      let frames: StackFrame[] = rawFrames.map((frame) => {
+        const file = frame.source?.path || frame.source?.name || '<unknown_source>';
+        // A non-zero sourceReference is the adapter saying "not a file you
+        // can open here" (js-debug sets it for every source it could not
+        // find on disk — a source-mapped '../src/x.ts' the package never
+        // shipped). Placeholder paths (<node_internals>, <eval>) carry one
+        // too but are self-describing, so only real-looking paths are
+        // flagged (issue #655).
+        const unresolvedSource =
+          typeof frame.source?.sourceReference === 'number' &&
+          frame.source.sourceReference !== 0 &&
+          !file.startsWith('<');
+        return {
+          id: frame.id,
+          name: frame.name,
+          file,
+          line: frame.line,
+          column: frame.column,
+          ...(unresolvedSource ? { unresolvedSource: true } : {})
+        };
+      });
       const totalFrameCount = frames.length;
       let allFramesInternal = false;
       const policy = this.ctx.selectPolicy(session.language);

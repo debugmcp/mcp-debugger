@@ -76,6 +76,14 @@ export interface JsAdapterState extends AdapterSpecificState {
   pendingCommands: QueuedDapCommand[];
 }
 
+/** A `node_modules` path *segment*, either separator (issue #655). */
+const NODE_MODULES_SEGMENT = /[\\/]node_modules[\\/]/;
+
+/** No source at all: the resolver's `<unknown_source>` placeholder or an empty path. */
+function hasNoSource(filePath: string): boolean {
+  return filePath === '' || filePath === '<unknown_source>';
+}
+
 export const JsDebugAdapterPolicy: AdapterPolicy = {
   name: 'js-debug',
   supportsLogPoints: true,
@@ -155,32 +163,58 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
   },
 
   /**
-   * Check if a stack frame is a Node.js internal frame
+   * Classify a frame as runtime/dependency glue rather than the user's code
+   * (issue #655). Three rules, all path-based:
+   *
+   * 1. Node internals — `<node_internals>/…` (js-debug already rewrites
+   *    `node:` URLs to that form; the bare `node:` prefix is kept as a
+   *    belt-and-braces for other DAP servers and `source.name` fallbacks).
+   * 2. Any `node_modules` path segment — pnpm's
+   *    `node_modules/.pnpm/express@4/node_modules/express/…`, Windows
+   *    `C:\app\node_modules\…`, and `file:///…/node_modules/…` URLs. A
+   *    *segment* match, not a substring, so `/app/src/node_modules_helper.js`
+   *    stays visible. Workspace packages are realpathed by Node, so a monorepo
+   *    package linked under `node_modules/@scope/pkg` reports its real
+   *    `packages/pkg/…` path and stays visible; only `--preserve-symlinks`
+   *    hides it — the same rule launch already applies via `skipFiles`. A
+   *    debuggee that *is* an installed package (`/usr/lib/node_modules/<pkg>`)
+   *    becomes all-internal: the central issue-#346 fallback keeps frame 0 and
+   *    the response note says so; `includeInternals: true` shows everything.
+   * 3. js-debug's async separators — `await` / `Promise.then` /
+   *    `bound-anonymous-fn` labels with no source at all and `line: 0`. A
+   *    sourceless frame that still reports a line (an eval'd `VM123` script)
+   *    is not matched.
+   *
+   * `frame.name` deliberately does not participate: `processTicksAndRejections`
+   * carries a `<node_internals>` path (rule 1), the separators are rule 3, and
+   * a name rule would only add false positives (a user function named `then`).
+   * Unresolvable source-mapped frames (a relative `../src/x.ts` js-debug could
+   * not find on disk) are NOT internal — they are the debuggee's own code and
+   * are annotated with `unresolvedSource` by the frame resolver instead.
    */
   isInternalFrame: (frame: StackFrame): boolean => {
-    // Node.js internal frames are identified by <node_internals> in the path
     const filePath = frame.file || '';
-    return filePath.includes('<node_internals>');
+    if (filePath.includes('<node_internals>') || filePath.startsWith('node:')) {
+      return true;
+    }
+    if (NODE_MODULES_SEGMENT.test(filePath)) {
+      return true;
+    }
+    return hasNoSource(filePath) && (frame.line ?? 0) === 0;
   },
-  
+
   /**
-   * Filter stack frames to optionally remove Node.js internals
+   * Filter stack frames to optionally remove Node.js internals and
+   * dependency frames. No local first-frame fallback: the frame resolver in
+   * the session layer restores the top frame for an all-internal stack and
+   * sets `allFramesInternal` (issue #346); a fallback here used to mask that
+   * flag and report "N-1 hidden" with the wrong note.
    */
   filterStackFrames: (frames: StackFrame[], includeInternals: boolean): StackFrame[] => {
-    // If including internals, return all frames
     if (includeInternals) {
       return frames;
     }
-    
-    // Filter out internal frames
-    const filtered = frames.filter(frame => !JsDebugAdapterPolicy.isInternalFrame!(frame));
-    
-    // Edge case: If all frames were filtered out, keep at least the first frame
-    if (filtered.length === 0 && frames.length > 0) {
-      return [frames[0]];
-    }
-    
-    return filtered;
+    return frames.filter(frame => !JsDebugAdapterPolicy.isInternalFrame!(frame));
   },
 
   /**
@@ -592,6 +626,18 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
           typeof a.autoAttachChildProcesses === 'boolean'
             ? (a.autoAttachChildProcesses as boolean)
             : false;
+      }
+      // Same self-containment for resolveSourceMapLocations (issue #655):
+      // js-debug's attach defaults collapse it to null without a workspace
+      // folder, applying every dependency's .js.map. The adapter transform
+      // already sets launch's exclusion; keep it for embedders that bypass
+      // the transform. Only an absent key is defaulted — an explicit null
+      // ("resolve everywhere") is a caller decision.
+      if (!('resolveSourceMapLocations' in attachArgs)) {
+        attachArgs.resolveSourceMapLocations =
+          'resolveSourceMapLocations' in a
+            ? a.resolveSourceMapLocations
+            : ['**', '!**/node_modules/**'];
       }
       try {
         console.info(`[JsDebugAdapterPolicy] [JS] Sending 'attach' to ${attachPort} (address=${attachHost})`);

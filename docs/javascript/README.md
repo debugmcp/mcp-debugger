@@ -224,6 +224,22 @@ If neither `tsx` nor `ts-node` is installed, the factory emits a warning (not an
   [attach presets](../../examples/kubernetes/attach-presets.md)); the target must be
   started with the inspector enabled, which mcp-debugger cannot do for you
 - Some advanced DAP features may not be exposed through MCP tools
+- **Source-mapped frames you cannot open.** A package that ships `.js.map` files
+  whose `sources` point at `.ts` files it did not ship makes js-debug report those
+  frames with a relative label (`../src/shared/protocol.ts`) and a non-zero
+  `sourceReference`; mcp-debugger marks them `unresolvedSource: true` and says so
+  in the `note` (issue #655). On attach the common causes are already handled:
+  `resolveSourceMapLocations` defaults to `["**", "!**/node_modules/**"]` so
+  dependency maps are not applied (those frames show their real `.js` path), and
+  `cwd` defaults to the server's working directory because js-debug resolves no
+  relative map source without a base path — with it, the debuggee's own
+  `dist/**` maps resolve to the absolute `src/**/*.ts` next to them. Knobs, all via
+  `adapterConfig`: `sourceMaps: false` (generated `.js` paths everywhere),
+  `resolveSourceMapLocations` (globs, or `null` for everywhere), `cwd`,
+  `sourceMapPathOverrides`. `get_stack_trace` hides `node_modules` and async
+  separator frames by default; a debuggee that is itself an installed package
+  under `node_modules` shows its top frame plus an "all frames are internal"
+  note — pass `includeInternals: true`
 - Debuggee exit codes are captured via an injected preload (js-debug itself
   never emits a DAP `exited` event), so `exitCode` is unavailable in two
   cases: attach mode (the target's environment is not under mcp-debugger's

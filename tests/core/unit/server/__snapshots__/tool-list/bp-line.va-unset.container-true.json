@@ -537,7 +537,7 @@
             },
             "includeInternals": {
               "type": "boolean",
-              "description": "Include internal/framework frames (e.g., Node.js internals). Default: false for cleaner output."
+              "description": "Include internal/framework frames (e.g., Node.js internals, node_modules dependencies, async separators). Default: false for cleaner output."
             },
             "threadId": {
               "type": "number",

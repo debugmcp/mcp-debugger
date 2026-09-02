@@ -2206,6 +2206,54 @@ describe('SessionManager - DAP Operations', () => {
       expect(frames).toHaveLength(1);
     });
 
+    it('js attach stack (issue #655): node_modules and async separators hidden, phantom source-mapped frames flagged', async () => {
+      // The shape js-debug returned for an attached express/MCP server:
+      // one user frame, pnpm dependency frames, `await` separators (no
+      // source, line 0, presentationHint label), a source-mapped '.ts' the
+      // package never shipped (sourceReference != 0), and node internals.
+      const JS_FRAMES = [
+        { id: 1, name: 'jsonResult', line: 13, source: { path: '/app/dist/server/tool-result.js', sourceReference: 0 } },
+        { id: 2, name: 'handleRequest', line: 89, source: { path: '../src/server/handlers/language-tools.ts', sourceReference: 253482918 } },
+        { id: 3, name: 'processTicksAndRejections', line: 103, source: { path: '<node_internals>/internal/process/task_queues', sourceReference: 1090918982 } },
+        { id: 4, name: 'await', line: 0, column: 0, presentationHint: 'label' },
+        { id: 5, name: 'handle', line: 435, source: { path: '/app/node_modules/.pnpm/router@2.2.0/node_modules/router/index.js', sourceReference: 0 } },
+        { id: 6, name: 'HTTPINCOMINGMESSAGE', line: 0, column: 0, presentationHint: 'label' }
+      ];
+      const session = await pausedSessionWithFrames(JS_FRAMES);
+      (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
+
+      const result = await sessionManager.getStackTraceDetailed(session.id);
+
+      expect(result.frames.map((f) => f.name)).toEqual(['jsonResult', 'handleRequest']);
+      expect(result.totalFrameCount).toBe(6);
+      expect(result.hiddenFrameCount).toBe(4);
+      expect(result.allFramesInternal).toBe(false);
+      expect(result.frames[0].unresolvedSource).toBeUndefined();
+      expect(result.frames[1]).toMatchObject({ file: '../src/server/handlers/language-tools.ts', unresolvedSource: true });
+
+      const unfiltered = await sessionManager.getStackTraceDetailed(session.id, undefined, true);
+      expect(unfiltered.frames).toHaveLength(6);
+      // Placeholder paths are self-describing: not flagged even with a sourceReference.
+      expect(unfiltered.frames[2]).not.toHaveProperty('unresolvedSource');
+      expect(unfiltered.frames[3].file).toBe('<unknown_source>');
+    });
+
+    it('all-internal js stack (issue #655): the central fallback engages now that the policy has no local one', async () => {
+      const ALL_INTERNAL = [
+        { id: 1, name: 'processTimers', line: 507, source: { path: '<node_internals>/internal/timers', sourceReference: 7 } },
+        { id: 2, name: 'next', line: 291, source: { path: '/app/node_modules/router/index.js', sourceReference: 0 } }
+      ];
+      const session = await pausedSessionWithFrames(ALL_INTERNAL);
+      (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
+
+      const result = await sessionManager.getStackTraceDetailed(session.id);
+
+      expect(result.frames).toHaveLength(1);
+      expect(result.frames[0].name).toBe('processTimers');
+      expect(result.hiddenFrameCount).toBe(1);
+      expect(result.allFramesInternal).toBe(true);
+    });
+
     it('all-internal LLDB stack (issue #369): rust policy filter engages, first-frame fallback annotates', async () => {
       // A rust program paused inside a sleep: every frame is LLDB/libc
       // internal. The real RustAdapterPolicy must classify them all as
