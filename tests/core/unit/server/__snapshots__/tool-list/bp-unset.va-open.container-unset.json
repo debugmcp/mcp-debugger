@@ -3,7 +3,7 @@
     "tools": [
       {
         "name": "create_debug_session",
-        "description": "Create a new debugging session. Provide host and port to attach to a running process; omit them for launch mode",
+        "description": "Create a new debugging session. Provide host and port to attach to a running process; omit them for launch mode. Attaching pauses the target unless stopOnEntry is false",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -30,6 +30,10 @@
             "port": {
               "type": "number",
               "description": "Debug port to attach to for remote debugging (optional, triggers attach mode)"
+            },
+            "stopOnEntry": {
+              "type": "boolean",
+              "description": "Attach mode only: same as attach_to_process.stopOnEntry — omitted means true, the target is paused after attach (possibly late, reported as pending:true). Pass false to attach to a live service without stopping it"
             },
             "timeout": {
               "type": "number",
@@ -213,7 +217,8 @@
               "type": "object",
               "properties": {
                 "stopOnEntry": {
-                  "type": "boolean"
+                  "type": "boolean",
+                  "description": "Pause at the first line before running. Default false — the opposite of attach, which pauses unless stopOnEntry is false"
                 },
                 "justMyCode": {
                   "type": "boolean"
@@ -302,7 +307,7 @@
             },
             "stopOnEntry": {
               "type": "boolean",
-              "description": "Stop on entry after attaching"
+              "description": "Pause the target after attaching. Default true when omitted (thread verification, then a pause request; if the stop lands after the response you get pending:true and the target still freezes on its next dispatch). Pass false to attach without stopping — required when attaching to a live service"
             },
             "justMyCode": {
               "type": "boolean",

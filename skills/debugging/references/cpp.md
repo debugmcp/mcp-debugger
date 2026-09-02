@@ -31,7 +31,7 @@ close_debug_session   {"sessionId": "<id>"}
 attach_to_process {"sessionId": "<id>", "processId": 4242}
 ```
 
-- Target is held **paused** after attach (pass `stopOnEntry: false` to resume immediately). `detach_from_process` leaves it running.
+- Target is held **paused** after attach — the attach default for every language, not C/C++-specific (pass `stopOnEntry: false` to resume immediately). `detach_from_process` leaves it running.
 - Linux: `kernel.yama.ptrace_scope=1` limits attach to child processes — `sudo sysctl kernel.yama.ptrace_scope=0` for arbitrary PIDs. Windows: same-privilege processes.
 - Adapter extras go in `adapterConfig`: `{"adapterConfig": {"program": "/path/to/binary"}}` helps symbol resolution when LLDB cannot open the module paths from `/proc/<pid>/maps` (different mount namespace — kubectl-debug sidecar: use `"/proc/<pid>/root/<binary>"`); `initCommands` runs LLDB commands before attach.
 

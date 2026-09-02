@@ -522,6 +522,72 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
       expect(payload.warning).toContain('remoteRoot');
       expect(payload.data.warning).toContain('remoteRoot');
     });
+
+    it('names a pending post-attach pause in the top-level message of a create_debug_session inline attach (issue #654)', async () => {
+      const sessionInfo: DebugSessionInfo = {
+        id: 'inline-attach-session',
+        name: 'inline',
+        language: 'python' as DebugLanguage,
+        state: 'created' as SessionState,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+      mockSessionManager.createSession.mockResolvedValue(sessionInfo);
+      mockSessionManager.attachToProcess.mockResolvedValue({
+        success: true,
+        state: 'running',
+        data: {
+          message: 'Attached to process at 127.0.0.1:9229; post-attach pause pending — the target stops when it next executes code (pass stopOnEntry: false to attach without pausing)',
+          pending: true
+        }
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'create_debug_session',
+          arguments: { language: 'python', host: '127.0.0.1', port: 5678 }
+        }
+      });
+
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload.success).toBe(true);
+      expect(payload.state).toBe('running');
+      expect(payload.pending).toBe(true);
+      expect(payload.message).toMatch(/^Created and attached python debug session: inline; post-attach pause pending/);
+      expect(payload.message).toMatch(/stopOnEntry: false/);
+      expect(payload.data.pending).toBe(true);
+    });
+
+    it('keeps the plain create_debug_session message when the attach pause was observed', async () => {
+      const sessionInfo: DebugSessionInfo = {
+        id: 'inline-attach-session',
+        name: 'inline',
+        language: 'python' as DebugLanguage,
+        state: 'created' as SessionState,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+      mockSessionManager.createSession.mockResolvedValue(sessionInfo);
+      mockSessionManager.attachToProcess.mockResolvedValue({
+        success: true,
+        state: 'paused',
+        data: { message: 'Attached to process at 127.0.0.1:9229' }
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'create_debug_session',
+          arguments: { language: 'python', host: '127.0.0.1', port: 5678 }
+        }
+      });
+
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload.state).toBe('paused');
+      expect(payload.pending).toBeUndefined();
+      expect(payload.message).toBe('Created and attached python debug session: inline');
+    });
   });
 
   describe('attach warning join (issue #450)', () => {

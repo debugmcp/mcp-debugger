@@ -370,15 +370,24 @@ export class DebugMcpServer implements ToolContext {
     const resolved = await this.resolveBreakpointFile(req.sessionId, req.file, { requireExists: true });
     const mode = getBpAddressingMode(this.environment);
 
-    const readLinesForContentAddressing = async (feature: string): Promise<string[]> => {
+    const readLinesForContentAddressing = async (
+      feature: 'statement addressing' | 'expectedContent'
+    ): Promise<string[]> => {
       if (!resolved.contentAddressable) {
         // Two distinct causes, two honest reasons (issue #497): an attach
         // session's file may be perfectly readable here — the rule is that
         // the debuggee's loaded source is the authority, not the host's copy.
+        // The remedy is feature-specific (issue #654): an expectedContent
+        // caller already passed line, so "use line addressing instead" read
+        // as a contradiction — tell them what to drop, not what to add.
+        const remedy =
+          feature === 'expectedContent'
+            ? 'drop expectedContent and keep line — the breakpoint is set by plain line addressing.'
+            : 'use line addressing instead.';
         const reason =
           resolved.nonAddressableReason === 'attach'
-            ? `${feature} is not supported for attach sessions — the debuggee's loaded source may not match the file on the mcp-debugger host. Use line addressing instead.`
-            : `${feature} requires a source file readable by the mcp-debugger server; "${req.file}" is a class name or remote path. Use line addressing instead.`;
+            ? `${feature} is not supported for attach sessions (the debuggee's loaded source may differ from the file on the mcp-debugger host); ${remedy}`
+            : `${feature} requires a source file readable by the mcp-debugger server; "${req.file}" is a class name or remote path — ${remedy}`;
         throw new McpError(McpErrorCode.InvalidParams, reason);
       }
       const lines = await this.lineReader.getFileLines(resolved.path);

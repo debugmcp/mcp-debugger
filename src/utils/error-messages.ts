@@ -113,6 +113,18 @@ export const ErrorMessages = {
 
 
   /**
+   * Suffix appended to the attach message when the post-attach pause was
+   * requested (explicitly or by the default) but no 'stopped' event arrived
+   * within the bounded wait, so the response reports state "running" with
+   * pending:true while the target will still freeze on its next dispatch
+   * (issue #654: attaching to a live server without stopOnEntry:false froze
+   * it seconds later with nothing in the response saying a pause was coming)
+   * Used in: src/session/attach/attach-controller.ts, src/server/handlers/session-tools.ts
+   */
+  attachPausePending:
+    'post-attach pause pending — the target stops when it next executes code (pass stopOnEntry: false to attach without pausing)',
+
+  /**
    * Error message for attach verification failures
    * Occurs when: After an attach handshake, the debugger does not report any
    * threads within the verification window — either the attach is dead

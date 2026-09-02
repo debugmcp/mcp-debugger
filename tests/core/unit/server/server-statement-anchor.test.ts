@@ -342,6 +342,10 @@ describe('set_breakpoint statement anchors (#271)', () => {
     expect(err.message).toMatch(/expectedContent/);
     expect(err.message).toMatch(/not supported for attach sessions/);
     expect(err.message).not.toMatch(/class name or remote path/);
+    // The caller already passed line: the remedy must say what to drop,
+    // not "use line addressing instead" (issue #654)
+    expect(err.message).toMatch(/drop expectedContent and keep line/);
+    expect(err.message).not.toMatch(/use line addressing instead/i);
   });
 
   it('keeps the class-name wording for non-file source identifiers', async () => {
