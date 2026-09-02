@@ -199,6 +199,12 @@ and point the client at it:
 }
 ```
 
+Each HTTP client gets its own isolated server: debug sessions are never visible to another
+client. A client that disconnects without `DELETE /mcp` keeps its debug sessions — and any
+paused attach target — alive until the server reaps it: 2 minutes after its SSE stream
+dropped (`MCP_HTTP_STREAM_LOST_SESSION_MS`), or 30 minutes idle if it never opened one
+(`MCP_HTTP_STALE_SESSION_MS`). `GET /health` lists what each session is holding.
+
 The port defaults to 3001. `GET /health` on the same port answers a liveness check. The legacy
 `sse` subcommand still exists but is deprecated — use `http`.
 

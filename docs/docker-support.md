@@ -225,11 +225,18 @@ passed through with `-e`:
   [Troubleshooting](#common-docker-issues), which is always on and needs no variable.
 - **`MCP_HTTP_STALE_SESSION_MS`** (`src/cli/http-command.ts`) -- idle window before an HTTP
   MCP session with no open SSE stream is reaped, closing its debug sessions and releasing
-  any ptrace claim on the target. Defaults to 30 minutes (1800000); `0` disables reaping;
+  any ptrace claim on the target. Defaults to 30 minutes (1800000); `0` disables that path;
   invalid values log a warning and fall back to the default. Read only by `http` mode
   (the legacy `sse` command has no reaper). A short-lived diagnostic container wants a
   much tighter window -- see the
   [Kubernetes debugging recipe](kubernetes.md), which sets it to 5 minutes.
+- **`MCP_HTTP_STREAM_LOST_SESSION_MS`** -- the short window for a session whose SSE stream
+  dropped and never came back (default 2 minutes; `0` falls back to the stale window). An
+  MCP SDK client keeps a GET stream open, so when it crashes or exits without `DELETE /mcp`
+  the server sees the socket close and releases its debug sessions -- including a paused
+  attach target -- within this window plus one sweep, instead of holding them for the full
+  stale window (issue #658). Only a client that never opened a stream waits out
+  `MCP_HTTP_STALE_SESSION_MS`. `GET /health` lists what each HTTP session is holding.
 
 ## Dockerfile Details
 

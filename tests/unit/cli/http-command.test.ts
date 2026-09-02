@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, Mock } from 'vitest';
 import { EventEmitter } from 'events';
 import os from 'os';
 import path from 'path';
-import { createHttpApp, handleHttpCommand } from '../../../src/cli/http-command.js';
+import { createHttpApp, handleHttpCommand, type ServerFactoryOptions } from '../../../src/cli/http-command.js';
 import { FakeCurrentProcess } from '../../test-utils/mocks/fake-current-process.js';
 import type { Logger as WinstonLoggerType } from 'winston';
 import { DebugMcpServer } from '../../../src/server.js';
@@ -18,8 +18,8 @@ const mockedCreateMcpExpressApp = vi.mocked(createMcpExpressApp);
 
 describe('HTTP Command Handler', () => {
   let mockLogger: WinstonLoggerType;
-  let mockServerFactory: ReturnType<typeof vi.fn>;
-  let mockExitProcess: ReturnType<typeof vi.fn>;
+  let mockServerFactory: Mock<(options: ServerFactoryOptions) => DebugMcpServer>;
+  let mockExitProcess: Mock<(code: number) => void>;
   let mockServer: DebugMcpServer;
   let mockTransport: any;
   let fakeProc: FakeCurrentProcess;
@@ -44,10 +44,13 @@ describe('HTTP Command Handler', () => {
       server: {
         connect: vi.fn().mockResolvedValue(undefined),
       },
+      sessionManager: {
+        getAllSessions: vi.fn().mockReturnValue([]),
+      },
     } as any;
 
-    mockServerFactory = vi.fn().mockReturnValue(mockServer);
-    mockExitProcess = vi.fn();
+    mockServerFactory = vi.fn<(options: ServerFactoryOptions) => DebugMcpServer>().mockReturnValue(mockServer);
+    mockExitProcess = vi.fn<(code: number) => void>();
     // Signal handlers attach to the fake's emitter, never the real process
     // (issues #159/#183).
     fakeProc = new FakeCurrentProcess();
@@ -369,17 +372,56 @@ describe('HTTP Command Handler', () => {
         mode: 'http',
         connections: 0,
         sessions: [],
+        details: [],
       });
 
       // Add a session and re-check
-      (app as any).httpSessions.set('s1', { transport: {}, server: {} });
+      (app as any).httpSessions.set('s1', {
+        transport: {},
+        server: mockServer,
+        lastActivity: Date.now(),
+        openStreams: 1,
+        hadStream: true,
+      });
       healthHandler({}, res);
-      expect(res.json).toHaveBeenLastCalledWith({
+      expect(res.json).toHaveBeenLastCalledWith(expect.objectContaining({
         status: 'ok',
         mode: 'http',
         connections: 1,
         sessions: ['s1'],
+      }));
+    });
+
+    it('names what each HTTP session holds, so an orphan is discoverable (issue #658)', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(100_000);
+      const app = createHttpApp(
+        { port: '3001' },
+        { logger: mockLogger, serverFactory: mockServerFactory }
+      );
+      const healthHandler = mockApp.get.mock.calls.find((c: any) => c[0] === '/health')![1];
+      (mockServer as any).sessionManager.getAllSessions.mockReturnValue([
+        { id: 'dbg-1', name: 'attached', language: 'javascript', state: 'paused', createdAt: new Date(), extra: 'omitted' },
+      ]);
+      (app as any).httpSessions.set('orphan', {
+        transport: {},
+        server: mockServer,
+        lastActivity: 40_000,
+        openStreams: 0,
+        hadStream: true,
       });
+
+      const res = { json: vi.fn() };
+      healthHandler({}, res);
+      expect(res.json.mock.calls[0][0].details).toEqual([
+        {
+          id: 'orphan',
+          openStreams: 0,
+          streamLost: true,
+          idleMs: 60_000,
+          debugSessions: [{ id: 'dbg-1', name: 'attached', language: 'javascript', state: 'paused' }],
+        },
+      ]);
     });
   });
 
@@ -512,6 +554,134 @@ describe('HTTP Command Handler', () => {
       await vi.advanceTimersByTimeAsync(2_100);
 
       expect(transport.close).toHaveBeenCalled();
+    });
+
+    it('reaps a session whose SSE stream dropped and never returned after the short window (issue #658)', async () => {
+      vi.useFakeTimers();
+      const { handler } = createAppAndHandler();
+      const transport = await initSession(handler);
+      const streamRes = makeStreamRes();
+      await handler(
+        { method: 'GET', headers: { 'mcp-session-id': transport.sessionId }, body: undefined },
+        streamRes
+      );
+      (mockServer as any).sessionManager.getAllSessions.mockReturnValue([
+        { id: 'dbg-1', name: 'attached', language: 'javascript', state: 'paused', createdAt: new Date() },
+      ]);
+
+      // Client crash: the socket closes without a DELETE, and — unlike a
+      // reconnecting SDK client or a load balancer cutting an idle stream —
+      // no GET comes back.
+      streamRes.emit('close');
+
+      // Sweeps at 60s and 120s see idle 60s/120s — not over the 2-minute window.
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(transport.close).not.toHaveBeenCalled();
+
+      // The 180s sweep sees idle 180s and reaps — not 30 minutes later.
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(transport.close).toHaveBeenCalled();
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringMatching(/its SSE stream closed 180s ago .*MCP_HTTP_STREAM_LOST_SESSION_MS=120000.*holding debug session\(s\) dbg-1 \(javascript, paused\)/)
+      );
+    });
+
+    it('a stream that comes back within the window keeps the session alive (issue #658)', async () => {
+      vi.useFakeTimers();
+      const { handler } = createAppAndHandler();
+      const transport = await initSession(handler);
+      const first = makeStreamRes();
+      await handler({ method: 'GET', headers: { 'mcp-session-id': transport.sessionId }, body: undefined }, first);
+
+      // A load balancer cuts the idle stream; the SDK client reconnects seconds later.
+      first.emit('close');
+      await vi.advanceTimersByTimeAsync(3_000);
+      const second = makeStreamRes();
+      await handler({ method: 'GET', headers: { 'mcp-session-id': transport.sessionId }, body: undefined }, second);
+
+      await vi.advanceTimersByTimeAsync(20 * 60_000);
+      expect(transport.close).not.toHaveBeenCalled();
+    });
+
+    it('request activity after a lost stream keeps the session alive (issue #658)', async () => {
+      vi.useFakeTimers();
+      const { handler } = createAppAndHandler();
+      const transport = await initSession(handler);
+      const streamRes = makeStreamRes();
+      await handler({ method: 'GET', headers: { 'mcp-session-id': transport.sessionId }, body: undefined }, streamRes);
+      streamRes.emit('close');
+
+      // A client that gave up on its stream (SDK maxRetries exhausted during
+      // a network blip) but still POSTs is alive: every request resets the window.
+      for (let i = 0; i < 5; i++) {
+        await vi.advanceTimersByTimeAsync(90_000);
+        await handler(
+          { method: 'POST', headers: { 'mcp-session-id': transport.sessionId }, body: { jsonrpc: '2.0', id: 2 + i, method: 'tools/list' } },
+          makeStreamRes()
+        );
+      }
+      expect(transport.close).not.toHaveBeenCalled();
+
+      // Once it stops sending, the short window applies.
+      await vi.advanceTimersByTimeAsync(180_000);
+      expect(transport.close).toHaveBeenCalled();
+    });
+
+    it('a session that never held a stream keeps the long stale window (issue #658)', async () => {
+      vi.useFakeTimers();
+      const { handler } = createAppAndHandler();
+      const transport = await initSession(handler);
+
+      await vi.advanceTimersByTimeAsync(20 * 60_000);
+      expect(transport.close).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(12 * 60_000);
+      expect(transport.close).toHaveBeenCalled();
+    });
+
+    it('MCP_HTTP_STREAM_LOST_SESSION_MS=0 falls back to the stale window; the sweep still runs when only that path is on', async () => {
+      vi.useFakeTimers();
+      fakeProc.env.MCP_HTTP_STREAM_LOST_SESSION_MS = '0';
+      const { handler } = createAppAndHandler('300000');
+      const transport = await initSession(handler);
+      const streamRes = makeStreamRes();
+      await handler({ method: 'GET', headers: { 'mcp-session-id': transport.sessionId }, body: undefined }, streamRes);
+      streamRes.emit('close');
+
+      await vi.advanceTimersByTimeAsync(4 * 60_000);
+      expect(transport.close).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(2 * 60_000);
+      expect(transport.close).toHaveBeenCalled();
+
+      // And the inverse: the stale window off, the stream-lost path alone still sweeps.
+      vi.clearAllMocks();
+      fakeProc.env.MCP_HTTP_STREAM_LOST_SESSION_MS = '1000';
+      const second = createAppAndHandler('0');
+      const t2 = await initSession(second.handler);
+      const s2 = makeStreamRes();
+      await second.handler({ method: 'GET', headers: { 'mcp-session-id': t2.sessionId }, body: undefined }, s2);
+      s2.emit('close');
+      await vi.advanceTimersByTimeAsync(61_000);
+      expect(t2.close).toHaveBeenCalled();
+    });
+
+    it('invalid MCP_HTTP_STREAM_LOST_SESSION_MS values warn and keep the 2-minute default', async () => {
+      vi.useFakeTimers();
+      for (const bad of ['-5', 'abc']) {
+        vi.clearAllMocks();
+        fakeProc.env.MCP_HTTP_STREAM_LOST_SESSION_MS = bad;
+        const { handler } = createAppAndHandler();
+        const transport = await initSession(handler);
+        expect(mockLogger.warn).toHaveBeenCalledWith(
+          expect.stringContaining('Ignoring invalid MCP_HTTP_STREAM_LOST_SESSION_MS')
+        );
+        const streamRes = makeStreamRes();
+        await handler({ method: 'GET', headers: { 'mcp-session-id': transport.sessionId }, body: undefined }, streamRes);
+        streamRes.emit('close');
+        await vi.advanceTimersByTimeAsync(120_000);
+        expect(transport.close).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(transport.close).toHaveBeenCalled();
+      }
     });
 
     it('invalid MCP_HTTP_STALE_SWEEP_INTERVAL_MS values warn and keep the 60s default', async () => {
