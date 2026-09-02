@@ -7,7 +7,8 @@ vi.mock('fs', async (importOriginal) => {
   return {
     ...actual,
     existsSync: vi.fn(),
-    mkdirSync: vi.fn()
+    mkdirSync: vi.fn(),
+    statSync: vi.fn()
   };
 });
 
@@ -21,19 +22,41 @@ vi.mock('child_process', async (importOriginal) => {
   };
 });
 
-import { existsSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync, statSync } from 'fs';
 import { execFileSync } from 'child_process';
-import { resolveJdiBridgeClassDir, ensureJdiBridgeCompiled } from '@debugmcp/adapter-java';
+import { resolveJdiBridgeClassDir, ensureJdiBridgeCompiled, ensureJdiBridge, isJdiBridgeStale } from '@debugmcp/adapter-java';
 
 const mockExistsSync = vi.mocked(existsSync);
 const mockMkdirSync = vi.mocked(mkdirSync);
+const mockStatSync = vi.mocked(statSync);
 const mockExecFileSync = vi.mocked(execFileSync);
+
+/** Make both the source and the class exist, with the given mtimes (ms). */
+function bridgeOnDisk(opts: { sourceMtime: number; classMtime: number; javac?: boolean }): void {
+  mockExistsSync.mockImplementation((p: any) => {
+    const pathStr = p.toString();
+    if (pathStr.includes('JdiDapServer.class')) return true;
+    if (pathStr.includes('JdiDapServer.java')) return true;
+    if (pathStr.includes('javac')) return opts.javac ?? true;
+    return false;
+  });
+  mockStatSync.mockImplementation(((p: any) => {
+    const pathStr = p.toString();
+    if (pathStr.endsWith('JdiDapServer.java')) return { mtimeMs: opts.sourceMtime } as any;
+    if (pathStr.endsWith('JdiDapServer.class')) return { mtimeMs: opts.classMtime } as any;
+    throw new Error(`ENOENT: ${pathStr}`);
+  }) as any);
+}
 
 describe('jdi-resolver', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
     // Default: nothing exists
     mockExistsSync.mockReturnValue(false);
+    mockStatSync.mockImplementation(() => {
+      throw new Error('ENOENT');
+    });
   });
 
   describe('resolveJdiBridgeClassDir', () => {
@@ -221,6 +244,104 @@ describe('jdi-resolver', () => {
         expect.arrayContaining(['--release', '21']),
         expect.any(Object)
       );
+    });
+  });
+
+  describe('staleness (issue #646)', () => {
+    it('a fresh class (class newer than source) is used without compiling', () => {
+      vi.stubEnv('JAVA_HOME', '/usr/lib/jvm/java-21');
+      bridgeOnDisk({ sourceMtime: 1000, classMtime: 2000 });
+
+      const status = ensureJdiBridge();
+
+      expect(status.dir).toContain(path.join('java', 'out'));
+      expect(status).toMatchObject({ stale: false, recompiled: false });
+      expect(status.error).toBeUndefined();
+      expect(mockExecFileSync).not.toHaveBeenCalled();
+      expect(isJdiBridgeStale()).toBe(false);
+    });
+
+    it('a stale class (source newer) is recompiled into <source>/out', () => {
+      vi.stubEnv('JAVA_HOME', '/usr/lib/jvm/java-21');
+      bridgeOnDisk({ sourceMtime: 3000, classMtime: 2000 });
+      mockExecFileSync.mockReturnValue(Buffer.from(''));
+
+      expect(isJdiBridgeStale()).toBe(true);
+      const status = ensureJdiBridge();
+
+      expect(status).toMatchObject({ stale: false, recompiled: true });
+      expect(status.dir).toContain(path.join('java', 'out'));
+      expect(status.sourceFile).toContain('JdiDapServer.java');
+      expect(mockMkdirSync).toHaveBeenCalled();
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        expect.stringContaining('javac'),
+        expect.arrayContaining(['--release', '21', '-d']),
+        expect.objectContaining({ stdio: ['ignore', 'pipe', 'pipe'] })
+      );
+      // The path-only wrapper agrees
+      expect(ensureJdiBridgeCompiled()).toBe(status.dir);
+    });
+
+    it('a stale class with no javac is returned as stale, with the reason', () => {
+      vi.stubEnv('JAVA_HOME', undefined);
+      bridgeOnDisk({ sourceMtime: 3000, classMtime: 2000, javac: false });
+      mockExecFileSync.mockImplementation(() => {
+        throw new Error('not found');
+      });
+
+      const status = ensureJdiBridge();
+
+      expect(status.dir).toContain(path.join('java', 'out'));
+      expect(status).toMatchObject({ stale: true, recompiled: false });
+      expect(status.error).toMatch(/javac not found/);
+      // Only the which/where probe ran — never a compile
+      expect(mockExecFileSync).toHaveBeenCalledTimes(1);
+      expect(mockExecFileSync).toHaveBeenCalledWith(expect.stringMatching(/^(which|where)$/), ['javac'], expect.anything());
+      expect(ensureJdiBridgeCompiled()).toBe(status.dir);
+    });
+
+    it('a stale class whose recompile fails is returned as stale, carrying javac stderr', () => {
+      vi.stubEnv('JAVA_HOME', '/usr/lib/jvm/java-21');
+      bridgeOnDisk({ sourceMtime: 3000, classMtime: 2000 });
+      mockExecFileSync.mockImplementation(() => {
+        const err = new Error('Command failed: javac') as Error & { stderr: Buffer };
+        err.stderr = Buffer.from('JdiDapServer.java:42: error: cannot find symbol\n  foo();\n');
+        throw err;
+      });
+
+      const status = ensureJdiBridge();
+
+      expect(status).toMatchObject({ stale: true, recompiled: false });
+      expect(status.dir).toContain(path.join('java', 'out'));
+      expect(status.error).toContain('javac failed: JdiDapServer.java:42: error: cannot find symbol');
+    });
+
+    it('JDI_BRIDGE_DIR is an explicit override: never stat-compared, never recompiled', () => {
+      vi.stubEnv('JDI_BRIDGE_DIR', '/custom/jdi/bridge');
+      vi.stubEnv('JAVA_HOME', '/usr/lib/jvm/java-21');
+      bridgeOnDisk({ sourceMtime: 3000, classMtime: 2000 });
+
+      expect(isJdiBridgeStale()).toBe(false);
+      const status = ensureJdiBridge();
+
+      expect(status).toMatchObject({ dir: '/custom/jdi/bridge', stale: false, recompiled: false });
+      expect(mockStatSync).not.toHaveBeenCalled();
+      expect(mockExecFileSync).not.toHaveBeenCalled();
+    });
+
+    it('a class with no shipped source is never stale (stat failures mean "not stale")', () => {
+      mockExistsSync.mockImplementation((p: any) => p.toString().includes('JdiDapServer.class'));
+
+      expect(isJdiBridgeStale()).toBe(false);
+      const status = ensureJdiBridge();
+      expect(status).toMatchObject({ stale: false, recompiled: false, sourceFile: null });
+      expect(status.dir).not.toBeNull();
+      expect(mockExecFileSync).not.toHaveBeenCalled();
+    });
+
+    it('isJdiBridgeStale is false when no class exists at all', () => {
+      mockExistsSync.mockImplementation((p: any) => p.toString().includes('JdiDapServer.java'));
+      expect(isJdiBridgeStale()).toBe(false);
     });
   });
 });

@@ -79,27 +79,68 @@ function resolveJdiBridgeSourceDir(): string | null {
 }
 
 /**
+ * What the launch path learned about the bridge (issue #646).
+ */
+export interface JdiBridgeStatus {
+  /** Class directory to put on the JVM classpath, or null when nothing usable exists. */
+  dir: string | null;
+  /** Resolved JdiDapServer.java, or null when no source ships with this install. */
+  sourceFile: string | null;
+  /** True when `dir` holds a class older than `sourceFile` (a recompile was needed and did not happen). */
+  stale: boolean;
+  /** True when this call ran javac successfully. */
+  recompiled: boolean;
+  /** Why a needed recompile did not happen: no javac, or javac failed (its stderr, trimmed). */
+  error?: string;
+}
+
+/**
+ * Compare the shipped source against a compiled class directory without
+ * compiling anything. `JDI_BRIDGE_DIR` is an explicit override and is never
+ * reported stale — comparing it against an unrelated in-tree source would be
+ * spurious.
+ */
+export function isJdiBridgeStale(): boolean {
+  const classDir = resolveJdiBridgeClassDir();
+  if (!classDir || isEnvOverride(classDir)) return false;
+  const sourceDir = resolveJdiBridgeSourceDir();
+  return sourceDir ? isClassStale(path.join(sourceDir, 'JdiDapServer.java'), classDir) : false;
+}
+
+/**
  * Ensure the JDI bridge is compiled. Compiles on-demand if needed, and also
  * recompiles when the .java source is newer than the cached .class — this
  * prevents stale bridge classes from silently dropping CLI args added in
- * newer versions (e.g. --owner-pid for the orphan-reap markers).
- *
- * @returns Path to the output directory, or null if compilation fails
+ * newer versions (e.g. --owner-pid for the orphan-reap markers). Every
+ * launch goes through here (issue #646): a fresh class costs two stats.
  */
-export function ensureJdiBridgeCompiled(): string | null {
+export function ensureJdiBridge(): JdiBridgeStatus {
   // Find source first so we can compare against any cached .class
   const sourceDir = resolveJdiBridgeSourceDir();
   const sourceFile = sourceDir ? path.join(sourceDir, 'JdiDapServer.java') : null;
 
-  // Already compiled and not stale?
   const existing = resolveJdiBridgeClassDir();
-  if (existing && (!sourceFile || !isClassStale(sourceFile, existing))) {
-    return existing;
+  const fresh = (dir: string): JdiBridgeStatus => ({ dir, sourceFile, stale: false, recompiled: false });
+
+  // An explicit JDI_BRIDGE_DIR is the user's business: never rebuilt, never stale.
+  if (existing && isEnvOverride(existing)) return fresh(existing);
+
+  // Already compiled and not stale?
+  if (existing && (!sourceFile || !isClassStale(sourceFile, existing))) return fresh(existing);
+
+  if (!sourceDir || !sourceFile) {
+    return { dir: null, sourceFile: null, stale: false, recompiled: false };
   }
 
-  if (!sourceDir || !sourceFile) return null;
-
   const outDir = path.join(sourceDir, 'out');
+  // Whatever we return short of a successful compile is the stale class (if any).
+  const fallback = (error: string): JdiBridgeStatus => ({
+    dir: existing,
+    sourceFile,
+    stale: existing !== null,
+    recompiled: false,
+    error
+  });
 
   // Find javac
   let javac: string | null = null;
@@ -121,20 +162,41 @@ export function ensureJdiBridgeCompiled(): string | null {
   }
   // No compiler, or compilation fails: a cached (possibly stale) class beats
   // nothing — e.g. a read-only global npm install dir where javac can't write.
-  if (!javac) return existing;
+  if (!javac) return fallback('javac not found (set JAVA_HOME or put javac on PATH)');
 
-  // Compile
+  // Compile. Capture the compiler's output instead of inheriting the proxy
+  // worker's stdio, so a failure can say why.
   try {
     mkdirSync(outDir, { recursive: true });
     execFileSync(javac, ['--release', '21', sourceFile, '-d', outDir], {
-      stdio: 'inherit',
+      stdio: ['ignore', 'pipe', 'pipe'],
       cwd: sourceDir,
       windowsHide: true
     });
-    return outDir;
-  } catch {
-    return existing;
+    return { dir: outDir, sourceFile, stale: false, recompiled: true };
+  } catch (err) {
+    return fallback(describeCompileFailure(err));
   }
+}
+
+/**
+ * Ensure the JDI bridge is compiled; the class directory or null.
+ * Thin wrapper over ensureJdiBridge() for callers that only need the path.
+ */
+export function ensureJdiBridgeCompiled(): string | null {
+  return ensureJdiBridge().dir;
+}
+
+function isEnvOverride(classDir: string): boolean {
+  return !!process.env.JDI_BRIDGE_DIR && classDir === process.env.JDI_BRIDGE_DIR;
+}
+
+function describeCompileFailure(err: unknown): string {
+  const stderr = (err as { stderr?: unknown })?.stderr;
+  const text = typeof stderr === 'string' ? stderr : Buffer.isBuffer(stderr) ? stderr.toString('utf-8') : '';
+  const firstLines = text.trim().split('\n').slice(0, 5).join('\n').trim();
+  const message = err instanceof Error ? err.message : String(err);
+  return firstLines ? `javac failed: ${firstLines}` : `javac failed: ${message}`;
 }
 
 /**
