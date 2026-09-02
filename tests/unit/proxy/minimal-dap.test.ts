@@ -429,6 +429,44 @@ describe('MinimalDapClient', () => {
       await expect(requestPromise).rejects.toThrow('Failed to launch');
     });
 
+    it('rejects with body.error.format when the adapter sets no message (js-debug ProtocolError, issue #663)', async () => {
+      await client.connect();
+
+      const requestPromise = client.sendRequest('evaluate', { expression: 'httpSessions.size', frameId: 3 });
+
+      // js-debug: this._send({...response, success: false, body: { error: cause }}) — no `message`.
+      const errorResponse: DebugProtocol.Response = {
+        seq: 2,
+        type: 'response',
+        request_seq: 1,
+        command: 'evaluate',
+        success: false,
+        body: { error: { id: 2013, format: 'Uncaught ReferenceError: httpSessions is not defined', showUser: true } }
+      };
+
+      mockSocket.emit('data', createDapMessage(errorResponse));
+
+      await expect(requestPromise).rejects.toThrow('Uncaught ReferenceError: httpSessions is not defined');
+    });
+
+    it('fills {placeholders} in body.error.format from its variables (issue #663)', async () => {
+      await client.connect();
+
+      const requestPromise = client.sendRequest('setVariable', { name: 'x', value: '?' });
+      const errorResponse: DebugProtocol.Response = {
+        seq: 2,
+        type: 'response',
+        request_seq: 1,
+        command: 'setVariable',
+        success: false,
+        body: { error: { id: 1, format: 'Cannot set {name}: {reason}', variables: { name: 'x', reason: 'read-only' } } }
+      };
+
+      mockSocket.emit('data', createDapMessage(errorResponse));
+
+      await expect(requestPromise).rejects.toThrow('Cannot set x: read-only');
+    });
+
     it('should handle concurrent requests', async () => {
       await client.connect();
 
@@ -2023,6 +2061,32 @@ describe('MinimalDapClient', () => {
         success: false,
         request_seq: 8,
         errorMessage: 'Request failed'
+      });
+
+      c.shutdown('test done');
+    });
+
+    it('logs body.error.format as errorMessage when the adapter sets no message (issue #663)', async () => {
+      const c = new MinimalDapClient('localhost', 5678);
+      loggerInstances.forEach((l) => l.info.mockClear());
+
+      await (c as any).handleProtocolMessage({
+        seq: 12,
+        type: 'response',
+        request_seq: 9,
+        command: 'evaluate',
+        success: false,
+        body: { error: { id: 2013, format: 'Uncaught ReferenceError: httpSessions is not defined' } }
+      } satisfies DebugProtocol.Response);
+
+      const responseLog = loggerInstances
+        .flatMap((l) => l.info.mock.calls)
+        .find(([msg]) => typeof msg === 'string' && msg.includes('DAP message: response'));
+      expect(responseLog?.[1]).toMatchObject({
+        command: 'evaluate',
+        success: false,
+        request_seq: 9,
+        errorMessage: 'Uncaught ReferenceError: httpSessions is not defined'
       });
 
       c.shutdown('test done');
