@@ -52,12 +52,15 @@ export function isTypedSessionError(
 /**
  * A {success: false} result for a session-lifecycle failure, or undefined when
  * the error is not a typed session failure (the caller applies its own fallback).
+ * The envelope carries the error's plain `detail`, not `.message`: McpError
+ * bakes `MCP error <code>: ` into the latter, which belongs on the JSON-RPC
+ * path only (issue #647).
  */
 export function sessionErrorToResult(
   error: unknown,
   extra?: Record<string, unknown>
 ): ToolResult | undefined {
-  return isTypedSessionError(error) ? failureResult(error.message, extra) : undefined;
+  return isTypedSessionError(error) ? failureResult(error.detail, extra) : undefined;
 }
 
 /**

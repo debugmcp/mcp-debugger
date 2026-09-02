@@ -577,7 +577,7 @@ export class ExecutionController {
     }
 
     if (!session.proxyManager || !session.proxyManager.isRunning()) {
-      throw new ProxyNotRunningError(sessionId, 'listThreads');
+      throw new ProxyNotRunningError(sessionId, 'list threads');
     }
 
     const response = await session.proxyManager.sendDapRequest<DebugProtocol.ThreadsResponse>('threads', {});
