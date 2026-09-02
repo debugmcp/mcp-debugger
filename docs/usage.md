@@ -353,7 +353,7 @@ You can also evaluate arbitrary expressions in the current debug context:
 - Narrow the request to escape the cap: pass `names: ["a", "b"]` to `get_variables` or `get_local_variables` to fetch specific variables in full. Requested names that were not found are listed in the response's `notFound`
 
 ### Stack Trace Filtering
-- `get_stack_trace` filters internal/runtime frames by default. When any are hidden the response carries `hiddenFrames` (the count) and a `note` saying so; pass `includeInternals: true` to get the full stack
+- `get_stack_trace` filters internal/runtime frames by default (for JavaScript: Node internals, `node_modules` dependencies, and async separators). When any are hidden the response carries `hiddenFrames` (the count) and a `note` saying so; pass `includeInternals: true` to get the full stack. A frame with `unresolvedSource: true` has a `file` that is a label, not an openable path
 
 ### Breakpoint Behavior
 - Breakpoints initially show `"verified": false` because verification happens asynchronously by the debug adapter once the module is loaded (e.g., debugpy verifies after the script starts)

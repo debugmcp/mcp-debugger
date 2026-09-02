@@ -37,6 +37,19 @@ import { determineOutFiles, isESMProject, hasTsConfigPaths } from './utils/confi
 import { JsDebugLaunchBarrier } from './utils/js-debug-launch-barrier.js';
 import { jsDebugCandidatePaths } from './utils/js-debug-resolver.js';
 
+/**
+ * Base path js-debug uses to resolve source-map `sources` on attach (issue
+ * #655): the same fallback transformLaunchConfig applies when no program
+ * directory is known — the workspace root in container mode, else the
+ * server's working directory (VS Code's `${workspaceFolder}` equivalent).
+ */
+function defaultAttachCwd(): string {
+  if (process.env.MCP_CONTAINER === 'true') {
+    return process.env.MCP_WORKSPACE_ROOT || '/workspace';
+  }
+  return process.cwd();
+}
+
 export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapter {
   readonly language = 'javascript' as unknown as DebugLanguage;
   readonly name = 'JavaScript/TypeScript Debug Adapter';
@@ -700,6 +713,29 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       // off for attach — pausing an attached process must land truthfully,
       // even in an internal frame; an explicit caller value wins.
       smartStep: typeof rest.smartStep === 'boolean' ? rest.smartStep : false,
+      // Source-map resolution on attach (issue #655). js-debug's pwa-node
+      // attach defaults resolveSourceMapLocations to ['**','!**/node_modules/**'],
+      // but its applyNodeDefaults copies an undefined outFiles over that
+      // default before the spread, and without a workspace folder the value
+      // collapses to null (= resolve maps everywhere). Dependencies that ship
+      // .js.map files without their sources then surface as phantom
+      // '../src/*.ts' frames. Pass launch's exclusion explicitly; an explicit
+      // caller value — including null — wins ('in' check, not Array.isArray).
+      // skipFiles is deliberately NOT defaulted: '**/node_modules/**' would
+      // V8-blackbox dependency scripts and turn a pause landing in framework
+      // glue on an idle server into the #513 step-chase; the policy hides
+      // those frames from get_stack_trace instead.
+      ...('resolveSourceMapLocations' in rest
+        ? {}
+        : { resolveSourceMapLocations: ['**', '!**/node_modules/**'] }),
+      // js-debug resolves a source map's relative `sources` only when it has
+      // a base path, and its attach path leaves cwd undefined — so even the
+      // debuggee's own '../../src/x.ts' entries (which do exist next to
+      // dist/) were reported as unopenable relative labels. The value only
+      // gates the resolution (sources resolve against the map's own
+      // location, verified with a deliberately wrong cwd); default it the way
+      // launch does when no program dir is known. An explicit caller value wins.
+      ...('cwd' in rest ? {} : { cwd: defaultAttachCwd() }),
     } as LanguageSpecificAttachConfig;
   }
 

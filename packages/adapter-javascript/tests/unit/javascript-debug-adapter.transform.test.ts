@@ -331,6 +331,48 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
     });
   });
 
+  describe('transformAttachConfig source-map defaults (issue #655)', () => {
+    it('defaults resolveSourceMapLocations to the launch exclusion and cwd to the server cwd', () => {
+      const adapter = new JavascriptDebugAdapter(deps);
+      const cfg = adapter.transformAttachConfig({ request: 'attach', port: 9229 } as any) as Record<string, unknown>;
+      expect(cfg.resolveSourceMapLocations).toEqual(['**', '!**/node_modules/**']);
+      expect(cfg.cwd).toBe(process.cwd());
+      // Deliberately not defaulted: blackboxing node_modules would recreate
+      // the #513 pause step-chase; the policy hides those frames instead.
+      expect(cfg.skipFiles).toBeUndefined();
+      expect(cfg.sourceMaps).toBeUndefined();
+      expect(cfg.outFiles).toBeUndefined();
+    });
+
+    it('keeps a caller resolveSourceMapLocations — including an explicit null — and a caller cwd', () => {
+      const adapter = new JavascriptDebugAdapter(deps);
+      const list = adapter.transformAttachConfig({
+        request: 'attach', port: 9229, resolveSourceMapLocations: ['/app/**'], cwd: '/app'
+      } as any) as Record<string, unknown>;
+      expect(list.resolveSourceMapLocations).toEqual(['/app/**']);
+      expect(list.cwd).toBe('/app');
+
+      const everywhere = adapter.transformAttachConfig({
+        request: 'attach', port: 9229, resolveSourceMapLocations: null
+      } as any) as Record<string, unknown>;
+      expect(everywhere.resolveSourceMapLocations).toBeNull();
+    });
+
+    it('uses the workspace root as cwd in container mode', () => {
+      const prev = { c: process.env.MCP_CONTAINER, w: process.env.MCP_WORKSPACE_ROOT };
+      process.env.MCP_CONTAINER = 'true';
+      process.env.MCP_WORKSPACE_ROOT = '/ws';
+      try {
+        const adapter = new JavascriptDebugAdapter(deps);
+        const cfg = adapter.transformAttachConfig({ request: 'attach', port: 9229 } as any) as Record<string, unknown>;
+        expect(cfg.cwd).toBe('/ws');
+      } finally {
+        if (prev.c === undefined) delete process.env.MCP_CONTAINER; else process.env.MCP_CONTAINER = prev.c;
+        if (prev.w === undefined) delete process.env.MCP_WORKSPACE_ROOT; else process.env.MCP_WORKSPACE_ROOT = prev.w;
+      }
+    });
+  });
+
   describe('transformAttachConfig passthrough (issues #450/#466)', () => {
     it('normalizes the pwa-node attach shape and defaults the host', () => {
       const adapter = new JavascriptDebugAdapter(deps);

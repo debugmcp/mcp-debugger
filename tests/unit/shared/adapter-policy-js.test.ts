@@ -61,12 +61,17 @@ describe('JsDebugAdapterPolicy', () => {
       { id: 3, file: '<node_internals>/inspector' }
     ];
 
+    // Issue #655: node_modules dependency frames are internal too.
     const filtered = JsDebugAdapterPolicy.filterStackFrames(frames as any, false);
-    expect(filtered).toHaveLength(2);
-    expect(filtered.find(frame => String(frame.file).includes('<node_internals>'))).toBeUndefined();
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].file).toBe('/app/index.js');
 
     const includeAll = JsDebugAdapterPolicy.filterStackFrames(frames as any, true);
     expect(includeAll).toHaveLength(3);
+
+    // No local fallback: an all-internal stack filters to [] and the
+    // session-layer resolver restores the top frame (issue #346).
+    expect(JsDebugAdapterPolicy.filterStackFrames!(frames.slice(1) as any, false)).toEqual([]);
   });
 
   it('extracts local variables while excluding special entries', () => {
@@ -420,6 +425,19 @@ describe('JsDebugAdapterPolicy', () => {
         autoAttachChildProcesses: true
       });
       expect(optedIn.autoAttachChildProcesses).toBe(true);
+
+      // Issue #655: the same self-containment for resolveSourceMapLocations.
+      expect(defaulted.resolveSourceMapLocations).toEqual(['**', '!**/node_modules/**']);
+      const callerList = await runAttachHandshake({
+        request: 'attach', attachSimplePort: 9229, type: 'pwa-node',
+        resolveSourceMapLocations: ['/app/**']
+      });
+      expect(callerList.resolveSourceMapLocations).toEqual(['/app/**']);
+      const callerNull = await runAttachHandshake({
+        request: 'attach', attachSimplePort: 9229, type: 'pwa-node',
+        resolveSourceMapLocations: null
+      });
+      expect(callerNull.resolveSourceMapLocations).toBeNull();
     });
   });
 });

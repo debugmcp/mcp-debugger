@@ -63,7 +63,7 @@ describe('JsDebugAdapterPolicy', () => {
   });
 
   describe('filterStackFrames', () => {
-    it('filters out internal frames but keeps first when all removed', () => {
+    it('filters out internal frames and returns [] when all are removed (the resolver owns the #346 fallback)', () => {
       const frames = [
         createStackFrame(1, '<node_internals>/lib.js'),
         createStackFrame(2, '/workspace/app.js'),
@@ -72,10 +72,36 @@ describe('JsDebugAdapterPolicy', () => {
       expect(filtered).toHaveLength(1);
       expect(filtered[0].id).toBe(2);
 
+      // Issue #655: no local first-frame fallback — a local copy masked the
+      // central allFramesInternal flag and produced "N-1 hidden".
       const allInternal = [createStackFrame(3, '<node_internals>/timer.js')];
-      const fallback = JsDebugAdapterPolicy.filterStackFrames!(allInternal, false);
-      expect(fallback).toHaveLength(1);
-      expect(fallback[0].id).toBe(3);
+      expect(JsDebugAdapterPolicy.filterStackFrames!(allInternal, false)).toEqual([]);
+      expect(JsDebugAdapterPolicy.filterStackFrames!(allInternal, true)).toHaveLength(1);
+    });
+  });
+
+  describe('isInternalFrame (issue #655)', () => {
+    const frame = (file: string | undefined, line: number, name = 'fn') =>
+      ({ id: 1, name, line, column: 0, file: file as string });
+    const cases: Array<{ desc: string; file: string | undefined; line: number; name?: string; internal: boolean }> = [
+      { desc: 'node internals', file: '<node_internals>/internal/process/task_queues', line: 103, internal: true },
+      { desc: 'bare node: URL', file: 'node:internal/timers', line: 507, internal: true },
+      { desc: 'node_modules dependency', file: '/app/node_modules/express/lib/router/index.js', line: 1, internal: true },
+      { desc: 'pnpm nested node_modules', file: '/app/node_modules/.pnpm/router@2.2.0/node_modules/router/lib/layer.js', line: 152, internal: true },
+      { desc: 'Windows node_modules', file: 'C:\\app\\node_modules\\hono\\dist\\hono.js', line: 9, internal: true },
+      { desc: 'file:// node_modules URL', file: 'file:///app/node_modules/x/index.js', line: 3, internal: true },
+      { desc: 'user file whose name contains node_modules', file: '/app/src/node_modules_helper.js', line: 4, internal: false },
+      { desc: 'monorepo package (realpathed)', file: '/app/packages/api/src/handler.ts', line: 10, internal: false },
+      { desc: 'async separator with <unknown_source>', file: '<unknown_source>', line: 0, name: 'await', internal: true },
+      { desc: 'async separator with empty file', file: '', line: 0, name: 'Promise.then', internal: true },
+      { desc: 'async separator with undefined file', file: undefined, line: 0, name: 'bound-anonymous-fn', internal: true },
+      { desc: 'sourceless frame that reports a line', file: '<unknown_source>', line: 12, internal: false },
+      { desc: 'eval script', file: '<eval>/VM123', line: 1, internal: false },
+      { desc: 'name alone never classifies', file: '/app/src/queue.js', line: 8, name: 'Promise.then', internal: false },
+      { desc: 'unresolved source-mapped path is user code', file: '../src/shared/protocol.ts', line: 40, internal: false },
+    ];
+    it.each(cases)('$desc -> $internal', ({ file, line, name, internal }) => {
+      expect(JsDebugAdapterPolicy.isInternalFrame!(frame(file, line, name))).toBe(internal);
     });
   });
 

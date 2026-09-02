@@ -258,6 +258,32 @@ describe('Server Inspection Tools Tests', () => {
       expect(content.note).toContain('includeInternals: true');
     });
 
+    it('notes frames whose file is a source-map label rather than an openable path (issue #655)', async () => {
+      const mockSession = {
+        proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(1) }
+      };
+      mockSessionManager.getSession.mockReturnValue(mockSession);
+      mockSessionManager.getStackTraceDetailed.mockResolvedValue({
+        frames: [
+          { id: 1, name: 'jsonResult', file: '/app/dist/tool-result.js', line: 13 },
+          { id: 2, name: 'handler', file: '../src/handlers/tools.ts', line: 89, unresolvedSource: true }
+        ],
+        totalFrameCount: 2, hiddenFrameCount: 0, allFramesInternal: false
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'get_stack_trace', arguments: { sessionId: 'test-session' } }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      expect(content.hiddenFrames).toBeUndefined();
+      expect(content.stackFrames[1].unresolvedSource).toBe(true);
+      expect(content.note).toContain('1 frame(s) are source-mapped to files not present on this host');
+      expect(content.note).toContain('adapterConfig.sourceMaps: false');
+    });
+
     it('explains the kept-first-frame fallback when every frame is internal (issue #346)', async () => {
       const mockSession = {
         proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(1) }

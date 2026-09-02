@@ -84,6 +84,14 @@ export const getStackTraceTool: ToolHandler = async (ctx, args) => {
         ? `All ${stackTrace.totalFrameCount} frames are internal/runtime frames; showing the top internal frame so scopes and evaluate still work. Pass includeInternals: true to see the full stack.`
         : `${stackTrace.hiddenFrameCount} internal frame(s) hidden — pass includeInternals: true to see them.`);
     }
+    // Frames whose file is a label rather than an openable path (issue #655):
+    // say so once, so an agent does not feed them to get_source_context.
+    const unresolvedCount = stackTrace.frames.filter((frame) => frame.unresolvedSource).length;
+    if (unresolvedCount > 0) {
+      notes.push(
+        `${unresolvedCount} frame(s) are source-mapped to files not present on this host (unresolvedSource: true) — their file is a label, not an openable path; attach with adapterConfig.sourceMaps: false to see the generated .js paths instead.`
+      );
+    }
     if (notes.length > 0) {
       payload.note = notes.join(' ');
     }

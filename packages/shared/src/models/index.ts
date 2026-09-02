@@ -438,6 +438,13 @@ export interface StackFrame {
   line: number;
   /** Column number */
   column?: number;
+  /**
+   * True when the adapter reports this frame's source is not a file on this
+   * host (DAP `sourceReference != 0` with a non-placeholder path) — typically
+   * a source-mapped original the package did not ship. `file` is then a
+   * label, not an openable path (issue #655).
+   */
+  unresolvedSource?: boolean;
 }
 
 /**
