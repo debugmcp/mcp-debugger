@@ -223,6 +223,10 @@ If neither `tsx` nor `ts-node` is installed, the factory emits a warning (not an
   target, including pods via `kubectl port-forward` (see
   [attach presets](../../examples/kubernetes/attach-presets.md)); the target must be
   started with the inspector enabled, which mcp-debugger cannot do for you
+- Attach pauses the target unless you pass `stopOnEntry: false`. js-debug's pause
+  lands on the next event-loop dispatch, so an idle server answers
+  `state: "running", pending: true` (the `message` names the pending pause) and
+  freezes on its next request — attach to a live server with `stopOnEntry: false`
 - Some advanced DAP features may not be exposed through MCP tools
 - **Source-mapped frames you cannot open.** A package that ships `.js.map` files
   whose `sources` point at `.ts` files it did not ship makes js-debug report those

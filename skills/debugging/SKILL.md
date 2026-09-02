@@ -67,6 +67,7 @@ For an already-running process (including remote machines, containers, and Kuber
 attach_to_process {sessionId, host: "localhost", port: 5678, sourcePaths: ["<local src>"], adapterConfig: {...}}
 ```
 
+- **Attach pauses the target by default** (omitting `stopOnEntry` means `true` — the opposite of `start_debugging`). Pass `stopOnEntry: false` for a live service you must not freeze. A response with `pending: true` means the pause lands when the target next runs code; `continue_execution` releases it.
 - **Python**: target ran `python -m debugpy --listen <host>:<port> ...`; to address breakpoints by local-checkout path, map it onto the debuggee tree with `adapterConfig: {pathMappings: [{localRoot: "<abs local>", remoteRoot: "/app"}]}`
 - **Ruby**: target ran `rdbg --open --port <port> ...` (works through `kubectl port-forward`); `localfsMap: "/app:<abs local dir>"` maps paths
 - **Java**: target JVM has `-agentlib:jdwp=transport=dt_socket,server=y,address=*:<port>`; breakpoints in not-yet-loaded classes are deferred automatically, and a fully-qualified class name as `file` needs no source files at all

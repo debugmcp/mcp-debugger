@@ -2437,6 +2437,9 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result.success).toBe(true);
       expect(result.state).toBe(SessionState.RUNNING);
       expect(result.data?.pending).toBe(true);
+      // A pending pause is named in the message, not only flagged (issue #654)
+      expect(result.data?.message).toMatch(/^Attached to process at localhost:5005; post-attach pause pending/);
+      expect(result.data?.message).toMatch(/stopOnEntry: false/);
       expect(threadCalls).toBeGreaterThanOrEqual(3);
       expect(mockProxyManager.setCurrentThreadId).toHaveBeenCalledWith(7);
     });
@@ -2597,6 +2600,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('pause', { threadId: 1 });
       expect(result.state).toBe(SessionState.RUNNING);
       expect(result.data?.pending).toBe(true);
+      expect(result.data?.message).toMatch(/post-attach pause pending/);
       expect(mockSession.lastStop).toBeUndefined();
     });
 
@@ -2632,6 +2636,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result.success).toBe(true);
       expect(result.state).toBe(SessionState.PAUSED);
       expect(result.data?.pending).toBeUndefined();
+      expect(result.data?.message).toBe('Attached to process at 127.0.0.1:12345');
       expect(mockSession.lastStop?.reason).toBe('pause');
     });
 

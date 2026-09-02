@@ -149,8 +149,8 @@ through `/proc/<pid>/root/` — required because mount namespaces are not shared
 and `/proc/1/maps` paths aren't openable from the sidecar. The target is
 **PID 1** of the shared namespace when injected with `--target=app`.
 `--profile=general` is what injects `SYS_PTRACE` (nodes run
-`kernel.yama.ptrace_scope=1`). `stopOnEntry` defaults to `true` for C/C++
-attach. Expect `<optimized out>` locals on `-O2` builds and symbol-only
+`kernel.yama.ptrace_scope=1`). `stopOnEntry` defaults to `true` for attach in
+every language (pass `false` to leave the target running). Expect `<optimized out>` locals on `-O2` builds and symbol-only
 breakpoints on stripped binaries.
 
 ## dotnet — no Kubernetes recipe today
