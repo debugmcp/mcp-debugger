@@ -13,10 +13,10 @@ import {
   ReadResourceRequestSchema,
   SubscribeRequestSchema,
   UnsubscribeRequestSchema,
-  ErrorCode as McpErrorCode,
-  McpError
+  ErrorCode as McpErrorCode
 } from '@modelcontextprotocol/sdk/types.js';
 import { ILogger, type IFileSystem } from '@debugmcp/shared';
+import { WireMcpError } from '../errors/debug-errors.js';
 import type { SessionManager } from '../session/session-manager.js';
 import { proxyLogPathFor } from '../proxy/session-log-layout.js';
 import { readProxyLogTail } from '../session/launch/proxy-failure-diagnostics.js';
@@ -162,11 +162,11 @@ export function registerResourceHandlers(
     const sessionId = outputSessionId ?? proxyLogSessionId;
     const session = sessionId ? sessionManager.getSession(sessionId) : undefined;
     if (!session) {
-      throw new McpError(McpErrorCode.InvalidParams, `Unknown resource: ${uri}`);
+      throw new WireMcpError(McpErrorCode.InvalidParams, `Unknown resource: ${uri}`);
     }
     if (proxyLogSessionId) {
       if (!session.logDir) {
-        throw new McpError(McpErrorCode.InvalidParams, `Unknown resource: ${uri}`);
+        throw new WireMcpError(McpErrorCode.InvalidParams, `Unknown resource: ${uri}`);
       }
       const text = await readProxyLogTail(
         fileSystem,
@@ -190,7 +190,7 @@ export function registerResourceHandlers(
     const uri = request.params.uri;
     const sessionId = parseOutputResourceUri(uri);
     if (!sessionId || !sessionManager.getSession(sessionId)) {
-      throw new McpError(McpErrorCode.InvalidParams, `Unknown resource: ${uri}`);
+      throw new WireMcpError(McpErrorCode.InvalidParams, `Unknown resource: ${uri}`);
     }
     notifier.subscribe(uri);
     return {};

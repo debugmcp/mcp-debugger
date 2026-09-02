@@ -8,10 +8,10 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
   ListPromptsRequestSchema,
   GetPromptRequestSchema,
-  ErrorCode as McpErrorCode,
-  McpError
+  ErrorCode as McpErrorCode
 } from '@modelcontextprotocol/sdk/types.js';
 import { IEnvironment } from '@debugmcp/shared';
+import { WireMcpError } from '../errors/debug-errors.js';
 import { buildDebuggingWorkflowPrompt } from '../skill-content.js';
 import { getBpAddressingMode } from '../utils/bp-addressing.js';
 
@@ -28,7 +28,7 @@ export function registerPromptHandlers(server: Server, environment: IEnvironment
 
   server.setRequestHandler(GetPromptRequestSchema, async (request) => {
     if (request.params.name !== promptDescriptor.name) {
-      throw new McpError(McpErrorCode.InvalidParams, `Unknown prompt: ${request.params.name}`);
+      throw new WireMcpError(McpErrorCode.InvalidParams, `Unknown prompt: ${request.params.name}`);
     }
     return {
       description: promptDescriptor.description,

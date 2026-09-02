@@ -15,10 +15,11 @@ import { ErrorCode as McpErrorCode } from '@modelcontextprotocol/sdk/types.js';
  * Base for mcp-debugger's typed errors.
  *
  * McpError's constructor bakes `MCP error <code>: ` into `.message`, which is
- * right on the JSON-RPC path (the SDK derives the wire error from it) and wrong
- * inside a tool result envelope, where it reads like a transport failure
- * (issue #647). The SDK keeps no copy of the plain text, so this base records
- * it as `detail`; tool result envelopes and getErrorMessage() report that.
+ * right for logs and in-process callers and wrong inside a tool result
+ * envelope, where it reads like a transport failure (issue #647). The SDK
+ * keeps no copy of the plain text, so this base records it as `detail`; tool
+ * result envelopes and getErrorMessage() report that, and the JSON-RPC
+ * boundary sends it on the wire (toWireError, issue #659).
  */
 export abstract class DebugError extends McpError {
   /** The message without the SDK's `MCP error <code>: ` prefix. */
@@ -166,6 +167,51 @@ export class DebugSessionCreationError extends DebugError {
     this.reason = reason;
     this.originalError = originalError;
   }
+}
+
+/**
+ * The plain text of an McpError: a DebugError's recorded `detail`, otherwise
+ * `.message` with the single `MCP error <code>: ` prefix its constructor added.
+ * Only the error's own code is stripped, and only once — a message that
+ * legitimately begins with that text for another reason is left alone.
+ */
+export function mcpErrorDetail(error: McpError): string {
+  if (error instanceof DebugError) {
+    return error.detail;
+  }
+  const prefix = `MCP error ${error.code}: `;
+  return error.message.startsWith(prefix) ? error.message.slice(prefix.length) : error.message;
+}
+
+/**
+ * The McpError shape the JSON-RPC boundary throws (issue #659).
+ *
+ * The SDK's Protocol copies a thrown error's `.code` and `.message` verbatim
+ * into the JSON-RPC error, and the client-side McpError constructor prefixes
+ * `MCP error <code>: ` again — so an ordinary McpError thrown from a request
+ * handler reaches SDK clients as `MCP error -32602: MCP error -32602: …`.
+ * This subclass keeps the class (instanceof, `.code`, `.data`) and resets
+ * `.message` to the bare detail so the wire carries the text once. It is for
+ * the request-handler boundary only; everything upstream keeps throwing
+ * McpError / DebugError, whose prefixed `.message` is right in logs.
+ */
+export class WireMcpError extends McpError {
+  constructor(code: McpErrorCode, detail: string, data?: unknown) {
+    super(code, detail, data);
+    this.message = detail;
+  }
+}
+
+/** Convert an McpError for the JSON-RPC boundary; a WireMcpError passes through. */
+export function toWireError(error: McpError): WireMcpError {
+  if (error instanceof WireMcpError) {
+    return error;
+  }
+  const wire = new WireMcpError(error.code, mcpErrorDetail(error), error.data);
+  if (error.stack) {
+    wire.stack = error.stack;
+  }
+  return wire;
 }
 
 /**
