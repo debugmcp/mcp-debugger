@@ -91,7 +91,8 @@ All language adapters are bundled into the CLI package. No separate installation
 | `DEBUG_MCP_BP_ADDRESSING=line\|assert\|content` | Breakpoint addressing mode (default `content`: statement anchors + content assertions) |
 | `CODELLDB_PATH` | Path to a CodeLLDB binary when the platform packages are unavailable (see note above) |
 | `CPP_MSVC_BEHAVIOR=warn\|error\|continue` | What to do when a C/C++ target looks MSVC-built (partial PDB fidelity) |
-| `MCP_HTTP_STALE_SESSION_MS` | HTTP mode: reap crash-abandoned MCP sessions after this idle time (default 30 min) |
+| `MCP_HTTP_STALE_SESSION_MS` | HTTP mode: reap a crash-abandoned MCP session that never opened an SSE stream after this idle time (default 30 min) |
+| `MCP_HTTP_STREAM_LOST_SESSION_MS` | HTTP mode: reap a session whose SSE stream dropped and never returned after this idle time (default 2 min) — releases a dead client's paused attach target |
 
 ### Check Rust binary compatibility
 ```bash
