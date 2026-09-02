@@ -17,6 +17,7 @@ import net from 'net';
 import crypto from 'crypto';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import { DapFrameDecoder, encodeDapMessage } from './dap-framing.js';
+import { dapResponseErrorText } from './dap-response-error.js';
 import type { ILogger } from './dap-proxy-interfaces.js';
 
 // ===== Host interface (implemented by DapProxyWorker) =====
@@ -286,7 +287,12 @@ export class MirrorClientConnection {
     if (FORWARDED_REQUESTS.has(command)) {
       try {
         const response = await this.host.forwardRequest(command, request.arguments);
-        this.sendResponse(request, response?.body ?? {}, response?.success !== false, response?.message);
+        this.sendResponse(
+          request,
+          response?.body ?? {},
+          response?.success !== false,
+          response ? dapResponseErrorText(response) : undefined
+        );
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         this.sendErrorResponse(request, MIRROR_ERROR_READ_ONLY, message, false);

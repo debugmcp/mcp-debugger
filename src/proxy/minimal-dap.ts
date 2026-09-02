@@ -6,6 +6,7 @@
 import net, { Socket } from 'net';
 import { EventEmitter } from 'events';
 import { DebugProtocol } from '@vscode/debugprotocol';
+import { DEFAULT_DAP_FAILURE_MESSAGE, dapResponseErrorMessage, dapResponseErrorText } from './dap-response-error.js';
 import { createLogger } from '../utils/logger.js';
 import fs from 'fs';
 import path from 'path';
@@ -221,8 +222,11 @@ export class MinimalDapClient extends EventEmitter {
       const resp = message as DebugProtocol.Response;
       debugInfo.success = resp.success;
       debugInfo.request_seq = resp.request_seq;
-      if (resp.success === false && resp.message) {
-        debugInfo.errorMessage = resp.message;
+      if (resp.success === false) {
+        const errorMessage = dapResponseErrorText(resp);
+        if (errorMessage) {
+          debugInfo.errorMessage = errorMessage;
+        }
       }
     }
 
@@ -263,7 +267,7 @@ export class MinimalDapClient extends EventEmitter {
         if (response.success) {
           pending.resolve(response);
         } else {
-          pending.reject(new Error(response.message || 'Request failed'));
+          pending.reject(new Error(dapResponseErrorMessage(response)));
         }
       } else {
         if (this.isDisconnectingOrDisconnected) {
@@ -906,7 +910,7 @@ export class MinimalDapClient extends EventEmitter {
       request_seq: request.seq,
       command: request.command,
       success,
-      ...(success ? { body } : { message: errorMessage || 'Request failed' })
+      ...(success ? { body } : { message: errorMessage || DEFAULT_DAP_FAILURE_MESSAGE })
     };
     this.writeMessage(response);
   }

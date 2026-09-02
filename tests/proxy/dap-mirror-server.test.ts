@@ -448,6 +448,26 @@ describe('DapMirrorServer', () => {
       expect(response?.message).toContain('not available while running');
     });
 
+    it('forwards a failed response that carries only body.error.format with that text as message (issue #663)', async () => {
+      const h = await createHarness();
+      h.host.forwardRequest.mockResolvedValueOnce({
+        seq: 999,
+        type: 'response',
+        request_seq: 0,
+        command: 'evaluate',
+        success: false,
+        body: { error: { id: 2013, format: 'Uncaught ReferenceError: {name} is not defined', variables: { name: 'x' } } }
+      });
+      const socket = h.connect();
+      await join(h, socket);
+      send(socket, request('evaluate', { expression: 'x' }));
+      await flush();
+
+      const response = responseFor(socket, 'evaluate');
+      expect(response?.success).toBe(false);
+      expect(response?.message).toBe('Uncaught ReferenceError: x is not defined');
+    });
+
     it('correlates out-of-order completions to the right request_seq', async () => {
       const h = await createHarness();
       const deferred: Array<(r: DebugProtocol.Response) => void> = [];
