@@ -128,7 +128,7 @@ kubectl port-forward "pod/$POD" 3001:3001 &
 
 Register the endpoint with your agent (e.g. `claude mcp add-json sick-pod '{"type":"http","url":"http://127.0.0.1:3001/mcp"}'`).
 
-The HTTP server reaps MCP sessions abandoned by a crashed client (idle, with no open SSE stream) after 30 minutes, closing their debug sessions and releasing any ptrace claim on the target. For a short-lived diagnostic sidecar a tighter window is safer — add `--env=MCP_HTTP_STALE_SESSION_MS=300000` (5 minutes; `0` disables) to the `kubectl debug` command.
+The HTTP server reaps MCP sessions abandoned by a crashed client, closing their debug sessions and releasing any ptrace claim on the target: a client whose SSE stream dropped and never returned (any MCP SDK client that crashed or exited without `DELETE`) is reaped after 2 minutes idle (`MCP_HTTP_STREAM_LOST_SESSION_MS`), one that never opened a stream after 30 (`MCP_HTTP_STALE_SESSION_MS`). For a short-lived diagnostic sidecar a tighter stale window is safer — add `--env=MCP_HTTP_STALE_SESSION_MS=300000` (5 minutes; `0` disables) to the `kubectl debug` command. `GET /health` on the sidecar lists what each MCP session is holding.
 
 Facts that will save you an afternoon (all observed, not assumed):
 

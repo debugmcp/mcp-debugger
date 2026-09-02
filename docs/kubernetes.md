@@ -138,8 +138,10 @@ The flags that matter — each one is load-bearing:
   `exec: "http": executable file not found`. (Git Bash on Windows mangles
   `/app/...` — prefix the command with `MSYS_NO_PATHCONV=1`.)
 - **`MCP_HTTP_STALE_SESSION_MS=300000`** tightens the reaper that cleans up MCP
-  sessions abandoned by a crashed client from 30 min to 5 — releasing the
-  ptrace claim on your pod sooner.
+  sessions abandoned by a client that never opened an SSE stream from 30 min
+  to 5 — releasing the ptrace claim on your pod sooner. (A crashed SDK client,
+  whose stream the server saw close, is reaped after 2 min regardless —
+  `MCP_HTTP_STREAM_LOST_SESSION_MS`.)
 - Ephemeral containers **cannot be removed or restarted** — each retry needs a
   fresh `--container` name; only a pod restart clears them.
 

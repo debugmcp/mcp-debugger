@@ -34,22 +34,78 @@ interface SessionData {
   lastActivity: number;
   /** Open SSE (GET) streams; a session with a live stream is never idle. */
   openStreams: number;
+  /**
+   * Whether the client ever held a GET stream. A client that had one and lost
+   * it without coming back is presumed dead far sooner than one that never
+   * opened a stream at all (issue #658).
+   */
+  hadStream: boolean;
 }
 
 /** Idle window before a streamless HTTP session is reaped (issue #337). */
 const DEFAULT_STALE_SESSION_MS = 30 * 60 * 1000;
+/**
+ * Idle window before a session whose SSE stream dropped and never returned is
+ * reaped (issue #658). The SDK client re-opens a lost stream within seconds
+ * (three attempts, ~1s apart), and a load balancer that cuts idle streams sees
+ * the same immediate reconnect, so a session that is still streamless — and
+ * has sent nothing — this long after losing its stream belongs to a client
+ * that is gone.
+ */
+const DEFAULT_STREAM_LOST_SESSION_MS = 2 * 60 * 1000;
 const DEFAULT_STALE_SWEEP_INTERVAL_MS = 60 * 1000;
 
-function parseStaleSessionMs(raw: string | undefined, logger: WinstonLoggerType): number {
+function parseNonNegativeMs(
+  name: string,
+  raw: string | undefined,
+  fallback: number,
+  logger: WinstonLoggerType
+): number {
   if (raw === undefined || raw === '') {
-    return DEFAULT_STALE_SESSION_MS;
+    return fallback;
   }
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed < 0) {
-    logger.warn(`Ignoring invalid MCP_HTTP_STALE_SESSION_MS value "${raw}"; using default ${DEFAULT_STALE_SESSION_MS}ms.`);
-    return DEFAULT_STALE_SESSION_MS;
+    logger.warn(`Ignoring invalid ${name} value "${raw}"; using default ${fallback}ms.`);
+    return fallback;
   }
   return parsed;
+}
+
+function parseStaleSessionMs(raw: string | undefined, logger: WinstonLoggerType): number {
+  return parseNonNegativeMs('MCP_HTTP_STALE_SESSION_MS', raw, DEFAULT_STALE_SESSION_MS, logger);
+}
+
+function parseStreamLostSessionMs(raw: string | undefined, logger: WinstonLoggerType): number {
+  return parseNonNegativeMs('MCP_HTTP_STREAM_LOST_SESSION_MS', raw, DEFAULT_STREAM_LOST_SESSION_MS, logger);
+}
+
+/**
+ * Why the sweep is reaping a session, or undefined to leave it alone. Two
+ * windows apply, both measured from the last request or stream close:
+ * - a session that once held a GET stream and has been streamless since
+ *   longer than streamLostMs (issue #658) — its client's death was observed;
+ * - any streamless session idle longer than staleMs (issue #337) — the
+ *   pure-POST fallback, where liveness is unobservable.
+ * A window of 0 disables that path.
+ * @internal exported for the reaper tests.
+ */
+export function classifyIdleSession(
+  session: Pick<SessionData, 'openStreams' | 'hadStream' | 'lastActivity'>,
+  now: number,
+  windows: { staleMs: number; streamLostMs: number }
+): 'stream-lost' | 'stale' | undefined {
+  if (session.openStreams > 0) {
+    return undefined;
+  }
+  const idleMs = now - session.lastActivity;
+  if (session.hadStream && windows.streamLostMs > 0 && idleMs > windows.streamLostMs) {
+    return 'stream-lost';
+  }
+  if (windows.staleMs > 0 && idleMs > windows.staleMs) {
+    return 'stale';
+  }
+  return undefined;
 }
 
 /**
@@ -84,25 +140,45 @@ export function createHttpApp(
   // Reap crash-abandoned sessions (issue #337): a client that dies without
   // DELETE leaves its transport registered forever — transport.onclose only
   // fires on explicit close — so its DebugMcpServer and every proxy chain
-  // (including lldb-server's ptrace claim on an attach target) stay alive,
-  // invisible to the reconnecting client's fresh session. Sessions holding a
-  // live SSE stream are never reaped; a pure-POST client idle longer than
-  // MCP_HTTP_STALE_SESSION_MS (default 30 min; 0 disables) is closed through
-  // the normal onclose path, which stops its server and debug sessions.
+  // (including lldb-server's ptrace claim on an attach target, or a paused
+  // attach target itself) stay alive, invisible to the reconnecting client's
+  // fresh session. Sessions holding a live SSE stream are never reaped. A
+  // session whose stream dropped and never came back is reaped after
+  // MCP_HTTP_STREAM_LOST_SESSION_MS (default 2 min; issue #658) — the SDK
+  // client keeps a GET stream open, so its death is observed the moment the
+  // socket closes and need not wait out the long window. A pure-POST client,
+  // whose liveness is unobservable, is reaped only after
+  // MCP_HTTP_STALE_SESSION_MS (default 30 min). 0 disables either path. Both
+  // close the transport through the normal onclose path, which stops its
+  // server and debug sessions.
   const staleSessionMs = parseStaleSessionMs(proc.env.MCP_HTTP_STALE_SESSION_MS, logger);
+  const streamLostSessionMs = parseStreamLostSessionMs(proc.env.MCP_HTTP_STREAM_LOST_SESSION_MS, logger);
   const staleSweepIntervalMs = parseSweepIntervalMs(proc.env.MCP_HTTP_STALE_SWEEP_INTERVAL_MS, logger);
   let staleSweepTimer: NodeJS.Timeout | undefined;
-  if (staleSessionMs > 0) {
+  if (staleSessionMs > 0 || streamLostSessionMs > 0) {
+    const windows = { staleMs: staleSessionMs, streamLostMs: streamLostSessionMs };
     staleSweepTimer = setInterval(() => {
       const now = Date.now();
       for (const [sid, session] of httpSessions) {
-        if (session.openStreams === 0 && now - session.lastActivity > staleSessionMs) {
-          logger.warn(`Reaping stale HTTP session ${sid} (idle ${Math.round((now - session.lastActivity) / 1000)}s, no open streams).`);
-          try {
-            void session.transport.close();
-          } catch (err) {
-            logger.error(`Error closing stale HTTP session ${sid}`, { error: err });
-          }
+        const verdict = classifyIdleSession(session, now, windows);
+        if (!verdict) {
+          continue;
+        }
+        const idleSeconds = Math.round((now - session.lastActivity) / 1000);
+        const held = session.server.sessionManager.getAllSessions()
+          .map((debugSession) => `${debugSession.id} (${debugSession.language}, ${debugSession.state})`);
+        const holding = held.length > 0 ? `; holding debug session(s) ${held.join(', ')}` : '';
+        if (verdict === 'stream-lost') {
+          logger.warn(
+            `Reaping HTTP session ${sid}: its SSE stream closed ${idleSeconds}s ago and the client neither reconnected nor sent a request (MCP_HTTP_STREAM_LOST_SESSION_MS=${streamLostSessionMs})${holding}.`
+          );
+        } else {
+          logger.warn(`Reaping stale HTTP session ${sid} (idle ${idleSeconds}s, no open streams)${holding}.`);
+        }
+        try {
+          void session.transport.close();
+        } catch (err) {
+          logger.error(`Error closing stale HTTP session ${sid}`, { error: err });
         }
       }
     }, staleSweepIntervalMs);
@@ -148,9 +224,13 @@ export function createHttpApp(
           // A live SSE stream marks the session as attended; the socket
           // closing (client crash included) is observed immediately.
           session.openStreams++;
+          session.hadStream = true;
           res.on('close', () => {
             session.openStreams = Math.max(0, session.openStreams - 1);
             session.lastActivity = Date.now();
+            if (session.openStreams === 0) {
+              logger.debug(`HTTP session ${sessionId} lost its last SSE stream; reaping in ${streamLostSessionMs}ms unless it returns.`);
+            }
           });
         }
         transport = session.transport;
@@ -175,6 +255,7 @@ export function createHttpApp(
                 server: newDebugServer,
                 lastActivity: Date.now(),
                 openStreams: 0,
+                hadStream: false,
               });
               logger.info(`HTTP session initialized: ${sid}`);
             }
@@ -239,12 +320,28 @@ export function createHttpApp(
   app.get('/mcp', handleMcpRequest);
   app.delete('/mcp', handleMcpRequest);
 
+  // /health names what each HTTP session holds (issue #658): an orphaned
+  // session's debug sessions are invisible to every other MCP client, so
+  // this is the operator's only view of a paused attach target short of ps.
   app.get('/health', (_req: Request, res: Response) => {
+    const now = Date.now();
     res.json({
       status: 'ok',
       mode: 'http',
       connections: httpSessions.size,
       sessions: Array.from(httpSessions.keys()),
+      details: Array.from(httpSessions, ([id, session]) => ({
+        id,
+        openStreams: session.openStreams,
+        streamLost: session.hadStream && session.openStreams === 0,
+        idleMs: now - session.lastActivity,
+        debugSessions: session.server.sessionManager.getAllSessions().map((debugSession) => ({
+          id: debugSession.id,
+          name: debugSession.name,
+          language: debugSession.language,
+          state: debugSession.state,
+        })),
+      })),
     });
   });
 
