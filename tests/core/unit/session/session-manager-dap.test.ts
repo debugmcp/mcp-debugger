@@ -866,6 +866,218 @@ describe('SessionManager - DAP Operations', () => {
       expect(bp2.message).toBeUndefined();
     });
 
+    describe('provisional child ids and hit-implies-bound (issue #673)', () => {
+      const TS_REQUEST = { file: 'src/cli/http-command.ts', line: 349 };
+
+      async function jsSessionWithProvisionalStub(id: number, at: { file: string; line: number }) {
+        const session = await createJsSessionWithChildVerifiedBp();
+        const { breakpoint } = await sessionManager.setBreakpoint(session.id, at);
+        // The child's replay of the stored breakpoints answers with its own
+        // provisional stub — child-origin, verified:false, child-space id —
+        // and the requested path+line (child-session-manager synthesizes it).
+        dependencies.mockProxyManager.simulateEvent('breakpoint', {
+          reason: 'changed',
+          breakpoint: {
+            id,
+            verified: false,
+            line: at.line,
+            source: { path: at.file },
+            message: 'breakpoint.provisionalBreakpoint'
+          },
+          __mcpChildOrigin: true
+        });
+        const stored = sessionManager.listBreakpoints(session.id).find(bp => bp.id === breakpoint.id)!;
+        expect(stored.verified).toBe(false);
+        expect(stored.adapterId).toBeUndefined();
+        expect(stored.message).toBe('Unbound breakpoint');
+        return { session, storeId: breakpoint.id };
+      }
+
+      const find = (sessionId: string, storeId: string) =>
+        sessionManager.listBreakpoints(sessionId).find(bp => bp.id === storeId)!;
+
+      it('binds a source-mapped request through the provisional id when the child verifies it under the generated path', async () => {
+        const { session, storeId } = await jsSessionWithProvisionalStub(2, TS_REQUEST);
+
+        dependencies.mockProxyManager.simulateEvent('breakpoint', {
+          reason: 'changed',
+          breakpoint: { id: 2, verified: true, line: 277, source: { path: 'dist/cli/http-command.js' } },
+          __mcpChildOrigin: true
+        });
+
+        const bp = find(session.id, storeId);
+        expect(bp.verified).toBe(true);
+        expect(bp.adapterId).toBe(2);
+        expect(bp.message).toBeUndefined();
+        // The request is untouched; the generated location is reported beside it.
+        expect(bp.file).toBe('src/cli/http-command.ts');
+        expect(bp.line).toBe(349);
+        expect(bp.boundFile).toBe('dist/cli/http-command.js');
+        expect(bp.boundLine).toBe(277);
+      });
+
+      it('moves the line in place when the child verifies the same file at another line (no boundFile)', async () => {
+        const { session, storeId } = await jsSessionWithProvisionalStub(3, { file: 'app.js', line: 20 });
+
+        dependencies.mockProxyManager.simulateEvent('breakpoint', {
+          reason: 'changed',
+          breakpoint: { id: 3, verified: true, line: 21, source: { path: 'app.js' } },
+          __mcpChildOrigin: true
+        });
+
+        const bp = find(session.id, storeId);
+        expect(bp.verified).toBe(true);
+        expect(bp.adapterId).toBe(3);
+        expect(bp.line).toBe(21);
+        expect(bp.boundFile).toBeUndefined();
+        expect(bp.boundLine).toBeUndefined();
+      });
+
+      it('marks a breakpoint verified when a stop names its provisional id (hit implies bound)', async () => {
+        const { session, storeId } = await jsSessionWithProvisionalStub(5, { file: 'app.js', line: 20 });
+
+        dependencies.mockProxyManager.simulateStopped(1, 'breakpoint', {
+          reason: 'breakpoint',
+          threadId: 1,
+          hitBreakpointIds: [5]
+        });
+
+        const bp = find(session.id, storeId);
+        expect(bp.verified).toBe(true);
+        expect(bp.adapterId).toBe(5);
+        expect(bp.message).toBeUndefined();
+        expect(bp.line).toBe(20);
+      });
+
+      it('ignores hit ids it cannot correlate and never downgrades on a later stop', async () => {
+        const { session, storeId } = await jsSessionWithProvisionalStub(5, { file: 'app.js', line: 20 });
+
+        dependencies.mockProxyManager.simulateStopped(1, 'breakpoint', { reason: 'breakpoint', threadId: 1, hitBreakpointIds: [999] });
+        expect(find(session.id, storeId).verified).toBe(false);
+
+        dependencies.mockProxyManager.simulateStopped(1, 'breakpoint', { reason: 'breakpoint', threadId: 1, hitBreakpointIds: [5] });
+        expect(find(session.id, storeId).verified).toBe(true);
+
+        // A stop that names nothing (a pause) leaves the upgraded record alone.
+        dependencies.mockProxyManager.simulateStopped(1, 'pause', { reason: 'pause', threadId: 1 });
+        const bp = find(session.id, storeId);
+        expect(bp.verified).toBe(true);
+        expect(bp.adapterId).toBe(5);
+      });
+
+      it('ignores an unmarked (parent) event carrying a provisional id — the id spaces collide (issue #495)', async () => {
+        const { session, storeId } = await jsSessionWithProvisionalStub(2, { file: 'app.js', line: 20 });
+
+        dependencies.mockProxyManager.simulateEvent('breakpoint', {
+          reason: 'changed',
+          breakpoint: { id: 2, verified: true, line: 99, source: { path: 'other.js' } }
+        });
+
+        const bp = find(session.id, storeId);
+        expect(bp.verified).toBe(false);
+        expect(bp.line).toBe(20);
+        expect(bp.adapterId).toBeUndefined();
+        expect(bp.boundFile).toBeUndefined();
+      });
+
+      it('records provisional ids from a child-sourced setBreakpoints response too', async () => {
+        const session = await createJsSessionWithChildVerifiedBp();
+        // A live sync needs a RUNNING/PAUSED session; the fixture leaves it initializing.
+        dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+        dependencies.mockProxyManager.setDapRequestHandler(async (command, args) => {
+          if (command === 'setBreakpoints') {
+            return {
+              success: true,
+              body: {
+                breakpoints: args?.breakpoints?.map((bp: { line: number }, i: number) => ({
+                  id: 40 + i,
+                  verified: false,
+                  line: bp.line,
+                  message: 'breakpoint.provisionalBreakpoint'
+                })) || []
+              },
+              __mcpChildSourced: true
+            };
+          }
+          return { success: true };
+        });
+        const { breakpoint } = await sessionManager.setBreakpoint(session.id, { file: 'lib.js', line: 7 });
+        expect(breakpoint.verified).toBe(false);
+        expect(breakpoint.adapterId).toBeUndefined();
+
+        dependencies.mockProxyManager.simulateStopped(1, 'breakpoint', { reason: 'breakpoint', threadId: 1, hitBreakpointIds: [40] });
+
+        const bp = find(session.id, breakpoint.id);
+        expect(bp.verified).toBe(true);
+        expect(bp.adapterId).toBe(40);
+        expect(bp.message).toBeUndefined();
+      });
+
+      it('forgets provisional ids on relaunch — a stale id cannot bind the new adapter instance', async () => {
+        const { session, storeId } = await jsSessionWithProvisionalStub(2, TS_REQUEST);
+
+        // The fixture leaves the session initializing (the js handshake never
+        // completes under the mock); a stop makes it PAUSED so restart is allowed.
+        dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+        const restart = await sessionManager.restartDebugging(session.id);
+        expect(restart.success, JSON.stringify(restart)).toBe(true);
+        await vi.runAllTimersAsync();
+
+        dependencies.mockProxyManager.simulateEvent('breakpoint', {
+          reason: 'changed',
+          breakpoint: { id: 2, verified: true, line: 277, source: { path: 'dist/cli/http-command.js' } },
+          __mcpChildOrigin: true
+        });
+
+        const bp = find(session.id, storeId);
+        expect(bp.verified).toBe(false);
+        expect(bp.boundFile).toBeUndefined();
+      });
+
+      it('does not resurrect a removed breakpoint from a stale hit id', async () => {
+        const { session, storeId } = await jsSessionWithProvisionalStub(5, { file: 'app.js', line: 20 });
+
+        await sessionManager.removeBreakpoint(session.id, storeId);
+        dependencies.mockProxyManager.simulateStopped(1, 'breakpoint', { reason: 'breakpoint', threadId: 1, hitBreakpointIds: [5] });
+
+        expect(sessionManager.listBreakpoints(session.id).find(bp => bp.id === storeId)).toBeUndefined();
+      });
+
+      it('applies hit-implies-bound to a non-mirroring adapter by adapterId', async () => {
+        const session = await sessionManager.createSession({
+          language: DebugLanguage.MOCK,
+          executablePath: 'python'
+        });
+        dependencies.mockProxyManager.setDapRequestHandler(async (command, args) => {
+          if (command === 'setBreakpoints') {
+            return {
+              success: true,
+              body: {
+                breakpoints: args?.breakpoints?.map((bp: { line: number }) => ({
+                  id: 11,
+                  verified: false,
+                  line: bp.line,
+                  message: 'Breakpoint pending until the module loads'
+                })) || []
+              }
+            };
+          }
+          return { success: true, body: {} };
+        });
+        await sessionManager.startDebugging(session.id, 'test.py');
+        await vi.runAllTimersAsync();
+        const { breakpoint } = await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 10 });
+        expect(breakpoint.verified).toBe(false);
+        expect(breakpoint.adapterId).toBe(11);
+
+        dependencies.mockProxyManager.simulateStopped(1, 'breakpoint', { reason: 'breakpoint', threadId: 1, hitBreakpointIds: [11] });
+
+        const bp = find(session.id, breakpoint.id);
+        expect(bp.verified).toBe(true);
+        expect(bp.message).toBeUndefined();
+      });
+    });
+
     it('normalizes raw l10n keys in stored messages and full-stamps from a child-sourced response (issues #471/#500)', async () => {
       const session = await sessionManager.createSession({
         language: DebugLanguage.JAVASCRIPT,

@@ -227,6 +227,16 @@ export interface Breakpoint {
   /** Breakpoint id assigned by the debug adapter (from setBreakpoints responses / breakpoint events) */
   adapterId?: number;
   /**
+   * Source file the adapter actually bound the breakpoint in when that is a
+   * different file from the request — a source-mapped `.ts` request that
+   * js-debug verifies under its generated `dist/*.js` (issue #673). `file`
+   * and `line` keep describing the request; this pair says where it landed.
+   * Absent when the binding file is the requested one.
+   */
+  boundFile?: string;
+  /** Line in `boundFile` the adapter bound the breakpoint at (issue #673) */
+  boundLine?: number;
+  /**
    * The line originally requested by the client, recorded before the adapter
    * had a chance to bind elsewhere. Present only in assert/content addressing
    * modes (issue #271); `line` !== `requestedLine` means the adapter snapped

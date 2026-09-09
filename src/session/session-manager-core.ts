@@ -7,7 +7,7 @@ import {
   SessionState, SessionLifecycleState, DebugLanguage, DebugSessionInfo, mapLegacyState,
   AdapterPolicy, SessionOutputEntry, redactSecretsInString
 } from '@debugmcp/shared';
-import type { StackFrame } from '@debugmcp/shared';
+import type { Breakpoint, FunctionBreakpoint, StackFrame } from '@debugmcp/shared';
 import { isRedactionEnabled } from '../utils/redaction-mode.js';
 import { ValidationResultCache } from '../utils/language-availability.js';
 import { SessionStore, ManagedSession } from './session-store.js';
@@ -41,6 +41,12 @@ import {
   type ProxyFailureDiagnostics
 } from './launch/proxy-failure-diagnostics.js';
 import type { AnchorResolution } from './breakpoints/anchor-resolution.js';
+import {
+  applyHitBreakpointIds,
+  clearProvisionalAdapterIds,
+  recordProvisionalAdapterId,
+  resolveProvisionalAdapterId
+} from './breakpoints/provisional-adapter-ids.js';
 
 // Custom launch arguments interface extending DebugProtocol.LaunchRequestArguments
 export interface CustomLaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
@@ -457,7 +463,10 @@ export abstract class SessionManagerCore extends EventEmitter {
       bp.verified = false;
       bp.message = undefined;
       bp.adapterId = undefined;
+      bp.boundFile = undefined;
+      bp.boundLine = undefined;
     }
+    clearProvisionalAdapterIds(session);
     for (const bp of session.functionBreakpoints?.values() ?? []) {
       bp.verified = false;
       bp.message = undefined;
@@ -484,6 +493,28 @@ export abstract class SessionManagerCore extends EventEmitter {
 
     // Named function for stopped event
     const handleStopped = (threadId: number | undefined, rawReason: string, body?: DebugProtocol.StoppedEvent['body']) => {
+      // A stop that names breakpoint ids proves those breakpoints are bound,
+      // whatever the adapter reported (or never reported) about them (issue
+      // #673: js-debug launch verifies a source-mapped request under its
+      // generated path and sends no event at all for a node_modules one).
+      // Applied first so the id sets below see the freshest truth.
+      if (Array.isArray(body?.hitBreakpointIds) && body.hitBreakpointIds.length > 0) {
+        for (const hit of applyHitBreakpointIds(session, body.hitBreakpointIds)) {
+          this.logger.info('debug:breakpoint', {
+            event: 'verified',
+            via: 'hit',
+            sessionId,
+            sessionName: session.name,
+            breakpointId: hit.breakpoint.id,
+            adapterId: hit.adapterId,
+            ...(hit.kind === 'line'
+              ? { file: (hit.breakpoint as Breakpoint).file, line: (hit.breakpoint as Breakpoint).line }
+              : { functionName: (hit.breakpoint as FunctionBreakpoint).functionName }),
+            verified: true,
+            timestamp: Date.now(),
+          });
+        }
+      }
       // Give the adapter policy a chance to normalize misleading raw reasons
       // (e.g. CodeLLDB reports a SIGSTOP-delivered pause as 'exception')
       // before the reason drives auto-continue, lastStop, and exceptionInfo.
@@ -770,6 +801,17 @@ export abstract class SessionManagerCore extends EventEmitter {
         ? all.find(bp => bp.adapterId === eventBp.id)
         : undefined;
       const matchedByAdapterId = target !== undefined;
+      // Next, a provisional child id recorded from the child's own replay
+      // stub (issue #673). Consulted before the (file,line) guess because it
+      // names the exact record — a source-mapped request's verification
+      // arrives under the generated file and line, which could coincide
+      // with some other stored breakpoint's literal location. Child-origin
+      // only: the parent's ids share the integer space (#495).
+      let matchedByProvisionalId = false;
+      if (!target && fromChild && typeof eventBp.id === 'number') {
+        target = resolveProvisionalAdapterId(session, eventBp.id);
+        matchedByProvisionalId = target !== undefined;
+      }
       if (!target && eventBp.source?.path !== undefined && typeof eventBp.line === 'number') {
         const eventPath = eventBp.source.path;
         target = all.find(bp => samePath(bp.file, eventPath) && bp.line === eventBp.line);
@@ -796,6 +838,49 @@ export abstract class SessionManagerCore extends EventEmitter {
         );
         return;
       }
+      if (matchedByProvisionalId) {
+        // A match through the provisional table is upgrade-only: a stub
+        // answering a stub says nothing new, and a downgrade is only trusted
+        // by a verified adapterId (the rule below). Once verified, the id is
+        // as trustworthy as any child-origin verified event's.
+        if (eventBp.verified !== true) {
+          this.logger.debug(
+            `[SessionManager ${sessionId}] Provisional breakpoint event for ${target.file}:${target.line} (id=${eventBp.id}) carries no verification; nothing to apply`
+          );
+          return;
+        }
+        target.verified = true;
+        target.adapterId = eventBp.id;
+        const eventPath = eventBp.source?.path;
+        if (eventPath !== undefined && !samePath(target.file, eventPath)) {
+          // Verified under a different file: the request was source-mapped
+          // and the adapter bound its generated counterpart (issue #673).
+          // The request stays the request; report where it landed.
+          target.boundFile = eventPath;
+          if (typeof eventBp.line === 'number') {
+            target.boundLine = eventBp.line;
+          }
+        } else if (typeof eventBp.line === 'number') {
+          target.line = eventBp.line;
+        }
+        target.message = normalizeBreakpointMessage(
+          eventBp.message !== undefined ? eventBp.message : target.message,
+          true
+        );
+        this.logger.info('debug:breakpoint', {
+          event: 'changed',
+          via: 'provisional-id',
+          sessionId,
+          sessionName: session.name,
+          breakpointId: target.id,
+          file: target.file,
+          line: target.line,
+          ...(target.boundFile !== undefined ? { boundFile: target.boundFile, boundLine: target.boundLine } : {}),
+          verified: true,
+          timestamp: Date.now(),
+        });
+        return;
+      }
       target.verified = eventBp.verified;
       if (typeof eventBp.line === 'number') {
         target.line = eventBp.line;
@@ -812,12 +897,16 @@ export abstract class SessionManagerCore extends EventEmitter {
       // For mirroring policies only a child-origin VERIFIED event's id enters
       // the store: parent-space ids and provisional stub ids (the child
       // answers its own pending stub while adoption is in flight, issue #500)
-      // are unstable and would poison future id matching.
+      // are unstable and would poison future id matching. A child-origin
+      // provisional id is still remembered on the side (issue #673) so the
+      // verification or the stop that later names it can find this record.
       if (
         typeof eventBp.id === 'number' &&
         (!mirrorsToChild || (fromChild && eventBp.verified === true))
       ) {
         target.adapterId = eventBp.id;
+      } else if (typeof eventBp.id === 'number' && mirrorsToChild && fromChild) {
+        recordProvisionalAdapterId(session, eventBp.id, target.id);
       }
       this.logger.info('debug:breakpoint', {
         event: 'changed',

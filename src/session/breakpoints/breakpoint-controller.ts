@@ -28,6 +28,7 @@ import { normalizeBreakpointMessage } from '../../utils/breakpoint-message.js';
 import type { ManagedSession } from '../session-store.js';
 import type { BreakpointContext } from '../operations-context.js';
 import { buildFunctionBreakpointLaunchWarning } from './launch-warnings.js';
+import { recordProvisionalAdapterId } from './provisional-adapter-ids.js';
 
 /** Outcome of a DAP re-send: whether it reached the adapter, and why not. */
 export interface BreakpointSyncOutcome {
@@ -197,8 +198,12 @@ export class BreakpointController {
             allBpsForFile[i].verified = bpInfo.verified;
             // Only a VERIFIED child id enters the store: stub ids are
             // unstable across the pending→bound transition (issue #495).
+            // A provisional one is remembered on the side (issue #673) so
+            // the verification or stop that later names it finds the record.
             if (bpInfo.verified === true && typeof bpInfo.id === 'number') {
               allBpsForFile[i].adapterId = bpInfo.id;
+            } else if (typeof bpInfo.id === 'number') {
+              recordProvisionalAdapterId(session, bpInfo.id, allBpsForFile[i].id);
             }
           } else if (childAuthoritative) {
             allBpsForFile[i].verified = allBpsForFile[i].verified || bpInfo.verified;

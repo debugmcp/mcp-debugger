@@ -148,6 +148,20 @@ describe('JavaScript Debugging - Simple Smoke Tests', () => {
     // Wait briefly for session to stabilize
     await new Promise(resolve => setTimeout(resolve, 1000));
 
+    // A breakpoint the debuggee is paused on must never be reported unbound
+    // (issue #673): a stop naming its id is proof it bound, whatever js-debug
+    // said about it before.
+    const listResult = await mcpClient!.callTool({
+      name: 'list_breakpoints',
+      arguments: { sessionId }
+    });
+    const listResponse = parseSdkToolResult(listResult);
+    const listed = (listResponse.breakpoints as Array<{ verified: boolean; message?: string }>) ?? [];
+    expect(listed.length).toBe(1);
+    expect(listed[0].verified, JSON.stringify(listed[0])).toBe(true);
+    expect(listed[0].message).toBeUndefined();
+    console.log('[JS Simple Smoke] ✓ Hit breakpoint reported verified');
+
     // Step 4: Get stack - verify we can retrieve it
     console.log('[JS Simple Smoke] Getting stack trace...');
     const stackResult = await mcpClient!.callTool({

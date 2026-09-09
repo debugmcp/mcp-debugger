@@ -276,9 +276,18 @@ Lists all breakpoints in a session with their current verified state and adapter
       "line": 10,
       "verified": true,
       "adapterId": 3
+    },
+    {
+      "id": "bbe96ee0-6c6d-47b1-a3ef-166ffbde3028",
+      "file": "C:\\path\\to\\project\\src\\cli\\http-command.ts",
+      "line": 398,
+      "verified": true,
+      "adapterId": 2,
+      "boundFile": "c:\\path\\to\\project\\dist\\cli\\http-command.js",
+      "boundLine": 305
     }
   ],
-  "count": 1,
+  "count": 2,
   "functionBreakpoints": [],
   "functionCount": 0
 }
@@ -289,6 +298,8 @@ Lists all breakpoints in a session with their current verified state and adapter
 - `functionBreakpoints`/`functionCount` are always present in the unfiltered response (empty arrays when none exist). When filtering by `file` they are omitted — function breakpoints are session-global, not file-scoped.
 - `adapterId` is the debug adapter's own numeric id for the breakpoint, captured from setBreakpoints responses and breakpoint events. It is absent until the adapter has seen the breakpoint.
 - Verification is eventually consistent: some adapters (js-debug, JDI, netcoredbg) bind breakpoints asynchronously and confirm via DAP breakpoint events shortly after launch or class load.
+- A breakpoint the program has stopped on is reported `verified: true` from that stop onward, even if the adapter never confirmed it (issue #673): the stop event names the breakpoint ids it hit, and a hit is proof of binding. Its earlier "Unbound breakpoint"/pending `message` is dropped.
+- `boundFile`/`boundLine` appear when the adapter bound the breakpoint in a *different* file from the request — a source-mapped `.ts` request that js-debug verifies under its generated `dist/*.js` (issue #673). `file` and `line` keep describing the request; the bound pair is where it landed, and the file you will see in `get_stack_trace` frames.
 
 ---
 
