@@ -2300,6 +2300,197 @@ describe('SessionManager - DAP Operations', () => {
     });
   });
 
+  describe('Paused frame hidden by the display filter (issue #672)', () => {
+    // The shape js-debug returns for a breakpoint inside a dependency of a
+    // running express server: the paused frame is in node_modules, every
+    // synchronous ancestor is a dependency or a node internal, and the only
+    // user frames are async ancestors (app.listen) V8 cannot evaluate in.
+    const DEPENDENCY_PAUSE = [
+      { id: 30, name: 'handle', line: 160, source: { path: '/app/node_modules/.pnpm/router@2.2.0/node_modules/router/index.js', sourceReference: 0 } },
+      { id: 31, name: 'handle', line: 177, source: { path: '/app/node_modules/.pnpm/express@5.2.1/node_modules/express/lib/application.js', sourceReference: 0 } },
+      { id: 33, name: 'Server.emit', line: 508, source: { path: '<node_internals>/events', sourceReference: 5 } },
+      { id: 36, name: 'HTTPINCOMINGMESSAGE', line: 0, column: 0, presentationHint: 'label' },
+      { id: 53, name: 'handleHttpCommand', line: 353, source: { path: '/app/dist/cli/http-command.js', sourceReference: 0 } },
+      { id: 67, name: 'main', line: 123, source: { path: '/app/dist/index.js', sourceReference: 0 } }
+    ];
+    const ROUTER_FRAME = 'router/index.js:160';
+
+    async function pausedInDependency(
+      reason: string,
+      framesByThread: Record<number, unknown[]> = { 1: DEPENDENCY_PAUSE }
+    ) {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+      await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+      dependencies.mockProxyManager.simulateStopped(1, reason);
+      dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: { threadId?: number }) => {
+        if (command === 'stackTrace') {
+          return { success: true, body: { stackFrames: framesByThread[args?.threadId ?? 1] ?? [] } };
+        }
+        return { success: true, body: {} };
+      });
+      (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
+      return session;
+    }
+
+    it('keeps the hidden paused frame at the head of the stack on a breakpoint stop', async () => {
+      const session = await pausedInDependency('breakpoint');
+
+      const result = await sessionManager.getStackTraceDetailed(session.id);
+
+      expect(result.frames.map((f) => f.name)).toEqual(['handle', 'handleHttpCommand', 'main']);
+      expect(result.frames[0].id).toBe(30);
+      expect(result.totalFrameCount).toBe(6);
+      expect(result.hiddenFrameCount).toBe(3);
+      expect(result.allFramesInternal).toBe(false);
+      expect(result.pausedFrameInternal).toBe(true);
+      expect(result.note).toMatch(/kept as frame 0/);
+      expect(result.note).toContain(ROUTER_FRAME);
+    });
+
+    it('keeps the hidden paused frame after a step as well', async () => {
+      const session = await pausedInDependency('step');
+
+      const result = await sessionManager.getStackTraceDetailed(session.id);
+
+      expect(result.frames[0].id).toBe(30);
+      expect(result.hiddenFrameCount).toBe(3);
+      expect(result.pausedFrameInternal).toBe(true);
+    });
+
+    it('a pause landing inside a dependency still anchors on the first user frame but discloses the hidden paused frame', async () => {
+      const session = await pausedInDependency('pause');
+
+      const result = await sessionManager.getStackTraceDetailed(session.id);
+
+      expect(result.frames.map((f) => f.name)).toEqual(['handleHttpCommand', 'main']);
+      expect(result.hiddenFrameCount).toBe(4);
+      expect(result.pausedFrameInternal).toBe(true);
+      expect(result.note).toMatch(/hidden by default/);
+      expect(result.note).toContain(ROUTER_FRAME);
+      expect(result.note).toMatch(/frameId: 30/);
+      expect(result.note).toMatch(/includeInternals: true/);
+    });
+
+    it('includeInternals: true reports nothing hidden and no paused-frame note', async () => {
+      const session = await pausedInDependency('breakpoint');
+
+      const result = await sessionManager.getStackTraceDetailed(session.id, undefined, true);
+
+      expect(result.frames).toHaveLength(6);
+      expect(result.hiddenFrameCount).toBe(0);
+      expect(result.pausedFrameInternal).toBeFalsy();
+      expect(result.note).toBeUndefined();
+    });
+
+    it('an all-internal stack on a breakpoint still takes the issue #346 path, not both', async () => {
+      const session = await pausedInDependency('breakpoint', { 1: DEPENDENCY_PAUSE.slice(0, 4) });
+
+      const result = await sessionManager.getStackTraceDetailed(session.id);
+
+      expect(result.frames).toHaveLength(1);
+      expect(result.frames[0].id).toBe(30);
+      expect(result.allFramesInternal).toBe(true);
+      expect(result.pausedFrameInternal).toBeFalsy();
+      expect(result.note).toBeUndefined();
+    });
+
+    it('leaves a sibling thread that is not the stopped thread filtered, with no paused-frame note', async () => {
+      // Thread 1 is the stopped thread; thread 2 is parked inside a dependency.
+      // The "paused inside" rule is about where the debuggee stopped, so it
+      // must not fire for a thread the stop event did not name.
+      const session = await pausedInDependency('breakpoint', { 1: DEPENDENCY_PAUSE, 2: DEPENDENCY_PAUSE });
+
+      const result = await sessionManager.getStackTraceDetailed(session.id, 2);
+
+      expect(result.threadId).toBe(2);
+      expect(result.frames.map((f) => f.name)).toEqual(['handleHttpCommand', 'main']);
+      expect(result.pausedFrameInternal).toBeFalsy();
+      expect(result.note).toBeUndefined();
+    });
+
+    it('anchors locals on the hidden paused frame at a breakpoint inside a dependency', async () => {
+      const session = await pausedInDependency('breakpoint');
+      dependencies.mockProxyManager.setDapRequestHandler(
+        async (command: string, args?: { frameId?: number; variablesReference?: number }) => {
+          switch (command) {
+            case 'stackTrace':
+              return { success: true, body: { stackFrames: DEPENDENCY_PAUSE } };
+            case 'scopes':
+              return {
+                success: true,
+                body: {
+                  scopes: [{ name: 'Local', variablesReference: args?.frameId === 30 ? 300 : 500, expensive: false }]
+                }
+              };
+            case 'variables':
+              return {
+                success: true,
+                body: {
+                  variables: args?.variablesReference === 300
+                    ? [
+                        { name: 'req', value: 'IncomingMessage', type: 'object', variablesReference: 0 },
+                        { name: 'idx', value: '0', type: 'number', variablesReference: 0 }
+                      ]
+                    : []
+                }
+              };
+            default:
+              return { success: true, body: {} };
+          }
+        }
+      );
+
+      const result = await sessionManager.getLocalVariables(session.id);
+
+      expect(result.frame).toEqual(expect.objectContaining({ name: 'handle', line: 160 }));
+      expect(result.frame?.file).toContain('router/index.js');
+      expect(result.variables.map((v) => v.name)).toEqual(['req', 'idx']);
+      expect(result.anchorNote).toMatch(/kept as frame 0/);
+
+      const filtered = await sessionManager.getLocalVariables(session.id, false, ['req']);
+      expect(filtered.variables.map((v) => v.name)).toEqual(['req']);
+    });
+
+    it('locals after a pause inside a dependency come from the visible user frame and say so', async () => {
+      const session = await pausedInDependency('pause');
+      dependencies.mockProxyManager.setDapRequestHandler(
+        async (command: string, args?: { frameId?: number; variablesReference?: number }) => {
+          switch (command) {
+            case 'stackTrace':
+              return { success: true, body: { stackFrames: DEPENDENCY_PAUSE } };
+            case 'scopes':
+              return {
+                success: true,
+                body: { scopes: [{ name: 'Local', variablesReference: args?.frameId === 53 ? 530 : 900, expensive: false }] }
+              };
+            case 'variables':
+              return {
+                success: true,
+                body: {
+                  variables: args?.variablesReference === 530
+                    ? [{ name: 'port', value: '3111', type: 'number', variablesReference: 0 }]
+                    : []
+                }
+              };
+            default:
+              return { success: true, body: {} };
+          }
+        }
+      );
+
+      const result = await sessionManager.getLocalVariables(session.id);
+
+      expect(result.frame).toEqual(expect.objectContaining({ name: 'handleHttpCommand', line: 353 }));
+      expect(result.variables.map((v) => v.name)).toEqual(['port']);
+      expect(result.anchorNote).toMatch(/hidden by default/);
+      expect(result.anchorNote).toMatch(/frameId: 30/);
+    });
+  });
+
   describe('Paused stack readiness (empty-stack hardening)', () => {
     // A PAUSED session answering stackTrace with success + zero frames is
     // (nearly always) a transient adapter race — netcoredbg does this right

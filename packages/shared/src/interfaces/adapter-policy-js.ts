@@ -180,6 +180,10 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
    *    debuggee that *is* an installed package (`/usr/lib/node_modules/<pkg>`)
    *    becomes all-internal: the central issue-#346 fallback keeps frame 0 and
    *    the response note says so; `includeInternals: true` shows everything.
+   *    A breakpoint or step that lands *inside* a dependency while user frames
+   *    survive below is the mixed case: the frame resolver keeps that paused
+   *    frame at the head (issue #672) — this classifier only says what is
+   *    internal, never what the inspection anchor is.
    * 3. js-debug's async separators — `await` / `Promise.then` /
    *    `bound-anonymous-fn` labels with no source at all and `line: 0`. A
    *    sourceless frame that still reports a line (an eval'd `VM123` script)

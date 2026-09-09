@@ -38,8 +38,18 @@ export interface EvaluateResult {
   error?: string;
   /** Present when secret-shaped content was masked in `result` (issue #237) */
   redaction?: { rules: string[]; notice: string };
-  /** Discloses when default evaluation adopted a different stopped thread. */
+  /**
+   * Discloses when default evaluation adopted a different stopped thread, or
+   * when the frame the debuggee paused in is hidden by the display filter
+   * (issue #672).
+   */
   anchorNote?: string;
+  /**
+   * The frame the expression was evaluated in when no frameId was given —
+   * the same shape get_local_variables reports — so a caller can tell which
+   * frame answered without a second stack request.
+   */
+  frame?: { name: string; file: string; line: number };
 }
 
 /**
@@ -127,6 +137,7 @@ export class ExpressionEvaluator {
     // Resolve the same default anchor stack and locals use. An explicit
     // frameId is authoritative and deliberately bypasses the resolver.
     let anchorNote: string | undefined;
+    let anchorFrame: EvaluateResult['frame'];
     if (frameId === undefined) {
       try {
         this.ctx.logger.info(
@@ -140,7 +151,9 @@ export class ExpressionEvaluator {
         );
         anchorNote = anchor.note;
         if (anchor.frames.length > 0) {
-          frameId = anchor.frames[0].id;
+          const top = anchor.frames[0];
+          frameId = top.id;
+          anchorFrame = { name: top.name, file: top.file, line: top.line };
           this.ctx.logger.info(
             `[SM evaluateExpression ${sessionId}] Using shared anchor frame ID: ${frameId}`
           );
@@ -203,7 +216,8 @@ export class ExpressionEvaluator {
           namedVariables: body.namedVariables,
           indexedVariables: body.indexedVariables,
           presentationHint: body.presentationHint,
-          ...(anchorNote ? { anchorNote } : {})
+          ...(anchorNote ? { anchorNote } : {}),
+          ...(anchorFrame ? { frame: anchorFrame } : {})
         };
 
         // Redaction hook (issue #237), placed above the logs below so they
@@ -281,7 +295,15 @@ export class ExpressionEvaluator {
         userError = `Invalid frame context: ${errorMessage}`;
       }
 
-      return { success: false, error: withTimeoutHint(userError) };
+      // Name the frame the failed evaluation ran in: "Unable to evaluate on
+      // async stack frame" is only actionable when the caller can see which
+      // frame that was (issue #672).
+      return {
+        success: false,
+        error: withTimeoutHint(userError),
+        ...(anchorNote ? { anchorNote } : {}),
+        ...(anchorFrame ? { frame: anchorFrame } : {})
+      };
     }
   }
 }

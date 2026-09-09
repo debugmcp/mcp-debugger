@@ -656,6 +656,7 @@ Gets the current call stack.
 - Internal/runtime frames (e.g. Node.js internals and `node_modules` dependencies, Go `/runtime/`, `System.*`) are filtered out by default; pass `includeInternals: true` to see them. When any frames were hidden, the response additionally carries `hiddenFrames` (count) and a `note` explaining how to reveal them.
 - A frame whose source the adapter could not find on this host (js-debug: a source-mapped `.ts` the package did not ship) carries `unresolvedSource: true`, and the `note` says its `file` is a label rather than an openable path — do not pass it to `get_source_context`.
 - The filtered stack is never empty when the adapter reported frames: if *every* frame is internal (e.g. a goroutine paused inside the Go runtime), the top internal frame is kept so `get_scopes`/`evaluate_expression` still have a valid `frameId`, and the `note` says so.
+- When the frame the debuggee is paused in is itself internal (a breakpoint or step that landed inside a `node_modules` dependency, say) while user frames survive further down, the paused frame is kept as `stackFrames[0]` on a breakpoint or step stop, so locals and evaluation anchor where the program actually stopped, and the `note` says so (`hiddenFrames` counts only the frames that stayed hidden). After a `pause` or an exception — stops that routinely land in runtime frames where the first user frame is the useful one — the paused frame stays hidden and the `note` names it and its `frameId` so you can inspect it explicitly (issue #672).
 - When an explicit thread reports no frames, the response remains anchored to that thread and its `note` suggests a frame-bearing alternative when one is available.
 - When the implicit stopped thread is frameless, stack, locals, and default evaluation share one resolver. It scans siblings, prefers a thread whose frames the language policy recognizes as user code over runtime-only stacks, adopts it once, and discloses the switch in `note`/`anchorNote`.
 - Failed or empty stack responses include the session's optional `diagnostics` when the proxy failed, matching `list_debug_sessions`.
@@ -869,6 +870,7 @@ If the originally stopped thread has no frames, this tool uses the same user-fra
 - Session must be paused at a breakpoint for this tool to work
 - The tool walks down from the top frame only until a frame yields usable locals, then uses the adapter policy to extract them from that frame's scopes
 - When the top frame has no usable locals (a runtime/stdlib frame, a `sleep`), the response anchors to the first lower frame that does, `frame` names that frame, and `note` explains the switch; `note` also reports a same-frame scope fallback (e.g. JavaScript Local → Module). Pass `names` to disable the frame walk-down
+- At a breakpoint or step inside a frame the stack display hides as internal (a dependency under `node_modules`), the anchor is that frame — the one the program actually stopped in — and `note` says it was kept. After a `pause` inside such a frame the anchor stays on the first visible frame and `note` names the hidden paused frame and its `frameId` (issue #672)
 - When `includeSpecial` is true, all variables including internals are returned
 - This is especially useful for AI agents that need quick access to current local state
 
@@ -881,7 +883,7 @@ Evaluates an expression in the context of the current debug session.
 **Parameters:**
 - `sessionId` (string, required): The ID of the debug session.
 - `expression` (string, required): The expression to evaluate.
-- `frameId` (number, optional): Authoritative stack frame ID for context. If omitted, evaluation uses the same adopted top frame as `get_stack_trace` and `get_local_variables`; an automatic thread switch is returned as `anchorNote`.
+- `frameId` (number, optional): Authoritative stack frame ID for context. If omitted, evaluation uses the same adopted top frame as `get_stack_trace` and `get_local_variables` — at a breakpoint or step that is the frame the program stopped in even when the default stack display would hide it as internal (issue #672). An automatic thread switch or a hidden paused frame is returned as `anchorNote`, and `frame` names the frame that was used — on failure too, so an `Unable to evaluate on async stack frame` error says which frame it tried.
 - `timeout` (number, optional): Maximum time in milliseconds to wait for the evaluation to complete (default: 30000, max: 600000). On expiry the request fails but the expression may keep executing in the debuggee.
 
 **Response:**
@@ -891,9 +893,12 @@ Evaluates an expression in the context of the current debug session.
   "result": "10",
   "type": "int",
   "variablesReference": 0,
-  "presentationHint": {}
+  "presentationHint": {},
+  "frame": { "name": "swap_variables", "file": "C:\\path\\to\\swap_vars.py", "line": 5 }
 }
 ```
+
+`frame` is present when `frameId` was omitted and names the frame the expression ran in (the same shape `get_local_variables` reports).
 
 **Example - Simple Variable:**
 ```json

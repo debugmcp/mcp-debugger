@@ -243,7 +243,11 @@ If neither `tsx` nor `ts-node` is installed, the factory emits a warning (not an
   `sourceMapPathOverrides`. `get_stack_trace` hides `node_modules` and async
   separator frames by default; a debuggee that is itself an installed package
   under `node_modules` shows its top frame plus an "all frames are internal"
-  note — pass `includeInternals: true`
+  note — pass `includeInternals: true`. A breakpoint or step that lands
+  *inside* a dependency keeps that frame as frame 0 (the `note` says so) so
+  `get_local_variables` and `evaluate_expression` work where the program
+  stopped; a `pause` that lands inside one stays filtered and the `note` names
+  the hidden frame's `frameId` (issue #672)
 - Debuggee exit codes are captured via an injected preload (js-debug itself
   never emits a DAP `exited` event), so `exitCode` is unavailable in two
   cases: attach mode (the target's environment is not under mcp-debugger's
