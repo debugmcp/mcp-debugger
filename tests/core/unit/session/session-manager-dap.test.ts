@@ -1043,6 +1043,69 @@ describe('SessionManager - DAP Operations', () => {
         expect(sessionManager.listBreakpoints(session.id).find(bp => bp.id === storeId)).toBeUndefined();
       });
 
+      it('a provisional event reaching a record only through the table applies nothing', async () => {
+        const { session, storeId } = await jsSessionWithProvisionalStub(2, TS_REQUEST);
+
+        // Same child id, still unverified, under a location that matches no
+        // stored breakpoint: the table finds the record, but a stub answering
+        // a stub carries no new fact.
+        dependencies.mockProxyManager.simulateEvent('breakpoint', {
+          reason: 'changed',
+          breakpoint: { id: 2, verified: false, line: 999, source: { path: 'elsewhere.js' }, message: 'breakpoint.provisionalBreakpoint' },
+          __mcpChildOrigin: true
+        });
+
+        const bp = find(session.id, storeId);
+        expect(bp.verified).toBe(false);
+        expect(bp.line).toBe(349);
+        expect(bp.adapterId).toBeUndefined();
+        expect(bp.boundFile).toBeUndefined();
+      });
+
+      it('ignores non-numeric hit ids and still applies the numeric ones', async () => {
+        const { session, storeId } = await jsSessionWithProvisionalStub(5, { file: 'app.js', line: 20 });
+
+        dependencies.mockProxyManager.simulateStopped(1, 'breakpoint', {
+          reason: 'breakpoint',
+          threadId: 1,
+          hitBreakpointIds: ['5' as unknown as number, 5]
+        });
+
+        expect(find(session.id, storeId).verified).toBe(true);
+      });
+
+      it('marks a function breakpoint verified when a stop names its adapter id', async () => {
+        const session = await sessionManager.createSession({
+          language: DebugLanguage.MOCK,
+          executablePath: 'python'
+        });
+        dependencies.mockProxyManager.setDapRequestHandler(async (command) => {
+          if (command === 'setFunctionBreakpoints') {
+            return {
+              success: true,
+              body: { breakpoints: [{ id: 77, verified: false, message: 'Breakpoint pending until the symbol loads' }] }
+            };
+          }
+          return { success: true, body: {} };
+        });
+        await sessionManager.setFunctionBreakpoint(session.id, { functionName: 'compute' });
+        await sessionManager.startDebugging(session.id, 'test.py');
+        await vi.runAllTimersAsync();
+        const before = sessionManager.listFunctionBreakpoints(session.id)[0];
+        expect(before.verified).toBe(false);
+        expect(before.adapterId).toBe(77);
+
+        dependencies.mockProxyManager.simulateStopped(1, 'function breakpoint', {
+          reason: 'function breakpoint',
+          threadId: 1,
+          hitBreakpointIds: [77]
+        });
+
+        const after = sessionManager.listFunctionBreakpoints(session.id)[0];
+        expect(after.verified).toBe(true);
+        expect(after.message).toBeUndefined();
+      });
+
       it('applies hit-implies-bound to a non-mirroring adapter by adapterId', async () => {
         const session = await sessionManager.createSession({
           language: DebugLanguage.MOCK,
