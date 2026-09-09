@@ -221,7 +221,8 @@ on a Docker network (`http://mcp-debugger:3001/mcp` from another container or ma
 controls who can reach the port (a private network, mTLS, an authenticating proxy):
 
 ```bash
-docker run -d --rm --network mynet --name mcp-debugger -e MCP_HTTP_ALLOWED_HOSTS=mcp-debugger \n  debugmcp/mcp-debugger:latest http -p 3001
+docker run -d --rm --network mynet --name mcp-debugger -e MCP_HTTP_ALLOWED_HOSTS=mcp-debugger \
+  debugmcp/mcp-debugger:latest http -p 3001
 # or: ... debugmcp/mcp-debugger:latest http -p 3001 --allowed-host mcp-debugger
 ```
 
@@ -265,7 +266,7 @@ may reach it. All are passed through with `-e`:
   list as repeating `--allowed-host`. Port-agnostic and case-insensitive; IPv6 literals in
   brackets; no wildcard. The same list governs browser requests' `Origin`. An unusable entry (a
   URL, a bare IPv6 literal, `*`, anything the parser would rewrite) stops the server at startup
-  with the entry named on stderr. Read by `http` mode only. See
+  with the entry named on stderr. Read by `http` and the deprecated `sse` mode. See
   [Streamable HTTP from a container](#streamable-http-from-a-container).
 
 ## Dockerfile Details

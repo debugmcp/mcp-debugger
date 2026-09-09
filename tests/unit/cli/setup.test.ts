@@ -99,7 +99,7 @@ describe('CLI Setup', () => {
       
       expect(sseCommand).toBeDefined();
       expect(sseCommand?.description()).toBe('Start the server using SSE (DEPRECATED: use "http" subcommand instead)');
-      expect(sseCommand?.options).toHaveLength(3);
+      expect(sseCommand?.options).toHaveLength(4);
       
       // Check options
       const options = sseCommand?.options || [];
@@ -119,6 +119,29 @@ describe('CLI Setup', () => {
       
       expect(logFileOption).toBeDefined();
       expect(logFileOption?.description).toBe('Log to file instead of console');
+
+      // The same Host/Origin allowlist option the http command has (issue #671).
+      const allowedHostOption = options.find(opt => opt.long === '--allowed-host');
+      expect(allowedHostOption?.defaultValue).toEqual([]);
+      expect(allowedHostOption?.description).toContain('MCP_HTTP_ALLOWED_HOSTS');
+      expect(allowedHostOption?.defaultValueDescription).toBe('localhost, 127.0.0.1, [::1]');
+      expect(sseCommand?.helpInformation()).not.toContain('(default: [])');
+    });
+
+    it('collects every --allowed-host occurrence, in order (issue #671)', async () => {
+      const program = new Command();
+      const mockHandler = vi.fn().mockResolvedValue(undefined);
+
+      setupSSECommand(program, mockHandler);
+
+      await program.parseAsync([
+        'node', 'test', 'sse', '--allowed-host', 'mcp-debugger', '--allowed-host', 'api.internal',
+      ]);
+
+      expect(mockHandler).toHaveBeenCalledWith(
+        expect.objectContaining({ allowedHost: ['mcp-debugger', 'api.internal'] }),
+        expect.anything()
+      );
     });
 
     it('should call handler when sse command is executed', async () => {
