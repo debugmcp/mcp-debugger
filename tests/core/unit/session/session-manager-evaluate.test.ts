@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
-import { DebugLanguage } from '@debugmcp/shared';
+import { DebugLanguage, JsDebugAdapterPolicy } from '@debugmcp/shared';
 import { createMockDependencies } from './session-manager-test-utils.js';
 
 function makeManager(launchArgs: { stopOnEntry: boolean } = { stopOnEntry: true }) {
@@ -151,6 +151,119 @@ describe('SessionManager.evaluateExpression default-frame resolution', () => {
     expect(dependencies.mockProxyManager.getCurrentThreadId()).toBe(3);
   });
 
+  it('anchors evaluation on the hidden paused frame at a breakpoint inside a dependency (#672)', async () => {
+    const { sessionManager, dependencies } = makeManager();
+    const session = await createRunningSession(sessionManager, dependencies);
+    (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
+    let evaluatedFrame: number | undefined;
+    dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: { frameId?: number }) => {
+      if (command === 'stackTrace') {
+        return {
+          body: {
+            stackFrames: [
+              { id: 30, name: 'handle', line: 160, source: { path: '/app/node_modules/router/index.js', sourceReference: 0 } },
+              { id: 53, name: 'handleHttpCommand', line: 353, source: { path: '/app/dist/cli/http-command.js', sourceReference: 0 } }
+            ]
+          }
+        };
+      }
+      if (command === 'evaluate') {
+        evaluatedFrame = args?.frameId;
+        return { body: { result: 'GET /health', type: 'string', variablesReference: 0 } };
+      }
+      return { success: true, body: {} };
+    });
+
+    const result = await sessionManager.evaluateExpression(session.id, 'req.method');
+
+    expect(result.success).toBe(true);
+    expect(evaluatedFrame).toBe(30);
+    expect(result.frame).toEqual({ name: 'handle', file: '/app/node_modules/router/index.js', line: 160 });
+    expect(result.anchorNote).toMatch(/kept as frame 0/);
+  });
+
+  it('after a pause inside a dependency, evaluation stays on the visible frame and discloses the hidden one (#672)', async () => {
+    const { sessionManager, dependencies } = makeManager({ stopOnEntry: false });
+    const session = await createRunningSession(sessionManager, dependencies, { paused: false });
+    dependencies.mockProxyManager.simulateStopped(1, 'pause');
+    (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
+    let evaluatedFrame: number | undefined;
+    dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: { frameId?: number }) => {
+      if (command === 'stackTrace') {
+        return {
+          body: {
+            stackFrames: [
+              { id: 30, name: 'handle', line: 160, source: { path: '/app/node_modules/router/index.js', sourceReference: 0 } },
+              { id: 53, name: 'handleHttpCommand', line: 353, source: { path: '/app/dist/cli/http-command.js', sourceReference: 0 } }
+            ]
+          }
+        };
+      }
+      if (command === 'evaluate') {
+        evaluatedFrame = args?.frameId;
+        return { body: { result: '3111', type: 'number', variablesReference: 0 } };
+      }
+      return { success: true, body: {} };
+    });
+
+    const result = await sessionManager.evaluateExpression(session.id, 'port');
+
+    expect(result.success).toBe(true);
+    expect(evaluatedFrame).toBe(53);
+    expect(result.frame).toEqual({ name: 'handleHttpCommand', file: '/app/dist/cli/http-command.js', line: 353 });
+    expect(result.anchorNote).toMatch(/hidden by default/);
+    expect(result.anchorNote).toMatch(/frameId: 30/);
+  });
+
+  it('names the anchor frame when the evaluation itself fails (#672)', async () => {
+    const { sessionManager, dependencies } = makeManager();
+    const session = await createRunningSession(sessionManager, dependencies);
+    (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
+    dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+      if (command === 'stackTrace') {
+        return {
+          body: {
+            stackFrames: [
+              { id: 30, name: 'handle', line: 160, source: { path: '/app/node_modules/router/index.js', sourceReference: 0 } },
+              { id: 53, name: 'handleHttpCommand', line: 353, source: { path: '/app/dist/cli/http-command.js', sourceReference: 0 } }
+            ]
+          }
+        };
+      }
+      if (command === 'evaluate') {
+        throw new Error('Unable to evaluate on async stack frame');
+      }
+      return { success: true, body: {} };
+    });
+
+    const result = await sessionManager.evaluateExpression(session.id, 'req.url');
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Invalid frame context');
+    expect(result.frame).toEqual({ name: 'handle', file: '/app/node_modules/router/index.js', line: 160 });
+    expect(result.anchorNote).toMatch(/kept as frame 0/);
+  });
+
+  it('names the anchor frame when the adapter answers without a body', async () => {
+    const { sessionManager, dependencies } = makeManager();
+    const session = await createRunningSession(sessionManager, dependencies);
+    dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+      if (command === 'stackTrace') {
+        return { body: { stackFrames: [{ id: 9, name: 'top', line: 4, source: { path: '/work/app.js' } }] } };
+      }
+      if (command === 'evaluate') {
+        return { success: true };
+      }
+      return { success: true, body: {} };
+    });
+
+    const result = await sessionManager.evaluateExpression(session.id, 'x');
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('No response body');
+    expect(result.frame).toEqual({ name: 'top', file: '/work/app.js', line: 4 });
+  });
+
   it('fails cleanly when the paused thread reports no stack frames', async () => {
     const { sessionManager, dependencies } = makeManager();
     const session = await createRunningSession(sessionManager, dependencies);
@@ -166,6 +279,8 @@ describe('SessionManager.evaluateExpression default-frame resolution', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('No active stack frame');
+    // The resolver's explanation (readiness wait, thread scan) travels with the failure.
+    expect(result.anchorNote).toMatch(/no stack frames/i);
   });
 
   it('wraps stack-trace failures in an evaluation error', async () => {

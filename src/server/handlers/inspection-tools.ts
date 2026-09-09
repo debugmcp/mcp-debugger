@@ -78,6 +78,16 @@ export const getStackTraceTool: ToolHandler = async (ctx, args) => {
     if (stackTrace.note) {
       notes.push(stackTrace.note);
     }
+    // The frame the debuggee is paused in was filtered as internal (issue
+    // #672): say where the pause really is, and whether it was kept as
+    // stackFrames[0]. The includeInternals advice below already covers how to
+    // see everything.
+    if (stackTrace.pausedFrame) {
+      payload.pausedFrame = { ...stackTrace.pausedFrame.frame, kept: stackTrace.pausedFrame.kept };
+      if (stackTrace.pausedFrameNote) {
+        notes.push(stackTrace.pausedFrameNote);
+      }
+    }
     if (stackTrace.hiddenFrameCount > 0) {
       payload.hiddenFrames = stackTrace.hiddenFrameCount;
       notes.push(stackTrace.allFramesInternal
