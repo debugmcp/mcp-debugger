@@ -1,4 +1,4 @@
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 
 export interface StdioOptions {
   logLevel?: string;
@@ -84,12 +84,14 @@ export function setupHttpCommand(program: Command, handler: HttpHandler): void {
     .option('-p, --port <number>', 'Port to listen on', '3001')
     .option('-l, --log-level <level>', 'Set log level (error, warn, info, debug)', 'info')
     .option('--log-file <path>', 'Log to file instead of console')
-    .option(
-      '--allowed-host <host>',
-      'Additional Host header value to accept (repeatable; or MCP_HTTP_ALLOWED_HOSTS, comma-separated). ' +
-        'Implies another access control fronts this server. No wildcard. Default: localhost, 127.0.0.1, [::1]',
-      (value: string, previous: string[]) => [...previous, value],
-      [] as string[]
+    .addOption(
+      new Option(
+        '--allowed-host <host>',
+        'Additional Host (and browser Origin) hostname to accept (repeatable; or MCP_HTTP_ALLOWED_HOSTS, ' +
+          'comma-separated). Implies another access control fronts this server. No wildcard.'
+      )
+        .argParser((value: string, previous: string[]) => [...previous, value])
+        .default([] as string[], 'localhost, 127.0.0.1, [::1]')
     )
     .action(async (options: HttpOptions, command: Command) => {
       // Silence console output to protect any spawned proxy IPC channels

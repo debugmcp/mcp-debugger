@@ -70,7 +70,7 @@ any other MCP host) lists mcp-debugger as failed or disconnected.
 container's service name, the machine's hostname, a LAN IP) gets:
 
 ```json
-{"jsonrpc":"2.0","error":{"code":-32000,"message":"Invalid Host: mcp-debugger — this server accepts only these Host header values: localhost, 127.0.0.1, [::1] (DNS-rebinding protection; the port is ignored). Reach it through a port-forward or SSH tunnel, or, if another access control fronts it, start it with --allowed-host mcp-debugger or MCP_HTTP_ALLOWED_HOSTS=mcp-debugger."},"id":null}
+{"jsonrpc":"2.0","error":{"code":-32000,"message":"Invalid Host: mcp-debugger — this server accepts only these Host header values: localhost, 127.0.0.1, [::1] ..."},"id":null}
 ```
 
 Two ways out:
@@ -81,6 +81,10 @@ Two ways out:
 - **Opt in explicitly.** Start the server with `--allowed-host <name>` (repeatable) or
   `MCP_HTTP_ALLOWED_HOSTS=<name>,<name>` when another access control fronts it. The server logs
   the extended allowlist at startup and each rejected hostname once; there is no wildcard.
+
+A browser-based client sees the same 403 with `Invalid Origin: ...` when the page's origin is not
+on that list: the `Origin` header is checked against it too (cross-site request protection), so
+add the page's host with `--allowed-host` if that page should control the debugger.
 
 ## Python Issues
 

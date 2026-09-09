@@ -185,6 +185,10 @@ describe('CLI Setup', () => {
       expect(logFileOption).toBeDefined();
       expect(allowedHostOption?.defaultValue).toEqual([]);
       expect(allowedHostOption?.description).toContain('MCP_HTTP_ALLOWED_HOSTS');
+      // The help must show the real default once — not a hand-written sentence
+      // followed by commander's own "(default: [])".
+      expect(allowedHostOption?.defaultValueDescription).toBe('localhost, 127.0.0.1, [::1]');
+      expect(httpCommand?.helpInformation()).not.toContain('(default: [])');
     });
 
     it('collects every --allowed-host occurrence, in order (issue #667)', async () => {

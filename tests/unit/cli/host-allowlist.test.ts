@@ -4,6 +4,7 @@ import {
   hostAllowlistMiddleware,
   parseAllowedHosts,
 } from '../../../src/cli/host-allowlist.js';
+import { invokeMiddleware } from '../../test-utils/mocks/express-stubs.js';
 
 const LOOPBACK = ['localhost', '127.0.0.1', '[::1]'];
 
@@ -43,12 +44,45 @@ describe('parseAllowedHosts', () => {
     expect(parseAllowedHosts(['[fd00::5]'], undefined).hosts).toEqual([...LOOPBACK, '[fd00::5]']);
   });
 
-  it('accepts an internationalized hostname in its punycode form and warns about the normalization', () => {
-    const { hosts, warnings } = parseAllowedHosts(['bücher.example'], undefined);
-    expect(hosts).toEqual([...LOOPBACK, 'xn--bcher-kva.example']);
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain('bücher.example');
-    expect(warnings[0]).toContain('xn--bcher-kva.example');
+  it('splits a comma-separated --allowed-host value too, since the env var invites that shape', () => {
+    expect(parseAllowedHosts(['a.example,b.example'], undefined).hosts).toEqual([...LOOPBACK, 'a.example', 'b.example']);
+  });
+
+  it('rejects an entry the URL parser would silently rewrite into a different host, naming what it became', () => {
+    const cases: Array<[string, string]> = [
+      ['3001', '0.0.11.185'],
+      ['192.168.1', '192.168.0.1'],
+      ['evil@localhost', 'localhost'],
+      ['host?x', 'host'],
+      ['bücher.example', 'xn--bcher-kva.example'],
+    ];
+    for (const [entry, canonical] of cases) {
+      let error: unknown;
+      try {
+        parseAllowedHosts([entry], undefined);
+      } catch (err) {
+        error = err;
+      }
+      expect(error, entry).toBeInstanceOf(AllowedHostError);
+      expect((error as Error).message, entry).toContain(canonical);
+    }
+  });
+
+  it('rejects characters that can never appear in a Host header, so a wildcard pattern cannot masquerade as a hostname', () => {
+    for (const entry of ['*.example', 'a.example;b.example', 'a=b.example', 'under_score.example']) {
+      expect(() => parseAllowedHosts([entry], undefined), entry).toThrow(AllowedHostError);
+    }
+  });
+
+  it('explains that a zone id cannot appear in a Host header', () => {
+    let error: unknown;
+    try {
+      parseAllowedHosts(['[fe80::1%eth0]'], undefined);
+    } catch (err) {
+      error = err;
+    }
+    expect(error).toBeInstanceOf(AllowedHostError);
+    expect((error as Error).message).toContain('zone');
   });
 
   it('rejects a URL instead of silently accepting its scheme as the hostname', () => {
@@ -96,12 +130,8 @@ describe('parseAllowedHosts', () => {
 
 describe('hostAllowlistMiddleware', () => {
   function run(hostHeader: string | undefined, allowed: string[], logger = { warn: vi.fn() }) {
-    const json = vi.fn();
-    const res = { status: vi.fn(() => ({ json })), json };
-    const next = vi.fn();
-    const req = { headers: hostHeader === undefined ? {} : { host: hostHeader } };
-    hostAllowlistMiddleware(allowed, logger)(req as never, res as never, next);
-    return { res, json, next, logger };
+    const headers: Record<string, string> = hostHeader === undefined ? {} : { host: hostHeader };
+    return { ...invokeMiddleware(hostAllowlistMiddleware(allowed, logger), { headers }), logger };
   }
 
   it('answers 403 with a JSON-RPC error when the Host header is missing', () => {
@@ -153,14 +183,7 @@ describe('hostAllowlistMiddleware', () => {
   it('logs one warning per distinct rejected hostname, not per request', () => {
     const logger = { warn: vi.fn() };
     const middleware = hostAllowlistMiddleware(LOOPBACK, logger);
-    const call = (host: string) => {
-      const json = vi.fn();
-      middleware(
-        { headers: { host } } as never,
-        { status: vi.fn(() => ({ json })), json } as never,
-        vi.fn()
-      );
-    };
+    const call = (host: string) => invokeMiddleware(middleware, { headers: { host } });
     call('evil.example');
     call('evil.example:8080');
     call('other.example');
@@ -169,17 +192,60 @@ describe('hostAllowlistMiddleware', () => {
     expect(logger.warn.mock.calls[1][0]).toContain('other.example');
   });
 
+  it('logs the same remedy text the 403 body carries, so log and client never disagree', () => {
+    const logger = { warn: vi.fn() };
+    const { json } = run('evil.example', LOOPBACK, logger);
+    const body = json.mock.calls[0][0].error.message as string;
+    expect(logger.warn.mock.calls[0][0]).toContain(body);
+  });
+
   it('stops logging new hostnames after 50 distinct rejections so a scanner cannot grow the log', () => {
     const logger = { warn: vi.fn() };
     const middleware = hostAllowlistMiddleware(LOOPBACK, logger);
     for (let i = 0; i < 60; i++) {
-      const json = vi.fn();
-      middleware(
-        { headers: { host: `scan-${i}.example` } } as never,
-        { status: vi.fn(() => ({ json })), json } as never,
-        vi.fn()
-      );
+      invokeMiddleware(middleware, { headers: { host: `scan-${i}.example` } });
     }
-    expect(logger.warn).toHaveBeenCalledTimes(50);
+    // 50 hostnames, then one notice that the cap was reached — never silence without saying so.
+    expect(logger.warn).toHaveBeenCalledTimes(51);
+    expect(logger.warn.mock.calls[50][0]).toMatch(/no further rejected hostnames will be logged/i);
+  });
+
+  describe('Origin validation (browser cross-origin requests)', () => {
+    function runOrigin(origin: string | undefined, allowed: string[]) {
+      const headers: Record<string, string> = { host: 'localhost:3001' };
+      if (origin !== undefined) headers.origin = origin;
+      return invokeMiddleware(hostAllowlistMiddleware(allowed, { warn: vi.fn() }), { headers });
+    }
+
+    it('passes a request with no Origin header (every non-browser client)', () => {
+      const { next, res } = runOrigin(undefined, LOOPBACK);
+      expect(next).toHaveBeenCalledTimes(1);
+      expect(res.status).not.toHaveBeenCalled();
+    });
+
+    it('passes a browser request whose Origin host is allowlisted, port ignored', () => {
+      for (const origin of ['http://localhost:6274', 'http://127.0.0.1', 'https://mcp-debugger:8443']) {
+        const { next, res } = runOrigin(origin, [...LOOPBACK, 'mcp-debugger']);
+        expect(next, origin).toHaveBeenCalledTimes(1);
+        expect(res.status, origin).not.toHaveBeenCalled();
+      }
+    });
+
+    it('refuses a browser request from a foreign Origin even when Host is loopback, naming the remedy', () => {
+      const { json, res, next } = runOrigin('https://evil.example', LOOPBACK);
+      expect(res.status).toHaveBeenCalledWith(403);
+      const message = json.mock.calls[0][0].error.message as string;
+      expect(message.startsWith('Invalid Origin: https://evil.example')).toBe(true);
+      expect(message).toContain('--allowed-host evil.example');
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    it('refuses the opaque "null" Origin and an unparsable one', () => {
+      for (const origin of ['null', 'not a url']) {
+        const { res, next } = runOrigin(origin, LOOPBACK);
+        expect(res.status, origin).toHaveBeenCalledWith(403);
+        expect(next, origin).not.toHaveBeenCalled();
+      }
+    });
   });
 });

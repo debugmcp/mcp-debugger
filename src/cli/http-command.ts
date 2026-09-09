@@ -4,7 +4,7 @@ import express from 'express';
 import { randomUUID } from 'crypto';
 import { IncomingMessage, ServerResponse } from 'http';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
+import { ErrorCode, isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { DebugMcpServer } from '../server.js';
 import { attachSharedFileTransport } from '../utils/logger.js';
 import type { HttpOptions } from './setup.js';
@@ -16,6 +16,7 @@ import {
   hostAllowlistMiddleware,
   parseAllowedHosts,
 } from './host-allowlist.js';
+import { jsonRpcErrorBody } from './json-rpc-error.js';
 import { watchStdinForParentExit } from './stdin-watchdog.js';
 import type { ProcessLike } from '../interfaces/process-interfaces.js';
 
@@ -222,7 +223,13 @@ export function createHttpApp(
   // CORS — Mcp-Session-Id and last-event-id must be exposed for the MCP Inspector
   // and for clients to read the session ID from the Initialize response.
   app.use((req: Request, res: Response, next: NextFunction) => {
-    res.header('Access-Control-Allow-Origin', '*');
+    // A request carrying an Origin has already passed the allowlist above:
+    // echo that origin (and Vary on it) instead of granting every origin.
+    const origin = req.headers.origin;
+    res.header('Access-Control-Allow-Origin', origin ?? '*');
+    if (origin !== undefined) {
+      res.header('Vary', 'Origin');
+    }
     res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
     res.header(
       'Access-Control-Allow-Headers',
@@ -320,14 +327,12 @@ export function createHttpApp(
           hasSessionId: !!sessionId,
           isInit: req.method === 'POST' && isInitializeRequest(req.body),
         });
-        res.status(400).json({
-          jsonrpc: '2.0',
-          error: {
-            code: -32600,
-            message: 'Bad Request: missing or unknown Mcp-Session-Id, and this is not an initialize request',
-          },
-          id: null,
-        });
+        res.status(400).json(
+          jsonRpcErrorBody(
+            ErrorCode.InvalidRequest,
+            'Bad Request: missing or unknown Mcp-Session-Id, and this is not an initialize request'
+          )
+        );
         return;
       }
 
@@ -335,15 +340,9 @@ export function createHttpApp(
     } catch (error) {
       logger.error('Error handling MCP request', { error });
       if (!res.headersSent) {
-        res.status(500).json({
-          jsonrpc: '2.0',
-          error: {
-            code: -32603,
-            message: 'Internal error',
-            data: error instanceof Error ? error.message : 'Unknown error',
-          },
-          id: null,
-        });
+        res.status(500).json(
+          jsonRpcErrorBody(ErrorCode.InternalError, 'Internal error', error instanceof Error ? error.message : 'Unknown error')
+        );
       }
     }
   };
@@ -377,32 +376,22 @@ export function createHttpApp(
     });
   });
 
-  // A body-parser failure (oversize, malformed JSON, bad charset) would
-  // otherwise fall through to Express's HTML error page, which an MCP client
-  // cannot read (issue #670). Answer in the JSON-RPC shape instead. Express
+  // An error reaching this point would otherwise fall through to Express's
+  // HTML error page, which an MCP client cannot read (issue #670). Answer in
+  // the JSON-RPC shape whatever the cause: body-parser tags its failures with
+  // an HTTP status (a decompression failure carries no `type`, so the status
+  // is the reliable discriminator); anything else is a server fault. Express
   // recognizes an error handler by its four parameters.
-  app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
-    if (res.headersSent || !isBodyParserError(err)) {
+  app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
+    if (res.headersSent) {
       next(err);
       return;
     }
-    if (err.type === 'entity.too.large') {
-      res.status(413).json({
-        jsonrpc: '2.0',
-        error: { code: -32600, message: `Request body too large (limit ${JSON_BODY_LIMIT})` },
-        id: null,
-      });
-      return;
+    const failure = classifyRequestError(err);
+    if (failure.status >= 500) {
+      logger.error(`Unhandled error on ${req.method} ${req.path}: ${failure.detail}`, { error: err });
     }
-    const parseFailure = err.type === 'entity.parse.failed';
-    res.status(err.status).json({
-      jsonrpc: '2.0',
-      error: {
-        code: parseFailure ? -32700 : -32600,
-        message: parseFailure ? `Parse error: ${err.message}` : err.message,
-      },
-      id: null,
-    });
+    res.status(failure.status).json(jsonRpcErrorBody(failure.code, failure.message));
   });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -411,13 +400,38 @@ export function createHttpApp(
   return app;
 }
 
-/** body-parser (via express.json) tags its errors with a `type` and an HTTP `status`. */
-function isBodyParserError(err: unknown): err is { type: string; status: number; message: string } {
-  if (typeof err !== 'object' || err === null) {
-    return false;
+/** What to answer for an error that escaped the request pipeline (see the error handler above). */
+function classifyRequestError(err: unknown): { status: number; code: number; message: string; detail: string } {
+  const candidate = (typeof err === 'object' && err !== null ? err : {}) as {
+    status?: unknown;
+    type?: unknown;
+    message?: unknown;
+    expose?: unknown;
+  };
+  const detail = typeof candidate.message === 'string' ? candidate.message : String(err);
+  const status =
+    typeof candidate.status === 'number' && candidate.status >= 400 && candidate.status < 600 ? candidate.status : 500;
+  if (status >= 500) {
+    return { status, code: ErrorCode.InternalError, message: 'Internal error', detail };
   }
-  const candidate = err as { type?: unknown; status?: unknown };
-  return typeof candidate.type === 'string' && typeof candidate.status === 'number';
+  if (candidate.type === 'entity.too.large') {
+    return { status, code: ErrorCode.InvalidRequest, message: `Request body too large (limit ${JSON_BODY_LIMIT})`, detail };
+  }
+  if (candidate.type === 'entity.parse.failed') {
+    return { status, code: ErrorCode.ParseError, message: `Parse error: ${detail}`, detail };
+  }
+  // http-errors marks 4xx messages as safe to expose; anything else stays generic.
+  return { status, code: ErrorCode.InvalidRequest, message: candidate.expose === false ? 'Bad Request' : detail, detail };
+}
+
+/**
+ * http mode silences the console (src/index.ts), so a fatal line that only
+ * reaches the logger leaves the operator with a bare exit code; write it to
+ * stderr as well. `detail` is appended on stderr only, so callers keep their
+ * existing logger call shapes.
+ */
+function reportFatal(proc: ProcessLike, message: string, detail?: string): void {
+  proc.stderr?.write(`mcp-debugger: ${message}${detail ? `: ${detail}` : ''}` + '\n');
 }
 
 export async function handleHttpCommand(
@@ -452,11 +466,12 @@ export async function handleHttpCommand(
     });
 
     server.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE') {
-        logger.error(`Port ${port} is already in use. Another instance may be running.`);
-      } else {
-        logger.error(`Server error: ${err.message}`);
-      }
+      const line =
+        err.code === 'EADDRINUSE'
+          ? `Port ${port} is already in use. Another instance may be running.`
+          : `Server error: ${err.message}`;
+      logger.error(line);
+      reportFatal(proc, line);
       exitProcess(1);
     });
 
@@ -478,6 +493,7 @@ export async function handleHttpCommand(
       // begun, the process must not park forever holding live proxy chains.
       const hardExit = setTimeout(() => {
         logger.error('Graceful shutdown timed out; forcing exit.');
+        reportFatal(proc, 'Graceful shutdown timed out; forcing exit.');
         exitProcess(1);
       }, 15000);
       hardExit.unref?.();
@@ -529,13 +545,12 @@ export async function handleHttpCommand(
     if (error instanceof AllowedHostError) {
       // Fail fast and by name: a silently dropped allowlist entry would
       // reproduce the very discoverability problem the flag exists to fix.
-      // The console logger is silenced in http mode, so the log line alone
-      // would leave the operator with a bare exit code 1 — say it on stderr too.
       const line = `${error.message}. The server was not started.`;
       logger.error(line);
-      proc.stderr?.write(`mcp-debugger: ${line}\n`);
+      reportFatal(proc, line);
     } else {
       logger.error('Failed to start server in HTTP mode', { error });
+      reportFatal(proc, 'Failed to start server in HTTP mode', error instanceof Error ? error.message : String(error));
     }
     exitProcess(1);
   }

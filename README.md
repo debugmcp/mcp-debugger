@@ -215,7 +215,8 @@ PIDs. A client on another machine reaches it through a port-forward or an SSH tu
 gets a 403 that says so. To accept a service name directly — `http://mcp-debugger:3001/mcp` on a
 container network — start the server with `--allowed-host mcp-debugger` (repeatable) or
 `MCP_HTTP_ALLOWED_HOSTS=mcp-debugger` (comma-separated). That opt-in means another access control
-fronts the server; there is no wildcard.
+fronts the server; there is no wildcard. Browser clients are checked against the same list by
+their `Origin`, so a cross-site page cannot drive the debugger.
 
 ## 📚 How It Works
 

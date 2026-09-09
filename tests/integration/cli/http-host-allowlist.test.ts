@@ -6,13 +6,14 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import * as http from 'http';
 import type { AddressInfo } from 'net';
-import type { Logger as WinstonLoggerType } from 'winston';
 import { createHttpApp } from '../../../src/cli/http-command.js';
 import { FakeCurrentProcess } from '../../test-utils/mocks/fake-current-process.js';
+import { createMockLogger } from '../../test-utils/mocks/mock-logger.js';
 
 interface Reply {
   status: number;
   body: string;
+  headers: http.IncomingHttpHeaders;
 }
 
 const servers: http.Server[] = [];
@@ -23,16 +24,13 @@ afterEach(async () => {
   );
 });
 
-function makeLogger(): WinstonLoggerType {
-  return { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn(), level: 'info' } as unknown as WinstonLoggerType;
-}
-
 async function listen(options: { allowedHost?: string[] } = {}, env: Record<string, string> = {}): Promise<number> {
   const proc = new FakeCurrentProcess();
-  Object.assign(proc.env, env);
+  // Disable the session reapers so no interval outlives the test.
+  Object.assign(proc.env, { MCP_HTTP_STALE_SESSION_MS: '0', MCP_HTTP_STREAM_LOST_SESSION_MS: '0' }, env);
   const app = createHttpApp(
     { port: '0', ...options },
-    { logger: makeLogger(), serverFactory: vi.fn(), proc }
+    { logger: createMockLogger(), serverFactory: vi.fn(), proc }
   );
   const server = app.listen(0, '127.0.0.1');
   servers.push(server);
@@ -40,10 +38,15 @@ async function listen(options: { allowedHost?: string[] } = {}, env: Record<stri
   return (server.address() as AddressInfo).port;
 }
 
-function request(port: number, opts: { path?: string; method?: string; host?: string; body?: string } = {}): Promise<Reply> {
+function request(
+  port: number,
+  opts: { path?: string; method?: string; host?: string; origin?: string; body?: string; encoding?: string } = {}
+): Promise<Reply> {
   return new Promise((resolve, reject) => {
     const headers: Record<string, string> = {};
     if (opts.host !== undefined) headers.Host = opts.host;
+    if (opts.origin !== undefined) headers.Origin = opts.origin;
+    if (opts.encoding !== undefined) headers['Content-Encoding'] = opts.encoding;
     if (opts.body !== undefined) {
       headers['Content-Type'] = 'application/json';
       headers['Content-Length'] = String(Buffer.byteLength(opts.body));
@@ -54,7 +57,7 @@ function request(port: number, opts: { path?: string; method?: string; host?: st
         let body = '';
         res.setEncoding('utf8');
         res.on('data', (chunk) => (body += chunk));
-        res.on('end', () => resolve({ status: res.statusCode ?? 0, body }));
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body, headers: res.headers }));
       }
     );
     req.on('error', reject);
@@ -117,6 +120,30 @@ describe('HTTP Host allowlist (issue #667)', () => {
     expect(parsed.id).toBeNull();
     expect(parsed.error.code).toBe(-32600);
     expect(parsed.error.message).toContain('10mb');
+  });
+
+  it('answers a corrupt compressed body with a JSON-RPC error, not an HTML page (issue #670)', async () => {
+    const port = await listen();
+    const reply = await request(port, { path: '/mcp', method: 'POST', body: 'not-compressed', encoding: 'gzip' });
+    expect(reply.status).toBe(400);
+    expect(reply.headers['content-type']).toContain('application/json');
+    expect(JSON.parse(reply.body).error.code).toBe(-32600);
+  });
+
+  it('refuses a browser request from a foreign Origin even with a loopback Host (issue #677)', async () => {
+    const port = await listen();
+    const reply = await request(port, { origin: 'https://evil.example' });
+    expect(reply.status).toBe(403);
+    expect(JSON.parse(reply.body).error.message).toContain('Invalid Origin: https://evil.example');
+  });
+
+  it('admits a browser request from an allowlisted Origin and echoes exactly that origin in CORS', async () => {
+    const port = await listen({ allowedHost: ['app.internal'] });
+    for (const origin of ['http://localhost:6274', 'https://app.internal']) {
+      const reply = await request(port, { origin });
+      expect(reply.status, origin).toBe(200);
+      expect(reply.headers['access-control-allow-origin'], origin).toBe(origin);
+    }
   });
 
   it('answers malformed JSON with a JSON-RPC parse error, not an HTML page (issue #670)', async () => {

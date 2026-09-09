@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import { createHttpApp, handleHttpCommand, type ServerFactoryOptions } from '../../../src/cli/http-command.js';
 import { FakeCurrentProcess } from '../../test-utils/mocks/fake-current-process.js';
+import { invokeMiddleware } from '../../test-utils/mocks/express-stubs.js';
 import type { Logger as WinstonLoggerType } from 'winston';
 import { DebugMcpServer } from '../../../src/server.js';
 
@@ -27,11 +28,7 @@ const MockedStreamableHTTPServerTransport = vi.mocked(StreamableHTTPServerTransp
 
 /** Drive a Host-checking middleware with one request; returns what it did. */
 function runHost(middleware: (req: any, res: any, next: any) => void, host: string) {
-  const json = vi.fn();
-  const res = { status: vi.fn(() => ({ json })), json };
-  const next = vi.fn();
-  middleware({ headers: { host } }, res, next);
-  return { res, json, next };
+  return invokeMiddleware(middleware, { headers: { host } });
 }
 
 describe('HTTP Command Handler', () => {
@@ -109,6 +106,9 @@ describe('HTTP Command Handler', () => {
       listen: vi.fn(),
     };
     expressMock.state.app = mockApp;
+    // createHttpApp reads MCP_HTTP_ALLOWED_HOSTS and throws on an unusable value;
+    // the developer's or CI's real environment must not reach the tests.
+    vi.stubEnv('MCP_HTTP_ALLOWED_HOSTS', '');
   });
 
   afterEach(() => {
@@ -159,14 +159,27 @@ describe('HTTP Command Handler', () => {
       expect(malformed.res.status).toHaveBeenCalledWith(400);
       expect(malformed.json.mock.calls[0][0].error.code).toBe(-32700);
 
-      const charset = run({ type: 'charset.unsupported', status: 415, message: 'unsupported charset "LATIN1"' });
+      const charset = run({ type: 'charset.unsupported', status: 415, message: 'unsupported charset "LATIN1"', expose: true });
       expect(charset.res.status).toHaveBeenCalledWith(415);
       expect(charset.json.mock.calls[0][0].error).toEqual({ code: -32600, message: 'unsupported charset "LATIN1"' });
 
-      // Not a body-parser error: Express's default handling must see it.
+      // body-parser wraps a decompression failure with a status but no `type`
+      // (lib/read.js): it must still answer as JSON-RPC, not fall through to HTML.
+      const gzip = run({ status: 400, message: 'incorrect header check', expose: true });
+      expect(gzip.res.status).toHaveBeenCalledWith(400);
+      expect(gzip.json.mock.calls[0][0].error).toEqual({ code: -32600, message: 'incorrect header check' });
+
+      // A 5xx from the stream layer is a server fault: internal-error code, no message echo.
+      const stream = run({ type: 'stream.not.readable', status: 500, message: 'stream is not readable', expose: false });
+      expect(stream.res.status).toHaveBeenCalledWith(500);
+      expect(stream.json.mock.calls[0][0].error).toEqual({ code: -32603, message: 'Internal error' });
+
+      // Anything else reaching an MCP endpoint is still answered as JSON-RPC, and logged.
       const plain = run(new Error('boom'));
-      expect(plain.next).toHaveBeenCalledWith(expect.objectContaining({ message: 'boom' }));
-      expect(plain.res.status).not.toHaveBeenCalled();
+      expect(plain.res.status).toHaveBeenCalledWith(500);
+      expect(plain.json.mock.calls[0][0].error).toEqual({ code: -32603, message: 'Internal error' });
+      expect(plain.next).not.toHaveBeenCalled();
+      expect(mockLogger.error).toHaveBeenCalledWith(expect.stringContaining('boom'), expect.anything());
 
       // Headers already sent: nothing more can be written, pass it on.
       const late = run({ type: 'entity.too.large', status: 413, message: 'x' }, true);
@@ -230,7 +243,7 @@ describe('HTTP Command Handler', () => {
       };
       const next = vi.fn();
 
-      corsMiddleware({ method: 'GET' }, res, next);
+      corsMiddleware({ method: 'GET', headers: {} }, res, next);
       expect(headers.get('access-control-allow-origin')).toBe('*');
       expect(headers.get('access-control-expose-headers')?.toLowerCase()).toContain('mcp-session-id');
       expect(headers.get('access-control-expose-headers')?.toLowerCase()).toContain('last-event-id');
@@ -240,9 +253,17 @@ describe('HTTP Command Handler', () => {
       // OPTIONS short-circuits
       const res2 = { header: vi.fn(), sendStatus: vi.fn() };
       const next2 = vi.fn();
-      corsMiddleware({ method: 'OPTIONS' }, res2, next2);
+      corsMiddleware({ method: 'OPTIONS', headers: {} }, res2, next2);
       expect(res2.sendStatus).toHaveBeenCalledWith(200);
       expect(next2).not.toHaveBeenCalled();
+
+      // A browser request carries an Origin the allowlist middleware has already
+      // validated: echo that origin (with Vary) rather than granting every origin.
+      const echoed = new Map<string, string>();
+      const res3 = { header: vi.fn((name: string, value: string) => echoed.set(name.toLowerCase(), value)), sendStatus: vi.fn() };
+      corsMiddleware({ method: 'POST', headers: { origin: 'http://localhost:6274' } }, res3, vi.fn());
+      expect(echoed.get('access-control-allow-origin')).toBe('http://localhost:6274');
+      expect(echoed.get('vary')).toBe('Origin');
     });
   });
 
@@ -870,11 +891,33 @@ describe('HTTP Command Handler', () => {
 
       await handleHttpCommand(
         { port: '3001' },
-        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess }
+        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
 
       expect(mockLogger.error).toHaveBeenCalledWith('Failed to start server in HTTP mode', { error });
       expect(mockExitProcess).toHaveBeenCalledWith(1);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(fakeProc.stderrChunks.join('')).toContain('boom');
+    });
+
+    it('reports a port already in use on stderr, not only in the silenced log', async () => {
+      const handlers: Record<string, (err: unknown) => void> = {};
+      mockApp.listen = vi.fn(() => ({
+        on: vi.fn((event: string, handler: (err: unknown) => void) => {
+          handlers[event] = handler;
+        }),
+        close: vi.fn(),
+      }));
+
+      await handleHttpCommand(
+        { port: '3001' },
+        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+      );
+      handlers.error(Object.assign(new Error('listen EADDRINUSE'), { code: 'EADDRINUSE' }));
+
+      expect(mockExitProcess).toHaveBeenCalledWith(1);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(fakeProc.stderrChunks.join('')).toMatch(/3001.*already in use/);
     });
 
     it('handles SIGINT by closing all transports, stopping all servers, then exiting', async () => {

@@ -221,7 +221,7 @@ on a Docker network (`http://mcp-debugger:3001/mcp` from another container or ma
 controls who can reach the port (a private network, mTLS, an authenticating proxy):
 
 ```bash
-docker run -d --rm --network mynet --name mcp-debugger -e MCP_HTTP_ALLOWED_HOSTS=mcp-debugger   debugmcp/mcp-debugger:latest http -p 3001
+docker run -d --rm --network mynet --name mcp-debugger -e MCP_HTTP_ALLOWED_HOSTS=mcp-debugger \n  debugmcp/mcp-debugger:latest http -p 3001
 # or: ... debugmcp/mcp-debugger:latest http -p 3001 --allowed-host mcp-debugger
 ```
 
@@ -229,8 +229,8 @@ The image `EXPOSE`s 3001, matching the CLI default; pass `-p` explicitly if you 
 
 ### Container lifecycle environment variables
 
-Two environment variables control when a containerized server gives up and exits. Both are
-passed through with `-e`:
+These environment variables control when a containerized server gives up and exits, and who
+may reach it. All are passed through with `-e`:
 
 - **`MCP_EXIT_ON_STDIN_CLOSE=1`** (`src/cli/stdin-watchdog.ts`) -- opt-in orphan
   self-defense for the **network transports** (`http`, `sse`), which otherwise have no
@@ -263,8 +263,9 @@ passed through with `-e`:
 - **`MCP_HTTP_ALLOWED_HOSTS`** (`src/cli/host-allowlist.ts`) -- comma-separated `Host` header
   values to accept in addition to the loopback trio (`localhost`, `127.0.0.1`, `[::1]`); the same
   list as repeating `--allowed-host`. Port-agnostic and case-insensitive; IPv6 literals in
-  brackets; no wildcard. An unusable entry (a URL, a bare IPv6 literal, `*`) stops the server at
-  startup with the entry named. Read by `http` mode only. See
+  brackets; no wildcard. The same list governs browser requests' `Origin`. An unusable entry (a
+  URL, a bare IPv6 literal, `*`, anything the parser would rewrite) stops the server at startup
+  with the entry named on stderr. Read by `http` mode only. See
   [Streamable HTTP from a container](#streamable-http-from-a-container).
 
 ## Dockerfile Details
