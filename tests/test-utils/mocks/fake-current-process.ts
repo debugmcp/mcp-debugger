@@ -30,13 +30,17 @@ export class FakeCurrentProcess extends EventEmitter implements ProcessLike {
 
   public stdin = new PassThrough();
   public stdout = new PassThrough();
+  public stderr = new PassThrough();
 
   /** Everything written to stdout, decoded as utf8, in write order. */
   public readonly stdoutChunks: string[] = [];
+  /** Everything written to stderr, decoded as utf8, in write order. */
+  public readonly stderrChunks: string[] = [];
 
   constructor() {
     super();
     this.stdout.on('data', (chunk: Buffer) => this.stdoutChunks.push(chunk.toString('utf8')));
+    this.stderr.on('data', (chunk: Buffer) => this.stderrChunks.push(chunk.toString('utf8')));
   }
 
   /** Fresh live IPC channel: new recording send mock, connected = true. */

@@ -63,6 +63,25 @@ any other MCP host) lists mcp-debugger as failed or disconnected.
 3. Use quotes for paths with spaces:
    - If your path contains spaces, ensure it's properly quoted in the command
 
+### The HTTP Endpoint Answers 403 `Invalid Host: <name>`
+
+`http` mode accepts only loopback `Host` headers by default -- `localhost`, `127.0.0.1`,
+`[::1]` -- as DNS-rebinding protection. A client that reaches the server by any other name (a
+container's service name, the machine's hostname, a LAN IP) gets:
+
+```json
+{"jsonrpc":"2.0","error":{"code":-32000,"message":"Invalid Host: mcp-debugger — this server accepts only these Host header values: localhost, 127.0.0.1, [::1] (DNS-rebinding protection; the port is ignored). Reach it through a port-forward or SSH tunnel, or, if another access control fronts it, start it with --allowed-host mcp-debugger or MCP_HTTP_ALLOWED_HOSTS=mcp-debugger."},"id":null}
+```
+
+Two ways out:
+
+- **Keep the default and tunnel.** `ssh -L 3001:127.0.0.1:3001 user@server` (or
+  `kubectl port-forward`, or `docker run -p 127.0.0.1:3001:3001`) makes the client's `Host`
+  loopback; point it at `http://127.0.0.1:3001/mcp`.
+- **Opt in explicitly.** Start the server with `--allowed-host <name>` (repeatable) or
+  `MCP_HTTP_ALLOWED_HOSTS=<name>,<name>` when another access control fronts it. The server logs
+  the extended allowlist at startup and each rejected hostname once; there is no wildcard.
+
 ## Python Issues
 
 ### Python Not Found

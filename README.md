@@ -208,6 +208,15 @@ dropped (`MCP_HTTP_STREAM_LOST_SESSION_MS`), or 30 minutes idle if it never open
 The port defaults to 3001. `GET /health` on the same port answers a liveness check. The legacy
 `sse` subcommand still exists but is deprecated — use `http`.
 
+The server accepts only loopback `Host` headers by default — `localhost`, `127.0.0.1`, `[::1]` —
+as DNS-rebinding protection for an unauthenticated endpoint that can spawn processes and attach to
+PIDs. A client on another machine reaches it through a port-forward or an SSH tunnel
+(`ssh -L 3001:127.0.0.1:3001 user@server`, then `http://127.0.0.1:3001/mcp`); any other `Host`
+gets a 403 that says so. To accept a service name directly — `http://mcp-debugger:3001/mcp` on a
+container network — start the server with `--allowed-host mcp-debugger` (repeatable) or
+`MCP_HTTP_ALLOWED_HOSTS=mcp-debugger` (comma-separated). That opt-in means another access control
+fronts the server; there is no wildcard.
+
 ## 📚 How It Works
 
 mcp-debugger exposes debugging operations as MCP tools that can be called with structured JSON parameters:

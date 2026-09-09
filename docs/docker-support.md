@@ -204,6 +204,29 @@ In the MCP settings:
 ]
 ```
 
+### Streamable HTTP from a container
+
+`http` mode is the transport for a server that runs somewhere else. Publish the port on the
+host's loopback and point the client at `http://127.0.0.1:3001/mcp`:
+
+```bash
+docker run -d --rm -p 127.0.0.1:3001:3001 -v /path/to/project:/workspace:rw debugmcp/mcp-debugger:latest http -p 3001
+```
+
+The endpoint accepts only loopback `Host` headers by default (`localhost`, `127.0.0.1`, `[::1]`) --
+DNS-rebinding protection for an unauthenticated debugger -- so the published-on-loopback form
+above and `kubectl port-forward` work as-is, while reaching the container by its **service name**
+on a Docker network (`http://mcp-debugger:3001/mcp` from another container or machine) answers
+403 `Invalid Host: mcp-debugger`. That case is an explicit opt-in, because it means something else
+controls who can reach the port (a private network, mTLS, an authenticating proxy):
+
+```bash
+docker run -d --rm --network mynet --name mcp-debugger -e MCP_HTTP_ALLOWED_HOSTS=mcp-debugger   debugmcp/mcp-debugger:latest http -p 3001
+# or: ... debugmcp/mcp-debugger:latest http -p 3001 --allowed-host mcp-debugger
+```
+
+The image `EXPOSE`s 3001, matching the CLI default; pass `-p` explicitly if you choose another port.
+
 ### Container lifecycle environment variables
 
 Two environment variables control when a containerized server gives up and exits. Both are
@@ -237,6 +260,12 @@ passed through with `-e`:
   attach target -- within this window plus one sweep, instead of holding them for the full
   stale window (issue #658). Only a client that never opened a stream waits out
   `MCP_HTTP_STALE_SESSION_MS`. `GET /health` lists what each HTTP session is holding.
+- **`MCP_HTTP_ALLOWED_HOSTS`** (`src/cli/host-allowlist.ts`) -- comma-separated `Host` header
+  values to accept in addition to the loopback trio (`localhost`, `127.0.0.1`, `[::1]`); the same
+  list as repeating `--allowed-host`. Port-agnostic and case-insensitive; IPv6 literals in
+  brackets; no wildcard. An unusable entry (a URL, a bare IPv6 literal, `*`) stops the server at
+  startup with the entry named. Read by `http` mode only. See
+  [Streamable HTTP from a container](#streamable-http-from-a-container).
 
 ## Dockerfile Details
 

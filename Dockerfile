@@ -255,7 +255,7 @@ COPY --from=builder /app/node_modules/which /app/node_modules/which
 COPY --from=builder /app/node_modules/.pnpm/isexe@4.0.0/node_modules/isexe /app/node_modules/isexe
 
 # Expose ports
-EXPOSE 3000 5679
+EXPOSE 3001 5679
 
 # Copy stdio silencer preloader into runtime image
 COPY --from=builder /app/scripts/stdio-silencer.cjs /app/scripts/stdio-silencer.cjs

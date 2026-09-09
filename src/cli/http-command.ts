@@ -4,11 +4,18 @@ import express from 'express';
 import { randomUUID } from 'crypto';
 import { IncomingMessage, ServerResponse } from 'http';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { DebugMcpServer } from '../server.js';
 import { attachSharedFileTransport } from '../utils/logger.js';
-import { SSEOptions } from './setup.js';
+import type { HttpOptions } from './setup.js';
+import {
+  ALLOWED_HOSTS_ENV_KEY,
+  ALLOWED_HOST_FLAG,
+  AllowedHostError,
+  LOOPBACK_HOSTS,
+  hostAllowlistMiddleware,
+  parseAllowedHosts,
+} from './host-allowlist.js';
 import { watchStdinForParentExit } from './stdin-watchdog.js';
 import type { ProcessLike } from '../interfaces/process-interfaces.js';
 
@@ -41,6 +48,9 @@ interface SessionData {
    */
   hadStream: boolean;
 }
+
+/** Largest JSON-RPC request body accepted; also named in the 413 the parser answers with (issue #670). */
+const JSON_BODY_LIMIT = '10mb';
 
 /** Idle window before a streamless HTTP session is reaped (issue #337). */
 const DEFAULT_STALE_SESSION_MS = 30 * 60 * 1000;
@@ -126,14 +136,36 @@ function parseSweepIntervalMs(raw: string | undefined, logger: WinstonLoggerType
 }
 
 export function createHttpApp(
-  options: SSEOptions,
+  options: HttpOptions,
   dependencies: HttpCommandDependencies
 ): Express {
   const { logger, serverFactory } = dependencies;
   const proc = dependencies.proc ?? process;
 
-  // createMcpExpressApp wires hostHeaderValidation for localhost binds
-  const app = createMcpExpressApp();
+  // The app is built here rather than with the SDK's createMcpExpressApp()
+  // (issues #667, #670). That helper installs its own express.json() at the
+  // 100 KB default ahead of everything else — so the 10 MB parser below was
+  // never reached — and its Host check answers a fixed "Invalid Host: <name>"
+  // that names neither the cause nor the remedy. The allowlist middleware
+  // mirrors the SDK's comparison and runs first, so a rejected request is
+  // never parsed (the order the SDK's own v1.x branch has since adopted).
+  // Throws AllowedHostError for an unusable --allowed-host/env entry:
+  // handleHttpCommand turns that into a named startup failure.
+  const { hosts: allowedHosts, warnings: allowedHostWarnings } = parseAllowedHosts(
+    options.allowedHost,
+    proc.env[ALLOWED_HOSTS_ENV_KEY]
+  );
+  const app = express();
+  app.use(hostAllowlistMiddleware(allowedHosts, logger));
+  for (const warning of allowedHostWarnings) {
+    logger.warn(warning);
+  }
+  if (allowedHosts.length > LOOPBACK_HOSTS.length) {
+    logger.info(
+      `HTTP Host allowlist extended beyond loopback: ${allowedHosts.join(', ')} ` +
+        `(from ${ALLOWED_HOST_FLAG} / ${ALLOWED_HOSTS_ENV_KEY}); this assumes another access control fronts the server.`
+    );
+  }
 
   const httpSessions = new Map<string, SessionData>();
 
@@ -207,7 +239,7 @@ export function createHttpApp(
     }
   });
 
-  app.use(express.json({ limit: '10mb' }));
+  app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
   const handleMcpRequest = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -345,14 +377,51 @@ export function createHttpApp(
     });
   });
 
+  // A body-parser failure (oversize, malformed JSON, bad charset) would
+  // otherwise fall through to Express's HTML error page, which an MCP client
+  // cannot read (issue #670). Answer in the JSON-RPC shape instead. Express
+  // recognizes an error handler by its four parameters.
+  app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+    if (res.headersSent || !isBodyParserError(err)) {
+      next(err);
+      return;
+    }
+    if (err.type === 'entity.too.large') {
+      res.status(413).json({
+        jsonrpc: '2.0',
+        error: { code: -32600, message: `Request body too large (limit ${JSON_BODY_LIMIT})` },
+        id: null,
+      });
+      return;
+    }
+    const parseFailure = err.type === 'entity.parse.failed';
+    res.status(err.status).json({
+      jsonrpc: '2.0',
+      error: {
+        code: parseFailure ? -32700 : -32600,
+        message: parseFailure ? `Parse error: ${err.message}` : err.message,
+      },
+      id: null,
+    });
+  });
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (app as any).httpSessions = httpSessions;
 
   return app;
 }
 
+/** body-parser (via express.json) tags its errors with a `type` and an HTTP `status`. */
+function isBodyParserError(err: unknown): err is { type: string; status: number; message: string } {
+  if (typeof err !== 'object' || err === null) {
+    return false;
+  }
+  const candidate = err as { type?: unknown; status?: unknown };
+  return typeof candidate.type === 'string' && typeof candidate.status === 'number';
+}
+
 export async function handleHttpCommand(
-  options: SSEOptions,
+  options: HttpOptions,
   dependencies: HttpCommandDependencies
 ): Promise<void> {
   const proc = dependencies.proc ?? process;
@@ -457,7 +526,17 @@ export async function handleHttpCommand(
       env: proc.env,
     });
   } catch (error) {
-    logger.error('Failed to start server in HTTP mode', { error });
+    if (error instanceof AllowedHostError) {
+      // Fail fast and by name: a silently dropped allowlist entry would
+      // reproduce the very discoverability problem the flag exists to fix.
+      // The console logger is silenced in http mode, so the log line alone
+      // would leave the operator with a bare exit code 1 — say it on stderr too.
+      const line = `${error.message}. The server was not started.`;
+      logger.error(line);
+      proc.stderr?.write(`mcp-debugger: ${line}\n`);
+    } else {
+      logger.error('Failed to start server in HTTP mode', { error });
+    }
     exitProcess(1);
   }
 }

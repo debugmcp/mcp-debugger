@@ -11,7 +11,10 @@ export interface SSEOptions {
   logFile?: string;
 }
 
-export type HttpOptions = SSEOptions;
+export interface HttpOptions extends SSEOptions {
+  /** Repeatable `--allowed-host` values; merged with MCP_HTTP_ALLOWED_HOSTS (issue #667). */
+  allowedHost?: string[];
+}
 
 export interface CheckRustBinaryOptions {
   json?: boolean;
@@ -81,6 +84,13 @@ export function setupHttpCommand(program: Command, handler: HttpHandler): void {
     .option('-p, --port <number>', 'Port to listen on', '3001')
     .option('-l, --log-level <level>', 'Set log level (error, warn, info, debug)', 'info')
     .option('--log-file <path>', 'Log to file instead of console')
+    .option(
+      '--allowed-host <host>',
+      'Additional Host header value to accept (repeatable; or MCP_HTTP_ALLOWED_HOSTS, comma-separated). ' +
+        'Implies another access control fronts this server. No wildcard. Default: localhost, 127.0.0.1, [::1]',
+      (value: string, previous: string[]) => [...previous, value],
+      [] as string[]
+    )
     .action(async (options: HttpOptions, command: Command) => {
       // Silence console output to protect any spawned proxy IPC channels
       process.env.CONSOLE_OUTPUT_SILENCED = '1';
