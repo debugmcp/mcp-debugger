@@ -134,7 +134,10 @@ jobs:
           MANIFEST=packages/codelldb-common/vendor-manifest.json
           VERSION="$(node -p "require('./$MANIFEST').codelldb.version")"
           EXPECTED_SHA="$(node -p "require('./$MANIFEST').codelldb.assets['codelldb-$CANARY_PLAT.vsix']")"
-          curl -fsSL --retry 3 -o "$RUNNER_TEMP/codelldb.vsix" \
+          # A short GitHub release-CDN blip (HTTP 500 x4 in ~7s filed #669)
+          # must not fail the leg: curl already treats 5xx as transient, the
+          # 1s/2s/4s default backoff was the problem. ~60s window.
+          curl -fsSL --retry 6 --retry-delay 10 -o "$RUNNER_TEMP/codelldb.vsix" \
             "https://github.com/vadimcn/codelldb/releases/download/v${VERSION}/codelldb-${CANARY_PLAT}.vsix"
           ACTUAL_SHA="$(node -e "const{createHash}=require('crypto');const{readFileSync}=require('fs');console.log(createHash('sha256').update(readFileSync(process.argv[1])).digest('hex'))" "$RUNNER_TEMP/codelldb.vsix")"
           if [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
