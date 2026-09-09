@@ -138,6 +138,42 @@ describe('HTTP Command Handler', () => {
       expect(uses[3]).toHaveLength(4);
     });
 
+    it('answers body-parser failures in the JSON-RPC shape and passes every other error on (issue #670)', () => {
+      createHttpApp({ port: '3001' }, { logger: mockLogger, serverFactory: mockServerFactory });
+      const errorHandler = mockApp.use.mock.calls[3][0] as (err: unknown, req: any, res: any, next: any) => void;
+      const run = (err: unknown, headersSent = false) => {
+        const json = vi.fn();
+        const res = { headersSent, status: vi.fn(() => ({ json })), json };
+        const next = vi.fn();
+        errorHandler(err, {}, res, next);
+        return { res, json, next };
+      };
+
+      const tooLarge = run({ type: 'entity.too.large', status: 413, message: 'request entity too large' });
+      expect(tooLarge.res.status).toHaveBeenCalledWith(413);
+      expect(tooLarge.json.mock.calls[0][0].error.code).toBe(-32600);
+      expect(tooLarge.json.mock.calls[0][0].error.message).toContain('10mb');
+      expect(tooLarge.next).not.toHaveBeenCalled();
+
+      const malformed = run({ type: 'entity.parse.failed', status: 400, message: 'Unexpected token' });
+      expect(malformed.res.status).toHaveBeenCalledWith(400);
+      expect(malformed.json.mock.calls[0][0].error.code).toBe(-32700);
+
+      const charset = run({ type: 'charset.unsupported', status: 415, message: 'unsupported charset "LATIN1"' });
+      expect(charset.res.status).toHaveBeenCalledWith(415);
+      expect(charset.json.mock.calls[0][0].error).toEqual({ code: -32600, message: 'unsupported charset "LATIN1"' });
+
+      // Not a body-parser error: Express's default handling must see it.
+      const plain = run(new Error('boom'));
+      expect(plain.next).toHaveBeenCalledWith(expect.objectContaining({ message: 'boom' }));
+      expect(plain.res.status).not.toHaveBeenCalled();
+
+      // Headers already sent: nothing more can be written, pass it on.
+      const late = run({ type: 'entity.too.large', status: 413, message: 'x' }, true);
+      expect(late.next).toHaveBeenCalled();
+      expect(late.res.status).not.toHaveBeenCalled();
+    });
+
     it('accepts only the loopback trio by default', () => {
       createHttpApp({ port: '3001' }, { logger: mockLogger, serverFactory: mockServerFactory });
       const hostMiddleware = mockApp.use.mock.calls[0][0];

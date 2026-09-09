@@ -43,6 +43,14 @@ describe('parseAllowedHosts', () => {
     expect(parseAllowedHosts(['[fd00::5]'], undefined).hosts).toEqual([...LOOPBACK, '[fd00::5]']);
   });
 
+  it('accepts an internationalized hostname in its punycode form and warns about the normalization', () => {
+    const { hosts, warnings } = parseAllowedHosts(['bücher.example'], undefined);
+    expect(hosts).toEqual([...LOOPBACK, 'xn--bcher-kva.example']);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('bücher.example');
+    expect(warnings[0]).toContain('xn--bcher-kva.example');
+  });
+
   it('rejects a URL instead of silently accepting its scheme as the hostname', () => {
     expect(() => parseAllowedHosts(['http://mcp-debugger'], undefined)).toThrow(AllowedHostError);
     expect(() => parseAllowedHosts(['mcp-debugger/mcp'], undefined)).toThrow(AllowedHostError);
@@ -159,5 +167,19 @@ describe('hostAllowlistMiddleware', () => {
     expect(logger.warn).toHaveBeenCalledTimes(2);
     expect(logger.warn.mock.calls[0][0]).toContain('evil.example');
     expect(logger.warn.mock.calls[1][0]).toContain('other.example');
+  });
+
+  it('stops logging new hostnames after 50 distinct rejections so a scanner cannot grow the log', () => {
+    const logger = { warn: vi.fn() };
+    const middleware = hostAllowlistMiddleware(LOOPBACK, logger);
+    for (let i = 0; i < 60; i++) {
+      const json = vi.fn();
+      middleware(
+        { headers: { host: `scan-${i}.example` } } as never,
+        { status: vi.fn(() => ({ json })), json } as never,
+        vi.fn()
+      );
+    }
+    expect(logger.warn).toHaveBeenCalledTimes(50);
   });
 });
