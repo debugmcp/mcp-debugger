@@ -215,6 +215,55 @@ describe('SessionManager.evaluateExpression default-frame resolution', () => {
     expect(result.anchorNote).toMatch(/frameId: 30/);
   });
 
+  it('names the anchor frame when the evaluation itself fails (#672)', async () => {
+    const { sessionManager, dependencies } = makeManager();
+    const session = await createRunningSession(sessionManager, dependencies);
+    (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
+    dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+      if (command === 'stackTrace') {
+        return {
+          body: {
+            stackFrames: [
+              { id: 30, name: 'handle', line: 160, source: { path: '/app/node_modules/router/index.js', sourceReference: 0 } },
+              { id: 53, name: 'handleHttpCommand', line: 353, source: { path: '/app/dist/cli/http-command.js', sourceReference: 0 } }
+            ]
+          }
+        };
+      }
+      if (command === 'evaluate') {
+        throw new Error('Unable to evaluate on async stack frame');
+      }
+      return { success: true, body: {} };
+    });
+
+    const result = await sessionManager.evaluateExpression(session.id, 'req.url');
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Invalid frame context');
+    expect(result.frame).toEqual({ name: 'handle', file: '/app/node_modules/router/index.js', line: 160 });
+    expect(result.anchorNote).toMatch(/kept as frame 0/);
+  });
+
+  it('names the anchor frame when the adapter answers without a body', async () => {
+    const { sessionManager, dependencies } = makeManager();
+    const session = await createRunningSession(sessionManager, dependencies);
+    dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+      if (command === 'stackTrace') {
+        return { body: { stackFrames: [{ id: 9, name: 'top', line: 4, source: { path: '/work/app.js' } }] } };
+      }
+      if (command === 'evaluate') {
+        return { success: true };
+      }
+      return { success: true, body: {} };
+    });
+
+    const result = await sessionManager.evaluateExpression(session.id, 'x');
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('No response body');
+    expect(result.frame).toEqual({ name: 'top', file: '/work/app.js', line: 4 });
+  });
+
   it('fails cleanly when the paused thread reports no stack frames', async () => {
     const { sessionManager, dependencies } = makeManager();
     const session = await createRunningSession(sessionManager, dependencies);
@@ -230,6 +279,8 @@ describe('SessionManager.evaluateExpression default-frame resolution', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('No active stack frame');
+    // The resolver's explanation (readiness wait, thread scan) travels with the failure.
+    expect(result.anchorNote).toMatch(/no stack frames/i);
   });
 
   it('wraps stack-trace failures in an evaluation error', async () => {

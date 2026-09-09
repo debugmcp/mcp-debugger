@@ -74,6 +74,23 @@ describe('JsDebugAdapterPolicy', () => {
     expect(JsDebugAdapterPolicy.filterStackFrames!(frames.slice(1) as any, false)).toEqual([]);
   });
 
+  it('normalizes a debugger statement, which js-debug reports as a pause, to a breakpoint stop (#672)', () => {
+    const ctx = { pausePending: false, lineBreakpointCount: 0, functionBreakpointCount: 0 };
+    expect(
+      JsDebugAdapterPolicy.normalizeStopReason!('pause', { reason: 'pause', description: 'Paused on debugger statement' }, ctx)
+    ).toBe('breakpoint');
+    // An explicit pause keeps its reason.
+    expect(JsDebugAdapterPolicy.normalizeStopReason!('pause', { reason: 'pause', description: 'Paused' }, ctx)).toBeUndefined();
+    expect(JsDebugAdapterPolicy.normalizeStopReason!('pause', { reason: 'pause' }, ctx)).toBeUndefined();
+  });
+
+  it('recognizes async boundary frames (the sourceless line-0 separators) (#672)', () => {
+    expect(JsDebugAdapterPolicy.isAsyncBoundaryFrame!({ id: 1, name: 'await', file: '<unknown_source>', line: 0 })).toBe(true);
+    expect(JsDebugAdapterPolicy.isAsyncBoundaryFrame!({ id: 2, name: 'HTTPINCOMINGMESSAGE', file: '', line: 0 })).toBe(true);
+    expect(JsDebugAdapterPolicy.isAsyncBoundaryFrame!({ id: 3, name: 'handle', file: '/app/x.js', line: 0 })).toBe(false);
+    expect(JsDebugAdapterPolicy.isAsyncBoundaryFrame!({ id: 4, name: 'VM123', file: '<unknown_source>', line: 3 })).toBe(false);
+  });
+
   it('extracts local variables while excluding special entries', () => {
     const frames = [{ id: 1 }];
     const scopes = {

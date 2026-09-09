@@ -22,7 +22,7 @@ import {
   withTimeoutHint
 } from '../dap-request-helpers.js';
 import type { EvaluateContext } from '../operations-context.js';
-import type { FrameAnchorResolver } from './frame-anchor-resolver.js';
+import { frameSummary, type FrameAnchorResolver, type FrameSummary } from './frame-anchor-resolver.js';
 
 /**
  * Result type for evaluate expression operations
@@ -47,10 +47,13 @@ export interface EvaluateResult {
   /**
    * The frame the expression was evaluated in when no frameId was given —
    * the same shape get_local_variables reports — so a caller can tell which
-   * frame answered without a second stack request.
+   * frame answered without a second stack request. Present on failure too.
    */
-  frame?: { name: string; file: string; line: number };
+  frame?: FrameSummary;
 }
+
+/** The disclosure fields every return of a default-anchored evaluation carries. */
+type AnchorFields = Pick<EvaluateResult, 'anchorNote' | 'frame'>;
 
 /**
  * The "variable name" an evaluate expression stands for, for name-based
@@ -136,8 +139,7 @@ export class ExpressionEvaluator {
 
     // Resolve the same default anchor stack and locals use. An explicit
     // frameId is authoritative and deliberately bypasses the resolver.
-    let anchorNote: string | undefined;
-    let anchorFrame: EvaluateResult['frame'];
+    let anchorFields: AnchorFields = {};
     if (frameId === undefined) {
       try {
         this.ctx.logger.info(
@@ -149,11 +151,20 @@ export class ExpressionEvaluator {
           false,
           { ensureStackReady: true }
         );
-        anchorNote = anchor.note;
+        // The thread-adoption note and the paused-frame fact, with the advice
+        // that fits this tool: it has a frameId parameter and nothing else.
+        const pausedAdvice =
+          anchor.pausedFrame && !anchor.pausedFrame.kept
+            ? ` Pass frameId: ${anchor.pausedFrame.frame.id} to evaluate there.`
+            : '';
+        const anchorNote = [anchor.note, anchor.pausedFrameNote && `${anchor.pausedFrameNote}${pausedAdvice}`]
+          .filter((part): part is string => !!part)
+          .join(' ');
+        anchorFields = anchorNote ? { anchorNote } : {};
         if (anchor.frames.length > 0) {
           const top = anchor.frames[0];
           frameId = top.id;
-          anchorFrame = { name: top.name, file: top.file, line: top.line };
+          anchorFields = { ...anchorFields, frame: frameSummary(top) };
           this.ctx.logger.info(
             `[SM evaluateExpression ${sessionId}] Using shared anchor frame ID: ${frameId}`
           );
@@ -166,6 +177,7 @@ export class ExpressionEvaluator {
             error: anchor.note?.includes('No stopped thread')
               ? 'Unable to find thread for evaluation. Ensure the debugger is paused at a breakpoint.'
               : 'No active stack frame. Ensure the debugger is paused at a breakpoint.',
+            ...anchorFields
           };
         }
       } catch (error) {
@@ -216,8 +228,7 @@ export class ExpressionEvaluator {
           namedVariables: body.namedVariables,
           indexedVariables: body.indexedVariables,
           presentationHint: body.presentationHint,
-          ...(anchorNote ? { anchorNote } : {}),
-          ...(anchorFrame ? { frame: anchorFrame } : {})
+          ...anchorFields
         };
 
         // Redaction hook (issue #237), placed above the logs below so they
@@ -264,7 +275,7 @@ export class ExpressionEvaluator {
         return result;
       } else {
         this.ctx.logger.warn(`[SM evaluateExpression ${sessionId}] No body in evaluate response`);
-        return { success: false, error: 'No response body from debug adapter' };
+        return { success: false, error: 'No response body from debug adapter', ...anchorFields };
       }
     } catch (error) {
       const errorMessage = getErrorMessage(error);
@@ -298,12 +309,7 @@ export class ExpressionEvaluator {
       // Name the frame the failed evaluation ran in: "Unable to evaluate on
       // async stack frame" is only actionable when the caller can see which
       // frame that was (issue #672).
-      return {
-        success: false,
-        error: withTimeoutHint(userError),
-        ...(anchorNote ? { anchorNote } : {}),
-        ...(anchorFrame ? { frame: anchorFrame } : {})
-      };
+      return { success: false, error: withTimeoutHint(userError), ...anchorFields };
     }
   }
 }

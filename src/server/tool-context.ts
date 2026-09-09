@@ -25,7 +25,7 @@ import type {
 } from '@debugmcp/shared';
 import type { SessionManager } from '../session/session-manager.js';
 import type { DebugResult, StepResultData } from '../session/session-manager-core.js';
-import type { StackTraceResult } from '../session/session-manager-data.js';
+import type { FrameSummary, StackTraceResult } from '../session/session-manager-data.js';
 import type { VariableTruncationSummary } from '../session/variable-caps.js';
 import type { SimpleFileChecker, FileExistenceResult } from '../utils/simple-file-checker.js';
 import type { LineReader } from '../utils/line-reader.js';
@@ -108,7 +108,7 @@ export interface ToolContext {
   getScopes(sessionId: string, frameId: number): Promise<DebugProtocol.Scope[]>;
   getLocalVariables(sessionId: string, includeSpecial?: boolean, names?: string[]): Promise<{
     variables: Variable[];
-    frame: { name: string; file: string; line: number } | null;
+    frame: FrameSummary | null;
     scopeName: string | null;
     anchorNote?: string;
     truncation?: VariableTruncationSummary;

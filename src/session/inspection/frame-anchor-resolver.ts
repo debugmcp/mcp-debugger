@@ -7,6 +7,7 @@
  * be current at that instant.
  */
 import {
+  BREAKPOINT_STOP_REASONS,
   SessionState,
   type AdapterPolicy,
   type DebugLanguage,
@@ -14,8 +15,29 @@ import {
   type StackFrame
 } from '@debugmcp/shared';
 import type { DebugProtocol } from '@vscode/debugprotocol';
+import path from 'path';
 import type { IProxyManager } from '../../proxy/proxy-manager.js';
 import type { ManagedSession } from '../session-store.js';
+
+/** The frame fields a tool response names when it says which frame answered. */
+export type FrameSummary = Pick<StackFrame, 'name' | 'file' | 'line'>;
+
+export function frameSummary(frame: StackFrame): FrameSummary {
+  return { name: frame.name, file: frame.file, line: frame.line };
+}
+
+/**
+ * The stopped thread's raw frame 0 when the policy classifies it internal
+ * while other frames survive the filter (issue #672).
+ */
+export interface PausedFrameDisclosure {
+  frame: StackFrame;
+  /**
+   * True when it was kept as `frames[0]`; false when it stays hidden and
+   * `frames[0]` is the first visible frame instead.
+   */
+  kept: boolean;
+}
 
 export interface StackTraceResult {
   frames: StackFrame[];
@@ -25,38 +47,45 @@ export interface StackTraceResult {
   hiddenFrameCount: number;
   allFramesInternal: boolean;
   /**
-   * True when the stopped thread's top frame — the frame the debuggee is
-   * actually paused in — is classified internal while other frames survived
-   * the filter (issue #672). On a user-directed stop (breakpoint, step) that
-   * frame is kept as `frames[0]`; otherwise it stays hidden and `note` says
-   * where the pause really is and how to reach it.
+   * Present when the frame the debuggee is actually paused in was filtered
+   * as internal while ancestors survived (issue #672) — see the keep/hide rule
+   * in `resolve`. `pausedFrameNote` states the fact neutrally; each consumer
+   * appends the advice that fits its own parameters.
    */
-  pausedFrameInternal?: boolean;
-  /**
-   * Explanation for an empty result, an adopted sibling thread, or a paused
-   * frame the display filter would have hidden.
-   */
+  pausedFrame?: PausedFrameDisclosure;
+  pausedFrameNote?: string;
+  /** Explanation for an empty result or an adopted sibling thread. */
   note?: string;
 }
 
 /**
  * Stop reasons where the user asked to be exactly here — a breakpoint they
- * set, a step they requested. When such a stop lands in a frame the display
- * filter classifies internal (a dependency, most often), hiding it would
- * misreport the stop location and anchor locals/evaluate on an ancestor the
- * runtime may not even be able to evaluate in (an async ancestor under
- * js-debug, issue #672). A `pause` or an `exception` is different: those
- * routinely land in runtime frames (Go's `runtime.gopark`, a JDK sleep, a
- * panic unwinder) where the first user frame is the actionable one, so they
- * keep the filtered anchor and get a disclosure note instead.
+ * set (the shared breakpoint family), a step they requested. When such a
+ * stop lands in a frame the display filter classifies internal (a
+ * dependency, most often), hiding it would misreport the stop location and
+ * anchor locals/evaluate on an ancestor (issue #672). A `pause` or an
+ * `exception` is different: those routinely land in runtime frames (Go's
+ * `runtime.gopark`, a JDK sleep, a panic unwinder) where the first user frame
+ * is the actionable one, so they keep the filtered anchor and get a
+ * disclosure — unless the policy says the visible anchor sits beyond an async
+ * boundary, in which case nothing below the paused frame can be evaluated
+ * and it is kept whatever the reason.
  */
-const USER_DIRECTED_STOP_REASONS: ReadonlySet<string> = new Set([
-  'breakpoint',
-  'function breakpoint',
-  'data breakpoint',
-  'instruction breakpoint',
-  'step'
-]);
+const USER_DIRECTED_STOP_REASONS: ReadonlySet<string> = new Set([...BREAKPOINT_STOP_REASONS, 'step']);
+
+/**
+ * A kept frame whose `file` is a relative label rather than an openable path
+ * (the JDI bridge synthesizes `java/io/PrintStream.java` for a class off the
+ * sourcePath) gets the same `unresolvedSource` flag the source-map case
+ * carries, so nobody feeds it to get_source_context. Placeholders (`<…>`) are
+ * self-describing and left alone.
+ */
+function withUnresolvedLabel(frame: StackFrame): StackFrame {
+  if (frame.unresolvedSource || frame.file.startsWith('<') || path.isAbsolute(frame.file)) {
+    return frame;
+  }
+  return { ...frame, unresolvedSource: true };
+}
 
 export interface FrameAnchorTunables {
   readonly pausedStackReadyTimeoutMs: number;
@@ -117,6 +146,10 @@ export class FrameAnchorResolver {
       this.ctx.logger.warn(`[FrameAnchor ${sessionId}] No effective thread ID to use.`);
       return emptyResult('No stopped thread is known for this session.');
     }
+    // The stop this stack belongs to. A new stop landing while the stack is
+    // in flight makes the frames stale; the paused-frame rule below only
+    // applies when the stop it reasons about is still the current one.
+    const stopAtGate = session.lastStop;
 
     const proxyManager = session.proxyManager;
     try {
@@ -161,7 +194,8 @@ export class FrameAnchorResolver {
       });
       const totalFrameCount = frames.length;
       let allFramesInternal = false;
-      let pausedFrameInternal = false;
+      let pausedFrame: PausedFrameDisclosure | undefined;
+      let pausedFrameNote: string | undefined;
       const policy = this.ctx.selectPolicy(session.language);
       if (policy.filterStackFrames) {
         const filtered = policy.filterStackFrames(frames, includeInternals);
@@ -172,29 +206,33 @@ export class FrameAnchorResolver {
         } else if (
           filtered.length > 0 &&
           filtered[0].id !== rawTop.id &&
-          this.isStoppedThread(session, threadId, effectiveThreadId, resultThreadId)
+          session.lastStop === stopAtGate &&
+          this.isStoppedThread(stopAtGate, currentThreadId, resultThreadId)
         ) {
           // The paused frame itself was filtered out while ancestors survived
           // (issue #672). Only the stopped thread's top frame is "where the
           // debuggee paused": a sibling thread parked in runtime code is
           // simply filtered as before.
-          pausedFrameInternal = true;
+          const visible = filtered[0];
+          const hiddenAbove = frames.slice(1, frames.indexOf(visible));
+          const crossesAsyncBoundary =
+            policy.isAsyncBoundaryFrame !== undefined &&
+            hiddenAbove.some((frame) => policy.isAsyncBoundaryFrame!(frame));
           const where = `'${rawTop.name}' (${rawTop.file}:${rawTop.line})`;
-          let pausedNote: string;
-          if (USER_DIRECTED_STOP_REASONS.has(session.lastStop?.reason ?? '')) {
-            frames = [rawTop, ...filtered];
-            pausedNote =
+          if (USER_DIRECTED_STOP_REASONS.has(stopAtGate?.reason ?? '') || crossesAsyncBoundary) {
+            const kept = withUnresolvedLabel(rawTop);
+            frames = [kept, ...filtered];
+            pausedFrame = { frame: kept, kept: true };
+            pausedFrameNote =
               `Paused inside an internal frame ${where}; kept as frame 0 so locals and evaluate ` +
               `anchor on the actual stop location.`;
           } else {
             frames = filtered;
-            const visible = filtered[0];
-            pausedNote =
+            pausedFrame = { frame: rawTop, kept: false };
+            pausedFrameNote =
               `Paused inside an internal frame ${where}, hidden by default; inspection anchors on ` +
-              `'${visible.name}' (${visible.file}:${visible.line}). Pass includeInternals: true or ` +
-              `frameId: ${rawTop.id} to inspect the paused frame.`;
+              `'${visible.name}' (${visible.file}:${visible.line}).`;
           }
-          note = note ? `${note} ${pausedNote}` : pausedNote;
         } else {
           frames = filtered;
         }
@@ -209,7 +247,7 @@ export class FrameAnchorResolver {
         totalFrameCount,
         hiddenFrameCount: totalFrameCount - frames.length,
         allFramesInternal,
-        ...(pausedFrameInternal ? { pausedFrameInternal: true } : {}),
+        ...(pausedFrame ? { pausedFrame, pausedFrameNote } : {}),
         ...(note ? { note } : {})
       };
     } catch (error) {
@@ -219,22 +257,23 @@ export class FrameAnchorResolver {
   }
 
   /**
-   * Whether the resolved stack belongs to the thread the last stop event
-   * named. When the stop carried no thread id, "the stopped thread" is the
-   * implicit current thread — an explicit request for another thread, or a
-   * readiness adoption of a sibling, is not it.
+   * Whether the resolved stack belongs to the thread the stop event named.
+   * When the stop carried no thread id, "the stopped thread" is the thread
+   * that was current when this resolve began — the same answer whether the
+   * caller named it explicitly (get_stack_trace does) or resolved implicitly
+   * (locals and evaluate do), so the consumers agree on frame 0. A readiness
+   * adoption of a sibling within this call is not it.
    */
   private isStoppedThread(
-    session: ManagedSession,
-    requestedThreadId: number | undefined,
-    effectiveThreadId: number,
+    stop: ManagedSession['lastStop'],
+    currentThreadId: number | null | undefined,
     resultThreadId: number
   ): boolean {
-    const stoppedThreadId = session.lastStop?.threadId;
+    const stoppedThreadId = stop?.threadId;
     if (typeof stoppedThreadId === 'number') {
       return resultThreadId === stoppedThreadId;
     }
-    return requestedThreadId === undefined && resultThreadId === effectiveThreadId;
+    return typeof currentThreadId === 'number' && resultThreadId === currentThreadId;
   }
 
   private async requestRawStackFrames(

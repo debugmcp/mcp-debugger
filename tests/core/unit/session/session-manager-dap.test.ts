@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
 import {
   DebugLanguage,
+  JavaAdapterPolicy,
   JsDebugAdapterPolicy,
   RubyAdapterPolicy,
   RustAdapterPolicy,
@@ -2301,10 +2302,10 @@ describe('SessionManager - DAP Operations', () => {
   });
 
   describe('Paused frame hidden by the display filter (issue #672)', () => {
-    // The shape js-debug returns for a breakpoint inside a dependency of a
-    // running express server: the paused frame is in node_modules, every
-    // synchronous ancestor is a dependency or a node internal, and the only
-    // user frames are async ancestors (app.listen) V8 cannot evaluate in.
+    // The shape js-debug returns for a stop inside a dependency of a running
+    // express server: the paused frame is in node_modules, every synchronous
+    // ancestor is a dependency or a node internal, and the only user frames
+    // sit beyond an async boundary (app.listen) V8 cannot evaluate in.
     const DEPENDENCY_PAUSE = [
       { id: 30, name: 'handle', line: 160, source: { path: '/app/node_modules/.pnpm/router@2.2.0/node_modules/router/index.js', sourceReference: 0 } },
       { id: 31, name: 'handle', line: 177, source: { path: '/app/node_modules/.pnpm/express@5.2.1/node_modules/express/lib/application.js', sourceReference: 0 } },
@@ -2313,11 +2314,19 @@ describe('SessionManager - DAP Operations', () => {
       { id: 53, name: 'handleHttpCommand', line: 353, source: { path: '/app/dist/cli/http-command.js', sourceReference: 0 } },
       { id: 67, name: 'main', line: 123, source: { path: '/app/dist/index.js', sourceReference: 0 } }
     ];
+    // A dependency frame called synchronously from user code: the visible
+    // anchor right below it is a real, evaluable frame.
+    const SYNC_DEPENDENCY = [
+      { id: 30, name: 'handle', line: 160, source: { path: '/app/node_modules/.pnpm/router@2.2.0/node_modules/router/index.js', sourceReference: 0 } },
+      { id: 40, name: 'healthHandler', line: 12, source: { path: '/app/dist/cli/http-command.js', sourceReference: 0 } },
+      { id: 67, name: 'main', line: 123, source: { path: '/app/dist/index.js', sourceReference: 0 } }
+    ];
     const ROUTER_FRAME = 'router/index.js:160';
 
     async function pausedInDependency(
       reason: string,
-      framesByThread: Record<number, unknown[]> = { 1: DEPENDENCY_PAUSE }
+      framesByThread: Record<number, unknown[]> = { 1: DEPENDENCY_PAUSE },
+      body?: { reason: string; description?: string; threadId?: number }
     ) {
       const session = await sessionManager.createSession({
         language: DebugLanguage.MOCK,
@@ -2325,7 +2334,7 @@ describe('SessionManager - DAP Operations', () => {
       });
       await sessionManager.startDebugging(session.id, 'test.py');
       await vi.runAllTimersAsync();
-      dependencies.mockProxyManager.simulateStopped(1, reason);
+      dependencies.mockProxyManager.simulateStopped(1, reason, body);
       dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: { threadId?: number }) => {
         if (command === 'stackTrace') {
           return { success: true, body: { stackFrames: framesByThread[args?.threadId ?? 1] ?? [] } };
@@ -2335,6 +2344,10 @@ describe('SessionManager - DAP Operations', () => {
       (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
       return session;
     }
+
+    const managed = (sessionId: string) =>
+      (sessionManager as unknown as { sessionStore: { get(id: string): { lastStop?: { reason: string; rawReason?: string; threadId?: number } } } })
+        .sessionStore.get(sessionId);
 
     it('keeps the hidden paused frame at the head of the stack on a breakpoint stop', async () => {
       const session = await pausedInDependency('breakpoint');
@@ -2346,9 +2359,11 @@ describe('SessionManager - DAP Operations', () => {
       expect(result.totalFrameCount).toBe(6);
       expect(result.hiddenFrameCount).toBe(3);
       expect(result.allFramesInternal).toBe(false);
-      expect(result.pausedFrameInternal).toBe(true);
-      expect(result.note).toMatch(/kept as frame 0/);
-      expect(result.note).toContain(ROUTER_FRAME);
+      expect(result.pausedFrame).toMatchObject({ kept: true, frame: { id: 30, name: 'handle' } });
+      expect(result.pausedFrameNote).toMatch(/kept as frame 0/);
+      expect(result.pausedFrameNote).toContain(ROUTER_FRAME);
+      // The thread-related note stays separate from the paused-frame sentence.
+      expect(result.note).toBeUndefined();
     });
 
     it('keeps the hidden paused frame after a step as well', async () => {
@@ -2358,21 +2373,52 @@ describe('SessionManager - DAP Operations', () => {
 
       expect(result.frames[0].id).toBe(30);
       expect(result.hiddenFrameCount).toBe(3);
-      expect(result.pausedFrameInternal).toBe(true);
+      expect(result.pausedFrame?.kept).toBe(true);
     });
 
-    it('a pause landing inside a dependency still anchors on the first user frame but discloses the hidden paused frame', async () => {
+    // The reason does not matter when nothing below an async boundary can be
+    // evaluated: hiding the frame would anchor on an async ancestor.
+    it('keeps the paused frame on a pause when the visible anchor lies beyond an async boundary', async () => {
       const session = await pausedInDependency('pause');
 
       const result = await sessionManager.getStackTraceDetailed(session.id);
 
-      expect(result.frames.map((f) => f.name)).toEqual(['handleHttpCommand', 'main']);
-      expect(result.hiddenFrameCount).toBe(4);
-      expect(result.pausedFrameInternal).toBe(true);
-      expect(result.note).toMatch(/hidden by default/);
-      expect(result.note).toContain(ROUTER_FRAME);
-      expect(result.note).toMatch(/frameId: 30/);
-      expect(result.note).toMatch(/includeInternals: true/);
+      expect(result.frames[0].id).toBe(30);
+      expect(result.pausedFrame?.kept).toBe(true);
+      expect(result.pausedFrameNote).toMatch(/kept as frame 0/);
+    });
+
+    it('keeps the paused frame on an exception when the visible anchor lies beyond an async boundary', async () => {
+      const session = await pausedInDependency('exception');
+
+      const result = await sessionManager.getStackTraceDetailed(session.id);
+
+      expect(result.frames[0].id).toBe(30);
+      expect(result.pausedFrame?.kept).toBe(true);
+    });
+
+    it('a pause inside a dependency called synchronously from user code stays hidden and is disclosed', async () => {
+      const session = await pausedInDependency('pause', { 1: SYNC_DEPENDENCY });
+
+      const result = await sessionManager.getStackTraceDetailed(session.id);
+
+      expect(result.frames.map((f) => f.name)).toEqual(['healthHandler', 'main']);
+      expect(result.hiddenFrameCount).toBe(1);
+      expect(result.pausedFrame).toMatchObject({ kept: false, frame: { id: 30 } });
+      expect(result.pausedFrameNote).toMatch(/hidden by default/);
+      expect(result.pausedFrameNote).toContain(ROUTER_FRAME);
+      expect(result.pausedFrameNote).toMatch(/anchors on 'healthHandler'/);
+      // The resolver states the fact; each tool appends its own advice.
+      expect(result.pausedFrameNote).not.toMatch(/includeInternals|frameId/);
+    });
+
+    it('an exception inside a synchronously called dependency stays hidden too', async () => {
+      const session = await pausedInDependency('exception', { 1: SYNC_DEPENDENCY });
+
+      const result = await sessionManager.getStackTraceDetailed(session.id);
+
+      expect(result.frames[0].id).toBe(40);
+      expect(result.pausedFrame?.kept).toBe(false);
     });
 
     it('includeInternals: true reports nothing hidden and no paused-frame note', async () => {
@@ -2382,7 +2428,8 @@ describe('SessionManager - DAP Operations', () => {
 
       expect(result.frames).toHaveLength(6);
       expect(result.hiddenFrameCount).toBe(0);
-      expect(result.pausedFrameInternal).toBeFalsy();
+      expect(result.pausedFrame).toBeUndefined();
+      expect(result.pausedFrameNote).toBeUndefined();
       expect(result.note).toBeUndefined();
     });
 
@@ -2394,8 +2441,8 @@ describe('SessionManager - DAP Operations', () => {
       expect(result.frames).toHaveLength(1);
       expect(result.frames[0].id).toBe(30);
       expect(result.allFramesInternal).toBe(true);
-      expect(result.pausedFrameInternal).toBeFalsy();
-      expect(result.note).toBeUndefined();
+      expect(result.pausedFrame).toBeUndefined();
+      expect(result.pausedFrameNote).toBeUndefined();
     });
 
     it('leaves a sibling thread that is not the stopped thread filtered, with no paused-frame note', async () => {
@@ -2408,40 +2455,107 @@ describe('SessionManager - DAP Operations', () => {
 
       expect(result.threadId).toBe(2);
       expect(result.frames.map((f) => f.name)).toEqual(['handleHttpCommand', 'main']);
-      expect(result.pausedFrameInternal).toBeFalsy();
-      expect(result.note).toBeUndefined();
+      expect(result.pausedFrame).toBeUndefined();
+      expect(result.pausedFrameNote).toBeUndefined();
     });
+
+    it('a stop that named no thread: an explicit request for the current thread and the implicit anchor agree', async () => {
+      // get_stack_trace passes the current thread id explicitly (server.ts)
+      // while locals and evaluate resolve implicitly; with no thread on the
+      // stop event both must still treat the current thread as the stopped one.
+      const session = await pausedInDependency('breakpoint');
+      managed(session.id).lastStop!.threadId = undefined;
+
+      const explicit = await sessionManager.getStackTraceDetailed(session.id, 1);
+      const implicit = await sessionManager.getStackTraceDetailed(session.id);
+
+      expect(explicit.frames[0].id).toBe(30);
+      expect(explicit.pausedFrame?.kept).toBe(true);
+      expect(implicit.frames[0].id).toBe(30);
+      expect(implicit.pausedFrame?.kept).toBe(true);
+    });
+
+    it('a js `debugger;` statement, which js-debug reports as a pause, counts as a user-directed stop', async () => {
+      overridePolicy(sessionManager, { normalizeStopReason: JsDebugAdapterPolicy.normalizeStopReason });
+      const session = await pausedInDependency(
+        'pause',
+        { 1: SYNC_DEPENDENCY },
+        { reason: 'pause', description: 'Paused on debugger statement', threadId: 1 }
+      );
+
+      const result = await sessionManager.getStackTraceDetailed(session.id);
+
+      expect(managed(session.id).lastStop).toMatchObject({ reason: 'breakpoint', rawReason: 'pause' });
+      expect(result.frames[0].id).toBe(30);
+      expect(result.pausedFrame?.kept).toBe(true);
+    });
+
+    it('marks a kept frame whose source is a relative label as unresolved (a Java step into the JDK)', async () => {
+      // The JDI bridge synthesizes `java/io/PrintStream.java` (no
+      // sourceReference) for a class off the sourcePath; kept as frame 0 it
+      // must carry unresolvedSource so nobody feeds it to get_source_context.
+      const JDK_STEP = [
+        { id: 1, name: 'java.io.PrintStream.println', line: 1167, source: { path: 'java/io/PrintStream.java' } },
+        { id: 2, name: 'Main.main', line: 5, source: { path: '/work/Main.java' } }
+      ];
+      const session = await pausedInDependency('step', { 1: JDK_STEP });
+      (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JavaAdapterPolicy;
+
+      const result = await sessionManager.getStackTraceDetailed(session.id);
+
+      expect(result.frames.map((f) => f.id)).toEqual([1, 2]);
+      expect(result.frames[0].unresolvedSource).toBe(true);
+      expect(result.pausedFrame).toMatchObject({ kept: true, frame: { id: 1, unresolvedSource: true } });
+    });
+
+    it('ignores the paused-frame rule when a new stop lands while the stack is being fetched', async () => {
+      const session = await pausedInDependency('breakpoint');
+      dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+        if (command === 'stackTrace') {
+          // A fresh stop arrives mid-request: the frames about to be returned
+          // belong to the previous stop, so no keep/hide decision is safe.
+          dependencies.mockProxyManager.simulateStopped(1, 'pause');
+          return { success: true, body: { stackFrames: DEPENDENCY_PAUSE } };
+        }
+        return { success: true, body: {} };
+      });
+
+      const result = await sessionManager.getStackTraceDetailed(session.id);
+
+      expect(result.frames.map((f) => f.name)).toEqual(['handleHttpCommand', 'main']);
+      expect(result.pausedFrame).toBeUndefined();
+      expect(result.pausedFrameNote).toBeUndefined();
+    });
+
+    function scopesHandler(frames: unknown[], localsByFrame: Record<number, Array<{ name: string; value: string }>>) {
+      return async (command: string, args?: { frameId?: number; variablesReference?: number }) => {
+        switch (command) {
+          case 'stackTrace':
+            return { success: true, body: { stackFrames: frames } };
+          case 'scopes':
+            return {
+              success: true,
+              body: { scopes: [{ name: 'Local', variablesReference: 1000 + (args?.frameId ?? 0), expensive: false }] }
+            };
+          case 'variables': {
+            const frameId = (args?.variablesReference ?? 0) - 1000;
+            return {
+              success: true,
+              body: {
+                variables: (localsByFrame[frameId] ?? []).map((v) => ({ ...v, type: 'string', variablesReference: 0 }))
+              }
+            };
+          }
+          default:
+            return { success: true, body: {} };
+        }
+      };
+    }
 
     it('anchors locals on the hidden paused frame at a breakpoint inside a dependency', async () => {
       const session = await pausedInDependency('breakpoint');
       dependencies.mockProxyManager.setDapRequestHandler(
-        async (command: string, args?: { frameId?: number; variablesReference?: number }) => {
-          switch (command) {
-            case 'stackTrace':
-              return { success: true, body: { stackFrames: DEPENDENCY_PAUSE } };
-            case 'scopes':
-              return {
-                success: true,
-                body: {
-                  scopes: [{ name: 'Local', variablesReference: args?.frameId === 30 ? 300 : 500, expensive: false }]
-                }
-              };
-            case 'variables':
-              return {
-                success: true,
-                body: {
-                  variables: args?.variablesReference === 300
-                    ? [
-                        { name: 'req', value: 'IncomingMessage', type: 'object', variablesReference: 0 },
-                        { name: 'idx', value: '0', type: 'number', variablesReference: 0 }
-                      ]
-                    : []
-                }
-              };
-            default:
-              return { success: true, body: {} };
-          }
-        }
+        scopesHandler(DEPENDENCY_PAUSE, { 30: [{ name: 'req', value: 'IncomingMessage' }, { name: 'idx', value: '0' }] })
       );
 
       const result = await sessionManager.getLocalVariables(session.id);
@@ -2455,39 +2569,37 @@ describe('SessionManager - DAP Operations', () => {
       expect(filtered.variables.map((v) => v.name)).toEqual(['req']);
     });
 
-    it('locals after a pause inside a dependency come from the visible user frame and say so', async () => {
-      const session = await pausedInDependency('pause');
+    it('locals after a pause inside a synchronously called dependency come from the visible frame and point at the paused one', async () => {
+      const session = await pausedInDependency('pause', { 1: SYNC_DEPENDENCY });
       dependencies.mockProxyManager.setDapRequestHandler(
-        async (command: string, args?: { frameId?: number; variablesReference?: number }) => {
-          switch (command) {
-            case 'stackTrace':
-              return { success: true, body: { stackFrames: DEPENDENCY_PAUSE } };
-            case 'scopes':
-              return {
-                success: true,
-                body: { scopes: [{ name: 'Local', variablesReference: args?.frameId === 53 ? 530 : 900, expensive: false }] }
-              };
-            case 'variables':
-              return {
-                success: true,
-                body: {
-                  variables: args?.variablesReference === 530
-                    ? [{ name: 'port', value: '3111', type: 'number', variablesReference: 0 }]
-                    : []
-                }
-              };
-            default:
-              return { success: true, body: {} };
-          }
-        }
+        scopesHandler(SYNC_DEPENDENCY, { 40: [{ name: 'port', value: '3111' }] })
+      );
+
+      const result = await sessionManager.getLocalVariables(session.id);
+
+      expect(result.frame).toEqual(expect.objectContaining({ name: 'healthHandler', line: 12 }));
+      expect(result.variables.map((v) => v.name)).toEqual(['port']);
+      expect(result.anchorNote).toMatch(/hidden by default/);
+      // Advice that fits this tool: it has no includeInternals or frameId.
+      expect(result.anchorNote).toMatch(/evaluate_expression|get_scopes/);
+      expect(result.anchorNote).toMatch(/frameId 30/);
+      expect(result.anchorNote).not.toMatch(/includeInternals/);
+    });
+
+    it('a kept paused frame with no locals walks down and says so without contradicting itself', async () => {
+      const session = await pausedInDependency('breakpoint');
+      dependencies.mockProxyManager.setDapRequestHandler(
+        scopesHandler(DEPENDENCY_PAUSE, { 30: [], 53: [{ name: 'port', value: '3111' }] })
       );
 
       const result = await sessionManager.getLocalVariables(session.id);
 
       expect(result.frame).toEqual(expect.objectContaining({ name: 'handleHttpCommand', line: 353 }));
       expect(result.variables.map((v) => v.name)).toEqual(['port']);
-      expect(result.anchorNote).toMatch(/hidden by default/);
-      expect(result.anchorNote).toMatch(/frameId: 30/);
+      expect(result.anchorNote).toMatch(/Paused inside an internal frame 'handle'/);
+      expect(result.anchorNote).toMatch(/no local variables; showing frame #1 'handleHttpCommand'/);
+      expect(result.anchorNote).toMatch(/evaluate_expression still anchors on the paused frame/);
+      expect(result.anchorNote).not.toMatch(/kept as frame 0/);
     });
   });
 

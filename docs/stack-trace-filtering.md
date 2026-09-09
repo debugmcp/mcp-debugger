@@ -82,19 +82,27 @@ When the frame the debuggee is paused in is itself internal — a breakpoint or 
 step that landed inside a `node_modules` dependency while the caller's frames
 survive further down — hiding it would misreport the stop and leave locals and
 evaluation anchored on an ancestor (under js-debug an async ancestor V8 cannot
-evaluate in). On a breakpoint or step stop that frame is therefore kept as
-`stackFrames[0]` and the `note` says so; `hiddenFrames` counts only the frames
-that stayed hidden. After a `pause` or an exception — stops that routinely land
-in runtime frames (`runtime.gopark`, a JDK sleep) where the first user frame is
-the useful one — the paused frame stays hidden and the `note` names it and its
-`frameId` (issue #672):
+evaluate in). The response then carries `pausedFrame` (the frame, plus `kept`)
+and the `note` says what happened (issue #672):
+
+- On a breakpoint or step stop (a `debugger;` statement counts as a breakpoint),
+  or whenever the language policy reports an async boundary between the paused
+  frame and the first visible one (js-debug's `await` / `HTTPINCOMINGMESSAGE`
+  separators — nothing below them is evaluable), the paused frame is **kept** as
+  `stackFrames[0]`; `hiddenFrames` counts only the frames that stayed hidden.
+- After a `pause` or an exception with a real, synchronous caller visible — stops
+  that routinely land in runtime frames (`runtime.gopark`, a JDK sleep) where the
+  first user frame is the useful one — the paused frame stays **hidden** and the
+  `note` names it; `pausedFrame.id` is the `frameId` to inspect it with.
 
 ```json
 {
   "stackFrames": [ { "id": 30, "name": "handle", "file": ".../node_modules/router/index.js", "line": 160 },
                    { "id": 53, "name": "handleHttpCommand", "file": ".../dist/cli/http-command.js", "line": 353 } ],
-  "hiddenFrames": 47,
-  "note": "Paused inside an internal frame 'handle' (.../node_modules/router/index.js:160); kept as frame 0 so locals and evaluate anchor on the actual stop location. 47 internal frame(s) hidden — pass includeInternals: true to see them."
+  "count": 6,
+  "pausedFrame": { "id": 30, "name": "handle", "file": ".../node_modules/router/index.js", "line": 160, "kept": true },
+  "hiddenFrames": 46,
+  "note": "Paused inside an internal frame 'handle' (.../node_modules/router/index.js:160); kept as frame 0 so locals and evaluate anchor on the actual stop location. 46 internal frame(s) hidden — pass includeInternals: true to see them."
 }
 ```
 
@@ -133,14 +141,15 @@ The filtering is implemented using the existing `AdapterPolicy` system:
      `src/session/session-manager-data.ts`, which reaches the resolver through
      `getStackTrace` / `getStackTraceDetailed`)
    - Any language whose AdapterPolicy implements `filterStackFrames` has filtering applied
-   - Computes `totalFrameCount`, `hiddenFrameCount`, and `allFramesInternal`
+   - Computes `totalFrameCount`, `hiddenFrameCount`, and `allFramesInternal`, and
+     the `pausedFrame` disclosure (issue #672) with its neutral `pausedFrameNote`
 
 6. **get_stack_trace handler** (`src/server/handlers/inspection-tools.ts`)
    - Turns that metadata into the `hiddenFrames` field and the `note` sentence
 
 ### Edge Cases Handled
 - **All frames internal**: The filtered stack is never empty when the adapter reported frames. `FrameAnchorResolver` keeps the top (unfiltered) frame and sets `allFramesInternal`, so `get_scopes` and `evaluate_expression` always have a valid `frameId`; the `note` says so and points at `includeInternals: true` (issue #346). This guarantee is central and applies to every language, Go and .NET included. One policy additionally softens the result itself — Java returns the full unfiltered array (so a thread parked deep in JDK code still shows its stack)
-- **Paused frame internal, ancestors visible** (issue #672): when only the stopped thread's top frame is filtered, the resolver keeps it as `frames[0]` on a breakpoint or step stop (`pausedFrameInternal`, plus a `note`), so the inspection anchor is the frame the debuggee stopped in; after a `pause` or an exception it stays hidden and the `note` names it with its `frameId`. Sibling threads are never treated as the paused frame
+- **Paused frame internal, ancestors visible** (issue #672): when the stopped thread's top frame is filtered while others survive, the resolver reports it as `pausedFrame` and keeps it as `frames[0]` on a breakpoint or step stop, or when the policy's `isAsyncBoundaryFrame` finds a boundary between it and the first visible frame; otherwise it stays hidden with `kept: false`. The decision is made only for the thread the stop event named (or the current thread when the event named none) and only while that stop is still the current one — a new stop landing mid-request falls back to plain filtering. A kept frame whose `file` is a relative label rather than a path (the JDI bridge's `java/io/PrintStream.java`) carries `unresolvedSource: true`
 - **No frames**: Returns empty array as before
 - **Unresolvable source-mapped frames** (issue #655): when the adapter reports a frame's source as not-a-file-on-this-host (DAP `sourceReference != 0` with a real-looking path — js-debug does this for a source map's `../src/x.ts` that the package never shipped), the frame carries `unresolvedSource: true` and the `note` says its `file` is a label, not an openable path. These frames are the debuggee's own code and are never hidden. On js attach this is rare now: `resolveSourceMapLocations` excludes `node_modules` by default (so dependency maps are not applied and those frames report their real `.js` path) and `cwd` is defaulted so the debuggee's own relative map sources resolve
 - **Python**: No filtering applied (Python's AdapterPolicy does not implement `filterStackFrames`)
