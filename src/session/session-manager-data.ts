@@ -24,10 +24,12 @@ import {
 } from './variable-caps.js';
 import {
   FrameAnchorResolver,
+  frameSummary,
+  type FrameSummary,
   type StackTraceResult
 } from './inspection/frame-anchor-resolver.js';
 
-export type { StackTraceResult } from './inspection/frame-anchor-resolver.js';
+export type { FrameSummary, StackTraceResult } from './inspection/frame-anchor-resolver.js';
 
 /**
  * Stack trace frames plus filtering metadata (issue #346): how many frames the
@@ -271,7 +273,7 @@ export abstract class SessionManagerData extends SessionManagerCore {
    */
   async getLocalVariables(sessionId: string, includeSpecial: boolean = false, names?: string[]): Promise<{
     variables: Variable[];
-    frame: { name: string; file: string; line: number } | null;
+    frame: FrameSummary | null;
     scopeName: string | null;
     /**
      * Explains any departure from "the top frame's local scope": the top
@@ -533,11 +535,32 @@ export abstract class SessionManagerData extends SessionManagerCore {
       ]);
 
       const anchorNotes: string[] = stackResult.note ? [stackResult.note] : [];
-      if (anchorIndex > 0) {
+      const paused = stackResult.pausedFrame;
+      if (paused?.kept && anchorIndex > 0) {
+        // The kept paused frame had nothing to show (issue #672): name both
+        // anchors in one sentence rather than "kept as frame 0" followed by
+        // "showing frame #k instead".
+        const pf = paused.frame;
         anchorNotes.push(
-          `Top frame '${topFrame.name}' has no local variables (runtime/stdlib frame); ` +
-          `showing frame #${anchorIndex} '${anchorFrame.name}' instead`
+          `Paused inside an internal frame '${pf.name}' (${pf.file}:${pf.line}), which has no local variables; ` +
+          `showing frame #${anchorIndex} '${anchorFrame.name}' instead (evaluate_expression still anchors on the paused frame)`
         );
+      } else {
+        if (paused && stackResult.pausedFrameNote) {
+          // Advice that fits this tool: it has neither includeInternals nor
+          // frameId, so point at the tools that take a frame id.
+          anchorNotes.push(
+            paused.kept
+              ? stackResult.pausedFrameNote
+              : `${stackResult.pausedFrameNote} Use evaluate_expression or get_scopes with frameId ${paused.frame.id} to inspect it.`
+          );
+        }
+        if (anchorIndex > 0) {
+          anchorNotes.push(
+            `Top frame '${topFrame.name}' has no local variables (runtime/stdlib frame); ` +
+            `showing frame #${anchorIndex} '${anchorFrame.name}' instead`
+          );
+        }
       }
       if (scopeNote) {
         anchorNotes.push(scopeNote);
@@ -545,11 +568,7 @@ export abstract class SessionManagerData extends SessionManagerCore {
 
       return {
         variables: cappedLocals.variables,
-        frame: {
-          name: anchorFrame.name,
-          file: anchorFrame.file,
-          line: anchorFrame.line
-        },
+        frame: frameSummary(anchorFrame),
         scopeName,
         ...(anchorNotes.length > 0 ? { anchorNote: anchorNotes.join('; ') } : {}),
         ...(truncation ? { truncation } : {})

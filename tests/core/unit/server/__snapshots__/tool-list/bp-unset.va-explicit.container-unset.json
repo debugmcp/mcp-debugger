@@ -522,7 +522,7 @@
       },
       {
         "name": "get_local_variables",
-        "description": "Get local variables for the shared inspection anchor. If the stopped thread is frameless, a sibling with policy-recognized user frames is preferred, adopted, and disclosed in anchorNote. A JavaScript frame with no Local/block scope returns empty with guidance instead of mislabeling Global bindings. Responses are size-guarded; pass names:[...] to fetch specific variables in full",
+        "description": "Get local variables for the shared inspection anchor. If the stopped thread is frameless, a sibling with policy-recognized user frames is preferred, adopted, and disclosed in note. At a breakpoint or step inside a frame the stack display hides as internal (a node_modules dependency), the anchor is that frame — the one the program stopped in — and note says so. A JavaScript frame with no Local/block scope returns empty with guidance instead of mislabeling Global bindings. Responses are size-guarded; pass names:[...] to fetch specific variables in full",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -549,7 +549,7 @@
       },
       {
         "name": "get_stack_trace",
-        "description": "Get stack trace. The response includes stopReason — why the session is paused. For an implicit frameless stopped thread, a sibling with policy-recognized user frames is preferred and adopted, with the switch disclosed in note. Internal/runtime frames are filtered by default; when any are hidden the response carries hiddenFrames and a note",
+        "description": "Get stack trace. The response includes stopReason — why the session is paused. For an implicit frameless stopped thread, a sibling with policy-recognized user frames is preferred and adopted, with the switch disclosed in note. Internal/runtime frames are filtered by default; when any are hidden the response carries hiddenFrames and a note. When the frame the program is paused in is itself internal, pausedFrame names it (kept: whether it was retained as stackFrames[0]) and the note says so",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -592,7 +592,7 @@
       },
       {
         "name": "evaluate_expression",
-        "description": "Evaluate expression in the current debug context. Without frameId, uses the same adopted top frame as stack and locals and discloses an automatic thread switch in anchorNote. Expressions can read and modify program state. Waits up to 30s by default",
+        "description": "Evaluate expression in the current debug context. Without frameId, uses the same adopted top frame as stack and locals — at a breakpoint or step that is the frame the program stopped in even when the stack display would hide it — and discloses an automatic thread switch or a hidden paused frame in anchorNote; frame names the frame that was used, on success and on failure. Expressions can read and modify program state. Waits up to 30s by default",
         "inputSchema": {
           "type": "object",
           "properties": {

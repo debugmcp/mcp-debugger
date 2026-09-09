@@ -150,14 +150,24 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
    * cannot distinguish them. Normalize to 'pause' only while a user-initiated
    * pause request is in flight. A step that happens to complete inside that
    * window is reported as 'pause', which matches what the user asked for.
+   *
+   * A `debugger;` statement arrives as reason 'pause' with description
+   * 'Paused on debugger statement' (js-debug's `_createPausedDetails` for a
+   * CDP pause it did not request). It is a breakpoint the user wrote into the
+   * code: report it as one, so it is never auto-continued as an incidental
+   * first stop and the frame it lands in is treated as the stop location
+   * (issue #672). The raw reason is kept alongside by the session layer.
    */
   normalizeStopReason: (
     reason: string,
-    _body: DebugProtocol.StoppedEvent['body'] | undefined,
+    body: DebugProtocol.StoppedEvent['body'] | undefined,
     context: StopReasonContext
   ): string | undefined => {
     if (reason === 'step' && context.pausePending) {
       return 'pause';
+    }
+    if (reason === 'pause' && /debugger statement/i.test(body?.description ?? '')) {
+      return 'breakpoint';
     }
     return undefined;
   },
@@ -180,6 +190,10 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
    *    debuggee that *is* an installed package (`/usr/lib/node_modules/<pkg>`)
    *    becomes all-internal: the central issue-#346 fallback keeps frame 0 and
    *    the response note says so; `includeInternals: true` shows everything.
+   *    A breakpoint or step that lands *inside* a dependency while user frames
+   *    survive below is the mixed case: the frame resolver keeps that paused
+   *    frame at the head (issue #672) — this classifier only says what is
+   *    internal, never what the inspection anchor is.
    * 3. js-debug's async separators — `await` / `Promise.then` /
    *    `bound-anonymous-fn` labels with no source at all and `line: 0`. A
    *    sourceless frame that still reports a line (an eval'd `VM123` script)
@@ -200,8 +214,18 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
     if (NODE_MODULES_SEGMENT.test(filePath)) {
       return true;
     }
-    return hasNoSource(filePath) && (frame.line ?? 0) === 0;
+    return JsDebugAdapterPolicy.isAsyncBoundaryFrame!(frame);
   },
+
+  /**
+   * Rule 3 above, on its own: the `await` / `Promise.then` / `HTTPINCOMINGMESSAGE`
+   * labels js-debug inserts between async activations. Frames below one of
+   * them are the async ancestors V8 answers "Unable to evaluate on async stack
+   * frame" for — so the frame resolver keeps a paused frame above such a
+   * boundary rather than anchoring below it (issue #672).
+   */
+  isAsyncBoundaryFrame: (frame: StackFrame): boolean =>
+    hasNoSource(frame.file || '') && (frame.line ?? 0) === 0,
 
   /**
    * Filter stack frames to optionally remove Node.js internals and
