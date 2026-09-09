@@ -171,17 +171,40 @@ describe('CLI Setup', () => {
       expect(httpCommand?.description()).toBe(
         'Start the server using Streamable HTTP transport (recommended)'
       );
-      expect(httpCommand?.options).toHaveLength(3);
+      expect(httpCommand?.options).toHaveLength(4);
 
       const options = httpCommand?.options || [];
       const portOption = options.find(opt => opt.long === '--port');
       const logLevelOption = options.find(opt => opt.long === '--log-level');
       const logFileOption = options.find(opt => opt.long === '--log-file');
+      const allowedHostOption = options.find(opt => opt.long === '--allowed-host');
 
       expect(portOption?.short).toBe('-p');
       expect(portOption?.defaultValue).toBe('3001');
       expect(logLevelOption?.defaultValue).toBe('info');
       expect(logFileOption).toBeDefined();
+      expect(allowedHostOption?.defaultValue).toEqual([]);
+      expect(allowedHostOption?.description).toContain('MCP_HTTP_ALLOWED_HOSTS');
+      // The help must show the real default once — not a hand-written sentence
+      // followed by commander's own "(default: [])".
+      expect(allowedHostOption?.defaultValueDescription).toBe('localhost, 127.0.0.1, [::1]');
+      expect(httpCommand?.helpInformation()).not.toContain('(default: [])');
+    });
+
+    it('collects every --allowed-host occurrence, in order (issue #667)', async () => {
+      const program = new Command();
+      const mockHandler = vi.fn().mockResolvedValue(undefined);
+
+      setupHttpCommand(program, mockHandler);
+
+      await program.parseAsync([
+        'node', 'test', 'http', '--allowed-host', 'mcp-debugger', '--allowed-host', 'api.internal',
+      ]);
+
+      expect(mockHandler).toHaveBeenCalledWith(
+        expect.objectContaining({ allowedHost: ['mcp-debugger', 'api.internal'] }),
+        expect.anything()
+      );
     });
 
     it('should call handler when http command is executed', async () => {

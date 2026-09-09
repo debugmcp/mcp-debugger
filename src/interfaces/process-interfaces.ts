@@ -95,4 +95,6 @@ export interface ProcessLike {
 
   stdin: NodeJS.ReadableStream;
   stdout: NodeJS.WritableStream;
+  /** Optional: only startup-failure reporting writes here (issue #667); fakes may omit it. */
+  stderr?: NodeJS.WritableStream;
 }
