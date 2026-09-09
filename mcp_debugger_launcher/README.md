@@ -41,6 +41,23 @@ debug-mcp-server sse
 
 `--port` affects `http` and `sse`; `stdio` ignores it (default port: 3001).
 
+Any flag the launcher does not recognise is passed to the server as given, as long
+as it comes after the mode:
+
+```bash
+# Accept the Host header a containerised client sends (server flag, forwarded)
+debug-mcp-server http --allowed-host mcp-debugger
+
+# Docker mode reachable from other machines: publish on every interface AND
+# tell the server which Host to accept
+debug-mcp-server http --docker --bind 0.0.0.0 --allowed-host myhost
+```
+
+`--bind ADDR` (Docker mode only) chooses the host address the port is published on;
+the default is `127.0.0.1`, so a launched container is only reachable from the
+machine that launched it unless you say otherwise. `MCP_HTTP_ALLOWED_HOSTS`, when
+set in the launcher's environment, is forwarded into the container.
+
 ### Runtime Selection
 
 The launcher automatically detects and uses the best available runtime:
@@ -84,10 +101,12 @@ debug-mcp-server --help
 - The launcher will automatically pull the image if needed
 - For `stdio` the launcher runs
   `docker run -i --rm -v <cwd>:/workspace debugmcp/mcp-debugger:latest stdio`;
-  for `http`/`sse` it also inserts `-p <port>:<port>` before the image and appends
-  `--port <port>` after the mode (the port defaults to 3001). The current working
-  directory is mounted at `/workspace`, so files under it are debuggable inside the
-  container - launch the tool from your project root.
+  for `http`/`sse` it also inserts `-p 127.0.0.1:<port>:<port>` (or `<bind>:<port>:<port>`
+  with `--bind`) before the image, forwards `MCP_HTTP_ALLOWED_HOSTS` with `-e` when it is
+  set, and appends `--port <port>` after the mode (the port defaults to 3001). Any
+  unrecognised flags follow after that. The current working directory is mounted at
+  `/workspace`, so files under it are debuggable inside the container - launch the tool
+  from your project root.
 
 ### For Python debugging:
 - `debugpy` is automatically installed with this package
@@ -97,6 +116,8 @@ debug-mcp-server --help
 - **stdio**: Standard input/output communication (default)
 - **http**: Streamable HTTP transport (recommended for remote/HTTP-based use)
   - Default port: 3001; custom port via `--port`
+  - The server only accepts loopback `Host` headers unless told otherwise; pass
+    `--allowed-host <name>` (forwarded to the server) or export `MCP_HTTP_ALLOWED_HOSTS`
 - **sse**: Server-Sent Events mode
   - > **Deprecated:** SSE transport is deprecated in the debug-mcp-server and will be removed in a future release; both the launcher and the server print a deprecation warning. Use `http` instead.
 
