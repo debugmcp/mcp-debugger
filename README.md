@@ -216,7 +216,8 @@ gets a 403 that says so. To accept a service name directly — `http://mcp-debug
 container network — start the server with `--allowed-host mcp-debugger` (repeatable) or
 `MCP_HTTP_ALLOWED_HOSTS=mcp-debugger` (comma-separated). That opt-in means another access control
 fronts the server; there is no wildcard. Browser clients are checked against the same list by
-their `Origin`, so a cross-site page cannot drive the debugger.
+their `Origin`, so a cross-site page cannot drive the debugger. The deprecated `sse` subcommand
+applies the same allowlist and accepts the same flag.
 
 ## 📚 How It Works
 

@@ -93,7 +93,7 @@ All language adapters are bundled into the CLI package. No separate installation
 | `CPP_MSVC_BEHAVIOR=warn\|error\|continue` | What to do when a C/C++ target looks MSVC-built (partial PDB fidelity) |
 | `MCP_HTTP_STALE_SESSION_MS` | HTTP mode: reap a crash-abandoned MCP session that never opened an SSE stream after this idle time (default 30 min) |
 | `MCP_HTTP_STREAM_LOST_SESSION_MS` | HTTP mode: reap a session whose SSE stream dropped and never returned after this idle time (default 2 min) — releases a dead client's paused attach target |
-| `MCP_HTTP_ALLOWED_HOSTS` | HTTP mode: comma-separated `Host` (and browser `Origin`) hostnames to accept besides `localhost`, `127.0.0.1`, `[::1]` — only when another access control fronts the server; same as repeating `--allowed-host` |
+| `MCP_HTTP_ALLOWED_HOSTS` | HTTP and (deprecated) SSE modes: comma-separated `Host` (and browser `Origin`) hostnames to accept besides `localhost`, `127.0.0.1`, `[::1]` — only when another access control fronts the server; same as repeating `--allowed-host` |
 
 ### Check Rust binary compatibility
 ```bash
@@ -113,7 +113,7 @@ Analyzes a Rust executable to determine whether it was built with the GNU or MSV
 - `-p, --port <number>` - Port for SSE or HTTP mode (default: 3001)
 
 ### HTTP options
-- `--allowed-host <host>` - Additional `Host`/`Origin` hostname to accept (repeatable; or `MCP_HTTP_ALLOWED_HOSTS`, comma-separated). Implies another access control fronts this server. No wildcard. Default: `localhost`, `127.0.0.1`, `[::1]`
+- `--allowed-host <host>` - Additional `Host`/`Origin` hostname to accept (repeatable; or `MCP_HTTP_ALLOWED_HOSTS`, comma-separated). Implies another access control fronts this server. No wildcard. Default: `localhost`, `127.0.0.1`, `[::1]`. The deprecated `sse` command takes the same option.
 
 ### `doctor` options
 - `[languages...]` - Languages to check and gate the exit code on (default: report all, exit 0)

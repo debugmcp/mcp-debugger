@@ -84,7 +84,8 @@ Two ways out:
 
 A browser-based client sees the same 403 with `Invalid Origin: ...` when the page's origin is not
 on that list: the `Origin` header is checked against it too (cross-site request protection), so
-add the page's host with `--allowed-host` if that page should control the debugger.
+add the page's host with `--allowed-host` if that page should control the debugger. The
+deprecated `sse` transport enforces the same list, with the same flag and variable.
 
 ## Python Issues
 

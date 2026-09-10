@@ -9,11 +9,28 @@ export interface SSEOptions {
   port: string;
   logLevel?: string;
   logFile?: string;
+  /**
+   * Repeatable `--allowed-host` values; merged with MCP_HTTP_ALLOWED_HOSTS
+   * (issue #667). Shared by the http and the deprecated sse transports — a
+   * shipped path gets the same Host/Origin control (issue #671).
+   */
+  allowedHost?: string[];
 }
 
-export interface HttpOptions extends SSEOptions {
-  /** Repeatable `--allowed-host` values; merged with MCP_HTTP_ALLOWED_HOSTS (issue #667). */
-  allowedHost?: string[];
+export type HttpOptions = SSEOptions;
+
+/**
+ * The `--allowed-host` option, built once for both network transports so the
+ * flag, its help text and its default description cannot drift apart.
+ */
+function allowedHostOption(): Option {
+  return new Option(
+    '--allowed-host <host>',
+    'Additional Host (and browser Origin) hostname to accept (repeatable; or MCP_HTTP_ALLOWED_HOSTS, ' +
+      'comma-separated). Implies another access control fronts this server. No wildcard.'
+  )
+    .argParser((value: string, previous: string[]) => [...previous, value])
+    .default([] as string[], 'localhost, 127.0.0.1, [::1]');
 }
 
 export interface CheckRustBinaryOptions {
@@ -70,6 +87,7 @@ export function setupSSECommand(program: Command, handler: SSEHandler): void {
     .option('-p, --port <number>', 'Port to listen on', '3001')
     .option('-l, --log-level <level>', 'Set log level (error, warn, info, debug)', 'info')
     .option('--log-file <path>', 'Log to file instead of console')
+    .addOption(allowedHostOption())
     .action(async (options: SSEOptions, command: Command) => {
       // Silencing also applies to SSE to protect transports used for JS debugging
       process.env.CONSOLE_OUTPUT_SILENCED = '1';
@@ -84,15 +102,7 @@ export function setupHttpCommand(program: Command, handler: HttpHandler): void {
     .option('-p, --port <number>', 'Port to listen on', '3001')
     .option('-l, --log-level <level>', 'Set log level (error, warn, info, debug)', 'info')
     .option('--log-file <path>', 'Log to file instead of console')
-    .addOption(
-      new Option(
-        '--allowed-host <host>',
-        'Additional Host (and browser Origin) hostname to accept (repeatable; or MCP_HTTP_ALLOWED_HOSTS, ' +
-          'comma-separated). Implies another access control fronts this server. No wildcard.'
-      )
-        .argParser((value: string, previous: string[]) => [...previous, value])
-        .default([] as string[], 'localhost, 127.0.0.1, [::1]')
-    )
+    .addOption(allowedHostOption())
     .action(async (options: HttpOptions, command: Command) => {
       // Silence console output to protect any spawned proxy IPC channels
       process.env.CONSOLE_OUTPUT_SILENCED = '1';

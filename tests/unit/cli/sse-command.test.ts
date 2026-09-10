@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach, Mock } from 'vitest';
 import express from 'express';
-import { createSSEApp, handleSSECommand } from '../../../src/cli/sse-command.js';
+import { createSSEApp, handleSSECommand, type ServerFactoryOptions } from '../../../src/cli/sse-command.js';
 import { FakeCurrentProcess } from '../../test-utils/mocks/fake-current-process.js';
 import type { Logger as WinstonLoggerType } from 'winston';
 import { DebugMcpServer } from '../../../src/server.js';
@@ -21,7 +21,7 @@ const MockedSSEServerTransport = vi.mocked(SSEServerTransport);
 
 describe('SSE Command Handler', () => {
   let mockLogger: WinstonLoggerType;
-  let mockServerFactory: ReturnType<typeof vi.fn>;
+  let mockServerFactory: ReturnType<typeof vi.fn> & ((options: ServerFactoryOptions) => DebugMcpServer);
   let mockExitProcess: ReturnType<typeof vi.fn>;
   let mockServer: DebugMcpServer;
   let mockTransport: any;
@@ -47,7 +47,7 @@ describe('SSE Command Handler', () => {
     } as any;
 
     // Create mock server factory
-    mockServerFactory = vi.fn().mockReturnValue(mockServer);
+    mockServerFactory = vi.fn().mockReturnValue(mockServer) as typeof mockServerFactory;
 
     // Create mock exit function
     mockExitProcess = vi.fn();
@@ -111,16 +111,51 @@ describe('SSE Command Handler', () => {
       expect(app.listen).toBeDefined();
     });
 
+    it('installs the Host/Origin allowlist before anything else (issue #671)', () => {
+      const options = { port: '3001', logLevel: 'info' };
+      createSSEApp(options, { logger: mockLogger, serverFactory: mockServerFactory, proc: fakeProc });
+
+      // The very first middleware is the allowlist: a foreign Host is answered
+      // with a JSON-RPC 403 before CORS or any route runs.
+      const allowlist = mockApp.use.mock.calls[0][0];
+      const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn(), header: vi.fn() };
+      const mockNext = vi.fn();
+      allowlist({ method: 'GET', headers: { host: 'evil.example' } }, mockRes, mockNext);
+      expect(mockRes.status).toHaveBeenCalledWith(403);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({ error: expect.objectContaining({ message: expect.stringContaining('Invalid Host: evil.example') }) })
+      );
+      expect(mockNext).not.toHaveBeenCalled();
+
+      allowlist({ method: 'GET', headers: { host: 'localhost:3001' } }, mockRes, mockNext);
+      expect(mockNext).toHaveBeenCalledTimes(1);
+    });
+
+    it('honours --allowed-host and MCP_HTTP_ALLOWED_HOSTS from the injected process (issue #671)', () => {
+      fakeProc.env.MCP_HTTP_ALLOWED_HOSTS = 'from-env.example';
+      createSSEApp(
+        { port: '3001', logLevel: 'info', allowedHost: ['from-flag.example'] },
+        { logger: mockLogger, serverFactory: mockServerFactory, proc: fakeProc }
+      );
+      const allowlist = mockApp.use.mock.calls[0][0];
+      const mockRes = { status: vi.fn().mockReturnThis(), json: vi.fn(), header: vi.fn() };
+      const mockNext = vi.fn();
+      allowlist({ method: 'GET', headers: { host: 'from-flag.example' } }, mockRes, mockNext);
+      allowlist({ method: 'GET', headers: { host: 'from-env.example:8443' } }, mockRes, mockNext);
+      expect(mockNext).toHaveBeenCalledTimes(2);
+      expect(mockRes.status).not.toHaveBeenCalled();
+    });
+
     it('should set up CORS middleware', () => {
       const options = { port: '3001', logLevel: 'info' };
-      createSSEApp(options, { logger: mockLogger, serverFactory: mockServerFactory });
+      createSSEApp(options, { logger: mockLogger, serverFactory: mockServerFactory, proc: fakeProc });
 
       // Verify middleware was set up
       expect(mockApp.use).toHaveBeenCalled();
       
-      // Get the middleware function
-      const corsMiddleware = mockApp.use.mock.calls[0][0];
-      const mockReq = { method: 'OPTIONS' };
+      // Get the middleware function (the allowlist is registered first, issue #671)
+      const corsMiddleware = mockApp.use.mock.calls[1][0];
+      const mockReq = { method: 'OPTIONS', headers: {} } as { method: string; headers: Record<string, string> };
       const mockRes = {
         header: vi.fn(),
         sendStatus: vi.fn()
@@ -138,6 +173,13 @@ describe('SSE Command Handler', () => {
       // Test non-OPTIONS request
       mockReq.method = 'GET';
       corsMiddleware(mockReq, mockRes, mockNext);
+
+      // A request carrying an Origin has already passed the allowlist: echo
+      // exactly that origin instead of granting every origin (issue #677 parity).
+      mockRes.header.mockClear();
+      corsMiddleware({ method: 'GET', headers: { origin: 'http://localhost:6274' } }, mockRes, mockNext);
+      expect(mockRes.header).toHaveBeenCalledWith('Access-Control-Allow-Origin', 'http://localhost:6274');
+      expect(mockRes.header).toHaveBeenCalledWith('Vary', 'Origin');
       expect(mockNext).toHaveBeenCalled();
     });
 
@@ -596,6 +638,23 @@ describe('SSE Command Handler', () => {
         close: vi.fn(),
         on: vi.fn()
       };
+    });
+
+    it('refuses to start on an unusable --allowed-host value, naming it (issue #671)', async () => {
+      const mockListen = vi.fn();
+      vi.mocked(express).mockReturnValue({ use: vi.fn(), get: vi.fn(), post: vi.fn(), listen: mockListen } as any);
+
+      await handleSSECommand(
+        { port: '3001', allowedHost: ['http://bad.example'] },
+        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+      );
+
+      expect(mockExitProcess).toHaveBeenCalledWith(1);
+      expect(mockListen).not.toHaveBeenCalled();
+      expect(mockLogger.error).toHaveBeenCalledWith(expect.stringContaining('http://bad.example'));
+      // sse mode silences the console like http does; the reason must reach stderr.
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(fakeProc.stderrChunks.join('')).toContain('http://bad.example');
     });
 
     it('should start server successfully in SSE mode', async () => {

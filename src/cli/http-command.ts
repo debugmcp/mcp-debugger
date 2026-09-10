@@ -16,6 +16,7 @@ import {
   hostAllowlistMiddleware,
   parseAllowedHosts,
 } from './host-allowlist.js';
+import { reportFatal } from './report-fatal.js';
 import { jsonRpcErrorBody } from './json-rpc-error.js';
 import { watchStdinForParentExit } from './stdin-watchdog.js';
 import type { ProcessLike } from '../interfaces/process-interfaces.js';
@@ -422,16 +423,6 @@ function classifyRequestError(err: unknown): { status: number; code: number; mes
   }
   // http-errors marks 4xx messages as safe to expose; anything else stays generic.
   return { status, code: ErrorCode.InvalidRequest, message: candidate.expose === false ? 'Bad Request' : detail, detail };
-}
-
-/**
- * http mode silences the console (src/index.ts), so a fatal line that only
- * reaches the logger leaves the operator with a bare exit code; write it to
- * stderr as well. `detail` is appended on stderr only, so callers keep their
- * existing logger call shapes.
- */
-function reportFatal(proc: ProcessLike, message: string, detail?: string): void {
-  proc.stderr?.write(`mcp-debugger: ${message}${detail ? `: ${detail}` : ''}` + '\n');
 }
 
 export async function handleHttpCommand(

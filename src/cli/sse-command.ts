@@ -7,6 +7,15 @@ import { attachSharedFileTransport } from '../utils/logger.js';
 import { SSEOptions } from './setup.js';
 import { watchStdinForParentExit } from './stdin-watchdog.js';
 import type { ProcessLike } from '../interfaces/process-interfaces.js';
+import {
+  ALLOWED_HOST_FLAG,
+  ALLOWED_HOSTS_ENV_KEY,
+  AllowedHostError,
+  hostAllowlistMiddleware,
+  LOOPBACK_HOSTS,
+  parseAllowedHosts
+} from './host-allowlist.js';
+import { reportFatal } from './report-fatal.js';
 
 export interface ServerFactoryOptions {
   logLevel?: string;
@@ -33,21 +42,50 @@ export function createSSEApp(
   dependencies: SSECommandDependencies
 ): express.Application {
   const { logger, serverFactory } = dependencies;
+  const proc = dependencies.proc ?? process;
+
+  // The same Host/Origin allowlist the Streamable HTTP app runs first (issues
+  // #667/#677): a deprecated transport is still a shipped one, and this
+  // server spawns processes, attaches to PIDs and evaluates expressions
+  // (issue #671). Runs before CORS and every route, so a rejected request is
+  // never handled. Throws AllowedHostError for an unusable entry —
+  // handleSSECommand turns that into a named startup failure.
+  const { hosts: allowedHosts, warnings: allowedHostWarnings } = parseAllowedHosts(
+    options.allowedHost,
+    proc.env[ALLOWED_HOSTS_ENV_KEY]
+  );
   const app = express();
-  
+  app.use(hostAllowlistMiddleware(allowedHosts, logger));
+  for (const warning of allowedHostWarnings) {
+    logger.warn(warning);
+  }
+  if (allowedHosts.length > LOOPBACK_HOSTS.length) {
+    logger.info(
+      `SSE Host allowlist extended beyond loopback: ${allowedHosts.join(', ')} ` +
+        `(from ${ALLOWED_HOST_FLAG} / ${ALLOWED_HOSTS_ENV_KEY}); this assumes another access control fronts the server.`
+    );
+  }
+
   // Create a single shared Debug MCP Server instance for all connections
   const sharedDebugServer = serverFactory({
     logLevel: options.logLevel,
     logFile: options.logFile,
   });
   logger.info('Created shared Debug MCP Server instance for SSE mode');
-  
+
   // Store active SSE transports by session ID
   const sseTransports = new Map<string, SessionData>();
-  
+
   // CORS middleware
   app.use((req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
+    // A request carrying an Origin has already passed the allowlist above:
+    // echo that origin (and Vary on it) instead of granting every origin
+    // (issue #677 parity).
+    const origin = req.headers.origin;
+    res.header('Access-Control-Allow-Origin', origin ?? '*');
+    if (origin !== undefined) {
+      res.header('Vary', 'Origin');
+    }
     res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.header('Access-Control-Allow-Headers', 'Content-Type, X-Session-ID');
     if (req.method === 'OPTIONS') {
@@ -230,11 +268,12 @@ export async function handleSSECommand(
     });
 
     server.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE') {
-        logger.error(`Port ${port} is already in use. Another instance may be running.`);
-      } else {
-        logger.error(`Server error: ${err.message}`);
-      }
+      const line =
+        err.code === 'EADDRINUSE'
+          ? `Port ${port} is already in use. Another instance may be running.`
+          : `Server error: ${err.message}`;
+      logger.error(line);
+      reportFatal(proc, line);
       exitProcess(1);
     });
 
@@ -299,7 +338,16 @@ export async function handleSSECommand(
       env: proc.env,
     });
   } catch (error) {
-    logger.error('Failed to start server in SSE mode', { error });
+    if (error instanceof AllowedHostError) {
+      // Fail fast and by name (issue #667): a silently dropped allowlist
+      // entry would reproduce the discoverability problem the flag exists to fix.
+      const line = `${error.message}. The server was not started.`;
+      logger.error(line);
+      reportFatal(proc, line);
+    } else {
+      logger.error('Failed to start server in SSE mode', { error });
+      reportFatal(proc, 'Failed to start server in SSE mode', error instanceof Error ? error.message : String(error));
+    }
     exitProcess(1);
   }
 }
