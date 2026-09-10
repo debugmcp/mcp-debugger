@@ -430,6 +430,18 @@ describe('CdpFunctionBreakpointBridge', () => {
       expect(body.hitBreakpointIds).toEqual([greetAdapterId]);
     });
 
+    it('merges the line-breakpoint ids js-debug reported into the rewritten stop (issue #673)', async () => {
+      // A line breakpoint on the function's first statement co-fires in the
+      // same V8 pause; its id may be the only proof that breakpoint bound.
+      cdp.pause({ hitBreakpoints: ['cdp-obj-greet'] });
+      const evt = stoppedEvent('breakpoint');
+      (evt.body as DebugProtocol.StoppedEvent['body']).hitBreakpointIds = [3];
+      const out = await bridge.processStoppedEvent(evt);
+      const body = out.body as DebugProtocol.StoppedEvent['body'];
+      expect(body.reason).toBe('function breakpoint');
+      expect(body.hitBreakpointIds).toEqual([3, greetAdapterId]);
+    });
+
     it('rewrites an "entry"-labeled stop too (entry-bp collision) when CDP hits intersect ours', async () => {
       cdp.pause({ hitBreakpoints: ['entry-bp-id', 'cdp-obj-greet'] });
       const out = await bridge.processStoppedEvent(stoppedEvent('entry'));

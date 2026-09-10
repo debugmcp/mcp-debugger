@@ -42,11 +42,11 @@ import {
 } from './launch/proxy-failure-diagnostics.js';
 import type { AnchorResolution } from './breakpoints/anchor-resolution.js';
 import {
+  applyBoundLocation,
   applyHitBreakpointIds,
-  clearProvisionalAdapterIds,
-  recordProvisionalAdapterId,
-  resolveProvisionalAdapterId
-} from './breakpoints/provisional-adapter-ids.js';
+  resetBinding,
+  samePath
+} from './breakpoints/hit-verification.js';
 
 // Custom launch arguments interface extending DebugProtocol.LaunchRequestArguments
 export interface CustomLaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
@@ -460,19 +460,10 @@ export abstract class SessionManagerCore extends EventEmitter {
     // A new adapter instance has verified nothing yet: clear per-launch
     // breakpoint state so a relaunch reports honest verification (#238).
     for (const bp of session.breakpoints.values()) {
-      bp.verified = false;
-      bp.message = undefined;
-      bp.adapterId = undefined;
-      bp.boundFile = undefined;
-      bp.boundLine = undefined;
+      resetBinding(bp);
     }
-    clearProvisionalAdapterIds(session);
     for (const bp of session.functionBreakpoints?.values() ?? []) {
-      bp.verified = false;
-      bp.message = undefined;
-      bp.adapterId = undefined;
-      bp.boundFile = undefined;
-      bp.boundLine = undefined;
+      resetBinding(bp);
     }
 
     // Adapters whose first stopped event after launch may not carry
@@ -741,14 +732,9 @@ export abstract class SessionManagerCore extends EventEmitter {
 
     // Deferred breakpoint verification/relocation pushed by the adapter after
     // the setBreakpoints response (e.g. debugpy verifying once the module
-    // loads). Match by adapter-assigned id first; fall back to (file, line).
-    // The path fallback tolerates case differences between Windows-style
-    // paths: adapters canonicalize differently (js-debug lowercases the
-    // drive letter) and Windows paths are case-insensitive anyway (#236).
-    const windowsPathish = /^[a-z]:[\\/]/i;
-    const samePath = (a: string, b: string): boolean =>
-      a === b ||
-      (windowsPathish.test(a) && windowsPathish.test(b) && a.toLowerCase() === b.toLowerCase());
+    // loads). Match by adapter-assigned id first; fall back to (file, line)
+    // via samePath, which tolerates the case and separator differences
+    // between Windows-style paths (#236, #673).
     const handleBreakpoint = (body: DebugProtocol.BreakpointEvent['body']) => {
       // Strip the child-origin marker before anything else so it never leaks
       // past this handler (issues #500/#495).
@@ -801,20 +787,17 @@ export abstract class SessionManagerCore extends EventEmitter {
         ? all.find(bp => bp.adapterId === eventBp.id)
         : undefined;
       const matchedByAdapterId = target !== undefined;
-      // Next, a provisional child id recorded from the child's own replay
-      // stub (issue #673). Consulted before the (file,line) guess because it
-      // names the exact record — a source-mapped request's verification
-      // arrives under the generated file and line, which could coincide
-      // with some other stored breakpoint's literal location. Child-origin
-      // only: the parent's ids share the integer space (#495).
-      let matchedByProvisionalId = false;
-      if (!target && fromChild && typeof eventBp.id === 'number') {
-        target = resolveProvisionalAdapterId(session, eventBp.id);
-        matchedByProvisionalId = target !== undefined;
-      }
       if (!target && eventBp.source?.path !== undefined && typeof eventBp.line === 'number') {
         const eventPath = eventBp.source.path;
-        target = all.find(bp => samePath(bp.file, eventPath) && bp.line === eventBp.line);
+        const atLocation = all.filter(bp => samePath(bp.file, eventPath) && bp.line === eventBp.line);
+        // Twins at one location (a plain and a conditional breakpoint): a
+        // child-origin stub carrying an id claims the first twin that has no
+        // id yet, so the replay's stubs map positionally instead of all
+        // landing on the first record (issue #673).
+        target =
+          (fromChild && typeof eventBp.id === 'number'
+            ? atLocation.find(bp => bp.adapterId === undefined)
+            : undefined) ?? atLocation[0];
       }
       if (!target) {
         const stored = all
@@ -832,58 +815,41 @@ export abstract class SessionManagerCore extends EventEmitter {
       // verified record is the parent contradicting the authoritative child;
       // ignore it whether it matched by id or by (file,line). Child-origin
       // downgrades (real unbinding) still apply.
-      if (mirrorsToChild && !fromChild && target.verified === true && eventBp.verified === false) {
+      if (mirrorsToChild && !fromChild && matchedByAdapterId) {
+        // A parent-space id never addresses a record: the ids stored here
+        // are the child's, and the two spaces collide (issue #495).
         this.logger.debug(
-          `[SessionManager ${sessionId}] Ignoring non-authoritative breakpoint downgrade for ${target.file}:${target.line} (matchedByAdapterId=${matchedByAdapterId})`
+          `[SessionManager ${sessionId}] Ignoring parent breakpoint event that matched ${target.file}:${target.line} only by a colliding id`
         );
         return;
       }
-      if (matchedByProvisionalId) {
-        // A match through the provisional table is upgrade-only: a stub
-        // answering a stub says nothing new, and a downgrade is only trusted
-        // by a verified adapterId (the rule below). Once verified, the id is
-        // as trustworthy as any child-origin verified event's.
-        if (eventBp.verified !== true) {
-          this.logger.debug(
-            `[SessionManager ${sessionId}] Provisional breakpoint event for ${target.file}:${target.line} (id=${eventBp.id}) carries no verification; nothing to apply`
-          );
-          return;
-        }
-        target.verified = true;
-        target.adapterId = eventBp.id;
-        const eventPath = eventBp.source?.path;
-        if (eventPath !== undefined && !samePath(target.file, eventPath)) {
-          // Verified under a different file: the request was source-mapped
-          // and the adapter bound its generated counterpart (issue #673).
-          // The request stays the request; report where it landed.
-          target.boundFile = eventPath;
-          if (typeof eventBp.line === 'number') {
-            target.boundLine = eventBp.line;
-          }
-        } else if (typeof eventBp.line === 'number') {
-          target.line = eventBp.line;
-        }
-        target.message = normalizeBreakpointMessage(
-          eventBp.message !== undefined ? eventBp.message : target.message,
-          true
+      if (mirrorsToChild && !fromChild && target.verified === true && eventBp.verified === false) {
+        this.logger.debug(
+          `[SessionManager ${sessionId}] Ignoring non-authoritative breakpoint downgrade for ${target.file}:${target.line}`
         );
-        this.logger.info('debug:breakpoint', {
-          event: 'changed',
-          via: 'provisional-id',
-          sessionId,
-          sessionName: session.name,
-          breakpointId: target.id,
-          file: target.file,
-          line: target.line,
-          ...(target.boundFile !== undefined ? { boundFile: target.boundFile, boundLine: target.boundLine } : {}),
-          verified: true,
-          timestamp: Date.now(),
-        });
+        return;
+      }
+      if (eventBp.verified === false && target.verifiedBy === 'hit') {
+        // A stop already proved this breakpoint bound (issue #673). js-debug
+        // answers "unbound" on every replace-all for a location it cannot
+        // map to a source; the CDP breakpoint underneath keeps firing. Keep
+        // the id current and nothing else.
+        if (typeof eventBp.id === 'number' && (!mirrorsToChild || fromChild)) {
+          target.adapterId = eventBp.id;
+        }
+        this.logger.debug(
+          `[SessionManager ${sessionId}] Keeping hit-proven breakpoint ${target.file}:${target.line} verified despite an unverified echo (id=${eventBp.id})`
+        );
         return;
       }
       target.verified = eventBp.verified;
-      if (typeof eventBp.line === 'number') {
-        target.line = eventBp.line;
+      target.verifiedBy = target.verified ? 'adapter' : undefined;
+      // Where it bound: the request stays the request; a different file is
+      // reported as boundFile/boundLine, a same-file move lands in `line`.
+      applyBoundLocation(target, eventBp.source?.path, eventBp.line);
+      if (!target.verified) {
+        target.boundFile = undefined;
+        target.boundLine = undefined;
       }
       // A provisional "unbound" note must not survive verification, and a
       // leaked l10n key must not reach the user (issue #471). When the event
@@ -894,19 +860,14 @@ export abstract class SessionManagerCore extends EventEmitter {
         eventBp.message !== undefined ? eventBp.message : target.message,
         target.verified
       );
-      // For mirroring policies only a child-origin VERIFIED event's id enters
-      // the store: parent-space ids and provisional stub ids (the child
-      // answers its own pending stub while adoption is in flight, issue #500)
-      // are unstable and would poison future id matching. A child-origin
-      // provisional id is still remembered on the side (issue #673) so the
-      // verification or the stop that later names it can find this record.
-      if (
-        typeof eventBp.id === 'number' &&
-        (!mirrorsToChild || (fromChild && eventBp.verified === true))
-      ) {
+      // The id: any non-mirroring adapter's, or the child's — provisional or
+      // not. js-debug keeps an entry's id across re-sends, and the #495
+      // hazard was the PARENT's colliding id space, which the child-origin
+      // marker excludes above. Stamping it from the child's first stub is
+      // what lets a later verification under a generated path, or a stop
+      // that names the id, reach this record (issue #673).
+      if (typeof eventBp.id === 'number' && (!mirrorsToChild || fromChild)) {
         target.adapterId = eventBp.id;
-      } else if (typeof eventBp.id === 'number' && mirrorsToChild && fromChild) {
-        recordProvisionalAdapterId(session, eventBp.id, target.id);
       }
       this.logger.info('debug:breakpoint', {
         event: 'changed',
@@ -915,6 +876,7 @@ export abstract class SessionManagerCore extends EventEmitter {
         breakpointId: target.id,
         file: target.file,
         line: target.line,
+        ...(target.boundFile !== undefined ? { boundFile: target.boundFile, boundLine: target.boundLine } : {}),
         verified: target.verified,
         timestamp: Date.now(),
       });

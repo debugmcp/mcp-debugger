@@ -98,11 +98,6 @@ export interface ManagedSession extends DebugSessionInfo {
   // Function breakpoints (issue #271 phase 3): session-global, name-addressed,
   // synced via DAP setFunctionBreakpoints (replace-all per request).
   functionBreakpoints: Map<string, FunctionBreakpoint>;
-  // Child-space adapter ids seen on provisional (unverified) stubs, keyed to
-  // the store id they answered for (issue #673). Lets a later verification
-  // under a generated path, or a stop naming the id, reach the right record.
-  // Per launch; never a downgrade source. See breakpoints/provisional-adapter-ids.ts.
-  provisionalAdapterIds?: Map<number, string>;
   // New state model fields
   sessionLifecycle: SessionLifecycleState;
   executionState?: ExecutionState;

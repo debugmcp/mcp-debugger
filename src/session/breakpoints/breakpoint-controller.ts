@@ -28,7 +28,7 @@ import { normalizeBreakpointMessage } from '../../utils/breakpoint-message.js';
 import type { ManagedSession } from '../session-store.js';
 import type { BreakpointContext } from '../operations-context.js';
 import { buildFunctionBreakpointLaunchWarning } from './launch-warnings.js';
-import { recordProvisionalAdapterId } from './provisional-adapter-ids.js';
+import { applyBoundLocation } from './hit-verification.js';
 
 /** Outcome of a DAP re-send: whether it reached the adapter, and why not. */
 export interface BreakpointSyncOutcome {
@@ -192,27 +192,35 @@ export class BreakpointController {
         // Update ALL breakpoints from response (positional match)
         for (let i = 0; i < Math.min(responseBps.length, allBpsForFile.length); i++) {
           const bpInfo = responseBps[i];
-          const keepChildState =
-            childAuthoritative && !childSourced && allBpsForFile[i].verified === true;
-          if (childAuthoritative && childSourced) {
-            allBpsForFile[i].verified = bpInfo.verified;
-            // Only a VERIFIED child id enters the store: stub ids are
-            // unstable across the pending→bound transition (issue #495).
-            // A provisional one is remembered on the side (issue #673) so
-            // the verification or stop that later names it finds the record.
-            if (bpInfo.verified === true && typeof bpInfo.id === 'number') {
-              allBpsForFile[i].adapterId = bpInfo.id;
-            } else if (typeof bpInfo.id === 'number') {
-              recordProvisionalAdapterId(session, bpInfo.id, allBpsForFile[i].id);
+          const record = allBpsForFile[i];
+          // The parent's answer for a mirroring policy is not authoritative;
+          // a child-sourced one, or any non-mirroring adapter's, is.
+          const authoritative = !childAuthoritative || childSourced;
+          const keepChildState = !authoritative && record.verified === true;
+          // A stop already proved this breakpoint bound (issue #673): an
+          // "unbound" answer for a location the adapter cannot map is not
+          // evidence it stopped firing. Keep the id current and nothing else.
+          const hitProven = bpInfo.verified === false && record.verifiedBy === 'hit';
+          if (!authoritative) {
+            record.verified = record.verified || bpInfo.verified;
+          } else if (hitProven) {
+            if (typeof bpInfo.id === 'number') {
+              record.adapterId = bpInfo.id;
             }
-          } else if (childAuthoritative) {
-            allBpsForFile[i].verified = allBpsForFile[i].verified || bpInfo.verified;
           } else {
-            allBpsForFile[i].verified = bpInfo.verified;
-            allBpsForFile[i].adapterId = bpInfo.id ?? allBpsForFile[i].adapterId;
+            record.verified = bpInfo.verified;
+            record.verifiedBy = record.verified ? 'adapter' : undefined;
+            // The child's ids — provisional included — are the real ids for
+            // these records (see handleBreakpoint); so are a non-mirroring
+            // adapter's.
+            if (typeof bpInfo.id === 'number') {
+              record.adapterId = bpInfo.id;
+            }
+            // Where it bound: a different file is reported as
+            // boundFile/boundLine, a same-file move lands in `line`.
+            applyBoundLocation(record, bpInfo.source?.path, bpInfo.line);
           }
-          allBpsForFile[i].line = bpInfo.line || allBpsForFile[i].line;
-          if (!keepChildState) {
+          if (!keepChildState && !hitProven) {
             // Normalize before storing (issue #471): raw l10n keys like
             // js-debug's "breakpoint.provisionalBreakpoint" must never sit in
             // the store, and a provisional note must not survive verification.
