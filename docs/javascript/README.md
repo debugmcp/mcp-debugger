@@ -243,7 +243,11 @@ If neither `tsx` nor `ts-node` is installed, the factory emits a warning (not an
   `sourceMapPathOverrides`. `get_stack_trace` hides `node_modules` and async
   separator frames by default; a debuggee that is itself an installed package
   under `node_modules` shows its top frame plus an "all frames are internal"
-  note — pass `includeInternals: true`
+  note — pass `includeInternals: true`. A stop *inside* a dependency — a
+  breakpoint, a step, a `debugger;` statement, or any stop whose only visible
+  ancestors sit beyond an `await`/request boundary — keeps that frame as frame
+  0 (reported as `pausedFrame`, and the `note` says so) so `get_local_variables`
+  and `evaluate_expression` work where the program stopped (issue #672)
 - **Breakpoints in source-mapped TypeScript bind under the generated file.**
   A launch breakpoint set on `src/x.ts:349` is verified by js-debug under
   `dist/x.js:277`; `list_breakpoints` keeps the request as `file`/`line` and

@@ -96,24 +96,38 @@ def check_debugpy():
     except AttributeError:
         return True, "unknown"
 
-@click.command(context_settings=dict(help_option_names=['-h', '--help']))
+# ignore_unknown_options + the trailing UNPROCESSED argument: any flag the
+# launcher does not recognise is forwarded to the server verbatim (issue
+# #676), so `--allowed-host`, `--log-level`, ... work without a launcher
+# release. They must follow the mode; a leading unknown flag would be taken
+# as the mode itself.
+@click.command(context_settings=dict(help_option_names=['-h', '--help'], ignore_unknown_options=True))
 @click.argument('mode', default='stdio', type=click.Choice(['stdio', 'http', 'sse']))
+@click.argument('server_args', nargs=-1, type=click.UNPROCESSED)
 @click.option('--port', '-p', type=int, help='Port for http/sse mode (default: 3001)')
+@click.option('--bind', type=str, default=None, metavar='ADDR',
+              help='Docker mode: host address to publish the port on (default: 127.0.0.1; '
+                   '0.0.0.0 for every interface). Ignored with npx.')
 @click.option('--docker', is_flag=True, help='Force Docker mode')
 @click.option('--npm', is_flag=True, help='Force npm/npx mode')
 @click.option('--dry-run', is_flag=True, help='Show what command would be executed')
 @click.option('--verbose', '-v', is_flag=True, help='Enable verbose output')
 @click.version_option(__version__, '--version', '-V', prog_name='debug-mcp-server')
-def main(mode: str, port: Optional[int], docker: bool, npm: bool, 
-         dry_run: bool, verbose: bool):
+def main(mode: str, server_args: tuple, port: Optional[int], bind: Optional[str],
+         docker: bool, npm: bool, dry_run: bool, verbose: bool):
     """
     Launch the debug-mcp-server in stdio (default), http, or sse mode.
+
+    Flags the launcher does not recognise are passed to the server as given,
+    after the mode: `debug-mcp-server http --allowed-host mcp-debugger`.
 
     \b
     Examples:
       debug-mcp-server               # Launch in stdio mode (default)
       debug-mcp-server http          # Streamable HTTP mode (recommended for remote)
       debug-mcp-server http -p 8080  # HTTP mode with custom port
+      debug-mcp-server http --allowed-host mcp-debugger   # server flag, forwarded
+      debug-mcp-server http --docker --bind 0.0.0.0 --allowed-host myhost
       debug-mcp-server sse           # SSE mode (DEPRECATED: use http)
       debug-mcp-server --docker      # Force Docker mode
       debug-mcp-server --npm         # Force npm mode
@@ -150,7 +164,10 @@ def main(mode: str, port: Optional[int], docker: bool, npm: bool,
             print("\n❌ Error: Docker is not installed or not available", file=sys.stderr)
             print_installation_help()
             sys.exit(1)
-        if "daemon not running" in (runtimes["docker"]["version"] or ""):
+        # A dry run only prints the command; it does not need the daemon
+        # (issue #676 — the docker argv is exactly what one wants to inspect
+        # before starting Docker Desktop).
+        if "daemon not running" in (runtimes["docker"]["version"] or "") and not dry_run:
             print("\n❌ Error: Docker daemon is not running", file=sys.stderr)
             print("   Please start Docker Desktop and try again.", file=sys.stderr)
             sys.exit(1)
@@ -183,17 +200,26 @@ def main(mode: str, port: Optional[int], docker: bool, npm: bool,
     if mode in DebugMCPLauncher.PORTED_MODES:
         actual_port = port or DebugMCPLauncher.DEFAULT_SSE_PORT
         print(f"🔌 Port: {actual_port}")
+        if runtime == "docker":
+            print(f"🌐 Published on: {bind or DebugMCPLauncher.DEFAULT_BIND}:{actual_port}")
     print(f"🏃 Runtime: {runtime.upper()}")
-    
+    if server_args:
+        print(f"➡️  Server flags: {_display_command(list(server_args))}")
+    if bind and runtime != "docker":
+        # The npx-run server has no bind-address option of its own yet
+        # (debugmcp/mcp-debugger#680); it listens on every interface.
+        print("⚠️  --bind applies to Docker mode only; the npx-run server listens on all interfaces.",
+              file=sys.stderr)
+
     # Create launcher
     launcher = DebugMCPLauncher(verbose=verbose)
-    
+
     # Prepare the command
     if runtime == "npx":
         if dry_run:
             # Same builder as the real launch (issue #345): dry-run output can
             # never drift from the executed command.
-            cmd = launcher.build_npx_command(mode, port)
+            cmd = launcher.build_npx_command(mode, port, server_args)
             print(f"\n🔍 Would execute: {_display_command(cmd)}")
             sys.exit(0)
 
@@ -206,13 +232,13 @@ def main(mode: str, port: Optional[int], docker: bool, npm: bool,
         print("Starting debug-mcp-server...")
         print("─" * 40 + "\n")
 
-        sys.exit(launcher.launch_with_npx(mode, port))
-        
+        sys.exit(launcher.launch_with_npx(mode, port, server_args))
+
     elif runtime == "docker":
         if dry_run:
             # Same builder as the real launch (issue #345): dry-run output can
             # never drift from the executed command.
-            cmd = launcher.build_docker_command(mode, port)
+            cmd = launcher.build_docker_command(mode, port, extra_args=server_args, bind=bind)
             print(f"\n🔍 Would execute: {_display_command(cmd)}")
             sys.exit(0)
 
@@ -220,7 +246,7 @@ def main(mode: str, port: Optional[int], docker: bool, npm: bool,
         print("Starting debug-mcp-server...")
         print("─" * 40 + "\n")
 
-        sys.exit(launcher.launch_with_docker(mode, port))
+        sys.exit(launcher.launch_with_docker(mode, port, extra_args=server_args, bind=bind))
 
     sys.exit(0)
 

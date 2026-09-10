@@ -8,6 +8,7 @@ import {
   AdapterPolicy, SessionOutputEntry, redactSecretsInString
 } from '@debugmcp/shared';
 import type { Breakpoint, FunctionBreakpoint, StackFrame } from '@debugmcp/shared';
+import { BREAKPOINT_STOP_REASONS } from '@debugmcp/shared';
 import { isRedactionEnabled } from '../utils/redaction-mode.js';
 import { ValidationResultCache } from '../utils/language-availability.js';
 import { SessionStore, ManagedSession } from './session-store.js';
@@ -47,6 +48,12 @@ import {
   resetBinding,
   samePath
 } from './breakpoints/hit-verification.js';
+
+/**
+ * Stop reasons the first-stop auto-continue must never swallow: the shared
+ * breakpoint family plus an exception the user asked to break on.
+ */
+const USER_BREAK_REASONS: ReadonlySet<string> = new Set([...BREAKPOINT_STOP_REASONS, 'exception']);
 
 // Custom launch arguments interface extending DebugProtocol.LaunchRequestArguments
 export interface CustomLaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
@@ -578,13 +585,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       // Reasons that always reflect explicit user-visible debug events.
       // Even on the very first stop, these must NOT be auto-continued —
       // the user set the breakpoint or hit the exception deliberately.
-      const userBreakReasons = new Set([
-        'breakpoint',
-        'function breakpoint',
-        'data breakpoint',
-        'instruction breakpoint',
-        'exception'
-      ]);
+      const userBreakReasons = USER_BREAK_REASONS;
       const isFirstStop = !session.firstStopHandled;
       // Attach sessions have no launch entry stop to skip: any stop observed
       // after attach is either the deliberate post-attach pause issued by

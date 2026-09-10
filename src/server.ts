@@ -20,7 +20,7 @@ import {
 } from './errors/debug-errors.js';
 import { SessionManager, SessionManagerConfig } from './session/session-manager.js';
 import type { DebugResult, StepResultData } from './session/session-manager-core.js';
-import { StackTraceResult } from './session/session-manager-data.js';
+import { FrameSummary, StackTraceResult } from './session/session-manager-data.js';
 import { VariableTruncationSummary } from './session/variable-caps.js';
 import { createProductionDependencies } from './container/dependencies.js';
 import { ContainerConfig } from './container/types.js';
@@ -560,7 +560,7 @@ export class DebugMcpServer implements ToolContext {
 
   public async getLocalVariables(sessionId: string, includeSpecial: boolean = false, names?: string[]): Promise<{
     variables: Variable[];
-    frame: { name: string; file: string; line: number } | null;
+    frame: FrameSummary | null;
     scopeName: string | null;
     anchorNote?: string;
     truncation?: VariableTruncationSummary;
