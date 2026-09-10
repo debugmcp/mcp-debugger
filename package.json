@@ -149,6 +149,11 @@
   "bin": {
     "mcp-debugger": "./dist/index.js"
   },
+  "pi": {
+    "extensions": ["./pi-extension/index.ts"],
+    "skills": ["./skills"],
+    "mcp": ["./pi.mcp.json"]
+  },
   "dependencies": {
     "@debugmcp/shared": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.30.0",
