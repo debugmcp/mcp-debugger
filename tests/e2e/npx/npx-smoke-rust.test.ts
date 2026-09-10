@@ -66,7 +66,10 @@ if (!packageAvailable) {
   );
 }
 
-describe.sequential.skipIf(!packageAvailable)('NPX: Rust Debugging Smoke Tests', () => {
+// skipIf() must lead: vitest implements it as `condition ? suite.skip : suite`
+// against the BASE collector, so `describe.sequential.skipIf(...)` silently threw
+// the `sequential` flag away. Chained this way both flags survive.
+describe.skipIf(!packageAvailable).sequential('NPX: Rust Debugging Smoke Tests', () => {
   let mcpClient: Client | null = null;
   let cleanup: (() => Promise<void>) | null = null;
   let sessionId: string | null = null;

@@ -5,7 +5,7 @@
  * environment/filesystem. No process is spawned. Presentation comes from the
  * factories' own describeToolchain (issue #435).
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, type Mock } from 'vitest';
 import type { IEnvironment, IFileSystem } from '@debugmcp/shared';
 import { diagnose, type DiagnoseDeps } from '../../../../src/cli/commands/doctor/diagnose.js';
 
@@ -393,7 +393,9 @@ describe('diagnose', () => {
 
   it('survives a factory whose getMetadata throws, falling back to the registry attach mechanism', async () => {
     const deps = makeDeps([{ name: 'ruby', attach: 'direct-connect', validate: okValidate() }]);
-    const registry = deps.registry as unknown as { getFactory: ReturnType<typeof vi.fn> };
+    // `ReturnType<typeof vi.fn>` resolves to Mock<Procedure | Constructable>, which
+    // is not callable; `Mock` defaults to the plain procedure form.
+    const registry = deps.registry as unknown as { getFactory: Mock };
     const originalGetFactory = registry.getFactory;
     registry.getFactory = vi.fn(async (language: string) => {
       const factory = await originalGetFactory(language);

@@ -3,6 +3,14 @@
  *
  * These factories ensure mocks have all required properties and
  * return appropriate values for successful test execution
+ *
+ * CAVEAT: every factory below is unannotated, so nothing checks it against the
+ * interface it claims to double, and several have drifted -- `createMockFileSystem`
+ * returns 7 of `IFileSystem`'s 16 members, `createMockEnvironment` shares no member
+ * at all with `IEnvironment`, `createMockProxyProcess` lacks `sessionId` and
+ * `waitForInitialization`. Prefer the annotated factories in
+ * `tests/test-utils/helpers/adapter-dependencies.ts` and
+ * `tests/test-utils/helpers/test-dependencies.ts` for new tests.
  */
 
 import { vi } from 'vitest';
@@ -13,28 +21,31 @@ import type { ChildProcess } from 'child_process';
  * Create a fully configured mock child process
  */
 export function createMockChildProcess(): ChildProcess & EventEmitter {
-  const mockProcess = new EventEmitter() as ChildProcess & EventEmitter;
+  // `pid`, `connected`, `exitCode`, `signalCode`, `spawnargs`, `spawnfile` and
+  // `killed` are readonly on ChildProcess, so the double has to be built in one
+  // step and asserted afterwards rather than assigned field by field.
+  const mockProcess = Object.assign(new EventEmitter(), {
+    // Streams
+    stdin: new EventEmitter(),
+    stdout: new EventEmitter(),
+    stderr: new EventEmitter(),
+    // Readonly state
+    pid: 12345,
+    connected: true,
+    exitCode: null,
+    signalCode: null,
+    spawnargs: [],
+    spawnfile: '',
+    killed: false,
+    // Methods
+    send: vi.fn().mockReturnValue(true),
+    kill: vi.fn().mockReturnValue(true),
+    ref: vi.fn().mockReturnThis(),
+    unref: vi.fn().mockReturnThis(),
+    disconnect: vi.fn()
+  });
 
-  // Add all required properties
-  mockProcess.stdin = new EventEmitter() as any;
-  mockProcess.stdout = new EventEmitter() as any;
-  mockProcess.stderr = new EventEmitter() as any;
-  mockProcess.pid = 12345;
-  mockProcess.connected = true;
-  mockProcess.exitCode = null;
-  mockProcess.signalCode = null;
-  mockProcess.spawnargs = [];
-  mockProcess.spawnfile = '';
-  mockProcess.killed = false;
-
-  // Add required methods
-  mockProcess.send = vi.fn().mockReturnValue(true);
-  mockProcess.kill = vi.fn().mockReturnValue(true);
-  mockProcess.ref = vi.fn().mockReturnThis();
-  mockProcess.unref = vi.fn().mockReturnThis();
-  mockProcess.disconnect = vi.fn();
-
-  return mockProcess;
+  return mockProcess as unknown as ChildProcess & EventEmitter;
 }
 
 /**

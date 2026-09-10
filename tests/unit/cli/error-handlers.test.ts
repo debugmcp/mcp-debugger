@@ -1,11 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { setupErrorHandlers } from '../../../src/cli/error-handlers.js';
 import { FakeCurrentProcess } from '../../test-utils/mocks/fake-current-process.js';
 import type { Logger as WinstonLoggerType } from 'winston';
 
 describe('Error Handlers', () => {
   let mockLogger: WinstonLoggerType;
-  let mockExitProcess: ReturnType<typeof vi.fn>;
+  let mockExitProcess: Mock<(code: number) => void>;
   let fakeProc: FakeCurrentProcess;
 
   beforeEach(() => {
@@ -19,7 +19,7 @@ describe('Error Handlers', () => {
     } as any;
 
     // Create mock exit function
-    mockExitProcess = vi.fn();
+    mockExitProcess = vi.fn<(code: number) => void>();
 
     // Handlers attach to the fake's emitter, never the real process (issue #183)
     fakeProc = new FakeCurrentProcess();

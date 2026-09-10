@@ -1,18 +1,9 @@
-﻿import { describe, it, expect, vi } from 'vitest';
+﻿import { describe, it, expect } from 'vitest';
 import { JavascriptDebugAdapter } from '../../../packages/adapter-javascript/src/javascript-debug-adapter.js';
 import { DebugFeature } from '@debugmcp/shared';
+import { createMockAdapterDependencies } from '../../test-utils/helpers/adapter-dependencies.js';
 
-const createDependencies = () => ({
-  logger: {
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn()
-  },
-  fileSystem: {},
-  environment: {},
-  networkManager: {} as unknown
-});
+const createDependencies = () => createMockAdapterDependencies();
 
 describe('JavascriptDebugAdapter runtime helpers', () => {
   it('translates ENOENT errors into actionable guidance', () => {

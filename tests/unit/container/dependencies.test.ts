@@ -56,7 +56,7 @@ vi.mock('../../../src/adapters/adapter-registry.js', () => ({
   AdapterRegistry: AdapterRegistryMock
 }));
 
-const isLanguageDisabledMock = vi.fn(() => false);
+const isLanguageDisabledMock = vi.fn<(...args: unknown[]) => boolean>(() => false);
 
 vi.mock('../../../src/utils/language-config.js', () => ({
   isLanguageDisabled: (...args: unknown[]) => isLanguageDisabledMock(...args)
@@ -107,7 +107,9 @@ describe('createProductionDependencies', () => {
       adapterRegistry: expect.any(AdapterRegistryMock)
     });
 
-    const registry = dependencies.adapterRegistry as AdapterRegistryMock;
+    // vi.mock swapped the real registry class out for this double, which the
+    // static IAdapterRegistry type cannot know about.
+    const registry = dependencies.adapterRegistry as unknown as AdapterRegistryMock;
     expect(registry.config).toEqual(
       expect.objectContaining({
         validateOnRegister: false,

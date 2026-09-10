@@ -9,11 +9,21 @@ import { ProxyManager } from '../../../src/proxy/proxy-manager.js';
 import { ProxyConfig } from '../../../src/proxy/proxy-config.js';
 import { IFileSystem, ILogger } from '@debugmcp/shared';
 import type { DebugProtocol } from '@vscode/debugprotocol';
+import type { Stats } from 'fs';
+import { createMockFileSystem as createTypedMockFileSystem } from '../../test-utils/helpers/adapter-dependencies.js';
 
 export class TestProxyManager extends ProxyManager {
   private mockResponses: Map<string, any> = new Map();
   private simulatedThreadId: number | null = null;
   public lastSentCommand: any = null;
+
+  /**
+   * `sessionId` is private on ProxyManager, but the double must drive the real
+   * field so the inherited message handling reads the same value.
+   */
+  private get internals(): { sessionId: string | null } {
+    return this as unknown as { sessionId: string | null };
+  }
 
   constructor(
     logger: ILogger = createMockLogger(),
@@ -30,7 +40,7 @@ export class TestProxyManager extends ProxyManager {
    * Override start to skip complex initialization
    */
   async start(config: ProxyConfig): Promise<void> {
-    this.sessionId = config.sessionId;
+    this.internals.sessionId = config.sessionId;
     (this as any).isInitialized = true;
     (this as any).proxyProcess = { pid: 12345 };
 
@@ -65,7 +75,11 @@ export class TestProxyManager extends ProxyManager {
   /**
    * Override sendDapRequest to return mock responses
    */
-  async sendDapRequest(command: string, args?: any, options?: { timeoutMs?: number }): Promise<DebugProtocol.Response> {
+  async sendDapRequest<T extends DebugProtocol.Response>(
+    command: string,
+    args?: unknown,
+    options?: { timeoutMs?: number }
+  ): Promise<T> {
     this.lastSentCommand = { command, args, ...(options !== undefined ? { options } : {}) };
 
     // Check if proxy is running
@@ -122,8 +136,8 @@ export class TestProxyManager extends ProxyManager {
     }
 
     // Ensure we have sessionId in the message
-    if (!message.sessionId && this.sessionId) {
-      message.sessionId = this.sessionId;
+    if (!message.sessionId && this.internals.sessionId) {
+      message.sessionId = this.internals.sessionId;
     }
 
     // Call the private handleProxyMessage method
@@ -177,13 +191,16 @@ function createMockLogger(): ILogger {
  * Create a mock file system for testing
  */
 function createMockFileSystem(): IFileSystem {
-  return {
+  // The seven behaviours below are the ones ProxyManager (and its tests) rely on;
+  // the shared factory supplies inert spies for the other nine IFileSystem members
+  // so the double actually satisfies the interface.
+  return createTypedMockFileSystem({
     ensureDir: async () => {},
     pathExists: async () => true,
     writeFile: async () => {},
     readFile: async () => '',
     readTail: async () => '',
-    stat: async () => ({ isFile: () => true } as any),
+    stat: async () => ({ isFile: () => true }) as unknown as Stats,
     ensureDirSync: () => {}
-  };
+  });
 }

@@ -43,11 +43,9 @@ describe('NetworkManagerImpl', () => {
     networkManager = new NetworkManagerImpl();
     vi.clearAllMocks();
     
-    // Reset mock server methods
-    Object.keys(mockServer).forEach(key => {
-      if (typeof mockServer[key] === 'function') {
-        mockServer[key].mockClear();
-      }
+    // Reset mock server methods (every member is a spy)
+    Object.values(mockServer).forEach(member => {
+      member.mockClear();
     });
   });
 

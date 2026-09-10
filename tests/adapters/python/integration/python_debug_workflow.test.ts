@@ -20,11 +20,16 @@ async function startTestServer(): Promise<void> {
     const serverScriptPath = path.resolve(currentDirName, '../../../../dist/index.js');
     console.log(`[Test Setup] Server script path for SDK StdioClientTransport: ${serverScriptPath}`); 
 
-    client = new Client({
-        name: "mcp-test-client",
-        version: "0.1.0",
-        capabilities: { tools: {} } 
-    });
+    client = new Client(
+        {
+            name: "mcp-test-client",
+            version: "0.1.0"
+        },
+        // Capabilities belong in the ClientOptions argument; `tools` is a SERVER
+        // capability, so the old `capabilities: { tools: {} }` inside clientInfo
+        // was inert either way.
+        { capabilities: {} }
+    );
 
     const filteredEnv: Record<string, string> = {};
     for (const key in process.env) {

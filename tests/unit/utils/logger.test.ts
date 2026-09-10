@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -11,7 +11,19 @@ const fileTransportSpy = vi.fn(function (this: Record<string, unknown>, options:
   this.type = 'file';
   this.options = options;
 });
-const createLoggerSpy = vi.fn(() => ({
+/**
+ * The winston logger stand-in `createLogger` hands back. `transports`/`level`/`add`
+ * are only present on the richer doubles the redirect tests install, hence optional.
+ */
+interface MockWinstonLogger {
+  on: Mock;
+  warn: Mock;
+  transports?: unknown[];
+  level?: string;
+  add?: Mock;
+}
+
+const createLoggerSpy = vi.fn<(...args: unknown[]) => MockWinstonLogger>(() => ({
   on: vi.fn(),
   warn: vi.fn()
 }));
@@ -213,7 +225,7 @@ describe('logger utility', () => {
     stubFs();
     loggerModule.createLogger('debug-mcp:test');
 
-    const loggerInstance = createLoggerSpy.mock.results[0].value as { on: ReturnType<typeof vi.fn> };
+    const loggerInstance = createLoggerSpy.mock.results[0].value as { on: Mock };
     const errorHandler = loggerInstance.on.mock.calls.find(([event]) => event === 'error')?.[1] as
       | ((err: Error) => void)
       | undefined;
@@ -235,7 +247,7 @@ describe('logger utility', () => {
 
     loggerModule.createLogger('debug-mcp:test');
 
-    const loggerInstance = createLoggerSpy.mock.results[0].value as { on: ReturnType<typeof vi.fn> };
+    const loggerInstance = createLoggerSpy.mock.results[0].value as { on: Mock };
     const errorHandler = loggerInstance.on.mock.calls.find(([event]) => event === 'error')?.[1] as
       | ((err: Error) => void)
       | undefined;
@@ -250,11 +262,11 @@ describe('logger utility', () => {
     /** Mock winston loggers rich enough for add-transport redirection. */
     function makeMockLogger() {
       const inst: {
-        on: ReturnType<typeof vi.fn>;
-        warn: ReturnType<typeof vi.fn>;
+        on: Mock;
+        warn: Mock;
         transports: unknown[];
         level: string;
-        add: ReturnType<typeof vi.fn>;
+        add: Mock;
       } = {
         on: vi.fn(),
         warn: vi.fn(),

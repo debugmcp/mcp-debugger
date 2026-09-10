@@ -36,7 +36,7 @@ describe('JsDebugLaunchBarrier', () => {
     const barrier = new JsDebugLaunchBarrier(logger, 2000);
     const waitPromise = barrier.waitUntilReady();
 
-    barrier.onProxyStatus('adapter_connected', { status: 'adapter_connected' });
+    barrier.onProxyStatus('adapter_connected');
     await vi.advanceTimersByTimeAsync(500);
 
     await expect(waitPromise).resolves.toBeUndefined();
@@ -142,7 +142,7 @@ describe('JsDebugLaunchBarrier', () => {
     barrier.onDapEvent('stopped', undefined);
     await waitPromise;
 
-    barrier.onProxyStatus('adapter_connected', {});
+    barrier.onProxyStatus('adapter_connected');
     barrier.onProxyExit(0, null);
 
     expect(logger.info).toHaveBeenCalledTimes(1);

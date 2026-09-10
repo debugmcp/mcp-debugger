@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import { spawn } from 'child_process';
 import fs from 'node:fs';
-import type { AdapterDependencies } from '@debugmcp/shared';
+import type { AdapterDependencies, GenericLaunchConfig } from '@debugmcp/shared';
 import { AdapterState, DebugLanguage, DebugFeature } from '@debugmcp/shared';
 import { GoDebugAdapter } from '@debugmcp/adapter-go';
 
@@ -475,12 +475,16 @@ describe('GoDebugAdapter', () => {
 
   describe('transformLaunchConfig', () => {
     it('should transform generic config to Go-specific config', async () => {
-      const transformed = await adapter.transformLaunchConfig({
+      // `program` is read by transformLaunchConfig (via a Record cast) but is not
+      // declared on GenericLaunchConfig, so a fresh literal trips excess-property
+      // checking. Naming the intersection keeps every key type-checked.
+      const config: GenericLaunchConfig & { program: string } = {
         program: '/app/main.go',
         cwd: '/app',
         args: ['--verbose'],
         env: { DEBUG: 'true' }
-      });
+      };
+      const transformed = await adapter.transformLaunchConfig(config);
 
       expect(transformed.type).toBe('go');
       expect(transformed.request).toBe('launch');
@@ -631,7 +635,8 @@ describe('GoDebugAdapter', () => {
           adapterPort: 2345,
           logDir: '/tmp',
           scriptPath: 'main.go',
-          executablePath: '/fake/dlv'
+          executablePath: '/fake/dlv',
+          launchConfig: {}
         });
         expect(cmd.command).toBe('/fake/dlv');
         expect(cmd.args).toContain('--log');

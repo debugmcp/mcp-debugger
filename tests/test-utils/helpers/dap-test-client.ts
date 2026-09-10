@@ -28,7 +28,10 @@ export class TcpDapClient {
         this.notifyWaiters();
       });
       this.socket.on('data', (data) => {
-        this.received.push(...this.decoder.push(data));
+        // No encoding is ever set on this socket, so `data` is always a Buffer at
+        // runtime; the guard exists only because the listener type admits string.
+        const chunk = typeof data === 'string' ? Buffer.from(data) : data;
+        this.received.push(...this.decoder.push(chunk));
         this.notifyWaiters();
       });
     });

@@ -298,7 +298,7 @@ describeDockerRust.sequential('Docker: Rust Debugging Smoke Tests', () => {
 
       await waitForStackFrame(
         sessionId,
-        (frame) => frame.file?.replace(/\\/g, '/').includes(absoluteAsyncSourcePath.replace(/\\/g, '/')),
+        (frame) => frame.file?.replace(/\\/g, '/').includes(absoluteAsyncSourcePath.replace(/\\/g, '/')) ?? false,
         'async_example'
       );
 

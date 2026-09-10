@@ -62,7 +62,7 @@ describe('SafeFileTransport', () => {
           new Promise<void>((resolve) => {
             t.once('closed', () => resolve());
             try {
-              t.close();
+              t.close?.();
             } catch {
               resolve();
             }

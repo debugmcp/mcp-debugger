@@ -10,6 +10,7 @@ import {
   ValidationResultCache
 } from '../../../src/utils/language-availability.js';
 import { ErrorMessages } from '../../../src/utils/error-messages.js';
+import type { FactoryValidationResult } from '@debugmcp/shared';
 
 const ok = { valid: true, errors: [], warnings: [] };
 const bad = (msg: string) => ({ valid: false, errors: [msg], warnings: [] });
@@ -272,9 +273,11 @@ describe('probeLanguageEntry (issue #435)', () => {
 
   it('routes validate through the runValidate wrapper and carries the result on the probe', async () => {
     const factory = makeFactory();
-    const runValidate = vi.fn(async (_language: string, validate: () => Promise<typeof ok>) => {
-      return validate();
-    });
+    const runValidate = vi.fn(
+      async (_language: string, validate: () => Promise<FactoryValidationResult>) => {
+        return validate();
+      }
+    );
 
     const probe = await probeLanguageEntry(entry(), {
       registry: { getFactory: vi.fn().mockResolvedValue(factory) },
