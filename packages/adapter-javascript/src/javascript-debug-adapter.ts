@@ -28,7 +28,8 @@ import {
   type AdapterLaunchBarrier,
   OWNER_PID_ARG_PREFIX,
   SESSION_ID_ARG_PREFIX,
-  resolveJsLaunchSkipFiles
+  resolveJsLaunchSkipFiles,
+  resolveJsLaunchSmartStep
 } from '@debugmcp/shared';
 import { DebugLanguage } from '@debugmcp/shared';
 import type { AdapterDependencies } from '@debugmcp/shared';
@@ -450,14 +451,15 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       args,
       stopOnEntry,
       justMyCode,
-      // js-debug's smart-stepper steps out of any pause or step that lands in a
+      // js-debug's smart-stepper keeps stepping while a pause or step is in a
       // skipped frame. Node internals are skipped on every launch, and on a
       // server the request path enters user code by calls, never by returns,
       // so with the stepper on a pause on an idle server never lands (issue
       // #678; the #513 mechanism on attach). justMyCode: false means "let me
       // see everything": turn the stepper off too, so the pause lands
-      // truthfully even in an internal frame. An explicit caller value wins.
-      smartStep: typeof u.smartStep === 'boolean' ? u.smartStep : justMyCode !== false,
+      // truthfully even in an internal frame. An explicit caller value wins;
+      // the shared helper is what the policy's hints read too.
+      smartStep: resolveJsLaunchSmartStep(u),
       skipFiles,
       console: 'internalConsole',
       outputCapture: 'std',

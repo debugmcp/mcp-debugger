@@ -174,7 +174,14 @@ export type BreakpointContext = Pick<
  */
 export type ExecutionContext = Pick<
   OperationsContext,
-  'logger' | 'getSession' | 'updateState' | 'getStackTrace' | 'getStackTraceDetailed' | 'selectPolicy' | 'tunables'
+  | 'logger'
+  | 'getSession'
+  | 'updateState'
+  | 'getStackTrace'
+  | 'getStackTraceDetailed'
+  | 'selectPolicy'
+  | 'tunables'
+  | 'defaultDapLaunchArgs'
 >;
 
 /** Expression evaluation, including the redaction hook. */

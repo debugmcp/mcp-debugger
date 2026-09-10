@@ -125,7 +125,7 @@ describe('execution tool handlers', () => {
         success: true,
         state: 'paused',
         data: {
-          message: "Step stopped on 'breakpoint' rather than on the step itself.",
+          message: "Stepped over; stopped on 'breakpoint' rather than on the step itself (see stopReason).",
           stopReason: 'breakpoint',
           location: { file: '/app/node_modules/router/index.js', line: 160, column: 16 }
         }
@@ -135,13 +135,13 @@ describe('execution tool handlers', () => {
       const payload = JSON.parse(result.content[0].text);
 
       expect(payload.success).toBe(true);
-      expect(payload.message).toBe("Step stopped on 'breakpoint' rather than on the step itself.");
+      expect(payload.message).toBe("Stepped over; stopped on 'breakpoint' rather than on the step itself (see stopReason).");
       expect(payload.stopReason).toBe('breakpoint');
       expect(payload.location).toEqual({ file: '/app/node_modules/router/index.js', line: 160, column: 16 });
       expect(payload.pending).toBeUndefined();
     });
 
-    it('forwards a non-interrupting stopReason but keeps the "Stepped" wording (issue #678)', async () => {
+    it('passes the controller wording through alongside a non-interrupting stopReason (issue #678)', async () => {
       ctx.sessionManager.getSession.mockReturnValue({
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
@@ -149,7 +149,7 @@ describe('execution tool handlers', () => {
       ctx.sessionManager.stepOver.mockResolvedValue({
         success: true,
         state: 'paused',
-        data: { message: 'Step completed.', stopReason: 'pause' }
+        data: { message: 'Stepped over', stopReason: 'pause' }
       });
 
       const result = await stepTool(ctx, { sessionId: 'test-session' }, 'step_over');
@@ -157,6 +157,24 @@ describe('execution tool handlers', () => {
 
       expect(payload.message).toBe('Stepped over');
       expect(payload.stopReason).toBe('pause');
+    });
+
+    it('passes any controller message through: the controller owns the step wording (issue #678 review)', async () => {
+      ctx.sessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+      ctx.sessionManager.stepInto.mockResolvedValue({
+        success: true,
+        state: 'paused',
+        data: { message: 'Stepped into', location: { file: '/app/main.py', line: 3, column: 1 } }
+      });
+
+      const result = await stepTool(ctx, { sessionId: 'test-session' }, 'step_into');
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.message).toBe('Stepped into');
+      expect(payload.location).toEqual({ file: '/app/main.py', line: 3, column: 1 });
     });
   });
 

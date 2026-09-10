@@ -204,7 +204,9 @@ export {
   JS_NODE_INTERNALS_SKIP,
   JS_NODE_MODULES_SKIP,
   resolveJsLaunchSkipFiles,
-  jsLaunchBlackboxesNodeModules
+  jsLaunchBlackboxesNodeModules,
+  jsLaunchSkipsNodeInternals,
+  resolveJsLaunchSmartStep
 } from './interfaces/js-launch-defaults.js';
 export type { JsLaunchSkipInputs } from './interfaces/js-launch-defaults.js';
 export { PythonAdapterPolicy } from './interfaces/adapter-policy-python.js';

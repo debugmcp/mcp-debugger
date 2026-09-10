@@ -354,7 +354,7 @@ Steps into a function call.
 #### `stepOut(sessionId: string): Promise<DebugResult<StepResultData>>`
 Steps out of the current function.
 
-The three step methods take only a `sessionId` and return a typed result, not `void`. `StepResultData` adds a required `message` plus an optional `location` (`{ file, line, column? }`, taken from the top stack frame). If no `stopped` event arrives before the step grace window elapses, the call still succeeds with `data.pending = true` — that window is a reporting deadline, not a deadline on the debuggee.
+The three step methods take only a `sessionId` and return a typed result, not `void`. `StepResultData` adds a required `message` plus an optional `location` (`{ file, line, column? }`, taken from the top stack frame) and, when the stop that ended the step was recorded as something other than the step, `stopReason`/`rawStopReason` with the same semantics as `PauseResultData` (issue #678). If no `stopped` event arrives before the step grace window elapses, the call still succeeds with `data.pending = true` — that window is a reporting deadline, not a deadline on the debuggee.
 
 #### `pause(sessionId: string, threadId?: number): Promise<DebugResult<PauseResultData>>`
 Pauses execution. `PauseResultData` adds `message`, optional `stopReason`/`rawStopReason` (present only when this pause's own stop was recorded, never a stale earlier one) and an optional `location`.

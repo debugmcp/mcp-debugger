@@ -1509,8 +1509,9 @@ describe('SessionManager - DAP Operations', () => {
       const data = result.data as { message?: string; stopReason?: string; pending?: boolean };
       expect(data.pending).toBeUndefined();
       expect(data.stopReason).toBe('breakpoint');
-      expect(data.message).toBe(ErrorMessages.stepStoppedOn('breakpoint'));
-      expect(data.message).not.toMatch(/interrupted|before the step completed/);
+      expect(data.message).toBe(ErrorMessages.stepStoppedOn('Stepped over', 'breakpoint'));
+      expect(data.message).toMatch(/^Stepped over; /);
+      expect(data.message).not.toMatch(/interrupted|before the step completed|where the program stopped/);
     });
 
     /**
@@ -1551,7 +1552,7 @@ describe('SessionManager - DAP Operations', () => {
       const data = result.data as { message?: string; stopReason?: string; location?: { line: number } };
       expect(data.stopReason).toBe('breakpoint');
       expect(data.location?.line).toBe(160);
-      expect(data.message).toBe(ErrorMessages.stepStoppedOn('breakpoint', { backAtOrigin: true }));
+      expect(data.message).toBe(ErrorMessages.stepStoppedOn('Stepped over', 'breakpoint', { backAtOrigin: true }));
       expect(data.message).toMatch(/back at the line the step was issued from/);
     });
 
@@ -1580,7 +1581,7 @@ describe('SessionManager - DAP Operations', () => {
       const data = result.data as { message?: string; stopReason?: string; location?: { line: number } };
       expect(data.stopReason).toBe('breakpoint');
       expect(data.location?.line).toBe(11);
-      expect(data.message).toBe(ErrorMessages.stepStoppedOn('breakpoint'));
+      expect(data.message).toBe(ErrorMessages.stepStoppedOn('Stepped over', 'breakpoint'));
     });
 
     it('keeps the plain completion wording, with no stopReason, when the step itself stopped (issue #678)', async () => {
@@ -1601,7 +1602,7 @@ describe('SessionManager - DAP Operations', () => {
       expect(result.success).toBe(true);
       const data = result.data as { message?: string; stopReason?: string };
       expect(data.stopReason).toBeUndefined();
-      expect(data.message).not.toMatch(/interrupted/);
+      expect(data.message).toBe('Stepped over');
     });
 
     it('should treat termination during step as a successful completion', async () => {

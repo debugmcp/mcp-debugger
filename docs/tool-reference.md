@@ -363,7 +363,7 @@ Starts debugging a script.
 - `args` (array of strings, optional): Command line arguments for the script.
 - `dapLaunchArgs` (object, optional): Standard DAP launch arguments:
   - `stopOnEntry` (boolean): Stop at first line (default `false` — the opposite of attach, which pauses unless `stopOnEntry` is `false`)
-  - `justMyCode` (boolean): Debug only user code (default `true`). JavaScript launch: `true` blackboxes `node_modules` through js-debug's `skipFiles`, so a pause or step that lands inside a dependency is resumed by js-debug and does not land (`pending: true`, with an explanation); `false` drops `node_modules` from the skip list and turns js-debug's smart-stepper off, so steps land inside dependencies and `pause_execution` lands on an idle server (issue #678). A caller `skipFiles` replaces the default list. Source maps are on for every JavaScript launch, `.js` programs included — stops report `src/*.ts` when maps and sources are present; `adapterLaunchConfig: { sourceMaps: false }` opts out (issue #684)
+  - `justMyCode` (boolean): Debug only user code (default `true`). JavaScript launch: `true` blackboxes `node_modules` through js-debug's `skipFiles` and keeps js-debug's smart-stepper on, so a pause or step that lands in skipped code (Node internals, `node_modules`) is stepped through and may never land (`pending: true`, with an explanation); `false` drops `node_modules` from the skip list and turns the stepper off, so steps land inside dependencies and `pause_execution` lands as soon as any JavaScript runs (issue #678). A caller `skipFiles` replaces the default list. Source maps are on for every JavaScript launch, `.js` programs included — stops report `src/*.ts` when maps and sources are present; `adapterLaunchConfig: { sourceMaps: false }` opts out (issue #684)
   - Additional DAP launch keys (`program`, `cwd`, `env`, language-specific options) pass through to the adapter. Top-level parameters do **not** belong here: a nested `breakOnExceptions` is honored as an alias (the top-level value wins if both are given) and reported via a `warning` in the response; other misplaced top-level keys (`dryRunSpawn`, `sessionId`, `scriptPath`, `adapterLaunchConfig`) are stripped with a warning instead of silently riding into the launch config.
 - `adapterLaunchConfig` (object, optional): Adapter-specific launch configuration overrides. Use this for language-specific settings that go beyond standard DAP arguments (e.g., `mainClass` and `classpath` for Java, `buildCommand` for Rust). For Rust, `_adapterSettings` passes through to CodeLLDB (issue #441) — e.g. `{"_adapterSettings": {"scriptConfig": {"lang": {"rust": {"sysroot": "/path"}}}}}` points the Rust formatter lookup at an explicit sysroot; the `CODELLDB_RUST_SYSROOT` env var does the same without per-launch config (a user-supplied `_adapterSettings` value wins over the env var).
 - `dryRunSpawn` (boolean, optional): Test spawn without actually starting
@@ -451,6 +451,14 @@ Steps over the current line, executing it without entering function calls.
 
 `location` and `context` are best-effort: they appear when the post-step stack trace and the source file could both be read.
 
+When the stop that ended the step was recorded as something other than the step — a breakpoint on the landing
+line, or a breakpoint or exception hit before the step completed — the response also carries `stopReason` (and
+`rawStopReason` when the adapter's raw reason was normalized, as for [pause_execution](#pause_execution)), and the
+message reads `Stepped over; stopped on 'breakpoint' rather than on the step itself (see stopReason)`. When that stop
+is on the very line the step was issued from — a lost step whose breakpoint fired again, or a single-line loop — the
+message adds `The program is back at the line the step was issued from.` A `pause` reason is reported in
+`stopReason` with the plain wording (issue #678). `location` is the first visible frame, as everywhere else.
+
 #### Pending steps
 
 `step_over`, `step_into`, and `step_out` share one contract. The DAP step request only acknowledges that the debugger accepted the command — where the program lands arrives later, as a `stopped` event — so each tool waits up to ~5s for it. If the step is still executing when that grace window elapses (e.g. stepping over a long-running call), the call still **succeeds**, but with `state: "running"`, a top-level `pending: true`, and no `location`:
@@ -465,6 +473,10 @@ Steps over the current line, executing it without entering function calls.
 ```
 
 The step is not cancelled: the session becomes `"paused"` on its own when it completes (poll `list_debug_sessions`), or call `pause_execution` to interrupt it.
+
+The adapter may append one sentence to that message explaining why the step may never land — the JavaScript adapter
+does so for a step issued from a frame its `skipFiles` blackbox while `smartStep` is on (issue #678) — so match a
+pending step by its `pending: true` flag, not by the message text.
 
 Once a stop has been observed, the stop path owns the answer — a step that demonstrably landed is never reported as pending afterwards, at the cost of the response then being bounded by the stack-trace round trip rather than by the ~5s window. If the debuggee ends while the step is in flight the result is still a success, with a terminal `state` and a message such as `"Step completed as session terminated."`.
 
@@ -571,6 +583,10 @@ Pauses a running program. The DAP pause request only acknowledges that the debug
   }
 }
 ```
+
+The adapter may append one sentence explaining why the pause may never land — the JavaScript adapter does so for a
+launch whose `smartStep` is on and whose `skipFiles` blackbox Node internals (issue #678) — so match a pending pause
+by `data.pending`, not by the message text.
 
 **Notes:**
 - The `"state"` field is the session state at the moment the tool answers: `"paused"` once the stop has been observed, and `"running"` **only on the pending path** — the request was delivered but the program has not stopped yet. On that path, poll `list_debug_sessions` (or watch a subsequent tool call) to see the state flip to `"paused"` when the target next executes code.
@@ -1173,6 +1189,7 @@ When the requested pause has not landed by the time the tool answers (an idle No
 - When `processId` was used, the message reads `Attached to process PID <pid>` instead.
 - The response `warning` reports two distinct `adapterConfig` key outcomes (issues #450/#466): keys the adapter's attach transform genuinely drops (e.g. Python's ptvsd-era `localRoot`/`remoteRoot` — use `pathMappings`) are named as **ignored**, while keys mcp-debugger doesn't recognize are **forwarded to the adapter as-is** and named with an edit-distance suggestion for near-misses (`pathMapping (did you mean pathMappings?)`) — "ignored" means dropped, "forwarded as-is" means the adapter still sees them. The same field also carries the launch-style warning for function breakpoints still unverified at attach (issue #308).
 - js-debug attach honors `adapterConfig` too: `localRoot`/`remoteRoot`/`sourceMaps`/`skipFiles`/`continueOnAttach` and other js-debug attach options reach the debugger (issue #466). Two keys are defaulted when absent (issue #655): `resolveSourceMapLocations: ["**", "!**/node_modules/**"]` (js-debug's own attach default collapses to "resolve everywhere", which applied every dependency's `.js.map` and produced phantom `../src/*.ts` frames) and `cwd` (the server's working directory, or the workspace root in container mode — js-debug needs a base path before it resolves any source map's relative `sources`, even ones next to the generated file). Pass your own value, including `resolveSourceMapLocations: null`, to override. `skipFiles` is deliberately left at js-debug's default: blackboxing `node_modules` would turn a `pause_execution` that lands in framework code on an idle server into the endless step-chase of issue #513 — `get_stack_trace` hides those frames instead.
+- `justMyCode` has no effect on a JavaScript attach: js-debug has no such key, and the attach transform derives nothing from it (a launch derives `skipFiles` and `smartStep` from it — see [start_debugging](#start_debugging)). Set `adapterConfig.skipFiles` / `adapterConfig.smartStep` yourself; attach defaults `smartStep` to `false` and leaves `skipFiles` unset (issue #513), so pauses and steps land where the program is (issue #678).
 - Breakpoints set before the attach are re-sent once the debuggee-owning session is provably live, so their verified state in `list_breakpoints` is authoritative.
 - Languages whose adapter has no attach implementation (`rust`, `go`, `mock`) fail fast with a clear error.
 - A failed attach reports `success: false` with the reason in `message` (`Failed to attach: ...`) and tears the proxy down, so no live proxy is left behind; `state` is then `"error"` (or `"stopped"` if the session was already gone). When the failure happened during proxy initialization, `data` carries `proxyLogPath`, `proxyLogResource`, and `initProgress` diagnostics. Session-lifecycle failures (unknown or terminated session) return the standard application-level `error` payload instead — see [Error Handling](#error-handling).

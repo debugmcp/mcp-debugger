@@ -3,7 +3,9 @@ import {
   JS_NODE_INTERNALS_SKIP,
   JS_NODE_MODULES_SKIP,
   jsLaunchBlackboxesNodeModules,
-  resolveJsLaunchSkipFiles
+  jsLaunchSkipsNodeInternals,
+  resolveJsLaunchSkipFiles,
+  resolveJsLaunchSmartStep
 } from '../../src/interfaces/js-launch-defaults.js';
 
 describe('resolveJsLaunchSkipFiles (issue #678)', () => {
@@ -48,5 +50,40 @@ describe('jsLaunchBlackboxesNodeModules (issue #678)', () => {
   it('follows the caller list when one is given', () => {
     expect(jsLaunchBlackboxesNodeModules({ skipFiles: ['**/foo/**'] })).toBe(false);
     expect(jsLaunchBlackboxesNodeModules({ skipFiles: ['**/foo/**', JS_NODE_MODULES_SKIP], justMyCode: false })).toBe(true);
+  });
+});
+
+describe('resolveJsLaunchSmartStep (issue #678 review)', () => {
+  it('is on by default and follows justMyCode when not set explicitly', () => {
+    expect(resolveJsLaunchSmartStep({})).toBe(true);
+    expect(resolveJsLaunchSmartStep({ justMyCode: true })).toBe(true);
+    expect(resolveJsLaunchSmartStep({ justMyCode: false })).toBe(false);
+  });
+
+  it('lets an explicit boolean win over justMyCode', () => {
+    expect(resolveJsLaunchSmartStep({ justMyCode: false, smartStep: true })).toBe(true);
+    expect(resolveJsLaunchSmartStep({ justMyCode: true, smartStep: false })).toBe(false);
+    expect(resolveJsLaunchSmartStep({ smartStep: false })).toBe(false);
+  });
+
+  it('ignores a non-boolean smartStep', () => {
+    expect(resolveJsLaunchSmartStep({ smartStep: 'false' })).toBe(true);
+    expect(resolveJsLaunchSmartStep({ smartStep: 0, justMyCode: false })).toBe(false);
+  });
+});
+
+describe('jsLaunchSkipsNodeInternals (issue #678 review)', () => {
+  it('is true for both default lists', () => {
+    expect(jsLaunchSkipsNodeInternals({})).toBe(true);
+    expect(jsLaunchSkipsNodeInternals({ justMyCode: false })).toBe(true);
+  });
+
+  it("follows the caller list: js-debug skips internals only for a pattern that starts with '<node_internals>/'", () => {
+    expect(jsLaunchSkipsNodeInternals({ skipFiles: [] })).toBe(false);
+    expect(jsLaunchSkipsNodeInternals({ skipFiles: ['**/node_modules/**'] })).toBe(false);
+    expect(jsLaunchSkipsNodeInternals({ skipFiles: ['<node_internals>/**'] })).toBe(true);
+    expect(jsLaunchSkipsNodeInternals({ skipFiles: ['<node_internals>/**/*.js'] })).toBe(true);
+    expect(jsLaunchSkipsNodeInternals({ skipFiles: ['<node_internals>\\**'] })).toBe(true);
+    expect(jsLaunchSkipsNodeInternals({ skipFiles: ['<node_internals>'] })).toBe(false);
   });
 });

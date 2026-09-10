@@ -606,10 +606,10 @@ describe('Server Control Tools Tests', () => {
       ['step_into', 'stepInto', 'Stepped into'],
       ['step_out', 'stepOut', 'Stepped out']
     ])('keeps the %s wording for an ordinary stop that carries a message (issue #574)', async (toolName, methodName, expectedMessage) => {
-      // The other direction of the state gate. The controller ALWAYS sets
-      // data.message ('Step completed.'), so surfacing it unconditionally
-      // would have replaced "Stepped over" on every successful step; only a
-      // terminal state may override the wording.
+      // The other direction of the state gate. The controller owns the step
+      // wording (issue #678 review): its own message for an ordinary stop is
+      // the user-facing 'Stepped over', and the handler passes data.message
+      // through whenever the controller set one.
       mockSessionManager.getSession.mockReturnValue({
         id: 'test-session',
         sessionLifecycle: 'ACTIVE'
@@ -618,7 +618,7 @@ describe('Server Control Tools Tests', () => {
         success: true,
         state: 'paused',
         data: {
-          message: 'Step completed.',
+          message: expectedMessage,
           location: { file: '/app/main.py', line: 12, column: 1 }
         }
       });

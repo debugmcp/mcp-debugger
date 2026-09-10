@@ -49,7 +49,8 @@ import type {
   StepResultData,
   StopLocation
 } from '../session-manager-core.js';
-import { isStepInterruptingReason } from '../session-manager-core.js';
+import { USER_BREAK_REASONS } from '../session-manager-core.js';
+import { samePath } from '../breakpoints/hit-verification.js';
 import type { ExecutionContext } from '../operations-context.js';
 import type { PauseCoordinator } from './pause-coordinator.js';
 
@@ -69,19 +70,19 @@ const STEP_KINDS = {
     command: 'next',
     operation: 'step over',
     logTag: 'stepOver',
-    successMessage: 'Step completed.'
+    successMessage: 'Stepped over'
   },
   stepInto: {
     command: 'stepIn',
     operation: 'step into',
     logTag: 'stepInto',
-    successMessage: 'Step into completed.'
+    successMessage: 'Stepped into'
   },
   stepOut: {
     command: 'stepOut',
     operation: 'step out',
     logTag: 'stepOut',
-    successMessage: 'Step out completed.'
+    successMessage: 'Stepped out'
   }
 } as const satisfies Record<string, StepKind>;
 
@@ -129,9 +130,9 @@ export interface StepOperationOptions {
   origin?: StopLocation;
 }
 
-/** Same file (case-insensitively — a same-line stop in a case-twin file is not a real case) and line. */
+/** Same line of the same file, with the breakpoint layer's path equality (exact, Windows-folded). */
 function isSameLine(a: StopLocation, b: StopLocation): boolean {
-  return a.line === b.line && a.file.toLowerCase() === b.file.toLowerCase();
+  return a.line === b.line && samePath(a.file, b.file);
 }
 
 export class ExecutionController {
@@ -184,6 +185,23 @@ export class ExecutionController {
 
     const fromFrame = await this.readStepOrigin(session, sessionId, threadId);
     const pendingHint = await this.describePendingStop(session, sessionId, 'step', fromFrame);
+
+    // Re-check after the awaits — the origin read is a real DAP round trip
+    // — in the order and spirit of pause()'s re-check (#574): a
+    // continue_execution or a second step can have resumed the thread, or
+    // the session can have ended, in the meantime. Without this the step
+    // would go to a running thread and its rejection would flip a healthy
+    // session to ERROR.
+    if (isTerminated(session)) {
+      throw new SessionTerminatedError(sessionId);
+    }
+    if (!session.proxyManager || !session.proxyManager.isRunning()) {
+      throw new ProxyNotRunningError(sessionId, operation);
+    }
+    if (session.state !== SessionState.PAUSED) {
+      this.ctx.logger.warn(`[SM ${logTag} ${sessionId}] No longer paused after the origin read. State: ${session.state}`);
+      return { success: false, error: 'Not paused', state: session.state };
+    }
 
     this.ctx.logger.info(`[SM ${logTag} ${sessionId}] Sending DAP '${command}' for threadId ${threadId}`);
 
@@ -318,8 +336,8 @@ export class ExecutionController {
             ...(ownStop.rawReason ? { rawStopReason: ownStop.rawReason } : {})
           };
           const backAtOrigin = options.origin !== undefined && location !== undefined && isSameLine(options.origin, location);
-          const message = isStepInterruptingReason(ownStop.reason)
-            ? ErrorMessages.stepStoppedOn(ownStop.reason, { backAtOrigin })
+          const message = USER_BREAK_REASONS.has(ownStop.reason)
+            ? ErrorMessages.stepStoppedOn(options.successMessage, ownStop.reason, { backAtOrigin })
             : options.successMessage;
           success(message, location, stop);
           return;
@@ -643,8 +661,10 @@ export class ExecutionController {
    * The raw frame a step is about to be issued from (issue #678) — internals
    * included, no readiness wait — read only for policies with
    * `describePendingStop`, whose explanation depends on it, so other adapters
-   * pay nothing. The same frame is the step's `origin`. A failed read costs
-   * the explanation and the origin, never the step.
+   * pay nothing. The same frame is the step's `origin`. The read is bounded to
+   * a fraction of the step grace window: a wedged stackTrace (a js child
+   * mid-teardown) must not hold the step for the 30s DAP request timeout. A
+   * failed or late read costs the explanation and the origin, never the step.
    */
   private async readStepOrigin(
     session: ManagedSession,
@@ -654,12 +674,28 @@ export class ExecutionController {
     if (!this.ctx.selectPolicy(session.language).describePendingStop) {
       return undefined;
     }
+    const boundMs = Math.max(1, Math.floor(this.ctx.tunables.stepGraceMs / 5));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<undefined>((resolve) => {
+      timer = setTimeout(() => resolve(undefined), boundMs);
+    });
     try {
-      const detailed = await this.ctx.getStackTraceDetailed(sessionId, threadId, true, { ensureStackReady: false });
+      const detailed = await Promise.race([
+        this.ctx.getStackTraceDetailed(sessionId, threadId, true, { ensureStackReady: false }),
+        late
+      ]);
+      if (!detailed) {
+        this.ctx.logger.debug(`[SM step ${sessionId}] Origin frame read exceeded ${boundMs}ms; stepping without it`);
+        return undefined;
+      }
       return detailed.frames[0];
     } catch (error) {
       this.ctx.logger.debug(`[SM step ${sessionId}] Could not read the origin frame for the pending-stop explanation:`, error);
       return undefined;
+    } finally {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
     }
   }
 
@@ -679,8 +715,14 @@ export class ExecutionController {
       return undefined;
     }
     try {
+      // The launcher's merge order: defaults under the caller's dapLaunchArgs,
+      // adapterLaunchConfig on top (proxy-launcher.ts). lastLaunch records the
+      // caller's input only, so the defaults layer is re-applied here.
       const launch = session.lastLaunch
-        ? { dapLaunchArgs: session.lastLaunch.dapLaunchArgs, adapterLaunchConfig: session.lastLaunch.adapterLaunchConfig }
+        ? {
+            dapLaunchArgs: { ...this.ctx.defaultDapLaunchArgs, ...(session.lastLaunch.dapLaunchArgs ?? {}) },
+            adapterLaunchConfig: session.lastLaunch.adapterLaunchConfig
+          }
         : undefined;
       return policy.describePendingStop({
         operation,

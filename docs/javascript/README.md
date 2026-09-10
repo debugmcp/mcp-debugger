@@ -97,25 +97,29 @@ The JavaScript adapter automatically configures:
 
 ### Stepping and pausing inside dependencies (`justMyCode`, `skipFiles`)
 
-js-debug has no `justMyCode` key of its own; the launch transform turns the intent into js-debug's
-`skipFiles` (V8 blackboxing), and js-debug **resumes any pause or step that lands in a skipped frame**, stepping
-out into a synchronous caller — on a request path, node internals — rather than waiting for your code to run
-(issue #678). What that means in practice:
+js-debug has no `justMyCode` key of its own; the launch transform turns the intent into two js-debug keys:
+`skipFiles` (V8 blackboxing — `node_modules` is on the list while `justMyCode` is true, Node internals always) and
+`smartStep`, whose stepper **keeps stepping while the program is in a skipped frame** — in the direction you asked
+for, falling back to step-out — instead of reporting the stop. On a server every pause lands in Node internals, and
+a request path enters your code by calls, not returns, so with the stepper on neither a pause nor a step issued
+from a skipped frame lands (issue #678). `justMyCode: false` turns the stepper off and takes `node_modules` off the
+list. What that means in practice:
 
 | Launch | `skipFiles` sent | `smartStep` | A breakpoint inside a dependency | `step_over` from that breakpoint | `pause_execution` on an idle server |
 |---|---|---|---|---|---|
-| default (`justMyCode: true`) | `<node_internals>/**`, `**/node_modules/**` | `true` | fires; frame 0 is the dependency frame | does not land on a request path (`pending: true`; the message names the skipped frame and the remedy) | does not land (`pending: true`; the message says node_modules is blackboxed and what to do) |
+| default (`justMyCode: true`) | `<node_internals>/**`, `**/node_modules/**` | `true` | fires; frame 0 is the dependency frame | may never land on a request path (`pending: true`; the message names the skipped frame, the stepper and the remedy) | may never land (`pending: true`; the message names the stepper and the remedy) |
 | `dapLaunchArgs: { justMyCode: false }` | `<node_internals>/**` | `false` | fires | lands on the next line of the dependency | lands as soon as any JavaScript runs (the next request or timer), in an internal frame if that is where it is (the stack response marks it). With the smart-stepper off, steps also stop in unmapped generated helpers it used to skip |
-| `dapLaunchArgs: { skipFiles: [...] }` | exactly your list | as above | — | — | — |
+| `dapLaunchArgs: { skipFiles: [...] }` | exactly your list | follows `justMyCode` unless set | fires | lands unless the frame is on your list and the stepper is on | may never land while the stepper is on and `<node_internals>/**` is on your list |
+| `adapterLaunchConfig: { smartStep: false }` (default list) | `<node_internals>/**`, `**/node_modules/**` | `false` | fires | lands in the next frame V8 does not skip (an internals frame on a request path) | lands, in an internals frame |
 
 A caller-supplied `skipFiles` **replaces** the default list (VS Code's launch.json semantics); include
 `<node_internals>/**` yourself if you still want internals skipped. An explicit `smartStep` always wins over the
 derived value. Attach sessions default neither key — see `attach_to_process` in the tool reference.
 
 A step whose stop is a breakpoint or an exception rather than the step itself is reported as
-`Step stopped on 'breakpoint'` with a `stopReason` — the location is where the program stopped, which is the
-next line when that line carries a breakpoint, and the very line you stepped from when a lost step's next request
-re-hit the same breakpoint (the message then says so).
+`Stepped over; stopped on 'breakpoint' rather than on the step itself (see stopReason)` — true both when the next
+line carries a breakpoint and when a lost step's next request re-hit the same breakpoint; in the second case the
+program is back at the line you stepped from, and the message says so.
 
 ### Custom Configuration
 

@@ -7,7 +7,7 @@
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import * as path from 'path';
 import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction, QueuedDapCommand, StopReasonContext, PendingStopContext } from './adapter-policy.js';
-import { jsLaunchBlackboxesNodeModules } from './js-launch-defaults.js';
+import { jsLaunchBlackboxesNodeModules, jsLaunchSkipsNodeInternals, resolveJsLaunchSmartStep } from './js-launch-defaults.js';
 import { emptyLocalVariableExtraction, extractionFromScope, resolveExceptionFilters } from './adapter-policy.js';
 import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
@@ -229,16 +229,20 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
     hasNoSource(frame.file || '') && (frame.line ?? 0) === 0,
 
   /**
-   * Why a launch-mode pause or step may never stop (issue #678). While the
-   * launch blackboxes node_modules — the default, see resolveJsLaunchSkipFiles
-   * — js-debug resumes every pause that lands in a skipped frame, and a step
-   * issued from one only ever steps OUT of it, into a synchronous caller. On a
-   * request path those callers are node internals, so neither lands — user
-   * code that runs later (a route handler, the next request's middleware)
-   * does not end them; measured on mcp-debugger's own HTTP server and on the
-   * express_idle_server e2e fixture. Node internals are skipped on every
-   * launch, so a step from one of those frames gets the same explanation
-   * without the justMyCode remedy. Attach sessions do not default skipFiles
+   * Why a launch-mode pause or step may never stop (issue #678). js-debug's
+   * smart-stepper (`smartStep`, on by default while justMyCode is true) keeps
+   * stepping — in the direction that was asked for, step-out after 256 tries —
+   * while the program is in a frame the skip list blackboxes, and Node
+   * internals are on the default list: on an idle server every pause lands
+   * there, and a request path enters user code by calls, not returns, so
+   * neither the pause nor a step issued from a skipped frame lands. Measured
+   * on the #686 build: default skip list + smartStep:false → the pause landed;
+   * internals-only skip list + smartStep:true → the chase, with node_modules
+   * NOT blackboxed. So the hints key on the effective smartStep plus whether
+   * the frame in question is skipped, both from the helpers the launch
+   * transform uses. A caller's own glob (`**\/vendor/**`) is not matched — this
+   * package has no glob matcher, and an over-match would be a false hint — so
+   * a step from such a frame gets silence. Attach sessions default neither key
    * (#513) and get nothing here.
    */
   describePendingStop: (info: PendingStopContext): string | undefined => {
@@ -246,12 +250,16 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
       return undefined;
     }
     const merged = { ...(info.launch?.dapLaunchArgs ?? {}), ...(info.launch?.adapterLaunchConfig ?? {}) };
-    const blackboxed = jsLaunchBlackboxesNodeModules(merged);
+    if (!resolveJsLaunchSmartStep(merged)) {
+      return undefined;
+    }
+    const internalsSkipped = jsLaunchSkipsNodeInternals(merged);
     if (info.operation === 'pause') {
-      return blackboxed
-        ? 'This launch blackboxes node_modules (justMyCode: true): js-debug resumes a pause that lands in a skipped ' +
-          'frame, and on a server that is where every pause lands, so the pause does not land at all. Set a breakpoint ' +
-          'in your own code, or relaunch with dapLaunchArgs.justMyCode: false to pause inside dependencies.'
+      return internalsSkipped
+        ? "js-debug's smart-stepper is on for this launch (smartStep: true, the default while justMyCode is true) and " +
+          'Node internals are skipped, so a pause that lands in internals — where an idle server always is — is ' +
+          'stepped through instead of reported and may never land. Set a breakpoint in your own code, or relaunch ' +
+          'with dapLaunchArgs.justMyCode: false (or adapterLaunchConfig.smartStep: false) to pause where the program is.'
         : undefined;
     }
     const frame = info.fromFrame;
@@ -260,15 +268,17 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
     }
     const file = frame.file || '';
     const where = `${file}:${frame.line}`;
-    if (file.includes('<node_internals>') || file.startsWith('node:')) {
-      return `The step was issued from a skipped frame in Node internals (${where}); js-debug only steps out of ` +
-        'skipped code into a synchronous caller, so the step may not land at all. Use step_out, or ' +
-        'continue_execution with a breakpoint in your own code.';
+    if (internalsSkipped && (file.includes('<node_internals>') || file.startsWith('node:'))) {
+      return `The step was issued from a skipped frame in Node internals (${where}); js-debug's smart-stepper keeps ` +
+        'stepping while the program is in skipped code, so on a request path the step may never land. Use ' +
+        'continue_execution with a breakpoint in your own code, or relaunch with adapterLaunchConfig.smartStep: false ' +
+        'to stop in the next frame V8 does not skip.';
     }
-    if (blackboxed && NODE_MODULES_SEGMENT.test(file)) {
+    if (jsLaunchBlackboxesNodeModules(merged) && NODE_MODULES_SEGMENT.test(file)) {
       return `The step was issued from a skipped frame (${where}); this launch blackboxes node_modules ` +
-        '(justMyCode: true) and js-debug only steps out of skipped code into a synchronous caller, so on a request ' +
-        'path the step does not land at all. Relaunch with dapLaunchArgs.justMyCode: false to step through dependencies.';
+        "(justMyCode: true) and js-debug's smart-stepper keeps stepping while the program is in skipped code, so on " +
+        'a request path the step may never land. Relaunch with dapLaunchArgs.justMyCode: false to step through ' +
+        'dependencies.';
     }
     return undefined;
   },
@@ -750,9 +760,10 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
           baseLaunchConfig.outputCapture = 'std';
         }
 
-        if (typeof baseLaunchConfig.smartStep !== 'boolean') {
-          baseLaunchConfig.smartStep = true;
-        }
+        // Same derivation as the launch transform (an explicit boolean wins,
+        // else it follows justMyCode) so an embedder bypassing the transform
+        // does not get the stepper back on with justMyCode: false (issue #678).
+        baseLaunchConfig.smartStep = resolveJsLaunchSmartStep(baseLaunchConfig);
 
         if (typeof baseLaunchConfig.pauseForSourceMap !== 'boolean') {
           baseLaunchConfig.pauseForSourceMap = true;

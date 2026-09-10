@@ -529,7 +529,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         expect(describePendingStop).toHaveBeenCalledWith({
           operation: 'step',
           attachMode: false,
-          launch: { dapLaunchArgs: { justMyCode: true }, adapterLaunchConfig: undefined },
+          // The launcher's merge order: defaultDapLaunchArgs under the caller's dapLaunchArgs
+          launch: { dapLaunchArgs: { stopOnEntry: false, justMyCode: true }, adapterLaunchConfig: undefined },
           fromFrame: rawTop
         });
       } finally {
@@ -553,6 +554,51 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         expect(result.data?.pending).toBe(true);
         expect(result.data?.message).toBe(ErrorMessages.stepStillRunning(5));
         expect(detailed).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('refuses the step, sending nothing, when the session stops being paused during the origin read (issue #678 review)', async () => {
+      vi.useFakeTimers();
+      try {
+        mockSession.state = SessionState.PAUSED;
+        mockProxyManager.sendDapRequest.mockResolvedValue({});
+        vi.spyOn(operations as any, 'selectPolicy').mockReturnValue({ describePendingStop: () => undefined } as any);
+        vi.spyOn(operations, 'getStackTraceDetailed').mockImplementation(async () => {
+          // A continue_execution landed while the stackTrace was in flight:
+          // the pre-flight PAUSED check is stale by the time the step is sent.
+          mockSession.state = SessionState.RUNNING;
+          return { frames: [], totalFrameCount: 0, hiddenFrameCount: 0, allFramesInternal: false } as never;
+        });
+
+        const result = await operations.stepOver('test-session');
+
+        expect(result.success).toBe(false);
+        expect(result.error).toBe('Not paused');
+        expect(mockProxyManager.sendDapRequest).not.toHaveBeenCalledWith('next', expect.anything());
+        expect(mockSession.state).toBe(SessionState.RUNNING);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('sends the step after a bounded wait when the origin read hangs (issue #678 review)', async () => {
+      vi.useFakeTimers();
+      try {
+        mockSession.state = SessionState.PAUSED;
+        mockProxyManager.sendDapRequest.mockResolvedValue({});
+        mockProxyManager.once.mockImplementation(() => {});
+        vi.spyOn(operations as any, 'selectPolicy').mockReturnValue({ describePendingStop: () => undefined } as any);
+        vi.spyOn(operations, 'getStackTraceDetailed').mockReturnValue(new Promise(() => {}) as never);
+
+        const promise = operations.stepOver('test-session');
+        // A fifth of the step grace window, not the 30s DAP request timeout.
+        await vi.advanceTimersByTimeAsync(1100);
+        expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('next', expect.objectContaining({ threadId: 1 }));
+        await vi.advanceTimersByTimeAsync(5100);
+        const result = await promise;
+        expect(result.data?.pending).toBe(true);
       } finally {
         vi.useRealTimers();
       }
@@ -4216,7 +4262,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         expect(describePendingStop).toHaveBeenCalledWith({
           operation: 'pause',
           attachMode: false,
-          launch: { dapLaunchArgs: undefined, adapterLaunchConfig: { skipFiles: ['**/node_modules/**'] } }
+          launch: { dapLaunchArgs: { stopOnEntry: false, justMyCode: true }, adapterLaunchConfig: { skipFiles: ['**/node_modules/**'] } }
         });
       } finally {
         vi.useRealTimers();

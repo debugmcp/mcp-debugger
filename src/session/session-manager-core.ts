@@ -53,7 +53,7 @@ import {
  * Stop reasons the first-stop auto-continue must never swallow: the shared
  * breakpoint family plus an exception the user asked to break on.
  */
-const USER_BREAK_REASONS: ReadonlySet<string> = new Set([...BREAKPOINT_STOP_REASONS, 'exception']);
+export const USER_BREAK_REASONS: ReadonlySet<string> = new Set([...BREAKPOINT_STOP_REASONS, 'exception']);
 
 // Custom launch arguments interface extending DebugProtocol.LaunchRequestArguments
 export interface CustomLaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
@@ -117,16 +117,6 @@ export type StepResultData = DebugResultData & {
   stopReason?: string;
   rawStopReason?: string;
 };
-
-/**
- * Whether a stop reason recorded for a step gets its own wording instead of
- * "Stepped over" (issue #678): the breakpoint family and exceptions. A `pause`
- * is reported as `stopReason` too, but keeps the step's own wording — some
- * adapters use it for stops the user did ask for.
- */
-export function isStepInterruptingReason(reason: string | undefined): boolean {
-  return reason !== undefined && (BREAKPOINT_STOP_REASONS.has(reason) || reason === 'exception');
-}
 
 /**
  * What a pause returns. `stopReason`/`rawStopReason` are present only when
