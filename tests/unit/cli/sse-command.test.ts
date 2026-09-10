@@ -22,7 +22,7 @@ const MockedSSEServerTransport = vi.mocked(SSEServerTransport);
 describe('SSE Command Handler', () => {
   let mockLogger: WinstonLoggerType;
   let mockServerFactory: ReturnType<typeof vi.fn> & ((options: ServerFactoryOptions) => DebugMcpServer);
-  let mockExitProcess: ReturnType<typeof vi.fn>;
+  let mockExitProcess: ReturnType<typeof vi.fn> & ((code: number) => void);
   let mockServer: DebugMcpServer;
   let mockTransport: any;
   let fakeProc: FakeCurrentProcess;
@@ -50,7 +50,7 @@ describe('SSE Command Handler', () => {
     mockServerFactory = vi.fn().mockReturnValue(mockServer) as typeof mockServerFactory;
 
     // Create mock exit function
-    mockExitProcess = vi.fn();
+    mockExitProcess = vi.fn() as typeof mockExitProcess;
 
     // Signal handlers attach to the fake's emitter, never the real process
     // (issues #159/#183).
@@ -144,6 +144,18 @@ describe('SSE Command Handler', () => {
       allowlist({ method: 'GET', headers: { host: 'from-env.example:8443' } }, mockRes, mockNext);
       expect(mockNext).toHaveBeenCalledTimes(2);
       expect(mockRes.status).not.toHaveBeenCalled();
+    });
+
+    it('logs an allowlist extended beyond loopback, and each normalization warning (issue #671)', () => {
+      createSSEApp(
+        { port: '3001', logLevel: 'info', allowedHost: ['App.Internal:8443'] },
+        { logger: mockLogger, serverFactory: mockServerFactory, proc: fakeProc }
+      );
+
+      expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('SSE Host allowlist extended beyond loopback'));
+      expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('app.internal'));
+      // The port is dropped and the case folded; the parser says so once.
+      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('App.Internal:8443'));
     });
 
     it('should set up CORS middleware', () => {
@@ -638,6 +650,42 @@ describe('SSE Command Handler', () => {
         close: vi.fn(),
         on: vi.fn()
       };
+    });
+
+    it('reports a port already in use on stderr as well as the log (issue #671)', async () => {
+      const listeners: Record<string, (err: NodeJS.ErrnoException) => void> = {};
+      const listeningServer = { close: vi.fn(), on: vi.fn((event: string, cb: (err: NodeJS.ErrnoException) => void) => { listeners[event] = cb; }) };
+      vi.mocked(express).mockReturnValue({
+        use: vi.fn(), get: vi.fn(), post: vi.fn(),
+        listen: vi.fn((_port: number, cb: () => void) => { cb(); return listeningServer; }),
+        sseTransports: new Map()
+      } as any);
+
+      await handleSSECommand(
+        { port: '3001' },
+        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+      );
+      const err = Object.assign(new Error('listen EADDRINUSE'), { code: 'EADDRINUSE' });
+      listeners.error(err);
+
+      expect(mockExitProcess).toHaveBeenCalledWith(1);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(fakeProc.stderrChunks.join('')).toMatch(/3001.*already in use/);
+    });
+
+    it('reports a generic startup failure on stderr with its cause (issue #671)', async () => {
+      vi.mocked(express).mockReturnValue({ use: vi.fn(), get: vi.fn(), post: vi.fn(), listen: vi.fn() } as any);
+      const failingFactory = vi.fn(() => { throw new Error('boom'); }) as unknown as typeof mockServerFactory;
+
+      await handleSSECommand(
+        { port: '3001' },
+        { logger: mockLogger, serverFactory: failingFactory, exitProcess: mockExitProcess, proc: fakeProc }
+      );
+
+      expect(mockExitProcess).toHaveBeenCalledWith(1);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(fakeProc.stderrChunks.join('')).toContain('Failed to start server in SSE mode');
+      expect(fakeProc.stderrChunks.join('')).toContain('boom');
     });
 
     it('refuses to start on an unusable --allowed-host value, naming it (issue #671)', async () => {
