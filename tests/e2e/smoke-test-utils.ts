@@ -148,7 +148,7 @@ export async function executeDebugSequence(
  */
 export async function waitForHealthEndpoint(port: number, timeout: number = 10000): Promise<boolean> {
   const startTime = Date.now();
-  const healthUrl = `http://localhost:${port}/health`;
+  const healthUrl = `http://127.0.0.1:${port}/health`;
   console.log(`[Smoke Test] Waiting for SSE server health at ${healthUrl}...`);
 
   while (Date.now() - startTime < timeout) {

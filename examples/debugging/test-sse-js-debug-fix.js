@@ -17,7 +17,7 @@ async function waitForPort(port, maxAttempts = 30) {
   for (let i = 0; i < maxAttempts; i++) {
     try {
       await new Promise((resolve, reject) => {
-        const socket = net.createConnection(port, 'localhost');
+        const socket = net.createConnection(port, '127.0.0.1');
         socket.on('connect', () => {
           socket.end();
           resolve();
@@ -73,7 +73,7 @@ async function runTest() {
       version: '1.0.0'
     });
     
-    const transport = new SSEClientTransport(new URL(`http://localhost:${PORT}/sse`));
+    const transport = new SSEClientTransport(new URL(`http://127.0.0.1:${PORT}/sse`));
     await client.connect(transport);
     console.log('✅ MCP client connected');
 

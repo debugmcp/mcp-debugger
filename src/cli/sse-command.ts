@@ -16,6 +16,15 @@ import {
   parseAllowedHosts
 } from './host-allowlist.js';
 import { reportFatal } from './report-fatal.js';
+import {
+  BIND_ENV_KEY,
+  BIND_FLAG,
+  BindAddressError,
+  describeEndpoint,
+  isLoopbackAddress,
+  resolveBindAddress,
+  type ResolvedBindAddress,
+} from './bind-address.js';
 
 export interface ServerFactoryOptions {
   logLevel?: string;
@@ -214,11 +223,17 @@ export function createSSEApp(
     }
   });
 
+  // Bind address (issue #680): resolved here so /health can report it;
+  // handleSSECommand listens on it. Throws BindAddressError for an unusable value.
+  const bind = resolveBindAddress(options.bind, proc.env);
+  const listeningPort = parseInt(options.port, 10);
+
   // Add a simple health check endpoint
   app.get('/health', (req, res) => {
     res.json({ 
       status: 'ok', 
       mode: 'sse',
+      listening: { address: bind.address, port: listeningPort },
       connections: sseTransports.size,
       sessions: Array.from(sseTransports.keys())
     });
@@ -226,6 +241,7 @@ export function createSSEApp(
 
   // Expose the transports map and shared server for graceful shutdown
   (app as any).sseTransports = sseTransports; // eslint-disable-line @typescript-eslint/no-explicit-any
+  (app as any).bindAddress = bind; // eslint-disable-line @typescript-eslint/no-explicit-any
   (app as any).sharedDebugServer = sharedDebugServer; // eslint-disable-line @typescript-eslint/no-explicit-any
 
   return app;
@@ -260,17 +276,27 @@ export async function handleSSECommand(
 
     // Start the shared debug server (mirrors stdio-command.ts startup)
     const sharedDebugServer = (app as any).sharedDebugServer as DebugMcpServer; // eslint-disable-line @typescript-eslint/no-explicit-any
+    const bind = (app as any).bindAddress as ResolvedBindAddress; // eslint-disable-line @typescript-eslint/no-explicit-any
     await sharedDebugServer.start();
 
-    const server = app.listen(port, () => {
-      logger.info(`Debug MCP Server (SSE) listening on port ${port}`);
-      logger.info(`SSE endpoint available at http://localhost:${port}/sse`);
+    if (bind.note) {
+      logger.info(bind.note);
+    }
+    if (!isLoopbackAddress(bind.address)) {
+      logger.warn(
+        `Bound to ${bind.address} (from ${BIND_FLAG} / ${BIND_ENV_KEY}): reachable from other machines. ` +
+          'The Host/Origin allowlist stops browsers, not direct clients — front this server with another access control.'
+      );
+    }
+    const server = app.listen(port, bind.address, () => {
+      logger.info(`Debug MCP Server (SSE) listening on ${bind.address}:${port}`);
+      logger.info(`SSE endpoint available at ${describeEndpoint(bind.address, port, '/sse')}`);
     });
 
     server.on('error', (err: NodeJS.ErrnoException) => {
       const line =
         err.code === 'EADDRINUSE'
-          ? `Port ${port} is already in use. Another instance may be running.`
+          ? `Port ${port} is already in use on ${bind.address}. Another instance may be running.`
           : `Server error: ${err.message}`;
       logger.error(line);
       reportFatal(proc, line);
@@ -338,7 +364,7 @@ export async function handleSSECommand(
       env: proc.env,
     });
   } catch (error) {
-    if (error instanceof AllowedHostError) {
+    if (error instanceof AllowedHostError || error instanceof BindAddressError) {
       // Fail fast and by name (issue #667): a silently dropped allowlist
       // entry would reproduce the discoverability problem the flag exists to fix.
       const line = `${error.message}. The server was not started.`;

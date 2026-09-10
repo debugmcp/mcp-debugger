@@ -65,7 +65,7 @@ class TransportTester {
       // Wait for server to be ready
       const checkReady = setInterval(async () => {
         try {
-          const response = await fetch(`http://localhost:${port}/health`);
+          const response = await fetch(`http://127.0.0.1:${port}/health`);
           if (response.ok) {
             clearInterval(checkReady);
             clearTimeout(timeout);
@@ -282,7 +282,7 @@ class TransportTester {
         version: '1.0.0'
       });
 
-      const transport = new SSEClientTransport(new URL(`http://localhost:${port}/sse`));
+      const transport = new SSEClientTransport(new URL(`http://127.0.0.1:${port}/sse`));
       await client.connect(transport);
       console.log('  Connected via SSE');
 

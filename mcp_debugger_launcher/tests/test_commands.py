@@ -69,6 +69,20 @@ class TestBuildNpxCommand(unittest.TestCase):
             ["npx", DebugMCPLauncher.NPM_PACKAGE, "http", "--port", "8080", "--allowed-host", "mcp-debugger"],
         )
 
+    def test_bind_is_forwarded_to_the_server(self):
+        # The server has its own --bind since debugmcp/mcp-debugger#680: npx
+        # mode forwards it verbatim, after --port and before the pass-through flags.
+        self.assertEqual(
+            self.launcher.build_npx_command("http", 8080, extra_args=("--allowed-host", "myhost"), bind="0.0.0.0"),
+            ["npx", DebugMCPLauncher.NPM_PACKAGE, "http", "--port", "8080", "--bind", "0.0.0.0", "--allowed-host", "myhost"],
+        )
+
+    def test_bind_is_ignored_for_stdio(self):
+        self.assertEqual(
+            self.launcher.build_npx_command("stdio", bind="0.0.0.0"),
+            ["npx", DebugMCPLauncher.NPM_PACKAGE, "stdio"],
+        )
+
     def test_extra_args_forwarded_for_stdio_too(self):
         self.assertEqual(
             self.launcher.build_npx_command("stdio", extra_args=("--log-level", "debug")),
@@ -194,6 +208,12 @@ class TestCliPassThrough(unittest.TestCase):
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn("0.0.0.0:3001:3001", result.output)
         self.assertIn("--allowed-host myhost", result.output)
+
+    def test_bind_reaches_the_npx_command(self):
+        result = self.invoke(["http", "--npm", "--dry-run", "--bind", "0.0.0.0"], self.NODE_ONLY)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("--bind 0.0.0.0", result.output)
+        self.assertNotIn("Docker mode only", result.output)
 
     def test_docker_forwards_allowed_hosts_env(self):
         with mock.patch.dict(os.environ, {"MCP_HTTP_ALLOWED_HOSTS": "svc.internal"}):

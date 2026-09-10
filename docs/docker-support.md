@@ -228,6 +228,11 @@ docker run -d --rm --network mynet --name mcp-debugger -e MCP_HTTP_ALLOWED_HOSTS
 
 The image `EXPOSE`s 3001, matching the CLI default; pass `-p` explicitly if you choose another port.
 
+Inside the image the server binds every interface (`ENV MCP_HTTP_BIND=0.0.0.0`, issue #680) so a published
+port works; on a bare host the same server binds `127.0.0.1` unless started with `--bind`. The host-side
+`-p 127.0.0.1:3001:3001` publish is the loopback control for a container; `-e MCP_HTTP_BIND=127.0.0.1` would
+make the container itself loopback-only, which nothing reaches through a publish.
+
 ### Container lifecycle environment variables
 
 These environment variables control when a containerized server gives up and exits, and who

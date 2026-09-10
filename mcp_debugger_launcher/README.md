@@ -53,7 +53,7 @@ debug-mcp-server http --allowed-host mcp-debugger
 debug-mcp-server http --docker --bind 0.0.0.0 --allowed-host myhost
 ```
 
-`--bind ADDR` (Docker mode only) chooses the host address the port is published on;
+`--bind ADDR` chooses the address the server is reachable on — with npx it is forwarded as the server's own `--bind` (default 127.0.0.1, debugmcp/mcp-debugger#680); with Docker it is the host address the port is published on;
 the default is `127.0.0.1`, so a launched container is only reachable from the
 machine that launched it unless you say otherwise. `MCP_HTTP_ALLOWED_HOSTS`, when
 set in the launcher's environment, is forwarded into the container.

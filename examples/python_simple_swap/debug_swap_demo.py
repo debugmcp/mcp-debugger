@@ -8,7 +8,7 @@ import os
 import uuid
 import sys # Import the sys module
 
-MCP_SERVER_URL = "http://localhost:3001/mcp" # Default URL, ensure server is running
+MCP_SERVER_URL = "http://127.0.0.1:3001/mcp" # Default URL, ensure server is running
 
 # Get the absolute path to swap_vars.py in the same directory
 SWAP_SCRIPT_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "swap_vars.py"))

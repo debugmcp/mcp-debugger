@@ -17,6 +17,15 @@ import {
   parseAllowedHosts,
 } from './host-allowlist.js';
 import { reportFatal } from './report-fatal.js';
+import {
+  BIND_ENV_KEY,
+  BIND_FLAG,
+  BindAddressError,
+  describeEndpoint,
+  isLoopbackAddress,
+  resolveBindAddress,
+  type ResolvedBindAddress,
+} from './bind-address.js';
 import { jsonRpcErrorBody } from './json-rpc-error.js';
 import { watchStdinForParentExit } from './stdin-watchdog.js';
 import type { ProcessLike } from '../interfaces/process-interfaces.js';
@@ -168,6 +177,12 @@ export function createHttpApp(
         `(from ${ALLOWED_HOST_FLAG} / ${ALLOWED_HOSTS_ENV_KEY}); this assumes another access control fronts the server.`
     );
   }
+
+  // Bind address (issue #680): resolved here, beside the allowlist, so /health
+  // can report what the operator exposed; handleHttpCommand listens on it.
+  // Throws BindAddressError for an unusable value — a named startup failure.
+  const bind = resolveBindAddress(options.bind, proc.env);
+  const listeningPort = parseInt(options.port, 10);
 
   const httpSessions = new Map<string, SessionData>();
 
@@ -360,6 +375,7 @@ export function createHttpApp(
     res.json({
       status: 'ok',
       mode: 'http',
+      listening: { address: bind.address, port: listeningPort },
       connections: httpSessions.size,
       sessions: Array.from(httpSessions.keys()),
       details: Array.from(httpSessions, ([id, session]) => ({
@@ -397,6 +413,8 @@ export function createHttpApp(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (app as any).httpSessions = httpSessions;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (app as any).bindAddress = bind;
 
   return app;
 }
@@ -450,16 +468,27 @@ export async function handleHttpCommand(
     const app = createHttpApp(options, dependencies);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const httpSessions = (app as any).httpSessions as Map<string, SessionData>;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const bind = (app as any).bindAddress as ResolvedBindAddress;
 
-    const server = app.listen(port, () => {
-      logger.info(`Debug MCP Server (HTTP) listening on port ${port}`);
-      logger.info(`MCP endpoint available at http://localhost:${port}/mcp`);
+    if (bind.note) {
+      logger.info(bind.note);
+    }
+    if (!isLoopbackAddress(bind.address)) {
+      logger.warn(
+        `Bound to ${bind.address} (from ${BIND_FLAG} / ${BIND_ENV_KEY}): reachable from other machines. ` +
+          'The Host/Origin allowlist stops browsers, not direct clients — front this server with another access control.'
+      );
+    }
+    const server = app.listen(port, bind.address, () => {
+      logger.info(`Debug MCP Server (HTTP) listening on ${bind.address}:${port}`);
+      logger.info(`MCP endpoint available at ${describeEndpoint(bind.address, port, '/mcp')}`);
     });
 
     server.on('error', (err: NodeJS.ErrnoException) => {
       const line =
         err.code === 'EADDRINUSE'
-          ? `Port ${port} is already in use. Another instance may be running.`
+          ? `Port ${port} is already in use on ${bind.address}. Another instance may be running.`
           : `Server error: ${err.message}`;
       logger.error(line);
       reportFatal(proc, line);
@@ -533,7 +562,7 @@ export async function handleHttpCommand(
       env: proc.env,
     });
   } catch (error) {
-    if (error instanceof AllowedHostError) {
+    if (error instanceof AllowedHostError || error instanceof BindAddressError) {
       // Fail fast and by name: a silently dropped allowlist entry would
       // reproduce the very discoverability problem the flag exists to fix.
       const line = `${error.message}. The server was not started.`;

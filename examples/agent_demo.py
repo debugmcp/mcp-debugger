@@ -8,7 +8,7 @@ import os
 import uuid
 import sys
 
-MCP_SERVER_URL = "http://localhost:3001/mcp" # Default URL, ensure server is running
+MCP_SERVER_URL = "http://127.0.0.1:3001/mcp" # Default URL, ensure server is running
 
 # --- MCP Interaction Helper (similar to debug_swap_demo.py) ---
 def call_mcp_tool(tool_name: str, arguments: dict, mcp_session_id: str | None = None):

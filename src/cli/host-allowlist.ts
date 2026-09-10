@@ -1,7 +1,8 @@
 /**
  * Host and Origin allowlist for the Streamable HTTP transport (issues #667, #677).
  *
- * The server binds every interface, so the Host header check is what keeps a
+ * The server binds loopback by default (`--bind` / `MCP_HTTP_BIND` widen it,
+ * issue #680), and the Host header check is what keeps a
  * browser on the operator's machine from reaching it through DNS rebinding,
  * and the Origin check is what keeps an ordinary cross-site page from driving
  * it at all. Both consult one list: the loopback names by default, extended

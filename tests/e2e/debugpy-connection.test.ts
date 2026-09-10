@@ -205,7 +205,7 @@ describe('MCP Server connecting to debugpy', () => {
       serverPort = await findAvailablePort();
       mcpProcess = await startMcpServer(serverPort); 
 
-      const healthUrl = `http://localhost:${serverPort}/health`;
+      const healthUrl = `http://127.0.0.1:${serverPort}/health`;
       console.log(`[E2E Test] Polling MCP server health at ${healthUrl}...`);
       await waitUntil(async () => {
         try {
@@ -220,7 +220,7 @@ describe('MCP Server connecting to debugpy', () => {
       console.log('[E2E Test] MCP server /health reported OK.');
       
       mcpSdkClient = new Client({ name: "e2e-sdk-test-client", version: "0.1.0" });
-      const transport = new SSEClientTransport(new URL(`http://localhost:${serverPort}/sse`));
+      const transport = new SSEClientTransport(new URL(`http://127.0.0.1:${serverPort}/sse`));
       await mcpSdkClient.connect(transport);
       console.log('[E2E Test] MCP SDK Client connected via SSE.');
     } catch (error) {

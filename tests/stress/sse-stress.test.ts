@@ -104,7 +104,7 @@ class SSEStressTester {
         version: '1.0.0'
       });
       
-      const transport = new SSEClientTransport(new URL(`http://localhost:${port}/sse`));
+      const transport = new SSEClientTransport(new URL(`http://127.0.0.1:${port}/sse`));
       await client.connect(transport);
       
       const connectTime = Date.now() - startTime;
@@ -157,7 +157,7 @@ class SSEStressTester {
 
   private async isPortOpen(port: number): Promise<boolean> {
     return new Promise((resolve) => {
-      const socket = net.createConnection(port, 'localhost');
+      const socket = net.createConnection(port, '127.0.0.1');
       
       socket.on('connect', () => {
         socket.end();

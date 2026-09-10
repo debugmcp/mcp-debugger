@@ -81,6 +81,9 @@ Two ways out:
 - **Opt in explicitly.** Start the server with `--allowed-host <name>` (repeatable) or
   `MCP_HTTP_ALLOWED_HOSTS=<name>,<name>` when another access control fronts it. The server logs
   the extended allowlist at startup and each rejected hostname once; there is no wildcard.
+  On a bare host the server also *listens* on `127.0.0.1` only (issue #680): a connection refused
+  from another machine means you also need `--bind 0.0.0.0` (or `MCP_HTTP_BIND=0.0.0.0`); the
+  allowlist still applies on top. `GET /health` shows the bound address under `listening`.
 
 A browser-based client sees the same 403 with `Invalid Origin: ...` when the page's origin is not
 on that list: the `Origin` header is checked against it too (cross-site request protection), so

@@ -38,7 +38,7 @@ echo.
 echo Environment checks passed!
 echo.
 echo Starting Debug MCP Server in SSE mode...
-echo Server will be available at: http://localhost:3001/sse
+echo Server will be available at: http://127.0.0.1:3001/sse
 echo.
 echo Press Ctrl+C to stop the server
 echo ========================================

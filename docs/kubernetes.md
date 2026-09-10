@@ -196,6 +196,9 @@ the MCP endpoint, and the containerized server attaches to python, ruby
   unauthenticated and allow arbitrary code execution; the MCP HTTP port
   controls a ptrace-capable debugger. `kubectl port-forward` keeps every hop
   inside your kubeconfig's auth.
+- The image binds every interface inside the pod (`MCP_HTTP_BIND=0.0.0.0`) so
+  `kubectl port-forward` can reach it; a server on a bare host binds `127.0.0.1`
+  unless started with `--bind` (issue #680).
 - The sidecar's MCP endpoint accepts only loopback `Host` headers (`localhost`,
   `127.0.0.1`, `[::1]`) — exactly what `kubectl port-forward` presents.
   Reaching it by a Service DNS name answers 403 unless the container is

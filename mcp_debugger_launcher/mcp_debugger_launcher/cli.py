@@ -106,8 +106,9 @@ def check_debugpy():
 @click.argument('server_args', nargs=-1, type=click.UNPROCESSED)
 @click.option('--port', '-p', type=int, help='Port for http/sse mode (default: 3001)')
 @click.option('--bind', type=str, default=None, metavar='ADDR',
-              help='Docker mode: host address to publish the port on (default: 127.0.0.1; '
-                   '0.0.0.0 for every interface). Ignored with npx.')
+              help='Address the server is reachable on (default: 127.0.0.1; 0.0.0.0 for every '
+                   'interface). npx: forwarded as the server flag --bind; Docker: the host address '
+                   'the port is published on.')
 @click.option('--docker', is_flag=True, help='Force Docker mode')
 @click.option('--npm', is_flag=True, help='Force npm/npx mode')
 @click.option('--dry-run', is_flag=True, help='Show what command would be executed')
@@ -205,11 +206,8 @@ def main(mode: str, server_args: tuple, port: Optional[int], bind: Optional[str]
     print(f"🏃 Runtime: {runtime.upper()}")
     if server_args:
         print(f"➡️  Server flags: {_display_command(list(server_args))}")
-    if bind and runtime != "docker":
-        # The npx-run server has no bind-address option of its own yet
-        # (debugmcp/mcp-debugger#680); it listens on every interface.
-        print("⚠️  --bind applies to Docker mode only; the npx-run server listens on all interfaces.",
-              file=sys.stderr)
+    if bind and runtime == "npx":
+        print(f"🌐 Bind: {bind}")
 
     # Create launcher
     launcher = DebugMCPLauncher(verbose=verbose)
@@ -219,7 +217,7 @@ def main(mode: str, server_args: tuple, port: Optional[int], bind: Optional[str]
         if dry_run:
             # Same builder as the real launch (issue #345): dry-run output can
             # never drift from the executed command.
-            cmd = launcher.build_npx_command(mode, port, server_args)
+            cmd = launcher.build_npx_command(mode, port, server_args, bind=bind)
             print(f"\n🔍 Would execute: {_display_command(cmd)}")
             sys.exit(0)
 
@@ -232,7 +230,7 @@ def main(mode: str, server_args: tuple, port: Optional[int], bind: Optional[str]
         print("Starting debug-mcp-server...")
         print("─" * 40 + "\n")
 
-        sys.exit(launcher.launch_with_npx(mode, port, server_args))
+        sys.exit(launcher.launch_with_npx(mode, port, server_args, bind=bind))
 
     elif runtime == "docker":
         if dry_run:
