@@ -79,7 +79,10 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
     expect(cfg.request).toBe('launch');
     expect(cfg.stopOnEntry).toBe(true);
     expect(cfg.smartStep).toBe(true);
-    expect(cfg.sourceMaps).toBe(false);
+    // js-debug's own default (issue #684): maps on, with launch's outFiles/exclusion
+    expect(cfg.sourceMaps).toBe(true);
+    expect(cfg.outFiles).toEqual(['**/*.js', '!**/node_modules/**']);
+    expect(cfg.resolveSourceMapLocations).toEqual(['**', '!**/node_modules/**']);
     expect(norm(cfg.cwd)).toBe(norm(path.dirname(program)));
     expect(Array.isArray(cfg.args)).toBe(true);
     expect((cfg.args as string[]).length).toBe(0);
@@ -242,6 +245,54 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
       outFiles: ['dist/**/*.js']
     } as any);
     expect(cfg.outFiles).toEqual(['dist/**/*.js']);
+  });
+
+  it('JS: an explicit sourceMaps false opts out of maps and passes caller outFiles through (issue #684)', async () => {
+    const program = path.resolve('/proj/app.js');
+    const cfg = await adapter.transformLaunchConfig({
+      program,
+      sourceMaps: false,
+      outFiles: ['dist/**/*.js']
+    } as any);
+    expect(cfg.sourceMaps).toBe(false);
+    expect(cfg.outFiles).toEqual(['dist/**/*.js']);
+    expect(cfg.resolveSourceMapLocations).toBeUndefined();
+  });
+
+  it('justMyCode false keeps node internals blackboxed but not node_modules (issue #678)', async () => {
+    const program = path.resolve('/proj/app.js');
+    const cfg = await adapter.transformLaunchConfig({
+      program,
+      justMyCode: false
+    } as any);
+    expect(cfg.justMyCode).toBe(false);
+    expect(cfg.skipFiles).toEqual(['<node_internals>/**']);
+  });
+
+  it('justMyCode false also turns off smartStep, so a pause lands instead of being stepped past (issue #678)', async () => {
+    // Node internals stay blackboxed on every launch, and on an HTTP server the
+    // request path enters user code by calls, never by returns — so with the
+    // smart-stepper on, a pause that lands in internals is stepped out of
+    // forever (the #513 mechanism). Off, the pause lands truthfully.
+    const program = path.resolve('/proj/app.js');
+    const cfg = await adapter.transformLaunchConfig({ program, justMyCode: false } as any);
+    expect(cfg.smartStep).toBe(false);
+  });
+
+  it('keeps smartStep on for the default launch and honours an explicit caller value either way (issue #678)', async () => {
+    const program = path.resolve('/proj/app.js');
+    expect((await adapter.transformLaunchConfig({ program } as any)).smartStep).toBe(true);
+    expect((await adapter.transformLaunchConfig({ program, justMyCode: false, smartStep: true } as any)).smartStep).toBe(true);
+    expect((await adapter.transformLaunchConfig({ program, smartStep: false } as any)).smartStep).toBe(false);
+  });
+
+  it('a caller skipFiles list replaces the defaults instead of being merged into them (issue #678)', async () => {
+    const program = path.resolve('/proj/app.js');
+    const cfg = await adapter.transformLaunchConfig({
+      program,
+      skipFiles: ['**/foo/**']
+    } as any);
+    expect(cfg.skipFiles).toEqual(['**/foo/**']);
   });
 
   it('env merge should not mutate process.env', async () => {

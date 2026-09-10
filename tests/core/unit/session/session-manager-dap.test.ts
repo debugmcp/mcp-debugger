@@ -4,6 +4,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
 import {
+  type AdapterPolicy,
   DebugLanguage,
   JavaAdapterPolicy,
   JsDebugAdapterPolicy,
@@ -1481,6 +1482,127 @@ describe('SessionManager - DAP Operations', () => {
       dependencies.mockProxyManager.simulateStopped(1, 'step');
       await vi.runAllTimersAsync();
       expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.PAUSED);
+    });
+
+    it('names a breakpoint that ended the step instead of the step itself (issue #678)', async () => {
+      // Observed live: a js step from a blackboxed frame was resumed by js-debug
+      // and the next request re-hit the breakpoint; the step reported "Stepped
+      // over" at the very same line with nothing to say the stop was a
+      // breakpoint hit. Also observed live: a step that lands on the next line
+      // is reported as 'breakpoint' when that line carries one — so the wording
+      // must not claim the step was cut short.
+      const session = await createPausedSession(sessionManager, dependencies);
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (command: string) => {
+        if (command === 'next') {
+          process.nextTick(() => {
+            dependencies.mockProxyManager.simulateStopped(1, 'breakpoint', { reason: 'breakpoint', threadId: 1 });
+          });
+        }
+        return { success: true };
+      });
+
+      const stepPromise = sessionManager.stepOver(session.id);
+      await vi.runAllTimersAsync();
+      const result = await stepPromise;
+
+      expect(result.success).toBe(true);
+      const data = result.data as { message?: string; stopReason?: string; pending?: boolean };
+      expect(data.pending).toBeUndefined();
+      expect(data.stopReason).toBe('breakpoint');
+      expect(data.message).toBe(ErrorMessages.stepStoppedOn('Stepped over', 'breakpoint'));
+      expect(data.message).toMatch(/^Stepped over; /);
+      expect(data.message).not.toMatch(/interrupted|before the step completed|where the program stopped/);
+    });
+
+    /**
+     * The execution controller reads policy through the manager's own
+     * selectPolicy (not the store's), so the hook is patched there. The hook
+     * itself explains nothing; its presence is what makes the origin frame
+     * get read before the step.
+     */
+    function withPendingStopHook(manager: SessionManager): void {
+      const original = (manager as unknown as { selectPolicy: (language: string) => AdapterPolicy }).selectPolicy.bind(manager);
+      vi.spyOn(manager as unknown as { selectPolicy: (language: string) => AdapterPolicy }, 'selectPolicy')
+        .mockImplementation((language: string) => ({ ...original(language), describePendingStop: () => undefined }));
+    }
+
+    it('says the program is back at the origin line when a breakpoint stop lands where the step was issued (issue #678)', async () => {
+      // The lost-step signature: same file, same line as the frame the step
+      // left from. Only a policy with describePendingStop has the origin frame
+      // read (it is what the hint needs), so the sentence is js-only.
+      const session = await createPausedSession(sessionManager, dependencies);
+      withPendingStopHook(sessionManager);
+      const frame = { id: 1, name: 'handle', source: { path: '/app/node_modules/router/index.js' }, line: 160, column: 16 };
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (command: string) => {
+        if (command === 'next') {
+          process.nextTick(() => {
+            dependencies.mockProxyManager.simulateStopped(1, 'breakpoint', { reason: 'breakpoint', threadId: 1 });
+          });
+        }
+        if (command === 'stackTrace') {
+          return { success: true, body: { stackFrames: [frame], totalFrames: 1 } };
+        }
+        return { success: true };
+      });
+
+      const stepPromise = sessionManager.stepOver(session.id);
+      await vi.runAllTimersAsync();
+      const result = await stepPromise;
+
+      const data = result.data as { message?: string; stopReason?: string; location?: { line: number } };
+      expect(data.stopReason).toBe('breakpoint');
+      expect(data.location?.line).toBe(160);
+      expect(data.message).toBe(ErrorMessages.stepStoppedOn('Stepped over', 'breakpoint', { backAtOrigin: true }));
+      expect(data.message).toMatch(/back at the line the step was issued from/);
+    });
+
+    it('omits the back-at-origin sentence when the breakpoint stop is on another line (issue #678)', async () => {
+      const session = await createPausedSession(sessionManager, dependencies);
+      withPendingStopHook(sessionManager);
+      let stackReads = 0;
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (command: string) => {
+        if (command === 'next') {
+          process.nextTick(() => {
+            dependencies.mockProxyManager.simulateStopped(1, 'breakpoint', { reason: 'breakpoint', threadId: 1 });
+          });
+        }
+        if (command === 'stackTrace') {
+          // First read: the origin (line 10). Later reads: where it stopped (line 11).
+          const line = stackReads++ === 0 ? 10 : 11;
+          return { success: true, body: { stackFrames: [{ id: 1, name: 'main', source: { path: '/app/simple_test.js' }, line, column: 3 }], totalFrames: 1 } };
+        }
+        return { success: true };
+      });
+
+      const stepPromise = sessionManager.stepOver(session.id);
+      await vi.runAllTimersAsync();
+      const result = await stepPromise;
+
+      const data = result.data as { message?: string; stopReason?: string; location?: { line: number } };
+      expect(data.stopReason).toBe('breakpoint');
+      expect(data.location?.line).toBe(11);
+      expect(data.message).toBe(ErrorMessages.stepStoppedOn('Stepped over', 'breakpoint'));
+    });
+
+    it('keeps the plain completion wording, with no stopReason, when the step itself stopped (issue #678)', async () => {
+      const session = await createPausedSession(sessionManager, dependencies);
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (command: string) => {
+        if (command === 'next') {
+          process.nextTick(() => {
+            dependencies.mockProxyManager.simulateStopped(1, 'step', { reason: 'step', threadId: 1 });
+          });
+        }
+        return { success: true };
+      });
+
+      const stepPromise = sessionManager.stepOver(session.id);
+      await vi.runAllTimersAsync();
+      const result = await stepPromise;
+
+      expect(result.success).toBe(true);
+      const data = result.data as { message?: string; stopReason?: string };
+      expect(data.stopReason).toBeUndefined();
+      expect(data.message).toBe('Stepped over');
     });
 
     it('should treat termination during step as a successful completion', async () => {

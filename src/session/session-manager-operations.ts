@@ -143,6 +143,8 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       closeSession: (sessionId) => this.closeSession(sessionId),
       getStackTrace: (sessionId, threadId, includeInternals) =>
         this.getStackTrace(sessionId, threadId, includeInternals),
+      getStackTraceDetailed: (sessionId, threadId, includeInternals, opts) =>
+        this.getStackTraceDetailed(sessionId, threadId, includeInternals, opts),
       redactionEnabled: () => this.redactionEnabled()
     };
   }

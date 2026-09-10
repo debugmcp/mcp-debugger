@@ -177,6 +177,20 @@ export interface QueuedDapCommand {
   dapArgs?: unknown;
 }
 
+/** What a policy may consult when explaining a pending pause or step (issue #678). */
+export interface PendingStopContext {
+  operation: 'pause' | 'step';
+  /** True for attach sessions, whose skip configuration is the target's, not the launch's. */
+  attachMode: boolean;
+  /** The caller's launch inputs as the launcher merges them: adapterLaunchConfig wins over dapLaunchArgs. */
+  launch?: {
+    dapLaunchArgs?: Record<string, unknown>;
+    adapterLaunchConfig?: Record<string, unknown>;
+  };
+  /** The raw top frame the step was issued from — step only, and only when it could be read. */
+  fromFrame?: StackFrame;
+}
+
 export interface AdapterPolicy {
   /**
    * Identifying name for diagnostics (e.g., 'default', 'js-debug')
@@ -298,6 +312,18 @@ export interface AdapterPolicy {
    * stop reason. Optional — absent means the adapter has no such frames.
    */
   isAsyncBoundaryFrame?(frame: StackFrame): boolean;
+
+  /**
+   * Explain why a pause or step may never produce a `stopped` event under this
+   * adapter's configuration, for the `pending: true` responses (issue #678).
+   * js-debug, for example, resumes any pause or step that lands in a frame its
+   * `skipFiles` blackboxes, so a pause on an idle server or a step issued from
+   * inside a dependency is swallowed with nothing to distinguish it from a
+   * slow one. The session layer appends the sentence to the generic pending
+   * message; undefined leaves that message exactly as it is. Optional — absent
+   * means the adapter has nothing to add.
+   */
+  describePendingStop?(info: PendingStopContext): string | undefined;
 
   /**
    * Return true to drop a DAP 'output' event that is known adapter-internal

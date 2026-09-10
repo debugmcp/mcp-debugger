@@ -4,6 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { ErrorMessages } from '../../src/utils/error-messages.js';
 import path from 'path';
 import { SessionManagerOperations } from '../../src/session/session-manager-operations';
 import { DebugLanguage, SessionLifecycleState, SessionState } from '@debugmcp/shared';
@@ -499,6 +500,108 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(data?.message).toContain('still executing');
 
       vi.useRealTimers();
+    });
+
+    it("appends the policy's explanation to a pending step when the adapter can explain a lost step (issue #678)", async () => {
+      vi.useFakeTimers();
+      try {
+        mockSession.state = SessionState.PAUSED;
+        mockSession.attachMode = false;
+        mockSession.lastLaunch = { scriptPath: '/app/dist/index.js', dapLaunchArgs: { justMyCode: true }, launchedAt: 1 };
+        mockProxyManager.sendDapRequest.mockResolvedValue({});
+        mockProxyManager.once.mockImplementation(() => {});
+
+        const describePendingStop = vi.fn().mockReturnValue('Explained by the policy.');
+        vi.spyOn(operations as any, 'selectPolicy').mockReturnValue({ describePendingStop } as any);
+        const rawTop = { id: 7, name: 'handle', file: '/app/node_modules/router/index.js', line: 160 };
+        const detailed = vi.spyOn(operations, 'getStackTraceDetailed').mockResolvedValue({
+          frames: [rawTop], totalFrameCount: 1, hiddenFrameCount: 0, allFramesInternal: false
+        } as never);
+
+        const promise = operations.stepOver('test-session');
+        await vi.advanceTimersByTimeAsync(5100);
+        const result = await promise;
+
+        expect(result.data?.pending).toBe(true);
+        expect(result.data?.message).toBe(`${ErrorMessages.stepStillRunning(5)} Explained by the policy.`);
+        // The raw paused frame, not the filtered display: internals included, no readiness wait
+        expect(detailed).toHaveBeenCalledWith('test-session', 1, true, { ensureStackReady: false });
+        expect(describePendingStop).toHaveBeenCalledWith({
+          operation: 'step',
+          attachMode: false,
+          // The launcher's merge order: defaultDapLaunchArgs under the caller's dapLaunchArgs
+          launch: { dapLaunchArgs: { stopOnEntry: false, justMyCode: true }, adapterLaunchConfig: undefined },
+          fromFrame: rawTop
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps the pending-step message untouched, and reads no stack, when the policy has no explanation (issue #678)', async () => {
+      vi.useFakeTimers();
+      try {
+        mockSession.state = SessionState.PAUSED;
+        mockProxyManager.sendDapRequest.mockResolvedValue({});
+        mockProxyManager.once.mockImplementation(() => {});
+        vi.spyOn(operations as any, 'selectPolicy').mockReturnValue({} as any);
+        const detailed = vi.spyOn(operations, 'getStackTraceDetailed');
+
+        const promise = operations.stepOver('test-session');
+        await vi.advanceTimersByTimeAsync(5100);
+        const result = await promise;
+
+        expect(result.data?.pending).toBe(true);
+        expect(result.data?.message).toBe(ErrorMessages.stepStillRunning(5));
+        expect(detailed).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('refuses the step, sending nothing, when the session stops being paused during the origin read (issue #678 review)', async () => {
+      vi.useFakeTimers();
+      try {
+        mockSession.state = SessionState.PAUSED;
+        mockProxyManager.sendDapRequest.mockResolvedValue({});
+        vi.spyOn(operations as any, 'selectPolicy').mockReturnValue({ describePendingStop: () => undefined } as any);
+        vi.spyOn(operations, 'getStackTraceDetailed').mockImplementation(async () => {
+          // A continue_execution landed while the stackTrace was in flight:
+          // the pre-flight PAUSED check is stale by the time the step is sent.
+          mockSession.state = SessionState.RUNNING;
+          return { frames: [], totalFrameCount: 0, hiddenFrameCount: 0, allFramesInternal: false } as never;
+        });
+
+        const result = await operations.stepOver('test-session');
+
+        expect(result.success).toBe(false);
+        expect(result.error).toBe('Not paused');
+        expect(mockProxyManager.sendDapRequest).not.toHaveBeenCalledWith('next', expect.anything());
+        expect(mockSession.state).toBe(SessionState.RUNNING);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('sends the step after a bounded wait when the origin read hangs (issue #678 review)', async () => {
+      vi.useFakeTimers();
+      try {
+        mockSession.state = SessionState.PAUSED;
+        mockProxyManager.sendDapRequest.mockResolvedValue({});
+        mockProxyManager.once.mockImplementation(() => {});
+        vi.spyOn(operations as any, 'selectPolicy').mockReturnValue({ describePendingStop: () => undefined } as any);
+        vi.spyOn(operations, 'getStackTraceDetailed').mockReturnValue(new Promise(() => {}) as never);
+
+        const promise = operations.stepOver('test-session');
+        // A fifth of the step grace window, not the 30s DAP request timeout.
+        await vi.advanceTimersByTimeAsync(1100);
+        expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('next', expect.objectContaining({ threadId: 1 }));
+        await vi.advanceTimersByTimeAsync(5100);
+        const result = await promise;
+        expect(result.data?.pending).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('handles stepOut when internal execution rejects', async () => {
@@ -4135,6 +4238,49 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         const data = result.data;
         expect(data?.pending).toBe(true);
         expect(data?.message).toContain("no 'stopped' event");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("appends the policy's explanation to a pending pause when the adapter can explain it (issue #678)", async () => {
+      vi.useFakeTimers();
+      try {
+        mockSession.state = SessionState.RUNNING;
+        mockSession.attachMode = false;
+        mockSession.lastLaunch = { scriptPath: '/app/dist/index.js', adapterLaunchConfig: { skipFiles: ['**/node_modules/**'] }, launchedAt: 1 };
+        mockProxyManager.sendDapRequest.mockResolvedValue({});
+        const describePendingStop = vi.fn().mockReturnValue('Explained by the policy.');
+        vi.spyOn(operations as any, 'selectPolicy').mockReturnValue({ describePendingStop } as any);
+
+        const promise = operations.pause('test-session', 1);
+        await vi.advanceTimersByTimeAsync(5000);
+        const result = await promise;
+
+        expect(result.data?.pending).toBe(true);
+        expect(result.data?.message).toBe(`${ErrorMessages.pausePending(5)} Explained by the policy.`);
+        expect(describePendingStop).toHaveBeenCalledWith({
+          operation: 'pause',
+          attachMode: false,
+          launch: { dapLaunchArgs: { stopOnEntry: false, justMyCode: true }, adapterLaunchConfig: { skipFiles: ['**/node_modules/**'] } }
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps the pending-pause message byte-identical when the policy has no explanation (issue #678)', async () => {
+      vi.useFakeTimers();
+      try {
+        mockSession.state = SessionState.RUNNING;
+        mockProxyManager.sendDapRequest.mockResolvedValue({});
+        vi.spyOn(operations as any, 'selectPolicy').mockReturnValue({} as any);
+
+        const promise = operations.pause('test-session', 1);
+        await vi.advanceTimersByTimeAsync(5000);
+        const result = await promise;
+
+        expect(result.data?.message).toBe(ErrorMessages.pausePending(5));
       } finally {
         vi.useRealTimers();
       }

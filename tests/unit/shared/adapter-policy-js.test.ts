@@ -91,6 +91,95 @@ describe('JsDebugAdapterPolicy', () => {
     expect(JsDebugAdapterPolicy.isAsyncBoundaryFrame!({ id: 4, name: 'VM123', file: '<unknown_source>', line: 3 })).toBe(false);
   });
 
+  describe('describePendingStop (issue #678)', () => {
+    const hook = JsDebugAdapterPolicy.describePendingStop!;
+    const depFrame = { id: 1, name: 'handle', file: 'C:\\app\\node_modules\\router\\index.js', line: 160 };
+    const internalFrame = { id: 2, name: 'processTicksAndRejections', file: '<node_internals>/internal/process/task_queues', line: 95 };
+    const userFrame = { id: 3, name: 'main', file: '/app/src/index.js', line: 12 };
+    const launch = (dapLaunchArgs?: Record<string, unknown>, adapterLaunchConfig?: Record<string, unknown>) =>
+      ({ ...(dapLaunchArgs ? { dapLaunchArgs } : {}), ...(adapterLaunchConfig ? { adapterLaunchConfig } : {}) });
+
+    it('says nothing for attach sessions (skipFiles is not defaulted there)', () => {
+      expect(hook({ operation: 'pause', attachMode: true })).toBeUndefined();
+      expect(hook({ operation: 'step', attachMode: true, fromFrame: depFrame })).toBeUndefined();
+    });
+
+    // js-debug's resume-on-skipped-frame lives inside its smart-stepper
+    // (`getSmartStepDirection` returns early unless launchConfig.smartStep);
+    // blackboxing is only the condition it reads. Measured on the #686 build:
+    // default skip list + smartStep:false → the pause landed; internals-only
+    // skip list + smartStep:true → the #678 chase with node_modules NOT
+    // blackboxed.
+    describe('pause', () => {
+      it('explains a pending pause on the default launch: the smart-stepper is on and internals are skipped', () => {
+        const text = hook({ operation: 'pause', attachMode: false, launch: {} });
+        expect(text).toMatch(/smart-stepper|smartStep/);
+        expect(text).toMatch(/may never land/);
+        expect(text).not.toMatch(/does not land/);
+        expect(text).toMatch(/justMyCode: false/);
+        expect(text).toMatch(/smartStep: false/);
+      });
+
+      it('says nothing once the smart-stepper is off, whichever way it was turned off', () => {
+        expect(hook({ operation: 'pause', attachMode: false, launch: launch({ justMyCode: false }) })).toBeUndefined();
+        expect(hook({ operation: 'pause', attachMode: false, launch: launch(undefined, { smartStep: false }) })).toBeUndefined();
+      });
+
+      it('still explains the pause when justMyCode is off but the stepper was forced back on (run B)', () => {
+        const text = hook({ operation: 'pause', attachMode: false, launch: launch({ justMyCode: false }, { smartStep: true }) });
+        expect(text).toMatch(/smartStep/);
+        expect(text).toMatch(/may never land/);
+      });
+
+      it('says nothing when the caller list does not skip node internals (the stepper has nothing to step out of)', () => {
+        expect(hook({ operation: 'pause', attachMode: false, launch: launch(undefined, { skipFiles: ['**/node_modules/**'] }) })).toBeUndefined();
+        expect(hook({ operation: 'pause', attachMode: false, launch: launch(undefined, { skipFiles: [] }) })).toBeUndefined();
+      });
+
+      it('lets adapterLaunchConfig win over dapLaunchArgs, as the launcher merge does', () => {
+        expect(hook({ operation: 'pause', attachMode: false, launch: launch({ justMyCode: true }, { smartStep: false }) })).toBeUndefined();
+        expect(hook({ operation: 'pause', attachMode: false, launch: launch({ justMyCode: false }, { smartStep: true }) })).toBeDefined();
+      });
+    });
+
+    describe('step', () => {
+      it('explains a pending step issued from a blackboxed dependency frame, naming the frame and the justMyCode remedy', () => {
+        const text = hook({ operation: 'step', attachMode: false, launch: {}, fromFrame: depFrame });
+        expect(text).toMatch(/skipped frame/);
+        expect(text).toMatch(/router[\\/]index\.js:160/);
+        expect(text).toMatch(/justMyCode: false/);
+        expect(text).toMatch(/may never land/);
+        expect(text).not.toMatch(/step_out/);
+        expect(text).not.toMatch(/only steps out/);
+      });
+
+      it('says nothing about a step from a dependency frame once node_modules is not blackboxed or the stepper is off', () => {
+        expect(hook({ operation: 'step', attachMode: false, launch: launch({ justMyCode: false }), fromFrame: depFrame })).toBeUndefined();
+        expect(hook({ operation: 'step', attachMode: false, launch: launch(undefined, { smartStep: false }), fromFrame: depFrame })).toBeUndefined();
+        expect(hook({ operation: 'step', attachMode: false, launch: launch(undefined, { skipFiles: ['<node_internals>/**'] }), fromFrame: depFrame })).toBeUndefined();
+      });
+
+      it('explains a step issued from a skipped node-internals frame with the smartStep remedy, never step_out', () => {
+        const text = hook({ operation: 'step', attachMode: false, launch: {}, fromFrame: internalFrame });
+        expect(text).toMatch(/node internals/i);
+        expect(text).toMatch(/smartStep: false/);
+        expect(text).not.toMatch(/step_out/);
+        expect(text).not.toMatch(/only steps out/);
+      });
+
+      it('says nothing about an internals frame when internals are not skipped or the stepper is off', () => {
+        expect(hook({ operation: 'step', attachMode: false, launch: launch(undefined, { skipFiles: ['**/node_modules/**'] }), fromFrame: internalFrame })).toBeUndefined();
+        expect(hook({ operation: 'step', attachMode: false, launch: launch(undefined, { skipFiles: [] }), fromFrame: internalFrame })).toBeUndefined();
+        expect(hook({ operation: 'step', attachMode: false, launch: launch({ justMyCode: false }), fromFrame: internalFrame })).toBeUndefined();
+      });
+
+      it('says nothing about a step from user code or a step whose origin frame is unknown', () => {
+        expect(hook({ operation: 'step', attachMode: false, launch: {}, fromFrame: userFrame })).toBeUndefined();
+        expect(hook({ operation: 'step', attachMode: false, launch: {} })).toBeUndefined();
+      });
+    });
+  });
+
   it('extracts local variables while excluding special entries', () => {
     const frames = [{ id: 1 }];
     const scopes = {

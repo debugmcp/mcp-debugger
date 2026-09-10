@@ -99,6 +99,28 @@ export const ErrorMessages = {
     `pause_execution to interrupt.`,
 
   /**
+   * A step whose recorded stop is a breakpoint or an exception rather than
+   * the step (issue #678). Neutral by design: js-debug and debugpy both report
+   * 'breakpoint' when a step lands on a line that carries one (the routine
+   * case), and the same reason comes back when js-debug resumed a lost step
+   * and the next request re-hit the breakpoint (the case that motivated the
+   * disclosure: the response used to read "Stepped over" at the very line the
+   * step left from). So the wording only names the reason and points at
+   * stopReason; `backAtOrigin` adds the lost-step signature — the stop is on
+   * the very line the step was issued from (also true of a single-line loop)
+   * — when the caller knows the origin. `location` keeps its display
+   * semantics (the first visible frame, #672); nothing is claimed about it.
+   * Used in: src/session/execution/execution-controller.ts
+   *
+   * @param stepped - The step's own wording ('Stepped over', ...)
+   * @param reason - The recorded stop reason (e.g. 'breakpoint', 'exception')
+   * @param opts.backAtOrigin - The stop is on the file+line the step left from
+   */
+  stepStoppedOn: (stepped: string, reason: string, opts?: { backAtOrigin?: boolean }) =>
+    `${stepped}; stopped on '${reason}' rather than on the step itself (see stopReason).` +
+    (opts?.backAtOrigin ? ' The program is back at the line the step was issued from.' : ''),
+
+  /**
    * Informational message for pause requests not yet honored within the grace window
    * Occurs when: A pause request is acknowledged but no 'stopped' event arrives within the grace
    * window — the target may be blocked in native code or a syscall, which is not an error

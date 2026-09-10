@@ -92,7 +92,34 @@ The JavaScript adapter automatically configures:
 
 - **Runtime**: Uses system Node.js or specified executable
 - **Console**: Captures stdout/stderr
-- **Smart Stepping**: Skips node internals
+- **Skipped code**: Node internals and, by default, `node_modules` (see below)
+- **Source maps**: On by default, for `.js` programs as well as `.ts` (see [TypeScript Support](#typescript-support))
+
+### Stepping and pausing inside dependencies (`justMyCode`, `skipFiles`)
+
+js-debug has no `justMyCode` key of its own; the launch transform turns the intent into two js-debug keys:
+`skipFiles` (V8 blackboxing — `node_modules` is on the list while `justMyCode` is true, Node internals always) and
+`smartStep`, whose stepper **keeps stepping while the program is in a skipped frame** — in the direction you asked
+for, falling back to step-out — instead of reporting the stop. On a server every pause lands in Node internals, and
+a request path enters your code by calls, not returns, so with the stepper on neither a pause nor a step issued
+from a skipped frame lands (issue #678). `justMyCode: false` turns the stepper off and takes `node_modules` off the
+list. What that means in practice:
+
+| Launch | `skipFiles` sent | `smartStep` | A breakpoint inside a dependency | `step_over` from that breakpoint | `pause_execution` on an idle server |
+|---|---|---|---|---|---|
+| default (`justMyCode: true`) | `<node_internals>/**`, `**/node_modules/**` | `true` | fires; frame 0 is the dependency frame | may never land on a request path (`pending: true`; the message names the skipped frame, the stepper and the remedy) | may never land (`pending: true`; the message names the stepper and the remedy) |
+| `dapLaunchArgs: { justMyCode: false }` | `<node_internals>/**` | `false` | fires | lands on the next line of the dependency | lands as soon as any JavaScript runs (the next request or timer), in an internal frame if that is where it is (the stack response marks it). With the smart-stepper off, steps also stop in unmapped generated helpers it used to skip |
+| `dapLaunchArgs: { skipFiles: [...] }` | exactly your list | follows `justMyCode` unless set | fires | lands unless the frame is on your list and the stepper is on | may never land while the stepper is on and `<node_internals>/**` is on your list |
+| `adapterLaunchConfig: { smartStep: false }` (default list) | `<node_internals>/**`, `**/node_modules/**` | `false` | fires | lands in the next frame V8 does not skip (an internals frame on a request path) | lands, in an internals frame |
+
+A caller-supplied `skipFiles` **replaces** the default list (VS Code's launch.json semantics); include
+`<node_internals>/**` yourself if you still want internals skipped. An explicit `smartStep` always wins over the
+derived value. Attach sessions default neither key — see `attach_to_process` in the tool reference.
+
+A step whose stop is a breakpoint or an exception rather than the step itself is reported as
+`Stepped over; stopped on 'breakpoint' rather than on the step itself (see stopReason)` — true both when the next
+line carries a breakpoint and when a lost step's next request re-hit the same breakpoint; in the second case the
+program is back at the line you stepped from, and the message says so.
 
 ### Custom Configuration
 
@@ -212,7 +239,17 @@ The adapter has built-in TypeScript support. When the factory validates the envi
 }
 ```
 
-Source maps are supported automatically when debugging compiled JavaScript -- breakpoints set in `.ts` files will resolve to the correct location in the generated `.js` if source maps are present.
+Source maps are on by default for every launch, `.js` programs included (js-debug's own default; issue #684).
+Launching a compiled TypeScript app from `dist/index.js` with `dist/**/*.js.map` beside it and `src/**/*.ts` on
+disk therefore behaves like debugging the sources: breakpoints set in `src/*.ts` bind and verify under their own
+path, and `get_stack_trace`, `get_local_variables`, `evaluate_expression`, `get_source_context` and every step
+location report `src/*.ts` lines. The default `outFiles` is `**/*.js` excluding `node_modules`, and
+`resolveSourceMapLocations` excludes `node_modules` too, so dependency maps are not applied. A program without
+maps is unaffected. A map whose sources are not on disk yields frames flagged `unresolvedSource` (issue #655).
+
+To see generated locations instead, pass `adapterLaunchConfig: { sourceMaps: false }`; `outFiles` you pass with it
+is forwarded untouched. A breakpoint you set in a generated file still binds and fires with maps on; js-debug then
+reports that one frame at its generated location while the frames below it map to their sources.
 
 If neither `tsx` nor `ts-node` is installed, the factory emits a warning (not an error), and you can still debug compiled `.js` files with source maps.
 

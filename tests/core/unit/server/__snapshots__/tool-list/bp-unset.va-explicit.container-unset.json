@@ -221,7 +221,8 @@
                   "description": "Pause at the first line before running. Default false — the opposite of attach, which pauses unless stopOnEntry is false"
                 },
                 "justMyCode": {
-                  "type": "boolean"
+                  "type": "boolean",
+                  "description": "Only debug user code (default true). JavaScript launch: true blackboxes node_modules via skipFiles and keeps js-debug's smart-stepper on, so a pause or step that lands in skipped code (Node internals, node_modules) is stepped through and may never land; false drops node_modules from skipFiles and turns the stepper off, so pauses and steps land inside dependencies"
                 }
               },
               "additionalProperties": true

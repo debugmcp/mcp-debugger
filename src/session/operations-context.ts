@@ -24,6 +24,7 @@ import type {
   StackFrame
 } from '@debugmcp/shared';
 import type { ManagedSession } from './session-store.js';
+import type { StackTraceResult } from './inspection/frame-anchor-resolver.js';
 import type { CustomLaunchRequestArguments } from './session-manager-core.js';
 import type { IProxyManager } from '../proxy/proxy-manager.js';
 import type { IProxyManagerFactory } from '../factories/proxy-manager-factory.js';
@@ -93,6 +94,13 @@ export interface OperationsContext {
     threadId?: number,
     includeInternals?: boolean
   ): Promise<StackFrame[]>;
+  /** The data layer's `getStackTraceDetailed`: frames plus the filtering metadata. */
+  getStackTraceDetailed(
+    sessionId: string,
+    threadId?: number,
+    includeInternals?: boolean,
+    opts?: { ensureStackReady?: boolean }
+  ): Promise<StackTraceResult>;
   redactionEnabled(): boolean;
 }
 
@@ -159,10 +167,21 @@ export type BreakpointContext = Pick<
   'logger' | 'getSession' | 'selectPolicy' | 'selectStorePolicy'
 >;
 
-/** Stepping / continue / pause / threads. */
+/**
+ * Stepping / continue / pause / threads. The policy and the detailed stack
+ * serve the pending-stop explanation (issue #678): the raw origin frame of a
+ * step, and the adapter's account of why it may never land.
+ */
 export type ExecutionContext = Pick<
   OperationsContext,
-  'logger' | 'getSession' | 'updateState' | 'getStackTrace' | 'tunables'
+  | 'logger'
+  | 'getSession'
+  | 'updateState'
+  | 'getStackTrace'
+  | 'getStackTraceDetailed'
+  | 'selectPolicy'
+  | 'tunables'
+  | 'defaultDapLaunchArgs'
 >;
 
 /** Expression evaluation, including the redaction hook. */

@@ -53,7 +53,7 @@ import {
  * Stop reasons the first-stop auto-continue must never swallow: the shared
  * breakpoint family plus an exception the user asked to break on.
  */
-const USER_BREAK_REASONS: ReadonlySet<string> = new Set([...BREAKPOINT_STOP_REASONS, 'exception']);
+export const USER_BREAK_REASONS: ReadonlySet<string> = new Set([...BREAKPOINT_STOP_REASONS, 'exception']);
 
 // Custom launch arguments interface extending DebugProtocol.LaunchRequestArguments
 export interface CustomLaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
@@ -105,10 +105,17 @@ export interface DebugResultData extends ProxyFailureDiagnostics {
  */
 export type StopLocation = Pick<StackFrame, 'file' | 'line' | 'column'>;
 
-/** What a step operation returns: `message` is always set, plus where it landed. */
+/**
+ * What a step operation returns: `message` is always set, plus where it
+ * landed. `stopReason`/`rawStopReason` are present only when the stop that
+ * ended the step was recorded and was not the step itself (issue #678) — a
+ * breakpoint or exception that fired first, or a pause from elsewhere.
+ */
 export type StepResultData = DebugResultData & {
   message: string;
   location?: StopLocation;
+  stopReason?: string;
+  rawStopReason?: string;
 };
 
 /**

@@ -189,7 +189,8 @@ export type {
   LocalVariableExtraction,
   HandshakeProxy,
   HandshakeContext,
-  QueuedDapCommand
+  QueuedDapCommand,
+  PendingStopContext
 } from './interfaces/adapter-policy.js';
 export { BREAKPOINT_STOP_REASONS } from './interfaces/adapter-policy.js';
 export {
@@ -199,6 +200,15 @@ export {
   extractionFromScope
 } from './interfaces/adapter-policy.js';
 export { JsDebugAdapterPolicy, JS_SCOPE_KINDS } from './interfaces/adapter-policy-js.js';
+export {
+  JS_NODE_INTERNALS_SKIP,
+  JS_NODE_MODULES_SKIP,
+  resolveJsLaunchSkipFiles,
+  jsLaunchBlackboxesNodeModules,
+  jsLaunchSkipsNodeInternals,
+  resolveJsLaunchSmartStep
+} from './interfaces/js-launch-defaults.js';
+export type { JsLaunchSkipInputs } from './interfaces/js-launch-defaults.js';
 export { PythonAdapterPolicy } from './interfaces/adapter-policy-python.js';
 export { RubyAdapterPolicy } from './interfaces/adapter-policy-ruby.js';
 export { RustAdapterPolicy } from './interfaces/adapter-policy-rust.js';

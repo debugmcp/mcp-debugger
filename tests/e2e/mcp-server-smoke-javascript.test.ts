@@ -323,6 +323,123 @@ describe('JavaScript Debugging - Simple Smoke Tests', () => {
     console.log('[JS Simple Smoke] ✓ Dependency breakpoint reported verified after its hit');
   }, 60000);
 
+  /**
+   * Launch the idle express fixture — with a breakpoint inside express unless
+   * told otherwise — and return the port it listens on.
+   */
+  async function launchIdleExpress(justMyCode: boolean, options: { breakpoint: boolean } = { breakpoint: true }): Promise<number> {
+    const fixture = path.join(ROOT, 'examples', 'javascript', 'express_idle_server.js');
+    const expressApplication = path.join(ROOT, 'node_modules', 'express', 'lib', 'application.js');
+
+    const createResult = await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: { language: 'javascript', name: `js-dependency-${justMyCode}` }
+    });
+    sessionId = parseSdkToolResult(createResult).sessionId as string;
+
+    if (options.breakpoint) {
+      const bpResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'set_breakpoint',
+        arguments: { sessionId, file: expressApplication, statement: 'this.router.handle(req, res, done);' }
+      }));
+      expect(bpResponse.success, JSON.stringify(bpResponse)).toBe(true);
+    }
+
+    const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'start_debugging',
+      arguments: { sessionId, scriptPath: fixture, args: [], dapLaunchArgs: { stopOnEntry: false, justMyCode } }
+    }));
+    expect(startResponse.success, JSON.stringify(startResponse)).toBe(true);
+
+    // The fixture prints its port once it listens.
+    let port: number | undefined;
+    const listenDeadline = Date.now() + 20000;
+    while (port === undefined && Date.now() < listenDeadline) {
+      await new Promise(resolve => setTimeout(resolve, 250));
+      const output = parseSdkToolResult(await mcpClient!.callTool({ name: 'get_output', arguments: { sessionId } }));
+      const entries = (output.entries as Array<{ output: string }>) ?? [];
+      const match = entries.map(e => /listening (\d+)/.exec(e.output)).find(Boolean);
+      if (match) port = Number(match[1]);
+    }
+    expect(port, 'the fixture must report its port').toBeDefined();
+    return port!;
+  }
+
+  /**
+   * Launch with the express breakpoint, send one request from here, and return
+   * once the session is paused on it.
+   */
+  async function pauseInsideExpress(justMyCode: boolean): Promise<void> {
+    const port = await launchIdleExpress(justMyCode);
+
+    // One request, left pending: it parks on the express breakpoint.
+    const http = await import('node:http');
+    const request = http.get(`http://127.0.0.1:${port}/ping`, res => res.resume());
+    request.on('error', () => { /* the session teardown ends the request */ });
+
+    const deadline = Date.now() + 20000;
+    let paused = false;
+    while (!paused && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 250));
+      const listed = parseSdkToolResult(await mcpClient!.callTool({ name: 'list_debug_sessions', arguments: {} }));
+      const mine = ((listed.sessions as Array<{ id: string; state: string }>) ?? []).find(s => s.id === sessionId);
+      paused = mine?.state === 'paused';
+    }
+    expect(paused, 'the express breakpoint must fire on the request').toBe(true);
+  }
+
+  it('explains a step lost to a skipped dependency frame on the default launch (issue #678)', async () => {
+    await pauseInsideExpress(true);
+
+    const step = parseSdkToolResult(await mcpClient!.callTool({ name: 'step_over', arguments: { sessionId } }));
+    expect(step.success, JSON.stringify(step)).toBe(true);
+    // js-debug steps out of the blackboxed frame and the request completes
+    // without ever reaching unskipped code: the step is lost, and the
+    // response says why and what to do about it.
+    expect(step.pending, JSON.stringify(step)).toBe(true);
+    expect(step.message).toMatch(/skipped frame/);
+    expect(step.message).toMatch(/justMyCode: false/);
+    console.log('[JS Simple Smoke] ✓ Lost dependency step explained');
+  }, 60000);
+
+  it('lands a step issued inside a dependency when justMyCode is false (issue #678)', async () => {
+    await pauseInsideExpress(false);
+
+    const step = parseSdkToolResult(await mcpClient!.callTool({ name: 'step_over', arguments: { sessionId } }));
+    expect(step.success, JSON.stringify(step)).toBe(true);
+    expect(step.pending, JSON.stringify(step)).toBeUndefined();
+    expect(step.stopReason, JSON.stringify(step)).toBeUndefined();
+    const location = step.location as { file: string; line: number } | undefined;
+    expect(location?.file, JSON.stringify(step)).toMatch(/[\\/]express[\\/]lib[\\/]application\.js$/);
+    console.log('[JS Simple Smoke] ✓ Dependency step landed with justMyCode: false');
+  }, 60000);
+
+  it('lands pause_execution on an idle launched server when justMyCode is false (issue #678)', async () => {
+    // Node internals stay skipped on every launch, so with js-debug's
+    // smart-stepper on, a pause that lands in them is stepped out of forever
+    // (the #513 mechanism). justMyCode: false turns the stepper off too.
+    const port = await launchIdleExpress(false, { breakpoint: false });
+
+    // Nothing runs on a truly idle server, so the pause is pending until the
+    // next JavaScript executes; a request supplies that, and the stepper being
+    // off is what lets the resulting stop land instead of being stepped past.
+    const pause = parseSdkToolResult(await mcpClient!.callTool({ name: 'pause_execution', arguments: { sessionId } }));
+    expect(pause.success, JSON.stringify(pause)).toBe(true);
+    const http = await import('node:http');
+    const request = http.get(`http://127.0.0.1:${port}/ping`, res => res.resume());
+    request.on('error', () => { /* the session teardown ends the request */ });
+    let paused = pause.state === 'paused';
+    const deadline = Date.now() + 15000;
+    while (!paused && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 250));
+      const listed = parseSdkToolResult(await mcpClient!.callTool({ name: 'list_debug_sessions', arguments: {} }));
+      const mine = ((listed.sessions as Array<{ id: string; state: string }>) ?? []).find(s => s.id === sessionId);
+      paused = mine?.state === 'paused';
+    }
+    expect(paused, JSON.stringify(pause)).toBe(true);
+    console.log('[JS Simple Smoke] ✓ Pause landed on an idle launched server with justMyCode: false');
+  }, 60000);
+
   it('should handle multiple breakpoints', async () => {
     const scriptPath = JS_SCRIPT_PATH;
     

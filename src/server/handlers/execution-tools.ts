@@ -68,6 +68,19 @@ export const stepTool: ToolHandler = async (ctx, args, toolName) => {
       // exit (non-zero, or no code at all) to ERROR, so a step that died with
       // the proxy lands there rather than in STOPPED.
       response.message = resultData.message;
+    } else if (resultData?.message) {
+      // The controller owns the step wording (issue #678 review): 'Stepped
+      // over' for an ordinary stop, or its disclosure when the stop that
+      // ended the step was not the step. The default above covers a result
+      // that carries no message.
+      response.message = resultData.message;
+    }
+    if (resultData?.stopReason) {
+      // The stop that ended the step was not the step (issue #678): name it.
+      response.stopReason = resultData.stopReason;
+      if (resultData.rawStopReason) {
+        response.rawStopReason = resultData.rawStopReason;
+      }
     }
 
     // Extract location from result data
