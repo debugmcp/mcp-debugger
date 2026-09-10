@@ -248,6 +248,13 @@ If neither `tsx` nor `ts-node` is installed, the factory emits a warning (not an
   ancestors sit beyond an `await`/request boundary — keeps that frame as frame
   0 (reported as `pausedFrame`, and the `note` says so) so `get_local_variables`
   and `evaluate_expression` work where the program stopped (issue #672)
+- **Breakpoints in source-mapped TypeScript bind under the generated file.**
+  A launch breakpoint set on `src/x.ts:349` is verified by js-debug under
+  `dist/x.js:277`; `list_breakpoints` keeps the request as `file`/`line` and
+  reports the generated location as `boundFile`/`boundLine`, and `verified`
+  flips to true. A breakpoint the program stops on is reported verified from
+  that stop even when js-debug never sent a verification for it (observed for
+  `node_modules` files) — issue #673
 - Debuggee exit codes are captured via an injected preload (js-debug itself
   never emits a DAP `exited` event), so `exitCode` is unavailable in two
   cases: attach mode (the target's environment is not under mcp-debugger's

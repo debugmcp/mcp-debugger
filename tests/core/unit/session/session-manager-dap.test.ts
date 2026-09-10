@@ -816,7 +816,7 @@ describe('SessionManager - DAP Operations', () => {
       expect(stored.message).toBeUndefined();
     });
 
-    it('never stamps adapterId from an unmarked event or a child-origin provisional stub', async () => {
+    it('never stamps adapterId from an unmarked (parent) event; a child-origin provisional stub stamps the child id', async () => {
       const session = await createJsSessionWithChildVerifiedBp();
       await sessionManager.setBreakpoint(session.id, { file: 'app.js', line: 20 });
 
@@ -839,8 +839,9 @@ describe('SessionManager - DAP Operations', () => {
       expect(bp2.message).toBe('Unbound breakpoint');
 
       // Child-origin but PROVISIONAL (the child answers its own pending
-      // stub while adoption is in flight, issue #500): still no id stamp —
-      // stub ids are unstable across the pending→bound transition.
+      // stub while adoption is in flight, issue #500): the id is the child's
+      // real id for this record and is stamped (issue #673) — the #495
+      // hazard was the parent's colliding space, excluded above.
       dependencies.mockProxyManager.simulateEvent('breakpoint', {
         reason: 'changed',
         breakpoint: {
@@ -853,7 +854,8 @@ describe('SessionManager - DAP Operations', () => {
         __mcpChildOrigin: true
       });
       bp2 = sessionManager.listBreakpoints(session.id).find(bp => bp.line === 20)!;
-      expect(bp2.adapterId).toBeUndefined();
+      expect(bp2.verified).toBe(false);
+      expect(bp2.adapterId).toBe(1);
 
       // Child-origin VERIFIED event: full stamp, provisional note cleared.
       dependencies.mockProxyManager.simulateEvent('breakpoint', {
@@ -865,6 +867,425 @@ describe('SessionManager - DAP Operations', () => {
       expect(bp2.verified).toBe(true);
       expect(bp2.adapterId).toBe(101);
       expect(bp2.message).toBeUndefined();
+    });
+
+    describe('provisional child ids and hit-implies-bound (issue #673)', () => {
+      const TS_REQUEST = { file: 'src/cli/http-command.ts', line: 349 };
+      const GENERATED = { path: 'dist/cli/http-command.js', line: 277 };
+
+      const find = (sessionId: string, storeId: string) =>
+        sessionManager.listBreakpoints(sessionId).find(bp => bp.id === storeId)!;
+
+      const childEvent = (breakpoint: Record<string, unknown>) =>
+        dependencies.mockProxyManager.simulateEvent('breakpoint', {
+          reason: 'changed',
+          breakpoint,
+          __mcpChildOrigin: true
+        });
+
+      const provisionalStub = (id: number, at: { file: string; line: number }) => ({
+        id,
+        verified: false,
+        line: at.line,
+        source: { path: at.file },
+        message: 'breakpoint.provisionalBreakpoint'
+      });
+
+      async function jsSessionWithProvisionalStub(id: number, at: { file: string; line: number }) {
+        const session = await createJsSessionWithChildVerifiedBp();
+        const { breakpoint } = await sessionManager.setBreakpoint(session.id, at);
+        // The child's replay of the stored breakpoints answers with its own
+        // provisional stub — child-origin, verified:false, child-space id —
+        // and the requested path+line (child-session-manager synthesizes it).
+        // The id is the child's real id for this record and is stamped.
+        childEvent(provisionalStub(id, at));
+        const stored = find(session.id, breakpoint.id);
+        expect(stored.verified).toBe(false);
+        expect(stored.adapterId).toBe(id);
+        expect(stored.message).toBe('Unbound breakpoint');
+        return { session, storeId: breakpoint.id };
+      }
+
+      const hit = (...ids: number[]) =>
+        dependencies.mockProxyManager.simulateStopped(1, 'breakpoint', {
+          reason: 'breakpoint',
+          threadId: 1,
+          hitBreakpointIds: ids
+        });
+
+      it('binds a source-mapped request when the child verifies it under the generated path', async () => {
+        const { session, storeId } = await jsSessionWithProvisionalStub(2, TS_REQUEST);
+
+        childEvent({ id: 2, verified: true, line: GENERATED.line, source: { path: GENERATED.path } });
+
+        const bp = find(session.id, storeId);
+        expect(bp.verified).toBe(true);
+        expect(bp.verifiedBy).toBe('adapter');
+        expect(bp.adapterId).toBe(2);
+        expect(bp.message).toBeUndefined();
+        // The request is untouched; the generated location is reported beside it.
+        expect(bp.file).toBe(TS_REQUEST.file);
+        expect(bp.line).toBe(349);
+        expect(bp.boundFile).toBe(GENERATED.path);
+        expect(bp.boundLine).toBe(277);
+      });
+
+      it('a later child echo under the generated location leaves the request line alone', async () => {
+        // The very next replace-all re-sends the file; js-debug echoes the
+        // bound entry with the same id under the generated location.
+        const { session, storeId } = await jsSessionWithProvisionalStub(2, TS_REQUEST);
+        childEvent({ id: 2, verified: true, line: GENERATED.line, source: { path: GENERATED.path } });
+
+        childEvent({ id: 2, verified: true, line: GENERATED.line, source: { path: GENERATED.path } });
+
+        const bp = find(session.id, storeId);
+        expect(bp.line).toBe(349);
+        expect(bp.boundFile).toBe(GENERATED.path);
+        expect(bp.boundLine).toBe(277);
+      });
+
+      it('a child downgrade clears the bound location', async () => {
+        const { session, storeId } = await jsSessionWithProvisionalStub(2, TS_REQUEST);
+        childEvent({ id: 2, verified: true, line: GENERATED.line, source: { path: GENERATED.path } });
+
+        // js-debug's unbind event carries neither source nor line.
+        childEvent({ id: 2, verified: false, message: 'breakpoint.provisionalBreakpoint' });
+
+        const bp = find(session.id, storeId);
+        expect(bp.verified).toBe(false);
+        expect(bp.verifiedBy).toBeUndefined();
+        expect(bp.message).toBe('Unbound breakpoint');
+        expect(bp.line).toBe(349);
+        expect(bp.boundFile).toBeUndefined();
+        expect(bp.boundLine).toBeUndefined();
+      });
+
+      it('moves the line in place when the child verifies the same file at another line (no boundFile)', async () => {
+        const { session, storeId } = await jsSessionWithProvisionalStub(3, { file: 'app.js', line: 20 });
+
+        childEvent({ id: 3, verified: true, line: 21, source: { path: 'app.js' } });
+
+        const bp = find(session.id, storeId);
+        expect(bp.verified).toBe(true);
+        expect(bp.adapterId).toBe(3);
+        expect(bp.line).toBe(21);
+        expect(bp.boundFile).toBeUndefined();
+        expect(bp.boundLine).toBeUndefined();
+      });
+
+      it('treats a Windows path spelled with forward slashes as the same file as the adapter backslashes', async () => {
+        const { session, storeId } = await jsSessionWithProvisionalStub(4, { file: 'C:/proj/app.js', line: 20 });
+
+        childEvent({ id: 4, verified: true, line: 21, source: { path: 'c:\\proj\\app.js' } });
+
+        const bp = find(session.id, storeId);
+        expect(bp.verified).toBe(true);
+        expect(bp.line).toBe(21);
+        expect(bp.boundFile).toBeUndefined();
+      });
+
+      it('a repeated provisional stub for the same id changes nothing', async () => {
+        const { session, storeId } = await jsSessionWithProvisionalStub(2, TS_REQUEST);
+
+        childEvent(provisionalStub(2, TS_REQUEST));
+
+        const bp = find(session.id, storeId);
+        expect(bp.verified).toBe(false);
+        expect(bp.line).toBe(349);
+        expect(bp.adapterId).toBe(2);
+        expect(bp.boundFile).toBeUndefined();
+      });
+
+      it('marks a breakpoint verified when a stop names its provisional id (hit implies bound)', async () => {
+        const { session, storeId } = await jsSessionWithProvisionalStub(5, { file: 'app.js', line: 20 });
+
+        hit(5);
+
+        const bp = find(session.id, storeId);
+        expect(bp.verified).toBe(true);
+        expect(bp.verifiedBy).toBe('hit');
+        expect(bp.adapterId).toBe(5);
+        expect(bp.message).toBeUndefined();
+        expect(bp.line).toBe(20);
+      });
+
+      it('an unverified child echo does not downgrade a breakpoint a stop already proved bound', async () => {
+        // js-debug answers "unbound" on every replace-all for a node_modules
+        // location it cannot map to a source; the CDP breakpoint keeps firing.
+        const { session, storeId } = await jsSessionWithProvisionalStub(5, { file: 'app.js', line: 20 });
+        hit(5);
+
+        childEvent(provisionalStub(5, { file: 'app.js', line: 20 }));
+        let bp = find(session.id, storeId);
+        expect(bp.verified).toBe(true);
+        expect(bp.verifiedBy).toBe('hit');
+        expect(bp.message).toBeUndefined();
+
+        // The same answer through a child-sourced setBreakpoints response.
+        dependencies.mockProxyManager.setDapRequestHandler(async (command, args) => {
+          if (command === 'setBreakpoints') {
+            return {
+              success: true,
+              __mcpChildSourced: true,
+              body: {
+                // Positional echo: the fixture's app.js:10 keeps its id 100,
+                // the hit-proven line 20 is echoed unbound under its id 5.
+                breakpoints: args?.breakpoints?.map((b: { line: number }) => ({
+                  id: b.line === 10 ? 100 : b.line === 20 ? 5 : 6,
+                  verified: b.line === 10,
+                  line: b.line,
+                  ...(b.line === 10 ? {} : { message: 'breakpoint.provisionalBreakpoint' })
+                })) || []
+              }
+            };
+          }
+          return { success: true, body: {} };
+        });
+        await sessionManager.setBreakpoint(session.id, { file: 'app.js', line: 30 });
+        bp = find(session.id, storeId);
+        expect(bp.verified).toBe(true);
+        expect(bp.verifiedBy).toBe('hit');
+
+        // A real verification from the adapter takes over the provenance.
+        childEvent({ id: 5, verified: true, line: 20, source: { path: 'app.js' } });
+        expect(find(session.id, storeId).verifiedBy).toBe('adapter');
+      });
+
+      it('keeps a non-provisional note through the hit but drops a provisional one', async () => {
+        const { session, storeId } = await jsSessionWithProvisionalStub(5, { file: 'app.js', line: 20 });
+        const stale = "Anchor 'const self = this' not found at restart; breakpoint kept at last known line 20";
+        (sessionManager as unknown as { sessionStore: { get(id: string): { breakpoints: Map<string, { message?: string }> } } })
+          .sessionStore.get(session.id).breakpoints.get(storeId)!.message = stale;
+
+        hit(5);
+
+        const bp = find(session.id, storeId);
+        expect(bp.verified).toBe(true);
+        expect(bp.message).toBe(stale);
+      });
+
+      it('ignores hit ids it cannot correlate and never downgrades on a later stop', async () => {
+        const { session, storeId } = await jsSessionWithProvisionalStub(5, { file: 'app.js', line: 20 });
+
+        hit(999);
+        expect(find(session.id, storeId).verified).toBe(false);
+
+        hit(5);
+        expect(find(session.id, storeId).verified).toBe(true);
+
+        // A stop that names nothing (a pause) leaves the upgraded record alone.
+        dependencies.mockProxyManager.simulateStopped(1, 'pause', { reason: 'pause', threadId: 1 });
+        const bp = find(session.id, storeId);
+        expect(bp.verified).toBe(true);
+        expect(bp.adapterId).toBe(5);
+      });
+
+      it('ignores non-numeric hit ids and still applies the numeric ones', async () => {
+        const { session, storeId } = await jsSessionWithProvisionalStub(5, { file: 'app.js', line: 20 });
+
+        dependencies.mockProxyManager.simulateStopped(1, 'breakpoint', {
+          reason: 'breakpoint',
+          threadId: 1,
+          hitBreakpointIds: ['5' as unknown as number, 5]
+        });
+
+        expect(find(session.id, storeId).verified).toBe(true);
+      });
+
+      it('ignores an unmarked (parent) event carrying a colliding id — the id spaces collide (issue #495)', async () => {
+        const { session, storeId } = await jsSessionWithProvisionalStub(2, { file: 'app.js', line: 20 });
+
+        dependencies.mockProxyManager.simulateEvent('breakpoint', {
+          reason: 'changed',
+          breakpoint: { id: 2, verified: true, line: 99, source: { path: 'other.js' } }
+        });
+
+        const bp = find(session.id, storeId);
+        expect(bp.verified).toBe(false);
+        expect(bp.line).toBe(20);
+        expect(bp.adapterId).toBe(2);
+        expect(bp.boundFile).toBeUndefined();
+      });
+
+      it('twins at one location take the replay stubs positionally', async () => {
+        const session = await createJsSessionWithChildVerifiedBp();
+        const { breakpoint: plain } = await sessionManager.setBreakpoint(session.id, { file: 'app.js', line: 20 });
+        const { breakpoint: conditional } = await sessionManager.setBreakpoint(session.id, { file: 'app.js', line: 20, condition: 'i > 3' });
+
+        childEvent(provisionalStub(2, { file: 'app.js', line: 20 }));
+        childEvent(provisionalStub(3, { file: 'app.js', line: 20 }));
+
+        expect(find(session.id, plain.id).adapterId).toBe(2);
+        expect(find(session.id, conditional.id).adapterId).toBe(3);
+
+        hit(3);
+        expect(find(session.id, plain.id).verified).toBe(false);
+        expect(find(session.id, conditional.id).verified).toBe(true);
+      });
+
+      it('stamps a child-sourced provisional id so a later hit resolves it', async () => {
+        const session = await createJsSessionWithChildVerifiedBp();
+        // A live sync needs a RUNNING/PAUSED session; the fixture leaves it initializing.
+        dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+        dependencies.mockProxyManager.setDapRequestHandler(async (command, args) => {
+          if (command === 'setBreakpoints') {
+            return {
+              success: true,
+              body: {
+                breakpoints: args?.breakpoints?.map((bp: { line: number }, i: number) => ({
+                  id: 40 + i,
+                  verified: false,
+                  line: bp.line,
+                  message: 'breakpoint.provisionalBreakpoint'
+                })) || []
+              },
+              __mcpChildSourced: true
+            };
+          }
+          return { success: true };
+        });
+        const { breakpoint } = await sessionManager.setBreakpoint(session.id, { file: 'lib.js', line: 7 });
+        expect(breakpoint.verified).toBe(false);
+        expect(breakpoint.adapterId).toBe(40);
+
+        hit(40);
+
+        const bp = find(session.id, breakpoint.id);
+        expect(bp.verified).toBe(true);
+        expect(bp.verifiedBy).toBe('hit');
+        expect(bp.message).toBeUndefined();
+      });
+
+      it('reports a child-sourced answer under the generated file as boundFile, keeping the request line', async () => {
+        const session = await createJsSessionWithChildVerifiedBp();
+        dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+        dependencies.mockProxyManager.setDapRequestHandler(async (command, args) => {
+          if (command === 'setBreakpoints') {
+            return {
+              success: true,
+              __mcpChildSourced: true,
+              body: {
+                breakpoints: args?.breakpoints?.map(() => ({
+                  id: 9, verified: true, line: GENERATED.line, source: { path: GENERATED.path }
+                })) || []
+              }
+            };
+          }
+          return { success: true };
+        });
+
+        const { breakpoint } = await sessionManager.setBreakpoint(session.id, TS_REQUEST);
+
+        expect(breakpoint.verified).toBe(true);
+        expect(breakpoint.adapterId).toBe(9);
+        expect(breakpoint.line).toBe(349);
+        expect(breakpoint.boundFile).toBe(GENERATED.path);
+        expect(breakpoint.boundLine).toBe(277);
+      });
+
+      it('forgets the child ids on relaunch — a stale id cannot bind the new adapter instance', async () => {
+        const { session, storeId } = await jsSessionWithProvisionalStub(2, TS_REQUEST);
+
+        // The fixture leaves the session initializing (the js handshake never
+        // completes under the mock); a stop makes it PAUSED so restart is allowed.
+        dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+        const restart = await sessionManager.restartDebugging(session.id);
+        expect(restart.success, JSON.stringify(restart)).toBe(true);
+        await vi.runAllTimersAsync();
+
+        expect(find(session.id, storeId).adapterId).toBeUndefined();
+        childEvent({ id: 2, verified: true, line: GENERATED.line, source: { path: GENERATED.path } });
+
+        const bp = find(session.id, storeId);
+        expect(bp.verified).toBe(false);
+        expect(bp.boundFile).toBeUndefined();
+      });
+
+      it('a stale hit id for a removed breakpoint upgrades nothing else', async () => {
+        const { session, storeId } = await jsSessionWithProvisionalStub(5, { file: 'app.js', line: 20 });
+        const { breakpoint: bystander } = await sessionManager.setBreakpoint(session.id, { file: 'app.js', line: 30 });
+        childEvent(provisionalStub(8, { file: 'app.js', line: 30 }));
+        await sessionManager.removeBreakpoint(session.id, storeId);
+        vi.mocked(dependencies.logger.info).mockClear();
+
+        hit(5);
+
+        expect(sessionManager.listBreakpoints(session.id).find(bp => bp.id === storeId)).toBeUndefined();
+        const others = sessionManager.listBreakpoints(session.id);
+        expect(others.find(bp => bp.id === bystander.id)).toMatchObject({ verified: false, adapterId: 8 });
+        expect(others.find(bp => bp.line === 10)).toMatchObject({ verified: true, adapterId: 100 });
+        expect(dependencies.logger.info).not.toHaveBeenCalledWith(
+          'debug:breakpoint',
+          expect.objectContaining({ via: 'hit' })
+        );
+      });
+
+      it('marks a function breakpoint verified when a stop names its adapter id', async () => {
+        const session = await sessionManager.createSession({
+          language: DebugLanguage.MOCK,
+          executablePath: 'python'
+        });
+        dependencies.mockProxyManager.setDapRequestHandler(async (command) => {
+          if (command === 'setFunctionBreakpoints') {
+            return {
+              success: true,
+              body: { breakpoints: [{ id: 77, verified: false, message: 'Unbound breakpoint' }] }
+            };
+          }
+          return { success: true, body: {} };
+        });
+        await sessionManager.setFunctionBreakpoint(session.id, { functionName: 'compute' });
+        await sessionManager.startDebugging(session.id, 'test.py');
+        await vi.runAllTimersAsync();
+        const before = sessionManager.listFunctionBreakpoints(session.id)[0];
+        expect(before.verified).toBe(false);
+        expect(before.adapterId).toBe(77);
+
+        dependencies.mockProxyManager.simulateStopped(1, 'function breakpoint', {
+          reason: 'function breakpoint',
+          threadId: 1,
+          hitBreakpointIds: [77]
+        });
+
+        const after = sessionManager.listFunctionBreakpoints(session.id)[0];
+        expect(after.verified).toBe(true);
+        expect(after.verifiedBy).toBe('hit');
+        expect(after.message).toBeUndefined();
+      });
+
+      it('applies hit-implies-bound to a non-mirroring adapter by adapterId', async () => {
+        const session = await sessionManager.createSession({
+          language: DebugLanguage.MOCK,
+          executablePath: 'python'
+        });
+        dependencies.mockProxyManager.setDapRequestHandler(async (command, args) => {
+          if (command === 'setBreakpoints') {
+            return {
+              success: true,
+              body: {
+                breakpoints: args?.breakpoints?.map((bp: { line: number }) => ({
+                  id: 11,
+                  verified: false,
+                  line: bp.line,
+                  message: 'Unbound breakpoint'
+                })) || []
+              }
+            };
+          }
+          return { success: true, body: {} };
+        });
+        await sessionManager.startDebugging(session.id, 'test.py');
+        await vi.runAllTimersAsync();
+        const { breakpoint } = await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 10 });
+        expect(breakpoint.verified).toBe(false);
+        expect(breakpoint.adapterId).toBe(11);
+
+        hit(11);
+
+        const bp = find(session.id, breakpoint.id);
+        expect(bp.verified).toBe(true);
+        expect(bp.message).toBeUndefined();
+      });
     });
 
     it('normalizes raw l10n keys in stored messages and full-stamps from a child-sourced response (issues #471/#500)', async () => {
@@ -931,8 +1352,10 @@ describe('SessionManager - DAP Operations', () => {
       expect(b2.verified).toBe(true);
       expect(b2.adapterId).toBe(1);
 
-      // A child-sourced UNVERIFIED echo tells the truth about verified but
-      // must not stamp its (unstable stub) id.
+      // A child-sourced UNVERIFIED echo tells the truth about verified and
+      // its id is the child's real id for the record (issue #673) — the
+      // #495 hazard was the parent's colliding space, which is not marked
+      // child-sourced.
       dependencies.mockProxyManager.setDapRequestHandler(async (command, args) => {
         if (command === 'setBreakpoints') {
           return {
@@ -953,7 +1376,7 @@ describe('SessionManager - DAP Operations', () => {
       await sessionManager.setBreakpoint(session.id, { file: 'other.js', line: 30 });
       const b3 = sessionManager.listBreakpoints(session.id).find(b => b.line === 30)!;
       expect(b3.verified).toBe(false);
-      expect(b3.adapterId).toBeUndefined();
+      expect(b3.adapterId).toBe(9);
       expect(b3.message).toBe('Unbound breakpoint');
     });
 

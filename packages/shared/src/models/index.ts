@@ -222,10 +222,28 @@ export interface Breakpoint {
   suspendPolicy?: 'all' | 'thread';
   /** Whether the breakpoint is verified */
   verified: boolean;
+  /**
+   * What proved `verified` (issue #673): 'adapter' — a setBreakpoints answer
+   * or breakpoint event said so; 'hit' — the only proof so far is a stop that
+   * named this breakpoint's id. An adapter answer of "unbound" does not
+   * downgrade a hit-proven record: js-debug answers that for a location it
+   * cannot map to a source while the breakpoint underneath keeps firing.
+   */
+  verifiedBy?: 'adapter' | 'hit';
   /** Validation message from DAP adapter */
   message?: string;
   /** Breakpoint id assigned by the debug adapter (from setBreakpoints responses / breakpoint events) */
   adapterId?: number;
+  /**
+   * Source file the adapter actually bound the breakpoint in when that is a
+   * different file from the request — a source-mapped `.ts` request that
+   * js-debug verifies under its generated `dist/*.js` (issue #673). `file`
+   * and `line` keep describing the request; this pair says where it landed.
+   * Absent when the binding file is the requested one.
+   */
+  boundFile?: string;
+  /** Line in `boundFile` the adapter bound the breakpoint at (issue #673) */
+  boundLine?: number;
   /**
    * The line originally requested by the client, recorded before the adapter
    * had a chance to bind elsewhere. Present only in assert/content addressing
@@ -259,6 +277,8 @@ export interface FunctionBreakpoint {
   condition?: string;
   /** Whether the breakpoint is verified */
   verified: boolean;
+  /** What proved `verified` — see Breakpoint.verifiedBy (issue #673) */
+  verifiedBy?: 'adapter' | 'hit';
   /** Validation message from DAP adapter */
   message?: string;
   /** Breakpoint id assigned by the debug adapter */
