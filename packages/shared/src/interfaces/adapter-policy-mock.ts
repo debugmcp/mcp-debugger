@@ -9,7 +9,7 @@ import { emptyLocalVariableExtraction, extractionFromScope } from './adapter-pol
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior } from './dap-client-behavior.js';
 
-export const MockAdapterPolicy: AdapterPolicy = {
+export const MockAdapterPolicy = {
   name: 'mock',
   supportsLogPoints: true,
   supportsFunctionBreakpoints: true,
@@ -217,4 +217,4 @@ export const MockAdapterPolicy: AdapterPolicy = {
     // The proxy worker should handle this case appropriately for testing
     return undefined;
   }
-};
+} satisfies AdapterPolicy;

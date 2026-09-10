@@ -11,7 +11,7 @@ import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
 
-export const GoAdapterPolicy: AdapterPolicy = {
+export const GoAdapterPolicy = {
   name: 'go',
   supportsLogPoints: true,
   supportsFunctionBreakpoints: true,
@@ -376,4 +376,4 @@ export const GoAdapterPolicy: AdapterPolicy = {
       logDir: payload.logDir
     };
   }
-};
+} satisfies AdapterPolicy;

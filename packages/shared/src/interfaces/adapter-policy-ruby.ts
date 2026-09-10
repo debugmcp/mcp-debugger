@@ -5,7 +5,7 @@ import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
 
-export const RubyAdapterPolicy: AdapterPolicy = {
+export const RubyAdapterPolicy = {
   name: 'ruby',
   // rdbg does not advertise supportsLogPoints and its setBreakpoints ignores
   // logMessage, silently downgrading a logpoint into a pausing breakpoint —
@@ -255,4 +255,4 @@ export const RubyAdapterPolicy: AdapterPolicy = {
       adapterExitCodeIsDebuggeeExitCode: true
     };
   }
-};
+} satisfies AdapterPolicy;

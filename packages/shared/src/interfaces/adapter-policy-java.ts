@@ -15,7 +15,7 @@ import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from '
 /** Package prefixes identifying JDK-internal classes in frame names or FQCNs. */
 const JDK_INTERNAL_PREFIXES = ['java.', 'javax.', 'sun.', 'jdk.', 'com.sun.'];
 
-export const JavaAdapterPolicy: AdapterPolicy = {
+export const JavaAdapterPolicy = {
   name: 'java',
   supportsLogPoints: false,
   // JdiDapServer implements setFunctionBreakpoints natively: BreakpointRequests
@@ -280,4 +280,4 @@ export const JavaAdapterPolicy: AdapterPolicy = {
       logDir: payload.logDir
     };
   }
-};
+} satisfies AdapterPolicy;

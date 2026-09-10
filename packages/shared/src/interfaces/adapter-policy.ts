@@ -732,7 +732,7 @@ export type AdapterSpawnConfig =
  * implements the smallest safe surface so real adapters cannot accidentally
  * rely on it for behaviour.
  */
-export const DefaultAdapterPolicy: AdapterPolicy = {
+export const DefaultAdapterPolicy = {
   name: 'default',
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
@@ -762,7 +762,7 @@ export const DefaultAdapterPolicy: AdapterPolicy = {
   matchesAdapter: () => false,
   getInitializationBehavior: () => ({}),
   getDapClientBehavior: (): DapClientBehavior => ({})
-};
+} satisfies AdapterPolicy;
 
 /**
  * Resolve an abstract break-on-exception mode to the concrete DAP

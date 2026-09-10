@@ -26,7 +26,7 @@ import {
   lldbAnnotateOutputEvent
 } from './lldb-policy-shared.js';
 
-export const RustAdapterPolicy: AdapterPolicy = {
+export const RustAdapterPolicy = {
   name: 'rust',
   supportsLogPoints: true,
   supportsFunctionBreakpoints: true,
@@ -167,4 +167,4 @@ export const RustAdapterPolicy: AdapterPolicy = {
    */
   getAdapterSpawnConfig: (payload, platform: NodeJS.Platform = process.platform, arch: NodeJS.Architecture = process.arch) =>
     buildLldbSpawnConfig(payload, platform, arch)
-};
+} satisfies AdapterPolicy;

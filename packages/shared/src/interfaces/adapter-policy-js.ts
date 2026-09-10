@@ -85,7 +85,7 @@ function hasNoSource(filePath: string): boolean {
   return filePath === '' || filePath === '<unknown_source>';
 }
 
-export const JsDebugAdapterPolicy: AdapterPolicy = {
+export const JsDebugAdapterPolicy = {
   name: 'js-debug',
   supportsLogPoints: true,
   // js-debug implements no DAP setFunctionBreakpoints (upstream out of scope,
@@ -1126,4 +1126,4 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
     console.warn('[JsDebugAdapterPolicy] No adapter command provided - JavaScript debugging may not work correctly');
     return undefined;
   }
-};
+} satisfies AdapterPolicy;
