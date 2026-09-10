@@ -8,7 +8,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
-import { createProductionDependencies, type Dependencies } from '../../../../src/container/dependencies.js';
+import { createProductionDependencies } from '../../../../src/container/dependencies.js';
 import { DEBUGGING_WORKFLOW_PROMPT } from '../../../../src/skill-content.js';
 import {
   createMockDependencies,
@@ -33,7 +33,7 @@ describe('Server Prompts Tests', () => {
     // networkManager and the factories are bare vi.fn() placeholders these tests
     // never call. (The single-point fix is a typed return on the helper itself.)
     vi.mocked(createProductionDependencies).mockReturnValue(
-      mockDependencies as unknown as Dependencies
+      mockDependencies
     );
 
     mockServer = createMockServer();

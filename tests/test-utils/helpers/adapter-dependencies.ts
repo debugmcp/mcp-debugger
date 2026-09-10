@@ -22,14 +22,23 @@ import type {
   INetworkManager
 } from '@debugmcp/shared';
 
-/** Every `IFileSystem` member as a bare spy. Pass `overrides` for the ones a test asserts on. */
+/**
+ * Every `IFileSystem` member as a bare spy. Pass `overrides` for the ones a test asserts on.
+ *
+ * The three existence predicates answer `false` rather than the `undefined` a bare `vi.fn()`
+ * would return. Truthiness is identical, so no test changes behaviour -- but `IFileSystem`
+ * declares them as returning `boolean`, and a double that violates its own contract at runtime
+ * is the kind of thing this cleanup exists to remove. Note the consequence either way: an
+ * un-stubbed probe reports "not found", so a code path that resolves a file will take its
+ * failure branch quietly. Stub the predicate in any test that reaches one.
+ */
 export function createMockFileSystem(overrides: Partial<IFileSystem> = {}): IFileSystem {
   return {
     readFile: vi.fn(),
     readTail: vi.fn(),
     writeFile: vi.fn(),
-    exists: vi.fn(),
-    existsSync: vi.fn(),
+    exists: vi.fn(async () => false),
+    existsSync: vi.fn(() => false),
     mkdir: vi.fn(),
     readdir: vi.fn(),
     stat: vi.fn(),
@@ -37,7 +46,7 @@ export function createMockFileSystem(overrides: Partial<IFileSystem> = {}): IFil
     rmdir: vi.fn(),
     ensureDir: vi.fn(),
     ensureDirSync: vi.fn(),
-    pathExists: vi.fn(),
+    pathExists: vi.fn(async () => false),
     remove: vi.fn(),
     copy: vi.fn(),
     outputFile: vi.fn(),

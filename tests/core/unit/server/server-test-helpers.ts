@@ -14,10 +14,17 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { createProductionDependencies } from '../../../../src/container/dependencies.js';
-import { createMockLogger } from '../../../test-utils/helpers/test-dependencies.js';
+import {
+  createMockLogger,
+  createMockNetworkManager,
+  createMockProcessManager,
+  createMockProxyProcessLauncher
+} from '../../../test-utils/helpers/test-dependencies.js';
+import { MockProxyManagerFactory } from '../../../../src/factories/proxy-manager-factory.js';
+import { MockSessionStoreFactory } from '../../../../src/factories/session-store-factory.js';
 import { createMockAdapterRegistry } from '../../../test-utils/mocks/mock-adapter-registry.js';
 
-export function createMockDependencies() {
+export function createMockDependencies(): ReturnType<typeof createProductionDependencies> {
   const mockLogger = createMockLogger();
   const mockAdapterRegistry = createMockAdapterRegistry();
   
@@ -41,45 +48,18 @@ export function createMockDependencies() {
       copy: vi.fn().mockResolvedValue(undefined),
       outputFile: vi.fn().mockResolvedValue(undefined)
     },
-    processManager: vi.fn(),
-    networkManager: vi.fn(),
-    proxyProcessLauncher: vi.fn(),
-    proxyManagerFactory: vi.fn(),
-    sessionStoreFactory: vi.fn(),
+    // Real shapes, not bare `vi.fn()`. Nothing in the server tests calls these, but a
+    // double that satisfies none of its interfaces means the whole bag has to be cast at
+    // every call site -- which then silences the members that ARE exercised too.
+    processManager: createMockProcessManager(),
+    networkManager: createMockNetworkManager(),
+    proxyProcessLauncher: createMockProxyProcessLauncher(),
+    proxyManagerFactory: new MockProxyManagerFactory(),
+    sessionStoreFactory: new MockSessionStoreFactory(),
     environment: {
       get: vi.fn((key: string) => process.env[key]),
       getAll: vi.fn(() => ({ ...process.env })),
       getCurrentWorkingDirectory: vi.fn(() => process.cwd())
-    },
-    pathUtils: {
-      isAbsolute: vi.fn((p: string) => {
-        // Mock platform-appropriate behavior
-        if (process.platform === 'win32') {
-          return /^[A-Za-z]:[\\\/]/.test(p) || /^\\\\/.test(p);
-        } else {
-          return p.startsWith('/');
-        }
-      }),
-      resolve: vi.fn((...args: string[]) => {
-        // Simple mock: joins segments with '/' and collapses duplicate slashes.
-        // Does NOT implement real resolve() semantics (absolute-path override,
-        // '.'/'..' normalization, Windows separators) -- simple cases only.
-        return args.join('/').replace(/\/+/g, '/');
-      }),
-      join: vi.fn((...args: string[]) => args.join('/')),
-      dirname: vi.fn((p: string) => {
-        const lastSlash = p.lastIndexOf('/');
-        return lastSlash === -1 ? '.' : p.substring(0, lastSlash);
-      }),
-      basename: vi.fn((p: string, ext?: string) => {
-        const lastSlash = p.lastIndexOf('/');
-        const base = lastSlash === -1 ? p : p.substring(lastSlash + 1);
-        if (ext && base.endsWith(ext)) {
-          return base.substring(0, base.length - ext.length);
-        }
-        return base;
-      }),
-      sep: '/'
     },
     adapterRegistry: mockAdapterRegistry
   };

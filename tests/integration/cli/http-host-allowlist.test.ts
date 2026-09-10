@@ -8,6 +8,7 @@ import * as http from 'http';
 import type { AddressInfo } from 'net';
 import { createHttpApp } from '../../../src/cli/http-command.js';
 import { FakeCurrentProcess } from '../../test-utils/mocks/fake-current-process.js';
+import type { Logger as WinstonLogger } from 'winston';
 import { createMockLogger } from '../../test-utils/mocks/mock-logger.js';
 
 interface Reply {
@@ -30,7 +31,7 @@ async function listen(options: { allowedHost?: string[] } = {}, env: Record<stri
   Object.assign(proc.env, { MCP_HTTP_STALE_SESSION_MS: '0', MCP_HTTP_STREAM_LOST_SESSION_MS: '0' }, env);
   const app = createHttpApp(
     { port: '0', ...options },
-    { logger: createMockLogger(), serverFactory: vi.fn(), proc }
+    { logger: createMockLogger() as unknown as WinstonLogger, serverFactory: vi.fn(), proc }
   );
   const server = app.listen(0, '127.0.0.1');
   servers.push(server);

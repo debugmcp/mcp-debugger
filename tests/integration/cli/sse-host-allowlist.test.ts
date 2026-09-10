@@ -9,6 +9,7 @@ import * as http from 'http';
 import type { AddressInfo } from 'net';
 import { createSSEApp } from '../../../src/cli/sse-command.js';
 import { FakeCurrentProcess } from '../../test-utils/mocks/fake-current-process.js';
+import type { Logger as WinstonLogger } from 'winston';
 import { createMockLogger } from '../../test-utils/mocks/mock-logger.js';
 
 interface Reply {
@@ -30,7 +31,7 @@ async function listen(options: { allowedHost?: string[] } = {}, env: Record<stri
   Object.assign(proc.env, env);
   const app = createSSEApp(
     { port: '0', ...options },
-    { logger: createMockLogger(), serverFactory: vi.fn().mockReturnValue({ server: {} }), proc }
+    { logger: createMockLogger() as unknown as WinstonLogger, serverFactory: vi.fn().mockReturnValue({ server: {} }), proc }
   );
   const server = app.listen(0, '127.0.0.1');
   servers.push(server);

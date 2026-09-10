@@ -29,7 +29,7 @@ vi.mock('../../../../src/container/dependencies.js');
 describe('set_breakpoint function gating (#271 phase 3)', () => {
   let mockServer: any;
   let mockSessionManager: any;
-  let mockDependencies: any;
+  let mockDependencies: Dependencies;
   let callToolHandler: any;
   let listToolsHandler: any;
 
@@ -219,7 +219,7 @@ describe('set_breakpoint function-name normalization (issue #467)', () => {
     // networkManager and the factories are bare vi.fn() placeholders these tests
     // never call. (The single-point fix is a typed return on the helper itself.)
     vi.mocked(createProductionDependencies).mockReturnValue(
-      mockDependencies as unknown as Dependencies
+      mockDependencies
     );
     mockServer = createMockServer();
     vi.mocked(Server).mockImplementation(function() { return mockServer as any; });
