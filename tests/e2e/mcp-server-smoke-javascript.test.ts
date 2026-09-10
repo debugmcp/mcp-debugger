@@ -148,6 +148,20 @@ describe('JavaScript Debugging - Simple Smoke Tests', () => {
     // Wait briefly for session to stabilize
     await new Promise(resolve => setTimeout(resolve, 1000));
 
+    // A breakpoint the debuggee is paused on must never be reported unbound
+    // (issue #673): a stop naming its id is proof it bound, whatever js-debug
+    // said about it before.
+    const listResult = await mcpClient!.callTool({
+      name: 'list_breakpoints',
+      arguments: { sessionId }
+    });
+    const listResponse = parseSdkToolResult(listResult);
+    const listed = (listResponse.breakpoints as Array<{ verified: boolean; message?: string }>) ?? [];
+    expect(listed.length).toBe(1);
+    expect(listed[0].verified, JSON.stringify(listed[0])).toBe(true);
+    expect(listed[0].message).toBeUndefined();
+    console.log('[JS Simple Smoke] ✓ Hit breakpoint reported verified');
+
     // Step 4: Get stack - verify we can retrieve it
     console.log('[JS Simple Smoke] Getting stack trace...');
     const stackResult = await mcpClient!.callTool({
@@ -253,6 +267,60 @@ describe('JavaScript Debugging - Simple Smoke Tests', () => {
     console.log('[JS Simple Smoke] ✓ Session closed');
 
     console.log('[JS Simple Smoke] ✅ All checks passed');
+  }, 60000);
+
+  it('reports a dependency breakpoint verified once it is hit, even when js-debug never confirms it (issue #673)', async () => {
+    // A breakpoint inside express, addressed through the top-level
+    // node_modules/express path (pnpm makes it a symlink to the real
+    // package). js-debug binds it and it fires, but it sends no
+    // `breakpoint` event for such a location; the stop that names its id
+    // is the only proof it bound.
+    const fixture = path.join(ROOT, 'examples', 'javascript', 'express_selfcall.js');
+    const expressApplication = path.join(ROOT, 'node_modules', 'express', 'lib', 'application.js');
+
+    const createResult = await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: { language: 'javascript', name: 'js-dependency-breakpoint' }
+    });
+    sessionId = parseSdkToolResult(createResult).sessionId as string;
+
+    const bpResult = await mcpClient!.callTool({
+      name: 'set_breakpoint',
+      arguments: { sessionId, file: expressApplication, statement: 'this.router.handle(req, res, done);' }
+    });
+    const bpResponse = parseSdkToolResult(bpResult);
+    expect(bpResponse.success, JSON.stringify(bpResponse)).toBe(true);
+
+    const startResult = await mcpClient!.callTool({
+      name: 'start_debugging',
+      arguments: { sessionId, scriptPath: fixture, args: [], dapLaunchArgs: { stopOnEntry: false, justMyCode: true } }
+    });
+    const startResponse = parseSdkToolResult(startResult);
+    expect(startResponse.success, JSON.stringify(startResponse)).toBe(true);
+
+    // The self-request runs on the next event-loop turns; wait for the stop.
+    const deadline = Date.now() + 20000;
+    let paused = startResponse.state === 'paused';
+    while (!paused && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 250));
+      const listed = parseSdkToolResult(await mcpClient!.callTool({ name: 'list_debug_sessions', arguments: {} }));
+      const mine = ((listed.sessions as Array<{ id: string; state: string }>) ?? []).find(s => s.id === sessionId);
+      paused = mine?.state === 'paused';
+    }
+    expect(paused, 'the express breakpoint must fire on the self-request').toBe(true);
+
+    const stack = parseSdkToolResult(await mcpClient!.callTool({ name: 'get_stack_trace', arguments: { sessionId } }));
+    expect(stack.stopReason).toBe('breakpoint');
+
+    const listResponse = parseSdkToolResult(await mcpClient!.callTool({ name: 'list_breakpoints', arguments: { sessionId } }));
+    const listed = (listResponse.breakpoints as Array<{ verified: boolean; message?: string; adapterId?: number }>) ?? [];
+    expect(listed.length).toBe(1);
+    expect(listed[0].verified, JSON.stringify(listed[0])).toBe(true);
+    expect(listed[0].message).toBeUndefined();
+    expect(typeof listed[0].adapterId).toBe('number');
+
+    await mcpClient!.callTool({ name: 'continue_execution', arguments: { sessionId } });
+    console.log('[JS Simple Smoke] ✓ Dependency breakpoint reported verified after its hit');
   }, 60000);
 
   it('should handle multiple breakpoints', async () => {
