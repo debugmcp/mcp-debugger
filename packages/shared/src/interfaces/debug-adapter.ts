@@ -356,8 +356,11 @@ export interface GenericLaunchConfig {
    * launch (`src/session/launch/proxy-launcher.ts`), and every adapter reads it back. It was
    * simply never written down: the launcher builds the config as `Record<string, unknown>` and
    * casts to this interface, so the omission never surfaced there, and each adapter re-cast its
-   * way back to the value (`(config as Record<string, unknown>).program`). Declaring it lets
-   * both sides drop the cast.
+   * way back to the value (`(config as Record<string, unknown>).program`).
+   *
+   * The java adapter now reads `config.program` directly. The go, ruby and javascript
+   * adapters still take a `Record<string, unknown>` view, but for other undeclared keys
+   * (`mode`, `script`), so declaring `program` alone does not retire those casts.
    */
   program?: string;
   stopOnEntry?: boolean;
