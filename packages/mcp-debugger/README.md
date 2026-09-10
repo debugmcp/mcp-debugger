@@ -94,6 +94,7 @@ All language adapters are bundled into the CLI package. No separate installation
 | `MCP_HTTP_STALE_SESSION_MS` | HTTP mode: reap a crash-abandoned MCP session that never opened an SSE stream after this idle time (default 30 min) |
 | `MCP_HTTP_STREAM_LOST_SESSION_MS` | HTTP mode: reap a session whose SSE stream dropped and never returned after this idle time (default 2 min) — releases a dead client's paused attach target |
 | `MCP_HTTP_ALLOWED_HOSTS` | HTTP and (deprecated) SSE modes: comma-separated `Host` (and browser `Origin`) hostnames to accept besides `localhost`, `127.0.0.1`, `[::1]` — only when another access control fronts the server; same as repeating `--allowed-host` |
+| `MCP_HTTP_BIND` | HTTP and (deprecated) SSE modes: IP address to listen on (default `127.0.0.1`, loopback only); same as `--bind`. The Docker image sets `0.0.0.0` so a published port works. An empty value refuses to start |
 
 ### Check Rust binary compatibility
 ```bash
@@ -111,6 +112,7 @@ Analyzes a Rust executable to determine whether it was built with the GNU or MSV
 
 ### SSE and HTTP options
 - `-p, --port <number>` - Port for SSE or HTTP mode (default: 3001)
+- `--bind <address>` - IP address to listen on (default: `127.0.0.1`, loopback only; or `MCP_HTTP_BIND`). `0.0.0.0` listens on every interface and is reachable from other machines — pair it with `--allowed-host <name>` for the name those clients dial, and front the server with another access control. `localhost` means `127.0.0.1`; hostnames and an empty value are refused. `GET /health` reports the bound address and port under `listening`.
 
 ### HTTP options
 - `--allowed-host <host>` - Additional `Host`/`Origin` hostname to accept (repeatable; or `MCP_HTTP_ALLOWED_HOSTS`, comma-separated). Implies another access control fronts this server. No wildcard. Default: `localhost`, `127.0.0.1`, `[::1]`. The deprecated `sse` command takes the same option.

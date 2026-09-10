@@ -213,7 +213,20 @@ class TestCliPassThrough(unittest.TestCase):
         result = self.invoke(["http", "--npm", "--dry-run", "--bind", "0.0.0.0"], self.NODE_ONLY)
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn("--bind 0.0.0.0", result.output)
+        self.assertIn("Bind: 0.0.0.0", result.output)
         self.assertNotIn("Docker mode only", result.output)
+        self.assertNotIn("ignored", result.output)
+
+    def test_bind_is_announced_as_ignored_for_stdio(self):
+        # The status block used to print "Bind:" for any npx run, stdio included,
+        # where the flag does nothing; it now says so instead (either runtime).
+        for runtime_flag, runtimes in (("--npm", self.NODE_ONLY), ("--docker", self.DOCKER_ONLY)):
+            result = self.invoke(["stdio", runtime_flag, "--dry-run", "--bind", "0.0.0.0"], runtimes)
+            self.assertEqual(result.exit_code, 0, result.output)
+            self.assertNotIn("Bind: 0.0.0.0", result.output)
+            command_line = next(line for line in result.output.splitlines() if "Would execute" in line)
+            self.assertNotIn("--bind", command_line)
+            self.assertIn("--bind applies to http/sse only", result.output)
 
     def test_docker_forwards_allowed_hosts_env(self):
         with mock.patch.dict(os.environ, {"MCP_HTTP_ALLOWED_HOSTS": "svc.internal"}):

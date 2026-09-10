@@ -80,7 +80,7 @@ node dist/index.js
 
 # Run with specific transport modes
 node dist/index.js                          # STDIO mode (default)
-node dist/index.js http -p 3001             # Streamable HTTP mode (recommended for remote)
+node dist/index.js http -p 3001             # Streamable HTTP mode, on 127.0.0.1 (add --bind 0.0.0.0 --allowed-host <name> for other machines)
 node dist/index.js sse -p 3001              # SSE mode (DEPRECATED — use http instead)
 ```
 

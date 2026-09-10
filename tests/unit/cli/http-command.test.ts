@@ -109,6 +109,8 @@ describe('HTTP Command Handler', () => {
     // createHttpApp reads MCP_HTTP_ALLOWED_HOSTS and throws on an unusable value;
     // the developer's or CI's real environment must not reach the tests.
     vi.stubEnv('MCP_HTTP_ALLOWED_HOSTS', '');
+    // Likewise MCP_HTTP_BIND (an empty string would itself be fatal, so delete it).
+    vi.stubEnv('MCP_HTTP_BIND', undefined);
   });
 
   afterEach(() => {
@@ -870,6 +872,9 @@ describe('HTTP Command Handler', () => {
       expect(listen).toHaveBeenCalledWith(4000, '0.0.0.0', expect.any(Function));
       expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('0.0.0.0'));
       expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('reachable from other machines'));
+      // ...and names the knob that set it plus the allowlist remedy other machines will hit.
+      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('(from --bind)'));
+      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('--allowed-host <name>'));
       // The startup line still names a URL a client on this machine can open.
       expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('http://127.0.0.1:4000/mcp'));
       expect(mockExitProcess).not.toHaveBeenCalled();
@@ -888,6 +893,9 @@ describe('HTTP Command Handler', () => {
         { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
       expect(listen).toHaveBeenCalledWith(4000, '10.0.0.5', expect.any(Function));
+      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('(from MCP_HTTP_BIND)'));
+      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('--allowed-host 10.0.0.5'));
+      expect(mockLogger.warn).not.toHaveBeenCalledWith(expect.stringContaining('--bind'));
 
       await handleHttpCommand(
         { port: '4001', bind: '127.0.0.1' },
@@ -911,6 +919,75 @@ describe('HTTP Command Handler', () => {
       expect(listen).toHaveBeenCalledWith(4000, '127.0.0.1', expect.any(Function));
       expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('localhost binds 127.0.0.1'));
       expect(mockLogger.warn).not.toHaveBeenCalledWith(expect.stringContaining('reachable from other machines'));
+    });
+
+    it('reports the image default (MCP_HTTP_BIND=0.0.0.0 under MCP_CONTAINER=true) at info level, not as a warning', async () => {
+      const listen = vi.fn((_port: number, _address: string, cb: Function) => {
+        cb();
+        return mockHttpServer;
+      });
+      mockApp.listen = listen;
+      fakeProc.env.MCP_HTTP_BIND = '0.0.0.0';
+      fakeProc.env.MCP_CONTAINER = 'true';
+
+      await handleHttpCommand(
+        { port: '3001' },
+        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+      );
+
+      expect(listen).toHaveBeenCalledWith(3001, '0.0.0.0', expect.any(Function));
+      expect(mockLogger.warn).not.toHaveBeenCalledWith(expect.stringContaining('reachable from other machines'));
+      expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('image default'));
+      expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('--allowed-host <name>'));
+    });
+
+    it('reports an address no interface has, naming the knob and the address (EADDRNOTAVAIL)', async () => {
+      const handlers: Record<string, (err: unknown) => void> = {};
+      mockApp.listen = vi.fn(() => ({
+        on: vi.fn((event: string, handler: (err: unknown) => void) => {
+          handlers[event] = handler;
+        }),
+        close: vi.fn(),
+      }));
+
+      await handleHttpCommand(
+        { port: '3001', bind: '10.255.255.9' },
+        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+      );
+      handlers.error(Object.assign(new Error('listen EADDRNOTAVAIL'), { code: 'EADDRNOTAVAIL' }));
+
+      expect(mockExitProcess).toHaveBeenCalledWith(1);
+      await new Promise((resolve) => setImmediate(resolve));
+      const stderr = fakeProc.stderrChunks.join('');
+      expect(stderr).toContain('10.255.255.9:3001');
+      expect(stderr).toContain('--bind');
+      expect(stderr).toContain('no interface');
+    });
+
+    it('reports in /health the address and port the socket actually bound, not only what was asked for', async () => {
+      const handlers: Record<string, () => void> = {};
+      mockApp.listen = vi.fn(() => ({
+        on: vi.fn((event: string, handler: () => void) => {
+          handlers[event] = handler;
+        }),
+        close: vi.fn(),
+        // What Node reports after `listen(0, '127.0.0.1')`: the OS-assigned port.
+        address: () => ({ address: '127.0.0.1', family: 'IPv4', port: 64417 }),
+      }));
+
+      await handleHttpCommand(
+        { port: '0' },
+        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+      );
+      const healthCall = mockApp.get.mock.calls.find((c: any) => c[0] === '/health');
+      const before = { json: vi.fn() };
+      healthCall![1]({}, before);
+      expect(before.json).toHaveBeenCalledWith(expect.objectContaining({ listening: { address: '127.0.0.1', port: 0 } }));
+
+      handlers.listening();
+      const after = { json: vi.fn() };
+      healthCall![1]({}, after);
+      expect(after.json).toHaveBeenCalledWith(expect.objectContaining({ listening: { address: '127.0.0.1', port: 64417 } }));
     });
 
     it('refuses to start on an unusable --bind value, naming it (issue #680)', async () => {

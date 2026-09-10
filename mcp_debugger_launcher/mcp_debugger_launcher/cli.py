@@ -203,11 +203,16 @@ def main(mode: str, server_args: tuple, port: Optional[int], bind: Optional[str]
         print(f"🔌 Port: {actual_port}")
         if runtime == "docker":
             print(f"🌐 Published on: {bind or DebugMCPLauncher.DEFAULT_BIND}:{actual_port}")
+        elif bind:
+            print(f"🌐 Bind: {bind}")
+    elif bind:
+        # Neither runtime does anything with it for stdio (the npx command
+        # omits it, the Docker command publishes no port): say so rather than
+        # print a "Bind:" line that suggests otherwise.
+        print("⚠️  --bind applies to http/sse only; ignored for stdio", file=sys.stderr)
     print(f"🏃 Runtime: {runtime.upper()}")
     if server_args:
         print(f"➡️  Server flags: {_display_command(list(server_args))}")
-    if bind and runtime == "npx":
-        print(f"🌐 Bind: {bind}")
 
     # Create launcher
     launcher = DebugMCPLauncher(verbose=verbose)

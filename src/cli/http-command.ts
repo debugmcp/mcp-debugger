@@ -18,12 +18,12 @@ import {
 } from './host-allowlist.js';
 import { reportFatal } from './report-fatal.js';
 import {
-  BIND_ENV_KEY,
-  BIND_FLAG,
   BindAddressError,
+  bindNotice,
   describeEndpoint,
-  isLoopbackAddress,
+  describeListenError,
   resolveBindAddress,
+  type ListeningEndpoint,
   type ResolvedBindAddress,
 } from './bind-address.js';
 import { jsonRpcErrorBody } from './json-rpc-error.js';
@@ -181,8 +181,10 @@ export function createHttpApp(
   // Bind address (issue #680): resolved here, beside the allowlist, so /health
   // can report what the operator exposed; handleHttpCommand listens on it.
   // Throws BindAddressError for an unusable value — a named startup failure.
+  // `listening` is overwritten from server.address() once the socket is bound,
+  // so an OS-assigned port (-p 0) shows up too.
   const bind = resolveBindAddress(options.bind, proc.env);
-  const listeningPort = parseInt(options.port, 10);
+  const listening: ListeningEndpoint = { address: bind.address, port: parseInt(options.port, 10) };
 
   const httpSessions = new Map<string, SessionData>();
 
@@ -375,7 +377,7 @@ export function createHttpApp(
     res.json({
       status: 'ok',
       mode: 'http',
-      listening: { address: bind.address, port: listeningPort },
+      listening: { ...listening },
       connections: httpSessions.size,
       sessions: Array.from(httpSessions.keys()),
       details: Array.from(httpSessions, ([id, session]) => ({
@@ -415,6 +417,8 @@ export function createHttpApp(
   (app as any).httpSessions = httpSessions;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (app as any).bindAddress = bind;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (app as any).listening = listening;
 
   return app;
 }
@@ -470,26 +474,34 @@ export async function handleHttpCommand(
     const httpSessions = (app as any).httpSessions as Map<string, SessionData>;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const bind = (app as any).bindAddress as ResolvedBindAddress;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const listening = (app as any).listening as ListeningEndpoint;
 
     if (bind.note) {
       logger.info(bind.note);
     }
-    if (!isLoopbackAddress(bind.address)) {
-      logger.warn(
-        `Bound to ${bind.address} (from ${BIND_FLAG} / ${BIND_ENV_KEY}): reachable from other machines. ` +
-          'The Host/Origin allowlist stops browsers, not direct clients — front this server with another access control.'
-      );
+    const notice = bindNotice(bind, proc.env);
+    if (notice?.level === 'warn') {
+      logger.warn(notice.message);
+    } else if (notice) {
+      logger.info(notice.message);
     }
     const server = app.listen(port, bind.address, () => {
       logger.info(`Debug MCP Server (HTTP) listening on ${bind.address}:${port}`);
       logger.info(`MCP endpoint available at ${describeEndpoint(bind.address, port, '/mcp')}`);
     });
+    // /health reports what the socket actually bound. Registered after listen()
+    // returns: Node emits 'listening' on a later tick, so `server` is assigned.
+    server.on('listening', () => {
+      const bound = server.address();
+      if (bound && typeof bound === 'object') {
+        listening.address = bound.address;
+        listening.port = bound.port;
+      }
+    });
 
     server.on('error', (err: NodeJS.ErrnoException) => {
-      const line =
-        err.code === 'EADDRINUSE'
-          ? `Port ${port} is already in use on ${bind.address}. Another instance may be running.`
-          : `Server error: ${err.message}`;
+      const line = describeListenError(err, port, bind);
       logger.error(line);
       reportFatal(proc, line);
       exitProcess(1);

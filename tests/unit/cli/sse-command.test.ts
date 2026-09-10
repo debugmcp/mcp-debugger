@@ -56,6 +56,12 @@ describe('SSE Command Handler', () => {
     // (issues #159/#183).
     fakeProc = new FakeCurrentProcess();
 
+    // createSSEApp reads MCP_HTTP_ALLOWED_HOSTS and MCP_HTTP_BIND and throws on an
+    // unusable value; the developer's or CI's real environment must not reach the tests
+    // (an empty MCP_HTTP_BIND would itself be fatal, so it is deleted, not blanked).
+    vi.stubEnv('MCP_HTTP_ALLOWED_HOSTS', '');
+    vi.stubEnv('MCP_HTTP_BIND', undefined);
+
     // Setup mock transport
     MockedSSEServerTransport.mockImplementation(function(path: string, res: any) {
       mockTransport = {
@@ -78,6 +84,7 @@ describe('SSE Command Handler', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     // Clear all timers
     vi.clearAllTimers();
     vi.useRealTimers();
@@ -727,6 +734,8 @@ describe('SSE Command Handler', () => {
 
       expect(mockListen).toHaveBeenCalledWith(4000, '0.0.0.0', expect.any(Function));
       expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('reachable from other machines'));
+      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('(from --bind)'));
+      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('--allowed-host <name>'));
       expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('http://127.0.0.1:4000/sse'));
       expect(mockExitProcess).not.toHaveBeenCalled();
     });
@@ -742,9 +751,62 @@ describe('SSE Command Handler', () => {
 
       expect(mockExitProcess).toHaveBeenCalledWith(1);
       expect(mockListen).not.toHaveBeenCalled();
+      // Refused beside the allowlist, before any debug server (and its adapter registry) is built.
+      expect(mockServerFactory).not.toHaveBeenCalled();
       expect(mockLogger.error).toHaveBeenCalledWith(expect.stringContaining('myhost'));
       await new Promise((resolve) => setImmediate(resolve));
       expect(fakeProc.stderrChunks.join('')).toContain('myhost');
+    });
+
+    it('reports an address no interface has, naming the knob and the address (EADDRNOTAVAIL)', async () => {
+      const listeners: Record<string, (err: NodeJS.ErrnoException) => void> = {};
+      const listeningServer = { close: vi.fn(), on: vi.fn((event: string, cb: (err: NodeJS.ErrnoException) => void) => { listeners[event] = cb; }) };
+      vi.mocked(express).mockReturnValue({
+        use: vi.fn(), get: vi.fn(), post: vi.fn(),
+        listen: vi.fn((_port: number, _address: string, cb: () => void) => { cb(); return listeningServer; }),
+        sseTransports: new Map()
+      } as any);
+
+      await handleSSECommand(
+        { port: '3001', bind: '10.255.255.9' },
+        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+      );
+      listeners.error(Object.assign(new Error('listen EADDRNOTAVAIL'), { code: 'EADDRNOTAVAIL' }));
+
+      expect(mockExitProcess).toHaveBeenCalledWith(1);
+      await new Promise((resolve) => setImmediate(resolve));
+      const stderr = fakeProc.stderrChunks.join('');
+      expect(stderr).toContain('10.255.255.9:3001');
+      expect(stderr).toContain('--bind');
+    });
+
+    it('reports in /health the address and port the socket actually bound (issue #680)', async () => {
+      const listeners: Record<string, () => void> = {};
+      const listeningServer = {
+        close: vi.fn(),
+        on: vi.fn((event: string, cb: () => void) => { listeners[event] = cb; }),
+        address: () => ({ address: '127.0.0.1', family: 'IPv4', port: 64417 })
+      };
+      const get = vi.fn();
+      vi.mocked(express).mockReturnValue({
+        use: vi.fn(), get, post: vi.fn(),
+        listen: vi.fn((_port: number, _address: string, cb: () => void) => { cb(); return listeningServer; }),
+        sseTransports: new Map()
+      } as any);
+
+      await handleSSECommand(
+        { port: '0' },
+        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+      );
+      const healthHandler = get.mock.calls.find((c: any) => c[0] === '/health')![1];
+      const before = { json: vi.fn() };
+      healthHandler({}, before);
+      expect(before.json).toHaveBeenCalledWith(expect.objectContaining({ listening: { address: '127.0.0.1', port: 0 } }));
+
+      listeners.listening();
+      const after = { json: vi.fn() };
+      healthHandler({}, after);
+      expect(after.json).toHaveBeenCalledWith(expect.objectContaining({ listening: { address: '127.0.0.1', port: 64417 } }));
     });
 
     it('should start server successfully in SSE mode', async () => {

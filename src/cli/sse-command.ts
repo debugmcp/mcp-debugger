@@ -17,12 +17,12 @@ import {
 } from './host-allowlist.js';
 import { reportFatal } from './report-fatal.js';
 import {
-  BIND_ENV_KEY,
-  BIND_FLAG,
   BindAddressError,
+  bindNotice,
   describeEndpoint,
-  isLoopbackAddress,
+  describeListenError,
   resolveBindAddress,
+  type ListeningEndpoint,
   type ResolvedBindAddress,
 } from './bind-address.js';
 
@@ -74,6 +74,13 @@ export function createSSEApp(
         `(from ${ALLOWED_HOST_FLAG} / ${ALLOWED_HOSTS_ENV_KEY}); this assumes another access control fronts the server.`
     );
   }
+
+  // Bind address (issue #680): resolved here, beside the allowlist and before
+  // any debug server is built, so an unusable value is refused by name with
+  // nothing to tear down; /health reports it and handleSSECommand listens on
+  // it. `listening` is overwritten from server.address() once the socket is bound.
+  const bind = resolveBindAddress(options.bind, proc.env);
+  const listening: ListeningEndpoint = { address: bind.address, port: parseInt(options.port, 10) };
 
   // Create a single shared Debug MCP Server instance for all connections
   const sharedDebugServer = serverFactory({
@@ -223,17 +230,12 @@ export function createSSEApp(
     }
   });
 
-  // Bind address (issue #680): resolved here so /health can report it;
-  // handleSSECommand listens on it. Throws BindAddressError for an unusable value.
-  const bind = resolveBindAddress(options.bind, proc.env);
-  const listeningPort = parseInt(options.port, 10);
-
   // Add a simple health check endpoint
   app.get('/health', (req, res) => {
     res.json({ 
       status: 'ok', 
       mode: 'sse',
-      listening: { address: bind.address, port: listeningPort },
+      listening: { ...listening },
       connections: sseTransports.size,
       sessions: Array.from(sseTransports.keys())
     });
@@ -242,6 +244,7 @@ export function createSSEApp(
   // Expose the transports map and shared server for graceful shutdown
   (app as any).sseTransports = sseTransports; // eslint-disable-line @typescript-eslint/no-explicit-any
   (app as any).bindAddress = bind; // eslint-disable-line @typescript-eslint/no-explicit-any
+  (app as any).listening = listening; // eslint-disable-line @typescript-eslint/no-explicit-any
   (app as any).sharedDebugServer = sharedDebugServer; // eslint-disable-line @typescript-eslint/no-explicit-any
 
   return app;
@@ -277,27 +280,34 @@ export async function handleSSECommand(
     // Start the shared debug server (mirrors stdio-command.ts startup)
     const sharedDebugServer = (app as any).sharedDebugServer as DebugMcpServer; // eslint-disable-line @typescript-eslint/no-explicit-any
     const bind = (app as any).bindAddress as ResolvedBindAddress; // eslint-disable-line @typescript-eslint/no-explicit-any
+    const listening = (app as any).listening as ListeningEndpoint; // eslint-disable-line @typescript-eslint/no-explicit-any
     await sharedDebugServer.start();
 
     if (bind.note) {
       logger.info(bind.note);
     }
-    if (!isLoopbackAddress(bind.address)) {
-      logger.warn(
-        `Bound to ${bind.address} (from ${BIND_FLAG} / ${BIND_ENV_KEY}): reachable from other machines. ` +
-          'The Host/Origin allowlist stops browsers, not direct clients — front this server with another access control.'
-      );
+    const notice = bindNotice(bind, proc.env);
+    if (notice?.level === 'warn') {
+      logger.warn(notice.message);
+    } else if (notice) {
+      logger.info(notice.message);
     }
     const server = app.listen(port, bind.address, () => {
       logger.info(`Debug MCP Server (SSE) listening on ${bind.address}:${port}`);
       logger.info(`SSE endpoint available at ${describeEndpoint(bind.address, port, '/sse')}`);
     });
+    // /health reports what the socket actually bound. Registered after listen()
+    // returns: Node emits 'listening' on a later tick, so `server` is assigned.
+    server.on('listening', () => {
+      const bound = server.address();
+      if (bound && typeof bound === 'object') {
+        listening.address = bound.address;
+        listening.port = bound.port;
+      }
+    });
 
     server.on('error', (err: NodeJS.ErrnoException) => {
-      const line =
-        err.code === 'EADDRINUSE'
-          ? `Port ${port} is already in use on ${bind.address}. Another instance may be running.`
-          : `Server error: ${err.message}`;
+      const line = describeListenError(err, port, bind);
       logger.error(line);
       reportFatal(proc, line);
       exitProcess(1);
