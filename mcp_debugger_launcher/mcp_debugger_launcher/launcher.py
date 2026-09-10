@@ -35,8 +35,11 @@ class DebugMCPLauncher:
             print(f"{prefix}{message}", file=sys.stderr if error else sys.stdout)
     
     def build_npx_command(self, mode: str = "stdio", port: Optional[int] = None,
-                          extra_args: Sequence[str] = ()) -> List[str]:
+                          extra_args: Sequence[str] = (), bind: Optional[str] = None) -> List[str]:
         """Build the npx launch command.
+
+        `bind` is forwarded as the server's own `--bind` for the ported modes
+        (debugmcp/mcp-debugger#680); the server defaults to 127.0.0.1.
 
         Single source of truth for both the real launch and --dry-run (issue
         #345). Deliberate asymmetry with Docker: --port is only forwarded when
@@ -51,6 +54,8 @@ class DebugMCPLauncher:
         cmd = ["npx", self.NPM_PACKAGE, mode]
         if mode in self.PORTED_MODES and port:
             cmd.extend(["--port", str(port)])
+        if mode in self.PORTED_MODES and bind:
+            cmd.extend(["--bind", bind])
         cmd.extend(extra_args)
         return cmd
 
@@ -93,9 +98,9 @@ class DebugMCPLauncher:
         return cmd
 
     def launch_with_npx(self, mode: str = "stdio", port: Optional[int] = None,
-                        extra_args: Sequence[str] = ()) -> int:
+                        extra_args: Sequence[str] = (), bind: Optional[str] = None) -> int:
         """Launch the server using npx."""
-        cmd = self.build_npx_command(mode, port, extra_args)
+        cmd = self.build_npx_command(mode, port, extra_args, bind=bind)
 
         self.log(f"Launching with command: {' '.join(cmd)}")
         

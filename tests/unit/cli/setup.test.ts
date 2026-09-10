@@ -99,10 +99,19 @@ describe('CLI Setup', () => {
       
       expect(sseCommand).toBeDefined();
       expect(sseCommand?.description()).toBe('Start the server using SSE (DEPRECATED: use "http" subcommand instead)');
-      expect(sseCommand?.options).toHaveLength(4);
+      expect(sseCommand?.options).toHaveLength(5);
       
       // Check options
       const options = sseCommand?.options || [];
+
+      // The bind address option (issue #680): no commander default, so the
+      // environment variable can win; the default is spelled out in the text.
+      const bindOpt = options.find(opt => opt.long === '--bind');
+      expect(bindOpt).toBeDefined();
+      expect(bindOpt?.flags).toBe('--bind <address>');
+      expect(bindOpt?.description).toContain('127.0.0.1');
+      expect(bindOpt?.description).toContain('MCP_HTTP_BIND');
+      expect(bindOpt?.defaultValue).toBeUndefined();
       const portOption = options.find(opt => opt.long === '--port');
       const logLevelOption = options.find(opt => opt.long === '--log-level');
       const logFileOption = options.find(opt => opt.long === '--log-file');
@@ -194,9 +203,18 @@ describe('CLI Setup', () => {
       expect(httpCommand?.description()).toBe(
         'Start the server using Streamable HTTP transport (recommended)'
       );
-      expect(httpCommand?.options).toHaveLength(4);
+      expect(httpCommand?.options).toHaveLength(5);
 
       const options = httpCommand?.options || [];
+
+      // The bind address option (issue #680): no commander default, so the
+      // environment variable can win; the default is spelled out in the text.
+      const bindOpt = options.find(opt => opt.long === '--bind');
+      expect(bindOpt).toBeDefined();
+      expect(bindOpt?.flags).toBe('--bind <address>');
+      expect(bindOpt?.description).toContain('127.0.0.1');
+      expect(bindOpt?.description).toContain('MCP_HTTP_BIND');
+      expect(bindOpt?.defaultValue).toBeUndefined();
       const portOption = options.find(opt => opt.long === '--port');
       const logLevelOption = options.find(opt => opt.long === '--log-level');
       const logFileOption = options.find(opt => opt.long === '--log-file');

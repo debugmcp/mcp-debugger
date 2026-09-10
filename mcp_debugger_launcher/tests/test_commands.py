@@ -69,6 +69,20 @@ class TestBuildNpxCommand(unittest.TestCase):
             ["npx", DebugMCPLauncher.NPM_PACKAGE, "http", "--port", "8080", "--allowed-host", "mcp-debugger"],
         )
 
+    def test_bind_is_forwarded_to_the_server(self):
+        # The server has its own --bind since debugmcp/mcp-debugger#680: npx
+        # mode forwards it verbatim, after --port and before the pass-through flags.
+        self.assertEqual(
+            self.launcher.build_npx_command("http", 8080, extra_args=("--allowed-host", "myhost"), bind="0.0.0.0"),
+            ["npx", DebugMCPLauncher.NPM_PACKAGE, "http", "--port", "8080", "--bind", "0.0.0.0", "--allowed-host", "myhost"],
+        )
+
+    def test_bind_is_ignored_for_stdio(self):
+        self.assertEqual(
+            self.launcher.build_npx_command("stdio", bind="0.0.0.0"),
+            ["npx", DebugMCPLauncher.NPM_PACKAGE, "stdio"],
+        )
+
     def test_extra_args_forwarded_for_stdio_too(self):
         self.assertEqual(
             self.launcher.build_npx_command("stdio", extra_args=("--log-level", "debug")),
@@ -194,6 +208,25 @@ class TestCliPassThrough(unittest.TestCase):
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn("0.0.0.0:3001:3001", result.output)
         self.assertIn("--allowed-host myhost", result.output)
+
+    def test_bind_reaches_the_npx_command(self):
+        result = self.invoke(["http", "--npm", "--dry-run", "--bind", "0.0.0.0"], self.NODE_ONLY)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("--bind 0.0.0.0", result.output)
+        self.assertIn("Bind: 0.0.0.0", result.output)
+        self.assertNotIn("Docker mode only", result.output)
+        self.assertNotIn("ignored", result.output)
+
+    def test_bind_is_announced_as_ignored_for_stdio(self):
+        # The status block used to print "Bind:" for any npx run, stdio included,
+        # where the flag does nothing; it now says so instead (either runtime).
+        for runtime_flag, runtimes in (("--npm", self.NODE_ONLY), ("--docker", self.DOCKER_ONLY)):
+            result = self.invoke(["stdio", runtime_flag, "--dry-run", "--bind", "0.0.0.0"], runtimes)
+            self.assertEqual(result.exit_code, 0, result.output)
+            self.assertNotIn("Bind: 0.0.0.0", result.output)
+            command_line = next(line for line in result.output.splitlines() if "Would execute" in line)
+            self.assertNotIn("--bind", command_line)
+            self.assertIn("--bind applies to http/sse only", result.output)
 
     def test_docker_forwards_allowed_hosts_env(self):
         with mock.patch.dict(os.environ, {"MCP_HTTP_ALLOWED_HOSTS": "svc.internal"}):

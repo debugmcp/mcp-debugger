@@ -1,4 +1,5 @@
 import { Command, Option } from 'commander';
+import { bindOption } from './bind-address.js';
 
 export interface StdioOptions {
   logLevel?: string;
@@ -15,6 +16,12 @@ export interface SSEOptions {
    * shipped path gets the same Host/Origin control (issue #671).
    */
   allowedHost?: string[];
+  /**
+   * `--bind <address>`: the interface to listen on (issue #680). Resolved
+   * against MCP_HTTP_BIND and the loopback default by `resolveBindAddress`,
+   * which is why the option itself carries no commander default.
+   */
+  bind?: string;
 }
 
 export type HttpOptions = SSEOptions;
@@ -88,6 +95,7 @@ export function setupSSECommand(program: Command, handler: SSEHandler): void {
     .option('-l, --log-level <level>', 'Set log level (error, warn, info, debug)', 'info')
     .option('--log-file <path>', 'Log to file instead of console')
     .addOption(allowedHostOption())
+    .addOption(bindOption())
     .action(async (options: SSEOptions, command: Command) => {
       // Silencing also applies to SSE to protect transports used for JS debugging
       process.env.CONSOLE_OUTPUT_SILENCED = '1';
@@ -103,6 +111,7 @@ export function setupHttpCommand(program: Command, handler: HttpHandler): void {
     .option('-l, --log-level <level>', 'Set log level (error, warn, info, debug)', 'info')
     .option('--log-file <path>', 'Log to file instead of console')
     .addOption(allowedHostOption())
+    .addOption(bindOption())
     .action(async (options: HttpOptions, command: Command) => {
       // Silence console output to protect any spawned proxy IPC channels
       process.env.CONSOLE_OUTPUT_SILENCED = '1';

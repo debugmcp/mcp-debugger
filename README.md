@@ -205,14 +205,17 @@ paused attach target — alive until the server reaps it: 2 minutes after its SS
 dropped (`MCP_HTTP_STREAM_LOST_SESSION_MS`), or 30 minutes idle if it never opened one
 (`MCP_HTTP_STALE_SESSION_MS`). `GET /health` lists what each session is holding.
 
-The port defaults to 3001. `GET /health` on the same port answers a liveness check. The legacy
-`sse` subcommand still exists but is deprecated — use `http`.
+The port defaults to 3001, and the server listens on `127.0.0.1` only. `--bind 0.0.0.0` (or
+`MCP_HTTP_BIND=0.0.0.0`) listens on every interface — pair it with `--allowed-host` for the names other
+machines will use; `--bind localhost` means `127.0.0.1`, and only IP addresses are accepted. `GET /health`
+on the same port answers a liveness check and reports the bound address and port under `listening`. The
+legacy `sse` subcommand still exists but is deprecated — use `http`.
 
 The server accepts only loopback `Host` headers by default — `localhost`, `127.0.0.1`, `[::1]` —
 as DNS-rebinding protection for an unauthenticated endpoint that can spawn processes and attach to
 PIDs. A client on another machine reaches it through a port-forward or an SSH tunnel
-(`ssh -L 3001:127.0.0.1:3001 user@server`, then `http://127.0.0.1:3001/mcp`); any other `Host`
-gets a 403 that says so. To accept a service name directly — `http://mcp-debugger:3001/mcp` on a
+(`ssh -L 3001:127.0.0.1:3001 user@server`, then `http://127.0.0.1:3001/mcp`), or you bind an
+interface with `--bind`; any other `Host` gets a 403 that says so. To accept a service name directly — `http://mcp-debugger:3001/mcp` on a
 container network — start the server with `--allowed-host mcp-debugger` (repeatable) or
 `MCP_HTTP_ALLOWED_HOSTS=mcp-debugger` (comma-separated). That opt-in means another access control
 fronts the server; there is no wildcard. Browser clients are checked against the same list by

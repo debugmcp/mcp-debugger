@@ -282,7 +282,7 @@ describe('MCP Server E2E SSE Smoke Test', () => {
         version: "0.1.0" 
       });
       
-      const sseUrl = new URL(`http://localhost:${serverPort}/sse`);
+      const sseUrl = new URL(`http://127.0.0.1:${serverPort}/sse`);
       const transport = new SSEClientTransport(sseUrl);
       
       await mcpSdkClient.connect(transport);
@@ -355,7 +355,7 @@ describe('MCP Server E2E SSE Smoke Test', () => {
         version: "0.1.0" 
       });
       
-      const sseUrl = new URL(`http://localhost:${serverPort}/sse`);
+      const sseUrl = new URL(`http://127.0.0.1:${serverPort}/sse`);
       const transport = new SSEClientTransport(sseUrl);
       
       await mcpSdkClient.connect(transport);

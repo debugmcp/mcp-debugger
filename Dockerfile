@@ -180,6 +180,11 @@ WORKDIR /app
 
 # Set container marker for runtime
 ENV MCP_CONTAINER=true
+# The network transports bind loopback by default (issue #680). A container's
+# published port needs every interface inside the container; the host-side
+# `-p 127.0.0.1:3001:3001` publish stays the loopback control. Override with
+# `-e MCP_HTTP_BIND=...`.
+ENV MCP_HTTP_BIND=0.0.0.0
 # Set default workspace mount location (can be overridden at runtime)
 ENV MCP_WORKSPACE_ROOT=/workspace
 

@@ -19,7 +19,7 @@ const path = require('path');
 
 // Test configuration
 const SSE_PORT = 3001;
-const SSE_URL = `http://localhost:${SSE_PORT}/sse`;
+const SSE_URL = `http://127.0.0.1:${SSE_PORT}/sse`;
 const LOG_FILE = path.join(__dirname, '../../logs/javascript-sse-timing-test.log');
 
 // Ensure log directory exists
@@ -368,7 +368,7 @@ main();
 // Check if SSE server is running
 async function checkServerRunning() {
     return new Promise((resolve) => {
-        const req = http.get(`http://localhost:${SSE_PORT}/health`, (res) => {
+        const req = http.get(`http://127.0.0.1:${SSE_PORT}/health`, (res) => {
             resolve(res.statusCode === 200);
         });
         

@@ -416,7 +416,7 @@ class BackendManager {
 
   async _waitForHealth() {
     // Used for HTTP / SSE modes
-    const url = `http://localhost:${BACKEND_PORT}/health`;
+    const url = `http://127.0.0.1:${BACKEND_PORT}/health`;
     const deadline = Date.now() + HEALTH_POLL_TIMEOUT_MS;
 
     while (Date.now() < deadline) {
@@ -487,7 +487,7 @@ class BackendManager {
       log('MCP Client connected to backend via stdio');
     } else if (this.backendTransport === 'http') {
       // Streamable HTTP mode: SDK handles reconnection internally; no phantom hack needed
-      const mcpUrl = new URL(`http://localhost:${BACKEND_PORT}/mcp`);
+      const mcpUrl = new URL(`http://127.0.0.1:${BACKEND_PORT}/mcp`);
       const transport = new StreamableHTTPClientTransport(mcpUrl);
 
       transport.onerror = (err) => {
@@ -510,7 +510,7 @@ class BackendManager {
       log('MCP Client connected to backend via Streamable HTTP');
     } else {
       // SSE mode (legacy): connect to running HTTP server
-      const sseUrl = new URL(`http://localhost:${BACKEND_PORT}/sse`);
+      const sseUrl = new URL(`http://127.0.0.1:${BACKEND_PORT}/sse`);
 
       // Block EventSource auto-reconnection: eventsource@4.0.0 reconnects when the
       // SSE stream reader returns done, creating a phantom 2nd session that overwrites

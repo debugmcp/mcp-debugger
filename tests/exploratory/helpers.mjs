@@ -63,7 +63,7 @@ export async function waitForHealth(port, timeout = 15000) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
     try {
-      const resp = await fetch(`http://localhost:${port}/health`);
+      const resp = await fetch(`http://127.0.0.1:${port}/health`);
       if (resp.ok) {
         const data = await resp.json();
         if (data.status === 'ok') return true;
@@ -84,7 +84,7 @@ export function sleep(ms) {
 
 export async function connectSSEClient(port, clientName = 'exploratory-test') {
   const client = new Client({ name: clientName, version: '0.1.0' });
-  const transport = new SSEClientTransport(new URL(`http://localhost:${port}/sse`));
+  const transport = new SSEClientTransport(new URL(`http://127.0.0.1:${port}/sse`));
   await client.connect(transport);
   return client;
 }
