@@ -78,7 +78,7 @@ Restart the client after changing its configuration.
 
 ```bash
 mcp-debugger stdio                  # default subcommand; for clients that spawn the server
-mcp-debugger http -p 3001           # Streamable HTTP, recommended for remote; endpoint /mcp
+mcp-debugger http -p 3001           # Streamable HTTP on 127.0.0.1, endpoint /mcp; other machines need --bind + --allowed-host
 mcp-debugger sse -p 3001            # DEPRECATED — use http
 ```
 

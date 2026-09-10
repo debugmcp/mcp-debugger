@@ -139,9 +139,10 @@ mcp-debugger http -p 3001
 claude mcp add-json mcp-debugger '{"type":"http","url":"http://127.0.0.1:3001/mcp"}'
 ```
 
-The endpoint accepts only loopback `Host` headers by default, so a client on another machine goes
-through a port-forward or SSH tunnel. To accept a service name directly, start the server with
-`--allowed-host <name>` or `MCP_HTTP_ALLOWED_HOSTS=<name>` — see
+The server listens on `127.0.0.1` and accepts only loopback `Host` headers by default, so a client on
+another machine goes through a port-forward or SSH tunnel. To serve it directly, start the server with
+`--bind 0.0.0.0` (or `MCP_HTTP_BIND=0.0.0.0`) and `--allowed-host <name>` (or
+`MCP_HTTP_ALLOWED_HOSTS=<name>`) for the name that client dials — see
 [Over the network (Streamable HTTP)](../README.md#over-the-network-streamable-http) in the README.
 
 Restart the client after changing its configuration, then confirm the connection — `/mcp` inside
