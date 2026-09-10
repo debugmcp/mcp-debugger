@@ -12,6 +12,7 @@ import { DebugLanguage, type IProxyProcess, type IProxyProcessLauncher, type IFi
 import { FakeDebugAdapter } from '../../test-utils/fakes/fake-debug-adapter.js';
 
 class FakeProxyProcess extends EventEmitter implements IProxyProcess {
+  sessionId = 'session-123';
   pid = 4242;
   killed = false;
   exitCode: number | null = null;
@@ -25,6 +26,25 @@ class FakeProxyProcess extends EventEmitter implements IProxyProcess {
   kill = vi.fn().mockReturnValue(true);
   waitForInitialization = vi.fn().mockResolvedValue(undefined);
 }
+
+/**
+ * Await a promise that is expected to reject and hand back the Error.
+ * `promise.catch(e => e)` cannot be used here: `start()` returns
+ * `Promise<void>`, so the fulfilled arm widens the result to `void | Error`
+ * and every `err.message` read stops type-checking. Taking the rejection
+ * branch explicitly keeps the type — and turns a promise that unexpectedly
+ * resolves into a named failure instead of a `TypeError` on `undefined`.
+ */
+const rejectionOf = (promise: Promise<unknown>): Promise<Error> =>
+  promise.then(
+    () => {
+      throw new Error('Expected the promise to reject, but it resolved');
+    },
+    (reason: unknown) => {
+      if (reason instanceof Error) return reason;
+      throw new Error(`Expected an Error rejection, got: ${String(reason)}`);
+    }
+  );
 
 describe('ProxyManager.start', () => {
   let fakeProcess: FakeProxyProcess;
@@ -269,7 +289,11 @@ describe('ProxyManager.start', () => {
   });
 
   it('ignores adapter command when command value is not a string', async () => {
-    const config: ProxyConfig = {
+    // Deliberately ill-typed input: this test exists to pin what the manager
+    // does with an adapterCommand whose `command` is not a string and whose
+    // args array holds holes. The cast is what keeps the bad values intact —
+    // making them well-typed would delete the behaviour under test.
+    const config = {
       ...baseConfig,
       dryRunSpawn: false,
       adapterCommand: {
@@ -277,7 +301,7 @@ describe('ProxyManager.start', () => {
         command: { command: 'invalid' },
         args: [undefined, '']
       }
-    };
+    } as unknown as ProxyConfig;
 
     fakeProcess.sendCommand.mockImplementation((cmd: any) => {
       if (cmd.cmd === 'init') {
@@ -781,7 +805,7 @@ describe('ProxyManager.start', () => {
 
     const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
     await expect(startPromise).rejects.toThrow(/Proxy exited during initialization\. Code: 1/);
-    const err = await startPromise.catch((e: Error) => e);
+    const err = await rejectionOf(startPromise);
 
     // Capped to the last 10 of 15 lines, labelled as such
     expect(err.message).toContain('(last 10 of 15 lines)');
@@ -817,7 +841,7 @@ describe('ProxyManager.start', () => {
 
     const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
     await expect(startPromise).rejects.toThrow(/Proxy exited during initialization/);
-    const err = await startPromise.catch((e: Error) => e);
+    const err = await rejectionOf(startPromise);
 
     // Truncation marker present; the stderr tail is bounded near the 2000-char cap.
     expect(err.message).toContain('…');
@@ -851,7 +875,7 @@ describe('ProxyManager.start', () => {
 
     const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
     await expect(startPromise).rejects.toThrow(/Proxy exited during initialization/);
-    const err = await startPromise.catch((e: Error) => e);
+    const err = await rejectionOf(startPromise);
 
     // Buffer bounded at 100 (not 150), so the label reports 100 and the newest line survives.
     expect(err.message).toContain('(last 10 of 100 lines)');
@@ -882,7 +906,7 @@ describe('ProxyManager.start', () => {
 
     const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
     await expect(startPromise).rejects.toThrow(/Proxy exited during initialization/);
-    const err = await startPromise.catch((e: Error) => e);
+    const err = await rejectionOf(startPromise);
 
     // Neither half of the split secret may surface anywhere.
     expect(err.message).not.toContain('supersecret');
@@ -917,7 +941,7 @@ describe('ProxyManager.start', () => {
 
     const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
     await expect(startPromise).rejects.toThrow(/Proxy exited during initialization/);
-    const err = await startPromise.catch((e: Error) => e);
+    const err = await rejectionOf(startPromise);
 
     expect(err.message).toContain('benign-diagnostic-line');
     expect(err.message).not.toContain('github_pat_secret');
@@ -946,7 +970,7 @@ describe('ProxyManager.start', () => {
 
     const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
     await expect(startPromise).rejects.toThrow(/Proxy exited during initialization/);
-    const err = await startPromise.catch((e: Error) => e);
+    const err = await rejectionOf(startPromise);
 
     expect(err.message).toContain('fatal: adapter exploded');
   });
@@ -1329,7 +1353,7 @@ describe('ProxyManager.start', () => {
       timestamp: 456
     });
 
-    const debugMessages = logger.debug.mock.calls.map((call) => call[0]);
+    const debugMessages = vi.mocked(logger.debug).mock.calls.map((call) => call[0]);
     expect(debugMessages).toContain(`[ProxyManager] IPC send start pid=1 connected=false summary=init`);
     expect(debugMessages).toContain(
       `[ProxyManager] IPC send complete pid=1 connected=true summary=init queueBefore=0 queueAfter=0`

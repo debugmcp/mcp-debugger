@@ -62,15 +62,6 @@ export function createMockDependencies(): SessionManagerDependencies & {
   
   const mockSessionStoreFactory = new SessionStoreFactory();
   
-  const mockPathUtils = {
-    isAbsolute: vi.fn((p: string) => p.startsWith('/') || /^[A-Za-z]:/.test(p)),
-    resolve: vi.fn((...args: string[]) => args.join('/')),
-    join: vi.fn((...args: string[]) => args.join('/')),
-    dirname: vi.fn((p: string) => p.substring(0, p.lastIndexOf('/'))),
-    basename: vi.fn((p: string) => p.substring(p.lastIndexOf('/') + 1)),
-    sep: '/'
-  };
-  
   const mockAdapterRegistry = createMockAdapterRegistry();
   
   return {
@@ -85,7 +76,6 @@ export function createMockDependencies(): SessionManagerDependencies & {
     environment: mockEnvironment,
     proxyManagerFactory: mockProxyManagerFactory,
     sessionStoreFactory: mockSessionStoreFactory,
-    pathUtils: mockPathUtils,
     adapterRegistry: mockAdapterRegistry
   };
 }

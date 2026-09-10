@@ -18,9 +18,13 @@ import type {
   IDapClient,
   ProxyInitPayload,
   DapCommandPayload,
-  StatusMessage
+  StatusMessage,
+  DapResponseMessage,
+  DapEventMessage,
+  ErrorMessage
 } from '../../src/proxy/dap-proxy-interfaces.js';
 import { ProxyState } from '../../src/proxy/dap-proxy-interfaces.js';
+import type { AdapterPolicy } from '@debugmcp/shared';
 import {
   DefaultAdapterPolicy,
   JsDebugAdapterPolicy,
@@ -29,6 +33,30 @@ import {
   JavaAdapterPolicy,
   RubyAdapterPolicy
 } from '@debugmcp/shared';
+
+/**
+ * Everything the worker hands to `IMessageSender.send`. The interface itself
+ * declares the parameter as `unknown` (it is an opaque IPC payload to the
+ * sender), so the mock is typed with the concrete union instead — that is what
+ * lets the assertions below discriminate on `.type` without a cast per site.
+ */
+type SentMessage = StatusMessage | DapResponseMessage | DapEventMessage | ErrorMessage;
+
+/**
+ * `Array.prototype.find` does not narrow what it returns, so a status lookup
+ * over `send.mock.calls` would still hand back the whole union. This filters
+ * and narrows in one step.
+ */
+const isStatusCall = (status: string) =>
+  (call: [SentMessage]): call is [StatusMessage] =>
+    call[0].type === 'status' && call[0].status === status;
+
+/**
+ * `DapEventMessage.body` is `unknown` on the wire type (the worker forwards
+ * whatever the adapter sent). Narrow it before reading DAP body fields.
+ */
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
 
 // Mock implementations
 const createMockLogger = (): ILogger => ({
@@ -88,21 +116,24 @@ const createMockDapClient = (): IDapClient & EventEmitter => {
 };
 
 const createMockMessageSender = () => ({
-  send: vi.fn()
+  send: vi.fn<(message: SentMessage) => void>()
 });
 
 describe('DapProxyWorker', () => {
   let worker: DapProxyWorker;
   let dependencies: DapProxyDependencies;
   let mockLogger: ILogger;
-  let mockDapClient: IDapClient;
+  // The factory hands back `IDapClient & EventEmitter`; keeping that
+  // intersection on the variable is what lets the tests emit DAP events on the
+  // fake without casting back to EventEmitter at every site.
+  let mockDapClient: ReturnType<typeof createMockDapClient>;
   let mockMessageSender: ReturnType<typeof createMockMessageSender>;
 
   // Every worker in this file is constructed with an injected exit hook
   // (issue #183): no test can reach the real process.exit, even via the
   // worker's setImmediate + setTimeout(100ms) exit scheduling (see
   // handleInit's error path), and no global process spy net is needed.
-  let workerExitSpy: ReturnType<typeof vi.fn>;
+  let workerExitSpy: Mock<(code: number) => void>;
 
   beforeEach(() => {
     mockLogger = createMockLogger();
@@ -119,7 +150,7 @@ describe('DapProxyWorker', () => {
       messageSender: mockMessageSender
     };
 
-    workerExitSpy = vi.fn();
+    workerExitSpy = vi.fn<(code: number) => void>();
     worker = new DapProxyWorker(dependencies, { exit: workerExitSpy });
   });
 
@@ -545,7 +576,7 @@ describe('DapProxyWorker', () => {
         await bareWorker.handleCommand({ ...basePayload, sessionId: 'no-redirect-session' });
         vi.clearAllTimers();
         const statuses = mockMessageSender.send.mock.calls
-          .map(([m]: [StatusMessage]) => m)
+          .map(([m]) => m)
           .filter((m) => m.type === 'status' && m.sessionId === 'no-redirect-session');
         expect(statuses.length).toBeGreaterThan(0);
       } finally {
@@ -737,10 +768,10 @@ describe('DapProxyWorker', () => {
       await (worker as any).handleInitializedEvent();
 
       const syncCall = mockMessageSender.send.mock.calls.find(
-        ([m]: [{ type?: string; status?: string }]) => m.type === 'status' && m.status === 'breakpoints_synced'
+        isStatusCall('breakpoints_synced')
       );
       expect(syncCall).toBeDefined();
-      expect((syncCall![0] as { breakpoints: unknown }).breakpoints).toEqual([
+      expect(syncCall![0].breakpoints).toEqual([
         { id: 'bp-1', file: '/work/app.py', line: 5, verified: true, adapterId: 42, boundLine: 6, message: 'ok' }
       ]);
     });
@@ -782,9 +813,9 @@ describe('DapProxyWorker', () => {
       await (worker as any).handleInitializedEvent();
 
       const syncCall = mockMessageSender.send.mock.calls.find(
-        ([m]: [{ type?: string; status?: string }]) => m.type === 'status' && m.status === 'breakpoints_synced'
+        isStatusCall('breakpoints_synced')
       );
-      const results = (syncCall![0] as { breakpoints: Array<{ id?: string; adapterId?: number; verified: boolean }> }).breakpoints;
+      const results = syncCall![0].breakpoints!;
       expect(results).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ id: 'bp-a1', line: 3, verified: true, adapterId: 1 }),
@@ -827,9 +858,9 @@ describe('DapProxyWorker', () => {
       await (worker as any).handleInitializedEvent();
 
       const syncCall = mockMessageSender.send.mock.calls.find(
-        ([m]: [{ type?: string; status?: string }]) => m.type === 'status' && m.status === 'breakpoints_synced'
+        isStatusCall('breakpoints_synced')
       );
-      const results = (syncCall![0] as { breakpoints: Array<Record<string, unknown>> }).breakpoints;
+      const results = syncCall![0].breakpoints!;
       expect(results[0]).toEqual(expect.objectContaining({ id: 'bp-1', verified: true, adapterId: 5 }));
       expect(results[1]).toEqual({ id: 'bp-2', file: '/work/app.py', line: 9, verified: false });
     });
@@ -863,9 +894,9 @@ describe('DapProxyWorker', () => {
       await (worker as any).handleInitializedEvent();
 
       const syncCall = mockMessageSender.send.mock.calls.find(
-        ([m]: [{ type?: string; status?: string }]) => m.type === 'status' && m.status === 'breakpoints_synced'
+        isStatusCall('breakpoints_synced')
       );
-      const results = (syncCall![0] as { breakpoints: Array<Record<string, unknown>> }).breakpoints;
+      const results = syncCall![0].breakpoints!;
       expect(results).toEqual([{ file: '/work/app.py', line: 5, verified: true, adapterId: 3 }]);
       expect(results[0]).not.toHaveProperty('id');
     });
@@ -1223,7 +1254,7 @@ describe('DapProxyWorker', () => {
         }),
         initializeSession: vi.fn().mockImplementation(async () => {
           // Emit 'initialized' event after initializeSession, simulating real DAP adapter behavior
-          setImmediate(() => (mockDapClient as EventEmitter).emit('initialized'));
+          setImmediate(() => mockDapClient.emit('initialized'));
         }),
         sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
         setBreakpoints: vi.fn().mockResolvedValue(undefined),
@@ -1431,7 +1462,7 @@ describe('DapProxyWorker', () => {
           if (handlers.onInitialized) client.on('initialized', handlers.onInitialized);
         }),
         initializeSession: vi.fn().mockImplementation(async () => {
-          setImmediate(() => (mockDapClient as EventEmitter).emit('initialized'));
+          setImmediate(() => mockDapClient.emit('initialized'));
         }),
         sendAttachRequest: vi.fn().mockResolvedValue(undefined),
         setBreakpoints: vi.fn().mockResolvedValue(undefined),
@@ -1489,7 +1520,7 @@ describe('DapProxyWorker', () => {
           if (handlers.onInitialized) client.on('initialized', handlers.onInitialized);
         }),
         initializeSession: vi.fn().mockImplementation(async () => {
-          setImmediate(() => (mockDapClient as EventEmitter).emit('initialized'));
+          setImmediate(() => mockDapClient.emit('initialized'));
         }),
         sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
         setBreakpoints: vi.fn().mockResolvedValue(undefined),
@@ -1577,7 +1608,7 @@ describe('DapProxyWorker', () => {
         payload: ProxyInitPayload,
         processStub: unknown,
         connectionStub: unknown,
-        policy: typeof RubyAdapterPolicy
+        policy: AdapterPolicy
       ) => {
         (worker as any).logger = mockLogger;
         (worker as any).processManager = processStub;
@@ -1604,7 +1635,7 @@ describe('DapProxyWorker', () => {
 
           const startPromise = (worker as any).startAdapterAndConnect(payload);
           await vi.advanceTimersByTimeAsync(0); // reach the parked initialize await
-          (mockDapClient as EventEmitter).emit('initialized');
+          mockDapClient.emit('initialized');
           await vi.advanceTimersByTimeAsync(2000); // grace period for a late response
 
           await startPromise;
@@ -1615,7 +1646,7 @@ describe('DapProxyWorker', () => {
           // No response ⇒ no capabilities to report.
           expect(capabilitiesStatuses()).toHaveLength(0);
           const statusCall = mockMessageSender.send.mock.calls.find(
-            ([message]: [StatusMessage]) => message.type === 'status' && message.status === 'adapter_configured_and_launched'
+            ([message]) => message.type === 'status' && message.status === 'adapter_configured_and_launched'
           );
           expect(statusCall).toBeDefined();
         } finally {
@@ -1635,7 +1666,7 @@ describe('DapProxyWorker', () => {
 
           const startPromise = (worker as any).startAdapterAndConnect(payload);
           await vi.advanceTimersByTimeAsync(0);
-          (mockDapClient as EventEmitter).emit('initialized');
+          mockDapClient.emit('initialized');
           await vi.advanceTimersByTimeAsync(2000);
           await startPromise;
           expect(capabilitiesStatuses()).toHaveLength(0);
@@ -1653,7 +1684,7 @@ describe('DapProxyWorker', () => {
         const payload = rubyLaunchPayload();
         const capabilities = { supportsConfigurationDoneRequest: true };
         const { processStub, connectionStub } = makeStubs(async () => {
-          setImmediate(() => (mockDapClient as EventEmitter).emit('initialized'));
+          setImmediate(() => mockDapClient.emit('initialized'));
           return capabilities;
         });
         wireWorker(payload, processStub, connectionStub, RubyAdapterPolicy);
@@ -1670,7 +1701,7 @@ describe('DapProxyWorker', () => {
       it('emits init-progress statuses for the parent init-timeout diagnosis (issue #493)', async () => {
         const payload = rubyLaunchPayload();
         const { processStub, connectionStub } = makeStubs(async () => {
-          setImmediate(() => (mockDapClient as EventEmitter).emit('initialized'));
+          setImmediate(() => mockDapClient.emit('initialized'));
           return { supportsConfigurationDoneRequest: true };
         });
         wireWorker(payload, processStub, connectionStub, RubyAdapterPolicy);
@@ -1717,7 +1748,7 @@ describe('DapProxyWorker', () => {
           const startPromise = (worker as any).startAdapterAndConnect(payload)
             .then(() => { settled = true; }, () => { settled = true; });
           await vi.advanceTimersByTimeAsync(0);
-          (mockDapClient as EventEmitter).emit('initialized');
+          mockDapClient.emit('initialized');
           await vi.advanceTimersByTimeAsync(10000);
 
           expect(settled).toBe(false);
@@ -1754,7 +1785,7 @@ describe('DapProxyWorker', () => {
           const startPromise = (worker as any).startAdapterAndConnect(payload)
             .then(() => { settled = true; }, () => { settled = true; });
           await vi.advanceTimersByTimeAsync(0);
-          (mockDapClient as EventEmitter).emit('initialized');
+          mockDapClient.emit('initialized');
           await vi.advanceTimersByTimeAsync(10000);
 
           expect(settled).toBe(false);
@@ -1806,7 +1837,7 @@ describe('DapProxyWorker', () => {
           if (handlers.onClose) client.on('close', handlers.onClose);
         }),
         initializeSession: vi.fn().mockImplementation(async () => {
-          setImmediate(() => (mockDapClient as EventEmitter).emit('initialized'));
+          setImmediate(() => mockDapClient.emit('initialized'));
         }),
         sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
         setBreakpoints: vi.fn().mockResolvedValue(undefined),
@@ -1830,8 +1861,8 @@ describe('DapProxyWorker', () => {
       const flush = () => new Promise(resolve => setImmediate(resolve));
 
       // Adapter announces termination and closes the DAP socket...
-      (mockDapClient as EventEmitter).emit('terminated', {});
-      (mockDapClient as EventEmitter).emit('close');
+      mockDapClient.emit('terminated', {});
+      mockDapClient.emit('close');
       await flush();
 
       // ...but neither signal is forwarded while the stdio streams are open
@@ -1847,7 +1878,8 @@ describe('DapProxyWorker', () => {
 
       const messages = sentMessages();
       const outputIdx = messages.findIndex(m =>
-        m.type === 'dapEvent' && m.event === 'output' && m.body?.category === 'stdout' && m.body?.output === '15: FizzBuzz\n');
+        m.type === 'dapEvent' && m.event === 'output' && isRecord(m.body)
+        && m.body.category === 'stdout' && m.body.output === '15: FizzBuzz\n');
       const terminatedIdx = messages.findIndex(m => m.type === 'dapEvent' && m.event === 'terminated');
       expect(outputIdx).toBeGreaterThanOrEqual(0);
       expect(terminatedIdx).toBeGreaterThanOrEqual(0);
@@ -1895,7 +1927,7 @@ describe('DapProxyWorker', () => {
           if (handlers.onClose) client.on('close', handlers.onClose);
         }),
         initializeSession: vi.fn().mockImplementation(async () => {
-          setImmediate(() => (mockDapClient as EventEmitter).emit('initialized'));
+          setImmediate(() => mockDapClient.emit('initialized'));
         }),
         sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
         setBreakpoints: vi.fn().mockResolvedValue(undefined),
@@ -1919,8 +1951,8 @@ describe('DapProxyWorker', () => {
 
       // Terminated arrives first, then the socket closes, then stdio drains
       // and rdbg's process dies
-      (mockDapClient as EventEmitter).emit('terminated', {});
-      (mockDapClient as EventEmitter).emit('close');
+      mockDapClient.emit('terminated', {});
+      mockDapClient.emit('close');
       await flush();
       adapterProcess.stdout.emit('close');
       adapterProcess.stderr.emit('close');
@@ -1977,7 +2009,7 @@ describe('DapProxyWorker', () => {
           if (handlers.onClose) client.on('close', handlers.onClose);
         }),
         initializeSession: vi.fn().mockImplementation(async () => {
-          setImmediate(() => (mockDapClient as EventEmitter).emit('initialized'));
+          setImmediate(() => mockDapClient.emit('initialized'));
         }),
         sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
         setBreakpoints: vi.fn().mockResolvedValue(undefined),
@@ -1999,7 +2031,7 @@ describe('DapProxyWorker', () => {
       const sentMessages = () => mockMessageSender.send.mock.calls.map(([m]) => m);
       const flush = () => new Promise(resolve => setImmediate(resolve));
 
-      (mockDapClient as EventEmitter).emit('close');
+      mockDapClient.emit('close');
       adapterProcess.stdout.emit('close');
       adapterProcess.stderr.emit('close');
       await flush();
@@ -2007,7 +2039,7 @@ describe('DapProxyWorker', () => {
 
       const closed = sentMessages().find(m => m.type === 'status' && m.status === 'dap_connection_closed');
       expect(closed).toBeDefined();
-      expect(closed.expected).toBe(false);
+      expect(closed!.expected).toBe(false);
     });
 
     describe('adapter-exit exitCode synthesis (issue #258)', () => {
@@ -2051,7 +2083,7 @@ describe('DapProxyWorker', () => {
             if (handlers.onClose) client.on('close', handlers.onClose);
           }),
           initializeSession: vi.fn().mockImplementation(async () => {
-            setImmediate(() => (mockDapClient as EventEmitter).emit('initialized'));
+            setImmediate(() => mockDapClient.emit('initialized'));
           }),
           sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
           setBreakpoints: vi.fn().mockResolvedValue(undefined),
@@ -2072,13 +2104,13 @@ describe('DapProxyWorker', () => {
         return { adapterProcess };
       };
 
-      const sentMessages = () => mockMessageSender.send.mock.calls.map(([m]: [any]) => m);
+      const sentMessages = () => mockMessageSender.send.mock.calls.map(([m]) => m);
       const flush = () => new Promise(resolve => setImmediate(resolve));
 
       it('synthesizes exited from the adapter exit code before terminated (crash, code 1)', async () => {
         const { adapterProcess } = await makeRubyHarness('ruby-synth-crash', 8130);
 
-        (mockDapClient as EventEmitter).emit('terminated', {});
+        mockDapClient.emit('terminated', {});
         adapterProcess.stdout.emit('close');
         adapterProcess.stderr.emit('close');
         await flush();
@@ -2100,7 +2132,7 @@ describe('DapProxyWorker', () => {
       it('synthesizes exited with code 0 for a clean run', async () => {
         const { adapterProcess } = await makeRubyHarness('ruby-synth-clean', 8131);
 
-        (mockDapClient as EventEmitter).emit('terminated', {});
+        mockDapClient.emit('terminated', {});
         adapterProcess.stdout.emit('close');
         adapterProcess.stderr.emit('close');
         await flush();
@@ -2109,15 +2141,15 @@ describe('DapProxyWorker', () => {
         await flush();
 
         const messages = sentMessages();
-        const exited = messages.find((m: any) => m.type === 'dapEvent' && m.event === 'exited');
+        const exited = messages.find((m) => m.type === 'dapEvent' && m.event === 'exited');
         expect(exited).toBeDefined();
-        expect(exited.body).toEqual({ exitCode: 0 });
+        expect(exited!.body).toEqual({ exitCode: 0 });
       });
 
       it('skips synthesis on signal kill (no exit code)', async () => {
         const { adapterProcess } = await makeRubyHarness('ruby-synth-signal', 8132);
 
-        (mockDapClient as EventEmitter).emit('terminated', {});
+        mockDapClient.emit('terminated', {});
         adapterProcess.stdout.emit('close');
         adapterProcess.stderr.emit('close');
         await flush();
@@ -2163,7 +2195,7 @@ describe('DapProxyWorker', () => {
             if (handlers.onClose) client.on('close', handlers.onClose);
           }),
           initializeSession: vi.fn().mockImplementation(async () => {
-            setImmediate(() => (mockDapClient as EventEmitter).emit('initialized'));
+            setImmediate(() => mockDapClient.emit('initialized'));
           }),
           sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
           setBreakpoints: vi.fn().mockResolvedValue(undefined),
@@ -2183,7 +2215,7 @@ describe('DapProxyWorker', () => {
         await (worker as any).startAdapterAndConnect(payload);
 
         adapterProcess.emit('exit', 1, null);
-        (mockDapClient as EventEmitter).emit('terminated', {});
+        mockDapClient.emit('terminated', {});
         await flush();
         await flush();
 
@@ -2232,7 +2264,7 @@ describe('DapProxyWorker', () => {
           if (handlers.onClose) client.on('close', handlers.onClose);
         }),
         initializeSession: vi.fn().mockImplementation(async () => {
-          setImmediate(() => (mockDapClient as EventEmitter).emit('initialized'));
+          setImmediate(() => mockDapClient.emit('initialized'));
         }),
         sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
         setBreakpoints: vi.fn().mockResolvedValue(undefined),
@@ -2256,7 +2288,7 @@ describe('DapProxyWorker', () => {
 
       // Terminated arrives, then the adapter process dies (code 1 = the
       // debuggee's own exit status under rdbg -c), then stdio drains
-      (mockDapClient as EventEmitter).emit('terminated', {});
+      mockDapClient.emit('terminated', {});
       adapterProcess.emit('exit', 1, null);
       await flush();
       adapterProcess.stdout.emit('close');
@@ -2361,7 +2393,7 @@ describe('DapProxyWorker', () => {
         initializeSession: vi.fn().mockImplementation(async () => {
           callOrder.push('initializeSession');
           // Delve fires initialized event right after initialize response
-          setImmediate(() => (mockDapClient as EventEmitter).emit('initialized'));
+          setImmediate(() => mockDapClient.emit('initialized'));
         }),
         sendLaunchRequest: vi.fn().mockImplementation(async () => {
           callOrder.push('sendLaunchRequest');
@@ -2415,7 +2447,7 @@ describe('DapProxyWorker', () => {
 
       // Verify final state
       const statusCall = mockMessageSender.send.mock.calls.find(
-        ([message]: [StatusMessage]) => message.type === 'status' && message.status === 'adapter_configured_and_launched'
+        ([message]) => message.type === 'status' && message.status === 'adapter_configured_and_launched'
       );
       expect(statusCall).toBeDefined();
       expect(worker.getState()).toBe(ProxyState.CONNECTED);
@@ -2547,7 +2579,7 @@ describe('DapProxyWorker', () => {
         }),
         initializeSession: vi.fn().mockImplementation(async () => {
           // Emit 'initialized' event after initializeSession, simulating real DAP adapter behavior
-          setImmediate(() => (mockDapClient as EventEmitter).emit('initialized'));
+          setImmediate(() => mockDapClient.emit('initialized'));
         }),
         sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
         setBreakpoints: vi.fn().mockResolvedValue(undefined),
@@ -2773,7 +2805,7 @@ describe('DapProxyWorker', () => {
       disconnect: vi.fn().mockResolvedValue(undefined)
     });
 
-    const primeWorker = (payload: ProxyInitPayload, connectionStub: object, policy = PythonAdapterPolicy) => {
+    const primeWorker = (payload: ProxyInitPayload, connectionStub: object, policy: AdapterPolicy = PythonAdapterPolicy) => {
       (worker as any).logger = mockLogger;
       (worker as any).connectionManager = connectionStub;
       (worker as any).adapterPolicy = policy;
@@ -3714,7 +3746,7 @@ describe('DapProxyWorker', () => {
         }),
         initializeSession: vi.fn().mockImplementation(async () => {
           // Emit 'initialized' event shortly after initializeSession
-          setTimeout(() => (mockDapClient as EventEmitter).emit('initialized'), 50);
+          setTimeout(() => mockDapClient.emit('initialized'), 50);
         }),
         sendAttachRequest: vi.fn().mockResolvedValue(undefined),
         setBreakpoints: vi.fn().mockResolvedValue(undefined),
@@ -3777,7 +3809,7 @@ describe('DapProxyWorker', () => {
           if (handlers.onStopped) client.on('stopped', handlers.onStopped);
         }),
         initializeSession: vi.fn().mockImplementation(async () => {
-          setTimeout(() => (mockDapClient as EventEmitter).emit('initialized'), 50);
+          setTimeout(() => mockDapClient.emit('initialized'), 50);
         }),
         sendAttachRequest: vi.fn().mockResolvedValue(undefined),
         setBreakpoints: vi.fn().mockResolvedValue(undefined),
@@ -3852,7 +3884,7 @@ describe('DapProxyWorker', () => {
         sendAttachRequest: vi.fn().mockImplementation(() => {
           callOrder.push('attach');
           // 'initialized' arrives only after the attach request is received
-          setImmediate(() => (mockDapClient as EventEmitter).emit('initialized'));
+          setImmediate(() => mockDapClient.emit('initialized'));
           // the attach response arrives only after configurationDone
           return attachResponse;
         }),
@@ -3971,7 +4003,7 @@ describe('DapProxyWorker', () => {
         }),
         initializeSession: vi.fn().mockImplementation(async () => {
           // Go/Delve sends initialized quickly after initialize
-          setTimeout(() => (mockDapClient as EventEmitter).emit('initialized'), 50);
+          setTimeout(() => mockDapClient.emit('initialized'), 50);
         }),
         sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
         setBreakpoints: vi.fn().mockResolvedValue(undefined),
@@ -4029,7 +4061,7 @@ describe('DapProxyWorker', () => {
           if (handlers.onStopped) client.on('stopped', handlers.onStopped);
         }),
         initializeSession: vi.fn().mockImplementation(async () => {
-          setTimeout(() => (mockDapClient as EventEmitter).emit('initialized'), 50);
+          setTimeout(() => mockDapClient.emit('initialized'), 50);
         }),
         sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
         setBreakpoints: vi.fn().mockResolvedValue(undefined),

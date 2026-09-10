@@ -1,24 +1,21 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { DebugFeature, AdapterState, AdapterErrorCode } from '@debugmcp/shared';
 import { MockDebugAdapter, MockErrorScenario } from '../../src/mock-debug-adapter.js';
 import type { AdapterDependencies } from '@debugmcp/shared';
+import {
+  createMockAdapterDependencies,
+  createMockEnvironment
+} from '../../../../tests/test-utils/helpers/adapter-dependencies.js';
 
-const createDependencies = (): AdapterDependencies & {
-  logger: { debug: ReturnType<typeof vi.fn>; info: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
-} => ({
-  fileSystem: {} as any,
-  networkManager: undefined,
-  environment: {
-    get: () => undefined,
-    getAll: () => ({}),
-    getCurrentWorkingDirectory: () => '/tmp',
-  },
-  logger: {
-    debug: vi.fn(),
-    info: vi.fn(),
-    error: vi.fn(),
-  },
-});
+const createDependencies = (): AdapterDependencies =>
+  createMockAdapterDependencies({
+    networkManager: undefined,
+    environment: createMockEnvironment({
+      get: () => undefined,
+      getAll: () => ({}),
+      getCurrentWorkingDirectory: () => '/tmp',
+    }),
+  });
 
 describe('MockDebugAdapter', () => {
   let deps: ReturnType<typeof createDependencies>;

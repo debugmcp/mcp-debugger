@@ -2,22 +2,19 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { AdapterState } from '@debugmcp/shared';
 import { PythonDebugAdapter } from '../../src/python-debug-adapter.js';
 import type { AdapterDependencies } from '@debugmcp/shared';
+import {
+  createMockAdapterDependencies,
+  createMockEnvironment
+} from '../../../../tests/test-utils/helpers/adapter-dependencies.js';
 
-const createDependencies = (): AdapterDependencies & {
-  logger: { info: ReturnType<typeof vi.fn>; debug: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
-} => ({
-  fileSystem: {} as any,
-  environment: {
-    get: () => undefined,
-    getAll: () => ({}),
-    getCurrentWorkingDirectory: () => '/tmp',
-  },
-  logger: {
-    info: vi.fn(),
-    debug: vi.fn(),
-    error: vi.fn(),
-  },
-});
+const createDependencies = (): AdapterDependencies =>
+  createMockAdapterDependencies({
+    environment: createMockEnvironment({
+      get: () => undefined,
+      getAll: () => ({}),
+      getCurrentWorkingDirectory: () => '/tmp',
+    }),
+  });
 
 const setSuccessfulEnvironment = (adapter: PythonDebugAdapter) => {
   (adapter as any).resolveExecutablePath = vi.fn().mockResolvedValue('/usr/bin/python3');

@@ -49,7 +49,7 @@ class DapTestClient {
         await new Promise((r) => setTimeout(r, 100));
       }
     }
-    this.socket.on('data', (chunk) => this.onData(chunk));
+    this.socket.on('data', (chunk: Buffer) => this.onData(chunk));
   }
 
   private onData(chunk: Buffer): void {

@@ -1,9 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import { PythonAdapterPolicy } from '../../../packages/shared/src/interfaces/adapter-policy-python.js';
+import type { AdapterSpawnPayload } from '../../../packages/shared/src/interfaces/adapter-policy.js';
 
 describe('PythonAdapterPolicy', () => {
   it('rejects child session support', () => {
-    expect(() => PythonAdapterPolicy.buildChildStartArgs('', {})).toThrow(/does not support child sessions/);
+    expect(() => PythonAdapterPolicy.buildChildStartArgs()).toThrow(/does not support child sessions/);
   });
 
   it('extracts local variables while filtering special entries', () => {
@@ -89,8 +90,11 @@ describe('PythonAdapterPolicy', () => {
   });
 
   describe('getAdapterSpawnConfig', () => {
-    const basePayload = {
+    // scriptPath is required by AdapterSpawnPayload but never read by this
+    // policy — the debuggee script reaches debugpy through the launch config.
+    const basePayload: AdapterSpawnPayload = {
       executablePath: 'python',
+      scriptPath: '/workspace/app.py',
       adapterHost: '127.0.0.1',
       adapterPort: 40000,
       logDir: '/logs'

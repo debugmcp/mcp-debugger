@@ -21,7 +21,7 @@ describe('DotnetAdapterPolicy', () => {
   // ===== Child sessions =====
 
   it('rejects child session support', () => {
-    expect(() => DotnetAdapterPolicy.buildChildStartArgs('', {})).toThrow(/does not support child sessions/);
+    expect(() => DotnetAdapterPolicy.buildChildStartArgs()).toThrow(/does not support child sessions/);
   });
 
   it('isChildReadyEvent returns true for initialized event', () => {
@@ -188,7 +188,10 @@ describe('DotnetAdapterPolicy', () => {
   it('isSessionReady returns true only when PAUSED', () => {
     expect(DotnetAdapterPolicy.isSessionReady(SessionState.PAUSED)).toBe(true);
     expect(DotnetAdapterPolicy.isSessionReady(SessionState.RUNNING)).toBe(false);
-    expect(DotnetAdapterPolicy.isSessionReady(SessionState.IDLE)).toBe(false);
+    // SessionState has no IDLE member — this line used to read
+    // `SessionState.IDLE`, i.e. it passed `undefined` and only ever proved
+    // that undefined is not PAUSED. CREATED is the real pre-launch state.
+    expect(DotnetAdapterPolicy.isSessionReady(SessionState.CREATED)).toBe(false);
   });
 
   // ===== Command queueing =====
@@ -303,7 +306,7 @@ describe('DotnetAdapterPolicy', () => {
     const context = { sendResponse } as any;
     const request = { command: 'runInTerminal', seq: 1, type: 'request' } as any;
 
-    const result = await behavior.handleReverseRequest(request, context);
+    const result = await behavior.handleReverseRequest!(request, context);
 
     expect(result.handled).toBe(true);
     expect(sendResponse).toHaveBeenCalledWith(request, {});
@@ -314,7 +317,7 @@ describe('DotnetAdapterPolicy', () => {
     const context = { sendResponse: vi.fn() } as any;
     const request = { command: 'unknown', seq: 1, type: 'request' } as any;
 
-    const result = await behavior.handleReverseRequest(request, context);
+    const result = await behavior.handleReverseRequest!(request, context);
 
     expect(result.handled).toBe(false);
   });

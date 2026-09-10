@@ -76,6 +76,8 @@ describe('resolveExceptionFilters', () => {
   });
 
   it('DefaultAdapterPolicy declares no defaultExceptionBreakMode (issue #244)', () => {
-    expect(DefaultAdapterPolicy.getInitializationBehavior().defaultExceptionBreakMode).toBeUndefined();
+    // The placeholder returns a bare {} — it does not declare the key at all,
+    // which is stronger than declaring it undefined, so assert on absence.
+    expect('defaultExceptionBreakMode' in DefaultAdapterPolicy.getInitializationBehavior()).toBe(false);
   });
 });

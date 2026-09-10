@@ -35,8 +35,7 @@ describe('SessionManager - Memory Leak Prevention', () => {
   describe('Event Listener Cleanup', () => {
     it('should remove all event listeners when closing session', async () => {
       const session = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
       
       await sessionManager.startDebugging(session.id, 'test.py');
@@ -79,8 +78,7 @@ describe('SessionManager - Memory Leak Prevention', () => {
       // Create and close 10 sessions
       for (let i = 0; i < 10; i++) {
         const session = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
         sessionIds.push(session.id);
         
@@ -100,8 +98,7 @@ describe('SessionManager - Memory Leak Prevention', () => {
 
     it('should clean up listeners even if proxyManager.stop() throws error', async () => {
       const session = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
       
       await sessionManager.startDebugging(session.id, 'test.py');
@@ -125,8 +122,7 @@ describe('SessionManager - Memory Leak Prevention', () => {
 
     it('should handle double close gracefully', async () => {
       const session = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
       
       await sessionManager.startDebugging(session.id, 'test.py');
@@ -156,8 +152,7 @@ describe('SessionManager - Memory Leak Prevention', () => {
 
     it('should clean up listeners when proxy terminates unexpectedly', async () => {
       const session = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
       
       await sessionManager.startDebugging(session.id, 'test.py');
@@ -186,8 +181,7 @@ describe('SessionManager - Memory Leak Prevention', () => {
 
     it('should clean up listeners when proxy exits unexpectedly', async () => {
       const session = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
       
       await sessionManager.startDebugging(session.id, 'test.py');
@@ -218,8 +212,7 @@ describe('SessionManager - Memory Leak Prevention', () => {
   describe('Cleanup Method Testing', () => {
     it('should properly clean up event handlers via internal method', async () => {
       const session = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
       
       await sessionManager.startDebugging(session.id, 'test.py');
@@ -242,8 +235,7 @@ describe('SessionManager - Memory Leak Prevention', () => {
 
     it('should log cleanup operations', async () => {
       const session = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
       
       await sessionManager.startDebugging(session.id, 'test.py');
@@ -270,8 +262,7 @@ describe('SessionManager - Memory Leak Prevention', () => {
   describe('Edge Cases', () => {
     it('should handle cleanup when no handlers were attached', async () => {
       const session = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
       
       // Close without starting debugging (no proxy/handlers)
@@ -280,8 +271,7 @@ describe('SessionManager - Memory Leak Prevention', () => {
 
     it('should handle partial cleanup failure gracefully', async () => {
       const session = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
       
       await sessionManager.startDebugging(session.id, 'test.py');
@@ -319,8 +309,7 @@ describe('SessionManager - Memory Leak Prevention', () => {
       const sessions: string[] = [];
       for (let i = 0; i < 5; i++) {
         const session = await sessionManager.createSession({
-          language: DebugLanguage.MOCK,
-          pythonPath: 'python'
+          language: DebugLanguage.MOCK
         });
         sessions.push(session.id);
       }
@@ -336,8 +325,7 @@ describe('SessionManager - Memory Leak Prevention', () => {
 
     it('should return undefined from getSession after close', async () => {
       const session = await sessionManager.createSession({
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
 
       expect(sessionManager.getSession(session.id)).toBeDefined();

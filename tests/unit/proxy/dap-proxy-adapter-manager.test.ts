@@ -4,7 +4,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { GenericAdapterManager } from '../../../src/proxy/dap-proxy-adapter-manager.js';
+import type { AdapterStdioSource } from '../../../src/proxy/dap-proxy-adapter-manager.js';
 import type { IProcessSpawner, ILogger, IFileSystem } from '../../../src/proxy/dap-proxy-interfaces.js';
+import type { Mock } from 'vitest';
 
 function createMockLogger(): ILogger {
   return {
@@ -18,7 +20,9 @@ function createMockLogger(): ILogger {
 function createMockFileSystem(): IFileSystem {
   return {
     ensureDir: vi.fn().mockResolvedValue(undefined),
-    pathExists: vi.fn().mockResolvedValue(true)
+    pathExists: vi.fn().mockResolvedValue(true),
+    readFile: vi.fn().mockResolvedValue(''),
+    remove: vi.fn().mockResolvedValue(undefined)
   };
 }
 
@@ -229,10 +233,10 @@ describe('GenericAdapterManager', () => {
 
   describe('stdio forwarding to onStdioLine (issue #222)', () => {
     const REDACTED = '[REDACTED — line contained sensitive data]';
-    let onStdioLine: ReturnType<typeof vi.fn>;
+    let onStdioLine: Mock<(source: AdapterStdioSource, line: string) => void>;
 
     beforeEach(async () => {
-      onStdioLine = vi.fn();
+      onStdioLine = vi.fn<(source: AdapterStdioSource, line: string) => void>();
       await manager.spawn({ command: 'rdbg', args: ['--open'], logDir: '/logs', onStdioLine });
     });
 

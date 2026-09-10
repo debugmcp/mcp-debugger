@@ -15,6 +15,15 @@ import path from 'node:path';
 import { RubyAdapterPolicy, getPolicyForLanguage, DebugLanguage } from '@debugmcp/shared';
 import { buildRdbgInvocation } from '@debugmcp/adapter-ruby';
 import type { DebugProtocol } from '@vscode/debugprotocol';
+import type { Variable } from '@debugmcp/shared';
+
+/**
+ * extractLocalVariables takes the DOMAIN Variable (models/index.ts), which
+ * carries `expandable` alongside name/value/type — rdbg's scalars are all
+ * leaves here.
+ */
+const rubyVar = (name: string, value: string, type: string): Variable =>
+  ({ name, value, type, expandable: false });
 
 const basePayload = {
   executablePath: '/usr/bin/ruby',
@@ -180,12 +189,12 @@ describe('RubyAdapterPolicy hooks', () => {
       ]
     };
     const variables = {
-      7: [{ name: 'counter', value: '3', type: 'Integer' }],
-      8: [{ name: '$stdout', value: 'IO', type: 'IO' }]
+      7: [rubyVar('counter', '3', 'Integer')],
+      8: [rubyVar('$stdout', 'IO', 'IO')]
     };
 
     const locals = RubyAdapterPolicy.extractLocalVariables!(frames, scopes, variables);
-    expect(locals.variables).toEqual([{ name: 'counter', value: '3', type: 'Integer' }]);
+    expect(locals.variables).toEqual([rubyVar('counter', '3', 'Integer')]);
     // Only the local scope is reported — the Global scope on the same
     // frame contributed nothing and must not be attributed.
     expect(locals.scopeRefs).toEqual([7]);
@@ -200,13 +209,13 @@ describe('RubyAdapterPolicy hooks', () => {
     };
     const variables = {
       7: [
-        { name: '%self', value: 'main', type: 'Object' },
-        { name: 'counter', value: '3', type: 'Integer' }
+        rubyVar('%self', 'main', 'Object'),
+        rubyVar('counter', '3', 'Integer')
       ]
     };
 
     expect(RubyAdapterPolicy.extractLocalVariables!(frames, scopes, variables).variables)
-      .toEqual([{ name: 'counter', value: '3', type: 'Integer' }]);
+      .toEqual([rubyVar('counter', '3', 'Integer')]);
     expect(RubyAdapterPolicy.extractLocalVariables!(frames, scopes, variables, true).variables)
       .toEqual(variables[7]);
   });
@@ -220,9 +229,9 @@ describe('RubyAdapterPolicy hooks', () => {
     };
     const variables = {
       9: [
-        { name: '%self', value: 'main', type: 'Object' },
-        { name: '%return', value: '42', type: 'Integer' },
-        { name: '%raised', value: '#<RuntimeError: boom>', type: 'RuntimeError' }
+        rubyVar('%self', 'main', 'Object'),
+        rubyVar('%return', '42', 'Integer'),
+        rubyVar('%raised', '#<RuntimeError: boom>', 'RuntimeError')
       ]
     };
 
@@ -263,13 +272,15 @@ describe('RubyAdapterPolicy behavior surface', () => {
       }
     });
     expect(RubyAdapterPolicy.requiresCommandQueueing()).toBe(false);
-    expect(RubyAdapterPolicy.shouldQueueCommand('next', undefined, {} as never)).toMatchObject({
+    // The verdict is constant — rdbg never queues, so the policy's
+    // implementation takes no command or state at all.
+    expect(RubyAdapterPolicy.shouldQueueCommand()).toMatchObject({
       shouldQueue: false,
       shouldDefer: false
     });
     expect(RubyAdapterPolicy.isChildReadyEvent({ event: 'initialized' } as never)).toBe(true);
     expect(RubyAdapterPolicy.isChildReadyEvent({ event: 'stopped' } as never)).toBe(false);
-    expect(() => RubyAdapterPolicy.buildChildStartArgs('x', {})).toThrow(/child sessions/);
+    expect(() => RubyAdapterPolicy.buildChildStartArgs()).toThrow(/child sessions/);
   });
 
   it('resolves the ruby executable from explicit path or env', () => {

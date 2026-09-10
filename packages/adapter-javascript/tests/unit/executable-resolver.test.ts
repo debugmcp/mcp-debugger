@@ -21,6 +21,15 @@ class MockFileSystem implements FileSystem {
     }
     return false;
   }
+
+  /**
+   * `FileSystem` requires this, but executable resolution never reads a file — throw
+   * rather than invent a return value, so a future caller fails loudly instead of
+   * silently seeing an empty file.
+   */
+  readFileSync(path: string): string {
+    throw new Error(`MockFileSystem.readFileSync is not stubbed (called with ${path})`);
+  }
 }
 
 function withPath(paths: string[]) {

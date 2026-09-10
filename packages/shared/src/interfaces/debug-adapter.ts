@@ -349,6 +349,17 @@ export interface AdapterConfig {
  * Generic launch configuration (common across languages)
  */
 export interface GenericLaunchConfig {
+  /**
+   * What to run: the debuggee's entry point, as an absolute or cwd-relative path.
+   *
+   * Declared here because it is genuinely universal -- `ProxyLauncher` populates it for every
+   * launch (`src/session/launch/proxy-launcher.ts`), and every adapter reads it back. It was
+   * simply never written down: the launcher builds the config as `Record<string, unknown>` and
+   * casts to this interface, so the omission never surfaced there, and each adapter re-cast its
+   * way back to the value (`(config as Record<string, unknown>).program`). Declaring it lets
+   * both sides drop the cast.
+   */
+  program?: string;
   stopOnEntry?: boolean;
   justMyCode?: boolean;
   env?: Record<string, string>;

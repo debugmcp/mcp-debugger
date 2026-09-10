@@ -1,6 +1,4 @@
 import { describe, expect, it, vi } from 'vitest';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore -- plain-JS module without type declarations
 import { LifecycleQueue } from '../../../tools/dev-proxy/lifecycle-queue.mjs';
 
 describe('dev-proxy LifecycleQueue', () => {

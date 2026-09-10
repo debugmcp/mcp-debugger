@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Mocks for the child_process module
  * 
@@ -14,8 +13,11 @@ import { EventEmitter } from 'events';
 export class MockChildProcess extends EventEmitter {
   // Stream mocks - these need to be proper stream-like objects
   public stdin: NodeJS.WritableStream | null = null;
-  public stdout: NodeJS.ReadableStream | null = new EventEmitter() as any;
-  public stderr: NodeJS.ReadableStream | null = new EventEmitter() as any;
+  // Non-null: this mock always constructs both streams, and `simulate*` writes to them
+  // unconditionally. Declaring them nullable (as the real `ChildProcess` does) only forced
+  // every helper below to guard against a case this class cannot produce.
+  public stdout: NodeJS.ReadableStream = new EventEmitter() as unknown as NodeJS.ReadableStream;
+  public stderr: NodeJS.ReadableStream = new EventEmitter() as unknown as NodeJS.ReadableStream;
   
   // Process methods
   public kill = vi.fn();
@@ -80,8 +82,8 @@ export class MockChildProcess extends EventEmitter {
    */
   reset(): void {
     this.removeAllListeners();
-    this.stdout?.removeAllListeners();
-    this.stderr?.removeAllListeners();
+    this.stdout.removeAllListeners();
+    this.stderr.removeAllListeners();
     this.kill.mockClear();
     this.send.mockClear();
     this.killed = false;

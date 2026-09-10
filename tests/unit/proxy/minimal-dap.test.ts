@@ -57,7 +57,7 @@ describe('MinimalDapClient', () => {
     emitter.getActiveChild = vi.fn().mockReturnValue(null);
     emitter.hasActiveChildren = vi.fn().mockReturnValue(false);
     emitter.shouldRouteToChild = vi.fn().mockReturnValue(false);
-    emitter.storeBreakpoints = vi.fn();
+    emitter.storeBreakpoints = vi.fn<ChildSessionManager['storeBreakpoints']>();
     emitter.isAdoptionInProgress = vi.fn().mockReturnValue(false);
     emitter.getChildTargetState = vi.fn().mockReturnValue('none');
     emitter.shutdown = vi.fn().mockResolvedValue(undefined);
@@ -1526,11 +1526,14 @@ describe('MinimalDapClient', () => {
       childSessionManager.getActiveChild.mockReturnValue(child);
 
       const adoptionBehavior: DapClientBehavior = {
+        // Deliberately partial ChildSessionConfig: host/port are never read
+        // here (createChildSession is a stub) and the assertion below pins the
+        // config object exactly, so filling them in would break the test.
         handleReverseRequest: vi.fn().mockResolvedValue({
           handled: true,
           createChildSession: true,
           childConfig: { pendingId: 'child-1', parentConfig: { __pendingTargetId: 'child-1' } }
-        } as ReverseRequestResult)
+        } as unknown as ReverseRequestResult)
       };
 
       const client = new MinimalDapClient('localhost', 5678);

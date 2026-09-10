@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import { EventEmitter } from 'node:events';
 
 // Mock child_process before importing the module
@@ -24,7 +24,9 @@ const { existsSyncMock, readdirSyncMock, openSyncMock, readSyncMock, closeSyncMo
   renameSyncMock: vi.fn()
 }));
 vi.mock('node:fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('node:fs')>();
+  const actual = await importOriginal<
+    typeof import('node:fs') & { default: typeof import('node:fs') }
+  >();
   return {
     __esModule: true,
     ...actual,
@@ -50,7 +52,7 @@ vi.mock('node:fs', async (importOriginal) => {
   };
 });
 
-import { spawn, spawnSync } from 'child_process';
+import { spawn, spawnSync, type SpawnOptions } from 'child_process';
 import which from 'which';
 import {
   findNetcoredbgExecutable,
@@ -74,9 +76,17 @@ type ChildProcessMock = EventEmitter & {
   kill: () => void;
 };
 
-const spawnMock = spawn as unknown as vi.Mock;
-const spawnSyncMock = spawnSync as unknown as vi.Mock;
-const whichMock = which as unknown as vi.Mock;
+/**
+ * `spawn`/`spawnSync` are handed deliberately partial doubles: the tests supply only the
+ * handful of fields `dotnet-utils` reads, never a whole `ChildProcess`/`SpawnSyncReturns`.
+ * Typing the aliases to what the doubles actually are keeps every call site honest without
+ * inventing a dozen members nothing looks at. `which` needs no such help.
+ */
+type SpawnSyncMockReturn = { status: number; stdout: string | Buffer; stderr: string | Buffer };
+
+const spawnMock = spawn as unknown as Mock<(command: string, args?: readonly string[], options?: SpawnOptions) => ChildProcessMock>;
+const spawnSyncMock = spawnSync as unknown as Mock<(...args: unknown[]) => SpawnSyncMockReturn>;
+const whichMock = vi.mocked(which);
 
 const createSpawnShell = (): ChildProcessMock => {
   const proc = new EventEmitter() as ChildProcessMock;

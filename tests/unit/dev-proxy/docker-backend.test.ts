@@ -1,6 +1,4 @@
 import { describe, expect, it } from 'vitest';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore -- plain-JS module without type declarations
 import {
   DOCKER_OWNER_LABEL,
   addDockerOwnershipLabel,
@@ -52,11 +50,11 @@ describe('dev-proxy Docker backend recognition', () => {
 describe('dev-proxy Docker backend cleanup', () => {
   it('removes owned stdio containers by label without relying on a published port', () => {
     const calls: Array<{ command: string; args: string[] }> = [];
-    const execFile = ((command: string, args: string[]) => {
+    const execFile = (command: string, args: string[]) => {
       calls.push({ command, args });
       if (args[0] === 'ps') return 'owned-a\r\nowned-b\r\n';
       return '';
-    }) as never;
+    };
 
     const result = removeOwnedDockerContainers({
       dockerCommand: 'docker',
@@ -76,12 +74,12 @@ describe('dev-proxy Docker backend cleanup', () => {
 
   it('also removes unlabeled published-port containers for network compatibility', () => {
     const removed: string[] = [];
-    const execFile = ((_command: string, args: string[]) => {
+    const execFile = (_command: string, args: string[]) => {
       if (args[0] === 'ps' && args.includes('-aq')) return 'owned-a\n';
       if (args[0] === 'ps') return 'owned-a\nlegacy-b\n';
       if (args[0] === 'rm') removed.push(args[2]);
       return '';
-    }) as never;
+    };
 
     const result = removeOwnedDockerContainers({
       dockerCommand: 'docker.exe',

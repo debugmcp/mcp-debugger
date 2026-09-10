@@ -3,11 +3,14 @@
  *
  * All tests use mock spawn and mock sockets — no real processes or TCP.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import net from 'net';
+import type { ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
-import { createBridge, type BridgeHandle } from '../../src/utils/netcoredbg-bridge-core.js';
+import { createBridge, type BridgeHandle, type BridgeOptions } from '../../src/utils/netcoredbg-bridge-core.js';
+
+type SpawnFn = NonNullable<BridgeOptions['spawnFn']>;
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -15,16 +18,13 @@ import { createBridge, type BridgeHandle } from '../../src/utils/netcoredbg-brid
 
 /** Minimal mock ChildProcess with piped stdio */
 function createMockChildProcess() {
-  const stdin = new PassThrough();
-  const stdout = new EventEmitter();
-  const stderr = new EventEmitter();
-  const cp: any = new EventEmitter();
-  cp.stdin = stdin;
-  cp.stdout = stdout;
-  cp.stderr = stderr;
-  cp.kill = vi.fn();
-  cp.pid = 12345;
-  return cp;
+  return Object.assign(new EventEmitter(), {
+    stdin: new PassThrough(),
+    stdout: new EventEmitter(),
+    stderr: new EventEmitter(),
+    kill: vi.fn(),
+    pid: 12345
+  });
 }
 
 /** Wait for the TCP server to start listening; returns the OS-assigned port */
@@ -57,17 +57,20 @@ const tick = () => new Promise((r) => setTimeout(r, 30));
 describe('netcoredbg-bridge-core', () => {
   let bridge: BridgeHandle;
   let mockCp: ReturnType<typeof createMockChildProcess>;
-  let spawnFn: ReturnType<typeof vi.fn>;
+  let spawnFn: Mock<SpawnFn>;
   let stderrChunks: string[];
   let stderrStream: NodeJS.WritableStream;
 
   beforeEach(() => {
     mockCp = createMockChildProcess();
-    spawnFn = vi.fn().mockReturnValue(mockCp);
+    // The bridge only reads stdin/stdout/stderr/kill/pid off the child; the rest of
+    // `ChildProcess` is deliberately absent, so the double is cast at this one boundary.
+    spawnFn = vi.fn<SpawnFn>().mockReturnValue(mockCp as unknown as ChildProcess);
     stderrChunks = [];
+    // Likewise: the bridge only ever calls `write`.
     stderrStream = {
-      write: (chunk: any) => { stderrChunks.push(String(chunk)); return true; }
-    } as any;
+      write: (chunk: string | Uint8Array) => { stderrChunks.push(String(chunk)); return true; }
+    } as unknown as NodeJS.WritableStream;
   });
 
   afterEach(() => {
@@ -123,7 +126,7 @@ describe('netcoredbg-bridge-core', () => {
     await tick();
 
     const received: Buffer[] = [];
-    client.on('data', (d) => received.push(d));
+    client.on('data', (d: Buffer) => received.push(d));
 
     const chunk = Buffer.from('Content-Length: 3\r\n\r\nfoo');
     mockCp.stdout.emit('data', chunk);

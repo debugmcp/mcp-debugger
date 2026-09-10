@@ -12,6 +12,7 @@ describe('ProxyManager sendInitWithRetry', () => {
   const fsStub: IFileSystem = {
     ensureDir: vi.fn(),
     ensureDirSync: vi.fn(),
+    mkdir: vi.fn(),
     pathExists: vi.fn(),
     exists: vi.fn(),
     readFile: vi.fn(),

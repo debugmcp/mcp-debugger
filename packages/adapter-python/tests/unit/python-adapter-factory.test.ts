@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { AdapterDependencies } from '@debugmcp/shared';
+import {
+  createMockAdapterDependencies,
+  createMockEnvironment
+} from '../../../../tests/test-utils/helpers/adapter-dependencies.js';
 import { DebugLanguage } from '@debugmcp/shared';
 import { PythonAdapterFactory } from '../../src/python-adapter-factory.js';
 import { PythonDebugAdapter } from '../../src/python-debug-adapter.js';
@@ -15,21 +19,13 @@ const findPythonExecutableMock = vi.mocked(findPythonExecutable);
 const getPythonVersionMock = vi.mocked(getPythonVersion);
 const getDebugpyVersionMock = vi.mocked(getDebugpyVersion);
 
-const createDependencies = (): AdapterDependencies & {
-  logger: { info: () => void; debug: () => void; error: () => void };
-} => ({
-  fileSystem: {} as unknown,
-  environment: {
-    get: () => undefined,
-    getAll: () => ({}),
-    getCurrentWorkingDirectory: () => process.cwd()
-  },
-  logger: {
-    info: () => undefined,
-    debug: () => undefined,
-    error: () => undefined
-  }
-});
+// These adapters read `process.env` directly and never consult `dependencies.environment`
+// (nor `dependencies.fileSystem`), but the inline double this replaced reported an *empty*
+// environment — keep that, so this stays a type fix and not a behaviour change.
+const createDependencies = (): AdapterDependencies =>
+  createMockAdapterDependencies({
+    environment: createMockEnvironment({ get: () => undefined, getAll: () => ({}) })
+  });
 
 describe('PythonAdapterFactory', () => {
   beforeEach(() => {
@@ -104,7 +100,7 @@ describe('PythonAdapterFactory', () => {
 
   it('warns when Python version cannot be determined', async () => {
     findPythonExecutableMock.mockResolvedValue('/usr/bin/python3');
-    getPythonVersionMock.mockResolvedValue(undefined);
+    getPythonVersionMock.mockResolvedValue(null);
     getDebugpyVersionMock.mockResolvedValue('1.6.0');
 
     const factory = new PythonAdapterFactory();

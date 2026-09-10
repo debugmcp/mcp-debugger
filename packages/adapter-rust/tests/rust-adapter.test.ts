@@ -12,6 +12,7 @@ import {
   AdapterDependencies,
   AdapterConfig
 } from '@debugmcp/shared';
+import type { LanguageSpecificLaunchConfig } from '@debugmcp/shared';
 import * as path from 'path';
 
 // RustAdapterFactory.validate() probes the real environment (vendored CodeLLDB on
@@ -243,9 +244,10 @@ describe('RustDebugAdapter', () => {
     });
 
     it('should default to terminal "console" so debuggee stdio arrives as DAP output events (issue #223)', async () => {
-      const transformed = await adapter.transformLaunchConfig({
+      const launchConfig: LanguageSpecificLaunchConfig = {
         program: './target/debug/myapp'
-      });
+      };
+      const transformed = await adapter.transformLaunchConfig(launchConfig);
 
       expect(transformed.terminal).toBe('console');
       expect(transformed.console).toBeUndefined();
@@ -258,21 +260,23 @@ describe('RustDebugAdapter', () => {
         ['externalTerminal', 'external']
       ];
       for (const [legacy, expected] of cases) {
-        const transformed = await adapter.transformLaunchConfig({
+        const launchConfig: LanguageSpecificLaunchConfig = {
           program: './target/debug/myapp',
           console: legacy
-        });
+        };
+        const transformed = await adapter.transformLaunchConfig(launchConfig);
         expect(transformed.terminal).toBe(expected);
         expect(transformed.console).toBeUndefined();
       }
     });
 
     it('should let an explicit terminal value win over a legacy console value', async () => {
-      const transformed = await adapter.transformLaunchConfig({
+      const launchConfig: LanguageSpecificLaunchConfig = {
         program: './target/debug/myapp',
         terminal: 'integrated',
         console: 'externalTerminal'
-      });
+      };
+      const transformed = await adapter.transformLaunchConfig(launchConfig);
 
       expect(transformed.terminal).toBe('integrated');
     });
@@ -284,10 +288,11 @@ describe('RustDebugAdapter', () => {
           '/home/user/proj': '/workspace'
         });
         try {
-          const transformed = await adapter.transformLaunchConfig({
+          const launchConfig: LanguageSpecificLaunchConfig = {
             program: './target/debug/myapp',
             cwd: '/project'
-          });
+          };
+          const transformed = await adapter.transformLaunchConfig(launchConfig);
 
           expect(deriveSourceMapFromBinary).toHaveBeenCalledWith(
             path.resolve('/project', './target/debug/myapp'),
@@ -302,11 +307,12 @@ describe('RustDebugAdapter', () => {
       it('skips derivation when the caller supplies sourceMap entries', async () => {
         vi.stubEnv('MCP_CONTAINER', 'true');
         try {
-          const transformed = await adapter.transformLaunchConfig({
+          const launchConfig: LanguageSpecificLaunchConfig = {
             program: './target/debug/myapp',
             cwd: '/project',
             sourceMap: { '/custom': '/workspace' }
-          });
+          };
+          const transformed = await adapter.transformLaunchConfig(launchConfig);
 
           expect(deriveSourceMapFromBinary).not.toHaveBeenCalled();
           expect(transformed.sourceMap).toEqual({ '/custom': '/workspace' });
@@ -316,10 +322,11 @@ describe('RustDebugAdapter', () => {
       });
 
       it('skips derivation outside container mode', async () => {
-        const transformed = await adapter.transformLaunchConfig({
+        const launchConfig: LanguageSpecificLaunchConfig = {
           program: './target/debug/myapp',
           cwd: '/project'
-        });
+        };
+        const transformed = await adapter.transformLaunchConfig(launchConfig);
 
         expect(deriveSourceMapFromBinary).not.toHaveBeenCalled();
         expect(transformed.sourceMap).toEqual({});

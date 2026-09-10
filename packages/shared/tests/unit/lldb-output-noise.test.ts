@@ -85,6 +85,8 @@ describe('lldbAnnotateOutputEvent (issue #441)', () => {
 
   it('is wired into the rust policy but not cpp', () => {
     expect(RustAdapterPolicy.annotateOutputEvent?.('console', RUST_LANG_SUPPORT_FAILURE)).toBeDefined();
-    expect(CppAdapterPolicy.annotateOutputEvent).toBeUndefined();
+    // The cpp policy does not declare the hook at all — assert on absence
+    // rather than on an undefined read, which the policy's type forbids.
+    expect('annotateOutputEvent' in CppAdapterPolicy).toBe(false);
   });
 });

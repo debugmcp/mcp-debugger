@@ -5,6 +5,19 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
 import { DebugLanguage, SessionState } from '@debugmcp/shared';
 import { createMockDependencies } from './session-manager-test-utils.js';
+import type { MockProxyManager } from '../../../test-utils/mocks/mock-proxy-manager.js';
+
+/**
+ * Flip the mock proxy's private running flag.
+ *
+ * The tests below replace `start()` wholesale and must reproduce its side
+ * effect: `sendDapRequest` reads `_isRunning` directly, so stubbing the public
+ * `isRunning()` would not be equivalent. Keeping the reach-in here means one
+ * cast for the file rather than one per call site.
+ */
+function setMockProxyRunning(proxyManager: MockProxyManager, running: boolean): void {
+  (proxyManager as unknown as { _isRunning: boolean })._isRunning = running;
+}
 
 describe('SessionManager - Debug Session Workflow', () => {
   let sessionManager: SessionManager;
@@ -36,8 +49,7 @@ describe('SessionManager - Debug Session Workflow', () => {
       // Create session
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        name: 'Full Workflow Test',
-        pythonPath: 'python'
+        name: 'Full Workflow Test'
       });
       
       expect(session).toMatchObject({
@@ -85,8 +97,7 @@ describe('SessionManager - Debug Session Workflow', () => {
     it('should handle dry run workflow correctly', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        name: 'Dry Run Test',
-        pythonPath: 'python'
+        name: 'Dry Run Test'
       });
       
       const startPromise = sessionManager.startDebugging(
@@ -116,8 +127,7 @@ describe('SessionManager - Debug Session Workflow', () => {
     it('propagates the effective log level into the proxy config (issue #403)', async () => {
       (dependencies.mockLogger as { level?: string }).level = 'warn';
       const session = await sessionManager.createSession({
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
 
       const startPromise = sessionManager.startDebugging(session.id, 'test.py', [], {}, true);
@@ -129,8 +139,7 @@ describe('SessionManager - Debug Session Workflow', () => {
 
     it('should handle stopOnEntry=false workflow', async () => {
       const session = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
       
       // Configure mock to not stop on entry
@@ -168,7 +177,7 @@ describe('SessionManager - Debug Session Workflow', () => {
 
       dependencies.mockProxyManager.start = vi.fn().mockImplementation(async (proxyConfig) => {
         dependencies.mockProxyManager.startCalls.push(proxyConfig);
-        (dependencies.mockProxyManager as unknown as { _isRunning: boolean })._isRunning = true;
+        setMockProxyRunning(dependencies.mockProxyManager, true);
         process.nextTick(() => {
           dependencies.mockProxyManager.emit('stopped', 1, 'breakpoint', {
             reason: 'breakpoint',
@@ -196,13 +205,12 @@ describe('SessionManager - Debug Session Workflow', () => {
 
     it('should handle terminated event during startup', async () => {
       const session = await sessionManager.createSession({
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
 
       // Override mock to emit 'terminated' instead of normal flow
       dependencies.mockProxyManager.start = vi.fn().mockImplementation(async (config) => {
-        dependencies.mockProxyManager._isRunning = true;
+        setMockProxyRunning(dependencies.mockProxyManager, true);
         dependencies.mockProxyManager.startCalls.push(config);
         process.nextTick(() => {
           dependencies.mockProxyManager.emit('terminated');
@@ -228,12 +236,11 @@ describe('SessionManager - Debug Session Workflow', () => {
 
     it('should handle exited event during startup', async () => {
       const session = await sessionManager.createSession({
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
 
       dependencies.mockProxyManager.start = vi.fn().mockImplementation(async (config) => {
-        dependencies.mockProxyManager._isRunning = true;
+        setMockProxyRunning(dependencies.mockProxyManager, true);
         dependencies.mockProxyManager.startCalls.push(config);
         process.nextTick(() => {
           dependencies.mockProxyManager.emit('exited', 0);
@@ -259,12 +266,11 @@ describe('SessionManager - Debug Session Workflow', () => {
 
     it('should handle exit event during startup', async () => {
       const session = await sessionManager.createSession({
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
 
       dependencies.mockProxyManager.start = vi.fn().mockImplementation(async (config) => {
-        dependencies.mockProxyManager._isRunning = true;
+        setMockProxyRunning(dependencies.mockProxyManager, true);
         dependencies.mockProxyManager.startCalls.push(config);
         process.nextTick(() => {
           dependencies.mockProxyManager.emit('exit', 1, 'SIGKILL');

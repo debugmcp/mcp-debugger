@@ -3,7 +3,8 @@
  */
 import { EventEmitter } from 'events';
 import { DebugProtocol } from '@vscode/debugprotocol';
-import { IProxyManager, ProxyConfig, ProxyManagerEvents } from '../../src/proxy/proxy-manager.js';
+import { IProxyManager, ProxyManagerEvents } from '../../../src/proxy/proxy-manager.js';
+import { ProxyConfig } from '../../../src/proxy/proxy-config.js';
 
 /** Error message thrown by start() when shouldFailStart is set; import this in
  * assertions instead of repeating the literal. */
