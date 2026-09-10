@@ -92,7 +92,30 @@ The JavaScript adapter automatically configures:
 
 - **Runtime**: Uses system Node.js or specified executable
 - **Console**: Captures stdout/stderr
-- **Smart Stepping**: Skips node internals
+- **Skipped code**: Node internals and, by default, `node_modules` (see below)
+- **Source maps**: On by default, for `.js` programs as well as `.ts` (see [TypeScript Support](#typescript-support))
+
+### Stepping and pausing inside dependencies (`justMyCode`, `skipFiles`)
+
+js-debug has no `justMyCode` key of its own; the launch transform turns the intent into js-debug's
+`skipFiles` (V8 blackboxing), and js-debug **resumes any pause or step that lands in a skipped frame**, stepping
+out into a synchronous caller — on a request path, node internals — rather than waiting for your code to run
+(issue #678). What that means in practice:
+
+| Launch | `skipFiles` sent | `smartStep` | A breakpoint inside a dependency | `step_over` from that breakpoint | `pause_execution` on an idle server |
+|---|---|---|---|---|---|
+| default (`justMyCode: true`) | `<node_internals>/**`, `**/node_modules/**` | `true` | fires; frame 0 is the dependency frame | does not land on a request path (`pending: true`; the message names the skipped frame and the remedy) | does not land (`pending: true`; the message says node_modules is blackboxed and what to do) |
+| `dapLaunchArgs: { justMyCode: false }` | `<node_internals>/**` | `false` | fires | lands on the next line of the dependency | lands as soon as any JavaScript runs (the next request or timer), in an internal frame if that is where it is (the stack response marks it). With the smart-stepper off, steps also stop in unmapped generated helpers it used to skip |
+| `dapLaunchArgs: { skipFiles: [...] }` | exactly your list | as above | — | — | — |
+
+A caller-supplied `skipFiles` **replaces** the default list (VS Code's launch.json semantics); include
+`<node_internals>/**` yourself if you still want internals skipped. An explicit `smartStep` always wins over the
+derived value. Attach sessions default neither key — see `attach_to_process` in the tool reference.
+
+A step whose stop is a breakpoint or an exception rather than the step itself is reported as
+`Step stopped on 'breakpoint'` with a `stopReason` — the location is where the program stopped, which is the
+next line when that line carries a breakpoint, and the very line you stepped from when a lost step's next request
+re-hit the same breakpoint (the message then says so).
 
 ### Custom Configuration
 
@@ -212,7 +235,17 @@ The adapter has built-in TypeScript support. When the factory validates the envi
 }
 ```
 
-Source maps are supported automatically when debugging compiled JavaScript -- breakpoints set in `.ts` files will resolve to the correct location in the generated `.js` if source maps are present.
+Source maps are on by default for every launch, `.js` programs included (js-debug's own default; issue #684).
+Launching a compiled TypeScript app from `dist/index.js` with `dist/**/*.js.map` beside it and `src/**/*.ts` on
+disk therefore behaves like debugging the sources: breakpoints set in `src/*.ts` bind and verify under their own
+path, and `get_stack_trace`, `get_local_variables`, `evaluate_expression`, `get_source_context` and every step
+location report `src/*.ts` lines. The default `outFiles` is `**/*.js` excluding `node_modules`, and
+`resolveSourceMapLocations` excludes `node_modules` too, so dependency maps are not applied. A program without
+maps is unaffected. A map whose sources are not on disk yields frames flagged `unresolvedSource` (issue #655).
+
+To see generated locations instead, pass `adapterLaunchConfig: { sourceMaps: false }`; `outFiles` you pass with it
+is forwarded untouched. A breakpoint you set in a generated file still binds and fires with maps on; js-debug then
+reports that one frame at its generated location while the frames below it map to their sources.
 
 If neither `tsx` nor `ts-node` is installed, the factory emits a warning (not an error), and you can still debug compiled `.js` files with source maps.
 

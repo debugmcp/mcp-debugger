@@ -115,6 +115,49 @@ describe('execution tool handlers', () => {
       expect(payload.message).toBe('Stepped over');
       expect(payload.state).toBe('paused');
     });
+
+    it('surfaces the controller wording and stopReason when a breakpoint, not the step, ended the step (issue #678)', async () => {
+      ctx.sessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+      ctx.sessionManager.stepOver.mockResolvedValue({
+        success: true,
+        state: 'paused',
+        data: {
+          message: "Step stopped on 'breakpoint' rather than on the step itself.",
+          stopReason: 'breakpoint',
+          location: { file: '/app/node_modules/router/index.js', line: 160, column: 16 }
+        }
+      });
+
+      const result = await stepTool(ctx, { sessionId: 'test-session' }, 'step_over');
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.success).toBe(true);
+      expect(payload.message).toBe("Step stopped on 'breakpoint' rather than on the step itself.");
+      expect(payload.stopReason).toBe('breakpoint');
+      expect(payload.location).toEqual({ file: '/app/node_modules/router/index.js', line: 160, column: 16 });
+      expect(payload.pending).toBeUndefined();
+    });
+
+    it('forwards a non-interrupting stopReason but keeps the "Stepped" wording (issue #678)', async () => {
+      ctx.sessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+      ctx.sessionManager.stepOver.mockResolvedValue({
+        success: true,
+        state: 'paused',
+        data: { message: 'Step completed.', stopReason: 'pause' }
+      });
+
+      const result = await stepTool(ctx, { sessionId: 'test-session' }, 'step_over');
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.message).toBe('Stepped over');
+      expect(payload.stopReason).toBe('pause');
+    });
   });
 
   describe('continueExecutionTool envelopes (issue #638)', () => {

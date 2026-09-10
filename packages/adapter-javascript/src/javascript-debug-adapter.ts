@@ -27,7 +27,8 @@ import {
   type AdapterCapabilities,
   type AdapterLaunchBarrier,
   OWNER_PID_ARG_PREFIX,
-  SESSION_ID_ARG_PREFIX
+  SESSION_ID_ARG_PREFIX,
+  resolveJsLaunchSkipFiles
 } from '@debugmcp/shared';
 import { DebugLanguage } from '@debugmcp/shared';
 import type { AdapterDependencies } from '@debugmcp/shared';
@@ -433,10 +434,10 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     // with an environment we don't control.
     this.injectExitCodeShim(mergedEnv);
 
-    // Skip files defaults with optional user merge (dedupe)
-    const defaultSkip = ['<node_internals>/**', '**/node_modules/**'];
-    const userSkip = Array.isArray(u.skipFiles) ? (u.skipFiles as string[]) : undefined;
-    const skipFiles = Array.from(new Set([...(userSkip || []), ...defaultSkip]));
+    // js-debug has no justMyCode key: the skip list is the only thing behind
+    // the intent, so it is derived from justMyCode here (issue #678). A caller
+    // list replaces the defaults, as in VS Code's launch.json.
+    const skipFiles = resolveJsLaunchSkipFiles(u);
 
     // Source maps and outFiles
     type MutableConfig = Partial<LanguageSpecificLaunchConfig> & { [key: string]: unknown };
@@ -449,7 +450,14 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       args,
       stopOnEntry,
       justMyCode,
-      smartStep: true,
+      // js-debug's smart-stepper steps out of any pause or step that lands in a
+      // skipped frame. Node internals are skipped on every launch, and on a
+      // server the request path enters user code by calls, never by returns,
+      // so with the stepper on a pause on an idle server never lands (issue
+      // #678; the #513 mechanism on attach). justMyCode: false means "let me
+      // see everything": turn the stepper off too, so the pause lands
+      // truthfully even in an internal frame. An explicit caller value wins.
+      smartStep: typeof u.smartStep === 'boolean' ? u.smartStep : justMyCode !== false,
       skipFiles,
       console: 'internalConsole',
       outputCapture: 'std',
@@ -457,22 +465,20 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       env: mergedEnv
     };
 
-    if (isTS) {
-      result.sourceMaps = true;
-      const outFiles = determineOutFiles(Array.isArray(u.outFiles) ? (u.outFiles as string[]) : undefined);
-      result.outFiles = outFiles;
+    // Source maps are on unless the caller opts out — js-debug's own default,
+    // for .js programs as much as for .ts ones (issue #684): a compiled
+    // TypeScript app run from dist/ then reports stops, frames, locals and
+    // step locations in the src/*.ts view its breakpoints were set in. A
+    // program without maps is unaffected; maps whose sources are missing
+    // surface as unresolvedSource frames (issue #655).
+    const userOut = Array.isArray(u.outFiles) ? (u.outFiles as string[]) : undefined;
+    result.sourceMaps = typeof u.sourceMaps === 'boolean' ? u.sourceMaps : true;
+    if (result.sourceMaps) {
+      result.outFiles = determineOutFiles(userOut);
       result.resolveSourceMapLocations = ['**', '!**/node_modules/**'];
-    } else {
-      const sm = Boolean(u.sourceMaps as unknown);
-      result.sourceMaps = sm;
-      const userOut = Array.isArray(u.outFiles) ? (u.outFiles as string[]) : undefined;
-      if (sm) {
-        result.outFiles = determineOutFiles(userOut);
-        result.resolveSourceMapLocations = ['**', '!**/node_modules/**'];
-      } else if (userOut) {
-        // If user explicitly provided outFiles while sourceMaps false, pass through
-        result.outFiles = userOut;
-      }
+    } else if (userOut) {
+      // Caller opted out of maps but named outFiles: pass through untouched
+      result.outFiles = userOut;
     }
 
     // Runtime selection and args with overrides and idempotency
@@ -724,7 +730,8 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       // skipFiles is deliberately NOT defaulted: '**/node_modules/**' would
       // V8-blackbox dependency scripts and turn a pause landing in framework
       // glue on an idle server into the #513 step-chase; the policy hides
-      // those frames from get_stack_trace instead.
+      // those frames from get_stack_trace instead. (Launch does blackbox
+      // node_modules while justMyCode is true — see resolveJsLaunchSkipFiles.)
       ...('resolveSourceMapLocations' in rest
         ? {}
         : { resolveSourceMapLocations: ['**', '!**/node_modules/**'] }),

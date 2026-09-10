@@ -91,6 +91,60 @@ describe('JsDebugAdapterPolicy', () => {
     expect(JsDebugAdapterPolicy.isAsyncBoundaryFrame!({ id: 4, name: 'VM123', file: '<unknown_source>', line: 3 })).toBe(false);
   });
 
+  describe('describePendingStop (issue #678)', () => {
+    const hook = JsDebugAdapterPolicy.describePendingStop!;
+    const depFrame = { id: 1, name: 'handle', file: 'C:\\app\\node_modules\\router\\index.js', line: 160 };
+    const internalFrame = { id: 2, name: 'processTicksAndRejections', file: '<node_internals>/internal/process/task_queues', line: 95 };
+    const userFrame = { id: 3, name: 'main', file: '/app/src/index.js', line: 12 };
+
+    it('says nothing for attach sessions (skipFiles is not defaulted there)', () => {
+      expect(hook({ operation: 'pause', attachMode: true })).toBeUndefined();
+      expect(hook({ operation: 'step', attachMode: true, fromFrame: depFrame })).toBeUndefined();
+    });
+
+    it('explains a pending pause on a default launch, which blackboxes node_modules', () => {
+      const text = hook({ operation: 'pause', attachMode: false, launch: {} });
+      expect(text).toMatch(/node_modules/);
+      expect(text).toMatch(/justMyCode: false/);
+    });
+
+    it('says nothing about a pending pause once node_modules is not blackboxed', () => {
+      expect(hook({ operation: 'pause', attachMode: false, launch: { dapLaunchArgs: { justMyCode: false } } })).toBeUndefined();
+      expect(hook({ operation: 'pause', attachMode: false, launch: { adapterLaunchConfig: { skipFiles: ['**/foo/**'] } } })).toBeUndefined();
+    });
+
+    it('lets adapterLaunchConfig win over dapLaunchArgs, as the launcher merge does', () => {
+      const text = hook({
+        operation: 'pause',
+        attachMode: false,
+        launch: { dapLaunchArgs: { justMyCode: false }, adapterLaunchConfig: { skipFiles: ['**/node_modules/**'] } }
+      });
+      expect(text).toMatch(/node_modules/);
+    });
+
+    it('explains a pending step issued from a blackboxed dependency frame, naming the frame', () => {
+      const text = hook({ operation: 'step', attachMode: false, launch: {}, fromFrame: depFrame });
+      expect(text).toMatch(/skipped frame/);
+      expect(text).toMatch(/router[\\/]index\.js:160/);
+      expect(text).toMatch(/justMyCode: false/);
+    });
+
+    it('says nothing about a step from a dependency frame once node_modules is not blackboxed', () => {
+      expect(hook({ operation: 'step', attachMode: false, launch: { dapLaunchArgs: { justMyCode: false } }, fromFrame: depFrame })).toBeUndefined();
+    });
+
+    it('explains a step issued from a node-internals frame without offering justMyCode (internals are always skipped)', () => {
+      const text = hook({ operation: 'step', attachMode: false, launch: { dapLaunchArgs: { justMyCode: false } }, fromFrame: internalFrame });
+      expect(text).toMatch(/node internals/i);
+      expect(text).not.toMatch(/justMyCode/);
+    });
+
+    it('says nothing about a step from user code or a step whose origin frame is unknown', () => {
+      expect(hook({ operation: 'step', attachMode: false, launch: {}, fromFrame: userFrame })).toBeUndefined();
+      expect(hook({ operation: 'step', attachMode: false, launch: {} })).toBeUndefined();
+    });
+  });
+
   it('extracts local variables while excluding special entries', () => {
     const frames = [{ id: 1 }];
     const scopes = {

@@ -149,15 +149,13 @@ describe('JavascriptDebugAdapter.transformLaunchConfig (edge cases)', () => {
     expect((out as any).outFiles).toBeUndefined();
   });
 
-  it('skipFiles merge/dedupe with defaults', async () => {
+  it('a caller skipFiles list is sent as given — no defaults merged in (issue #678)', async () => {
     const program = path.resolve('/proj/app.js');
     const out = await adapter.transformLaunchConfig({
       program,
-      skipFiles: ['**/*.spec.js', '**/node_modules/**'] // includes a default to test dedupe
+      skipFiles: ['**/*.spec.js', '**/node_modules/**']
     } as any);
 
-    const sf = (out.skipFiles || []) as string[];
-    const expected = ['**/*.spec.js', '<node_internals>/**', '**/node_modules/**'];
-    expect([...sf].sort()).toEqual([...expected].sort());
+    expect(out.skipFiles).toEqual(['**/*.spec.js', '**/node_modules/**']);
   });
 });

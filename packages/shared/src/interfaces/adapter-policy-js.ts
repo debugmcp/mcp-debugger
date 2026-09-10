@@ -6,7 +6,8 @@
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import * as path from 'path';
-import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction, QueuedDapCommand, StopReasonContext } from './adapter-policy.js';
+import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction, QueuedDapCommand, StopReasonContext, PendingStopContext } from './adapter-policy.js';
+import { jsLaunchBlackboxesNodeModules } from './js-launch-defaults.js';
 import { emptyLocalVariableExtraction, extractionFromScope, resolveExceptionFilters } from './adapter-policy.js';
 import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
@@ -186,7 +187,7 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
    *    stays visible. Workspace packages are realpathed by Node, so a monorepo
    *    package linked under `node_modules/@scope/pkg` reports its real
    *    `packages/pkg/…` path and stays visible; only `--preserve-symlinks`
-   *    hides it — the same rule launch already applies via `skipFiles`. A
+   *    hides it — the same rule a justMyCode launch applies via `skipFiles`. A
    *    debuggee that *is* an installed package (`/usr/lib/node_modules/<pkg>`)
    *    becomes all-internal: the central issue-#346 fallback keeps frame 0 and
    *    the response note says so; `includeInternals: true` shows everything.
@@ -226,6 +227,51 @@ export const JsDebugAdapterPolicy: AdapterPolicy = {
    */
   isAsyncBoundaryFrame: (frame: StackFrame): boolean =>
     hasNoSource(frame.file || '') && (frame.line ?? 0) === 0,
+
+  /**
+   * Why a launch-mode pause or step may never stop (issue #678). While the
+   * launch blackboxes node_modules — the default, see resolveJsLaunchSkipFiles
+   * — js-debug resumes every pause that lands in a skipped frame, and a step
+   * issued from one only ever steps OUT of it, into a synchronous caller. On a
+   * request path those callers are node internals, so neither lands — user
+   * code that runs later (a route handler, the next request's middleware)
+   * does not end them; measured on mcp-debugger's own HTTP server and on the
+   * express_idle_server e2e fixture. Node internals are skipped on every
+   * launch, so a step from one of those frames gets the same explanation
+   * without the justMyCode remedy. Attach sessions do not default skipFiles
+   * (#513) and get nothing here.
+   */
+  describePendingStop: (info: PendingStopContext): string | undefined => {
+    if (info.attachMode) {
+      return undefined;
+    }
+    const merged = { ...(info.launch?.dapLaunchArgs ?? {}), ...(info.launch?.adapterLaunchConfig ?? {}) };
+    const blackboxed = jsLaunchBlackboxesNodeModules(merged);
+    if (info.operation === 'pause') {
+      return blackboxed
+        ? 'This launch blackboxes node_modules (justMyCode: true): js-debug resumes a pause that lands in a skipped ' +
+          'frame, and on a server that is where every pause lands, so the pause does not land at all. Set a breakpoint ' +
+          'in your own code, or relaunch with dapLaunchArgs.justMyCode: false to pause inside dependencies.'
+        : undefined;
+    }
+    const frame = info.fromFrame;
+    if (!frame) {
+      return undefined;
+    }
+    const file = frame.file || '';
+    const where = `${file}:${frame.line}`;
+    if (file.includes('<node_internals>') || file.startsWith('node:')) {
+      return `The step was issued from a skipped frame in Node internals (${where}); js-debug only steps out of ` +
+        'skipped code into a synchronous caller, so the step may not land at all. Use step_out, or ' +
+        'continue_execution with a breakpoint in your own code.';
+    }
+    if (blackboxed && NODE_MODULES_SEGMENT.test(file)) {
+      return `The step was issued from a skipped frame (${where}); this launch blackboxes node_modules ` +
+        '(justMyCode: true) and js-debug only steps out of skipped code into a synchronous caller, so on a request ' +
+        'path the step does not land at all. Relaunch with dapLaunchArgs.justMyCode: false to step through dependencies.';
+    }
+    return undefined;
+  },
 
   /**
    * Filter stack frames to optionally remove Node.js internals and

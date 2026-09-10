@@ -99,6 +99,27 @@ export const ErrorMessages = {
     `pause_execution to interrupt.`,
 
   /**
+   * A step whose stop was recorded as a breakpoint or an exception rather than
+   * the step (issue #678). Without this the response read "Stepped over" at a
+   * location the step never reached: observed live when js-debug resumed a
+   * step issued from a blackboxed frame and the next request re-hit the same
+   * breakpoint. The wording does not claim the step was cut short, because a
+   * step that lands on the next line is also reported as 'breakpoint' when
+   * that line carries one (observed live with js-debug); it only says that
+   * the location is where the program stopped. `backAtOrigin` adds the
+   * lost-step signature — the stop is on the very line the step was issued
+   * from — when the caller knows the origin.
+   * Used in: src/session/execution/execution-controller.ts
+   *
+   * @param reason - The recorded stop reason (e.g. 'breakpoint', 'exception')
+   * @param opts.backAtOrigin - The stop is on the file+line the step left from
+   */
+  stepStoppedOn: (reason: string, opts?: { backAtOrigin?: boolean }) =>
+    `Step stopped on '${reason}' rather than on the step itself: the location is where the program ` +
+    `stopped, not necessarily where the step alone would have landed; see stopReason.` +
+    (opts?.backAtOrigin ? ' The program is back at the line the step was issued from.' : ''),
+
+  /**
    * Informational message for pause requests not yet honored within the grace window
    * Occurs when: A pause request is acknowledged but no 'stopped' event arrives within the grace
    * window — the target may be blocked in native code or a syscall, which is not an error

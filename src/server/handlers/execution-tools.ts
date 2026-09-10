@@ -5,6 +5,7 @@
 import { SessionState } from '@debugmcp/shared';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import type { DebugResult, StepResultData } from '../../session/session-manager-core.js';
+import { isStepInterruptingReason } from '../../session/session-manager-core.js';
 import { requireSessionId } from '../tool-validation.js';
 import { readLineContext } from './shared.js';
 import {
@@ -68,6 +69,18 @@ export const stepTool: ToolHandler = async (ctx, args, toolName) => {
       // exit (non-zero, or no code at all) to ERROR, so a step that died with
       // the proxy lands there rather than in STOPPED.
       response.message = resultData.message;
+    } else if (resultData?.stopReason) {
+      // The stop that ended the step was not the step (issue #678): always
+      // name it, and let the controller's wording through for a breakpoint
+      // or exception — "Stepped over" at a line the step never reached is the
+      // misreport observed live.
+      response.stopReason = resultData.stopReason;
+      if (resultData.rawStopReason) {
+        response.rawStopReason = resultData.rawStopReason;
+      }
+      if (isStepInterruptingReason(resultData.stopReason) && resultData.message) {
+        response.message = resultData.message;
+      }
     }
 
     // Extract location from result data

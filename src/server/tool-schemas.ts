@@ -148,7 +148,7 @@ export function buildToolDefinitions(options: BuildToolDefinitionsOptions): Tool
             type: 'object', 
             properties: { 
               stopOnEntry: { type: 'boolean', description: 'Pause at the first line before running. Default false — the opposite of attach, which pauses unless stopOnEntry is false' },
-              justMyCode: { type: 'boolean' } 
+              justMyCode: { type: 'boolean', description: 'Only debug user code (default true). JavaScript launch: true blackboxes node_modules via skipFiles, so a pause or step that lands inside a dependency is resumed by js-debug; pass false to pause and step inside dependencies' }
             },
             additionalProperties: true
           },

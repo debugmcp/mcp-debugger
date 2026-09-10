@@ -105,11 +105,28 @@ export interface DebugResultData extends ProxyFailureDiagnostics {
  */
 export type StopLocation = Pick<StackFrame, 'file' | 'line' | 'column'>;
 
-/** What a step operation returns: `message` is always set, plus where it landed. */
+/**
+ * What a step operation returns: `message` is always set, plus where it
+ * landed. `stopReason`/`rawStopReason` are present only when the stop that
+ * ended the step was recorded and was not the step itself (issue #678) — a
+ * breakpoint or exception that fired first, or a pause from elsewhere.
+ */
 export type StepResultData = DebugResultData & {
   message: string;
   location?: StopLocation;
+  stopReason?: string;
+  rawStopReason?: string;
 };
+
+/**
+ * Whether a stop reason recorded for a step gets its own wording instead of
+ * "Stepped over" (issue #678): the breakpoint family and exceptions. A `pause`
+ * is reported as `stopReason` too, but keeps the step's own wording — some
+ * adapters use it for stops the user did ask for.
+ */
+export function isStepInterruptingReason(reason: string | undefined): boolean {
+  return reason !== undefined && (BREAKPOINT_STOP_REASONS.has(reason) || reason === 'exception');
+}
 
 /**
  * What a pause returns. `stopReason`/`rawStopReason` are present only when
