@@ -258,6 +258,33 @@ describe('Server Inspection Tools Tests', () => {
       expect(content.note).toContain('includeInternals: true');
     });
 
+    it('surfaces the paused frame and its note when the display filter would have hidden it (issue #672)', async () => {
+      const mockSession = {
+        proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(1) }
+      };
+      mockSessionManager.getSession.mockReturnValue(mockSession);
+      const pausedFrame = { id: 30, name: 'handle', file: '/app/node_modules/router/index.js', line: 160 };
+      mockSessionManager.getStackTraceDetailed.mockResolvedValue({
+        frames: [pausedFrame, { id: 53, name: 'handleHttpCommand', file: '/app/dist/cli/http-command.js', line: 353 }],
+        totalFrameCount: 6, hiddenFrameCount: 4, allFramesInternal: false,
+        pausedFrame: { frame: pausedFrame, kept: true },
+        pausedFrameNote: "Paused inside an internal frame 'handle' (/app/node_modules/router/index.js:160); kept as frame 0 so locals and evaluate anchor on the actual stop location."
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'get_stack_trace', arguments: { sessionId: 'test-session' } }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      expect(content.pausedFrame).toEqual({ ...pausedFrame, kept: true });
+      expect(content.hiddenFrames).toBe(4);
+      expect(content.note).toContain('kept as frame 0');
+      // The handler owns the includeInternals sentence; it must appear once.
+      expect(content.note.match(/includeInternals: true/g)).toHaveLength(1);
+    });
+
     it('notes frames whose file is a source-map label rather than an openable path (issue #655)', async () => {
       const mockSession = {
         proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(1) }

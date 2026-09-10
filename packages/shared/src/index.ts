@@ -191,6 +191,7 @@ export type {
   HandshakeContext,
   QueuedDapCommand
 } from './interfaces/adapter-policy.js';
+export { BREAKPOINT_STOP_REASONS } from './interfaces/adapter-policy.js';
 export {
   DefaultAdapterPolicy,
   resolveExceptionFilters,

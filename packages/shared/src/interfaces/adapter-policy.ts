@@ -43,6 +43,21 @@ export interface AdapterSpecificState {
 }
 
 /**
+ * The DAP stop reasons that mean "a breakpoint the user set fired". Shared by
+ * the session layer's first-stop auto-continue guard (a stop with one of these
+ * reasons is never auto-continued) and the frame resolver's paused-frame rule
+ * (issue #672), so a policy that relabels a stop to a breakpoint-shaped reason
+ * — the way the LLDB and .NET policies produce 'function breakpoint' — is
+ * honoured by both without a second list to update.
+ */
+export const BREAKPOINT_STOP_REASONS: ReadonlySet<string> = new Set([
+  'breakpoint',
+  'function breakpoint',
+  'data breakpoint',
+  'instruction breakpoint'
+]);
+
+/**
  * Context passed to AdapterPolicy.normalizeStopReason (issues #260/#302).
  * See that method's doc comment for the completeness rules.
  */
@@ -272,6 +287,17 @@ export interface AdapterPolicy {
    * @returns True if the frame is internal/framework code, false otherwise
    */
   isInternalFrame?(frame: StackFrame): boolean;
+
+  /**
+   * True for a frame that marks an async boundary in the adapter's stack —
+   * js-debug's `await` / `Promise.then` / `HTTPINCOMINGMESSAGE` labels — below
+   * which the frames belong to an earlier activation the runtime can no longer
+   * evaluate in. The frame resolver uses it to decide whether the first visible
+   * frame under a hidden paused frame is a real anchor at all (issue #672):
+   * when a boundary lies between them, the paused frame is kept whatever the
+   * stop reason. Optional — absent means the adapter has no such frames.
+   */
+  isAsyncBoundaryFrame?(frame: StackFrame): boolean;
 
   /**
    * Return true to drop a DAP 'output' event that is known adapter-internal
