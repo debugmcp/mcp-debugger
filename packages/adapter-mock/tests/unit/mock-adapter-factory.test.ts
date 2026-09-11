@@ -1,24 +1,20 @@
 import { describe, it, expect } from 'vitest';
 import type { AdapterDependencies } from '@debugmcp/shared';
+import {
+  createMockAdapterDependencies,
+  createMockEnvironment
+} from '../../../../tests/test-utils/helpers/adapter-dependencies.js';
 import { DebugFeature, DebugLanguage } from '@debugmcp/shared';
 import { MockAdapterFactory, createMockAdapterFactory } from '../../src/mock-adapter-factory.js';
 import { MockDebugAdapter } from '../../src/mock-debug-adapter.js';
 
-const createDependencies = (): AdapterDependencies & {
-  logger: { info: () => void; debug: () => void; error: () => void };
-} => ({
-  fileSystem: {} as unknown,
-  environment: {
-    get: () => undefined,
-    getAll: () => ({}),
-    getCurrentWorkingDirectory: () => process.cwd()
-  },
-  logger: {
-    info: () => undefined,
-    debug: () => undefined,
-    error: () => undefined
-  }
-});
+// These adapters read `process.env` directly and never consult `dependencies.environment`
+// (nor `dependencies.fileSystem`), but the inline double this replaced reported an *empty*
+// environment — keep that, so this stays a type fix and not a behaviour change.
+const createDependencies = (): AdapterDependencies =>
+  createMockAdapterDependencies({
+    environment: createMockEnvironment({ get: () => undefined, getAll: () => ({}) })
+  });
 
 describe('MockAdapterFactory', () => {
   it('creates MockDebugAdapter instances using provided configuration', () => {
@@ -50,7 +46,7 @@ describe('MockAdapterFactory', () => {
     expect(result.valid).toBe(true);
     expect(result.errors).toEqual([]);
     expect(result.warnings).toEqual([]);
-    expect(result.details.config).toEqual({});
+    expect(result.details?.config).toEqual({});
   });
 
   it('createMockAdapterFactory helper forwards configuration', () => {

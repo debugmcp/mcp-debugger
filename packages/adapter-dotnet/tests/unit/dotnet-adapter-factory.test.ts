@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { AdapterDependencies } from '@debugmcp/shared';
+import {
+  createMockAdapterDependencies,
+  createMockEnvironment
+} from '../../../../tests/test-utils/helpers/adapter-dependencies.js';
 import { DebugLanguage } from '@debugmcp/shared';
 import { DotnetAdapterFactory } from '../../src/DotnetAdapterFactory.js';
 import { DotnetDebugAdapter } from '../../src/DotnetDebugAdapter.js';
@@ -24,19 +28,13 @@ const findNetcoredbgExecutableMock = vi.mocked(findNetcoredbgExecutable);
 const getNetcoredbgVersionMock = vi.mocked(getNetcoredbgVersion);
 const getDotnetSdkVersionMock = vi.mocked(getDotnetSdkVersion);
 
-const createDependencies = (): AdapterDependencies => ({
-  fileSystem: {} as unknown,
-  environment: {
-    get: () => undefined,
-    getAll: () => ({}),
-    getCurrentWorkingDirectory: () => process.cwd()
-  },
-  logger: {
-    info: () => undefined,
-    debug: () => undefined,
-    error: () => undefined
-  }
-});
+// These adapters read `process.env` directly and never consult `dependencies.environment`
+// (nor `dependencies.fileSystem`), but the inline double this replaced reported an *empty*
+// environment — keep that, so this stays a type fix and not a behaviour change.
+const createDependencies = (): AdapterDependencies =>
+  createMockAdapterDependencies({
+    environment: createMockEnvironment({ get: () => undefined, getAll: () => ({}) })
+  });
 
 describe('DotnetAdapterFactory', () => {
   beforeEach(() => {

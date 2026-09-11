@@ -8,18 +8,19 @@
  * EOF/close/error, protocol-level server close, or signals — the proxy stops its
  * backend child exactly once and then exits, even if backend.stop() hangs or throws.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, type Mock } from 'vitest';
 import { EventEmitter } from 'events';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore -- plain-JS module without type declarations
 import {
   installShutdownHandlers,
   isIntentionalTransportAbort,
   killChildGracefully,
 } from '../../../tools/dev-proxy/shutdown.mjs';
 
+// `Mock<Signature>` rather than `ReturnType<typeof vi.fn>`: the latter resolves to
+// `Mock<Procedure | Constructable>`, which carries no plain call signature and so
+// satisfies no concrete parameter type.
 interface FakeProc extends EventEmitter {
-  exit: ReturnType<typeof vi.fn>;
+  exit: Mock<(code?: number) => void>;
 }
 
 function makeDeps() {
@@ -162,8 +163,8 @@ describe('dev-proxy installShutdownHandlers', () => {
 interface FakeChild extends EventEmitter {
   pid: number;
   exitCode: number | null;
-  kill: ReturnType<typeof vi.fn>;
-  stdin: { destroyed: boolean; end: ReturnType<typeof vi.fn> } | null;
+  kill: Mock<(signal?: NodeJS.Signals) => void>;
+  stdin: { destroyed: boolean; end: Mock<() => void> } | null;
 }
 
 function makeFakeChild({ withStdin = true }: { withStdin?: boolean } = {}): FakeChild {

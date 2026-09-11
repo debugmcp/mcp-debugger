@@ -10,7 +10,7 @@ import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
 
-export const PythonAdapterPolicy: AdapterPolicy = {
+export const PythonAdapterPolicy = {
   name: 'python',
   supportsLogPoints: true,
   supportsFunctionBreakpoints: true,
@@ -350,4 +350,4 @@ export const PythonAdapterPolicy: AdapterPolicy = {
       logDir: payload.logDir
     };
   }
-};
+} satisfies AdapterPolicy;

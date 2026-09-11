@@ -74,7 +74,10 @@ async function getToolsFromServer(server: DebugMcpServer): Promise<Array<{
   // Spy on setRequestHandler
   const originalSetRequestHandler = server.server.setRequestHandler.bind(server.server);
   server.server.setRequestHandler = vi.fn().mockImplementation(
-    (schema: unknown, handler: unknown) => {
+    (
+      schema: Parameters<typeof originalSetRequestHandler>[0],
+      handler: Parameters<typeof originalSetRequestHandler>[1]
+    ) => {
       // Check if this is the ListToolsRequestSchema
       if (schema === ListToolsRequestSchema) {
         capturedHandler = handler;

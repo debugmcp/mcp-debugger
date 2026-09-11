@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Mock implementation of the Debug Adapter Protocol (DAP) client
  * 
@@ -7,6 +6,9 @@
  */
 import { vi } from 'vitest';
 import { EventEmitter } from 'events';
+
+/** A listener registered on this mock. `Function` is too wide for EventEmitter.on(). */
+type DapEventHandler = (...args: unknown[]) => void;
 
 // Events tracked by the client
 export type DapEvent = 
@@ -40,7 +42,7 @@ export class MockDapClient extends EventEmitter {
   public sendRequest = vi.fn().mockResolvedValue({});
   
   // Event handlers
-  private eventHandlers: Map<string, Function[]> = new Map();
+  private eventHandlers: Map<string, DapEventHandler[]> = new Map();
 
   // Per-command mock responses and errors
   private mockResponses: Map<string, any> = new Map();
@@ -50,7 +52,7 @@ export class MockDapClient extends EventEmitter {
     super();
     
     // Create a wrapper around the on method to track registered handlers
-    this.on = vi.fn().mockImplementation((event: string, handler: Function) => {
+    this.on = vi.fn().mockImplementation((event: string, handler: DapEventHandler) => {
       if (!this.eventHandlers.has(event)) {
         this.eventHandlers.set(event, []);
       }

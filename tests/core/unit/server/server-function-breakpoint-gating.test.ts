@@ -12,7 +12,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
-import { createProductionDependencies } from '../../../../src/container/dependencies.js';
+import { createProductionDependencies, type Dependencies } from '../../../../src/container/dependencies.js';
 import {
   createMockDependencies,
   createMockServer,
@@ -29,7 +29,7 @@ vi.mock('../../../../src/container/dependencies.js');
 describe('set_breakpoint function gating (#271 phase 3)', () => {
   let mockServer: any;
   let mockSessionManager: any;
-  let mockDependencies: any;
+  let mockDependencies: Dependencies;
   let callToolHandler: any;
   let listToolsHandler: any;
 
@@ -215,7 +215,12 @@ describe('set_breakpoint function-name normalization (issue #467)', () => {
 
   beforeEach(() => {
     const mockDependencies = createMockDependencies();
-    vi.mocked(createProductionDependencies).mockReturnValue(mockDependencies);
+    // createMockDependencies() is a deliberate partial double: processManager,
+    // networkManager and the factories are bare vi.fn() placeholders these tests
+    // never call. (The single-point fix is a typed return on the helper itself.)
+    vi.mocked(createProductionDependencies).mockReturnValue(
+      mockDependencies
+    );
     mockServer = createMockServer();
     vi.mocked(Server).mockImplementation(function() { return mockServer as any; });
     const mockStdioTransport = createMockStdioTransport();

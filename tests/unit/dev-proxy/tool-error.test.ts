@@ -12,8 +12,6 @@
  * that, in parallel runs, can destroy every other agent's sessions.
  */
 import { describe, it, expect } from 'vitest';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore -- plain-JS module without type declarations
 import { isBackendUnavailableError, dedupeMcpErrorPrefix, assertBackendAvailable } from '../../../tools/dev-proxy/tool-error.mjs';
 
 describe('dev-proxy isBackendUnavailableError', () => {

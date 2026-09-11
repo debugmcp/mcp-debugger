@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+﻿import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import path from 'node:path';
 import fs from 'node:fs';
 import { EventEmitter } from 'node:events';
@@ -9,7 +9,7 @@ vi.mock('child_process', async () => {
   return { ...actual, spawn };
 });
 
-import { spawn } from 'child_process';
+import { spawn, type SpawnOptions } from 'child_process';
 import {
   findPythonExecutable,
   setDefaultCommandFinder,
@@ -23,7 +23,9 @@ type ChildProcessMock = EventEmitter & {
   kill: () => void;
 };
 
-const spawnMock = spawn as unknown as vi.Mock;
+// `spawn` gets a deliberately partial `ChildProcess` double (an EventEmitter with two
+// streams), so the alias is typed to what the double actually is.
+const spawnMock = spawn as unknown as Mock<(command: string, args?: readonly string[], options?: SpawnOptions) => ChildProcessMock>;
 
 const createSpawn = (options: { exitCode: number; stdout?: string; stderr?: string }) => {
   const proc = new EventEmitter() as ChildProcessMock;

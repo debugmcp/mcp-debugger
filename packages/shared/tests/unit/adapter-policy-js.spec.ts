@@ -631,10 +631,9 @@ describe('JsDebugAdapterPolicy', () => {
         { requestId: '3', dapCommand: 'configurationDone' },
         { requestId: '4', dapCommand: 'threads' },
       ];
-      const ordered = JsDebugAdapterPolicy.processQueuedCommands!(
-        commands,
-        JsDebugAdapterPolicy.createInitialState()
-      );
+      // The ordering is state-independent, so the policy's implementation
+      // takes the command list alone.
+      const ordered = JsDebugAdapterPolicy.processQueuedCommands(commands);
       expect(ordered.map(c => c.dapCommand)).toEqual([
         'setBreakpoints',
         'configurationDone',

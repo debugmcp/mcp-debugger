@@ -297,7 +297,7 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
     };
 
     // If a .java source file is provided as 'program', determine mainClass
-    const program = (config as Record<string, unknown>).program as string | undefined;
+    const program = config.program;
     if (program) {
       if (program.endsWith('.java')) {
         javaConfig.mainClass = path.basename(program, '.java');

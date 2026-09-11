@@ -16,7 +16,11 @@ import type {
   IFileSystem,
   IProcessSpawner,
   IDapClient,
-  ProxyInitPayload
+  ProxyInitPayload,
+  StatusMessage,
+  DapResponseMessage,
+  DapEventMessage,
+  ErrorMessage
 } from '../../src/proxy/dap-proxy-interfaces.js';
 import { ProxyState } from '../../src/proxy/dap-proxy-interfaces.js';
 import { GoAdapterPolicy } from '@debugmcp/shared';
@@ -32,7 +36,9 @@ const createMockLogger = (): ILogger => ({
 
 const createMockFileSystem = (): IFileSystem => ({
   ensureDir: vi.fn().mockResolvedValue(undefined),
-  pathExists: vi.fn().mockResolvedValue(true)
+  pathExists: vi.fn().mockResolvedValue(true),
+  readFile: vi.fn().mockResolvedValue(''),
+  remove: vi.fn().mockResolvedValue(undefined)
 });
 
 const createMockProcessSpawner = (): IProcessSpawner => ({
@@ -76,8 +82,16 @@ const createMockDapClient = (): IDapClient & EventEmitter => {
   }) as IDapClient & EventEmitter;
 };
 
+/**
+ * Everything the worker hands to `IMessageSender.send`. The interface itself
+ * declares the parameter as `unknown`, so the mock is typed with the concrete
+ * union instead — that is what lets the assertion below discriminate on
+ * `.type` without a cast.
+ */
+type SentMessage = StatusMessage | DapResponseMessage | DapEventMessage | ErrorMessage;
+
 const createMockMessageSender = () => ({
-  send: vi.fn()
+  send: vi.fn<(message: SentMessage) => void>()
 });
 
 const GO_PAYLOAD: ProxyInitPayload = {
@@ -216,8 +230,7 @@ describe('Go initialized event fallback', () => {
 
     // Final state should be CONNECTED
     const statusCall = mockMessageSender.send.mock.calls.find(
-      ([msg]: [{ type: string; status: string }]) =>
-        msg.type === 'status' && msg.status === 'adapter_configured_and_launched'
+      ([msg]) => msg.type === 'status' && msg.status === 'adapter_configured_and_launched'
     );
     expect(statusCall).toBeDefined();
     expect(worker.getState()).toBe(ProxyState.CONNECTED);

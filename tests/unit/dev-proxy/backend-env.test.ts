@@ -1,6 +1,4 @@
 import { describe, expect, it } from 'vitest';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore -- plain-JS module without type declarations
 import {
   buildBackendEnvironment,
   updateBackendEnvOverrides,

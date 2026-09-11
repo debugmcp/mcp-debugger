@@ -36,18 +36,15 @@ describe('SessionManager - Multi-Session Management', () => {
     // Create multiple sessions
     const session1 = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        name: 'Session 1',
-        pythonPath: 'python'
+        name: 'Session 1'
       });
     const session2 = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        name: 'Session 2',
-        pythonPath: 'python'
+        name: 'Session 2'
       });
     const session3 = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        name: 'Session 3',
-        pythonPath: 'python'
+        name: 'Session 3'
       });
     
     // All sessions should be created
@@ -81,13 +78,11 @@ describe('SessionManager - Multi-Session Management', () => {
     
     const session1 = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        name: 'Session 1',
-        pythonPath: 'python'
+        name: 'Session 1'
       });
     const session2 = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        name: 'Session 2',
-        pythonPath: 'python'
+        name: 'Session 2'
       });
     
     // Start both sessions
@@ -108,12 +103,10 @@ describe('SessionManager - Multi-Session Management', () => {
   it('should handle closeAllSessions with active sessions', async () => {
     // Create and start multiple sessions
     const session1 = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
     const session2 = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
     
     await sessionManager.startDebugging(session1.id, 'test1.py');
@@ -144,12 +137,10 @@ describe('SessionManager - Multi-Session Management', () => {
   it('should handle errors in individual sessions during closeAllSessions', async () => {
     // Create multiple sessions
     const session1 = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
     const session2 = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
     
     await sessionManager.startDebugging(session1.id, 'test1.py');

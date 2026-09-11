@@ -8,7 +8,7 @@ import { existsSync } from 'fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
-import { skipIfSpawnBlocked } from '../test-utils/helpers/adapter-spawn.js';
+import { skipIfSpawnBlocked, type SkippableContext } from '../test-utils/helpers/adapter-spawn.js';
 import { prepareRustExample } from './rust-example-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -350,7 +350,7 @@ describe('MCP Server Rust Debugging Smoke Test', () => {
   // user frame at `line` is live. Returns `reached: false` if the breakpoint
   // was not hit within the limit -- callers must assert on `reached`.
   async function launchAndReachBreakpoint(
-    ctx: Parameters<Parameters<typeof it>[1]>[0],
+    ctx: SkippableContext,
     line: number,
     name: string
   ): Promise<{

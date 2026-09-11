@@ -2,7 +2,9 @@
  * SessionManager DAP operations tests
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { DebugProtocol } from '@vscode/debugprotocol';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
+import { markChildOrigin } from '../../../../src/utils/child-origin-events.js';
 import {
   type AdapterPolicy,
   DebugLanguage,
@@ -19,6 +21,25 @@ import {
 } from './session-manager-test-utils.js';
 import { ErrorMessages } from '../../../../src/utils/error-messages.js';
 import { ProxyNotRunningError } from '../../../../src/errors/debug-errors.js';
+
+/**
+ * A `breakpoint` event body as the proxy delivers it for a CHILD session event.
+ *
+ * `__mcpChildOrigin` is a private, transient marker (`src/utils/child-origin-events.ts`,
+ * issues #500/#495) that is stamped as a child event re-enters the parent stream and
+ * stripped where the SessionManager consumes it -- deliberately not part of the public
+ * `BreakpointEvent` body. Stamping it here with production's own helper rather than
+ * writing the literal key means this test cannot drift from the key
+ * `consumeChildOrigin` actually reads.
+ */
+function childBreakpointEvent(
+  reason: string,
+  breakpoint: DebugProtocol.Breakpoint
+): DebugProtocol.BreakpointEvent['body'] {
+  const body: DebugProtocol.BreakpointEvent['body'] = { reason, breakpoint };
+  markChildOrigin(body);
+  return body;
+}
 
 describe('SessionManager - DAP Operations', () => {
   let sessionManager: SessionManager;
@@ -739,11 +760,7 @@ describe('SessionManager - DAP Operations', () => {
       // Child verifies via (synthesized or real) breakpoint event, child id
       // 100. The proxy marks child events with the child-origin key (issues
       // #500/#495) — only marked verified events may stamp adapterId.
-      dependencies.mockProxyManager.simulateEvent('breakpoint', {
-        reason: 'changed',
-        breakpoint: { id: 100, verified: true, line: 10, source: { path: 'app.js' } },
-        __mcpChildOrigin: true
-      });
+      dependencies.mockProxyManager.simulateEvent('breakpoint', childBreakpointEvent('changed', { id: 100, verified: true, line: 10, source: { path: 'app.js' } }));
       const [stored] = sessionManager.listBreakpoints(session.id);
       expect(stored.verified).toBe(true);
       expect(stored.adapterId).toBe(100);
@@ -783,11 +800,7 @@ describe('SessionManager - DAP Operations', () => {
     it('still applies a child-origin id-matched downgrade (real child unbinding)', async () => {
       const session = await createJsSessionWithChildVerifiedBp();
 
-      dependencies.mockProxyManager.simulateEvent('breakpoint', {
-        reason: 'changed',
-        breakpoint: { id: 100, verified: false, line: 10 },
-        __mcpChildOrigin: true
-      });
+      dependencies.mockProxyManager.simulateEvent('breakpoint', childBreakpointEvent('changed', { id: 100, verified: false, line: 10 }));
 
       const [stored] = sessionManager.listBreakpoints(session.id);
       expect(stored.verified).toBe(false);
@@ -843,27 +856,22 @@ describe('SessionManager - DAP Operations', () => {
       // stub while adoption is in flight, issue #500): the id is the child's
       // real id for this record and is stamped (issue #673) — the #495
       // hazard was the parent's colliding space, excluded above.
-      dependencies.mockProxyManager.simulateEvent('breakpoint', {
-        reason: 'changed',
-        breakpoint: {
+      dependencies.mockProxyManager.simulateEvent(
+        'breakpoint',
+        childBreakpointEvent('changed', {
           id: 1,
           verified: false,
           line: 20,
           source: { path: 'app.js' },
           message: 'breakpoint.provisionalBreakpoint'
-        },
-        __mcpChildOrigin: true
-      });
+        })
+      );
       bp2 = sessionManager.listBreakpoints(session.id).find(bp => bp.line === 20)!;
       expect(bp2.verified).toBe(false);
       expect(bp2.adapterId).toBe(1);
 
       // Child-origin VERIFIED event: full stamp, provisional note cleared.
-      dependencies.mockProxyManager.simulateEvent('breakpoint', {
-        reason: 'changed',
-        breakpoint: { id: 101, verified: true, line: 20, source: { path: 'app.js' } },
-        __mcpChildOrigin: true
-      });
+      dependencies.mockProxyManager.simulateEvent('breakpoint', childBreakpointEvent('changed', { id: 101, verified: true, line: 20, source: { path: 'app.js' } }));
       bp2 = sessionManager.listBreakpoints(session.id).find(bp => bp.line === 20)!;
       expect(bp2.verified).toBe(true);
       expect(bp2.adapterId).toBe(101);
@@ -877,12 +885,11 @@ describe('SessionManager - DAP Operations', () => {
       const find = (sessionId: string, storeId: string) =>
         sessionManager.listBreakpoints(sessionId).find(bp => bp.id === storeId)!;
 
-      const childEvent = (breakpoint: Record<string, unknown>) =>
-        dependencies.mockProxyManager.simulateEvent('breakpoint', {
-          reason: 'changed',
-          breakpoint,
-          __mcpChildOrigin: true
-        });
+      const childEvent = (breakpoint: DebugProtocol.Breakpoint) =>
+        dependencies.mockProxyManager.simulateEvent(
+          'breakpoint',
+          childBreakpointEvent('changed', breakpoint)
+        );
 
       const provisionalStub = (id: number, at: { file: string; line: number }) => ({
         id,

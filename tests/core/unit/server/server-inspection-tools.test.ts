@@ -477,7 +477,7 @@ describe('Server Inspection Tools Tests', () => {
             type: 'text',
             text: JSON.stringify({
               success: false,
-              error: error.message
+              error: error instanceof Error ? error.message : String(error)
             })
           }]
         };

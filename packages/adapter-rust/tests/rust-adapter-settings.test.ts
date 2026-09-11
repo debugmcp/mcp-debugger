@@ -16,6 +16,7 @@ import * as path from 'path';
 import { RustDebugAdapter } from '../src/rust-debug-adapter.js';
 import { buildRustAdapterSettings } from '../src/utils/rust-utils.js';
 import { AdapterDependencies } from '@debugmcp/shared';
+import type { LanguageSpecificLaunchConfig } from '@debugmcp/shared';
 
 interface AdapterSettingsShape {
   scriptConfig?: {
@@ -134,10 +135,11 @@ describe('transformLaunchConfig _adapterSettings (issue #441)', () => {
   ): Promise<{ result: Record<string, unknown>; deps: AdapterDependencies }> {
     const deps = makeDependencies(env);
     const adapter = new RustDebugAdapter(deps);
-    const result = (await adapter.transformLaunchConfig({
+    const launchConfig: LanguageSpecificLaunchConfig = {
       program: './target/debug/myapp',
       ...config
-    })) as Record<string, unknown>;
+    };
+    const result = (await adapter.transformLaunchConfig(launchConfig)) as Record<string, unknown>;
     return { result, deps };
   }
 

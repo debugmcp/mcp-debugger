@@ -41,7 +41,9 @@ describe('MockAdapterPolicy', () => {
 
   it('extracts variables using the first scope of the top frame', () => {
     const vars = MockAdapterPolicy.extractLocalVariables!(
-      [{ id: 1 }],
+      // The domain StackFrame (models/index.ts) requires name/file/line;
+      // the policy anchors on frames[0].id and ignores the rest.
+      [{ id: 1, name: 'main', file: '/workspace/mock.js', line: 1 }],
       {
         1: [
           {
@@ -96,7 +98,7 @@ describe('MockAdapterPolicy', () => {
 
   it('throws when buildChildStartArgs is called', () => {
     expect(() =>
-      MockAdapterPolicy.buildChildStartArgs('pending-1', {})
+      MockAdapterPolicy.buildChildStartArgs()
     ).toThrow(/does not support child sessions/);
   });
 });

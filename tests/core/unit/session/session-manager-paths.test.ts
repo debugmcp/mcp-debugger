@@ -34,8 +34,7 @@ describe('SessionManager - Path Resolution', () => {
   describe('Windows Path Handling', () => {
     it('should handle Windows absolute paths with drive letters', async () => {
       const session = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
       
       const windowsPaths = [
@@ -56,8 +55,7 @@ describe('SessionManager - Path Resolution', () => {
 
     it('should preserve path components with backslash separators', async () => {
       const session = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
       
       const { breakpoint: bp } = await sessionManager.setBreakpoint(
@@ -73,8 +71,7 @@ describe('SessionManager - Path Resolution', () => {
 
     it('should pass through paths without modification', async () => {
       const session = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
       
       const testPath = 'test/file.py';
@@ -92,8 +89,7 @@ describe('SessionManager - Path Resolution', () => {
   describe('Breakpoint Path Resolution', () => {
     it('should pass through relative paths without modification', async () => {
       const session = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
       
       const relativePath = 'src/test.py';
@@ -105,8 +101,7 @@ describe('SessionManager - Path Resolution', () => {
 
     it('should handle already absolute breakpoint paths', async () => {
       const session = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
       
       const absolutePath = '/home/user/project/test.py';
@@ -118,8 +113,7 @@ describe('SessionManager - Path Resolution', () => {
 
     it('should preserve path components with mixed separators', async () => {
       const session = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
       
       // Mix of path separators

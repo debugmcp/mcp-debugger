@@ -18,11 +18,16 @@ describe('Python Discovery - Real Implementation Test @requires-python', () => {
     const currentDirName = path.dirname(currentFilePath);
     const serverScriptPath = path.resolve(currentDirName, '../../../../dist/index.js');
 
-    client = new Client({
-      name: "python-discovery-test-client",
-      version: "0.1.0",
-      capabilities: { tools: {} }
-    });
+    client = new Client(
+      {
+        name: "python-discovery-test-client",
+        version: "0.1.0"
+      },
+      // Capabilities belong in the ClientOptions argument; `tools` is a SERVER
+      // capability, so the old `capabilities: { tools: {} }` inside clientInfo
+      // was inert either way.
+      { capabilities: {} }
+    );
 
     const filteredEnv: Record<string, string> = {};
     for (const key in process.env) {

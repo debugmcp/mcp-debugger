@@ -32,8 +32,7 @@ describe('SessionManager - Dry Run Race Condition Tests', () => {
     it('should wait for dry run completion beyond 500ms', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        name: 'SlowDryRunTest',
-        pythonPath: 'python'
+        name: 'SlowDryRunTest'
       });
 
       const mockProxyManager = dependencies.mockProxyManager;
@@ -87,8 +86,7 @@ describe('SessionManager - Dry Run Race Condition Tests', () => {
       
       const session = await testSessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        name: 'TimeoutDryRunTest',
-        pythonPath: 'python'
+        name: 'TimeoutDryRunTest'
       });
 
       const mockProxyManager = dependencies.mockProxyManager;
@@ -133,8 +131,7 @@ describe('SessionManager - Dry Run Race Condition Tests', () => {
     it('should handle dry run completing before event listener setup', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        name: 'RaceConditionTest',
-        pythonPath: 'python'
+        name: 'RaceConditionTest'
       });
 
       const mockProxyManager = dependencies.mockProxyManager;
@@ -176,8 +173,7 @@ describe('SessionManager - Dry Run Race Condition Tests', () => {
     it('should handle dry run with very fast completion', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        name: 'FastDryRunTest',
-        pythonPath: 'python'
+        name: 'FastDryRunTest'
       });
 
       const mockProxyManager = dependencies.mockProxyManager;
@@ -227,8 +223,7 @@ describe('SessionManager - Dry Run Race Condition Tests', () => {
       
       const session = await testSessionManager.createSession({ 
         language: DebugLanguage.MOCK,
-        name: 'CleanupTest',
-        pythonPath: 'python'  // Add pythonPath
+        name: 'CleanupTest'
       });
 
       const mockProxyManager = dependencies.mockProxyManager;

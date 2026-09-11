@@ -11,6 +11,8 @@ export interface ParsedToolResult {
   sessionId?: string;
   success?: boolean;
   state?: string;
+  /** Populated by callToolSafely() on every failure path, and by failing tools. */
+  message?: string;
   [key: string]: unknown;
 }
 
@@ -155,7 +157,7 @@ export async function waitForHealthEndpoint(port: number, timeout: number = 1000
     try {
       const response = await fetch(healthUrl);
       if (response.ok) {
-        const healthStatus = await response.json();
+        const healthStatus = (await response.json()) as { status?: string };
         if (healthStatus.status === 'ok') {
           console.log('[Smoke Test] SSE server health check passed');
           return true;

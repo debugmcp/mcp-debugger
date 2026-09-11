@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { MockDebugAdapter, MockErrorScenario } from '../../../packages/adapter-mock/src/mock-debug-adapter.js';
-import { AdapterState, DebugFeature, type AdapterDependencies } from '@debugmcp/shared';
+import {
+  AdapterState,
+  DebugFeature,
+  type AdapterConfig,
+  type AdapterDependencies
+} from '@debugmcp/shared';
+import { createMockAdapterDependencies } from '../../test-utils/helpers/adapter-dependencies.js';
 
 // buildAdapterCommand probes the filesystem for the bundled .cjs process
 // file; the ESM fs namespace is not spy-able, so route existsSync through a
@@ -20,17 +26,7 @@ vi.mock('fs', async (importOriginal) => {
   };
 });
 
-const createDependencies = (): AdapterDependencies => ({
-  logger: {
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn()
-  },
-  environment: {},
-  fileSystem: {} as unknown as AdapterDependencies['fileSystem'],
-  networkManager: {} as unknown as AdapterDependencies['networkManager']
-});
+const createDependencies = (): AdapterDependencies => createMockAdapterDependencies();
 
 describe('MockDebugAdapter behaviour', () => {
   let adapter: MockDebugAdapter;
@@ -143,12 +139,16 @@ describe('MockDebugAdapter behaviour', () => {
   });
 
   describe('adapter command and configuration surface', () => {
-    const adapterConfig = {
+    // executablePath/launchConfig are required by AdapterConfig; the mock adapter
+    // never reads either, but the double should still satisfy the contract.
+    const adapterConfig: AdapterConfig = {
       sessionId: 'sess-1',
+      executablePath: process.execPath,
       adapterHost: '127.0.0.1',
       adapterPort: 4711,
       logDir: '/tmp/logs',
-      scriptPath: 'ignored.js'
+      scriptPath: 'ignored.js',
+      launchConfig: {}
     };
 
     it('builds the adapter command around mock-adapter-process.js', () => {

@@ -2,6 +2,8 @@ import { describe, it, expect, afterEach, vi, type Mock } from 'vitest';
 import { EventEmitter } from 'events';
 import { PythonDebugAdapter } from '../../../packages/adapter-python/src/python-debug-adapter.js';
 import { AdapterState, AdapterError, DebugFeature } from '@debugmcp/shared';
+import type { AdapterDependencies, LanguageSpecificLaunchConfig } from '@debugmcp/shared';
+import { createMockAdapterDependencies } from '../../test-utils/helpers/adapter-dependencies.js';
 
 vi.mock('child_process', () => ({
   spawn: vi.fn(),
@@ -22,17 +24,7 @@ const { findPythonExecutable, getPythonVersion } = await import('../../../packag
 const { spawn } = await import('child_process');
 const { existsSync } = await import('fs');
 
-const createDependencies = () => ({
-  fileSystem: {} as unknown,
-  logger: {
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn()
-  },
-  environment: {} as unknown,
-  networkManager: undefined
-});
+const createDependencies = (): AdapterDependencies => createMockAdapterDependencies();
 
 describe('PythonDebugAdapter', () => {
   afterEach(() => {
@@ -40,7 +32,7 @@ describe('PythonDebugAdapter', () => {
   });
 
   it('caches resolveExecutablePath results', async () => {
-    findPythonExecutable.mockResolvedValue('/usr/bin/python');
+    vi.mocked(findPythonExecutable).mockResolvedValue('/usr/bin/python');
     const adapter = new PythonDebugAdapter(createDependencies());
 
     const first = await adapter.resolveExecutablePath();
@@ -188,7 +180,7 @@ describe('PythonDebugAdapter', () => {
   it('initializes successfully when environment validates', async () => {
     const adapter = new PythonDebugAdapter(createDependencies());
     const validateSpy = vi
-      .spyOn(adapter, 'validateEnvironment' as never)
+      .spyOn(adapter, 'validateEnvironment')
       .mockResolvedValue({ valid: true, errors: [], warnings: [] });
 
     const initialized = vi.fn();
@@ -203,7 +195,7 @@ describe('PythonDebugAdapter', () => {
 
   it('throws AdapterError when environment validation fails during initialize', async () => {
     const adapter = new PythonDebugAdapter(createDependencies());
-    vi.spyOn(adapter, 'validateEnvironment' as never).mockResolvedValue({
+    vi.spyOn(adapter, 'validateEnvironment').mockResolvedValue({
       valid: false,
       errors: [{ code: 'ENV_BAD', message: 'bad env', recoverable: false }],
       warnings: []
@@ -269,13 +261,17 @@ describe('PythonDebugAdapter', () => {
 
   it('transforms launch configuration with python defaults', async () => {
     const adapter = new PythonDebugAdapter(createDependencies());
-    const config = await adapter.transformLaunchConfig({
+    // `type`/`request`/`name` are keys `GenericLaunchConfig` does not declare; the
+    // session layer forwards unlisted keys through a cast and python's transform reads
+    // and overwrites all three, so they are typed here as the language-specific shape.
+    const launchConfig: LanguageSpecificLaunchConfig = {
       type: 'python',
       request: 'launch',
       name: 'Test',
       stopOnEntry: true,
       justMyCode: false
-    });
+    };
+    const config = await adapter.transformLaunchConfig(launchConfig);
 
     expect(config.name).toBe('Python: Current File');
     expect(config.console).toBe('internalConsole');
@@ -484,7 +480,7 @@ describe('PythonDebugAdapter', () => {
 
     it('propagates stopOnEntry into the attach config when provided', () => {
       const adapter = new PythonDebugAdapter(createDependencies());
-      const attach = adapter.transformAttachConfig({ port: 5678, stopOnEntry: true });
+      const attach = adapter.transformAttachConfig({ request: 'attach', port: 5678, stopOnEntry: true });
       expect(attach.stopOnEntry).toBe(true);
     });
 
@@ -562,7 +558,7 @@ describe('PythonDebugAdapter', () => {
     }
 
     it('warns when the Python version cannot be determined and detects a virtualenv', async () => {
-      findPythonExecutable.mockResolvedValue('/usr/bin/python');
+      vi.mocked(findPythonExecutable).mockResolvedValue('/usr/bin/python');
       (getPythonVersion as Mock).mockResolvedValue(null);
       scriptSpawn({ debugpyOutput: '1.8.0\n', venvOutput: 'True\n' });
       const deps = createDependencies();
@@ -579,7 +575,7 @@ describe('PythonDebugAdapter', () => {
     });
 
     it('resolves the version via getPythonVersion on cache miss and reuses the cached debugpy answer', async () => {
-      findPythonExecutable.mockResolvedValue('/usr/bin/python');
+      vi.mocked(findPythonExecutable).mockResolvedValue('/usr/bin/python');
       (getPythonVersion as Mock).mockResolvedValue('3.12.1');
       scriptSpawn({ debugpyOutput: '1.8.0\n', venvOutput: 'False\n' });
       const adapter = new PythonDebugAdapter(createDependencies() as never);
@@ -598,7 +594,7 @@ describe('PythonDebugAdapter', () => {
     });
 
     it('treats a failing virtualenv probe as not-a-venv', async () => {
-      findPythonExecutable.mockResolvedValue('/usr/bin/python');
+      vi.mocked(findPythonExecutable).mockResolvedValue('/usr/bin/python');
       (getPythonVersion as Mock).mockResolvedValue('3.12.1');
       scriptSpawn({ debugpyOutput: '1.8.0\n', venvError: true });
       const deps = createDependencies();
@@ -616,7 +612,7 @@ describe('PythonDebugAdapter', () => {
       vi.stubEnv('CI', 'true');
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       try {
-        findPythonExecutable.mockResolvedValue('/usr/bin/python');
+        vi.mocked(findPythonExecutable).mockResolvedValue('/usr/bin/python');
         (getPythonVersion as Mock).mockResolvedValue('3.12.1');
         scriptSpawn({ debugpyOutput: '1.8.0\n', venvOutput: 'False\n' });
         const adapter = new PythonDebugAdapter(createDependencies() as never);

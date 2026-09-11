@@ -2,10 +2,16 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import { EventEmitter } from 'events';
 import { RustAdapterPolicy } from '../../src/interfaces/adapter-policy-rust.js';
-import type { StopReasonContext } from '../../src/interfaces/adapter-policy.js';
+import type {
+  AdapterSpawnConfig,
+  AdapterSpawnPayload,
+  StopReasonContext
+} from '../../src/interfaces/adapter-policy.js';
+import type { StackFrame, Variable } from '../../src/models/index.js';
 import { SessionState } from '@debugmcp/shared';
 
-const accessMock = vi.fn<[], Promise<void>>();
+// Vitest 4 takes ONE type argument: the whole function type.
+const accessMock = vi.fn<() => Promise<void>>();
 const spawnMock = vi.fn();
 
 vi.mock('fs/promises', () => ({
@@ -28,9 +34,13 @@ describe('RustAdapterPolicy', () => {
   });
 
   describe('extractLocalVariables', () => {
-    const frame: DebugProtocol.StackFrame = {
+    // extractLocalVariables takes the DOMAIN StackFrame/Variable
+    // (models/index.ts), not the DAP wire types — it is called with what the
+    // session layer already mapped.
+    const frame: StackFrame = {
       id: 1,
       name: 'main',
+      file: '/src/main.rs',
       line: 1,
       column: 1
     };
@@ -39,11 +49,11 @@ describe('RustAdapterPolicy', () => {
       const scopes: Record<number, DebugProtocol.Scope[]> = {
         1: [{ name: 'Locals', variablesReference: 42, expensive: false }]
       };
-      const vars: Record<number, DebugProtocol.Variable[]> = {
+      const vars: Record<number, Variable[]> = {
         42: [
-          { name: '$__internal', value: 'skip', variablesReference: 0 },
-          { name: '_lldb_internal', value: 'skip', variablesReference: 0 },
-          { name: 'app', value: 'value', variablesReference: 0 }
+          { name: '$__internal', value: 'skip', type: 'i32', expandable: false },
+          { name: '_lldb_internal', value: 'skip', type: 'i32', expandable: false },
+          { name: 'app', value: 'value', type: 'String', expandable: false }
         ]
       };
       const filtered = RustAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
@@ -55,10 +65,10 @@ describe('RustAdapterPolicy', () => {
       const scopes: Record<number, DebugProtocol.Scope[]> = {
         1: [{ name: 'Local', variablesReference: 7, expensive: false }]
       };
-      const vars: Record<number, DebugProtocol.Variable[]> = {
+      const vars: Record<number, Variable[]> = {
         7: [
-          { name: '__lldb_internal', value: 'one', variablesReference: 0 },
-          { name: 'regular', value: 'two', variablesReference: 0 }
+          { name: '__lldb_internal', value: 'one', type: 'i32', expandable: false },
+          { name: 'regular', value: 'two', type: 'i32', expandable: false }
         ]
       };
       const result = RustAdapterPolicy.extractLocalVariables!([frame], scopes, vars, true);
@@ -411,13 +421,35 @@ describe('RustAdapterPolicy', () => {
   });
 
   describe('getAdapterSpawnConfig', () => {
+    // CodeLLDB reads only the transport fields plus adapterCommand: an empty
+    // executablePath still selects the vendored adapter, and scriptPath is
+    // never consulted.
+    const basePayload: AdapterSpawnPayload = {
+      executablePath: '',
+      scriptPath: '',
+      adapterHost: '127.0.0.1',
+      adapterPort: 9000,
+      logDir: '/tmp/logs'
+    };
+
+    /**
+     * CodeLLDB is always spawned, never connected to — narrow the
+     * AdapterSpawnConfig union so the spawn-only fields are readable, and
+     * fail loudly if that ever stops being true.
+     */
+    const asSpawn = (config: AdapterSpawnConfig) => {
+      if (config.mode !== 'spawn') {
+        throw new Error(`expected a spawn config, got mode '${config.mode}'`);
+      }
+      return config;
+    };
+
     it('returns custom adapter command when provided', () => {
-      const config = RustAdapterPolicy.getAdapterSpawnConfig!({
+      const config = asSpawn(RustAdapterPolicy.getAdapterSpawnConfig({
+        ...basePayload,
         adapterCommand: { command: 'custom', args: ['--flag'], env: { ONE: '1' } },
-        adapterHost: '127.0.0.1',
-        adapterPort: 4444,
-        logDir: '/tmp/logs'
-      });
+        adapterPort: 4444
+      }));
 
       expect(config.command).toBe('custom');
       expect(config.args).toEqual(['--flag']);
@@ -425,11 +457,9 @@ describe('RustAdapterPolicy', () => {
     });
 
     it('builds vendored codelldb command per platform', () => {
-      const config = RustAdapterPolicy.getAdapterSpawnConfig!({
-        adapterHost: '127.0.0.1',
-        adapterPort: 9000,
-        logDir: '/tmp/logs'
-      }, 'win32', 'x64');
+      const config = asSpawn(
+        RustAdapterPolicy.getAdapterSpawnConfig(basePayload, 'win32', 'x64')
+      );
 
       const normalizedCommand = config.command.replace(/\\/g, '/');
       expect(normalizedCommand).toMatch(/vendor\/codelldb\/win32-x64\/adapter\/codelldb\.exe$/);
@@ -440,27 +470,21 @@ describe('RustAdapterPolicy', () => {
     it('opts into adapter-stdio forwarding on win32 only (issue #223)', () => {
       // Windows: LLDB's console mode lets the debuggee inherit the adapter
       // process's stdio — forwarding is the only way output reaches get_output.
-      const win = RustAdapterPolicy.getAdapterSpawnConfig!({
-        adapterHost: '127.0.0.1',
-        adapterPort: 9000,
-        logDir: '/tmp/logs'
-      }, 'win32', 'x64');
+      const win = asSpawn(
+        RustAdapterPolicy.getAdapterSpawnConfig(basePayload, 'win32', 'x64')
+      );
       expect(win.forwardStdio).toEqual({});
 
-      const winCustom = RustAdapterPolicy.getAdapterSpawnConfig!({
-        adapterCommand: { command: 'custom', args: [] },
-        adapterHost: '127.0.0.1',
-        adapterPort: 9000,
-        logDir: '/tmp/logs'
-      }, 'win32', 'x64');
+      const winCustom = asSpawn(RustAdapterPolicy.getAdapterSpawnConfig({
+        ...basePayload,
+        adapterCommand: { command: 'custom', args: [] }
+      }, 'win32', 'x64'));
       expect(winCustom.forwardStdio).toEqual({});
 
       // POSIX: CodeLLDB emits DAP output events itself (LLDB holds the pipes)
-      const linux = RustAdapterPolicy.getAdapterSpawnConfig!({
-        adapterHost: '127.0.0.1',
-        adapterPort: 9000,
-        logDir: '/tmp/logs'
-      }, 'linux', 'x64');
+      const linux = asSpawn(
+        RustAdapterPolicy.getAdapterSpawnConfig(basePayload, 'linux', 'x64')
+      );
       expect(linux.forwardStdio).toBeUndefined();
     });
   });

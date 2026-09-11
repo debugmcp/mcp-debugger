@@ -29,7 +29,12 @@ describe('Server Prompts Tests', () => {
 
   beforeEach(() => {
     const mockDependencies = createMockDependencies();
-    vi.mocked(createProductionDependencies).mockReturnValue(mockDependencies);
+    // createMockDependencies() is a deliberate partial double: processManager,
+    // networkManager and the factories are bare vi.fn() placeholders these tests
+    // never call. (The single-point fix is a typed return on the helper itself.)
+    vi.mocked(createProductionDependencies).mockReturnValue(
+      mockDependencies
+    );
 
     mockServer = createMockServer();
     vi.mocked(Server).mockImplementation(function() { return mockServer as any; });

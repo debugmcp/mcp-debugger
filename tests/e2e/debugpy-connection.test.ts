@@ -211,7 +211,7 @@ describe('MCP Server connecting to debugpy', () => {
         try {
           const response = await globalThis.fetch(healthUrl);
           if (!response.ok) return false;
-          const healthStatus = await response.json();
+          const healthStatus = (await response.json()) as { status?: string };
           return healthStatus.status === 'ok';
         } catch {
           return false; // Connection error - retry until timeout

@@ -37,8 +37,7 @@ describe('SessionManager - worker reap guarantees (issue #502)', () => {
 
   async function startSession(): Promise<string> {
     const session = await sessionManager.createSession({
-      language: DebugLanguage.MOCK,
-      pythonPath: 'python'
+      language: DebugLanguage.MOCK
     });
     await sessionManager.startDebugging(session.id, 'test.py');
     await vi.runAllTimersAsync();

@@ -186,7 +186,7 @@ describe('DAP mirror e2e (#217, mock adapter)', () => {
       const found = client.frames
         .slice(fromIndex)
         .find((m) => m.type === 'event' && (m as { event?: string }).event === event);
-      if (found) return found as { event: string; body?: unknown };
+      if (found) return found as typeof found & { event: string; body?: unknown };
       await new Promise((r) => setTimeout(r, 50));
     }
     throw new Error(`No '${event}' event after frame ${fromIndex}`);

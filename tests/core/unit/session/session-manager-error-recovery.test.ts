@@ -35,8 +35,7 @@ describe('SessionManager - Error Recovery', () => {
   describe('Proxy Crash Recovery', () => {
     it('should clean up when proxy crashes unexpectedly', async () => {
       const session = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
       
       // Start debugging
@@ -55,8 +54,7 @@ describe('SessionManager - Error Recovery', () => {
 
     it('should allow restart after proxy crash', async () => {
       const session = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
       
       // First start
@@ -78,8 +76,7 @@ describe('SessionManager - Error Recovery', () => {
 
     it('should handle "proxy exited before initialization" scenario', async () => {
       const session = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
       
       // Configure mock to fail start with error
@@ -96,8 +93,7 @@ describe('SessionManager - Error Recovery', () => {
   describe('Timeout Handling', () => {
     it('should handle proxy initialization properly', async () => {
       const session = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
       
       // Configure mock to emit events immediately
@@ -119,8 +115,7 @@ describe('SessionManager - Error Recovery', () => {
 
     it('should return empty variables when session is in RUNNING state', async () => {
       const session = await sessionManager.createSession({
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
 
       await sessionManager.startDebugging(session.id, 'test.py');
@@ -139,8 +134,7 @@ describe('SessionManager - Error Recovery', () => {
 
     it('should cleanup properly after startup failure', async () => {
       const session = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        pythonPath: 'python'
+        language: DebugLanguage.MOCK
       });
       
       // Make proxy fail to start (simulates immediate startup failure)

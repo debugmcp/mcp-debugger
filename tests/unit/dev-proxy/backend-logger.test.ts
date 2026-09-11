@@ -12,8 +12,6 @@
  * redaction patterns.
  */
 import { describe, it, expect } from 'vitest';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore -- plain-JS module without type declarations
 import {
   createBackendLogger,
   isProxyRedactionDisabled,

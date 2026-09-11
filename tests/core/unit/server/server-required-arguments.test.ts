@@ -41,7 +41,7 @@ describe('schema-driven required arguments', () => {
 
   beforeEach(() => {
     mockDependencies = createMockDependencies();
-    mockDependencies.environment.get.mockReturnValue(undefined);
+    vi.mocked(mockDependencies.environment.get).mockReturnValue(undefined);
     vi.mocked(createProductionDependencies).mockReturnValue(mockDependencies as never);
 
     const mockServer = createMockServer();

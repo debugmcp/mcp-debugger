@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { AdapterDependencies } from '@debugmcp/shared';
 import {
+  createMockAdapterDependencies,
+  createMockEnvironment
+} from '../../../../tests/test-utils/helpers/adapter-dependencies.js';
+import {
   DebugLanguage,
   AdapterState,
   DebugFeature
@@ -24,19 +28,13 @@ const convertPdbsToTempMock = vi.mocked(convertPdbsToTemp);
 const getProcessExecutableDirMock = vi.mocked(getProcessExecutableDir);
 const getProcessArchitectureMock = vi.mocked(getProcessArchitecture);
 
-const createDependencies = (): AdapterDependencies => ({
-  fileSystem: {} as unknown,
-  environment: {
-    get: () => undefined,
-    getAll: () => ({}),
-    getCurrentWorkingDirectory: () => process.cwd()
-  },
-  logger: {
-    info: () => undefined,
-    debug: () => undefined,
-    error: () => undefined
-  }
-});
+// These adapters read `process.env` directly and never consult `dependencies.environment`
+// (nor `dependencies.fileSystem`), but the inline double this replaced reported an *empty*
+// environment — keep that, so this stays a type fix and not a behaviour change.
+const createDependencies = (): AdapterDependencies =>
+  createMockAdapterDependencies({
+    environment: createMockEnvironment({ get: () => undefined, getAll: () => ({}) })
+  });
 
 describe('DotnetDebugAdapter', () => {
   let adapter: DotnetDebugAdapter;

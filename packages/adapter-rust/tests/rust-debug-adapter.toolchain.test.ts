@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest';
 import { RustDebugAdapter } from '../src/rust-debug-adapter.js';
 import { AdapterError, DebugFeature, AdapterState } from '@debugmcp/shared';
 import type { AdapterConfig, AdapterDependencies } from '@debugmcp/shared';
+import type { LanguageSpecificLaunchConfig } from '@debugmcp/shared';
+import { createMockAdapterDependencies } from '../../../tests/test-utils/helpers/adapter-dependencies.js';
 import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
 import * as path from 'path';
@@ -39,6 +41,7 @@ import {
   findDlltoolExecutable
 } from '../src/utils/rust-utils.js';
 import { detectBinaryFormat } from '../src/utils/binary-detector.js';
+import type { BinaryInfo } from '../src/utils/binary-detector.js';
 import {
   findCargoProjectRoot,
   getDefaultBinary,
@@ -47,37 +50,7 @@ import {
 } from '../src/utils/cargo-utils.js';
 import { resolveCodeLLDBExecutable } from '../src/utils/codelldb-resolver.js';
 
-const createDependencies = (): AdapterDependencies => ({
-  fileSystem: {
-    readFile: vi.fn(),
-    readTail: vi.fn(),
-    writeFile: vi.fn(),
-    outputFile: vi.fn(),
-    exists: vi.fn(),
-    existsSync: vi.fn(),
-    mkdir: vi.fn(),
-    readdir: vi.fn(),
-    stat: vi.fn(),
-    unlink: vi.fn(),
-    rmdir: vi.fn(),
-    ensureDir: vi.fn(),
-    ensureDirSync: vi.fn(),
-    pathExists: vi.fn(),
-    copy: vi.fn(),
-    remove: vi.fn()
-  },
-  logger: {
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn()
-  },
-  environment: {
-    get: vi.fn((key: string) => process.env[key]),
-    getAll: vi.fn(() => process.env),
-    getCurrentWorkingDirectory: vi.fn(() => process.cwd())
-  }
-});
+const createDependencies = (): AdapterDependencies => createMockAdapterDependencies();
 
 describe('RustDebugAdapter toolchain logic', () => {
   let adapter: RustDebugAdapter;
@@ -105,11 +78,11 @@ describe('RustDebugAdapter toolchain logic', () => {
 
   describe('resolveExecutablePath', () => {
     it('returns cached executable path when available', async () => {
-      checkCargoInstallation.mockResolvedValueOnce(true);
+      vi.mocked(checkCargoInstallation).mockResolvedValueOnce(true);
       const first = await adapter.resolveExecutablePath();
       expect(first).toBe('cargo');
 
-      checkCargoInstallation.mockResolvedValueOnce(false);
+      vi.mocked(checkCargoInstallation).mockResolvedValueOnce(false);
       const second = await adapter.resolveExecutablePath();
       expect(second).toBe('cargo');
       expect(checkCargoInstallation).toHaveBeenCalledTimes(1);
@@ -129,8 +102,8 @@ describe('RustDebugAdapter toolchain logic', () => {
     });
 
     it('falls back to rustc when cargo is unavailable', async () => {
-      checkCargoInstallation.mockResolvedValueOnce(false);
-      checkRustInstallation.mockResolvedValueOnce(true);
+      vi.mocked(checkCargoInstallation).mockResolvedValueOnce(false);
+      vi.mocked(checkRustInstallation).mockResolvedValueOnce(true);
       const result = await adapter.resolveExecutablePath();
       expect(result).toBe('rustc');
     });
@@ -138,8 +111,8 @@ describe('RustDebugAdapter toolchain logic', () => {
     it('uses relaxed toolchain placeholder when allowed', async () => {
       vi.stubEnv('MCP_RUST_ALLOW_PREBUILT', 'true');
       vi.stubEnv('MCP_RUST_EXECUTABLE_PLACEHOLDER', 'custom-rust-binary');
-      checkCargoInstallation.mockResolvedValueOnce(false);
-      checkRustInstallation.mockResolvedValueOnce(false);
+      vi.mocked(checkCargoInstallation).mockResolvedValueOnce(false);
+      vi.mocked(checkRustInstallation).mockResolvedValueOnce(false);
       const dependencies = createDependencies();
       const warnSpy = dependencies.logger?.warn as unknown as Mock;
       adapter = new RustDebugAdapter(dependencies);
@@ -152,9 +125,9 @@ describe('RustDebugAdapter toolchain logic', () => {
   describe('validateEnvironment', () => {
     it('reports missing CodeLLDB and MSVC warning', async () => {
       vi.mocked(resolveCodeLLDBExecutable).mockResolvedValueOnce(null);
-      checkCargoInstallation.mockResolvedValueOnce(true);
-      checkRustInstallation.mockResolvedValueOnce(true);
-      getRustHostTriple.mockResolvedValueOnce('x86_64-pc-windows-msvc');
+      vi.mocked(checkCargoInstallation).mockResolvedValueOnce(true);
+      vi.mocked(checkRustInstallation).mockResolvedValueOnce(true);
+      vi.mocked(getRustHostTriple).mockResolvedValueOnce('x86_64-pc-windows-msvc');
 
       const result = await adapter.validateEnvironment();
       expect(result.valid).toBe(false);
@@ -166,10 +139,10 @@ describe('RustDebugAdapter toolchain logic', () => {
     it('warns when dlltool is missing for GNU toolchain on Windows', async () => {
       const winAdapter = new RustDebugAdapter(dependencies, 'win32');
       vi.mocked(resolveCodeLLDBExecutable).mockResolvedValueOnce('C:\\\\codelldb.exe');
-      checkCargoInstallation.mockResolvedValueOnce(true);
-      checkRustInstallation.mockResolvedValueOnce(true);
-      getRustHostTriple.mockResolvedValueOnce('x86_64-pc-windows-gnu');
-      findDlltoolExecutable.mockResolvedValueOnce(undefined);
+      vi.mocked(checkCargoInstallation).mockResolvedValueOnce(true);
+      vi.mocked(checkRustInstallation).mockResolvedValueOnce(true);
+      vi.mocked(getRustHostTriple).mockResolvedValueOnce('x86_64-pc-windows-gnu');
+      vi.mocked(findDlltoolExecutable).mockResolvedValueOnce(null);
 
       const result = await winAdapter.validateEnvironment();
       expect(result.valid).toBe(true);
@@ -215,11 +188,11 @@ describe('RustDebugAdapter toolchain logic', () => {
   });
 
   describe('transformLaunchConfig with Rust sources', () => {
-    const mockBinaryInfo = {
+    const mockBinaryInfo: BinaryInfo = {
       format: 'gnu',
       hasPDB: false,
       hasRSDS: false,
-      imports: [] as string[],
+      imports: [],
       debugInfoType: 'dwarf'
     };
 
@@ -227,11 +200,12 @@ describe('RustDebugAdapter toolchain logic', () => {
       vi.mocked(findCargoProjectRoot).mockResolvedValueOnce('/workspace/project');
       vi.mocked(getDefaultBinary).mockResolvedValueOnce('project-bin');
       vi.mocked(needsRebuild).mockResolvedValueOnce(false);
-      detectBinaryFormat.mockResolvedValueOnce(mockBinaryInfo);
+      vi.mocked(detectBinaryFormat).mockResolvedValueOnce(mockBinaryInfo);
 
-      const result = await adapter.transformLaunchConfig({
+      const launchConfig: LanguageSpecificLaunchConfig = {
         program: '/workspace/project/src/main.rs'
-      });
+      };
+      const result = await adapter.transformLaunchConfig(launchConfig);
 
       const expectedBinaryPath = path.join(
         '/workspace/project',
@@ -255,12 +229,13 @@ describe('RustDebugAdapter toolchain logic', () => {
         success: true,
         binaryPath: builtBinaryPath
       });
-      detectBinaryFormat.mockResolvedValueOnce(mockBinaryInfo);
+      vi.mocked(detectBinaryFormat).mockResolvedValueOnce(mockBinaryInfo);
 
-      const result = await adapter.transformLaunchConfig({
+      const launchConfig: LanguageSpecificLaunchConfig = {
         program: '/workspace/project/src/main.rs',
         cargo: { release: true }
-      });
+      };
+      const result = await adapter.transformLaunchConfig(launchConfig);
 
       expect(buildCargoProject).toHaveBeenCalledWith(
         '/workspace/project',
@@ -278,19 +253,20 @@ describe('RustDebugAdapter toolchain logic', () => {
         success: false,
         error: 'compile error'
       });
-      detectBinaryFormat.mockResolvedValueOnce(mockBinaryInfo);
+      vi.mocked(detectBinaryFormat).mockResolvedValueOnce(mockBinaryInfo);
 
-      await expect(
-        adapter.transformLaunchConfig({
-          program: '/workspace/project/src/main.rs'
-        })
-      ).rejects.toThrow('Cargo build failed: compile error');
+      const launchConfig: LanguageSpecificLaunchConfig = {
+        program: '/workspace/project/src/main.rs'
+      };
+      await expect(adapter.transformLaunchConfig(launchConfig)).rejects.toThrow(
+        'Cargo build failed: compile error'
+      );
     });
   });
 
   describe('validateToolchain', () => {
     it('records MSVC incompatibility details', async () => {
-      detectBinaryFormat.mockResolvedValue({
+      vi.mocked(detectBinaryFormat).mockResolvedValue({
         format: 'msvc',
         hasPDB: true,
         hasRSDS: true,
@@ -298,7 +274,8 @@ describe('RustDebugAdapter toolchain logic', () => {
         debugInfoType: 'pdb'
       });
 
-      await adapter.transformLaunchConfig({ program: '/bin/app.exe' });
+      const launchConfig: LanguageSpecificLaunchConfig = { program: '/bin/app.exe' };
+      await adapter.transformLaunchConfig(launchConfig);
       const result = adapter.consumeLastToolchainValidation();
       expect(result?.compatible).toBe(false);
       expect(result?.toolchain).toBe('msvc');
@@ -308,7 +285,7 @@ describe('RustDebugAdapter toolchain logic', () => {
     });
 
     it('returns generic compatibility on detection failure', async () => {
-      detectBinaryFormat.mockRejectedValueOnce(new Error('failure'));
+      vi.mocked(detectBinaryFormat).mockRejectedValueOnce(new Error('failure'));
       const result = await adapter.validateToolchain('/bin/app');
       expect(result.compatible).toBe(true);
       expect(result.toolchain).toBe('unknown');
@@ -317,7 +294,7 @@ describe('RustDebugAdapter toolchain logic', () => {
     it('honors MSVC behavior "error" during launch transformation', async () => {
       vi.stubEnv('RUST_MSVC_BEHAVIOR', 'error');
       adapter = new RustDebugAdapter(createDependencies());
-      detectBinaryFormat.mockResolvedValue({
+      vi.mocked(detectBinaryFormat).mockResolvedValue({
         format: 'msvc',
         hasPDB: false,
         hasRSDS: false,
@@ -325,9 +302,8 @@ describe('RustDebugAdapter toolchain logic', () => {
         debugInfoType: 'pdb'
       });
 
-      await expect(
-        adapter.transformLaunchConfig({ program: '/tmp/my-program' })
-      ).rejects.toThrow(AdapterError);
+      const launchConfig: LanguageSpecificLaunchConfig = { program: '/tmp/my-program' };
+      await expect(adapter.transformLaunchConfig(launchConfig)).rejects.toThrow(AdapterError);
     });
   });
 
@@ -351,6 +327,7 @@ describe('RustDebugAdapter toolchain logic', () => {
       adapter.on('terminated', terminatedSpy);
 
       adapter.handleDapEvent({
+        seq: 1,
         type: 'event',
         event: 'stopped',
         body: { threadId: 21 }
@@ -360,7 +337,7 @@ describe('RustDebugAdapter toolchain logic', () => {
       expect(adapter.getCurrentThreadId()).toBe(21);
       expect(stoppedSpy).toHaveBeenCalledWith({ threadId: 21 });
 
-      adapter.handleDapEvent({ type: 'event', event: 'terminated', body: {} });
+      adapter.handleDapEvent({ seq: 2, type: 'event', event: 'terminated', body: {} });
       expect(adapter.getState()).toBe(AdapterState.CONNECTED);
       expect(adapter.getCurrentThreadId()).toBeNull();
       expect(terminatedSpy).toHaveBeenCalled();

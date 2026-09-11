@@ -40,9 +40,11 @@ export function createMockFromInterface<T extends object>(
   const mock = {} as any;
   const {
     excludeMethods = [],
-    defaultReturns = {},
     includeInherited = true
   } = options;
+  // Destructuring with a `{}` default widens the type to `Partial<...> | {}`,
+  // and `{}` cannot be indexed by `keyof T`. Default it against its own type.
+  const defaultReturns: NonNullable<typeof options.defaultReturns> = options.defaultReturns ?? {};
 
   // Handle both instances and constructors
   let instance: any;

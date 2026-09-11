@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { AdapterRegistry, getAdapterRegistry, resetAdapterRegistry } from '../../../src/adapters/adapter-registry.js';
 import { AdapterNotFoundError, DuplicateRegistrationError, FactoryValidationError } from '@debugmcp/shared';
 import { createProductionDependencies } from '../../../src/container/dependencies.js';
@@ -47,7 +47,20 @@ const createAdapterStub = () => {
   };
 };
 
-const createFactory = (overrides: Partial<ReturnType<typeof createFactory>> = {}) => {
+/**
+ * The registry only ever sees these three methods; `__adapter` is the stub the
+ * factory hands back so a test can assert on it. Named rather than inferred
+ * because `Partial<ReturnType<typeof createFactory>>` referred to the function
+ * being declared, which made the whole thing implicitly `any`.
+ */
+interface FactoryStub {
+  validate: Mock;
+  getMetadata: Mock;
+  createAdapter: Mock;
+  __adapter: ReturnType<typeof createAdapterStub>;
+}
+
+const createFactory = (overrides: Partial<FactoryStub> = {}): FactoryStub => {
   const adapter = createAdapterStub();
   return {
     validate: vi.fn().mockResolvedValue({ valid: true, errors: [], warnings: [] }),

@@ -95,7 +95,8 @@ describe('Auto Mock Generation', () => {
       });
 
       expect(mock.method).toBeDefined();
-      expect(mock._privateMethod).toBeUndefined();
+      // `_privateMethod` is private on TestClass, so it has to be read reflectively.
+      expect(Reflect.get(mock, '_privateMethod')).toBeUndefined();
     });
 
     it('should exclude specific methods by name', () => {

@@ -25,7 +25,9 @@ function createMockDependencies(): DapProxyDependencies {
     }),
     fileSystem: {
       ensureDir: vi.fn().mockResolvedValue(undefined),
-      pathExists: vi.fn().mockResolvedValue(true)
+      pathExists: vi.fn().mockResolvedValue(true),
+      readFile: vi.fn().mockResolvedValue(''),
+      remove: vi.fn().mockResolvedValue(undefined)
     },
     processSpawner: {
       spawn: vi.fn()

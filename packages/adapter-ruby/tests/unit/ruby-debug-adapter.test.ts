@@ -1,6 +1,8 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { RubyDebugAdapter } from '../../src/ruby-debug-adapter.js';
 import { AdapterError, AdapterState, DebugFeature } from '@debugmcp/shared';
+import type { AdapterDependencies, LanguageSpecificLaunchConfig } from '@debugmcp/shared';
+import { createMockAdapterDependencies } from '../../../../tests/test-utils/helpers/adapter-dependencies.js';
 
 vi.mock('../../src/utils/ruby-utils.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/utils/ruby-utils.js')>();
@@ -17,17 +19,7 @@ vi.mock('../../src/utils/ruby-utils.js', async (importOriginal) => {
 
 const { findRubyExecutable, getRubyVersion, findRdbgExecutable, getRdbgVersion, getRubySearchPaths, ensureRubySyncHelper } = await import('../../src/utils/ruby-utils.js');
 
-const createDependencies = () => ({
-  fileSystem: {} as unknown,
-  logger: {
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn()
-  },
-  environment: {} as unknown,
-  networkManager: undefined
-});
+const createDependencies = (): AdapterDependencies => createMockAdapterDependencies();
 
 describe('RubyDebugAdapter', () => {
   afterEach(() => {
@@ -111,6 +103,12 @@ describe('RubyDebugAdapter', () => {
     (adapter as unknown as { rdbgPathCache: Map<string, { path: string; timestamp: number }> })
       .rdbgPathCache.set('default', { path: '/usr/bin/rdbg', timestamp: Date.now() });
 
+    // rdbg-specific keys `GenericLaunchConfig` does not declare; the session layer
+    // forwards unlisted keys through a cast and buildAdapterCommand reads these.
+    const bundlerLaunchConfig: LanguageSpecificLaunchConfig = {
+      useBundler: true,
+      bundlePath: '/usr/local/bin/bundle'
+    };
     const command = adapter.buildAdapterCommand({
       sessionId: 'ruby-session',
       executablePath: '/usr/bin/ruby',
@@ -119,7 +117,7 @@ describe('RubyDebugAdapter', () => {
       logDir: '/tmp/logs',
       scriptPath: '/workspace/app.rb',
       scriptArgs: [],
-      launchConfig: { useBundler: true, bundlePath: '/usr/local/bin/bundle' }
+      launchConfig: bundlerLaunchConfig
     });
 
     const dashC = command.args.indexOf('-c');
@@ -254,11 +252,12 @@ describe('RubyDebugAdapter', () => {
 
   it('builds a launch config with rdbg fields', async () => {
     const adapter = new RubyDebugAdapter(createDependencies());
-    const config = await adapter.transformLaunchConfig({
+    const launchConfig: LanguageSpecificLaunchConfig = {
       program: '/workspace/app.rb',
       stopOnEntry: true,
       justMyCode: false
-    });
+    };
+    const config = await adapter.transformLaunchConfig(launchConfig);
 
     expect(config.type).toBe('rdbg');
     expect(config.request).toBe('launch');

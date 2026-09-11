@@ -34,7 +34,12 @@ function createServer(envOverrides: Record<string, string>) {
     getAll: vi.fn(() => ({ ...envOverrides })),
     getCurrentWorkingDirectory: vi.fn(() => process.cwd())
   };
-  vi.mocked(createProductionDependencies).mockReturnValue(mockDependencies);
+  // createMockDependencies() is a deliberate partial double: processManager,
+  // networkManager and the factories are bare vi.fn() placeholders these tests
+  // never call. (The single-point fix is a typed return on the helper itself.)
+  vi.mocked(createProductionDependencies).mockReturnValue(
+    mockDependencies
+  );
 
   const mockServer = createMockServer();
   vi.mocked(Server).mockImplementation(function() { return mockServer as any; });

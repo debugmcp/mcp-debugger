@@ -7,7 +7,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ErrorMessages } from '../../src/utils/error-messages.js';
 import path from 'path';
 import { SessionManagerOperations } from '../../src/session/session-manager-operations';
-import { DebugLanguage, SessionLifecycleState, SessionState } from '@debugmcp/shared';
+import {
+  DebugLanguage,
+  SessionLifecycleState,
+  SessionState,
+  type Breakpoint,
+  type CustomLaunchRequestArguments,
+  type FunctionBreakpoint
+} from '@debugmcp/shared';
 
 /** Concrete subclass for testing the abstract SessionManagerOperations */
 class TestableSessionManagerOperations extends SessionManagerOperations {
@@ -25,6 +32,41 @@ import {
 import { createEnvironmentMock } from '../test-utils/mocks/environment';
 import { FakeDebugAdapter } from '../test-utils/fakes/fake-debug-adapter';
 import { internals } from '../test-utils/helpers/operations-internals';
+
+/**
+ * Launch args as callers actually send them.
+ *
+ * `CustomLaunchRequestArguments` does not declare the out-of-band keys the
+ * session layer reads back off the merged config: `request`/`__attachMode`
+ * select the DAP sequence and shutdown semantics (src/session/launch/
+ * proxy-launcher.ts, debug-launcher.ts), `host`/`port` name the attach target,
+ * and adapter-specific keys such as the C/C++ adapter's `forceRebuild` ride
+ * through verbatim via `genericLaunchConfig = { ...effectiveLaunchArgs }`.
+ */
+type LaunchArgsWithReservedKeys = Partial<CustomLaunchRequestArguments> & {
+  request?: string;
+  __attachMode?: boolean;
+  host?: string;
+  port?: number;
+  forceRebuild?: boolean;
+};
+
+/**
+ * Pass a launch-args literal that carries the reserved keys above. Naming the
+ * wider type here (rather than at each literal) is what keeps the excess
+ * property check from firing -- no assertion involved.
+ */
+function launchArgs(args: LaunchArgsWithReservedKeys): Partial<CustomLaunchRequestArguments> {
+  return args;
+}
+
+/**
+ * `removeBreakpoint` answers with either breakpoint kind; the tests below only
+ * ever set line breakpoints, so narrow before asserting on `line`.
+ */
+function asLineBreakpoint(bp: Breakpoint | FunctionBreakpoint | undefined): Breakpoint | undefined {
+  return bp && 'line' in bp ? bp : undefined;
+}
 
 describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () => {
   let operations: SessionManagerOperations;
@@ -2849,7 +2891,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         'test-session',
         '/dummy/path.java',
         [],
-        { request: 'attach', host: 'localhost', port: 5005 }
+        launchArgs({ request: 'attach', host: 'localhost', port: 5005 })
       );
 
       expect(result.success).toBe(false);
@@ -2875,7 +2917,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         'test-session',
         '/dummy/path.java',
         [],
-        { __attachMode: true, host: 'localhost', port: 5005 }
+        launchArgs({ __attachMode: true, host: 'localhost', port: 5005 })
       );
 
       expect(result.success).toBe(false);
@@ -2906,7 +2948,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         'test-session',
         '/some/script.java',
         ['arg1', 'arg2'],
-        { request: 'attach', host: 'localhost', port: 5005 }
+        launchArgs({ request: 'attach', host: 'localhost', port: 5005 })
       );
 
       expect(result.success).toBe(false);
@@ -2934,7 +2976,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         'test-session',
         '/script.py',
         [],
-        { request: 'attach' } // Request attach but adapter doesn't support it
+        launchArgs({ request: 'attach' }) // Request attach but adapter doesn't support it
       );
 
       expect(result.success).toBe(false);
@@ -2963,7 +3005,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         'test-session',
         '/dummy/path.java',
         [],
-        { request: 'attach', host: 'localhost', port: 5005 }
+        launchArgs({ request: 'attach', host: 'localhost', port: 5005 })
       );
 
       expect(result.success).toBe(false);
@@ -2994,7 +3036,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         'test-session',
         '/work/main.cpp',
         [],
-        { forceRebuild: true }
+        launchArgs({ forceRebuild: true })
       );
 
       expect(result.success).toBe(false);
@@ -3093,8 +3135,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       }
 
       // Remove first BP (line 10) via the real API — removal itself re-syncs
-      const firstBpId = Array.from(mockSession.breakpoints.entries())
-        .find(([_, bp]: [string, any]) => bp.line === 10)?.[0];
+      const firstBpId = Array.from<[string, Breakpoint]>(mockSession.breakpoints.entries())
+        .find(([, bp]) => bp.line === 10)?.[0];
       expect(firstBpId).toBeDefined();
       mockProxyManager.sendDapRequest.mockResolvedValue({
         body: {
@@ -3106,7 +3148,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       });
       const result = await operations.removeBreakpoint('test-session', firstBpId!);
 
-      expect(result.removed?.line).toBe(10);
+      expect(asLineBreakpoint(result.removed)?.line).toBe(10);
       const lastBps = getLastDapBreakpoints();
       expect(lastBps).toHaveLength(2);
       expect(lastBps.map(bp => bp.line)).toEqual([20, 30]);
@@ -3127,8 +3169,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       }
 
       // Remove middle BP (line 20) via the real API
-      const middleBpId = Array.from(mockSession.breakpoints.entries())
-        .find(([_, bp]: [string, any]) => bp.line === 20)?.[0];
+      const middleBpId = Array.from<[string, Breakpoint]>(mockSession.breakpoints.entries())
+        .find(([, bp]) => bp.line === 20)?.[0];
       expect(middleBpId).toBeDefined();
       mockProxyManager.sendDapRequest.mockResolvedValue({
         body: {
@@ -3140,7 +3182,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       });
       const result = await operations.removeBreakpoint('test-session', middleBpId!);
 
-      expect(result.removed?.line).toBe(20);
+      expect(asLineBreakpoint(result.removed)?.line).toBe(20);
       const lastBps = getLastDapBreakpoints();
       expect(lastBps).toHaveLength(2);
       expect(lastBps.map(bp => bp.line)).toEqual([10, 30]);
@@ -3161,8 +3203,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       }
 
       // Remove last BP (line 30) via the real API
-      const lastBpId = Array.from(mockSession.breakpoints.entries())
-        .find(([_, bp]: [string, any]) => bp.line === 30)?.[0];
+      const lastBpId = Array.from<[string, Breakpoint]>(mockSession.breakpoints.entries())
+        .find(([, bp]) => bp.line === 30)?.[0];
       expect(lastBpId).toBeDefined();
       mockProxyManager.sendDapRequest.mockResolvedValue({
         body: {
@@ -3174,7 +3216,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       });
       const result = await operations.removeBreakpoint('test-session', lastBpId!);
 
-      expect(result.removed?.line).toBe(30);
+      expect(asLineBreakpoint(result.removed)?.line).toBe(30);
       const lastBps = getLastDapBreakpoints();
       expect(lastBps).toHaveLength(2);
       expect(lastBps.map(bp => bp.line)).toEqual([10, 20]);
@@ -3218,13 +3260,13 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       });
       await operations.setBreakpoint('test-session', { file: 'com.example.Foo', line: 20 });
 
-      const bps = Array.from(mockSession.breakpoints.values());
-      const bp10 = bps.find((bp: any) => bp.line === 10);
-      const bp20 = bps.find((bp: any) => bp.line === 20);
+      const bps = Array.from<Breakpoint>(mockSession.breakpoints.values());
+      const bp10 = bps.find(bp => bp.line === 10);
+      const bp20 = bps.find(bp => bp.line === 20);
 
-      expect(bp10.verified).toBe(true);
-      expect(bp20.verified).toBe(false);
-      expect(bp20.message).toBe('No executable code at line 20');
+      expect(bp10?.verified).toBe(true);
+      expect(bp20?.verified).toBe(false);
+      expect(bp20?.message).toBe('No executable code at line 20');
     });
 
     it('should update line number when DAP adjusts it', async () => {
@@ -3311,11 +3353,11 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       await operations.setBreakpoint('test-session', { file: 'com.example.Foo', line: 20 });
 
       // First BP updated, second remains unverified (default)
-      const bps = Array.from(mockSession.breakpoints.values());
-      const bp10 = bps.find((bp: any) => bp.line === 10);
-      const bp20 = bps.find((bp: any) => bp.line === 20);
-      expect(bp10.verified).toBe(true);
-      expect(bp20.verified).toBe(false);
+      const bps = Array.from<Breakpoint>(mockSession.breakpoints.values());
+      const bp10 = bps.find(bp => bp.line === 10);
+      const bp20 = bps.find(bp => bp.line === 20);
+      expect(bp10?.verified).toBe(true);
+      expect(bp20?.verified).toBe(false);
     });
 
     it('should keep com.b.Foo BP intact when removing com.a.Foo BP', async () => {
@@ -3335,8 +3377,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(mockSession.breakpoints.size).toBe(2);
 
       // Remove the com.a.Foo BP
-      const aFooBpId = Array.from(mockSession.breakpoints.entries())
-        .find(([_, bp]: [string, any]) => bp.file === 'com.a.Foo')?.[0];
+      const aFooBpId = Array.from<[string, Breakpoint]>(mockSession.breakpoints.entries())
+        .find(([, bp]) => bp.file === 'com.a.Foo')?.[0];
       expect(aFooBpId).toBeDefined();
       mockSession.breakpoints.delete(aFooBpId!);
 
@@ -3390,8 +3432,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(mockSession.breakpoints.size).toBe(3);
 
       // Remove one of the com.b.Foo BPs (line 10)
-      const bFoo10Id = Array.from(mockSession.breakpoints.entries())
-        .find(([_, bp]: [string, any]) => bp.file === 'com.b.Foo' && bp.line === 10)?.[0];
+      const bFoo10Id = Array.from<[string, Breakpoint]>(mockSession.breakpoints.entries())
+        .find(([, bp]) => bp.file === 'com.b.Foo' && bp.line === 10)?.[0];
       expect(bFoo10Id).toBeDefined();
       mockSession.breakpoints.delete(bFoo10Id!);
 
@@ -3436,8 +3478,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(mockSession.breakpoints.size).toBe(2);
 
       // Remove com.A.Foo BP
-      const aFooBpId = Array.from(mockSession.breakpoints.entries())
-        .find(([_, bp]: [string, any]) => bp.file === 'com.A.Foo')?.[0];
+      const aFooBpId = Array.from<[string, Breakpoint]>(mockSession.breakpoints.entries())
+        .find(([, bp]) => bp.file === 'com.A.Foo')?.[0];
       expect(aFooBpId).toBeDefined();
       mockSession.breakpoints.delete(aFooBpId!);
 

@@ -40,7 +40,7 @@ import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
 
-export const DotnetAdapterPolicy: AdapterPolicy = {
+export const DotnetAdapterPolicy = {
   name: 'dotnet',
   supportsLogPoints: false,
   supportsFunctionBreakpoints: true,
@@ -376,4 +376,4 @@ export const DotnetAdapterPolicy: AdapterPolicy = {
       logDir: payload.logDir
     };
   }
-};
+} satisfies AdapterPolicy;

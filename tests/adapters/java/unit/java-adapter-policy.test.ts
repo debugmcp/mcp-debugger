@@ -247,8 +247,10 @@ describe('JavaAdapterPolicy', () => {
     it('should use sendLaunchBeforeConfig (JDI sends initialized before launch)', () => {
       const behavior = JavaAdapterPolicy.getInitializationBehavior();
       expect(behavior.sendLaunchBeforeConfig).toBe(true);
-      expect(behavior.deferConfigDone).toBeUndefined();
-      expect(behavior.defaultStopOnEntry).toBeUndefined();
+      // The policy does not declare these keys at all, which is stronger than
+      // declaring them undefined — assert on absence.
+      expect('deferConfigDone' in behavior).toBe(false);
+      expect('defaultStopOnEntry' in behavior).toBe(false);
     });
 
     it('should declare the exception filters the JDI bridge honors (issue #259)', () => {
@@ -263,7 +265,7 @@ describe('JavaAdapterPolicy', () => {
 
   describe('buildChildStartArgs', () => {
     it('should throw since child sessions are not supported', () => {
-      expect(() => JavaAdapterPolicy.buildChildStartArgs({} as any, {} as any)).toThrow();
+      expect(() => JavaAdapterPolicy.buildChildStartArgs()).toThrow();
     });
   });
 
@@ -368,7 +370,7 @@ describe('JavaAdapterPolicy', () => {
       };
       const request = { command: 'runInTerminal', seq: 1, type: 'request' };
 
-      const result = await behavior.handleReverseRequest(request as any, mockContext as any);
+      const result = await behavior.handleReverseRequest!(request as any, mockContext as any);
 
       expect(result.handled).toBe(true);
       expect(mockContext.sendResponse).toHaveBeenCalledWith(request, {});
@@ -379,7 +381,7 @@ describe('JavaAdapterPolicy', () => {
       const mockContext = { sendResponse: vi.fn() };
       const request = { command: 'other', seq: 1, type: 'request' };
 
-      const result = await behavior.handleReverseRequest(request as any, mockContext as any);
+      const result = await behavior.handleReverseRequest!(request as any, mockContext as any);
 
       expect(result.handled).toBe(false);
       expect(mockContext.sendResponse).not.toHaveBeenCalled();

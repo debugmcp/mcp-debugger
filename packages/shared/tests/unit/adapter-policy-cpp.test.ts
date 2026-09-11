@@ -3,6 +3,7 @@ import type { DebugProtocol } from '@vscode/debugprotocol';
 import * as path from 'path';
 import { CppAdapterPolicy } from '../../src/interfaces/adapter-policy-cpp.js';
 import type { StopReasonContext } from '../../src/interfaces/adapter-policy.js';
+import type { StackFrame, Variable } from '../../src/models/index.js';
 import { SessionState } from '@debugmcp/shared';
 
 const baseContext: StopReasonContext = {
@@ -24,7 +25,9 @@ describe('CppAdapterPolicy', () => {
   // Unlike Rust (issue #303), a bare 'main' in C/C++ IS the user's function —
   // no CRT-trampoline hint must fire.
   it('does not define a function-breakpoint name hint', () => {
-    expect(CppAdapterPolicy.functionBreakpointNameHint).toBeUndefined();
+    // The policy does not declare the hook at all, so assert on absence
+    // rather than on an undefined read.
+    expect('functionBreakpointNameHint' in CppAdapterPolicy).toBe(false);
   });
 
   describe('normalizeStopReason (shared CodeLLDB quirks)', () => {
@@ -72,17 +75,19 @@ describe('CppAdapterPolicy', () => {
   });
 
   describe('extractLocalVariables (shared LLDB scope handling)', () => {
-    const frame: DebugProtocol.StackFrame = { id: 1, name: 'main', line: 1, column: 1 };
+    // extractLocalVariables takes the DOMAIN StackFrame/Variable (models/index.ts),
+    // not the wire types: it is called with what the session layer already mapped.
+    const frame: StackFrame = { id: 1, name: 'main', file: '/src/main.cpp', line: 1, column: 1 };
 
     it('reads the Local/Locals scope and filters LLDB internals', () => {
       const scopes: Record<number, DebugProtocol.Scope[]> = {
         1: [{ name: 'Local', variablesReference: 9, expensive: false }]
       };
-      const vars: Record<number, DebugProtocol.Variable[]> = {
+      const vars: Record<number, Variable[]> = {
         9: [
-          { name: '$0', value: 'skip', variablesReference: 0 },
-          { name: '__vec_ptr', value: 'skip', variablesReference: 0 },
-          { name: 'count', value: '42', variablesReference: 0 }
+          { name: '$0', value: 'skip', type: 'int', expandable: false },
+          { name: '__vec_ptr', value: 'skip', type: 'void *', expandable: false },
+          { name: 'count', value: '42', type: 'int', expandable: false }
         ]
       };
       const filtered = CppAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
@@ -180,7 +185,7 @@ describe('CppAdapterPolicy', () => {
   });
 
   it('throws when building child session args', () => {
-    expect(() => CppAdapterPolicy.buildChildStartArgs!('pending-1', {})).toThrow(
+    expect(() => CppAdapterPolicy.buildChildStartArgs()).toThrow(
       'CppAdapterPolicy does not support child sessions'
     );
   });
@@ -212,8 +217,10 @@ describe('CppAdapterPolicy', () => {
   });
 
   it('never queues commands', () => {
-    expect(CppAdapterPolicy.requiresCommandQueueing!()).toBe(false);
-    const handling = CppAdapterPolicy.shouldQueueCommand!('next', CppAdapterPolicy.createInitialState!());
+    expect(CppAdapterPolicy.requiresCommandQueueing()).toBe(false);
+    // The verdict is constant — the policy's shouldQueueCommand ignores the
+    // command name and state entirely.
+    const handling = CppAdapterPolicy.shouldQueueCommand();
     expect(handling).toEqual({
       shouldQueue: false,
       shouldDefer: false,

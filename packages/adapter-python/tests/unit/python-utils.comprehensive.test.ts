@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import { EventEmitter } from 'node:events';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -15,7 +15,7 @@ vi.mock('which', () => ({
   default: vi.fn()
 }));
 
-import { spawn } from 'child_process';
+import { spawn, type SpawnOptions } from 'child_process';
 import which from 'which';
 import {
   findPythonExecutable,
@@ -33,8 +33,16 @@ type ChildProcessMock = EventEmitter & {
   kill: () => void;
 };
 
-const spawnMock = spawn as unknown as vi.Mock;
-const whichMock = which as unknown as vi.Mock;
+/**
+ * `spawn` gets a deliberately partial `ChildProcess` double (an EventEmitter with two
+ * streams), and `which` is only ever called by `python-utils` as `which(cmd, { all: true })`,
+ * whose overload resolves `string[]`. Typing the aliases to those shapes is what lets the
+ * call sites below stay unannotated.
+ */
+const spawnMock = spawn as unknown as Mock<(command: string, args?: readonly string[], options?: SpawnOptions) => ChildProcessMock>;
+const whichMock = which as unknown as Mock<
+  (command: string, options: { all: true }) => Promise<string[]>
+>;
 
 const createSpawn = (options: { exitCode: number; stdout?: string; stderr?: string; error?: Error }) => {
   const proc = new EventEmitter() as ChildProcessMock;
@@ -245,17 +253,18 @@ describe('WhichCommandFinder integration', () => {
 
   describe('Environment variable handling', () => {
     it('uses PYTHON_EXECUTABLE environment variable', async () => {
-      vi.stubEnv('PYTHON_EXECUTABLE', '/opt/python/bin/python3');
+      const pythonExecutable = '/opt/python/bin/python3';
+      vi.stubEnv('PYTHON_EXECUTABLE', pythonExecutable);
       vi.stubEnv('PYTHON_PATH', undefined);
       vi.stubEnv('DEBUG_PYTHON_DISCOVERY', 'false');
 
-      whichMock.mockResolvedValue([process.env.PYTHON_EXECUTABLE]);
+      whichMock.mockResolvedValue([pythonExecutable]);
       spawnMock.mockImplementation(() => createSpawn({ exitCode: 0, stdout: '1.8.0' }));
 
       const loggerMock = { error: vi.fn(), debug: vi.fn() };
 
       const result = await findPythonExecutable(undefined, loggerMock, undefined, 'linux');
-      expect(result).toBe('/opt/python/bin/python3');
+      expect(result).toBe(pythonExecutable);
     });
 
     it('uses PythonLocation (uppercase) environment variable on Windows', async () => {

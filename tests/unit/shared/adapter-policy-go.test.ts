@@ -37,7 +37,7 @@ describe('GoAdapterPolicy', () => {
   // ===== Child sessions =====
 
   it('rejects child session support', () => {
-    expect(() => GoAdapterPolicy.buildChildStartArgs('', {})).toThrow(/does not support child sessions/);
+    expect(() => GoAdapterPolicy.buildChildStartArgs()).toThrow(/does not support child sessions/);
   });
 
   it('isChildReadyEvent returns true for initialized event', () => {
@@ -234,7 +234,10 @@ describe('GoAdapterPolicy', () => {
   it('isSessionReady returns true only when PAUSED', () => {
     expect(GoAdapterPolicy.isSessionReady(SessionState.PAUSED)).toBe(true);
     expect(GoAdapterPolicy.isSessionReady(SessionState.RUNNING)).toBe(false);
-    expect(GoAdapterPolicy.isSessionReady(SessionState.IDLE)).toBe(false);
+    // SessionState has no IDLE member — this line used to read
+    // `SessionState.IDLE`, i.e. it passed `undefined` and only ever proved
+    // that undefined is not PAUSED. CREATED is the real pre-launch state.
+    expect(GoAdapterPolicy.isSessionReady(SessionState.CREATED)).toBe(false);
   });
 
   // ===== Command queueing =====

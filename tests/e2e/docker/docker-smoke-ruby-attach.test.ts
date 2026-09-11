@@ -13,7 +13,7 @@ import { promisify } from 'util';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { buildDockerImage, createDockerMcpClient, getDockerLogs } from './docker-test-utils.js';
-import { parseSdkToolResult } from '../smoke-test-utils.js';
+import { parseSdkToolResult, type ParsedToolResult } from '../smoke-test-utils.js';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 
 const execAsync = promisify(exec);
@@ -207,7 +207,7 @@ describe.skipIf(SKIP_DOCKER)('Docker: Ruby attach-only debugging', () => {
       name: 'get_local_variables',
       arguments: { sessionId }
     });
-    const localsResponse = parseSdkToolResult(localsResult) as {
+    const localsResponse = parseSdkToolResult(localsResult) as ParsedToolResult & {
       variables?: Array<{ name: string; value: string }>;
     };
     expect(localsResponse.success).not.toBe(false);

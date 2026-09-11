@@ -32,7 +32,7 @@ import {
   lldbShouldSuppressOutputEvent
 } from './lldb-policy-shared.js';
 
-export const CppAdapterPolicy: AdapterPolicy = {
+export const CppAdapterPolicy = {
   name: 'cpp',
   supportsLogPoints: true,
   supportsFunctionBreakpoints: true,
@@ -132,4 +132,4 @@ export const CppAdapterPolicy: AdapterPolicy = {
 
   getAdapterSpawnConfig: (payload, platform: NodeJS.Platform = process.platform, arch: NodeJS.Architecture = process.arch) =>
     buildLldbSpawnConfig(payload, platform, arch)
-};
+} satisfies AdapterPolicy;

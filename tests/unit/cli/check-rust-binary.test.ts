@@ -21,8 +21,10 @@ vi.mock('@debugmcp/adapter-rust', () => ({
 
 const { handleCheckRustBinaryCommand } = await import('../../../src/cli/commands/check-rust-binary.js');
 
-const stdoutWrite = vi.fn<[string | Uint8Array, unknown?], boolean>(() => true);
-const stderrWrite = vi.fn<[string | Uint8Array, unknown?], boolean>(() => true);
+type WriteSpy = (chunk: string | Uint8Array, encoding?: unknown) => boolean;
+
+const stdoutWrite = vi.fn<WriteSpy>(() => true);
+const stderrWrite = vi.fn<WriteSpy>(() => true);
 const originalStdoutWrite = process.stdout.write;
 const originalStderrWrite = process.stderr.write;
 
