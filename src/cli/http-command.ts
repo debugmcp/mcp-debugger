@@ -11,22 +11,22 @@ import type { HttpOptions } from './setup.js';
 import {
   ALLOWED_HOSTS_ENV_KEY,
   ALLOWED_HOST_FLAG,
-  AllowedHostError,
   LOOPBACK_HOSTS,
   hostAllowlistMiddleware,
   parseAllowedHosts,
 } from './host-allowlist.js';
 import { reportFatal } from './report-fatal.js';
 import {
-  BindAddressError,
+  announceListening,
   bindNotice,
-  describeEndpoint,
   describeListenError,
   resolveBindAddress,
   type ListeningEndpoint,
   type ResolvedBindAddress,
 } from './bind-address.js';
 import { jsonRpcErrorBody } from './json-rpc-error.js';
+import { resolvePort } from './port.js';
+import { StartupRefusalError } from './startup-refusal.js';
 import { watchStdinForParentExit } from './stdin-watchdog.js';
 import type { ProcessLike } from '../interfaces/process-interfaces.js';
 
@@ -178,13 +178,14 @@ export function createHttpApp(
     );
   }
 
-  // Bind address (issue #680): resolved here, beside the allowlist, so /health
-  // can report what the operator exposed; handleHttpCommand listens on it.
-  // Throws BindAddressError for an unusable value — a named startup failure.
-  // `listening` is overwritten from server.address() once the socket is bound,
-  // so an OS-assigned port (-p 0) shows up too.
+  // Bind address (issue #680) and port (issue #689): resolved here, beside the
+  // allowlist, so /health can report what the operator exposed;
+  // handleHttpCommand listens on them. Either throws a named error for an
+  // unusable value — a named startup failure. `listening` is overwritten from
+  // server.address() once the socket is bound, so an OS-assigned port (-p 0)
+  // shows up too.
   const bind = resolveBindAddress(options.bind, proc.env);
-  const listening: ListeningEndpoint = { address: bind.address, port: parseInt(options.port, 10) };
+  const listening: ListeningEndpoint = { address: bind.address, port: resolvePort(options.port) };
 
   const httpSessions = new Map<string, SessionData>();
 
@@ -465,10 +466,9 @@ export async function handleHttpCommand(
     attachSharedFileTransport(logger, options.logFile);
   }
 
-  const port = parseInt(options.port, 10);
-  logger.info(`Starting Debug MCP Server in HTTP (Streamable HTTP) mode on port ${port}`);
-
   try {
+    // The factory resolves --port (issue #689) beside --bind and the allowlist,
+    // so an unusable value is refused by name before anything is announced.
     const app = createHttpApp(options, dependencies);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const httpSessions = (app as any).httpSessions as Map<string, SessionData>;
@@ -476,6 +476,9 @@ export async function handleHttpCommand(
     const bind = (app as any).bindAddress as ResolvedBindAddress;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const listening = (app as any).listening as ListeningEndpoint;
+    // The requested port; `listening` is rewritten from the bound socket later.
+    const port = listening.port;
+    logger.info(`Starting Debug MCP Server in HTTP (Streamable HTTP) mode on port ${port}`);
 
     if (bind.note) {
       logger.info(bind.note);
@@ -486,19 +489,11 @@ export async function handleHttpCommand(
     } else if (notice) {
       logger.info(notice.message);
     }
-    const server = app.listen(port, bind.address, () => {
-      logger.info(`Debug MCP Server (HTTP) listening on ${bind.address}:${port}`);
-      logger.info(`MCP endpoint available at ${describeEndpoint(bind.address, port, '/mcp')}`);
-    });
-    // /health reports what the socket actually bound. Registered after listen()
+    const server = app.listen(port, bind.address);
+    // /health and the startup lines report what the socket actually bound —
+    // for -p 0 the OS-assigned port (issue #689). Registered after listen()
     // returns: Node emits 'listening' on a later tick, so `server` is assigned.
-    server.on('listening', () => {
-      const bound = server.address();
-      if (bound && typeof bound === 'object') {
-        listening.address = bound.address;
-        listening.port = bound.port;
-      }
-    });
+    server.on('listening', () => announceListening(server, listening, { logger, proc, label: 'HTTP', path: '/mcp' }));
 
     server.on('error', (err: NodeJS.ErrnoException) => {
       const line = describeListenError(err, port, bind);
@@ -574,9 +569,10 @@ export async function handleHttpCommand(
       env: proc.env,
     });
   } catch (error) {
-    if (error instanceof AllowedHostError || error instanceof BindAddressError) {
-      // Fail fast and by name: a silently dropped allowlist entry would
-      // reproduce the very discoverability problem the flag exists to fix.
+    if (error instanceof StartupRefusalError) {
+      // Fail fast and by name (--allowed-host, --bind, --port): a silently
+      // dropped value would reproduce the very discoverability problem each
+      // flag exists to fix.
       const line = `${error.message}. The server was not started.`;
       logger.error(line);
       reportFatal(proc, line);

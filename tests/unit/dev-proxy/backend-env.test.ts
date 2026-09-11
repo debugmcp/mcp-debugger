@@ -1,8 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildBackendEnvironment,
+  resolveBackendPort,
   updateBackendEnvOverrides,
 } from '../../../tools/dev-proxy/backend-env.mjs';
+
+describe('dev-proxy backend port (issue #689)', () => {
+  it('defaults to 3001 when DEV_PROXY_PORT is unset or empty, and accepts an integer in 1-65535', () => {
+    expect(resolveBackendPort(undefined)).toBe(3001);
+    expect(resolveBackendPort('')).toBe(3001);
+    expect(resolveBackendPort('3005')).toBe(3005);
+    expect(resolveBackendPort('65535')).toBe(65535);
+  });
+
+  it.each(['abc', '3001x', '-5', '0', '70000', '1.5', ' 3001'])(
+    "refuses '%s' by name instead of dialing a truncated or NaN port",
+    (raw) => {
+      expect(() => resolveBackendPort(raw)).toThrow(/DEV_PROXY_PORT/);
+      expect(() => resolveBackendPort(raw)).toThrow(raw);
+    }
+  );
+});
 
 describe('dev-proxy backend environment overrides', () => {
   it('preserves overrides when env is omitted', () => {

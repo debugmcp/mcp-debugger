@@ -18,9 +18,12 @@
  * loopback fallback inside the image would leave the published port
  * unreachable with nothing saying why.
  */
-import { isIP } from 'node:net';
+import { isIP, type AddressInfo } from 'node:net';
 import { Option } from 'commander';
+import type { Logger as WinstonLoggerType } from 'winston';
+import type { ProcessLike } from '../interfaces/process-interfaces.js';
 import { ALLOWED_HOST_FLAG, LOOPBACK_HOSTS } from './host-allowlist.js';
+import { StartupRefusalError } from './startup-refusal.js';
 
 export const BIND_ENV_KEY = 'MCP_HTTP_BIND';
 export const BIND_FLAG = '--bind';
@@ -30,7 +33,7 @@ export const DEFAULT_BIND_ADDRESS = '127.0.0.1';
 export type BindOrigin = typeof BIND_FLAG | typeof BIND_ENV_KEY;
 
 /** An unusable `--bind` / `MCP_HTTP_BIND` value; the server must not start. */
-export class BindAddressError extends Error {
+export class BindAddressError extends StartupRefusalError {
   constructor(message: string) {
     super(message);
     this.name = 'BindAddressError';
@@ -222,9 +225,52 @@ export function describeEndpoint(address: string, port: number, path: string): s
   if (isUnspecifiedAddress(address)) {
     return `http://${DEFAULT_BIND_ADDRESS}:${port}${path} (bound to all interfaces: ${stripBrackets(address)})`;
   }
+  return `http://${authority(address, port)}${path}`;
+}
+
+/** What `announceListening` needs from the transport that owns the socket. */
+export interface ListeningAnnouncement {
+  logger: Pick<WinstonLoggerType, 'info'>;
+  proc: Pick<ProcessLike, 'stderr'>;
+  /** The transport's name in the startup lines. */
+  label: 'HTTP' | 'SSE';
+  /** The endpoint path clients dial. */
+  path: string;
+}
+
+/**
+ * Report the socket actually bound (issue #689) — for `-p 0` the OS-assigned
+ * port — in one place for both transports: the `listening` record /health
+ * serves, the two startup log lines, and stderr. Call it from the server's
+ * 'listening' event, where `server.address()` is readable; a `listen()`
+ * callback fires before that handler and could only repeat the requested
+ * port. The stderr mirror is there because http and sse silence the console,
+ * so the logger alone would leave a plain `-p 0` with nowhere visible to read
+ * the port — stderr is not the MCP channel on either transport, the same path
+ * reportFatal takes.
+ */
+export function announceListening(
+  server: { address(): AddressInfo | string | null },
+  listening: ListeningEndpoint,
+  { logger, proc, label, path }: ListeningAnnouncement
+): void {
+  const bound = server.address();
+  if (bound && typeof bound === 'object') {
+    listening.address = bound.address;
+    listening.port = bound.port;
+  }
+  logger.info(`Debug MCP Server (${label}) listening on ${authority(listening.address, listening.port)}`);
+  const endpointLine =
+    `${label === 'SSE' ? 'SSE' : 'MCP'} endpoint available at ${describeEndpoint(listening.address, listening.port, path)}`;
+  logger.info(endpointLine);
+  proc.stderr?.write(`mcp-debugger: ${endpointLine}\n`);
+}
+
+/** `host:port` with an IPv6 literal bracketed, so the boundary is unambiguous. */
+function authority(address: string, port: number): string {
   const bare = stripBrackets(address);
   const host = isIP(bare) === 6 ? `[${bare}]` : bare;
-  return `http://${host}:${port}${path}`;
+  return `${host}:${port}`;
 }
 
 /** The Host value a client dialing this address sends, as the allowlist stores it (IPv6 bracketed, lower-case). */

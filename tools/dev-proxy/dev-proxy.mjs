@@ -54,7 +54,7 @@ import {
   isDockerRunInvocation,
   removeOwnedDockerContainers,
 } from './docker-backend.mjs';
-import { buildBackendEnvironment, updateBackendEnvOverrides } from './backend-env.mjs';
+import { buildBackendEnvironment, resolveBackendPort, updateBackendEnvOverrides } from './backend-env.mjs';
 import { LifecycleQueue } from './lifecycle-queue.mjs';
 import { isBackendUnavailableError, dedupeMcpErrorPrefix, assertBackendAvailable } from './tool-error.mjs';
 
@@ -65,7 +65,7 @@ import { isBackendUnavailableError, dedupeMcpErrorPrefix, assertBackendAvailable
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const BACKEND_PORT = parseInt(process.env.DEV_PROXY_PORT || '3001', 10);
+const BACKEND_PORT = resolveBackendPort(process.env.DEV_PROXY_PORT);
 const BUILD_CMD = process.env.DEV_PROXY_BUILD_CMD || 'npm run build';
 const PROJECT_ROOT = process.env.DEV_PROXY_ROOT || path.resolve(__dirname, '..', '..');
 const BACKEND_TRANSPORT = process.env.DEV_PROXY_BACKEND_TRANSPORT || 'http';

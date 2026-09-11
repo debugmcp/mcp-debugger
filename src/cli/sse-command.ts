@@ -10,16 +10,16 @@ import type { ProcessLike } from '../interfaces/process-interfaces.js';
 import {
   ALLOWED_HOST_FLAG,
   ALLOWED_HOSTS_ENV_KEY,
-  AllowedHostError,
   hostAllowlistMiddleware,
   LOOPBACK_HOSTS,
   parseAllowedHosts
 } from './host-allowlist.js';
 import { reportFatal } from './report-fatal.js';
+import { resolvePort } from './port.js';
+import { StartupRefusalError } from './startup-refusal.js';
 import {
-  BindAddressError,
+  announceListening,
   bindNotice,
-  describeEndpoint,
   describeListenError,
   resolveBindAddress,
   type ListeningEndpoint,
@@ -75,12 +75,13 @@ export function createSSEApp(
     );
   }
 
-  // Bind address (issue #680): resolved here, beside the allowlist and before
-  // any debug server is built, so an unusable value is refused by name with
-  // nothing to tear down; /health reports it and handleSSECommand listens on
-  // it. `listening` is overwritten from server.address() once the socket is bound.
+  // Bind address (issue #680) and port (issue #689): resolved here, beside the
+  // allowlist and before any debug server is built, so an unusable value is
+  // refused by name with nothing to tear down; /health reports them and
+  // handleSSECommand listens on them. `listening` is overwritten from
+  // server.address() once the socket is bound.
   const bind = resolveBindAddress(options.bind, proc.env);
-  const listening: ListeningEndpoint = { address: bind.address, port: parseInt(options.port, 10) };
+  const listening: ListeningEndpoint = { address: bind.address, port: resolvePort(options.port) };
 
   // Create a single shared Debug MCP Server instance for all connections
   const sharedDebugServer = serverFactory({
@@ -267,20 +268,24 @@ export async function handleSSECommand(
     attachSharedFileTransport(logger, options.logFile);
   }
   
-  const port = parseInt(options.port, 10);
-  logger.warn(
-    `SSE transport is deprecated and will be removed in a future release. ` +
-      `Switch to: mcp-debugger http -p ${port}`
-  );
-  logger.info(`Starting Debug MCP Server in SSE mode on port ${port}`);
-
   try {
+    // The factory resolves --port (issue #689) beside --bind and the allowlist,
+    // before the shared debug server is built, so an unusable value is
+    // refused by name with nothing announced and nothing to tear down.
     const app = createSSEApp(options, dependencies);
 
-    // Start the shared debug server (mirrors stdio-command.ts startup)
     const sharedDebugServer = (app as any).sharedDebugServer as DebugMcpServer; // eslint-disable-line @typescript-eslint/no-explicit-any
     const bind = (app as any).bindAddress as ResolvedBindAddress; // eslint-disable-line @typescript-eslint/no-explicit-any
     const listening = (app as any).listening as ListeningEndpoint; // eslint-disable-line @typescript-eslint/no-explicit-any
+    // The requested port; `listening` is rewritten from the bound socket later.
+    const port = listening.port;
+    logger.warn(
+      `SSE transport is deprecated and will be removed in a future release. ` +
+        `Switch to: mcp-debugger http -p ${port}`
+    );
+    logger.info(`Starting Debug MCP Server in SSE mode on port ${port}`);
+
+    // Start the shared debug server (mirrors stdio-command.ts startup)
     await sharedDebugServer.start();
 
     if (bind.note) {
@@ -292,19 +297,11 @@ export async function handleSSECommand(
     } else if (notice) {
       logger.info(notice.message);
     }
-    const server = app.listen(port, bind.address, () => {
-      logger.info(`Debug MCP Server (SSE) listening on ${bind.address}:${port}`);
-      logger.info(`SSE endpoint available at ${describeEndpoint(bind.address, port, '/sse')}`);
-    });
-    // /health reports what the socket actually bound. Registered after listen()
+    const server = app.listen(port, bind.address);
+    // /health and the startup lines report what the socket actually bound —
+    // for -p 0 the OS-assigned port (issue #689). Registered after listen()
     // returns: Node emits 'listening' on a later tick, so `server` is assigned.
-    server.on('listening', () => {
-      const bound = server.address();
-      if (bound && typeof bound === 'object') {
-        listening.address = bound.address;
-        listening.port = bound.port;
-      }
-    });
+    server.on('listening', () => announceListening(server, listening, { logger, proc, label: 'SSE', path: '/sse' }));
 
     server.on('error', (err: NodeJS.ErrnoException) => {
       const line = describeListenError(err, port, bind);
@@ -374,9 +371,10 @@ export async function handleSSECommand(
       env: proc.env,
     });
   } catch (error) {
-    if (error instanceof AllowedHostError || error instanceof BindAddressError) {
-      // Fail fast and by name (issue #667): a silently dropped allowlist
-      // entry would reproduce the discoverability problem the flag exists to fix.
+    if (error instanceof StartupRefusalError) {
+      // Fail fast and by name (--allowed-host, --bind, --port; issue #667): a
+      // silently dropped value would reproduce the discoverability problem
+      // each flag exists to fix.
       const line = `${error.message}. The server was not started.`;
       logger.error(line);
       reportFatal(proc, line);
