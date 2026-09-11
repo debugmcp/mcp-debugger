@@ -101,9 +101,9 @@ js-debug has no `justMyCode` key of its own; the launch transform turns the inte
 `skipFiles` (V8 blackboxing — `node_modules` is on the list while `justMyCode` is true, Node internals always) and
 `smartStep`, whose stepper **keeps stepping while the program is in a skipped frame** — in the direction you asked
 for, falling back to step-out — instead of reporting the stop. On a server every pause lands in Node internals, and
-a request path enters your code by calls, not returns, so with the stepper on neither a pause nor a step issued
-from a skipped frame lands (issue #678). `justMyCode: false` turns the stepper off and takes `node_modules` off the
-list. What that means in practice:
+a request path enters your code by calls, not returns, so with the stepper on neither a pause nor a `step_over` /
+`step_out` issued from a skipped frame lands (issue #678); a `step_into` still reaches the next call into your
+code. `justMyCode: false` turns the stepper off and takes `node_modules` off the list. What that means in practice:
 
 | Launch | `skipFiles` sent | `smartStep` | A breakpoint inside a dependency | `step_over` from that breakpoint | `pause_execution` on an idle server |
 |---|---|---|---|---|---|
@@ -114,16 +114,19 @@ list. What that means in practice:
 
 A caller-supplied `skipFiles` **replaces** the default list (VS Code's launch.json semantics); include
 `<node_internals>/**` yourself if you still want internals skipped. An explicit `smartStep` always wins over the
-derived value. Attach sessions default neither key — see `attach_to_process` in the tool reference.
+derived value. Attach defaults `smartStep` to `false` and leaves `skipFiles` unset (issue #513) — see
+`attach_to_process` in the tool reference.
 
 Why launch keeps the stepper on by default while attach turns it off (issue #687, measured on js-debug 1.112):
-`<node_internals>/**` on `skipFiles` is not a V8 blackbox, so with the stepper off a `step_into` from a
-dependency frame stops in Node internals one line at a time (`<node_internals>/url`) instead of in your handler,
-which the stepper reaches in one press; and `step_into` an `async` callee in TypeScript compiled to ES2015 or
-lower costs four unmapped `__awaiter` stops before the callee's first line. `step_over` across an `await` is
-unchanged either way. Those costs have no hint mechanism, while the two pending cases in the default row name
-their remedy — so the default stays, and `justMyCode: false` (or `smartStep: false`) is the switch when a pause or
-a step from a dependency matters more than stepping into one.
+js-debug's V8 blackbox patterns for `<node_internals>/**` cover `node:internal/*` but not top-level builtins such
+as `node:url` or `node:events` (the per-builtin patterns are built with a `.js` suffix the live URLs do not
+carry), so with the stepper off a `step_into` from a dependency frame stops in those internals one line at a
+time (`<node_internals>/url`) instead of in your handler, which the stepper reaches in one press; and `step_into`
+an `async` callee in TypeScript compiled for a target below ES2017 costs four unmapped `__awaiter` stops before
+the callee's first line. `step_over` across an `await` is unchanged either way. Those costs have no hint
+mechanism, while the two pending cases in the default row name their remedy — so the default stays, and
+`justMyCode: false` (or `smartStep: false`) is the switch when a pause or a step from a dependency matters more
+than stepping into one.
 
 A step whose stop is a breakpoint or an exception rather than the step itself is reported as
 `Stepped over; stopped on 'breakpoint' rather than on the step itself (see stopReason)` — true both when the next

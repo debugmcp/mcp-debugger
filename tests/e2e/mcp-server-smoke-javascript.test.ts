@@ -325,13 +325,21 @@ describe('JavaScript Debugging - Simple Smoke Tests', () => {
 
   /**
    * How the idle express fixture is launched: `justMyCode` is spread into
-   * dapLaunchArgs only when given, so `{}` exercises the unset default the
-   * README's default row describes (issue #687); `adapterLaunchConfig`
-   * reaches the launch transform's overrides (e.g. `{ smartStep: false }`).
+   * dapLaunchArgs only when given, so `{}` replays the unset default the
+   * README's default row describes (issue #687) at the MCP surface — the
+   * server merges `defaultDapLaunchArgs` underneath, so below that boundary it
+   * is the `justMyCode: true` launch; `adapterLaunchConfig` reaches the launch
+   * transform's overrides (e.g. `{ smartStep: false }`).
    */
   interface IdleExpressLaunch {
     justMyCode?: boolean;
     adapterLaunchConfig?: Record<string, unknown>;
+  }
+
+  /** A session name that encodes the whole launch variant, for leaked-session dumps. */
+  function describeLaunch(launch: IdleExpressLaunch): string {
+    const extras = Object.entries(launch.adapterLaunchConfig ?? {}).map(([key, value]) => `${key}=${String(value)}`);
+    return [`justMyCode=${launch.justMyCode ?? 'unset'}`, ...extras].join('-');
   }
 
   /**
@@ -344,7 +352,7 @@ describe('JavaScript Debugging - Simple Smoke Tests', () => {
 
     const createResult = await mcpClient!.callTool({
       name: 'create_debug_session',
-      arguments: { language: 'javascript', name: `js-dependency-${launch.justMyCode ?? 'default'}` }
+      arguments: { language: 'javascript', name: `js-dependency-${describeLaunch(launch)}` }
     });
     sessionId = parseSdkToolResult(createResult).sessionId as string;
 
@@ -405,8 +413,11 @@ describe('JavaScript Debugging - Simple Smoke Tests', () => {
     expect(paused, 'the express breakpoint must fire on the request').toBe(true);
   }
 
-  it('explains a step lost to a skipped dependency frame with justMyCode: true (issue #678)', async () => {
-    await pauseInsideExpress({ justMyCode: true });
+  it.each([
+    ['justMyCode: true', { justMyCode: true } as IdleExpressLaunch],
+    ['the unset default (issue #687)', {} as IdleExpressLaunch]
+  ])('explains a step lost to a skipped dependency frame on the launch with %s (issue #678)', async (label, launch) => {
+    await pauseInsideExpress(launch);
 
     const step = parseSdkToolResult(await mcpClient!.callTool({ name: 'step_over', arguments: { sessionId } }));
     expect(step.success, JSON.stringify(step)).toBe(true);
@@ -416,7 +427,7 @@ describe('JavaScript Debugging - Simple Smoke Tests', () => {
     expect(step.pending, JSON.stringify(step)).toBe(true);
     expect(step.message).toMatch(/skipped frame/);
     expect(step.message).toMatch(/justMyCode: false/);
-    console.log('[JS Simple Smoke] ✓ Lost dependency step explained');
+    console.log(`[JS Simple Smoke] ✓ Lost dependency step explained (${label})`);
   }, 60000);
 
   it('lands a step issued inside a dependency when justMyCode is false (issue #678)', async () => {
@@ -457,20 +468,8 @@ describe('JavaScript Debugging - Simple Smoke Tests', () => {
     console.log('[JS Simple Smoke] ✓ Pause landed on an idle launched server with justMyCode: false');
   }, 60000);
 
-  // The three tests above pass justMyCode explicitly; the README's default row
-  // describes the launch with nothing set, which is what the next two exercise
-  // (issue #687: the launch default was measured and kept).
-
-  it('explains a step lost to a skipped dependency frame on the unset default launch (issue #687)', async () => {
-    await pauseInsideExpress({});
-
-    const step = parseSdkToolResult(await mcpClient!.callTool({ name: 'step_over', arguments: { sessionId } }));
-    expect(step.success, JSON.stringify(step)).toBe(true);
-    expect(step.pending, JSON.stringify(step)).toBe(true);
-    expect(step.message).toMatch(/skipped frame/);
-    expect(step.message).toMatch(/justMyCode: false/);
-    console.log('[JS Simple Smoke] ✓ Lost dependency step explained on the unset default');
-  }, 60000);
+  // Issue #687 measured the launch default and kept it; the next tests pin
+  // both sides of that decision on the same fixture.
 
   it('lands a step issued inside a dependency with the smart-stepper off on the default skip list (issue #687)', async () => {
     // What a launch default of smartStep: false would do (the attach default
@@ -484,11 +483,32 @@ describe('JavaScript Debugging - Simple Smoke Tests', () => {
     const location = step.location as { file: string; line: number } | undefined;
     expect(location?.file, JSON.stringify(step)).toMatch(/<node_internals>/);
 
+    // Frame 0 is the internals frame the program stopped in — kept as the
+    // anchor whether or not an async ancestor survives the display filter.
     const stack = parseSdkToolResult(await mcpClient!.callTool({ name: 'get_stack_trace', arguments: { sessionId } }));
-    expect(stack.pausedFrame, JSON.stringify(stack)).toBeDefined();
+    const frames = stack.stackFrames as Array<{ file: string }>;
+    expect(frames[0]?.file, JSON.stringify(stack)).toMatch(/<node_internals>/);
     const locals = parseSdkToolResult(await mcpClient!.callTool({ name: 'get_local_variables', arguments: { sessionId } }));
     expect(locals.success, JSON.stringify(locals)).toBe(true);
-    console.log('[JS Simple Smoke] ✓ Dependency step landed in a marked internals frame with the stepper off');
+    console.log('[JS Simple Smoke] ✓ Dependency step landed in an internals frame with the stepper off');
+  }, 60000);
+
+  // The load-bearing #687 observation: from a dependency frame, step_into
+  // reaches the user handler in one press with the stepper on (the default)
+  // and stops in Node internals with it off — js-debug 1.112's blackbox
+  // patterns cover node:internal/* but not top-level builtins such as node:url.
+  it.each([
+    ['on (the default)', {} as IdleExpressLaunch, /[\\/]express_idle_server\.js$/],
+    ['off', { adapterLaunchConfig: { smartStep: false } } as IdleExpressLaunch, /<node_internals>/]
+  ])('step_into from a dependency frame with the smart-stepper %s (issue #687)', async (label, launch, expected) => {
+    await pauseInsideExpress(launch);
+
+    const step = parseSdkToolResult(await mcpClient!.callTool({ name: 'step_into', arguments: { sessionId } }));
+    expect(step.success, JSON.stringify(step)).toBe(true);
+    expect(step.pending, JSON.stringify(step)).toBeUndefined();
+    const location = step.location as { file: string; line: number } | undefined;
+    expect(location?.file, JSON.stringify(step)).toMatch(expected);
+    console.log(`[JS Simple Smoke] ✓ step_into from a dependency frame, stepper ${label}: ${location?.file}`);
   }, 60000);
 
   it('should handle multiple breakpoints', async () => {
