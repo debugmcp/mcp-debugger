@@ -18,6 +18,7 @@
 import type { RequestHandler } from 'express';
 import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import { jsonRpcErrorBody } from './json-rpc-error.js';
+import { StartupRefusalError } from './startup-refusal.js';
 
 /** The names a loopback client can present; always accepted. */
 export const LOOPBACK_HOSTS: readonly string[] = Object.freeze(['localhost', '127.0.0.1', '[::1]']);
@@ -35,7 +36,7 @@ export type AllowedHostSource = typeof ALLOWED_HOST_FLAG | typeof ALLOWED_HOSTS_
  * dropped or rewritten entry reproduces the very discoverability problem the
  * flag exists to fix.
  */
-export class AllowedHostError extends Error {
+export class AllowedHostError extends StartupRefusalError {
   constructor(
     public readonly entry: string,
     public readonly source: AllowedHostSource,

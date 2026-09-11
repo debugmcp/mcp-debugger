@@ -1,9 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   BIND_ENV_KEY,
   BIND_FLAG,
   BindAddressError,
   DEFAULT_BIND_ADDRESS,
+  announceListening,
   bindOption,
   bindNotice,
   describeEndpoint,
@@ -11,8 +12,10 @@ import {
   isLoopbackAddress,
   isUnspecifiedAddress,
   resolveBindAddress,
+  type ListeningEndpoint,
   type ResolvedBindAddress
 } from '../../../src/cli/bind-address.js';
+import type { ProcessLike } from '../../../src/interfaces/process-interfaces.js';
 
 describe('bind-address (issue #680)', () => {
   describe('resolveBindAddress', () => {
@@ -208,6 +211,42 @@ describe('bind-address (issue #680)', () => {
 
     it('falls back to the raw message for anything else', () => {
       expect(describeListenError(errno('EPROTO', 'boom'), 3001, bind)).toBe('Server error: boom');
+    });
+  });
+
+  describe('announceListening (issue #689)', () => {
+    function fakes() {
+      const logger = { info: vi.fn() };
+      const chunks: string[] = [];
+      const proc = { stderr: { write: (chunk: string) => { chunks.push(chunk); return true; } } } as unknown as Pick<ProcessLike, 'stderr'>;
+      return { logger, proc, chunks };
+    }
+
+    it('copies the bound address and port into the /health record, brackets an IPv6 host, and mirrors the endpoint to stderr', () => {
+      const { logger, proc, chunks } = fakes();
+      const listening: ListeningEndpoint = { address: '::1', port: 0 };
+      const server = { address: () => ({ address: '::1', family: 'IPv6', port: 64417 }) };
+
+      announceListening(server, listening, { logger, proc, label: 'HTTP', path: '/mcp' });
+
+      expect(listening).toEqual({ address: '::1', port: 64417 });
+      expect(logger.info).toHaveBeenCalledWith('Debug MCP Server (HTTP) listening on [::1]:64417');
+      expect(logger.info).toHaveBeenCalledWith('MCP endpoint available at http://[::1]:64417/mcp');
+      // http/sse silence the console, so the logger alone leaves a plain
+      // `-p 0` with nowhere to read the port; stderr is not the MCP channel there.
+      expect(chunks.join('')).toContain('http://[::1]:64417/mcp');
+    });
+
+    it('keeps the requested endpoint when the server reports no address, and names the SSE endpoint for sse', () => {
+      const { logger, proc, chunks } = fakes();
+      const listening: ListeningEndpoint = { address: '127.0.0.1', port: 4000 };
+
+      announceListening({ address: () => null }, listening, { logger, proc, label: 'SSE', path: '/sse' });
+
+      expect(listening).toEqual({ address: '127.0.0.1', port: 4000 });
+      expect(logger.info).toHaveBeenCalledWith('Debug MCP Server (SSE) listening on 127.0.0.1:4000');
+      expect(logger.info).toHaveBeenCalledWith('SSE endpoint available at http://127.0.0.1:4000/sse');
+      expect(chunks.join('')).toContain('http://127.0.0.1:4000/sse');
     });
   });
 

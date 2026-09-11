@@ -657,7 +657,9 @@ describe('SSE Command Handler', () => {
     beforeEach(() => {
       mockServer = {
         close: vi.fn(),
-        on: vi.fn()
+        on: vi.fn(),
+        // What net.Server.address() returns before the socket is bound.
+        address: vi.fn(() => null)
       };
     });
 
@@ -666,7 +668,7 @@ describe('SSE Command Handler', () => {
       const listeningServer = { close: vi.fn(), on: vi.fn((event: string, cb: (err: NodeJS.ErrnoException) => void) => { listeners[event] = cb; }) };
       vi.mocked(express).mockReturnValue({
         use: vi.fn(), get: vi.fn(), post: vi.fn(),
-        listen: vi.fn((_port: number, _address: string, cb: () => void) => { cb(); return listeningServer; }),
+        listen: vi.fn(() => listeningServer),
         sseTransports: new Map()
       } as any);
 
@@ -715,10 +717,9 @@ describe('SSE Command Handler', () => {
     });
 
     it('binds the address from --bind and warns when it is not loopback (issue #680)', async () => {
-      const mockListen = vi.fn((_port: number, _address: string, callback: Function) => {
-        callback();
-        return mockServer;
-      });
+      const listeners: Record<string, () => void> = {};
+      mockServer.on = vi.fn((event: string, cb: () => void) => { listeners[event] = cb; });
+      const mockListen = vi.fn(() => mockServer);
       vi.mocked(express).mockReturnValue({
         use: vi.fn(),
         get: vi.fn(),
@@ -732,10 +733,11 @@ describe('SSE Command Handler', () => {
         { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
 
-      expect(mockListen).toHaveBeenCalledWith(4000, '0.0.0.0', expect.any(Function));
+      expect(mockListen).toHaveBeenCalledWith(4000, '0.0.0.0');
       expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('reachable from other machines'));
       expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('(from --bind)'));
       expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('--allowed-host <name>'));
+      listeners.listening();
       expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('http://127.0.0.1:4000/sse'));
       expect(mockExitProcess).not.toHaveBeenCalled();
     });
@@ -763,7 +765,7 @@ describe('SSE Command Handler', () => {
       const listeningServer = { close: vi.fn(), on: vi.fn((event: string, cb: (err: NodeJS.ErrnoException) => void) => { listeners[event] = cb; }) };
       vi.mocked(express).mockReturnValue({
         use: vi.fn(), get: vi.fn(), post: vi.fn(),
-        listen: vi.fn((_port: number, _address: string, cb: () => void) => { cb(); return listeningServer; }),
+        listen: vi.fn(() => listeningServer),
         sseTransports: new Map()
       } as any);
 
@@ -790,7 +792,7 @@ describe('SSE Command Handler', () => {
       const get = vi.fn();
       vi.mocked(express).mockReturnValue({
         use: vi.fn(), get, post: vi.fn(),
-        listen: vi.fn((_port: number, _address: string, cb: () => void) => { cb(); return listeningServer; }),
+        listen: vi.fn(() => listeningServer),
         sseTransports: new Map()
       } as any);
 
@@ -809,17 +811,72 @@ describe('SSE Command Handler', () => {
       expect(after.json).toHaveBeenCalledWith(expect.objectContaining({ listening: { address: '127.0.0.1', port: 64417 } }));
     });
 
-    it('should start server successfully in SSE mode', async () => {
+    it.each(['abc', '3001x'])("refuses to start on an unusable --port value '%s', naming it (issue #689)", async (port) => {
+      const listen = vi.fn();
+      vi.mocked(express).mockReturnValue({
+        use: vi.fn(), get: vi.fn(), post: vi.fn(), listen, sseTransports: new Map()
+      } as any);
+
+      await handleSSECommand(
+        { port },
+        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+      );
+
+      expect(mockExitProcess).toHaveBeenCalledWith(1);
+      expect(listen).not.toHaveBeenCalled();
+      // Refused before the shared debug server is built: nothing to tear down.
+      expect(mockServerFactory).not.toHaveBeenCalled();
+      expect(mockLogger.error).toHaveBeenCalledWith(expect.stringContaining(`--port value '${port}'`));
+      // Nothing was announced before the refusal, the deprecation line included.
+      expect(mockLogger.warn).not.toHaveBeenCalledWith(expect.stringContaining('deprecated'));
+      expect(mockLogger.info).not.toHaveBeenCalledWith(expect.stringContaining('Starting Debug MCP Server'));
+      await new Promise((resolve) => setImmediate(resolve));
+      const stderr = fakeProc.stderrChunks.join('');
+      expect(stderr).toContain(`--port value '${port}'`);
+      expect(stderr).toContain('The server was not started');
+    });
+
+    it('logs the port the socket actually bound, not the one asked for (-p 0, issue #689)', async () => {
+      const listeners: Record<string, () => void> = {};
+      const listeningServer = {
+        close: vi.fn(),
+        on: vi.fn((event: string, cb: () => void) => { listeners[event] = cb; }),
+        address: () => ({ address: '127.0.0.1', family: 'IPv4', port: 64417 })
+      };
+      vi.mocked(express).mockReturnValue({
+        use: vi.fn(), get: vi.fn(), post: vi.fn(),
+        listen: vi.fn(() => listeningServer),
+        sseTransports: new Map()
+      } as any);
+
+      await handleSSECommand(
+        { port: '0' },
+        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+      );
+      // Not announced until the socket is bound: the requested port is not the bound one.
+      expect(mockLogger.info).not.toHaveBeenCalledWith(expect.stringContaining('listening on'));
+
+      listeners.listening();
+      expect(mockLogger.info).toHaveBeenCalledWith('Debug MCP Server (SSE) listening on 127.0.0.1:64417');
+      expect(mockLogger.info).toHaveBeenCalledWith('SSE endpoint available at http://127.0.0.1:64417/sse');
+      expect(mockLogger.info).not.toHaveBeenCalledWith(expect.stringContaining(':0'));
+      // sse mode silences the console too: the bound endpoint is mirrored to stderr.
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(fakeProc.stderrChunks.join('')).toContain('http://127.0.0.1:64417/sse');
+    });
+
+    it('should start server successfully in SSE mode, announcing the endpoint once the socket is bound', async () => {
       const options = {
         port: '4000',
         logLevel: 'debug',
         logFile: '/tmp/test.log'
       };
 
-      const mockListen = vi.fn((port, _address, callback) => {
-        callback();
-        return mockServer;
-      });
+      const listeners: Record<string, () => void> = {};
+      mockServer.on = vi.fn((event: string, cb: () => void) => { listeners[event] = cb; });
+      // No listen callback: the endpoint is announced from the 'listening'
+      // event, where server.address() is readable (issue #689).
+      const mockListen = vi.fn(() => mockServer);
 
       // Mock express app
       vi.mocked(express).mockReturnValue({
@@ -842,11 +899,12 @@ describe('SSE Command Handler', () => {
 
       // Verify info logs
       expect(mockLogger.info).toHaveBeenCalledWith('Starting Debug MCP Server in SSE mode on port 4000');
+      listeners.listening();
       expect(mockLogger.info).toHaveBeenCalledWith('Debug MCP Server (SSE) listening on 127.0.0.1:4000');
       expect(mockLogger.info).toHaveBeenCalledWith('SSE endpoint available at http://127.0.0.1:4000/sse');
 
       // Verify server listen was called
-      expect(mockListen).toHaveBeenCalledWith(4000, '127.0.0.1', expect.any(Function));
+      expect(mockListen).toHaveBeenCalledWith(4000, '127.0.0.1');
 
       // Verify SIGINT handler was registered on the injected handle
       expect(fakeProc.listenerCount('SIGINT')).toBe(1);
@@ -856,10 +914,7 @@ describe('SSE Command Handler', () => {
     });
 
     it('attaches --log-file to the CLI logger before emitting SSE lifecycle lines (issue #533)', async () => {
-      const mockListen = vi.fn((_port: number, _address: string, callback: Function) => {
-        callback();
-        return mockServer;
-      });
+      const mockListen = vi.fn(() => mockServer);
       vi.mocked(express).mockReturnValue({
         use: vi.fn(),
         get: vi.fn(),
@@ -894,10 +949,7 @@ describe('SSE Command Handler', () => {
         close: vi.fn((cb?: Function) => cb && cb()),
         on: vi.fn()
       };
-      const mockListen = vi.fn((_port: number, _address: string, callback: Function) => {
-        callback();
-        return httpServer;
-      });
+      const mockListen = vi.fn(() => httpServer);
       vi.mocked(express).mockReturnValue({
         use: vi.fn(),
         get: vi.fn(),
@@ -959,10 +1011,7 @@ describe('SSE Command Handler', () => {
         logLevel: 'info'
       };
 
-      const mockListen = vi.fn((port, _address, callback) => {
-        callback();
-        return mockServer;
-      });
+      const mockListen = vi.fn(() => mockServer);
 
       // Mock express app
       vi.mocked(express).mockReturnValue({
@@ -981,7 +1030,7 @@ describe('SSE Command Handler', () => {
       });
 
       // Verify listen was called with integer port
-      expect(mockListen).toHaveBeenCalledWith(3001, '127.0.0.1', expect.any(Function));
+      expect(mockListen).toHaveBeenCalledWith(3001, '127.0.0.1');
     });
 
     it('should handle SIGINT for graceful shutdown', async () => {
@@ -992,10 +1041,7 @@ describe('SSE Command Handler', () => {
         use: vi.fn(),
         get: vi.fn(),
         post: vi.fn(),
-        listen: vi.fn((port: number, _address: string, callback: Function) => {
-          callback();
-          return mockServer;
-        }),
+        listen: vi.fn(() => mockServer),
         sseTransports: new Map(),
         sharedDebugServer: null as any
       };
@@ -1045,10 +1091,7 @@ describe('SSE Command Handler', () => {
         use: vi.fn(),
         get: vi.fn(),
         post: vi.fn(),
-        listen: vi.fn((port: number, _address: string, callback: Function) => {
-          callback();
-          return mockServer;
-        }),
+        listen: vi.fn(() => mockServer),
         sseTransports: new Map(),
         sharedDebugServer: null as any
       };
@@ -1103,10 +1146,7 @@ describe('SSE Command Handler', () => {
       const options = { port: '3001' };
       mockLogger.level = 'warn';
 
-      const mockListen = vi.fn((port, _address, callback) => {
-        callback();
-        return mockServer;
-      });
+      const mockListen = vi.fn(() => mockServer);
 
       vi.mocked(express).mockReturnValue({
         use: vi.fn(),

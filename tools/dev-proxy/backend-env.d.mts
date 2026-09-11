@@ -4,6 +4,12 @@
  */
 
 /**
+ * The backend port from DEV_PROXY_PORT: unset or empty means 3001; anything
+ * but an integer in 1-65535 throws an Error naming the variable and the value.
+ */
+export function resolveBackendPort(raw: string | undefined): number;
+
+/**
  * Replace backend overrides only when a tool call explicitly supplies `env`.
  * Omission returns `current` unchanged (by identity); an empty `env` clears it.
  *
