@@ -116,6 +116,15 @@ A caller-supplied `skipFiles` **replaces** the default list (VS Code's launch.js
 `<node_internals>/**` yourself if you still want internals skipped. An explicit `smartStep` always wins over the
 derived value. Attach sessions default neither key — see `attach_to_process` in the tool reference.
 
+Why launch keeps the stepper on by default while attach turns it off (issue #687, measured on js-debug 1.112):
+`<node_internals>/**` on `skipFiles` is not a V8 blackbox, so with the stepper off a `step_into` from a
+dependency frame stops in Node internals one line at a time (`<node_internals>/url`) instead of in your handler,
+which the stepper reaches in one press; and `step_into` an `async` callee in TypeScript compiled to ES2015 or
+lower costs four unmapped `__awaiter` stops before the callee's first line. `step_over` across an `await` is
+unchanged either way. Those costs have no hint mechanism, while the two pending cases in the default row name
+their remedy — so the default stays, and `justMyCode: false` (or `smartStep: false`) is the switch when a pause or
+a step from a dependency matters more than stepping into one.
+
 A step whose stop is a breakpoint or an exception rather than the step itself is reported as
 `Stepped over; stopped on 'breakpoint' rather than on the step itself (see stopReason)` — true both when the next
 line carries a breakpoint and when a lost step's next request re-hit the same breakpoint; in the second case the
