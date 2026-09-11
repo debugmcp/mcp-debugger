@@ -12,14 +12,15 @@
  * accepted, anything else is refused by name before a server is built.
  */
 import { Option } from 'commander';
+import { StartupRefusalError } from './startup-refusal.js';
 
 export const PORT_FLAG = '--port';
-/** A string, like every commander default: the handlers resolve it themselves. */
+/** A string, like every commander default: the app factories resolve it. */
 export const DEFAULT_PORT = '3001';
 export const MAX_PORT = 65535;
 
 /** An unusable `--port` value; the server must not start. */
-export class PortError extends Error {
+export class PortError extends StartupRefusalError {
   constructor(message: string) {
     super(message);
     this.name = 'PortError';
@@ -44,18 +45,18 @@ export function portOption(): Option {
  * The port to hand to `listen()`. Only an unsigned decimal integer in
  * 0-65535 is accepted — no sign, no decimal point, no whitespace, no trailing
  * characters — so a typo fails loudly instead of binding a different port.
- * Throws {@link PortError} naming the flag and the value as typed. The message
- * carries no trailing period: the handlers append ". The server was not
- * started." to it.
+ * Throws {@link PortError} naming the flag, the value as typed and which of
+ * the two rules it broke. The message carries no trailing period: the
+ * handlers append ". The server was not started." to it.
  */
 export function resolvePort(raw: string): number {
-  const refusal = `${PORT_FLAG} value '${raw}' is not a port number; give an integer 0-${MAX_PORT} (0 lets the OS choose)`;
+  const remedy = `give an integer 0-${MAX_PORT} (0 lets the OS choose)`;
   if (!/^\d+$/.test(raw)) {
-    throw new PortError(refusal);
+    throw new PortError(`${PORT_FLAG} value '${raw}' is not a port number; ${remedy}`);
   }
   const port = Number(raw);
   if (port > MAX_PORT) {
-    throw new PortError(refusal);
+    throw new PortError(`${PORT_FLAG} value '${raw}' is above ${MAX_PORT}; ${remedy}`);
   }
   return port;
 }

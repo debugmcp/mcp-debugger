@@ -34,6 +34,14 @@ describe('port (issue #689)', () => {
       expect(message.endsWith('.')).toBe(false);
     });
 
+    it('tells an out-of-range integer apart from garbage', () => {
+      for (const raw of ['65536', '70000']) {
+        expect(() => resolvePort(raw)).toThrow(/is above 65535/);
+        expect(() => resolvePort(raw)).not.toThrow(/is not a port number/);
+      }
+      expect(() => resolvePort('abc')).toThrow(/is not a port number/);
+    });
+
     it('names its error class so a catch can tell it from a generic startup failure', () => {
       expect(() => resolvePort('abc')).toThrow(expect.objectContaining({ name: 'PortError' }));
     });

@@ -10,17 +10,16 @@ import type { ProcessLike } from '../interfaces/process-interfaces.js';
 import {
   ALLOWED_HOST_FLAG,
   ALLOWED_HOSTS_ENV_KEY,
-  AllowedHostError,
   hostAllowlistMiddleware,
   LOOPBACK_HOSTS,
   parseAllowedHosts
 } from './host-allowlist.js';
 import { reportFatal } from './report-fatal.js';
-import { PortError, resolvePort } from './port.js';
+import { resolvePort } from './port.js';
+import { StartupRefusalError } from './startup-refusal.js';
 import {
-  BindAddressError,
+  announceListening,
   bindNotice,
-  describeEndpoint,
   describeListenError,
   resolveBindAddress,
   type ListeningEndpoint,
@@ -270,21 +269,23 @@ export async function handleSSECommand(
   }
   
   try {
-    // First, and inside the try: an unusable --port is refused by name before
-    // anything is announced or built (issue #689).
-    const port = resolvePort(options.port);
+    // The factory resolves --port (issue #689) beside --bind and the allowlist,
+    // before the shared debug server is built, so an unusable value is
+    // refused by name with nothing announced and nothing to tear down.
+    const app = createSSEApp(options, dependencies);
+
+    const sharedDebugServer = (app as any).sharedDebugServer as DebugMcpServer; // eslint-disable-line @typescript-eslint/no-explicit-any
+    const bind = (app as any).bindAddress as ResolvedBindAddress; // eslint-disable-line @typescript-eslint/no-explicit-any
+    const listening = (app as any).listening as ListeningEndpoint; // eslint-disable-line @typescript-eslint/no-explicit-any
+    // The requested port; `listening` is rewritten from the bound socket later.
+    const port = listening.port;
     logger.warn(
       `SSE transport is deprecated and will be removed in a future release. ` +
         `Switch to: mcp-debugger http -p ${port}`
     );
     logger.info(`Starting Debug MCP Server in SSE mode on port ${port}`);
 
-    const app = createSSEApp(options, dependencies);
-
     // Start the shared debug server (mirrors stdio-command.ts startup)
-    const sharedDebugServer = (app as any).sharedDebugServer as DebugMcpServer; // eslint-disable-line @typescript-eslint/no-explicit-any
-    const bind = (app as any).bindAddress as ResolvedBindAddress; // eslint-disable-line @typescript-eslint/no-explicit-any
-    const listening = (app as any).listening as ListeningEndpoint; // eslint-disable-line @typescript-eslint/no-explicit-any
     await sharedDebugServer.start();
 
     if (bind.note) {
@@ -298,19 +299,9 @@ export async function handleSSECommand(
     }
     const server = app.listen(port, bind.address);
     // /health and the startup lines report what the socket actually bound —
-    // for -p 0 that is the OS-assigned port (issue #689). Registered after
-    // listen() returns: Node emits 'listening' on a later tick, so `server` is
-    // assigned; a listen() callback would run before this handler and could
-    // only repeat the requested port.
-    server.on('listening', () => {
-      const bound = server.address();
-      if (bound && typeof bound === 'object') {
-        listening.address = bound.address;
-        listening.port = bound.port;
-      }
-      logger.info(`Debug MCP Server (SSE) listening on ${bind.address}:${listening.port}`);
-      logger.info(`SSE endpoint available at ${describeEndpoint(bind.address, listening.port, '/sse')}`);
-    });
+    // for -p 0 the OS-assigned port (issue #689). Registered after listen()
+    // returns: Node emits 'listening' on a later tick, so `server` is assigned.
+    server.on('listening', () => announceListening(server, listening, { logger, proc, label: 'SSE', path: '/sse' }));
 
     server.on('error', (err: NodeJS.ErrnoException) => {
       const line = describeListenError(err, port, bind);
@@ -380,9 +371,10 @@ export async function handleSSECommand(
       env: proc.env,
     });
   } catch (error) {
-    if (error instanceof AllowedHostError || error instanceof BindAddressError || error instanceof PortError) {
-      // Fail fast and by name (issue #667): a silently dropped allowlist
-      // entry would reproduce the discoverability problem the flag exists to fix.
+    if (error instanceof StartupRefusalError) {
+      // Fail fast and by name (--allowed-host, --bind, --port; issue #667): a
+      // silently dropped value would reproduce the discoverability problem
+      // each flag exists to fix.
       const line = `${error.message}. The server was not started.`;
       logger.error(line);
       reportFatal(proc, line);
