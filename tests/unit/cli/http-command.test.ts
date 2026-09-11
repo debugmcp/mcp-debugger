@@ -854,14 +854,17 @@ describe('HTTP Command Handler', () => {
       mockHttpServer = {
         close: vi.fn((cb?: Function) => cb && cb()),
         on: vi.fn(),
+        // What net.Server.address() returns before the socket is bound.
+        address: vi.fn(() => null),
       };
     });
 
     it('binds the address from --bind and warns when it is not loopback (issue #680)', async () => {
-      const listen = vi.fn((_port: number, _address: string, cb: Function) => {
-        cb();
-        return mockHttpServer;
+      const handlers: Record<string, () => void> = {};
+      mockHttpServer.on = vi.fn((event: string, handler: () => void) => {
+        handlers[event] = handler;
       });
+      const listen = vi.fn(() => mockHttpServer);
       mockApp.listen = listen;
 
       await handleHttpCommand(
@@ -869,20 +872,21 @@ describe('HTTP Command Handler', () => {
         { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
 
-      expect(listen).toHaveBeenCalledWith(4000, '0.0.0.0', expect.any(Function));
+      expect(listen).toHaveBeenCalledWith(4000, '0.0.0.0');
       expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('0.0.0.0'));
       expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('reachable from other machines'));
       // ...and names the knob that set it plus the allowlist remedy other machines will hit.
       expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('(from --bind)'));
       expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('--allowed-host <name>'));
       // The startup line still names a URL a client on this machine can open.
+      handlers.listening();
       expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('http://127.0.0.1:4000/mcp'));
       expect(mockExitProcess).not.toHaveBeenCalled();
     });
 
     it('binds the address from MCP_HTTP_BIND when no flag is given, and lets --bind win over it (issue #680)', async () => {
       const listen = vi.fn((_port: number, _address: string, cb: Function) => {
-        cb();
+        cb?.();
         return mockHttpServer;
       });
       mockApp.listen = listen;
@@ -892,7 +896,7 @@ describe('HTTP Command Handler', () => {
         { port: '4000' },
         { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
-      expect(listen).toHaveBeenCalledWith(4000, '10.0.0.5', expect.any(Function));
+      expect(listen).toHaveBeenCalledWith(4000, '10.0.0.5');
       expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('(from MCP_HTTP_BIND)'));
       expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('--allowed-host 10.0.0.5'));
       expect(mockLogger.warn).not.toHaveBeenCalledWith(expect.stringContaining('--bind'));
@@ -901,12 +905,12 @@ describe('HTTP Command Handler', () => {
         { port: '4001', bind: '127.0.0.1' },
         { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
-      expect(listen).toHaveBeenCalledWith(4001, '127.0.0.1', expect.any(Function));
+      expect(listen).toHaveBeenCalledWith(4001, '127.0.0.1');
     });
 
     it('normalizes --bind localhost to 127.0.0.1 and says so (issue #680)', async () => {
       const listen = vi.fn((_port: number, _address: string, cb: Function) => {
-        cb();
+        cb?.();
         return mockHttpServer;
       });
       mockApp.listen = listen;
@@ -916,14 +920,14 @@ describe('HTTP Command Handler', () => {
         { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
 
-      expect(listen).toHaveBeenCalledWith(4000, '127.0.0.1', expect.any(Function));
+      expect(listen).toHaveBeenCalledWith(4000, '127.0.0.1');
       expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('localhost binds 127.0.0.1'));
       expect(mockLogger.warn).not.toHaveBeenCalledWith(expect.stringContaining('reachable from other machines'));
     });
 
     it('reports the image default (MCP_HTTP_BIND=0.0.0.0 under MCP_CONTAINER=true) at info level, not as a warning', async () => {
       const listen = vi.fn((_port: number, _address: string, cb: Function) => {
-        cb();
+        cb?.();
         return mockHttpServer;
       });
       mockApp.listen = listen;
@@ -935,7 +939,7 @@ describe('HTTP Command Handler', () => {
         { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
 
-      expect(listen).toHaveBeenCalledWith(3001, '0.0.0.0', expect.any(Function));
+      expect(listen).toHaveBeenCalledWith(3001, '0.0.0.0');
       expect(mockLogger.warn).not.toHaveBeenCalledWith(expect.stringContaining('reachable from other machines'));
       expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('image default'));
       expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('--allowed-host <name>'));
@@ -990,6 +994,47 @@ describe('HTTP Command Handler', () => {
       expect(after.json).toHaveBeenCalledWith(expect.objectContaining({ listening: { address: '127.0.0.1', port: 64417 } }));
     });
 
+    it.each(['abc', '3001x'])("refuses to start on an unusable --port value '%s', naming it (issue #689)", async (port) => {
+      await handleHttpCommand(
+        { port },
+        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+      );
+
+      expect(mockExitProcess).toHaveBeenCalledWith(1);
+      expect(mockApp.listen).not.toHaveBeenCalled();
+      expect(mockServerFactory).not.toHaveBeenCalled();
+      expect(mockLogger.error).toHaveBeenCalledWith(expect.stringContaining(`--port value '${port}'`));
+      // Nothing was announced before the refusal.
+      expect(mockLogger.info).not.toHaveBeenCalledWith(expect.stringContaining('Starting Debug MCP Server'));
+      await new Promise((resolve) => setImmediate(resolve));
+      const stderr = fakeProc.stderrChunks.join('');
+      expect(stderr).toContain(`--port value '${port}'`);
+      expect(stderr).toContain('The server was not started');
+    });
+
+    it('logs the port the socket actually bound, not the one asked for (-p 0, issue #689)', async () => {
+      const handlers: Record<string, () => void> = {};
+      mockApp.listen = vi.fn(() => ({
+        on: vi.fn((event: string, handler: () => void) => {
+          handlers[event] = handler;
+        }),
+        close: vi.fn(),
+        address: () => ({ address: '127.0.0.1', family: 'IPv4', port: 64417 }),
+      }));
+
+      await handleHttpCommand(
+        { port: '0' },
+        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+      );
+      // Not announced until the socket is bound: the requested port is not the bound one.
+      expect(mockLogger.info).not.toHaveBeenCalledWith(expect.stringContaining('listening on'));
+
+      handlers.listening();
+      expect(mockLogger.info).toHaveBeenCalledWith('Debug MCP Server (HTTP) listening on 127.0.0.1:64417');
+      expect(mockLogger.info).toHaveBeenCalledWith('MCP endpoint available at http://127.0.0.1:64417/mcp');
+      expect(mockLogger.info).not.toHaveBeenCalledWith(expect.stringContaining(':0'));
+    });
+
     it('refuses to start on an unusable --bind value, naming it (issue #680)', async () => {
       await handleHttpCommand(
         { port: '3001', bind: 'myhost' },
@@ -1003,11 +1048,12 @@ describe('HTTP Command Handler', () => {
       expect(fakeProc.stderrChunks.join('')).toContain('myhost');
     });
 
-    it('starts the HTTP server on the parsed port and logs the endpoint URL', async () => {
-      const listen = vi.fn((_port: number, _address: string, cb: Function) => {
-        cb();
-        return mockHttpServer;
+    it('starts the HTTP server on the parsed port and logs the endpoint URL once the socket is bound', async () => {
+      const handlers: Record<string, () => void> = {};
+      mockHttpServer.on = vi.fn((event: string, handler: () => void) => {
+        handlers[event] = handler;
       });
+      const listen = vi.fn(() => mockHttpServer);
       mockApp.listen = listen;
 
       await handleHttpCommand(
@@ -1016,7 +1062,10 @@ describe('HTTP Command Handler', () => {
       );
 
       expect(mockLogger.level).toBe('debug');
-      expect(listen).toHaveBeenCalledWith(4000, '127.0.0.1', expect.any(Function));
+      // No listen callback: the endpoint is announced from the 'listening' event,
+      // where server.address() is readable (issue #689).
+      expect(listen).toHaveBeenCalledWith(4000, '127.0.0.1');
+      handlers.listening();
       expect(mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('http://127.0.0.1:4000/mcp')
       );
@@ -1027,7 +1076,7 @@ describe('HTTP Command Handler', () => {
 
     it('wires --log-file into the CLI logger without failing on non-winston loggers (issue #502)', async () => {
       const listen = vi.fn((_port: number, _address: string, cb: Function) => {
-        cb();
+        cb?.();
         return mockHttpServer;
       });
       mockApp.listen = listen;
@@ -1039,7 +1088,7 @@ describe('HTTP Command Handler', () => {
         { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
 
-      expect(listen).toHaveBeenCalledWith(4001, '127.0.0.1', expect.any(Function));
+      expect(listen).toHaveBeenCalledWith(4001, '127.0.0.1');
       expect(mockExitProcess).not.toHaveBeenCalled();
     });
 
@@ -1082,7 +1131,7 @@ describe('HTTP Command Handler', () => {
 
     it('handles SIGINT by closing all transports, stopping all servers, then exiting', async () => {
       const listen = vi.fn((_port: number, _address: string, cb: Function) => {
-        cb();
+        cb?.();
         return mockHttpServer;
       });
       mockApp.listen = listen;
@@ -1116,7 +1165,7 @@ describe('HTTP Command Handler', () => {
 
     it('proceeds past a hung session stop after the guard and still exits 0 (issue #337)', async () => {
       const listen = vi.fn((_port: number, _address: string, cb: Function) => {
-        cb();
+        cb?.();
         return mockHttpServer;
       });
       mockApp.listen = listen;
@@ -1148,7 +1197,7 @@ describe('HTTP Command Handler', () => {
       // must not park the process forever once shutdown has begun.
       mockHttpServer.close = vi.fn();
       const listen = vi.fn((_port: number, _address: string, cb: Function) => {
-        cb();
+        cb?.();
         return mockHttpServer;
       });
       mockApp.listen = listen;
@@ -1180,7 +1229,7 @@ describe('HTTP Command Handler', () => {
 
       beforeEach(() => {
         mockApp.listen = vi.fn((_port: number, _address: string, cb: Function) => {
-          cb();
+          cb?.();
           return mockHttpServer;
         });
       });
@@ -1247,7 +1296,7 @@ describe('HTTP Command Handler', () => {
     it('logs EADDRINUSE specifically and exits 1', async () => {
       let errorHandler: Function = () => {};
       const listen = vi.fn((_port: number, _address: string, cb: Function) => {
-        cb();
+        cb?.();
         return mockHttpServer;
       });
       mockApp.listen = listen;

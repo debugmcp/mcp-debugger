@@ -118,7 +118,8 @@ describe('CLI Setup', () => {
       
       expect(portOption).toBeDefined();
       expect(portOption?.short).toBe('-p');
-      expect(portOption?.description).toBe('Port to listen on');
+      expect(portOption?.description).toContain('Port to listen on');
+      expect(portOption?.description).toContain('65535');
       expect(portOption?.defaultValue).toBe('3001');
       
       expect(logLevelOption).toBeDefined();
@@ -221,6 +222,7 @@ describe('CLI Setup', () => {
       const allowedHostOption = options.find(opt => opt.long === '--allowed-host');
 
       expect(portOption?.short).toBe('-p');
+      expect(portOption?.description).toContain('65535');
       expect(portOption?.defaultValue).toBe('3001');
       expect(logLevelOption?.defaultValue).toBe('info');
       expect(logFileOption).toBeDefined();

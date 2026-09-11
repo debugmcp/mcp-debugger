@@ -1,5 +1,6 @@
 import { Command, Option } from 'commander';
 import { bindOption } from './bind-address.js';
+import { portOption } from './port.js';
 
 export interface StdioOptions {
   logLevel?: string;
@@ -91,7 +92,7 @@ export function setupSSECommand(program: Command, handler: SSEHandler): void {
   program
     .command('sse')
     .description('Start the server using SSE (DEPRECATED: use "http" subcommand instead)')
-    .option('-p, --port <number>', 'Port to listen on', '3001')
+    .addOption(portOption())
     .option('-l, --log-level <level>', 'Set log level (error, warn, info, debug)', 'info')
     .option('--log-file <path>', 'Log to file instead of console')
     .addOption(allowedHostOption())
@@ -107,7 +108,7 @@ export function setupHttpCommand(program: Command, handler: HttpHandler): void {
   program
     .command('http')
     .description('Start the server using Streamable HTTP transport (recommended)')
-    .option('-p, --port <number>', 'Port to listen on', '3001')
+    .addOption(portOption())
     .option('-l, --log-level <level>', 'Set log level (error, warn, info, debug)', 'info')
     .option('--log-file <path>', 'Log to file instead of console')
     .addOption(allowedHostOption())
