@@ -206,9 +206,12 @@ export {
   resolveJsLaunchSkipFiles,
   jsLaunchBlackboxesNodeModules,
   jsLaunchSkipsNodeInternals,
-  resolveJsLaunchSmartStep
+  resolveJsLaunchSmartStep,
+  resolveJsLaunchWorkspaceFolder,
+  resolveJsPauseForSourceMap,
+  isJsTranspiledProgram
 } from './interfaces/js-launch-defaults.js';
-export type { JsLaunchSkipInputs } from './interfaces/js-launch-defaults.js';
+export type { JsLaunchSkipInputs, JsLaunchSourceMapInputs, JsLaunchWorkspaceOptions } from './interfaces/js-launch-defaults.js';
 export { PythonAdapterPolicy } from './interfaces/adapter-policy-python.js';
 export { RubyAdapterPolicy } from './interfaces/adapter-policy-ruby.js';
 export { RustAdapterPolicy } from './interfaces/adapter-policy-rust.js';
