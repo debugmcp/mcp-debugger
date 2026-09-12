@@ -741,4 +741,51 @@ describe('JavaScript Debugging - module-load breakpoints in source-mapped TypeSc
       await mcpClient!.callTool({ name: 'continue_execution', arguments: { sessionId } });
     }, 60000);
   }
+
+  /**
+   * Where a mapped .ts request is reported bound (issue #700): with maps on
+   * js-debug verifies it under the .ts path and no boundFile appears; with
+   * maps off it verifies under the generated .js and list_breakpoints carries
+   * the bound pair. Pinned here so a js-debug bump cannot rot the docs again.
+   */
+  for (const mapsOn of [true, false]) {
+    it(`reports a mapped .ts breakpoint bound under ${mapsOn ? 'the .ts path (maps on)' : 'the generated .js (sourceMaps: false)'} (issue #700)`, async () => {
+      const dir = dirs.get('commonjs')!;
+      const created = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'create_debug_session',
+        arguments: { language: 'javascript', name: `js-700-maps-${mapsOn}` }
+      }));
+      sessionId = created.sessionId as string;
+      await mcpClient!.callTool({
+        name: 'set_breakpoint',
+        arguments: { sessionId, file: path.join(dir, 'typescript_test.ts'), line: MODULE_LOAD_LINE }
+      });
+      const start = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: path.join(dir, 'typescript_test.js'),
+          args: [],
+          dapLaunchArgs: { stopOnEntry: false, justMyCode: true },
+          ...(mapsOn ? {} : { adapterLaunchConfig: { sourceMaps: false } })
+        }
+      }));
+      expect(start.state, JSON.stringify(start)).toBe('paused');
+
+      const listed = parseSdkToolResult(await mcpClient!.callTool({ name: 'list_breakpoints', arguments: { sessionId } }));
+      const [record] = (listed.breakpoints as Array<{ verified: boolean; boundFile?: string; boundLine?: number }>) ?? [];
+      expect(record?.verified, JSON.stringify(record)).toBe(true);
+      const stack = parseSdkToolResult(await mcpClient!.callTool({ name: 'get_stack_trace', arguments: { sessionId } }));
+      const top = ((stack.stackFrames as Array<{ file?: string }>) ?? [])[0];
+      if (mapsOn) {
+        expect(record?.boundFile, JSON.stringify(record)).toBeUndefined();
+        expect(top?.file ?? '').toMatch(/typescript_test\.ts$/i);
+      } else {
+        expect(record?.boundFile ?? '', JSON.stringify(record)).toMatch(/typescript_test\.js$/i);
+        expect(typeof record?.boundLine).toBe('number');
+        expect(top?.file ?? '').toMatch(/typescript_test\.js$/i);
+      }
+      await mcpClient!.callTool({ name: 'continue_execution', arguments: { sessionId } });
+    }, 60000);
+  }
 });

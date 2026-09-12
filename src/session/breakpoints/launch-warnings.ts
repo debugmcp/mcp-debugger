@@ -1,16 +1,26 @@
 /**
  * Launch-time breakpoint warnings.
  *
- * Each of these reads session state and returns a string — no adapter, no
- * proxy, no clock. They were already written that way as methods (their tests
- * called them off the prototype with a bare receiver to prove it); as free
- * functions the purity is the signature rather than a convention.
+ * Each of these reads session state and returns text (or, for the
+ * run-to-completion summary, text plus the structured fields behind it) — no
+ * adapter, no proxy, no clock. They were already written that way as methods
+ * (their tests called them off the prototype with a bare receiver to prove
+ * it); as free functions the purity is the signature rather than a convention.
  */
 import path from 'path';
 import type { AdapterPolicy } from '@debugmcp/shared';
 import { normalizeBreakpointMessage } from '../../utils/breakpoint-message.js';
 import type { ManagedSession } from '../session-store.js';
-import type { UnhitBreakpointSummary } from '../session-manager-core.js';
+
+/** One line breakpoint the program ran past without stopping (issue #701). */
+export interface UnhitBreakpointSummary {
+  file: string;
+  /** The line as the adapter bound it (the store's current line). */
+  line: number;
+  /** The line the caller asked for, when the adapter moved it. */
+  requestedLine?: number;
+  verified: boolean;
+}
 
 /**
  * Ran-to-completion unbound-breakpoint warning (issue #467). Built only
@@ -40,46 +50,77 @@ export function buildUnboundBreakpointExitWarning(
   );
 }
 
-/** What a launch reports when the program ended before any user-visible stop. */
+/** What a launch reports when it ended STOPPED: a sentence for the message, and the fields behind it. */
 export interface RunToCompletionSummary {
-  message: string;
-  exitCode?: number;
-  unhitBreakpoints: UnhitBreakpointSummary[];
+  /** Appended to the launch message after "Current state: stopped". */
+  summary: string;
+  /** Spread into the result's data. */
+  data: {
+    exitCode?: number;
+    unhitBreakpoints?: UnhitBreakpointSummary[];
+  };
 }
 
 /**
  * Run-to-completion summary (issue #701). Built when the launch ends in
- * STOPPED: a user-visible stop would have returned PAUSED, so every line
- * breakpoint in the store went unhit — the verified ones included, which the
- * unbound warning (#467) never names. Says the program exited, with its exit
- * code when the debuggee reported one (attach targets and signal-killed
- * debuggees leave it undefined), lists the breakpoints, and, when a verified
- * one was passed over, points at the entry stop that holds a program whose
- * breakpoint line runs while its module loads.
+ * STOPPED. Says how the program ended — with its exit code when the debuggee
+ * reported one (attach targets, signal-killed debuggees and adapters that
+ * send no `exited` leave it undefined) — and, when no stop was recorded,
+ * lists every breakpoint it ran past, verified or not, naming the verified
+ * ones (the unbound warning, #467, names the unbound ones). A stop that was
+ * recorded before the exit — a breakpoint hit whose `stopped` and the
+ * `exited` arrived in the same tick — means the breakpoints were not all
+ * missed, so the list is withheld and the stop is named instead. Logpoints
+ * the adapter supports are not breakpoints the program "missed" (they log
+ * and run on) and are left out; a downgraded logpoint (no adapter support)
+ * did pause, so it counts.
  */
 export function buildRunToCompletionSummary(
-  session: Pick<ManagedSession, 'breakpoints' | 'exitCode'>,
-  scriptPath: string
+  session: Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints' | 'exitCode' | 'lastStop' | 'adapterCapabilities'>
 ): RunToCompletionSummary {
-  const unhitBreakpoints = Array.from(session.breakpoints.values()).map(bp => ({
-    file: bp.file,
-    line: bp.line,
-    verified: bp.verified
-  }));
-  const hasExitCode = typeof session.exitCode === 'number';
-  const exit = hasExitCode ? ` (exit code ${session.exitCode})` : '';
-  const breakpoints = unhitBreakpoints.length > 0 ? ' without hitting any breakpoint' : '';
-  const hint = unhitBreakpoints.some(bp => bp.verified)
-    ? ' A verified breakpoint was never hit. If its line runs while the module loads, retry with' +
-      ' dapLaunchArgs: { stopOnEntry: true } and continue_execution.'
+  const exitCode = session.exitCode;
+  const ended =
+    typeof exitCode !== 'number'
+      ? 'The program ended without reporting an exit code'
+      : exitCode === 0
+        ? 'The program ran to completion (exit code 0)'
+        : `The program exited with code ${exitCode}`;
+  const data: RunToCompletionSummary['data'] = typeof exitCode === 'number' ? { exitCode } : {};
+
+  if (session.lastStop) {
+    return {
+      summary: `${ended} after a stop the launch could not report (last stop: ${session.lastStop.reason}).`,
+      data
+    };
+  }
+
+  const logpointsRunOn = session.adapterCapabilities?.supportsLogPoints === true;
+  const unhitBreakpoints: UnhitBreakpointSummary[] = [];
+  for (const bp of session.breakpoints.values()) {
+    if (logpointsRunOn && bp.logMessage !== undefined) {
+      continue;
+    }
+    unhitBreakpoints.push({
+      file: bp.file,
+      line: bp.line,
+      ...(typeof bp.requestedLine === 'number' && bp.requestedLine !== bp.line ? { requestedLine: bp.requestedLine } : {}),
+      verified: bp.verified
+    });
+  }
+  const unhitFunctions = Array.from(session.functionBreakpoints?.values() ?? []);
+  data.unhitBreakpoints = unhitBreakpoints;
+
+  if (unhitBreakpoints.length === 0 && unhitFunctions.length === 0) {
+    return { summary: `${ended}.`, data };
+  }
+  const verifiedNames = [
+    ...unhitBreakpoints.filter(bp => bp.verified).map(bp => `${path.basename(bp.file)}:${bp.line}`),
+    ...unhitFunctions.filter(bp => bp.verified).map(bp => `function '${bp.functionName}'`)
+  ];
+  const verifiedClause = verifiedNames.length > 0
+    ? ` Verified but never hit: ${verifiedNames.join(', ')}.`
     : '';
-  return {
-    message:
-      `Debugging started for ${scriptPath}. Current state: stopped. ` +
-      `The program ran to completion${exit}${breakpoints}.${hint}`,
-    ...(hasExitCode ? { exitCode: session.exitCode } : {}),
-    unhitBreakpoints
-  };
+  return { summary: `${ended} without hitting any breakpoint.${verifiedClause}`, data };
 }
 
 /**

@@ -299,7 +299,7 @@ Lists all breakpoints in a session with their current verified state and adapter
 - `adapterId` is the debug adapter's own numeric id for the breakpoint, captured from setBreakpoints responses and breakpoint events. It is absent until the adapter has seen the breakpoint.
 - Verification is eventually consistent: some adapters (js-debug, JDI, netcoredbg) bind breakpoints asynchronously and confirm via DAP breakpoint events shortly after launch or class load.
 - A breakpoint the program has stopped on is reported `verified: true` from that stop onward, even if the adapter never confirmed it (issue #673), for adapters whose `stopped` event names the breakpoints it hit (`hitBreakpointIds`: js-debug, debugpy, Delve, CodeLLDB — netcoredbg, the JDI bridge and rdbg omit the field). Such a record carries `verifiedBy: "hit"` until the adapter itself confirms it (`"adapter"`); an adapter answer of "unbound" does not downgrade it. A provisional "Unbound breakpoint" `message` is dropped by the hit; any other note is kept.
-- On entries of the `breakpoints` array, `boundFile`/`boundLine` appear when the adapter bound the breakpoint in a *different* file from the request. For a source-mapped `.ts` request on a JavaScript launch that is the case only with source maps off (`adapterLaunchConfig: { sourceMaps: false }`), when js-debug verifies it under its generated `dist/*.js` and `get_stack_trace` frames show that file too — the example above; with maps on (the default) js-debug verifies the request under the `.ts` path, the frames show `.ts`, and the pair is absent (issues #673, #700). `file` and `line` keep describing the request; the bound pair is where it landed. (Entries of `functionBreakpoints` use the same names for the bound location of the symbol, present whenever it is bound.)
+- On entries of the `breakpoints` array, `boundFile`/`boundLine` appear when the adapter answers under a *different* file from the request. For a source-mapped `.ts` request on a JavaScript launch with maps on (the default) js-debug verifies the request under the `.ts` path, `get_stack_trace` frames show `.ts`, and the pair is absent; it appears when js-debug answers under the generated `dist/*.js` instead — measured with `adapterLaunchConfig: { sourceMaps: false }` (the second entry in the example above was captured that way, and the frames then show the generated file too), and possible whenever the `.ts` source cannot be resolved through the map (issues #673, #700). `file` and `line` keep describing the request; the bound pair is where it landed. (Entries of `functionBreakpoints` use the same names for the bound location of the symbol, present whenever it is bound.)
 
 ---
 
@@ -388,7 +388,28 @@ Starts debugging a script.
 - `"entry"`: Stopped on entry (if configured)
 - `"exception"`: Stopped at an exception (the launch default for most languages; see `breakOnExceptions`). `lastStop.description`/`lastStop.text` carry the exception class and message where the adapter reports them. Where the adapter supports the DAP `exceptionInfo` request (Python, JavaScript, Java, .NET, mock), `lastStop.exceptionInfo` is additionally populated best-effort with `exceptionId`, `breakMode`, and optional `details` (message, type names, adapter-side stack trace). The enrichment is requested asynchronously right after the pause, so it may appear in `list_debug_sessions`/`get_stack_trace` a moment after the stop itself — re-query if it is absent immediately after pausing.
 
-**Exit code:** when the debuggee terminates, the exit code reported by the adapter is surfaced as `exitCode` in `list_debug_sessions`, so a crash (non-zero) is distinguishable from a clean exit.
+**A launch that ends before it can report a pause** answers `state: "stopped"` and says how the program ended (issue #701):
+
+```json
+{
+  "success": true,
+  "state": "stopped",
+  "message": "Debugging started for /abs/path/app.js. Current state: stopped. The program ran to completion (exit code 0) without hitting any breakpoint. Verified but never hit: app.ts:91.",
+  "data": {
+    "message": "Debugging started for /abs/path/app.js. Current state: stopped. The program ran to completion (exit code 0) without hitting any breakpoint. Verified but never hit: app.ts:91.",
+    "exitCode": 0,
+    "unhitBreakpoints": [{ "file": "/abs/path/src/app.ts", "line": 91, "verified": true }],
+    "stopOnEntrySuccessful": false
+  }
+}
+```
+
+- The sentence distinguishes a clean run (`ran to completion (exit code 0)`), a non-zero exit (`exited with code N`) and a debuggee that reported no code at all (`ended without reporting an exit code` — attach targets, signal-killed debuggees, adapters that send no `exited` event).
+- `data.exitCode` is present only when the debuggee reported one. `data.unhitBreakpoints` lists every line breakpoint the program ran past (`file`, `line` as bound, `requestedLine` when the adapter moved it, `verified`); logpoints the adapter supports are left out, since they log and run on. Verified line and function breakpoints that were never hit are named in the sentence; breakpoints that never bound keep their #467 `warning`.
+- When a stop and the exit arrived in the same tick (a breakpoint hit as the program ended), the breakpoints were not all missed: the list is withheld and the sentence names the stop (`after a stop the launch could not report (last stop: breakpoint)`), which `list_debug_sessions` also shows as `lastStop`.
+- `restart_debugging` returns the same fields for a relaunch that ends the same way.
+
+**Exit code:** when the debuggee terminates, the exit code reported by the adapter is surfaced as `exitCode` in `list_debug_sessions` (and, for a launch that ended before reporting a pause, as `data.exitCode` above), so a crash (non-zero) is distinguishable from a clean exit.
 
 ---
 

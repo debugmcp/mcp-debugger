@@ -12,6 +12,7 @@ import { BREAKPOINT_STOP_REASONS } from '@debugmcp/shared';
 import { isRedactionEnabled } from '../utils/redaction-mode.js';
 import { ValidationResultCache } from '../utils/language-availability.js';
 import { SessionStore, ManagedSession } from './session-store.js';
+import type { UnhitBreakpointSummary } from './breakpoints/launch-warnings.js';
 import type { ToolchainValidationState } from './session-store.js';
 import { OutputRingBuffer } from './output-buffer.js';
 import {
@@ -70,13 +71,6 @@ export interface CustomLaunchRequestArguments extends DebugProtocol.LaunchReques
  * union would force narrowing at every server read for no gain. Keeping the
  * optional field set closed makes misspelled reads and writes fail typecheck.
  */
-/** One line breakpoint the program ran past without stopping (issue #701). */
-export interface UnhitBreakpointSummary {
-  file: string;
-  line: number;
-  verified: boolean;
-}
-
 export interface DebugResultData extends ProxyFailureDiagnostics {
   /** Human-readable status for the tool result. */
   message?: string;

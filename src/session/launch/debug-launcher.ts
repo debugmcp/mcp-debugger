@@ -451,12 +451,11 @@ export class DebugLauncher {
         `[SessionManager] Debugging started for session ${sessionId}. State: ${finalState}`
       );
 
-      // Ran to completion (issue #701): a user-visible stop would have returned
-      // PAUSED, so STOPPED here means the program ended without one — say so,
-      // with the exit code and the breakpoints it ran past, verified or not.
+      // Ended before the launch could report a pause (issue #701): say how
+      // the program ended, with its exit code and the breakpoints it ran past.
       const runToCompletion =
         finalState === SessionState.STOPPED
-          ? buildRunToCompletionSummary(finalSession, scriptPath)
+          ? buildRunToCompletionSummary(finalSession)
           : undefined;
 
       return {
@@ -464,11 +463,10 @@ export class DebugLauncher {
         state: finalState,
         data: {
           ...(launchWarning ? { warning: launchWarning } : {}),
-          message: runToCompletion
-            ? runToCompletion.message
-            : `Debugging started for ${scriptPath}. Current state: ${finalState}`,
-          ...(runToCompletion?.exitCode !== undefined ? { exitCode: runToCompletion.exitCode } : {}),
-          ...(runToCompletion ? { unhitBreakpoints: runToCompletion.unhitBreakpoints } : {}),
+          message:
+            `Debugging started for ${scriptPath}. Current state: ${finalState}` +
+            (runToCompletion ? `. ${runToCompletion.summary}` : ''),
+          ...(runToCompletion?.data ?? {}),
           // Prefer the actual DAP stop reason (issue #214) — the first stop is
           // not always a breakpoint (e.g. an uncaught exception before any
           // breakpoint is hit). handleStopped records lastStop synchronously
