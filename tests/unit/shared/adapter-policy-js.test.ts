@@ -551,38 +551,41 @@ describe('JsDebugAdapterPolicy', () => {
 describe('JsDebugAdapterPolicy.performHandshake workspace root and pauseForSourceMap (issue #699)', () => {
   async function launchArgsFor(context: Record<string, unknown>): Promise<Record<string, unknown>> {
     vi.useFakeTimers();
-    const events = new EventEmitter();
-    const sendDapRequest = vi.fn().mockResolvedValue({});
-    const proxyManager = Object.assign(events, {
-      isRunning: () => true,
-      sendDapRequest,
-      removeListener: events.removeListener.bind(events)
-    });
-    const handshakePromise = JsDebugAdapterPolicy.performHandshake({
-      proxyManager,
-      sessionId: 'session-699',
-      breakpoints: new Map(),
-      ...context
-    } as any);
-    await Promise.resolve();
-    events.emit('dap-event', 'initialized', {});
-    await vi.advanceTimersByTimeAsync(0);
-    await handshakePromise;
-    vi.useRealTimers();
-    const launch = sendDapRequest.mock.calls.find(([cmd]) => cmd === 'launch');
-    expect(launch, 'launch was sent').toBeDefined();
-    return launch![1] as Record<string, unknown>;
+    try {
+      const events = new EventEmitter();
+      const sendDapRequest = vi.fn().mockResolvedValue({});
+      const proxyManager = Object.assign(events, {
+        isRunning: () => true,
+        sendDapRequest,
+        removeListener: events.removeListener.bind(events)
+      });
+      const handshakePromise = JsDebugAdapterPolicy.performHandshake({
+        proxyManager,
+        sessionId: 'session-699',
+        breakpoints: new Map(),
+        ...context
+      } as any);
+      await Promise.resolve();
+      events.emit('dap-event', 'initialized', {});
+      await vi.advanceTimersByTimeAsync(0);
+      await handshakePromise;
+      const launch = sendDapRequest.mock.calls.find(([cmd]) => cmd === 'launch');
+      expect(launch, 'launch was sent').toBeDefined();
+      return launch![1] as Record<string, unknown>;
+    } finally {
+      vi.useRealTimers();
+    }
   }
 
-  it('names the cwd as js-debug workspace root and leaves pauseForSourceMap off for a .js program', async () => {
+  it('derives a workspace root for the program and leaves pauseForSourceMap off for a .js program', async () => {
     const args = await launchArgsFor({ dapLaunchArgs: { stopOnEntry: false }, scriptPath: '/workspace/app.js', scriptArgs: [] });
+    // no package.json under a path that does not exist: the program directory
     expect(args.__workspaceFolder).toBe('/workspace');
     expect(args.pauseForSourceMap).toBe(false);
   });
 
   it('keeps pauseForSourceMap on for a TypeScript program run through a transpiler', async () => {
     const args = await launchArgsFor({ dapLaunchArgs: { stopOnEntry: false }, scriptPath: '/workspace/app.ts', scriptArgs: [] });
-    expect(args.__workspaceFolder).toBe('/workspace');
     expect(args.pauseForSourceMap).toBe(true);
   });
 
@@ -594,6 +597,16 @@ describe('JsDebugAdapterPolicy.performHandshake workspace root and pauseForSourc
       launchConfig: { program: '/workspace/app.js', cwd: '/workspace', __workspaceFolder: '/root', pauseForSourceMap: true }
     });
     expect(args.__workspaceFolder).toBe('/root');
+    expect(args.pauseForSourceMap).toBe(true);
+  });
+
+  it('honours the same two keys from dapLaunchArgs when the launch config lacks them (embedder path)', async () => {
+    const args = await launchArgsFor({
+      dapLaunchArgs: { stopOnEntry: false, __workspaceFolder: '/from-args', pauseForSourceMap: true },
+      scriptPath: '/workspace/app.js',
+      scriptArgs: []
+    });
+    expect(args.__workspaceFolder).toBe('/from-args');
     expect(args.pauseForSourceMap).toBe(true);
   });
 });

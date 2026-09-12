@@ -14,6 +14,7 @@
  * unless the caller sets it explicitly — the pair attach has had since #513.
  */
 
+import * as fs from 'fs';
 import * as path from 'path';
 
 export const JS_NODE_INTERNALS_SKIP = '<node_internals>/**';
@@ -59,32 +60,61 @@ export function resolveJsLaunchSmartStep(cfg: JsLaunchSkipInputs): boolean {
 
 export interface JsLaunchSourceMapInputs {
   program?: unknown;
-  cwd?: unknown;
   __workspaceFolder?: unknown;
   pauseForSourceMap?: unknown;
 }
 
+/** Test seam for the package.json walk; production uses fs.existsSync. */
+export interface JsLaunchWorkspaceOptions {
+  fileExists?: (filePath: string) => boolean;
+}
+
 /** A TypeScript program handed to a transpiling runtime (tsx/ts-node). */
-const TS_PROGRAM = /.([mc])?tsx?$/i;
+const TS_PROGRAM = /\.([mc])?tsx?$/i;
 
 const nonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 
+/** Whether a launch program is TypeScript (`.ts`/`.tsx`/`.mts`/`.cts`), i.e. run through a transpiler. */
+export function isJsTranspiledProgram(program: unknown): boolean {
+  return nonEmptyString(program) && TS_PROGRAM.test(program);
+}
+
 /**
  * js-debug's workspace root for a launch: an explicit `__workspaceFolder`,
- * else `cwd`, else the program's directory. Without it js-debug's config
- * resolution sets `rootPath` to undefined, its `outFiles` search is empty,
- * and its breakpoint predictor — which pre-binds a source-mapped breakpoint
- * before the program runs, the entry script and later-required modules
- * alike — never runs (issue #699). Relative `outFiles` resolve against it.
+ * else the nearest directory at or above the program that holds a
+ * `package.json`, else the program's own directory. Without a root js-debug's
+ * config resolution sets `rootPath` to undefined, its `outFiles` search is
+ * empty, and its breakpoint predictor — which pre-binds a source-mapped
+ * breakpoint before the program runs, the entry script and later-loaded
+ * modules alike — never runs (issue #699). Relative `outFiles` resolve
+ * against it, so the root must cover every generated file the program can
+ * load: the package is that scope, the program's directory is not (a
+ * `dist/bin/cli.js` importing `../lib/config.js`), and `cwd` says nothing
+ * about where the build lives.
  */
-export function resolveJsLaunchWorkspaceFolder(cfg: JsLaunchSourceMapInputs): string | undefined {
+export function resolveJsLaunchWorkspaceFolder(
+  cfg: JsLaunchSourceMapInputs,
+  options: JsLaunchWorkspaceOptions = {}
+): string | undefined {
   if (nonEmptyString(cfg.__workspaceFolder)) {
     return cfg.__workspaceFolder;
   }
-  if (nonEmptyString(cfg.cwd)) {
-    return cfg.cwd;
+  if (!nonEmptyString(cfg.program)) {
+    return undefined;
   }
-  return nonEmptyString(cfg.program) ? path.dirname(cfg.program) : undefined;
+  const fileExists = options.fileExists ?? fs.existsSync;
+  const programDir = path.dirname(cfg.program);
+  let dir = programDir;
+  for (;;) {
+    if (fileExists(path.join(dir, 'package.json'))) {
+      return dir;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) {
+      return programDir;
+    }
+    dir = parent;
+  }
 }
 
 /**
@@ -101,5 +131,5 @@ export function resolveJsPauseForSourceMap(cfg: JsLaunchSourceMapInputs): boolea
   if (typeof cfg.pauseForSourceMap === 'boolean') {
     return cfg.pauseForSourceMap;
   }
-  return nonEmptyString(cfg.program) && TS_PROGRAM.test(cfg.program);
+  return isJsTranspiledProgram(cfg.program);
 }

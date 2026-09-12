@@ -31,7 +31,8 @@ import {
   resolveJsLaunchSkipFiles,
   resolveJsLaunchSmartStep,
   resolveJsLaunchWorkspaceFolder,
-  resolveJsPauseForSourceMap
+  resolveJsPauseForSourceMap,
+  isJsTranspiledProgram
 } from '@debugmcp/shared';
 import { DebugLanguage } from '@debugmcp/shared';
 import type { AdapterDependencies } from '@debugmcp/shared';
@@ -55,16 +56,43 @@ function defaultAttachCwd(): string {
 }
 
 /**
- * Generic launch inputs transformLaunchConfig consumes into derived js-debug
- * keys (env merge, skip list, runtime selection, …) or that select the DAP
- * sequence upstream. Everything else the caller passes is forwarded as-is.
+ * Generic launch inputs transformLaunchConfig folds into derived js-debug keys
+ * (env merge, skip list, runtime selection, source-map settings, …) or that
+ * select the DAP sequence upstream. They never reach js-debug under their own
+ * name; everything else the caller passes is forwarded as-is (issue #703).
  */
 const JS_LAUNCH_CONSUMED_KEYS: ReadonlySet<string> = new Set([
   'program', 'args', 'cwd', 'env', 'stopOnEntry', 'justMyCode',
   'sourceMaps', 'outFiles', 'resolveSourceMapLocations', 'runtimeExecutable',
   'runtimeArgs', 'skipFiles', 'smartStep', '__workspaceFolder',
-  'pauseForSourceMap', 'request', '__attachMode'
+  '__workspaceCachePath', 'pauseForSourceMap', 'autoAttachChildProcesses',
+  'request', '__attachMode'
 ]);
+
+/**
+ * The pwa-node launch shape mcp-debugger owns: a caller value is dropped
+ * with a warning rather than forwarded (a console other than the internal
+ * one has nowhere to open here; outputCapture is what get_output reads).
+ */
+const JS_LAUNCH_PINNED_KEYS: ReadonlySet<string> = new Set([
+  'type', 'request', 'name', 'console', 'outputCapture'
+]);
+
+/**
+ * js-debug keys that have no meaning on a parent launch and break it when
+ * present: __pendingTargetId is the child-adoption handle js-debug itself
+ * issues (the DAP server rejects a launch that carries one), and
+ * attachSimplePort switches js-debug to polling a port the launch never
+ * opens (cf. the policy's _ignoredSimplePort on attach).
+ */
+const JS_LAUNCH_NOT_FOR_LAUNCH_KEYS: ReadonlySet<string> = new Set([
+  '__pendingTargetId', 'attachSimplePort'
+]);
+
+/** Own keys a JSON-parsed config can carry that must never be copied. */
+const UNSAFE_OBJECT_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
+
+const DEFAULT_RESOLVE_SOURCE_MAP_LOCATIONS = ['**', '!**/node_modules/**'];
 
 export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapter {
   readonly language = 'javascript' as unknown as DebugLanguage;
@@ -425,8 +453,10 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     const stopOnEntry = (u.stopOnEntry as boolean | undefined) ?? false;
     const justMyCode = (u.justMyCode as boolean | undefined) ?? true;
 
-    // Type detection: treat .ts, .tsx, .mts, .cts as TypeScript
-    const isTS = /\.([mc])?tsx?$/i.test(program);
+    // Type detection: treat .ts, .tsx, .mts, .cts as TypeScript — the same
+    // predicate resolveJsPauseForSourceMap uses, so the runtime choice and the
+    // source-map pause can never disagree on what counts as TypeScript
+    const isTS = isJsTranspiledProgram(program);
 
     // Env: copy string values from process.env, merge user env (string-only), set NODE_ENV
     const mergedEnv: Record<string, string> = {};
@@ -477,7 +507,10 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       skipFiles,
       console: 'internalConsole',
       outputCapture: 'std',
-      autoAttachChildProcesses: false,
+      // Off by default (every fork() would park under waitForDebugger, #501);
+      // an explicit caller value wins, as it does on attach
+      autoAttachChildProcesses:
+        typeof u.autoAttachChildProcesses === 'boolean' ? u.autoAttachChildProcesses : false,
       env: mergedEnv
     };
 
@@ -494,30 +527,44 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       // A caller value — including an explicit null, js-debug's "resolve maps
       // everywhere" — wins, as it does on attach (issue #655)
       result.resolveSourceMapLocations = 'resolveSourceMapLocations' in u
-        ? u.resolveSourceMapLocations
-        : ['**', '!**/node_modules/**'];
+        ? this.resolveSourceMapLocationsOrDefault(u.resolveSourceMapLocations)
+        : DEFAULT_RESOLVE_SOURCE_MAP_LOCATIONS;
     } else if (userOut) {
       // Caller opted out of maps but named outFiles: pass through untouched
       result.outFiles = userOut;
     }
 
-    // js-debug's workspace root and source-map pause (issue #699). Without a
-    // root its breakpoint predictor never runs, and the instrumentation pause
-    // that pauseForSourceMap relies on does not fire for a CommonJS entry
-    // module under Node 24 — so a breakpoint on a line that runs at module
-    // load bound only after the line had executed. With the root set the
-    // predictor pre-binds every mapped breakpoint before the program runs,
-    // the way VS Code's launch does; the shared resolvers keep the policy's
-    // embedder fallback on the same rules.
-    result.__workspaceFolder = resolveJsLaunchWorkspaceFolder({
-      __workspaceFolder: u.__workspaceFolder,
-      cwd,
-      program
-    });
+    // js-debug's source-map pause and workspace root (issue #699). The pause
+    // js-debug relies on with pauseForSourceMap does not fire for CommonJS
+    // modules under Node 24, and while it is armed js-debug skips its
+    // breakpoint predictor — the mechanism that pre-binds every mapped
+    // breakpoint before the program runs, the way VS Code's launch does. The
+    // predictor needs a workspace root; without one it never ran in any
+    // mcp-debugger launch. The shared resolvers keep the policy's embedder
+    // fallback on the same rules.
     result.pauseForSourceMap = resolveJsPauseForSourceMap({
       pauseForSourceMap: u.pauseForSourceMap,
       program
     });
+    if (result.sourceMaps) {
+      // No maps wanted means nothing to predict: the root (and the scan it
+      // puts on the child attach's critical path) is only sent with maps on.
+      const workspaceFolder = resolveJsLaunchWorkspaceFolder(
+        { __workspaceFolder: u.__workspaceFolder, program },
+        { fileExists: (p) => this.dependencies.fileSystem?.existsSync?.(p) ?? false }
+      );
+      if (workspaceFolder !== undefined) {
+        result.__workspaceFolder = workspaceFolder;
+        // js-debug caches its scan (bp-predict.json, keyed by file mtime)
+        // under this directory, so restart_debugging does not re-read the tree
+        const cachePath = typeof u.__workspaceCachePath === 'string' && u.__workspaceCachePath
+          ? u.__workspaceCachePath
+          : this.predictorCacheDirectory();
+        if (cachePath) {
+          result.__workspaceCachePath = cachePath;
+        }
+      }
+    }
 
     // Runtime selection and args with overrides and idempotency
     const runtimeExecutableOverride = typeof u.runtimeExecutable === 'string' ? (u.runtimeExecutable as string) : undefined;
@@ -628,26 +675,83 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     }
 
     // Forward every js-debug key the caller passed that this transform does
-    // not derive — trace, __workspaceFolder, perScriptSourcemaps, timeouts,
-    // sourceMapPathOverrides, … — the way the attach transform has since
-    // issue #466. Until now a launch silently dropped them (issue #703).
-    // Derived keys always win, and the generic inputs consumed above never
-    // reach js-debug under their own name.
+    // not derive — trace, perScriptSourcemaps, timeouts, sourceMapPathOverrides,
+    // … — the way the attach transform has since issue #466; until now a
+    // launch silently dropped them (issue #703). Derived keys win; the pwa-node
+    // shape mcp-debugger owns and the keys that break a parent launch are
+    // dropped with a warning instead.
+    const output: Record<string, unknown> = {};
     const forwarded: string[] = [];
+    const pinned: string[] = [];
+    const ignored: string[] = [];
     for (const [key, value] of Object.entries(u)) {
-      if (value === undefined || key in result || JS_LAUNCH_CONSUMED_KEYS.has(key)) {
+      if (value === undefined || JS_LAUNCH_CONSUMED_KEYS.has(key) || UNSAFE_OBJECT_KEYS.has(key)) {
         continue;
       }
-      result[key] = value;
+      if (JS_LAUNCH_PINNED_KEYS.has(key)) {
+        pinned.push(key);
+        continue;
+      }
+      if (JS_LAUNCH_NOT_FOR_LAUNCH_KEYS.has(key)) {
+        ignored.push(key);
+        continue;
+      }
+      // js-debug reads trace.stdio when trace is an object: null would throw
+      if (key === 'trace' && typeof value !== 'boolean' && (typeof value !== 'object' || value === null)) {
+        ignored.push(key);
+        continue;
+      }
+      output[key] = value;
       forwarded.push(key);
     }
+    Object.assign(output, result);
+
+    const log = this.dependencies.logger;
     if (forwarded.length > 0) {
-      this.dependencies.logger?.info?.(
-        `[JavascriptDebugAdapter] launch forwarded adapterLaunchConfig key(s) to js-debug: ${forwarded.join(', ')}`
-      );
+      log?.info?.(`[JavascriptDebugAdapter] launch config key(s) forwarded to js-debug: ${forwarded.join(', ')}`);
+    }
+    if (pinned.length > 0) {
+      log?.warn?.(`[JavascriptDebugAdapter] launch config key(s) ignored — mcp-debugger pins the js-debug launch shape: ${pinned.join(', ')}`);
+    }
+    if (ignored.length > 0) {
+      log?.warn?.(`[JavascriptDebugAdapter] launch config key(s) ignored — not applicable to a launch: ${ignored.join(', ')}`);
     }
 
-    return result as LanguageSpecificLaunchConfig;
+    return output as LanguageSpecificLaunchConfig;
+  }
+
+  /**
+   * js-debug expects resolveSourceMapLocations as null ("resolve everywhere")
+   * or an array of globs; anything else throws inside its path resolver and
+   * kills the launch with no hint of the key. Validate here for both
+   * transforms and fall back to the default with a warning.
+   */
+  private resolveSourceMapLocationsOrDefault(value: unknown): string[] | null {
+    if (value === null) {
+      return null;
+    }
+    if (Array.isArray(value) && value.every((entry) => typeof entry === 'string')) {
+      return value as string[];
+    }
+    this.dependencies.logger?.warn?.(
+      `[JavascriptDebugAdapter] resolveSourceMapLocations must be null or an array of globs; ignoring ${JSON.stringify(value)}`
+    );
+    return DEFAULT_RESOLVE_SOURCE_MAP_LOCATIONS;
+  }
+
+  /** Where js-debug may keep its breakpoint-predictor cache; undefined when it cannot be created. */
+  private predictorCacheDirectory(): string | undefined {
+    const fileSystem = this.dependencies.fileSystem;
+    if (!fileSystem?.ensureDirSync) {
+      return undefined;
+    }
+    const dir = path.join(os.tmpdir(), 'debug-mcp-server', 'js-debug-predictor');
+    try {
+      fileSystem.ensureDirSync(dir);
+      return dir;
+    } catch {
+      return undefined;
+    }
   }
 
   private normalizeBinary(value?: string): string {
@@ -790,9 +894,9 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       // glue on an idle server into the #513 step-chase; the policy hides
       // those frames from get_stack_trace instead. (Launch does blackbox
       // node_modules while justMyCode is true — see resolveJsLaunchSkipFiles.)
-      ...('resolveSourceMapLocations' in rest
-        ? {}
-        : { resolveSourceMapLocations: ['**', '!**/node_modules/**'] }),
+      resolveSourceMapLocations: 'resolveSourceMapLocations' in rest
+        ? this.resolveSourceMapLocationsOrDefault(rest.resolveSourceMapLocations)
+        : DEFAULT_RESOLVE_SOURCE_MAP_LOCATIONS,
       // js-debug resolves a source map's relative `sources` only when it has
       // a base path, and its attach path leaves cwd undefined — so even the
       // debuggee's own '../../src/x.ts' entries (which do exist next to

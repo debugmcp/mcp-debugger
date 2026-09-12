@@ -89,19 +89,34 @@ describe('jsLaunchSkipsNodeInternals (issue #678 review)', () => {
 });
 
 describe('resolveJsLaunchWorkspaceFolder (issue #699)', () => {
-  it('prefers an explicit __workspaceFolder, then cwd, then the program directory', async () => {
+  const sep = (p: string) => p.replace(/\\/g, '/');
+
+  it('prefers an explicit __workspaceFolder', async () => {
     const { resolveJsLaunchWorkspaceFolder } = await import('../../src/interfaces/js-launch-defaults.js');
-    expect(resolveJsLaunchWorkspaceFolder({ __workspaceFolder: '/root', cwd: '/proj/dist', program: '/proj/dist/app.js' })).toBe('/root');
-    expect(resolveJsLaunchWorkspaceFolder({ cwd: '/proj', program: '/proj/dist/app.js' })).toBe('/proj');
-    expect(resolveJsLaunchWorkspaceFolder({ program: '/proj/dist/app.js' })).toBe('/proj/dist');
+    const root = resolveJsLaunchWorkspaceFolder(
+      { __workspaceFolder: '/root', program: '/proj/dist/app.js' },
+      { fileExists: () => true }
+    );
+    expect(root).toBe('/root');
   });
 
-  it('ignores empty strings and non-strings, and yields undefined with nothing to derive from', async () => {
+  it('roots at the nearest directory above the program that holds a package.json', async () => {
     const { resolveJsLaunchWorkspaceFolder } = await import('../../src/interfaces/js-launch-defaults.js');
-    expect(resolveJsLaunchWorkspaceFolder({ __workspaceFolder: '', cwd: '', program: '/proj/app.js' })).toBe('/proj');
-    expect(resolveJsLaunchWorkspaceFolder({ __workspaceFolder: 42, cwd: null, program: '/proj/app.js' })).toBe('/proj');
-    expect(resolveJsLaunchWorkspaceFolder({})).toBeUndefined();
-    expect(resolveJsLaunchWorkspaceFolder({ program: '' })).toBeUndefined();
+    const packageJsons = new Set(['/proj/package.json', '/package.json']);
+    const fileExists = (p: string) => packageJsons.has(sep(p));
+    expect(sep(resolveJsLaunchWorkspaceFolder({ program: '/proj/dist/bin/cli.js' }, { fileExists }) ?? '')).toBe('/proj');
+    // the program's own directory counts when it holds one
+    packageJsons.add('/proj/dist/bin/package.json');
+    expect(sep(resolveJsLaunchWorkspaceFolder({ program: '/proj/dist/bin/cli.js' }, { fileExists }) ?? '')).toBe('/proj/dist/bin');
+  });
+
+  it('falls back to the program directory when no package.json is found, and to undefined without a program', async () => {
+    const { resolveJsLaunchWorkspaceFolder } = await import('../../src/interfaces/js-launch-defaults.js');
+    const none = () => false;
+    expect(sep(resolveJsLaunchWorkspaceFolder({ program: '/proj/dist/app.js' }, { fileExists: none }) ?? '')).toBe('/proj/dist');
+    expect(resolveJsLaunchWorkspaceFolder({}, { fileExists: none })).toBeUndefined();
+    expect(resolveJsLaunchWorkspaceFolder({ program: '', __workspaceFolder: '' }, { fileExists: none })).toBeUndefined();
+    expect(resolveJsLaunchWorkspaceFolder({ __workspaceFolder: 42 }, { fileExists: none })).toBeUndefined();
   });
 });
 
@@ -113,12 +128,15 @@ describe('resolveJsPauseForSourceMap (issue #699)', () => {
   });
 
   it('pauses for source maps only when the program is TypeScript run through a transpiler', async () => {
-    const { resolveJsPauseForSourceMap } = await import('../../src/interfaces/js-launch-defaults.js');
-    for (const ts of ['/p/app.ts', '/p/app.tsx', '/p/app.mts', '/p/app.cts', 'C:\p\APP.TS']) {
+    const { resolveJsPauseForSourceMap, isJsTranspiledProgram } = await import('../../src/interfaces/js-launch-defaults.js');
+    for (const ts of ['/p/app.ts', '/p/app.tsx', '/p/app.mts', '/p/app.cts', 'C:\\p\\APP.TS']) {
       expect(resolveJsPauseForSourceMap({ program: ts }), ts).toBe(true);
+      expect(isJsTranspiledProgram(ts), ts).toBe(true);
     }
-    for (const js of ['/p/app.js', '/p/app.mjs', '/p/app.cjs', '/p/app.jsx', '']) {
+    // dot-less names that merely end in "ts" are not TypeScript (review of #706)
+    for (const js of ['/p/app.js', '/p/app.mjs', '/p/app.cjs', '/p/app.jsx', '/proj/scripts', '/proj/tests', '/opt/bin/ts', '/proj/node_modules/.bin/tsx', '']) {
       expect(resolveJsPauseForSourceMap({ program: js }), js || '(empty)').toBe(false);
+      expect(isJsTranspiledProgram(js), js || '(empty)').toBe(false);
     }
     expect(resolveJsPauseForSourceMap({})).toBe(false);
     expect(resolveJsPauseForSourceMap({ pauseForSourceMap: 'yes', program: '/p/app.js' })).toBe(false);

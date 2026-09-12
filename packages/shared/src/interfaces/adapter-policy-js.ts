@@ -776,11 +776,21 @@ export const JsDebugAdapterPolicy = {
         // what lets js-debug's breakpoint predictor pre-bind source-mapped
         // breakpoints before the program runs; the pause stays on only for a
         // transpiled TypeScript program.
+        // Sourced like stopOnEntry above: launchConfig, then dapLaunchArgs,
+        // then the derivation.
+        const launchArgsRecord = (a ?? {}) as Record<string, unknown>;
         if (typeof baseLaunchConfig.__workspaceFolder !== 'string' || !baseLaunchConfig.__workspaceFolder.length) {
-          baseLaunchConfig.__workspaceFolder = resolveJsLaunchWorkspaceFolder(baseLaunchConfig);
+          const explicitRoot = launchArgsRecord.__workspaceFolder;
+          baseLaunchConfig.__workspaceFolder =
+            typeof explicitRoot === 'string' && explicitRoot.length > 0
+              ? explicitRoot
+              : resolveJsLaunchWorkspaceFolder(baseLaunchConfig);
         }
         if (typeof baseLaunchConfig.pauseForSourceMap !== 'boolean') {
-          baseLaunchConfig.pauseForSourceMap = resolveJsPauseForSourceMap(baseLaunchConfig);
+          baseLaunchConfig.pauseForSourceMap =
+            typeof launchArgsRecord.pauseForSourceMap === 'boolean'
+              ? launchArgsRecord.pauseForSourceMap
+              : resolveJsPauseForSourceMap(baseLaunchConfig);
         }
 
         if (typeof baseLaunchConfig.runtimeExecutable !== 'string') {

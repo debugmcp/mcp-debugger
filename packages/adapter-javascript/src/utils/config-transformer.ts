@@ -26,10 +26,14 @@ export function setDefaultFileSystem(fileSystem: FileSystem): void {
  * - Else default to the common JS pattern including all .js files and excluding node_modules.
  */
 export function determineOutFiles(userOutFiles?: string[]): string[] {
-  if (Array.isArray(userOutFiles) && userOutFiles.length > 0) {
+  // A caller list wins, an empty one included: with a workspace root set
+  // (issue #699) outFiles is the breakpoint predictor's scan set, and [] is
+  // the opt-out. The default is js-debug's own spelling, so .mjs/.cjs output
+  // (an .mts/.cts build) is scanned too.
+  if (Array.isArray(userOutFiles)) {
     return userOutFiles;
   }
-  return ['**/*.js', '!**/node_modules/**'];
+  return ['**/*.(m|c|)js', '!**/node_modules/**'];
 }
 
 /**

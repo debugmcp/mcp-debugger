@@ -9,7 +9,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { existsSync } from 'fs';
 import * as fs from 'fs';
 import * as os from 'os';
 import ts from 'typescript';
@@ -30,7 +29,7 @@ describe('JavaScript Debugging - Simple Smoke Tests', () => {
     console.log('[JS Simple Smoke] Starting MCP server...');
     
     const cliEntry = path.join(ROOT, 'packages', 'mcp-debugger', 'dist', 'cli.mjs');
-    if (!existsSync(cliEntry)) {
+    if (!fs.existsSync(cliEntry)) {
       throw new Error(
         `mcp-debugger CLI bundle missing at ${cliEntry}. Run "pnpm --filter @debugmcp/mcp-debugger build" before executing this test.`
       );
@@ -632,9 +631,6 @@ describe('JavaScript Debugging - module-load breakpoints in source-mapped TypeSc
   let sessionId: string | null = null;
 
   function transpile(kind: Kind): string {
-    // realpathSync.native resolves Windows 8.3 short names in os.tmpdir(), so
-    // the path js-debug echoes back can be matched by suffix.
-    const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), `mcp-js-699-${kind}-`)));
     const source = fs.readFileSync(FIXTURE_TS, 'utf8');
     const compilerOptions: ts.CompilerOptions = kind === 'commonjs'
       ? { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2015, sourceMap: true }
@@ -643,6 +639,9 @@ describe('JavaScript Debugging - module-load breakpoints in source-mapped TypeSc
     if (!out.sourceMapText) {
       throw new Error(`transpileModule produced no source map for the ${kind} variant`);
     }
+    // realpathSync.native resolves Windows 8.3 short names in os.tmpdir(), so
+    // the path js-debug echoes back can be matched by suffix.
+    const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), `mcp-js-699-${kind}-`)));
     fs.writeFileSync(path.join(dir, 'typescript_test.ts'), source);
     fs.writeFileSync(path.join(dir, 'typescript_test.js'), out.outputText);
     fs.writeFileSync(path.join(dir, 'typescript_test.js.map'), out.sourceMapText);
@@ -656,7 +655,7 @@ describe('JavaScript Debugging - module-load breakpoints in source-mapped TypeSc
     }
 
     const cliEntry = path.join(ROOT, 'packages', 'mcp-debugger', 'dist', 'cli.mjs');
-    if (!existsSync(cliEntry)) {
+    if (!fs.existsSync(cliEntry)) {
       throw new Error(`mcp-debugger CLI bundle missing at ${cliEntry}. Run "pnpm --filter @debugmcp/mcp-debugger build" first.`);
     }
     transport = new StdioClientTransport({
