@@ -2,12 +2,23 @@ import type { AdapterLaunchBarrier, ILogger } from '@debugmcp/shared';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 
 const DEFAULT_TIMEOUT_MS = 5000;
-const ADAPTER_CONNECTED_DELAY_MS = 500;
+/**
+ * How long a ready status waits for a first stop that may be in flight before
+ * the launch is treated as running: the child is adopted a few milliseconds
+ * after the debuggee is released, and a breakpoint on a module-load line
+ * fires in that window (issue #704).
+ */
+const READY_STATUS_DELAY_MS = 500;
+
+/** Worker statuses after which the launch is treated as ready, absent a stop. */
+const READY_STATUSES: ReadonlySet<string> = new Set(['adapter_connected', 'adapter_configured_and_launched']);
 
 /**
  * Coordinates js-debug launch readiness by waiting for either a 'stopped' DAP
- * event or the adapter transport connection, mirroring the legacy behavior that
- * lived inside ProxyManager.
+ * event or a ready status from the worker — adapter_connected (the legacy
+ * signal, which in practice precedes the barrier) or
+ * adapter_configured_and_launched, sent once the child session is adopted
+ * and the debuggee released (issue #704) — falling back to a timeout.
  */
 export class JsDebugLaunchBarrier implements AdapterLaunchBarrier {
   readonly awaitResponse = false;
@@ -18,7 +29,7 @@ export class JsDebugLaunchBarrier implements AdapterLaunchBarrier {
   private reject!: (error: Error) => void;
   private readonly promise: Promise<void>;
   private timeoutHandle: NodeJS.Timeout | null = null;
-  private adapterConnectedHandle: NodeJS.Timeout | null = null;
+  private readyStatusHandle: NodeJS.Timeout | null = null;
   private settled = false;
 
   constructor(logger?: ILogger, timeoutMs: number = DEFAULT_TIMEOUT_MS) {
@@ -51,23 +62,25 @@ export class JsDebugLaunchBarrier implements AdapterLaunchBarrier {
   }
 
   onProxyStatus(status: string): void {
-    if (this.settled || status !== 'adapter_connected') {
+    if (this.settled || !READY_STATUSES.has(status)) {
       return;
     }
 
-    if (this.adapterConnectedHandle) {
-      clearTimeout(this.adapterConnectedHandle);
+    if (this.readyStatusHandle) {
+      clearTimeout(this.readyStatusHandle);
     }
 
-    this.adapterConnectedHandle = setTimeout(() => {
+    this.readyStatusHandle = setTimeout(() => {
       if (this.settled) {
         return;
       }
       this.logger?.info?.(
-        '[JavascriptAdapter] js-debug adapter connected; treating launch as ready'
+        status === 'adapter_connected'
+          ? '[JavascriptAdapter] js-debug adapter connected; treating launch as ready'
+          : '[JavascriptAdapter] js-debug child adopted with no stop in flight; treating launch as ready'
       );
       this.resolveBarrier();
-    }, ADAPTER_CONNECTED_DELAY_MS);
+    }, READY_STATUS_DELAY_MS);
   }
 
   onDapEvent(event: string, _body: DebugProtocol.Event['body'] | undefined): void {
@@ -109,9 +122,9 @@ export class JsDebugLaunchBarrier implements AdapterLaunchBarrier {
       clearTimeout(this.timeoutHandle);
       this.timeoutHandle = null;
     }
-    if (this.adapterConnectedHandle) {
-      clearTimeout(this.adapterConnectedHandle);
-      this.adapterConnectedHandle = null;
+    if (this.readyStatusHandle) {
+      clearTimeout(this.readyStatusHandle);
+      this.readyStatusHandle = null;
     }
     // Backstop: a dispose with the promise still pending would otherwise
     // orphan the awaiter forever (#242). Settle inline — resolveBarrier/

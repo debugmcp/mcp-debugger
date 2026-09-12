@@ -522,30 +522,20 @@ export class MinimalDapClient extends EventEmitter {
    * stopOnEntry:false launch as wanting an entry stop, waited 15 s for one
    * and then paused the debuggee itself. The launch keys stay behind —
    * js-debug binds the child target to the parent's launch config itself, so
-   * they would only ride into the child's attach request as noise.
+   * they would only ride into the child's attach request as noise. The
+   * request marker is threaded for both modes; today only 'attach' is read.
    */
   private enrichChildConfig(config: ChildSessionConfig): ChildSessionConfig {
     const start = this.lastStartRequestArgs;
     if (!start) {
       return config;
     }
-    if (start.request === 'launch') {
-      const parentConfig: Record<string, unknown> = {
-        ...(config.parentConfig ?? {}),
-        request: 'launch'
-      };
-      if (typeof start.stopOnEntry === 'boolean') {
-        parentConfig.stopOnEntry = start.stopOnEntry;
-      }
-      return { ...config, parentConfig };
-    }
-    if (start.request !== 'attach') {
-      return config;
-    }
     const parentConfig: Record<string, unknown> = {
-      ...start,
+      // Only an attach parent's extras ride into the child's attach request;
+      // js-debug binds a launched target to the parent's launch config itself
+      ...(start.request === 'attach' ? start : {}),
       ...(config.parentConfig ?? {}),
-      request: 'attach'
+      request: start.request
     };
     if (typeof start.stopOnEntry === 'boolean') {
       parentConfig.stopOnEntry = start.stopOnEntry;

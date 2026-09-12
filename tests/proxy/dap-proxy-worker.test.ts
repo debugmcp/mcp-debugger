@@ -1201,6 +1201,23 @@ describe('DapProxyWorker', () => {
         ([message]) => message.type === 'status' && message.status === 'adapter_configured_and_launched'
       );
       expect(configuredAfter).toHaveLength(1);
+      expect(configuredAfter[0][0]).not.toHaveProperty('lastStop');
+
+      // A first stop that already arrived rides along for the parent's replay
+      (worker as any).lastStop = { reason: 'entry', threadId: 1 };
+      mockDapClient.emit('child-adopted', 'pending-2');
+      const withStop = mockMessageSender.send.mock.calls.filter(
+        ([message]) => message.type === 'status' && message.status === 'adapter_configured_and_launched'
+      );
+      expect(withStop).toHaveLength(2);
+      expect((withStop[1][0] as { lastStop?: unknown }).lastStop).toEqual({ reason: 'entry', threadId: 1 });
+
+      // Nothing is reported once the worker has left the connected state
+      (worker as any).state = ProxyState.SHUTTING_DOWN;
+      mockDapClient.emit('child-adopted', 'pending-3');
+      expect(mockMessageSender.send.mock.calls.filter(
+        ([message]) => message.type === 'status' && message.status === 'adapter_configured_and_launched'
+      )).toHaveLength(2);
     });
 
     it('startAdapterAndConnect defaults adapter cwd to MCP_WORKSPACE_ROOT only when it exists (issue #332)', async () => {

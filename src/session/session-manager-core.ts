@@ -488,12 +488,15 @@ export abstract class SessionManagerCore extends EventEmitter {
     }
 
     // Adapters whose first stopped event after launch may not carry
-    // reason='entry' (e.g., js-debug emits 'pause'/'breakpoint' from
-    // pauseForSourceMap or post-attach forced pauses) opt into a relaxed
-    // first-stop auto-continue rule. Identified by the policy flag
-    // `pauseAfterChildAttach`, which today is true only for js-debug.
-    // Other adapters keep the strict reason==='entry' check so a real
-    // user-initiated pause_execution lands paused, not auto-continued.
+    // reason='entry' opt into a relaxed first-stop auto-continue rule:
+    // js-debug reports a stopOnEntry:true entry stop as 'pause' or
+    // 'breakpoint', and a launch with function breakpoints armed (issue
+    // #295) forces that entry stop even when the caller asked for
+    // stopOnEntry:false. Identified by the policy flag
+    // `pauseAfterChildAttach`, which today is true only for js-debug. Other
+    // adapters keep the strict reason==='entry' check, and a stop that
+    // answers the user's own pause_execution is exempt everywhere (see
+    // answersUserPause below).
     let firstStopMayBeNonEntry = false;
     try {
       const policy = this.sessionStore.selectPolicy(session.language);
@@ -531,6 +534,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       // (e.g. CodeLLDB reports a SIGSTOP-delivered pause as 'exception')
       // before the reason drives auto-continue, lastStop, and exceptionInfo.
       let reason = rawReason;
+      let pauseIntent: ReturnType<typeof getCurrentPauseIntent>;
       try {
         const policy = this.sessionStore.selectPolicy(session.language);
         // Collect the adapter-assigned ids of all user breakpoints so the
@@ -561,7 +565,7 @@ export abstract class SessionManagerCore extends EventEmitter {
         }
         const userBreakpointIds: ReadonlySet<number> | undefined =
           lineComplete && fnComplete ? new Set([...lineIds, ...fnIds]) : undefined;
-        const pauseIntent = getCurrentPauseIntent(session);
+        pauseIntent = getCurrentPauseIntent(session);
         const normalized = policy.normalizeStopReason?.(rawReason, body, {
           pausePending: pauseIntent !== undefined,
           ...(pauseIntent ? { pauseSource: pauseIntent.source } : {}),
@@ -610,9 +614,16 @@ export abstract class SessionManagerCore extends EventEmitter {
       const isAttachSession =
         launchArgsRecord.request === 'attach' ||
         launchArgsRecord.__attachMode === true;
+      // A stop that answers a pause the user asked for is never the launch's
+      // entry stop, whatever its reason or position (issue #704): with no
+      // forced entry pause on a stopOnEntry:false js launch, the user's own
+      // pause_execution can be the first stop, and the relaxed rule below
+      // would resume it within a millisecond.
+      const answersUserPause = pauseIntent?.source === 'user';
       const shouldAutoContinue =
         !isAttachSession &&
         !effectiveLaunchArgs.stopOnEntry &&
+        !answersUserPause &&
         (reason === 'entry' ||
           (firstStopMayBeNonEntry && isFirstStop && !userBreakReasons.has(reason)));
 

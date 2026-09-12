@@ -569,10 +569,13 @@ export class DapProxyWorker {
           if (this.state !== ProxyState.CONNECTED) {
             return;
           }
-          this.sendStatus(
-            'adapter_configured_and_launched',
-            this.lastStop ? { lastStop: this.lastStop } : {}
-          );
+          // The emitter sits inside the adoption's try: a throw here would
+          // roll back a healthy adoption, so contain it.
+          try {
+            this.reportConfiguredAndLaunched();
+          } catch (err) {
+            this.logger?.warn(`[Worker] configured status after child adoption failed: ${err instanceof Error ? err.message : String(err)}`);
+          }
         });
         await this.drainPreConnectQueue();
       } else {
@@ -1060,10 +1063,7 @@ export class DapProxyWorker {
 
       // Update state and notify parent
       this.state = ProxyState.CONNECTED;
-      this.sendStatus(
-        'adapter_configured_and_launched',
-        this.lastStop ? { lastStop: this.lastStop } : {}
-      );
+      this.reportConfiguredAndLaunched();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger!.error('[Worker] Error in initialized handler:', error);
@@ -1717,6 +1717,21 @@ export class DapProxyWorker {
     }
     this.adapterCapabilitiesSent = true;
     this.sendStatus('adapter_capabilities', { capabilities });
+  }
+
+  /**
+   * The readiness status the parent's launch waits on. Carries the first
+   * stop when one already arrived, so ProxyManager can replay it if the
+   * dapEvent raced the status (rdbg emits it synchronously with
+   * configurationDone). Sent from the initialized handler for adapters that
+   * run their own configuration sequence, and on child adoption for
+   * command-queueing policies (issue #704).
+   */
+  private reportConfiguredAndLaunched(): void {
+    this.sendStatus(
+      'adapter_configured_and_launched',
+      this.lastStop ? { lastStop: this.lastStop } : {}
+    );
   }
 
   private sendStatus(status: string, extra: Record<string, unknown> = {}): void {

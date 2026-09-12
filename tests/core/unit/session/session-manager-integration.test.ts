@@ -4,7 +4,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
 import { DebugLanguage, SessionState } from '@debugmcp/shared';
-import { createMockDependencies } from './session-manager-test-utils.js';
+import { createMockDependencies , overridePolicy } from './session-manager-test-utils.js';
 
 describe('SessionManager - Integration Tests', () => {
   let sessionManager: SessionManager;
@@ -74,6 +74,45 @@ describe('SessionManager - Integration Tests', () => {
       expect(loggerSpy).toHaveBeenCalledWith(
         expect.stringContaining('Auto-continuing (stopOnEntry=false)')
       );
+    });
+  });
+
+  describe('first-stop auto-continue and a user pause (issue #704)', () => {
+    it('never auto-continues a first stop that answers the user\'s own pause, even under the relaxed js rule', async () => {
+      const session = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      // A js-style policy: relaxed first-stop rule on, and 'pause' is not a user break reason
+      overridePolicy(sessionManager, {
+        getDapClientBehavior: () => ({ pauseAfterChildAttach: true })
+      } as any);
+      const loggerSpy = vi.spyOn(dependencies.logger, 'info');
+
+      await sessionManager.startDebugging(session.id, 'server.js', [], { stopOnEntry: false });
+      await vi.runAllTimersAsync();
+
+      // The user asked for a pause; the debuggee answers with the first stop of the launch
+      const managed = (sessionManager as any).sessionStore.get(session.id);
+      managed.pauseIntent = { generation: managed.proxyGeneration ?? 0, source: 'user', armedAt: Date.now() };
+      dependencies.mockProxyManager.simulateEvent('stopped', 1, 'pause');
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(loggerSpy).not.toHaveBeenCalledWith(expect.stringContaining('Auto-continuing (stopOnEntry=false)'));
+      expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.PAUSED);
+    });
+
+    it('still auto-continues a first non-entry stop nobody asked for under the relaxed js rule', async () => {
+      const session = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      overridePolicy(sessionManager, {
+        getDapClientBehavior: () => ({ pauseAfterChildAttach: true })
+      } as any);
+      const loggerSpy = vi.spyOn(dependencies.logger, 'info');
+
+      await sessionManager.startDebugging(session.id, 'server.js', [], { stopOnEntry: false });
+      await vi.runAllTimersAsync();
+
+      dependencies.mockProxyManager.simulateEvent('stopped', 1, 'pause');
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(loggerSpy).toHaveBeenCalledWith(expect.stringContaining('Auto-continuing (stopOnEntry=false)'));
     });
   });
 

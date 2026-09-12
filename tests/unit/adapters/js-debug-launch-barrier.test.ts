@@ -44,6 +44,57 @@ describe('JsDebugLaunchBarrier', () => {
     barrier.dispose();
   });
 
+  it('resolves shortly after adapter_configured_and_launched (the child adoption, issue #704)', async () => {
+    const barrier = new JsDebugLaunchBarrier(logger, 5000);
+    const waitPromise = barrier.waitUntilReady();
+
+    barrier.onProxyStatus('adapter_configured_and_launched');
+    await vi.advanceTimersByTimeAsync(499);
+    let settled = false;
+    void waitPromise.then(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(waitPromise).resolves.toBeUndefined();
+    expect(logger.info).toHaveBeenCalledWith(
+      '[JavascriptAdapter] js-debug child adopted with no stop in flight; treating launch as ready'
+    );
+    barrier.dispose();
+  });
+
+  it('lets a stop that lands inside the adoption window win (issue #704)', async () => {
+    const barrier = new JsDebugLaunchBarrier(logger, 5000);
+    const waitPromise = barrier.waitUntilReady();
+
+    barrier.onProxyStatus('adapter_configured_and_launched');
+    await vi.advanceTimersByTimeAsync(20);
+    barrier.onDapEvent('stopped', undefined);
+
+    await expect(waitPromise).resolves.toBeUndefined();
+    expect(logger.info).toHaveBeenCalledWith('[JavascriptAdapter] js-debug launch confirmed by stopped event');
+    expect(logger.info).not.toHaveBeenCalledWith(
+      '[JavascriptAdapter] js-debug child adopted with no stop in flight; treating launch as ready'
+    );
+    barrier.dispose();
+  });
+
+  it('ignores statuses that are not readiness signals', async () => {
+    const barrier = new JsDebugLaunchBarrier(logger, 1000);
+    const waitPromise = barrier.waitUntilReady();
+
+    barrier.onProxyStatus('breakpoints_synced');
+    await vi.advanceTimersByTimeAsync(600);
+    let settled = false;
+    void waitPromise.then(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(400);
+    await expect(waitPromise).resolves.toBeUndefined();
+    barrier.dispose();
+  });
+
   it('falls back to timeout when no events arrive', async () => {
     const barrier = new JsDebugLaunchBarrier(logger, 1500);
     const waitPromise = barrier.waitUntilReady();

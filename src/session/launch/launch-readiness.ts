@@ -18,16 +18,6 @@ import type { OperationsContext } from '../operations-context.js';
 /** The readiness wait re-reads the session's state and narrates how it settled. */
 export type LaunchReadinessContext = Pick<OperationsContext, 'logger' | 'getSession'>;
 
-/**
- * How long a configured-and-running launch waits for a first stop that may
- * be in flight, for policies whose child adoption can race it (js-debug: the
- * child is adopted a few milliseconds after the debuggee is released, and a
- * breakpoint on a module-load line fires in that window). Long enough for
- * any module-load stop, short enough that an idle server answers promptly
- * (issue #704).
- */
-export const LAUNCH_CONFIGURED_GRACE_MS = 500;
-
 export interface LaunchReadinessInput {
   session: ManagedSession;
   sessionId: string;
@@ -48,11 +38,9 @@ export function waitForLaunchReadiness(
       let resolved = false;
       // eslint-disable-next-line prefer-const -- assigned after cleanup/handlers are defined
       let timeoutId: ReturnType<typeof setTimeout> | undefined;
-      let graceId: ReturnType<typeof setTimeout> | undefined;
 
       const cleanup = () => {
         if (timeoutId) clearTimeout(timeoutId);
-        if (graceId !== undefined) clearTimeout(graceId);
         session.proxyManager?.removeListener('stopped', handleStopped);
         session.proxyManager?.removeListener('adapter-configured', handleConfigured);
         session.proxyManager?.removeListener('terminated', handleTerminated);
@@ -69,8 +57,11 @@ export function waitForLaunchReadiness(
         }
       };
 
-      const settleRunning = () => {
-        if (!resolved) {
+      const handleConfigured = () => {
+        const readyOnRunning = policy.isSessionReady
+          ? policy.isSessionReady(SessionState.RUNNING, { stopOnEntry: dapLaunchArgs?.stopOnEntry })
+          : !dapLaunchArgs?.stopOnEntry;
+        if (!resolved && readyOnRunning) {
           resolved = true;
           cleanup();
           ctx.logger.info(
@@ -78,25 +69,6 @@ export function waitForLaunchReadiness(
           );
           resolve();
         }
-      };
-
-      const handleConfigured = () => {
-        const readyOnRunning = policy.isSessionReady
-          ? policy.isSessionReady(SessionState.RUNNING, { stopOnEntry: dapLaunchArgs?.stopOnEntry })
-          : !dapLaunchArgs?.stopOnEntry;
-        if (resolved || !readyOnRunning) {
-          return;
-        }
-        // A policy that adopts a child after releasing the debuggee reports
-        // "configured" while a module-load breakpoint may already be firing:
-        // give that first stop a moment to win, so the launch reports paused
-        // rather than a running that flips a few milliseconds later.
-        const adoptionRacesFirstStop = policy.getDapClientBehavior?.().pauseAfterChildAttach === true;
-        if (adoptionRacesFirstStop && graceId === undefined) {
-          graceId = setTimeout(settleRunning, LAUNCH_CONFIGURED_GRACE_MS);
-          return;
-        }
-        settleRunning();
       };
 
       const handleTerminated = () => {
