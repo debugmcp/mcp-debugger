@@ -7,7 +7,13 @@
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import * as path from 'path';
 import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction, QueuedDapCommand, StopReasonContext, PendingStopContext } from './adapter-policy.js';
-import { jsLaunchBlackboxesNodeModules, jsLaunchSkipsNodeInternals, resolveJsLaunchSmartStep } from './js-launch-defaults.js';
+import {
+  jsLaunchBlackboxesNodeModules,
+  jsLaunchSkipsNodeInternals,
+  resolveJsLaunchSmartStep,
+  resolveJsLaunchWorkspaceFolder,
+  resolveJsPauseForSourceMap
+} from './js-launch-defaults.js';
 import { emptyLocalVariableExtraction, extractionFromScope, resolveExceptionFilters } from './adapter-policy.js';
 import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
@@ -765,8 +771,16 @@ export const JsDebugAdapterPolicy = {
         // does not get the stepper back on with justMyCode: false (issue #678).
         baseLaunchConfig.smartStep = resolveJsLaunchSmartStep(baseLaunchConfig);
 
+        // Workspace root and source-map pause on the same rules as the launch
+        // transform, for embedders that bypass it (issue #699): the root is
+        // what lets js-debug's breakpoint predictor pre-bind source-mapped
+        // breakpoints before the program runs; the pause stays on only for a
+        // transpiled TypeScript program.
+        if (typeof baseLaunchConfig.__workspaceFolder !== 'string' || !baseLaunchConfig.__workspaceFolder.length) {
+          baseLaunchConfig.__workspaceFolder = resolveJsLaunchWorkspaceFolder(baseLaunchConfig);
+        }
         if (typeof baseLaunchConfig.pauseForSourceMap !== 'boolean') {
-          baseLaunchConfig.pauseForSourceMap = true;
+          baseLaunchConfig.pauseForSourceMap = resolveJsPauseForSourceMap(baseLaunchConfig);
         }
 
         if (typeof baseLaunchConfig.runtimeExecutable !== 'string') {

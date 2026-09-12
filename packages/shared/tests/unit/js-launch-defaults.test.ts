@@ -87,3 +87,40 @@ describe('jsLaunchSkipsNodeInternals (issue #678 review)', () => {
     expect(jsLaunchSkipsNodeInternals({ skipFiles: ['<node_internals>'] })).toBe(false);
   });
 });
+
+describe('resolveJsLaunchWorkspaceFolder (issue #699)', () => {
+  it('prefers an explicit __workspaceFolder, then cwd, then the program directory', async () => {
+    const { resolveJsLaunchWorkspaceFolder } = await import('../../src/interfaces/js-launch-defaults.js');
+    expect(resolveJsLaunchWorkspaceFolder({ __workspaceFolder: '/root', cwd: '/proj/dist', program: '/proj/dist/app.js' })).toBe('/root');
+    expect(resolveJsLaunchWorkspaceFolder({ cwd: '/proj', program: '/proj/dist/app.js' })).toBe('/proj');
+    expect(resolveJsLaunchWorkspaceFolder({ program: '/proj/dist/app.js' })).toBe('/proj/dist');
+  });
+
+  it('ignores empty strings and non-strings, and yields undefined with nothing to derive from', async () => {
+    const { resolveJsLaunchWorkspaceFolder } = await import('../../src/interfaces/js-launch-defaults.js');
+    expect(resolveJsLaunchWorkspaceFolder({ __workspaceFolder: '', cwd: '', program: '/proj/app.js' })).toBe('/proj');
+    expect(resolveJsLaunchWorkspaceFolder({ __workspaceFolder: 42, cwd: null, program: '/proj/app.js' })).toBe('/proj');
+    expect(resolveJsLaunchWorkspaceFolder({})).toBeUndefined();
+    expect(resolveJsLaunchWorkspaceFolder({ program: '' })).toBeUndefined();
+  });
+});
+
+describe('resolveJsPauseForSourceMap (issue #699)', () => {
+  it('lets an explicit boolean win', async () => {
+    const { resolveJsPauseForSourceMap } = await import('../../src/interfaces/js-launch-defaults.js');
+    expect(resolveJsPauseForSourceMap({ pauseForSourceMap: true, program: '/p/app.js' })).toBe(true);
+    expect(resolveJsPauseForSourceMap({ pauseForSourceMap: false, program: '/p/app.ts' })).toBe(false);
+  });
+
+  it('pauses for source maps only when the program is TypeScript run through a transpiler', async () => {
+    const { resolveJsPauseForSourceMap } = await import('../../src/interfaces/js-launch-defaults.js');
+    for (const ts of ['/p/app.ts', '/p/app.tsx', '/p/app.mts', '/p/app.cts', 'C:\p\APP.TS']) {
+      expect(resolveJsPauseForSourceMap({ program: ts }), ts).toBe(true);
+    }
+    for (const js of ['/p/app.js', '/p/app.mjs', '/p/app.cjs', '/p/app.jsx', '']) {
+      expect(resolveJsPauseForSourceMap({ program: js }), js || '(empty)').toBe(false);
+    }
+    expect(resolveJsPauseForSourceMap({})).toBe(false);
+    expect(resolveJsPauseForSourceMap({ pauseForSourceMap: 'yes', program: '/p/app.js' })).toBe(false);
+  });
+});

@@ -29,7 +29,9 @@ import {
   OWNER_PID_ARG_PREFIX,
   SESSION_ID_ARG_PREFIX,
   resolveJsLaunchSkipFiles,
-  resolveJsLaunchSmartStep
+  resolveJsLaunchSmartStep,
+  resolveJsLaunchWorkspaceFolder,
+  resolveJsPauseForSourceMap
 } from '@debugmcp/shared';
 import { DebugLanguage } from '@debugmcp/shared';
 import type { AdapterDependencies } from '@debugmcp/shared';
@@ -51,6 +53,18 @@ function defaultAttachCwd(): string {
   }
   return process.cwd();
 }
+
+/**
+ * Generic launch inputs transformLaunchConfig consumes into derived js-debug
+ * keys (env merge, skip list, runtime selection, …) or that select the DAP
+ * sequence upstream. Everything else the caller passes is forwarded as-is.
+ */
+const JS_LAUNCH_CONSUMED_KEYS: ReadonlySet<string> = new Set([
+  'program', 'args', 'cwd', 'env', 'stopOnEntry', 'justMyCode',
+  'sourceMaps', 'outFiles', 'resolveSourceMapLocations', 'runtimeExecutable',
+  'runtimeArgs', 'skipFiles', 'smartStep', '__workspaceFolder',
+  'pauseForSourceMap', 'request', '__attachMode'
+]);
 
 export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapter {
   readonly language = 'javascript' as unknown as DebugLanguage;
@@ -477,11 +491,33 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     result.sourceMaps = typeof u.sourceMaps === 'boolean' ? u.sourceMaps : true;
     if (result.sourceMaps) {
       result.outFiles = determineOutFiles(userOut);
-      result.resolveSourceMapLocations = ['**', '!**/node_modules/**'];
+      // A caller value — including an explicit null, js-debug's "resolve maps
+      // everywhere" — wins, as it does on attach (issue #655)
+      result.resolveSourceMapLocations = 'resolveSourceMapLocations' in u
+        ? u.resolveSourceMapLocations
+        : ['**', '!**/node_modules/**'];
     } else if (userOut) {
       // Caller opted out of maps but named outFiles: pass through untouched
       result.outFiles = userOut;
     }
+
+    // js-debug's workspace root and source-map pause (issue #699). Without a
+    // root its breakpoint predictor never runs, and the instrumentation pause
+    // that pauseForSourceMap relies on does not fire for a CommonJS entry
+    // module under Node 24 — so a breakpoint on a line that runs at module
+    // load bound only after the line had executed. With the root set the
+    // predictor pre-binds every mapped breakpoint before the program runs,
+    // the way VS Code's launch does; the shared resolvers keep the policy's
+    // embedder fallback on the same rules.
+    result.__workspaceFolder = resolveJsLaunchWorkspaceFolder({
+      __workspaceFolder: u.__workspaceFolder,
+      cwd,
+      program
+    });
+    result.pauseForSourceMap = resolveJsPauseForSourceMap({
+      pauseForSourceMap: u.pauseForSourceMap,
+      program
+    });
 
     // Runtime selection and args with overrides and idempotency
     const runtimeExecutableOverride = typeof u.runtimeExecutable === 'string' ? (u.runtimeExecutable as string) : undefined;
@@ -589,6 +625,26 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
         finalArgs = [...finalArgs, `--inspect-brk=${port}`];
         result.runtimeArgs = finalArgs;
       }
+    }
+
+    // Forward every js-debug key the caller passed that this transform does
+    // not derive — trace, __workspaceFolder, perScriptSourcemaps, timeouts,
+    // sourceMapPathOverrides, … — the way the attach transform has since
+    // issue #466. Until now a launch silently dropped them (issue #703).
+    // Derived keys always win, and the generic inputs consumed above never
+    // reach js-debug under their own name.
+    const forwarded: string[] = [];
+    for (const [key, value] of Object.entries(u)) {
+      if (value === undefined || key in result || JS_LAUNCH_CONSUMED_KEYS.has(key)) {
+        continue;
+      }
+      result[key] = value;
+      forwarded.push(key);
+    }
+    if (forwarded.length > 0) {
+      this.dependencies.logger?.info?.(
+        `[JavascriptDebugAdapter] launch forwarded adapterLaunchConfig key(s) to js-debug: ${forwarded.join(', ')}`
+      );
     }
 
     return result as LanguageSpecificLaunchConfig;

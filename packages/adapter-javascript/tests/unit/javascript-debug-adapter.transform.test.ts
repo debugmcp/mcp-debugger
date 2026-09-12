@@ -535,3 +535,102 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
     });
   });
 });
+
+describe('JavascriptDebugAdapter.transformLaunchConfig passthrough (issue #699)', () => {
+  const deps = {
+    logger: { info: () => {}, error: () => {}, debug: () => {}, warn: () => {} }
+  } as unknown as import('@debugmcp/shared').AdapterDependencies;
+
+  it('forwards js-debug keys the transform does not derive; derived keys win and consumed inputs never leak', async () => {
+    const adapter = new JavascriptDebugAdapter(deps);
+    const program = path.resolve('/proj/app.js');
+    const cfg = await adapter.transformLaunchConfig({
+      program,
+      stopOnEntry: false,
+      justMyCode: true,
+      trace: { logFile: '/tmp/js-debug.json', stdio: false },
+      __workspaceFolder: '/proj',
+      perScriptSourcemaps: 'yes',
+      pauseForSourceMap: false,
+      timeouts: { sourceMapMinPause: 0 },
+      env: { FOO: 'bar' },
+      skipFiles: ['<node_internals>/**'],
+      request: 'attach',
+      __attachMode: true
+    } as any) as Record<string, unknown>;
+
+    // js-debug keys ride along untouched
+    expect(cfg.trace).toEqual({ logFile: '/tmp/js-debug.json', stdio: false });
+    expect(cfg.__workspaceFolder).toBe('/proj');
+    expect(cfg.perScriptSourcemaps).toBe('yes');
+    expect(cfg.pauseForSourceMap).toBe(false);
+    expect(cfg.timeouts).toEqual({ sourceMapMinPause: 0 });
+
+    // consumed generic inputs are folded into their derived keys, not re-sent
+    expect((cfg.env as Record<string, string>).FOO).toBe('bar');
+    expect(cfg.skipFiles).toEqual(['<node_internals>/**']);
+    expect(cfg.smartStep).toBe(true);
+
+    // launch/attach selection is never forwarded
+    expect(cfg.request).toBe('launch');
+    expect(cfg.__attachMode).toBeUndefined();
+  });
+
+  it('a caller resolveSourceMapLocations (including null) wins over the launch default', async () => {
+    const adapter = new JavascriptDebugAdapter(deps);
+    const program = path.resolve('/proj/app.js');
+    const explicit = await adapter.transformLaunchConfig({
+      program,
+      resolveSourceMapLocations: ['/proj/dist/**']
+    } as any) as Record<string, unknown>;
+    expect(explicit.resolveSourceMapLocations).toEqual(['/proj/dist/**']);
+
+    const everywhere = await adapter.transformLaunchConfig({
+      program,
+      resolveSourceMapLocations: null
+    } as any) as Record<string, unknown>;
+    expect(everywhere.resolveSourceMapLocations).toBeNull();
+
+    const byDefault = await adapter.transformLaunchConfig({ program } as any) as Record<string, unknown>;
+    expect(byDefault.resolveSourceMapLocations).toEqual(['**', '!**/node_modules/**']);
+  });
+});
+
+describe('JavascriptDebugAdapter.transformLaunchConfig workspace root and source-map pause (issue #699)', () => {
+  const deps = {
+    logger: { info: () => {}, error: () => {}, debug: () => {}, warn: () => {} }
+  } as unknown as import('@debugmcp/shared').AdapterDependencies;
+
+  it('names the program directory as js-debug workspace root and leaves pauseForSourceMap off for a .js program', async () => {
+    const adapter = new JavascriptDebugAdapter(deps);
+    const program = path.resolve('/proj/dist/app.js');
+    const cfg = await adapter.transformLaunchConfig({ program } as any) as Record<string, unknown>;
+    expect(norm(cfg.__workspaceFolder)).toBe(norm(path.dirname(program)));
+    expect(cfg.pauseForSourceMap).toBe(false);
+  });
+
+  it('roots the workspace at a caller cwd, and an explicit __workspaceFolder wins over both', async () => {
+    const adapter = new JavascriptDebugAdapter(deps);
+    const program = path.resolve('/proj/dist/app.js');
+    const byCwd = await adapter.transformLaunchConfig({ program, cwd: path.resolve('/proj') } as any) as Record<string, unknown>;
+    expect(norm(byCwd.__workspaceFolder)).toBe(norm(path.resolve('/proj')));
+
+    const explicit = await adapter.transformLaunchConfig({
+      program, cwd: path.resolve('/proj'), __workspaceFolder: path.resolve('/root')
+    } as any) as Record<string, unknown>;
+    expect(norm(explicit.__workspaceFolder)).toBe(norm(path.resolve('/root')));
+    expect(norm(explicit.cwd)).toBe(norm(path.resolve('/proj')));
+  });
+
+  it('keeps pauseForSourceMap on for a TypeScript program run through a transpiler, and honours an explicit value', async () => {
+    (detectBinary as unknown as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
+    const adapter = new JavascriptDebugAdapter(deps);
+    const ts = await adapter.transformLaunchConfig({ program: path.resolve('/proj/src/app.ts') } as any) as Record<string, unknown>;
+    expect(ts.pauseForSourceMap).toBe(true);
+
+    const forced = await adapter.transformLaunchConfig({
+      program: path.resolve('/proj/dist/app.js'), pauseForSourceMap: true
+    } as any) as Record<string, unknown>;
+    expect(forced.pauseForSourceMap).toBe(true);
+  });
+});
