@@ -1156,6 +1156,70 @@ describe('DapProxyWorker', () => {
       expect(worker.getState()).toBe(ProxyState.CONNECTED);
     });
 
+    it('reports adapter_configured_and_launched once the js-debug child is adopted (issue #704)', async () => {
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'js-session-704',
+        executablePath: 'node',
+        adapterHost: 'localhost',
+        adapterPort: 9229,
+        logDir: '/logs',
+        scriptPath: '/path/to/script.js',
+        adapterCommand: { command: 'node', args: ['--inspect', 'adapter.js'] }
+      };
+      const processStub = {
+        spawn: vi.fn().mockResolvedValue({ process: new EventEmitter() as unknown as ChildProcess, pid: 321 }),
+        shutdown: vi.fn().mockResolvedValue(undefined)
+      };
+      const connectionStub = {
+        connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+        setAdapterPolicy: vi.fn(),
+        setupEventHandlers: vi.fn(),
+        initializeSession: vi.fn(),
+        sendLaunchRequest: vi.fn(),
+        setBreakpoints: vi.fn(),
+        sendConfigurationDone: vi.fn(),
+        disconnect: vi.fn()
+      };
+      (worker as any).logger = mockLogger;
+      (worker as any).processManager = processStub;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = JsDebugAdapterPolicy;
+      (worker as any).adapterState = JsDebugAdapterPolicy.createInitialState();
+      (worker as any).currentInitPayload = payload;
+      (worker as any).state = ProxyState.INITIALIZING;
+
+      await (worker as any).startAdapterAndConnect(payload);
+      const configuredBefore = mockMessageSender.send.mock.calls.filter(
+        ([message]) => message.type === 'status' && message.status === 'adapter_configured_and_launched'
+      );
+      expect(configuredBefore).toHaveLength(0);
+
+      mockDapClient.emit('child-adopted', 'pending-1');
+
+      const configuredAfter = mockMessageSender.send.mock.calls.filter(
+        ([message]) => message.type === 'status' && message.status === 'adapter_configured_and_launched'
+      );
+      expect(configuredAfter).toHaveLength(1);
+      expect(configuredAfter[0][0]).not.toHaveProperty('lastStop');
+
+      // A first stop that already arrived rides along for the parent's replay
+      (worker as any).lastStop = { reason: 'entry', threadId: 1 };
+      mockDapClient.emit('child-adopted', 'pending-2');
+      const withStop = mockMessageSender.send.mock.calls.filter(
+        ([message]) => message.type === 'status' && message.status === 'adapter_configured_and_launched'
+      );
+      expect(withStop).toHaveLength(2);
+      expect((withStop[1][0] as { lastStop?: unknown }).lastStop).toEqual({ reason: 'entry', threadId: 1 });
+
+      // Nothing is reported once the worker has left the connected state
+      (worker as any).state = ProxyState.SHUTTING_DOWN;
+      mockDapClient.emit('child-adopted', 'pending-3');
+      expect(mockMessageSender.send.mock.calls.filter(
+        ([message]) => message.type === 'status' && message.status === 'adapter_configured_and_launched'
+      )).toHaveLength(2);
+    });
+
     it('startAdapterAndConnect defaults adapter cwd to MCP_WORKSPACE_ROOT only when it exists (issue #332)', async () => {
       const payload: ProxyInitPayload = {
         cmd: 'init',

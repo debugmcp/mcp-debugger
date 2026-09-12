@@ -562,9 +562,9 @@ export class ChildSessionManager extends EventEmitter {
       // Handle post-attach initialization if needed
       await death.race(this.handlePostAttachInit(child, postAttachInitBaseline));
 
-      // Connect the CDP function-breakpoint bridge BEFORE forcing the entry
-      // pause so the proxy's sticky Debugger.paused replay plus a live
-      // subscription cover it either way (issue #295). attachToChild never
+      // Connect the CDP function-breakpoint bridge BEFORE the entry-stop gate
+      // below so the proxy's sticky Debugger.paused replay plus a live
+      // subscription cover an entry stop either way (issue #295). attachToChild never
       // throws by design; death.race can, and a dead child fails adoption in
       // the next step regardless, so log and continue here.
       if (this.cdpBridge) {
@@ -593,6 +593,11 @@ export class ChildSessionManager extends EventEmitter {
       this.adoptionInProgress = false;
       logger.info(`[ChildSessionManager:${this.instanceId}] Setting adoptionInProgress = false for ${pendingId} (success)`);
 
+      // childCreated becomes the parent's readiness status (issue #704): let
+      // any child event the chain still holds — a stop the CDP bridge is
+      // rewriting — reach the parent first, so the status never overtakes
+      // the stop it should follow.
+      await this.flushEvents();
       logger.info(`[ChildSessionManager:${this.instanceId}] Child session created successfully for ${pendingId}`);
       this.emit('childCreated', pendingId, child);
       return 'adopted';

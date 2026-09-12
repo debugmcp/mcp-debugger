@@ -753,6 +753,12 @@ export const JsDebugAdapterPolicy = {
         if (typeof baseLaunchConfig.stopOnEntry !== 'boolean' && typeof a?.stopOnEntry === 'boolean') {
           baseLaunchConfig.stopOnEntry = a.stopOnEntry;
         }
+        // Always a boolean on the wire: the child adoption reads an absent
+        // stopOnEntry as "wait for an entry stop, then force one" (issue
+        // #704), the opposite of what every session-layer reader assumes.
+        if (typeof baseLaunchConfig.stopOnEntry !== 'boolean') {
+          baseLaunchConfig.stopOnEntry = false;
+        }
 
         if (typeof baseLaunchConfig.justMyCode !== 'boolean' && typeof a?.justMyCode === 'boolean') {
           baseLaunchConfig.justMyCode = a.justMyCode;
