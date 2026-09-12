@@ -9,7 +9,9 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { existsSync } from 'fs';
+import * as fs from 'fs';
+import * as os from 'os';
+import ts from 'typescript';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { parseSdkToolResult } from './smoke-test-utils.js';
@@ -27,7 +29,7 @@ describe('JavaScript Debugging - Simple Smoke Tests', () => {
     console.log('[JS Simple Smoke] Starting MCP server...');
     
     const cliEntry = path.join(ROOT, 'packages', 'mcp-debugger', 'dist', 'cli.mjs');
-    if (!existsSync(cliEntry)) {
+    if (!fs.existsSync(cliEntry)) {
       throw new Error(
         `mcp-debugger CLI bundle missing at ${cliEntry}. Run "pnpm --filter @debugmcp/mcp-debugger build" before executing this test.`
       );
@@ -594,4 +596,149 @@ describe('JavaScript Debugging - Simple Smoke Tests', () => {
     });
     sessionId = null;
   });
+});
+
+/**
+ * Module-load breakpoints in source-mapped TypeScript (issue #699).
+ *
+ * A breakpoint on a `.ts` line that runs while its module loads used to be
+ * verified by js-debug only after the line had executed, so a
+ * `stopOnEntry: false` launch ran to completion without stopping. The launch
+ * now hands js-debug a workspace root, which is what lets its breakpoint
+ * predictor pre-bind the mapped location before the program starts.
+ *
+ * Both module flavours are transpiled here from the checked-in
+ * `typescript_test.ts` rather than launching the committed `.js` beside it:
+ * that output is a build artefact with no drift check, and the line number
+ * below is only meaningful against a map produced from the same source.
+ * CommonJS is the shape that raced — the instrumentation pause js-debug can
+ * otherwise fall back on never fires for a CommonJS entry module under Node
+ * 24 — and ES2015 is deliberate: `await` downlevels to `__awaiter`/`yield`,
+ * the harsher mapping. The ES-module variant guards the shape that already
+ * worked. Each temp dir carries its own package.json so the root's
+ * `"type": "module"` cannot leak in.
+ */
+describe('JavaScript Debugging - module-load breakpoints in source-mapped TypeScript (issue #699)', () => {
+  const FIXTURE_TS = path.join(ROOT, 'examples', 'javascript', 'typescript_test.ts');
+  /** `const person1 = await fetchData(1);` inside main(), which is called at module load. */
+  const MODULE_LOAD_LINE = 91;
+  const KINDS = ['commonjs', 'esm'] as const;
+  type Kind = typeof KINDS[number];
+
+  const dirs = new Map<Kind, string>();
+  let mcpClient: Client | null = null;
+  let transport: StdioClientTransport | null = null;
+  let sessionId: string | null = null;
+
+  function transpile(kind: Kind): string {
+    const source = fs.readFileSync(FIXTURE_TS, 'utf8');
+    const compilerOptions: ts.CompilerOptions = kind === 'commonjs'
+      ? { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2015, sourceMap: true }
+      : { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022, sourceMap: true };
+    const out = ts.transpileModule(source, { fileName: 'typescript_test.ts', compilerOptions });
+    if (!out.sourceMapText) {
+      throw new Error(`transpileModule produced no source map for the ${kind} variant`);
+    }
+    // realpathSync.native resolves Windows 8.3 short names in os.tmpdir(), so
+    // the path js-debug echoes back can be matched by suffix.
+    const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), `mcp-js-699-${kind}-`)));
+    fs.writeFileSync(path.join(dir, 'typescript_test.ts'), source);
+    fs.writeFileSync(path.join(dir, 'typescript_test.js'), out.outputText);
+    fs.writeFileSync(path.join(dir, 'typescript_test.js.map'), out.sourceMapText);
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ type: kind === 'esm' ? 'module' : 'commonjs' }));
+    return dir;
+  }
+
+  beforeAll(async () => {
+    for (const kind of KINDS) {
+      dirs.set(kind, transpile(kind));
+    }
+
+    const cliEntry = path.join(ROOT, 'packages', 'mcp-debugger', 'dist', 'cli.mjs');
+    if (!fs.existsSync(cliEntry)) {
+      throw new Error(`mcp-debugger CLI bundle missing at ${cliEntry}. Run "pnpm --filter @debugmcp/mcp-debugger build" first.`);
+    }
+    transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [cliEntry, 'stdio', '--log-level', 'info'],
+      env: { ...process.env, NODE_ENV: 'test' }
+    });
+    mcpClient = new Client({ name: 'js-699-smoke-client', version: '1.0.0' }, { capabilities: {} });
+    await mcpClient.connect(transport);
+  }, 30000);
+
+  afterEach(async () => {
+    if (sessionId && mcpClient) {
+      try {
+        await mcpClient.callTool({ name: 'close_debug_session', arguments: { sessionId } });
+      } catch {
+        // Ignore cleanup errors
+      }
+      sessionId = null;
+    }
+  });
+
+  afterAll(async () => {
+    if (mcpClient) {
+      await mcpClient.close();
+    }
+    if (transport) {
+      await transport.close();
+    }
+    for (const dir of dirs.values()) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  for (const kind of KINDS) {
+    it(`${kind}: a breakpoint on a line that runs at module load fires on a stopOnEntry:false launch`, async () => {
+      const dir = dirs.get(kind)!;
+      const tsFile = path.join(dir, 'typescript_test.ts');
+      const jsFile = path.join(dir, 'typescript_test.js');
+
+      const created = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'create_debug_session',
+        arguments: { language: 'javascript', name: `js-699-${kind}` }
+      }));
+      expect(created.sessionId).toBeDefined();
+      sessionId = created.sessionId as string;
+
+      const bp = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'set_breakpoint',
+        arguments: { sessionId, file: tsFile, line: MODULE_LOAD_LINE }
+      }));
+      expect(bp.success, JSON.stringify(bp)).toBe(true);
+
+      const start = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: jsFile,
+          args: [],
+          dapLaunchArgs: { stopOnEntry: false, justMyCode: true }
+        }
+      }));
+      expect(start.state, JSON.stringify(start)).toBe('paused');
+      expect((start.data as { reason?: string } | undefined)?.reason, JSON.stringify(start)).toBe('breakpoint');
+
+      const stack = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'get_stack_trace',
+        arguments: { sessionId }
+      }));
+      expect(stack.stopReason).toBe('breakpoint');
+      const frames = (stack.stackFrames as Array<{ file?: string; line?: number }>) ?? [];
+      // js-debug echoes a lower-case drive letter on Windows: match by suffix only
+      expect(frames[0]?.file ?? '', JSON.stringify(frames[0])).toMatch(/typescript_test.ts$/i);
+      expect(frames[0]?.line).toBe(MODULE_LOAD_LINE);
+
+      const listed = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'list_breakpoints',
+        arguments: { sessionId }
+      }));
+      const [record] = (listed.breakpoints as Array<{ verified: boolean; message?: string }>) ?? [];
+      expect(record?.verified, JSON.stringify(record)).toBe(true);
+
+      await mcpClient!.callTool({ name: 'continue_execution', arguments: { sessionId } });
+    }, 60000);
+  }
 });

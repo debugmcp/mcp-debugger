@@ -89,6 +89,6 @@ describe('utils/config-transformer.edge: tolerant JSON parse and defaults', () =
 
   it('determineOutFiles: when user not provided, returns default pattern', () => {
     const res = determineOutFiles();
-    expect(res).toEqual(['**/*.js', '!**/node_modules/**']);
+    expect(res).toEqual(['**/*.(m|c|)js', '!**/node_modules/**']);
   });
 });

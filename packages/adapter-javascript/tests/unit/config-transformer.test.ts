@@ -45,7 +45,11 @@ describe('utils/config-transformer: determineOutFiles', () => {
   });
 
   it('returns default outFiles when not provided', () => {
-    expect(determineOutFiles()).toEqual(['**/*.js', '!**/node_modules/**']);
+    expect(determineOutFiles()).toEqual(['**/*.(m|c|)js', '!**/node_modules/**']);
+  });
+
+  it('keeps an empty caller list: with a workspace root it is the breakpoint-scan opt-out (issue #699)', () => {
+    expect(determineOutFiles([])).toEqual([]);
   });
 });
 
