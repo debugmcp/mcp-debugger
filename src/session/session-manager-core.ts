@@ -70,6 +70,13 @@ export interface CustomLaunchRequestArguments extends DebugProtocol.LaunchReques
  * union would force narrowing at every server read for no gain. Keeping the
  * optional field set closed makes misspelled reads and writes fail typecheck.
  */
+/** One line breakpoint the program ran past without stopping (issue #701). */
+export interface UnhitBreakpointSummary {
+  file: string;
+  line: number;
+  verified: boolean;
+}
+
 export interface DebugResultData extends ProxyFailureDiagnostics {
   /** Human-readable status for the tool result. */
   message?: string;
@@ -89,6 +96,12 @@ export interface DebugResultData extends ProxyFailureDiagnostics {
   reason?: string;
   stopOnEntrySuccessful?: boolean;
   toolchainValidation?: ToolchainValidationState;
+  /**
+   * Run-to-completion fields (issue #701): set when the launch ended before
+   * any user-visible stop. `exitCode` only when the debuggee reported one.
+   */
+  exitCode?: number;
+  unhitBreakpoints?: UnhitBreakpointSummary[];
   /** Restart result fields. */
   breakpointsReapplied?: number;
   outputReset?: boolean;

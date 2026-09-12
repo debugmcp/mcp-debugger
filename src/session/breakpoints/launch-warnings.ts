@@ -10,6 +10,7 @@ import path from 'path';
 import type { AdapterPolicy } from '@debugmcp/shared';
 import { normalizeBreakpointMessage } from '../../utils/breakpoint-message.js';
 import type { ManagedSession } from '../session-store.js';
+import type { UnhitBreakpointSummary } from '../session-manager-core.js';
 
 /**
  * Ran-to-completion unbound-breakpoint warning (issue #467). Built only
@@ -37,6 +38,48 @@ export function buildUnboundBreakpointExitWarning(
     `The program ran to completion without stopping there — check the file path and line, ` +
     `or list_breakpoints for the full per-breakpoint state`
   );
+}
+
+/** What a launch reports when the program ended before any user-visible stop. */
+export interface RunToCompletionSummary {
+  message: string;
+  exitCode?: number;
+  unhitBreakpoints: UnhitBreakpointSummary[];
+}
+
+/**
+ * Run-to-completion summary (issue #701). Built when the launch ends in
+ * STOPPED: a user-visible stop would have returned PAUSED, so every line
+ * breakpoint in the store went unhit — the verified ones included, which the
+ * unbound warning (#467) never names. Says the program exited, with its exit
+ * code when the debuggee reported one (attach targets and signal-killed
+ * debuggees leave it undefined), lists the breakpoints, and, when a verified
+ * one was passed over, points at the entry stop that holds a program whose
+ * breakpoint line runs while its module loads.
+ */
+export function buildRunToCompletionSummary(
+  session: Pick<ManagedSession, 'breakpoints' | 'exitCode'>,
+  scriptPath: string
+): RunToCompletionSummary {
+  const unhitBreakpoints = Array.from(session.breakpoints.values()).map(bp => ({
+    file: bp.file,
+    line: bp.line,
+    verified: bp.verified
+  }));
+  const hasExitCode = typeof session.exitCode === 'number';
+  const exit = hasExitCode ? ` (exit code ${session.exitCode})` : '';
+  const breakpoints = unhitBreakpoints.length > 0 ? ' without hitting any breakpoint' : '';
+  const hint = unhitBreakpoints.some(bp => bp.verified)
+    ? ' A verified breakpoint was never hit. If its line runs while the module loads, retry with' +
+      ' dapLaunchArgs: { stopOnEntry: true } and continue_execution.'
+    : '';
+  return {
+    message:
+      `Debugging started for ${scriptPath}. Current state: stopped. ` +
+      `The program ran to completion${exit}${breakpoints}.${hint}`,
+    ...(hasExitCode ? { exitCode: session.exitCode } : {}),
+    unhitBreakpoints
+  };
 }
 
 /**
