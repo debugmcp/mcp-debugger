@@ -157,6 +157,31 @@ claude mcp list
 
 **Important**: The `stdio` argument is required to prevent console output from corrupting the JSON-RPC protocol. See [CLAUDE.md](CLAUDE.md) for detailed setup and troubleshooting.
 
+### For the pi coding agent
+
+pi (badlogic pi-mono lineage) has no built-in MCP support — MCP servers reach
+it through the `pi-mcp-adapter` extension. This repo is itself a pi package:
+installing the checkout registers the stdio server (picked up by the adapter
+and started lazily on first use), the `mcp-debugger` agent skill, and a
+session-start hint:
+
+```bash
+# Clone the repository
+git clone https://github.com/debugmcp/mcp-debugger.git
+cd mcp-debugger
+
+# Install the checkout as a pi package (user scope)
+pi install "$(pwd)"
+
+# Verify: the package appears alongside the mcp-debugger skill and server
+pi list
+```
+
+> **Prerequisite**: `pi-mcp-adapter` must be installed (`pi install npm:pi-mcp-adapter`).
+> The package manifest is the `pi` key in the root `package.json`; this shape is
+> local-path install only — `npm:`/`git:` installs run plain `npm install`,
+> which cannot resolve this pnpm workspace root.
+
 ### Using Docker
 
 ```bash

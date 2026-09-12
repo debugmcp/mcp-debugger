@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "mcp-debugger": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@debugmcp/mcp-debugger", "stdio"]
+    }
+  }
+}
