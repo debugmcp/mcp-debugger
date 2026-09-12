@@ -81,7 +81,7 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
     expect(cfg.smartStep).toBe(true);
     // js-debug's own default (issue #684): maps on, with launch's outFiles/exclusion
     expect(cfg.sourceMaps).toBe(true);
-    expect(cfg.outFiles).toEqual(['**/*.js', '!**/node_modules/**']);
+    expect(cfg.outFiles).toEqual(['**/*.(m|c|)js', '!**/node_modules/**']);
     expect(cfg.resolveSourceMapLocations).toEqual(['**', '!**/node_modules/**']);
     expect(norm(cfg.cwd)).toBe(norm(path.dirname(program)));
     expect(Array.isArray(cfg.args)).toBe(true);
@@ -100,8 +100,8 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
   it('JS with sourceMaps true applies default outFiles when not provided', async () => {
     const program = path.resolve('/proj/app.js');
     (determineOutFiles as any).mockImplementation((user?: string[]) => {
-      if (user && user.length > 0) return user;
-      return ['**/*.js', '!**/node_modules/**'];
+      if (Array.isArray(user)) return user;
+      return ['**/*.(m|c|)js', '!**/node_modules/**'];
     });
 
     const cfg = await adapter.transformLaunchConfig({
@@ -110,7 +110,7 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
     } as any);
 
     expect(cfg.sourceMaps).toBe(true);
-    expect(cfg.outFiles).toEqual(['**/*.js', '!**/node_modules/**']);
+    expect(cfg.outFiles).toEqual(['**/*.(m|c|)js', '!**/node_modules/**']);
     expect(cfg.resolveSourceMapLocations).toEqual(['**', '!**/node_modules/**']);
   });
 
@@ -128,7 +128,7 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
     } as any);
 
     expect(cfg.sourceMaps).toBe(true);
-    expect((cfg.outFiles as string[])).toContain('**/*.js');
+    expect((cfg.outFiles as string[])).toContain('**/*.(m|c|)js');
     // runtimeExecutable defaults to host Node.js when ts-node is present (hooks added)
     expect(norm(cfg.runtimeExecutable as string)).toBe(norm(process.execPath));
     // runtimeArgs should include ts-node hooks
@@ -533,5 +533,178 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
       } as any) as Record<string, unknown>;
       expect(optOut.smartStep).toBe(false);
     });
+  });
+});
+
+/** Deps with a file system that knows a fixed set of paths, and remembers what was ensured. */
+function depsWithFileSystem(existing: string[], ensured: string[] = []) {
+  const known = new Set(existing.map(norm));
+  return {
+    logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() },
+    fileSystem: {
+      existsSync: (p: string) => known.has(norm(p)),
+      ensureDirSync: (p: string) => { ensured.push(p); }
+    }
+  } as unknown as import('@debugmcp/shared').AdapterDependencies & {
+    logger: { info: ReturnType<typeof vi.fn>; warn: ReturnType<typeof vi.fn> };
+  };
+}
+
+describe('JavascriptDebugAdapter.transformLaunchConfig passthrough (issue #703)', () => {
+  it('forwards js-debug keys the transform does not derive; derived keys win and consumed inputs never leak', async () => {
+    const adapter = new JavascriptDebugAdapter(deps);
+    const program = path.resolve('/proj/app.js');
+    const cfg = await adapter.transformLaunchConfig({
+      program,
+      stopOnEntry: false,
+      justMyCode: true,
+      trace: { logFile: '/tmp/js-debug.json', stdio: false },
+      perScriptSourcemaps: 'yes',
+      pauseForSourceMap: false,
+      timeouts: { sourceMapMinPause: 0 },
+      env: { FOO: 'bar' },
+      skipFiles: ['<node_internals>/**'],
+      request: 'attach',
+      __attachMode: true
+    } as any) as Record<string, unknown>;
+
+    // js-debug keys ride along untouched
+    expect(cfg.trace).toEqual({ logFile: '/tmp/js-debug.json', stdio: false });
+    expect(cfg.perScriptSourcemaps).toBe('yes');
+    expect(cfg.pauseForSourceMap).toBe(false);
+    expect(cfg.timeouts).toEqual({ sourceMapMinPause: 0 });
+
+    // consumed generic inputs are folded into their derived keys, not re-sent
+    expect((cfg.env as Record<string, string>).FOO).toBe('bar');
+    expect(cfg.skipFiles).toEqual(['<node_internals>/**']);
+    expect(cfg.smartStep).toBe(true);
+
+    // launch/attach selection is never forwarded
+    expect(cfg.request).toBe('launch');
+    expect(cfg.__attachMode).toBeUndefined();
+  });
+
+  it('pins the launch shape mcp-debugger owns, lets autoAttachChildProcesses follow the caller, and says so', async () => {
+    const d = depsWithFileSystem([]);
+    const adapter = new JavascriptDebugAdapter(d);
+    const cfg = await adapter.transformLaunchConfig({
+      program: path.resolve('/proj/app.js'),
+      console: 'integratedTerminal',
+      outputCapture: 'console',
+      type: 'node',
+      name: 'mine',
+      autoAttachChildProcesses: true,
+      trace: true
+    } as any) as Record<string, unknown>;
+    expect(cfg.console).toBe('internalConsole');
+    expect(cfg.outputCapture).toBe('std');
+    expect(cfg.type).toBe('pwa-node');
+    expect(cfg.name).toBe('Debug JavaScript/TypeScript');
+    expect(cfg.autoAttachChildProcesses).toBe(true);
+    expect(cfg.trace).toBe(true);
+    const warned = d.logger.warn.mock.calls.map(([m]) => String(m)).join('\n');
+    expect(warned).toMatch(/pins the js-debug launch shape: console, outputCapture, type, name/);
+    const info = d.logger.info.mock.calls.map(([m]) => String(m)).join('\n');
+    expect(info).toMatch(/forwarded to js-debug: trace$/m);
+  });
+
+  it('never forwards the keys that break a parent launch, nor a null trace, and warns', async () => {
+    const d = depsWithFileSystem([]);
+    const adapter = new JavascriptDebugAdapter(d);
+    const cfg = await adapter.transformLaunchConfig({
+      program: path.resolve('/proj/app.js'),
+      __pendingTargetId: 'x',
+      attachSimplePort: 9230,
+      trace: null,
+      ['__proto__']: { polluted: true }
+    } as any) as Record<string, unknown>;
+    expect('__pendingTargetId' in cfg).toBe(false);
+    expect('attachSimplePort' in cfg).toBe(false);
+    expect('trace' in cfg).toBe(false);
+    expect((cfg as { polluted?: unknown }).polluted).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(cfg, '__proto__')).toBe(false);
+    const warned = d.logger.warn.mock.calls.map(([m]) => String(m)).join('\n');
+    expect(warned).toMatch(/not applicable to a launch: __pendingTargetId, attachSimplePort, trace/);
+  });
+
+  it('a caller resolveSourceMapLocations (an array or null) wins over the launch default; anything else falls back with a warning', async () => {
+    const d = depsWithFileSystem([]);
+    const adapter = new JavascriptDebugAdapter(d);
+    const program = path.resolve('/proj/app.js');
+    const explicit = await adapter.transformLaunchConfig({ program, resolveSourceMapLocations: ['/proj/dist/**'] } as any) as Record<string, unknown>;
+    expect(explicit.resolveSourceMapLocations).toEqual(['/proj/dist/**']);
+
+    const everywhere = await adapter.transformLaunchConfig({ program, resolveSourceMapLocations: null } as any) as Record<string, unknown>;
+    expect(everywhere.resolveSourceMapLocations).toBeNull();
+
+    const byDefault = await adapter.transformLaunchConfig({ program } as any) as Record<string, unknown>;
+    expect(byDefault.resolveSourceMapLocations).toEqual(['**', '!**/node_modules/**']);
+
+    const bad = await adapter.transformLaunchConfig({ program, resolveSourceMapLocations: 'dist/**' } as any) as Record<string, unknown>;
+    expect(bad.resolveSourceMapLocations).toEqual(['**', '!**/node_modules/**']);
+    expect(d.logger.warn.mock.calls.map(([m]) => String(m)).join('\n')).toMatch(/resolveSourceMapLocations must be null or an array/);
+
+    const attach = adapter.transformAttachConfig({ host: 'h', port: 1, resolveSourceMapLocations: { no: true } } as any) as Record<string, unknown>;
+    expect(attach.resolveSourceMapLocations).toEqual(['**', '!**/node_modules/**']);
+  });
+});
+
+describe('JavascriptDebugAdapter.transformLaunchConfig workspace root and source-map pause (issue #699)', () => {
+  it('roots js-debug at the nearest package.json above the program and leaves pauseForSourceMap off for a .js program', async () => {
+    const ensured: string[] = [];
+    const d = depsWithFileSystem([path.resolve('/proj/package.json')], ensured);
+    const adapter = new JavascriptDebugAdapter(d);
+    const program = path.resolve('/proj/dist/bin/cli.js');
+    const cfg = await adapter.transformLaunchConfig({ program } as any) as Record<string, unknown>;
+    expect(norm(cfg.__workspaceFolder)).toBe(norm(path.resolve('/proj')));
+    expect(cfg.pauseForSourceMap).toBe(false);
+    // the predictor cache lives under the server's temp tree and is created on the way
+    expect(typeof cfg.__workspaceCachePath).toBe('string');
+    expect(ensured).toEqual([cfg.__workspaceCachePath]);
+  });
+
+  it('falls back to the program directory without a package.json, and sends no cache path without a file system', async () => {
+    const adapter = new JavascriptDebugAdapter(deps);
+    const program = path.resolve('/proj/dist/app.js');
+    const cfg = await adapter.transformLaunchConfig({ program } as any) as Record<string, unknown>;
+    expect(norm(cfg.__workspaceFolder)).toBe(norm(path.dirname(program)));
+    expect('__workspaceCachePath' in cfg).toBe(false);
+  });
+
+  it('an explicit __workspaceFolder and __workspaceCachePath win', async () => {
+    const d = depsWithFileSystem([path.resolve('/proj/package.json')]);
+    const adapter = new JavascriptDebugAdapter(d);
+    const cfg = await adapter.transformLaunchConfig({
+      program: path.resolve('/proj/dist/app.js'),
+      __workspaceFolder: path.resolve('/root'),
+      __workspaceCachePath: path.resolve('/cache')
+    } as any) as Record<string, unknown>;
+    expect(norm(cfg.__workspaceFolder)).toBe(norm(path.resolve('/root')));
+    expect(norm(cfg.__workspaceCachePath)).toBe(norm(path.resolve('/cache')));
+  });
+
+  it('sends no root when source maps are off (nothing to predict), and honours outFiles: [] as the scan opt-out', async () => {
+    const d = depsWithFileSystem([path.resolve('/proj/package.json')]);
+    const adapter = new JavascriptDebugAdapter(d);
+    const program = path.resolve('/proj/dist/app.js');
+    const off = await adapter.transformLaunchConfig({ program, sourceMaps: false } as any) as Record<string, unknown>;
+    expect('__workspaceFolder' in off).toBe(false);
+    expect('__workspaceCachePath' in off).toBe(false);
+
+    const optOut = await adapter.transformLaunchConfig({ program, outFiles: [] } as any) as Record<string, unknown>;
+    expect(optOut.outFiles).toEqual([]);
+    expect(norm(optOut.__workspaceFolder)).toBe(norm(path.resolve('/proj')));
+  });
+
+  it('keeps pauseForSourceMap on for a TypeScript program run through a transpiler, and honours an explicit value', async () => {
+    (detectBinary as unknown as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
+    const adapter = new JavascriptDebugAdapter(deps);
+    const ts = await adapter.transformLaunchConfig({ program: path.resolve('/proj/src/app.ts') } as any) as Record<string, unknown>;
+    expect(ts.pauseForSourceMap).toBe(true);
+
+    const forced = await adapter.transformLaunchConfig({
+      program: path.resolve('/proj/dist/app.js'), pauseForSourceMap: true
+    } as any) as Record<string, unknown>;
+    expect(forced.pauseForSourceMap).toBe(true);
   });
 });

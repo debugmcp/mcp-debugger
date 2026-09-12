@@ -255,7 +255,10 @@ Source maps are on by default for every launch, `.js` programs included (js-debu
 Launching a compiled TypeScript app from `dist/index.js` with `dist/**/*.js.map` beside it and `src/**/*.ts` on
 disk therefore behaves like debugging the sources: breakpoints set in `src/*.ts` bind and verify under their own
 path, and `get_stack_trace`, `get_local_variables`, `evaluate_expression`, `get_source_context` and every step
-location report `src/*.ts` lines. The default `outFiles` is `**/*.js` excluding `node_modules`, and
+location report `src/*.ts` lines. The default `outFiles` is `**/*.(m|c|)js` excluding `node_modules`, resolved
+against the workspace root js-debug is given — the nearest directory above the program with a `package.json`,
+else the program's directory (`adapterLaunchConfig: { __workspaceFolder }` overrides it; `outFiles: []` opts out
+of the pre-launch breakpoint scan) — and
 `resolveSourceMapLocations` excludes `node_modules` too, so dependency maps are not applied. A program without
 maps is unaffected. A map whose sources are not on disk yields frames flagged `unresolvedSource` (issue #655).
 
