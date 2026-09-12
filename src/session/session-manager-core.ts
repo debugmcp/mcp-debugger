@@ -12,6 +12,7 @@ import { BREAKPOINT_STOP_REASONS } from '@debugmcp/shared';
 import { isRedactionEnabled } from '../utils/redaction-mode.js';
 import { ValidationResultCache } from '../utils/language-availability.js';
 import { SessionStore, ManagedSession } from './session-store.js';
+import type { UnhitBreakpointSummary } from './breakpoints/launch-warnings.js';
 import type { ToolchainValidationState } from './session-store.js';
 import { OutputRingBuffer } from './output-buffer.js';
 import {
@@ -89,6 +90,12 @@ export interface DebugResultData extends ProxyFailureDiagnostics {
   reason?: string;
   stopOnEntrySuccessful?: boolean;
   toolchainValidation?: ToolchainValidationState;
+  /**
+   * Run-to-completion fields (issue #701): set when the launch ended before
+   * any user-visible stop. `exitCode` only when the debuggee reported one.
+   */
+  exitCode?: number;
+  unhitBreakpoints?: UnhitBreakpointSummary[];
   /** Restart result fields. */
   breakpointsReapplied?: number;
   outputReset?: boolean;

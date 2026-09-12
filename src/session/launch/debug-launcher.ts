@@ -26,7 +26,8 @@ import type { BreakpointController } from '../breakpoints/breakpoint-controller.
 import { reresolveAnchors } from '../breakpoints/anchor-resolution.js';
 import {
   buildLogpointDowngradeLaunchWarning,
-  buildUnboundBreakpointExitWarning
+  buildUnboundBreakpointExitWarning,
+  buildRunToCompletionSummary
 } from '../breakpoints/launch-warnings.js';
 import {
   failProxySetup,
@@ -450,12 +451,22 @@ export class DebugLauncher {
         `[SessionManager] Debugging started for session ${sessionId}. State: ${finalState}`
       );
 
+      // Ended before the launch could report a pause (issue #701): say how
+      // the program ended, with its exit code and the breakpoints it ran past.
+      const runToCompletion =
+        finalState === SessionState.STOPPED
+          ? buildRunToCompletionSummary(finalSession)
+          : undefined;
+
       return {
         success: true,
         state: finalState,
         data: {
           ...(launchWarning ? { warning: launchWarning } : {}),
-          message: `Debugging started for ${scriptPath}. Current state: ${finalState}`,
+          message:
+            `Debugging started for ${scriptPath}. Current state: ${finalState}` +
+            (runToCompletion ? `. ${runToCompletion.summary}` : ''),
+          ...(runToCompletion?.data ?? {}),
           // Prefer the actual DAP stop reason (issue #214) — the first stop is
           // not always a breakpoint (e.g. an uncaught exception before any
           // breakpoint is hit). handleStopped records lastStop synchronously

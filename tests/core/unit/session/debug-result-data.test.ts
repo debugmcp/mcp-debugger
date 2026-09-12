@@ -16,6 +16,8 @@ describe('DebugResultData type contract (issue #590)', () => {
       | 'reason'
       | 'stopOnEntrySuccessful'
       | 'toolchainValidation'
+      | 'exitCode'
+      | 'unhitBreakpoints'
       | 'breakpointsReapplied'
       | 'outputReset'
       | 'anchorResolution'
