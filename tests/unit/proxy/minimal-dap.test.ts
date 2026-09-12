@@ -2212,10 +2212,42 @@ describe('MinimalDapClient', () => {
       c.shutdown();
     });
 
-    it('returns the config unchanged for launch-mode parents', () => {
+    it('threads request and stopOnEntry into launch-mode child configs without the launch extras (issue #704)', () => {
       const c = new MinimalDapClient('localhost', 1234, JsDebugAdapterPolicy);
-      (c as any).lastStartRequestArgs = { request: 'launch', stopOnEntry: false };
-      expect((c as any).enrichChildConfig(baseConfig)).toBe(baseConfig);
+      (c as any).lastStartRequestArgs = {
+        request: 'launch', stopOnEntry: false, program: '/proj/app.js', cwd: '/proj', env: { A: '1' }
+      };
+      const enriched = (c as any).enrichChildConfig(baseConfig);
+      expect(enriched.parentConfig.request).toBe('launch');
+      expect(enriched.parentConfig.stopOnEntry).toBe(false);
+      expect(enriched.parentConfig.type).toBe('pwa-node');
+      // js-debug binds the child target to the parent's launch config itself;
+      // the launch keys must not ride into the child's attach request
+      expect('program' in enriched.parentConfig).toBe(false);
+      expect('cwd' in enriched.parentConfig).toBe(false);
+      expect('env' in enriched.parentConfig).toBe(false);
+      expect((baseConfig.parentConfig as Record<string, unknown>).request).toBeUndefined();
+      c.shutdown();
+    });
+
+    it('omits stopOnEntry for a launch whose request did not carry a boolean', () => {
+      const c = new MinimalDapClient('localhost', 1234, JsDebugAdapterPolicy);
+      (c as any).lastStartRequestArgs = { request: 'launch' };
+      const enriched = (c as any).enrichChildConfig(baseConfig);
+      expect(enriched.parentConfig.request).toBe('launch');
+      expect('stopOnEntry' in enriched.parentConfig).toBe(false);
+      c.shutdown();
+    });
+
+    it('re-emits the child session manager childCreated as child-adopted (issue #704)', () => {
+      const stubManager = createChildSessionManagerStub();
+      const c = new MinimalDapClient('localhost', 1234, JsDebugAdapterPolicy, {
+        childSessionManagerFactory: () => stubManager as unknown as ChildSessionManager
+      });
+      const adopted: unknown[] = [];
+      c.on('child-adopted', (pendingId: unknown) => adopted.push(pendingId));
+      (stubManager as unknown as EventEmitter).emit('childCreated', 'p1', { shutdown: vi.fn() });
+      expect(adopted).toEqual(['p1']);
       c.shutdown();
     });
 

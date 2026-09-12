@@ -560,6 +560,20 @@ export class DapProxyWorker {
         await this.sendInitialFunctionBreakpoints();
         this.state = ProxyState.CONNECTED;
         this.sendStatus('adapter_connected');
+        // Queueing policies never reach handleInitializedEvent, which is where
+        // every other adapter reports adapter_configured_and_launched — so a
+        // js-debug launch had no readiness signal but a stop, a terminal
+        // event, or the 30 s ceiling (issue #704). The child's adoption is the
+        // moment the debuggee is released and answering: report it then.
+        this.dapClient.on('child-adopted', () => {
+          if (this.state !== ProxyState.CONNECTED) {
+            return;
+          }
+          this.sendStatus(
+            'adapter_configured_and_launched',
+            this.lastStop ? { lastStop: this.lastStop } : {}
+          );
+        });
         await this.drainPreConnectQueue();
       } else {
         const initBehavior = this.adapterPolicy.getInitializationBehavior();

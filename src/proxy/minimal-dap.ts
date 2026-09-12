@@ -145,6 +145,10 @@ export class MinimalDapClient extends EventEmitter {
         logger.info(`[MinimalDapClient] childCreated event: Setting activeChild for ${pendingId}`);
         this.childSessions.set(pendingId, child as MinimalDapClient);
         this.activeChild = child as MinimalDapClient;
+        // The debuggee is released and the child is answering: the worker
+        // turns this into the configured status a launch's readiness waits
+        // on (issue #704).
+        this.emit('child-adopted', pendingId);
       });
       
       this.childSessionManager.on('childEvent', (evt: DebugProtocol.Event) => {
@@ -511,12 +515,31 @@ export class MinimalDapClient extends EventEmitter {
    * attach extras (localRoot/remoteRoot, sourceMaps, skipFiles, …) ride along
    * too — the child session is where source resolution actually happens, so
    * dropping them here would make forwarded attach options inert (issue #466).
-   * js-debug's own child keys win over the parent's. Launch-mode configs are
-   * returned unchanged.
+   * js-debug's own child keys win over the parent's.
+   *
+   * A launch-mode config gets only the request mode and the caller's
+   * stopOnEntry (issue #704): without them ChildSessionManager read every
+   * stopOnEntry:false launch as wanting an entry stop, waited 15 s for one
+   * and then paused the debuggee itself. The launch keys stay behind —
+   * js-debug binds the child target to the parent's launch config itself, so
+   * they would only ride into the child's attach request as noise.
    */
   private enrichChildConfig(config: ChildSessionConfig): ChildSessionConfig {
     const start = this.lastStartRequestArgs;
-    if (!start || start.request !== 'attach') {
+    if (!start) {
+      return config;
+    }
+    if (start.request === 'launch') {
+      const parentConfig: Record<string, unknown> = {
+        ...(config.parentConfig ?? {}),
+        request: 'launch'
+      };
+      if (typeof start.stopOnEntry === 'boolean') {
+        parentConfig.stopOnEntry = start.stopOnEntry;
+      }
+      return { ...config, parentConfig };
+    }
+    if (start.request !== 'attach') {
       return config;
     }
     const parentConfig: Record<string, unknown> = {
