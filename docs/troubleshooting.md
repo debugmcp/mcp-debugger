@@ -274,9 +274,11 @@ The message names the reason, and each one is by design:
   Detach and attach again instead.
 - *"Nothing to restart: this session has not been launched…"* — `start_debugging` has not
   run, or only a dry run (`dryRunSpawn: true`) was performed.
-- *"A restart is already in progress for this session."* — a second restart arrived while
+- *"A restart is already in progress for this session…"* — a second restart arrived while
   the first was still replaying.
-- *"Session is still initializing…"* — wait for the in-flight start to finish.
+- *"A launch is already in progress…"* / *"An attach is already in progress…"* — the
+  session's `start_debugging` or `attach_to_process` has not returned yet. One launch-shaped
+  call per session at a time (#711): wait for it to return, then restart.
 
 On success it replays the last launch and re-applies every breakpoint, reporting
 `breakpointsReapplied`. Two warnings are worth reading rather than skipping:

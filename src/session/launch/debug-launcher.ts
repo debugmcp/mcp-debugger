@@ -36,15 +36,15 @@ import {
 } from './proxy-failure-diagnostics.js';
 import { waitForLaunchReadiness } from './launch-readiness.js';
 import type { ProxyLauncher } from './proxy-launcher.js';
+import type { InFlightGuard } from '../in-flight-guard.js';
 
 export class DebugLauncher {
-  /** Sessions with a restart currently in flight (reentrancy guard, #238) */
-  private restartingSessions = new Set<string>();
-
   constructor(
     private readonly ctx: LaunchContext,
     private readonly proxyLauncher: ProxyLauncher,
-    private readonly breakpoints: BreakpointController
+    private readonly breakpoints: BreakpointController,
+    /** Shared with the attach controller: one launch-shaped call per session at a time (#711) */
+    private readonly inFlight: InFlightGuard
   ) {}
 
   /**
@@ -108,7 +108,45 @@ export class DebugLauncher {
     }
   }
 
+  /**
+   * Start (or dry-run) a launch. Claims the session for the whole call
+   * (issue #711): a concurrent start_debugging, restart_debugging or
+   * attach_to_process on the same session is refused with a clear error
+   * instead of tearing down the launch this call is still awaiting. The
+   * claim is made before the first await so a same-tick call cannot race it.
+   */
   async startDebugging(
+    sessionId: string,
+    scriptPath: string,
+    scriptArgs?: string[],
+    dapLaunchArgs?: Partial<CustomLaunchRequestArguments>,
+    dryRunSpawn?: boolean,
+    adapterLaunchConfig?: Record<string, unknown>,
+    breakOnExceptions?: ExceptionBreakMode
+  ): Promise<DebugResult> {
+    const session = this.ctx.getSession(sessionId);
+    const refusal = this.inFlight.tryAcquire(sessionId, 'launch', 'start_debugging');
+    if (refusal) {
+      this.ctx.logger.warn(`[SessionManager] ${refusal}`);
+      return { success: false, state: session.state, error: refusal };
+    }
+    try {
+      return await this.launch(
+        sessionId,
+        scriptPath,
+        scriptArgs,
+        dapLaunchArgs,
+        dryRunSpawn,
+        adapterLaunchConfig,
+        breakOnExceptions
+      );
+    } finally {
+      this.inFlight.release(sessionId);
+    }
+  }
+
+  /** The launch sequence proper; the caller holds the session's in-flight claim. */
+  private async launch(
     sessionId: string,
     scriptPath: string,
     scriptArgs?: string[],
@@ -568,6 +606,26 @@ export class DebugLauncher {
   async restartDebugging(sessionId: string): Promise<DebugResult> {
     const session = this.ctx.getSession(sessionId);
 
+    // Claimed first (issue #711): a launch or attach still being awaited, or
+    // a restart already replaying, is the most relevant fact about the
+    // session and the one the caller must wait out. Held for the whole
+    // restart, so the replayed launch runs under this claim.
+    const refusal = this.inFlight.tryAcquire(sessionId, 'restart', 'restart_debugging');
+    if (refusal) {
+      this.ctx.logger.warn(`[SessionManager] ${refusal}`);
+      return { success: false, state: session.state, error: refusal };
+    }
+    try {
+      return await this.restart(session);
+    } finally {
+      this.inFlight.release(sessionId);
+    }
+  }
+
+  /** The restart proper; the caller holds the session's in-flight claim. */
+  private async restart(session: ManagedSession): Promise<DebugResult> {
+    const sessionId = session.id;
+
     if (session.attachMode) {
       return {
         success: false,
@@ -582,79 +640,61 @@ export class DebugLauncher {
         error: 'Nothing to restart: this session has not been launched (start_debugging has not run, or only a dry run was performed).'
       };
     }
-    if (this.restartingSessions.has(sessionId)) {
-      return {
-        success: false,
-        state: session.state,
-        error: 'A restart is already in progress for this session.'
-      };
-    }
-    if (session.state === SessionState.INITIALIZING) {
-      return {
-        success: false,
-        state: session.state,
-        error: 'Session is still initializing; wait for the current start to complete before restarting.'
-      };
-    }
 
-    this.restartingSessions.add(sessionId);
-    try {
-      // Content anchors re-resolve BEFORE the relaunch snapshots
-      // initialBreakpoints, so breakpoints survive the edit that was the
-      // point of the session (issue #271).
-      const anchorResolution = await reresolveAnchors(session, this.ctx);
+    // Content anchors re-resolve BEFORE the relaunch snapshots
+    // initialBreakpoints, so breakpoints survive the edit that was the
+    // point of the session (issue #271).
+    const anchorResolution = await reresolveAnchors(session, this.ctx);
 
-      const spec = session.lastLaunch;
-      this.ctx.logger.info(
-        `[SessionManager] Restarting session ${sessionId}: replaying launch of ${spec.scriptPath}`
-      );
-      const result = await this.startDebugging(
-        sessionId,
-        spec.scriptPath,
-        spec.scriptArgs,
-        spec.dapLaunchArgs,
-        false, // never replay as a dry run
-        spec.adapterLaunchConfig,
-        spec.breakOnExceptions
-      );
-      if (result.success) {
-        const staleCount = anchorResolution?.stale.length ?? 0;
-        // Stamp stale-anchor notes AFTER the relaunch: the per-launch
-        // breakpoint state reset (#238) clears message on every new launch,
-        // and a real adapter message should still win over ours.
-        if (anchorResolution) {
-          const bps = this.ctx.getSession(sessionId).breakpoints;
-          for (const staleEntry of anchorResolution.stale) {
-            const bp = bps.get(staleEntry.breakpointId);
-            if (bp && !bp.message) {
-              bp.message = `Anchor "${staleEntry.statement}" not found at restart; breakpoint kept at last known line ${staleEntry.line}`;
-            }
+    const spec = session.lastLaunch;
+    this.ctx.logger.info(
+      `[SessionManager] Restarting session ${sessionId}: replaying launch of ${spec.scriptPath}`
+    );
+    // The replay runs under this restart's claim, not startDebugging's own.
+    const result = await this.launch(
+      sessionId,
+      spec.scriptPath,
+      spec.scriptArgs,
+      spec.dapLaunchArgs,
+      false, // never replay as a dry run
+      spec.adapterLaunchConfig,
+      spec.breakOnExceptions
+    );
+    if (result.success) {
+      const staleCount = anchorResolution?.stale.length ?? 0;
+      // Stamp stale-anchor notes AFTER the relaunch: the per-launch
+      // breakpoint state reset (#238) clears message on every new launch,
+      // and a real adapter message should still win over ours.
+      if (anchorResolution) {
+        const bps = this.ctx.getSession(sessionId).breakpoints;
+        for (const staleEntry of anchorResolution.stale) {
+          const bp = bps.get(staleEntry.breakpointId);
+          if (bp && !bp.message) {
+            bp.message = `Anchor "${staleEntry.statement}" not found at restart; breakpoint kept at last known line ${staleEntry.line}`;
           }
         }
-        // Join rather than clobber: startDebugging may already have set a
-        // warning (unbound function breakpoints, issue #308).
-        const priorWarning = result.data?.warning;
-        const staleWarning = staleCount > 0
-          ? `${staleCount} statement anchor(s) no longer match the current file; those breakpoints kept their previous lines — re-set them if the target moved.`
-          : undefined;
-        const ambiguousCount = anchorResolution?.moved.filter((m) => m.candidates !== undefined).length ?? 0;
-        const ambiguousWarning = ambiguousCount > 0
-          ? `${ambiguousCount} statement anchor(s) matched multiple lines and re-anchored to the nearest match — check anchorResolution.moved (candidates listed) and re-set any that landed wrong.`
-          : undefined;
-        const warnings = [priorWarning, staleWarning, ambiguousWarning].filter(Boolean);
-        result.data = {
-          ...(result.data ?? {}),
-          breakpointsReapplied: this.ctx.getSession(sessionId).breakpoints.size,
-          // Each launch starts a fresh output buffer: tell the caller to
-          // reset its get_output cursor to since=0.
-          outputReset: true,
-          ...(anchorResolution ? { anchorResolution } : {}),
-          ...(warnings.length > 0 ? { warning: warnings.join('; ') } : {}),
-        };
       }
-      return result;
-    } finally {
-      this.restartingSessions.delete(sessionId);
+      // Join rather than clobber: startDebugging may already have set a
+      // warning (unbound function breakpoints, issue #308).
+      const priorWarning = result.data?.warning;
+      const staleWarning = staleCount > 0
+        ? `${staleCount} statement anchor(s) no longer match the current file; those breakpoints kept their previous lines — re-set them if the target moved.`
+        : undefined;
+      const ambiguousCount = anchorResolution?.moved.filter((m) => m.candidates !== undefined).length ?? 0;
+      const ambiguousWarning = ambiguousCount > 0
+        ? `${ambiguousCount} statement anchor(s) matched multiple lines and re-anchored to the nearest match — check anchorResolution.moved (candidates listed) and re-set any that landed wrong.`
+        : undefined;
+      const warnings = [priorWarning, staleWarning, ambiguousWarning].filter(Boolean);
+      result.data = {
+        ...(result.data ?? {}),
+        breakpointsReapplied: this.ctx.getSession(sessionId).breakpoints.size,
+        // Each launch starts a fresh output buffer: tell the caller to
+        // reset its get_output cursor to since=0.
+        outputReset: true,
+        ...(anchorResolution ? { anchorResolution } : {}),
+        ...(warnings.length > 0 ? { warning: warnings.join('; ') } : {}),
+      };
     }
+    return result;
   }
 }
