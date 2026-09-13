@@ -56,6 +56,7 @@ import {
 } from './docker-backend.mjs';
 import { buildBackendEnvironment, resolveBackendPort, updateBackendEnvOverrides } from './backend-env.mjs';
 import { LifecycleQueue } from './lifecycle-queue.mjs';
+import { createInitialStartupGate } from './initial-startup.mjs';
 import { isBackendUnavailableError, dedupeMcpErrorPrefix, assertBackendAvailable } from './tool-error.mjs';
 
 // ---------------------------------------------------------------------------
@@ -828,6 +829,9 @@ async function main() {
   }
 
   const backend = new BackendManager();
+  // Install the wait before accepting requests, so initial discovery cannot
+  // race startup. Status and recovery tools remain callable while it waits.
+  const initialStartup = createInitialStartupGate(HEALTH_POLL_TIMEOUT_MS);
 
   // Create the MCP Server that Claude Code talks to (via stdio)
   const server = new Server(
@@ -844,6 +848,7 @@ async function main() {
 
   // ListTools: forward live to backend, fall back to dev-tools-only when backend is down
   server.setRequestHandler(ListToolsRequestSchema, async () => {
+    await initialStartup.ready;
     if (backend.state === 'running' && backend.mcpClient) {
       try {
         const result = await backend.mcpClient.listTools();
@@ -929,11 +934,14 @@ async function main() {
   // Start the backend automatically
   try {
     await backend.start();
-    // Notify Claude Code that tools changed — initial tools/list arrived before backend was up
+    initialStartup.complete();
+    // Also refresh clients whose initial discovery hit the bounded wait.
     await server.sendToolListChanged();
   } catch (err) {
     log(`Initial backend start failed: ${err.message}`);
     log('Dev tools are still available — use dev_restart_debugger to retry');
+  } finally {
+    initialStartup.complete();
   }
 }
 

@@ -66,6 +66,28 @@ LOG_LEVEL=debug LOG_FILE=debug.log node dist/index.js
 
 ## Common Debugging Scenarios
 
+### Debugging a second MCP server with mcp-debugger
+
+Build the checkout, create a JavaScript session, and launch its `dist/index.js` with
+`args: ["http", "--port", "0"]`. The operating system chooses a free port; `get_output` reports
+the resulting MCP endpoint. If the outer server runs under the development proxy, pass
+`dapLaunchArgs.env: { "MCP_EXIT_ON_STDIN_CLOSE": "0" }` so the nested HTTP server is supervised by
+the debug session instead of inheriting the proxy's stdin-close policy.
+
+The bundled CLI restores its internal `DEBUG_MCP_SKIP_AUTO_START` override before starting the
+server, so it can debug the checkout's entrypoint without suppressing the target's startup. Any
+value explicitly inherited from the caller is preserved.
+
+Set a breakpoint in `src/cli/http-command.ts` at
+`const sessionIdHeader = req.headers['mcp-session-id'];`, with the condition
+`req.body?.method === 'tools/list'`. Connect a separate MCP client to the nested endpoint and
+request its tool list. The outer debugger can now inspect `req.body`, step through the HTTP
+handler, and resume the pending request with `continue_execution`. Keep the outer debugger's
+connection active while the nested server is paused.
+
+The automated version is
+`pnpm exec vitest run --project e2e tests/e2e/mcp-server-self-debug.test.ts` after building.
+
 ### 1. Server Won't Start
 
 **Symptoms**: Server exits immediately or hangs
