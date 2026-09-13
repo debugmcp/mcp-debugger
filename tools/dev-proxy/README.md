@@ -87,6 +87,12 @@ Once connected, three additional tools are available:
 
 All regular mcp-debugger tools (create_debug_session, set_breakpoint, etc.) are forwarded transparently to the backend.
 
+Initial tool discovery waits for the first backend startup attempt, for up to 30 seconds, so a
+healthy backend's debugging tools appear in the first inventory. If startup fails or takes longer,
+discovery returns the three development tools for recovery. Status and restart calls remain
+available during that wait. The proxy sends a tool-list change notification when startup eventually
+succeeds and after each successful restart.
+
 ## Configuration
 
 Environment variables (all optional):

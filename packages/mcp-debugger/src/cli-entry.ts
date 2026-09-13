@@ -66,19 +66,28 @@ process.argv = process.argv.map(arg =>
   typeof arg === 'string' ? arg.replace(/^["'](.*)["']$/, '$1') : arg
 );
 
-// Signal to the core entrypoint that the CLI shim will invoke main() explicitly.
-process.env.DEBUG_MCP_SKIP_AUTO_START = '1';
-
 // Import batteries-included module to ensure all adapters are bundled
 import './batteries-included.js';
 
 const bootstrap = async (): Promise<void> => {
-  // Import and run the existing CLI main from the root source to avoid duplicating logic.
-  // The bundler will include the referenced source so npx works standalone.
-  const { main } = await import('../../../src/index.js');
+  // Suppress the core's automatic startup only while importing it. Restore the
+  // caller's environment before main() can spawn adapters or debuggees (#717).
+  const previousSkipAutoStart = process.env.DEBUG_MCP_SKIP_AUTO_START;
+  process.env.DEBUG_MCP_SKIP_AUTO_START = '1';
+  let entrypoint: typeof import('../../../src/index.js');
+  try {
+    // The bundler includes this source so npx works standalone.
+    entrypoint = await import('../../../src/index.js');
+  } finally {
+    if (previousSkipAutoStart === undefined) {
+      delete process.env.DEBUG_MCP_SKIP_AUTO_START;
+    } else {
+      process.env.DEBUG_MCP_SKIP_AUTO_START = previousSkipAutoStart;
+    }
+  }
 
   return Promise.resolve()
-    .then(() => main())
+    .then(() => entrypoint.main())
     .catch((error) => {
       // When console is silenced, avoid writing to stdout/stderr
       if (process.env.CONSOLE_OUTPUT_SILENCED !== '1') {
