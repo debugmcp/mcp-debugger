@@ -121,6 +121,42 @@ describe('ProxyManager Message Handling', () => {
       expect(received[0]).toEqual(capabilities);
     });
 
+    it('emits each status-derived event exactly once (issue #713)', () => {
+      // Every status message runs through BOTH the imperative handler and the
+      // functional core. The imperative handler owns the emits (and their
+      // latches); before #713 the core's emitEvent commands re-fired
+      // adapter-configured, init-received, dry-run-complete and initialized
+      // on every listener, so a non-idempotent listener ran twice per launch.
+      const counts: Record<string, number> = {};
+      const events = ['init-received', 'dry-run-complete', 'initialized', 'adapter-configured', 'exit'] as const;
+      for (const event of events) {
+        proxyManager.on(event, () => {
+          counts[event] = (counts[event] ?? 0) + 1;
+        });
+      }
+      const send = (status: string, extra: Record<string, unknown> = {}) =>
+        proxyManager.simulateMessage({ type: 'status', sessionId: 'test-session', status, ...extra });
+
+      // TestProxyManager.start() pre-marks the imperative isInitialized flag
+      // (production sets it in the 'initialized' listener, after the emit);
+      // restore the pre-handshake value so adapter_connected emits it here.
+      (proxyManager as unknown as { isInitialized: boolean }).isInitialized = false;
+
+      send('init_received');
+      send('dry_run_complete', { command: 'python', script: '/path/to/script.py' });
+      send('adapter_connected');
+      send('adapter_configured_and_launched');
+      send('adapter_exited', { code: 0 });
+
+      expect(counts).toEqual({
+        'init-received': 1,
+        'dry-run-complete': 1,
+        initialized: 1,
+        'adapter-configured': 1,
+        exit: 1
+      });
+    });
+
     it('emits breakpoints-synced exactly once per status message (issue #439)', () => {
       // Same single-emission rule as adapter_capabilities: the imperative
       // handler emits, the functional core has no case for the status.

@@ -237,14 +237,19 @@ describe('SessionManager - restart and relaunch', () => {
       expect(result.success).toBe(true);
     });
 
-    it('refuses while a start is still INITIALIZING', async () => {
+    it('restarts a session left INITIALIZING by a start that already returned (issue #711)', async () => {
+      // A readiness wait that hits its ceiling returns with the session still
+      // INITIALIZING. The old state-based check then refused every restart of
+      // it forever ("wait for the current start to complete" — it had). What
+      // matters is whether a start is in flight, and none is; the in-flight
+      // refusal itself is pinned in session-manager-in-flight-guard.test.ts.
       const session = await createLaunchedSession();
       sessionManager.getSession(session.id)!.state = SessionState.INITIALIZING;
 
       const result = await sessionManager.restartDebugging(session.id);
+      await vi.runAllTimersAsync();
 
-      expect(result.success).toBe(false);
-      expect(result.error).toMatch(/initializing/i);
+      expect(result.success).toBe(true);
     });
   });
 });

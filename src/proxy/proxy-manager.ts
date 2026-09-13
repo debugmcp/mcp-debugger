@@ -1183,9 +1183,12 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
               // Skip emitEvent commands for DAP events — they are already handled
               // by the fast-path handleDapEvent() call above to avoid double emission.
               if (message.type === 'dapEvent') break;
-              // Terminal statuses are emitted (and latched) by
-              // handleStatusMessage above — suppress the duplicate (issue #258).
-              if (command.event === 'exit' && this.exitEmitted) break;
+              // Same for status messages: handleStatusMessage above owns every
+              // status emit and its latch (initialized, the #258 exit latch).
+              // Executing the core's copy too fired adapter-configured,
+              // init-received and dry-run-complete on every listener twice
+              // per message (issue #713; #243 had patched one status).
+              if (message.type === 'status') break;
               const args = (command.args as unknown[]) ?? [];
               this.emit(command.event as keyof ProxyManagerEvents, ...(args as never[]));
             }

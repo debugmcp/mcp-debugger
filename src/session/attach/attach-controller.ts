@@ -24,32 +24,60 @@ import { failProxySetup, sessionRemovedDuringTeardown } from '../launch/proxy-fa
 import type { ProxyLauncher } from '../launch/proxy-launcher.js';
 import { verifyAttachThreads } from './attach-verification.js';
 import type { PauseCoordinator } from '../execution/pause-coordinator.js';
+import type { InFlightGuard } from '../in-flight-guard.js';
+
+/** The attach_to_process arguments as the session layer receives them. */
+export interface AttachRequest {
+  port?: number;
+  host?: string;
+  processId?: number | string;
+  timeout?: number;
+  sourcePaths?: string[];
+  stopOnEntry?: boolean;
+  justMyCode?: boolean;
+  verifyTimeout?: number;
+  breakOnExceptions?: ExceptionBreakMode;
+  adapterConfig?: Record<string, unknown>;
+}
 
 export class AttachController {
   constructor(
     private readonly ctx: AttachContext,
     private readonly proxyLauncher: ProxyLauncher,
     private readonly breakpoints: BreakpointController,
-    private readonly pauseCoordinator: PauseCoordinator
+    private readonly pauseCoordinator: PauseCoordinator,
+    /** Shared with the launcher: one launch-shaped call per session at a time (#711) */
+    private readonly inFlight: InFlightGuard
   ) {}
 
   /**
-   * Attach to a running process for debugging
+   * Attach to a running process for debugging. Claims the session for the
+   * whole call (issue #711): a concurrent start_debugging,
+   * restart_debugging or attach_to_process is refused instead of tearing
+   * down the proxy this attach is still bringing up. Claimed before the
+   * first await so a same-tick call cannot race it.
    */
   async attachToProcess(
     sessionId: string,
-    attachConfig: {
-      port?: number;
-      host?: string;
-      processId?: number | string;
-      timeout?: number;
-      sourcePaths?: string[];
-      stopOnEntry?: boolean;
-      justMyCode?: boolean;
-      verifyTimeout?: number;
-      breakOnExceptions?: ExceptionBreakMode;
-      adapterConfig?: Record<string, unknown>;
+    attachConfig: AttachRequest
+  ): Promise<DebugResult<AttachResultData>> {
+    const session = this.ctx.getSession(sessionId);
+    const refusal = this.inFlight.tryAcquire(sessionId, 'attach', 'attach_to_process');
+    if (refusal) {
+      this.ctx.logger.warn(`[SessionManager] ${refusal}`);
+      return { success: false, state: session.state, error: refusal };
     }
+    try {
+      return await this.attach(sessionId, attachConfig);
+    } finally {
+      this.inFlight.release(sessionId);
+    }
+  }
+
+  /** The attach sequence proper; the caller holds the session's in-flight claim. */
+  private async attach(
+    sessionId: string,
+    attachConfig: AttachRequest
   ): Promise<DebugResult<AttachResultData>> {
     const session = this.ctx.getSession(sessionId);
     this.ctx.logger.info(
