@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import type { AdapterPolicy } from '@debugmcp/shared';
+import type { AdapterPolicy, ChildSessionConfig } from '@debugmcp/shared';
 import { JsDebugAdapterPolicy, PythonAdapterPolicy, DefaultAdapterPolicy } from '@debugmcp/shared';
 import { ChildSessionManager } from '../../src/proxy/child-session-manager.js';
 // Mock MinimalDapClient
@@ -361,6 +361,127 @@ describe('ChildSessionManager', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    describe('config enrichment on every adoption path (issue #712)', () => {
+      // The caller's intent (request mode, stopOnEntry, attach extras) used
+      // to be threaded into a child config only on the parent connection,
+      // by MinimalDapClient before it called createChildSession. A
+      // startDebugging that js-debug delivers on a child or release
+      // connection (a fork's request lands on its parent target's socket)
+      // reached createChildSession bare. The enricher is now an option the
+      // manager applies itself, at the top of createChildSession, so both
+      // entry points see the same config.
+      const enrich = (config: ChildSessionConfig): ChildSessionConfig => ({
+        ...config,
+        parentConfig: {
+          ...config.parentConfig,
+          request: 'launch',
+          stopOnEntry: false,
+          localRoot: '/enriched'
+        }
+      });
+
+      it('applies the enricher to a bare config, so a launch-mode target skips the entry-stop stall', async () => {
+        vi.useFakeTimers();
+        try {
+          const enrichConfig = vi.fn(enrich);
+          const enriched = new ChildSessionManager({
+            policy: JsDebugAdapterPolicy,
+            host: 'localhost',
+            port: 9229,
+            enrichConfig
+          });
+          const bare = {
+            pendingId: 'bare-launch-child',
+            host: 'localhost',
+            port: 9229,
+            parentConfig: { type: 'pwa-node' }
+          };
+
+          const createPromise = enriched.createChildSession(bare);
+          // Only the post-attach initialized wait (3s) may be pending: with
+          // stopOnEntry:false threaded in, the 15s ensureChildStopped stall
+          // and its forced pause must not run.
+          await vi.advanceTimersByTimeAsync(4000);
+          expect(await createPromise).toBe('adopted');
+
+          expect(enrichConfig).toHaveBeenCalledWith(bare);
+          const child = enriched.getActiveChild() as unknown as MockMinimalDapClient;
+          expect(child.requests.map((r) => r.command)).not.toContain('pause');
+          // The forwardable extra reached the child's attach request
+          const attach = child.requests.find((r) => r.command === 'attach');
+          expect(attach?.args).toEqual(expect.objectContaining({ localRoot: '/enriched' }));
+          // The caller's object was not mutated
+          expect(bare.parentConfig).toEqual({ type: 'pwa-node' });
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('runs a startDebugging forwarded from a child connection through the same enricher', async () => {
+        vi.useFakeTimers();
+        try {
+          const enrichConfig = vi.fn(enrich);
+          const enriched = new ChildSessionManager({
+            policy: JsDebugAdapterPolicy,
+            host: 'localhost',
+            port: 9229,
+            enrichConfig
+          });
+          const adoption = enriched.createChildSession({
+            pendingId: 'first-child',
+            host: 'localhost',
+            port: 9229,
+            parentConfig: { type: 'pwa-node' }
+          });
+          await vi.advanceTimersByTimeAsync(4000);
+          expect(await adoption).toBe('adopted');
+          enrichConfig.mockClear();
+
+          // js-debug delivers a fork's startDebugging on the adopted child's
+          // own connection; the child-safe policy hands it back to the
+          // manager (issue #501). Drive that handler exactly as the child's
+          // MinimalDapClient would.
+          const child = MockMinimalDapClient.instances[0];
+          const childBehavior = child.policy!.getDapClientBehavior();
+          const forwarded: DebugProtocol.Request = {
+            seq: 7,
+            type: 'request',
+            command: 'startDebugging',
+            arguments: { configuration: { type: 'pwa-node', name: 'fork', __pendingTargetId: 'forked-child' } }
+          };
+          const context = {
+            sendResponse: vi.fn(),
+            createChildSession: vi.fn(),
+            activeChildren: new Map<string, unknown>(),
+            adoptedTargets: new Set<string>()
+          };
+          const result = await childBehavior.handleReverseRequest!(forwarded, context);
+          expect(result.handled).toBe(true);
+          // The release runs the attach + ready-signal wait + disconnect
+          await vi.advanceTimersByTimeAsync(20000);
+
+          // The bare forwarded config went through the enricher…
+          expect(enrichConfig).toHaveBeenCalledWith(
+            expect.objectContaining({
+              pendingId: 'forked-child',
+              parentConfig: { type: 'pwa-node', name: 'fork', __pendingTargetId: 'forked-child' }
+            })
+          );
+          // …and the release connection attached with the enriched config
+          const release = MockMinimalDapClient.instances.find(
+            (c) => c !== child && c.requests.some((r) => r.command === 'attach')
+          );
+          expect(release?.options?.traceLabel).toBe('release:forked-c');
+          const releaseAttach = release!.requests.find((r) => r.command === 'attach');
+          expect(releaseAttach?.args).toEqual(expect.objectContaining({ localRoot: '/enriched' }));
+          // The active child was never disturbed
+          expect(enriched.getActiveChild()).toBe(child as unknown);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
     });
 
     it('should route commands to child when policy specifies', () => {

@@ -90,6 +90,15 @@ export interface ChildSessionOptions {
   port: number;
   /** DI seam for tests; only consulted when the policy delivers function breakpoints via CDP (issue #295). */
   cdpBridgeFactory?: () => CdpFunctionBreakpointBridge;
+  /**
+   * Threads the caller's launch/attach intent (request mode, stopOnEntry,
+   * attach extras) into an adoption request's parentConfig. Applied by the
+   * manager itself at the top of createChildSession, so a startDebugging
+   * js-debug delivers on a child or release connection — a fork's request
+   * lands on its parent target's socket — is enriched exactly like one
+   * from the parent connection (issue #712). Must not mutate its input.
+   */
+  enrichConfig?: (config: ChildSessionConfig) => ChildSessionConfig;
 }
 
 /**
@@ -159,6 +168,8 @@ export class ChildSessionManager extends EventEmitter {
   private dapBehavior: DapClientBehavior;
   private host: string;
   private port: number;
+  /** Optional per-request config enricher (issue #712); see ChildSessionOptions.enrichConfig. */
+  private readonly enrichConfig?: (config: ChildSessionConfig) => ChildSessionConfig;
 
   // Child session tracking
   private adoptedTargets = new Set<string>();
@@ -210,6 +221,7 @@ export class ChildSessionManager extends EventEmitter {
     this.dapBehavior = options.policy.getDapClientBehavior();
     this.host = options.host;
     this.port = options.port;
+    this.enrichConfig = options.enrichConfig;
     this.instanceId = createInstanceId();
     if (options.policy.functionBreakpointsVia === 'cdp') {
       this.cdpBridge = options.cdpBridgeFactory?.() ?? new CdpFunctionBreakpointBridge();
@@ -475,9 +487,13 @@ export class ChildSessionManager extends EventEmitter {
   }
 
   /**
-   * Create and configure a child session
+   * Create and configure a child session. Every adoption request — from the
+   * parent connection or forwarded by a child/release connection's
+   * child-safe policy — passes through the configured enricher here, the
+   * one place both paths meet (issue #712).
    */
-  async createChildSession(config: ChildSessionConfig): Promise<ChildSessionOutcome> {
+  async createChildSession(rawConfig: ChildSessionConfig): Promise<ChildSessionOutcome> {
+    const config = this.enrichConfig ? this.enrichConfig(rawConfig) : rawConfig;
     const { pendingId, parentConfig } = config;
 
     // Check if already adopted
@@ -580,7 +596,8 @@ export class ChildSessionManager extends EventEmitter {
       // pause contradicts intent and the resulting 'pause'-reason stopped
       // event would not be recognized by the auto-continue trigger.
       // Also skip for attach-mode parents (request === 'attach', threaded in
-      // by MinimalDapClient.enrichChildConfig): attach targets emit no entry
+      // by the enricher — MinimalDapClient.enrichChildConfig, applied at the
+      // top of createChildSession, issue #712): attach targets emit no entry
       // stop, so waiting for one here only stalls adoption, and the
       // SessionManager already issues and verifies the post-attach pause via
       // the policy's getAttachBehavior().pauseAfterAttach (issue #124).
