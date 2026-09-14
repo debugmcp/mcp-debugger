@@ -171,7 +171,7 @@ pi list                                # shows the package, its skill, and its M
 ```
 
 The adapter namespaces contributed servers by package, so the tools appear under
-`debugmcp_mcp_debugger__mcp_debugger`; `mcp({ search: "breakpoint" })` finds them either way.
+`debugmcp_mcp-debugger__mcp-debugger`; `mcp({ search: "breakpoint" })` finds them either way.
 The server entry runs the published package via `npx`. To debug a source build instead,
 register the [dev proxy](tools/dev-proxy/README.md) in the adapter's own config.
 
