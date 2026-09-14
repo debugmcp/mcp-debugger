@@ -159,28 +159,21 @@ claude mcp list
 
 ### For the pi coding agent
 
-pi (badlogic pi-mono lineage) has no built-in MCP support — MCP servers reach
-it through the `pi-mcp-adapter` extension. This repo is itself a pi package:
-installing the checkout registers the stdio server (picked up by the adapter
-and started lazily on first use), the `mcp-debugger` agent skill, and a
-session-start hint:
+pi has no built-in MCP support — MCP servers reach it through the community
+[`pi-mcp-adapter`](https://github.com/nicobailon/pi-mcp-adapter) extension. The published
+`@debugmcp/mcp-debugger` package is itself a pi package (from v0.25.0): it ships the
+`mcp-debugger` agent skill and a server entry for the adapter, so one install registers both:
 
 ```bash
-# Clone the repository
-git clone https://github.com/debugmcp/mcp-debugger.git
-cd mcp-debugger
-
-# Install the checkout as a pi package (user scope)
-pi install "$(pwd)"
-
-# Verify: the package appears alongside the mcp-debugger skill and server
-pi list
+pi install npm:pi-mcp-adapter          # prerequisite: the MCP bridge for pi
+pi install npm:@debugmcp/mcp-debugger  # registers the stdio server and the mcp-debugger skill
+pi list                                # shows the package, its skill, and its MCP server
 ```
 
-> **Prerequisite**: `pi-mcp-adapter` must be installed (`pi install npm:pi-mcp-adapter`).
-> The package manifest is the `pi` key in the root `package.json`; this shape is
-> local-path install only — `npm:`/`git:` installs run plain `npm install`,
-> which cannot resolve this pnpm workspace root.
+The adapter namespaces contributed servers by package, so the tools appear under
+`debugmcp_mcp_debugger__mcp_debugger`; `mcp({ search: "breakpoint" })` finds them either way.
+The server entry runs the published package via `npx`. To debug a source build instead,
+register the [dev proxy](tools/dev-proxy/README.md) in the adapter's own config.
 
 ### Using Docker
 

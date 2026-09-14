@@ -130,6 +130,17 @@ codex mcp add mcp-debugger -- npx -y @debugmcp/mcp-debugger stdio
 codex mcp list
 ```
 
+### pi coding agent
+
+pi reaches MCP servers through the community `pi-mcp-adapter` extension. The published package
+is a pi package that ships the agent skill and a server entry for the adapter (from v0.25.0):
+
+```bash
+pi install npm:pi-mcp-adapter
+pi install npm:@debugmcp/mcp-debugger
+pi list
+```
+
 ### Over Streamable HTTP
 
 Start the server yourself, then point the client at its endpoint:

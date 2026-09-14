@@ -328,6 +328,10 @@ which appends a `Signed-off-by: Your Name <you@example.com>` trailer. If you for
    - Keep PRs focused on a single concern
    - Write clear descriptions
    - Add screenshots/demos for UI changes
+   - Client and harness integrations (Claude Code, Codex, pi, ...) ship as documentation or
+     inside the published `@debugmcp/mcp-debugger` package (its manifest keys and the shipped
+     `skills/` directory), never as per-harness directories or manifest keys at the repository
+     root — the root `package.json` is private and never reaches users
 
 3. **Review Process**:
    - PRs require at least one review from @debugmcp
