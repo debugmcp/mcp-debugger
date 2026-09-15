@@ -224,6 +224,14 @@ export const ErrorMessages = {
   /**
    * A launch-shaped call arrived while another one on the same session had
    * not returned yet (issue #711). `held` is the operation in flight.
+   *
+   * "Wait for it to complete" is the right advice for every pairing but one:
+   * restart_debugging on a session whose attach is still in flight will not
+   * become available when the attach finishes — restart replays a launch
+   * configuration and an attach session has none. That pairing gets the
+   * terminal answer the post-attach `session.attachMode` check would give,
+   * which `attachMode` is written too late (after the attach's first awaits)
+   * to deliver on its own.
    */
   operationInFlight: (held: 'launch' | 'restart' | 'attach' | 'detach', requestedTool: string) => {
     const inFlight = {
@@ -232,6 +240,10 @@ export const ErrorMessages = {
       attach: 'An attach is already in progress for this session (attach_to_process has not returned yet)',
       detach: 'A detach is already in progress for this session (detach_from_process has not returned yet)'
     }[held];
+    if (held === 'attach' && requestedTool === 'restart_debugging') {
+      return `${inFlight}, and restart_debugging is never available for an attach session: ` +
+        `there is no launch configuration to replay. Detach and re-attach instead.`;
+    }
     return `${inFlight}; wait for it to complete before calling ${requestedTool}.`;
   },
 

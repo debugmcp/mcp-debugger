@@ -608,8 +608,12 @@ export class DebugLauncher {
 
     // Claimed first (issue #711): a launch or attach still being awaited, or
     // a restart already replaying, is the most relevant fact about the
-    // session and the one the caller must wait out. Held for the whole
-    // restart, so the replayed launch runs under this claim.
+    // session. Held for the whole restart, so the replayed launch runs under
+    // this claim. The refusal text distinguishes "wait for it" from the one
+    // pairing that is terminal rather than transient — an in-flight attach,
+    // whose session will never accept a restart (the `session.attachMode`
+    // check below, answered up front because attachMode is only written
+    // after the attach's first awaits).
     const refusal = this.inFlight.tryAcquire(sessionId, 'restart', 'restart_debugging');
     if (refusal) {
       this.ctx.logger.warn(`[SessionManager] ${refusal}`);

@@ -126,6 +126,10 @@ describe('SessionManager - in-flight launch guard (issue #711)', () => {
     expect(start.error).toMatch(/attach is already in progress/i);
     expect(restart.success).toBe(false);
     expect(restart.error).toMatch(/attach is already in progress/i);
+    // Restart is not merely blocked here — it is never available for an
+    // attach session, so the refusal must not read as transient advice.
+    expect(restart.error).toMatch(/never available for an attach session/i);
+    expect(restart.error).not.toMatch(/wait for it to complete/i);
 
     park.fail(new Error('adapter exited'));
     const attachResult = await attach;
