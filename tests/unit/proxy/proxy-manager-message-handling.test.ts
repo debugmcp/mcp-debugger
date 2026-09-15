@@ -138,11 +138,6 @@ describe('ProxyManager Message Handling', () => {
       const send = (status: string, extra: Record<string, unknown> = {}) =>
         proxyManager.simulateMessage({ type: 'status', sessionId: 'test-session', status, ...extra });
 
-      // TestProxyManager.start() pre-marks the imperative isInitialized flag
-      // (production sets it in the 'initialized' listener, after the emit);
-      // restore the pre-handshake value so adapter_connected emits it here.
-      (proxyManager as unknown as { isInitialized: boolean }).isInitialized = false;
-
       send('init_received');
       send('dry_run_complete', { command: 'python', script: '/path/to/script.py' });
       send('adapter_connected');
