@@ -18,6 +18,23 @@ export interface ProxyInitProgress {
   pendingCommand?: string;
 }
 
+/**
+ * The refusal lead-in for each operation that takes a session's in-flight
+ * claim (issue #711). Declared here, next to the message builder that reads
+ * it, so `InFlightGuard` can import the operation union instead of restating
+ * it — the guard lives in the session layer and this module must not depend
+ * on that direction.
+ */
+const IN_FLIGHT = {
+  launch: 'A launch is already in progress for this session (start_debugging has not returned yet)',
+  restart: 'A restart is already in progress for this session (restart_debugging has not returned yet)',
+  attach: 'An attach is already in progress for this session (attach_to_process has not returned yet)',
+  detach: 'A detach is already in progress for this session (detach_from_process has not returned yet)'
+} as const;
+
+/** The launch-shaped operations one session may hold a claim for (issue #711). */
+export type InFlightOperation = keyof typeof IN_FLIGHT;
+
 export const ErrorMessages = {
   /**
    * Error message for DAP request timeouts
@@ -233,13 +250,8 @@ export const ErrorMessages = {
    * which `attachMode` is written too late (after the attach's first awaits)
    * to deliver on its own.
    */
-  operationInFlight: (held: 'launch' | 'restart' | 'attach' | 'detach', requestedTool: string) => {
-    const inFlight = {
-      launch: 'A launch is already in progress for this session (start_debugging has not returned yet)',
-      restart: 'A restart is already in progress for this session (restart_debugging has not returned yet)',
-      attach: 'An attach is already in progress for this session (attach_to_process has not returned yet)',
-      detach: 'A detach is already in progress for this session (detach_from_process has not returned yet)'
-    }[held];
+  operationInFlight: (held: InFlightOperation, requestedTool: string) => {
+    const inFlight = IN_FLIGHT[held];
     if (held === 'attach' && requestedTool === 'restart_debugging') {
       return `${inFlight}, and restart_debugging is never available for an attach session: ` +
         `there is no launch configuration to replay. Detach and re-attach instead.`;

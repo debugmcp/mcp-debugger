@@ -17,9 +17,14 @@
  * launch and vice versa, and `detach_from_process` — which tears the proxy
  * down just as thoroughly — takes the same claim.
  */
-import { ErrorMessages } from '../utils/error-messages.js';
+import { ErrorMessages, type InFlightOperation } from '../utils/error-messages.js';
 
-export type InFlightOperation = 'launch' | 'restart' | 'attach' | 'detach';
+/**
+ * Re-exported for the session layer. The union is declared next to the refusal
+ * text it selects (src/utils/error-messages.ts) so adding an operation is one
+ * edit, and so this module does not need a utils → session dependency.
+ */
+export type { InFlightOperation };
 
 export class InFlightGuard {
   private readonly inFlight = new Map<string, InFlightOperation>();

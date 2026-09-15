@@ -274,11 +274,9 @@ The message names the reason, and each one is by design:
   Detach and attach again instead.
 - *"Nothing to restart: this session has not been launched…"* — `start_debugging` has not
   run, or only a dry run (`dryRunSpawn: true`) was performed.
-- *"A restart is already in progress for this session…"* — a second restart arrived while
-  the first was still replaying.
-- *"A launch is already in progress…"* / *"An attach is already in progress…"* — the
-  session's `start_debugging` or `attach_to_process` has not returned yet. One launch-shaped
-  call per session at a time (#711): wait for it to return, then restart.
+- *"A launch/restart/attach/detach is already in progress for this session…"* — another
+  launch-shaped call has not returned yet. Not specific to `restart_debugging`; see
+  [A Launch-Shaped Call Is Refused as "Already in Progress"](#a-launch-shaped-call-is-refused-as-already-in-progress).
 
 On success it replays the last launch and re-applies every breakpoint, reporting
 `breakpointsReapplied`. Two warnings are worth reading rather than skipping:
@@ -289,6 +287,27 @@ On success it replays the last launch and re-applies every breakpoint, reporting
   `anchorResolution.moved`. If your file changed shape, confirm the breakpoints landed
   where you meant.
 - `outputReset: true` means the `get_output` cursor must go back to `since: 0`.
+
+### A Launch-Shaped Call Is Refused as "Already in Progress"
+
+**Problem**: `start_debugging`, `restart_debugging`, `attach_to_process` or
+`detach_from_process` returns `success: false` naming an operation already in progress.
+
+- *"A launch/restart/attach/detach is already in progress for this session…"*: the
+  previous `start_debugging`, `restart_debugging`, `attach_to_process` or
+  `detach_from_process` has not returned. One launch-shaped call per session at a time
+  (#711) — each of them tears down whatever proxy the session holds and brings up (or
+  takes down) another, and the session state alone cannot tell "a launch is being
+  awaited" from "the program is running". The message names both the operation holding
+  the session and the tool that was refused.
+
+**What to do**: wait for the call in flight to return, then retry. Nothing else about the
+session changed — the refused call never touched it — and other sessions are unaffected.
+
+The one refusal not worth waiting out is `restart_debugging` while an
+`attach_to_process` is in flight: an attach session has no launch configuration to
+replay, so a restart will not become available when the attach finishes. Use
+`detach_from_process` and attach again instead; the message says so.
 
 ### `pause_execution` Returns `pending: true`
 

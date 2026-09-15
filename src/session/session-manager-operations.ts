@@ -35,7 +35,7 @@ import {
 } from './mirror/mirror-controller.js';
 import { ProxyLauncher } from './launch/proxy-launcher.js';
 import { DebugLauncher } from './launch/debug-launcher.js';
-import { AttachController } from './attach/attach-controller.js';
+import { AttachController, type AttachRequest } from './attach/attach-controller.js';
 import { InFlightGuard } from './in-flight-guard.js';
 import {
   AttachResultData,
@@ -364,18 +364,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
    */
   async attachToProcess(
     sessionId: string,
-    attachConfig: {
-      port?: number;
-      host?: string;
-      processId?: number | string;
-      timeout?: number;
-      sourcePaths?: string[];
-      stopOnEntry?: boolean;
-      justMyCode?: boolean;
-      verifyTimeout?: number;
-      breakOnExceptions?: ExceptionBreakMode;
-      adapterConfig?: Record<string, unknown>;
-    }
+    attachConfig: AttachRequest
   ): Promise<DebugResult<AttachResultData>> {
     return this.attach.attachToProcess(sessionId, attachConfig);
   }

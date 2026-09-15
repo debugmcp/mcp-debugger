@@ -208,22 +208,10 @@ describe('SessionManager - restart and relaunch', () => {
       expect(result.error).toMatch(/attach/i);
     });
 
-    it('refuses a second restart while one is in progress', async () => {
-      const session = await createLaunchedSession();
-      dependencies.mockProxyManager.simulateEvent('terminated');
-      await vi.runAllTimersAsync();
-
-      const first = sessionManager.restartDebugging(session.id);
-      const second = sessionManager.restartDebugging(session.id);
-      await vi.runAllTimersAsync();
-
-      const secondResult = await second;
-      expect(secondResult.success).toBe(false);
-      expect(secondResult.error).toMatch(/in progress/i);
-
-      const firstResult = await first;
-      expect(firstResult.success).toBe(true);
-    });
+    // A second restart while the first is replaying is refused; that lives in
+    // session-manager-in-flight-guard.test.ts, which parks the proxy start on
+    // an explicit gate rather than relying on timer interleaving, and covers
+    // the other five pairings besides.
 
     it('allows restart from ERROR state (crash recovery)', async () => {
       const session = await createLaunchedSession();

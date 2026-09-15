@@ -42,15 +42,25 @@ getters — never captured references — so reassigning a facade method or writ
 a tunable on a live instance is visible to the collaborators. Each collaborator's
 constructor takes the narrowest `Pick<>` slice of that context it uses;
 collaborator-to-collaborator dependencies are constructor arguments
-(`DebugLauncher(ctx, proxyLauncher, breakpoints)`,
-`AttachController(ctx, proxyLauncher, breakpoints, pauseCoordinator)`,
+(`DebugLauncher(ctx, proxyLauncher, breakpoints, inFlight)`,
+`AttachController(ctx, proxyLauncher, breakpoints, pauseCoordinator, inFlight)`,
 `ExecutionController(ctx, pauseCoordinator)`,
 `ExpressionEvaluator(ctx, frameAnchorResolver)`,
 `RedefineClassesController(ctx, breakpoints)`) held as captured instance
 references — their methods resolve at call time, so instance spies intercept,
 but reassigning a collaborator field after construction is not observed.
-`DebugLauncher` owns the restart reentrancy guard, and `restartDebugging`
-replays through `DebugLauncher.startDebugging` itself, not the facade's method.
+
+The facade owns one shared `InFlightGuard` (`src/session/in-flight-guard.ts`,
+issue #711) and hands the same instance to the launcher and the attach
+controller: `startDebugging`, `restartDebugging`, `attachToProcess` and
+`detachFromProcess` each claim the session before their first await and release
+it in `finally`, so one launch-shaped call per session at a time — a launch
+blocks an attach, a detach blocks a restart, and so on. The session state alone
+could not express this: a JavaScript launch projects RUNNING the moment its
+child session is adopted, while `start_debugging` is still parked on the launch
+barrier. `restartDebugging` replays through the launcher's private `launch()`
+under its own claim, never through the facade's `startDebugging`.
+
 Shared per-request DAP helpers (timeout override validation, the timeout hint,
 log truncation) live in `src/session/dap-request-helpers.ts`.
 
