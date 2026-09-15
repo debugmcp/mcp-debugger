@@ -6,25 +6,68 @@ import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { requireCliBundle } from '../test-utils/helpers/cli-bundle.js';
 import { parseSdkToolResult } from './smoke-test-utils.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
+
+/**
+ * Inherited values that would change what the nested server prints or how it
+ * launches: a bind address rewrites the announce line's authority, DEBUG floods
+ * the captured output, and NODE_OPTIONS with the exit-code shim markers would
+ * hand an inner launch the outer session's preload (issue #731).
+ *
+ * Compared upper-cased because `{ ...process.env }` is a plain, case-SENSITIVE
+ * object while `process.env` itself is a case-insensitive proxy on Windows — a
+ * `delete` by exact name misses a differently-cased inherited key.
+ */
+const SCRUBBED_ENV = [
+  'DEBUG_MCP_SKIP_AUTO_START',
+  'MCP_HTTP_BIND',
+  'DEBUG',
+  'NODE_OPTIONS',
+  'MCP_DEBUGGER_EXITCODE_FILE',
+  'MCP_DEBUGGER_EXITCODE_CLAIMED',
+];
+
+/** Cap on one teardown call, well inside the hooks' own timeout. */
+const TEARDOWN_STEP_MS = 10_000;
+
 let debuggerClient: Client | undefined;
 let targetClient: Client | undefined;
 let sessionId: string | undefined;
 
+/** Run one teardown call, bounded and swallowing, so it cannot skip the rest. */
+async function teardownStep(action: () => Promise<unknown>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    action().catch(() => {}),
+    new Promise<void>((resolve) => { timer = setTimeout(resolve, TEARDOWN_STEP_MS); }),
+  ]);
+  clearTimeout(timer);
+}
+
+// Registered FIRST so vitest's default `sequence.hooks: 'stack'` runs it LAST.
+// This is the heaviest teardown in the suite — the outer CLI owns js-debug and
+// the nested server, and orphan reaping is disabled for it — so closing it gets
+// its own hook and its own timeout rather than riding inside the session
+// teardown's try block, where a hook timeout would skip it entirely.
 afterEach(async () => {
-  try {
-    await targetClient?.close();
-    if (sessionId) {
-      await debuggerClient?.callTool({ name: 'close_debug_session', arguments: { sessionId } });
-    }
-  } finally {
-    await debuggerClient?.close();
-    debuggerClient = targetClient = undefined;
-    sessionId = undefined;
+  await teardownStep(async () => { await debuggerClient?.close(); });
+  debuggerClient = undefined;
+}, 30000);
+
+afterEach(async () => {
+  await teardownStep(async () => { await targetClient?.close(); });
+  if (sessionId) {
+    const id = sessionId;
+    await teardownStep(async () => {
+      await debuggerClient?.callTool({ name: 'close_debug_session', arguments: { sessionId: id } });
+    });
   }
-});
+  targetClient = undefined;
+  sessionId = undefined;
+}, 30000);
 
 async function call(name: string, args: Record<string, unknown> = {}) {
   const raw = await debuggerClient!.callTool({ name, arguments: { sessionId, ...args } });
@@ -32,17 +75,36 @@ async function call(name: string, args: Record<string, unknown> = {}) {
   return parseSdkToolResult(raw);
 }
 
+/**
+ * Drain every output entry produced since `cursor`. `get_output` pages at 100
+ * entries by default, so a fixed call only ever sees the first page and a
+ * startup line that lands past it would never be read.
+ */
+async function readOutputSince(cursor: { since: number }): Promise<string> {
+  let text = '';
+  for (;;) {
+    const page = await call('get_output', { since: cursor.since, limit: 1000 });
+    text += (page.entries as Array<{ output: string }>).map(entry => entry.output).join('');
+    cursor.since = page.nextSince as number;
+    if (!page.hasMore) return text;
+  }
+}
+
 describe('mcp-debugger debugging itself', () => {
   it('starts a nested HTTP server, inspects a paused MCP request, and resumes its response', async () => {
     const env = Object.fromEntries(Object.entries(process.env).filter(
-      (entry): entry is [string, string] => entry[1] !== undefined
+      (entry): entry is [string, string] =>
+        entry[1] !== undefined && !SCRUBBED_ENV.includes(entry[0].toUpperCase())
     ));
+    // Scoped to the outer CLI only — the nested launch clears it below. Reaping
+    // beside a live server is safe: a proxy whose owner pid is alive is skipped
+    // (src/utils/proxy-orphan-reaper.ts).
     env.MCP_SKIP_ORPHAN_REAPERS = '1';
-    delete env.DEBUG_MCP_SKIP_AUTO_START;
+
     debuggerClient = new Client({ name: 'self-debug-test', version: '1.0.0' });
     const transport = new StdioClientTransport({
       command: process.execPath,
-      args: [path.join(root, 'packages/mcp-debugger/dist/cli.mjs'), 'stdio'],
+      args: [requireCliBundle(root), 'stdio'],
       cwd: root,
       env,
       stderr: 'pipe',
@@ -55,16 +117,24 @@ describe('mcp-debugger debugging itself', () => {
     const launch = await call('start_debugging', {
       scriptPath: path.join(root, 'dist/index.js'),
       args: ['http', '--port', '0'],
-      // The nested server is supervised by the debug session, not by stdin.
-      dapLaunchArgs: { stopOnEntry: false, env: { MCP_EXIT_ON_STDIN_CLOSE: '0' } },
+      dapLaunchArgs: {
+        stopOnEntry: false,
+        // The nested server is supervised by the debug session, not by stdin.
+        // An empty MCP_SKIP_ORPHAN_REAPERS is not "1"/"true", so the nested
+        // server runs its janitor exactly as a standalone one would.
+        env: { MCP_EXIT_ON_STDIN_CLOSE: '0', MCP_SKIP_ORPHAN_REAPERS: '' },
+      },
     });
     expect(launch.state, JSON.stringify(launch)).toBe('running');
 
+    const cursor = { since: 0 };
+    let transcript = '';
     let endpoint: string | undefined;
     await expect.poll(async () => {
-      const output = await call('get_output');
-      const text = (output.entries as Array<{ output: string }>).map(entry => entry.output).join('');
-      endpoint = text.match(/MCP endpoint available at (http:\/\/127\.0\.0\.1:\d+\/mcp)/)?.[1];
+      transcript += await readOutputSince(cursor);
+      // Loose authority: announceListening prints whatever address was bound,
+      // which is only 127.0.0.1 while nothing has widened the bind.
+      endpoint = transcript.match(/MCP endpoint available at (http:\/\/[^/\s]+\/mcp)/)?.[1];
       return endpoint;
     }, { timeout: 15000 }).toBeDefined();
     const health = await fetch(new URL('/health', endpoint!), { signal: AbortSignal.timeout(5000) });

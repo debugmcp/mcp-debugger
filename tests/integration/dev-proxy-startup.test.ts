@@ -62,12 +62,14 @@ describe('dev-proxy initial tool discovery (issue #716)', () => {
     const releaseFile = path.join(dir, 'ready');
     const { client } = await connect({ DEV_PROXY_FIXTURE_RELEASE: releaseFile });
 
-    const firstTools = client.listTools();
+    const firstTools = observe(client.listTools());
     const status = await client.callTool({ name: 'dev_server_status', arguments: {} });
     expect(status.content).toEqual([expect.objectContaining({ text: expect.stringContaining('"starting"') })]);
     await writeFile(releaseFile, 'ready');
 
-    expect((await firstTools).tools.map(tool => tool.name)).toEqual(['fixture_tool', ...devTools]);
+    const listed = await firstTools;
+    expect(listed.error).toBeUndefined();
+    expect(listed.result?.tools.map(tool => tool.name)).toEqual(['fixture_tool', ...devTools]);
   });
 
   it('answers the first tools/list as soon as an http backend dies at spawn', async () => {

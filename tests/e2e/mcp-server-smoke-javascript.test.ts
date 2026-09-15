@@ -14,6 +14,7 @@ import * as os from 'os';
 import ts from 'typescript';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { requireCliBundle } from '../test-utils/helpers/cli-bundle.js';
 import { parseSdkToolResult } from './smoke-test-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -28,12 +29,7 @@ describe('JavaScript Debugging - Simple Smoke Tests', () => {
   beforeAll(async () => {
     console.log('[JS Simple Smoke] Starting MCP server...');
     
-    const cliEntry = path.join(ROOT, 'packages', 'mcp-debugger', 'dist', 'cli.mjs');
-    if (!fs.existsSync(cliEntry)) {
-      throw new Error(
-        `mcp-debugger CLI bundle missing at ${cliEntry}. Run "pnpm --filter @debugmcp/mcp-debugger build" before executing this test.`
-      );
-    }
+    const cliEntry = requireCliBundle(ROOT);
 
     transport = new StdioClientTransport({
       command: process.execPath,
@@ -654,10 +650,7 @@ describe('JavaScript Debugging - module-load breakpoints in source-mapped TypeSc
       dirs.set(kind, transpile(kind));
     }
 
-    const cliEntry = path.join(ROOT, 'packages', 'mcp-debugger', 'dist', 'cli.mjs');
-    if (!fs.existsSync(cliEntry)) {
-      throw new Error(`mcp-debugger CLI bundle missing at ${cliEntry}. Run "pnpm --filter @debugmcp/mcp-debugger build" first.`);
-    }
+    const cliEntry = requireCliBundle(ROOT);
     transport = new StdioClientTransport({
       command: process.execPath,
       args: [cliEntry, 'stdio', '--log-level', 'info'],

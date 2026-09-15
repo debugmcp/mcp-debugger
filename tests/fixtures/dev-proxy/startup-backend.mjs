@@ -7,9 +7,20 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 if (process.env.DEV_PROXY_FIXTURE_FAIL === '1') process.exit(1);
 
 // The test releases startup only after sending its first tools/list request.
+// The release file may never arrive (a test that fails before writing it), and
+// nothing is listening on stdin yet — the SDK transport attaches its 'data'
+// handler only at connect(), and resuming stdin here would consume the proxy's
+// initialize frame. So bound the wait: a fixture that is never released must
+// exit rather than poll access() at 100 Hz forever.
+const RELEASE_DEADLINE_MS = 60_000;
 const releaseFile = process.env.DEV_PROXY_FIXTURE_RELEASE;
 if (releaseFile) {
+  const deadline = Date.now() + RELEASE_DEADLINE_MS;
   while (!(await access(releaseFile).then(() => true, () => false))) {
+    if (Date.now() >= deadline) {
+      process.stderr.write(`startup fixture: never released after ${RELEASE_DEADLINE_MS}ms\n`);
+      process.exit(2);
+    }
     await setTimeout(10);
   }
 }
