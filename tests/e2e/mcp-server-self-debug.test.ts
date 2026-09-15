@@ -1,6 +1,7 @@
 /** Exercise the published CLI while it debugs a second MCP server (#717). */
 import { afterEach, describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -14,8 +15,9 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 /**
  * Inherited values that would change what the nested server prints or how it
  * launches: a bind address rewrites the announce line's authority, DEBUG floods
- * the captured output, and NODE_OPTIONS with the exit-code shim markers would
- * hand an inner launch the outer session's preload (issue #731).
+ * the captured output, and NODE_OPTIONS with the exit-code shim markers are
+ * what a nested server must scrub itself (issue #731) — kept out of the outer
+ * CLI's env so this test starts from a clean outer session either way.
  *
  * Compared upper-cased because `{ ...process.env }` is a plain, case-SENSITIVE
  * object while `process.env` itself is a case-insensitive proxy on Windows — a
@@ -36,6 +38,7 @@ const TEARDOWN_STEP_MS = 10_000;
 let debuggerClient: Client | undefined;
 let targetClient: Client | undefined;
 let sessionId: string | undefined;
+let innerDir: string | undefined;
 
 /** Run one teardown call, bounded and swallowing, so it cannot skip the rest. */
 async function teardownStep(action: () => Promise<unknown>): Promise<void> {
@@ -67,7 +70,26 @@ afterEach(async () => {
   }
   targetClient = undefined;
   sessionId = undefined;
+  if (innerDir) {
+    // Best-effort: on Windows a file the nested server still holds open makes
+    // this throw EPERM, which would abort the hook and skip the sibling that
+    // closes the outer CLI — leaking the heaviest process in the suite over a
+    // temp directory the OS will reclaim anyway.
+    try {
+      rmSync(innerDir, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
+    innerDir = undefined;
+  }
 }, 30000);
+
+/** Call a tool on the NESTED server (the debuggee), through targetClient. */
+async function callNested(name: string, args: Record<string, unknown> = {}) {
+  const raw = await targetClient!.callTool({ name, arguments: args });
+  expect(raw.isError, JSON.stringify(raw)).not.toBe(true);
+  return parseSdkToolResult(raw);
+}
 
 async function call(name: string, args: Record<string, unknown> = {}) {
   const raw = await debuggerClient!.callTool({ name, arguments: { sessionId, ...args } });
@@ -171,5 +193,32 @@ describe('mcp-debugger debugging itself', () => {
     const completed = await response;
     expect(completed.error).toBeUndefined();
     expect(completed.result?.tools.map(tool => tool.name)).toContain('start_debugging');
-  }, 60000);
+
+    // Issue #720: once continued, the listing must not repeat the stop the
+    // session just left as if it were still paused.
+    let resumed: { state: string; lastStop?: unknown } | undefined;
+    await expect.poll(async () => {
+      const listed = await call('list_debug_sessions');
+      resumed = (listed.sessions as Array<{ id: string; state: string; lastStop?: unknown }>).find(session => session.id === sessionId);
+      return resumed?.state;
+    }, { timeout: 15000 }).toBe('running');
+    expect(resumed, JSON.stringify(resumed)).not.toHaveProperty('lastStop');
+
+    // Issue #731: the nested server inherits the outer session's exit-code shim
+    // env; a JavaScript session it launches must still report its debuggee's
+    // exit code, with no env workaround on the inner launch.
+    innerDir = mkdtempSync(path.join(os.tmpdir(), 'mcp-self-debug-inner-'));
+    const innerScript = path.join(innerDir, 'exit-seven.js');
+    writeFileSync(innerScript, 'process.exit(7);' + os.EOL);
+    const innerId = (await callNested('create_debug_session', { language: 'javascript', name: 'inner' })).sessionId as string;
+    const innerLaunch = await callNested('start_debugging', {
+      sessionId: innerId, scriptPath: innerScript, dapLaunchArgs: { stopOnEntry: false },
+    });
+    expect(innerLaunch.success, JSON.stringify(innerLaunch)).toBe(true);
+    await expect.poll(async () => {
+      const listed = await callNested('list_debug_sessions');
+      return (listed.sessions as Array<{ id: string; state: string; exitCode?: number }>).find(session => session.id === innerId);
+    }, { timeout: 20000 }).toMatchObject({ state: 'stopped', exitCode: 7 });
+    await callNested('close_debug_session', { sessionId: innerId });
+  }, 90000);
 });

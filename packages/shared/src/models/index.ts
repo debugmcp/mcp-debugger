@@ -141,6 +141,16 @@ export enum SessionState {
 }
 
 /**
+ * Whether a session has reached a state it never leaves under its own power:
+ * the debuggee ended (STOPPED) or the session failed (ERROR). Both are
+ * "no live debuggee, and the recorded facts are final" — which is what the
+ * `lastStop` projection keys on (issue #720).
+ */
+export function isTerminalSessionState(state: SessionState | undefined): boolean {
+  return state === SessionState.STOPPED || state === SessionState.ERROR;
+}
+
+/**
  * Maps legacy SessionState to new state model
  */
 export function mapLegacyState(legacyState: SessionState): { lifecycle: SessionLifecycleState; execution?: ExecutionState } {
@@ -410,7 +420,13 @@ export interface DebugSessionInfo {
   state: SessionState;
   createdAt: Date;
   updatedAt?: Date; // Optional, as it might not always be present or needed for list views
-  /** Why the session last stopped; present after the first user-visible stop */
+  /**
+   * Why the session last stopped. Projected only while the session is
+   * `paused` (the stop it is at) or once it is terminal — `stopped`/`error`
+   * (the last stop before it ended). A `running` session omits it even though
+   * the internal model still holds that record, so the listing never repeats
+   * a stop the session has already left (issue #720).
+   */
   lastStop?: SessionStopInfo;
   /** Debuggee exit code from the DAP 'exited' event, when the adapter reports one */
   exitCode?: number;

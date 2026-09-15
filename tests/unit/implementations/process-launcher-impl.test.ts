@@ -1,7 +1,10 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
-import { ProxyProcessLauncherImpl } from '../../../src/implementations/process-launcher-impl.js';
+import {
+  IPC_DRAIN_CAP_MS,
+  ProxyProcessLauncherImpl
+} from '../../../src/implementations/process-launcher-impl.js';
 import type { IChildProcess, IProcessManager } from '@debugmcp/shared';
 
 class FakeChildProcess extends EventEmitter implements IChildProcess {
@@ -10,6 +13,7 @@ class FakeChildProcess extends EventEmitter implements IChildProcess {
   stdin: NodeJS.WritableStream | null = null;
   stdout: NodeJS.ReadableStream | null = null;
   stderr: NodeJS.ReadableStream | null = null;
+  connected?: boolean;
 
   constructor(pid?: number) {
     super();
@@ -243,5 +247,157 @@ describe('ProxyProcessLauncherImpl', () => {
         expect.objectContaining({ windowsHide: true })
       );
     });
+  });
+});
+
+// Node dispatches a child's raw `exit` as soon as the process handle closes;
+// IPC bytes the child wrote just before exiting can still be sitting in the
+// pipe and are delivered as `message` events afterwards, right up to the
+// channel EOF that flips `connected` to false (`disconnect`, or `close` when
+// the channel was the last open handle). Tearing the adapter down on the raw
+// `exit` dropped those late messages — a dry run's `dry_run_complete` among
+// them (issue #729).
+describe('ProxyProcessAdapter exit ordering with an open IPC channel (issue #729)', () => {
+  let processManager: IProcessManager;
+  let child: FakeChildProcess;
+
+  // `close` is deliberately not recorded: dispose() strips the adapter's
+  // tracked listeners on its own `exit`, so the adapter never forwards a
+  // `close` that follows an exit. Recording it would pin nothing and would
+  // let a trailing event stand in for the delivery under test.
+  function adapterWithOrder() {
+    const launcher = new ProxyProcessLauncherImpl(processManager);
+    const proxyProcess = launcher.launchProxy('./dist/proxy.js', 'session-729');
+    const order: string[] = [];
+    proxyProcess.on('message', (message: { status?: string }) => order.push(`message:${message.status}`));
+    proxyProcess.on('exit', (code: number | null) => order.push(`exit:${code}`));
+    return { proxyProcess, order };
+  }
+
+  beforeEach(() => {
+    child = new FakeChildProcess(2222);
+    processManager = {
+      spawn: vi.fn().mockReturnValue(child),
+      exec: vi.fn()
+    } as unknown as IProcessManager;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('holds exit until the channel disconnects so a message queued behind the raw exit is still forwarded', () => {
+    child.connected = true;
+    const { order } = adapterWithOrder();
+
+    child.emit('exit', 0, null);
+    child.emit('message', { type: 'status', status: 'dry_run_complete' });
+    child.connected = false;
+    child.emit('disconnect');
+
+    expect(order).toEqual(['message:dry_run_complete', 'exit:0']);
+  });
+
+  it('delivers the held exit on close when close arrives before disconnect, exactly once', () => {
+    child.connected = true;
+    const { order } = adapterWithOrder();
+
+    child.emit('exit', 0, null);
+    child.emit('message', { type: 'status', status: 'dry_run_complete' });
+    child.emit('close', 0, null);
+
+    // Asserted before the disconnect below: with the trailing disconnect
+    // first, this passed even when `close` delivered nothing at all.
+    expect(order).toEqual(['message:dry_run_complete', 'exit:0']);
+
+    child.connected = false;
+    child.emit('disconnect');
+
+    expect(order.filter(entry => entry.startsWith('exit:'))).toEqual(['exit:0']);
+  });
+
+  it('resolves a pending initialization when dry_run_complete lands after the raw exit', async () => {
+    child.connected = true;
+    const launcher = new ProxyProcessLauncherImpl(processManager);
+    const proxyProcess = launcher.launchProxy('./dist/proxy.js', 'session-729-init');
+    const pending = proxyProcess.waitForInitialization(1000);
+
+    child.emit('exit', 0, null);
+    child.emit('message', { type: 'status', status: 'dry_run_complete' });
+    child.connected = false;
+    child.emit('disconnect');
+
+    await expect(pending).resolves.toBeUndefined();
+  });
+
+  // The cap is a safety net for a channel that never reports EOF; it has not
+  // been observed to fire in practice — on both platforms disconnect (or
+  // close) follows the raw exit within the same poll.
+  it('reports the held exit after the drain cap when neither disconnect nor close ever arrives', () => {
+    vi.useFakeTimers();
+    child.connected = true;
+    const { order } = adapterWithOrder();
+
+    child.emit('exit', 0, null);
+    expect(order).toEqual([]);
+
+    vi.advanceTimersByTime(IPC_DRAIN_CAP_MS - 1);
+    expect(order).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(order).toEqual(['exit:0']);
+
+    child.emit('disconnect');
+    expect(order).toEqual(['exit:0']);
+  });
+
+  it('reports exit immediately when the channel already disconnected before the exit', () => {
+    child.connected = true;
+    const { order } = adapterWithOrder();
+
+    child.connected = false;
+    child.emit('disconnect');
+    child.emit('exit', 1, null);
+
+    expect(order).toEqual(['exit:1']);
+  });
+
+  it('reports exit immediately when the child has no IPC channel', () => {
+    const { order } = adapterWithOrder();
+
+    child.emit('exit', 1, null);
+
+    expect(order).toEqual(['exit:1']);
+  });
+
+  // During the hold the child is dead but its channel is still connected, so
+  // `child.send` accepts the write and Node raises EPIPE on the next tick as
+  // an 'error' — which ends the session in ERROR blaming an IPC fault rather
+  // than the exit that actually happened. Refuse the write instead, on the
+  // same "has it exited" test kill() uses.
+  it('refuses to write to a child that has exited while its channel is still held open', () => {
+    child.connected = true;
+    const { proxyProcess } = adapterWithOrder();
+
+    child.emit('exit', 0, null);
+    child.send.mockClear();
+
+    expect(() => proxyProcess.sendCommand({ cmd: 'terminate' })).toThrow(
+      /Proxy process has already exited \(code 0, signal null\)/
+    );
+    expect(proxyProcess.send({ cmd: 'terminate' })).toBe(false);
+    expect(child.send).not.toHaveBeenCalled();
+  });
+
+  it('names the signal when the child was killed rather than exiting', () => {
+    child.connected = true;
+    const { proxyProcess } = adapterWithOrder();
+
+    child.emit('exit', null, 'SIGTERM');
+    child.send.mockClear();
+
+    expect(() => proxyProcess.sendCommand({ cmd: 'terminate' })).toThrow(
+      /Proxy process has already exited \(code null, signal SIGTERM\)/
+    );
+    expect(child.send).not.toHaveBeenCalled();
   });
 });

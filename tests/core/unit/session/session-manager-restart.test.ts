@@ -10,6 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
 import { DebugLanguage, SessionState } from '@debugmcp/shared';
 import { createMockDependencies } from './session-manager-test-utils.js';
+import { internals } from '../../../test-utils/helpers/operations-internals.js';
 
 describe('SessionManager - restart and relaunch', () => {
   let sessionManager: SessionManager;
@@ -238,6 +239,53 @@ describe('SessionManager - restart and relaunch', () => {
       await vi.runAllTimersAsync();
 
       expect(result.success).toBe(true);
+    });
+  });
+
+  // The per-attempt reset exists so a new attempt is never judged on the
+  // previous run's evidence. lastStop is part of that evidence: a start that
+  // dies before a proxy exists (a cpp compile error, executable resolution,
+  // the adapter lease) emits no stop of its own, so anything still on the
+  // session is the PREVIOUS run's — and the terminal projection would list it
+  // as this attempt's (issues #720/#731).
+  describe('per-attempt terminal evidence reset (issue #720)', () => {
+    /** Fail the launch before any proxy exists, the way a pre-spawn error does. */
+    function failBeforeProxy(): void {
+      vi.spyOn(internals(sessionManager).proxyLauncher, 'start').mockRejectedValue(
+        new Error('compile failed before the proxy was spawned')
+      );
+    }
+
+    it('drops the previous run\'s lastStop when a relaunch fails before the proxy starts', async () => {
+      const session = await createLaunchedSession();
+      dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+      await vi.runAllTimersAsync();
+      expect(sessionManager.getSession(session.id)?.lastStop?.reason).toBe('breakpoint');
+
+      failBeforeProxy();
+      const result = await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+
+      expect(result.success).toBe(false);
+      expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.ERROR);
+      const listed = sessionManager.getAllSessions().find((s) => s.id === session.id);
+      expect(listed).not.toHaveProperty('lastStop');
+    });
+
+    it('drops the previous run\'s lastStop when an attach fails before the proxy starts', async () => {
+      const session = await createLaunchedSession();
+      dependencies.mockProxyManager.simulateStopped(1, 'exception');
+      await vi.runAllTimersAsync();
+      expect(sessionManager.getSession(session.id)?.lastStop?.reason).toBe('exception');
+
+      failBeforeProxy();
+      const result = await sessionManager.attachToProcess(session.id, { host: 'localhost', port: 5678 });
+      await vi.runAllTimersAsync();
+
+      expect(result.success).toBe(false);
+      expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.ERROR);
+      const listed = sessionManager.getAllSessions().find((s) => s.id === session.id);
+      expect(listed).not.toHaveProperty('lastStop');
     });
   });
 });

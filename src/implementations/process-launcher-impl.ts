@@ -15,6 +15,16 @@ import { IProcessManager, IChildProcess } from '@debugmcp/shared';
 import { OWNER_PID_ARG_PREFIX, SESSION_ID_ARG_PREFIX } from '../utils/proxy-orphan-reaper.js';
 
 /**
+ * Upper bound on how long a raw child `exit` is held back while its IPC
+ * channel is still open (issue #729). Channel EOF normally follows the exit
+ * within the same poll; the cap only guards against a channel that never
+ * reports EOF. Kept as a safety net, not a tuning knob: it has never been
+ * observed to fire — on both platforms disconnect (or close) follows the raw
+ * exit within the same poll.
+ */
+export const IPC_DRAIN_CAP_MS = 1000;
+
+/**
  * Proxy process adapter that adds proxy-specific functionality
  * Does NOT extend ProcessAdapter to avoid double message handling
  */
@@ -29,6 +39,9 @@ class ProxyProcessAdapter extends EventEmitter implements IProxyProcess {
   protected childProcessListeners: Array<{ event: string; listener: (...args: any[]) => void }> = []; // eslint-disable-line @typescript-eslint/no-explicit-any
   private _exitCode: number | null = null;
   private _signalCode: string | null = null;
+  private heldExit?: { code: number | null; signal: string | null };
+  private heldExitTimer?: ReturnType<typeof setTimeout>;
+  private heldExitDisconnectListener?: () => void;
 
   constructor(
     public readonly childProcess: IChildProcess,
@@ -41,14 +54,28 @@ class ProxyProcessAdapter extends EventEmitter implements IProxyProcess {
     // Create a unique ID for this adapter's promises for debugging
     this.promiseId = `ProxyProcess-${sessionId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-    // Set up event handlers
+    // Set up event handlers.
+    //
+    // Node dispatches the raw `exit` as soon as the process handle closes, but
+    // IPC bytes the child wrote just before exiting can still be in the pipe:
+    // they arrive as `message` events afterwards, up to the channel EOF that
+    // flips `connected` to false (`disconnect`, or `close` when the channel was
+    // the last open handle). handleEarlyExit() tears the message forwarder down
+    // on our own `exit`, so reporting the exit while the channel was still open
+    // dropped those late messages — a dry run's `dry_run_complete` among them
+    // (issue #729). Hold the exit until the channel has drained instead.
     const exitHandler = (code: number | null, signal: string | null) => {
       this._exitCode = code;
       this._signalCode = signal;
+      if (childProcess.connected === true) {
+        this.holdExitUntilChannelDrained(code, signal);
+        return;
+      }
       this.emit('exit', code, signal);
     };
     
     const closeHandler = (code: number | null, signal: string | null) => {
+      this.deliverHeldExit();
       this.emit('close', code, signal);
     };
     
@@ -211,6 +238,36 @@ class ProxyProcessAdapter extends EventEmitter implements IProxyProcess {
     }
   }
   
+  private holdExitUntilChannelDrained(code: number | null, signal: string | null): void {
+    this.heldExit = { code, signal };
+    const deliver = () => this.deliverHeldExit();
+    this.heldExitDisconnectListener = deliver;
+    this.childProcess.once('disconnect', deliver);
+    this.heldExitTimer = setTimeout(deliver, IPC_DRAIN_CAP_MS);
+    this.heldExitTimer.unref?.();
+  }
+
+  /** Emit a held exit exactly once, whichever of disconnect/close/cap fires first. */
+  private deliverHeldExit(): void {
+    const held = this.heldExit;
+    this.clearHeldExit();
+    if (held) {
+      this.emit('exit', held.code, held.signal);
+    }
+  }
+
+  private clearHeldExit(): void {
+    this.heldExit = undefined;
+    if (this.heldExitTimer) {
+      clearTimeout(this.heldExitTimer);
+      this.heldExitTimer = undefined;
+    }
+    if (this.heldExitDisconnectListener) {
+      this.childProcess.removeListener('disconnect', this.heldExitDisconnectListener);
+      this.heldExitDisconnectListener = undefined;
+    }
+  }
+
   private handleEarlyExit(): void {
     if (this.initializationState === 'none') {
       // Process exited without initialization being requested
@@ -224,6 +281,7 @@ class ProxyProcessAdapter extends EventEmitter implements IProxyProcess {
   private dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.clearHeldExit();
 
     // If we're waiting for initialization, fail it gracefully to avoid unhandled rejection
     if (this.initializationState === 'waiting') {
@@ -272,8 +330,23 @@ class ProxyProcessAdapter extends EventEmitter implements IProxyProcess {
     return this._signalCode;
   }
   
+  /**
+   * Whether the child has exited. Same test `kill()` uses — deliberately not
+   * `connected`: while a raw exit is held back for the channel to drain
+   * (issue #729) the child is dead but still connected, so `child.send()`
+   * accepts the write and Node raises EPIPE on the next tick as an 'error',
+   * ending the session in ERROR with the IPC fault as its stated cause
+   * instead of the exit that actually happened.
+   */
+  private get hasExited(): boolean {
+    return this._exitCode !== null || this._signalCode !== null;
+  }
+
   send(message: unknown): boolean {
     // The IChildProcess interface only has send(message) - one parameter
+    if (this.hasExited) {
+      return false;
+    }
     if (typeof this.childProcess.send === 'function') {
       const result = this.childProcess.send(message);
       return result;
@@ -281,8 +354,15 @@ class ProxyProcessAdapter extends EventEmitter implements IProxyProcess {
       return false;
     }
   }
-  
+
   sendCommand(command: object): void {
+    // Raised before the try below so the outer catch cannot rewrap it as an
+    // "IPC send threw error" — the point is to name the exit, not an IPC fault.
+    if (this.hasExited) {
+      throw new Error(
+        `Proxy process has already exited (code ${this._exitCode}, signal ${this._signalCode})`
+      );
+    }
     // Send object directly - Node.js IPC will handle serialization
     try {
       const summary = JSON.stringify({
@@ -290,10 +370,7 @@ class ProxyProcessAdapter extends EventEmitter implements IProxyProcess {
         requestId: (command as { requestId?: string }).requestId,
         sessionId: (command as { sessionId?: string }).sessionId
       });
-      const connectedBefore =
-        'connected' in this.childProcess
-          ? (this.childProcess as { connected?: boolean }).connected
-          : undefined;
+      const connectedBefore = this.childProcess.connected;
       const pid = this.childProcess.pid;
       this.emit('ipc-send-start', {
         pid,
@@ -323,10 +400,7 @@ class ProxyProcessAdapter extends EventEmitter implements IProxyProcess {
           });
           throw new Error(`Failed to send command via IPC. Send returned false. Adapter killed: ${killed}, Has childProcess: ${hasChildProcess}, Child killed: ${childProcessKilled}`);
         }
-        const connectedAfter =
-          'connected' in this.childProcess
-            ? (this.childProcess as { connected?: boolean }).connected
-            : undefined;
+        const connectedAfter = this.childProcess.connected;
         this.emit('ipc-send-complete', {
           pid,
           connectedAfter,
@@ -381,7 +455,7 @@ class ProxyProcessAdapter extends EventEmitter implements IProxyProcess {
     // blocked escalation: a delivered signal latches .killed while the
     // process may still be alive, so a follow-up SIGKILL was silently
     // swallowed (issue #502).
-    if (this.disposed || this._exitCode !== null || this._signalCode !== null) {
+    if (this.disposed || this.hasExited) {
       return false; // Already exited or disposed
     }
 

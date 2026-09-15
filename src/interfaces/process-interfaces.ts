@@ -51,6 +51,10 @@ export interface IProxyProcessLauncher {
 /**
  * Represents a launched proxy process
  * Extends IProcess with proxy-specific functionality
+ *
+ * Duplicate of the `@debugmcp/shared` copy (issue #692); the implementation
+ * and ProxyManager consume that one, and it carries the `exit`-after-`message`
+ * ordering contract (issue #729).
  */
 export interface IProxyProcess extends IProcess {
   sessionId: string;

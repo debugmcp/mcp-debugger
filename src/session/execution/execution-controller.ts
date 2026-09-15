@@ -34,6 +34,7 @@
  */
 import { getErrorMessage } from '../../errors/debug-errors.js';
 import {
+  isTerminalSessionState,
   NO_DEBUG_TARGET_MARKER,
   SessionLifecycleState,
   SessionState,
@@ -453,8 +454,21 @@ export class ExecutionController {
       );
       return { success: true, state: session.state };
     } catch (error) {
-      // Revert to PAUSED — the VM didn't actually resume
-      this.ctx.updateState(session, SessionState.PAUSED);
+      // Revert to PAUSED — the VM didn't actually resume. Only from RUNNING,
+      // though: the debuggee can end while the request is in flight (and the
+      // adapter then rejects it precisely BECAUSE the session is gone), which
+      // leaves the session STOPPED/ERROR. A terminal state is not something a
+      // failed resume can undo, and reverting it resurrected finished
+      // sessions as paused (issue #720).
+      //
+      // Phrased as "unless terminal" rather than "only from RUNNING" because
+      // the guard above narrowed session.state to PAUSED for the compiler and
+      // the await is precisely where that narrowing stops holding. The only
+      // other state reachable here is PAUSED itself — a breakpoint that fired
+      // during the await — where the revert is a no-op.
+      if (!isTerminalSessionState(session.state)) {
+        this.ctx.updateState(session, SessionState.PAUSED);
+      }
       const errorMessage = getErrorMessage(error);
       this.ctx.logger.error(
         `[SessionManager continue] Error sending 'continue' to proxy for session ${sessionId}: ${errorMessage}`

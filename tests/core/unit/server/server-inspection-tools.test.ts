@@ -198,8 +198,68 @@ describe('Server Inspection Tools Tests', () => {
       expect(content.note).toBeUndefined();
     });
 
+    it('omits stopReason and lastStop for a session that is no longer paused (issue #720)', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        state: 'running',
+        lastStop: { reason: 'step', threadId: 0, description: 'Paused' },
+        proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(0), setCurrentThreadId: vi.fn() }
+      });
+      mockSessionManager.getStackTraceDetailed.mockResolvedValue({
+        frames: [],
+        totalFrameCount: 0,
+        hiddenFrameCount: 0,
+        allFramesInternal: false,
+        note: 'Session is not paused'
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'get_stack_trace', arguments: { sessionId: 'test-session' } }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      expect(content).not.toHaveProperty('lastStop');
+      expect(content).not.toHaveProperty('stopReason');
+    });
+
+    // continue_execution sets RUNNING *before* its DAP send, so a continue
+    // that lands while the stack fetch is in flight flips the state under the
+    // handler. Reading the state after the await then dropped stopReason and
+    // lastStop from a payload whose frames were fetched from a genuinely
+    // paused session — the answer describes the pause it was taken at, so it
+    // must be judged on the state at that moment, not on the state now (#720).
+    it('keeps the stop it was paused at when a continue lands mid-fetch', async () => {
+      const session: { state: string; lastStop: unknown; proxyManager: unknown } = {
+        state: 'paused',
+        lastStop: { reason: 'breakpoint', threadId: 1, timestamp: 1 },
+        proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(1), setCurrentThreadId: vi.fn() }
+      };
+      mockSessionManager.getSession.mockReturnValue(session);
+      mockSessionManager.getStackTraceDetailed.mockImplementation(async () => {
+        session.state = 'running';
+        return {
+          frames: [{ id: 1, name: 'main', file: 'test.py', line: 10 }],
+          totalFrameCount: 1,
+          hiddenFrameCount: 0,
+          allFramesInternal: false
+        };
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'get_stack_trace', arguments: { sessionId: 'test-session' } }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.stackFrames).toHaveLength(1);
+      expect(content.stopReason).toBe('breakpoint');
+      expect(content.lastStop).toMatchObject({ reason: 'breakpoint', threadId: 1 });
+    });
+
     it('echoes the inspected thread and frameless-thread note (issue #553)', async () => {
       const mockSession = {
+        state: 'paused',
         lastStop: { reason: 'pause', threadId: 1 },
         failureDiagnostics: { proxyLogPath: '/logs/proxy-test-session.log' },
         proxyManager: {

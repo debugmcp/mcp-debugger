@@ -118,6 +118,8 @@ Lists all active debugging sessions.
 - `"stopped"`: Session stopped (program terminated)
 - `"error"`: Session encountered an error
 
+**`lastStop`:** present while the session is `paused` (the stop it is at: `reason`, `threadId`, `timestamp`, the adapter's `description`/`text`, and `exceptionInfo` for exception stops) and after it reaches `stopped`/`error` (the last stop before it ended). A `running` session never carries one, so a poller that calls this after `continue_execution` or a step sees `state: "running"` with no stop record until the next stop lands — the record of the stop it just left is not repeated as if the program were still paused.
+
 Errored sessions include optional `diagnostics` with the current launch attempt's server-host `proxyLogPath` and remote-safe `proxyLogResource`. The record is retained for proxy initialization failures and for proxy/adapter deaths after initialization, and is cleared when a new launch or attach attempt begins.
 
 ---
@@ -700,6 +702,7 @@ Gets the current call stack.
 **Notes:**
 - Stack frames are ordered from innermost (current) to outermost
 - `threadId` identifies the thread represented by `stackFrames`, or the explicitly queried thread when the stack is empty. `lastStop.threadId`, when present, remains the thread reported by the original stop event.
+- `stopReason` and `lastStop` describe the pause the frames were read at, so they are omitted whenever the session is not paused; they are taken from the state at the start of the call, so a `continue_execution` racing the fetch does not strip them from an answer that really was read at a stop.
 - Frame IDs are used with `get_scopes`
 - Internal/runtime frames (e.g. Node.js internals and `node_modules` dependencies, Go `/runtime/`, `System.*`) are filtered out by default; pass `includeInternals: true` to see them. When any frames were hidden, the response additionally carries `hiddenFrames` (count) and a `note` explaining how to reveal them.
 - A frame whose source the adapter could not find on this host (js-debug: a source-mapped `.ts` the package did not ship) carries `unresolvedSource: true`, and the `note` says its `file` is a label rather than an openable path — do not pass it to `get_source_context`.

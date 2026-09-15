@@ -147,6 +147,10 @@ export class AttachController {
       attachMode: true,
     });
     session.failureDiagnostics = undefined;
+    // Same per-attempt reset as startDebugging: an attach that fails before a
+    // proxy exists emits no stop, so a stop left over from a prior run would
+    // be reported as this attempt's once the session lands in ERROR (#720).
+    session.lastStop = undefined;
 
     try {
       // For attach mode, we use a placeholder scriptPath

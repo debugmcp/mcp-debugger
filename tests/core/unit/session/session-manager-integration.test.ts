@@ -166,6 +166,53 @@ describe('SessionManager - Integration Tests', () => {
       expect(sessionManager.getSession(session.id)?.lastStop).toBeUndefined();
     });
 
+    // The auto-continued entry stop is recorded only so the PAUSED invariant
+    // holds while the continue is in flight, then erased. If the debuggee's
+    // 'terminated' beats the continue, the session is already STOPPED when
+    // the erase runs — and a listing that still carried the transient stop
+    // showed a finished program as {state: 'stopped', lastStop: {reason:
+    // 'entry', description: 'Paused'}} (issue #720).
+    describe('a transient entry stop erased after the debuggee has already ended', () => {
+      async function autoContinueRacedByTermination(
+        onContinue: () => void | never
+      ): Promise<string> {
+        const session = await sessionManager.createSession({
+          language: DebugLanguage.MOCK,
+          executablePath: 'python'
+        });
+        await sessionManager.startDebugging(session.id, 'test.py', [], { stopOnEntry: false });
+        await vi.runAllTimersAsync();
+
+        dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+          if (command === 'continue') onContinue();
+          return {};
+        });
+
+        dependencies.mockProxyManager.simulateStopped(1, 'entry');
+        await vi.runAllTimersAsync();
+        return session.id;
+      }
+
+      it('clears it when the continue resolves after the session is STOPPED', async () => {
+        const id = await autoContinueRacedByTermination(() => {
+          dependencies.mockProxyManager.simulateEvent('terminated');
+        });
+
+        expect(sessionManager.getSession(id)?.state).toBe(SessionState.STOPPED);
+        expect(sessionManager.getSession(id)?.lastStop).toBeUndefined();
+      });
+
+      it('clears it when the continue rejects after the session is STOPPED', async () => {
+        const id = await autoContinueRacedByTermination(() => {
+          dependencies.mockProxyManager.simulateEvent('terminated');
+          throw new Error('Cannot continue: the process has exited');
+        });
+
+        expect(sessionManager.getSession(id)?.state).toBe(SessionState.STOPPED);
+        expect(sessionManager.getSession(id)?.lastStop).toBeUndefined();
+      });
+    });
+
     it('exposes lastStop through getAllSessions', async () => {
       const session = await sessionManager.createSession({
         language: DebugLanguage.MOCK,

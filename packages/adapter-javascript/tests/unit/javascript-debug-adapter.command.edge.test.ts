@@ -37,6 +37,28 @@ describe('JavascriptDebugAdapter.buildAdapterCommand (edge/env stability)', () =
   afterEach(() => {
     vi.restoreAllMocks();
     vi.clearAllMocks();
+    // These tests stub NODE_OPTIONS and the exit-code shim triplet; without
+    // this the stubs outlive the test and steer whatever runs next.
+    vi.unstubAllEnvs();
+  });
+
+  it('does not hand the js-debug adapter process an inherited exit-code shim env (issue #731)', () => {
+    // A nested server inherits the outer session's shim triplet; the adapter
+    // process it spawns must not carry it either, since js-debug builds every
+    // debuggee env on top of its own process env. Scrubbing here is what makes
+    // the debuggee's explicit empty claim merely defensive rather than load-bearing.
+    const adapter = new JavascriptDebugAdapter(deps);
+    vi.stubEnv('NODE_OPTIONS', '--require "/outer/bootloader.js" --require "/prior/exitcode-shim.cjs"');
+    vi.stubEnv('MCP_DEBUGGER_EXITCODE_FILE', '/outer/session/exit.txt');
+    vi.stubEnv('MCP_DEBUGGER_EXITCODE_CLAIMED', '1');
+
+    const cmd = adapter.buildAdapterCommand(baseConfig);
+
+    expect(cmd.env?.NODE_OPTIONS).not.toContain('exitcode-shim');
+    expect(cmd.env?.NODE_OPTIONS).toContain('--require "/outer/bootloader.js"');
+    expect(cmd.env?.NODE_OPTIONS).toContain('--max-old-space-size=4096');
+    expect(cmd.env?.MCP_DEBUGGER_EXITCODE_FILE).toBeUndefined();
+    expect(cmd.env?.MCP_DEBUGGER_EXITCODE_CLAIMED).not.toBe('1');
   });
 
   it('repeated calls are stable when NODE_OPTIONS already includes max-old-space-size (normalize whitespace once, no duplication)', () => {
