@@ -671,6 +671,11 @@ describe('ProxyManager.start', () => {
     }
   });
 
+  // The exit-before-acknowledgement ordering this drives is the unordered one:
+  // the process wrapper (ProxyProcessAdapter) holds a raw exit until the IPC
+  // channel has drained, so a real proxy's `dry_run_complete` always lands
+  // before `exit` (issue #729). What remains here is a proxy that exits
+  // without ever sending the acknowledgement — still a failure (#596).
   it('rejects when a dry-run proxy exits cleanly without reporting completion', async () => {
     fakeProcess.sendCommand.mockImplementation((cmd: any) => {
       if (cmd.cmd === 'init') {

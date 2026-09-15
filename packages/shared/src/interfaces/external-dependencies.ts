@@ -48,6 +48,11 @@ export interface IFileSystem {
 export interface IChildProcess extends EventEmitter {
   pid?: number;
   killed: boolean;
+  /**
+   * Whether the IPC channel is still open (Node's `ChildProcess#connected`).
+   * Optional so fakes without a channel need not model it.
+   */
+  connected?: boolean;
   kill(signal?: string): boolean;
   send(message: unknown): boolean;
   stdin: NodeJS.WritableStream | null;

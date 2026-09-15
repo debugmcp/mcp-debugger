@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 import { ProxyProcessLauncherImpl } from '../../../src/implementations/process-launcher-impl.js';
@@ -10,6 +10,7 @@ class FakeChildProcess extends EventEmitter implements IChildProcess {
   stdin: NodeJS.WritableStream | null = null;
   stdout: NodeJS.ReadableStream | null = null;
   stderr: NodeJS.ReadableStream | null = null;
+  connected?: boolean;
 
   constructor(pid?: number) {
     super();
@@ -243,5 +244,116 @@ describe('ProxyProcessLauncherImpl', () => {
         expect.objectContaining({ windowsHide: true })
       );
     });
+  });
+});
+
+// Node dispatches a child's raw `exit` as soon as the process handle closes;
+// IPC bytes the child wrote just before exiting can still be sitting in the
+// pipe and are delivered as `message` events afterwards, right up to the
+// channel EOF that flips `connected` to false (`disconnect`, or `close` when
+// the channel was the last open handle). Tearing the adapter down on the raw
+// `exit` dropped those late messages — a dry run's `dry_run_complete` among
+// them (issue #729).
+describe('ProxyProcessAdapter exit ordering with an open IPC channel (issue #729)', () => {
+  let processManager: IProcessManager;
+  let child: FakeChildProcess;
+
+  function adapterWithOrder() {
+    const launcher = new ProxyProcessLauncherImpl(processManager);
+    const proxyProcess = launcher.launchProxy('./dist/proxy.js', 'session-729');
+    const order: string[] = [];
+    proxyProcess.on('message', (message: { status?: string }) => order.push(`message:${message.status}`));
+    proxyProcess.on('exit', (code: number | null) => order.push(`exit:${code}`));
+    proxyProcess.on('close', (code: number | null) => order.push(`close:${code}`));
+    return { proxyProcess, order };
+  }
+
+  beforeEach(() => {
+    child = new FakeChildProcess(2222);
+    processManager = {
+      spawn: vi.fn().mockReturnValue(child),
+      exec: vi.fn()
+    } as unknown as IProcessManager;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('holds exit until the channel disconnects so a message queued behind the raw exit is still forwarded', () => {
+    child.connected = true;
+    const { order } = adapterWithOrder();
+
+    child.emit('exit', 0, null);
+    child.emit('message', { type: 'status', status: 'dry_run_complete' });
+    child.connected = false;
+    child.emit('disconnect');
+
+    expect(order).toEqual(['message:dry_run_complete', 'exit:0']);
+  });
+
+  it('delivers the held exit on close when close arrives before disconnect, exactly once', () => {
+    child.connected = true;
+    const { order } = adapterWithOrder();
+
+    child.emit('exit', 0, null);
+    child.emit('message', { type: 'status', status: 'dry_run_complete' });
+    child.emit('close', 0, null);
+    child.connected = false;
+    child.emit('disconnect');
+
+    expect(order.filter(entry => entry.startsWith('exit:'))).toEqual(['exit:0']);
+    expect(order).toContain('message:dry_run_complete');
+    expect(order.indexOf('message:dry_run_complete')).toBeLessThan(order.indexOf('exit:0'));
+  });
+
+  it('resolves a pending initialization when dry_run_complete lands after the raw exit', async () => {
+    child.connected = true;
+    const launcher = new ProxyProcessLauncherImpl(processManager);
+    const proxyProcess = launcher.launchProxy('./dist/proxy.js', 'session-729-init');
+    const pending = proxyProcess.waitForInitialization(1000);
+
+    child.emit('exit', 0, null);
+    child.emit('message', { type: 'status', status: 'dry_run_complete' });
+    child.connected = false;
+    child.emit('disconnect');
+
+    await expect(pending).resolves.toBeUndefined();
+  });
+
+  it('reports the held exit after the drain cap when neither disconnect nor close ever arrives', () => {
+    vi.useFakeTimers();
+    child.connected = true;
+    const { order } = adapterWithOrder();
+
+    child.emit('exit', 0, null);
+    expect(order).toEqual([]);
+
+    vi.advanceTimersByTime(999);
+    expect(order).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(order).toEqual(['exit:0']);
+
+    child.emit('disconnect');
+    expect(order).toEqual(['exit:0']);
+  });
+
+  it('reports exit immediately when the channel already disconnected before the exit', () => {
+    child.connected = true;
+    const { order } = adapterWithOrder();
+
+    child.connected = false;
+    child.emit('disconnect');
+    child.emit('exit', 1, null);
+
+    expect(order).toEqual(['exit:1']);
+  });
+
+  it('reports exit immediately when the child has no IPC channel', () => {
+    const { order } = adapterWithOrder();
+
+    child.emit('exit', 1, null);
+
+    expect(order).toEqual(['exit:1']);
   });
 });
