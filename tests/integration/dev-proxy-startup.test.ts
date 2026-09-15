@@ -60,6 +60,19 @@ describe('dev-proxy initial tool discovery (issue #716)', () => {
     expect((await firstTools).tools.map(tool => tool.name)).toEqual(['fixture_tool', ...devTools]);
   });
 
+  it('answers the first tools/list as soon as an http backend dies at spawn', async () => {
+    // Its own port: the proxy force-kills whichever node process holds the
+    // configured one, and the default 3001 is a live developer backend.
+    const startedAt = Date.now();
+    const { client } = await connect({
+      DEV_PROXY_BACKEND_TRANSPORT: 'http',
+      DEV_PROXY_PORT: '39917',
+      DEV_PROXY_FIXTURE_FAIL: '1',
+    });
+    expect((await client.listTools()).tools.map(tool => tool.name)).toEqual(devTools);
+    expect(Date.now() - startedAt).toBeLessThan(8000);
+  });
+
   it('returns recovery tools after a failed start and refreshes discovery after restarts', async () => {
     const { client, notifications } = await connect({ DEV_PROXY_FIXTURE_FAIL: '1' });
     expect((await client.listTools()).tools.map(tool => tool.name)).toEqual(devTools);

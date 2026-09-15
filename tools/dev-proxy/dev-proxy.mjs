@@ -406,6 +406,8 @@ class BackendManager {
   _onChildExit(exitedChild) {
     // Used for HTTP / SSE modes (manually spawned child)
     if (this.child !== exitedChild) return;
+    // Cleared for every exit, not only a crash while 'running' — _waitForHealth
+    // reads this to notice a child that died before it ever served /health.
     this.child = null;
     if (!this.expectedChildExit && this.state === 'running') {
       this.mcpClient = null;
@@ -421,6 +423,13 @@ class BackendManager {
     const deadline = Date.now() + HEALTH_POLL_TIMEOUT_MS;
 
     while (Date.now() < deadline) {
+      // A backend that dies at spawn refuses connections exactly like one that
+      // has not bound yet, so ECONNREFUSED alone cannot tell them apart. Poll
+      // liveness instead: without this a dead child parked the first tools/list
+      // for the whole 30s timeout.
+      if (!this.child) {
+        throw new Error('Backend exited before becoming healthy');
+      }
       try {
         const resp = await fetch(url);
         if (resp.ok) {
