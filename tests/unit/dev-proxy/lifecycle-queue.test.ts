@@ -1,5 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LifecycleQueue } from '../../../tools/dev-proxy/lifecycle-queue.mjs';
+
+afterEach(() => vi.useRealTimers());
 
 describe('dev-proxy LifecycleQueue', () => {
   it('serializes a restart submitted while initial startup is still running', async () => {
@@ -31,5 +33,72 @@ describe('dev-proxy LifecycleQueue', () => {
 
     await expect(failed).rejects.toThrow('startup failed');
     await expect(recovered).resolves.toBe('restarted');
+  });
+});
+
+describe('dev-proxy LifecycleQueue.idle (issue #716)', () => {
+  it('resolves at once when nothing is queued', async () => {
+    await expect(new LifecycleQueue().idle({ timeoutMs: 30000 })).resolves.toBe(true);
+  });
+
+  it('waits for an in-flight operation and clears its deadline timer', async () => {
+    vi.useFakeTimers();
+    const queue = new LifecycleQueue();
+    let finish!: () => void;
+    const running = queue.run(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const idle = queue.idle({ timeoutMs: 30000 });
+
+    await vi.advanceTimersByTimeAsync(29000);
+    finish();
+
+    await expect(idle).resolves.toBe(true);
+    await running;
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('follows an operation queued while it is already waiting', async () => {
+    const queue = new LifecycleQueue();
+    let finishFirst!: () => void;
+    const first = queue.run(() => new Promise<void>((resolve) => { finishFirst = resolve; }));
+    const idle = queue.idle({ timeoutMs: 30000 });
+    await vi.waitFor(() => expect(finishFirst).toBeTypeOf('function'));
+
+    // Slow enough that an idle() which only awaited the tail it captured would
+    // resolve while this is still running.
+    let secondDone = false;
+    const second = queue.run(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      secondDone = true;
+    });
+    finishFirst();
+
+    await expect(idle).resolves.toBe(true);
+    expect(secondDone).toBe(true);
+    await Promise.all([first, second]);
+  });
+
+  it('gives up at the deadline, leaving no timer behind', async () => {
+    vi.useFakeTimers();
+    const queue = new LifecycleQueue();
+    queue.run(() => new Promise<void>(() => {}));
+    const idle = queue.idle({ timeoutMs: 15000 });
+
+    await vi.advanceTimersByTimeAsync(14999);
+    await vi.advanceTimersByTimeAsync(1);
+
+    await expect(idle).resolves.toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('stops waiting when the caller aborts, and never starts for an aborted signal', async () => {
+    const queue = new LifecycleQueue();
+    queue.run(() => new Promise<void>(() => {}));
+
+    const controller = new AbortController();
+    const idle = queue.idle({ timeoutMs: 30000, signal: controller.signal });
+    controller.abort();
+    await expect(idle).resolves.toBe(false);
+
+    await expect(queue.idle({ timeoutMs: 30000, signal: controller.signal })).resolves.toBe(false);
   });
 });

@@ -87,6 +87,14 @@ Once connected, three additional tools are available:
 
 All regular mcp-debugger tools (create_debug_session, set_breakpoint, etc.) are forwarded transparently to the backend.
 
+Requests wait while the backend is starting or restarting, for up to `DEV_PROXY_DISCOVERY_WAIT_MS`
+(15 seconds by default), so a healthy backend's debugging tools appear in the first inventory and a
+tool call issued during a restart reaches the new backend instead of being refused. If the attempt
+fails or outlasts the wait, discovery returns the three development tools for recovery and calls
+report the backend's state. `dev_server_status` remains available throughout; a restart call is
+accepted immediately but runs after the pending attempt settles. The proxy sends a tool-list change
+notification when startup eventually succeeds and after every restart, successful or not.
+
 ## Configuration
 
 Environment variables (all optional):
@@ -98,6 +106,7 @@ Environment variables (all optional):
 | `DEV_PROXY_ROOT` | Auto-detected | Project root directory |
 | `DEV_PROXY_BACKEND_TRANSPORT` | `http` | Backend transport: `http` (default), `sse` (legacy/deprecated), or `stdio` |
 | `DEV_PROXY_BACKEND_CMD` | Source CLI | Custom backend command, including `docker run ...` commands |
+| `DEV_PROXY_DISCOVERY_WAIT_MS` | `15000` | How long a request waits for a backend start or restart to settle. Keep it below the client's MCP startup timeout (30s in Claude Code); `0` disables the wait |
 | `DEBUG_MCP_NO_REDACT` | unset | Set on the stable proxy process to `1` or `true` to disable status-value redaction |
 
 ### Backend environment overrides
