@@ -7,11 +7,12 @@ FROM node:26-slim@sha256:deae974a69e140f44f434ab29cb519fb5f8fe250fd364b8ca446bd0
 ARG DISABLE_LANGUAGES
 ENV DEBUG_MCP_DISABLE_LANGUAGES=${DISABLE_LANGUAGES}
 
-# Install pnpm via corepack (version 10 to match local development).
+# Install pnpm via corepack (version 12, matching the packageManager pin in
+# package.json).
 # node:26-slim no longer bundles corepack, so install it explicitly (pinned,
 # matching the rest of this Dockerfile's exact-version pins) before enabling;
 # the activated pnpm version is still integrity-checked against the spec.
-RUN npm install -g corepack@0.35.0 && corepack enable && corepack prepare pnpm@10.33.0 --activate
+RUN npm install -g corepack@0.35.0 && corepack enable && corepack prepare pnpm@12.4.1 --activate
 
 # Set application directory
 WORKDIR /app
