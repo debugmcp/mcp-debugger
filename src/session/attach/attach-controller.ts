@@ -402,11 +402,37 @@ export class AttachController {
   }
 
   /**
-   * Detach from the debugged process without terminating it
+   * Detach from the debugged process without terminating it. Claims the
+   * session for the whole call (issue #711): a detach tears the proxy down,
+   * so it must not run while a launch, restart or attach is still being
+   * awaited — a detach during a parked `start_debugging` used to stop the
+   * worker out from under the readiness wait, which then read the worker's
+   * exit as the program running to completion and returned `success: true`
+   * for a process the caller had just detached from. Claimed before the
+   * proxy check and before the first await, so a same-tick call cannot race
+   * it, and a launch arriving mid-detach is refused likewise.
    */
   async detachFromProcess(
     sessionId: string,
     terminateProcess: boolean = false
+  ): Promise<DebugResult> {
+    const session = this.ctx.getSession(sessionId);
+    const refusal = this.inFlight.tryAcquire(sessionId, 'detach', 'detach_from_process');
+    if (refusal) {
+      this.ctx.logger.warn(`[SessionManager] ${refusal}`);
+      return { success: false, state: session.state, error: refusal };
+    }
+    try {
+      return await this.detach(sessionId, terminateProcess);
+    } finally {
+      this.inFlight.release(sessionId);
+    }
+  }
+
+  /** The detach proper; the caller holds the session's in-flight claim. */
+  private async detach(
+    sessionId: string,
+    terminateProcess: boolean
   ): Promise<DebugResult> {
     const session = this.ctx.getSession(sessionId);
     this.ctx.logger.info(
@@ -437,8 +463,21 @@ export class AttachController {
 
         // Stop the proxy manager — it may already be gone if the disconnect
         // request triggered a 'terminated' event that cleared proxyManager.
+        // Listeners come off BEFORE the worker is stopped, the ordering
+        // closeSession uses: otherwise the worker's own exit(0) reaches the
+        // session's handlers, which read it as the debuggee finishing and
+        // report a run to completion for the process just detached from.
         if (session.proxyManager) {
-          await session.proxyManager.stop();
+          const proxyManager = session.proxyManager;
+          try {
+            this.ctx.cleanupProxyEventHandlers(session, proxyManager);
+          } catch (cleanupError) {
+            this.ctx.logger.error(
+              `[SessionManager] Error during listener cleanup for session ${sessionId}:`,
+              cleanupError
+            );
+          }
+          await proxyManager.stop();
         }
 
         this.ctx.updateState(session, SessionState.STOPPED);

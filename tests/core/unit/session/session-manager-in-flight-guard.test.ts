@@ -152,6 +152,48 @@ describe('SessionManager - in-flight launch guard (issue #711)', () => {
     await expect(first).resolves.toMatchObject({ success: true });
   });
 
+  it('refuses detach_from_process while a launch is in flight', async () => {
+    // detach tears the proxy down; doing that under a parked launch made the
+    // readiness wait resolve on the worker's exit and report a clean
+    // run-to-completion for a process the caller had just detached from.
+    const session = await createSession();
+    const park = parkNextProxyStart();
+
+    const first = sessionManager.startDebugging(session.id, 'test.py');
+    const detach = await sessionManager.detachFromProcess(session.id);
+
+    expect(detach.success).toBe(false);
+    expect(detach.error).toMatch(/launch is already in progress/i);
+    expect(detach.error).toContain('detach_from_process');
+    expect(dependencies.mockProxyManager.stopCalls).toBe(0);
+
+    park.release();
+    await expect(first).resolves.toMatchObject({ success: true });
+  });
+
+  it('refuses start_debugging while a detach is in flight', async () => {
+    const session = await createSession();
+    await sessionManager.startDebugging(session.id, 'test.py');
+
+    const gate = deferred();
+    const proxy = dependencies.mockProxyManager;
+    const realSend = proxy.sendDapRequest.bind(proxy);
+    vi.spyOn(proxy, 'sendDapRequest').mockImplementationOnce(async (command, args, options) => {
+      await gate.promise;
+      return realSend(command, args, options);
+    });
+
+    const detach = sessionManager.detachFromProcess(session.id);
+    const start = await sessionManager.startDebugging(session.id, 'test.py');
+
+    expect(start.success).toBe(false);
+    expect(start.error).toMatch(/detach is already in progress/i);
+    expect(start.error).toContain('start_debugging');
+
+    gate.resolve();
+    await expect(detach).resolves.toMatchObject({ success: true });
+  });
+
   it('releases the guard when a launch fails, so the next start is not refused', async () => {
     const session = await createSession();
     dependencies.mockProxyManager.shouldFailStart = true;

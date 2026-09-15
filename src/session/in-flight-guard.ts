@@ -14,11 +14,12 @@
  * The guard is claimed synchronously, before the operation's first await, so
  * a concurrent call dispatched in the same tick is refused rather than raced.
  * It is shared by the launcher and the attach controller: an attach blocks a
- * launch and vice versa.
+ * launch and vice versa, and `detach_from_process` — which tears the proxy
+ * down just as thoroughly — takes the same claim.
  */
 import { ErrorMessages } from '../utils/error-messages.js';
 
-export type InFlightOperation = 'launch' | 'restart' | 'attach';
+export type InFlightOperation = 'launch' | 'restart' | 'attach' | 'detach';
 
 export class InFlightGuard {
   private readonly inFlight = new Map<string, InFlightOperation>();

@@ -40,10 +40,12 @@ describe('InFlightGuard', () => {
     guard.tryAcquire('launch', 'launch', 'start_debugging');
     guard.tryAcquire('restart', 'restart', 'restart_debugging');
     guard.tryAcquire('attach', 'attach', 'attach_to_process');
+    guard.tryAcquire('detach', 'detach', 'detach_from_process');
 
     expect(guard.tryAcquire('launch', 'launch', 'start_debugging')).toMatch(/^A launch is already in progress/);
     expect(guard.tryAcquire('restart', 'launch', 'start_debugging')).toMatch(/^A restart is already in progress/);
     expect(guard.tryAcquire('attach', 'launch', 'start_debugging')).toMatch(/^An attach is already in progress/);
+    expect(guard.tryAcquire('detach', 'launch', 'start_debugging')).toMatch(/^A detach is already in progress/);
   });
 
   it('release is idempotent and safe on an unknown session', () => {

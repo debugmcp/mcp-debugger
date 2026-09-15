@@ -225,11 +225,12 @@ export const ErrorMessages = {
    * A launch-shaped call arrived while another one on the same session had
    * not returned yet (issue #711). `held` is the operation in flight.
    */
-  operationInFlight: (held: 'launch' | 'restart' | 'attach', requestedTool: string) => {
+  operationInFlight: (held: 'launch' | 'restart' | 'attach' | 'detach', requestedTool: string) => {
     const inFlight = {
       launch: 'A launch is already in progress for this session (start_debugging has not returned yet)',
       restart: 'A restart is already in progress for this session (restart_debugging has not returned yet)',
-      attach: 'An attach is already in progress for this session (attach_to_process has not returned yet)'
+      attach: 'An attach is already in progress for this session (attach_to_process has not returned yet)',
+      detach: 'A detach is already in progress for this session (detach_from_process has not returned yet)'
     }[held];
     return `${inFlight}; wait for it to complete before calling ${requestedTool}.`;
   },

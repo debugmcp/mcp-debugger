@@ -140,6 +140,8 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       findFreePort: () => this.findFreePort(),
       setupProxyEventHandlers: (session, proxyManager, effectiveLaunchArgs) =>
         this.setupProxyEventHandlers(session, proxyManager, effectiveLaunchArgs),
+      cleanupProxyEventHandlers: (session, proxyManager) =>
+        this.cleanupProxyEventHandlers(session, proxyManager),
       stopProxyPreservingSession: (session) => this.stopProxyPreservingSession(session),
       closeSession: (sessionId) => this.closeSession(sessionId),
       getStackTrace: (sessionId, threadId, includeInternals) =>
