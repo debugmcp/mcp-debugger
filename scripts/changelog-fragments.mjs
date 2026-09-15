@@ -64,7 +64,7 @@ const USER_VISIBLE_ROOTS = ['src/', 'packages/', 'tools/'];
  * `pnpm-lock.yaml` is deliberately NOT here, and it is not an oversight: every dependency PR
  * touches the lockfile, devDependency-only ones included, so gating on it would undo #629 the
  * day after it landed. It also has no top-level keys to classify. The accepted cost is that a
- * purely transitive change — a `pnpm.overrides` pin — goes ungated.
+ * purely transitive change — an `overrides` pin in `pnpm-workspace.yaml` — goes ungated.
  */
 const USER_VISIBLE_FILES = ['package.json'];
 
