@@ -157,6 +157,24 @@ claude mcp list
 
 **Important**: The `stdio` argument is required to prevent console output from corrupting the JSON-RPC protocol. See [CLAUDE.md](CLAUDE.md) for detailed setup and troubleshooting.
 
+### For the pi coding agent
+
+pi has no built-in MCP support — MCP servers reach it through the community
+[`pi-mcp-adapter`](https://github.com/nicobailon/pi-mcp-adapter) extension. The published
+`@debugmcp/mcp-debugger` package is itself a pi package (from v0.25.0): it ships the
+`mcp-debugger` agent skill and a server entry for the adapter, so one install registers both:
+
+```bash
+pi install npm:pi-mcp-adapter          # prerequisite: the MCP bridge for pi
+pi install npm:@debugmcp/mcp-debugger  # registers the stdio server and the mcp-debugger skill
+pi list                                # shows the package, its skill, and its MCP server
+```
+
+The adapter namespaces contributed servers by package, so the tools appear under
+`debugmcp_mcp-debugger__mcp-debugger`; `mcp({ search: "breakpoint" })` finds them either way.
+The server entry runs the published package via `npx`. To debug a source build instead,
+register the [dev proxy](tools/dev-proxy/README.md) in the adapter's own config.
+
 ### Using Docker
 
 ```bash

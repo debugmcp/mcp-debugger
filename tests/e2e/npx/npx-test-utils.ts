@@ -25,6 +25,8 @@ const PACKAGE_DIR = path.join(ROOT, 'packages', 'mcp-debugger');
 const PACKAGE_DIST_DIR = path.join(PACKAGE_DIR, 'dist');
 const PACK_CACHE_DIR = path.join(PACKAGE_DIR, 'package-cache');
 const PACKAGE_JSON_PATH = path.join(PACKAGE_DIR, 'package.json');
+const PI_MCP_JSON_PATH = path.join(PACKAGE_DIR, 'pi.mcp.json');
+const PACKAGE_SKILLS_DIR = path.join(PACKAGE_DIR, 'skills');
 const PACKAGE_BACKUP_PATH = path.join(PACKAGE_DIR, 'package.json.backup');
 const ROOT_DIST_DIR = path.join(ROOT, 'dist');
 // dist/index.js is what `npm run build` (tsc) emits; dist/bundle.cjs exists
@@ -139,6 +141,11 @@ async function computePackFingerprint(): Promise<string> {
   const hash = createHash('sha256');
   hash.update(await fs.readFile(PACKAGE_JSON_PATH));
   await hashDirectoryContents(PACKAGE_DIST_DIR, hash, PACKAGE_DIR);
+  // The pi package surface (issue #714) ships alongside dist.
+  await hashDirectoryContents(PACKAGE_SKILLS_DIR, hash, PACKAGE_DIR);
+  if (await pathExists(PI_MCP_JSON_PATH)) {
+    hash.update(await fs.readFile(PI_MCP_JSON_PATH));
+  }
   return hash.digest('hex');
 }
 
@@ -428,6 +435,8 @@ export async function verifyPackageContents(tarballPath: string): Promise<{
   hasJavaScript: boolean;
   hasPython: boolean;
   hasMock: boolean;
+  hasSkill: boolean;
+  hasPiManifest: boolean;
   tarballSize: number;
 }> {
   console.log('[NPX Test] Verifying package contents...');
@@ -445,6 +454,9 @@ export async function verifyPackageContents(tarballPath: string): Promise<{
       entries.has('package/dist/vendor/js-debug/vsDebugServer.js');
     const hasPython = contents.includes('python') || contents.includes('debugpy');
     const hasMock = contents.includes('mock');
+    // The pi package surface (issue #714): the shipped skill and the adapter entry.
+    const hasSkill = entries.has('package/skills/debugging/SKILL.md');
+    const hasPiManifest = entries.has('package/pi.mcp.json');
     
     // Get the total tarball size (cli.mjs presence confirms the CLI bundle
     // was included; the size measured is the whole tarball, not cli.mjs)
@@ -459,10 +471,12 @@ export async function verifyPackageContents(tarballPath: string): Promise<{
       hasJavaScript,
       hasPython,
       hasMock,
+      hasSkill,
+      hasPiManifest,
       tarballSize
     });
 
-    return { hasJavaScript, hasPython, hasMock, tarballSize };
+    return { hasJavaScript, hasPython, hasMock, hasSkill, hasPiManifest, tarballSize };
   } catch (error) {
     console.error('[NPX Test] Package verification failed:', error);
     throw error;
