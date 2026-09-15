@@ -18,6 +18,11 @@
  * down just as thoroughly — takes the same claim.
  */
 import { ErrorMessages, type InFlightOperation } from '../utils/error-messages.js';
+import type { DebugResult, DebugResultData } from './session-manager-core.js';
+import type { OperationsContext } from './operations-context.js';
+
+/** The slice of the operations context `run` needs: the session and the log. */
+export type InFlightContext = Pick<OperationsContext, 'getSession' | 'logger'>;
 
 /**
  * Re-exported for the session layer. The union is declared next to the refusal
@@ -52,5 +57,37 @@ export class InFlightGuard {
   /** Release the session; a no-op when nothing is claimed. */
   release(sessionId: string): void {
     this.inFlight.delete(sessionId);
+  }
+
+  /**
+   * Run `body` holding the session's claim: the wrapper every public
+   * launch-shaped method uses (`startDebugging`, `restartDebugging`,
+   * `attachToProcess`, `detachFromProcess`).
+   *
+   * The session is resolved BEFORE the claim, so an unknown id throws
+   * `SessionNotFoundError` without leaving a claim stranded, and so the
+   * refusal envelope can report the session's real state. Nothing here
+   * awaits before `tryAcquire`, and `body()` is invoked synchronously, so a
+   * concurrent call dispatched in the same tick is refused rather than raced.
+   * The claim is released in `finally` — a thrown body releases it too.
+   */
+  async run<TData extends DebugResultData>(
+    sessionId: string,
+    operation: InFlightOperation,
+    requestedTool: string,
+    ctx: InFlightContext,
+    body: () => Promise<DebugResult<TData>>
+  ): Promise<DebugResult<TData>> {
+    const session = ctx.getSession(sessionId);
+    const refusal = this.tryAcquire(sessionId, operation, requestedTool);
+    if (refusal) {
+      ctx.logger.warn(`[SessionManager] ${refusal}`);
+      return { success: false, state: session.state, error: refusal };
+    }
+    try {
+      return await body();
+    } finally {
+      this.release(sessionId);
+    }
   }
 }

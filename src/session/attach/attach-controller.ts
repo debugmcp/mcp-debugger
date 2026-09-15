@@ -61,17 +61,9 @@ export class AttachController {
     sessionId: string,
     attachConfig: AttachRequest
   ): Promise<DebugResult<AttachResultData>> {
-    const session = this.ctx.getSession(sessionId);
-    const refusal = this.inFlight.tryAcquire(sessionId, 'attach', 'attach_to_process');
-    if (refusal) {
-      this.ctx.logger.warn(`[SessionManager] ${refusal}`);
-      return { success: false, state: session.state, error: refusal };
-    }
-    try {
-      return await this.attach(sessionId, attachConfig);
-    } finally {
-      this.inFlight.release(sessionId);
-    }
+    return this.inFlight.run(sessionId, 'attach', 'attach_to_process', this.ctx, () =>
+      this.attach(sessionId, attachConfig)
+    );
   }
 
   /** The attach sequence proper; the caller holds the session's in-flight claim. */
@@ -416,17 +408,9 @@ export class AttachController {
     sessionId: string,
     terminateProcess: boolean = false
   ): Promise<DebugResult> {
-    const session = this.ctx.getSession(sessionId);
-    const refusal = this.inFlight.tryAcquire(sessionId, 'detach', 'detach_from_process');
-    if (refusal) {
-      this.ctx.logger.warn(`[SessionManager] ${refusal}`);
-      return { success: false, state: session.state, error: refusal };
-    }
-    try {
-      return await this.detach(sessionId, terminateProcess);
-    } finally {
-      this.inFlight.release(sessionId);
-    }
+    return this.inFlight.run(sessionId, 'detach', 'detach_from_process', this.ctx, () =>
+      this.detach(sessionId, terminateProcess)
+    );
   }
 
   /** The detach proper; the caller holds the session's in-flight claim. */

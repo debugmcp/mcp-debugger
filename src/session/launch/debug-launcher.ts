@@ -124,14 +124,8 @@ export class DebugLauncher {
     adapterLaunchConfig?: Record<string, unknown>,
     breakOnExceptions?: ExceptionBreakMode
   ): Promise<DebugResult> {
-    const session = this.ctx.getSession(sessionId);
-    const refusal = this.inFlight.tryAcquire(sessionId, 'launch', 'start_debugging');
-    if (refusal) {
-      this.ctx.logger.warn(`[SessionManager] ${refusal}`);
-      return { success: false, state: session.state, error: refusal };
-    }
-    try {
-      return await this.launch(
+    return this.inFlight.run(sessionId, 'launch', 'start_debugging', this.ctx, () =>
+      this.launch(
         sessionId,
         scriptPath,
         scriptArgs,
@@ -139,10 +133,8 @@ export class DebugLauncher {
         dryRunSpawn,
         adapterLaunchConfig,
         breakOnExceptions
-      );
-    } finally {
-      this.inFlight.release(sessionId);
-    }
+      )
+    );
   }
 
   /** The launch sequence proper; the caller holds the session's in-flight claim. */
@@ -604,8 +596,6 @@ export class DebugLauncher {
    * wiring (issue #238).
    */
   async restartDebugging(sessionId: string): Promise<DebugResult> {
-    const session = this.ctx.getSession(sessionId);
-
     // Claimed first (issue #711): a launch or attach still being awaited, or
     // a restart already replaying, is the most relevant fact about the
     // session. Held for the whole restart, so the replayed launch runs under
@@ -614,16 +604,9 @@ export class DebugLauncher {
     // whose session will never accept a restart (the `session.attachMode`
     // check below, answered up front because attachMode is only written
     // after the attach's first awaits).
-    const refusal = this.inFlight.tryAcquire(sessionId, 'restart', 'restart_debugging');
-    if (refusal) {
-      this.ctx.logger.warn(`[SessionManager] ${refusal}`);
-      return { success: false, state: session.state, error: refusal };
-    }
-    try {
-      return await this.restart(session);
-    } finally {
-      this.inFlight.release(sessionId);
-    }
+    return this.inFlight.run(sessionId, 'restart', 'restart_debugging', this.ctx, () =>
+      this.restart(this.ctx.getSession(sessionId))
+    );
   }
 
   /** The restart proper; the caller holds the session's in-flight claim. */
