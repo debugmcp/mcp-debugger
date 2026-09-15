@@ -18,7 +18,9 @@ import { OWNER_PID_ARG_PREFIX, SESSION_ID_ARG_PREFIX } from '../utils/proxy-orph
  * Upper bound on how long a raw child `exit` is held back while its IPC
  * channel is still open (issue #729). Channel EOF normally follows the exit
  * within the same poll; the cap only guards against a channel that never
- * reports EOF.
+ * reports EOF. Kept as a safety net, not a tuning knob: it has never been
+ * observed to fire — on both platforms disconnect (or close) follows the raw
+ * exit within the same poll.
  */
 export const IPC_DRAIN_CAP_MS = 1000;
 
@@ -328,8 +330,23 @@ class ProxyProcessAdapter extends EventEmitter implements IProxyProcess {
     return this._signalCode;
   }
   
+  /**
+   * Whether the child has exited. Same test `kill()` uses — deliberately not
+   * `connected`: while a raw exit is held back for the channel to drain
+   * (issue #729) the child is dead but still connected, so `child.send()`
+   * accepts the write and Node raises EPIPE on the next tick as an 'error',
+   * ending the session in ERROR with the IPC fault as its stated cause
+   * instead of the exit that actually happened.
+   */
+  private get hasExited(): boolean {
+    return this._exitCode !== null || this._signalCode !== null;
+  }
+
   send(message: unknown): boolean {
     // The IChildProcess interface only has send(message) - one parameter
+    if (this.hasExited) {
+      return false;
+    }
     if (typeof this.childProcess.send === 'function') {
       const result = this.childProcess.send(message);
       return result;
@@ -337,8 +354,15 @@ class ProxyProcessAdapter extends EventEmitter implements IProxyProcess {
       return false;
     }
   }
-  
+
   sendCommand(command: object): void {
+    // Raised before the try below so the outer catch cannot rewrap it as an
+    // "IPC send threw error" — the point is to name the exit, not an IPC fault.
+    if (this.hasExited) {
+      throw new Error(
+        `Proxy process has already exited (code ${this._exitCode}, signal ${this._signalCode})`
+      );
+    }
     // Send object directly - Node.js IPC will handle serialization
     try {
       const summary = JSON.stringify({
@@ -346,10 +370,7 @@ class ProxyProcessAdapter extends EventEmitter implements IProxyProcess {
         requestId: (command as { requestId?: string }).requestId,
         sessionId: (command as { sessionId?: string }).sessionId
       });
-      const connectedBefore =
-        'connected' in this.childProcess
-          ? (this.childProcess as { connected?: boolean }).connected
-          : undefined;
+      const connectedBefore = this.childProcess.connected;
       const pid = this.childProcess.pid;
       this.emit('ipc-send-start', {
         pid,
@@ -379,10 +400,7 @@ class ProxyProcessAdapter extends EventEmitter implements IProxyProcess {
           });
           throw new Error(`Failed to send command via IPC. Send returned false. Adapter killed: ${killed}, Has childProcess: ${hasChildProcess}, Child killed: ${childProcessKilled}`);
         }
-        const connectedAfter =
-          'connected' in this.childProcess
-            ? (this.childProcess as { connected?: boolean }).connected
-            : undefined;
+        const connectedAfter = this.childProcess.connected;
         this.emit('ipc-send-complete', {
           pid,
           connectedAfter,
@@ -437,7 +455,7 @@ class ProxyProcessAdapter extends EventEmitter implements IProxyProcess {
     // blocked escalation: a delivered signal latches .killed while the
     // process may still be alive, so a follow-up SIGKILL was silently
     // swallowed (issue #502).
-    if (this.disposed || this._exitCode !== null || this._signalCode !== null) {
+    if (this.disposed || this.hasExited) {
       return false; // Already exited or disposed
     }
 

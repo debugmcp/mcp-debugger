@@ -52,10 +52,9 @@ export interface IProxyProcessLauncher {
  * Represents a launched proxy process
  * Extends IProcess with proxy-specific functionality
  *
- * Ordering contract: `exit` is emitted only after every `message` the child
- * sent has been forwarded (issue #729). A consumer may therefore treat an
- * `exit` that arrives before an expected status message as that message never
- * having been sent.
+ * Duplicate of the `@debugmcp/shared` copy (issue #692); the implementation
+ * and ProxyManager consume that one, and it carries the `exit`-after-`message`
+ * ordering contract (issue #729).
  */
 export interface IProxyProcess extends IProcess {
   sessionId: string;
