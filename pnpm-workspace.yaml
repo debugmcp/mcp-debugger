@@ -1,2 +1,20 @@
 packages:
   - 'packages/*'
+
+# Dependencies whose install/postinstall scripts may run. Everything else with a
+# build script is skipped (pnpm's default since v10; pnpm 11 removed the older
+# onlyBuiltDependencies spelling).
+allowBuilds:
+  esbuild: true
+
+# Security overrides — mirrored into pnpm-lock.yaml's `overrides` block. Keep the
+# two in sync: a frozen install fails on any mismatch.
+overrides:
+  vite: 7.3.6
+  path-to-regexp: '>=8.4.0'
+  brace-expansion: '>=5.0.6'
+  hono: ^4.12.25
+  fast-uri: ^3.1.6
+  qs: ^6.15.2
+  ip-address: ^10.1.1
+  esbuild: ^0.28.2

@@ -143,7 +143,7 @@
   "engines": {
     "node": ">=22.0.0"
   },
-  "packageManager": "pnpm@10.33.0",
+  "packageManager": "pnpm@12.4.1",
   "main": "dist/index.js",
   "type": "module",
   "bin": {
@@ -196,20 +196,5 @@
     "typescript": "^6.0.2",
     "typescript-eslint": "^8.70.0",
     "vitest": "^4.1.11"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ],
-    "overrides": {
-      "vite": "7.3.6",
-      "path-to-regexp": ">=8.4.0",
-      "brace-expansion": ">=5.0.6",
-      "hono": "^4.12.25",
-      "fast-uri": "^3.1.6",
-      "qs": "^6.15.2",
-      "ip-address": "^10.1.1",
-      "esbuild": "^0.28.2"
-    }
   }
 }

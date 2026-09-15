@@ -37,7 +37,7 @@ function run(cmd, args, opts = {}) {
 
 fs.mkdirSync(TARBALL_DIR, { recursive: true });
 
-run('pnpm', ['install', '--frozen-lockfile=false']);
+run('pnpm', ['install', '--no-frozen-lockfile']);
 run('npm', ['run', 'build']);
 run('npm', ['run', 'build:packages']);
 // Rewrite workspace:* specifiers to real versions before packing (issue #463)
