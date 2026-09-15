@@ -1012,7 +1012,11 @@ async function main() {
 
   if (await initialStart) {
     // Refresh clients whose discovery gave up before the backend was ready.
-    await server.sendToolListChanged();
+    // Swallowing: a client that died during a slow start leaves the transport
+    // closed, and `notification()` throws 'Not connected'. Letting that escape
+    // would reject main() and hard-exit before the shutdown handler's queued
+    // backend.stop() ran, orphaning the child (issue #122).
+    await notifyToolListChanged(server);
   }
 }
 
