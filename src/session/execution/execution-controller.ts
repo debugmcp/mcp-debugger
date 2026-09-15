@@ -34,6 +34,7 @@
  */
 import { getErrorMessage } from '../../errors/debug-errors.js';
 import {
+  isTerminalSessionState,
   NO_DEBUG_TARGET_MARKER,
   SessionLifecycleState,
   SessionState,
@@ -459,7 +460,13 @@ export class ExecutionController {
       // leaves the session STOPPED/ERROR. A terminal state is not something a
       // failed resume can undo, and reverting it resurrected finished
       // sessions as paused (issue #720).
-      if (session.state === SessionState.RUNNING) {
+      //
+      // Phrased as "unless terminal" rather than "only from RUNNING" because
+      // the guard above narrowed session.state to PAUSED for the compiler and
+      // the await is precisely where that narrowing stops holding. The only
+      // other state reachable here is PAUSED itself — a breakpoint that fired
+      // during the await — where the revert is a no-op.
+      if (!isTerminalSessionState(session.state)) {
         this.ctx.updateState(session, SessionState.PAUSED);
       }
       const errorMessage = getErrorMessage(error);
