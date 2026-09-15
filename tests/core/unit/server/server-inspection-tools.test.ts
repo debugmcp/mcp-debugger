@@ -198,8 +198,34 @@ describe('Server Inspection Tools Tests', () => {
       expect(content.note).toBeUndefined();
     });
 
+    it('omits stopReason and lastStop for a session that is no longer paused (issue #720)', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        state: 'running',
+        lastStop: { reason: 'step', threadId: 0, description: 'Paused' },
+        proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(0), setCurrentThreadId: vi.fn() }
+      });
+      mockSessionManager.getStackTraceDetailed.mockResolvedValue({
+        frames: [],
+        totalFrameCount: 0,
+        hiddenFrameCount: 0,
+        allFramesInternal: false,
+        note: 'Session is not paused'
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'get_stack_trace', arguments: { sessionId: 'test-session' } }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      expect(content).not.toHaveProperty('lastStop');
+      expect(content).not.toHaveProperty('stopReason');
+    });
+
     it('echoes the inspected thread and frameless-thread note (issue #553)', async () => {
       const mockSession = {
+        state: 'paused',
         lastStop: { reason: 'pause', threadId: 1 },
         failureDiagnostics: { proxyLogPath: '/logs/proxy-test-session.log' },
         proxyManager: {

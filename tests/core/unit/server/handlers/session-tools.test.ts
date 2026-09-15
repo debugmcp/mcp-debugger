@@ -50,5 +50,31 @@ describe('session tool handlers', () => {
         proxyLogPath: '/logs/proxy-session-1.log'
       });
     });
+
+    // lastStop is the record of the stop the session is at (paused) or the last
+    // one before it ended (stopped/error). The session model keeps the record
+    // across continue/step, so the listing must not show a running session the
+    // stop it already left as if it were still "Paused" (issue #720).
+    it('reports lastStop only for paused and terminal sessions', async () => {
+      const now = new Date();
+      const stop = (reason: string) => ({ reason, threadId: 0, timestamp: 1, description: 'Paused' });
+      ctx.sessionManager.getAllSessions.mockReturnValue([
+        { id: 'running', name: 'r', language: 'javascript', state: 'running', createdAt: now, lastStop: stop('step') },
+        { id: 'paused', name: 'p', language: 'javascript', state: 'paused', createdAt: now, lastStop: stop('breakpoint') },
+        { id: 'stopped', name: 's', language: 'javascript', state: 'stopped', createdAt: now, lastStop: stop('breakpoint') },
+        { id: 'errored', name: 'e', language: 'javascript', state: 'error', createdAt: now, lastStop: stop('exception') },
+        { id: 'initializing', name: 'i', language: 'javascript', state: 'initializing', createdAt: now, lastStop: stop('entry') }
+      ]);
+
+      const result = await handleListDebugSessions(ctx);
+      const payload = JSON.parse(result.content[0].text);
+      const byId = Object.fromEntries(payload.sessions.map((s: { id: string }) => [s.id, s]));
+
+      expect(byId.running).not.toHaveProperty('lastStop');
+      expect(byId.initializing).not.toHaveProperty('lastStop');
+      expect(byId.paused.lastStop).toMatchObject({ reason: 'breakpoint' });
+      expect(byId.stopped.lastStop).toMatchObject({ reason: 'breakpoint' });
+      expect(byId.errored.lastStop).toMatchObject({ reason: 'exception' });
+    });
   });
 });

@@ -7,7 +7,7 @@ import { SessionState } from '@debugmcp/shared';
 import { SessionTerminatedError } from '../../errors/debug-errors.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { enforceExplicitNames, requireSessionId } from '../tool-validation.js';
-import { variablePayloadExtras } from './shared.js';
+import { carriesLastStop, variablePayloadExtras } from './shared.js';
 import {
   failureResult,
   jsonResult,
@@ -58,7 +58,8 @@ export const getStackTraceTool: ToolHandler = async (ctx, args) => {
     // Default to false for cleaner output
     const includeInternals = args.includeInternals ?? false;
     const stackTrace = await ctx.getStackTrace(args.sessionId, includeInternals, args.threadId);
-    const lastStop = ctx.sessionManager.getSession(args.sessionId)?.lastStop;
+    const session = ctx.sessionManager.getSession(args.sessionId);
+    const lastStop = carriesLastStop(session?.state) ? session?.lastStop : undefined;
     const payload: Record<string, unknown> = {
       success: true,
       stackFrames: stackTrace.frames,

@@ -118,6 +118,8 @@ Lists all active debugging sessions.
 - `"stopped"`: Session stopped (program terminated)
 - `"error"`: Session encountered an error
 
+**`lastStop`:** present while the session is `paused` (the stop it is at: `reason`, `threadId`, `timestamp`, the adapter's `description`/`text`, and `exceptionInfo` for exception stops) and after it reaches `stopped`/`error` (the last stop before it ended). A `running` session never carries one, so a poller that calls this after `continue_execution` or a step sees `state: "running"` with no stop record until the next stop lands — the record of the stop it just left is not repeated as if the program were still paused.
+
 Errored sessions include optional `diagnostics` with the current launch attempt's server-host `proxyLogPath` and remote-safe `proxyLogResource`. The record is retained for proxy initialization failures and for proxy/adapter deaths after initialization, and is cleared when a new launch or attach attempt begins.
 
 ---

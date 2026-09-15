@@ -3,11 +3,22 @@
  * read, the redaction notice, the get_variables / get_local_variables payload
  * extras, and the attach warning both attach paths surface.
  */
-import { REDACTION_NOTICE, Variable } from '@debugmcp/shared';
+import { REDACTION_NOTICE, SessionState, Variable } from '@debugmcp/shared';
 import type { LineContext } from '../../utils/line-reader.js';
 import { buildTruncationNotice, VariableTruncationSummary } from '../../session/variable-caps.js';
 import type { ToolContext } from '../tool-context.js';
 import type { DebugResult } from '../../session/session-manager-core.js';
+
+/**
+ * Whether a session's recorded `lastStop` describes where it is now. The
+ * model keeps the record across continue/step (the run-to-completion summary
+ * and the PAUSED invariant depend on it), so a running session still holds
+ * the stop it already left; only a paused session (the stop it is at) or a
+ * terminal one (the last stop before it ended) should surface it (issue #720).
+ */
+export function carriesLastStop(state: SessionState | undefined): boolean {
+  return state === SessionState.PAUSED || state === SessionState.STOPPED || state === SessionState.ERROR;
+}
 
 /** The line-context slice the breakpoint and step payloads embed. */
 export type EmbeddedLineContext = Pick<LineContext, 'lineContent' | 'surrounding'>;

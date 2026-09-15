@@ -9,7 +9,7 @@ import { checkLaunchToolchain } from '../../utils/language-availability.js';
 import { isContainerRuntime } from '../../utils/container-path-utils.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { assertPlainObjectArg, requireSessionId } from '../tool-validation.js';
-import { successWarning } from './shared.js';
+import { carriesLastStop, successWarning } from './shared.js';
 import { failureResult, jsonResult, rethrowAsMcpError, type ToolResult } from '../tool-result.js';
 
 export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
@@ -166,7 +166,7 @@ export async function handleListDebugSessions(ctx: ToolContext): Promise<ToolRes
       if (session.updatedAt) {
           mappedSession.updatedAt = session.updatedAt.toISOString();
       }
-      if (session.lastStop) {
+      if (session.lastStop && carriesLastStop(session.state)) {
           mappedSession.lastStop = session.lastStop;
       }
       if (session.exitCode !== undefined) {
