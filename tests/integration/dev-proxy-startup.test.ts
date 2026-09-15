@@ -98,6 +98,30 @@ describe('dev-proxy initial tool discovery (issue #716)', () => {
     expect(notifications).toHaveLength(2);
   });
 
+  it('announces the shrunken inventory when a restart fails', async () => {
+    // Start from a failed start, so the only notifications are the restarts' own.
+    const { client, notifications } = await connect({ DEV_PROXY_FIXTURE_FAIL: '1' });
+    expect((await client.listTools()).tools.map(tool => tool.name)).toEqual(devTools);
+
+    const recovered = await client.callTool({
+      name: 'dev_restart_debugger',
+      arguments: { env: { DEV_PROXY_FIXTURE_FAIL: '0', DEV_PROXY_FIXTURE_TOOL: 'recovered_tool' } },
+    });
+    expect(recovered.isError).not.toBe(true);
+    expect((await client.listTools()).tools.map(tool => tool.name)).toEqual(['recovered_tool', ...devTools]);
+
+    const failed = await client.callTool({
+      name: 'dev_restart_debugger',
+      arguments: { env: { DEV_PROXY_FIXTURE_FAIL: '1' } },
+    });
+    expect(failed.isError).toBe(true);
+
+    // A rebuild whose new dist throws at startup changes the inventory too; without
+    // the notification the client keeps offering a backend tool that is now gone.
+    await expect.poll(() => notifications).toHaveLength(2);
+    expect((await client.listTools()).tools.map(tool => tool.name)).toEqual(devTools);
+  });
+
   it('holds a tool call for an in-flight restart instead of refusing it', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'mcp-proxy-restart-'));
     directories.push(dir);

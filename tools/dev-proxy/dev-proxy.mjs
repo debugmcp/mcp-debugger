@@ -774,6 +774,19 @@ const DEV_TOOLS = [
   },
 ];
 
+/**
+ * Announce the inventory change a restart caused, successful or not: a rebuild
+ * whose new dist throws at startup leaves the client holding the pre-restart
+ * tool list, which no longer exists.
+ */
+async function notifyToolListChanged(server) {
+  try {
+    await server.sendToolListChanged();
+  } catch (err) {
+    log(`Failed to send tools/list_changed: ${err.message}`);
+  }
+}
+
 async function handleDevTool(backend, server, name, args) {
   switch (name) {
     case 'dev_restart_debugger': {
@@ -811,6 +824,7 @@ async function handleDevTool(backend, server, name, args) {
           ],
         };
       } catch (err) {
+        await notifyToolListChanged(server);
         return {
           content: [{ type: 'text', text: JSON.stringify({ success: false, error: err.message }, null, 2) }],
           isError: true,
@@ -841,6 +855,7 @@ async function handleDevTool(backend, server, name, args) {
           ],
         };
       } catch (err) {
+        await notifyToolListChanged(server);
         return {
           content: [{ type: 'text', text: JSON.stringify({ success: false, error: err.message }, null, 2) }],
           isError: true,
