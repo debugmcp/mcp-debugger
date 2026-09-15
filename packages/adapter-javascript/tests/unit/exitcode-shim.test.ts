@@ -91,6 +91,26 @@ describe('exitcode-shim.cjs', () => {
     expect(fs.readFileSync(exitFile, 'utf8').trim()).toBe('5');
   });
 
+  it('an explicit empty claim re-arms the shim for a process whose parent had claimed it (issue #731)', () => {
+    // A nested mcp-debugger inherits MCP_DEBUGGER_EXITCODE_CLAIMED=1 from the
+    // outer session; its adapter hands the inner debuggee '' (not a deletion,
+    // which js-debug's env overlay would not propagate) plus a fresh file.
+    const exitFile = nextExitFile();
+    const script = [
+      "const { spawnSync } = require('child_process');",
+      "spawnSync(process.execPath, ['-e', 'process.exit(4)'], {",
+      "  env: { ...process.env, MCP_DEBUGGER_EXITCODE_CLAIMED: '', MCP_DEBUGGER_EXITCODE_FILE: process.env.INNER_EXIT_FILE },",
+      "  stdio: 'ignore'",
+      '});',
+      'process.exit(0);'
+    ].join('\n');
+    const innerExitFile = nextExitFile();
+    const status = runNode(script, exitFile, { INNER_EXIT_FILE: innerExitFile });
+    expect(status).toBe(0);
+    expect(fs.readFileSync(exitFile, 'utf8').trim()).toBe('0');
+    expect(fs.readFileSync(innerExitFile, 'utf8').trim()).toBe('4');
+  });
+
   it('does nothing when MCP_DEBUGGER_EXITCODE_FILE is unset', () => {
     const exitFile = nextExitFile();
     execFileSync(process.execPath, ['-e', 'process.exit(0)'], {

@@ -94,6 +94,59 @@ const UNSAFE_OBJECT_KEYS: ReadonlySet<string> = new Set(['__proto__', 'construct
 
 const DEFAULT_RESOLVE_SOURCE_MAP_LOCATIONS = ['**', '!**/node_modules/**'];
 
+/**
+ * Strip an inherited exit-code shim environment from `env` in place
+ * (issue #731).
+ *
+ * A server that is itself a js-debug debuggee inherits the outer session's
+ * `NODE_OPTIONS --require .../exitcode-shim.cjs`, the outer session's
+ * `MCP_DEBUGGER_EXITCODE_FILE`, and the `MCP_DEBUGGER_EXITCODE_CLAIMED=1` the
+ * shim stamped on the server itself. Left in place, an inner launch would skip
+ * its own preload, its debuggee would inherit the claim and register no exit
+ * handler, and the inner proxy worker would read (and delete) the OUTER
+ * session's exit-code file. Keys are matched by upper-cased name because
+ * `process.env` is case-insensitive on Windows while a `{ ...process.env }`
+ * copy is not. Only our own `--require` token is removed from `NODE_OPTIONS`;
+ * everything else in it (js-debug's bootloader, user flags) survives.
+ *
+ * An inherited claim is replaced by an explicit empty value rather than
+ * deleted: js-debug overlays the launch env on its own process env, so a
+ * deleted key would resurface as `1` from the adapter process, while `''`
+ * reaches the debuggee and re-arms the shim (it tests `=== '1'`).
+ */
+export function scrubInheritedExitCodeShim(env: Record<string, string>): void {
+  let claimInherited = false;
+  for (const key of Object.keys(env)) {
+    switch (key.toUpperCase()) {
+      case 'NODE_OPTIONS': {
+        const stripped = env[key]
+          .replace(/--require\s+"[^"]*exitcode-shim\.cjs"/g, '')
+          .replace(/--require\s+\S*exitcode-shim\.cjs/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (stripped) {
+          env[key] = stripped;
+        } else {
+          delete env[key];
+        }
+        break;
+      }
+      case 'MCP_DEBUGGER_EXITCODE_FILE':
+        delete env[key];
+        break;
+      case 'MCP_DEBUGGER_EXITCODE_CLAIMED':
+        delete env[key];
+        claimInherited = true;
+        break;
+      default:
+        break;
+    }
+  }
+  if (claimInherited) {
+    env.MCP_DEBUGGER_EXITCODE_CLAIMED = '';
+  }
+}
+
 export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapter {
   readonly language = 'javascript' as unknown as DebugLanguage;
   readonly name = 'JavaScript/TypeScript Debug Adapter';
@@ -394,6 +447,10 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
         env[k] = v;
       }
     }
+    // A nested server's adapter process must not carry the outer session's
+    // exit-code shim either: js-debug builds every debuggee env on top of its
+    // own process env (issue #731)
+    scrubInheritedExitCodeShim(env);
 
     const existing = env.NODE_OPTIONS;
     const hasMaxOldSpace =
@@ -788,11 +845,12 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
    * gracefully to today's behavior (no exitCode), never a failed launch.
    */
   private injectExitCodeShim(env: Record<string, string>): void {
-    // Idempotency: the merged env starts from process.env, so a server
-    // itself launched with the shim must not append a second preload
-    if (/exitcode-shim\.cjs/.test(env.NODE_OPTIONS ?? '')) {
-      return;
-    }
+    // The merged env starts from process.env, so a server that is itself a
+    // js-debug debuggee carries the outer session's shim env. Replace it with
+    // our own rather than skipping the preload (issue #731) - and do so before
+    // the asset lookup below, so a missing asset never leaves the outer
+    // session's exit-code file in the inner launch config.
+    scrubInheritedExitCodeShim(env);
 
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);

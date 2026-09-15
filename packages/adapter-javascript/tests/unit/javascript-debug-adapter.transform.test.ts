@@ -342,16 +342,76 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
       expect(env.NODE_OPTIONS).toMatch(/--require "[^"]*exitcode-shim\.cjs"/);
     });
 
-    it('does not double-append when NODE_OPTIONS already carries the shim', async () => {
+    // A server that is itself a js-debug debuggee inherits the outer session's
+    // shim env (issue #731): the outer --require token, the outer session's
+    // exit-code file, and the claim the shim stamped on the server. Each inner
+    // launch must scrub all three and stamp its own, or the inner debuggee
+    // inherits the claim, registers no exit handler, and reports no exitCode.
+    const OUTER_BOOTLOADER = '--require "/outer/js-debug/bootloader.js"';
+    const OUTER_SHIM = '--require "/prior/exitcode-shim.cjs"';
+
+    it('replaces an inherited exit-code shim env with its own for the inner debuggee (issue #731)', async () => {
+      process.env.NODE_OPTIONS = `${OUTER_BOOTLOADER} ${OUTER_SHIM}`;
+      process.env.MCP_DEBUGGER_EXITCODE_FILE = '/outer/session/exit.txt';
+      process.env.MCP_DEBUGGER_EXITCODE_CLAIMED = '1';
       const withFs = new JavascriptDebugAdapter(depsWithFs);
       const cfg = await withFs.transformLaunchConfig({
-        program: path.resolve('/proj/app.js'),
-        env: { NODE_OPTIONS: '--require "/prior/exitcode-shim.cjs"' }
+        program: path.resolve('/proj/app.js')
       } as any);
 
       const env = cfg.env as Record<string, string>;
-      const occurrences = env.NODE_OPTIONS.match(/exitcode-shim\.cjs/g) ?? [];
-      expect(occurrences.length).toBe(1);
+      const shims = env.NODE_OPTIONS.match(/--require "[^"]*exitcode-shim\.cjs"/g) ?? [];
+      expect(shims).toHaveLength(1);
+      expect(shims[0]).not.toContain('/prior/');
+      expect(env.NODE_OPTIONS).toContain(OUTER_BOOTLOADER);
+      expect(env.MCP_DEBUGGER_EXITCODE_FILE).toMatch(/mcp-exitcode-[0-9a-f-]+\.txt$/);
+      expect(env.MCP_DEBUGGER_EXITCODE_FILE).not.toBe('/outer/session/exit.txt');
+      // '' not deleted: the js-debug adapter process inherits the claim too and
+      // js-debug overlays the launch env on its own, so only an explicit empty
+      // value reaches the debuggee and re-arms the shim (it tests === '1')
+      expect(env.MCP_DEBUGGER_EXITCODE_CLAIMED).toBe('');
+    });
+
+    it('scrubs the inherited shim keys whatever their case (process.env is case-insensitive on Windows)', async () => {
+      process.env.Node_Options = OUTER_SHIM;
+      process.env.Mcp_Debugger_Exitcode_File = '/outer/session/exit.txt';
+      process.env.Mcp_Debugger_Exitcode_Claimed = '1';
+      const withFs = new JavascriptDebugAdapter(depsWithFs);
+      const cfg = await withFs.transformLaunchConfig({
+        program: path.resolve('/proj/app.js')
+      } as any);
+
+      const env = cfg.env as Record<string, string>;
+      const byName = (name: string) => Object.entries(env).filter(([k]) => k.toUpperCase() === name);
+      expect(byName('MCP_DEBUGGER_EXITCODE_FILE').map(([, v]) => v)).toEqual([
+        expect.stringMatching(/mcp-exitcode-[0-9a-f-]+\.txt$/)
+      ]);
+      expect(byName('MCP_DEBUGGER_EXITCODE_CLAIMED').map(([, v]) => v)).toEqual(['']);
+      const optionValues = byName('NODE_OPTIONS').map(([, v]) => v).join(' ');
+      expect(optionValues).not.toContain('/prior/');
+      expect(optionValues.match(/exitcode-shim\.cjs/g) ?? []).toHaveLength(1);
+    });
+
+    it('still drops the inherited exit-code file when its own shim asset cannot be resolved', async () => {
+      process.env.NODE_OPTIONS = OUTER_SHIM;
+      process.env.MCP_DEBUGGER_EXITCODE_FILE = '/outer/session/exit.txt';
+      process.env.MCP_DEBUGGER_EXITCODE_CLAIMED = '1';
+      const depsNoShim = {
+        ...deps,
+        fileSystem: { existsSync: () => false }
+      } as unknown as import('@debugmcp/shared').AdapterDependencies;
+      const withoutShim = new JavascriptDebugAdapter(depsNoShim);
+
+      const cfg = await withoutShim.transformLaunchConfig({
+        program: path.resolve('/proj/app.js')
+      } as any);
+
+      // Otherwise the inner proxy worker would read — and delete — the OUTER
+      // session's exit-code file on the inner debuggee's termination
+      const env = cfg.env as Record<string, string>;
+      expect(env.MCP_DEBUGGER_EXITCODE_FILE).toBeUndefined();
+      expect(env.NODE_OPTIONS ?? '').not.toContain('exitcode-shim');
+      expect(env.MCP_DEBUGGER_EXITCODE_CLAIMED).toBe('');
     });
 
     it('skips injection cleanly when the shim asset cannot be resolved', async () => {

@@ -84,12 +84,11 @@ The bundled CLI restores its internal `DEBUG_MCP_SKIP_AUTO_START` override befor
 server, so it can debug the checkout's entrypoint without suppressing the target's startup. Any
 value explicitly inherited from the caller is preserved.
 
-The nested server does inherit the outer JavaScript session's exit-code shim environment:
-`NODE_OPTIONS` carries the adapter's `--require .../exitcode-shim.cjs`, and the shim marks itself
-claimed with `MCP_DEBUGGER_EXITCODE_CLAIMED=1`. A JavaScript debuggee launched by the *nested*
-server therefore reports no `exitCode` — the adapter sees a preload already present and skips
-injecting a fresh one. Clear both on the inner launch to get exit codes back:
-`dapLaunchArgs.env: { "NODE_OPTIONS": "", "MCP_DEBUGGER_EXITCODE_CLAIMED": "" }` (issue #731).
+The nested server inherits the outer JavaScript session's exit-code shim environment
+(`NODE_OPTIONS --require .../exitcode-shim.cjs`, `MCP_DEBUGGER_EXITCODE_FILE`, and the
+`MCP_DEBUGGER_EXITCODE_CLAIMED=1` the shim stamped on the server). Its JavaScript adapter scrubs
+that inherited triplet from every inner launch and stamps its own, so JavaScript sessions on the
+nested server report `exitCode` with no extra env (issue #731).
 
 Set a breakpoint in `src/cli/http-command.ts` at
 `const sessionIdHeader = req.headers['mcp-session-id'];`, with the condition
