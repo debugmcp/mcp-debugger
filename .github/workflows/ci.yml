@@ -31,7 +31,7 @@ jobs:
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
     
     - name: Setup pnpm
-      uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
+      uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413  # v6.1.0
       # version comes from package.json "packageManager" (issue #478)
     
     - name: Setup Node.js ${{ matrix.node-version }}
@@ -59,7 +59,7 @@ jobs:
       run: go install github.com/go-delve/delve/cmd/dlv@v1.24.2
 
     - name: Setup Java 21
-      uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c  # v6.0.0
+      uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6  # v6.0.1
       with:
         distribution: 'temurin'
         java-version: '21'
@@ -144,7 +144,7 @@ jobs:
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
     - name: Setup pnpm
-      uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
+      uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413  # v6.1.0
       # version comes from package.json "packageManager" (issue #478)
 
     - name: Setup Node.js
@@ -164,7 +164,7 @@ jobs:
         python -m pip install --require-hashes -r requirements/debugpy.txt
 
     - name: Setup Java 21
-      uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c  # v6.0.0
+      uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6  # v6.0.1
       with:
         distribution: 'temurin'
         java-version: '21'
@@ -212,7 +212,7 @@ jobs:
         fetch-depth: 0
 
     - name: Setup pnpm
-      uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
+      uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413  # v6.1.0
       # version comes from package.json "packageManager" (issue #478)
     
     - name: Setup Node.js
@@ -222,7 +222,7 @@ jobs:
         cache: 'pnpm'
 
     - name: Setup Java 21
-      uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c  # v6.0.0
+      uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6  # v6.0.1
       with:
         distribution: 'temurin'
         java-version: '21'
@@ -323,7 +323,7 @@ jobs:
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
     
     - name: Setup pnpm
-      uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
+      uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413  # v6.1.0
       # version comes from package.json "packageManager" (issue #478)
     
     - name: Setup Node.js
@@ -333,7 +333,7 @@ jobs:
         cache: 'pnpm'
     
     - name: Setup Java 21
-      uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c  # v6.0.0
+      uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6  # v6.0.1
       with:
         distribution: 'temurin'
         java-version: '21'

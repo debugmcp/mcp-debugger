@@ -228,7 +228,6 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   private dryRunCompleteReceived = false;
   private dryRunCommandSnapshot?: string;
   private dryRunScriptPath?: string;
-  private adapterConfigured = false;
   private dapState: DAPSessionState | null = null;
   /** Whether this parent has already consumed a stopped event for this run. */
   private initializationStopSeen = false;
@@ -1182,10 +1181,10 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
             {
               // Skip emitEvent commands for DAP events — they are already handled
               // by the fast-path handleDapEvent() call above to avoid double emission.
+              // Status messages need no such skip: the core issues no commands
+              // for them at all, because the imperative handleStatusMessage
+              // above owns every status emit and its latch (issue #713).
               if (message.type === 'dapEvent') break;
-              // Terminal statuses are emitted (and latched) by
-              // handleStatusMessage above — suppress the duplicate (issue #258).
-              if (command.event === 'exit' && this.exitEmitted) break;
               const args = (command.args as unknown[]) ?? [];
               this.emit(command.event as keyof ProxyManagerEvents, ...(args as never[]));
             }
@@ -1214,7 +1213,6 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         if (result.newState.initialized) {
           this.everInitialized = true;
         }
-        this.adapterConfigured = result.newState.adapterConfigured;
         // The imperative currentThreadId is authoritative — the fast-path
         // stopped handler in handleDapEvent writes it. Restoring the core's
         // copy here clobbered anchors adopted via setCurrentThreadId() on
@@ -1374,7 +1372,6 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
             body: message.lastStop
           });
         }
-        this.adapterConfigured = true;
         this.emit('adapter-configured');
         if (!this.isInitialized) {
           this.isInitialized = true;
@@ -1394,23 +1391,21 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         break;
 
       case 'adapter_capabilities':
-        // Emitted here only: the functional core (dap-core/handlers.ts) has
-        // no case for this status, so unlike adapter_configured_and_launched
-        // it is not double-processed (issue #243).
+        // Emitted here, like every status-derived event: the functional core
+        // issues no commands for status messages at all (issue #713).
         this.logger.info(`[ProxyManager] Adapter capabilities received`);
         this.emit('adapter-capabilities', message.capabilities);
         break;
 
       case 'adapter_spawned':
-        // Like adapter_capabilities: handled here only, no dap-core case, so
-        // never double-processed. Progress fact for the init-timeout
-        // diagnosis (issue #493) — no event to emit.
+        // Progress fact for the init-timeout diagnosis (issue #493) — no
+        // event to emit.
         this.initProgress.adapterPid = typeof message.pid === 'number' ? message.pid : undefined;
         this.logger.info(`[ProxyManager] Adapter process spawned (PID ${message.pid ?? 'unknown'})`);
         break;
 
       case 'dap_handshake_stage':
-        // Like adapter_capabilities: handled here only, no dap-core case (issue #493).
+        // Progress facts for the init-timeout diagnosis (issue #493).
         if (message.stage === 'transport_connected') {
           this.initProgress.transportConnected = true;
         } else if (message.stage === 'request_pending') {
@@ -1424,15 +1419,13 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         break;
 
       case 'function_breakpoints_synced':
-        // Like adapter_capabilities: emitted here only, no dap-core case, so
-        // never double-processed (issue #302).
+        // Emitted here, like every status-derived event (issue #302).
         this.logger.info(`[ProxyManager] Pre-launch function-breakpoint sync results received`);
         this.emit('function-breakpoints-synced', message.functionBreakpoints ?? []);
         break;
 
       case 'breakpoints_synced':
-        // Like adapter_capabilities: emitted here only, no dap-core case, so
-        // never double-processed (issue #439).
+        // Emitted here, like every status-derived event (issue #439).
         this.logger.info(`[ProxyManager] Pre-launch breakpoint sync results received`);
         this.emit('breakpoints-synced', message.breakpoints ?? []);
         break;
@@ -1507,7 +1500,6 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
     this.proxyProcess = null;
     this.isInitialized = false;
-    this.adapterConfigured = false;
     this.currentThreadId = null;
     this.stderrBuffer = [];
     this.sessionId = null;
