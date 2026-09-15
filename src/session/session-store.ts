@@ -15,7 +15,8 @@ import {
   Breakpoint,
   FunctionBreakpoint,
   AdapterPolicy,
-  getPolicyForLanguage
+  getPolicyForLanguage,
+  isTerminalSessionState
 } from '@debugmcp/shared';
 import type { ExceptionBreakMode } from '@debugmcp/shared';
 import { SessionNotFoundError } from '../errors/debug-errors.js';
@@ -274,7 +275,16 @@ export class SessionStore {
       state: s.state,
       createdAt: s.createdAt,
       updatedAt: s.updatedAt,
-      lastStop: s.lastStop,
+      // The session model keeps lastStop across continue/step (the
+      // run-to-completion summary and the PAUSED invariant depend on it), so
+      // a running session still holds the stop it already left. Only the stop
+      // a session is AT (paused) or its last stop before it ended (terminal)
+      // belongs in the public projection (issue #720). Gated here rather than
+      // in one handler: this is the single DebugSessionInfo list source, so
+      // every consumer of it inherits the gate.
+      ...(s.lastStop && (s.state === SessionState.PAUSED || isTerminalSessionState(s.state))
+        ? { lastStop: s.lastStop }
+        : {}),
       exitCode: s.exitCode,
       ...(s.state === SessionState.ERROR && s.failureDiagnostics
         ? { diagnostics: s.failureDiagnostics }

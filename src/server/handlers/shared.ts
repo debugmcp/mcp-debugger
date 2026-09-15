@@ -3,7 +3,7 @@
  * read, the redaction notice, the get_variables / get_local_variables payload
  * extras, and the attach warning both attach paths surface.
  */
-import { REDACTION_NOTICE, SessionState, Variable } from '@debugmcp/shared';
+import { isTerminalSessionState, REDACTION_NOTICE, SessionState, Variable } from '@debugmcp/shared';
 import type { LineContext } from '../../utils/line-reader.js';
 import { buildTruncationNotice, VariableTruncationSummary } from '../../session/variable-caps.js';
 import type { ToolContext } from '../tool-context.js';
@@ -15,9 +15,16 @@ import type { DebugResult } from '../../session/session-manager-core.js';
  * and the PAUSED invariant depend on it), so a running session still holds
  * the stop it already left; only a paused session (the stop it is at) or a
  * terminal one (the last stop before it ended) should surface it (issue #720).
+ *
+ * `SessionStore.getAll()` already applies the same gate to the session
+ * listing; this is the second line for handlers that read a ManagedSession
+ * directly. `get_stack_trace` is one of those, and in practice only its
+ * PAUSED arm can carry a stop: a terminal session is refused earlier
+ * (SessionTerminatedError, or no proxy to ask), so that tool simply omits
+ * `lastStop`/`stopReason` whenever the session is not paused.
  */
 export function carriesLastStop(state: SessionState | undefined): boolean {
-  return state === SessionState.PAUSED || state === SessionState.STOPPED || state === SessionState.ERROR;
+  return state === SessionState.PAUSED || isTerminalSessionState(state);
 }
 
 /** The line-context slice the breakpoint and step payloads embed. */

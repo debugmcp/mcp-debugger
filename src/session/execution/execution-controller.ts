@@ -453,8 +453,15 @@ export class ExecutionController {
       );
       return { success: true, state: session.state };
     } catch (error) {
-      // Revert to PAUSED — the VM didn't actually resume
-      this.ctx.updateState(session, SessionState.PAUSED);
+      // Revert to PAUSED — the VM didn't actually resume. Only from RUNNING,
+      // though: the debuggee can end while the request is in flight (and the
+      // adapter then rejects it precisely BECAUSE the session is gone), which
+      // leaves the session STOPPED/ERROR. A terminal state is not something a
+      // failed resume can undo, and reverting it resurrected finished
+      // sessions as paused (issue #720).
+      if (session.state === SessionState.RUNNING) {
+        this.ctx.updateState(session, SessionState.PAUSED);
+      }
       const errorMessage = getErrorMessage(error);
       this.ctx.logger.error(
         `[SessionManager continue] Error sending 'continue' to proxy for session ${sessionId}: ${errorMessage}`

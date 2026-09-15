@@ -702,6 +702,7 @@ Gets the current call stack.
 **Notes:**
 - Stack frames are ordered from innermost (current) to outermost
 - `threadId` identifies the thread represented by `stackFrames`, or the explicitly queried thread when the stack is empty. `lastStop.threadId`, when present, remains the thread reported by the original stop event.
+- `stopReason` and `lastStop` describe the pause the frames were read at, so they are omitted whenever the session is not paused; they are taken from the state at the start of the call, so a `continue_execution` racing the fetch does not strip them from an answer that really was read at a stop.
 - Frame IDs are used with `get_scopes`
 - Internal/runtime frames (e.g. Node.js internals and `node_modules` dependencies, Go `/runtime/`, `System.*`) are filtered out by default; pass `includeInternals: true` to see them. When any frames were hidden, the response additionally carries `hiddenFrames` (count) and a `note` explaining how to reveal them.
 - A frame whose source the adapter could not find on this host (js-debug: a source-mapped `.ts` the package did not ship) carries `unresolvedSource: true`, and the `note` says its `file` is a label rather than an openable path — do not pass it to `get_source_context`.

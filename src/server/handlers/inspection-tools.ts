@@ -57,9 +57,15 @@ export const getStackTraceTool: ToolHandler = async (ctx, args) => {
   try {
     // Default to false for cleaner output
     const includeInternals = args.includeInternals ?? false;
+    // Snapshot the stop BEFORE the fetch: continue_execution sets RUNNING
+    // ahead of its own DAP send, so a continue landing mid-fetch would flip
+    // the state under us and strip the stop from a payload whose frames were
+    // read while the session really was paused (issue #720). The diagnostics
+    // read below stays post-await on purpose — it describes the failure the
+    // fetch itself may have recorded.
+    const sessionBefore = ctx.sessionManager.getSession(args.sessionId);
+    const lastStop = carriesLastStop(sessionBefore?.state) ? sessionBefore?.lastStop : undefined;
     const stackTrace = await ctx.getStackTrace(args.sessionId, includeInternals, args.threadId);
-    const session = ctx.sessionManager.getSession(args.sessionId);
-    const lastStop = carriesLastStop(session?.state) ? session?.lastStop : undefined;
     const payload: Record<string, unknown> = {
       success: true,
       stackFrames: stackTrace.frames,

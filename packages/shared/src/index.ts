@@ -170,6 +170,7 @@ export {
   ProcessIdentifierType,
 
   // State mapping functions
+  isTerminalSessionState,
   mapLegacyState,
   mapToLegacyState
 } from './models/index.js';

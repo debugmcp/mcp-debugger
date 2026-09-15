@@ -5,7 +5,7 @@
 import { EventEmitter } from 'events';
 import {
   SessionState, SessionLifecycleState, DebugLanguage, DebugSessionInfo, mapLegacyState,
-  AdapterPolicy, SessionOutputEntry, redactSecretsInString
+  isTerminalSessionState, AdapterPolicy, SessionOutputEntry, redactSecretsInString
 } from '@debugmcp/shared';
 import type { Breakpoint, FunctionBreakpoint, StackFrame } from '@debugmcp/shared';
 import { BREAKPOINT_STOP_REASONS } from '@debugmcp/shared';
@@ -642,14 +642,25 @@ export abstract class SessionManagerCore extends EventEmitter {
         };
         session.lastStop = autoContinuedStop;
         this._updateSessionState(session, SessionState.PAUSED);
+        // Erase the transient stop however the continue settles. The identity
+        // check is what keeps it safe: a newer user-visible stop that raced
+        // the continue replaced the record and must survive, and a continue
+        // that failed with the session still PAUSED is genuinely at this stop.
+        // Terminal states count as "no longer at it" alongside RUNNING: the
+        // debuggee's 'terminated' can beat the continue (resolving it late, or
+        // rejecting it outright), and skipping the erase then listed a
+        // finished program as stopped with an 'entry' stop (issue #720).
+        const clearTransientEntryStop = () => {
+          const movedOn =
+            session.state === SessionState.RUNNING || isTerminalSessionState(session.state);
+          if (movedOn && session.lastStop === autoContinuedStop) {
+            session.lastStop = undefined;
+          }
+        };
         this.handleAutoContinue(sessionId)
-          .then(() => {
-            // Do not erase a newer user-visible stop that raced the continue.
-            if (session.state === SessionState.RUNNING && session.lastStop === autoContinuedStop) {
-              session.lastStop = undefined;
-            }
-          })
+          .then(clearTransientEntryStop)
           .catch(err => {
+            clearTransientEntryStop();
             this.logger.error(`[ProxyManager ${sessionId}] Error auto-continuing:`, err);
           });
       } else {

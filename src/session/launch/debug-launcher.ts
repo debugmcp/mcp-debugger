@@ -196,11 +196,15 @@ export class DebugLauncher {
       attachMode: false,
     });
     // Per-attempt terminal evidence. A prior program/proxy exit must not
-    // influence whether this launch is reported as successful.
+    // influence whether this launch is reported as successful. lastStop is
+    // part of that evidence: a launch that dies before a proxy exists emits no
+    // stop of its own, so a leftover one would be listed as this attempt's
+    // once the session lands in ERROR (issue #720).
     session.exitCode = undefined;
     session.lastProxyExit = undefined;
     session.lastProxyError = undefined;
     session.failureDiagnostics = undefined;
+    session.lastStop = undefined;
     this.ctx.logger.info(`[SessionManager] Session ${sessionId} lifecycle state set to ACTIVE`);
 
     // Record the launch spec for restart_debugging BEFORE attempting the

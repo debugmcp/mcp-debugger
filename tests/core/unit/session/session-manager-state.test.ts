@@ -103,11 +103,61 @@ describe('SessionManager - State Machine Integrity', () => {
     expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.PAUSED);
     
     dependencies.mockProxyManager.simulateError(new Error('Runtime error'));
-    
+
     // Should transition to ERROR state
     expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.ERROR);
     expect(sessionManager.getSession(session.id)?.proxyManager).toBeUndefined();
     // A proxy in error state must be reaped, not just dereferenced (issue #122)
     expect(dependencies.mockProxyManager.stopCalls).toBe(1);
+  });
+
+  // continue() flips PAUSED → RUNNING before the DAP send and reverts on
+  // failure, because a rejected 'continue' means the VM never resumed. That
+  // revert must not resurrect a session the debuggee has meanwhile left: the
+  // program can terminate while the request is in flight (the adapter then
+  // rejects it precisely BECAUSE the session is gone), and a terminal state
+  // is not something a failed resume can undo (issue #720).
+  it('leaves a session that went terminal mid-continue in its terminal state', async () => {
+    const session = await sessionManager.createSession({
+      language: DebugLanguage.MOCK,
+      executablePath: 'python'
+    });
+    await sessionManager.startDebugging(session.id, 'test.py');
+    await vi.runAllTimersAsync();
+    expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.PAUSED);
+
+    dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+      if (command === 'continue') {
+        // The debuggee ends while our request is on the wire...
+        dependencies.mockProxyManager.simulateEvent('terminated');
+        // ...and the adapter answers the now-meaningless request with an error.
+        throw new Error('Cannot continue: the process has exited');
+      }
+      return {};
+    });
+
+    await expect(sessionManager.continue(session.id)).rejects.toThrow('the process has exited');
+    await vi.runAllTimersAsync();
+
+    expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.STOPPED);
+  });
+
+  it('still reverts to PAUSED when a continue fails on a session that never left the breakpoint', async () => {
+    const session = await sessionManager.createSession({
+      language: DebugLanguage.MOCK,
+      executablePath: 'python'
+    });
+    await sessionManager.startDebugging(session.id, 'test.py');
+    await vi.runAllTimersAsync();
+
+    dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+      if (command === 'continue') throw new Error('adapter said no');
+      return {};
+    });
+
+    await expect(sessionManager.continue(session.id)).rejects.toThrow('adapter said no');
+
+    // The VM never resumed and nothing ended it — it is still at its stop.
+    expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.PAUSED);
   });
 });
