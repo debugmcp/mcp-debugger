@@ -74,9 +74,22 @@ the resulting MCP endpoint. If the outer server runs under the development proxy
 `dapLaunchArgs.env: { "MCP_EXIT_ON_STDIN_CLOSE": "0" }` so the nested HTTP server is supervised by
 the debug session instead of inheriting the proxy's stdin-close policy.
 
+That also means the debug session is the *only* thing that will stop it. A restart kills the outer
+backend's own process; on Linux the nested `dist/index.js http --port 0` has no watchdog left and
+survives, holding its port. **Call `close_debug_session` on the outer session before
+`dev_rebuild_and_restart` (or `dev_restart_debugger`), and again when you are finished** — ending
+the session is the teardown step for the nested server.
+
 The bundled CLI restores its internal `DEBUG_MCP_SKIP_AUTO_START` override before starting the
 server, so it can debug the checkout's entrypoint without suppressing the target's startup. Any
 value explicitly inherited from the caller is preserved.
+
+The nested server does inherit the outer JavaScript session's exit-code shim environment:
+`NODE_OPTIONS` carries the adapter's `--require .../exitcode-shim.cjs`, and the shim marks itself
+claimed with `MCP_DEBUGGER_EXITCODE_CLAIMED=1`. A JavaScript debuggee launched by the *nested*
+server therefore reports no `exitCode` — the adapter sees a preload already present and skips
+injecting a fresh one. Clear both on the inner launch to get exit codes back:
+`dapLaunchArgs.env: { "NODE_OPTIONS": "", "MCP_DEBUGGER_EXITCODE_CLAIMED": "" }` (issue #731).
 
 Set a breakpoint in `src/cli/http-command.ts` at
 `const sessionIdHeader = req.headers['mcp-session-id'];`, with the condition
