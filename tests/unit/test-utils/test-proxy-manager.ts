@@ -39,9 +39,16 @@ export class TestProxyManager extends ProxyManager {
   /**
    * Override start to skip complex initialization
    */
+  /**
+   * `isInitialized` is deliberately NOT pre-marked: the imperative
+   * handleStatusMessage is the sole emitter of 'initialized' and latches on
+   * that flag, so a pre-marked double would silently swallow the handshake
+   * emit of any simulateMessage-driven test. `isRunning()` reads
+   * `proxyProcess` alone, and this class overrides `sendDapRequest`, so
+   * nothing here needs the flag set up front.
+   */
   async start(config: ProxyConfig): Promise<void> {
     this.internals.sessionId = config.sessionId;
-    (this as any).isInitialized = true;
     (this as any).proxyProcess = { pid: 12345 };
 
     // Initialize DAP state so message handling works

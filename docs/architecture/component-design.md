@@ -42,15 +42,25 @@ getters — never captured references — so reassigning a facade method or writ
 a tunable on a live instance is visible to the collaborators. Each collaborator's
 constructor takes the narrowest `Pick<>` slice of that context it uses;
 collaborator-to-collaborator dependencies are constructor arguments
-(`DebugLauncher(ctx, proxyLauncher, breakpoints)`,
-`AttachController(ctx, proxyLauncher, breakpoints, pauseCoordinator)`,
+(`DebugLauncher(ctx, proxyLauncher, breakpoints, inFlight)`,
+`AttachController(ctx, proxyLauncher, breakpoints, pauseCoordinator, inFlight)`,
 `ExecutionController(ctx, pauseCoordinator)`,
 `ExpressionEvaluator(ctx, frameAnchorResolver)`,
 `RedefineClassesController(ctx, breakpoints)`) held as captured instance
 references — their methods resolve at call time, so instance spies intercept,
 but reassigning a collaborator field after construction is not observed.
-`DebugLauncher` owns the restart reentrancy guard, and `restartDebugging`
-replays through `DebugLauncher.startDebugging` itself, not the facade's method.
+
+The facade owns one shared `InFlightGuard` (`src/session/in-flight-guard.ts`,
+issue #711) and hands the same instance to the launcher and the attach
+controller: `startDebugging`, `restartDebugging`, `attachToProcess` and
+`detachFromProcess` each claim the session before their first await and release
+it in `finally`, so one launch-shaped call per session at a time — a launch
+blocks an attach, a detach blocks a restart, and so on. The session state alone
+could not express this: a JavaScript launch projects RUNNING the moment its
+child session is adopted, while `start_debugging` is still parked on the launch
+barrier. `restartDebugging` replays through the launcher's private `launch()`
+under its own claim, never through the facade's `startDebugging`.
+
 Shared per-request DAP helpers (timeout override validation, the timeout hint,
 log truncation) live in `src/session/dap-request-helpers.ts`.
 
@@ -212,6 +222,13 @@ ProxyManager spawns and communicates with a debug proxy worker process over IPC 
 3. **Functional Core Integration**
    - Uses pure functions from dap-core for state management
    - Commands pattern for side effects
+   - Two message kinds are handled imperatively first and are therefore NOT
+     re-emitted from the core's commands: DAP events (the `handleDapEvent()`
+     fast path, so a stop is never delayed by the command loop) and proxy
+     status messages, whose emits carry latches the core cannot see — the
+     `initialized` latch, the `exitEmitted` latch of issue #258. The core
+     returns state transitions for status messages and no commands at all
+     (issue #713); `dapEvent` still needs the explicit skip below.
    ```typescript
    const result = handleProxyMessage(this.dapState, message);
    
@@ -222,6 +239,8 @@ ProxyManager spawns and communicates with a debug proxy worker process over IPC 
          this.logger[command.level](command.message, command.data);
          break;
        case 'emitEvent':
+         // handleDapEvent() above already emitted this one
+         if (message.type === 'dapEvent') break;
          this.emit(command.event as any, ...command.args);
          break;
        // ...

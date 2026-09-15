@@ -94,6 +94,37 @@ describe('ErrorMessages', () => {
     expect(message).toContain('verifyTimeout');
   });
 
+  describe('operationInFlight (issue #711)', () => {
+    it('names the operation in flight and the refused tool, and says to wait', () => {
+      const message = ErrorMessages.operationInFlight('launch', 'attach_to_process');
+      expect(message).toContain('A launch is already in progress');
+      expect(message).toContain('start_debugging has not returned yet');
+      expect(message).toContain('wait for it to complete before calling attach_to_process');
+    });
+
+    it('does not tell restart_debugging to wait out an attach — it is never available for one', () => {
+      // Waiting cannot help: restart_debugging replays a launch configuration
+      // and an attach session has none, so the answer is terminal, not transient.
+      const message = ErrorMessages.operationInFlight('attach', 'restart_debugging');
+      expect(message).toContain('An attach is already in progress');
+      expect(message).toContain('never available for an attach session');
+      expect(message).toContain('Detach and re-attach instead');
+      expect(message).not.toContain('wait for it to complete');
+    });
+
+    it('still tells start_debugging to wait out an attach', () => {
+      const message = ErrorMessages.operationInFlight('attach', 'start_debugging');
+      expect(message).toContain('wait for it to complete before calling start_debugging');
+      expect(message).not.toContain('never available');
+    });
+
+    it('describes a detach in flight', () => {
+      const message = ErrorMessages.operationInFlight('detach', 'start_debugging');
+      expect(message).toContain('A detach is already in progress');
+      expect(message).toContain('detach_from_process has not returned yet');
+    });
+  });
+
   it('builds adapter ready timeout message', () => {
     const message = ErrorMessages.adapterReadyTimeout(15);
     expect(message).toContain('15s');

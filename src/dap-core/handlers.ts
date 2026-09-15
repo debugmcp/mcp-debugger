@@ -64,78 +64,36 @@ export function handleProxyMessage(
 
 /**
  * Handle status messages (Phase 1: proxy lifecycle status/error messages,
- * as distinct from Phase 2: DAP events and responses)
+ * as distinct from Phase 2: DAP events and responses).
+ *
+ * STATE TRANSITIONS ONLY — no commands, for any status. ProxyManager's own
+ * `handleStatusMessage` owns every status-derived side effect: the logging,
+ * the emits and the latches that make them once-only (the initialized latch,
+ * the #258 exit latch), the kill on the IPC probe, and the progress facts the
+ * init-timeout diagnosis reads. Duplicating them here meant every status was
+ * logged twice, every status-derived event fired every listener twice, and
+ * the IPC probe killed the proxy twice (issue #713).
  */
 function handleStatusMessage(
   state: DAPSessionState,
   message: ProxyStatusMessage
 ): DAPProcessingResult {
-  const commands: DAPCommand[] = [];
-
   switch (message.status) {
-    case 'proxy_minimal_ran_ipc_test':
-      commands.push(
-        { type: 'log', level: 'info', message: '[ProxyManager] IPC test message received' },
-        { type: 'killProcess' }
-      );
-      break;
-
-    case 'init_received':
-      commands.push(
-        { type: 'log', level: 'info', message: '[ProxyManager] Init command acknowledged by proxy' },
-        { type: 'emitEvent', event: 'init-received', args: [] }
-      );
-      break;
-
-    case 'dry_run_complete':
-      commands.push(
-        { type: 'log', level: 'info', message: '[ProxyManager] Dry run complete' },
-        { type: 'emitEvent', event: 'dry-run-complete', args: [message.command, message.script] }
-      );
-      break;
-
     case 'adapter_connected':
-      commands.push(
-        { type: 'log', level: 'info', message: '[ProxyManager] Adapter transport connected' },
-        { type: 'emitEvent', event: 'initialized', args: [] }
-      );
-      return { commands, newState: setInitialized(state, true) };
-    
-    case 'adapter_configured_and_launched':
-      commands.push(
-        { type: 'log', level: 'info', message: '[ProxyManager] Adapter configured and launched' },
-        { type: 'emitEvent', event: 'adapter-configured', args: [] }
-      );
-      
-      // Update state
-      let newState = setAdapterConfigured(state, true);
-      
-      // If not initialized, mark as initialized and emit event
-      if (!state.initialized) {
-        newState = setInitialized(newState, true);
-        commands.push({ type: 'emitEvent', event: 'initialized', args: [] });
-      }
-      
-      return { commands, newState };
-    
-    case 'adapter_exited':
-    case 'dap_connection_closed':
-    case 'terminated':
-      commands.push(
-        { type: 'log', level: 'info', message: `[ProxyManager] Status: ${message.status}` },
-        {
-          type: 'emitEvent',
-          event: 'exit',
-          // Pass the code through untouched (issue #258): only adapter_exited
-          // carries one, and fabricating 1 for the codeless closure statuses
-          // turned every clean rdbg run into a session error.
-          args: [message.code ?? null, message.signal || undefined, message.expected]
-        }
-      );
-      break;
-  }
+      // Adapter transport is up: DAP requests may be sent.
+      return { commands: [], newState: setInitialized(state, true) };
 
-  return { commands };
+    case 'adapter_configured_and_launched': {
+      const configured = setAdapterConfigured(state, true);
+      return {
+        commands: [],
+        newState: state.initialized ? configured : setInitialized(configured, true)
+      };
+    }
+
+    default:
+      return { commands: [] };
+  }
 }
 
 /**

@@ -208,22 +208,10 @@ describe('SessionManager - restart and relaunch', () => {
       expect(result.error).toMatch(/attach/i);
     });
 
-    it('refuses a second restart while one is in progress', async () => {
-      const session = await createLaunchedSession();
-      dependencies.mockProxyManager.simulateEvent('terminated');
-      await vi.runAllTimersAsync();
-
-      const first = sessionManager.restartDebugging(session.id);
-      const second = sessionManager.restartDebugging(session.id);
-      await vi.runAllTimersAsync();
-
-      const secondResult = await second;
-      expect(secondResult.success).toBe(false);
-      expect(secondResult.error).toMatch(/in progress/i);
-
-      const firstResult = await first;
-      expect(firstResult.success).toBe(true);
-    });
+    // A second restart while the first is replaying is refused; that lives in
+    // session-manager-in-flight-guard.test.ts, which parks the proxy start on
+    // an explicit gate rather than relying on timer interleaving, and covers
+    // the other five pairings besides.
 
     it('allows restart from ERROR state (crash recovery)', async () => {
       const session = await createLaunchedSession();
@@ -237,14 +225,19 @@ describe('SessionManager - restart and relaunch', () => {
       expect(result.success).toBe(true);
     });
 
-    it('refuses while a start is still INITIALIZING', async () => {
+    it('restarts a session left INITIALIZING by a start that already returned (issue #711)', async () => {
+      // A readiness wait that hits its ceiling returns with the session still
+      // INITIALIZING. The old state-based check then refused every restart of
+      // it forever ("wait for the current start to complete" — it had). What
+      // matters is whether a start is in flight, and none is; the in-flight
+      // refusal itself is pinned in session-manager-in-flight-guard.test.ts.
       const session = await createLaunchedSession();
       sessionManager.getSession(session.id)!.state = SessionState.INITIALIZING;
 
       const result = await sessionManager.restartDebugging(session.id);
+      await vi.runAllTimersAsync();
 
-      expect(result.success).toBe(false);
-      expect(result.error).toMatch(/initializing/i);
+      expect(result.success).toBe(true);
     });
   });
 });

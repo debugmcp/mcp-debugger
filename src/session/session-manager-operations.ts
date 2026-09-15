@@ -35,7 +35,8 @@ import {
 } from './mirror/mirror-controller.js';
 import { ProxyLauncher } from './launch/proxy-launcher.js';
 import { DebugLauncher } from './launch/debug-launcher.js';
-import { AttachController } from './attach/attach-controller.js';
+import { AttachController, type AttachRequest } from './attach/attach-controller.js';
+import { InFlightGuard } from './in-flight-guard.js';
 import {
   AttachResultData,
   CustomLaunchRequestArguments,
@@ -139,6 +140,8 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       findFreePort: () => this.findFreePort(),
       setupProxyEventHandlers: (session, proxyManager, effectiveLaunchArgs) =>
         this.setupProxyEventHandlers(session, proxyManager, effectiveLaunchArgs),
+      cleanupProxyEventHandlers: (session, proxyManager) =>
+        this.cleanupProxyEventHandlers(session, proxyManager),
       stopProxyPreservingSession: (session) => this.stopProxyPreservingSession(session),
       closeSession: (sessionId) => this.closeSession(sessionId),
       getStackTrace: (sessionId, threadId, includeInternals) =>
@@ -159,11 +162,15 @@ export abstract class SessionManagerOperations extends SessionManagerData {
    * construction: `DebugLauncher` and `AttachController` hold the
    * `proxyLauncher` / `breakpoints` instances — their methods still resolve
    * at call time, so instance spies work, but reassigning one of these
-   * fields after construction is not observed. `DebugLauncher` also owns
-   * state of its own (`restartingSessions`), and `restartDebugging` replays
-   * through the launcher's own `startDebugging`, not this facade's method.
+   * fields after construction is not observed. The launcher and the attach
+   * controller share one `InFlightGuard` (issue #711): a launch, restart or
+   * attach still being awaited refuses any other launch-shaped call on the
+   * session, and `restartDebugging` replays the launch under its own claim
+   * (through the launcher's private launch sequence, not this facade's
+   * `startDebugging`).
    */
   protected readonly opsContext: OperationsContext = this.buildOperationsContext();
+  protected readonly inFlight = new InFlightGuard();
   protected readonly breakpoints = new BreakpointController(this.opsContext);
   protected readonly pauseCoordinator = new PauseCoordinator(this.opsContext);
   protected readonly execution = new ExecutionController(this.opsContext, this.pauseCoordinator);
@@ -171,12 +178,18 @@ export abstract class SessionManagerOperations extends SessionManagerData {
   protected readonly hotSwap = new RedefineClassesController(this.opsContext, this.breakpoints);
   protected readonly mirror = new MirrorController(this.opsContext);
   protected readonly proxyLauncher = new ProxyLauncher(this.opsContext);
-  protected readonly launcher = new DebugLauncher(this.opsContext, this.proxyLauncher, this.breakpoints);
+  protected readonly launcher = new DebugLauncher(
+    this.opsContext,
+    this.proxyLauncher,
+    this.breakpoints,
+    this.inFlight
+  );
   protected readonly attach = new AttachController(
     this.opsContext,
     this.proxyLauncher,
     this.breakpoints,
-    this.pauseCoordinator
+    this.pauseCoordinator,
+    this.inFlight
   );
 
   /**
@@ -351,18 +364,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
    */
   async attachToProcess(
     sessionId: string,
-    attachConfig: {
-      port?: number;
-      host?: string;
-      processId?: number | string;
-      timeout?: number;
-      sourcePaths?: string[];
-      stopOnEntry?: boolean;
-      justMyCode?: boolean;
-      verifyTimeout?: number;
-      breakOnExceptions?: ExceptionBreakMode;
-      adapterConfig?: Record<string, unknown>;
-    }
+    attachConfig: AttachRequest
   ): Promise<DebugResult<AttachResultData>> {
     return this.attach.attachToProcess(sessionId, attachConfig);
   }

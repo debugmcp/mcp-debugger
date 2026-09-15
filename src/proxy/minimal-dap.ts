@@ -137,7 +137,11 @@ export class MinimalDapClient extends EventEmitter {
       this.childSessionManager = createChildSessionManager({
         policy: this.policy,
         host,
-        port
+        port,
+        // The manager applies this to every adoption request — the ones
+        // this connection hands over below and the ones a child or release
+        // connection forwards (issue #712) — so enrichment has one site.
+        enrichConfig: (config) => this.enrichChildConfig(config)
       });
       
       // Wire up events from ChildSessionManager
@@ -301,7 +305,7 @@ export class MinimalDapClient extends EventEmitter {
             },
             createChildSession: async (config: ChildSessionConfig) => {
               if (this.childSessionManager) {
-                const outcome = await this.childSessionManager.createChildSession(this.enrichChildConfig(config));
+                const outcome = await this.childSessionManager.createChildSession(config);
                 // Update active child reference from manager
                 this.activeChild = this.childSessionManager.getActiveChild();
                 // A failed release keeps the target parked; forget it so a
@@ -326,7 +330,7 @@ export class MinimalDapClient extends EventEmitter {
               // Create child session through the manager
               logger.info(`[MinimalDapClient] Creating child session via ChildSessionManager`);
               try {
-                const outcome = await this.childSessionManager.createChildSession(this.enrichChildConfig(result.childConfig));
+                const outcome = await this.childSessionManager.createChildSession(result.childConfig);
 
                 // Update active child reference from manager
                 this.activeChild = this.childSessionManager.getActiveChild();
@@ -524,6 +528,10 @@ export class MinimalDapClient extends EventEmitter {
    * js-debug binds the child target to the parent's launch config itself, so
    * they would only ride into the child's attach request as noise. The
    * request marker is threaded for both modes; today only 'attach' is read.
+   *
+   * Applied by ChildSessionManager at the top of createChildSession (passed
+   * as its enrichConfig option), so a startDebugging forwarded from a child
+   * or release connection is enriched too (issue #712).
    */
   private enrichChildConfig(config: ChildSessionConfig): ChildSessionConfig {
     const start = this.lastStartRequestArgs;
