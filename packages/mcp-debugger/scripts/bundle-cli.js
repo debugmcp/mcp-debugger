@@ -264,6 +264,20 @@ async function bundleCLI() {
     console.warn('Warning: exitcode-shim.cjs not found; JS debuggee exit codes will not be captured in NPX distribution.');
   }
 
+  // Copy the agent skill so the package is a pi coding-agent package (issue
+  // #714): package.json's "pi.skills" points at ./skills, and any harness can
+  // read node_modules/@debugmcp/mcp-debugger/skills/debugging. Regenerated from
+  // the repo's skills/debugging on every build (gitignored) so it cannot drift.
+  const skillSrc = path.join(repoRoot, 'skills', 'debugging');
+  const skillsDest = path.join(packageRoot, 'skills');
+  fs.rmSync(skillsDest, { recursive: true, force: true });
+  if (fs.existsSync(path.join(skillSrc, 'SKILL.md'))) {
+    fs.cpSync(skillSrc, path.join(skillsDest, 'debugging'), { recursive: true, force: true });
+    console.log('Copied agent skill (skills/debugging) into the package.');
+  } else {
+    console.warn('Warning: skills/debugging/SKILL.md not found; the package will ship without the agent skill.');
+  }
+
   // Mirror dist into the package/ directory used by npm pack artifacts.
   const packageDir = path.join(packageRoot, 'package');
   const packageDistDir = path.join(packageDir, 'dist');

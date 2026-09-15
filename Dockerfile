@@ -166,7 +166,7 @@ FROM rust:1.98.0-slim@sha256:17d1ba895198f9934c6314ec5346a0d5115372f3243390c3d73
 RUN cp -r "$(rustc --print sysroot)/lib/rustlib/etc" /rust-etc
 
 # Stage 2: Create runtime image with full LLDB dependencies
-FROM ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea2648d2c0e09b
+FROM ubuntu:26.04@sha256:513c074113a871b51a8d16ab445c88779d6452d937a164fb5cc479f32668a41d
 # Disabled languages: go has no attach implementation and no Delve here,
 # dotnet has no netcoredbg here. Ruby is intentionally present but attach-only
 # (adapter shipped, no Ruby runtime — attach connects directly to a remote

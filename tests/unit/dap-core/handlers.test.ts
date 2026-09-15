@@ -40,181 +40,82 @@ describe('DAP Core Handlers', () => {
       });
     });
 
+    /**
+     * Status messages carry STATE TRANSITIONS only (issue #713).
+     *
+     * ProxyManager's imperative handleStatusMessage owns every status-derived
+     * side effect — the logging, the emits and their latches (the initialized
+     * latch, the #258 exit latch), the kill on the IPC probe. The core used to
+     * push its own copies, so the consumer had to skip them wholesale; it now
+     * returns commands for no status at all, and the consumer executes
+     * whatever it does return.
+     */
     describe('status messages (Phase 1)', () => {
-      it('should handle proxy_minimal_ran_ipc_test', () => {
-        const message: ProxyStatusMessage = {
-          type: 'status',
-          sessionId: 'test-session-123',
-          status: 'proxy_minimal_ran_ipc_test',
-          message: 'IPC test successful'
-        };
-        
-        const result = handleProxyMessage(state, message);
-        
-        expect(result.commands).toHaveLength(2);
-        expect(result.commands[0]).toEqual({
-          type: 'log',
-          level: 'info',
-          message: '[ProxyManager] IPC test message received'
-        });
-        expect(result.commands[1]).toEqual({
-          type: 'killProcess'
-        });
-        expect(result.newState).toBeUndefined();
-      });
+      const statusMessage = (
+        status: ProxyStatusMessage['status'],
+        extra: Partial<ProxyStatusMessage> = {}
+      ): ProxyStatusMessage => ({
+        type: 'status',
+        sessionId: 'test-session-123',
+        status,
+        ...extra
+      } as ProxyStatusMessage);
 
-      it('should handle dry_run_complete', () => {
-        const message: ProxyStatusMessage = {
-          type: 'status',
-          sessionId: 'test-session-123',
-          status: 'dry_run_complete',
-          command: 'python test.py --debug',
-          script: 'test.py'
-        };
-        
-        const result = handleProxyMessage(state, message);
-        
-        expect(result.commands).toHaveLength(2);
-        expect(result.commands[0]).toEqual({
-          type: 'log',
-          level: 'info',
-          message: '[ProxyManager] Dry run complete'
-        });
-        expect(result.commands[1]).toEqual({
-          type: 'emitEvent',
-          event: 'dry-run-complete',
-          args: ['python test.py --debug', 'test.py']
-        });
-      });
-
-      it('should handle adapter_configured_and_launched when not initialized', () => {
-        const message: ProxyStatusMessage = {
-          type: 'status',
-          sessionId: 'test-session-123',
-          status: 'adapter_configured_and_launched'
-        };
-        
-        const result = handleProxyMessage(state, message);
-        
-        expect(result.commands).toHaveLength(3);
-        expect(result.commands[0]).toEqual({
-          type: 'log',
-          level: 'info',
-          message: '[ProxyManager] Adapter configured and launched'
-        });
-        expect(result.commands[1]).toEqual({
-          type: 'emitEvent',
-          event: 'adapter-configured',
-          args: []
-        });
-        expect(result.commands[2]).toEqual({
-          type: 'emitEvent',
-          event: 'initialized',
-          args: []
-        });
-        
-        // Check state updates
-        expect(result.newState?.initialized).toBe(true);
-        expect(result.newState?.adapterConfigured).toBe(true);
-      });
-
-      it('should handle adapter_configured_and_launched when already initialized', () => {
-        state = { ...state, initialized: true };
-        
-        const message: ProxyStatusMessage = {
-          type: 'status',
-          sessionId: 'test-session-123',
-          status: 'adapter_configured_and_launched'
-        };
-        
-        const result = handleProxyMessage(state, message);
-        
-        // Should not emit 'initialized' event again
-        expect(result.commands).toHaveLength(2);
-        expect(result.commands[1].type).toBe('emitEvent');
-        expect((result.commands[1] as any).event).toBe('adapter-configured');
-      });
-
-      it('should handle adapter exit statuses', () => {
+      it('issues no commands for any status', () => {
         const statuses: Array<ProxyStatusMessage['status']> = [
+          'proxy_minimal_ran_ipc_test',
+          'init_received',
+          'dry_run_complete',
+          'adapter_connected',
+          'adapter_configured_and_launched',
           'adapter_exited',
           'dap_connection_closed',
           'terminated'
         ];
-        
-        statuses.forEach(status => {
-          const message: ProxyStatusMessage = {
-            type: 'status',
-            sessionId: 'test-session-123',
-            status: status as any,
-            code: 1,
-            signal: 'SIGTERM' as any
-          };
-          
-          const result = handleProxyMessage(state, message);
-          
-          expect(result.commands).toHaveLength(2);
-          expect(result.commands[0]).toEqual({
-            type: 'log',
-            level: 'info',
-            message: `[ProxyManager] Status: ${status}`
-          });
-          expect(result.commands[1]).toEqual({
-            type: 'emitEvent',
-            event: 'exit',
-            args: [1, 'SIGTERM', undefined]
-          });
-        });
+
+        for (const status of statuses) {
+          expect(handleProxyMessage(state, statusMessage(status)).commands).toEqual([]);
+        }
       });
 
-      it('should pass null code through when missing instead of fabricating 1 (issue #258)', () => {
-        const message: ProxyStatusMessage = {
-          type: 'status',
-          sessionId: 'test-session-123',
-          status: 'dap_connection_closed'
-        };
+      it('marks the session initialized on adapter_connected', () => {
+        const result = handleProxyMessage(state, statusMessage('adapter_connected'));
 
-        const result = handleProxyMessage(state, message);
-
-        expect(result.commands[1]).toEqual({
-          type: 'emitEvent',
-          event: 'exit',
-          args: [null, undefined, undefined]
-        });
+        expect(result.commands).toEqual([]);
+        expect(result.newState?.initialized).toBe(true);
       });
 
-      it('should preserve a real exit code of 0 (issue #258)', () => {
-        const message: ProxyStatusMessage = {
-          type: 'status',
-          sessionId: 'test-session-123',
-          status: 'adapter_exited',
-          code: 0
-        };
+      it('records adapter_configured_and_launched, initializing when not yet initialized', () => {
+        const result = handleProxyMessage(state, statusMessage('adapter_configured_and_launched'));
 
-        const result = handleProxyMessage(state, message);
-
-        expect(result.commands[1]).toEqual({
-          type: 'emitEvent',
-          event: 'exit',
-          args: [0, undefined, undefined]
-        });
+        expect(result.commands).toEqual([]);
+        expect(result.newState?.adapterConfigured).toBe(true);
+        expect(result.newState?.initialized).toBe(true);
       });
 
-      it('should pass the expected flag through (issue #258)', () => {
-        const message: ProxyStatusMessage = {
-          type: 'status',
-          sessionId: 'test-session-123',
-          status: 'dap_connection_closed',
-          expected: true
-        };
+      it('leaves an already-initialized session initialized', () => {
+        state = { ...state, initialized: true };
 
-        const result = handleProxyMessage(state, message);
+        const result = handleProxyMessage(state, statusMessage('adapter_configured_and_launched'));
 
-        expect(result.commands[1]).toEqual({
-          type: 'emitEvent',
-          event: 'exit',
-          args: [null, undefined, true]
-        });
+        expect(result.commands).toEqual([]);
+        expect(result.newState?.adapterConfigured).toBe(true);
+        expect(result.newState?.initialized).toBe(true);
+      });
+
+      it('does not transition state for the lifecycle statuses the imperative handler owns', () => {
+        const statuses: Array<ProxyStatusMessage['status']> = [
+          'proxy_minimal_ran_ipc_test',
+          'init_received',
+          'dry_run_complete',
+          'adapter_exited',
+          'dap_connection_closed',
+          'terminated'
+        ];
+
+        for (const status of statuses) {
+          expect(handleProxyMessage(state, statusMessage(status)).newState).toBeUndefined();
+        }
       });
     });
 

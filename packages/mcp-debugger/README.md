@@ -16,6 +16,14 @@ Or install it globally:
 npm install -g @debugmcp/mcp-debugger
 ```
 
+### Agent skill and pi package
+
+The package ships the [`mcp-debugger` agent skill](https://github.com/debugmcp/mcp-debugger/tree/main/skills/debugging)
+at `skills/debugging/` (when to debug, the session golden path, root-cause discipline, per-language
+references). It is also a [pi](https://github.com/earendil-works/pi) coding-agent package:
+`pi install npm:@debugmcp/mcp-debugger` installs the skill and, with the community `pi-mcp-adapter`
+extension present, registers the stdio server entry from `pi.mcp.json`.
+
 ## Usage
 
 ### STDIO mode (default)

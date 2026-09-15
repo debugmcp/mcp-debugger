@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { buildAndPackNpmPackage, installPackageGlobally, createNpxMcpClient, cleanupGlobalInstall, getPackageSize } from './npx-test-utils.js';
+import { buildAndPackNpmPackage, installPackageGlobally, createNpxMcpClient, cleanupGlobalInstall, getPackageSize, verifyPackageContents } from './npx-test-utils.js';
 import { parseSdkToolResult } from '../smoke-test-utils.js';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 
@@ -77,6 +77,12 @@ describe.sequential('NPX: Python Debugging Smoke Tests', () => {
       }
       sessionId = null;
     }
+  });
+
+  it('ships the agent skill and the pi manifest in the tarball (#714)', async () => {
+    const contents = await verifyPackageContents(tarballPath!);
+    expect(contents.hasSkill).toBe(true);
+    expect(contents.hasPiManifest).toBe(true);
   });
 
   it('should list supported languages including Python', async () => {

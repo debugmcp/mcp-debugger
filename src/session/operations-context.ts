@@ -87,6 +87,13 @@ export interface OperationsContext {
     proxyManager: IProxyManager,
     effectiveLaunchArgs: Partial<CustomLaunchRequestArguments>
   ): void;
+  /**
+   * The inverse of `setupProxyEventHandlers`. Detach removes the listeners
+   * before it stops the worker — closeSession's ordering — so the proxy's own
+   * exit cannot be read by the session's handlers as the debuggee finishing
+   * (issue #711).
+   */
+  cleanupProxyEventHandlers(session: ManagedSession, proxyManager: IProxyManager): void;
   stopProxyPreservingSession(session: ManagedSession): Promise<void>;
   closeSession(sessionId: string): Promise<boolean>;
   getStackTrace(
@@ -144,8 +151,9 @@ export type LaunchContext = Pick<
 /**
  * Attach-mode sessions: the attach gate (registry metadata), state and store
  * updates, the verification tunables, the proxy-failure record (hence the
- * filesystem), and both teardowns — session-preserving on failure, closeSession
- * on detach-with-terminate.
+ * filesystem), and all three teardowns — session-preserving on failure,
+ * closeSession on detach-with-terminate, and listener cleanup before the
+ * worker stop on a plain detach.
  */
 export type AttachContext = Pick<
   OperationsContext,
@@ -157,6 +165,7 @@ export type AttachContext = Pick<
   | 'updateState'
   | 'selectPolicy'
   | 'stopProxyPreservingSession'
+  | 'cleanupProxyEventHandlers'
   | 'closeSession'
   | 'tunables'
 >;

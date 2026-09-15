@@ -23,6 +23,12 @@ mkdir -p ~/.agents/skills && cp -r skills/debugging ~/.agents/skills/mcp-debugge
 mkdir -p ~/.copilot/skills && cp -r skills/debugging ~/.copilot/skills/mcp-debugger
 ```
 
+**pi coding agent**: the published npm package is a pi package that ships this skill, so
+`pi install npm:@debugmcp/mcp-debugger` installs it alongside the MCP server entry (from v0.25.0).
+
+**From the npm package** (any harness that can point at a skills directory): the package ships
+this directory at `node_modules/@debugmcp/mcp-debugger/skills/debugging` — no clone needed.
+
 **Any other agent**: paste the contents of `SKILL.md` into your system prompt or rules file (e.g. `.cursorrules`, Cline custom instructions), and keep the `references/` files reachable so the agent can read the per-language guides on demand.
 
 ## Contents

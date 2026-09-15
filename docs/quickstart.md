@@ -72,6 +72,13 @@ Codex CLI:
 codex mcp add mcp-debugger -- npx -y @debugmcp/mcp-debugger stdio
 ```
 
+pi coding agent (needs the community `pi-mcp-adapter` extension; from v0.25.0):
+
+```bash
+pi install npm:pi-mcp-adapter
+pi install npm:@debugmcp/mcp-debugger
+```
+
 Restart the client after changing its configuration.
 
 ## Transports

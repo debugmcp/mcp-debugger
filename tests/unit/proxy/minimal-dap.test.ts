@@ -3,10 +3,13 @@ import net from 'net';
 import fs from 'fs';
 import { EventEmitter } from 'events';
 import { MinimalDapClient } from '../../../src/proxy/minimal-dap.js';
-import type { ChildSessionManager } from '../../../src/proxy/child-session-manager.js';
+import type {
+  ChildSessionManager,
+  ChildSessionOptions
+} from '../../../src/proxy/child-session-manager.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import { JsDebugAdapterPolicy } from '@debugmcp/shared';
-import type { DapClientBehavior, ReverseRequestResult } from '@debugmcp/shared';
+import type { ChildSessionConfig, DapClientBehavior, ReverseRequestResult } from '@debugmcp/shared';
 
 // Mock the net module
 vi.mock('net');
@@ -999,6 +1002,54 @@ describe('MinimalDapClient', () => {
       stubManager.emit('childClosed');
       expect((client as any).childSessions.size).toBe(0);
       expect((client as any).activeChild).toBeNull();
+    });
+
+    it('gives the ChildSessionManager an enricher carrying the parent start request (issues #124/#704/#712)', () => {
+      // The wiring under test is the only production path that threads the
+      // caller's launch/attach intent into a child adoption: js-debug's
+      // reverse startDebugging configuration carries {type, name,
+      // __pendingTargetId} and nothing else. Every other adoption test here
+      // stubs the factory and ignores its options, so nothing observed that
+      // the enricher is actually handed over.
+      const stubManager = createChildSessionManagerStub();
+      let options: ChildSessionOptions | undefined;
+      const client = new MinimalDapClient('localhost', 5678, JsDebugAdapterPolicy, {
+        childSessionManagerFactory: (opts) => {
+          options = opts;
+          return stubManager as unknown as ChildSessionManager;
+        }
+      });
+
+      expect(options?.enrichConfig).toBeTypeOf('function');
+
+      // What sendRequest records when the parent's 'launch' goes out
+      (client as unknown as { lastStartRequestArgs: Record<string, unknown> }).lastStartRequestArgs = {
+        request: 'launch',
+        stopOnEntry: false,
+        program: '/app.js'
+      };
+
+      const bare: ChildSessionConfig = {
+        pendingId: 'pending-1',
+        host: 'localhost',
+        port: 5678,
+        parentConfig: { type: 'pwa-node', name: 'fork', __pendingTargetId: 'pending-1' }
+      };
+      const enriched = options!.enrichConfig!(bare);
+
+      expect(enriched.parentConfig).toMatchObject({
+        request: 'launch',
+        stopOnEntry: false,
+        type: 'pwa-node',
+        __pendingTargetId: 'pending-1'
+      });
+      // Only an attach parent's extras ride along; js-debug binds a launched
+      // target to the parent's own launch config itself
+      expect(enriched.parentConfig).not.toHaveProperty('program');
+      // The caller's config is not mutated
+      expect(bare.parentConfig).toEqual({ type: 'pwa-node', name: 'fork', __pendingTargetId: 'pending-1' });
+
+      client.shutdown('test');
     });
 
     it('flushChildEvents returns undefined when the policy has no child sessions (issue #378)', () => {
