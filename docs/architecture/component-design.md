@@ -212,6 +212,13 @@ ProxyManager spawns and communicates with a debug proxy worker process over IPC 
 3. **Functional Core Integration**
    - Uses pure functions from dap-core for state management
    - Commands pattern for side effects
+   - Two message kinds are handled imperatively first and are therefore NOT
+     re-emitted from the core's commands: DAP events (the `handleDapEvent()`
+     fast path, so a stop is never delayed by the command loop) and proxy
+     status messages, whose emits carry latches the core cannot see — the
+     `initialized` latch, the `exitEmitted` latch of issue #258. The core
+     returns state transitions for status messages and no commands at all
+     (issue #713); `dapEvent` still needs the explicit skip below.
    ```typescript
    const result = handleProxyMessage(this.dapState, message);
    
@@ -222,6 +229,8 @@ ProxyManager spawns and communicates with a debug proxy worker process over IPC 
          this.logger[command.level](command.message, command.data);
          break;
        case 'emitEvent':
+         // handleDapEvent() above already emitted this one
+         if (message.type === 'dapEvent') break;
          this.emit(command.event as any, ...command.args);
          break;
        // ...

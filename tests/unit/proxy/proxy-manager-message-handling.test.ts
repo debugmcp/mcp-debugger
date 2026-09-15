@@ -97,9 +97,9 @@ describe('ProxyManager Message Handling', () => {
     });
 
     it('emits adapter-capabilities exactly once per status message (issue #243)', () => {
-      // Status messages run through BOTH the imperative handler and the
-      // functional core; adapter_capabilities must only be emitted by the
-      // former or the payload would be clobbered by an empty-args re-emit.
+      // The imperative handler is the sole emitter of status-derived events
+      // (the functional core issues no commands for a status, issue #713);
+      // a second, empty-args re-emit would clobber this payload.
       const capabilities = {
         supportsExceptionInfoRequest: true,
         exceptionBreakpointFilters: [{ filter: 'uncaught', label: 'Uncaught' }]
@@ -122,11 +122,12 @@ describe('ProxyManager Message Handling', () => {
     });
 
     it('emits each status-derived event exactly once (issue #713)', () => {
-      // Every status message runs through BOTH the imperative handler and the
-      // functional core. The imperative handler owns the emits (and their
-      // latches); before #713 the core's emitEvent commands re-fired
-      // adapter-configured, init-received, dry-run-complete and initialized
-      // on every listener, so a non-idempotent listener ran twice per launch.
+      // Every status message reaches both the imperative handler and the
+      // functional core, but only the imperative handler emits: the core
+      // returns state transitions and no commands. Before #713 it pushed
+      // emitEvent commands too, re-firing adapter-configured, init-received,
+      // dry-run-complete and initialized on every listener, so a
+      // non-idempotent listener ran twice per launch.
       const counts: Record<string, number> = {};
       const events = ['init-received', 'dry-run-complete', 'initialized', 'adapter-configured', 'exit'] as const;
       for (const event of events) {
@@ -159,7 +160,7 @@ describe('ProxyManager Message Handling', () => {
 
     it('emits breakpoints-synced exactly once per status message (issue #439)', () => {
       // Same single-emission rule as adapter_capabilities: the imperative
-      // handler emits, the functional core has no case for the status.
+      // handler is the only emitter of status-derived events.
       const breakpoints = [
         { id: 'bp-1', file: '/work/app.py', line: 5, verified: true, adapterId: 42 }
       ];
@@ -1295,8 +1296,8 @@ describe('ProxyManager Message Handling', () => {
         fileSystem as never,
         logger
       );
-      // Arm the functional core so both the imperative handler and the
-      // dap-core executor see the message — the duplicate-emit path.
+      // Arm the functional core so the message reaches the dap-core executor
+      // as well as the imperative handler — the historical duplicate-emit path.
       (proxyManager as unknown as { dapState: unknown }).dapState =
         createInitialState('status-session');
 
