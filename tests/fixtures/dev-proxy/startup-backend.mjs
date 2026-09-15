@@ -2,7 +2,7 @@ import { access } from 'node:fs/promises';
 import { setTimeout } from 'node:timers/promises';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
 if (process.env.DEV_PROXY_FIXTURE_FAIL === '1') process.exit(1);
 
@@ -21,6 +21,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     description: 'Tool from the startup fixture',
     inputSchema: { type: 'object', properties: {} },
   }],
+}));
+// Answering at all is the point: it proves the proxy forwarded the call rather
+// than refusing it while the backend was still starting.
+server.setRequestHandler(CallToolRequestSchema, async (request) => ({
+  content: [{ type: 'text', text: `startup fixture handled ${request.params.name}` }],
 }));
 process.stdin.on('end', () => process.exit(0));
 await server.connect(new StdioServerTransport());

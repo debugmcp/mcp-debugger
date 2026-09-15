@@ -18,6 +18,8 @@
  *   DEV_PROXY_ROOT               - Project root (default: auto-detected)
  *   DEV_PROXY_BACKEND_TRANSPORT  - "http" (default), "sse" (legacy), or "stdio"
  *   DEV_PROXY_BACKEND_CMD        - Custom backend command override (e.g. "docker run ...")
+ *   DEV_PROXY_DISCOVERY_WAIT_MS  - How long a request waits for a backend start
+ *                                  or restart to settle (default: 15000)
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -56,7 +58,6 @@ import {
 } from './docker-backend.mjs';
 import { buildBackendEnvironment, resolveBackendPort, updateBackendEnvOverrides } from './backend-env.mjs';
 import { LifecycleQueue } from './lifecycle-queue.mjs';
-import { createInitialStartupGate } from './initial-startup.mjs';
 import { isBackendUnavailableError, dedupeMcpErrorPrefix, assertBackendAvailable } from './tool-error.mjs';
 
 // ---------------------------------------------------------------------------
@@ -74,6 +75,16 @@ const BACKEND_CMD = process.env.DEV_PROXY_BACKEND_CMD || null;
 
 const parsedTimeout = parseInt(process.env.DEV_PROXY_BUILD_TIMEOUT_MS || '', 10);
 const BUILD_TIMEOUT_MS = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 120000;
+
+// How long a request will wait for an in-flight backend start or restart.
+// Deliberately NOT tied to HEALTH_POLL_TIMEOUT_MS: that bounds how patient the
+// proxy is with its own child, whereas this bounds how long a CLIENT is made to
+// wait — and the binding constraint there is the client's MCP startup timeout
+// (30s in Claude Code). Staying well under it keeps a stuck backend from
+// costing the client its connection.
+const parsedDiscoveryWait = parseInt(process.env.DEV_PROXY_DISCOVERY_WAIT_MS || '', 10);
+const DISCOVERY_WAIT_MS =
+  Number.isFinite(parsedDiscoveryWait) && parsedDiscoveryWait >= 0 ? parsedDiscoveryWait : 15000;
 
 const HEALTH_POLL_INTERVAL_MS = 300;
 const HEALTH_POLL_TIMEOUT_MS = 30000;
@@ -373,9 +384,32 @@ class BackendManager {
     return buildOutput;
   }
 
-  async callTool(name, args) {
+  /**
+   * Resolve once no lifecycle operation is in flight, so a request that lands
+   * during the initial start or a restart sees the backend it is about to get
+   * rather than the one it has (issue #716). Re-arms itself for every restart,
+   * because it reads the live queue instead of a one-shot gate.
+   *
+   * @param {{ timeoutMs?: number, signal?: AbortSignal }} [options]
+   * @returns {Promise<boolean>} true when the backend settled within the bound.
+   */
+  whenReady({ timeoutMs = DISCOVERY_WAIT_MS, signal } = {}) {
+    return this.lifecycleQueue.idle({ timeoutMs, signal });
+  }
+
+  async callTool(name, args, { signal } = {}) {
     if (this.state !== 'running' || !this.mcpClient) {
-      throw new Error(`Backend is ${this.state} — cannot call tool "${name}". Use dev_restart_debugger to start it.`);
+      // Wait out a start/restart rather than refusing: the old refusal pointed
+      // at dev_restart_debugger, and an agent following that hint queued a
+      // second restart that tore down the backend about to become healthy.
+      await this.whenReady({ signal });
+    }
+    if (this.state !== 'running' || !this.mcpClient) {
+      throw new Error(
+        this.state === 'stopped'
+          ? `Backend is stopped — cannot call tool "${name}". Use dev_restart_debugger to start it.`
+          : `Backend is ${this.state} and did not settle within ${DISCOVERY_WAIT_MS}ms — cannot call tool "${name}" yet. Retry once dev_server_status reports "running".`
+      );
     }
     return await this.mcpClient.callTool({ name, arguments: args });
   }
@@ -838,9 +872,6 @@ async function main() {
   }
 
   const backend = new BackendManager();
-  // Install the wait before accepting requests, so initial discovery cannot
-  // race startup. Status and recovery tools remain callable while it waits.
-  const initialStartup = createInitialStartupGate(HEALTH_POLL_TIMEOUT_MS);
 
   // Create the MCP Server that Claude Code talks to (via stdio)
   const server = new Server(
@@ -855,9 +886,11 @@ async function main() {
     });
   };
 
-  // ListTools: forward live to backend, fall back to dev-tools-only when backend is down
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
-    await initialStartup.ready;
+  // ListTools: forward live to backend, fall back to dev-tools-only when backend is down.
+  // The wait keeps the first inventory from being taken before the backend has
+  // started (issue #716); a cancelled request stops waiting with the client.
+  server.setRequestHandler(ListToolsRequestSchema, async (_request, extra) => {
+    await backend.whenReady({ signal: extra?.signal });
     if (backend.state === 'running' && backend.mcpClient) {
       try {
         const result = await backend.mcpClient.listTools();
@@ -870,17 +903,18 @@ async function main() {
   });
 
   // CallTool: route dev_* locally, forward everything else to backend
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const { name, arguments: args } = request.params;
 
-    // Dev tools are always handled locally
+    // Dev tools are always handled locally — status and recovery stay callable
+    // while a start or restart is still in flight.
     if (name.startsWith('dev_')) {
       return await handleDevTool(backend, server, name, args);
     }
 
     // Forward to backend
     try {
-      const result = await backend.callTool(name, args || {});
+      const result = await backend.callTool(name, args || {}, { signal: extra?.signal });
       return result;
     } catch (err) {
       // A well-formed JSON-RPC error from a running backend (e.g. -32602
@@ -888,7 +922,12 @@ async function main() {
       // the restart hint, which would send agents on a false detour (#304).
       const body = { error: dedupeMcpErrorPrefix(err.message) };
       if (isBackendUnavailableError(err, backend.state)) {
-        body.hint = `The mcp-debugger backend is not reachable (state: ${backend.state}). Use dev_server_status to check, or dev_restart_debugger to restart it.`;
+        // Only a stopped backend wants restarting. Telling an agent to restart
+        // one that is mid-start queues a second restart that kills it (#716).
+        body.hint =
+          backend.state === 'stopped'
+            ? `The mcp-debugger backend is not reachable (state: ${backend.state}). Use dev_server_status to check, or dev_restart_debugger to restart it.`
+            : `The mcp-debugger backend is ${backend.state} and did not settle within ${DISCOVERY_WAIT_MS}ms. Retry the call; use dev_server_status to watch it — do NOT restart it.`;
       }
       return {
         content: [{ type: 'text', text: JSON.stringify(body, null, 2) }],
@@ -911,20 +950,44 @@ async function main() {
     return { resources: [] };
   });
 
-  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+  server.setRequestHandler(ReadResourceRequestSchema, async (request, extra) => {
+    await backend.whenReady({ signal: extra?.signal });
     assertBackendAvailable(backend);
     return await backend.mcpClient.readResource(request.params);
   });
 
-  server.setRequestHandler(SubscribeRequestSchema, async (request) => {
+  server.setRequestHandler(SubscribeRequestSchema, async (request, extra) => {
+    await backend.whenReady({ signal: extra?.signal });
     assertBackendAvailable(backend);
     return await backend.mcpClient.subscribeResource(request.params);
   });
 
-  server.setRequestHandler(UnsubscribeRequestSchema, async (request) => {
+  server.setRequestHandler(UnsubscribeRequestSchema, async (request, extra) => {
+    await backend.whenReady({ signal: extra?.signal });
     assertBackendAvailable(backend);
     return await backend.mcpClient.unsubscribeResource(request.params);
   });
+
+  // Exit when the MCP client goes away — stdin EOF/close/error, protocol-level
+  // server close, or SIGINT/SIGTERM — stopping the backend child on the way out.
+  // Installed before backend.start() so a client that dies during a slow backend
+  // startup still triggers shutdown (backend.stop() handles the 'starting' state).
+  // Without this, on Windows both the proxy and its backend outlive a dead
+  // Claude Code forever (issue #122). Safe to install before server.connect():
+  // only 'end'/'close'/'error' go on stdin, none of which make it flow.
+  installShutdownHandlers({ stdin: process.stdin, backend, server, log });
+
+  // Queue the automatic start BEFORE the transport goes live, so the first
+  // tools/list finds a lifecycle operation in flight and waits for it rather
+  // than racing it to a dev-tools-only inventory (issue #716).
+  const initialStart = backend.start().then(
+    () => true,
+    (err) => {
+      log(`Initial backend start failed: ${err.message}`);
+      log('Dev tools are still available — use dev_restart_debugger to retry');
+      return false;
+    }
+  );
 
   // Connect to stdio transport for Claude Code
   const transport = new StdioServerTransport();
@@ -932,25 +995,9 @@ async function main() {
 
   log(`Proxy server connected to stdio (backend transport: ${BACKEND_TRANSPORT})`);
 
-  // Exit when the MCP client goes away — stdin EOF/close/error, protocol-level
-  // server close, or SIGINT/SIGTERM — stopping the backend child on the way out.
-  // Installed before backend.start() so a client that dies during a slow backend
-  // startup still triggers shutdown (backend.stop() handles the 'starting' state).
-  // Without this, on Windows both the proxy and its backend outlive a dead
-  // Claude Code forever (issue #122).
-  installShutdownHandlers({ stdin: process.stdin, backend, server, log });
-
-  // Start the backend automatically
-  try {
-    await backend.start();
-    initialStartup.complete();
-    // Also refresh clients whose initial discovery hit the bounded wait.
+  if (await initialStart) {
+    // Refresh clients whose discovery gave up before the backend was ready.
     await server.sendToolListChanged();
-  } catch (err) {
-    log(`Initial backend start failed: ${err.message}`);
-    log('Dev tools are still available — use dev_restart_debugger to retry');
-  } finally {
-    initialStartup.complete();
   }
 }
 

@@ -20,4 +20,16 @@ export class LifecycleQueue {
    *   rejection is contained here and never blocks the next caller.
    */
   run<T>(operation: () => Promise<T>): Promise<T>;
+
+  /**
+   * Resolve once nothing is queued — the bounded, abortable wait behind
+   * `BackendManager.whenReady` (issue #716).
+   *
+   * @param options `timeoutMs` defaults to 0, i.e. "do not wait at all"; every
+   *   caller that means to wait passes its own bound.
+   * @returns `true` when the queue drained, `false` when `timeoutMs` elapsed
+   *   or `signal` aborted first. Never rejects: a failed operation still
+   *   drains the queue.
+   */
+  idle(options?: { timeoutMs?: number; signal?: AbortSignal }): Promise<boolean>;
 }

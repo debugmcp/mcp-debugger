@@ -503,6 +503,7 @@ The dev proxy (`tools/dev-proxy/dev-proxy.mjs`) is a lightweight MCP proxy that 
 - `DEV_PROXY_ROOT` — Project root (default: auto-detected)
 - `DEV_PROXY_BACKEND_TRANSPORT` — `http` (default), `sse` (legacy/deprecated), or `stdio`
 - `DEV_PROXY_BACKEND_CMD` — Custom backend command override (e.g. `docker run ...`)
+- `DEV_PROXY_DISCOVERY_WAIT_MS` — How long a request waits for a backend start or restart to settle (default: 15000; keep it under the client's MCP startup timeout, `0` disables the wait)
 
 #### Verify Installation
 

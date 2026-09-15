@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { setTimeout } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -16,6 +17,15 @@ afterEach(async () => {
   await Promise.all(clients.splice(0).map(client => client.close()));
   await Promise.all(directories.splice(0).map(dir => rm(dir, { recursive: true, force: true })));
 });
+
+/**
+ * Attach handlers now rather than at the first await. If an assertion in
+ * between throws, `afterEach`'s `client.close()` rejects the in-flight request
+ * and vitest reports an unhandled ConnectionClosed on top of the real failure.
+ */
+function observe<T>(promise: Promise<T>): Promise<{ result?: T; error?: unknown }> {
+  return promise.then(result => ({ result }), (error: unknown) => ({ error }));
+}
 
 async function connect(env: Record<string, string> = {}) {
   const client = new Client({ name: 'startup-test', version: '1.0.0' });
@@ -86,5 +96,37 @@ describe('dev-proxy initial tool discovery (issue #716)', () => {
       expect((await client.listTools()).tools.map(tool => tool.name)).toEqual([name, ...devTools]);
     }
     expect(notifications).toHaveLength(2);
+  });
+
+  it('holds a tool call for an in-flight restart instead of refusing it', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'mcp-proxy-restart-'));
+    directories.push(dir);
+    const releaseFile = path.join(dir, 'ready');
+    const { client } = await connect();
+    expect((await client.listTools()).tools.map(tool => tool.name)).toEqual(['fixture_tool', ...devTools]);
+
+    // Restart into a backend that cannot finish starting until it is released.
+    const restart = observe(client.callTool({
+      name: 'dev_restart_debugger',
+      arguments: { env: { DEV_PROXY_FIXTURE_RELEASE: releaseFile, DEV_PROXY_FIXTURE_TOOL: 'restarted_tool' } },
+    }));
+    await expect.poll(async () => {
+      const status = await client.callTool({ name: 'dev_server_status', arguments: {} });
+      return (status.content as Array<{ text: string }>)[0]?.text;
+    }, { timeout: 10000 }).toContain('"state": "starting"');
+
+    let answered = false;
+    const pending = observe(client.callTool({ name: 'restarted_tool', arguments: {} }))
+      .then(outcome => { answered = true; return outcome; });
+    // Long enough that a proxy which refuses mid-restart calls would already
+    // have answered — the wait, not a lucky race, is what this asserts.
+    await setTimeout(200);
+    expect(answered, 'the call was answered before the backend finished restarting').toBe(false);
+
+    await writeFile(releaseFile, 'ready');
+    const forwarded = await pending;
+    expect(forwarded.error).toBeUndefined();
+    expect(forwarded.result?.isError, JSON.stringify(forwarded.result)).not.toBe(true);
+    expect((await restart).result?.isError).not.toBe(true);
   });
 });
