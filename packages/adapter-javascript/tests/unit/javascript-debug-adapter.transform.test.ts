@@ -32,6 +32,7 @@ import {
 
 import { detectBinary } from '../../src/utils/typescript-detector.js';
 import { JavascriptDebugAdapter } from '../../src/index.js';
+import { scrubInheritedExitCodeShim } from '../../src/javascript-debug-adapter.js';
 
 // Minimal AdapterDependencies stub for constructor
 const deps = {
@@ -366,14 +367,20 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
       expect(env.NODE_OPTIONS).toContain(OUTER_BOOTLOADER);
       expect(env.MCP_DEBUGGER_EXITCODE_FILE).toMatch(/mcp-exitcode-[0-9a-f-]+\.txt$/);
       expect(env.MCP_DEBUGGER_EXITCODE_FILE).not.toBe('/outer/session/exit.txt');
-      // '' not deleted: the js-debug adapter process inherits the claim too and
-      // js-debug overlays the launch env on its own, so only an explicit empty
-      // value reaches the debuggee and re-arms the shim (it tests === '1')
+      // '' rather than a deletion: a defensive explicit overlay that costs
+      // nothing. js-debug builds the debuggee env on top of its own process
+      // env, which buildAdapterCommand scrubs too — spelling the cleared claim
+      // out leaves nothing to an ordering assumption, and '' re-arms the shim
+      // (it tests === '1')
       expect(env.MCP_DEBUGGER_EXITCODE_CLAIMED).toBe('');
     });
 
     it('scrubs the inherited shim keys whatever their case (process.env is case-insensitive on Windows)', async () => {
-      process.env.Node_Options = OUTER_SHIM;
+      // A NON-EMPTY remainder under the mixed-case key: that is what the fresh
+      // token could displace. Writing the remainder back under Node_Options
+      // while stamping ours under NODE_OPTIONS left win32's spawn to keep one
+      // of the two, and the bootloader token was the one that went.
+      process.env.Node_Options = `${OUTER_BOOTLOADER} ${OUTER_SHIM}`;
       process.env.Mcp_Debugger_Exitcode_File = '/outer/session/exit.txt';
       process.env.Mcp_Debugger_Exitcode_Claimed = '1';
       const withFs = new JavascriptDebugAdapter(depsWithFs);
@@ -387,9 +394,12 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
         expect.stringMatching(/mcp-exitcode-[0-9a-f-]+\.txt$/)
       ]);
       expect(byName('MCP_DEBUGGER_EXITCODE_CLAIMED').map(([, v]) => v)).toEqual(['']);
-      const optionValues = byName('NODE_OPTIONS').map(([, v]) => v).join(' ');
-      expect(optionValues).not.toContain('/prior/');
-      expect(optionValues.match(/exitcode-shim\.cjs/g) ?? []).toHaveLength(1);
+      // Exactly one NODE_OPTIONS, spelled canonically, carrying both the
+      // survivor and our single fresh token.
+      expect(byName('NODE_OPTIONS').map(([k]) => k)).toEqual(['NODE_OPTIONS']);
+      expect(env.NODE_OPTIONS).toContain(OUTER_BOOTLOADER);
+      expect(env.NODE_OPTIONS).not.toContain('/prior/');
+      expect(env.NODE_OPTIONS.match(/exitcode-shim\.cjs/g) ?? []).toHaveLength(1);
     });
 
     it('still drops the inherited exit-code file when its own shim asset cannot be resolved', async () => {
@@ -428,6 +438,114 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
       const env = cfg.env as Record<string, string>;
       expect(env.MCP_DEBUGGER_EXITCODE_FILE).toBeUndefined();
       expect(env.NODE_OPTIONS ?? '').not.toContain('exitcode-shim');
+    });
+
+    // The scrub runs on EVERY launch, so what it does to a NODE_OPTIONS
+    // carrying no shim at all is the common case, not the edge case. It used
+    // to collapse all runs of whitespace, which silently rewrote a quoted
+    // path containing two consecutive spaces into an unresolvable one and
+    // killed the debuggee at startup. Driven on the exported function rather
+    // than through a launch: the transform legitimately appends its own token,
+    // so byte-identity is only observable here.
+    describe('scrubInheritedExitCodeShim (issue #731)', () => {
+      const DOUBLE_SPACED = '--require "C:/Program  Files/x/preload.js" --trace-warnings';
+
+      it('leaves a NODE_OPTIONS with no shim token byte-identical', () => {
+        const env: Record<string, string> = { NODE_OPTIONS: DOUBLE_SPACED };
+
+        scrubInheritedExitCodeShim(env);
+
+        expect(env.NODE_OPTIONS).toBe(DOUBLE_SPACED);
+      });
+
+      it('keeps every surviving token intact when it does remove a shim', () => {
+        const env: Record<string, string> = {
+          NODE_OPTIONS: `${DOUBLE_SPACED} --require "/prior/exitcode-shim.cjs"`
+        };
+
+        scrubInheritedExitCodeShim(env);
+
+        expect(env.NODE_OPTIONS).toBe(DOUBLE_SPACED);
+      });
+
+      it('removes an unquoted shim token together with its leading whitespace', () => {
+        const env: Record<string, string> = {
+          NODE_OPTIONS: '--require /prior/exitcode-shim.cjs --trace-warnings'
+        };
+
+        scrubInheritedExitCodeShim(env);
+
+        expect(env.NODE_OPTIONS).toBe('--trace-warnings');
+      });
+
+      it('does not treat a path that merely starts with the shim name as the shim', () => {
+        const prefix = '--require "/proj/exitcode-shim.cjs.d/hook.js"';
+        const env: Record<string, string> = { NODE_OPTIONS: prefix };
+
+        scrubInheritedExitCodeShim(env);
+
+        expect(env.NODE_OPTIONS).toBe(prefix);
+      });
+
+      it('drops NODE_OPTIONS entirely when the shim was all it held', () => {
+        const env: Record<string, string> = { NODE_OPTIONS: '--require "/prior/exitcode-shim.cjs"' };
+
+        scrubInheritedExitCodeShim(env);
+
+        expect(env).not.toHaveProperty('NODE_OPTIONS');
+      });
+
+      // process.env is case-insensitive on Windows but a { ...process.env }
+      // copy is not, so the inherited value can arrive under any spelling.
+      // Writing the remainder back under the mixed-case key lost it: Node's
+      // win32 spawn keeps one of the two, and the fresh token goes under the
+      // canonical name.
+      it('canonicalizes a mixed-case key so the remainder is not lost to the fresh token', () => {
+        const env: Record<string, string> = {
+          Node_Options: '--require "/outer/bootloader.js" --require "/prior/exitcode-shim.cjs"'
+        };
+
+        scrubInheritedExitCodeShim(env);
+
+        const keys = Object.keys(env).filter((k) => k.toUpperCase() === 'NODE_OPTIONS');
+        expect(keys).toEqual(['NODE_OPTIONS']);
+        expect(env.NODE_OPTIONS).toBe('--require "/outer/bootloader.js"');
+      });
+
+      it('joins a mixed-case remainder onto an existing canonical value', () => {
+        const env: Record<string, string> = {
+          NODE_OPTIONS: '--trace-warnings',
+          Node_Options: '--require "/outer/bootloader.js" --require "/prior/exitcode-shim.cjs"'
+        };
+
+        scrubInheritedExitCodeShim(env);
+
+        const keys = Object.keys(env).filter((k) => k.toUpperCase() === 'NODE_OPTIONS');
+        expect(keys).toEqual(['NODE_OPTIONS']);
+        expect(env.NODE_OPTIONS).toContain('--trace-warnings');
+        expect(env.NODE_OPTIONS).toContain('--require "/outer/bootloader.js"');
+      });
+    });
+
+    // The pre-PR opt-out: a caller who wants the debuggee to run WITHOUT our
+    // exit handler sets the claim themselves. The scrub must not eat it, so it
+    // runs on the inherited process env before the caller's env is overlaid,
+    // not after (issue #731).
+    it('leaves a caller-supplied exit-code claim alone while still scrubbing the inherited one', async () => {
+      process.env.NODE_OPTIONS = '--require "/prior/exitcode-shim.cjs"';
+      process.env.MCP_DEBUGGER_EXITCODE_FILE = '/outer/session/exit.txt';
+      process.env.MCP_DEBUGGER_EXITCODE_CLAIMED = '1';
+      const withFs = new JavascriptDebugAdapter(depsWithFs);
+
+      const cfg = await withFs.transformLaunchConfig({
+        program: path.resolve('/proj/app.js'),
+        env: { MCP_DEBUGGER_EXITCODE_CLAIMED: '1' }
+      } as any);
+
+      const env = cfg.env as Record<string, string>;
+      expect(env.MCP_DEBUGGER_EXITCODE_CLAIMED).toBe('1');
+      expect(env.NODE_OPTIONS ?? '').not.toContain('/prior/');
+      expect(env.MCP_DEBUGGER_EXITCODE_FILE).not.toBe('/outer/session/exit.txt');
     });
 
     it('leaves attach configs untouched', async () => {

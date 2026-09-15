@@ -37,12 +37,16 @@ describe('JavascriptDebugAdapter.buildAdapterCommand (edge/env stability)', () =
   afterEach(() => {
     vi.restoreAllMocks();
     vi.clearAllMocks();
+    // These tests stub NODE_OPTIONS and the exit-code shim triplet; without
+    // this the stubs outlive the test and steer whatever runs next.
+    vi.unstubAllEnvs();
   });
 
   it('does not hand the js-debug adapter process an inherited exit-code shim env (issue #731)', () => {
     // A nested server inherits the outer session's shim triplet; the adapter
-    // process it spawns must not carry it either, or js-debug's env overlay
-    // re-supplies the outer claim/file to every inner debuggee
+    // process it spawns must not carry it either, since js-debug builds every
+    // debuggee env on top of its own process env. Scrubbing here is what makes
+    // the debuggee's explicit empty claim merely defensive rather than load-bearing.
     const adapter = new JavascriptDebugAdapter(deps);
     vi.stubEnv('NODE_OPTIONS', '--require "/outer/bootloader.js" --require "/prior/exitcode-shim.cjs"');
     vi.stubEnv('MCP_DEBUGGER_EXITCODE_FILE', '/outer/session/exit.txt');

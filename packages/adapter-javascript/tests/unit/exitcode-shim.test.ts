@@ -91,10 +91,38 @@ describe('exitcode-shim.cjs', () => {
     expect(fs.readFileSync(exitFile, 'utf8').trim()).toBe('5');
   });
 
+  // The claim is the first line of defence and a descendant can lose it — a
+  // nested launch deliberately clears it. The root's file variable is the
+  // second: the shim consumes it, so nothing below the root can address the
+  // root's file even with the claim gone.
+  it('no descendant can write the root file once the shim has consumed it (issue #731)', () => {
+    const exitFile = nextExitFile();
+    // The spawn happens in an 'exit' handler registered AFTER the shim's, so
+    // it runs second and the descendant is the last writer of the two — the
+    // ordering in which an inherited file variable actually corrupts the
+    // root's recorded code.
+    const script = [
+      "const { spawnSync } = require('child_process');",
+      "process.on('exit', () => {",
+      "  spawnSync(process.execPath, ['-e', 'process.exit(9)'], {",
+      "    env: { ...process.env, MCP_DEBUGGER_EXITCODE_CLAIMED: '' },",
+      "    stdio: 'ignore'",
+      '  });',
+      '});',
+      'process.exit(3);'
+    ].join('\n');
+    const status = runNode(script, exitFile);
+    expect(status).toBe(3);
+    expect(fs.readFileSync(exitFile, 'utf8').trim()).toBe('3');
+  });
+
   it('an explicit empty claim re-arms the shim for a process whose parent had claimed it (issue #731)', () => {
     // A nested mcp-debugger inherits MCP_DEBUGGER_EXITCODE_CLAIMED=1 from the
-    // outer session; its adapter hands the inner debuggee '' (not a deletion,
-    // which js-debug's env overlay would not propagate) plus a fresh file.
+    // outer session; its adapter hands the inner debuggee an explicit '' plus
+    // a fresh file. The '' is a defensive explicit overlay that costs nothing:
+    // js-debug builds the debuggee env on top of its own process env, which
+    // the adapter scrubs too, so spelling the cleared claim out simply leaves
+    // nothing to an ordering assumption.
     const exitFile = nextExitFile();
     const script = [
       "const { spawnSync } = require('child_process');",

@@ -71,7 +71,15 @@ afterEach(async () => {
   targetClient = undefined;
   sessionId = undefined;
   if (innerDir) {
-    rmSync(innerDir, { recursive: true, force: true });
+    // Best-effort: on Windows a file the nested server still holds open makes
+    // this throw EPERM, which would abort the hook and skip the sibling that
+    // closes the outer CLI — leaking the heaviest process in the suite over a
+    // temp directory the OS will reclaim anyway.
+    try {
+      rmSync(innerDir, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
     innerDir = undefined;
   }
 }, 30000);

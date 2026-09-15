@@ -95,6 +95,18 @@ const UNSAFE_OBJECT_KEYS: ReadonlySet<string> = new Set(['__proto__', 'construct
 const DEFAULT_RESOLVE_SOURCE_MAP_LOCATIONS = ['**', '!**/node_modules/**'];
 
 /**
+ * Our own `--require` of the exit-code shim inside a NODE_OPTIONS value, in
+ * both the quoted form the adapter writes and the bare form a hand-rolled
+ * env might carry. Each eats its own leading whitespace so removing it leaves
+ * the neighbouring tokens untouched, and each requires a token boundary after
+ * the path so `exitcode-shim.cjs.d/hook.js` — a different file that merely
+ * starts with the same name — is not mistaken for ours. The quoted pattern
+ * runs first: the bare `\S*` would otherwise swallow the opening quote.
+ */
+const QUOTED_EXITCODE_SHIM_TOKEN = /\s*--require\s+"[^"]*exitcode-shim\.cjs"(?=\s|$)/g;
+const BARE_EXITCODE_SHIM_TOKEN = /\s*--require\s+\S*exitcode-shim\.cjs(?=\s|$)/g;
+
+/**
  * Strip an inherited exit-code shim environment from `env` in place
  * (issue #731).
  *
@@ -109,24 +121,44 @@ const DEFAULT_RESOLVE_SOURCE_MAP_LOCATIONS = ['**', '!**/node_modules/**'];
  * copy is not. Only our own `--require` token is removed from `NODE_OPTIONS`;
  * everything else in it (js-debug's bootloader, user flags) survives.
  *
+ * A NODE_OPTIONS holding no shim token of ours is left byte-identical, and a
+ * value we do edit is only trimmed. This runs on every launch, so collapsing
+ * its whitespace wholesale rewrote quoted paths that legitimately contain two
+ * consecutive spaces into unresolvable ones and killed the debuggee at
+ * startup.
+ *
+ * A value found under a non-canonical spelling is rewritten under
+ * `NODE_OPTIONS` and the original key deleted: the fresh token below goes
+ * under the canonical name, and Node's win32 spawn keeps only one of the two,
+ * so leaving the remainder where it was lost it.
+ *
  * An inherited claim is replaced by an explicit empty value rather than
- * deleted: js-debug overlays the launch env on its own process env, so a
- * deleted key would resurface as `1` from the adapter process, while `''`
- * reaches the debuggee and re-arms the shim (it tests `=== '1'`).
+ * deleted. `''` is a defensive explicit overlay that costs nothing: js-debug
+ * builds the debuggee's env on top of its own process env, and while that
+ * process env is scrubbed too, spelling the cleared claim out leaves nothing
+ * to an ordering assumption — `''` reaches the debuggee and re-arms the shim,
+ * which tests `=== '1'`.
  */
 export function scrubInheritedExitCodeShim(env: Record<string, string>): void {
   let claimInherited = false;
+  // NODE_OPTIONS survivors in key order, so a mixed-case spelling folds into
+  // the canonical one instead of racing it at spawn time. Only written back
+  // when something was actually removed or renamed.
+  const nodeOptionRemainders: string[] = [];
+  let rewriteNodeOptions = false;
+
   for (const key of Object.keys(env)) {
     switch (key.toUpperCase()) {
       case 'NODE_OPTIONS': {
-        const stripped = env[key]
-          .replace(/--require\s+"[^"]*exitcode-shim\.cjs"/g, '')
-          .replace(/--require\s+\S*exitcode-shim\.cjs/g, '')
-          .replace(/\s+/g, ' ')
-          .trim();
-        if (stripped) {
-          env[key] = stripped;
-        } else {
+        const value = env[key];
+        const stripped = value
+          .replace(QUOTED_EXITCODE_SHIM_TOKEN, '')
+          .replace(BARE_EXITCODE_SHIM_TOKEN, '');
+        if (stripped !== value || key !== 'NODE_OPTIONS') {
+          rewriteNodeOptions = true;
+        }
+        nodeOptionRemainders.push(stripped.trim());
+        if (key !== 'NODE_OPTIONS') {
           delete env[key];
         }
         break;
@@ -140,6 +172,15 @@ export function scrubInheritedExitCodeShim(env: Record<string, string>): void {
         break;
       default:
         break;
+    }
+  }
+
+  if (rewriteNodeOptions) {
+    const remainder = nodeOptionRemainders.filter(Boolean).join(' ');
+    if (remainder) {
+      env.NODE_OPTIONS = remainder;
+    } else {
+      delete env.NODE_OPTIONS;
     }
   }
   if (claimInherited) {
@@ -520,6 +561,11 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     for (const [k, v] of Object.entries(process.env)) {
       if (typeof v === 'string') mergedEnv[k] = v;
     }
+    // Scrub the INHERITED shim env before the caller's env is overlaid, not
+    // after: a caller who sets MCP_DEBUGGER_EXITCODE_CLAIMED themselves is
+    // opting the debuggee out of our exit handler, and a scrub running later
+    // silently replaced that with our own claim (issue #731).
+    scrubInheritedExitCodeShim(mergedEnv);
     const userEnv = (u.env as Record<string, unknown> | undefined);
     if (userEnv && typeof userEnv === 'object') {
       for (const [k, v] of Object.entries(userEnv)) {
@@ -845,13 +891,11 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
    * gracefully to today's behavior (no exitCode), never a failed launch.
    */
   private injectExitCodeShim(env: Record<string, string>): void {
-    // The merged env starts from process.env, so a server that is itself a
-    // js-debug debuggee carries the outer session's shim env. Replace it with
-    // our own rather than skipping the preload (issue #731) - and do so before
-    // the asset lookup below, so a missing asset never leaves the outer
-    // session's exit-code file in the inner launch config.
-    scrubInheritedExitCodeShim(env);
-
+    // The inherited shim env is already gone: transformLaunchConfig scrubs the
+    // process.env copy before overlaying the caller's env, so this only ever
+    // stamps (issue #731). Keeping the scrub out of here is what lets a
+    // caller-supplied claim survive; buildAdapterCommand still runs its own
+    // for the adapter process.
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);
     const candidates = [
