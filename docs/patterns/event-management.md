@@ -464,10 +464,7 @@ assigns a `StubProxyProcess` onto the manager's private `proxyProcess` field and
 calls the private `handleProxyMessage` directly; and
 `proxy-manager.handshake.test.ts` spies on `sendCommand` and emits
 `'init-received'` on the manager itself, driving `sendInitWithRetry`'s backoff
-under fake timers. A reusable off-the-shelf `FakeProxyProcessLauncher` — with
-`prepareProxy()`, `getLastLaunchedProxy()` and `simulateExit()` — lives in
-`tests/implementations/test/fake-process-launcher.ts` for suites that would
-rather not hand-roll one.
+under fake timers.
 
 ### Testing Event Cleanup
 

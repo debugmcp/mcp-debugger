@@ -579,26 +579,36 @@ it('should propagate spawn errors', async () => {
 
 ### 3. Testing Error Recovery
 
-Shape only — `fakeLauncher` here is a `FakeProxyProcessLauncher` from
-`tests/implementations/test/fake-process-launcher.ts`, whose `prepareProxy()`
-seeds the next launch with a `FakeProxyProcess` you can drive:
+Shape only — paraphrased from `tests/unit/proxy/proxy-manager.start.test.ts`
+("rejects with the worker's init-failure report when it precedes the adapter
+exit"). `fakeProcess` is the suite's hand-rolled `IProxyProcess` double and
+`sendCommand.mockImplementation` scripts what the worker sends back:
 
 ```typescript
-it('should clean up on error', async () => {
-  // Simulate error during initialization
-  fakeLauncher.prepareProxy((proxy) => {
+it("rejects with the worker's init-failure report when it precedes the adapter exit", async () => {
+  const report = 'Critical initialization error: Failed to launch: …';
+  fakeProcess.sendCommand.mockImplementation((cmd) => {
+    if (cmd.cmd !== 'init') return;
     setTimeout(() => {
-      proxy.simulateProcessError(new Error('Initialization failed'));
-    }, 50);
+      fakeProcess.emit('message', { type: 'status', status: 'init_received', sessionId: cmd.sessionId });
+      setTimeout(() => {
+        fakeProcess.emit('message', { type: 'error', sessionId: cmd.sessionId, message: report });
+        fakeProcess.emit('message', { type: 'status', status: 'adapter_exited', sessionId: cmd.sessionId, code: 0, signal: null, expected: false });
+        fakeProcess.emit('exit', 0, null);
+      }, 0);
+    }, 0);
   });
 
-  await expect(proxyManager.start(defaultConfig)).rejects.toThrow('Initialization failed');
-  
-  // Verify cleanup
-  expect(proxyManager.isRunning()).toBe(false);
-  expect(proxyManager.getCurrentThreadId()).toBe(null);
+  const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+  await expect(startPromise).rejects.toThrow(report);
+  await expect(startPromise).rejects.not.toThrow(/Proxy exited during initialization/);
 });
 ```
+
+Every emit is deferred with `setTimeout(…, 0)` so it lands after `start()` has
+subscribed. The two assertions pin the precedence rule the manager implements: a
+failure the worker reports itself, arriving before the exit, is what the caller
+sees — not the generic "exited during initialization" message.
 
 ## Best Practices
 

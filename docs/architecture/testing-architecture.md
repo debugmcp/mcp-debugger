@@ -86,11 +86,12 @@ The singleton `portManager` tracks allocations in an in-process `Set<number>`. T
 
 ## Mock Architecture
 
-The project maintains three kinds of test double, in three places:
+The project maintains two kinds of test double, in two places:
 
 - **Mocks** (`tests/test-utils/mocks/`) — `vi.fn()`-based objects for call tracking and assertion. Answer: "was this method called with these arguments?"
-- **Functional fakes** (`tests/implementations/test/`) — lightweight implementations with deterministic behavior. Answer: "given this input, does the system produce the right output?"
 - **Compile-checked fakes** (`tests/test-utils/fakes/`) — classes that `implements` a production interface, so the *compiler* rejects them the moment the interface moves.
+
+There is no shared spawned-process fake. A suite that needs one compile-checks it locally — `class FakeProxyProcess extends EventEmitter implements IProxyProcess` in `tests/unit/proxy/proxy-manager.start.test.ts` — and drives it with `emit(...)`; see *Event-Driven Testing* below.
 
 ### Compile-Checked Fakes
 
@@ -140,21 +141,7 @@ Each returns a full `IAdapterRegistry` with `vi.fn()` methods. Helper functions:
 
 **`createMockFileSystem()` / `createMockProcessSpawner()`** (`dap-proxy-doubles.ts`) — the rest of the proxy worker's dependency slice, typed to the worker-local `IFileSystem` and `IProcessSpawner` in `src/proxy/dap-proxy-interfaces.ts`. The file-system one is the point: the worker's `IFileSystem` is a four-member slice of `@debugmcp/shared`'s, and a double typed to the wide interface would hide a member the worker starts calling. The worker's logger is the ordinary `createMockLogger()` from `helpers/test-dependencies.ts` — the worker-local `ILogger` (`...args: unknown[]`) is the *wider* signature, so shared's double is assignable to it. Shared by the proxy-worker and go-initialized-fallback tests alongside `createMockDapClient()`.
 
-**`MockChildProcess` / `ChildProcessMock`** (`child-process.ts`) — `MockChildProcess` extends `EventEmitter` with `kill`, `send`, `pid`, `killed`, and streams. Helpers: `simulateExit()`, `simulateError()`, `simulateStdout()`, `simulateStderr()`, `simulateMessage()`. The outer `ChildProcessMock` wraps `spawn`, `exec`, `execSync`, `fork` with domain-specific setup methods: `setupPythonSpawnMock()`, `setupPythonVersionCheckMock()`, `setupProxySpawnMock()`.
-
-**Other mocks**: `createMockLogger()` (simple `vi.fn()` stubs for `info`/`error`/`debug`/`warn`), `MockCommandFinder` (per-command path mappings with call history), minimal `fs-extra` and `net` mocks. Environment doubles come from `createMockEnvironment()` in `tests/test-utils/helpers/test-dependencies.ts` (a full `IEnvironment` that falls through to `process.env`).
-
-### Fake Implementations
-
-**File:** `tests/implementations/test/fake-process-launcher.ts`
-
-**`FakeProcess`** — extends `EventEmitter`, implements `IProcess`. Has real `PassThrough` streams for stdin/stdout/stderr and a deterministic `pid` (12345). Test helpers: `simulateOutput()`, `simulateError()`, `simulateExit()`, `simulateSpawn()`, `simulateProcessError()`, `simulateMessage()`.
-
-**`FakeProxyProcess`** — extends `FakeProcess`, implements `IProxyProcess`. Adds `sentCommands[]` tracking and `sendCommand(command)` that serializes to JSON via the inherited `send` method. Helpers: `simulateInitialization()`, `simulateInitializationFailure(error)`.
-
-**`FakeProxyProcessLauncher`** — implements `IProxyProcessLauncher`. Tracks `launchedProxies[]`. Auto-responds to `init` commands with `init_received` status. `prepareProxy(setupFn)` injects custom behavior for the next launch. `getLastLaunchedProxy()`, `reset()`.
-
-Design rationale: fakes enable testing the proxy lifecycle (start, init handshake, DAP routing, exit) without spawning real Node subprocesses, keeping unit tests fast and deterministic.
+**Other mocks**: `createMockLogger()` (simple `vi.fn()` stubs for `info`/`error`/`debug`/`warn`), `MockCommandFinder` (per-command path mappings with call history). Environment doubles come from `createMockEnvironment()` in `tests/test-utils/helpers/test-dependencies.ts` (a full `IEnvironment` that falls through to `process.env`).
 
 ### Auto-Mock Generation
 
@@ -236,13 +223,12 @@ Transport instrumentation hooks `transport.send` and `transport.onmessage` to lo
 
 `waitForEvent(emitter, event, timeout)` (`tests/test-utils/helpers/test-utils.ts`) wraps `emitter.once()` in a promise with a configurable timeout (default 5 seconds). Used for testing async DAP events without polling.
 
-Event simulation methods are available on all major mocks:
+Event simulation methods are available on the major mocks:
 - `MockProxyManager`: `simulateStopped(threadId, reason)`, `simulateEvent(event, ...args)`, `simulateError(error)`, `simulateExit(code, signal)`
 - `createMockDapClient()`: no `simulate*` layer — it is a real `EventEmitter`, so tests call `mockDapClient.emit(event, body)` directly; request failures are `sendRequest.mockRejectedValue(error)`, connection failures `connect.mockRejectedValueOnce(error)`
-- `FakeProcess`: `simulateMessage(message)`, `simulateExit(code, signal)`, `simulateProcessError(error)`
-- `FakeProxyProcess`: `simulateInitialization()`, `simulateInitializationFailure(error)`
+- the hand-rolled `IProxyProcess` doubles (`tests/unit/proxy/proxy-manager.start.test.ts`): no `simulate*` layer either — tests `emit('message', …)` and `emit('exit', code, signal)` on the fake, and `emit('data', …)` on its `stderr`, directly
 
-The `simulate*` methods that emit do so **synchronously** — `simulateStopped`, `simulateEvent`, `simulateError`, `simulateExit`, `simulateMessage`, `simulateProcessError`, `simulateInitialization` and `simulateInitializationFailure` all reach a bare `this.emit(...)`, with no `process.nextTick()` or `setTimeout()` deferral. The DAP client double has no such layer: `mockDapClient.emit(...)` is `EventEmitter.emit` itself, synchronous like the rest, and programming `sendRequest.mockRejectedValue(...)` or `connect.mockRejectedValueOnce(...)` emits nothing — it only decides what the next call (`…Once`) or every call resolves or rejects with. (Elsewhere on `FakeProcess`, `send()` and `simulateSpawn()` *do* defer via `process.nextTick`, so the rule is per-method, not per-class.) The consequence of the synchronous ones is a sequencing rule, not a style note: the listener has to be attached before you call one, or the event lands on nobody. `FakeProxyProcessLauncher` keeps its own emission off the caller's stack — its automatic `init_received` answer wraps `simulateMessage` in `process.nextTick` rather than replying inside the `sendCommand` call. `prepareProxy(setup)` offers no such deferral: it calls `setup` immediately, at *prepare* time, before the proxy is launched and before `ProxyManager` subscribes, so a callback that wants its message seen has to defer the call itself.
+The `simulate*` methods that emit do so **synchronously** — `simulateStopped`, `simulateEvent`, `simulateError` and `simulateExit` all reach a bare `this.emit(...)`, with no `process.nextTick()` or `setTimeout()` deferral. The DAP client double has no such layer: `mockDapClient.emit(...)` is `EventEmitter.emit` itself, synchronous like the rest, and programming `sendRequest.mockRejectedValue(...)` or `connect.mockRejectedValueOnce(...)` emits nothing — it only decides what the next call (`…Once`) or every call resolves or rejects with. The consequence is a sequencing rule, not a style note: the listener has to be attached before you call one, or the event lands on nobody. The process doubles show the other half of the rule: the `init_received` reply the manager blocks on is scripted inside `sendCommand.mockImplementation` behind a `process.nextTick` (or a `setTimeout(…, 0)`), so it lands after `ProxyManager.start()` has subscribed rather than inside the `sendCommand` call it is answering.
 
 ### Fake Timer Usage
 
@@ -251,13 +237,12 @@ Pattern: `vi.useFakeTimers()` in a try/finally block with `vi.useRealTimers()` i
 ### Call Tracking
 
 - `MockProxyManager.startCalls[]` and `dapRequestCalls[]`: arrays of recorded invocations for structural assertions
-- `FakeProxyProcess.sentCommands[]`: tracks all commands sent to the proxy
 - `vi.fn()` matchers: `expect(mock.method).toHaveBeenCalledWith(...)`, `.toHaveBeenCalledTimes(n)`
 
 ### Process Cleanup Discipline
 
 - **`afterEach`** (global via setup file): `vi.resetAllMocks()` + `vi.restoreAllMocks()`
-- **`afterEach`** (test-local): close sessions, stop proxy managers, reset fake launchers
+- **`afterEach`** (test-local): close sessions, stop proxy managers, `removeAllListeners()` on hand-rolled process doubles and the manager, then flush a `setImmediate` (issue #420)
 - **`afterAll`**: close MCP client and transport, reset port manager
 - E2E tests close sessions in both `afterEach` and `afterAll` as a safety net — the second close catches sessions left open by failed tests (errors are caught and ignored)
 

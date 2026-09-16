@@ -398,9 +398,11 @@ describe('SessionManager', () => {
 
 ### Example: Testing with Fake Implementations
 
-**Location**: `tests/unit/proxy/proxy-manager.start.test.ts` and its siblings
-(`proxy-manager.handshake.test.ts`, `proxy-manager-message-handling.test.ts`,
-`proxy-manager.branch-coverage.test.ts`)
+**Location**: `tests/unit/proxy/proxy-manager.start.test.ts`. Its siblings reach
+the same seams by other routes — `proxy-manager.branch-coverage.test.ts` assigns a
+`StubProxyProcess` onto the manager's private `proxyProcess` field, and
+`proxy-manager.handshake.test.ts` spies on `sendCommand` and emits on the manager
+itself (see [event-management.md](event-management.md)).
 
 Because every ProxyManager collaborator is an interface, the suite hands it a
 hand-rolled `IProxyProcessLauncher` that returns a fake `IProxyProcess` — an
@@ -455,10 +457,6 @@ it('launches the proxy process and sends the init command', async () => {
 The suite owns its teardown too: `afterEach` calls `removeAllListeners()` on both
 the fake and the manager and flushes with a `setImmediate`, so a straggling emit
 cannot fire into whichever test the shuffled ordering runs next (issue #420).
-
-A reusable `FakeProxyProcessLauncher` also lives in
-`tests/implementations/test/fake-process-launcher.ts` for suites that would
-rather take one off the shelf.
 
 ## Advanced Patterns
 
