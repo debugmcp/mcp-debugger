@@ -126,7 +126,7 @@ All in `tests/test-utils/mocks/`:
 - Controllable behavior: `shouldFailStart`, `startDelay`, `shouldFailDapRequests`, `dapRequestDelay`
 - Canned DAP responses for common commands: `setBreakpoints`, `stackTrace`, `scopes`, `variables`, step operations, `continue`
 - Custom DAP handler: `setDapRequestHandler(fn)` for per-test response logic
-- Event simulation: `simulateStopped(threadId, reason)`, `simulateEvent(event, ...args)`, `simulateError(error)`, `simulateExit(code, signal)`
+- Event simulation: `simulateStopped(threadId, reason)`, `simulateEvent(event, ...args)`, `simulateError(error)`, `simulateExited(exitCode)`, `simulateExit(code, signal)`
 - `reset()` clears all state, call history, and listeners
 
 **`MockAdapterRegistry`** (`mock-adapter-registry.ts`) — three factory variants:
