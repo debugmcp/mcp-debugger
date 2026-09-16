@@ -29,8 +29,8 @@
  * disposes through the same `disposeAdapterQuietly` helper, which the callers'
  * catches reach by stopping `session.proxyManager` — exactly as before.
  */
-import type { AdapterConfig, IAdapterRegistry, IDebugAdapter } from '@debugmcp/shared';
-import type { ILogger, IProxyManagerFactory } from '../interfaces/external-dependencies.js';
+import type { AdapterConfig, IAdapterRegistry, IDebugAdapter, ILogger } from '@debugmcp/shared';
+import type { IProxyManagerFactory } from '../factories/proxy-manager-factory.js';
 import { disposeAdapterQuietly } from './adapter-disposal.js';
 import type { IProxyManager } from '../proxy/proxy-manager.js';
 

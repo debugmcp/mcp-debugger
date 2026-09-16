@@ -6,15 +6,17 @@ import { SessionManager, SessionManagerDependencies } from '../../../../src/sess
 import type { SessionStore } from '../../../../src/session/session-store.js';
 import { MockProxyManager } from '../../../test-utils/mocks/mock-proxy-manager.js';
 import { SessionStoreFactory } from '../../../../src/factories/session-store-factory.js';
-import {
-  IFileSystem,
-  INetworkManager,
-  ILogger,
-  IProxyManagerFactory,
-  IEnvironment
-} from '../../../../src/interfaces/external-dependencies.js';
+import type { IProxyManagerFactory } from '../../../../src/factories/proxy-manager-factory.js';
 import { createMockFileSystem, createMockLogger } from '../../../test-utils/helpers/test-utils.js';
-import { DebugLanguage, IAdapterRegistry, type AdapterPolicy } from '@debugmcp/shared';
+import {
+  DebugLanguage,
+  IAdapterRegistry,
+  type AdapterPolicy,
+  type IEnvironment,
+  type IFileSystem,
+  type ILogger,
+  type INetworkManager
+} from '@debugmcp/shared';
 import { createMockAdapterRegistry as createCentralizedMockAdapterRegistry } from '../../../test-utils/mocks/mock-adapter-registry.js';
 
 /**

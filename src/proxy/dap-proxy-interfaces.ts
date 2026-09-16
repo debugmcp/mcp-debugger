@@ -195,17 +195,23 @@ export interface IProcessSpawner {
  */
 export interface IDapClient {
   connect(): Promise<void>;
-  sendRequest<T = unknown>(command: string, args?: unknown, timeoutMs?: number): Promise<T>;
+  sendRequest<T extends DebugProtocol.Response = DebugProtocol.Response>(
+    command: string,
+    args?: unknown,
+    timeoutMs?: number
+  ): Promise<T>;
   disconnect(): void;
   /**
    * Reject all pending requests, clear timers, dispose resources.
    * Should be idempotent.
    */
   shutdown(reason?: string): void;
-  on(event: string, handler: (...args: any[]) => void): void; // eslint-disable-line @typescript-eslint/no-explicit-any
-  off(event: string, handler: (...args: any[]) => void): void; // eslint-disable-line @typescript-eslint/no-explicit-any
-  once(event: string, handler: (...args: any[]) => void): void; // eslint-disable-line @typescript-eslint/no-explicit-any
-  removeAllListeners(): void;
+  // EventEmitter surface. Every implementation IS an EventEmitter, whose
+  // on/off/once/removeAllListeners return `this` (issue #691).
+  on(event: string, handler: (...args: any[]) => void): this; // eslint-disable-line @typescript-eslint/no-explicit-any
+  off(event: string, handler: (...args: any[]) => void): this; // eslint-disable-line @typescript-eslint/no-explicit-any
+  once(event: string, handler: (...args: any[]) => void): this; // eslint-disable-line @typescript-eslint/no-explicit-any
+  removeAllListeners(event?: string): this;
   /**
    * Record the session's break-on-exception mode so DAP child sessions can
    * apply the same exception filters (issue #220). Optional: only

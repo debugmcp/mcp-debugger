@@ -9,6 +9,12 @@ import { SpawnOptions } from 'child_process';
 import { Stats } from 'fs';
 import type { IDebugAdapter } from './debug-adapter.js';
 
+/**
+ * @deprecated Placeholder kept for published-API compatibility. The real
+ * `IProxyManager` is `src/proxy/proxy-manager.ts` in the app (shared cannot
+ * import it); nothing in this repo should import this one from
+ * `@debugmcp/shared`.
+ */
 export interface IProxyManager {
   // Minimal interface definition for type compatibility
   dispose(): Promise<void>;
@@ -102,6 +108,11 @@ export interface ILogger {
 
 /**
  * Proxy manager factory interface
+ *
+ * @deprecated Placeholder kept for published-API compatibility, typed against
+ * the placeholder `IProxyManager` above. The real factory interface is
+ * `src/factories/proxy-manager-factory.ts` in the app (shared cannot import
+ * it); nothing in this repo should import this one from `@debugmcp/shared`.
  */
 export interface IProxyManagerFactory {
   create(adapter?: IDebugAdapter): IProxyManager;

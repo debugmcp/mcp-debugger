@@ -5,11 +5,11 @@
 
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
-import {
+import type {
   IProcess,
   IProxyProcessLauncher,
   IProxyProcess
-} from '../../../src/interfaces/process-interfaces.js';
+} from '@debugmcp/shared';
 
 /**
  * Fake process implementation for testing

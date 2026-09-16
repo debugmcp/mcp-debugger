@@ -180,22 +180,20 @@ This factory pattern allows SessionManager to create ProxyManager instances with
 
 ### Core External Dependencies
 
-**Location**: `packages/shared/src/interfaces/external-dependencies.ts` (defines `IFileSystem`, `IProcessManager`, `INetworkManager`, `ILogger`, `IEnvironment`) and `packages/shared/src/interfaces/process-interfaces.ts` (defines `IProxyProcessLauncher` and related IProcess/IProxyProcess types)
-
-> **Heads-up: there are two `IFileSystem` declarations.**
-> `src/interfaces/external-dependencies.ts` is an app-local near-duplicate of the
-> shared module — same `IFileSystem`, `IChildProcess`, `IProcessManager`,
-> `INetworkManager`, `IServer`, `ILogger`, `IProxyManagerFactory`, `IEnvironment`,
-> `IDependencies`, `PartialDependencies`, `ILoggerFactory`, `IChildProcessFactory`.
-> The only substantive difference is `IProxyManager`: the shared copy declares a
-> minimal placeholder (`dispose()` only), because `@debugmcp/shared` cannot import
-> from `src/`, while the app-local copy imports the real `IProxyManager` from
-> `src/proxy/proxy-manager.ts` — so its `IProxyManagerFactory` is typed against the
-> full interface. TypeScript is structural, so the two `IFileSystem`s are
-> interchangeable and nothing breaks, which is exactly why the duplication is easy
-> to miss. Most of `src/` imports the shared module; `src/adapters/adapter-lease.ts`
-> and `src/session/launch/proxy-failure-diagnostics.ts` import the app-local one, as
-> do several test helpers. Prefer `@debugmcp/shared` in new code.
+**Location**: `packages/shared/src/interfaces/external-dependencies.ts` (`IFileSystem`,
+`IProcessManager`, `INetworkManager`, `ILogger`, `IEnvironment`, `IChildProcess`, `IServer`)
+and `packages/shared/src/interfaces/process-interfaces.ts` (`IProxyProcessLauncher`,
+`IProcess`, `IProcessOptions`, `IProxyProcess`). These are the canonical declarations: the
+app-local copies under `src/interfaces/` were removed in #692 because near-identical
+duplicates drift silently (the `IProcess*` copies already had). `src/interfaces/process-interfaces.ts`
+now holds only `ProcessLike` (the CLI's injectable `process` slice), and `IProxyManagerFactory`
+lives in `src/factories/proxy-manager-factory.ts`, typed against the real `IProxyManager`.
+Import from `@debugmcp/shared` — except `IProxyManagerFactory`: shared also exports one under
+that name, but it is a placeholder typed against a dispose-only `IProxyManager` (shared cannot
+import the real one from `src/`); take the real factory interface from
+`src/factories/proxy-manager-factory.ts`. `src/proxy/dap-proxy-interfaces.ts` keeps its own
+minimal `ILogger`/`IFileSystem` on purpose — they are the proxy worker's contracts, not
+duplicates.
 
 ```typescript
 // File system operations
@@ -217,11 +215,11 @@ export interface IProcessManager {
 }
 
 // Process launching (note this is a different interface from IProcessManager)
-// IProxyProcessLauncher is in process-interfaces.ts and is consumed by
+// IProxyProcessLauncher is in packages/shared/src/interfaces/process-interfaces.ts and is consumed by
 // ProxyManagerFactory/ProxyManager — adapters receive AdapterDependencies
 // (fileSystem, logger, environment, networkManager?) instead
 // (see "Process-Specific Interfaces" below for its full definition).
-// IProcessManager is in external-dependencies.ts and is the lower-level system abstraction.
+// IProcessManager is in packages/shared/src/interfaces/external-dependencies.ts and is the lower-level system abstraction.
 
 // Network operations
 export interface INetworkManager {

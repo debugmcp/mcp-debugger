@@ -8,9 +8,7 @@
  * ratchet's errors came from), others filled in whichever three methods that file happened
  * to call. One factory, anchored to the interface, keeps them honest.
  *
- * Anchored on `@debugmcp/shared` rather than `src/interfaces/external-dependencies.ts`.
- * Those two declare `IFileSystem`/`ILogger`/`IEnvironment` separately and identically today,
- * so either would compile — but adapters take the *shared* contract, so that is the one a
+ * Anchored on `@debugmcp/shared`: adapters take the shared contract, so that is the one a
  * double for an adapter should be held to.
  */
 import { vi } from 'vitest';

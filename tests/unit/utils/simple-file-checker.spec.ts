@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, beforeEach, vi, MockedFunction } from 'vitest';
 import { SimpleFileChecker, createSimpleFileChecker } from '../../../src/utils/simple-file-checker.js';
-import { IFileSystem, IEnvironment } from '../../../src/interfaces/external-dependencies.js';
+import type { IFileSystem, IEnvironment } from '@debugmcp/shared';
 
 describe('SimpleFileChecker', () => {
   let mockFileSystem: IFileSystem;

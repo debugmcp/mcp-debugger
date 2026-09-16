@@ -16,9 +16,13 @@
  * Both paths now call `logProxyFailure`, which is why it lives here rather than
  * in either one.
  */
-import { sanitizeStderrTail, type SessionFailureDiagnostics } from '@debugmcp/shared';
+import {
+  sanitizeStderrTail,
+  type IFileSystem,
+  type ILogger,
+  type SessionFailureDiagnostics
+} from '@debugmcp/shared';
 import type { ManagedSession } from '../session-store.js';
-import type { IFileSystem, ILogger } from '../../interfaces/external-dependencies.js';
 import type { ProxyInitProgress } from '../../utils/error-messages.js';
 import { getErrorMessage, SessionNotFoundError } from '../../errors/debug-errors.js';
 import { proxyLogPathFor } from '../../proxy/session-log-layout.js';
