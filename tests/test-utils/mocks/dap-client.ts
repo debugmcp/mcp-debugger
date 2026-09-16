@@ -2,11 +2,14 @@
  * Shared `IDapClient` double for the proxy-worker, go-initialized-fallback
  * and connection-manager tests: a real `EventEmitter` (so tests can `emit`
  * DAP events on it) whose `IDapClient` methods are all `vi.fn`s (so tests can
- * program and assert on them). Consumers see `IDapClient & EventEmitter`; a
- * member that changes shape or disappears fails here at compile time, but a
- * member ADDED to `IDapClient` must be added to this double by hand — the
- * construction is a type assertion, which passes when the target merely has
- * more members than the source (issue #691).
+ * program and assert on them). Typed against the interface (a plain annotated
+ * assignment, no assertion): a member `IDapClient` gains or loses fails here
+ * (a required addition is missing from the assembled object; a removal breaks
+ * the `IDapClient['x']` types). Shape drift is caught here only for the four
+ * listener wrappers, whose implementations are typed — `connect`/`disconnect`/
+ * `shutdown` are bare `vi.fn()`s and `sendRequest` is deliberately bare
+ * `Mock`, so their drift surfaces at consumers' typed `.mockResolvedValue(...)`
+ * sites and at `MinimalDapClient implements IDapClient`, not here (issue #691).
  */
 import { vi, type Mock } from 'vitest';
 import { EventEmitter } from 'events';
@@ -41,7 +44,7 @@ export function createMockDapClient(): MockDapClient {
 
   // The listener wrappers return the double itself (it IS the emitter —
   // Object.assign mutates it), which is what the `this`-returning interface
-  // promises and what keeps the assertion below comparable.
+  // promises and what lets the assignment below type-check without a cast.
   const client: MockDapClient = Object.assign(emitter, {
     sendRequest: vi.fn().mockResolvedValue({ body: {} }),
     connect: vi.fn().mockResolvedValue(undefined),
@@ -63,6 +66,6 @@ export function createMockDapClient(): MockDapClient {
       return client;
     }),
     shutdown: vi.fn()
-  }) as MockDapClient;
+  });
   return client;
 }
