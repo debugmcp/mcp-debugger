@@ -93,6 +93,8 @@ export class DapProxyWorker {
   // handleCommand returns while state is still SHUTTING_DOWN and the runner's
   // post-command exit check never fires, stranding the worker alive forever.
   private shutdownPromise: Promise<void> | null = null;
+  /** The init-failure report already sent to the parent, so it goes once. */
+  private initFailureReported: string | null = null;
   /** Once-per-session guard for the adapter_capabilities status message (issue #243). */
   private adapterCapabilitiesSent: boolean = false;
   // Exit-code synthesis bookkeeping (issue #247): a real DAP exited event
@@ -377,19 +379,14 @@ export class DapProxyWorker {
       if (!this.shutdownPromise) {
         this.state = ProxyState.UNINITIALIZED;
       }
-      const message = error instanceof Error ? error.message : String(error);
-
-      // Include adapter spawn config (command + args only, NOT env) for diagnostics
-      const adapterCmd = payload.adapterCommand;
-      const spawnInfo = adapterCmd
-        ? `Adapter command: ${adapterCmd.command} ${(adapterCmd.args ?? []).join(' ')}`
-        : `Executable: ${payload.executablePath ?? 'unknown'}`;
-      const adapterPid = this.adapterProcess?.pid ?? 'none';
-      const adapterExitCode = this.adapterProcess?.exitCode;
-      const diagnostics = `${spawnInfo} | adapter PID=${adapterPid} exitCode=${adapterExitCode ?? 'n/a'}`;
-
-      this.logger?.error(`[Worker] Critical initialization error: ${message} [${diagnostics}]`, error);
-      this.sendError(`Critical initialization error: ${message} [${diagnostics}]`);
+      const report = this.describeInitFailure(payload, error);
+      this.logger?.error(`[Worker] ${report}`, error);
+      // Already on the wire when startAdapterAndConnect failed after the
+      // adapter was up — it reports before its teardown so the reason beats
+      // the adapter's exit to the parent (see there). Send it here otherwise.
+      if (this.initFailureReported !== report) {
+        this.sendError(report);
+      }
       await this.shutdown();
       // Use setImmediate/setTimeout to allow IPC message to flush before exit
       setImmediate(() => {
@@ -711,9 +708,34 @@ export class DapProxyWorker {
 
       this.logger!.info('[Worker] Waiting for "initialized" event from adapter.');
     } catch (error) {
+      // Report before tearing down. shutdown() below waits on the debuggee
+      // and sweeps the adapter's process group (hundreds of ms); meanwhile
+      // the adapter's own exit reaches the parent as `adapter_exited`, which
+      // fails the launch with a generic "Proxy exited during initialization"
+      // and discards the reason sent afterwards — Delve refusing a too-new Go
+      // toolchain read as a bare exit code 0.
+      const report = this.describeInitFailure(payload, error);
+      this.initFailureReported = report;
+      this.sendError(report);
       await this.shutdown();
       throw error;
     }
+  }
+
+  /**
+   * The one line the parent gets for a failed init: the reason plus the
+   * adapter spawn config (command + args only, NOT env) and its process state.
+   */
+  private describeInitFailure(payload: ProxyInitPayload, error: unknown): string {
+    const message = error instanceof Error ? error.message : String(error);
+    const adapterCmd = payload.adapterCommand;
+    const spawnInfo = adapterCmd
+      ? `Adapter command: ${adapterCmd.command} ${(adapterCmd.args ?? []).join(' ')}`
+      : `Executable: ${payload.executablePath ?? 'unknown'}`;
+    const adapterPid = this.adapterProcess?.pid ?? 'none';
+    const adapterExitCode = this.adapterProcess?.exitCode;
+    const diagnostics = `${spawnInfo} | adapter PID=${adapterPid} exitCode=${adapterExitCode ?? 'n/a'}`;
+    return `Critical initialization error: ${message} [${diagnostics}]`;
   }
 
   /**

@@ -15,7 +15,7 @@ import ts from 'typescript';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { requireCliBundle } from '../test-utils/helpers/cli-bundle.js';
-import { parseSdkToolResult } from './smoke-test-utils.js';
+import { parseSdkToolResult, pollUntil } from './smoke-test-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -765,8 +765,22 @@ describe('JavaScript Debugging - module-load breakpoints in source-mapped TypeSc
       }));
       expect(start.state, JSON.stringify(start)).toBe('paused');
 
-      const listed = parseSdkToolResult(await mcpClient!.callTool({ name: 'list_breakpoints', arguments: { sessionId } }));
-      const [record] = (listed.breakpoints as Array<{ verified: boolean; boundFile?: string; boundLine?: number }>) ?? [];
+      type Listed = { verified: boolean; verifiedBy?: string; boundFile?: string; boundLine?: number };
+      const listBreakpoints = async (): Promise<Listed | undefined> => {
+        const listed = parseSdkToolResult(await mcpClient!.callTool({ name: 'list_breakpoints', arguments: { sessionId } }));
+        return ((listed.breakpoints as Listed[]) ?? [])[0];
+      };
+      // With maps off, js-debug reports the hit (`stopped`, which is what
+      // resolves start_debugging) a beat BEFORE it sends the `breakpoint`
+      // event that carries the bound .js location: the record is verified by
+      // the hit at once and gains boundFile/boundLine ~150ms later. Wait for
+      // the pair rather than racing it; with maps on nothing arrives later.
+      const record = mapsOn
+        ? await listBreakpoints()
+        : (await pollUntil(async () => {
+            const bp = await listBreakpoints();
+            return bp?.boundFile !== undefined ? bp : undefined;
+          }, 5000, 100)) ?? await listBreakpoints();
       expect(record?.verified, JSON.stringify(record)).toBe(true);
       const stack = parseSdkToolResult(await mcpClient!.callTool({ name: 'get_stack_trace', arguments: { sessionId } }));
       const top = ((stack.stackFrames as Array<{ file?: string }>) ?? [])[0];

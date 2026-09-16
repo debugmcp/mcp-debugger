@@ -3557,6 +3557,73 @@ describe('DapProxyWorker', () => {
       }
     });
 
+    it('reports a refused launch to the parent BEFORE tearing the adapter down', async () => {
+      // shutdown() waits on the debuggee and sweeps the adapter's process
+      // group; the adapter's own exit reaches the parent as `adapter_exited`
+      // meanwhile and fails the launch generically. The reason must already
+      // be on the wire by then — Delve refusing a too-new Go toolchain used
+      // to read as "Proxy exited during initialization. Code: 0".
+      worker = new DapProxyWorker(dependencies, { exit: vi.fn() });
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'launch-refused',
+        scriptPath: '/work/app',
+        adapterHost: 'localhost',
+        adapterPort: 4711,
+        logDir: '/logs',
+        executablePath: 'go',
+        adapterCommand: { command: '/home/user/go/bin/dlv', args: ['dap', '--listen=127.0.0.1:4711'] }
+      };
+      const launchError = new Error(
+        'Failed to launch: Version of Delve is too old for Go version go1.27.1 (maximum supported version 1.26, suppress this error with --check-go-version=false)'
+      );
+      const processStub = {
+        spawn: vi.fn().mockResolvedValue({ process: new EventEmitter() as unknown as ChildProcess, pid: 4242 }),
+        shutdown: vi.fn().mockResolvedValue(undefined)
+      };
+      const connectionStub = {
+        connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+        setAdapterPolicy: vi.fn(),
+        setupEventHandlers: vi.fn(),
+        initializeSession: vi.fn().mockResolvedValue(undefined),
+        sendLaunchRequest: vi.fn().mockRejectedValue(launchError),
+        disconnect: vi.fn().mockResolvedValue(undefined)
+      };
+      const order: string[] = [];
+      mockMessageSender.send.mockImplementation((message: { type: string }) => {
+        if (message.type === 'error') order.push('error');
+      });
+      const shutdownSpy = vi
+        .spyOn(worker as unknown as { shutdown: () => Promise<void> }, 'shutdown')
+        .mockImplementation(async () => {
+          order.push('shutdown');
+        });
+
+      (worker as any).logger = mockLogger;
+      (worker as any).processManager = processStub;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = PythonAdapterPolicy;
+      (worker as any).adapterState = PythonAdapterPolicy.createInitialState();
+      (worker as any).currentInitPayload = payload;
+      (worker as any).state = ProxyState.INITIALIZING;
+
+      try {
+        await expect((worker as any).startAdapterAndConnect(payload)).rejects.toBe(launchError);
+
+        const errorMessages = mockMessageSender.send.mock.calls
+          .map(([message]) => message as { type: string; message?: string })
+          .filter((message) => message.type === 'error');
+        expect(errorMessages).toHaveLength(1);
+        expect(errorMessages[0].message).toContain(
+          'Critical initialization error: Failed to launch: Version of Delve is too old'
+        );
+        expect(errorMessages[0].message).toContain('Adapter command: /home/user/go/bin/dlv dap --listen=127.0.0.1:4711');
+        expect(order).toEqual(['error', 'shutdown']);
+      } finally {
+        shutdownSpy.mockRestore();
+      }
+    });
+
     it('invokes exit hook when DAP connection fails', async () => {
       vi.useFakeTimers();
 

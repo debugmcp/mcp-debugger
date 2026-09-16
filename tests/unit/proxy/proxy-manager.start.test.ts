@@ -463,6 +463,37 @@ describe('ProxyManager.start', () => {
     expect(adapter.validateEnvironment).toHaveBeenCalledWith('/usr/bin/python3');
   });
 
+  // A worker that reports WHY its init failed, then loses the adapter, must
+  // fail start() with that reason — not with the adapter's exit, which the
+  // worker forwards as `adapter_exited` while it is still tearing down.
+  it("rejects with the worker's init-failure report when it precedes the adapter exit", async () => {
+    const report =
+      'Critical initialization error: Failed to launch: Version of Delve is too old for Go version go1.27.1 [Adapter command: dlv dap | adapter PID=7 exitCode=n/a]';
+    fakeProcess.sendCommand.mockImplementation((cmd: any) => {
+      if (cmd.cmd === 'init') {
+        setTimeout(() => {
+          fakeProcess.emit('message', { type: 'status', status: 'init_received', sessionId: cmd.sessionId });
+          setTimeout(() => {
+            fakeProcess.emit('message', { type: 'error', sessionId: cmd.sessionId, message: report });
+            fakeProcess.emit('message', {
+              type: 'status',
+              status: 'adapter_exited',
+              sessionId: cmd.sessionId,
+              code: 0,
+              signal: null,
+              expected: false
+            });
+            fakeProcess.emit('exit', 0, null);
+          }, 0);
+        }, 0);
+      }
+    });
+
+    const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+    await expect(startPromise).rejects.toThrow(report);
+    await expect(startPromise).rejects.not.toThrow(/Proxy exited during initialization/);
+  });
+
   describe('init retry handling', () => {
     beforeEach(() => {
       vi.useFakeTimers();
