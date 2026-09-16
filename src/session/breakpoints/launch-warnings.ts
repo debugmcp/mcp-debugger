@@ -86,10 +86,21 @@ export function buildNoDebugLaunchWarning(
     );
   }
   const expected: string[] = [];
-  const lineCount = session.breakpoints.size;
+  let lineCount = 0;
+  let logpointCount = 0;
+  for (const bp of session.breakpoints.values()) {
+    if (bp.logMessage !== undefined) {
+      logpointCount++;
+    } else {
+      lineCount++;
+    }
+  }
   const functionCount = session.functionBreakpoints?.size ?? 0;
   if (lineCount > 0) {
     expected.push(`${lineCount} breakpoint(s)`);
+  }
+  if (logpointCount > 0) {
+    expected.push(`${logpointCount} logpoint(s)`);
   }
   if (functionCount > 0) {
     expected.push(`${functionCount} function breakpoint(s)`);

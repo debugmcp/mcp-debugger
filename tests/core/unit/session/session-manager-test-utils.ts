@@ -83,14 +83,6 @@ export function createMockDependencies(): SessionManagerDependencies & {
 }
 
 /**
- * Overlay hooks on the session store's adapter policy.
- *
- * The store's lookup is the seam the session layer reads policy from —
- * function-breakpoint name resolution and the launch warnings both go through
- * it — so a test that wants a policy behavior overrides it here rather than
- * standing up a real adapter.
- */
-/**
  * Flip the mock proxy's private running flag.
  *
  * Tests that replace `start()` wholesale must reproduce its side effect:
@@ -102,6 +94,17 @@ export function setMockProxyRunning(proxyManager: MockProxyManager, running: boo
   (proxyManager as unknown as { _isRunning: boolean })._isRunning = running;
 }
 
+/**
+ * Overlay hooks on the session store's adapter policy.
+ *
+ * The store's lookup is the seam the breakpoint layer reads policy from —
+ * function-breakpoint name resolution and the launch-time function-breakpoint
+ * warning go through it — so a test that wants that policy behavior overrides
+ * it here rather than standing up a real adapter. The launcher reads the data
+ * layer's lookup instead (the facade's `selectPolicy`; see
+ * `OperationsContext.selectPolicy` vs `selectStorePolicy`), which a test
+ * overrides by spying on the SessionManager instance.
+ */
 export function overridePolicy(
   sessionManager: SessionManager,
   overrides: Partial<AdapterPolicy>

@@ -77,6 +77,13 @@ describe('buildNoDebugLaunchWarning', () => {
     expect(build(session(3), { noDebug: false, stopOnEntry: true }, 'all')).toBeUndefined();
   });
 
+  it('counts logpoints apart from breakpoints, as the run-to-completion summary does', () => {
+    const s = session(1);
+    s.breakpoints.set('lp', { id: 'lp', file: '/proj/app.py', line: 30, verified: false, logMessage: 'x={x}' });
+    const warning = build(s, { noDebug: true });
+    expect(warning).toMatch(/1 breakpoint\(s\) and 1 logpoint\(s\) will not fire/);
+  });
+
   it('lists every applicable clause in one sentence', () => {
     const warning = build(session(2, 1), { noDebug: true, stopOnEntry: true }, 'all');
     expect(warning).toMatch(
@@ -134,16 +141,19 @@ describe('SessionManager launches with noDebug (issue #710)', () => {
     }) as MockProxyManager['start'];
   }
 
-  /** Replace the mock proxy's start with one that configures the adapter and never stops. */
+  /**
+   * Replace the mock proxy's start with one that configures the adapter and
+   * never stops — emitting synchronously inside start(), the way the real
+   * worker reports adapter-configured before start() resolves, so the
+   * launcher's readiness listener is not yet registered when it fires.
+   */
   function runWithoutStopping(): void {
     const proxy = dependencies.mockProxyManager;
     proxy.start = vi.fn().mockImplementation(async (startConfig) => {
       setMockProxyRunning(proxy, true);
       proxy.startCalls.push(startConfig);
-      process.nextTick(() => {
-        proxy.emit('adapter-configured');
-        proxy.emit('initialized');
-      });
+      proxy.emit('adapter-configured');
+      proxy.emit('initialized');
     }) as MockProxyManager['start'];
   }
 
@@ -155,15 +165,24 @@ describe('SessionManager launches with noDebug (issue #710)', () => {
 
   const warningOf = (result: { data?: unknown }) => (result.data as { warning?: string } | undefined)?.warning;
 
+  /**
+   * Overlay policy fields on the launcher's lookup. The launcher reads the
+   * data layer's `ctx.selectPolicy`, which is the facade method — not the
+   * store's, which overridePolicy() targets. The real method is taken from
+   * the prototype so a second overlay does not wrap the first spy.
+   */
+  function pinPolicy(overrides: Partial<AdapterPolicy>): void {
+    const facade = sessionManager as unknown as { selectPolicy: (language: string) => AdapterPolicy };
+    const proto = Object.getPrototypeOf(sessionManager) as { selectPolicy: (language: string) => AdapterPolicy };
+    const original = proto.selectPolicy.bind(sessionManager);
+    vi.spyOn(facade, 'selectPolicy').mockImplementation((language) => ({ ...original(language), ...overrides }));
+  }
+
   describe('where the adapter honours the flag', () => {
     beforeEach(() => {
       // The mock adapter ignores noDebug; the policy override says otherwise
-      // so the launcher takes the debugger-off path. The launcher reads the
-      // data layer's lookup (ctx.selectPolicy), which is the facade method —
-      // not the store's, which overridePolicy() targets.
-      const facade = sessionManager as unknown as { selectPolicy: (language: string) => AdapterPolicy };
-      const original = facade.selectPolicy.bind(facade);
-      vi.spyOn(facade, 'selectPolicy').mockImplementation((language) => ({ ...original(language), honoursNoDebug: true }));
+      // so the launcher takes the debugger-off path.
+      pinPolicy({ honoursNoDebug: true });
     });
 
     it('says which breakpoints will not fire instead of telling the caller to check their paths', async () => {
@@ -218,6 +237,78 @@ describe('SessionManager launches with noDebug (issue #710)', () => {
       expect(warningOf(result)).toMatch(/stopOnEntry will not fire/);
       // Readiness resolved on adapter-configured, not on the 30 s ceiling.
       expect(Date.now() - before).toBeLessThan(30000);
+      // The adapter was asked for no entry stop either: one value everywhere.
+      const sent = dependencies.mockProxyManager.startCalls.at(-1) as { stopOnEntry?: boolean } | undefined;
+      expect(sent?.stopOnEntry).toBe(false);
+      // ...while the replayable launch spec keeps what the caller asked for.
+      expect(sessionManager.getSession(s.id)?.lastLaunch?.dapLaunchArgs?.stopOnEntry).toBe(true);
+    });
+
+    it('does not wait on a policy whose readiness is a pause (python/go/cpp always request an entry stop)', async () => {
+      pinPolicy({ honoursNoDebug: true, isSessionReady: (state: SessionState) => state === SessionState.PAUSED });
+      const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      runWithoutStopping();
+
+      const before = Date.now();
+      const result = await launch(s.id, { stopOnEntry: false, noDebug: true });
+
+      expect(result.success).toBe(true);
+      expect(result.state).toBe(SessionState.RUNNING);
+      expect(Date.now() - before).toBeLessThan(30000);
+    });
+
+    it('names a stopOnEntry that came in through adapterLaunchConfig', async () => {
+      const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      runWithoutStopping();
+
+      const result = await launch(s.id, { noDebug: true }, { stopOnEntry: true });
+
+      expect(warningOf(result)).toMatch(/stopOnEntry will not fire/);
+    });
+
+    it('counts a string-typed noDebug the way the adapter will (truthy)', async () => {
+      const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      await sessionManager.setBreakpoint(s.id, { file: '/work/src/app.py', line: 7 });
+      endDuringStartup();
+
+      const result = await launch(s.id, { stopOnEntry: false, noDebug: 'true' });
+
+      expect(warningOf(result)).toMatch(/noDebug is true/);
+      expect(warningOf(result)).not.toMatch(/never bound during this run/);
+    });
+
+    it('carries the note on a launch that failed under the flag', async () => {
+      const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      await sessionManager.setBreakpoint(s.id, { file: '/work/src/app.py', line: 7 });
+      dependencies.mockProxyManager.shouldFailStart = true;
+
+      const result = await launch(s.id, { stopOnEntry: false, noDebug: true });
+
+      expect(result.success).toBe(false);
+      expect(warningOf(result)).toMatch(/noDebug is true/);
+    });
+
+    it('believes a stop that arrived anyway over the policy pin', async () => {
+      // The mock adapter stops at its breakpoint whatever the flag says — the
+      // override pinned honoursNoDebug, so this is what a wrong pin looks like
+      // when the stop lands before the launch reports (a later stop is #749's
+      // territory: the launch has already answered).
+      const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      await sessionManager.setBreakpoint(s.id, { file: '/work/src/app.py', line: 7 });
+      const proxy = dependencies.mockProxyManager;
+      proxy.start = vi.fn().mockImplementation(async (startConfig) => {
+        setMockProxyRunning(proxy, true);
+        proxy.startCalls.push(startConfig);
+        proxy.emit('adapter-configured');
+        proxy.emit('initialized');
+        proxy.emit('stopped', 1, 'breakpoint', { reason: 'breakpoint', threadId: 1 });
+      }) as MockProxyManager['start'];
+
+      const result = await launch(s.id, { stopOnEntry: false, noDebug: true });
+
+      expect(result.state).toBe(SessionState.PAUSED);
+      expect(warningOf(result)).toMatch(/noDebug has no effect/);
+      expect(warningOf(result)).not.toMatch(/will not fire/);
     });
 
     it('warns on a dry run too — it is a configuration check', async () => {
