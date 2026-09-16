@@ -1,7 +1,7 @@
 /**
  * Test utilities for Debug MCP Server tests
  */
-import { IFileSystem, ILogger } from '../../../src/interfaces/external-dependencies.js';
+import type { IFileSystem, ILogger } from '@debugmcp/shared';
 import { vi } from 'vitest';
 
 /**

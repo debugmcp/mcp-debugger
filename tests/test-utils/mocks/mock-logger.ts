@@ -2,7 +2,7 @@
  * Mock logger utility for tests
  */
 import { vi } from 'vitest';
-import type { ILogger } from '../../../src/interfaces/external-dependencies.js';
+import type { ILogger } from '@debugmcp/shared';
 
 /**
  * Creates a mock logger with all methods stubbed.

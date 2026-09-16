@@ -1,11 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ProxyManagerFactory, MockProxyManagerFactory } from '../../../../src/factories/proxy-manager-factory.js';
 import { ProxyManager, IProxyManager } from '../../../../src/proxy/proxy-manager.js';
-import { IProxyProcessLauncher } from '../../../../src/interfaces/process-interfaces.js';
-import { IFileSystem, ILogger } from '../../../../src/interfaces/external-dependencies.js';
 import { createMockLogger, createMockFileSystem } from '../../../test-utils/helpers/test-dependencies.js';
 import { MockProxyManager } from '../../../test-utils/mocks/mock-proxy-manager.js';
-import { IDebugAdapter } from '@debugmcp/shared';
+import type { IDebugAdapter, IFileSystem, ILogger, IProxyProcessLauncher } from '@debugmcp/shared';
 import { FakeDebugAdapter } from '../../../test-utils/fakes/fake-debug-adapter.js';
 
 describe('ProxyManagerFactory', () => {

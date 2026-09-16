@@ -3,20 +3,20 @@
  * This file imports Vitest and other test frameworks.
  */
 import { vi } from 'vitest';
-import { 
-  IFileSystem, 
-  IProcessManager, 
-  INetworkManager, 
+import type {
+  IEnvironment,
+  IFileSystem,
   ILogger,
-  IProxyManagerFactory,
-  IEnvironment
-} from '../../../src/interfaces/external-dependencies.js';
-import {
+  INetworkManager,
+  IProcessManager,
   IProxyProcessLauncher
-} from '../../../src/interfaces/process-interfaces.js';
+} from '@debugmcp/shared';
 import { ISessionStoreFactory } from '../../../src/factories/session-store-factory.js';
 import { MockSessionStoreFactory } from '../../../src/factories/session-store-factory.js';
-import { MockProxyManagerFactory } from '../../../src/factories/proxy-manager-factory.js';
+import {
+  MockProxyManagerFactory,
+  type IProxyManagerFactory
+} from '../../../src/factories/proxy-manager-factory.js';
 import { MockProxyManager } from '../mocks/mock-proxy-manager.js';
 
 /**

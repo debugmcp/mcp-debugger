@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { LineReader, createLineReader } from '../../../src/utils/line-reader.js';
-import { IFileSystem } from '../../../src/interfaces/external-dependencies.js';
+import type { IFileSystem } from '@debugmcp/shared';
 import { Stats } from 'fs';
 
 // Mock file system
