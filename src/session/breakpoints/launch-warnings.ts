@@ -126,13 +126,16 @@ export function buildNoDebugLaunchWarning(
 
 /**
  * The note a launch that failed under an honoured `noDebug` carries when the
- * warning above had nothing to say (nothing was armed): the flag is the fact
- * the caller needs before retrying paths and ports (issue #746).
+ * warning above had nothing to say (nothing was armed). It states the fact
+ * and the remedy without blaming the flag: the failure may be unrelated (a
+ * bad path), or it may be an adapter that cannot complete a launch under
+ * the flag (issue #746) — either way, the flag is what the caller needs to
+ * know before retrying paths and ports.
  */
 export function buildNoDebugFailureNote(): string {
   return (
-    'noDebug is true, so this launch ran with the debugger disabled; the adapter accepted the flag ' +
-    'but the launch did not complete under it. Drop noDebug to debug, or run the program without a debug session'
+    'noDebug is true, so this launch ran with the debugger disabled. If the failure is unexpected, drop noDebug ' +
+    'and launch again — some adapters cannot complete a launch under the flag'
   );
 }
 
