@@ -22,11 +22,8 @@ import type {
 import { ProxyState } from '../../src/proxy/dap-proxy-interfaces.js';
 import { GoAdapterPolicy } from '@debugmcp/shared';
 import { createMockDapClient } from '../test-utils/mocks/dap-client.js';
-import {
-  createMockFileSystem,
-  createMockLogger,
-  createMockProcessSpawner
-} from '../test-utils/mocks/dap-proxy-doubles.js';
+import { createMockLogger } from '../test-utils/helpers/test-dependencies.js';
+import { createMockFileSystem, createMockProcessSpawner } from '../test-utils/mocks/dap-proxy-doubles.js';
 
 // --- helpers ---------------------------------------------------------------
 
