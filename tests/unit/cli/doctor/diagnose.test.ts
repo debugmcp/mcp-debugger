@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, vi, afterEach, type Mock } from 'vitest';
 import type { IEnvironment, IFileSystem } from '@debugmcp/shared';
-import { diagnose, type DiagnoseDeps } from '../../../../src/cli/commands/doctor/diagnose.js';
+import { diagnose, type DiagnoseDeps, type DoctorRegistry } from '../../../../src/cli/commands/doctor/diagnose.js';
 
 const makeEnvironment = (env: Record<string, string | undefined> = {}): IEnvironment => ({
   get: (key: string) => env[key],
@@ -286,7 +286,7 @@ describe('diagnose', () => {
   it('reports broken with probe.timedOut when getFactory itself hangs (wedged dynamic import)', async () => {
     vi.useFakeTimers();
     const deps = makeDeps([{ name: 'java', validate: okValidate() }], { timeoutMs: 1000 });
-    (deps.registry as unknown as { getFactory: ReturnType<typeof vi.fn> }).getFactory = vi.fn(
+    deps.registry.getFactory = vi.fn<DoctorRegistry['getFactory']>(
       () => new Promise(() => undefined)
     );
 
@@ -302,7 +302,7 @@ describe('diagnose', () => {
   it('reports the elapsed load time on a broken factory instead of durationMs 0', async () => {
     vi.useFakeTimers();
     const deps = makeDeps([{ name: 'python', installed: true }], { timeoutMs: 5000 });
-    (deps.registry as unknown as { getFactory: ReturnType<typeof vi.fn> }).getFactory = vi.fn(
+    deps.registry.getFactory = vi.fn<DoctorRegistry['getFactory']>(
       () =>
         new Promise((_resolve, reject) => setTimeout(() => reject(new Error('import exploded')), 400))
     );

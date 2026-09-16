@@ -379,7 +379,7 @@ describe('SessionManager - Integration Tests', () => {
       } as never);
       await vi.runAllTimersAsync();
 
-      const logged = (dependencies.logger.info as ReturnType<typeof vi.fn>).mock.calls
+      const logged = vi.mocked(dependencies.logger.info).mock.calls
         .map((call: unknown[]) => JSON.stringify(call))
         .join('\n');
       expect(logged).not.toContain('github_pat_SESSIONLEAK1');

@@ -4006,7 +4006,7 @@ describe('SessionManager - DAP Operations', () => {
 
       dependencies.mockProxyManager.simulateEvent('adapter-capabilities', capsWithExceptionInfo);
 
-      const warnCalls = (dependencies.mockLogger.warn as ReturnType<typeof vi.fn>).mock.calls
+      const warnCalls = vi.mocked(dependencies.mockLogger.warn).mock.calls
         .filter((call: unknown[]) => typeof call[0] === 'string' && (call[0] as string).includes('filter'));
       expect(warnCalls).toHaveLength(0);
     });

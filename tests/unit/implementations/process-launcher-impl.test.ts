@@ -194,7 +194,7 @@ describe('ProxyProcessLauncherImpl', () => {
       // Tree-kill must strike first: taskkill /T can only discover children
       // while the parent is alive.
       expect(treeKill.mock.invocationCallOrder[0]).toBeLessThan(
-        (child.kill as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]
+        child.kill.mock.invocationCallOrder[0]
       );
     });
 

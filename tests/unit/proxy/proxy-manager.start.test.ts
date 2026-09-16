@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import { EventEmitter } from 'events';
 import path from 'path';
 import { pathToFileURL } from 'url';
@@ -48,7 +48,7 @@ const rejectionOf = (promise: Promise<unknown>): Promise<Error> =>
 
 describe('ProxyManager.start', () => {
   let fakeProcess: FakeProxyProcess;
-  let launchProxySpy: ReturnType<typeof vi.fn>;
+  let launchProxySpy: Mock<IProxyProcessLauncher['launchProxy']>;
   let proxyProcessLauncher: IProxyProcessLauncher;
   let fileSystem: IFileSystem;
   let logger: ILogger;
@@ -91,7 +91,7 @@ describe('ProxyManager.start', () => {
 
     proxyProcessLauncher = {
       launchProxy: launchProxySpy
-    } as unknown as IProxyProcessLauncher;
+    };
 
     fileSystem = {
       pathExists: vi.fn().mockResolvedValue(true)
@@ -729,10 +729,10 @@ describe('ProxyManager.start', () => {
 
   it('maps worker stderr prefixes to logger levels and keeps captured lines unchanged (issue #534)', async () => {
     await completeStart();
-    (logger.debug as ReturnType<typeof vi.fn>).mockClear();
-    (logger.info as ReturnType<typeof vi.fn>).mockClear();
-    (logger.warn as ReturnType<typeof vi.fn>).mockClear();
-    (logger.error as ReturnType<typeof vi.fn>).mockClear();
+    vi.mocked(logger.debug).mockClear();
+    vi.mocked(logger.info).mockClear();
+    vi.mocked(logger.warn).mockClear();
+    vi.mocked(logger.error).mockClear();
     (proxyManager as unknown as { isInitialized: boolean }).isInitialized = false;
 
     const stderrEmitter = fakeProcess.stderr as unknown as EventEmitter;
@@ -917,7 +917,7 @@ describe('ProxyManager.start', () => {
     expect(err.message).not.toContain('supersecret');
     expect(err.message).not.toContain('tail1234567890');
     expect(err.message).toContain('[REDACTED — line contained sensitive data]');
-    for (const call of (logger.error as ReturnType<typeof vi.fn>).mock.calls) {
+    for (const call of vi.mocked(logger.error).mock.calls) {
       expect(String(call[0])).not.toContain('tail1234567890');
     }
   });
@@ -1010,7 +1010,7 @@ describe('ProxyManager.start', () => {
   });
 
   it('fails to start when bootstrap worker script is missing', async () => {
-    (fileSystem.pathExists as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+    vi.mocked(fileSystem.pathExists).mockResolvedValue(false);
 
     await expect(proxyManager.start(baseConfig)).rejects.toThrow(/Bootstrap worker script not found/);
     expect(fileSystem.pathExists).toHaveBeenCalled();
@@ -1210,7 +1210,7 @@ describe('ProxyManager.start', () => {
       fakeProcess.emit('exit', 0, null);
       await stopPromise;
 
-      const preInitErrors = (logger.error as ReturnType<typeof vi.fn>).mock.calls
+      const preInitErrors = vi.mocked(logger.error).mock.calls
         .filter((call: unknown[]) => String(call[0]).includes('exited before initialization'));
       expect(preInitErrors).toEqual([]);
     });
@@ -1222,15 +1222,15 @@ describe('ProxyManager.start', () => {
 
       fakeProcess.emit('exit', 1, null);
 
-      const preInitErrors = (logger.error as ReturnType<typeof vi.fn>).mock.calls
+      const preInitErrors = vi.mocked(logger.error).mock.calls
         .filter((call: unknown[]) => String(call[0]).includes('exited before initialization'));
       expect(preInitErrors.length).toBe(1);
     });
 
     it('logs an acknowledged clean dry-run exit at debug without a pre-init error', async () => {
       await proxyManager.start(baseConfig);
-      (logger.debug as ReturnType<typeof vi.fn>).mockClear();
-      (logger.error as ReturnType<typeof vi.fn>).mockClear();
+      vi.mocked(logger.debug).mockClear();
+      vi.mocked(logger.error).mockClear();
 
       fakeProcess.emit('exit', 0, null);
 

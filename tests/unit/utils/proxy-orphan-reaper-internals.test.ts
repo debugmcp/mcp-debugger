@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 
 // Module mocks are hoisted above all imports. Each mock preserves the rest of
 // the module via importOriginal so unrelated code paths aren't disturbed.
@@ -32,9 +32,18 @@ import {
 } from '../../../src/utils/proxy-orphan-reaper.js';
 import { PROC_SCAN_CONCURRENCY } from '../../../src/utils/proc-scan-concurrency.js';
 
-const mockExecFile = execFile as unknown as ReturnType<typeof vi.fn>;
-const mockReaddir = fsp.readdir as unknown as ReturnType<typeof vi.fn>;
-const mockReadFile = fsp.readFile as unknown as ReturnType<typeof vi.fn>;
+const mockExecFile = execFile as unknown as Mock<
+  (
+    file: string,
+    args: string[],
+    options: unknown,
+    callback: (err: Error | null, result?: { stdout: string; stderr: string }) => void,
+  ) => void
+>;
+const mockReaddir = fsp.readdir as unknown as Mock<(path: string) => Promise<string[]>>;
+const mockReadFile = fsp.readFile as unknown as Mock<
+  (path: string, encoding?: string) => Promise<string>
+>;
 
 /** A worker cmdline exactly as spawned by ProxyProcessLauncherImpl. */
 const workerArgs = (ownerPid: number | string, sessionId = 'sess-1') => [
@@ -268,7 +277,7 @@ describe('killWindows', () => {
   it('invokes taskkill with the exact tree-kill args and returns true on success', async () => {
     respondWith({ stdout: 'SUCCESS' });
     expect(await killWindows(9001)).toBe(true);
-    const [cmd, args] = mockExecFile.mock.calls[0] as [string, string[]];
+    const [cmd, args] = mockExecFile.mock.calls[0];
     expect(cmd).toBe('taskkill');
     expect(args).toEqual(['/PID', '9001', '/T', '/F']);
   });
@@ -296,7 +305,7 @@ describe('listLinuxProxies', () => {
   });
 
   it('skips non-numeric entries and unreadable cmdlines', async () => {
-    mockReaddir.mockResolvedValueOnce(['self', 'cpuinfo', '100', '200'] as never);
+    mockReaddir.mockResolvedValueOnce(['self', 'cpuinfo', '100', '200']);
     mockReadFile.mockImplementation(async (path: unknown) => {
       if (String(path).includes('/100/')) {
         throw Object.assign(new Error('disappeared'), { code: 'ENOENT' });
@@ -307,7 +316,7 @@ describe('listLinuxProxies', () => {
   });
 
   it('parses NUL-delimited cmdlines and returns tagged workers only', async () => {
-    mockReaddir.mockResolvedValueOnce(['100', '200', '300'] as never);
+    mockReaddir.mockResolvedValueOnce(['100', '200', '300']);
     mockReadFile.mockImplementation(async (path: unknown) => {
       const p = String(path);
       if (p.includes('/100/')) {
@@ -326,7 +335,7 @@ describe('listLinuxProxies', () => {
 
   it('bounds concurrent cmdline reads on hosts with many processes', async () => {
     const pids = Array.from({ length: 500 }, (_, i) => String(1000 + i));
-    mockReaddir.mockResolvedValueOnce(pids as never);
+    mockReaddir.mockResolvedValueOnce(pids);
 
     let inFlight = 0;
     let peak = 0;

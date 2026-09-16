@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach, Mock } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { EventEmitter } from 'events';
 import os from 'os';
 import path from 'path';
@@ -1207,7 +1207,7 @@ describe('HTTP Command Handler', () => {
     describe('stdin watchdog (MCP_EXIT_ON_STDIN_CLOSE, issue #122)', () => {
       function makeFakeStdin() {
         const stdin = new EventEmitter() as unknown as NodeJS.ReadStream & {
-          resume: ReturnType<typeof vi.fn>;
+          resume: Mock<() => void>;
           emit: (event: string, ...args: unknown[]) => boolean;
         };
         (stdin as unknown as { resume: unknown }).resume = vi.fn();

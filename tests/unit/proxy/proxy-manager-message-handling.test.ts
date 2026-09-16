@@ -6,7 +6,7 @@
  *
  * SIMPLIFIED: Uses TestProxyManager to avoid complex async initialization
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import { EventEmitter } from 'events';
 import path from 'path';
 import { pathToFileURL } from 'url';
@@ -575,23 +575,23 @@ describe('ProxyManager Message Handling', () => {
       );
 
       const fakeProcess = new EventEmitter() as unknown as IProxyProcess & {
-        sendCommand: ReturnType<typeof vi.fn>;
-        send: ReturnType<typeof vi.fn>;
+        sendCommand: Mock<IProxyProcess['sendCommand']>;
+        send: Mock<IProxyProcess['send']>;
         killed: boolean;
         exitCode: number | null;
-        kill: ReturnType<typeof vi.fn>;
+        kill: Mock<IProxyProcess['kill']>;
       };
-      /* eslint-disable @typescript-eslint/no-explicit-any */
-      (fakeProcess as any).sendCommand = vi.fn();
-      (fakeProcess as any).killed = false;
-      (fakeProcess as any).exitCode = null;
-      (fakeProcess as any).kill = vi.fn();
+      fakeProcess.sendCommand = vi.fn();
+      fakeProcess.killed = false;
+      fakeProcess.exitCode = null;
+      fakeProcess.kill = vi.fn();
       // stop() sends { cmd: 'terminate' }; the worker then exits
-      (fakeProcess as any).send = vi.fn(() => {
+      fakeProcess.send = vi.fn(() => {
         setImmediate(() => (fakeProcess as unknown as EventEmitter).emit('exit', 0, null));
         return true;
       });
 
+      /* eslint-disable @typescript-eslint/no-explicit-any */
       (proxyManager as any).proxyProcess = fakeProcess;
       (proxyManager as any).isInitialized = true;
       (proxyManager as any).sessionId = 'drain-session';
@@ -605,8 +605,12 @@ describe('ProxyManager Message Handling', () => {
       const { proxyManager, fakeProcess } = makeStoppableProxyManager();
 
       const continuePromise = proxyManager.sendDapRequest('continue', { threadId: 1 });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const payload = (fakeProcess as any).sendCommand.mock.calls[0][0];
+      // sendCommand's real param type is the deliberately loose `object` (IProxyProcess);
+      // narrow to the shape ProxyManager actually sends for a DAP command.
+      const payload = fakeProcess.sendCommand.mock.calls[0][0] as {
+        dapCommand: string;
+        requestId: string;
+      };
       expect(payload.dapCommand).toBe('continue');
 
       // Natural termination: handleTerminated fires stop() while the continue
@@ -638,8 +642,7 @@ describe('ProxyManager Message Handling', () => {
 
       // And the proxy still gets reaped
       await stopPromise;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      expect((fakeProcess as any).send).toHaveBeenCalledWith(
+      expect(fakeProcess.send).toHaveBeenCalledWith(
         expect.objectContaining({ cmd: 'terminate' })
       );
     });
