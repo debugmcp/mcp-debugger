@@ -18,7 +18,11 @@ import {
   createMockServer,
   createMockSessionManager,
   createMockStdioTransport,
-  getToolHandlers
+  getToolHandlers,
+  type CallToolHandler,
+  type ListToolsHandler,
+  type MockServer,
+  type MockSessionManager
 } from './server-test-helpers.js';
 
 vi.mock('@modelcontextprotocol/sdk/server/index.js');
@@ -27,11 +31,11 @@ vi.mock('../../../../src/session/session-manager.js');
 vi.mock('../../../../src/container/dependencies.js');
 
 describe('set_breakpoint function gating (#271 phase 3)', () => {
-  let mockServer: any;
-  let mockSessionManager: any;
+  let mockServer: MockServer;
+  let mockSessionManager: MockSessionManager;
   let mockDependencies: Dependencies;
-  let callToolHandler: any;
-  let listToolsHandler: any;
+  let callToolHandler: CallToolHandler;
+  let listToolsHandler: ListToolsHandler;
 
   beforeEach(() => {
     mockDependencies = createMockDependencies();
@@ -194,33 +198,35 @@ describe('set_breakpoint function gating (#271 phase 3)', () => {
     expect(mockSessionManager.setFunctionBreakpoint).not.toHaveBeenCalled();
   });
 
+  async function getSetBreakpointSchema() {
+    const { tools } = await listToolsHandler({ method: 'tools/list', params: {} });
+    const tool = tools.find((t) => t.name === 'set_breakpoint');
+    if (!tool) {
+      throw new Error('set_breakpoint is not in tools/list');
+    }
+    const { properties = {}, required = [] } = tool.inputSchema;
+    return { properties, required };
+  }
+
   it('exposes the function param in the schema only in content mode', async () => {
     vi.stubEnv('DEBUG_MCP_BP_ADDRESSING', 'assert');
-    let res = await listToolsHandler({ method: 'tools/list', params: {} });
-    let tool = res.tools.find((t: { name: string }) => t.name === 'set_breakpoint');
-    expect(tool.inputSchema.properties.function).toBeUndefined();
+    expect((await getSetBreakpointSchema()).properties.function).toBeUndefined();
 
     vi.stubEnv('DEBUG_MCP_BP_ADDRESSING', 'content');
-    res = await listToolsHandler({ method: 'tools/list', params: {} });
-    tool = res.tools.find((t: { name: string }) => t.name === 'set_breakpoint');
-    expect(tool.inputSchema.properties.function).toBeDefined();
-    expect(tool.inputSchema.required).toEqual(['sessionId']);
+    const { properties, required } = await getSetBreakpointSchema();
+    expect(properties.function).toBeDefined();
+    expect(required).toEqual(['sessionId']);
   });
 });
 
 describe('set_breakpoint function-name normalization (issue #467)', () => {
-  let mockServer: any;
-  let mockSessionManager: any;
-  let callToolHandler: any;
+  let mockServer: MockServer;
+  let mockSessionManager: MockSessionManager;
+  let callToolHandler: CallToolHandler;
 
   beforeEach(() => {
     const mockDependencies = createMockDependencies();
-    // createMockDependencies() is a deliberate partial double: processManager,
-    // networkManager and the factories are bare vi.fn() placeholders these tests
-    // never call. (The single-point fix is a typed return on the helper itself.)
-    vi.mocked(createProductionDependencies).mockReturnValue(
-      mockDependencies
-    );
+    vi.mocked(createProductionDependencies).mockReturnValue(mockDependencies);
     mockServer = createMockServer();
     vi.mocked(Server).mockImplementation(function() { return mockServer as any; });
     const mockStdioTransport = createMockStdioTransport();
