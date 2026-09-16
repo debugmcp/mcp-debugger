@@ -8,14 +8,18 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
 import { DebugSessionInfo, DebugLanguage, SessionState } from '@debugmcp/shared';
-import { createProductionDependencies } from '../../../../src/container/dependencies.js';
+import { createProductionDependencies, type Dependencies } from '../../../../src/container/dependencies.js';
 import { SessionNotFoundError } from '../../../../src/errors/debug-errors.js';
 import {
   createMockDependencies,
   createMockServer,
   createMockSessionManager,
   createMockStdioTransport,
-  getToolHandlers
+  getToolHandlers,
+  type CallToolHandler,
+  type ListToolsHandler,
+  type MockServer,
+  type MockSessionManager
 } from './server-test-helpers.js';
 
 vi.mock('@modelcontextprotocol/sdk/server/index.js');
@@ -24,11 +28,11 @@ vi.mock('../../../../src/session/session-manager.js');
 vi.mock('../../../../src/container/dependencies.js');
 
 describe('redefine_classes and attach stopOnEntry tests', () => {
-  let mockServer: any;
-  let mockSessionManager: any;
-  let mockDependencies: any;
-  let callToolHandler: any;
-  let listToolsHandler: any;
+  let mockServer: MockServer;
+  let mockSessionManager: MockSessionManager;
+  let mockDependencies: Dependencies;
+  let callToolHandler: CallToolHandler;
+  let listToolsHandler: ListToolsHandler;
 
   beforeEach(() => {
     mockDependencies = createMockDependencies();
@@ -91,25 +95,29 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
   describe('redefine_classes tool registration', () => {
     it('should be listed in available tools', async () => {
       const result = await listToolsHandler({ method: 'tools/list', params: {} });
-      const toolNames = result.tools.map((t: any) => t.name);
+      const toolNames = result.tools.map((t) => t.name);
       expect(toolNames).toContain('redefine_classes');
     });
 
     it('should have correct input schema', async () => {
       const result = await listToolsHandler({ method: 'tools/list', params: {} });
-      const tool = result.tools.find((t: any) => t.name === 'redefine_classes');
-      expect(tool).toBeDefined();
+      const tool = result.tools.find((t) => t.name === 'redefine_classes');
+      if (!tool) {
+        throw new Error('redefine_classes is not in tools/list');
+      }
       expect(tool.inputSchema.required).toContain('sessionId');
       expect(tool.inputSchema.required).toContain('classesDir');
-      expect(tool.inputSchema.properties.sinceTimestamp).toBeDefined();
-      expect(tool.inputSchema.properties.timeout).toBeDefined();
+      expect(tool.inputSchema.properties?.sinceTimestamp).toBeDefined();
+      expect(tool.inputSchema.properties?.timeout).toBeDefined();
     });
 
     it('evaluate_expression schema should expose a timeout property', async () => {
       const result = await listToolsHandler({ method: 'tools/list', params: {} });
-      const tool = result.tools.find((t: any) => t.name === 'evaluate_expression');
-      expect(tool).toBeDefined();
-      expect(tool.inputSchema.properties.timeout).toBeDefined();
+      const tool = result.tools.find((t) => t.name === 'evaluate_expression');
+      if (!tool) {
+        throw new Error('evaluate_expression is not in tools/list');
+      }
+      expect(tool.inputSchema.properties?.timeout).toBeDefined();
     });
   });
 
@@ -711,11 +719,11 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
     it('is advertised in the attach_to_process and create_debug_session schemas', async () => {
       const result = await listToolsHandler({ method: 'tools/list', params: {} });
 
-      const attach = result.tools.find((t: any) => t.name === 'attach_to_process');
-      expect(attach.inputSchema.properties.adapterConfig?.type).toBe('object');
+      const attach = result.tools.find((t) => t.name === 'attach_to_process');
+      expect(attach?.inputSchema.properties?.adapterConfig).toMatchObject({ type: 'object' });
 
-      const create = result.tools.find((t: any) => t.name === 'create_debug_session');
-      expect(create.inputSchema.properties.adapterConfig?.type).toBe('object');
+      const create = result.tools.find((t) => t.name === 'create_debug_session');
+      expect(create?.inputSchema.properties?.adapterConfig).toMatchObject({ type: 'object' });
     });
 
     it('create_debug_session auto-attach forwards adapterConfig', async () => {

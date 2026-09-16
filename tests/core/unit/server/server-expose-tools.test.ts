@@ -6,13 +6,17 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
-import { createProductionDependencies } from '../../../../src/container/dependencies.js';
+import { createProductionDependencies, type Dependencies } from '../../../../src/container/dependencies.js';
 import {
   createMockDependencies,
   createMockServer,
   createMockSessionManager,
   createMockStdioTransport,
-  getToolHandlers
+  getToolHandlers,
+  type CallToolHandler,
+  type ListToolsHandler,
+  type MockServer,
+  type MockSessionManager
 } from './server-test-helpers.js';
 
 vi.mock('@modelcontextprotocol/sdk/server/index.js');
@@ -21,11 +25,11 @@ vi.mock('../../../../src/session/session-manager.js');
 vi.mock('../../../../src/container/dependencies.js');
 
 describe('expose_session and unexpose_session tools', () => {
-  let mockServer: any;
-  let mockSessionManager: any;
-  let mockDependencies: any;
-  let callToolHandler: any;
-  let listToolsHandler: any;
+  let mockServer: MockServer;
+  let mockSessionManager: MockSessionManager;
+  let mockDependencies: Dependencies;
+  let callToolHandler: CallToolHandler;
+  let listToolsHandler: ListToolsHandler;
 
   const activeSession = { id: 'sess-1', sessionLifecycle: 'active' };
 
@@ -58,14 +62,17 @@ describe('expose_session and unexpose_session tools', () => {
   describe('registration', () => {
     it('lists both tools with sessionId-only schemas', async () => {
       const result = await listToolsHandler({ method: 'tools/list', params: {} });
-      const toolNames = result.tools.map((t: any) => t.name);
+      const toolNames = result.tools.map((t) => t.name);
       expect(toolNames).toContain('expose_session');
       expect(toolNames).toContain('unexpose_session');
 
       for (const name of ['expose_session', 'unexpose_session']) {
-        const tool = result.tools.find((t: any) => t.name === name);
+        const tool = result.tools.find((t) => t.name === name);
+        if (!tool) {
+          throw new Error(`${name} is not in tools/list`);
+        }
         expect(tool.inputSchema.required).toEqual(['sessionId']);
-        expect(Object.keys(tool.inputSchema.properties)).toEqual(['sessionId']);
+        expect(Object.keys(tool.inputSchema.properties ?? {})).toEqual(['sessionId']);
       }
     });
   });

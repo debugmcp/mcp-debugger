@@ -7,17 +7,19 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import path from 'node:path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { McpError } from '@modelcontextprotocol/sdk/types.js';
+import { McpError, type ReadResourceResult } from '@modelcontextprotocol/sdk/types.js';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
-import { createProductionDependencies } from '../../../../src/container/dependencies.js';
+import { createProductionDependencies, type Dependencies } from '../../../../src/container/dependencies.js';
 import { OutputRingBuffer } from '../../../../src/session/output-buffer.js';
 import {
   createMockDependencies,
   createMockServer,
   createMockSessionManager,
   createMockStdioTransport,
-  getResourceHandlers
+  getResourceHandlers,
+  type MockServer,
+  type MockSessionManager
 } from './server-test-helpers.js';
 
 vi.mock('@modelcontextprotocol/sdk/server/index.js');
@@ -25,11 +27,19 @@ vi.mock('@modelcontextprotocol/sdk/server/stdio.js');
 vi.mock('../../../../src/session/session-manager.js');
 vi.mock('../../../../src/container/dependencies.js');
 
+/** The text of a resources/read entry; a blob entry is a test failure, not a cast. */
+function textOf(content: ReadResourceResult['contents'][number]): string {
+  if (!('text' in content)) {
+    throw new Error(`expected a text resource for ${content.uri}, got a blob`);
+  }
+  return content.text;
+}
+
 describe('Server Output Resources Tests', () => {
   let debugServer: DebugMcpServer;
-  let mockServer: any;
-  let mockSessionManager: any;
-  let mockDependencies: any;
+  let mockServer: MockServer;
+  let mockSessionManager: MockSessionManager;
+  let mockDependencies: Dependencies;
   let outputCapturedListener: ((sessionId: string, entry: unknown) => void) | undefined;
 
   beforeEach(() => {
@@ -148,7 +158,7 @@ describe('Server Output Resources Tests', () => {
         params: { uri: 'debug://sessions/sess-1/output' }
       });
 
-      expect(result.contents[0].text).toBe('');
+      expect(textOf(result.contents[0])).toBe('');
     });
 
     it('routes proxy-log reads through the bounded sanitizer', async () => {
@@ -156,7 +166,7 @@ describe('Server Output Resources Tests', () => {
       mockSessionManager.getSession.mockReturnValue(mockSession({ logDir }));
       const lines = Array.from({ length: 100 }, (_, index) => `line ${index + 1}`);
       lines[98] = '[Worker] argv: --token=super-secret-value';
-      mockDependencies.fileSystem.readTail.mockResolvedValue(lines.join('\n'));
+      vi.mocked(mockDependencies.fileSystem.readTail).mockResolvedValue(lines.join('\n'));
 
       const { readResourceHandler } = getResourceHandlers(mockServer);
       const result = await readResourceHandler({
@@ -172,9 +182,10 @@ describe('Server Output Resources Tests', () => {
         uri: 'debug://sessions/sess-1/proxy-log',
         mimeType: 'text/plain'
       });
-      expect(result.contents[0].text).toContain('line 100');
-      expect(result.contents[0].text).toContain('[REDACTED');
-      expect(result.contents[0].text).not.toContain('super-secret-value');
+      const text = textOf(result.contents[0]);
+      expect(text).toContain('line 100');
+      expect(text).toContain('[REDACTED');
+      expect(text).not.toContain('super-secret-value');
     });
 
     it('rejects a proxy-log URI before the session has a run directory', async () => {

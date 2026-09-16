@@ -5,14 +5,18 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import type { IAdapterRegistry } from '@debugmcp/shared';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
-import { createProductionDependencies } from '../../../../src/container/dependencies.js';
+import { createProductionDependencies, type Dependencies } from '../../../../src/container/dependencies.js';
+import { createMockAdapterRegistryWithLanguages } from '../../../test-utils/mocks/mock-adapter-registry.js';
 import {
   createMockDependencies,
   createMockServer,
   createMockSessionManager,
-  getToolHandlers
+  getToolHandlers,
+  type MockServer,
+  type MockSessionManager
 } from './server-test-helpers.js';
 
 // Mock dependencies
@@ -23,10 +27,10 @@ vi.mock('../../../../src/container/dependencies.js');
 
 describe('Server Language Discovery Tests', () => {
   let debugServer: DebugMcpServer;
-  let mockServer: any;
-  let mockSessionManager: any;
-  let mockDependencies: any;
-  let mockAdapterRegistry: any;
+  let mockServer: MockServer;
+  let mockSessionManager: MockSessionManager;
+  let mockDependencies: Dependencies;
+  let mockAdapterRegistry: IAdapterRegistry;
 
   beforeEach(() => {
     mockDependencies = createMockDependencies();
@@ -370,9 +374,10 @@ describe('Server Language Discovery Tests', () => {
     });
 
     it('should handle undefined adapter registry gracefully', async () => {
-      mockDependencies.adapterRegistry = undefined;
-      mockSessionManager = createMockSessionManager(undefined);
-      vi.mocked(SessionManager).mockImplementation(function() { return mockSessionManager as any; });
+      // discoverSupportedLanguages guards a missing registry; the server reads it off
+      // the session manager. Delete the key rather than widen the doubles' types.
+      Reflect.deleteProperty(mockDependencies, 'adapterRegistry');
+      Reflect.deleteProperty(mockSessionManager, 'adapterRegistry');
 
       debugServer = new DebugMcpServer();
       const { callToolHandler } = getToolHandlers(mockServer);
@@ -679,7 +684,7 @@ describe('Server Language Discovery Tests', () => {
 
   describe('start_debugging with language support validation', () => {
     beforeEach(() => {
-      mockSessionManager.getSessionById = vi.fn().mockReturnValue({
+      mockSessionManager.getSession = vi.fn().mockReturnValue({
         id: 'session-123',
         language: 'python',
         state: { lifecycleState: 'READY' }
@@ -715,7 +720,7 @@ describe('Server Language Discovery Tests', () => {
       const { callToolHandler } = getToolHandlers(mockServer);
 
       // Session has a language not in static list but should be discovered dynamically
-      mockSessionManager.getSessionById = vi.fn().mockReturnValue({
+      mockSessionManager.getSession = vi.fn().mockReturnValue({
         id: 'session-123',
         language: 'javascript',
         state: { lifecycleState: 'READY' }
@@ -747,9 +752,9 @@ describe('Server Language Discovery Tests', () => {
       const { callToolHandler } = getToolHandlers(mockServer);
 
       // Create registry without listLanguages method
-      mockDependencies.adapterRegistry = {
-        getSupportedLanguages: vi.fn().mockReturnValue(['python'])
-      };
+      const registry = createMockAdapterRegistryWithLanguages(['python']);
+      Reflect.deleteProperty(registry, 'listLanguages');
+      mockDependencies.adapterRegistry = registry;
 
       const result = await callToolHandler({
         method: 'tools/call',
