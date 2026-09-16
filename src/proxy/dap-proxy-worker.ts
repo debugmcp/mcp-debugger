@@ -874,10 +874,9 @@ export class DapProxyWorker {
         // issue a 'threads' request to discover a valid thread and populate the body.
         if (this.dapClient && typeof body.threadId !== 'number') {
           try {
-            const resp = await this.dapClient.sendRequest('threads', {});
+            const resp = await this.dapClient.sendRequest<DebugProtocol.ThreadsResponse>('threads', {});
             this.logger!.info('[Worker] Auto-discovered threads after stopped event (no threadId)', resp);
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const threads = (resp as any)?.body?.threads;
+            const threads = resp.body?.threads;
             if (Array.isArray(threads) && threads.length > 0 && typeof threads[0]?.id === 'number') {
               body.threadId = threads[0].id;
               this.logger!.info(`[Worker] Set missing threadId to ${body.threadId} from threads response`);
@@ -890,7 +889,7 @@ export class DapProxyWorker {
           // JDI bridge (Java adapter) benefits from a 'threads' request after stopped
           // to ensure thread data is fresh before stackTrace requests.
           try {
-            const resp = await this.dapClient.sendRequest('threads', {});
+            const resp = await this.dapClient.sendRequest<DebugProtocol.ThreadsResponse>('threads', {});
             this.logger!.info('[Worker] Pre-fetched threads after stopped event', resp);
           } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -1106,17 +1105,20 @@ export class DapProxyWorker {
       return;
     }
     try {
-      const response = (await this.dapClient.sendRequest('setFunctionBreakpoints', {
-        breakpoints: this.currentInitPayload.initialFunctionBreakpoints.map((bp) => ({
-          name: bp.name,
-          ...(bp.condition !== undefined ? { condition: bp.condition } : {})
-        }))
-      })) as { body?: { breakpoints?: DebugProtocol.Breakpoint[] } } | undefined;
+      const response = await this.dapClient.sendRequest<DebugProtocol.SetFunctionBreakpointsResponse>(
+        'setFunctionBreakpoints',
+        {
+          breakpoints: this.currentInitPayload.initialFunctionBreakpoints.map((bp) => ({
+            name: bp.name,
+            ...(bp.condition !== undefined ? { condition: bp.condition } : {})
+          }))
+        }
+      );
       // Forward the adapter-assigned ids to the parent (issue #302): the
       // parent's store otherwise learns them only from the post-launch
       // re-sync, which loses the race against a stop that hits a function
       // breakpoint immediately at launch (e.g. a breakpoint on main).
-      const results = response?.body?.breakpoints ?? [];
+      const results = response.body?.breakpoints ?? [];
       this.sendStatus('function_breakpoints_synced', {
         functionBreakpoints: this.currentInitPayload.initialFunctionBreakpoints.map((bp, i) => ({
           name: bp.name,

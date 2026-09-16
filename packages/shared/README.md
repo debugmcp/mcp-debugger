@@ -89,8 +89,8 @@ An adapter factory may implement the optional `IAdapterFactory.describeToolchain
 | `INetworkManager` | interface | Network operations |
 | `IServer` | interface | Server abstraction |
 | `ILogger` | interface | Logging interface |
-| `IProxyManager` | interface | Debug proxy management |
-| `IProxyManagerFactory` | interface | Factory for proxy managers |
+| `IProxyManager` | interface | Debug proxy management (deprecated placeholder) |
+| `IProxyManagerFactory` | interface | Factory for proxy managers (deprecated placeholder) |
 | `IEnvironment` | interface | Environment information |
 | `ILoggerFactory` | interface | Factory for loggers |
 | `IChildProcessFactory` | interface | Factory for child processes |
