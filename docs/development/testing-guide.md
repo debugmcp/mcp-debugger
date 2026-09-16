@@ -161,7 +161,7 @@ describe('ComponentToTest', () => {
 });
 ```
 
-`tests/vitest.setup.ts` already calls `vi.resetAllMocks()`, `vi.restoreAllMocks()`, and `vi.unstubAllEnvs()` after every test, so a local `afterEach` is for *your* resources — sessions, proxy managers, fake launchers — not for the global mock slate.
+`tests/vitest.setup.ts` already calls `vi.resetAllMocks()`, `vi.restoreAllMocks()`, and `vi.unstubAllEnvs()` after every test, so a local `afterEach` is for *your* resources — sessions, proxy managers, listeners on hand-rolled process doubles — not for the global mock slate.
 
 ### Testing Patterns
 
@@ -265,7 +265,7 @@ it('should emit events correctly', async () => {
 There is no shared spawned-process fake. A suite that needs one hand-rolls a small
 `EventEmitter` that `implements IProxyProcess`, scripts the IPC reply the manager
 blocks on, and emits everything else. `tests/unit/proxy/proxy-manager.start.test.ts`
-is the template (paraphrased in full in [docs/patterns/dependency-injection.md](../patterns/dependency-injection.md)):
+is the template (paraphrased more fully in [docs/patterns/dependency-injection.md](../patterns/dependency-injection.md)):
 
 ```typescript
 beforeEach(() => {

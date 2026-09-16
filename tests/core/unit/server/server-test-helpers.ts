@@ -279,7 +279,7 @@ export function getPromptHandlers(mockServer: MockServer) {
 }
 
 /**
- * Synchronous variant for callers that already hold a tools array (or a
+ * Synchronous variant of `findTool` for callers that already hold a tools array (or a
  * structurally-typed projection of one). Throws with the tool name so a
  * missing tool fails loudly instead of as `undefined` three lines later.
  */

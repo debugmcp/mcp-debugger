@@ -454,8 +454,8 @@ it('launches the proxy process and sends the init command', async () => {
 });
 ```
 
-The suite owns its teardown too: `afterEach` calls `removeAllListeners()` on both
-the fake and the manager and flushes with a `setImmediate`, so a straggling emit
+The suite owns its teardown too: `afterEach` calls `removeAllListeners()` on the fake, its `stderr`
+and the manager and flushes with a `setImmediate`, so a straggling emit
 cannot fire into whichever test the shuffled ordering runs next (issue #420).
 
 ## Advanced Patterns
