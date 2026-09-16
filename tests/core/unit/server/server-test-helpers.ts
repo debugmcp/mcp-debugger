@@ -10,10 +10,22 @@ import {
   SubscribeRequestSchema,
   UnsubscribeRequestSchema,
   ListPromptsRequestSchema,
-  GetPromptRequestSchema
+  GetPromptRequestSchema,
+  type EmptyResult,
+  type GetPromptResult,
+  type ListPromptsResult,
+  type ListResourcesResult,
+  type ReadResourceResult,
+  type Tool
 } from '@modelcontextprotocol/sdk/types.js';
+import type { IAdapterRegistry } from '@debugmcp/shared';
 import { DebugMcpServer } from '../../../../src/server.js';
-import { createProductionDependencies } from '../../../../src/container/dependencies.js';
+import type { SessionManager } from '../../../../src/session/session-manager.js';
+import type { ToolResult } from '../../../../src/server/tool-result.js';
+import {
+  createProductionDependencies,
+  type Dependencies
+} from '../../../../src/container/dependencies.js';
 import {
   createMockLogger,
   createMockNetworkManager,
@@ -24,7 +36,7 @@ import { MockProxyManagerFactory } from '../../../../src/factories/proxy-manager
 import { MockSessionStoreFactory } from '../../../../src/factories/session-store-factory.js';
 import { createMockAdapterRegistry } from '../../../test-utils/mocks/mock-adapter-registry.js';
 
-export function createMockDependencies(): ReturnType<typeof createProductionDependencies> {
+export function createMockDependencies(): Dependencies {
   const mockLogger = createMockLogger();
   const mockAdapterRegistry = createMockAdapterRegistry();
   
@@ -72,12 +84,33 @@ export function createMockServer() {
     close: vi.fn(),
     sendResourceUpdated: vi.fn().mockResolvedValue(undefined),
     sendResourceListChanged: vi.fn().mockResolvedValue(undefined),
-    onerror: undefined as any
+    onerror: undefined as ((error: Error) => void) | undefined
   };
 }
 
-export function createMockSessionManager(mockAdapterRegistry: any) {
-  const manager: any = {
+export type MockServer = ReturnType<typeof createMockServer>;
+export type MockSessionManager = ReturnType<typeof createMockSessionManager>;
+
+/**
+ * The request shape the server tests hand to a registered handler. Every
+ * field is optional: the handlers only read `params`, and many tests omit
+ * the JSON-RPC envelope entirely.
+ */
+export type TestRequest = { method?: string; params?: Record<string, unknown>; jsonrpc?: string };
+export type CallToolHandler = (request: TestRequest) => Promise<ToolResult>;
+export type ListToolsHandler = (request?: TestRequest) => Promise<{ tools: Tool[] }>;
+
+/**
+ * A SessionManager double whose keys are pinned to the real class: a member
+ * the class no longer has fails to compile here (excess-property check on
+ * the `satisfies` literal), which is the drift guard. Every member stays a
+ * bare `vi.fn()` so tests can keep returning partial session objects.
+ */
+export function createMockSessionManager(mockAdapterRegistry: IAdapterRegistry) {
+  // Hoisted: getVariablesDetailed delegates to it, and a self-reference inside
+  // the literal would be a TS7022 circularity once the literal is inferred.
+  const getVariables = vi.fn();
+  const manager = {
     createSession: vi.fn(),
     getAllSessions: vi.fn(),
     getSession: vi.fn(),
@@ -108,12 +141,12 @@ export function createMockSessionManager(mockAdapterRegistry: any) {
     stepInto: vi.fn(),
     stepOut: vi.fn(),
     continue: vi.fn(),
-    getVariables: vi.fn(),
+    getVariables,
     // Delegates to getVariables so existing tests that stub/assert on
     // getVariables keep working now that the tool handler calls the
     // detailed variant (issues #356/#359).
     getVariablesDetailed: vi.fn(async (...args: unknown[]) => ({
-      variables: (await manager.getVariables(...(args as [string, number, string[]?]))) ?? []
+      variables: (await getVariables(...(args as [string, number, string[]?]))) ?? []
     })),
     getLocalVariables: vi.fn(),
     getStackTrace: vi.fn(),
@@ -133,12 +166,11 @@ export function createMockSessionManager(mockAdapterRegistry: any) {
     redefineClasses: vi.fn(),
     exposeSession: vi.fn(),
     unexposeSession: vi.fn(),
-    getAdapterRegistry: vi.fn().mockReturnValue(mockAdapterRegistry),
     adapterRegistry: mockAdapterRegistry,
     // EventEmitter surface used by DebugMcpServer for output-captured (issue #218)
     on: vi.fn(),
     removeListener: vi.fn()
-  };
+  } satisfies Partial<Record<keyof SessionManager, unknown>>;
   return manager;
 }
 
@@ -169,9 +201,7 @@ export function createMockToolContext(): DebugMcpServer {
       'otherwise every call opens a real winston file transport that is never closed.'
     );
   }
-  vi.mocked(createProductionDependencies).mockReturnValue(
-    createMockDependencies() as unknown as ReturnType<typeof createProductionDependencies>
-  );
+  vi.mocked(createProductionDependencies).mockReturnValue(createMockDependencies());
   const server = new DebugMcpServer({ logLevel: 'info' });
   Object.assign(server, {
     sessionManager: createMockSessionManager(createMockAdapterRegistry()),
@@ -186,33 +216,42 @@ export function createMockToolContext(): DebugMcpServer {
  * src/server.ts (tools, resources, prompts) is not a hidden test contract;
  * @modelcontextprotocol/sdk/types.js is never mocked, so the identity is safe.
  */
-function findHandler(mockServer: any, schema: unknown) {
+function findHandler(mockServer: MockServer, schema: unknown): unknown {
   const call = mockServer.setRequestHandler.mock.calls.find(
-    ([registered]: [unknown, unknown]) => registered === schema
+    ([registered]: unknown[]) => registered === schema
   );
   return call?.[1];
 }
 
-export function getToolHandlers(mockServer: any) {
+// The `as <Handler>` casts below are the one sanctioned cast per lookup:
+// `mock.calls` of an untyped `vi.fn` is `any[]`, so the registered handler
+// comes back as `unknown` and only the schema identity says which it is.
+export function getToolHandlers(mockServer: MockServer) {
   return {
-    listToolsHandler: findHandler(mockServer, ListToolsRequestSchema),
-    callToolHandler: findHandler(mockServer, CallToolRequestSchema)
+    listToolsHandler: findHandler(mockServer, ListToolsRequestSchema) as ListToolsHandler,
+    callToolHandler: findHandler(mockServer, CallToolRequestSchema) as CallToolHandler
   };
 }
 
 // Debuggee-output resource handlers (issue #218).
-export function getResourceHandlers(mockServer: any) {
+export function getResourceHandlers(mockServer: MockServer) {
   return {
-    listResourcesHandler: findHandler(mockServer, ListResourcesRequestSchema),
-    readResourceHandler: findHandler(mockServer, ReadResourceRequestSchema),
-    subscribeHandler: findHandler(mockServer, SubscribeRequestSchema),
-    unsubscribeHandler: findHandler(mockServer, UnsubscribeRequestSchema)
+    listResourcesHandler: findHandler(mockServer, ListResourcesRequestSchema) as
+      (request?: TestRequest) => Promise<ListResourcesResult>,
+    readResourceHandler: findHandler(mockServer, ReadResourceRequestSchema) as
+      (request: TestRequest) => Promise<ReadResourceResult>,
+    subscribeHandler: findHandler(mockServer, SubscribeRequestSchema) as
+      (request: TestRequest) => Promise<EmptyResult>,
+    unsubscribeHandler: findHandler(mockServer, UnsubscribeRequestSchema) as
+      (request: TestRequest) => Promise<EmptyResult>
   };
 }
 
-export function getPromptHandlers(mockServer: any) {
+export function getPromptHandlers(mockServer: MockServer) {
   return {
-    listPromptsHandler: findHandler(mockServer, ListPromptsRequestSchema),
-    getPromptHandler: findHandler(mockServer, GetPromptRequestSchema)
+    listPromptsHandler: findHandler(mockServer, ListPromptsRequestSchema) as
+      (request?: TestRequest) => Promise<ListPromptsResult>,
+    getPromptHandler: findHandler(mockServer, GetPromptRequestSchema) as
+      (request: TestRequest) => Promise<GetPromptResult>
   };
 }
