@@ -34,6 +34,7 @@ export function createMockLogger(): ILogger {
 export function createMockFileSystem(): IFileSystem {
   return {
     pathExists: vi.fn().mockResolvedValue(true),
+    existsSync: vi.fn().mockReturnValue(true),
     ensureDir: vi.fn().mockResolvedValue(undefined),
     readFile: vi.fn().mockResolvedValue(''),
     readTail: vi.fn().mockResolvedValue(''),
@@ -47,10 +48,8 @@ export function createMockFileSystem(): IFileSystem {
     stat: vi.fn().mockResolvedValue({ isDirectory: () => false, isFile: () => true }),
     unlink: vi.fn().mockResolvedValue(undefined),
     rmdir: vi.fn().mockResolvedValue(undefined),
-    ensureDirSync: vi.fn(),
-    createWriteStream: vi.fn(),
-    createReadStream: vi.fn()
-  } as any;
+    ensureDirSync: vi.fn()
+  };
 }
 
 /**
