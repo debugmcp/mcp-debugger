@@ -214,6 +214,7 @@ packages/
 - **`helpers/test-dependencies.ts`** — creates dependency injection containers pre-wired for testing
 - **`mocks/dap-client.ts`** — `createMockDapClient()`, an `IDapClient` double over a real `EventEmitter` with every method a `vi.fn`, shared by the proxy-worker, go-initialized-fallback and connection-manager tests
 - **`mocks/dap-proxy-doubles.ts`** — `createMockLogger()`, `createMockFileSystem()`, `createMockProcessSpawner()` for the proxy worker's own dependency slice, typed to the worker-local `ILogger`/`IFileSystem`/`IProcessSpawner` in `src/proxy/dap-proxy-interfaces.ts` (narrower than `@debugmcp/shared`'s), shared by the proxy-worker and go-initialized-fallback tests
+- **`mocks/session-doubles.ts`** — `PartialSessionStore` / `createPartialSessionStore(session)` (the six `SessionStore` members the operations suites drive, each a typed `vi.fn`) and the `ProxyManagerMockKeys` / `ProxyManagerMocks` / `ProxyManagerDouble` types for the deliberately partial proxy-manager double; shared by the attach-modes, launch-gate and operations-coverage tests
 - **`mocks/mock-logger.ts`** — captures log output for assertion
 - **`mocks/mock-proxy-manager.ts`** — mock proxy manager with controllable behavior
 - **`mocks/child-process.ts`**, **`mocks/net.ts`** — mock Node.js built-ins

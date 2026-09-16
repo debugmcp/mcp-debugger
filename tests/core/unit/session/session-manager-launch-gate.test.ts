@@ -4,7 +4,7 @@
  *   availability reason, before any state mutation or proxy teardown
  * - probe failures (throwing validate, missing getFactory) fail open
  */
-import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SessionManagerOperations } from '../../../../src/session/session-manager-operations.js';
 import type { SessionManagerDependencies } from '../../../../src/session/session-manager-core.js';
 import { SessionStore, type ManagedSession } from '../../../../src/session/session-store.js';
@@ -17,23 +17,21 @@ import {
 } from '@debugmcp/shared';
 import {
   createMockEnvironment,
-  createMockFileSystem,
   createMockLogger,
   createMockNetworkManager
 } from '../../../test-utils/helpers/test-dependencies.js';
+import { createMockFileSystem } from '../../../test-utils/helpers/test-utils.js';
 import { createMockAdapterRegistry } from '../../../test-utils/mocks/mock-adapter-registry.js';
+import {
+  createPartialSessionStore,
+  type PartialSessionStoreMock
+} from '../../../test-utils/mocks/session-doubles.js';
 
 class TestableSessionManagerOperations extends SessionManagerOperations {
   protected async handleAutoContinue(_sessionId: string): Promise<void> {
     // no-op for tests
   }
 }
-
-/** The store members these tests drive. Deliberately partial: the rest of SessionStore is never reached. */
-type PartialSessionStore = Pick<
-  SessionStore,
-  'get' | 'getOrThrow' | 'update' | 'updateState' | 'remove' | 'getAll'
->;
 
 /**
  * The launch gate's availability probe (`ProbeableAdapterFactory` in
@@ -50,7 +48,7 @@ function probeOnlyFactory(validate: IAdapterFactory['validate']): IAdapterFactor
 
 describe('SessionManagerOperations launch gate (issue #360)', () => {
   let operations: SessionManagerOperations;
-  let mockSessionStore: { [K in keyof PartialSessionStore]: Mock<PartialSessionStore[K]> };
+  let mockSessionStore: PartialSessionStoreMock;
   let mockDependencies: SessionManagerDependencies;
   let mockSession: ManagedSession;
 
@@ -69,22 +67,10 @@ describe('SessionManagerOperations launch gate (issue #360)', () => {
       executablePath: undefined
     };
 
-    mockSessionStore = {
-      get: vi.fn<PartialSessionStore['get']>().mockReturnValue(mockSession),
-      getOrThrow: vi.fn<PartialSessionStore['getOrThrow']>().mockReturnValue(mockSession),
-      update: vi.fn<PartialSessionStore['update']>(),
-      updateState: vi.fn<PartialSessionStore['updateState']>().mockImplementation(
-        (_sessionId: string, newState: SessionState) => {
-          mockSession.state = newState;
-        }
-      ),
-      remove: vi.fn<PartialSessionStore['remove']>().mockReturnValue(true),
-      getAll: vi.fn<PartialSessionStore['getAll']>().mockReturnValue([mockSession])
-    };
+    mockSessionStore = createPartialSessionStore(mockSession);
 
+    // Pre-configured helper: pathExists/ensureDir already answer true/undefined.
     const fileSystem = createMockFileSystem();
-    vi.mocked(fileSystem.pathExists).mockResolvedValue(true);
-    vi.mocked(fileSystem.ensureDir).mockResolvedValue(undefined);
     const networkManager = createMockNetworkManager();
     vi.mocked(networkManager.findFreePort).mockResolvedValue(9000);
 
@@ -156,9 +142,11 @@ describe('SessionManagerOperations launch gate (issue #360)', () => {
 
     // The launch proceeds past the gate and fails later for unrelated
     // mock-infrastructure reasons; what matters is that the gate did not
-    // block and state moved off CREATED.
+    // block and state moved off CREATED. Adapter creation (AdapterLease.acquire)
+    // sits past the gate, so its having run is the positive proof.
     expect(result.error ?? '').not.toContain("Cannot start a 'javascript' debug session");
     expect(mockSessionStore.updateState).toHaveBeenCalled();
+    expect(mockDependencies.adapterRegistry.create).toHaveBeenCalled();
   });
 
   it('fails open when the registry has no getFactory', async () => {
@@ -168,6 +156,7 @@ describe('SessionManagerOperations launch gate (issue #360)', () => {
 
     expect(result.error ?? '').not.toContain("Cannot start a 'javascript' debug session");
     expect(mockSessionStore.updateState).toHaveBeenCalled();
+    expect(mockDependencies.adapterRegistry.create).toHaveBeenCalled();
   });
 
   it('caches the probe result across calls (single validate for two launches)', async () => {

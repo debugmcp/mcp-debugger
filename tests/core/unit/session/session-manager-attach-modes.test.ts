@@ -5,7 +5,7 @@
  * - spawn-mode attach still resolves the local toolchain
  * - launch toolchain failures on attach-capable adapters carry an attach hint
  */
-import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SessionManagerOperations } from '../../../../src/session/session-manager-operations.js';
 import type { SessionManagerDependencies } from '../../../../src/session/session-manager-core.js';
 import { SessionStore, type ManagedSession } from '../../../../src/session/session-store.js';
@@ -15,11 +15,16 @@ import { DebugLanguage, SessionLifecycleState, SessionState } from '@debugmcp/sh
 import { DebugSessionCreationError } from '../../../../src/errors/debug-errors.js';
 import {
   createMockEnvironment,
-  createMockFileSystem,
   createMockLogger,
   createMockNetworkManager
 } from '../../../test-utils/helpers/test-dependencies.js';
+import { createMockFileSystem } from '../../../test-utils/helpers/test-utils.js';
 import { createMockAdapterRegistry } from '../../../test-utils/mocks/mock-adapter-registry.js';
+import {
+  createPartialSessionStore,
+  type PartialSessionStoreMock,
+  type ProxyManagerMocks
+} from '../../../test-utils/mocks/session-doubles.js';
 import {
   FakeDebugAdapter,
   type DefinedAttachMembers
@@ -38,28 +43,6 @@ class TestableSessionManagerOperations extends SessionManagerOperations {
     // no-op for tests
   }
 }
-
-/** The store members these tests drive. Deliberately partial: the rest of SessionStore is never reached. */
-type PartialSessionStore = Pick<
-  SessionStore,
-  'get' | 'getOrThrow' | 'update' | 'updateState' | 'remove' | 'getAll'
->;
-
-/**
- * The proxy-manager members the attach path reaches. Narrower than `IProxyManager`
- * (an EventEmitter) on purpose; this file never installs the double on a
- * `ManagedSession`, so the one widening cast sits at the factory boundary.
- */
-type ProxyManagerMockKeys =
-  | 'isRunning'
-  | 'getCurrentThreadId'
-  | 'sendDapRequest'
-  | 'stop'
-  | 'once'
-  | 'off'
-  | 'removeListener'
-  | 'on'
-  | 'start';
 
 /**
  * Factory metadata as the attach gate reads it: only `modes.attach` is consulted
@@ -103,8 +86,9 @@ function makeDirectConnectRubyAdapter(
 
 describe('SessionManagerOperations attach modes', () => {
   let operations: SessionManagerOperations;
-  let mockSessionStore: { [K in keyof PartialSessionStore]: Mock<PartialSessionStore[K]> };
-  let mockProxyManager: { [K in ProxyManagerMockKeys]: Mock };
+  let mockSessionStore: PartialSessionStoreMock;
+  // Never installed on a ManagedSession here, so just the stubs (see session-doubles.ts).
+  let mockProxyManager: ProxyManagerMocks;
   let mockDependencies: SessionManagerDependencies;
   let mockSession: ManagedSession;
 
@@ -139,26 +123,14 @@ describe('SessionManagerOperations attach modes', () => {
       executablePath: undefined
     };
 
-    mockSessionStore = {
-      get: vi.fn<PartialSessionStore['get']>().mockReturnValue(mockSession),
-      getOrThrow: vi.fn<PartialSessionStore['getOrThrow']>().mockReturnValue(mockSession),
-      update: vi.fn<PartialSessionStore['update']>(),
-      updateState: vi.fn<PartialSessionStore['updateState']>().mockImplementation(
-        (_sessionId: string, newState: SessionState) => {
-          mockSession.state = newState;
-        }
-      ),
-      remove: vi.fn<PartialSessionStore['remove']>().mockReturnValue(true),
-      getAll: vi.fn<PartialSessionStore['getAll']>().mockReturnValue([mockSession])
-    };
+    mockSessionStore = createPartialSessionStore(mockSession);
 
+    // Pre-configured helper: pathExists/ensureDir already answer true/undefined.
     const fileSystem = createMockFileSystem();
-    vi.mocked(fileSystem.pathExists).mockResolvedValue(true);
-    vi.mocked(fileSystem.ensureDir).mockResolvedValue(undefined);
     const networkManager = createMockNetworkManager();
     vi.mocked(networkManager.findFreePort).mockResolvedValue(9000);
     const proxyManagerFactory = new MockProxyManagerFactory();
-    // One sanctioned cast: the proxy double is deliberately partial (see ProxyManagerMockKeys).
+    // One sanctioned cast: the proxy double is deliberately partial (see ProxyManagerMocks).
     proxyManagerFactory.createFn = () => mockProxyManager as unknown as IProxyManager;
 
     mockDependencies = {

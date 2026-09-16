@@ -3,7 +3,7 @@
  * Focus on error paths and edge cases (aligned with new APIs)
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ErrorMessages } from '../../src/utils/error-messages.js';
 import path from 'path';
 import { SessionManagerOperations } from '../../src/session/session-manager-operations';
@@ -36,38 +36,18 @@ import {
 } from '../../src/errors/debug-errors';
 import {
   createMockEnvironment,
-  createMockFileSystem,
   createMockLogger,
   createMockNetworkManager
 } from '../test-utils/helpers/test-dependencies';
+import { createMockFileSystem } from '../test-utils/helpers/test-utils';
 import { createMockAdapterRegistry } from '../test-utils/mocks/mock-adapter-registry';
+import {
+  createPartialSessionStore,
+  type PartialSessionStoreMock,
+  type ProxyManagerDouble
+} from '../test-utils/mocks/session-doubles';
 import { FakeDebugAdapter } from '../test-utils/fakes/fake-debug-adapter';
 import { internals } from '../test-utils/helpers/operations-internals';
-
-/** The store members these tests drive. Deliberately partial: the rest of SessionStore is never reached. */
-type PartialSessionStore = Pick<
-  SessionStore,
-  'get' | 'getOrThrow' | 'update' | 'updateState' | 'remove' | 'getAll'
->;
-
-/**
- * The proxy-manager members these tests stub. Unlike the attach-modes suite,
- * this one installs the double on `ManagedSession.proxyManager` throughout, so
- * it has to *be* an `IProxyManager` (an EventEmitter) at the type level: the
- * intersection keeps every stub reachable as a `Mock`, and the one widening
- * cast sits where the literal is built.
- */
-type ProxyManagerMockKeys =
-  | 'isRunning'
-  | 'getCurrentThreadId'
-  | 'sendDapRequest'
-  | 'stop'
-  | 'once'
-  | 'off'
-  | 'removeListener'
-  | 'on'
-  | 'start';
-type ProxyManagerDouble = IProxyManager & { [K in ProxyManagerMockKeys]: Mock };
 
 /**
  * Launch args as callers actually send them.
@@ -106,7 +86,7 @@ function asLineBreakpoint(bp: Breakpoint | FunctionBreakpoint | undefined): Brea
 
 describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () => {
   let operations: SessionManagerOperations;
-  let mockSessionStore: { [K in keyof PartialSessionStore]: Mock<PartialSessionStore[K]> };
+  let mockSessionStore: PartialSessionStoreMock;
   let mockProxyManager: ProxyManagerDouble;
   let mockDependencies: SessionManagerDependencies;
   let mockLogger: ILogger;
@@ -116,8 +96,10 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     // Create mock logger
     mockLogger = createMockLogger();
 
-    // Create mock proxy manager (aligned with new IProxyManager shape).
-    // One sanctioned cast: the proxy double is deliberately partial (see ProxyManagerDouble).
+    // Create mock proxy manager (aligned with new IProxyManager shape). This
+    // suite installs it on ManagedSession.proxyManager, so it has to BE an
+    // IProxyManager at the type level. One sanctioned cast: the proxy double
+    // is deliberately partial (see ProxyManagerDouble in session-doubles.ts).
     mockProxyManager = {
       isRunning: vi.fn().mockReturnValue(true),
       getCurrentThreadId: vi.fn().mockReturnValue(1),
@@ -149,32 +131,21 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       executablePath: 'python'
     };
 
-    // Create mock session store (aligned with SessionStoreFactory usage)
-    mockSessionStore = {
-      get: vi.fn<PartialSessionStore['get']>().mockReturnValue(mockSession),
-      getOrThrow: vi.fn<PartialSessionStore['getOrThrow']>().mockImplementation(
-        (sessionId: string) => {
-          const session = mockSession.id === sessionId ? mockSession : null;
-          if (!session) {
-            throw new SessionNotFoundError(sessionId);
-          }
-          return session;
-        }
-      ),
-      update: vi.fn<PartialSessionStore['update']>(),
-      updateState: vi.fn<PartialSessionStore['updateState']>().mockImplementation(
-        (_sessionId: string, newState: SessionState) => {
-          mockSession.state = newState;
-        }
-      ),
-      remove: vi.fn<PartialSessionStore['remove']>().mockReturnValue(true),
-      getAll: vi.fn<PartialSessionStore['getAll']>().mockReturnValue([mockSession])
-    };
+    // Create mock session store (aligned with SessionStoreFactory usage).
+    // Unlike the shared default, getOrThrow here throws for an unknown id —
+    // the not-found paths below depend on it.
+    mockSessionStore = createPartialSessionStore(mockSession);
+    mockSessionStore.getOrThrow.mockImplementation((sessionId: string) => {
+      const session = mockSession.id === sessionId ? mockSession : null;
+      if (!session) {
+        throw new SessionNotFoundError(sessionId);
+      }
+      return session;
+    });
 
     // Create mock dependencies (aligned with new constructor dependencies)
+    // Pre-configured helper: pathExists/ensureDir already answer true/undefined.
     const fileSystem = createMockFileSystem();
-    vi.mocked(fileSystem.pathExists).mockResolvedValue(true);
-    vi.mocked(fileSystem.ensureDir).mockResolvedValue(undefined);
     const networkManager = createMockNetworkManager();
     vi.mocked(networkManager.findFreePort).mockResolvedValue(9000);
     const adapterRegistry = createMockAdapterRegistry();
@@ -1305,9 +1276,9 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       // The teardown (DAP drain, force-kill, log read) is the window a
       // concurrent close_debug_session lands in: model it by removing the
       // session from the store while stopProxyPreservingSession is in flight.
-      vi.spyOn(operations as any, 'stopProxyPreservingSession')
-        .mockImplementation(async () => {
-          mockSession.proxyManager = undefined;
+      vi.spyOn(internals(operations), 'stopProxyPreservingSession')
+        .mockImplementation(async (session: ManagedSession) => {
+          session.proxyManager = undefined;
           mockSessionStore.getOrThrow.mockImplementation((sessionId: string) => {
             throw new SessionNotFoundError(sessionId);
           });
@@ -1388,7 +1359,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       // The old proxy is torn down with the SESSION-PRESERVING helper —
       // closeSession here used to remove the session from the store and
       // destroy it mid-relaunch (issue #238)
-      const stopSpy = vi.spyOn(operations as any, 'stopProxyPreservingSession');
+      const stopSpy = vi.spyOn(internals(operations), 'stopProxyPreservingSession');
       const closeSpy = vi.spyOn(operations as any, 'closeSession');
 
       // Make the "adapter-configured" event fire immediately to avoid 30s wait
@@ -2161,9 +2132,9 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         mockSession.proxyManager = mockProxyManager;
         throw new Error('Timeout waiting for proxy initialization');
       });
-      vi.spyOn(operations as any, 'stopProxyPreservingSession')
-        .mockImplementation(async () => {
-          mockSession.proxyManager = undefined;
+      vi.spyOn(internals(operations), 'stopProxyPreservingSession')
+        .mockImplementation(async (session: ManagedSession) => {
+          session.proxyManager = undefined;
           mockSessionStore.getOrThrow.mockImplementation((sessionId: string) => {
             throw new SessionNotFoundError(sessionId);
           });
@@ -2224,9 +2195,9 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockRejectedValue(initError);
       // Teardown (which only clears the proxy handle) must still run on the
       // failure path; the diagnostics come from the error and logDir.
-      const stopSpy = vi.spyOn(operations as any, 'stopProxyPreservingSession')
-        .mockImplementation(async () => {
-          mockSession.proxyManager = undefined;
+      const stopSpy = vi.spyOn(internals(operations), 'stopProxyPreservingSession')
+        .mockImplementation(async (session: ManagedSession) => {
+          session.proxyManager = undefined;
         });
 
       const result = await operations.attachToProcess('test-session', {
