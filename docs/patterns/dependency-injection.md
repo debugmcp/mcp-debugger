@@ -184,7 +184,7 @@ This factory pattern allows SessionManager to create ProxyManager instances with
 `IProcessManager`, `INetworkManager`, `ILogger`, `IEnvironment`, `IChildProcess`, `IServer`)
 and `packages/shared/src/interfaces/process-interfaces.ts` (`IProxyProcessLauncher`,
 `IProcess`, `IProcessOptions`, `IProxyProcess`). These are the canonical declarations: the
-app-local copies under `src/interfaces/` were removed in #692 because identical-today
+app-local copies under `src/interfaces/` were removed in #692 because near-identical
 duplicates drift silently (the `IProcess*` copies already had). `src/interfaces/process-interfaces.ts`
 now holds only `ProcessLike` (the CLI's injectable `process` slice), and `IProxyManagerFactory`
 lives in `src/factories/proxy-manager-factory.ts`, typed against the real `IProxyManager`.
@@ -192,8 +192,8 @@ Import from `@debugmcp/shared` — except `IProxyManagerFactory`: shared also ex
 that name, but it is a placeholder typed against a dispose-only `IProxyManager` (shared cannot
 import the real one from `src/`); take the real factory interface from
 `src/factories/proxy-manager-factory.ts`. `src/proxy/dap-proxy-interfaces.ts` keeps its own
-narrower `ILogger`/`IFileSystem` on purpose — they are the proxy worker's minimal contracts,
-not duplicates.
+minimal `ILogger`/`IFileSystem` on purpose — they are the proxy worker's contracts, not
+duplicates.
 
 ```typescript
 // File system operations

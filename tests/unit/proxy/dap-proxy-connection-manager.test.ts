@@ -144,6 +144,7 @@ describe('DapConnectionManager', () => {
         if (event === 'error') {
           tempErrorHandler = handler;
         }
+        return mockDapClient;
       });
 
       mockDapClient.connect.mockResolvedValue(undefined);
