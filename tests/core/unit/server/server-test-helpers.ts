@@ -105,6 +105,14 @@ export type ListToolsHandler = (request?: TestRequest) => Promise<{ tools: Tool[
  * the class no longer has fails to compile here (excess-property check on
  * the `satisfies` literal), which is the drift guard. Every member stays a
  * bare `vi.fn()` so tests can keep returning partial session objects.
+ *
+ * The exception is a member with a default implementation: `vi.fn(impl)`
+ * infers the mock's signature from the impl, and a default that returns a
+ * subset of the real result (`removed: []` infers `never[]`; an omitted
+ * optional field is an excess property from then on) rejects the fuller
+ * shapes tests legitimately stub. Those are pinned with
+ * `vi.fn<SessionManager['member']>(impl)` so `.mockResolvedValue(...)` is
+ * checked against the real return type instead.
  */
 export function createMockSessionManager(mockAdapterRegistry: IAdapterRegistry) {
   // Hoisted: getVariablesDetailed delegates to it, and a self-reference inside
@@ -121,15 +129,19 @@ export function createMockSessionManager(mockAdapterRegistry: IAdapterRegistry) 
     // The session layer owns function-breakpoint names (issue #559). The
     // defaults are the no-policy answers: the name resolves to itself, and
     // nothing matches it.
-    resolveFunctionBreakpointName: vi.fn((_sessionId: string, requestedName: string) => ({
-      requestedName,
-      effectiveName: requestedName
-    })),
-    removeFunctionBreakpointsByName: vi.fn(async (_sessionId: string, requestedName: string) => ({
-      removed: [],
-      functionName: requestedName,
-      requestedName
-    })),
+    resolveFunctionBreakpointName: vi.fn<SessionManager['resolveFunctionBreakpointName']>(
+      (_sessionId, requestedName) => ({
+        requestedName,
+        effectiveName: requestedName
+      })
+    ),
+    removeFunctionBreakpointsByName: vi.fn<SessionManager['removeFunctionBreakpointsByName']>(
+      async (_sessionId, requestedName) => ({
+        removed: [],
+        functionName: requestedName,
+        requestedName
+      })
+    ),
     listFunctionBreakpoints: vi.fn().mockReturnValue([]),
     listBreakpoints: vi.fn().mockReturnValue([]),
     removeBreakpoint: vi.fn().mockResolvedValue({ removed: undefined }),
@@ -145,9 +157,11 @@ export function createMockSessionManager(mockAdapterRegistry: IAdapterRegistry) 
     // Delegates to getVariables so existing tests that stub/assert on
     // getVariables keep working now that the tool handler calls the
     // detailed variant (issues #356/#359).
-    getVariablesDetailed: vi.fn(async (...args: unknown[]) => ({
-      variables: (await getVariables(...(args as [string, number, string[]?]))) ?? []
-    })),
+    getVariablesDetailed: vi.fn<SessionManager['getVariablesDetailed']>(
+      async (sessionId, variablesReference, names) => ({
+        variables: (await getVariables(sessionId, variablesReference, names)) ?? []
+      })
+    ),
     getLocalVariables: vi.fn(),
     getStackTrace: vi.fn(),
     getStackTraceDetailed: vi.fn().mockResolvedValue({
