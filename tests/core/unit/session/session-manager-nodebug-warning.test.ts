@@ -257,13 +257,69 @@ describe('SessionManager launches with noDebug (issue #710)', () => {
       expect(Date.now() - before).toBeLessThan(30000);
     });
 
-    it('names a stopOnEntry that came in through adapterLaunchConfig', async () => {
+    it('names a stopOnEntry that came in through adapterLaunchConfig, and neutralizes it there too', async () => {
       const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
       runWithoutStopping();
 
       const result = await launch(s.id, { noDebug: true }, { stopOnEntry: true });
 
       expect(warningOf(result)).toMatch(/stopOnEntry will not fire/);
+      // adapterLaunchConfig wins the adapter merge, so it must carry false as well.
+      const sent = dependencies.mockProxyManager.startCalls.at(-1) as { stopOnEntry?: boolean; launchConfig?: { stopOnEntry?: boolean } } | undefined;
+      expect(sent?.stopOnEntry).toBe(false);
+      expect(sent?.launchConfig?.stopOnEntry).toBe(false);
+    });
+
+    it('reads the string forms the way the proxy parser coerces them', async () => {
+      const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      runWithoutStopping();
+
+      const result = await launch(s.id, { noDebug: 'true', stopOnEntry: 'false' });
+
+      // 'false' is false: no entry stop was asked for, so none is named.
+      expect(warningOf(result)).toBeUndefined();
+    });
+
+    it('leaves an attach-shaped start_debugging alone — noDebug is a launch-request property', async () => {
+      const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      await sessionManager.setBreakpoint(s.id, { file: '/work/src/app.py', line: 7 });
+      endDuringStartup();
+
+      const result = await launch(s.id, { request: 'attach', port: 9229, noDebug: true });
+
+      expect(warningOf(result)).not.toMatch(/noDebug/);
+      expect(warningOf(result)).toMatch(/never bound during this run/);
+    });
+
+    it('carries the note on a bare noDebug launch that failed, with nothing armed to warn about', async () => {
+      const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      dependencies.mockProxyManager.shouldFailStart = true;
+
+      const result = await launch(s.id, { stopOnEntry: false, noDebug: true });
+
+      expect(result.success).toBe(false);
+      expect(warningOf(result)).toMatch(/noDebug is true, so this launch ran with the debugger disabled/);
+    });
+
+    it('believes an entry stop the core already resumed over the policy pin', async () => {
+      // A wrong pin plus stopOnEntry: the neutralized value makes the core
+      // auto-continue the entry stop, so no pause is left standing — but
+      // the stop happened, and the response must not say no stop can come.
+      const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      const proxy = dependencies.mockProxyManager;
+      proxy.start = vi.fn().mockImplementation(async (startConfig) => {
+        setMockProxyRunning(proxy, true);
+        proxy.startCalls.push(startConfig);
+        proxy.emit('adapter-configured');
+        proxy.emit('initialized');
+        proxy.emit('stopped', 1, 'entry', { reason: 'entry', threadId: 1 });
+      }) as MockProxyManager['start'];
+
+      const result = await launch(s.id, { stopOnEntry: true, noDebug: true });
+
+      expect(result.success).toBe(true);
+      expect(warningOf(result)).toMatch(/noDebug has no effect/);
+      expect(warningOf(result)).not.toMatch(/will not fire/);
     });
 
     it('counts a string-typed noDebug the way the adapter will (truthy)', async () => {
@@ -304,11 +360,14 @@ describe('SessionManager launches with noDebug (issue #710)', () => {
         proxy.emit('stopped', 1, 'breakpoint', { reason: 'breakpoint', threadId: 1 });
       }) as MockProxyManager['start'];
 
+      const before = Date.now();
       const result = await launch(s.id, { stopOnEntry: false, noDebug: true });
 
       expect(result.state).toBe(SessionState.PAUSED);
       expect(warningOf(result)).toMatch(/noDebug has no effect/);
       expect(warningOf(result)).not.toMatch(/will not fire/);
+      // A pause that came anyway is ready too — not a 30 s wait for RUNNING.
+      expect(Date.now() - before).toBeLessThan(30000);
     });
 
     it('warns on a dry run too — it is a configuration check', async () => {

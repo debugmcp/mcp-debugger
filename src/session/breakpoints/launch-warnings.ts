@@ -66,9 +66,9 @@ export function buildUnboundBreakpointExitWarning(
  * Where the adapter ignores the flag, the debugger stays on and the caller is
  * told so instead — the flag they set changes nothing, which is worth a line.
  *
- * `noDebug` is the flag the adapter will actually see (adapterLaunchConfig
- * over dapLaunchArgs over the server defaults, the launcher's merge order);
- * `stopOnEntry` is the caller's own value.
+ * `noDebug` and `stopOnEntry` are the flags the adapter will actually see
+ * (adapterLaunchConfig over dapLaunchArgs, the launcher's merge order); the
+ * text names the flag alone since either source may have carried it.
  */
 export function buildNoDebugLaunchWarning(
   session: Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints' | 'language'>,
@@ -81,7 +81,7 @@ export function buildNoDebugLaunchWarning(
   }
   if (!honoursNoDebug) {
     return (
-      `dapLaunchArgs.noDebug has no effect with the ${session.language} adapter: the debugger stays on, ` +
+      `noDebug has no effect with the ${session.language} adapter: the debugger stays on, ` +
       `and breakpoints, breakOnExceptions and stopOnEntry work as usual`
     );
   }
@@ -119,8 +119,20 @@ export function buildNoDebugLaunchWarning(
       ? expected[0]
       : `${expected.slice(0, -1).join(', ')} and ${expected[expected.length - 1]}`;
   return (
-    `dapLaunchArgs.noDebug is true, so the debugger is disabled for this launch and no stop can arrive: ` +
+    `noDebug is true, so the debugger is disabled for this launch and no stop can arrive: ` +
     `${list} will not fire. Drop noDebug to debug, or ignore this if you only meant to run the program`
+  );
+}
+
+/**
+ * The note a launch that failed under an honoured `noDebug` carries when the
+ * warning above had nothing to say (nothing was armed): the flag is the fact
+ * the caller needs before retrying paths and ports (issue #746).
+ */
+export function buildNoDebugFailureNote(): string {
+  return (
+    'noDebug is true, so this launch ran with the debugger disabled; the adapter accepted the flag ' +
+    'but the launch did not complete under it. Drop noDebug to debug, or run the program without a debug session'
   );
 }
 
