@@ -9,7 +9,6 @@ import type { IAdapterRegistry } from '@debugmcp/shared';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
 import { createProductionDependencies, type Dependencies } from '../../../../src/container/dependencies.js';
-import { createMockAdapterRegistryWithLanguages } from '../../../test-utils/mocks/mock-adapter-registry.js';
 import {
   createMockDependencies,
   createMockServer,
@@ -696,8 +695,6 @@ describe('Server Language Discovery Tests', () => {
       debugServer = new DebugMcpServer();
       const { callToolHandler } = getToolHandlers(mockServer);
 
-      mockAdapterRegistry.listLanguages = vi.fn().mockResolvedValue(['python', 'mock']);
-
       const result = await callToolHandler({
         method: 'tools/call',
         params: {
@@ -711,22 +708,29 @@ describe('Server Language Discovery Tests', () => {
 
       expect(result.content[0].type).toBe('text');
       const content = JSON.parse(result.content[0].text);
-      // startDebugging is mocked to resolve successfully; assert only that the response carries a success field.
-      expect(content.success).toBeDefined();
+      expect(content.success).toBe(true);
+      expect(mockSessionManager.startDebugging).toHaveBeenCalledWith(
+        'session-123',
+        '/path/to/script.py',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined
+      );
     });
 
     it('should handle dynamic language discovery for session language', async () => {
       debugServer = new DebugMcpServer();
       const { callToolHandler } = getToolHandlers(mockServer);
 
-      // Session has a language not in static list but should be discovered dynamically
+      // A session language outside the default list: start_debugging does not
+      // re-validate it (create_debug_session does), so the launch goes through.
       mockSessionManager.getSession = vi.fn().mockReturnValue({
         id: 'session-123',
         language: 'javascript',
         state: { lifecycleState: 'READY' }
       });
-
-      mockAdapterRegistry.listLanguages = vi.fn().mockResolvedValue(['python', 'mock', 'javascript']);
 
       const result = await callToolHandler({
         method: 'tools/call',
@@ -741,8 +745,16 @@ describe('Server Language Discovery Tests', () => {
 
       expect(result.content[0].type).toBe('text');
       const content = JSON.parse(result.content[0].text);
-      // startDebugging is mocked to resolve successfully; assert only that the response carries a success field.
-      expect(content.success).toBeDefined();
+      expect(content.success).toBe(true);
+      expect(mockSessionManager.startDebugging).toHaveBeenCalledWith(
+        'session-123',
+        '/path/to/script.js',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined
+      );
     });
   });
 
@@ -751,10 +763,10 @@ describe('Server Language Discovery Tests', () => {
       debugServer = new DebugMcpServer();
       const { callToolHandler } = getToolHandlers(mockServer);
 
-      // Create registry without listLanguages method
-      const registry = createMockAdapterRegistryWithLanguages(['python']);
-      Reflect.deleteProperty(registry, 'listLanguages');
-      mockDependencies.adapterRegistry = registry;
+      // The server reads the registry via the session manager, so a registry-
+      // without-listLanguages scenario would have to be installed on
+      // mockSessionManager.adapterRegistry (and would then yield only that
+      // registry's languages). This test exercises the beforeEach registry.
 
       const result = await callToolHandler({
         method: 'tools/call',

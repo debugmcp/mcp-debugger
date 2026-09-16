@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import type { IAdapterFactory, IAdapterRegistry } from '@debugmcp/shared';
+import type { AdapterMetadata, IAdapterFactory, IAdapterRegistry } from '@debugmcp/shared';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
 import { createProductionDependencies } from '../../../../src/container/dependencies.js';
@@ -49,8 +49,12 @@ function buildSharedRegistry(): IAdapterRegistry {
   ];
 
   // Deliberately partial factories: the availability probe reads only validate and
-  // getMetadata, and a full IAdapterFactory would bury the scenario table above.
-  const factories: Record<string, unknown> = {
+  // getMetadata's modes, and a full IAdapterFactory would bury the scenario table
+  // above. The two members it does read are typed against the real signatures.
+  type ProbeFactory = Pick<IAdapterFactory, 'validate'> & {
+    getMetadata: () => Pick<AdapterMetadata, 'modes'>;
+  };
+  const factories: Record<string, ProbeFactory> = {
     python: {
       validate: async () => ({ valid: true, errors: [], warnings: [], details: {} }),
       getMetadata: () => ({ modes: { launch: true, attach: 'direct-connect' } })
@@ -98,7 +102,7 @@ describe('doctor / list_supported_languages availability parity (issue #435)', (
     vi.stubEnv('DEBUG_MCP_DISABLE_LANGUAGES', 'mock');
 
     const mockDependencies = createMockDependencies();
-    vi.mocked(createProductionDependencies).mockReturnValue(mockDependencies as never);
+    vi.mocked(createProductionDependencies).mockReturnValue(mockDependencies);
 
     mockServer = createMockServer();
     vi.mocked(Server).mockImplementation(function () {
