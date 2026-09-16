@@ -7,13 +7,17 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
-import { createProductionDependencies } from '../../../../src/container/dependencies.js';
+import { createProductionDependencies, type Dependencies } from '../../../../src/container/dependencies.js';
 import {
   createMockDependencies,
   createMockServer,
   createMockSessionManager,
   createMockStdioTransport,
-  getToolHandlers
+  getToolHandlers,
+  type CallToolHandler,
+  type ListToolsHandler,
+  type MockServer,
+  type MockSessionManager
 } from './server-test-helpers.js';
 
 // Mock dependencies
@@ -23,11 +27,11 @@ vi.mock('../../../../src/session/session-manager.js');
 vi.mock('../../../../src/container/dependencies.js');
 
 describe('Server Breakpoint Management Tools', () => {
-  let mockServer: any;
-  let mockSessionManager: any;
-  let mockDependencies: any;
-  let callToolHandler: any;
-  let listToolsHandler: any;
+  let mockServer: MockServer;
+  let mockSessionManager: MockSessionManager;
+  let mockDependencies: Dependencies;
+  let callToolHandler: CallToolHandler;
+  let listToolsHandler: ListToolsHandler;
 
   beforeEach(() => {
     mockDependencies = createMockDependencies();
