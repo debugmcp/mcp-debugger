@@ -13,8 +13,6 @@ import { DapProxyWorker } from '../../src/proxy/dap-proxy-worker.js';
 import type {
   DapProxyDependencies,
   ILogger,
-  IFileSystem,
-  IProcessSpawner,
   ProxyInitPayload,
   StatusMessage,
   DapResponseMessage,
@@ -24,32 +22,13 @@ import type {
 import { ProxyState } from '../../src/proxy/dap-proxy-interfaces.js';
 import { GoAdapterPolicy } from '@debugmcp/shared';
 import { createMockDapClient } from '../test-utils/mocks/dap-client.js';
+import {
+  createMockFileSystem,
+  createMockLogger,
+  createMockProcessSpawner
+} from '../test-utils/mocks/dap-proxy-doubles.js';
 
 // --- helpers ---------------------------------------------------------------
-
-const createMockLogger = (): ILogger => ({
-  info: vi.fn(),
-  error: vi.fn(),
-  debug: vi.fn(),
-  warn: vi.fn()
-});
-
-const createMockFileSystem = (): IFileSystem => ({
-  ensureDir: vi.fn().mockResolvedValue(undefined),
-  pathExists: vi.fn().mockResolvedValue(true),
-  readFile: vi.fn().mockResolvedValue(''),
-  remove: vi.fn().mockResolvedValue(undefined)
-});
-
-const createMockProcessSpawner = (): IProcessSpawner => ({
-  spawn: vi.fn().mockReturnValue({
-    pid: 12345,
-    on: vi.fn(),
-    kill: vi.fn(),
-    unref: vi.fn(),
-    killed: false
-  })
-});
 
 /**
  * Everything the worker hands to `IMessageSender.send`. The interface itself

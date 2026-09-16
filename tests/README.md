@@ -213,6 +213,7 @@ packages/
 - **`helpers/port-manager.ts`** — allocates unique ports to avoid conflicts between parallel tests
 - **`helpers/test-dependencies.ts`** — creates dependency injection containers pre-wired for testing
 - **`mocks/dap-client.ts`** — `createMockDapClient()`, an `IDapClient` double over a real `EventEmitter` with every method a `vi.fn`, shared by the proxy-worker, go-initialized-fallback and connection-manager tests
+- **`mocks/dap-proxy-doubles.ts`** — `createMockLogger()`, `createMockFileSystem()`, `createMockProcessSpawner()` for the proxy worker's own dependency slice, typed to the worker-local `ILogger`/`IFileSystem`/`IProcessSpawner` in `src/proxy/dap-proxy-interfaces.ts` (narrower than `@debugmcp/shared`'s), shared by the proxy-worker and go-initialized-fallback tests
 - **`mocks/mock-logger.ts`** — captures log output for assertion
 - **`mocks/mock-proxy-manager.ts`** — mock proxy manager with controllable behavior
 - **`mocks/child-process.ts`**, **`mocks/net.ts`** — mock Node.js built-ins

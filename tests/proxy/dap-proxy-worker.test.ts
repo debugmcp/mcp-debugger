@@ -13,8 +13,6 @@ import { DapConnectionManager } from '../../src/proxy/dap-proxy-connection-manag
 import type {
   DapProxyDependencies,
   ILogger,
-  IFileSystem,
-  IProcessSpawner,
   ProxyInitPayload,
   DapCommandPayload,
   StatusMessage,
@@ -25,6 +23,11 @@ import type {
 import { ProxyState } from '../../src/proxy/dap-proxy-interfaces.js';
 import type { AdapterPolicy } from '@debugmcp/shared';
 import { createMockDapClient } from '../test-utils/mocks/dap-client.js';
+import {
+  createMockFileSystem,
+  createMockLogger,
+  createMockProcessSpawner
+} from '../test-utils/mocks/dap-proxy-doubles.js';
 import {
   DefaultAdapterPolicy,
   JsDebugAdapterPolicy,
@@ -57,31 +60,6 @@ const isStatusCall = (status: string) =>
  */
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
-
-// Mock implementations
-const createMockLogger = (): ILogger => ({
-  info: vi.fn(),
-  error: vi.fn(),
-  debug: vi.fn(),
-  warn: vi.fn()
-});
-
-const createMockFileSystem = (): IFileSystem => ({
-  ensureDir: vi.fn().mockResolvedValue(undefined),
-  pathExists: vi.fn().mockResolvedValue(true),
-  readFile: vi.fn().mockResolvedValue(''),
-  remove: vi.fn().mockResolvedValue(undefined)
-});
-
-const createMockProcessSpawner = (): IProcessSpawner => ({
-  spawn: vi.fn().mockReturnValue({
-    pid: 12345,
-    on: vi.fn(),
-    kill: vi.fn(),
-    unref: vi.fn(),
-    killed: false
-  })
-});
 
 const createMockMessageSender = () => ({
   send: vi.fn<(message: SentMessage) => void>()
