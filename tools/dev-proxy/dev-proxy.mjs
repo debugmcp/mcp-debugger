@@ -364,15 +364,18 @@ class BackendManager {
     } catch (err) {
       if (err.killed || err.signal === 'SIGTERM') {
         throw new Error(
-          `Build timed out after ${Math.floor(BUILD_TIMEOUT_MS / 1000)}s — the build may still have succeeded, re-run manually to confirm`
+          `Build timed out after ${Math.floor(BUILD_TIMEOUT_MS / 1000)}s — the build may still have succeeded, re-run manually to confirm`,
+          { cause: err }
         );
       }
       
       // execSync's error message embeds raw build stderr — sanitize before it
       // reaches tool responses via err.message (issue #154). Include stdout
-      // too: build tools (tsc via npm) print their diagnostics there.
+      // too: build tools (tsc via npm) print their diagnostics there. The raw
+      // execSync error rides on `cause` for programmatic consumers; the tool
+      // handlers serialize `message` alone, so it never reaches a response.
       const output = [err.stdout, err.stderr].filter(Boolean).join('\n') || err.message || String(err);
-      throw new Error(`Build failed: ${sanitizeStderrTail(output, { maxLines: 20, maxChars: 2000 })}`);
+      throw new Error(`Build failed: ${sanitizeStderrTail(output, { maxLines: 20, maxChars: 2000 })}`, { cause: err });
     }
     log('Build succeeded');
     return sanitizeStderrTail(result, { maxLines: 50, maxChars: 2000 });
