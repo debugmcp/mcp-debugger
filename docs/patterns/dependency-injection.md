@@ -301,8 +301,9 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
 
 ```typescript
 // Returns the container's own Dependencies (src/container/dependencies.ts):
-// the nine required members below, with every method a vi.fn(). disposeLogger
-// is optional there and omitted here.
+// the nine required members below. Every interface member is a vi.fn() except
+// the two factories, which are the Mock*Factory classes from src/factories/.
+// disposeLogger is optional there and omitted here.
 export function createMockDependencies(): Dependencies {
   const fileSystem = createMockFileSystem();
   const processManager = createMockProcessManager();

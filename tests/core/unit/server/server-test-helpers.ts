@@ -246,20 +246,6 @@ function findHandler(mockServer: MockServer, schema: unknown): unknown {
 // The `as <Handler>` casts below are the one sanctioned cast per lookup:
 // `mock.calls` of an untyped `vi.fn` is `any[]`, so the registered handler
 // comes back as `unknown` and only the schema identity says which it is.
-/**
- * One tool out of `tools/list`, or a thrown error naming it: a schema test
- * must fail on a missing tool rather than let `toBeUndefined()` pass
- * vacuously on `undefined.inputSchema`.
- */
-export async function findTool(listToolsHandler: ListToolsHandler, name: string): Promise<Tool> {
-  const { tools } = await listToolsHandler({ method: 'tools/list', params: {} });
-  const tool = tools.find((t) => t.name === name);
-  if (!tool) {
-    throw new Error(`${name} is not in tools/list`);
-  }
-  return tool;
-}
-
 export function getToolHandlers(mockServer: MockServer) {
   return {
     listToolsHandler: findHandler(mockServer, ListToolsRequestSchema) as ListToolsHandler,
@@ -290,4 +276,18 @@ export function getPromptHandlers(mockServer: MockServer) {
     getPromptHandler: findHandler(mockServer, GetPromptRequestSchema) as
       (request: TestRequest) => Promise<GetPromptResult>
   };
+}
+
+/**
+ * One tool out of `tools/list`, or a thrown error naming it: a schema test
+ * must fail on a missing tool rather than let `toBeUndefined()` pass
+ * vacuously on `undefined.inputSchema`.
+ */
+export async function findTool(listToolsHandler: ListToolsHandler, name: string): Promise<Tool> {
+  const { tools } = await listToolsHandler({ method: 'tools/list', params: {} });
+  const tool = tools.find((t) => t.name === name);
+  if (!tool) {
+    throw new Error(`${name} is not in tools/list`);
+  }
+  return tool;
 }
