@@ -183,12 +183,17 @@ This factory pattern allows SessionManager to create ProxyManager instances with
 **Location**: `packages/shared/src/interfaces/external-dependencies.ts` (`IFileSystem`,
 `IProcessManager`, `INetworkManager`, `ILogger`, `IEnvironment`, `IChildProcess`, `IServer`)
 and `packages/shared/src/interfaces/process-interfaces.ts` (`IProxyProcessLauncher`,
-`IProcess`, `IProcessOptions`, `IProxyProcess`). These are the only declarations: the
+`IProcess`, `IProcessOptions`, `IProxyProcess`). These are the canonical declarations: the
 app-local copies under `src/interfaces/` were removed in #692 because identical-today
 duplicates drift silently (the `IProcess*` copies already had). `src/interfaces/process-interfaces.ts`
 now holds only `ProcessLike` (the CLI's injectable `process` slice), and `IProxyManagerFactory`
 lives in `src/factories/proxy-manager-factory.ts`, typed against the real `IProxyManager`.
-Import from `@debugmcp/shared`.
+Import from `@debugmcp/shared` — except `IProxyManagerFactory`: shared also exports one under
+that name, but it is a placeholder typed against a dispose-only `IProxyManager` (shared cannot
+import the real one from `src/`); take the real factory interface from
+`src/factories/proxy-manager-factory.ts`. `src/proxy/dap-proxy-interfaces.ts` keeps its own
+narrower `ILogger`/`IFileSystem` on purpose — they are the proxy worker's minimal contracts,
+not duplicates.
 
 ```typescript
 // File system operations
@@ -210,11 +215,11 @@ export interface IProcessManager {
 }
 
 // Process launching (note this is a different interface from IProcessManager)
-// IProxyProcessLauncher is in process-interfaces.ts and is consumed by
+// IProxyProcessLauncher is in packages/shared/src/interfaces/process-interfaces.ts and is consumed by
 // ProxyManagerFactory/ProxyManager — adapters receive AdapterDependencies
 // (fileSystem, logger, environment, networkManager?) instead
 // (see "Process-Specific Interfaces" below for its full definition).
-// IProcessManager is in external-dependencies.ts and is the lower-level system abstraction.
+// IProcessManager is in packages/shared/src/interfaces/external-dependencies.ts and is the lower-level system abstraction.
 
 // Network operations
 export interface INetworkManager {

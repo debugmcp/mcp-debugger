@@ -4,7 +4,8 @@
  * `ProcessLike` is the only process interface declared here. The child-process
  * contracts (`IProcess`, `IProcessOptions`, `IProxyProcessLauncher`,
  * `IProxyProcess`) live in `@debugmcp/shared`; the app-local copies were
- * removed in #692 because identical-today duplicates drift silently.
+ * removed in #692 because near-identical duplicates drift silently (these
+ * already had).
  */
 
 /**
