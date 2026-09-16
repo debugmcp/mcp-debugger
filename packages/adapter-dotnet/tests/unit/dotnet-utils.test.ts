@@ -123,12 +123,6 @@ const createSpawn = (options: { exitCode: number; stdout?: string; stderr?: stri
   return proc;
 };
 
-// Env stubs must not outlive their test: the root vitest setup unstubs after
-// every test, but a standalone package run has no setup file (issue #696).
-afterEach(() => {
-  vi.unstubAllEnvs();
-});
-
 describe('getNetcoredbgVersion (issue #423)', () => {
   beforeEach(() => {
     vi.clearAllMocks();

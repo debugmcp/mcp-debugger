@@ -21,12 +21,6 @@ import {
 
 const whichMock = vi.mocked(which);
 
-// Env stubs must not outlive their test: the root vitest setup unstubs after
-// every test, but a standalone package run has no setup file (issue #696).
-afterEach(() => {
-  vi.unstubAllEnvs();
-});
-
 describe('search paths', () => {
   it('includes RubyInstaller bin dirs for both ruby and rdbg on Windows', () => {
     // Regression: rdbg search paths originally omitted the RubyInstaller dirs,
