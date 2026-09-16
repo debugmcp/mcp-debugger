@@ -1,6 +1,7 @@
 /**
- * The reason a failed DAP response gives (issue #663): `message` when the
- * adapter set it, else the formatted `body.error`, else the generic fallback.
+ * The reason a failed DAP response gives (issue #663): the formatted
+ * `body.error` when the adapter set one, else `message`, else the generic
+ * fallback.
  */
 import { describe, expect, it } from 'vitest';
 import type { DebugProtocol } from '@vscode/debugprotocol';
@@ -16,9 +17,25 @@ function failed(extra: Partial<DebugProtocol.Response>): DebugProtocol.Response 
 }
 
 describe('dapResponseErrorMessage', () => {
-  it('prefers the raw message when the adapter set one', () => {
+  it('prefers the user-facing body.error.format over the short message when both are set', () => {
     const response = failed({ message: 'short form', body: { error: { id: 1, format: 'long form' } } });
-    expect(dapResponseErrorMessage(response)).toBe('short form');
+    expect(dapResponseErrorMessage(response)).toBe('long form');
+  });
+
+  it('surfaces the reason Delve puts only in body.error (launch refused for a too-new Go)', () => {
+    const format =
+      'Failed to launch: Version of Delve is too old for Go version go1.27.1 (maximum supported version 1.26, suppress this error with --check-go-version=false)';
+    const response = failed({
+      command: 'launch',
+      message: 'Failed to launch',
+      body: { error: { id: 3000, format, showUser: true } }
+    });
+    expect(dapResponseErrorMessage(response)).toBe(format);
+  });
+
+  it('uses the short message when body.error is absent or empty', () => {
+    expect(dapResponseErrorMessage(failed({ message: 'short form' }))).toBe('short form');
+    expect(dapResponseErrorMessage(failed({ message: 'short form', body: { error: { id: 1, format: '' } } }))).toBe('short form');
   });
 
   it('falls back to body.error.format (js-debug ProtocolError shape)', () => {
