@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach, Mock } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import express from 'express';
 import { createSSEApp, handleSSECommand, type ServerFactoryOptions } from '../../../src/cli/sse-command.js';
 import { FakeCurrentProcess } from '../../test-utils/mocks/fake-current-process.js';
@@ -21,8 +21,8 @@ const MockedSSEServerTransport = vi.mocked(SSEServerTransport);
 
 describe('SSE Command Handler', () => {
   let mockLogger: WinstonLoggerType;
-  let mockServerFactory: ReturnType<typeof vi.fn> & ((options: ServerFactoryOptions) => DebugMcpServer);
-  let mockExitProcess: ReturnType<typeof vi.fn> & ((code: number) => void);
+  let mockServerFactory: Mock<(options: ServerFactoryOptions) => DebugMcpServer>;
+  let mockExitProcess: Mock<(code: number) => void>;
   let mockServer: DebugMcpServer;
   let mockTransport: any;
   let fakeProc: FakeCurrentProcess;
@@ -47,10 +47,10 @@ describe('SSE Command Handler', () => {
     } as any;
 
     // Create mock server factory
-    mockServerFactory = vi.fn().mockReturnValue(mockServer) as typeof mockServerFactory;
+    mockServerFactory = vi.fn<(options: ServerFactoryOptions) => DebugMcpServer>().mockReturnValue(mockServer);
 
     // Create mock exit function
-    mockExitProcess = vi.fn() as typeof mockExitProcess;
+    mockExitProcess = vi.fn<(code: number) => void>();
 
     // Signal handlers attach to the fake's emitter, never the real process
     // (issues #159/#183).
@@ -938,7 +938,7 @@ describe('SSE Command Handler', () => {
         '/tmp/sse-command-533.log'
       );
       expect(vi.mocked(attachSharedFileTransport).mock.invocationCallOrder[0]).toBeLessThan(
-        (mockLogger.warn as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]
+        vi.mocked(mockLogger.warn).mock.invocationCallOrder[0]
       );
     });
 
@@ -958,7 +958,7 @@ describe('SSE Command Handler', () => {
       } as any);
 
       const stdin = new EventEmitter() as unknown as NodeJS.ReadStream & {
-        resume: ReturnType<typeof vi.fn>;
+        resume: Mock<() => void>;
         emit: (event: string, ...args: unknown[]) => boolean;
       };
       (stdin as unknown as { resume: unknown }).resume = vi.fn();

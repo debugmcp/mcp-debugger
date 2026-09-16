@@ -4,7 +4,7 @@
  * net.Server/net.Socket, and everything the mirror writes is decoded with
  * the real DapFrameDecoder so the assertions read whole protocol frames.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { EventEmitter } from 'events';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import {
@@ -80,9 +80,9 @@ interface Harness {
   server: DapMirrorServer;
   netServer: FakeNetServer;
   host: DapMirrorHost & {
-    forwardRequest: ReturnType<typeof vi.fn>;
-    getCapabilities: ReturnType<typeof vi.fn>;
-    getLastStop: ReturnType<typeof vi.fn>;
+    forwardRequest: Mock<DapMirrorHost['forwardRequest']>;
+    getCapabilities: Mock<DapMirrorHost['getCapabilities']>;
+    getLastStop: Mock<DapMirrorHost['getLastStop']>;
   };
   logger: ILogger;
   endpoint: { host: string; port: number; token: string };
@@ -123,7 +123,7 @@ async function createHarness(options?: {
   const netServer = new FakeNetServer();
   const logger = createMockLogger();
   const host = {
-    forwardRequest: vi.fn(async (command: string) => ({
+    forwardRequest: vi.fn<DapMirrorHost['forwardRequest']>(async (command) => ({
       seq: 999,
       type: 'response',
       request_seq: 0,

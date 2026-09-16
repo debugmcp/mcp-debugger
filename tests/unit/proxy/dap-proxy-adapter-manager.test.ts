@@ -474,11 +474,11 @@ describe('GenericAdapterManager', () => {
     // contains exactly the adapter and its helpers (codelldb + lldb-server).
     // The attach target is never in that group, so signalling -pid can never
     // take a pre-existing debuggee down (the #156 invariant, preserved).
-    let signalPid: ReturnType<typeof vi.fn>;
+    let signalPid: Mock<(pid: number, signal: NodeJS.Signals) => void>;
 
     const makeManager = (platform: NodeJS.Platform) => {
       signalPid = vi.fn();
-      return new GenericAdapterManager(spawner, logger, fileSystem, platform, signalPid as any);
+      return new GenericAdapterManager(spawner, logger, fileSystem, platform, signalPid);
     };
 
     afterEach(() => {

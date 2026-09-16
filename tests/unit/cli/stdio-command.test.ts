@@ -18,7 +18,7 @@ describe('STDIO Command Handler', () => {
 
   function makeFakeStdin() {
     const stdin = new EventEmitter() as unknown as NodeJS.ReadStream & {
-      resume: ReturnType<typeof vi.fn>;
+      resume: Mock<() => void>;
       emit: (event: string, ...args: unknown[]) => boolean;
     };
     (stdin as unknown as { resume: unknown }).resume = vi.fn();
@@ -345,7 +345,7 @@ describe('STDIO Command Handler', () => {
 
       await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
       expect(mockServer.stop).toHaveBeenCalled();
-      expect((mockServer.stop as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0])
+      expect(vi.mocked(mockServer.stop).mock.invocationCallOrder[0])
         .toBeLessThan(mockExitProcess.mock.invocationCallOrder[0]);
     });
 

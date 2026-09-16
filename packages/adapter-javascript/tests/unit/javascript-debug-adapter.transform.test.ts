@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import * as path from 'path';
+import type { ILogger } from '@debugmcp/shared';
 
 // Mocks for helper modules used by transformLaunchConfig
 vi.mock('../../src/utils/config-transformer.js', async () => {
@@ -119,7 +120,7 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
     const program = path.resolve('/proj/app.ts');
 
     // Synchronous detectBinary used by transformLaunchConfig
-    (detectBinary as any).mockImplementation((name: string) => {
+    vi.mocked(detectBinary).mockImplementation((name: string) => {
       if (name === 'ts-node') return '/bin/ts-node';
       return undefined;
     });
@@ -142,7 +143,7 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
   it('should use tsx when available (priority over ts-node)', async () => {
     const program = path.resolve('/proj/app.ts');
 
-    (detectBinary as any).mockImplementation((name: string) => {
+    vi.mocked(detectBinary).mockImplementation((name: string) => {
       if (name === 'tsx') return '/bin/tsx';
       return undefined;
     });
@@ -158,7 +159,7 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
   it('should add ts-node ESM loader for ESM project (.mts) when ts-node present', async () => {
     const program = path.resolve('/proj/app.mts');
 
-    (detectBinary as any).mockImplementation((name: string) => {
+    vi.mocked(detectBinary).mockImplementation((name: string) => {
       if (name === 'ts-node') return '/bin/ts-node';
       return undefined;
     });
@@ -178,7 +179,7 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
   it('should add tsconfig-paths/register when tsconfig has paths', async () => {
     const program = path.resolve('/proj/app.ts');
 
-    (detectBinary as any).mockImplementation((name: string) => {
+    vi.mocked(detectBinary).mockImplementation((name: string) => {
       if (name === 'ts-node') return '/bin/ts-node';
       return undefined;
     });
@@ -196,7 +197,7 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
 
   it('should preserve user-provided runtimeArgs and append last', async () => {
     const program = path.resolve('/proj/app.ts');
-    (detectBinary as any).mockImplementation((name: string) => {
+    vi.mocked(detectBinary).mockImplementation((name: string) => {
       if (name === 'ts-node') return '/bin/ts-node';
       return undefined;
     });
@@ -724,7 +725,7 @@ function depsWithFileSystem(existing: string[], ensured: string[] = []) {
       ensureDirSync: (p: string) => { ensured.push(p); }
     }
   } as unknown as import('@debugmcp/shared').AdapterDependencies & {
-    logger: { info: ReturnType<typeof vi.fn>; warn: ReturnType<typeof vi.fn> };
+    logger: { info: Mock<ILogger['info']>; warn: Mock<ILogger['warn']> };
   };
 }
 
@@ -875,7 +876,7 @@ describe('JavascriptDebugAdapter.transformLaunchConfig workspace root and source
   });
 
   it('keeps pauseForSourceMap on for a TypeScript program run through a transpiler, and honours an explicit value', async () => {
-    (detectBinary as unknown as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
+    vi.mocked(detectBinary).mockReturnValue(undefined);
     const adapter = new JavascriptDebugAdapter(deps);
     const ts = await adapter.transformLaunchConfig({ program: path.resolve('/proj/src/app.ts') } as any) as Record<string, unknown>;
     expect(ts.pauseForSourceMap).toBe(true);

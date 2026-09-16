@@ -7,7 +7,7 @@
  * over which default — since a field silently dropped here is lost for the
  * whole launch (#235) and a wrong program/cwd starts the wrong thing.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import path from 'path';
 import {
   ProxyLauncher,
@@ -69,7 +69,7 @@ function makeSession(overrides: Partial<ManagedSession> = {}): ManagedSession {
 interface Harness {
   launcher: ProxyLauncher;
   ctx: ProxyLaunchContext;
-  policy: { getInitializationBehavior: ReturnType<typeof vi.fn> };
+  policy: { getInitializationBehavior: Mock<AdapterPolicy['getInitializationBehavior']> };
 }
 
 /** What a full `start()` needs beyond the preparation steps: the adapter the registry hands out and the ProxyManager the factory builds. */
@@ -82,7 +82,7 @@ function makeHarness(options: HarnessOptions = {}): Harness {
   const logger = createMockLogger();
   const fileSystem = createMockFileSystem();
   vi.mocked(fileSystem.ensureDir).mockResolvedValue(undefined);
-  const policy = { getInitializationBehavior: vi.fn(() => ({})) };
+  const policy = { getInitializationBehavior: vi.fn<AdapterPolicy['getInitializationBehavior']>(() => ({})) };
   const { adapter, proxyManager } = options;
   const adapterRegistry = adapter
     ? createMockAdapterRegistry({ createAdapter: async () => adapter })

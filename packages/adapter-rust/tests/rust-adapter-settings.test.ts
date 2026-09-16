@@ -164,7 +164,7 @@ describe('transformLaunchConfig _adapterSettings (issue #441)', () => {
     const sysroot = sysrootDir(false);
     const { result, deps } = await transform({ CODELLDB_RUST_SYSROOT: sysroot }, {});
     expect(result._adapterSettings).toBeUndefined();
-    const warn = deps.logger?.warn as ReturnType<typeof vi.fn>;
+    const warn = vi.mocked(deps.logger.warn);
     const warned = warn.mock.calls.some((call) =>
       String(call[0]).includes('CODELLDB_RUST_SYSROOT')
     );

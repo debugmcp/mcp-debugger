@@ -5,8 +5,9 @@
  * writers, inject fake dependencies, assert on the joined output and the
  * returned exit code. Nothing real is probed.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, type Mock } from 'vitest';
 import { handleDoctorCommand, type DoctorDependencies } from '../../../../src/cli/commands/doctor/index.js';
+import type { DoctorRegistry } from '../../../../src/cli/commands/doctor/diagnose.js';
 
 interface FakeAdapterSpec {
   name: string;
@@ -14,7 +15,7 @@ interface FakeAdapterSpec {
   validate?: () => Promise<{ valid: boolean; errors: string[]; warnings: string[]; details?: Record<string, unknown> }>;
 }
 
-function makeFakeDependencies(adapters: FakeAdapterSpec[]): DoctorDependencies & { disposeLogger: ReturnType<typeof vi.fn> } {
+function makeFakeDependencies(adapters: FakeAdapterSpec[]): DoctorDependencies & { disposeLogger: Mock<() => void> } {
   const registry = {
     listAvailableAdapters: vi.fn().mockResolvedValue(
       adapters.map((a) => ({
@@ -47,7 +48,7 @@ function makeFakeDependencies(adapters: FakeAdapterSpec[]): DoctorDependencies &
     },
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
     disposeLogger: vi.fn()
-  } as unknown as DoctorDependencies & { disposeLogger: ReturnType<typeof vi.fn> };
+  } as unknown as DoctorDependencies & { disposeLogger: Mock<() => void> };
 }
 
 const okAdapter = (name: string): FakeAdapterSpec => ({
@@ -135,8 +136,8 @@ describe('handleDoctorCommand', () => {
 
   it('disposes the logger even when diagnosis fails, and returns 2', async () => {
     const deps = makeFakeDependencies([]);
-    (deps.adapterRegistry as unknown as { listAvailableAdapters: ReturnType<typeof vi.fn> }).listAvailableAdapters =
-      vi.fn().mockRejectedValue(new Error('registry exploded'));
+    deps.adapterRegistry.listAvailableAdapters =
+      vi.fn<DoctorRegistry['listAvailableAdapters']>().mockRejectedValue(new Error('registry exploded'));
     const writeError = vi.fn();
 
     const code = await handleDoctorCommand([], {}, {

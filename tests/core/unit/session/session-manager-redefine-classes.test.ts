@@ -301,7 +301,7 @@ describe('SessionManager - redefineClasses anchor re-resolution (issue #464)', (
       '        return 42/99;',
       '    }'
     ].join('\n');
-    (dependencies.mockFileSystem.readFile as ReturnType<typeof vi.fn>).mockResolvedValue(newSource);
+    vi.mocked(dependencies.mockFileSystem.readFile).mockResolvedValue(newSource);
 
     dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
       if (command === 'redefineClasses') {
@@ -341,7 +341,7 @@ describe('SessionManager - redefineClasses anchor re-resolution (issue #464)', (
   it('reports a stale anchor with a warning when the statement is gone', async () => {
     const session = await createSessionWithAnchoredBp();
 
-    (dependencies.mockFileSystem.readFile as ReturnType<typeof vi.fn>).mockResolvedValue(
+    vi.mocked(dependencies.mockFileSystem.readFile).mockResolvedValue(
       'public class RedefineTarget {\n    // statement deleted entirely\n}\n'
     );
 
