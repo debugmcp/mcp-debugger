@@ -3,17 +3,22 @@
  * Focus on error paths and edge cases (aligned with new APIs)
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { ErrorMessages } from '../../src/utils/error-messages.js';
 import path from 'path';
 import { SessionManagerOperations } from '../../src/session/session-manager-operations';
+import type { SessionManagerDependencies } from '../../src/session/session-manager-core';
+import { SessionStore, type ManagedSession } from '../../src/session/session-store';
+import type { IProxyManagerFactory } from '../../src/factories/proxy-manager-factory';
+import type { IProxyManager } from '../../src/proxy/proxy-manager';
 import {
   DebugLanguage,
   SessionLifecycleState,
   SessionState,
   type Breakpoint,
   type CustomLaunchRequestArguments,
-  type FunctionBreakpoint
+  type FunctionBreakpoint,
+  type ILogger
 } from '@debugmcp/shared';
 
 /** Concrete subclass for testing the abstract SessionManagerOperations */
@@ -29,9 +34,40 @@ import {
   PythonNotFoundError,
   DebugSessionCreationError
 } from '../../src/errors/debug-errors';
-import { createEnvironmentMock } from '../test-utils/mocks/environment';
+import {
+  createMockEnvironment,
+  createMockFileSystem,
+  createMockLogger,
+  createMockNetworkManager
+} from '../test-utils/helpers/test-dependencies';
+import { createMockAdapterRegistry } from '../test-utils/mocks/mock-adapter-registry';
 import { FakeDebugAdapter } from '../test-utils/fakes/fake-debug-adapter';
 import { internals } from '../test-utils/helpers/operations-internals';
+
+/** The store members these tests drive. Deliberately partial: the rest of SessionStore is never reached. */
+type PartialSessionStore = Pick<
+  SessionStore,
+  'get' | 'getOrThrow' | 'update' | 'updateState' | 'remove' | 'getAll'
+>;
+
+/**
+ * The proxy-manager members these tests stub. Unlike the attach-modes suite,
+ * this one installs the double on `ManagedSession.proxyManager` throughout, so
+ * it has to *be* an `IProxyManager` (an EventEmitter) at the type level: the
+ * intersection keeps every stub reachable as a `Mock`, and the one widening
+ * cast sits where the literal is built.
+ */
+type ProxyManagerMockKeys =
+  | 'isRunning'
+  | 'getCurrentThreadId'
+  | 'sendDapRequest'
+  | 'stop'
+  | 'once'
+  | 'off'
+  | 'removeListener'
+  | 'on'
+  | 'start';
+type ProxyManagerDouble = IProxyManager & { [K in ProxyManagerMockKeys]: Mock };
 
 /**
  * Launch args as callers actually send them.
@@ -70,22 +106,18 @@ function asLineBreakpoint(bp: Breakpoint | FunctionBreakpoint | undefined): Brea
 
 describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () => {
   let operations: SessionManagerOperations;
-  let mockSessionStore: any;
-  let mockProxyManager: any;
-  let mockDependencies: any;
-  let mockLogger: any;
-  let mockSession: any;
+  let mockSessionStore: { [K in keyof PartialSessionStore]: Mock<PartialSessionStore[K]> };
+  let mockProxyManager: ProxyManagerDouble;
+  let mockDependencies: SessionManagerDependencies;
+  let mockLogger: ILogger;
+  let mockSession: ManagedSession;
 
   beforeEach(() => {
     // Create mock logger
-    mockLogger = {
-      info: vi.fn(),
-      error: vi.fn(),
-      warn: vi.fn(),
-      debug: vi.fn()
-    };
+    mockLogger = createMockLogger();
 
-    // Create mock proxy manager (aligned with new IProxyManager shape)
+    // Create mock proxy manager (aligned with new IProxyManager shape).
+    // One sanctioned cast: the proxy double is deliberately partial (see ProxyManagerDouble).
     mockProxyManager = {
       isRunning: vi.fn().mockReturnValue(true),
       getCurrentThreadId: vi.fn().mockReturnValue(1),
@@ -96,7 +128,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       removeListener: vi.fn(),
       on: vi.fn(),
       start: vi.fn().mockResolvedValue(undefined)
-    };
+    } as unknown as ProxyManagerDouble;
     mockProxyManager.on.mockImplementation(() => mockProxyManager);
     mockProxyManager.off.mockImplementation(() => mockProxyManager);
     mockProxyManager.once.mockImplementation(() => mockProxyManager);
@@ -106,11 +138,12 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     mockSession = {
       id: 'test-session',
       name: 'Test Session',
-      language: 'python',
+      language: DebugLanguage.PYTHON,
       state: SessionState.CREATED,
       sessionLifecycle: SessionLifecycleState.ACTIVE,
       proxyManager: mockProxyManager,
       breakpoints: new Map(),
+      functionBreakpoints: new Map(),
       createdAt: new Date(),
       updatedAt: new Date(),
       executablePath: 'python'
@@ -118,63 +151,62 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     // Create mock session store (aligned with SessionStoreFactory usage)
     mockSessionStore = {
-      get: vi.fn().mockReturnValue(mockSession),
-      getOrThrow: vi.fn().mockImplementation((sessionId: string) => {
-        const session = mockSession.id === sessionId ? mockSession : null;
-        if (!session) {
-          throw new SessionNotFoundError(sessionId);
+      get: vi.fn<PartialSessionStore['get']>().mockReturnValue(mockSession),
+      getOrThrow: vi.fn<PartialSessionStore['getOrThrow']>().mockImplementation(
+        (sessionId: string) => {
+          const session = mockSession.id === sessionId ? mockSession : null;
+          if (!session) {
+            throw new SessionNotFoundError(sessionId);
+          }
+          return session;
         }
-        return session;
-      }),
-      update: vi.fn(),
-      updateState: vi.fn().mockImplementation((_sessionId: string, newState: SessionState) => {
-        mockSession.state = newState;
-      }),
-      delete: vi.fn(),
-      remove: vi.fn().mockReturnValue(true),
-      getAll: vi.fn().mockReturnValue([mockSession])
+      ),
+      update: vi.fn<PartialSessionStore['update']>(),
+      updateState: vi.fn<PartialSessionStore['updateState']>().mockImplementation(
+        (_sessionId: string, newState: SessionState) => {
+          mockSession.state = newState;
+        }
+      ),
+      remove: vi.fn<PartialSessionStore['remove']>().mockReturnValue(true),
+      getAll: vi.fn<PartialSessionStore['getAll']>().mockReturnValue([mockSession])
     };
 
     // Create mock dependencies (aligned with new constructor dependencies)
+    const fileSystem = createMockFileSystem();
+    vi.mocked(fileSystem.pathExists).mockResolvedValue(true);
+    vi.mocked(fileSystem.ensureDir).mockResolvedValue(undefined);
+    const networkManager = createMockNetworkManager();
+    vi.mocked(networkManager.findFreePort).mockResolvedValue(9000);
+    const adapterRegistry = createMockAdapterRegistry();
+    vi.mocked(adapterRegistry.create).mockResolvedValue(
+      new FakeDebugAdapter({
+        language: DebugLanguage.PYTHON,
+        resolveExecutablePath: async () => 'python'
+      })
+    );
+    // Implementation (not mockResolvedValue) so it survives mock resets;
+    // undefined metadata lets the attach-'none' gate fall through while
+    // still being exercised (issue #435 part 4 review).
+    vi.mocked(adapterRegistry.getFactoryMetadata).mockImplementation(async () => undefined);
+    // A vi.fn slot rather than MockProxyManagerFactory: tests below stub
+    // `create` per case (`mockReturnValueOnce`, a throwing implementation).
+    const proxyManagerFactory: IProxyManagerFactory = {
+      create: vi.fn<IProxyManagerFactory['create']>(() => mockProxyManager)
+    };
+
     mockDependencies = {
       logger: mockLogger,
-      sessionStoreFactory: {
-        create: vi.fn().mockReturnValue(mockSessionStore)
-      },
-      proxyManagerFactory: {
-        create: vi.fn().mockReturnValue(mockProxyManager)
-      },
-      fileSystem: {
-        readFile: vi.fn(),
-        readTail: vi.fn(),
-        exists: vi.fn(),
-        pathExists: vi.fn().mockResolvedValue(true),
-        ensureDir: vi.fn().mockResolvedValue(undefined),
-        ensureDirSync: vi.fn()
-      },
-      environment: createEnvironmentMock(),
-      networkManager: {
-        findFreePort: vi.fn().mockResolvedValue(9000)
-      },
-      adapterRegistry: {
-        create: vi.fn().mockResolvedValue(
-          new FakeDebugAdapter({
-            language: DebugLanguage.PYTHON,
-            resolveExecutablePath: async () => 'python'
-          })
-        ),
-        // Implementation (not mockResolvedValue) so it survives mock resets;
-        // undefined metadata lets the attach-'none' gate fall through while
-        // still being exercised (issue #435 part 4 review).
-        getFactoryMetadata: vi.fn(async () => undefined)
-      }
+      fileSystem,
+      networkManager,
+      environment: createMockEnvironment(),
+      adapterRegistry,
+      proxyManagerFactory,
+      // One sanctioned cast: the store double is deliberately partial (see PartialSessionStore).
+      sessionStoreFactory: { create: vi.fn(() => mockSessionStore as unknown as SessionStore) }
     };
 
     // Create operations instance with config
-    operations = new TestableSessionManagerOperations(
-      { logDirBase: '/tmp/logs' },
-      mockDependencies as any
-    );
+    operations = new TestableSessionManagerOperations({ logDirBase: '/tmp/logs' }, mockDependencies);
   });
 
   afterEach(() => {
@@ -183,7 +215,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
   describe('ProxyLauncher.start edge cases', () => {
     it('bubbles meaningful error when log directory creation fails', async () => {
-      mockDependencies.fileSystem.ensureDir.mockRejectedValueOnce(new Error('disk full'));
+      vi.mocked(mockDependencies.fileSystem.ensureDir).mockRejectedValueOnce(new Error('disk full'));
 
       await expect(
         internals(operations).proxyLauncher.start(mockSession, { scriptPath: 'script.py' })
@@ -197,7 +229,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
           throw new Error('python not found');
         }
       });
-      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapterStub);
 
       await expect(
         internals(operations).proxyLauncher.start(mockSession, { scriptPath: 'script.py' })
@@ -208,14 +240,14 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     });
 
     it('disposes the adapter when the launch transform rejects', async () => {
-      mockSession.language = 'cpp';
+      mockSession.language = DebugLanguage.CPP;
       const adapterStub = new FakeDebugAdapter({
         language: DebugLanguage.CPP,
         transformLaunchConfig: async () => {
           throw new Error('C/C++ compile failed: boom');
         }
       });
-      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapterStub);
 
       await expect(
         internals(operations).proxyLauncher.start(mockSession, { scriptPath: 'main.cpp' })
@@ -225,7 +257,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     });
 
     it('surfaces the MSVC verdict as the structured sentinel when the transform rejects under behavior=error', async () => {
-      mockSession.language = 'cpp';
+      mockSession.language = DebugLanguage.CPP;
       const validation = {
         compatible: false,
         behavior: 'error',
@@ -241,7 +273,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         // IDebugAdapter member, so it is attached as an extra rather than
         // smuggled in through a cast.
       }).withExtras({ consumeLastToolchainValidation: vi.fn(() => validation) });
-      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapterStub);
 
       let capturedError: unknown;
       try {
@@ -260,7 +292,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     });
 
     it('clears a stale toolchain verdict when the transform rejects for another reason', async () => {
-      mockSession.language = 'cpp';
+      mockSession.language = DebugLanguage.CPP;
       mockSession.toolchainValidation = {
         compatible: false,
         behavior: 'warn',
@@ -273,7 +305,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
           throw new Error('C/C++ compile failed: syntax error');
         }
       }).withExtras({ consumeLastToolchainValidation: vi.fn(() => undefined) });
-      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapterStub);
 
       await expect(
         internals(operations).proxyLauncher.start(mockSession, { scriptPath: 'main.cpp' })
@@ -285,14 +317,14 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     });
 
     it('wraps unresolved executable errors for non-python languages', async () => {
-      mockSession.language = 'javascript';
+      mockSession.language = DebugLanguage.JAVASCRIPT;
       const adapterStub = new FakeDebugAdapter({
         language: DebugLanguage.JAVASCRIPT,
         resolveExecutablePath: async () => {
           throw new Error('node missing');
         }
       });
-      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapterStub);
 
       await expect(
         internals(operations).proxyLauncher.start(mockSession, { scriptPath: 'app.js' })
@@ -315,7 +347,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       proxyInstance.off.mockReturnValue(proxyInstance);
       proxyInstance.once.mockReturnValue(proxyInstance);
       proxyInstance.removeListener.mockReturnValue(proxyInstance);
-      mockDependencies.proxyManagerFactory.create.mockReturnValueOnce(proxyInstance);
+      vi.mocked(mockDependencies.proxyManagerFactory.create).mockReturnValueOnce(proxyInstance);
 
       const scriptArgs = ['--flag'];
       const dapArgs = { stopOnEntry: true, justMyCode: true };
@@ -361,7 +393,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     });
 
     it('captures MSVC toolchain validation and throws structured error', async () => {
-      mockSession.language = 'rust';
+      mockSession.language = DebugLanguage.RUST;
       const validation = {
         compatible: false,
         behavior: 'warn',
@@ -373,7 +405,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         language: DebugLanguage.RUST,
         transformLaunchConfig: async () => ({ program: 'debug.exe' })
       }).withExtras({ consumeLastToolchainValidation: vi.fn(() => validation) });
-      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapterStub);
 
       let capturedError: unknown;
       try {
@@ -396,8 +428,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
   describe('startDebugging toolchain handling', () => {
     it('returns structured response when MSVC toolchain is detected', async () => {
-      mockSession.proxyManager = undefined as any;
-      mockSession.language = 'rust';
+      mockSession.proxyManager = undefined;
+      mockSession.language = DebugLanguage.RUST;
       const validation = {
         compatible: false,
         behavior: 'warn',
@@ -443,8 +475,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     });
 
     it('does not classify an unrelated launch failure from a stale session verdict', async () => {
-      mockSession.proxyManager = undefined as any;
-      mockSession.language = 'cpp';
+      mockSession.proxyManager = undefined;
+      mockSession.language = DebugLanguage.CPP;
       mockSession.toolchainValidation = {
         compatible: false,
         behavior: 'warn',
@@ -474,7 +506,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
   describe('Operation Failures with Error Details', () => {
     it('should handle continue failure with no proxy', async () => {
-      mockSession.proxyManager = null;
+      mockSession.proxyManager = undefined;
 
       await expect(operations.continue('test-session'))
         .rejects.toThrow(ProxyNotRunningError);
@@ -661,7 +693,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
   describe('Set Breakpoint Error Scenarios', () => {
     it('should handle setBreakpoint with no proxy', async () => {
-      mockSession.proxyManager = null;
+      mockSession.proxyManager = undefined;
 
       const { breakpoint: result } = await operations.setBreakpoint('test-session', { file: 'test.py', line: 10 });
       
@@ -717,7 +749,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       const GUIDANCE = /attach sessions send breakpoint paths to the remote debugger verbatim/i;
 
       it('appends topology guidance for a ruby attach session when rdbg rejects the path', async () => {
-        mockSession.language = 'ruby';
+        mockSession.language = DebugLanguage.RUBY;
         mockSession.attachMode = true;
         mockSession.state = SessionState.PAUSED;
         mockProxyManager.sendDapRequest.mockRejectedValue(RDBG_ERROR);
@@ -731,7 +763,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       });
 
       it('does not append guidance for a ruby launch session', async () => {
-        mockSession.language = 'ruby';
+        mockSession.language = DebugLanguage.RUBY;
         mockSession.attachMode = false;
         mockSession.state = SessionState.PAUSED;
         mockProxyManager.sendDapRequest.mockRejectedValue(RDBG_ERROR);
@@ -743,7 +775,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       });
 
       it('does not append guidance for other languages or other errors', async () => {
-        mockSession.language = 'python';
+        mockSession.language = DebugLanguage.PYTHON;
         mockSession.attachMode = true;
         mockSession.state = SessionState.PAUSED;
         mockProxyManager.sendDapRequest.mockRejectedValue(RDBG_ERROR);
@@ -751,7 +783,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         const { warning: pyWarning } = await operations.setBreakpoint('test-session', { file: 'a.py', line: 5 });
         expect(pyWarning).not.toMatch(GUIDANCE);
 
-        mockSession.language = 'ruby';
+        mockSession.language = DebugLanguage.RUBY;
         mockProxyManager.sendDapRequest.mockRejectedValue(new Error('Connection lost'));
         const { warning: otherWarning } = await operations.setBreakpoint('test-session', { file: 'a.rb', line: 5 });
         expect(otherWarning).toContain('live sync failed');
@@ -759,7 +791,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       });
 
       it('appends the same guidance on the function-breakpoint sync path', async () => {
-        mockSession.language = 'ruby';
+        mockSession.language = DebugLanguage.RUBY;
         mockSession.attachMode = true;
         mockSession.state = SessionState.PAUSED;
         mockSession.functionBreakpoints = new Map();
@@ -775,7 +807,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
   describe('Get Variables Error Scenarios', () => {
     it('should handle getVariables with no proxy', async () => {
-      mockSession.proxyManager = null;
+      mockSession.proxyManager = undefined;
 
       const result = await operations.getVariables('test-session', 100);
       
@@ -805,7 +837,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
   describe('Get Stack Trace Error Scenarios', () => {
     it('should handle getStackTrace with no proxy', async () => {
-      mockSession.proxyManager = null;
+      mockSession.proxyManager = undefined;
 
       const result = await operations.getStackTrace('test-session', 1);
       
@@ -860,7 +892,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
   describe('Get Scopes Error Scenarios', () => {
     it('should handle getScopes with no proxy', async () => {
-      mockSession.proxyManager = null;
+      mockSession.proxyManager = undefined;
 
       const result = await operations.getScopes('test-session', 0);
       
@@ -903,7 +935,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
   describe('Evaluate Expression Error Scenarios', () => {
     it('should handle evaluateExpression with no proxy', async () => {
-      mockSession.proxyManager = null;
+      mockSession.proxyManager = undefined;
 
       const result = await operations.evaluateExpression('test-session', 'x + 1');
       
@@ -1119,7 +1151,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockSession.proxyManager = dryRunProxy;
       mockSession.state = SessionState.INITIALIZING;
       mockSession.logDir = '/tmp/session-logs';
-      mockDependencies.fileSystem.readTail.mockResolvedValueOnce('adapter never answered');
+      vi.mocked(mockDependencies.fileSystem.readTail).mockResolvedValueOnce('adapter never answered');
 
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockResolvedValue(undefined);
       vi.spyOn(internals(operations).launcher, 'waitForDryRunCompletion').mockResolvedValue(false);
@@ -1182,7 +1214,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       vi.stubEnv('CI', 'true');
       vi.stubEnv('GITHUB_ACTIONS', undefined);
 
-      mockDependencies.proxyManagerFactory.create.mockImplementation(() => {
+      vi.mocked(mockDependencies.proxyManagerFactory.create).mockImplementation(() => {
         throw new Error('Port allocation failed');
       });
 
@@ -1206,7 +1238,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     it('captures proxy log tail when initialization throws', async () => {
       mockSession.logDir = '/tmp/session-logs';
-      mockDependencies.fileSystem.readTail.mockResolvedValueOnce('first line\nsecond line\nthird line');
+      vi.mocked(mockDependencies.fileSystem.readTail).mockResolvedValueOnce('first line\nsecond line\nthird line');
 
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockRejectedValue(new Error('Proxy failed to initialize'));
 
@@ -1230,7 +1262,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     it('tears a failed launch down session-preservingly: listeners, mirror record, and a failing stop', async () => {
       mockSession.proxyManager = undefined;
-      mockSession.exposure = { host: '127.0.0.1', port: 4711, token: 't' };
+      mockSession.exposure = { host: '127.0.0.1', port: 4711, token: 't', exposedAt: 0 };
       const failingProxy = {
         ...mockProxyManager,
         stop: vi.fn().mockRejectedValue(new Error('stop exploded')),
@@ -1274,8 +1306,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       // concurrent close_debug_session lands in: model it by removing the
       // session from the store while stopProxyPreservingSession is in flight.
       vi.spyOn(operations as any, 'stopProxyPreservingSession')
-        .mockImplementation(async (session: typeof mockSession) => {
-          session.proxyManager = undefined;
+        .mockImplementation(async () => {
+          mockSession.proxyManager = undefined;
           mockSessionStore.getOrThrow.mockImplementation((sessionId: string) => {
             throw new SessionNotFoundError(sessionId);
           });
@@ -1333,8 +1365,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     it('records log read failure when tail cannot be captured', async () => {
       mockSession.logDir = '/tmp/session-logs';
-      mockDependencies.fileSystem.pathExists.mockResolvedValueOnce(true);
-      mockDependencies.fileSystem.readTail.mockRejectedValueOnce(new Error('permission denied'));
+      vi.mocked(mockDependencies.fileSystem.pathExists).mockResolvedValueOnce(true);
+      vi.mocked(mockDependencies.fileSystem.readTail).mockRejectedValueOnce(new Error('permission denied'));
 
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockRejectedValue(new Error('Proxy start error'));
 
@@ -1378,7 +1410,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockSession.proxyManager = undefined;
       mockSession.state = SessionState.CREATED;
       mockSession.logDir = '/tmp/session-logs';
-      mockDependencies.fileSystem.readTail.mockResolvedValue('adapter crash details');
+      vi.mocked(mockDependencies.fileSystem.readTail).mockResolvedValue('adapter crash details');
 
       const proxyStub: any = {
         ...mockProxyManager,
@@ -2113,8 +2145,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       }).withAttachSupport({
         transform: () => ({ type: 'java', request: 'attach', host: 'localhost', port: 5005 })
       });
-      mockDependencies.adapterRegistry.create.mockResolvedValue(mockAdapter);
-      mockSession.language = 'java';
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(mockAdapter);
+      mockSession.language = DebugLanguage.JAVA;
       mockSession.state = SessionState.CREATED;
       mockProxyManager.setCurrentThreadId = vi.fn();
       // Shrink the attach verification window so failure-path tests stay fast.
@@ -2130,8 +2162,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         throw new Error('Timeout waiting for proxy initialization');
       });
       vi.spyOn(operations as any, 'stopProxyPreservingSession')
-        .mockImplementation(async (session: typeof mockSession) => {
-          session.proxyManager = undefined;
+        .mockImplementation(async () => {
+          mockSession.proxyManager = undefined;
           mockSessionStore.getOrThrow.mockImplementation((sessionId: string) => {
             throw new SessionNotFoundError(sessionId);
           });
@@ -2193,8 +2225,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       // Teardown (which only clears the proxy handle) must still run on the
       // failure path; the diagnostics come from the error and logDir.
       const stopSpy = vi.spyOn(operations as any, 'stopProxyPreservingSession')
-        .mockImplementation(async (session: typeof mockSession) => {
-          session.proxyManager = undefined;
+        .mockImplementation(async () => {
+          mockSession.proxyManager = undefined;
         });
 
       const result = await operations.attachToProcess('test-session', {
@@ -2242,7 +2274,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     });
 
     it('warns and proceeds when the registry lacks getFactoryMetadata (attach gate self-disabled)', async () => {
-      delete (mockDependencies.adapterRegistry as Record<string, unknown>).getFactoryMetadata;
+      Reflect.deleteProperty(mockDependencies.adapterRegistry, 'getFactoryMetadata');
       mockProxyManager.sendDapRequest.mockImplementation(async (command: string) =>
         command === 'threads' ? { body: { threads: [{ id: 1, name: 'main' }] } } : {}
       );
@@ -2723,7 +2755,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     it('should send a post-attach pause when the policy requests it (ruby)', async () => {
       // Ruby's policy declares pauseAfterAttach: rdbg does not suspend a
       // running target on attach, so the PAUSED state must be made real.
-      mockSession.language = 'ruby';
+      mockSession.language = DebugLanguage.RUBY;
       mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
         if (command === 'threads') {
           return { body: { threads: [{ id: 1, name: 'main' }] } };
@@ -2750,7 +2782,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     });
 
     it('reports PAUSED only after the post-attach stopped event records lastStop', async () => {
-      mockSession.language = 'ruby';
+      mockSession.language = DebugLanguage.RUBY;
       let stopped: (() => void) | undefined;
       mockProxyManager.on.mockImplementation((event: string, handler: () => void) => {
         if (event === 'stopped') stopped = handler;
@@ -2791,7 +2823,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       // thread refuses stackTrace. pauseAllThreads sends threadId 0 so the
       // bridge suspends the whole VM and re-anchors its stopped event to a
       // thread that can report frames.
-      mockSession.language = 'java';
+      mockSession.language = DebugLanguage.JAVA;
       mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
         if (command === 'threads') {
           return { body: { threads: [{ id: 1, name: 'main' }] } };
@@ -2814,7 +2846,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     });
 
     it('should tolerate a rejected post-attach pause (target already stopped)', async () => {
-      mockSession.language = 'ruby';
+      mockSession.language = DebugLanguage.RUBY;
       mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
         if (command === 'threads') {
           return { body: { threads: [{ id: 1, name: 'main' }] } };
@@ -2845,7 +2877,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       // java moved to pauseAfterAttach in issue #465 — go's policy has no
       // getAttachBehavior (Delve suspends on attach natively), so it keeps
       // the no-pause default this test pins.
-      mockSession.language = 'go';
+      mockSession.language = DebugLanguage.GO;
       mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
         if (command === 'threads') {
           return { body: { threads: [{ id: 2, name: 'main' }] } };
@@ -2883,8 +2915,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         }
       }).withAttachSupport({ transform: () => ({ type: 'java', request: 'attach' }) });
 
-      mockDependencies.adapterRegistry.create.mockResolvedValue(mockAdapter);
-      mockSession.language = 'java';
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(mockAdapter);
+      mockSession.language = DebugLanguage.JAVA;
       mockSession.state = SessionState.CREATED;
 
       const result = await operations.startDebugging(
@@ -2909,8 +2941,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         }
       }).withAttachSupport({ transform: () => ({ type: 'java', request: 'attach' }) });
 
-      mockDependencies.adapterRegistry.create.mockResolvedValue(mockAdapter);
-      mockSession.language = 'java';
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(mockAdapter);
+      mockSession.language = DebugLanguage.JAVA;
       mockSession.state = SessionState.CREATED;
 
       const result = await operations.startDebugging(
@@ -2940,8 +2972,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         }
       });
 
-      mockDependencies.adapterRegistry.create.mockResolvedValue(mockAdapter);
-      mockSession.language = 'java';
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(mockAdapter);
+      mockSession.language = DebugLanguage.JAVA;
       mockSession.state = SessionState.CREATED;
 
       const result = await operations.startDebugging(
@@ -2968,8 +3000,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         }
       });
 
-      mockDependencies.adapterRegistry.create.mockResolvedValue(mockAdapter);
-      mockSession.language = 'python';
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(mockAdapter);
+      mockSession.language = DebugLanguage.PYTHON;
       mockSession.state = SessionState.CREATED;
 
       const result = await operations.startDebugging(
@@ -2997,8 +3029,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         }
       });
 
-      mockDependencies.adapterRegistry.create.mockResolvedValue(mockAdapter);
-      mockSession.language = 'java';
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(mockAdapter);
+      mockSession.language = DebugLanguage.JAVA;
       mockSession.state = SessionState.CREATED;
 
       const result = await operations.startDebugging(
@@ -3028,8 +3060,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         }
       });
 
-      mockDependencies.adapterRegistry.create.mockResolvedValue(mockAdapter);
-      mockSession.language = 'cpp';
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(mockAdapter);
+      mockSession.language = DebugLanguage.CPP;
       mockSession.state = SessionState.CREATED;
 
       const result = await operations.startDebugging(
@@ -3062,8 +3094,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         }
       }).withExtras({ consumeLastToolchainValidation: vi.fn(() => validation) });
 
-      mockDependencies.adapterRegistry.create.mockResolvedValue(mockAdapter);
-      mockSession.language = 'cpp';
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(mockAdapter);
+      mockSession.language = DebugLanguage.CPP;
       mockSession.state = SessionState.CREATED;
 
       const result = await operations.startDebugging('test-session', '/work/msvc.exe', []);
@@ -3548,7 +3580,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
   describe('Disconnect and Detach Safety', () => {
     it('detachFromProcess should return error when proxyManager is null', async () => {
-      mockSession.proxyManager = null;
+      mockSession.proxyManager = undefined;
 
       const result = await operations.detachFromProcess('test-session');
 
@@ -3672,7 +3704,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     });
 
     it('should apply dotnet filtering in getStackTrace for dotnet session', async () => {
-      mockSession.language = 'dotnet';
+      mockSession.language = DebugLanguage.DOTNET;
       mockSession.state = SessionState.PAUSED;
       mockProxyManager.isRunning.mockReturnValue(true);
       mockProxyManager.getCurrentThreadId.mockReturnValue(1);
@@ -3740,7 +3772,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     });
 
     it('should throw ProxyNotRunningError when proxy manager is null', async () => {
-      mockSession.proxyManager = null;
+      mockSession.proxyManager = undefined;
 
       await expect(operations.listThreads('test-session'))
         .rejects.toBeInstanceOf(ProxyNotRunningError);
@@ -4157,7 +4189,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         // Exactly what the core does on 'terminated': terminal state first,
         // then the handle is dropped.
         mockSession.state = SessionState.STOPPED;
-        mockSession.proxyManager = null;
+        mockSession.proxyManager = undefined;
         emit('terminated');
         await vi.advanceTimersByTimeAsync(5000);
         release();
@@ -4231,7 +4263,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         if (command === 'threads') {
           mockSession.state = SessionState.STOPPED;
           mockSession.sessionLifecycle = SessionLifecycleState.TERMINATED;
-          mockSession.proxyManager = null;
+          mockSession.proxyManager = undefined;
           return Promise.resolve({ body: { threads: [{ id: 3, name: 'Main' }] } });
         }
         return Promise.resolve({});
@@ -4251,7 +4283,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       // listeners on null and throw a TypeError.
       mockProxyManager.sendDapRequest.mockImplementation((command: string) => {
         if (command === 'threads') {
-          mockSession.proxyManager = null;
+          mockSession.proxyManager = undefined;
           return Promise.resolve({ body: { threads: [{ id: 3, name: 'Main' }] } });
         }
         return Promise.resolve({});
