@@ -29,7 +29,6 @@
     "**/dist/**",
     "coverage",
     "tests/fixtures/**",
-    "tests/manual/**",
-    "tests/reports/**"
+    "tests/manual/**"
   ]
 }
