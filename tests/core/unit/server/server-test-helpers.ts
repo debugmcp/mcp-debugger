@@ -233,7 +233,8 @@ export function getToolHandlers(mockServer: MockServer) {
   };
 }
 
-// Debuggee-output resource handlers (issue #218).
+// Debuggee-output resource handlers (issue #218). Casts: see the note above
+// getToolHandlers.
 export function getResourceHandlers(mockServer: MockServer) {
   return {
     listResourcesHandler: findHandler(mockServer, ListResourcesRequestSchema) as
@@ -247,6 +248,7 @@ export function getResourceHandlers(mockServer: MockServer) {
   };
 }
 
+// Casts: see the note above getToolHandlers.
 export function getPromptHandlers(mockServer: MockServer) {
   return {
     listPromptsHandler: findHandler(mockServer, ListPromptsRequestSchema) as
