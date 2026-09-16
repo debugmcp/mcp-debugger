@@ -11,15 +11,13 @@ export default defineConfig({
       // Handle .js extensions in imports (strip them)
       '^(\\.{1,2}/.+)\\.js$': '$1',
       // Workspace source aliases for local dev
-      '@debugmcp/shared': path.resolve(__dirname, '../shared/src/index.ts'),
-      '@debugmcp/codelldb-common': path.resolve(__dirname, '../codelldb-common/src/index.ts')
+      '@debugmcp/shared': path.resolve(__dirname, '../shared/src/index.ts')
     }
   },
   resolve: {
     extensions: ['.ts', '.js', '.json', '.node'],
     alias: {
-      '@debugmcp/shared': path.resolve(__dirname, '../shared/src/index.ts'),
-      '@debugmcp/codelldb-common': path.resolve(__dirname, '../codelldb-common/src/index.ts')
+      '@debugmcp/shared': path.resolve(__dirname, '../shared/src/index.ts')
     }
   }
 });

@@ -30,12 +30,15 @@ Benefits:
 packages/adapter-<language>/
   package.json
   tsconfig.json
+  vitest.config.ts                   # Standalone test runs (see step 3)
   src/
     <language>-adapter-factory.ts    # IAdapterFactory implementation
     <language>-debug-adapter.ts      # IDebugAdapter implementation
     index.ts                         # Package entry point (exports)
     utils/                           # Optional: language-specific helpers
       <language>-utils.ts
+  tests/
+    unit/                            # Package-local unit tests
   dist/                              # Build output (gitignored)
 ```
 
@@ -130,6 +133,12 @@ Based on `packages/adapter-go/tsconfig.json`:
   ]
 }
 ```
+
+Also copy `packages/adapter-rust/vitest.config.ts` into the package as `vitest.config.ts`
+(drop the `@debugmcp/codelldb-common` alias unless the adapter depends on it). It makes
+`pnpm --filter @debugmcp/adapter-<language> test` work from the package directory: without it,
+vitest walks up to the root config, whose `setupFiles` resolves against the package cwd, and every
+suite fails at setup (issue #696). The root `pnpm test` picks up `packages/**/tests` either way.
 
 ### 4. Implement `IAdapterFactory`
 
@@ -485,6 +494,7 @@ The loader:
 - [ ] Registered in root `package.json` optionalDependencies
 - [ ] Added to known adapters list in `src/adapters/adapter-loader.ts`
 - [ ] Vitest alias added in `vitest.config.ts`
+- [ ] `packages/adapter-<language>/vitest.config.ts` shipped (copied from adapter-rust) so `pnpm --filter @debugmcp/adapter-<language> test` runs standalone
 - [ ] Adapter count assertions updated in tests
 - [ ] Unit and integration tests written under `tests/adapters/<language>/`
 - [ ] The new policy passes `tests/unit/shared/adapter-policy-contract.test.ts` — the cross-policy contract that runs against the real policies via `getPolicyForLanguage`. Its pinned capability table is a deliberate duplicate of what the policies declare, so a new language means editing that table on purpose

@@ -382,7 +382,7 @@ packages/adapter-{language}/
 ├── tests/
 ├── package.json         # Must include "type": "module" and workspace:* dep on @debugmcp/shared
 ├── tsconfig.json
-└── vitest.config.ts     # Optional if tests run from root
+└── vitest.config.ts     # Copy from adapter-rust; needed for standalone `pnpm --filter` runs
 ```
 
 ## Language-Specific Requirements
