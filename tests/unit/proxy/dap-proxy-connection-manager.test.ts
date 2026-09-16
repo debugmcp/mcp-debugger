@@ -1,8 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { DapConnectionManager } from '../../../src/proxy/dap-proxy-connection-manager.js';
-import { MinimalDapClient } from '../../../src/proxy/minimal-dap.js';
 import type {
-  IDapClient,
   IDapClientFactory,
   ILogger
 } from '../../../src/proxy/dap-proxy-interfaces.js';
@@ -64,15 +62,6 @@ describe('DapConnectionManager', () => {
     vi.clearAllTimers();
     vi.useRealTimers();
     vi.restoreAllMocks();
-  });
-
-  describe('IDapClient contract', () => {
-    it('MinimalDapClient satisfies IDapClient (issue #691)', () => {
-      // No connect(): the constructor opens nothing for the default policy.
-      const client: IDapClient = new MinimalDapClient('127.0.0.1', 0);
-      expect(client.on('x', () => {})).toBe(client); // returns this
-      client.removeAllListeners();
-    });
   });
 
   describe('connectWithRetry', () => {

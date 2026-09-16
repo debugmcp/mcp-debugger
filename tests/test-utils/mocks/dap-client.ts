@@ -39,7 +39,6 @@ export function createMockDapClient(): MockDapClient {
   // Store original methods before wrapping
   const originalOn = emitter.on.bind(emitter);
   const originalOff = emitter.off.bind(emitter);
-  const originalOnce = emitter.once.bind(emitter);
   const originalRemoveAllListeners = emitter.removeAllListeners.bind(emitter);
 
   // The listener wrappers return the double itself (it IS the emitter —
@@ -57,8 +56,16 @@ export function createMockDapClient(): MockDapClient {
       originalOff(event, handler);
       return client;
     }),
-    once: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
-      originalOnce(event, handler);
+    // Not EventEmitter's own once(): that goes through `this.on(...)`, i.e.
+    // the vi.fn wrapper above, so every once() would also record a spurious
+    // on() call. Register the self-removing wrapper via the captured
+    // prototype methods instead.
+    once: vi.fn<IDapClient['once']>((event, handler) => {
+      const onceWrapper = (...args: unknown[]) => {
+        originalOff(event, onceWrapper);
+        handler(...args);
+      };
+      originalOn(event, onceWrapper);
       return client;
     }),
     removeAllListeners: vi.fn((event?: string) => {

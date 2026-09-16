@@ -1063,7 +1063,7 @@ describe('DapProxyWorker', () => {
       (worker as any).setupDapEventHandlers();
 
       const body = { reason: 'changed', breakpoint: { id: 7, verified: true, line: 12 } };
-      (mockDapClient as unknown as EventEmitter).emit('breakpoint', body);
+      mockDapClient.emit('breakpoint', body);
 
       const forwarded = mockMessageSender.send.mock.calls
         .map(([m]) => m)
@@ -2488,7 +2488,7 @@ describe('DapProxyWorker', () => {
 
     it('ensureInitialStop should pause when threads available', async () => {
       (worker as any).dapClient = mockDapClient;
-      const sendRequestMock = mockDapClient.sendRequest as Mock;
+      const sendRequestMock = mockDapClient.sendRequest;
       sendRequestMock.mockReset();
       sendRequestMock.mockImplementation(async (command: string) => {
         if (command === 'threads') {
@@ -2518,7 +2518,7 @@ describe('DapProxyWorker', () => {
       
       (testWorker as any).dapClient = mockDapClient;
       (testWorker as any).logger = mockLogger;
-      const sendRequestMock = mockDapClient.sendRequest as Mock;
+      const sendRequestMock = mockDapClient.sendRequest;
       sendRequestMock.mockReset();
       sendRequestMock.mockImplementation(async (command: string) => {
         if (command === 'threads') {
@@ -2545,7 +2545,7 @@ describe('DapProxyWorker', () => {
     it('ensureInitialStop treats thread id 0 as discovered and skips pause (issue #520)', async () => {
       (worker as any).dapClient = mockDapClient;
       (worker as any).logger = mockLogger;
-      const sendRequestMock = mockDapClient.sendRequest as Mock;
+      const sendRequestMock = mockDapClient.sendRequest;
       sendRequestMock.mockReset();
       sendRequestMock.mockImplementation(async (command: string) => {
         if (command === 'threads') {
@@ -2699,7 +2699,7 @@ describe('DapProxyWorker', () => {
       // BEFORE dapClient.shutdown() destroys it — or the adapter never
       // receives terminateDebuggee and orphans its debuggee (issue #156).
       expect(connectionStub.disconnect.mock.invocationCallOrder[0]).toBeLessThan(
-        (mockDapClient.shutdown as Mock).mock.invocationCallOrder[0]
+        mockDapClient.shutdown.mock.invocationCallOrder[0]
       );
       expect(worker.getState()).toBe(ProxyState.TERMINATED);
     });
@@ -3292,8 +3292,8 @@ describe('DapProxyWorker', () => {
         })
       };
       (worker as any).adapterState = DefaultAdapterPolicy.createInitialState();
-      (mockDapClient.sendRequest as Mock).mockReset();
-      (mockDapClient.sendRequest as Mock).mockResolvedValue({ body: {} });
+      mockDapClient.sendRequest.mockReset();
+      mockDapClient.sendRequest.mockResolvedValue({ body: {} });
       mockMessageSender.send.mockClear();
       ensureSpy = vi.spyOn(worker as any, 'ensureInitialStop').mockResolvedValue(undefined);
     });
@@ -3312,7 +3312,7 @@ describe('DapProxyWorker', () => {
       } as DapCommandPayload);
 
       expect(ensureSpy).not.toHaveBeenCalled();
-      const sent = (mockDapClient.sendRequest as Mock).mock.calls.map(([cmd]) => cmd);
+      const sent = mockDapClient.sendRequest.mock.calls.map(([cmd]) => cmd);
       expect(sent).toContain('attach');
       // The drain that shares the requiresInitialStop gate must survive the
       // attach exclusion — queued commands still flush after attach.
@@ -4409,7 +4409,7 @@ describe('DapProxyWorker', () => {
       expect(capturedHost!.getLastStop()).toEqual({ reason: 'breakpoint', threadId: 3 });
 
       // forwardRequest rides the real adapter connection.
-      (mockDapClient.sendRequest as Mock).mockResolvedValueOnce({ body: { threads: [] } });
+      mockDapClient.sendRequest.mockResolvedValueOnce({ body: { threads: [] } });
       await capturedHost!.forwardRequest('threads', {});
       expect(mockDapClient.sendRequest).toHaveBeenCalledWith('threads', {});
     });
@@ -4474,7 +4474,7 @@ describe('DapProxyWorker', () => {
         // handler the same way the exit-code suites do.
         return {
           emitGeneric: (event: string, body: unknown) =>
-            (mockDapClient as unknown as EventEmitter).emit('event', { seq: 1, type: 'event', event, body })
+            mockDapClient.emit('event', { seq: 1, type: 'event', event, body })
         };
       };
 
@@ -4528,7 +4528,7 @@ describe('DapProxyWorker', () => {
         const handlers = await wireRealStopHandlers();
         // Adapters like Delve/JDI omit threadId; the worker discovers it via
         // a threads request and mutates the body before fan-out.
-        (mockDapClient.sendRequest as Mock).mockResolvedValueOnce({
+        mockDapClient.sendRequest.mockResolvedValueOnce({
           body: { threads: [{ id: 42, name: 'main' }] }
         });
 
@@ -4555,7 +4555,7 @@ describe('DapProxyWorker', () => {
         wireConnectedWorker();
         await worker.handleCommand(mirrorPayload('mirrorExpose'));
         (worker as any).lastStop = { reason: 'breakpoint', threadId: 5 };
-        (mockDapClient.sendRequest as Mock).mockResolvedValueOnce({ body: { allThreadsContinued: false } });
+        mockDapClient.sendRequest.mockResolvedValueOnce({ body: { allThreadsContinued: false } });
 
         await worker.handleCommand({
           cmd: 'dap',

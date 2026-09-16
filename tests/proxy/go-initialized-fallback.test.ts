@@ -15,7 +15,6 @@ import type {
   ILogger,
   IFileSystem,
   IProcessSpawner,
-  IDapClient,
   ProxyInitPayload,
   StatusMessage,
   DapResponseMessage,
@@ -86,7 +85,7 @@ const GO_PAYLOAD: ProxyInitPayload = {
 describe('Go initialized event fallback', () => {
   let worker: DapProxyWorker;
   let mockLogger: ILogger;
-  let mockDapClient: IDapClient & EventEmitter;
+  let mockDapClient: ReturnType<typeof createMockDapClient>;
   let mockMessageSender: ReturnType<typeof createMockMessageSender>;
   let dependencies: DapProxyDependencies;
 
