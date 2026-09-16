@@ -1,147 +1,63 @@
 /**
- * Mock implementation of the Debug Adapter Protocol (DAP) client
- * 
- * This provides a consistent mock implementation for the DAP client
- * used throughout the debugger tests.
+ * Shared `IDapClient` double for the proxy-worker and connection-manager
+ * tests: a real `EventEmitter` (so tests can `emit` DAP events on it) whose
+ * `IDapClient` methods are all `vi.fn`s (so tests can program and assert on
+ * them). Typed against the interface, so the compiler rejects it the moment
+ * `IDapClient` moves (issue #691).
  */
-import { vi } from 'vitest';
+import { vi, type Mock } from 'vitest';
 import { EventEmitter } from 'events';
-
-/** A listener registered on this mock. `Function` is too wide for EventEmitter.on(). */
-type DapEventHandler = (...args: unknown[]) => void;
-
-// Events tracked by the client
-export type DapEvent = 
-  | 'initialized' 
-  | 'stopped' 
-  | 'continued' 
-  | 'exited' 
-  | 'terminated' 
-  | 'thread' 
-  | 'output'
-  | 'breakpoint'
-  | 'module'
-  | 'loadedSource'
-  | 'process'
-  | 'capabilities'
-  | 'progressStart'
-  | 'progressUpdate'
-  | 'progressEnd'
-  | 'invalidated'
-  | 'memory'
-  | 'error'
-  | 'close';
+import type { IDapClient } from '../../../src/proxy/dap-proxy-interfaces.js';
 
 /**
- * Mock implementation of DebugAdapterClient used in tests
+ * What `createMockDapClient()` hands back. Each `IDapClient` method is also
+ * the `vi.fn` it actually is, so `client.sendRequest.mockResolvedValue(...)`
+ * needs no cast at the call site.
  */
-export class MockDapClient extends EventEmitter {
-  // Client methods
-  public connect = vi.fn().mockResolvedValue(undefined);
-  public disconnect = vi.fn().mockResolvedValue(undefined);
-  public sendRequest = vi.fn().mockResolvedValue({});
-  
-  // Event handlers
-  private eventHandlers: Map<string, DapEventHandler[]> = new Map();
-
-  // Per-command mock responses and errors
-  private mockResponses: Map<string, any> = new Map();
-  private mockErrors: Map<string, Error> = new Map();
-  
-  constructor() {
-    super();
-    
-    // Create a wrapper around the on method to track registered handlers
-    this.on = vi.fn().mockImplementation((event: string, handler: DapEventHandler) => {
-      if (!this.eventHandlers.has(event)) {
-        this.eventHandlers.set(event, []);
-      }
-      
-      this.eventHandlers.get(event)?.push(handler);
-      return super.on(event, handler);
-    });
-  }
-  
-  /**
-   * Reset all mocks and clear event state
-   */
-  reset(): void {
-    this.connect.mockReset();
-    this.disconnect.mockReset();
-    this.sendRequest.mockReset();
-    (this.on as any).mockClear();
-    
-    // Clear all registered event handlers
-    this.eventHandlers.clear();
-    this.mockResponses.clear();
-    this.mockErrors.clear();
-    this.removeAllListeners();
-    
-    // Reset default implementations
-    this.connect.mockResolvedValue(undefined);
-    this.disconnect.mockResolvedValue(undefined);
-    this.sendRequest.mockResolvedValue({});
-  }
-  
-  /**
-   * Set specific mock implementations for different request types.
-   * Multiple calls accumulate per-command responses in a map.
-   */
-  mockRequest(command: string, response: any): void {
-    this.mockResponses.set(command, response);
-    this._updateSendRequestMock();
-  }
-
-  /**
-   * Simulate a DAP event
-   */
-  simulateEvent(event: DapEvent, data: any = {}): void {
-    this.emit(event, data);
-  }
-
-  /**
-   * Simulate an error during a DAP request.
-   * Multiple calls accumulate per-command errors in a map.
-   */
-  simulateRequestError(command: string, error: Error): void {
-    this.mockErrors.set(command, error);
-    this._updateSendRequestMock();
-  }
-
-  /**
-   * Update sendRequest mock to reflect accumulated responses and errors.
-   */
-  private _updateSendRequestMock(): void {
-    this.sendRequest.mockImplementation((cmd: string, ...args: any[]) => {
-      if (this.mockErrors.has(cmd)) {
-        return Promise.reject(this.mockErrors.get(cmd));
-      }
-      if (this.mockResponses.has(cmd)) {
-        return Promise.resolve(this.mockResponses.get(cmd));
-      }
-      return Promise.resolve({}); // Default response
-    });
-  }
-  
-  /**
-   * Simulate a connection error
-   */
-  simulateConnectionError(error: Error): void {
-    this.connect.mockRejectedValueOnce(error);
-  }
-  
-  /**
-   * Get event handlers for a specific event
-   */
-  getEventHandlers(event: DapEvent): Function[] {
-    return this.eventHandlers.get(event) || [];
-  }
-}
-
-// Export a singleton instance
-export const mockDapClient = new MockDapClient();
-
-// Export default for use with vi.mock
-export default {
-  DebugAdapterClient: vi.fn().mockImplementation(function() { return mockDapClient; })
+export type MockDapClient = IDapClient & EventEmitter & {
+  connect: Mock<IDapClient['connect']>;
+  disconnect: Mock<IDapClient['disconnect']>;
+  shutdown: Mock<IDapClient['shutdown']>;
+  // Bare Mock on purpose: tests resolve partial DAP responses
+  // ({ success: true }, undefined) and read raw mock.calls args, which the
+  // real sendRequest<T extends DebugProtocol.Response> signature would reject.
+  sendRequest: Mock;
+  // Bare Mock too: tests replace `on` with a handler-capturing implementation
+  // that returns nothing, which a `this`-returning signature would reject.
+  on: Mock;
+  off: Mock;
+  once: Mock;
+  removeAllListeners: Mock;
 };
+
+export function createMockDapClient(): MockDapClient {
+  const emitter = new EventEmitter();
+  // Store original methods before wrapping
+  const originalOn = emitter.on.bind(emitter);
+  const originalOff = emitter.off.bind(emitter);
+  const originalOnce = emitter.once.bind(emitter);
+  const originalRemoveAllListeners = emitter.removeAllListeners.bind(emitter);
+
+  return Object.assign(emitter, {
+    sendRequest: vi.fn().mockResolvedValue({ body: {} }),
+    connect: vi.fn().mockResolvedValue(undefined),
+    disconnect: vi.fn().mockResolvedValue(undefined),
+    on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+      originalOn(event, handler);
+      return emitter;
+    }),
+    off: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+      originalOff(event, handler);
+      return emitter;
+    }),
+    once: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+      originalOnce(event, handler);
+      return emitter;
+    }),
+    removeAllListeners: vi.fn((event?: string) => {
+      originalRemoveAllListeners(event);
+      return emitter;
+    }),
+    shutdown: vi.fn()
+  }) as MockDapClient;
+}

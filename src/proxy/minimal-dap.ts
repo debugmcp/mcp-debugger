@@ -20,6 +20,7 @@ import {
   sanitizePayloadForLogging
 } from '@debugmcp/shared';
 import { ChildSessionManager, type ChildSessionOptions } from './child-session-manager.js';
+import type { IDapClient } from './dap-proxy-interfaces.js';
 import { markChildOrigin, markChildSourced } from '../utils/child-origin-events.js';
 import { getErrorMessage } from '../errors/debug-errors.js';
 import { DapFrameDecoder, encodeDapMessage } from './dap-framing.js';
@@ -61,7 +62,7 @@ const CHILD_REQUIRED_ADOPTION_GRACE_MS = 2000;
 // (provisional) response is returned instead.
 const CHILD_MIRROR_TIMEOUT_MS = 3000;
 
-export class MinimalDapClient extends EventEmitter {
+export class MinimalDapClient extends EventEmitter implements IDapClient {
   private socket: Socket | null = null;
   private decoder = new DapFrameDecoder({
     onError: (error, context) => {

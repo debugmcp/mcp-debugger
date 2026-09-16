@@ -1,23 +1,16 @@
-import { describe, it, expect, vi, beforeEach, afterEach, MockInstance } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { DapConnectionManager } from '../../../src/proxy/dap-proxy-connection-manager.js';
-import type { 
-  IDapClient, 
-  IDapClientFactory, 
-  ILogger 
+import { MinimalDapClient } from '../../../src/proxy/minimal-dap.js';
+import type {
+  IDapClient,
+  IDapClientFactory,
+  ILogger
 } from '../../../src/proxy/dap-proxy-interfaces.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
+import { createMockDapClient } from '../../test-utils/mocks/dap-client.js';
 
 describe('DapConnectionManager', () => {
-  let mockDapClient: {
-    connect: MockInstance;
-    disconnect: MockInstance;
-    shutdown: MockInstance;
-    sendRequest: MockInstance;
-    on: MockInstance;
-    off: MockInstance;
-    once: MockInstance;
-    removeAllListeners: MockInstance;
-  };
+  let mockDapClient: ReturnType<typeof createMockDapClient>;
 
   let mockDapClientFactory: IDapClientFactory;
   let mockLogger: ILogger;
@@ -48,22 +41,12 @@ describe('DapConnectionManager', () => {
     vi.clearAllMocks();
     vi.useFakeTimers();
 
-    mockDapClient = {
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      shutdown: vi.fn().mockImplementation((reason?: string) => {
-        // Intentional no-op: these tests don't exercise pending-request
-        // rejection (which the real shutdown performs)
-      }),
-      sendRequest: vi.fn(),
-      on: vi.fn(),
-      off: vi.fn(),
-      once: vi.fn(),
-      removeAllListeners: vi.fn()
-    };
+    mockDapClient = createMockDapClient();
 
+    // Typed against the interface so the double is checked against
+    // IDapClient rather than widened past it (issue #691).
     mockDapClientFactory = {
-      create: vi.fn().mockReturnValue(mockDapClient)
+      create: vi.fn<IDapClientFactory['create']>(() => mockDapClient)
     };
 
     mockLogger = {
@@ -81,6 +64,15 @@ describe('DapConnectionManager', () => {
     vi.clearAllTimers();
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  describe('IDapClient contract', () => {
+    it('MinimalDapClient satisfies IDapClient (issue #691)', () => {
+      // No connect(): the constructor opens nothing for the default policy.
+      const client: IDapClient = new MinimalDapClient('127.0.0.1', 0);
+      expect(client.on('x', () => {})).toBe(client); // returns this
+      client.removeAllListeners();
+    });
   });
 
   describe('connectWithRetry', () => {
@@ -243,7 +235,7 @@ describe('DapConnectionManager', () => {
     it('should send initialize request with correct arguments', async () => {
       mockDapClient.sendRequest.mockResolvedValue({ success: true });
 
-      await connectionManager.initializeSession(mockDapClient as any, 'test-session-123');
+      await connectionManager.initializeSession(mockDapClient, 'test-session-123');
 
       expect(mockDapClient.sendRequest).toHaveBeenCalledWith('initialize', {
         clientID: 'mcp-proxy-test-session-123',
@@ -263,7 +255,7 @@ describe('DapConnectionManager', () => {
       mockDapClient.sendRequest.mockRejectedValue(error);
 
       await expect(
-        connectionManager.initializeSession(mockDapClient as any, 'test-session')
+        connectionManager.initializeSession(mockDapClient, 'test-session')
       ).rejects.toThrow('Initialize failed');
     });
 
@@ -274,7 +266,7 @@ describe('DapConnectionManager', () => {
       };
       mockDapClient.sendRequest.mockResolvedValue({ success: true, body: capabilities });
 
-      const result = await connectionManager.initializeSession(mockDapClient as any, 'test-session');
+      const result = await connectionManager.initializeSession(mockDapClient, 'test-session');
 
       expect(result).toEqual(capabilities);
     });
@@ -282,7 +274,7 @@ describe('DapConnectionManager', () => {
     it('returns undefined when the initialize response has no body', async () => {
       mockDapClient.sendRequest.mockResolvedValue({ success: true });
 
-      const result = await connectionManager.initializeSession(mockDapClient as any, 'test-session');
+      const result = await connectionManager.initializeSession(mockDapClient, 'test-session');
 
       expect(result).toBeUndefined();
     });
@@ -303,7 +295,7 @@ describe('DapConnectionManager', () => {
         onClose: vi.fn()
       };
 
-      connectionManager.setupEventHandlers(mockDapClient as any, handlers);
+      connectionManager.setupEventHandlers(mockDapClient, handlers);
 
       expect(mockDapClient.on).toHaveBeenCalledWith('initialized', handlers.onInitialized);
       expect(mockDapClient.on).toHaveBeenCalledWith('output', handlers.onOutput);
@@ -323,7 +315,7 @@ describe('DapConnectionManager', () => {
         onStopped: vi.fn()
       };
 
-      connectionManager.setupEventHandlers(mockDapClient as any, handlers);
+      connectionManager.setupEventHandlers(mockDapClient, handlers);
 
       expect(mockDapClient.on).toHaveBeenCalledTimes(2);
       expect(mockDapClient.on).toHaveBeenCalledWith('initialized', handlers.onInitialized);
@@ -331,7 +323,7 @@ describe('DapConnectionManager', () => {
     });
 
     it('should handle empty handlers object', () => {
-      connectionManager.setupEventHandlers(mockDapClient as any, {});
+      connectionManager.setupEventHandlers(mockDapClient, {});
 
       expect(mockDapClient.on).not.toHaveBeenCalled();
       expect(mockLogger.info).toHaveBeenCalledWith('[ConnectionManager] DAP event handlers set up');
@@ -351,7 +343,7 @@ describe('DapConnectionManager', () => {
     it('should disconnect with terminateDebuggee true by default', async () => {
       mockDapClient.sendRequest.mockResolvedValue(undefined);
 
-      await connectionManager.disconnect(mockDapClient as any);
+      await connectionManager.disconnect(mockDapClient);
 
       expect(mockDapClient.sendRequest).toHaveBeenCalledWith('disconnect', { 
         terminateDebuggee: true 
@@ -363,7 +355,7 @@ describe('DapConnectionManager', () => {
     it('should disconnect without terminating debuggee when specified', async () => {
       mockDapClient.sendRequest.mockResolvedValue(undefined);
 
-      await connectionManager.disconnect(mockDapClient as any, false);
+      await connectionManager.disconnect(mockDapClient, false);
 
       expect(mockDapClient.sendRequest).toHaveBeenCalledWith('disconnect', { 
         terminateDebuggee: false 
@@ -375,7 +367,7 @@ describe('DapConnectionManager', () => {
         new Promise((resolve) => setTimeout(resolve, 2000))
       );
 
-      const disconnectPromise = connectionManager.disconnect(mockDapClient as any);
+      const disconnectPromise = connectionManager.disconnect(mockDapClient);
       
       // Advance past timeout
       await vi.advanceTimersByTimeAsync(1100);
@@ -391,7 +383,7 @@ describe('DapConnectionManager', () => {
       const error = new Error('Disconnect failed');
       mockDapClient.sendRequest.mockRejectedValue(error);
 
-      await connectionManager.disconnect(mockDapClient as any);
+      await connectionManager.disconnect(mockDapClient);
 
       expect(mockLogger.warn).toHaveBeenCalledWith(
         expect.stringContaining('Error or timeout during DAP "disconnect" request: Disconnect failed')
@@ -405,7 +397,7 @@ describe('DapConnectionManager', () => {
         throw new Error('Client disconnect error');
       });
 
-      await connectionManager.disconnect(mockDapClient as any);
+      await connectionManager.disconnect(mockDapClient);
 
       expect(mockLogger.error).toHaveBeenCalledWith(
         expect.stringContaining('Error calling client.disconnect(): Client disconnect error'),
@@ -419,7 +411,7 @@ describe('DapConnectionManager', () => {
         throw new Error('Disconnect error');
       });
 
-      await connectionManager.disconnect(mockDapClient as any);
+      await connectionManager.disconnect(mockDapClient);
 
       expect(mockLogger.warn).toHaveBeenCalledWith(
         expect.stringContaining('Request error')
@@ -435,7 +427,7 @@ describe('DapConnectionManager', () => {
         new Promise(resolve => setTimeout(() => resolve(undefined), 500))
       );
 
-      const disconnectPromise = connectionManager.disconnect(mockDapClient as any);
+      const disconnectPromise = connectionManager.disconnect(mockDapClient);
       
       // Advance time but less than timeout
       await vi.advanceTimersByTimeAsync(600);
@@ -456,7 +448,7 @@ describe('DapConnectionManager', () => {
     it('should send launch request with default arguments', async () => {
       mockDapClient.sendRequest.mockResolvedValue(undefined);
 
-      await connectionManager.sendLaunchRequest(mockDapClient as any, scriptPath);
+      await connectionManager.sendLaunchRequest(mockDapClient, scriptPath);
 
       expect(mockDapClient.sendRequest).toHaveBeenCalledWith('launch', {
         program: scriptPath,
@@ -472,7 +464,7 @@ describe('DapConnectionManager', () => {
       mockDapClient.sendRequest.mockResolvedValue(undefined);
 
       await connectionManager.sendLaunchRequest(
-        mockDapClient as any,
+        mockDapClient,
         scriptPath,
         ['--arg1', 'value1'],
         false,
@@ -494,7 +486,7 @@ describe('DapConnectionManager', () => {
       mockDapClient.sendRequest.mockRejectedValue(error);
 
       await expect(
-        connectionManager.sendLaunchRequest(mockDapClient as any, scriptPath)
+        connectionManager.sendLaunchRequest(mockDapClient, scriptPath)
       ).rejects.toThrow('Launch failed');
     });
 
@@ -502,7 +494,7 @@ describe('DapConnectionManager', () => {
       mockDapClient.sendRequest.mockResolvedValue(undefined);
 
       await connectionManager.sendLaunchRequest(
-        mockDapClient as any,
+        mockDapClient,
         scriptPath,
         [],
         true,
@@ -528,7 +520,7 @@ describe('DapConnectionManager', () => {
     it('does not log attach config env values while still sending them to the adapter', async () => {
       mockDapClient.sendRequest.mockResolvedValue(undefined);
 
-      await connectionManager.sendAttachRequest(mockDapClient as any, {
+      await connectionManager.sendAttachRequest(mockDapClient, {
         host: 'localhost',
         port: 5678,
         env: { SECRET_TOKEN: 'attach-secret-1' }
@@ -563,7 +555,7 @@ describe('DapConnectionManager', () => {
       mockDapClient.sendRequest.mockResolvedValue(response);
 
       const result = await connectionManager.setBreakpoints(
-        mockDapClient as any,
+        mockDapClient,
         sourcePath,
         [{ line: 10 }]
       );
@@ -587,7 +579,7 @@ describe('DapConnectionManager', () => {
       mockDapClient.sendRequest.mockResolvedValue(response);
 
       await connectionManager.setBreakpoints(
-        mockDapClient as any,
+        mockDapClient,
         sourcePath,
         [{ line: 10, condition: 'x > 1', logMessage: 'x is {x}', suspendPolicy: 'thread' }]
       );
@@ -622,7 +614,7 @@ describe('DapConnectionManager', () => {
       ];
 
       const result = await connectionManager.setBreakpoints(
-        mockDapClient as any,
+        mockDapClient,
         sourcePath,
         breakpoints
       );
@@ -660,7 +652,7 @@ describe('DapConnectionManager', () => {
       ];
 
       await connectionManager.setBreakpoints(
-        mockDapClient as any,
+        mockDapClient,
         sourcePath,
         breakpoints
       );
@@ -688,7 +680,7 @@ describe('DapConnectionManager', () => {
       mockDapClient.sendRequest.mockResolvedValue(response);
 
       const result = await connectionManager.setBreakpoints(
-        mockDapClient as any,
+        mockDapClient,
         sourcePath,
         []
       );
@@ -716,7 +708,7 @@ describe('DapConnectionManager', () => {
       mockDapClient.sendRequest.mockResolvedValue(response);
 
       const result = await connectionManager.setBreakpoints(
-        mockDapClient as any,
+        mockDapClient,
         sourcePath,
         [{ line: -1 }]
       );
@@ -744,7 +736,7 @@ describe('DapConnectionManager', () => {
       mockDapClient.sendRequest.mockResolvedValue(response);
 
       const result = await connectionManager.setBreakpoints(
-        mockDapClient as any,
+        mockDapClient,
         sourcePath,
         breakpoints
       );
@@ -776,7 +768,7 @@ describe('DapConnectionManager', () => {
       mockDapClient.sendRequest.mockResolvedValue(response);
 
       await connectionManager.setBreakpoints(
-        mockDapClient as any,
+        mockDapClient,
         sourcePath,
         breakpoints
       );
@@ -792,7 +784,7 @@ describe('DapConnectionManager', () => {
 
       await expect(
         connectionManager.setBreakpoints(
-          mockDapClient as any,
+          mockDapClient,
           sourcePath,
           [{ line: 10 }]
         )
@@ -804,7 +796,7 @@ describe('DapConnectionManager', () => {
     it('should send configurationDone request', async () => {
       mockDapClient.sendRequest.mockResolvedValue(undefined);
 
-      await connectionManager.sendConfigurationDone(mockDapClient as any);
+      await connectionManager.sendConfigurationDone(mockDapClient);
 
       expect(mockDapClient.sendRequest).toHaveBeenCalledWith('configurationDone', {});
       expect(mockLogger.info).toHaveBeenCalledWith(
@@ -817,7 +809,7 @@ describe('DapConnectionManager', () => {
       mockDapClient.sendRequest.mockRejectedValue(error);
 
       await expect(
-        connectionManager.sendConfigurationDone(mockDapClient as any)
+        connectionManager.sendConfigurationDone(mockDapClient)
       ).rejects.toThrow('Configuration done failed');
     });
   });

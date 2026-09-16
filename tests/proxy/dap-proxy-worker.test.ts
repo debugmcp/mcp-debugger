@@ -15,7 +15,6 @@ import type {
   ILogger,
   IFileSystem,
   IProcessSpawner,
-  IDapClient,
   ProxyInitPayload,
   DapCommandPayload,
   StatusMessage,
@@ -25,6 +24,7 @@ import type {
 } from '../../src/proxy/dap-proxy-interfaces.js';
 import { ProxyState } from '../../src/proxy/dap-proxy-interfaces.js';
 import type { AdapterPolicy } from '@debugmcp/shared';
+import { createMockDapClient } from '../test-utils/mocks/dap-client.js';
 import {
   DefaultAdapterPolicy,
   JsDebugAdapterPolicy,
@@ -83,38 +83,6 @@ const createMockProcessSpawner = (): IProcessSpawner => ({
   })
 });
 
-const createMockDapClient = (): IDapClient & EventEmitter => {
-  const emitter = new EventEmitter();
-  // Store original methods before wrapping
-  const originalOn = emitter.on.bind(emitter);
-  const originalOff = emitter.off.bind(emitter);
-  const originalOnce = emitter.once.bind(emitter);
-  const originalRemoveAllListeners = emitter.removeAllListeners.bind(emitter);
-
-  return Object.assign(emitter, {
-    sendRequest: vi.fn().mockResolvedValue({ body: {} }),
-    connect: vi.fn().mockResolvedValue(undefined),
-    disconnect: vi.fn().mockResolvedValue(undefined),
-    on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
-      originalOn(event, handler);
-      return emitter;
-    }),
-    off: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
-      originalOff(event, handler);
-      return emitter;
-    }),
-    once: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
-      originalOnce(event, handler);
-      return emitter;
-    }),
-    removeAllListeners: vi.fn((event?: string) => {
-      originalRemoveAllListeners(event);
-      return emitter;
-    }),
-    shutdown: vi.fn()
-  }) as IDapClient & EventEmitter;
-};
-
 const createMockMessageSender = () => ({
   send: vi.fn<(message: SentMessage) => void>()
 });
@@ -123,9 +91,10 @@ describe('DapProxyWorker', () => {
   let worker: DapProxyWorker;
   let dependencies: DapProxyDependencies;
   let mockLogger: ILogger;
-  // The factory hands back `IDapClient & EventEmitter`; keeping that
-  // intersection on the variable is what lets the tests emit DAP events on the
-  // fake without casting back to EventEmitter at every site.
+  // The shared factory hands back `IDapClient & EventEmitter` (plus each
+  // method as its `vi.fn`); keeping that intersection on the variable is what
+  // lets the tests emit DAP events on the fake without casting back to
+  // EventEmitter at every site.
   let mockDapClient: ReturnType<typeof createMockDapClient>;
   let mockMessageSender: ReturnType<typeof createMockMessageSender>;
 

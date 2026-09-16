@@ -14,6 +14,7 @@ import {
   ILoggerFactory
 } from './dap-proxy-interfaces.js';
 import type { ProcessLike } from '../interfaces/process-interfaces.js';
+import type { AdapterPolicy } from '@debugmcp/shared';
 
 /**
  * Create production dependencies for the DAP Proxy Worker
@@ -54,7 +55,7 @@ export function createProductionDependencies(
     },
     
     dapClientFactory: {
-      create: (host: string, port: number, policy?: any) => new MinimalDapClient(host, port, policy) as any // eslint-disable-line @typescript-eslint/no-explicit-any -- MinimalDapClient implements IDapClient but has type compatibility issues
+      create: (host: string, port: number, policy?: AdapterPolicy) => new MinimalDapClient(host, port, policy)
     },
     
     messageSender: {

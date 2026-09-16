@@ -24,6 +24,7 @@ import type {
 } from '../../src/proxy/dap-proxy-interfaces.js';
 import { ProxyState } from '../../src/proxy/dap-proxy-interfaces.js';
 import { GoAdapterPolicy } from '@debugmcp/shared';
+import { createMockDapClient } from '../test-utils/mocks/dap-client.js';
 
 // --- helpers ---------------------------------------------------------------
 
@@ -50,37 +51,6 @@ const createMockProcessSpawner = (): IProcessSpawner => ({
     killed: false
   })
 });
-
-const createMockDapClient = (): IDapClient & EventEmitter => {
-  const emitter = new EventEmitter();
-  const originalOn = emitter.on.bind(emitter);
-  const originalOff = emitter.off.bind(emitter);
-  const originalOnce = emitter.once.bind(emitter);
-  const originalRemoveAllListeners = emitter.removeAllListeners.bind(emitter);
-
-  return Object.assign(emitter, {
-    sendRequest: vi.fn().mockResolvedValue({ body: {} }),
-    connect: vi.fn().mockResolvedValue(undefined),
-    disconnect: vi.fn().mockResolvedValue(undefined),
-    on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
-      originalOn(event, handler);
-      return emitter;
-    }),
-    off: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
-      originalOff(event, handler);
-      return emitter;
-    }),
-    once: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
-      originalOnce(event, handler);
-      return emitter;
-    }),
-    removeAllListeners: vi.fn((event?: string) => {
-      originalRemoveAllListeners(event);
-      return emitter;
-    }),
-    shutdown: vi.fn()
-  }) as IDapClient & EventEmitter;
-};
 
 /**
  * Everything the worker hands to `IMessageSender.send`. The interface itself
