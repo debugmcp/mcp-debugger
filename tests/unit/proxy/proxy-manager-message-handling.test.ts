@@ -605,8 +605,7 @@ describe('ProxyManager Message Handling', () => {
       const { proxyManager, fakeProcess } = makeStoppableProxyManager();
 
       const continuePromise = proxyManager.sendDapRequest('continue', { threadId: 1 });
-      // sendCommand's real param type is the deliberately loose `object` (IProxyProcess);
-      // narrow to the shape ProxyManager actually sends for a DAP command.
+      // sendCommand(command: object) is deliberately loose; narrow to the DAP-shaped payload at the read site.
       const payload = fakeProcess.sendCommand.mock.calls[0][0] as {
         dapCommand: string;
         requestId: string;
