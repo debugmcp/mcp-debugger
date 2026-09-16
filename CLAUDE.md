@@ -381,8 +381,7 @@ packages/adapter-{language}/
 │   └── {language}-adapter-factory.ts  # Implement IAdapterFactory
 ├── tests/
 ├── package.json         # Must include "type": "module" and workspace:* dep on @debugmcp/shared
-├── tsconfig.json
-└── vitest.config.ts     # Optional if tests run from root
+└── tsconfig.json        # No vitest.config.ts: the root config covers `pnpm --filter … test`
 ```
 
 ## Language-Specific Requirements

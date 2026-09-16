@@ -38,7 +38,11 @@ const sharedOptimizeDeps = {
 
 // Shared test-level options (everything EXCEPT pool/parallelism/timeout, which
 // differ between the parallel `unit` project and the serial `e2e` project).
-const sharedSetupFiles = ['./tests/vitest.setup.ts'];
+// Absolute on purpose: a `pnpm --filter <pkg> test` run finds this config by
+// walking up from the package, but vitest resolves setupFiles against the
+// cwd, so a cwd-relative entry pointed at <pkg>/tests/vitest.setup.ts and
+// every config-less package failed at setup (issue #696).
+const sharedSetupFiles = [path.resolve(__dirname, 'tests/vitest.setup.ts')];
 
 // Console filtering for noise reduction (identical behavior for both projects)
 function onConsoleLog(log: string, type: 'stdout' | 'stderr'): boolean | void {
