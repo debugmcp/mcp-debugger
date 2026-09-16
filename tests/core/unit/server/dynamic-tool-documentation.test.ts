@@ -56,6 +56,7 @@ vi.mock('../../../../src/session/session-manager.js', () => ({
 // Import the schema we need to check against
 import { ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { registerToolHandlers } from '../../../../src/server/tool-dispatch.js';
+import { findToolIn } from './server-test-helpers.js';
 
 // Helper function to extract tools from server
 async function getToolsFromServer(server: DebugMcpServer): Promise<Array<{
@@ -123,10 +124,9 @@ describe('Dynamic Tool Documentation', () => {
     it('should provide generic path guidance in set_breakpoint file description', async () => {
       const tools = await getToolsFromServer(server);
       
-      const setBreakpointTool = tools.find(t => t.name === 'set_breakpoint');
-      expect(setBreakpointTool).toBeDefined();
-      
-      const fileDescription = setBreakpointTool!.inputSchema.properties.file.description;
+      const setBreakpointTool = findToolIn(tools, 'set_breakpoint');
+
+      const fileDescription = setBreakpointTool.inputSchema.properties.file.description;
       expect(fileDescription).toBeDefined();
       expect(fileDescription).toContain('Path to the source file');
       // The description mentions Java FQCN support and absolute file paths
@@ -136,10 +136,9 @@ describe('Dynamic Tool Documentation', () => {
     it('should provide generic path guidance in start_debugging scriptPath description', async () => {
       const tools = await getToolsFromServer(server);
       
-      const startDebuggingTool = tools.find(t => t.name === 'start_debugging');
-      expect(startDebuggingTool).toBeDefined();
-      
-      const scriptPathDescription = startDebuggingTool!.inputSchema.properties.scriptPath.description;
+      const startDebuggingTool = findToolIn(tools, 'start_debugging');
+
+      const scriptPathDescription = startDebuggingTool.inputSchema.properties.scriptPath.description;
       expect(scriptPathDescription).toBeDefined();
       expect(scriptPathDescription).toContain('Path to the script to debug');
       expect(scriptPathDescription).toContain('Use absolute paths or paths relative to your current working directory');
@@ -148,10 +147,9 @@ describe('Dynamic Tool Documentation', () => {
     it('should provide generic path guidance in get_source_context file description', async () => {
       const tools = await getToolsFromServer(server);
       
-      const getSourceContextTool = tools.find(t => t.name === 'get_source_context');
-      expect(getSourceContextTool).toBeDefined();
-      
-      const fileDescription = getSourceContextTool!.inputSchema.properties.file.description;
+      const getSourceContextTool = findToolIn(tools, 'get_source_context');
+
+      const fileDescription = getSourceContextTool.inputSchema.properties.file.description;
       expect(fileDescription).toBeDefined();
       expect(fileDescription).toContain('Path to the source file');
       expect(fileDescription).toContain('Use absolute paths or paths relative to your current working directory');
@@ -163,11 +161,11 @@ describe('Dynamic Tool Documentation', () => {
       const toolsWithPaths = ['set_breakpoint', 'start_debugging', 'get_source_context'];
       
       toolsWithPaths.forEach(toolName => {
-        const tool = tools.find(t => t.name === toolName);
+        const tool = findToolIn(tools, toolName);
         const pathProperties = ['file', 'scriptPath'];
-        
+
         pathProperties.forEach(prop => {
-          if (tool?.inputSchema.properties[prop]?.description) {
+          if (tool.inputSchema.properties[prop]?.description) {
             const description = tool.inputSchema.properties[prop].description;
             // Should not contain specific directory paths
             expect(description).not.toMatch(/C:\\/); // No Windows paths
@@ -182,15 +180,15 @@ describe('Dynamic Tool Documentation', () => {
       const tools = await getToolsFromServer(server);
 
       // Check that set_breakpoint and get_source_context use "source file"
-      const setBreakpointTool = tools.find(t => t.name === 'set_breakpoint');
-      expect(setBreakpointTool!.inputSchema.properties.file.description).toContain('source file');
+      const setBreakpointTool = findToolIn(tools, 'set_breakpoint');
+      expect(setBreakpointTool.inputSchema.properties.file.description).toContain('source file');
 
-      const getSourceContextTool = tools.find(t => t.name === 'get_source_context');
-      expect(getSourceContextTool!.inputSchema.properties.file.description).toContain('source file');
+      const getSourceContextTool = findToolIn(tools, 'get_source_context');
+      expect(getSourceContextTool.inputSchema.properties.file.description).toContain('source file');
 
       // Check that start_debugging uses "script"
-      const startDebuggingTool = tools.find(t => t.name === 'start_debugging');
-      expect(startDebuggingTool!.inputSchema.properties.scriptPath.description).toContain('script');
+      const startDebuggingTool = findToolIn(tools, 'start_debugging');
+      expect(startDebuggingTool.inputSchema.properties.scriptPath.description).toContain('script');
     });
 
     it('should provide simple, clear path guidance without complex examples', async () => {

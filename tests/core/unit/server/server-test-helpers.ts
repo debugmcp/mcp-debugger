@@ -279,15 +279,24 @@ export function getPromptHandlers(mockServer: MockServer) {
 }
 
 /**
+ * Synchronous variant for callers that already hold a tools array (or a
+ * structurally-typed projection of one). Throws with the tool name so a
+ * missing tool fails loudly instead of as `undefined` three lines later.
+ */
+export function findToolIn<T extends { name: string }>(tools: readonly T[], name: string): T {
+  const tool = tools.find((t) => t.name === name);
+  if (!tool) {
+    throw new Error(`${name} is not in tools/list`);
+  }
+  return tool;
+}
+
+/**
  * One tool out of `tools/list`, or a thrown error naming it: a schema test
  * must fail on a missing tool rather than let `toBeUndefined()` pass
  * vacuously on `undefined.inputSchema`.
  */
 export async function findTool(listToolsHandler: ListToolsHandler, name: string): Promise<Tool> {
   const { tools } = await listToolsHandler({ method: 'tools/list', params: {} });
-  const tool = tools.find((t) => t.name === name);
-  if (!tool) {
-    throw new Error(`${name} is not in tools/list`);
-  }
-  return tool;
+  return findToolIn(tools, name);
 }
