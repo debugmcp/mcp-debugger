@@ -26,6 +26,7 @@ import type { BreakpointController } from '../breakpoints/breakpoint-controller.
 import { reresolveAnchors } from '../breakpoints/anchor-resolution.js';
 import {
   buildLogpointDowngradeLaunchWarning,
+  buildNoDebugLaunchWarning,
   buildUnboundBreakpointExitWarning,
   buildRunToCompletionSummary
 } from '../breakpoints/launch-warnings.js';
@@ -221,6 +222,13 @@ export class DebugLauncher {
       };
     }
 
+    // noDebug disables the debugger, so nothing the caller asked to stop on
+    // can fire (issue #710). Decided here, before the dry-run branch, from the
+    // caller's own breakOnExceptions rather than the policy default resolved
+    // below: a dry run is a configuration check and a restart replays the
+    // same arguments, and both should say so.
+    const noDebugWarning = buildNoDebugLaunchWarning(session, dapLaunchArgs, breakOnExceptions);
+
     try {
       // For dry run, start the proxy and wait for completion
       if (dryRunSpawn) {
@@ -260,6 +268,7 @@ export class DebugLauncher {
             success: true,
             state: SessionState.STOPPED,
             data: {
+              ...(noDebugWarning ? { warning: noDebugWarning } : {}),
               dryRun: true,
               message: 'Dry run spawn command logged by proxy.',
               command: initialDryRunSnapshot?.command,
@@ -296,6 +305,7 @@ export class DebugLauncher {
             success: true,
             state: SessionState.STOPPED,
             data: {
+              ...(noDebugWarning ? { warning: noDebugWarning } : {}),
               dryRun: true,
               message: 'Dry run spawn command logged by proxy.',
               command: latestSnapshot?.command,
@@ -452,32 +462,42 @@ export class DebugLauncher {
         await this.breakpoints.resyncAll(finalSession);
       }
 
+      // The three breakpoint-shaped warnings below each diagnose a symptom
+      // ("check the file path", "check the symbol name", "will PAUSE") that
+      // has one cause when the debugger is off — the noDebug warning names
+      // it, and they are withheld so they cannot contradict it (issue #710).
+      const debuggerOn = noDebugWarning === undefined;
+
       // Unbound-at-launch warning (issue #308): the verified state is fresh
       // after the re-sync above, so a name the adapter could not resolve is
       // reported here instead of failing silently at "the program never
       // stopped". Suppressed for bind-late adapters (js/java), where
       // unverified-at-launch is the designed deferral path.
-      const fnBpWarning = this.breakpoints.functionBreakpointLaunchWarning(finalSession);
+      const fnBpWarning = debuggerOn
+        ? this.breakpoints.functionBreakpointLaunchWarning(finalSession)
+        : undefined;
 
       // Ran-to-completion with breakpoints that never bound (issue #467):
       // state "stopped" where the caller expected "paused" is only
       // explainable via list_breakpoints today — surface the stored
       // per-breakpoint diagnostics right here where the caller is looking.
       const unboundAtExitWarning =
-        finalState === SessionState.STOPPED
+        debuggerOn && finalState === SessionState.STOPPED
           ? buildUnboundBreakpointExitWarning(finalSession)
           : undefined;
 
       // Logpoint-downgrade verdict (issue #469): the deferred set_breakpoint
       // warning promised a launch-time answer — deliver it on this response.
-      const logpointWarning = buildLogpointDowngradeLaunchWarning(finalSession);
+      const logpointWarning = debuggerOn
+        ? buildLogpointDowngradeLaunchWarning(finalSession)
+        : undefined;
 
       // Adapter degradation notes (issue #441) accumulate on the session as
       // annotated output events arrive; joining here is best-effort — a note
       // arriving after this return still lands in the output buffer as an
       // attributed [mcp-debugger] Warning entry.
       const launchWarning =
-        [fnBpWarning, logpointWarning, unboundAtExitWarning, ...(finalSession.adapterNotices ?? [])]
+        [noDebugWarning, fnBpWarning, logpointWarning, unboundAtExitWarning, ...(finalSession.adapterNotices ?? [])]
           .filter(Boolean)
           .join('; ') || undefined;
 

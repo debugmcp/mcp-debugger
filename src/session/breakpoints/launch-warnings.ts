@@ -50,6 +50,55 @@ export function buildUnboundBreakpointExitWarning(
   );
 }
 
+/**
+ * noDebug launch warning (issue #710). `dapLaunchArgs.noDebug: true` is a
+ * standard DAP flag every adapter honours by not enabling the debugger: no
+ * breakpoint binds, no exception filter arms, no entry stop lands, and no
+ * `stopped` ever arrives. That is a legitimate way to just run the program,
+ * so the warning fires only when the caller also asked for a stop — line or
+ * function breakpoints in the store, an *explicit* breakOnExceptions other
+ * than 'none' (the caller's value, not the policy default the launcher fills
+ * in afterwards, which would make every bare noDebug run warn), or
+ * stopOnEntry — and names each thing that will not fire. The breakpoint-shaped
+ * launch warnings (#308, #467, #469) presuppose a debugger and are withheld
+ * when this one fires.
+ */
+export function buildNoDebugLaunchWarning(
+  session: Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints'>,
+  dapLaunchArgs: { noDebug?: boolean; stopOnEntry?: boolean } | undefined,
+  explicitBreakOnExceptions: string | undefined
+): string | undefined {
+  if (dapLaunchArgs?.noDebug !== true) {
+    return undefined;
+  }
+  const expected: string[] = [];
+  const lineCount = session.breakpoints.size;
+  const functionCount = session.functionBreakpoints?.size ?? 0;
+  if (lineCount > 0) {
+    expected.push(`${lineCount} breakpoint(s)`);
+  }
+  if (functionCount > 0) {
+    expected.push(`${functionCount} function breakpoint(s)`);
+  }
+  if (explicitBreakOnExceptions !== undefined && explicitBreakOnExceptions !== 'none') {
+    expected.push(`breakOnExceptions='${explicitBreakOnExceptions}'`);
+  }
+  if (dapLaunchArgs.stopOnEntry === true) {
+    expected.push('stopOnEntry');
+  }
+  if (expected.length === 0) {
+    return undefined;
+  }
+  const list =
+    expected.length === 1
+      ? expected[0]
+      : `${expected.slice(0, -1).join(', ')} and ${expected[expected.length - 1]}`;
+  return (
+    `dapLaunchArgs.noDebug is true, so the debugger is disabled for this launch and no stop can arrive: ` +
+    `${list} will not fire. Drop noDebug to debug, or ignore this if you only meant to run the program`
+  );
+}
+
 /** What a launch reports when it ended STOPPED: a sentence for the message, and the fields behind it. */
 export interface RunToCompletionSummary {
   /** Appended to the launch message after "Current state: stopped". */
