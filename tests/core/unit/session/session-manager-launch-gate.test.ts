@@ -36,9 +36,12 @@ type PartialSessionStore = Pick<
 >;
 
 /**
- * The launch gate's availability probe reads only `validate()` off the factory
- * (`ProbeableAdapterFactory`); `createAdapter`/`getMetadata` are never reached,
- * so the double is deliberately partial behind one overlap-checked cast.
+ * The launch gate's availability probe (`ProbeableAdapterFactory` in
+ * src/utils/language-availability.ts) drives `validate()`; it also calls
+ * `getMetadata()`, but inside a try/catch that warns and falls back to the
+ * registry entry's attach declaration, so the missing member only exercises
+ * that fallback. `createAdapter` is never reached. The double is deliberately
+ * partial behind one overlap-checked cast.
  */
 function probeOnlyFactory(validate: IAdapterFactory['validate']): IAdapterFactory {
   const partial: Pick<IAdapterFactory, 'validate'> = { validate };
@@ -108,7 +111,7 @@ describe('SessionManagerOperations launch gate (issue #360)', () => {
   it('fails fast with the availability reason when the factory reports invalid', async () => {
     vi.mocked(mockDependencies.adapterRegistry.getFactory).mockResolvedValue(
       probeOnlyFactory(
-        vi.fn().mockResolvedValue({
+        vi.fn<IAdapterFactory['validate']>().mockResolvedValue({
           valid: false,
           errors: ['js-debug adapter not found. Run build script to vendor js-debug'],
           warnings: []
@@ -132,7 +135,7 @@ describe('SessionManagerOperations launch gate (issue #360)', () => {
   it('gates dryRunSpawn launches too', async () => {
     vi.mocked(mockDependencies.adapterRegistry.getFactory).mockResolvedValue(
       probeOnlyFactory(
-        vi.fn().mockResolvedValue({ valid: false, errors: ['no toolchain'], warnings: [] })
+        vi.fn<IAdapterFactory['validate']>().mockResolvedValue({ valid: false, errors: ['no toolchain'], warnings: [] })
       )
     );
 
@@ -146,7 +149,7 @@ describe('SessionManagerOperations launch gate (issue #360)', () => {
 
   it('fails open when validate throws (proceeds into the launch path)', async () => {
     vi.mocked(mockDependencies.adapterRegistry.getFactory).mockResolvedValue(
-      probeOnlyFactory(vi.fn().mockRejectedValue(new Error('probe exploded')))
+      probeOnlyFactory(vi.fn<IAdapterFactory['validate']>().mockRejectedValue(new Error('probe exploded')))
     );
 
     const result = await operations.startDebugging('test-session', '/path/to/script.js');
@@ -168,7 +171,7 @@ describe('SessionManagerOperations launch gate (issue #360)', () => {
   });
 
   it('caches the probe result across calls (single validate for two launches)', async () => {
-    const validate = vi.fn().mockResolvedValue({ valid: false, errors: ['no toolchain'], warnings: [] });
+    const validate = vi.fn<IAdapterFactory['validate']>().mockResolvedValue({ valid: false, errors: ['no toolchain'], warnings: [] });
     vi.mocked(mockDependencies.adapterRegistry.getFactory).mockResolvedValue(
       probeOnlyFactory(validate)
     );

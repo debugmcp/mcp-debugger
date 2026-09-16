@@ -37,7 +37,7 @@ const mockExecFile = execFile as unknown as Mock<
     file: string,
     args: string[],
     options: unknown,
-    callback: (err: Error | null, result?: { stdout: string; stderr: string }) => void,
+    callback: (err: Error | null, result?: { stdout: string; stderr?: string }) => void,
   ) => void
 >;
 const mockReaddir = fsp.readdir as unknown as Mock<(path: string) => Promise<string[]>>;
@@ -256,13 +256,12 @@ describe('killPosixWithEscalation', () => {
 });
 
 describe('killWindows', () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const respondWith = (result: { stdout?: string; err?: Error & { code?: number | string } }) =>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mockExecFile.mockImplementation((..._args: any[]) => {
       const cb = _args[_args.length - 1] as (
         err: Error | null,
-        result?: { stdout: string; stderr: string },
+        result?: { stdout: string; stderr?: string },
       ) => void;
       if (result.err) {
         cb(result.err);
@@ -355,13 +354,12 @@ describe('listLinuxProxies', () => {
 });
 
 describe('listDarwinProxies', () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const respondWith = (result: { stdout: string }) =>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mockExecFile.mockImplementation((..._args: any[]) => {
       const cb = _args[_args.length - 1] as (
         err: Error | null,
-        result: { stdout: string; stderr: string },
+        result: { stdout: string; stderr?: string },
       ) => void;
       cb(null, { stdout: result.stdout, stderr: '' });
     });
@@ -390,13 +388,12 @@ describe('listDarwinProxies', () => {
 });
 
 describe('listWindowsProxies', () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const respondWith = (result: { stdout?: string; err?: Error }) =>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mockExecFile.mockImplementation((..._args: any[]) => {
       const cb = _args[_args.length - 1] as (
         err: Error | null,
-        result?: { stdout: string; stderr: string },
+        result?: { stdout: string; stderr?: string },
       ) => void;
       if (result.err) {
         cb(result.err);

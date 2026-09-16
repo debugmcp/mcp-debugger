@@ -691,7 +691,7 @@ describe('Server Language Discovery Tests', () => {
       mockSessionManager.startDebugging = vi.fn().mockResolvedValue({ success: true });
     });
 
-    it('should validate language support before starting debugging', async () => {
+    it('starts debugging for a READY session', async () => {
       debugServer = new DebugMcpServer();
       const { callToolHandler } = getToolHandlers(mockServer);
 
@@ -720,7 +720,7 @@ describe('Server Language Discovery Tests', () => {
       );
     });
 
-    it('should handle dynamic language discovery for session language', async () => {
+    it('starts debugging without re-validating the session language', async () => {
       debugServer = new DebugMcpServer();
       const { callToolHandler } = getToolHandlers(mockServer);
 
@@ -759,7 +759,7 @@ describe('Server Language Discovery Tests', () => {
   });
 
   describe('adapter registry interaction edge cases', () => {
-    it('should handle registry with missing methods gracefully', async () => {
+    it("lists the beforeEach registry's languages", async () => {
       debugServer = new DebugMcpServer();
       const { callToolHandler } = getToolHandlers(mockServer);
 

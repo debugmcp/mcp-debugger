@@ -65,6 +65,8 @@ export function createMockDapClient(): MockDapClient {
         originalOff(event, onceWrapper);
         handler(...args);
       };
+      // Node EventEmitter.once parity: off(event, handler) also removes the wrapper.
+      Object.assign(onceWrapper, { listener: handler });
       originalOn(event, onceWrapper);
       return client;
     }),
