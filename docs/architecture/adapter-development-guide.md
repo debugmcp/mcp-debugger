@@ -131,6 +131,12 @@ Based on `packages/adapter-go/tsconfig.json`:
 }
 ```
 
+No per-package `vitest.config.ts` is needed. `pnpm --filter @debugmcp/adapter-<language> test`
+walks up to the root `vitest.config.ts`, whose aliases and setup file are absolute, so the
+package's tests run under the same setup (leak guard, per-test mock and env reset) as the root
+`pnpm test` (issue #696). A package-local config replaces all of that, which is how two packages
+came to pass at the root and fail standalone.
+
 ### 4. Implement `IAdapterFactory`
 
 The factory creates adapter instances, provides metadata, and validates the environment. Either implement `IAdapterFactory` directly (as the Go reference and most adapters do) or extend the abstract `BaseAdapterFactory` (exported from `@debugmcp/shared`), which provides default `getMetadata()` and a default `validate()` (as `JavascriptAdapterFactory` does).
@@ -485,11 +491,12 @@ The loader:
 - [ ] Registered in root `package.json` optionalDependencies
 - [ ] Added to known adapters list in `src/adapters/adapter-loader.ts`
 - [ ] Vitest alias added in `vitest.config.ts`
+- [ ] If the package has its own tests under `packages/adapter-<language>/tests/`, `pnpm --filter @debugmcp/adapter-<language> test` passes from the package directory (no package-local vitest config; a package whose tests all live under `tests/adapters/<language>/` has nothing to run there)
 - [ ] Adapter count assertions updated in tests
 - [ ] Unit and integration tests written under `tests/adapters/<language>/`
 - [ ] The new policy passes `tests/unit/shared/adapter-policy-contract.test.ts` — the cross-policy contract that runs against the real policies via `getPolicyForLanguage`. Its pinned capability table is a deliberate duplicate of what the policies declare, so a new language means editing that table on purpose
 - [ ] `pnpm install` run to link workspace
-- [ ] `pnpm run lint` clean (`src/**` and `packages/*/src/**` are linted)
+- [ ] `pnpm run lint` clean (`src/**`, `packages/*/src/**`, `scripts/**` and `tools/**` are linted)
 - [ ] `pnpm run typecheck:all` clean — `typecheck` (shipped sources, must be zero errors) plus `typecheck:tests` (the per-file ratchet). Both are gated by `.husky/pre-push` and by CI's lint job
 - [ ] `tests/typecheck-baseline.json` committed if the ratchet moved. The ratchet fails in *both* directions: a count going up means new type errors to fix; a count going down (or a removed test file) means the baseline is stale — run `pnpm run typecheck:tests:update` and commit the result in the same PR
 - [ ] TypeScript builds to `dist/` (ESM)

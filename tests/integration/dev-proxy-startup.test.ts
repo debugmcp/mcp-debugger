@@ -156,3 +156,47 @@ describe('dev-proxy initial tool discovery (issue #716)', () => {
     expect((await restart).result?.isError).not.toBe(true);
   });
 });
+
+describe('dev-proxy rebuild failure reporting (issue #718)', () => {
+  it('reports a failed build by its sanitized message alone and keeps the running backend', async () => {
+    const { client, notifications } = await connect({
+      DEV_PROXY_BUILD_CMD: `"${process.execPath}" -e "console.error('boom: build exploded'); process.exit(1)"`,
+    });
+    expect((await client.listTools()).tools.map(tool => tool.name)).toEqual(['fixture_tool', ...devTools]);
+    // The successful initial start announces its inventory once; nothing below may add to that.
+    await expect.poll(() => notifications).toHaveLength(1);
+
+    const failed = await client.callTool({ name: 'dev_rebuild_and_restart', arguments: {} });
+    expect(failed.isError).toBe(true);
+    const payload = JSON.parse((failed.content as Array<{ text: string }>)[0]?.text ?? '{}');
+    // The build's own output reaches the caller only through the sanitized
+    // message (issue #154): the payload is the message and nothing else.
+    expect(Object.keys(payload).sort()).toEqual(['error', 'success']);
+    expect(payload.success).toBe(false);
+    expect(payload.error).toMatch(/^Build failed: /);
+    expect(payload.error).toContain('boom: build exploded');
+
+    // The build failed before the restart, so the old backend still serves —
+    // and the inventory it serves did not change, so nothing was announced.
+    expect((await client.listTools()).tools.map(tool => tool.name)).toEqual(['fixture_tool', ...devTools]);
+    const forwarded = await client.callTool({ name: 'fixture_tool', arguments: {} });
+    expect(forwarded.isError, JSON.stringify(forwarded)).not.toBe(true);
+    expect(notifications).toHaveLength(1);
+  });
+
+  it('reports a timed-out build as a timeout, with the output it had produced', async () => {
+    const { client, notifications } = await connect({
+      DEV_PROXY_BUILD_TIMEOUT_MS: '1000',
+      DEV_PROXY_BUILD_CMD: `"${process.execPath}" -e "console.log('vendoring step 3 of 9'); setTimeout(() => {}, 20000)"`,
+    });
+    expect((await client.listTools()).tools.map(tool => tool.name)).toEqual(['fixture_tool', ...devTools]);
+    await expect.poll(() => notifications).toHaveLength(1);
+
+    const failed = await client.callTool({ name: 'dev_rebuild_and_restart', arguments: {} });
+    expect(failed.isError).toBe(true);
+    const payload = JSON.parse((failed.content as Array<{ text: string }>)[0]?.text ?? '{}');
+    expect(payload.error).toMatch(/^Build timed out after 1s/);
+    expect(payload.error).toContain('vendoring step 3 of 9');
+    expect(notifications).toHaveLength(1);
+  });
+});

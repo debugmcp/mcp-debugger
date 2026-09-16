@@ -75,6 +75,10 @@ const BACKEND_CMD = process.env.DEV_PROXY_BACKEND_CMD || null;
 
 const parsedTimeout = parseInt(process.env.DEV_PROXY_BUILD_TIMEOUT_MS || '', 10);
 const BUILD_TIMEOUT_MS = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 120000;
+// Well above any tsc/esbuild transcript. execSync's 1 MiB default kills an
+// over-chatty build with the same SIGTERM a timeout uses (ENOBUFS), which
+// used to be reported as a timeout.
+const BUILD_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 
 // How long a request will wait for an in-flight backend start or restart.
 // Deliberately NOT tied to HEALTH_POLL_TIMEOUT_MS: that bounds how patient the
@@ -359,29 +363,30 @@ class BackendManager {
         encoding: 'utf-8',
         stdio: ['ignore', 'pipe', 'pipe'],
         timeout: BUILD_TIMEOUT_MS,
+        maxBuffer: BUILD_MAX_BUFFER_BYTES,
         env: { ...process.env },
       });
     } catch (err) {
-      if (err.killed || err.signal === 'SIGTERM') {
-        throw new Error(
-          `Build timed out after ${Math.floor(BUILD_TIMEOUT_MS / 1000)}s — the build may still have succeeded, re-run manually to confirm`
-        );
-      }
-      
       // execSync's error message embeds raw build stderr — sanitize before it
       // reaches tool responses via err.message (issue #154). Include stdout
-      // too: build tools (tsc via npm) print their diagnostics there.
+      // too: build tools (tsc via npm) print their diagnostics there. The raw
+      // execSync error rides on `cause` for programmatic consumers; the tool
+      // handlers serialize `message` alone, so it never reaches a response.
       const output = [err.stdout, err.stderr].filter(Boolean).join('\n') || err.message || String(err);
-      throw new Error(`Build failed: ${sanitizeStderrTail(output, { maxLines: 20, maxChars: 2000 })}`);
+      const tail = sanitizeStderrTail(output, { maxLines: 20, maxChars: 2000 });
+      // Only the timeout is a kill by this proxy. `err.killed` is never set by
+      // execSync, and signal SIGTERM alone does not identify it: a buffer
+      // overflow (ENOBUFS) arrives the same way.
+      if (err.code === 'ETIMEDOUT') {
+        throw new Error(
+          `Build timed out after ${Math.floor(BUILD_TIMEOUT_MS / 1000)}s — the build may still have succeeded, re-run manually to confirm. Output before the timeout:\n${tail}`,
+          { cause: err }
+        );
+      }
+      throw new Error(`Build failed: ${tail}`, { cause: err });
     }
     log('Build succeeded');
     return sanitizeStderrTail(result, { maxLines: 50, maxChars: 2000 });
-  }
-
-  async rebuildAndRestart() {
-    const buildOutput = this.rebuild();
-    await this.restart();
-    return buildOutput;
   }
 
   /**
@@ -787,32 +792,65 @@ async function notifyToolListChanged(server) {
   }
 }
 
+/** The failed dev-tool response: the message alone (issue #154). */
+function devToolFailure(err) {
+  return {
+    content: [{ type: 'text', text: JSON.stringify({ success: false, error: err.message }, null, 2) }],
+    isError: true,
+  };
+}
+
+/**
+ * Build, then restart. A failed build never reaches restart(): the running
+ * backend — and so the client's tool inventory — is untouched, so no
+ * tools/list_changed is sent for it. Only a restart can change the inventory.
+ */
+async function rebuildThenRestart(backend, server) {
+  let buildOutput;
+  try {
+    buildOutput = backend.rebuild();
+  } catch (err) {
+    return devToolFailure(err);
+  }
+  try {
+    await backend.restart();
+    await server.sendToolListChanged();
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(
+            {
+              success: true,
+              action: 'rebuild_and_restart',
+              buildOutput,
+              status: backend.getStatus(),
+            },
+            null,
+            2
+          ),
+        },
+      ],
+    };
+  } catch (err) {
+    await notifyToolListChanged(server);
+    return devToolFailure(err);
+  }
+}
+
 async function handleDevTool(backend, server, name, args) {
   switch (name) {
     case 'dev_restart_debugger': {
+      // A rejected env update changes nothing either: no notification.
       try {
         backend.applyEnvUpdate(args);
-        if (args?.rebuild) {
-          const buildOutput = await backend.rebuildAndRestart();
-          await server.sendToolListChanged();
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(
-                  {
-                    success: true,
-                    action: 'rebuild_and_restart',
-                    buildOutput,
-                    status: backend.getStatus(),
-                  },
-                  null,
-                  2
-                ),
-              },
-            ],
-          };
-        }
+      } catch (err) {
+        return devToolFailure(err);
+      }
+      if (args?.rebuild) {
+        return rebuildThenRestart(backend, server);
+      }
+      try {
         await backend.restart();
         await server.sendToolListChanged();
         return {
@@ -825,42 +863,17 @@ async function handleDevTool(backend, server, name, args) {
         };
       } catch (err) {
         await notifyToolListChanged(server);
-        return {
-          content: [{ type: 'text', text: JSON.stringify({ success: false, error: err.message }, null, 2) }],
-          isError: true,
-        };
+        return devToolFailure(err);
       }
     }
 
     case 'dev_rebuild_and_restart': {
       try {
         backend.applyEnvUpdate(args);
-        const buildOutput = await backend.rebuildAndRestart();
-        await server.sendToolListChanged();
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(
-                {
-                  success: true,
-                  action: 'rebuild_and_restart',
-                  buildOutput,
-                  status: backend.getStatus(),
-                },
-                null,
-                2
-              ),
-            },
-          ],
-        };
       } catch (err) {
-        await notifyToolListChanged(server);
-        return {
-          content: [{ type: 'text', text: JSON.stringify({ success: false, error: err.message }, null, 2) }],
-          isError: true,
-        };
+        return devToolFailure(err);
       }
+      return rebuildThenRestart(backend, server);
     }
 
     case 'dev_server_status': {

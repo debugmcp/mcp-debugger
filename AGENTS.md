@@ -13,7 +13,7 @@
 - `pnpm dev` launches the TypeScript entry point via `ts-node` for quick feedback.
 - `pnpm test` performs a full build, ensures Docker images are ready, and runs Vitest across all suites.
 - Targeted runs: `pnpm test:unit`, `pnpm test:integration`, `pnpm test:e2e`, `pnpm test:coverage`.
-- `pnpm lint` runs ESLint over `src/**/*.ts`, `packages/*/src/**/*.ts`, and `scripts/**/*.{js,mjs,cjs}`. `pnpm lint:fix` is narrower — it is `eslint src/**/*.ts --fix` — so it does **not** auto-fix everything `pnpm lint` reports; findings under `packages/` and `scripts/` have to be fixed by hand.
+- `pnpm lint` runs ESLint over `src/**/*.ts`, `packages/*/src/**/*.ts`, `scripts/**/*.{js,mjs,cjs}`, and `tools/**/*.{js,mjs,cjs}` (the dev-proxy supervisor is production tooling; experimental probes go in `scripts/experiments/`, which is ignored). `pnpm lint:fix` runs the same globs with `--fix`.
 - `pnpm typecheck` type-checks the shipped sources via `tsconfig.typecheck.json` (no build needed; the root `tsc -p tsconfig.json` checks nothing). `pnpm typecheck:tests` runs the per-file ratchet over the test trees against `tests/typecheck-baseline.json`; `pnpm typecheck:tests:update` re-records that baseline and `pnpm typecheck:tests:raw` emits unfiltered `tsc` output. `pnpm typecheck:all` runs both, and is the exact command pre-push and CI run.
 - **Run the whole dev-loop gate before pushing.** It is lint -> baseline committed -> `typecheck:all` -> clean build -> `test:unit` + `test:integration`, and both `.husky/pre-push` and CI enforce it; `typecheck:all` is the step most likely to block a push. It is documented once, canonically, in [CONTRIBUTING.md — Dev-Loop Gate](CONTRIBUTING.md#dev-loop-gate). Follow that section rather than any restatement of it.
 

@@ -106,9 +106,11 @@ no longer resolve, and counts that fell behind the code), `pnpm run changelog:ch
 (test-only changes are exempt automatically; label a genuine no-op PR `no-changelog`). Running
 those four before you push saves a CI round-trip.
 
-1. **Lint** — `pnpm run lint`. ESLint over `src/**/*.ts`, `packages/*/src/**/*.ts`, and
-   `scripts/**/*.{js,mjs,cjs}`. Note that `pnpm run lint:fix` is only `eslint src/**/*.ts --fix`,
-   so it does not auto-fix findings under `packages/` or `scripts/`.
+1. **Lint** — `pnpm run lint`. ESLint over `src/**/*.ts`, `packages/*/src/**/*.ts`,
+   `scripts/**/*.{js,mjs,cjs}`, and `tools/**/*.{js,mjs,cjs}` (the dev-proxy supervisor lives
+   under `tools/`, and it starts, stops and proxies the backend — it is production tooling, not a
+   probe script). `pnpm run lint:fix` runs the same globs with `--fix`. Experimental probes belong
+   in `scripts/experiments/`, which `eslint.config.js` ignores.
 
 2. **A committed `tests/typecheck-baseline.json`** — pre-push refuses to go further while that
    file is modified but uncommitted. The ratchet validates your working tree locally but the
@@ -177,10 +179,10 @@ We use ESLint to maintain consistent code style. There is no Prettier setup in t
 ### Setup
 
 ```bash
-# Run ESLint (src/**, packages/*/src/**, scripts/**)
+# Run ESLint (src/**, packages/*/src/**, scripts/**, tools/**)
 npm run lint
 
-# Fix auto-fixable issues — note this covers src/**/*.ts only
+# Fix auto-fixable issues over the same globs
 npm run lint:fix
 ```
 
