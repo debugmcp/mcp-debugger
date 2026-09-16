@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import net from 'net';
 import fs from 'fs';
 import { EventEmitter } from 'events';
@@ -16,10 +16,10 @@ vi.mock('net');
 
 // Track logger instances for assertions using hoisted storage so mocks can access it safely
 type MockLoggerInstance = {
-  info: ReturnType<typeof vi.fn>;
-  error: ReturnType<typeof vi.fn>;
-  debug: ReturnType<typeof vi.fn>;
-  warn: ReturnType<typeof vi.fn>;
+  info: Mock;
+  error: Mock;
+  debug: Mock;
+  warn: Mock;
 };
 
 const loggerInstances = vi.hoisted(() => [] as MockLoggerInstance[]);
@@ -43,15 +43,15 @@ describe('MinimalDapClient', () => {
   let mockSocket: any;
 
   type ChildSessionManagerStub = ChildSessionManager & EventEmitter & {
-    createChildSession: ReturnType<typeof vi.fn>;
-    getActiveChild: ReturnType<typeof vi.fn>;
-    hasActiveChildren: ReturnType<typeof vi.fn>;
-    shouldRouteToChild: ReturnType<typeof vi.fn>;
-    storeBreakpoints: ReturnType<typeof vi.fn>;
-    isAdoptionInProgress: ReturnType<typeof vi.fn>;
-    getChildTargetState: ReturnType<typeof vi.fn>;
-    shutdown: ReturnType<typeof vi.fn>;
-    flushEvents: ReturnType<typeof vi.fn>;
+    createChildSession: Mock<ChildSessionManager['createChildSession']>;
+    getActiveChild: Mock<ChildSessionManager['getActiveChild']>;
+    hasActiveChildren: Mock<ChildSessionManager['hasActiveChildren']>;
+    shouldRouteToChild: Mock<ChildSessionManager['shouldRouteToChild']>;
+    storeBreakpoints: Mock;
+    isAdoptionInProgress: Mock<ChildSessionManager['isAdoptionInProgress']>;
+    getChildTargetState: Mock<ChildSessionManager['getChildTargetState']>;
+    shutdown: Mock<ChildSessionManager['shutdown']>;
+    flushEvents: Mock<ChildSessionManager['flushEvents']>;
   };
 
   const createChildSessionManagerStub = (): ChildSessionManagerStub => {
@@ -1332,7 +1332,7 @@ describe('MinimalDapClient', () => {
         expect.any(Array),
         { forceFreshEcho: true }
       );
-      const written = (fakeSocket.write as ReturnType<typeof vi.fn>).mock.calls
+      const written = vi.mocked(fakeSocket.write).mock.calls
         .map(c => String(c[0]))
         .join('');
       expect(written).toContain('setBreakpoints');

@@ -1,13 +1,20 @@
 import { EventEmitter } from 'node:events';
 import { SessionState } from '@debugmcp/shared';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi, type Mock } from 'vitest';
+import type { DebugProtocol } from '@vscode/debugprotocol';
 import type { IProxyManager } from '../../../../src/proxy/proxy-manager.js';
 import { PauseCoordinator } from '../../../../src/session/execution/pause-coordinator.js';
 import type { ManagedSession } from '../../../../src/session/session-store.js';
 
 function fixture() {
   const proxy = new EventEmitter() as EventEmitter & {
-    sendDapRequest: ReturnType<typeof vi.fn>;
+    sendDapRequest: Mock<
+      (
+        command: string,
+        args?: unknown,
+        options?: { timeoutMs?: number }
+      ) => Promise<Partial<DebugProtocol.Response>>
+    >;
   };
   proxy.sendDapRequest = vi.fn();
   const session = {

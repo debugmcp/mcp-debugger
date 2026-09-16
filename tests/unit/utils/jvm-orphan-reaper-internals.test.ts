@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 
 // Module mocks are hoisted above all imports. Each mock preserves the rest of
 // the module via importOriginal so unrelated code paths aren't disturbed.
@@ -31,12 +31,18 @@ import {
 } from '../../../src/utils/jvm-orphan-reaper.js';
 import { PROC_SCAN_CONCURRENCY } from '../../../src/utils/proc-scan-concurrency.js';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const mockExecFile = execFile as unknown as ReturnType<typeof vi.fn>;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const mockReaddir = fsp.readdir as unknown as ReturnType<typeof vi.fn>;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const mockReadFile = fsp.readFile as unknown as ReturnType<typeof vi.fn>;
+const mockExecFile = execFile as unknown as Mock<
+  (
+    file: string,
+    args: string[],
+    options: unknown,
+    callback: (err: Error | null, result?: { stdout: string; stderr: string }) => void,
+  ) => void
+>;
+const mockReaddir = fsp.readdir as unknown as Mock<(path: string) => Promise<string[]>>;
+const mockReadFile = fsp.readFile as unknown as Mock<
+  (path: string, encoding?: string) => Promise<string>
+>;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -186,14 +192,14 @@ describe('listLinux', () => {
   });
 
   it('skips non-numeric entries in /proc', async () => {
-    mockReaddir.mockResolvedValueOnce(['cpuinfo', 'self', 'cmdline', 'meminfo'] as never);
+    mockReaddir.mockResolvedValueOnce(['cpuinfo', 'self', 'cmdline', 'meminfo']);
     expect(await listLinux()).toEqual([]);
     // None of the entries were numeric so no readFile calls should have happened
     expect(mockReadFile).not.toHaveBeenCalled();
   });
 
   it('skips PIDs whose cmdline read fails (process disappeared)', async () => {
-    mockReaddir.mockResolvedValueOnce(['100', '200'] as never);
+    mockReaddir.mockResolvedValueOnce(['100', '200']);
     mockReadFile.mockImplementation(async (path: unknown) => {
       if (String(path).includes('/100/')) {
         throw Object.assign(new Error('disappeared'), { code: 'ENOENT' });
@@ -205,7 +211,7 @@ describe('listLinux', () => {
   });
 
   it('parses NUL-delimited cmdline and returns tagged JVMs', async () => {
-    mockReaddir.mockResolvedValueOnce(['100', '200', 'self'] as never);
+    mockReaddir.mockResolvedValueOnce(['100', '200', 'self']);
     mockReadFile.mockImplementation(async (path: unknown) => {
       const p = String(path);
       if (p.includes('/100/')) {
@@ -231,7 +237,7 @@ describe('listLinux', () => {
 
   it('bounds concurrent cmdline reads on hosts with many processes', async () => {
     const pids = Array.from({ length: 500 }, (_, i) => String(1000 + i));
-    mockReaddir.mockResolvedValueOnce(pids as never);
+    mockReaddir.mockResolvedValueOnce(pids);
 
     let inFlight = 0;
     let peak = 0;
@@ -250,8 +256,8 @@ describe('listLinux', () => {
   });
 
   it('returns empty array when no /proc entries match the marker', async () => {
-    mockReaddir.mockResolvedValueOnce(['100', '200'] as never);
-    mockReadFile.mockResolvedValue('java\0-jar\0app.jar\0' as never);
+    mockReaddir.mockResolvedValueOnce(['100', '200']);
+    mockReadFile.mockResolvedValue('java\0-jar\0app.jar\0');
     expect(await listLinux()).toEqual([]);
   });
 });

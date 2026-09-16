@@ -3,7 +3,7 @@
  * 
  * Provides reusable mocks for IAdapterRegistry interface with realistic behavior
  */
-import { vi } from 'vitest';
+import { vi, type Mock } from 'vitest';
 import { IAdapterRegistry, AdapterInfo } from '@debugmcp/shared';
 import { DebugLanguage } from '@debugmcp/shared';
 import { FakeDebugAdapter } from '../fakes/fake-debug-adapter.js';
@@ -224,7 +224,7 @@ export function expectAdapterCreation(
 export function resetAdapterRegistryMock(mock: IAdapterRegistry): void {
   Object.values(mock).forEach(value => {
     if (typeof value === 'function' && 'mockReset' in value) {
-      const mockFn = value as ReturnType<typeof vi.fn>;
+      const mockFn = value as Mock;
       mockFn.mockReset();
     }
   });

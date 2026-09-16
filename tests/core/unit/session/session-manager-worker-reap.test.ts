@@ -113,7 +113,7 @@ describe('SessionManager - worker reap guarantees (issue #502)', () => {
     await sessionManager.closeSession(sessionId);
     await vi.advanceTimersByTimeAsync(1500);
 
-    const errorCalls = (dependencies.mockLogger.error as ReturnType<typeof vi.fn>).mock.calls;
+    const errorCalls = vi.mocked(dependencies.mockLogger.error).mock.calls;
     const leakLine = errorCalls.find((call) =>
       typeof call[0] === 'string' && call[0].includes('31337') && call[0].includes('leaked worker')
     );
@@ -128,7 +128,7 @@ describe('SessionManager - worker reap guarantees (issue #502)', () => {
     mockProxy.simulateEvent('exit', 0, undefined, true);
     await vi.runAllTimersAsync();
 
-    const warnCalls = (dependencies.mockLogger.warn as ReturnType<typeof vi.fn>).mock.calls;
+    const warnCalls = vi.mocked(dependencies.mockLogger.warn).mock.calls;
     expect(warnCalls.some((call) =>
       typeof call[0] === 'string' && call[0].includes("Error stopping proxy after 'exit'")
     )).toBe(true);
@@ -154,7 +154,7 @@ describe('SessionManager - worker reap guarantees (issue #502)', () => {
     expect(managed.proxyManager).toBeUndefined();
     expect(managed.pendingProxyStop).toBeUndefined();
     expect(pendingResolved).toBe(true);
-    const errorCalls = (dependencies.mockLogger.error as ReturnType<typeof vi.fn>).mock.calls;
+    const errorCalls = vi.mocked(dependencies.mockLogger.error).mock.calls;
     expect(errorCalls.some((call) =>
       typeof call[0] === 'string' && call[0].includes('Error during listener cleanup')
     )).toBe(true);
@@ -174,7 +174,7 @@ describe('SessionManager - worker reap guarantees (issue #502)', () => {
     await sessionManager.closeSession(sessionId);
     await vi.advanceTimersByTimeAsync(1500);
 
-    const errorCalls = (dependencies.mockLogger.error as ReturnType<typeof vi.fn>).mock.calls;
+    const errorCalls = vi.mocked(dependencies.mockLogger.error).mock.calls;
     const leakLine = errorCalls.find((call) =>
       typeof call[0] === 'string' && call[0].includes('leaked worker')
     );

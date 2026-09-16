@@ -99,7 +99,7 @@ describe('SessionManager - breakpoint addressing (#271)', () => {
 
   describe('restart re-resolution of statement anchors', () => {
     function stubFileContent(content: string) {
-      (dependencies.mockFileSystem.readFile as ReturnType<typeof vi.fn>).mockResolvedValue(content);
+      vi.mocked(dependencies.mockFileSystem.readFile).mockResolvedValue(content);
     }
 
     async function terminate() {

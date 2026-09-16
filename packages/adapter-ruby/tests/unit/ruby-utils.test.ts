@@ -19,7 +19,7 @@ import {
   RUBY_SYNC_HELPER_FILENAME
 } from '../../src/utils/ruby-utils.js';
 
-const whichMock = vi.mocked(which) as unknown as ReturnType<typeof vi.fn>;
+const whichMock = vi.mocked(which);
 
 describe('search paths', () => {
   it('includes RubyInstaller bin dirs for both ruby and rdbg on Windows', () => {
