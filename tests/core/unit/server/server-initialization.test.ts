@@ -7,14 +7,16 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { DebugMcpServer } from '../../../../src/server.js';
 import { TOOL_NAMES } from '../../../../src/server/tool-schemas.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
-import { createProductionDependencies } from '../../../../src/container/dependencies.js';
+import { createProductionDependencies, type Dependencies } from '../../../../src/container/dependencies.js';
 import path from 'path';
 import {
   createMockDependencies,
   createMockServer,
   createMockSessionManager,
   createMockStdioTransport,
-  getToolHandlers
+  getToolHandlers,
+  type MockServer,
+  type MockSessionManager
 } from './server-test-helpers.js';
 
 // Mock dependencies
@@ -25,10 +27,10 @@ vi.mock('../../../../src/container/dependencies.js');
 
 describe('Server Initialization Tests', () => {
   let debugServer: DebugMcpServer;
-  let mockServer: any;
-  let mockSessionManager: any;
-  let mockStdioTransport: any;
-  let mockDependencies: any;
+  let mockServer: MockServer;
+  let mockSessionManager: MockSessionManager;
+  let mockStdioTransport: ReturnType<typeof createMockStdioTransport>;
+  let mockDependencies: Dependencies;
 
   beforeEach(() => {
     mockDependencies = createMockDependencies();
@@ -128,7 +130,7 @@ describe('Server Initialization Tests', () => {
       // Derived from the schema module, not hand-maintained: the list of
       // toContain() calls this replaces named 20 of the 28 advertised tools
       // and had stopped growing with them (issue #579).
-      const toolNames = result.tools.map((t: any) => t.name);
+      const toolNames = result.tools.map((t) => t.name);
       expect(toolNames).toEqual(expect.arrayContaining([...TOOL_NAMES]));
       expect(toolNames).toHaveLength(TOOL_NAMES.length);
     });

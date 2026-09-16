@@ -7,17 +7,21 @@
  * behavior: requestedLine is never sent to the session layer.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import type { Stats } from 'fs';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
-import { createProductionDependencies } from '../../../../src/container/dependencies.js';
+import { createProductionDependencies, type Dependencies } from '../../../../src/container/dependencies.js';
 import {
   createMockDependencies,
   createMockServer,
   createMockSessionManager,
   createMockStdioTransport,
-  getToolHandlers
+  getToolHandlers,
+  type CallToolHandler,
+  type MockServer,
+  type MockSessionManager
 } from './server-test-helpers.js';
 
 vi.mock('@modelcontextprotocol/sdk/server/index.js');
@@ -33,19 +37,20 @@ const PY_FILE = [
 ].join('\n');
 
 describe('set_breakpoint loud snapping (#271)', () => {
-  let mockServer: any;
-  let mockSessionManager: any;
-  let mockDependencies: any;
-  let callToolHandler: any;
+  let mockServer: MockServer;
+  let mockSessionManager: MockSessionManager;
+  let mockDependencies: Dependencies;
+  let callToolHandler: CallToolHandler;
 
   beforeEach(() => {
     mockDependencies = createMockDependencies();
-    mockDependencies.fileSystem.readFile.mockResolvedValue(PY_FILE);
-    mockDependencies.fileSystem.stat.mockResolvedValue({
+    vi.mocked(mockDependencies.fileSystem.readFile).mockResolvedValue(PY_FILE);
+    // Deliberately partial Stats: the anchor path reads only isFile/size/mtimeMs.
+    vi.mocked(mockDependencies.fileSystem.stat).mockResolvedValue({
       isFile: () => true,
       size: PY_FILE.length,
       mtimeMs: 1000
-    });
+    } as Stats);
     vi.mocked(createProductionDependencies).mockReturnValue(mockDependencies);
 
     mockServer = createMockServer();

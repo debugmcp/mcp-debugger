@@ -32,7 +32,7 @@ const mockExecFile = execFile as unknown as Mock<
     file: string,
     args: string[],
     options: unknown,
-    callback: (err: Error | null, result?: { stdout: string; stderr: string }) => void,
+    callback: (err: Error | null, result?: { stdout: string; stderr?: string }) => void,
   ) => void
 >;
 const mockReaddir = fsp.readdir as unknown as Mock<(path: string) => Promise<string[]>>;
@@ -83,8 +83,8 @@ describe('scanLinux', () => {
 describe('scanDarwin', () => {
   it('parses ps pid/command lines into (pid, args)', async () => {
     mockExecFile.mockImplementation(
-      (_cmd: string, _args: string[], _opts: unknown, cb: (e: Error | null, r?: { stdout: string; stderr: string }) => void) => {
-        cb(null, { stdout: '   12 /usr/bin/thing --flag\n  345 node worker.js --mcp-owner-pid=9\n\n', stderr: '' });
+      (_cmd: string, _args: string[], _opts: unknown, cb: (e: Error | null, r?: { stdout: string; stderr?: string }) => void) => {
+        cb(null, { stdout: '   12 /usr/bin/thing --flag\n  345 node worker.js --mcp-owner-pid=9\n\n' });
       }
     );
 
@@ -104,10 +104,10 @@ describe('scanWindows', () => {
       'node.exe': JSON.stringify({ ProcessId: 200, CommandLine: 'node proxy-bootstrap.js --mcp-owner-pid=9' }),
     };
     mockExecFile.mockImplementation(
-      (_cmd: string, args: string[], _opts: unknown, cb: (e: Error | null, r?: { stdout: string; stderr: string }) => void) => {
+      (_cmd: string, args: string[], _opts: unknown, cb: (e: Error | null, r?: { stdout: string; stderr?: string }) => void) => {
         const psCommand = args[args.length - 1];
         const name = Object.keys(byName).find((n) => psCommand.includes(`Name='${n}'`));
-        cb(null, { stdout: name ? byName[name] : '', stderr: '' });
+        cb(null, { stdout: name ? byName[name] : '' });
       }
     );
 
@@ -122,12 +122,12 @@ describe('scanWindows', () => {
 
   it('tolerates a failing or empty query without failing the others', async () => {
     mockExecFile.mockImplementation(
-      (_cmd: string, args: string[], _opts: unknown, cb: (e: Error | null, r?: { stdout: string; stderr: string }) => void) => {
+      (_cmd: string, args: string[], _opts: unknown, cb: (e: Error | null, r?: { stdout: string; stderr?: string }) => void) => {
         const psCommand = args[args.length - 1];
         if (psCommand.includes("Name='java.exe'")) {
           cb(new Error('powershell exploded'));
         } else {
-          cb(null, { stdout: JSON.stringify({ ProcessId: 5, CommandLine: 'node x.js' }), stderr: '' });
+          cb(null, { stdout: JSON.stringify({ ProcessId: 5, CommandLine: 'node x.js' }) });
         }
       }
     );

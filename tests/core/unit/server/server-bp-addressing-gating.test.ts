@@ -11,13 +11,17 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
-import { createProductionDependencies } from '../../../../src/container/dependencies.js';
+import { createProductionDependencies, type Dependencies } from '../../../../src/container/dependencies.js';
 import {
   createMockDependencies,
   createMockServer,
   createMockSessionManager,
   createMockStdioTransport,
-  getToolHandlers
+  findTool,
+  getToolHandlers,
+  type ListToolsHandler,
+  type MockServer,
+  type MockSessionManager
 } from './server-test-helpers.js';
 
 vi.mock('@modelcontextprotocol/sdk/server/index.js');
@@ -26,9 +30,9 @@ vi.mock('../../../../src/session/session-manager.js');
 vi.mock('../../../../src/container/dependencies.js');
 
 describe('DEBUG_MCP_BP_ADDRESSING gating (#271)', () => {
-  let mockServer: any;
-  let mockSessionManager: any;
-  let mockDependencies: any;
+  let mockServer: MockServer;
+  let mockSessionManager: MockSessionManager;
+  let mockDependencies: Dependencies;
 
   beforeEach(() => {
     mockDependencies = createMockDependencies();
@@ -53,14 +57,9 @@ describe('DEBUG_MCP_BP_ADDRESSING gating (#271)', () => {
     return getToolHandlers(mockServer);
   }
 
-  async function getSetBreakpointSchema(listToolsHandler: any) {
-    const { tools } = await listToolsHandler({ method: 'tools/list', params: {} });
-    const tool = tools.find((t: { name: string }) => t.name === 'set_breakpoint');
-    expect(tool).toBeDefined();
-    return tool.inputSchema as {
-      properties: Record<string, unknown>;
-      required: string[];
-    };
+  async function getSetBreakpointSchema(listToolsHandler: ListToolsHandler) {
+    const { properties = {}, required = [] } = (await findTool(listToolsHandler, 'set_breakpoint')).inputSchema;
+    return { properties, required };
   }
 
   it('omits expectedContent from the schema in line mode', async () => {

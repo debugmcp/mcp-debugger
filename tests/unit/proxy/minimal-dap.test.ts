@@ -56,7 +56,8 @@ describe('MinimalDapClient', () => {
 
   const createChildSessionManagerStub = (): ChildSessionManagerStub => {
     const emitter = new EventEmitter() as unknown as ChildSessionManagerStub;
-    emitter.createChildSession = vi.fn().mockResolvedValue(undefined);
+    // 'adopted' is the neutral default: the client only branches on 'release-failed'.
+    emitter.createChildSession = vi.fn<ChildSessionManager['createChildSession']>().mockResolvedValue('adopted');
     emitter.getActiveChild = vi.fn().mockReturnValue(null);
     emitter.hasActiveChildren = vi.fn().mockReturnValue(false);
     emitter.shouldRouteToChild = vi.fn().mockReturnValue(false);

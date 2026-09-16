@@ -19,6 +19,7 @@ import {
   createMockServer,
   createMockSessionManager,
   createMockStdioTransport,
+  findTool,
   getToolHandlers
 } from './server-test-helpers.js';
 
@@ -34,12 +35,7 @@ function createServer(envOverrides: Record<string, string>) {
     getAll: vi.fn(() => ({ ...envOverrides })),
     getCurrentWorkingDirectory: vi.fn(() => process.cwd())
   };
-  // createMockDependencies() is a deliberate partial double: processManager,
-  // networkManager and the factories are bare vi.fn() placeholders these tests
-  // never call. (The single-point fix is a typed return on the helper itself.)
-  vi.mocked(createProductionDependencies).mockReturnValue(
-    mockDependencies
-  );
+  vi.mocked(createProductionDependencies).mockReturnValue(mockDependencies);
 
   const mockServer = createMockServer();
   vi.mocked(Server).mockImplementation(function() { return mockServer as any; });
@@ -55,11 +51,6 @@ function createServer(envOverrides: Record<string, string>) {
   return { ...getToolHandlers(mockServer), mockSessionManager };
 }
 
-async function getToolSchema(listToolsHandler: any, name: string) {
-  const { tools } = await listToolsHandler({ method: 'tools/list', params: {} });
-  return tools.find((t: { name: string }) => t.name === name);
-}
-
 describe('Variable access gating (issue #237)', () => {
   afterEach(() => {
     vi.clearAllMocks();
@@ -68,21 +59,21 @@ describe('Variable access gating (issue #237)', () => {
   describe('schema gating', () => {
     it('open mode (default): names is offered but not required', async () => {
       const { listToolsHandler } = createServer({});
-      const getVariables = await getToolSchema(listToolsHandler, 'get_variables');
-      expect(getVariables.inputSchema.properties.names).toBeDefined();
+      const getVariables = await findTool(listToolsHandler, 'get_variables');
+      expect(getVariables.inputSchema.properties?.names).toBeDefined();
       expect(getVariables.inputSchema.required).toEqual(['sessionId', 'scope']);
 
-      const getLocals = await getToolSchema(listToolsHandler, 'get_local_variables');
-      expect(getLocals.inputSchema.properties.names).toBeDefined();
+      const getLocals = await findTool(listToolsHandler, 'get_local_variables');
+      expect(getLocals.inputSchema.properties?.names).toBeDefined();
       expect(getLocals.inputSchema.required).toEqual(['sessionId']);
     });
 
     it('explicit mode: names becomes required on both tools', async () => {
       const { listToolsHandler } = createServer({ DEBUG_MCP_VARIABLE_ACCESS: 'explicit' });
-      const getVariables = await getToolSchema(listToolsHandler, 'get_variables');
+      const getVariables = await findTool(listToolsHandler, 'get_variables');
       expect(getVariables.inputSchema.required).toEqual(['sessionId', 'scope', 'names']);
 
-      const getLocals = await getToolSchema(listToolsHandler, 'get_local_variables');
+      const getLocals = await findTool(listToolsHandler, 'get_local_variables');
       expect(getLocals.inputSchema.required).toEqual(['sessionId', 'names']);
     });
   });

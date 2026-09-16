@@ -11,13 +11,16 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
 import { SessionState } from '@debugmcp/shared';
-import { createProductionDependencies } from '../../../../src/container/dependencies.js';
+import { createProductionDependencies, type Dependencies } from '../../../../src/container/dependencies.js';
 import {
   createMockDependencies,
   createMockServer,
   createMockSessionManager,
   createMockStdioTransport,
-  getToolHandlers
+  getToolHandlers,
+  type CallToolHandler,
+  type MockServer,
+  type MockSessionManager
 } from './server-test-helpers.js';
 
 vi.mock('@modelcontextprotocol/sdk/server/index.js');
@@ -26,10 +29,10 @@ vi.mock('../../../../src/session/session-manager.js');
 vi.mock('../../../../src/container/dependencies.js');
 
 describe('tool:response logging (issue #397)', () => {
-  let mockServer: any;
-  let mockSessionManager: any;
-  let mockDependencies: any;
-  let callToolHandler: any;
+  let mockServer: MockServer;
+  let mockSessionManager: MockSessionManager;
+  let mockDependencies: Dependencies;
+  let callToolHandler: CallToolHandler;
 
   beforeEach(() => {
     mockDependencies = createMockDependencies();
@@ -53,9 +56,9 @@ describe('tool:response logging (issue #397)', () => {
   });
 
   function toolResponseLogEntries(): Array<Record<string, unknown>> {
-    return mockDependencies.logger.info.mock.calls
-      .filter((call: unknown[]) => call[0] === 'tool:response')
-      .map((call: unknown[]) => call[1] as Record<string, unknown>);
+    return vi.mocked(mockDependencies.logger.info).mock.calls
+      .filter((call) => call[0] === 'tool:response')
+      .map((call) => call[1] as Record<string, unknown>);
   }
 
   it('logs success: false when the tool payload reports failure', async () => {

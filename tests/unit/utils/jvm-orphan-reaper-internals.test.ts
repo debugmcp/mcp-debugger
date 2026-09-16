@@ -36,7 +36,7 @@ const mockExecFile = execFile as unknown as Mock<
     file: string,
     args: string[],
     options: unknown,
-    callback: (err: Error | null, result?: { stdout: string; stderr: string }) => void,
+    callback: (err: Error | null, result?: { stdout: string; stderr?: string }) => void,
   ) => void
 >;
 const mockReaddir = fsp.readdir as unknown as Mock<(path: string) => Promise<string[]>>;
@@ -267,14 +267,13 @@ describe('listDarwin', () => {
   // by invoking the supplied callback. Promisify's default wrapper resolves
   // with the value passed as the second callback arg, so we pass an object
   // shaped like {stdout, stderr} for the destructuring on the receiving side.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const respondWith = (result: { stdout: string; stderr?: string }) =>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mockExecFile.mockImplementation((..._args: any[]) => {
       // Last argument is the node-style callback
       const cb = _args[_args.length - 1] as (
         err: Error | null,
-        result: { stdout: string; stderr: string },
+        result: { stdout: string; stderr?: string },
       ) => void;
       cb(null, { stdout: result.stdout, stderr: result.stderr ?? '' });
     });
@@ -318,13 +317,12 @@ describe('listDarwin', () => {
 });
 
 describe('listWindows', () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const respondWith = (result: { stdout?: string; err?: Error }) =>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mockExecFile.mockImplementation((..._args: any[]) => {
       const cb = _args[_args.length - 1] as (
         err: Error | null,
-        result?: { stdout: string; stderr: string },
+        result?: { stdout: string; stderr?: string },
       ) => void;
       if (result.err) {
         cb(result.err);

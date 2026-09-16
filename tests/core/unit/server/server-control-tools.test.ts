@@ -8,13 +8,16 @@ import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
 import { Breakpoint, SessionLifecycleState } from '@debugmcp/shared';
 import { ErrorMessages } from '../../../../src/utils/error-messages.js';
-import { createProductionDependencies } from '../../../../src/container/dependencies.js';
+import { createProductionDependencies, type Dependencies } from '../../../../src/container/dependencies.js';
 import {
   createMockDependencies,
   createMockServer,
   createMockSessionManager,
   createMockStdioTransport,
-  getToolHandlers
+  getToolHandlers,
+  type CallToolHandler,
+  type MockServer,
+  type MockSessionManager
 } from './server-test-helpers.js';
 
 // Mock dependencies
@@ -24,10 +27,10 @@ vi.mock('../../../../src/session/session-manager.js');
 vi.mock('../../../../src/container/dependencies.js');
 
 describe('Server Control Tools Tests', () => {
-  let mockServer: any;
-  let mockSessionManager: any;
-  let mockDependencies: any;
-  let callToolHandler: any;
+  let mockServer: MockServer;
+  let mockSessionManager: MockSessionManager;
+  let mockDependencies: Dependencies;
+  let callToolHandler: CallToolHandler;
 
   beforeEach(() => {
     mockDependencies = createMockDependencies();
@@ -574,7 +577,11 @@ describe('Server Control Tools Tests', () => {
   });
 
   describe('step operations', () => {
-    it.each([
+    // The it.each tables below index the session-manager mock by method name;
+    // a plain string column would widen to `string` and lose the key check.
+    type StepMethod = 'stepOver' | 'stepInto' | 'stepOut';
+
+    it.each<[string, StepMethod, string]>([
       ['step_over', 'stepOver', 'Stepped over'],
       ['step_into', 'stepInto', 'Stepped into'],
       ['step_out', 'stepOut', 'Stepped out']
@@ -601,7 +608,7 @@ describe('Server Control Tools Tests', () => {
       expect(content.message).toBe(expectedMessage);
     });
 
-    it.each([
+    it.each<[string, StepMethod, string]>([
       ['step_over', 'stepOver', 'Stepped over'],
       ['step_into', 'stepInto', 'Stepped into'],
       ['step_out', 'stepOut', 'Stepped out']
@@ -638,7 +645,7 @@ describe('Server Control Tools Tests', () => {
       expect(content.pending).toBeUndefined();
     });
 
-    it.each([
+    it.each<{ toolName: string; methodName: StepMethod; state: string }>([
       { toolName: 'step_over', methodName: 'stepOver', state: 'stopped' },
       { toolName: 'step_into', methodName: 'stepInto', state: 'stopped' },
       { toolName: 'step_out', methodName: 'stepOut', state: 'stopped' },
@@ -676,7 +683,7 @@ describe('Server Control Tools Tests', () => {
       expect(content.pending).toBeUndefined();
     });
 
-    it.each([
+    it.each<[string, StepMethod]>([
       ['step_over', 'stepOver'],
       ['step_into', 'stepInto'],
       ['step_out', 'stepOut']
@@ -698,7 +705,7 @@ describe('Server Control Tools Tests', () => {
       expect(content.error).toContain('Session not found: test-session');
     });
 
-    it.each([
+    it.each<[string, StepMethod]>([
       ['step_over', 'stepOver'],
       ['step_into', 'stepInto'],
       ['step_out', 'stepOut']
@@ -734,7 +741,7 @@ describe('Server Control Tools Tests', () => {
       expect(content.location).toBeUndefined();
     });
 
-    it.each([
+    it.each<[string, StepMethod]>([
       ['step_over', 'stepOver'],
       ['step_into', 'stepInto'],
       ['step_out', 'stepOut']

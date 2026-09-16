@@ -11,57 +11,41 @@ import type {
   IProcessManager,
   IProxyProcessLauncher
 } from '@debugmcp/shared';
-import { ISessionStoreFactory } from '../../../src/factories/session-store-factory.js';
+import type { Dependencies } from '../../../src/container/dependencies.js';
 import { MockSessionStoreFactory } from '../../../src/factories/session-store-factory.js';
-import {
-  MockProxyManagerFactory,
-  type IProxyManagerFactory
-} from '../../../src/factories/proxy-manager-factory.js';
+import { MockProxyManagerFactory } from '../../../src/factories/proxy-manager-factory.js';
 import { MockProxyManager } from '../mocks/mock-proxy-manager.js';
-
-/**
- * Complete set of application dependencies
- */
-export interface Dependencies {
-  // Core implementations
-  fileSystem: IFileSystem;
-  processManager: IProcessManager;
-  networkManager: INetworkManager;
-  logger: ILogger;
-  
-  // Process launchers
-  proxyProcessLauncher: IProxyProcessLauncher;
-  
-  // Factories
-  proxyManagerFactory: IProxyManagerFactory;
-  sessionStoreFactory: ISessionStoreFactory;
-}
+import { createMockAdapterRegistry } from '../mocks/mock-adapter-registry.js';
 
 /**
  * Creates a complete set of mock dependencies for testing
  * All methods are vi.fn() mocks with proper typing
- * @returns Dependencies with all methods mocked
+ * @returns The container's Dependencies with all methods mocked
  */
 export function createMockDependencies(): Dependencies {
   const fileSystem = createMockFileSystem();
   const processManager = createMockProcessManager();
   const networkManager = createMockNetworkManager();
   const logger = createMockLogger();
-  
+  const environment = createMockEnvironment();
+
   const proxyProcessLauncher = createMockProxyProcessLauncher();
-  
+
   const proxyManagerFactory = new MockProxyManagerFactory();
   proxyManagerFactory.createFn = () => new MockProxyManager();
   const sessionStoreFactory = new MockSessionStoreFactory();
-  
+  const adapterRegistry = createMockAdapterRegistry();
+
   return {
     fileSystem,
     processManager,
     networkManager,
     logger,
+    environment,
     proxyProcessLauncher,
     proxyManagerFactory,
-    sessionStoreFactory
+    sessionStoreFactory,
+    adapterRegistry
   };
 }
 

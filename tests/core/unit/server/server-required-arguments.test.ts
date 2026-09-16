@@ -14,7 +14,8 @@ import {
   createMockServer,
   createMockSessionManager,
   createMockStdioTransport,
-  getToolHandlers
+  getToolHandlers,
+  type CallToolHandler
 } from './server-test-helpers.js';
 
 vi.mock('@modelcontextprotocol/sdk/server/index.js');
@@ -36,13 +37,13 @@ const PRESENT_VALUES: Record<string, unknown> = {
 };
 
 describe('schema-driven required arguments', () => {
-  let callToolHandler: (request: unknown) => Promise<unknown>;
+  let callToolHandler: CallToolHandler;
   let mockDependencies: ReturnType<typeof createMockDependencies>;
 
   beforeEach(() => {
     mockDependencies = createMockDependencies();
     vi.mocked(mockDependencies.environment.get).mockReturnValue(undefined);
-    vi.mocked(createProductionDependencies).mockReturnValue(mockDependencies as never);
+    vi.mocked(createProductionDependencies).mockReturnValue(mockDependencies);
 
     const mockServer = createMockServer();
     vi.mocked(Server).mockImplementation(function() { return mockServer as never; });

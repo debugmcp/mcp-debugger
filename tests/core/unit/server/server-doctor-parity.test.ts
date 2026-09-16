@@ -7,6 +7,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import type { AdapterMetadata, IAdapterFactory, IAdapterRegistry } from '@debugmcp/shared';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
 import { createProductionDependencies } from '../../../../src/container/dependencies.js';
@@ -15,6 +16,7 @@ import {
   createMockEnvironment,
   createMockFileSystem
 } from '../../../test-utils/helpers/test-dependencies.js';
+import { createMockAdapterRegistry } from '../../../test-utils/mocks/mock-adapter-registry.js';
 import {
   createMockDependencies,
   createMockServer,
@@ -36,7 +38,7 @@ vi.mock('../../../../src/container/dependencies.js');
  * - dotnet: not installed
  * - mock: disabled via DEBUG_MCP_DISABLE_LANGUAGES
  */
-function buildSharedRegistry() {
+function buildSharedRegistry(): IAdapterRegistry {
   const entries = [
     { name: 'python', packageName: '@debugmcp/adapter-python', installed: true, attach: 'direct-connect' as const },
     { name: 'go', packageName: '@debugmcp/adapter-go', installed: true, attach: 'none' as const },
@@ -46,7 +48,13 @@ function buildSharedRegistry() {
     { name: 'mock', packageName: '@debugmcp/adapter-mock', installed: true, attach: 'none' as const }
   ];
 
-  const factories: Record<string, unknown> = {
+  // Deliberately partial factories: the availability probe reads only validate and
+  // getMetadata's modes, and a full IAdapterFactory would bury the scenario table
+  // above. The two members it does read are typed against the real signatures.
+  type ProbeFactory = Pick<IAdapterFactory, 'validate'> & {
+    getMetadata: () => Pick<AdapterMetadata, 'modes'>;
+  };
+  const factories: Record<string, ProbeFactory> = {
     python: {
       validate: async () => ({ valid: true, errors: [], warnings: [], details: {} }),
       getMetadata: () => ({ modes: { launch: true, attach: 'direct-connect' } })
@@ -68,22 +76,23 @@ function buildSharedRegistry() {
     }
   };
 
-  return {
-    listLanguages: vi.fn().mockResolvedValue(entries.filter((e) => e.installed).map((e) => e.name)),
-    getSupportedLanguages: vi.fn().mockReturnValue(entries.filter((e) => e.installed).map((e) => e.name)),
-    listAvailableAdapters: vi.fn().mockResolvedValue(entries),
-    getFactory: vi.fn(async (language: string) => factories[language]),
-    // The production AdapterRegistry always offers getFactoryResult, and the
-    // probe prefers it — the parity fence must exercise the branch production
-    // actually runs, not only the legacy getFactory fallback.
-    getFactoryResult: vi.fn(async (language: string) => {
-      const factory = factories[language];
-      return factory ? { factory } : {};
-    }),
-    isLanguageSupported: vi.fn().mockReturnValue(true),
-    create: vi.fn(),
-    register: vi.fn()
-  };
+  const factoryFor = (language: string) => factories[language] as IAdapterFactory | undefined;
+  const installed = entries.filter((e) => e.installed).map((e) => e.name);
+
+  const registry = createMockAdapterRegistry();
+  vi.mocked(registry.listLanguages).mockResolvedValue(installed);
+  vi.mocked(registry.getSupportedLanguages).mockReturnValue(installed);
+  vi.mocked(registry.listAvailableAdapters).mockResolvedValue(entries);
+  vi.mocked(registry.getFactory).mockImplementation(async (language) => factoryFor(language));
+  // The production AdapterRegistry always offers getFactoryResult, and the
+  // probe prefers it — the parity fence must exercise the branch production
+  // actually runs, not only the legacy getFactory fallback.
+  registry.getFactoryResult = vi.fn(async (language: string) => {
+    const factory = factoryFor(language);
+    return factory ? { factory } : {};
+  });
+  vi.mocked(registry.isLanguageSupported).mockReturnValue(true);
+  return registry;
 }
 
 describe('doctor / list_supported_languages availability parity (issue #435)', () => {
@@ -93,15 +102,16 @@ describe('doctor / list_supported_languages availability parity (issue #435)', (
     vi.stubEnv('DEBUG_MCP_DISABLE_LANGUAGES', 'mock');
 
     const mockDependencies = createMockDependencies();
-    vi.mocked(createProductionDependencies).mockReturnValue(mockDependencies as never);
+    vi.mocked(createProductionDependencies).mockReturnValue(mockDependencies);
 
     mockServer = createMockServer();
     vi.mocked(Server).mockImplementation(function () {
       return mockServer as never;
     });
 
+    // The server reads the registry off the (mocked) SessionManager, never
+    // off the dependency bag, so it is handed to the session-manager double.
     const registry = buildSharedRegistry();
-    (mockDependencies as { adapterRegistry: unknown }).adapterRegistry = registry;
     const mockSessionManager = createMockSessionManager(registry);
     vi.mocked(SessionManager).mockImplementation(function () {
       return mockSessionManager as never;
@@ -132,7 +142,7 @@ describe('doctor / list_supported_languages availability parity (issue #435)', (
     vi.mocked(fileSystem.stat).mockRejectedValue(new Error('ENOENT'));
     vi.mocked(fileSystem.readdir).mockRejectedValue(new Error('ENOENT'));
     const doctorDeps: DiagnoseDeps = {
-      registry: buildSharedRegistry() as unknown as DiagnoseDeps['registry'],
+      registry: buildSharedRegistry(),
       environment: createMockEnvironment(),
       fileSystem,
       env: { DEBUG_MCP_DISABLE_LANGUAGES: 'mock' },

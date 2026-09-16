@@ -17,7 +17,9 @@ import {
 } from '../../../../../src/session/launch/proxy-failure-diagnostics.js';
 import type { ProxyInitProgress } from '../../../../../src/utils/error-messages.js';
 import { createMockLogger } from '../../../../test-utils/helpers/test-dependencies.js';
-import { createMockFileSystem } from '../../../../unit/test-utils/mock-factories.js';
+// The pre-configured double: readTail resolves '' (an empty log) unless a test
+// programs it, which keeps the logProxyFailure tests on the read-succeeded path.
+import { createMockFileSystem } from '../../../../test-utils/helpers/test-utils.js';
 
 const initProgress: ProxyInitProgress = { transportConnected: true, pendingCommand: 'initialize' };
 
@@ -82,7 +84,7 @@ describe('readProxyLogTail', () => {
   it('returns only the last N content lines, so a long log cannot swamp the record', async () => {
     const fileSystem = createMockFileSystem();
     const allLines = Array.from({ length: 200 }, (_, i) => `line ${i + 1}`);
-    fileSystem.readTail.mockResolvedValue(logFile(allLines));
+    vi.mocked(fileSystem.readTail).mockResolvedValue(logFile(allLines));
 
     const tail = await readProxyLogTail(fileSystem, proxyLogPath, 80);
 
@@ -98,7 +100,7 @@ describe('readProxyLogTail', () => {
 
   it('splits CRLF logs, so a Windows proxy log is not one giant line', async () => {
     const fileSystem = createMockFileSystem();
-    fileSystem.readTail.mockResolvedValue('first\r\nsecond\r\nthird\r\n');
+    vi.mocked(fileSystem.readTail).mockResolvedValue('first\r\nsecond\r\nthird\r\n');
 
     expect(await readProxyLogTail(fileSystem, proxyLogPath, 2)).toBe(
       'second\nthird (last 2 of 3 lines)'
@@ -109,7 +111,7 @@ describe('readProxyLogTail', () => {
     const fileSystem = createMockFileSystem();
     // The proxy log carries raw adapter argv and DAP output bodies, so the lines
     // a failure makes interesting are exactly the ones that can hold a token.
-    fileSystem.readTail.mockResolvedValue(
+    vi.mocked(fileSystem.readTail).mockResolvedValue(
       logFile(['[Worker] spawning adapter', '[Worker] argv: --token=super-secret-value'])
     );
 
@@ -131,14 +133,14 @@ describe('readProxyLogTail', () => {
     const fileSystem = createMockFileSystem();
     // ENOENT is the answer an exists-check would have bought, one syscall later
     // and with a rotation race in between.
-    fileSystem.readTail.mockRejectedValue(enoent());
+    vi.mocked(fileSystem.readTail).mockRejectedValue(enoent());
 
     expect(await readProxyLogTail(fileSystem, proxyLogPath)).toBeUndefined();
   });
 
   it('reports any other read failure as the tail rather than throwing over the real error', async () => {
     const fileSystem = createMockFileSystem();
-    fileSystem.readTail.mockRejectedValue(new Error('permission denied'));
+    vi.mocked(fileSystem.readTail).mockRejectedValue(new Error('permission denied'));
 
     expect(await readProxyLogTail(fileSystem, proxyLogPath)).toBe(
       '<<Failed to read proxy log: permission denied>>'
@@ -304,7 +306,7 @@ describe('logProxyFailure', () => {
   it('logs the proxy log tail but returns only the pointers', async () => {
     const logger = createMockLogger();
     const fileSystem = createMockFileSystem();
-    fileSystem.readTail.mockResolvedValue(logFile(['adapter said: could not open port']));
+    vi.mocked(fileSystem.readTail).mockResolvedValue(logFile(['adapter said: could not open port']));
     const error = Object.assign(new Error('proxy init timed out'), { initProgress });
 
     const diagnostics = await logProxyFailure(

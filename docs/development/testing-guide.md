@@ -419,7 +419,7 @@ expect((result.data as { dryRun?: boolean })?.dryRun).toBe(true);
 
 ### Mock Creation Helpers
 
-`tests/test-utils/helpers/test-dependencies.ts` exports `createMockDependencies()` — a complete DI container matching the `Dependencies` interface (`fileSystem`, `processManager`, `networkManager`, `logger`, `proxyProcessLauncher`, `proxyManagerFactory`, `sessionStoreFactory`) — plus the narrower `createMockLogger()`, `createMockFileSystem()`, `createMockProcessManager()`, `createMockNetworkManager()`, `createMockProxyProcessLauncher()`, and `createMockEnvironment()`.
+`tests/test-utils/helpers/test-dependencies.ts` exports `createMockDependencies()` — the container's own `Dependencies` (`src/container/dependencies.ts`: the nine required members `fileSystem`, `processManager`, `networkManager`, `logger`, `environment`, `proxyProcessLauncher`, `proxyManagerFactory`, `sessionStoreFactory`, `adapterRegistry`; `disposeLogger?` is optional and omitted). Every interface member is a `vi.fn()` except the two factories, which are the `MockProxyManagerFactory` / `MockSessionStoreFactory` classes from `src/factories/`; the whole is assignable wherever production's container is — plus the narrower `createMockLogger()`, `createMockFileSystem()`, `createMockProcessManager()`, `createMockNetworkManager()`, `createMockProxyProcessLauncher()`, and `createMockEnvironment()`.
 
 `tests/test-utils/helpers/test-utils.ts` exports `delay()`, `waitUntil()`, `waitForEvent()`, and its own (pre-configured) `createMockLogger()` / `createMockFileSystem()`.
 

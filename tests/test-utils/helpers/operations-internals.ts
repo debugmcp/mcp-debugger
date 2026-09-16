@@ -46,6 +46,8 @@ export interface OperationsInternals {
   execution: ExecutionController;
   launcher: DebugLauncher;
   proxyLauncher: ProxyLauncherView;
+  /** Protected on SessionManagerCore; spied on to model a concurrent close during teardown. */
+  stopProxyPreservingSession(session: ManagedSession): Promise<void>;
 }
 
 /** The protected collaborators of an operations facade, for a test to drive. */

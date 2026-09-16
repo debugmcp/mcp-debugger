@@ -7,16 +7,31 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SessionManagerOperations } from '../../../../src/session/session-manager-operations.js';
+import type { SessionManagerDependencies } from '../../../../src/session/session-manager-core.js';
+import { SessionStore, type ManagedSession } from '../../../../src/session/session-store.js';
+import { MockProxyManagerFactory } from '../../../../src/factories/proxy-manager-factory.js';
+import type { IProxyManager } from '../../../../src/proxy/proxy-manager.js';
 import { DebugLanguage, SessionLifecycleState, SessionState } from '@debugmcp/shared';
 import { DebugSessionCreationError } from '../../../../src/errors/debug-errors.js';
-import { createEnvironmentMock } from '../../../test-utils/mocks/environment.js';
+import {
+  createMockEnvironment,
+  createMockLogger,
+  createMockNetworkManager
+} from '../../../test-utils/helpers/test-dependencies.js';
+import { createMockFileSystem } from '../../../test-utils/helpers/test-utils.js';
+import { createMockAdapterRegistry } from '../../../test-utils/mocks/mock-adapter-registry.js';
+import {
+  createPartialSessionStore,
+  type PartialSessionStoreMock,
+  type ProxyManagerMocks
+} from '../../../test-utils/mocks/session-doubles.js';
 import {
   FakeDebugAdapter,
   type DefinedAttachMembers
 } from '../../../test-utils/fakes/fake-debug-adapter.js';
 import { internals } from '../../../test-utils/helpers/operations-internals.js';
-import type { ManagedSession } from '../../../../src/session/session-store.js';
 import type {
+  AdapterMetadata,
   ExceptionBreakMode,
   GenericAttachConfig,
   LanguageSpecificAttachConfig,
@@ -27,6 +42,21 @@ class TestableSessionManagerOperations extends SessionManagerOperations {
   protected async handleAutoContinue(_sessionId: string): Promise<void> {
     // no-op for tests
   }
+}
+
+/**
+ * Factory metadata as the attach gate reads it: only `modes.attach` is consulted
+ * (attach-controller.ts), so the five required strings are neutral filler.
+ */
+function metadataWithModes(modes: AdapterMetadata['modes']): AdapterMetadata {
+  return {
+    language: 'test',
+    displayName: 'Test Adapter',
+    version: '0.0.0',
+    author: 'test',
+    description: 'test',
+    modes
+  };
 }
 
 /**
@@ -56,14 +86,13 @@ function makeDirectConnectRubyAdapter(
 
 describe('SessionManagerOperations attach modes', () => {
   let operations: SessionManagerOperations;
-  let mockSessionStore: any;
-  let mockProxyManager: any;
-  let mockDependencies: any;
-  let mockSession: any;
+  let mockSessionStore: PartialSessionStoreMock;
+  // Never installed on a ManagedSession here, so just the stubs (see session-doubles.ts).
+  let mockProxyManager: ProxyManagerMocks;
+  let mockDependencies: SessionManagerDependencies;
+  let mockSession: ManagedSession;
 
   beforeEach(() => {
-    const mockLogger = { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() };
-
     mockProxyManager = {
       isRunning: vi.fn().mockReturnValue(true),
       getCurrentThreadId: vi.fn().mockReturnValue(1),
@@ -83,50 +112,39 @@ describe('SessionManagerOperations attach modes', () => {
     mockSession = {
       id: 'test-session',
       name: 'Test Session',
-      language: 'ruby',
+      language: DebugLanguage.RUBY,
       state: SessionState.CREATED,
       sessionLifecycle: SessionLifecycleState.CREATED,
       proxyManager: undefined,
       breakpoints: new Map(),
+      functionBreakpoints: new Map(),
       createdAt: new Date(),
       updatedAt: new Date(),
       executablePath: undefined
     };
 
-    mockSessionStore = {
-      get: vi.fn().mockReturnValue(mockSession),
-      getOrThrow: vi.fn().mockReturnValue(mockSession),
-      update: vi.fn(),
-      updateState: vi.fn().mockImplementation((_sessionId: string, newState: SessionState) => {
-        mockSession.state = newState;
-      }),
-      delete: vi.fn(),
-      remove: vi.fn().mockReturnValue(true),
-      getAll: vi.fn().mockReturnValue([mockSession])
-    };
+    mockSessionStore = createPartialSessionStore(mockSession);
+
+    // Pre-configured helper: pathExists/ensureDir already answer true/undefined.
+    const fileSystem = createMockFileSystem();
+    const networkManager = createMockNetworkManager();
+    vi.mocked(networkManager.findFreePort).mockResolvedValue(9000);
+    const proxyManagerFactory = new MockProxyManagerFactory();
+    // One sanctioned cast: the proxy double is deliberately partial (see ProxyManagerMocks).
+    proxyManagerFactory.createFn = () => mockProxyManager as unknown as IProxyManager;
 
     mockDependencies = {
-      logger: mockLogger,
-      sessionStoreFactory: { create: vi.fn().mockReturnValue(mockSessionStore) },
-      proxyManagerFactory: { create: vi.fn().mockReturnValue(mockProxyManager) },
-      fileSystem: {
-        readFile: vi.fn(),
-        exists: vi.fn(),
-        pathExists: vi.fn().mockResolvedValue(true),
-        ensureDir: vi.fn().mockResolvedValue(undefined),
-        ensureDirSync: vi.fn()
-      },
-      environment: createEnvironmentMock(),
-      networkManager: { findFreePort: vi.fn().mockResolvedValue(9000) },
-      adapterRegistry: {
-        create: vi.fn()
-      }
+      logger: createMockLogger(),
+      fileSystem,
+      networkManager,
+      environment: createMockEnvironment(),
+      adapterRegistry: createMockAdapterRegistry(),
+      proxyManagerFactory,
+      // One sanctioned cast: the store double is deliberately partial (see PartialSessionStore).
+      sessionStoreFactory: { create: vi.fn(() => mockSessionStore as unknown as SessionStore) }
     };
 
-    operations = new TestableSessionManagerOperations(
-      { logDirBase: '/tmp/logs' },
-      mockDependencies as any
-    );
+    operations = new TestableSessionManagerOperations({ logDirBase: '/tmp/logs' }, mockDependencies);
   });
 
   afterEach(() => {
@@ -139,7 +157,7 @@ describe('SessionManagerOperations attach modes', () => {
         throw new Error('ruby not found');
       }
     });
-    mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+    vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapterStub);
 
     await internals(operations).proxyLauncher.start(mockSession, {
       scriptPath: 'attach://remote',
@@ -154,13 +172,13 @@ describe('SessionManagerOperations attach modes', () => {
   });
 
   it('still resolves the local toolchain for spawn-mode attach', async () => {
-    mockSession.language = 'java';
+    mockSession.language = DebugLanguage.JAVA;
     const adapterStub = new FakeDebugAdapter({
       language: DebugLanguage.JAVA,
       resolveExecutablePath: async () => 'java',
       buildAdapterCommand: () => ({ command: 'java', args: [] })
     }).withAttachSupport();
-    mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+    vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapterStub);
 
     await internals(operations).proxyLauncher.start(mockSession, {
       scriptPath: 'attach://remote',
@@ -175,10 +193,10 @@ describe('SessionManagerOperations attach modes', () => {
   });
 
   it("fails attach fast with a clean error when the adapter declares attach 'none'", async () => {
-    mockSession.language = 'rust';
-    mockDependencies.adapterRegistry.getFactoryMetadata = vi
-      .fn()
-      .mockResolvedValue({ modes: { launch: true, attach: 'none' } });
+    mockSession.language = DebugLanguage.RUST;
+    vi.mocked(mockDependencies.adapterRegistry.getFactoryMetadata).mockResolvedValue(
+      metadataWithModes({ launch: true, attach: 'none' })
+    );
 
     const result = await operations.attachToProcess('test-session', { port: 1234 });
 
@@ -194,11 +212,11 @@ describe('SessionManagerOperations attach modes', () => {
   });
 
   it('proceeds past the gate when the adapter declares a real attach mechanism', async () => {
-    mockDependencies.adapterRegistry.getFactoryMetadata = vi
-      .fn()
-      .mockResolvedValue({ modes: { launch: true, attach: 'direct-connect' } });
+    vi.mocked(mockDependencies.adapterRegistry.getFactoryMetadata).mockResolvedValue(
+      metadataWithModes({ launch: true, attach: 'direct-connect' })
+    );
     const adapterStub = makeDirectConnectRubyAdapter();
-    mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+    vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapterStub);
     // Only the gate is under test — let the post-start attach verification fail fast
     mockProxyManager.start.mockRejectedValue(new Error('stop here'));
 
@@ -216,11 +234,11 @@ describe('SessionManagerOperations attach modes', () => {
 
   describe('adapterConfig passthrough (issue #336)', () => {
     it('attachToProcess merges adapterConfig into the config handed to transformAttachConfig', async () => {
-      mockDependencies.adapterRegistry.getFactoryMetadata = vi
-        .fn()
-        .mockResolvedValue({ modes: { launch: true, attach: 'direct-connect' } });
+      vi.mocked(mockDependencies.adapterRegistry.getFactoryMetadata).mockResolvedValue(
+        metadataWithModes({ launch: true, attach: 'direct-connect' })
+      );
       const adapterStub = makeDirectConnectRubyAdapter();
-      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapterStub);
 
       const result = await operations.attachToProcess('test-session', {
         host: '127.0.0.1',
@@ -255,11 +273,11 @@ describe('SessionManagerOperations attach modes', () => {
       // The proxy worker re-reads request/__attachMode from the merged config
       // to choose the DAP sequence AND shutdown semantics (attach must detach
       // with terminateDebuggee=false) — extras must never rewrite them.
-      mockDependencies.adapterRegistry.getFactoryMetadata = vi
-        .fn()
-        .mockResolvedValue({ modes: { launch: true, attach: 'direct-connect' } });
+      vi.mocked(mockDependencies.adapterRegistry.getFactoryMetadata).mockResolvedValue(
+        metadataWithModes({ launch: true, attach: 'direct-connect' })
+      );
       const adapterStub = makeDirectConnectRubyAdapter();
-      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapterStub);
 
       await operations.attachToProcess('test-session', {
         host: '127.0.0.1',
@@ -282,7 +300,7 @@ describe('SessionManagerOperations attach modes', () => {
         // Declared but answering "no": not the same as never being asked.
         supportsAttach: () => false
       });
-      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapterStub);
 
       await internals(operations).proxyLauncher.start(mockSession, {
         scriptPath: 'script.rb',
@@ -312,9 +330,9 @@ describe('SessionManagerOperations attach modes', () => {
     }
 
     beforeEach(() => {
-      mockDependencies.adapterRegistry.getFactoryMetadata = vi
-        .fn()
-        .mockResolvedValue({ modes: { launch: true, attach: 'direct-connect' } });
+      vi.mocked(mockDependencies.adapterRegistry.getFactoryMetadata).mockResolvedValue(
+        metadataWithModes({ launch: true, attach: 'direct-connect' })
+      );
     });
 
     it('surfaces adapterConfig keys the attach transform dropped in data.warning', async () => {
@@ -322,7 +340,7 @@ describe('SessionManagerOperations attach modes', () => {
         request: 'attach',
         keepMe: (cfg as Record<string, unknown>).keepMe
       }));
-      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapterStub);
 
       const result = await operations.attachToProcess('test-session', {
         host: '127.0.0.1',
@@ -343,7 +361,7 @@ describe('SessionManagerOperations attach modes', () => {
 
     it('emits no warning when the transform preserves every adapterConfig key', async () => {
       const adapterStub = makeDirectConnectAdapter((cfg) => cfg);
-      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapterStub);
 
       const result = await operations.attachToProcess('test-session', {
         host: '127.0.0.1',
@@ -363,7 +381,7 @@ describe('SessionManagerOperations attach modes', () => {
         request: 'attach',
         connect: { host: '127.0.0.1', port: 12345 }
       }));
-      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapterStub);
 
       const result = await operations.attachToProcess('test-session', {
         host: '127.0.0.1',
@@ -380,7 +398,7 @@ describe('SessionManagerOperations attach modes', () => {
         (cfg) => cfg,
         ['pathMappings', 'justMyCode']
       );
-      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapterStub);
 
       const result = await operations.attachToProcess('test-session', {
         host: '127.0.0.1',
@@ -406,7 +424,7 @@ describe('SessionManagerOperations attach modes', () => {
         (cfg) => ({ request: 'attach', keepMe: (cfg as Record<string, unknown>).keepMe }),
         ['keepMe', 'alsoSupported']
       );
-      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapterStub);
 
       const result = await operations.attachToProcess('test-session', {
         host: '127.0.0.1',
@@ -429,7 +447,7 @@ describe('SessionManagerOperations attach modes', () => {
         },
         ['keepMe']
       );
-      mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapterStub);
 
       const result = await operations.attachToProcess('test-session', {
         host: '127.0.0.1',
@@ -448,7 +466,7 @@ describe('SessionManagerOperations attach modes', () => {
 
     it('does not leak a stale warning into a later attach on the same session', async () => {
       const dropAll = makeDirectConnectAdapter(() => ({ request: 'attach' }));
-      mockDependencies.adapterRegistry.create.mockResolvedValue(dropAll);
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(dropAll);
 
       const first = await operations.attachToProcess('test-session', {
         host: '127.0.0.1',
@@ -462,7 +480,7 @@ describe('SessionManagerOperations attach modes', () => {
       mockSession.proxyManager = undefined;
       mockSession.state = SessionState.CREATED;
       const identity = makeDirectConnectAdapter((cfg) => cfg);
-      mockDependencies.adapterRegistry.create.mockResolvedValue(identity);
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(identity);
 
       const second = await operations.attachToProcess('test-session', {
         host: '127.0.0.1',
@@ -475,10 +493,10 @@ describe('SessionManagerOperations attach modes', () => {
 
   describe('post-attach breakpoint re-sync (issue #500)', () => {
     beforeEach(() => {
-      mockDependencies.adapterRegistry.getFactoryMetadata = vi
-        .fn()
-        .mockResolvedValue({ modes: { launch: true, attach: 'direct-connect' } });
-      mockDependencies.adapterRegistry.create.mockResolvedValue(makeDirectConnectRubyAdapter());
+      vi.mocked(mockDependencies.adapterRegistry.getFactoryMetadata).mockResolvedValue(
+        metadataWithModes({ launch: true, attach: 'direct-connect' })
+      );
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(makeDirectConnectRubyAdapter());
     });
 
     it('re-sends every queued breakpoint file with forceFreshEcho after a successful attach', async () => {
@@ -497,11 +515,14 @@ describe('SessionManagerOperations attach modes', () => {
         (c: unknown[]) => c[0] === 'setBreakpoints'
       );
       expect(sbCalls).toHaveLength(2);
+      // `mock.calls` of a bare vi.fn is `any[][]`, so naming the argument shape
+      // here is an annotation on an `any`, not an assertion.
+      type SetBreakpointsArgs = { source: { path: string }; breakpoints: unknown[]; __mcpForceFreshEcho?: boolean };
       const byPath = Object.fromEntries(
-        sbCalls.map((c: [string, { source: { path: string }; breakpoints: unknown[]; __mcpForceFreshEcho?: boolean }]) => [
-          c[1].source.path,
-          c[1]
-        ])
+        sbCalls.map((c): [string, SetBreakpointsArgs] => {
+          const args: SetBreakpointsArgs = c[1];
+          return [args.source.path, args];
+        })
       );
       expect(byPath['/abs/app.js'].breakpoints).toHaveLength(2);
       expect(byPath['/abs/lib.js'].breakpoints).toHaveLength(1);
@@ -549,7 +570,7 @@ describe('SessionManagerOperations attach modes', () => {
         throw new Error('ruby not found');
       }
     }).withAttachSupport();
-    mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+    vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapterStub);
 
     await expect(
       internals(operations).proxyLauncher.start(mockSession, { scriptPath: 'script.rb' })
@@ -557,14 +578,14 @@ describe('SessionManagerOperations attach modes', () => {
   });
 
   it('omits the attach hint when the adapter has no attach support', async () => {
-    mockSession.language = 'go';
+    mockSession.language = DebugLanguage.GO;
     const adapterStub = new FakeDebugAdapter({
       language: DebugLanguage.GO,
       resolveExecutablePath: async () => {
         throw new Error('go not found');
       }
     });
-    mockDependencies.adapterRegistry.create.mockResolvedValue(adapterStub);
+    vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapterStub);
 
     const failure = await internals(operations).proxyLauncher
       .start(mockSession, { scriptPath: 'main.go' })

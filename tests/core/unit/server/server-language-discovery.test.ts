@@ -5,14 +5,17 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import type { IAdapterRegistry } from '@debugmcp/shared';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
-import { createProductionDependencies } from '../../../../src/container/dependencies.js';
+import { createProductionDependencies, type Dependencies } from '../../../../src/container/dependencies.js';
 import {
   createMockDependencies,
   createMockServer,
   createMockSessionManager,
-  getToolHandlers
+  getToolHandlers,
+  type MockServer,
+  type MockSessionManager
 } from './server-test-helpers.js';
 
 // Mock dependencies
@@ -23,10 +26,10 @@ vi.mock('../../../../src/container/dependencies.js');
 
 describe('Server Language Discovery Tests', () => {
   let debugServer: DebugMcpServer;
-  let mockServer: any;
-  let mockSessionManager: any;
-  let mockDependencies: any;
-  let mockAdapterRegistry: any;
+  let mockServer: MockServer;
+  let mockSessionManager: MockSessionManager;
+  let mockDependencies: Dependencies;
+  let mockAdapterRegistry: IAdapterRegistry;
 
   beforeEach(() => {
     mockDependencies = createMockDependencies();
@@ -48,8 +51,9 @@ describe('Server Language Discovery Tests', () => {
       create: vi.fn(),
       register: vi.fn()
     };
-    mockDependencies.adapterRegistry = mockAdapterRegistry;
 
+    // The server reads the registry off the SessionManager (getAdapterRegistry
+    // returns sessionManager.adapterRegistry), never off the dependency bag.
     mockSessionManager = createMockSessionManager(mockAdapterRegistry);
     vi.mocked(SessionManager).mockImplementation(function() { return mockSessionManager as any; });
   });
@@ -370,9 +374,9 @@ describe('Server Language Discovery Tests', () => {
     });
 
     it('should handle undefined adapter registry gracefully', async () => {
-      mockDependencies.adapterRegistry = undefined;
-      mockSessionManager = createMockSessionManager(undefined);
-      vi.mocked(SessionManager).mockImplementation(function() { return mockSessionManager as any; });
+      // discoverSupportedLanguages guards a missing registry; the server reads it off
+      // the session manager. Delete the key rather than widen the doubles' types.
+      Reflect.deleteProperty(mockSessionManager, 'adapterRegistry');
 
       debugServer = new DebugMcpServer();
       const { callToolHandler } = getToolHandlers(mockServer);
@@ -679,7 +683,7 @@ describe('Server Language Discovery Tests', () => {
 
   describe('start_debugging with language support validation', () => {
     beforeEach(() => {
-      mockSessionManager.getSessionById = vi.fn().mockReturnValue({
+      mockSessionManager.getSession = vi.fn().mockReturnValue({
         id: 'session-123',
         language: 'python',
         state: { lifecycleState: 'READY' }
@@ -687,11 +691,9 @@ describe('Server Language Discovery Tests', () => {
       mockSessionManager.startDebugging = vi.fn().mockResolvedValue({ success: true });
     });
 
-    it('should validate language support before starting debugging', async () => {
+    it('starts debugging for a READY session', async () => {
       debugServer = new DebugMcpServer();
       const { callToolHandler } = getToolHandlers(mockServer);
-
-      mockAdapterRegistry.listLanguages = vi.fn().mockResolvedValue(['python', 'mock']);
 
       const result = await callToolHandler({
         method: 'tools/call',
@@ -706,22 +708,29 @@ describe('Server Language Discovery Tests', () => {
 
       expect(result.content[0].type).toBe('text');
       const content = JSON.parse(result.content[0].text);
-      // startDebugging is mocked to resolve successfully; assert only that the response carries a success field.
-      expect(content.success).toBeDefined();
+      expect(content.success).toBe(true);
+      expect(mockSessionManager.startDebugging).toHaveBeenCalledWith(
+        'session-123',
+        '/path/to/script.py',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined
+      );
     });
 
-    it('should handle dynamic language discovery for session language', async () => {
+    it('starts debugging without re-validating the session language', async () => {
       debugServer = new DebugMcpServer();
       const { callToolHandler } = getToolHandlers(mockServer);
 
-      // Session has a language not in static list but should be discovered dynamically
-      mockSessionManager.getSessionById = vi.fn().mockReturnValue({
+      // A session language outside the default list: start_debugging does not
+      // re-validate it (create_debug_session does), so the launch goes through.
+      mockSessionManager.getSession = vi.fn().mockReturnValue({
         id: 'session-123',
         language: 'javascript',
         state: { lifecycleState: 'READY' }
       });
-
-      mockAdapterRegistry.listLanguages = vi.fn().mockResolvedValue(['python', 'mock', 'javascript']);
 
       const result = await callToolHandler({
         method: 'tools/call',
@@ -736,20 +745,36 @@ describe('Server Language Discovery Tests', () => {
 
       expect(result.content[0].type).toBe('text');
       const content = JSON.parse(result.content[0].text);
-      // startDebugging is mocked to resolve successfully; assert only that the response carries a success field.
-      expect(content.success).toBeDefined();
+      expect(content.success).toBe(true);
+      expect(mockSessionManager.startDebugging).toHaveBeenCalledWith(
+        'session-123',
+        '/path/to/script.js',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined
+      );
     });
   });
 
   describe('adapter registry interaction edge cases', () => {
-    it('should handle registry with missing methods gracefully', async () => {
-      debugServer = new DebugMcpServer();
-      const { callToolHandler } = getToolHandlers(mockServer);
-
-      // Create registry without listLanguages method
-      mockDependencies.adapterRegistry = {
+    it('falls back to getSupportedLanguages when listLanguages is absent', async () => {
+      // discoverSupportedLanguages keeps a runtime guard on `listLanguages` for
+      // partial registry doubles (src/server/language-discovery.ts); the
+      // fallback is `getSupportedLanguages?.()`. A clone of the beforeEach
+      // registry with the key removed exercises that branch, and the fallback
+      // answer differs from listLanguages' ['python', 'mock'] on purpose so the
+      // assertion can tell which branch produced it.
+      const registryWithoutListLanguages: IAdapterRegistry = {
+        ...mockAdapterRegistry,
         getSupportedLanguages: vi.fn().mockReturnValue(['python'])
       };
+      Reflect.deleteProperty(registryWithoutListLanguages, 'listLanguages');
+      mockSessionManager.adapterRegistry = registryWithoutListLanguages;
+
+      debugServer = new DebugMcpServer();
+      const { callToolHandler } = getToolHandlers(mockServer);
 
       const result = await callToolHandler({
         method: 'tools/call',
@@ -761,10 +786,15 @@ describe('Server Language Discovery Tests', () => {
 
       expect(result.content[0].type).toBe('text');
       const content = JSON.parse(result.content[0].text);
-      // The mock adapter registry still returns both languages
       const languageIds = content.languages.map((lang: any) => lang.id);
-      expect(languageIds).toContain('python');
-      expect(languageIds).toContain('mock');
+      expect(languageIds).toEqual(['python']);
+      expect(registryWithoutListLanguages.getSupportedLanguages).toHaveBeenCalled();
+      // The guard, not the catch, took the fallback: a partial registry is a
+      // legitimate shape, not a discovery failure worth a warning.
+      expect(mockDependencies.logger.warn).not.toHaveBeenCalledWith(
+        expect.stringContaining('Dynamic adapter language discovery failed'),
+        expect.anything()
+      );
     });
 
     it('should handle registry method exceptions', async () => {
