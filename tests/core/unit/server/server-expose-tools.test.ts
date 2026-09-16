@@ -12,6 +12,7 @@ import {
   createMockServer,
   createMockSessionManager,
   createMockStdioTransport,
+  findTool,
   getToolHandlers,
   type CallToolHandler,
   type ListToolsHandler,
@@ -67,10 +68,7 @@ describe('expose_session and unexpose_session tools', () => {
       expect(toolNames).toContain('unexpose_session');
 
       for (const name of ['expose_session', 'unexpose_session']) {
-        const tool = result.tools.find((t) => t.name === name);
-        if (!tool) {
-          throw new Error(`${name} is not in tools/list`);
-        }
+        const tool = await findTool(listToolsHandler, name);
         expect(tool.inputSchema.required).toEqual(['sessionId']);
         expect(Object.keys(tool.inputSchema.properties ?? {})).toEqual(['sessionId']);
       }

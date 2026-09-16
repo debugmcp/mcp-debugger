@@ -18,6 +18,7 @@ import {
   createMockServer,
   createMockSessionManager,
   createMockStdioTransport,
+  findTool,
   getToolHandlers,
   type CallToolHandler,
   type ListToolsHandler,
@@ -199,12 +200,7 @@ describe('set_breakpoint function gating (#271 phase 3)', () => {
   });
 
   async function getSetBreakpointSchema() {
-    const { tools } = await listToolsHandler({ method: 'tools/list', params: {} });
-    const tool = tools.find((t) => t.name === 'set_breakpoint');
-    if (!tool) {
-      throw new Error('set_breakpoint is not in tools/list');
-    }
-    const { properties = {}, required = [] } = tool.inputSchema;
+    const { properties = {}, required = [] } = (await findTool(listToolsHandler, 'set_breakpoint')).inputSchema;
     return { properties, required };
   }
 

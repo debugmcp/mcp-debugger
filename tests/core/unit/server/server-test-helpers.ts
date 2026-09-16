@@ -115,9 +115,19 @@ export type ListToolsHandler = (request?: TestRequest) => Promise<{ tools: Tool[
  * checked against the real return type instead.
  */
 export function createMockSessionManager(mockAdapterRegistry: IAdapterRegistry) {
-  // Hoisted: getVariablesDetailed delegates to it, and a self-reference inside
-  // the literal would be a TS7022 circularity once the literal is inferred.
-  const getVariables = vi.fn();
+  /**
+   * Late-bound on purpose: it reads `manager.getVariables` at call time, so a
+   * test that REASSIGNS `mockSessionManager.getVariables = vi.fn()...` (the
+   * idiom the server tests use for getSession/startDebugging) still feeds the
+   * detailed variant. A function declaration hoists past the literal, and the
+   * explicit return annotation is what keeps the self-reference from being a
+   * TS7022 circularity.
+   */
+  async function delegateToGetVariables(
+    ...args: Parameters<SessionManager['getVariablesDetailed']>
+  ): ReturnType<SessionManager['getVariablesDetailed']> {
+    return { variables: (await manager.getVariables(...args)) ?? [] };
+  }
   const manager = {
     createSession: vi.fn(),
     getAllSessions: vi.fn(),
@@ -153,15 +163,11 @@ export function createMockSessionManager(mockAdapterRegistry: IAdapterRegistry) 
     stepInto: vi.fn(),
     stepOut: vi.fn(),
     continue: vi.fn(),
-    getVariables,
+    getVariables: vi.fn(),
     // Delegates to getVariables so existing tests that stub/assert on
     // getVariables keep working now that the tool handler calls the
     // detailed variant (issues #356/#359).
-    getVariablesDetailed: vi.fn<SessionManager['getVariablesDetailed']>(
-      async (sessionId, variablesReference, names) => ({
-        variables: (await getVariables(sessionId, variablesReference, names)) ?? []
-      })
-    ),
+    getVariablesDetailed: vi.fn<SessionManager['getVariablesDetailed']>(delegateToGetVariables),
     getLocalVariables: vi.fn(),
     getStackTrace: vi.fn(),
     getStackTraceDetailed: vi.fn().mockResolvedValue({
@@ -240,6 +246,20 @@ function findHandler(mockServer: MockServer, schema: unknown): unknown {
 // The `as <Handler>` casts below are the one sanctioned cast per lookup:
 // `mock.calls` of an untyped `vi.fn` is `any[]`, so the registered handler
 // comes back as `unknown` and only the schema identity says which it is.
+/**
+ * One tool out of `tools/list`, or a thrown error naming it: a schema test
+ * must fail on a missing tool rather than let `toBeUndefined()` pass
+ * vacuously on `undefined.inputSchema`.
+ */
+export async function findTool(listToolsHandler: ListToolsHandler, name: string): Promise<Tool> {
+  const { tools } = await listToolsHandler({ method: 'tools/list', params: {} });
+  const tool = tools.find((t) => t.name === name);
+  if (!tool) {
+    throw new Error(`${name} is not in tools/list`);
+  }
+  return tool;
+}
+
 export function getToolHandlers(mockServer: MockServer) {
   return {
     listToolsHandler: findHandler(mockServer, ListToolsRequestSchema) as ListToolsHandler,

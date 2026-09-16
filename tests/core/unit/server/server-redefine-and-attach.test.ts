@@ -15,6 +15,7 @@ import {
   createMockServer,
   createMockSessionManager,
   createMockStdioTransport,
+  findTool,
   getToolHandlers,
   type CallToolHandler,
   type ListToolsHandler,
@@ -100,11 +101,7 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
     });
 
     it('should have correct input schema', async () => {
-      const result = await listToolsHandler({ method: 'tools/list', params: {} });
-      const tool = result.tools.find((t) => t.name === 'redefine_classes');
-      if (!tool) {
-        throw new Error('redefine_classes is not in tools/list');
-      }
+      const tool = await findTool(listToolsHandler, 'redefine_classes');
       expect(tool.inputSchema.required).toContain('sessionId');
       expect(tool.inputSchema.required).toContain('classesDir');
       expect(tool.inputSchema.properties?.sinceTimestamp).toBeDefined();
@@ -112,11 +109,7 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
     });
 
     it('evaluate_expression schema should expose a timeout property', async () => {
-      const result = await listToolsHandler({ method: 'tools/list', params: {} });
-      const tool = result.tools.find((t) => t.name === 'evaluate_expression');
-      if (!tool) {
-        throw new Error('evaluate_expression is not in tools/list');
-      }
+      const tool = await findTool(listToolsHandler, 'evaluate_expression');
       expect(tool.inputSchema.properties?.timeout).toBeDefined();
     });
   });

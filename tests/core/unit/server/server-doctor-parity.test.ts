@@ -109,8 +109,9 @@ describe('doctor / list_supported_languages availability parity (issue #435)', (
       return mockServer as never;
     });
 
+    // The server reads the registry off the (mocked) SessionManager, never
+    // off the dependency bag, so it is handed to the session-manager double.
     const registry = buildSharedRegistry();
-    mockDependencies.adapterRegistry = registry;
     const mockSessionManager = createMockSessionManager(registry);
     vi.mocked(SessionManager).mockImplementation(function () {
       return mockSessionManager as never;
