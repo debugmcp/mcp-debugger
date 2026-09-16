@@ -491,7 +491,7 @@ The loader:
 - [ ] Registered in root `package.json` optionalDependencies
 - [ ] Added to known adapters list in `src/adapters/adapter-loader.ts`
 - [ ] Vitest alias added in `vitest.config.ts`
-- [ ] `pnpm --filter @debugmcp/adapter-<language> test` passes from the package directory (no package-local vitest config)
+- [ ] If the package has its own tests under `packages/adapter-<language>/tests/`, `pnpm --filter @debugmcp/adapter-<language> test` passes from the package directory (no package-local vitest config; a package whose tests all live under `tests/adapters/<language>/` has nothing to run there)
 - [ ] Adapter count assertions updated in tests
 - [ ] Unit and integration tests written under `tests/adapters/<language>/`
 - [ ] The new policy passes `tests/unit/shared/adapter-policy-contract.test.ts` — the cross-policy contract that runs against the real policies via `getPolicyForLanguage`. Its pinned capability table is a deliberate duplicate of what the policies declare, so a new language means editing that table on purpose
