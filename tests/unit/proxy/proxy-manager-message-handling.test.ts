@@ -14,7 +14,7 @@ import { TestProxyManager } from '../test-utils/test-proxy-manager.js';
 import { ProxyConfig } from '../../../src/proxy/proxy-config.js';
 import { DebugLanguage, type IProxyProcess } from '@debugmcp/shared';
 import { FakeDebugAdapter } from '../../test-utils/fakes/fake-debug-adapter.js';
-import { createMockLogger, createMockFileSystem } from '../test-utils/mock-factories.js';
+import { createMockLogger, createMockFileSystem } from '../../test-utils/helpers/test-dependencies.js';
 import { ProxyManager } from '../../../src/proxy/proxy-manager.js';
 import { createInitialState } from '../../../src/dap-core/index.js';
 
@@ -231,13 +231,13 @@ describe('ProxyManager Message Handling', () => {
       });
 
       const allLogged = JSON.stringify([
-        ...mockLogger.debug.mock.calls,
-        ...mockLogger.info.mock.calls,
-        ...mockLogger.warn.mock.calls,
-        ...mockLogger.error.mock.calls
+        ...vi.mocked(mockLogger.debug).mock.calls,
+        ...vi.mocked(mockLogger.info).mock.calls,
+        ...vi.mocked(mockLogger.warn).mock.calls,
+        ...vi.mocked(mockLogger.error).mock.calls
       ]);
       expect(allLogged).not.toContain(token);
-      expect(JSON.stringify(mockLogger.debug.mock.calls)).toContain('[REDACTED]');
+      expect(JSON.stringify(vi.mocked(mockLogger.debug).mock.calls)).toContain('[REDACTED]');
     });
 
     it('should update currentThreadId when stopped event includes threadId', () => {
@@ -570,7 +570,7 @@ describe('ProxyManager Message Handling', () => {
       const proxyManager = new ProxyManager(
         null,
         { launchProxy: vi.fn() } as never,
-        fileSystem as never,
+        fileSystem,
         logger
       );
 
@@ -768,7 +768,7 @@ describe('ProxyManager Message Handling', () => {
       const proxyManager = new ProxyManager(
         null,
         { launchProxy: vi.fn() } as never,
-        fileSystem as never,
+        fileSystem,
         logger
       );
 
@@ -801,7 +801,7 @@ describe('ProxyManager Message Handling', () => {
       const proxyManager = new ProxyManager(
         null,
         { launchProxy: vi.fn() } as never,
-        fileSystem as never,
+        fileSystem,
         logger
       );
       const sendCommand = vi.fn();
@@ -874,7 +874,7 @@ describe('ProxyManager Message Handling', () => {
     it('throws helpful error when proxy bootstrap is missing', async () => {
       const logger = createMockLogger();
       const fileSystem = createMockFileSystem();
-      fileSystem.pathExists.mockResolvedValue(false);
+      vi.mocked(fileSystem.pathExists).mockResolvedValue(false);
 
       const runtimeEnv = {
         moduleUrl: pathToFileURL(path.join(process.cwd(), 'fake', 'src', 'proxy', 'proxy-manager.ts')).href,
@@ -884,7 +884,7 @@ describe('ProxyManager Message Handling', () => {
       const proxyManager = new ProxyManager(
         null,
         { launchProxy: vi.fn() } as never,
-        fileSystem as never,
+        fileSystem,
         logger,
         runtimeEnv
       );
@@ -910,7 +910,7 @@ describe('ProxyManager Message Handling', () => {
       const proxyManager = new ProxyManager(
         null,
         { launchProxy: vi.fn() } as never,
-        fileSystem as never,
+        fileSystem,
         logger
       );
 
@@ -951,7 +951,7 @@ describe('ProxyManager Message Handling', () => {
       const proxyManager = new ProxyManager(
         adapter,
         { launchProxy: vi.fn() } as never,
-        fileSystem as never,
+        fileSystem,
         logger
       );
 
@@ -992,7 +992,7 @@ describe('ProxyManager Message Handling', () => {
       const proxyManager = new ProxyManager(
         adapter,
         { launchProxy: vi.fn() } as never,
-        fileSystem as never,
+        fileSystem,
         logger
       );
 
@@ -1041,7 +1041,7 @@ describe('ProxyManager Message Handling', () => {
       const proxyManager = new ProxyManager(
         adapter,
         { launchProxy: vi.fn() } as never,
-        fileSystem as never,
+        fileSystem,
         logger
       );
 
@@ -1090,7 +1090,7 @@ describe('ProxyManager Message Handling', () => {
       const proxyManager = new ProxyManager(
         adapter,
         { launchProxy: vi.fn() } as never,
-        fileSystem as never,
+        fileSystem,
         logger
       );
 
@@ -1150,7 +1150,7 @@ describe('ProxyManager Message Handling', () => {
       const proxyManager = new ProxyManager(
         adapter,
         { launchProxy: vi.fn() } as never,
-        fileSystem as never,
+        fileSystem,
         logger
       );
 
@@ -1187,7 +1187,7 @@ describe('ProxyManager Message Handling', () => {
       const proxyManager = new ProxyManager(
         null,
         { launchProxy: vi.fn() } as never,
-        fileSystem as never,
+        fileSystem,
         logger
       );
 
@@ -1212,7 +1212,7 @@ describe('ProxyManager Message Handling', () => {
       const proxyManager = new ProxyManager(
         null,
         { launchProxy: vi.fn() } as never,
-        fileSystem as never,
+        fileSystem,
         logger
       );
 
@@ -1239,7 +1239,7 @@ describe('ProxyManager Message Handling', () => {
       const proxyManager = new ProxyManager(
         null,
         { launchProxy: vi.fn() } as never,
-        fileSystem as never,
+        fileSystem,
         logger
       );
 
@@ -1264,7 +1264,7 @@ describe('ProxyManager Message Handling', () => {
       const proxyManager = new ProxyManager(
         null,
         { launchProxy: vi.fn() } as never,
-        fileSystem as never,
+        fileSystem,
         logger
       );
 
@@ -1290,7 +1290,7 @@ describe('ProxyManager Message Handling', () => {
       const proxyManager = new ProxyManager(
         null,
         { launchProxy: vi.fn() } as never,
-        fileSystem as never,
+        fileSystem,
         logger
       );
       // Arm the functional core so the message reaches the dap-core executor
@@ -1319,7 +1319,7 @@ describe('ProxyManager Message Handling', () => {
       const proxyManager = new ProxyManager(
         null,
         { launchProxy: vi.fn() } as never,
-        fileSystem as never,
+        fileSystem,
         logger
       );
 
@@ -1349,7 +1349,7 @@ describe('ProxyManager Message Handling', () => {
       const proxyManager = new ProxyManager(
         null,
         { launchProxy: vi.fn() } as never,
-        fileSystem as never,
+        fileSystem,
         logger
       );
 

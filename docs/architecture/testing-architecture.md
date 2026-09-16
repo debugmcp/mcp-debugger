@@ -140,7 +140,7 @@ Each returns a full `IAdapterRegistry` with `vi.fn()` methods. Helper functions:
 
 **`MockChildProcess` / `ChildProcessMock`** (`child-process.ts`) — `MockChildProcess` extends `EventEmitter` with `kill`, `send`, `pid`, `killed`, and streams. Helpers: `simulateExit()`, `simulateError()`, `simulateStdout()`, `simulateStderr()`, `simulateMessage()`. The outer `ChildProcessMock` wraps `spawn`, `exec`, `execSync`, `fork` with domain-specific setup methods: `setupPythonSpawnMock()`, `setupPythonVersionCheckMock()`, `setupProxySpawnMock()`.
 
-**Other mocks**: `createMockLogger()` (simple `vi.fn()` stubs for `info`/`error`/`debug`/`warn`), `MockCommandFinder` (per-command path mappings with call history), `createEnvironmentMock()` (defaults `MCP_CONTAINER` to `'false'` for host mode), minimal `fs-extra` and `net` mocks.
+**Other mocks**: `createMockLogger()` (simple `vi.fn()` stubs for `info`/`error`/`debug`/`warn`), `MockCommandFinder` (per-command path mappings with call history), minimal `fs-extra` and `net` mocks. Environment doubles come from `createMockEnvironment()` in `tests/test-utils/helpers/test-dependencies.ts` (a full `IEnvironment` that falls through to `process.env`).
 
 ### Fake Implementations
 
