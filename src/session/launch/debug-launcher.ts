@@ -39,6 +39,24 @@ import { waitForLaunchReadiness } from './launch-readiness.js';
 import type { ProxyLauncher } from './proxy-launcher.js';
 import type { InFlightGuard } from '../in-flight-guard.js';
 
+/**
+ * The `noDebug` the adapter will see. The proxy launcher merges
+ * adapterLaunchConfig over dapLaunchArgs over the server defaults; a warning
+ * decided from dapLaunchArgs alone would miss a flag set (or unset) by either
+ * of the other two.
+ */
+function resolveNoDebug(
+  defaults: Partial<CustomLaunchRequestArguments>,
+  dapLaunchArgs: Partial<CustomLaunchRequestArguments> | undefined,
+  adapterLaunchConfig: Record<string, unknown> | undefined
+): boolean {
+  const fromAdapterConfig = adapterLaunchConfig?.noDebug;
+  if (typeof fromAdapterConfig === 'boolean') {
+    return fromAdapterConfig;
+  }
+  return (dapLaunchArgs?.noDebug ?? defaults.noDebug) === true;
+}
+
 export class DebugLauncher {
   constructor(
     private readonly ctx: LaunchContext,
@@ -222,16 +240,43 @@ export class DebugLauncher {
       };
     }
 
-    // noDebug disables the debugger, so nothing the caller asked to stop on
-    // can fire (issue #710). Decided here, before the dry-run branch, from the
-    // caller's own breakOnExceptions rather than the policy default resolved
-    // below: a dry run is a configuration check and a restart replays the
-    // same arguments, and both should say so.
-    const noDebugWarning = buildNoDebugLaunchWarning(session, dapLaunchArgs, breakOnExceptions);
+    // noDebug (issue #710). Whether the flag turns the debugger off is the
+    // policy's word, measured per adapter: where it does, nothing the caller
+    // asked to stop on can fire and the breakpoint-shaped launch warnings
+    // below are withheld; where the adapter ignores it, the warning says so
+    // instead. Decided here, before the dry-run branch, from the caller's own
+    // breakOnExceptions rather than the policy default resolved below: a dry
+    // run is a configuration check and a restart replays the same arguments,
+    // and both should say so.
+    const policy = this.ctx.selectPolicy(session.language);
+    const noDebug = resolveNoDebug(this.ctx.defaultDapLaunchArgs, dapLaunchArgs, adapterLaunchConfig);
+    const honoursNoDebug = policy.honoursNoDebug === true;
+    const debuggerOff = noDebug && honoursNoDebug;
+    const noDebugWarning = buildNoDebugLaunchWarning(
+      session,
+      { noDebug, stopOnEntry: dapLaunchArgs?.stopOnEntry },
+      breakOnExceptions,
+      honoursNoDebug
+    );
+    // With the debugger off an entry stop cannot come, so readiness must not
+    // wait for one — the launch would sit on the readiness ceiling instead.
+    const readinessArgs = debuggerOff ? { ...dapLaunchArgs, stopOnEntry: false } : dapLaunchArgs;
 
     try {
       // For dry run, start the proxy and wait for completion
       if (dryRunSpawn) {
+        const dryRunResult = (snapshot: { command?: string; script?: string } | undefined): DebugResult => ({
+          success: true,
+          state: SessionState.STOPPED,
+          data: {
+            ...(noDebugWarning ? { warning: noDebugWarning } : {}),
+            dryRun: true,
+            message: 'Dry run spawn command logged by proxy.',
+            command: snapshot?.command,
+            script: snapshot?.script,
+          },
+        });
+
         // Mark that we're setting up a dry run handler
         const sessionWithSetup = session as ManagedSession & { _dryRunHandlerSetup?: boolean };
         sessionWithSetup._dryRunHandlerSetup = true;
@@ -264,17 +309,7 @@ export class DebugLauncher {
           );
           delete sessionWithSetup._dryRunHandlerSetup;
 
-          return {
-            success: true,
-            state: SessionState.STOPPED,
-            data: {
-              ...(noDebugWarning ? { warning: noDebugWarning } : {}),
-              dryRun: true,
-              message: 'Dry run spawn command logged by proxy.',
-              command: initialDryRunSnapshot?.command,
-              script: initialDryRunSnapshot?.script,
-            },
-          };
+          return dryRunResult(initialDryRunSnapshot);
         }
 
         // Wait for completion with timeout
@@ -301,17 +336,7 @@ export class DebugLauncher {
             `[SessionManager] Dry run completed for session ${sessionId}, final state: ${latestSessionState.state}`
           );
 
-          return {
-            success: true,
-            state: SessionState.STOPPED,
-            data: {
-              ...(noDebugWarning ? { warning: noDebugWarning } : {}),
-              dryRun: true,
-              message: 'Dry run spawn command logged by proxy.',
-              command: latestSnapshot?.command,
-              script: latestSnapshot?.script,
-            },
-          };
+          return dryRunResult(latestSnapshot);
         } else {
           // Timeout occurred. The state is read once: the log read below is
           // an await, and a late dry-run-complete/exit landing during it must
@@ -381,7 +406,6 @@ export class DebugLauncher {
       this.ctx.logger.info(`[SessionManager] ProxyManager started for session ${sessionId}`);
 
       // Perform language-specific handshake if required
-      const policy = this.ctx.selectPolicy(session.language);
       if (policy.performHandshake) {
         try {
           await policy.performHandshake({
@@ -406,16 +430,24 @@ export class DebugLauncher {
       // Use policy-defined readiness criteria when available.
       const sessionStateAfterHandshake = this.ctx.getSession(sessionId).state;
       const alreadyReady = policy.isSessionReady
-        ? policy.isSessionReady(sessionStateAfterHandshake, { stopOnEntry: dapLaunchArgs?.stopOnEntry })
+        ? policy.isSessionReady(sessionStateAfterHandshake, { stopOnEntry: readinessArgs?.stopOnEntry })
         : sessionStateAfterHandshake === SessionState.PAUSED;
 
       if (!alreadyReady) {
         // Wait for adapter to be configured, first stop event, or termination
-        await waitForLaunchReadiness(this.ctx, { session, sessionId, policy, dapLaunchArgs });
+        await waitForLaunchReadiness(this.ctx, { session, sessionId, policy, dapLaunchArgs: readinessArgs });
       } else {
         this.ctx.logger.info(
           `[SessionManager] Session ${sessionId} already ${sessionStateAfterHandshake} after handshake - skipping adapter readiness wait`
         );
+      }
+
+      // With the debugger off, the entry stop that would normally carry the
+      // session out of INITIALIZING cannot come either (the core projects
+      // RUNNING on adapter-configured only when no entry stop is expected):
+      // the program is running, undebugged — say so.
+      if (debuggerOff && this.ctx.getSession(sessionId).state === SessionState.INITIALIZING) {
+        this.ctx.updateState(this.ctx.getSession(sessionId), SessionState.RUNNING);
       }
 
       // Re-fetch session to get the most up-to-date state
@@ -466,7 +498,7 @@ export class DebugLauncher {
       // ("check the file path", "check the symbol name", "will PAUSE") that
       // has one cause when the debugger is off — the noDebug warning names
       // it, and they are withheld so they cannot contradict it (issue #710).
-      const debuggerOn = noDebugWarning === undefined;
+      const debuggerOn = !debuggerOff;
 
       // Unbound-at-launch warning (issue #308): the verified state is fresh
       // after the re-sync above, so a name the adapter could not resolve is

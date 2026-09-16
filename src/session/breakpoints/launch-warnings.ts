@@ -8,7 +8,7 @@
  * it); as free functions the purity is the signature rather than a convention.
  */
 import path from 'path';
-import type { AdapterPolicy } from '@debugmcp/shared';
+import type { AdapterPolicy, ExceptionBreakMode } from '@debugmcp/shared';
 import { normalizeBreakpointMessage } from '../../utils/breakpoint-message.js';
 import type { ManagedSession } from '../session-store.js';
 
@@ -51,25 +51,39 @@ export function buildUnboundBreakpointExitWarning(
 }
 
 /**
- * noDebug launch warning (issue #710). `dapLaunchArgs.noDebug: true` is a
- * standard DAP flag every adapter honours by not enabling the debugger: no
- * breakpoint binds, no exception filter arms, no entry stop lands, and no
- * `stopped` ever arrives. That is a legitimate way to just run the program,
- * so the warning fires only when the caller also asked for a stop — line or
- * function breakpoints in the store, an *explicit* breakOnExceptions other
- * than 'none' (the caller's value, not the policy default the launcher fills
- * in afterwards, which would make every bare noDebug run warn), or
- * stopOnEntry — and names each thing that will not fire. The breakpoint-shaped
- * launch warnings (#308, #467, #469) presuppose a debugger and are withheld
- * when this one fires.
+ * noDebug launch warning (issue #710). `noDebug: true` is DAP's "launch
+ * without enabling debugging". Where the adapter honours it (the policy's
+ * `honoursNoDebug`, measured per adapter), no breakpoint binds, no exception
+ * filter arms, no entry stop lands, and no `stopped` ever arrives. That is a
+ * legitimate way to just run the program, so the warning fires only when the
+ * caller also asked for a stop — line or function breakpoints in the store,
+ * an *explicit* breakOnExceptions other than 'none' (the caller's value, not
+ * the policy default the launcher fills in afterwards, which would make every
+ * bare noDebug run warn), or stopOnEntry — and names each thing that will not
+ * fire. The breakpoint-shaped launch warnings (#308, #467, #469) presuppose a
+ * debugger and are withheld by the launcher in that case.
+ *
+ * Where the adapter ignores the flag, the debugger stays on and the caller is
+ * told so instead — the flag they set changes nothing, which is worth a line.
+ *
+ * `noDebug` is the flag the adapter will actually see (adapterLaunchConfig
+ * over dapLaunchArgs over the server defaults, the launcher's merge order);
+ * `stopOnEntry` is the caller's own value.
  */
 export function buildNoDebugLaunchWarning(
-  session: Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints'>,
-  dapLaunchArgs: { noDebug?: boolean; stopOnEntry?: boolean } | undefined,
-  explicitBreakOnExceptions: string | undefined
+  session: Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints' | 'language'>,
+  launchArgs: { noDebug?: boolean; stopOnEntry?: boolean } | undefined,
+  explicitBreakOnExceptions: ExceptionBreakMode | undefined,
+  honoursNoDebug: boolean
 ): string | undefined {
-  if (dapLaunchArgs?.noDebug !== true) {
+  if (launchArgs?.noDebug !== true) {
     return undefined;
+  }
+  if (!honoursNoDebug) {
+    return (
+      `dapLaunchArgs.noDebug has no effect with the ${session.language} adapter: the debugger stays on, ` +
+      `and breakpoints, breakOnExceptions and stopOnEntry work as usual`
+    );
   }
   const expected: string[] = [];
   const lineCount = session.breakpoints.size;
@@ -83,7 +97,7 @@ export function buildNoDebugLaunchWarning(
   if (explicitBreakOnExceptions !== undefined && explicitBreakOnExceptions !== 'none') {
     expected.push(`breakOnExceptions='${explicitBreakOnExceptions}'`);
   }
-  if (dapLaunchArgs.stopOnEntry === true) {
+  if (launchArgs.stopOnEntry === true) {
     expected.push('stopOnEntry');
   }
   if (expected.length === 0) {

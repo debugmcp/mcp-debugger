@@ -90,6 +90,18 @@ export function createMockDependencies(): SessionManagerDependencies & {
  * it — so a test that wants a policy behavior overrides it here rather than
  * standing up a real adapter.
  */
+/**
+ * Flip the mock proxy's private running flag.
+ *
+ * Tests that replace `start()` wholesale must reproduce its side effect:
+ * `sendDapRequest` reads `_isRunning` directly, so stubbing the public
+ * `isRunning()` would not be equivalent. One reach-in here rather than one
+ * per suite.
+ */
+export function setMockProxyRunning(proxyManager: MockProxyManager, running: boolean): void {
+  (proxyManager as unknown as { _isRunning: boolean })._isRunning = running;
+}
+
 export function overridePolicy(
   sessionManager: SessionManager,
   overrides: Partial<AdapterPolicy>

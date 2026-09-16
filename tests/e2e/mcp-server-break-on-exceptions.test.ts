@@ -223,6 +223,33 @@ describe('Break-on-exception (issue #220)', () => {
       })).rejects.toThrow(/breakOnExceptions/);
     }, 30000);
 
+    it('says noDebug had no effect on an adapter that ignores it, and still pauses at the breakpoint (issue #710)', async () => {
+      sessionId = await createSession('mock', 'mock-nodebug-ignored');
+      const bp = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'set_breakpoint',
+        arguments: { sessionId, file: CRASHING_SCRIPT, line: 5 }
+      }));
+      expect(bp.success).toBe(true);
+
+      // The mock adapter never reads noDebug (like rdbg, netcoredbg and the
+      // JDI bridge): the debugger stays on, so the breakpoint fires — and
+      // the caller is told the flag did nothing rather than that it disabled
+      // the debugger.
+      const startRes = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: CRASHING_SCRIPT,
+          dapLaunchArgs: { stopOnEntry: false, noDebug: true }
+        }
+      }));
+      expect(startRes.success, JSON.stringify(startRes)).toBe(true);
+      expect(startRes.state).toBe('paused');
+      const warning = (startRes as { warning?: string }).warning;
+      expect(warning).toMatch(/noDebug has no effect with the mock adapter/);
+      expect(warning).not.toMatch(/will not fire/);
+    }, 30000);
+
     it("honors breakOnExceptions 'none' nested inside dapLaunchArgs with a warning (#305)", async () => {
       sessionId = await createSession('mock', 'mock-nested-break-on-exceptions');
 

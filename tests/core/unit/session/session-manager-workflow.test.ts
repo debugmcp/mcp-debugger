@@ -4,20 +4,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
 import { DebugLanguage, SessionState } from '@debugmcp/shared';
-import { createMockDependencies } from './session-manager-test-utils.js';
-import type { MockProxyManager } from '../../../test-utils/mocks/mock-proxy-manager.js';
-
-/**
- * Flip the mock proxy's private running flag.
- *
- * The tests below replace `start()` wholesale and must reproduce its side
- * effect: `sendDapRequest` reads `_isRunning` directly, so stubbing the public
- * `isRunning()` would not be equivalent. Keeping the reach-in here means one
- * cast for the file rather than one per call site.
- */
-function setMockProxyRunning(proxyManager: MockProxyManager, running: boolean): void {
-  (proxyManager as unknown as { _isRunning: boolean })._isRunning = running;
-}
+import { createMockDependencies, setMockProxyRunning } from './session-manager-test-utils.js';
 
 describe('SessionManager - Debug Session Workflow', () => {
   let sessionManager: SessionManager;

@@ -226,7 +226,7 @@
                 },
                 "noDebug": {
                   "type": "boolean",
-                  "description": "Run the program with the debugger disabled (standard DAP flag, default false): no breakpoint binds, no exception filter arms, no entry stop lands, and no stop ever arrives. The response warns when breakpoints, an explicit breakOnExceptions, or stopOnEntry are set alongside it"
+                  "description": "DAP's launch-without-debugging flag (default false). Where the adapter honours it (js-debug does; debugpy, Delve and CodeLLDB do too, though their launches currently fail under it) no breakpoint binds, no exception filter arms, no entry stop lands and no stop ever arrives — the response warns when breakpoints, an explicit breakOnExceptions or stopOnEntry are set alongside it. rdbg, netcoredbg and the Java bridge ignore the flag, and the rust launch never forwards it: their debugger stays on and the response says so"
                 }
               },
               "additionalProperties": true

@@ -141,6 +141,7 @@ export type LaunchContext = Pick<
   | 'adapterRegistry'
   | 'launchValidationCache'
   | 'dryRunTimeoutMs'
+  | 'defaultDapLaunchArgs'
   | 'getSession'
   | 'updateSession'
   | 'updateState'

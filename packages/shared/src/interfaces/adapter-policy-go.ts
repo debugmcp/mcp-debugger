@@ -13,6 +13,10 @@ import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from '
 
 export const GoAdapterPolicy = {
   name: 'go',
+  // Delve runs the program undebugged under noDebug (verified live: the
+  // breakpoint never fired, the process exited 0); the launch currently fails
+  // init because no `initialized` follows (issue #746).
+  honoursNoDebug: true,
   supportsLogPoints: true,
   supportsFunctionBreakpoints: true,
   /**

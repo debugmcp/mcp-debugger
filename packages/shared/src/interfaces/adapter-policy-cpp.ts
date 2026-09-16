@@ -34,6 +34,9 @@ import {
 
 export const CppAdapterPolicy = {
   name: 'cpp',
+  // CodeLLDB honours noDebug by refusing debugger requests ("Not supported in
+  // noDebug mode"), which our launch sequence currently trips over (issue #746).
+  honoursNoDebug: true,
   supportsLogPoints: true,
   supportsFunctionBreakpoints: true,
   // Unlike Rust (issue #303), a bare 'main' in C/C++ IS the user's entry
