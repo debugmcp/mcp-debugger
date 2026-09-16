@@ -134,9 +134,10 @@ export function extractionFromScope(
  * `@debugmcp/shared` must not import from `src/`, so this is the structural
  * contract rather than `IProxyManager` itself — send a DAP request, ask
  * whether the proxy is still alive, and subscribe to DAP events for the
- * duration of the handshake. The app's `ProxyManager`
- * (src/proxy/proxy-manager.ts) satisfies it as written; the session layer
- * passing its own proxy manager straight in is the proof.
+ * duration of the handshake. The app's `IProxyManager`
+ * (src/proxy/proxy-manager.ts, where a compile-time `AssertAssignable`
+ * proves it) satisfies this as written — not the deprecated placeholder
+ * declared in this package.
  */
 export interface HandshakeProxy {
   /** False once the proxy has exited — a handshake must stop rather than hang. */

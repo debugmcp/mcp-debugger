@@ -300,26 +300,27 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
 **Location**: `tests/test-utils/helpers/test-dependencies.ts`
 
 ```typescript
-// Returns a Dependencies object (defined in tests/test-utils/helpers/test-dependencies.ts)
-// containing: fileSystem, processManager, networkManager, logger,
-//             proxyProcessLauncher,
-//             proxyManagerFactory, sessionStoreFactory
+// Returns the container's own Dependencies (src/container/dependencies.ts):
+// the nine required members below, with every method a vi.fn(). disposeLogger
+// is optional there and omitted here.
 export function createMockDependencies(): Dependencies {
-  const logger = createMockLogger();
   const fileSystem = createMockFileSystem();
   const processManager = createMockProcessManager();
   const networkManager = createMockNetworkManager();
+  const logger = createMockLogger();
+  const environment = createMockEnvironment();
 
   const proxyProcessLauncher = createMockProxyProcessLauncher();
 
   const proxyManagerFactory = new MockProxyManagerFactory();
   proxyManagerFactory.createFn = () => new MockProxyManager();
   const sessionStoreFactory = new MockSessionStoreFactory();
+  const adapterRegistry = createMockAdapterRegistry();
 
   return {
-    fileSystem, processManager, networkManager, logger,
+    fileSystem, processManager, networkManager, logger, environment,
     proxyProcessLauncher,
-    proxyManagerFactory, sessionStoreFactory
+    proxyManagerFactory, sessionStoreFactory, adapterRegistry
   };
 }
 
