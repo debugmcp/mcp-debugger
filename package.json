@@ -100,7 +100,7 @@
     "typecheck:tests:raw": "tsc -p tsconfig.spec.json --pretty false",
     "typecheck:all": "pnpm run typecheck && pnpm run typecheck:tests",
     "lint": "eslint \"src/**/*.ts\" \"packages/*/src/**/*.ts\" \"scripts/**/*.{js,mjs,cjs}\" \"tools/**/*.{js,mjs,cjs}\"",
-    "lint:fix": "eslint \"src/**/*.ts\" \"packages/*/src/**/*.ts\" \"scripts/**/*.{js,mjs,cjs}\" \"tools/**/*.{js,mjs,cjs}\" --fix",
+    "lint:fix": "pnpm run lint --fix",
     "check:personal-paths": "node scripts/check-personal-paths.cjs",
     "check:all-personal-paths": "node scripts/check-all-personal-paths.cjs",
     "check:docs": "node scripts/check-docs.mjs",
