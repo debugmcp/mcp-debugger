@@ -16,6 +16,7 @@ import {
   createMockSessionManager,
   createMockStdioTransport,
   findTool,
+  findToolIn,
   getToolHandlers,
   type CallToolHandler,
   type ListToolsHandler,
@@ -712,11 +713,11 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
     it('is advertised in the attach_to_process and create_debug_session schemas', async () => {
       const result = await listToolsHandler({ method: 'tools/list', params: {} });
 
-      const attach = result.tools.find((t) => t.name === 'attach_to_process');
-      expect(attach?.inputSchema.properties?.adapterConfig).toMatchObject({ type: 'object' });
+      const attach = findToolIn(result.tools, 'attach_to_process');
+      expect(attach.inputSchema.properties?.adapterConfig).toMatchObject({ type: 'object' });
 
-      const create = result.tools.find((t) => t.name === 'create_debug_session');
-      expect(create?.inputSchema.properties?.adapterConfig).toMatchObject({ type: 'object' });
+      const create = findToolIn(result.tools, 'create_debug_session');
+      expect(create.inputSchema.properties?.adapterConfig).toMatchObject({ type: 'object' });
     });
 
     it('create_debug_session auto-attach forwards adapterConfig', async () => {

@@ -161,7 +161,7 @@ describe('ComponentToTest', () => {
 });
 ```
 
-`tests/vitest.setup.ts` already calls `vi.resetAllMocks()`, `vi.restoreAllMocks()`, and `vi.unstubAllEnvs()` after every test, so a local `afterEach` is for *your* resources — sessions, proxy managers, fake launchers — not for the global mock slate.
+`tests/vitest.setup.ts` already calls `vi.resetAllMocks()`, `vi.restoreAllMocks()`, and `vi.unstubAllEnvs()` after every test, so a local `afterEach` is for *your* resources — sessions, proxy managers, listeners on hand-rolled process doubles — not for the global mock slate.
 
 ### Testing Patterns
 
@@ -260,35 +260,46 @@ it('should emit events correctly', async () => {
 
 **Never attach a listener to `process` and leave it there.** The setup file compares `process.rawListeners` against a baseline after every test, removes anything leaked, and logs a `[process-listener-leak]` error — leaked process listeners can hard-kill the Vitest fork worker (issue #159). Capture handlers with `mockImplementation` instead of attaching them, or remove them in `afterEach`. Run `npm run test:strict` (`LEAK_GUARD_STRICT=1`) to turn that warning into a failure.
 
-#### 6. Testing with the Fake Process Launcher
+#### 6. Driving a Fake Proxy Process
+
+There is no shared spawned-process fake. A suite that needs one hand-rolls a small
+`EventEmitter` that `implements IProxyProcess`, scripts the IPC reply the manager
+blocks on, and emits everything else. `tests/unit/proxy/proxy-manager.start.test.ts`
+is the template (paraphrased more fully in [docs/patterns/dependency-injection.md](../patterns/dependency-injection.md)):
 
 ```typescript
-// tests/implementations/test/fake-process-launcher.ts
-import { FakeProxyProcessLauncher } from '../../implementations/test/fake-process-launcher.js';
+beforeEach(() => {
+  fakeProcess = new FakeProxyProcess();   // EventEmitter + implements IProxyProcess, members are vi.fn()s
 
-it('should handle process messages', async () => {
-  const fakeLauncher = new FakeProxyProcessLauncher();
-
-  fakeLauncher.prepareProxy((proxy) => {
-    // The setup callback runs at PREPARE time — before the proxy is launched
-    // and before ProxyManager subscribes. `simulateMessage` emits synchronously,
-    // so calling it inline here would emit to nobody. Defer it.
-    setTimeout(() => {
-      proxy.simulateMessage({ type: 'status', status: 'initialized' });
-    }, 100);
+  // The manager blocks on init_received. Answer it OFF the sendCommand stack,
+  // so the reply lands after start() has subscribed.
+  fakeProcess.sendCommand.mockImplementation((cmd) => {
+    if (cmd.cmd === 'init') {
+      process.nextTick(() => fakeProcess.emit('message', {
+        type: 'status', status: 'init_received', sessionId: cmd.sessionId
+      }));
+    }
   });
 
-  // ProxyManager(adapter, proxyProcessLauncher, fileSystem, logger)
-  const manager = new ProxyManager(null, fakeLauncher, mockFileSystem, mockLogger);
-  await manager.start(config);
+  launchProxySpy = vi.fn().mockImplementation(() => {
+    setImmediate(() => fakeProcess.emit('spawn'));
+    return fakeProcess;
+  });
 
-  expect(fakeLauncher.launchedProxies).toHaveLength(1);
+  proxyManager = new ProxyManager(null, { launchProxy: launchProxySpy }, mockFileSystem, mockLogger);
+});
+
+it('launches the proxy process and sends the init command', async () => {
+  await proxyManager.start(baseConfig);
+
+  expect(launchProxySpy).toHaveBeenCalled();
+  expect(fakeProcess.sendCommand).toHaveBeenCalledWith(expect.objectContaining({ cmd: 'init' }));
 });
 ```
 
-This exercises the real proxy lifecycle — start, init handshake, DAP routing, exit — without spawning a Node subprocess, which is what keeps it in the parallel `unit` project.
+This exercises the real proxy lifecycle — start, init handshake, DAP routing, exit — without spawning a Node subprocess, which is what keeps it in the parallel `unit` project. The suite's `afterEach` calls `removeAllListeners()` on the fake, its `stderr` and the manager, then flushes a `setImmediate`, so a straggling emit cannot land in the next test (issue #420).
 
-The same sequencing rule applies to every `simulate*` helper on the mocks and fakes: they are a bare `this.emit(...)`, so the listener must already be attached. `MockProxyManager.simulateStopped(...)` works inline in the worked example below precisely because `startDebugging` has already returned by then.
+The same sequencing rule applies to every `simulate*` helper on the mocks: they are a bare `this.emit(...)`, so the listener must already be attached. `MockProxyManager.simulateStopped(...)` works inline in the worked example below precisely because `startDebugging` has already returned by then.
 
 #### 7. Reaching the Operations Collaborators
 

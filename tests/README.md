@@ -138,7 +138,6 @@ tests/
 │   ├── javascript-e2e/        # JS/TS fixtures for E2E tests
 │   └── python/                # Python debuggee scripts for attach/E2E tests
 │
-├── implementations/test/      # Fake implementations (e.g., fake-process-launcher.ts)
 ├── integration/rust/          # Rust cross-component integration tests
 ├── manual/                    # Manual/interactive test scripts (SSE, debugpy, js-debug)
 │
@@ -217,7 +216,6 @@ packages/
 - **`mocks/session-doubles.ts`** — `PartialSessionStore` / `createPartialSessionStore(session)` (the six `SessionStore` members the operations suites drive, each a typed `vi.fn`) and the `ProxyManagerMockKeys` / `ProxyManagerMocks` / `ProxyManagerDouble` types for the deliberately partial proxy-manager double; shared by the attach-modes, launch-gate and operations-coverage tests
 - **`mocks/mock-logger.ts`** — captures log output for assertion
 - **`mocks/mock-proxy-manager.ts`** — mock proxy manager with controllable behavior
-- **`mocks/child-process.ts`**, **`mocks/net.ts`** — mock Node.js built-ins
 - **`fixtures/python-scripts.ts`** — Python script content for test fixtures
 
 ### Fakes vs mocks

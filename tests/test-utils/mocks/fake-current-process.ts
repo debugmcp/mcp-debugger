@@ -4,9 +4,9 @@
  * EventEmitter-backed, so production code's proc.on(...) attaches listeners to
  * THIS object, never to the real global process: tests drive lifecycle events
  * with fakeProc.emit(...) and nothing can leak into the vitest fork worker
- * (issue #159). Not to be confused with FakeProcess in
- * tests/implementations/test/fake-process-launcher.ts, which models a spawned
- * CHILD process (IProcess).
+ * (issue #159). This models the CURRENT process, not a spawned child: the
+ * child-side doubles are the per-suite IProxyProcess fakes such as the one in
+ * tests/unit/proxy/proxy-manager.start.test.ts.
  */
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
