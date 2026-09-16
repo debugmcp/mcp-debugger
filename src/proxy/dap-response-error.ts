@@ -4,11 +4,15 @@
  * DAP's ErrorResponse carries two texts: `message`, "the raw error in short
  * form", and `body.error`, a structured Message whose `format` (with `{name}`
  * placeholders filled from `variables`) is what the user is meant to see.
- * Adapters are free to set either. js-debug sends a ProtocolError with only
- * `body.error` — `{success:false, body:{error:{id, format:"Uncaught
+ * Adapters are free to set either or both. js-debug sends a ProtocolError with
+ * only `body.error` — `{success:false, body:{error:{id, format:"Uncaught
  * ReferenceError: x is not defined"}}}` — so reading `message` alone turned
  * every one of its user-facing evaluate/variables/frame errors into a bare
- * "Request failed".
+ * "Request failed". Delve sets both, and its `message` is the short form
+ * verbatim: a launch refused for a too-new Go toolchain answers
+ * `message:"Failed to launch"` beside `body.error.format:"Failed to launch:
+ * Version of Delve is too old for Go version go1.27.1 (…)"`, so the user-facing
+ * text wins whenever it is present.
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
 
@@ -23,16 +27,16 @@ export function formatDapMessage(message: DebugProtocol.Message): string {
 }
 
 /**
- * `message` when the adapter set it, else the formatted `body.error`, else
+ * The formatted `body.error` when the adapter set one, else `message`, else
  * undefined. Callers add their own fallback.
  */
 export function dapResponseErrorText(response: DebugProtocol.Response): string | undefined {
-  if (response.message) {
-    return response.message;
-  }
   const error = (response.body as DebugProtocol.ErrorResponse['body'] | undefined)?.error;
   if (error && typeof error.format === 'string' && error.format !== '') {
     return formatDapMessage(error);
+  }
+  if (response.message) {
+    return response.message;
   }
   return undefined;
 }
