@@ -237,6 +237,18 @@ export abstract class SessionManagerCore extends EventEmitter {
     return isRedactionEnabled(this.environment);
   }
 
+  /**
+   * The write-time redaction every buffer entry gets (issue #237): the text
+   * to store and whether anything was masked, so the entry can be flagged.
+   */
+  private redactForBuffer(text: string): { text: string; redacted: boolean } {
+    if (!this.redactionEnabled()) {
+      return { text, redacted: false };
+    }
+    const result = redactSecretsInString(text);
+    return result.redacted ? { text: result.value, redacted: true } : { text, redacted: false };
+  }
+
   async createSession(params: { language: DebugLanguage; name?: string; executablePath?: string; }): Promise<DebugSessionInfo> {
     const createParams = {
       language: params.language,
@@ -474,6 +486,27 @@ export abstract class SessionManagerCore extends EventEmitter {
     // microtask/IPC queue when restart_debugging swapped buffers) can never
     // land in the new launch's buffer and take an early seq.
     const outputBuffer = session.outputBuffer = new OutputRingBuffer();
+    // One note once: on the session for the launch-result warning, and as an
+    // attributed entry in this launch's buffer (issues #441, #746).
+    const recordAdapterNotice = (rawNote: string): void => {
+      // A worker-forwarded note carries the adapter's own words, which may
+      // echo launch arguments: the same write-time redaction as every other
+      // buffer entry (issue #237).
+      const { text: note, redacted } = this.redactForBuffer(rawNote);
+      if (session.adapterNotices?.includes(note)) {
+        return;
+      }
+      (session.adapterNotices ??= []).push(note);
+      const noteEntry = outputBuffer.push(
+        'console',
+        `[mcp-debugger] Warning: ${note}\n`,
+        undefined,
+        redacted ? { redacted: true } : undefined
+      );
+      if (noteEntry) {
+        this.emit('output-captured', sessionId, noteEntry);
+      }
+    };
     // A new adapter instance has verified nothing yet: clear per-launch
     // breakpoint state so a relaunch reports honest verification (#238).
     for (const bp of session.breakpoints.values()) {
@@ -1322,15 +1355,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       // Redact-at-write (issue #237): one hook covers both buffer readers —
       // the get_output tool and the debug:// output resource. The original
       // text is deliberately not retained.
-      let text = body.output;
-      let redacted = false;
-      if (this.redactionEnabled()) {
-        const result = redactSecretsInString(text);
-        if (result.redacted) {
-          text = result.value;
-          redacted = true;
-        }
-      }
+      const { text, redacted } = this.redactForBuffer(body.output);
       // Push to the closure-captured buffer, NOT session.outputBuffer — see
       // the buffer construction above (issue #358).
       const entry: SessionOutputEntry | undefined = outputBuffer.push(
@@ -1347,12 +1372,8 @@ export abstract class SessionManagerCore extends EventEmitter {
       // attributed explanation and record it for the launch-result warning.
       try {
         const note = policy?.annotateOutputEvent?.(category, body.output);
-        if (note && !session.adapterNotices?.includes(note)) {
-          (session.adapterNotices ??= []).push(note);
-          const noteEntry = outputBuffer.push('console', `[mcp-debugger] Warning: ${note}\n`);
-          if (noteEntry) {
-            this.emit('output-captured', sessionId, noteEntry);
-          }
+        if (note) {
+          recordAdapterNotice(note);
         }
       } catch {
         // annotation must never break output capture
@@ -1360,6 +1381,23 @@ export abstract class SessionManagerCore extends EventEmitter {
     };
     proxyManager.on('output', handleOutput);
     handlers.set('output', handleOutput);
+
+    // An adapter answer the worker forwards on its own (issue #746 — a
+    // configuration request refused under an honoured noDebug): recorded
+    // exactly like a policy annotation, and contained like one — a
+    // subscriber throwing on the entry must not escape into the IPC
+    // listener that dispatched the status.
+    const handleAdapterNotice = (note: string) => {
+      try {
+        recordAdapterNotice(note);
+      } catch (err) {
+        this.logger.warn(
+          `[SessionManager ${sessionId}] Recording an adapter notice failed: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    };
+    proxyManager.on('adapter-notice', handleAdapterNotice);
+    handlers.set('adapter-notice', handleAdapterNotice);
 
     // Store handlers in WeakMap
     this.sessionEventHandlers.set(session, handlers);

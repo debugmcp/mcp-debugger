@@ -176,6 +176,28 @@ describe('ProxyManager Message Handling', () => {
       expect(received[0]).toEqual(breakpoints);
     });
 
+    it('forwards an adapter_notice status as an adapter-notice event, dropping an empty note (issue #746)', () => {
+      const received: string[] = [];
+      proxyManager.on('adapter-notice', (note) => {
+        received.push(note);
+      });
+
+      proxyManager.simulateMessage({
+        type: 'status',
+        sessionId: 'test-session',
+        status: 'adapter_notice',
+        note: 'setBreakpoints refused under noDebug: Not supported in noDebug mode.'
+      });
+      proxyManager.simulateMessage({
+        type: 'status',
+        sessionId: 'test-session',
+        status: 'adapter_notice',
+        note: ''
+      });
+
+      expect(received).toEqual(['setBreakpoints refused under noDebug: Not supported in noDebug mode.']);
+    });
+
     it('should handle dry-run complete status messages', () => {
       const dryRunMessage = {
         type: 'status',

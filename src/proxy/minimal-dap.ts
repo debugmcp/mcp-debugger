@@ -6,7 +6,7 @@
 import net, { Socket } from 'net';
 import { EventEmitter } from 'events';
 import { DebugProtocol } from '@vscode/debugprotocol';
-import { DEFAULT_DAP_FAILURE_MESSAGE, dapResponseErrorMessage, dapResponseErrorText } from './dap-response-error.js';
+import { DEFAULT_DAP_FAILURE_MESSAGE, DapResponseError, dapResponseErrorText } from './dap-response-error.js';
 import { createLogger } from '../utils/logger.js';
 import fs from 'fs';
 import path from 'path';
@@ -276,7 +276,7 @@ export class MinimalDapClient extends EventEmitter implements IDapClient {
         if (response.success) {
           pending.resolve(response);
         } else {
-          pending.reject(new Error(dapResponseErrorMessage(response)));
+          pending.reject(new DapResponseError(response));
         }
       } else {
         if (this.isDisconnectingOrDisconnected) {

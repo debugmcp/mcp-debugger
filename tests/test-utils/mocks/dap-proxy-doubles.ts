@@ -14,7 +14,46 @@
  * lives next door in `dap-client.ts`.
  */
 import { vi } from 'vitest';
-import type { IFileSystem, IProcessSpawner } from '../../../src/proxy/dap-proxy-interfaces.js';
+import type {
+  DapEventMessage,
+  DapProxyDependencies,
+  DapResponseMessage,
+  ErrorMessage,
+  IDapClient,
+  IFileSystem,
+  ILogger,
+  IProcessSpawner,
+  StatusMessage
+} from '../../../src/proxy/dap-proxy-interfaces.js';
+
+/**
+ * Everything the worker hands to `IMessageSender.send`. The interface itself
+ * declares the parameter as `unknown`, so the double is typed with the
+ * concrete union instead — that is what lets an assertion discriminate on
+ * `.type` without a cast.
+ */
+export type WorkerSentMessage = StatusMessage | DapResponseMessage | DapEventMessage | ErrorMessage;
+
+export const createMockMessageSender = () => ({
+  send: vi.fn<(message: WorkerSentMessage) => void>()
+});
+
+/**
+ * The worker's constructor bag over the doubles above plus the logger and
+ * DAP client a test already holds, so the three worker suites build one
+ * shape (the drift class #742 tracks).
+ */
+export const createMockWorkerDependencies = (
+  logger: ILogger,
+  dapClient: IDapClient,
+  messageSender: ReturnType<typeof createMockMessageSender>
+): DapProxyDependencies => ({
+  fileSystem: createMockFileSystem(),
+  loggerFactory: vi.fn().mockResolvedValue(logger),
+  processSpawner: createMockProcessSpawner(),
+  dapClientFactory: { create: vi.fn().mockResolvedValue(dapClient) },
+  messageSender
+});
 
 export const createMockFileSystem = (): IFileSystem => ({
   ensureDir: vi.fn().mockResolvedValue(undefined),

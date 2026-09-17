@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import {
   DEFAULT_DAP_FAILURE_MESSAGE,
+  DapResponseError,
   dapResponseErrorMessage,
   dapResponseErrorText,
   formatDapMessage
@@ -57,5 +58,24 @@ describe('formatDapMessage', () => {
     expect(formatDapMessage({ id: 1, format: 'Cannot set {name}: {reason} {unknown}', variables: { name: 'x', reason: 'read-only' } }))
       .toBe('Cannot set x: read-only {unknown}');
     expect(formatDapMessage({ id: 1, format: 'plain {text}' })).toBe('plain {text}');
+  });
+});
+
+/**
+ * A DAP error response is the adapter's own answer, distinct from a
+ * transport failure, a timeout or a shutdown (issue #746): the worker's
+ * noDebug tolerance keys on the type.
+ */
+describe('DapResponseError', () => {
+  it('carries the response and reads as the same message the plain rejection used to', () => {
+    const response = failed({ command: 'setBreakpoints', message: 'Not supported in noDebug mode.' });
+
+    const err = new DapResponseError(response);
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err.name).toBe('DapResponseError');
+    expect(err.message).toBe(dapResponseErrorMessage(response));
+    expect(err.response).toBe(response);
+    expect(err.command).toBe('setBreakpoints');
   });
 });

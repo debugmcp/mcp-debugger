@@ -14,8 +14,10 @@ import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from '
 export const GoAdapterPolicy = {
   name: 'go',
   // Delve runs the program undebugged under noDebug (verified live: the
-  // breakpoint never fired, the process exited 0); the launch currently fails
-  // init because no `initialized` follows (issue #746).
+  // breakpoint never fired, the process exited 0) and, correctly, sends no
+  // `initialized`: the worker does not wait for one (issue #746). It runs the
+  // program through Go's exec.LookPath, so on Windows the binary needs its
+  // .exe extension under the flag.
   honoursNoDebug: true,
   supportsLogPoints: true,
   supportsFunctionBreakpoints: true,

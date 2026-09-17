@@ -6,7 +6,7 @@
  * adapter ignores the flag, the caller is told it had no effect instead.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { buildNoDebugLaunchWarning } from '../../../../src/session/breakpoints/launch-warnings.js';
+import { buildNoDebugFailureNote, buildNoDebugLaunchWarning } from '../../../../src/session/breakpoints/launch-warnings.js';
 import type { ManagedSession } from '../../../../src/session/session-store.js';
 import { SessionManager, type SessionManagerConfig } from '../../../../src/session/session-manager.js';
 import { DebugLanguage, SessionState, type AdapterPolicy, type Breakpoint, type ExceptionBreakMode, type FunctionBreakpoint } from '@debugmcp/shared';
@@ -111,6 +111,14 @@ describe('buildNoDebugLaunchWarning', () => {
  * Where the debugger is off, the breakpoint-shaped launch warnings are
  * withheld and readiness does not wait for an entry stop that cannot come.
  */
+describe('buildNoDebugFailureNote', () => {
+  it("names Delve's exec quirk for go only", () => {
+    expect(buildNoDebugFailureNote('go')).toMatch(/Delve .*\.exe/);
+    expect(buildNoDebugFailureNote('python')).not.toMatch(/Delve/);
+    expect(buildNoDebugFailureNote('python')).toMatch(/noDebug is true, so this launch ran with the debugger disabled/);
+  });
+});
+
 describe('SessionManager launches with noDebug (issue #710)', () => {
   let sessionManager: SessionManager;
   let dependencies: ReturnType<typeof createMockDependencies>;
@@ -200,6 +208,20 @@ describe('SessionManager launches with noDebug (issue #710)', () => {
       expect(warningOf(result)).not.toMatch(/no stop can arrive/);
       // The #467 diagnosis ("check the file path and line") would be wrong here.
       expect(warningOf(result)).not.toMatch(/never bound during this run/);
+    });
+
+    it('stamps the decision on the proxy config — the worker reads that, not the launch config (issue #746)', async () => {
+      const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      runWithoutStopping();
+
+      await launch(s.id, { stopOnEntry: false, noDebug: true });
+      const stamped = dependencies.mockProxyManager.startCalls.at(-1) as { debuggerOff?: boolean } | undefined;
+      expect(stamped?.debuggerOff).toBe(true);
+
+      runWithoutStopping();
+      await launch(s.id, { stopOnEntry: false });
+      const plain = dependencies.mockProxyManager.startCalls.at(-1) as { debuggerOff?: boolean } | undefined;
+      expect(plain?.debuggerOff).toBe(false);
     });
 
     it('stays silent for a bare noDebug run with nothing to stop on', async () => {
@@ -429,6 +451,16 @@ describe('SessionManager launches with noDebug (issue #710)', () => {
   });
 
   describe('where the adapter ignores the flag (the mock policy, like rdbg, netcoredbg and the JDI bridge)', () => {
+    it('does not stamp debugger-off on the proxy config', async () => {
+      const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      runWithoutStopping();
+
+      await launch(s.id, { stopOnEntry: false, noDebug: true });
+
+      const sent = dependencies.mockProxyManager.startCalls.at(-1) as { debuggerOff?: boolean } | undefined;
+      expect(sent?.debuggerOff).toBe(false);
+    });
+
     it('says the flag had no effect and keeps the breakpoint diagnostics that still apply', async () => {
       const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
       await sessionManager.setBreakpoint(s.id, { file: '/work/src/app.py', line: 7 });

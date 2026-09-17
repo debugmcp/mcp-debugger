@@ -48,6 +48,8 @@ export interface ProxyLaunchRequest {
   dryRunSpawn?: boolean;
   adapterLaunchConfig?: Record<string, unknown>;
   breakOnExceptions?: ExceptionBreakMode;
+  /** The launcher's decision that this launch runs with the debugger off (issues #710, #746). */
+  debuggerOff?: boolean;
 }
 
 /**
@@ -537,6 +539,7 @@ export class ProxyLauncher {
       initialBreakpoints,
       initialFunctionBreakpoints,
       dryRunSpawn: dryRunSpawn === true,
+      debuggerOff: request.debuggerOff === true,
       // ILogger doesn't declare level, but the injected logger is the winston
       // instance whose level already resolves CLI --log-level and
       // DEBUG_MCP_LOG_LEVEL (issue #403); mocks without it fall back to the

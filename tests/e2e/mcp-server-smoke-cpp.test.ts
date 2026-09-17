@@ -347,4 +347,57 @@ describe.skipIf(SKIP_CPP)('MCP Server C/C++ Debugging Smoke Test @requires-cpp',
     },
     90000
   );
+
+  it(
+    'completes a noDebug launch although CodeLLDB refuses the configuration requests (issue #746)',
+    async (ctx) => {
+      const { sourcePath, binaryPath } = prepareCppExample('hello_world');
+
+      const createResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'create_debug_session',
+        arguments: { language: 'cpp', name: 'cpp-nodebug-launch' }
+      }));
+      expect(createResponse.success).toBe(true);
+      sessionId = createResponse.sessionId as string;
+
+      const bpResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'set_breakpoint',
+        arguments: { sessionId, file: sourcePath, line: BP_LINE }
+      }));
+      expect(bpResponse.success).toBe(true);
+
+      // CodeLLDB honours the flag by opening a configuration phase and then
+      // refusing what is sent in it ("Not supported in noDebug mode"); it
+      // withholds the launch response until configurationDone. The launch
+      // used to die as "Error in DAP sequence".
+      const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: binaryPath,
+          dapLaunchArgs: { stopOnEntry: false, noDebug: true }
+        }
+      }));
+      if (!startResponse.success) {
+        skipIfSpawnBlocked(ctx, startResponse, 'C/C++');
+        throw new Error(`noDebug start_debugging failed: ${JSON.stringify(startResponse, null, 2)}`);
+      }
+      expect(startResponse.state).not.toBe('error');
+      const warning = (startResponse as { warning?: string }).warning;
+      expect(warning).toMatch(/noDebug is true/);
+
+      const stopped = await pollStopped(20000);
+      expect(stopped, 'program should run to completion').toBeDefined();
+      expect(stopped!.exitCode).toBe(0);
+
+      // The adapter's own refusal is surfaced, not hidden: CodeLLDB prints
+      // it, and the worker forwards it as an adapter notice.
+      const outputResult = await callToolSafely(mcpClient!, 'get_output', { sessionId });
+      const entries = (outputResult.entries ?? []) as Array<{ output?: string }>;
+      expect(entries.some(e => e.output?.includes('CPP_DEBUG_MARKER'))).toBe(true);
+      expect(entries.some(e => /Not supported in noDebug mode/.test(e.output ?? ''))).toBe(true);
+      expect(warning).toMatch(/refused under noDebug: .*Not supported in noDebug mode/);
+    },
+    90000
+  );
 });

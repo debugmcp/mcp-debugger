@@ -279,7 +279,10 @@ export interface AdapterPolicy {
    * and CodeLLDB honour it; rdbg, netcoredbg, the JDI bridge and the mock
    * adapter ignore it, and the rust launch transform never forwards it. Left
    * undefined, the debugger is taken to stay on and a caller who set the
-   * flag is told it had no effect.
+   * flag is told it had no effect. The proxy worker reads the same pin: under
+   * an honoured flag it does not wait for the adapter's `initialized` event
+   * (an adapter that is not debugging opens no configuration phase) and a
+   * refused configuration request is logged rather than fatal (issue #746).
    */
   honoursNoDebug?: boolean;
 

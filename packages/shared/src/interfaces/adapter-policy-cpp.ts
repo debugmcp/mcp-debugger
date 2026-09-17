@@ -35,7 +35,9 @@ import {
 export const CppAdapterPolicy = {
   name: 'cpp',
   // CodeLLDB honours noDebug by refusing debugger requests ("Not supported in
-  // noDebug mode"), which our launch sequence currently trips over (issue #746).
+  // noDebug mode") while still opening a configuration phase — it withholds
+  // the launch response until configurationDone; the worker tolerates the
+  // refusals and closes the phase (issue #746).
   honoursNoDebug: true,
   supportsLogPoints: true,
   supportsFunctionBreakpoints: true,

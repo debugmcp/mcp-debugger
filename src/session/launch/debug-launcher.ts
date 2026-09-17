@@ -47,7 +47,8 @@ import type { InFlightGuard } from '../in-flight-guard.js';
  * set — or unset — through adapterLaunchConfig. The string forms are read
  * the way the proxy's message parser coerces them ('true'/'false', the
  * string-typed-args transport quirk); anything else counts by truthiness,
- * which is how the adapters read it.
+ * which is how the adapters read it. This is the one reading: the worker
+ * takes the decision stamped on its init payload, never the flag (#746).
  */
 function resolveLaunchFlag(
   key: 'noDebug' | 'stopOnEntry',
@@ -63,9 +64,8 @@ function resolveLaunchFlag(
 
 /**
  * The `data` of a failed launch: the failure record, plus the noDebug note
- * when there is one — an adapter that honours the flag but cannot complete
- * the launch under it (debugpy, Delve, CodeLLDB today: issue #746) would
- * otherwise report an init failure with no pointer to the flag behind it.
+ * when there is one — a launch that failed with the debugger off would
+ * otherwise report the failure with no pointer to the flag it ran under.
  */
 function failureData<T extends object>(
   diagnosticData: T,
@@ -294,7 +294,7 @@ export class DebugLauncher {
     );
     // A launch that fails under the flag still needs to point at it, whether
     // or not there was anything armed to warn about.
-    const noDebugFailureNote = noDebugWarning ?? (debuggerOff ? buildNoDebugFailureNote() : undefined);
+    const noDebugFailureNote = noDebugWarning ?? (debuggerOff ? buildNoDebugFailureNote(session.language) : undefined);
     // With the debugger off an entry stop cannot come. Everything that reads
     // stopOnEntry from here on — the proxy config (from either source the
     // adapter merge reads), the core's projection to RUNNING on
@@ -453,6 +453,8 @@ export class DebugLauncher {
         dryRunSpawn,
         adapterLaunchConfig: launchAdapterConfig,
         breakOnExceptions: effectiveBreakOnExceptions,
+        // Decided once, here; the worker reads the stamp (issue #746).
+        debuggerOff,
       });
       this.ctx.logger.info(`[SessionManager] ProxyManager started for session ${sessionId}`);
 
@@ -531,7 +533,11 @@ export class DebugLauncher {
       // by now (logpoint-only short programs), which this gated path can
       // never help — and a live re-send heals anything that changed between
       // the snapshot and now.
-      if (finalState === SessionState.RUNNING || finalState === SessionState.PAUSED) {
+      // Not with the debugger off (issue #746): the adapter has answered the
+      // pre-launch set already — CodeLLDB's refusal is echoed per breakpoint
+      // by the worker, and debugpy/Delve open no phase to answer in — and a
+      // re-send is a round trip per file whose answer resyncAll discards.
+      if ((finalState === SessionState.RUNNING || finalState === SessionState.PAUSED) && !debuggerOff) {
         await this.breakpoints.resyncAll(finalSession);
       }
 

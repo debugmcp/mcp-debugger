@@ -28,6 +28,8 @@ export interface ProxyInitPayload {
   initialBreakpoints?: { id?: string; file: string; line: number; condition?: string; logMessage?: string; suspendPolicy?: 'all' | 'thread' }[];
   initialFunctionBreakpoints?: { name: string; condition?: string }[];
   dryRunSpawn?: boolean;
+  /** The launcher's debugger-off decision for this launch (issues #710, #746). */
+  debuggerOff?: boolean;
   /** Effective log level for the per-session proxy logger; absent on legacy
    *  payloads, where the worker keeps its historical 'debug' default (issue #403) */
   logLevel?: string;
@@ -81,6 +83,13 @@ export interface StatusMessage extends ProxyMessage {
   script?: string;
   /** Adapter initialize response body, on 'adapter_capabilities' (issue #243) */
   capabilities?: DebugProtocol.Capabilities;
+  /**
+   * An adapter's own answer the caller should see although the launch goes
+   * on, on 'adapter_notice' (issue #746 — a configuration request refused
+   * under an honoured noDebug). The parent records it like a policy
+   * annotation (#441): launch-result warning plus an output entry.
+   */
+  note?: string;
   /**
    * Pre-launch setFunctionBreakpoints results in request order, on
    * 'function_breakpoints_synced' (issue #302). Carries the adapter-assigned
