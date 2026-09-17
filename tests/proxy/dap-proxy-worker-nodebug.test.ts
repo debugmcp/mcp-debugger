@@ -369,6 +369,52 @@ describe('noDebug launch completion (issue #746)', () => {
       expect(order).toEqual(['configured', 'terminated']);
     });
 
+    it('echoes the refusal onto every pre-launch breakpoint, so the store and list_breakpoints carry the adapter\'s answer', async () => {
+      const payload = payloadWith({ noDebug: true }, true);
+      wire(PythonAdapterPolicy, { ...payload, initialBreakpoints: [
+        { id: 'bp-1', file: '/path/to/script.py', line: 5 },
+        { id: 'bp-2', file: '/path/to/other.py', line: 9 }
+      ] });
+      connectionStub.setBreakpoints.mockRejectedValue(refusal('setBreakpoints'));
+
+      await (worker as any).startAdapterAndConnect(payload);
+      mockDapClient.emit('initialized');
+      await settle();
+      await settle();
+
+      const synced = mockMessageSender.send.mock.calls.find(
+        ([m]) => m.type === 'status' && m.status === 'breakpoints_synced'
+      )?.[0] as (StatusMessage & { breakpoints?: Array<{ id?: string; verified: boolean; message?: string }> }) | undefined;
+      expect(synced?.breakpoints).toEqual([
+        { id: 'bp-1', file: '/path/to/script.py', line: 5, verified: false, message: 'Internal debugger error: Not supported in noDebug mode.' },
+        { id: 'bp-2', file: '/path/to/other.py', line: 9, verified: false, message: 'Internal debugger error: Not supported in noDebug mode.' }
+      ]);
+    });
+
+    it('is not fooled by a transport failure on the configurationDone it sends after a refusal', async () => {
+      const payload = payloadWith({ noDebug: true }, true);
+      wire(PythonAdapterPolicy, payload);
+      connectionStub.setBreakpoints.mockRejectedValue(refusal('setBreakpoints'));
+      // The socket dropped between the refusal and the close of the phase.
+      connectionStub.sendConfigurationDone.mockRejectedValue(new Error('DAP client disconnected'));
+
+      let resolveLaunch!: () => void;
+      connectionStub.sendLaunchRequest.mockImplementation(
+        () => new Promise<void>((resolve) => { resolveLaunch = resolve; })
+      );
+      const connect = (worker as any).startAdapterAndConnect(payload);
+      await settle();
+      mockDapClient.emit('initialized');
+      await settle();
+      await settle();
+
+      expect(errorMessages()).toHaveLength(1);
+      expect((errorMessages()[0][0] as ErrorMessage).message).toMatch(/Error in DAP sequence: DAP client disconnected/);
+      expect(configuredStatuses()).toHaveLength(0);
+      resolveLaunch();
+      await connect.catch(() => undefined);
+    });
+
     it('survives a refused configurationDone as well', async () => {
       const payload = payloadWith({ noDebug: true }, true);
       wire(PythonAdapterPolicy, payload);
@@ -421,6 +467,52 @@ describe('noDebug launch completion (issue #746)', () => {
       expect(connectionStub.sendAttachRequest).toHaveBeenCalledTimes(1);
       expect(connectionStub.sendConfigurationDone).toHaveBeenCalledTimes(1);
       expect(configuredStatuses()).toHaveLength(1);
+    });
+
+    it('forwards terminated within the drain backstop when the launch request never answers', async () => {
+      vi.useFakeTimers();
+      const payload = payloadWith({ noDebug: true }, true);
+      wire(PythonAdapterPolicy, payload);
+      // The adapter says terminated but never answers the launch request.
+      connectionStub.sendLaunchRequest.mockImplementation(
+        () => new Promise<void>(() => { mockDapClient.emit('terminated', {}); })
+      );
+      const forwarded = () => mockMessageSender.send.mock.calls.filter(([m]) => m.type === 'dapEvent' && m.event === 'terminated');
+
+      void (worker as any).startAdapterAndConnect(payload);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(forwarded()).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(2500);
+
+      expect(forwarded()).toHaveLength(1);
+      expect(configuredStatuses()).toHaveLength(0);
+      vi.useRealTimers();
+    });
+
+    it('still forwards terminated when the readiness status itself throws inside the terminal slot', async () => {
+      const payload = payloadWith({ noDebug: true }, true);
+      wire(PythonAdapterPolicy, payload);
+      connectionStub.sendLaunchRequest.mockImplementation(async () => {
+        mockDapClient.emit('terminated', {});
+        for (let i = 0; i < 8; i++) {
+          await Promise.resolve();
+        }
+      });
+      const origSend = mockMessageSender.send.getMockImplementation();
+      mockMessageSender.send.mockImplementation((m) => {
+        if (m.type === 'status' && m.status === 'adapter_configured_and_launched') {
+          throw new Error('IPC channel closed');
+        }
+        origSend?.(m);
+      });
+
+      await (worker as any).startAdapterAndConnect(payload).catch(() => undefined);
+      for (let i = 0; i < 8; i++) {
+        await settle();
+      }
+
+      const forwarded = mockMessageSender.send.mock.calls.filter(([m]) => m.type === 'dapEvent' && m.event === 'terminated');
+      expect(forwarded).toHaveLength(1);
     });
   });
 
@@ -528,6 +620,47 @@ describe('noDebug launch completion (issue #746)', () => {
       expect(configuredStatuses()).toHaveLength(1);
     });
 
+    it('does not report configured mid-phase when a terminated event races a phase pending from the handshake', async () => {
+      wire(GoAdapterPolicy, GO_PAYLOAD);
+      const order: string[] = [];
+      let finishConfigurationDone!: () => void;
+      connectionStub.sendConfigurationDone.mockImplementation(
+        () => new Promise<void>((resolve) => { finishConfigurationDone = () => { order.push('configurationDone'); resolve(); }; })
+      );
+      connectionStub.setBreakpoints.mockImplementation(async () => {
+        order.push('setBreakpoints');
+        return { body: { breakpoints: [{ verified: true }] } };
+      });
+      connectionStub.sendLaunchRequest.mockImplementation(async () => {
+        // A stale-pin Delve: `initialized` during the launch request (deferred),
+        // then terminated arriving with the launch response.
+        mockDapClient.emit('initialized');
+        await settle();
+        mockDapClient.emit('terminated', {});
+        order.push('launch-response');
+      });
+      const origSend = mockMessageSender.send.getMockImplementation();
+      mockMessageSender.send.mockImplementation((m) => {
+        if (m.type === 'status' && m.status === 'adapter_configured_and_launched') order.push('configured');
+        if (m.type === 'dapEvent' && m.event === 'terminated') order.push('terminated');
+        origSend?.(m);
+      });
+
+      const connect = (worker as any).startAdapterAndConnect(GO_PAYLOAD);
+      for (let i = 0; i < 6; i++) {
+        await settle();
+      }
+      expect(order).not.toContain('configured');
+      finishConfigurationDone();
+      await connect;
+      for (let i = 0; i < 6; i++) {
+        await settle();
+      }
+
+      expect(order).toEqual(['launch-response', 'setBreakpoints', 'configurationDone', 'configured', 'terminated']);
+      expect(configuredStatuses()).toHaveLength(1);
+    });
+
     it('runs the phase once when initialized arrives late after all', async () => {
       wire(GoAdapterPolicy, GO_PAYLOAD);
 
@@ -545,24 +678,27 @@ describe('noDebug launch completion (issue #746)', () => {
     });
   });
 
-  describe('the #295 stopOnEntry force reads the flag through the same helper', () => {
-    it('does not force stopOnEntry for pending CDP function breakpoints under an honoured noDebug', async () => {
+  describe("the #295 stopOnEntry force reads the launcher's stamped decision", () => {
+    it('does not force stopOnEntry for pending CDP function breakpoints when the launch runs with the debugger off', async () => {
       const cdpPolicy = {
         ...MockAdapterPolicy,
         name: 'cdp-test',
         functionBreakpointsVia: 'cdp',
         honoursNoDebug: true
       } as unknown as AdapterPolicy;
-      wire(cdpPolicy, { ...payloadWith(undefined), initialFunctionBreakpoints: [{ name: 'main' }] });
+      wire(cdpPolicy, { ...payloadWith(undefined, true), initialFunctionBreakpoints: [{ name: 'main' }] });
       (worker as any).state = ProxyState.CONNECTED;
       (worker as any).dapClient = mockDapClient;
+      (worker as any).debuggerOff = true;
 
+      // The launch command's own args say nothing about noDebug: the stamp
+      // is the decision, not a second reading of the args.
       await (worker as any).handleDapCommand({
         cmd: 'dap',
         sessionId: 'nodebug-session',
         requestId: 'r1',
         dapCommand: 'launch',
-        dapArgs: { program: '/x.js', noDebug: 'true' }
+        dapArgs: { program: '/x.js' }
       });
 
       const launchArgs = mockDapClient.sendRequest.mock.calls.find(([cmd]) => cmd === 'launch')?.[1] as

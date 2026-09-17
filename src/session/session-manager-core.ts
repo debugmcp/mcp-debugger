@@ -241,6 +241,18 @@ export abstract class SessionManagerCore extends EventEmitter {
     return isRedactionEnabled(this.environment);
   }
 
+  /**
+   * The write-time redaction every buffer entry gets (issue #237): the text
+   * to store and whether anything was masked, so the entry can be flagged.
+   */
+  private redactForBuffer(text: string): { text: string; redacted: boolean } {
+    if (!this.redactionEnabled()) {
+      return { text, redacted: false };
+    }
+    const result = redactSecretsInString(text);
+    return result.redacted ? { text: result.value, redacted: true } : { text, redacted: false };
+  }
+
   async createSession(params: { language: DebugLanguage; name?: string; executablePath?: string; }): Promise<DebugSessionInfo> {
     const createParams = {
       language: params.language,
@@ -484,15 +496,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       // A worker-forwarded note carries the adapter's own words, which may
       // echo launch arguments: the same write-time redaction as every other
       // buffer entry (issue #237).
-      let note = rawNote;
-      let redacted = false;
-      if (this.redactionEnabled()) {
-        const result = redactSecretsInString(rawNote);
-        if (result.redacted) {
-          note = result.value;
-          redacted = true;
-        }
-      }
+      const { text: note, redacted } = this.redactForBuffer(rawNote);
       if (session.adapterNotices?.includes(note)) {
         return;
       }
@@ -1345,15 +1349,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       // Redact-at-write (issue #237): one hook covers both buffer readers —
       // the get_output tool and the debug:// output resource. The original
       // text is deliberately not retained.
-      let text = body.output;
-      let redacted = false;
-      if (this.redactionEnabled()) {
-        const result = redactSecretsInString(text);
-        if (result.redacted) {
-          text = result.value;
-          redacted = true;
-        }
-      }
+      const { text, redacted } = this.redactForBuffer(body.output);
       // Push to the closure-captured buffer, NOT session.outputBuffer — see
       // the buffer construction above (issue #358).
       const entry: SessionOutputEntry | undefined = outputBuffer.push(
@@ -1383,11 +1379,8 @@ export abstract class SessionManagerCore extends EventEmitter {
     // An adapter answer the worker forwards on its own (issue #746 — a
     // configuration request refused under an honoured noDebug): recorded
     // exactly like a policy annotation.
-    const handleAdapterNotice = (note: string) => {
-      recordAdapterNotice(note);
-    };
-    proxyManager.on('adapter-notice', handleAdapterNotice);
-    handlers.set('adapter-notice', handleAdapterNotice);
+    proxyManager.on('adapter-notice', recordAdapterNotice);
+    handlers.set('adapter-notice', recordAdapterNotice);
 
     // Store handlers in WeakMap
     this.sessionEventHandlers.set(session, handlers);

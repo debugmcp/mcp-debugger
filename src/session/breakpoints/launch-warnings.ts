@@ -135,8 +135,9 @@ export function buildNoDebugLaunchWarning(
  */
 export function buildNoDebugFailureNote(): string {
   return (
-    'noDebug is true, so this launch ran with the debugger disabled. The failure is most likely unrelated to the ' +
-    'flag (see the error); to compare, drop noDebug and launch again'
+    'noDebug is true, so this launch ran with the debugger disabled. The failure may be unrelated to the flag ' +
+    '(see the error), or an adapter behaving differently under it (Delve launches the binary through Go\'s exec, ' +
+    'which on Windows needs the .exe extension); to compare, drop noDebug and launch again'
   );
 }
 

@@ -1,5 +1,65 @@
-import { describe, it, expect } from 'vitest';
-import { DapResponseError, dapResponseErrorMessage } from '../../../src/proxy/dap-response-error.js';
+/**
+ * The reason a failed DAP response gives (issue #663): the formatted
+ * `body.error` when the adapter set one, else `message`, else the generic
+ * fallback.
+ */
+import { describe, expect, it } from 'vitest';
+import type { DebugProtocol } from '@vscode/debugprotocol';
+import {
+  DEFAULT_DAP_FAILURE_MESSAGE,
+  DapResponseError,
+  dapResponseErrorMessage,
+  dapResponseErrorText,
+  formatDapMessage
+} from '../../../src/proxy/dap-response-error.js';
+
+function failed(extra: Partial<DebugProtocol.Response>): DebugProtocol.Response {
+  return { seq: 1, type: 'response', request_seq: 1, command: 'evaluate', success: false, ...extra };
+}
+
+describe('dapResponseErrorMessage', () => {
+  it('prefers the user-facing body.error.format over the short message when both are set', () => {
+    const response = failed({ message: 'short form', body: { error: { id: 1, format: 'long form' } } });
+    expect(dapResponseErrorMessage(response)).toBe('long form');
+  });
+
+  it('surfaces the reason Delve puts only in body.error (launch refused for a too-new Go)', () => {
+    const format =
+      'Failed to launch: Version of Delve is too old for Go version go1.27.1 (maximum supported version 1.26, suppress this error with --check-go-version=false)';
+    const response = failed({
+      command: 'launch',
+      message: 'Failed to launch',
+      body: { error: { id: 3000, format, showUser: true } }
+    });
+    expect(dapResponseErrorMessage(response)).toBe(format);
+  });
+
+  it('uses the short message when body.error is absent or empty', () => {
+    expect(dapResponseErrorMessage(failed({ message: 'short form' }))).toBe('short form');
+    expect(dapResponseErrorMessage(failed({ message: 'short form', body: { error: { id: 1, format: '' } } }))).toBe('short form');
+  });
+
+  it('falls back to body.error.format (js-debug ProtocolError shape)', () => {
+    const response = failed({ body: { error: { id: 2013, format: 'Uncaught ReferenceError: x is not defined' } } });
+    expect(dapResponseErrorMessage(response)).toBe('Uncaught ReferenceError: x is not defined');
+  });
+
+  it('uses the generic fallback when neither text is present', () => {
+    expect(dapResponseErrorMessage(failed({}))).toBe(DEFAULT_DAP_FAILURE_MESSAGE);
+    expect(dapResponseErrorMessage(failed({ message: '' }))).toBe(DEFAULT_DAP_FAILURE_MESSAGE);
+    expect(dapResponseErrorMessage(failed({ body: { error: { id: 1, format: '' } } }))).toBe(DEFAULT_DAP_FAILURE_MESSAGE);
+    expect(dapResponseErrorMessage(failed({ body: { error: 'not a Message' } }))).toBe(DEFAULT_DAP_FAILURE_MESSAGE);
+    expect(dapResponseErrorText(failed({ body: {} }))).toBeUndefined();
+  });
+});
+
+describe('formatDapMessage', () => {
+  it('substitutes {name} placeholders from variables and leaves unknown ones alone', () => {
+    expect(formatDapMessage({ id: 1, format: 'Cannot set {name}: {reason} {unknown}', variables: { name: 'x', reason: 'read-only' } }))
+      .toBe('Cannot set x: read-only {unknown}');
+    expect(formatDapMessage({ id: 1, format: 'plain {text}' })).toBe('plain {text}');
+  });
+});
 
 /**
  * A DAP error response is the adapter's own answer, distinct from a
@@ -8,7 +68,7 @@ import { DapResponseError, dapResponseErrorMessage } from '../../../src/proxy/da
  */
 describe('DapResponseError', () => {
   it('carries the response and reads as the same message the plain rejection used to', () => {
-    const response = { seq: 7, type: 'response' as const, request_seq: 3, success: false, command: 'setBreakpoints', message: 'Not supported in noDebug mode.' };
+    const response = failed({ command: 'setBreakpoints', message: 'Not supported in noDebug mode.' });
 
     const err = new DapResponseError(response);
 
