@@ -390,10 +390,13 @@ describe.skipIf(SKIP_CPP)('MCP Server C/C++ Debugging Smoke Test @requires-cpp',
       expect(stopped, 'program should run to completion').toBeDefined();
       expect(stopped!.exitCode).toBe(0);
 
-      // The adapter's own refusal is surfaced, not hidden.
+      // The adapter's own refusal is surfaced, not hidden: CodeLLDB prints
+      // it, and the worker forwards it as an adapter notice.
       const outputResult = await callToolSafely(mcpClient!, 'get_output', { sessionId });
       const entries = (outputResult.entries ?? []) as Array<{ output?: string }>;
       expect(entries.some(e => e.output?.includes('CPP_DEBUG_MARKER'))).toBe(true);
+      expect(entries.some(e => /Not supported in noDebug mode/.test(e.output ?? ''))).toBe(true);
+      expect(warning).toMatch(/refused under noDebug: .*Not supported in noDebug mode/);
     },
     90000
   );

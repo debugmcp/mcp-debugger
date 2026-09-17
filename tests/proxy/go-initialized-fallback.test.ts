@@ -13,31 +13,15 @@ import { DapProxyWorker } from '../../src/proxy/dap-proxy-worker.js';
 import type {
   DapProxyDependencies,
   ILogger,
-  ProxyInitPayload,
-  StatusMessage,
-  DapResponseMessage,
-  DapEventMessage,
-  ErrorMessage
+  ProxyInitPayload
 } from '../../src/proxy/dap-proxy-interfaces.js';
 import { ProxyState } from '../../src/proxy/dap-proxy-interfaces.js';
 import { GoAdapterPolicy } from '@debugmcp/shared';
 import { createMockDapClient } from '../test-utils/mocks/dap-client.js';
 import { createMockLogger } from '../test-utils/helpers/test-dependencies.js';
-import { createMockFileSystem, createMockProcessSpawner } from '../test-utils/mocks/dap-proxy-doubles.js';
+import { createMockMessageSender, createMockWorkerDependencies } from '../test-utils/mocks/dap-proxy-doubles.js';
 
 // --- helpers ---------------------------------------------------------------
-
-/**
- * Everything the worker hands to `IMessageSender.send`. The interface itself
- * declares the parameter as `unknown`, so the mock is typed with the concrete
- * union instead — that is what lets the assertion below discriminate on
- * `.type` without a cast.
- */
-type SentMessage = StatusMessage | DapResponseMessage | DapEventMessage | ErrorMessage;
-
-const createMockMessageSender = () => ({
-  send: vi.fn<(message: SentMessage) => void>()
-});
 
 const GO_PAYLOAD: ProxyInitPayload = {
   cmd: 'init',
@@ -69,14 +53,7 @@ describe('Go initialized event fallback', () => {
     mockLogger = createMockLogger();
     mockDapClient = createMockDapClient();
     mockMessageSender = createMockMessageSender();
-
-    dependencies = {
-      fileSystem: createMockFileSystem(),
-      loggerFactory: vi.fn().mockResolvedValue(mockLogger),
-      processSpawner: createMockProcessSpawner(),
-      dapClientFactory: { create: vi.fn().mockResolvedValue(mockDapClient) },
-      messageSender: mockMessageSender
-    };
+    dependencies = createMockWorkerDependencies(mockLogger, mockDapClient, mockMessageSender);
 
     worker = new DapProxyWorker(dependencies, { exit: vi.fn() });
   });

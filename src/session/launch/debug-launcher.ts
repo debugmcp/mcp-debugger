@@ -37,6 +37,7 @@ import {
   sessionRemovedDuringTeardown
 } from './proxy-failure-diagnostics.js';
 import { waitForLaunchReadiness } from './launch-readiness.js';
+import { coerceLaunchFlag } from '../../utils/launch-flags.js';
 import type { ProxyLauncher } from './proxy-launcher.js';
 import type { InFlightGuard } from '../in-flight-guard.js';
 
@@ -44,10 +45,8 @@ import type { InFlightGuard } from '../in-flight-guard.js';
  * A launch flag the way the adapter will see it. The proxy launcher merges
  * adapterLaunchConfig over dapLaunchArgs (the server defaults carry neither
  * of these keys), so a value read from dapLaunchArgs alone would miss a flag
- * set — or unset — through adapterLaunchConfig. The string forms are read
- * the way the proxy's message parser coerces them ('true'/'false', the
- * string-typed-args transport quirk); anything else counts by truthiness,
- * which is how the adapters read it.
+ * set — or unset — through adapterLaunchConfig. The value is coerced by
+ * `coerceLaunchFlag`, the same reading the proxy worker applies (#746).
  */
 function resolveLaunchFlag(
   key: 'noDebug' | 'stopOnEntry',
@@ -56,16 +55,13 @@ function resolveLaunchFlag(
 ): boolean {
   const fromAdapterConfig = adapterLaunchConfig?.[key];
   const value = fromAdapterConfig !== undefined ? fromAdapterConfig : dapLaunchArgs?.[key];
-  if (value === 'true') return true;
-  if (value === 'false') return false;
-  return Boolean(value);
+  return coerceLaunchFlag(value);
 }
 
 /**
  * The `data` of a failed launch: the failure record, plus the noDebug note
- * when there is one — an adapter that honours the flag but cannot complete
- * the launch under it (debugpy, Delve, CodeLLDB today: issue #746) would
- * otherwise report an init failure with no pointer to the flag behind it.
+ * when there is one — a launch that failed with the debugger off would
+ * otherwise report the failure with no pointer to the flag it ran under.
  */
 function failureData<T extends object>(
   diagnosticData: T,

@@ -20,8 +20,6 @@ import type {
   ILogger,
   ProxyInitPayload,
   StatusMessage,
-  DapResponseMessage,
-  DapEventMessage,
   ErrorMessage
 } from '../../src/proxy/dap-proxy-interfaces.js';
 import { ProxyState } from '../../src/proxy/dap-proxy-interfaces.js';
@@ -29,15 +27,9 @@ import { GoAdapterPolicy, MockAdapterPolicy, PythonAdapterPolicy } from '@debugm
 import type { AdapterPolicy } from '@debugmcp/shared';
 import { createMockDapClient } from '../test-utils/mocks/dap-client.js';
 import { createMockLogger } from '../test-utils/helpers/test-dependencies.js';
-import { createMockFileSystem, createMockProcessSpawner } from '../test-utils/mocks/dap-proxy-doubles.js';
+import { createMockMessageSender, createMockWorkerDependencies } from '../test-utils/mocks/dap-proxy-doubles.js';
 
 // --- helpers ---------------------------------------------------------------
-
-type SentMessage = StatusMessage | DapResponseMessage | DapEventMessage | ErrorMessage;
-
-const createMockMessageSender = () => ({
-  send: vi.fn<(message: SentMessage) => void>()
-});
 
 /** A python-shaped init payload; `launchConfig` is what the launch request carries. */
 function payloadWith(launchConfig: Record<string, unknown> | undefined): ProxyInitPayload {
@@ -71,14 +63,7 @@ describe('noDebug launch completion (issue #746)', () => {
     mockLogger = createMockLogger();
     mockDapClient = createMockDapClient();
     mockMessageSender = createMockMessageSender();
-
-    dependencies = {
-      fileSystem: createMockFileSystem(),
-      loggerFactory: vi.fn().mockResolvedValue(mockLogger),
-      processSpawner: createMockProcessSpawner(),
-      dapClientFactory: { create: vi.fn().mockResolvedValue(mockDapClient) },
-      messageSender: mockMessageSender
-    };
+    dependencies = createMockWorkerDependencies(mockLogger, mockDapClient, mockMessageSender);
 
     worker = new DapProxyWorker(dependencies, { exit: vi.fn() });
 
@@ -213,6 +198,54 @@ describe('noDebug launch completion (issue #746)', () => {
       expect(worker.getState()).toBe(ProxyState.CONNECTED);
     });
 
+    it("forwards the adapter's refusal to the parent as an adapter notice, naming the request", async () => {
+      const payload = payloadWith({ noDebug: true });
+      wire(PythonAdapterPolicy, payload);
+      connectionStub.setBreakpoints.mockRejectedValue(new Error('Internal debugger error: Not supported in noDebug mode.'));
+
+      await (worker as any).startAdapterAndConnect(payload);
+      mockDapClient.emit('initialized');
+      await settle();
+      await settle();
+
+      const notices = mockMessageSender.send.mock.calls.filter(
+        ([m]) => m.type === 'status' && m.status === 'adapter_notice'
+      );
+      expect(notices).toHaveLength(1);
+      expect((notices[0][0] as StatusMessage & { note?: string }).note).toBe(
+        'setBreakpoints refused under noDebug: Internal debugger error: Not supported in noDebug mode.'
+      );
+    });
+
+    it('does not flip a session that is already shutting down back to CONNECTED', async () => {
+      const payload = payloadWith({ noDebug: true });
+      wire(PythonAdapterPolicy, payload);
+      // The adapter went away while setBreakpoints was pending: shutdown
+      // rejects the request, and the catch must not resurrect the session.
+      connectionStub.setBreakpoints.mockImplementation(async () => {
+        (worker as any).state = ProxyState.SHUTTING_DOWN;
+        throw new Error('worker shutdown');
+      });
+
+      // The phase runs before the launch response here, so the early report
+      // has not happened yet when the refusal lands.
+      let resolveLaunch!: () => void;
+      connectionStub.sendLaunchRequest.mockImplementation(
+        () => new Promise<void>((resolve) => { resolveLaunch = resolve; })
+      );
+      const connect = (worker as any).startAdapterAndConnect(payload);
+      await settle();
+      mockDapClient.emit('initialized');
+      await settle();
+      await settle();
+
+      expect(configuredStatuses()).toHaveLength(0);
+      expect(worker.getState()).toBe(ProxyState.SHUTTING_DOWN);
+      resolveLaunch();
+      await connect;
+      expect(configuredStatuses()).toHaveLength(0);
+    });
+
     it('survives a refused configurationDone as well', async () => {
       const payload = payloadWith({ noDebug: true });
       wire(PythonAdapterPolicy, payload);
@@ -240,6 +273,29 @@ describe('noDebug launch completion (issue #746)', () => {
 
       expect(configuredStatuses()).toHaveLength(1);
       expect(worker.getState()).toBe(ProxyState.CONNECTED);
+    });
+
+    it('reads every other form exactly as the launcher does — the two decisions must agree', async () => {
+      // The launcher (resolveLaunchFlag) coerces 'true'/'false' and takes
+      // anything else by truthiness, which is also how debugpy reads it.
+      for (const form of ['True', 1, 'yes']) {
+        mockMessageSender.send.mockClear();
+        (worker as any).state = ProxyState.INITIALIZING;
+        const payload = payloadWith({ noDebug: form });
+        wire(PythonAdapterPolicy, payload);
+
+        await (worker as any).startAdapterAndConnect(payload);
+        await settle();
+
+        expect(configuredStatuses(), `noDebug: ${JSON.stringify(form)}`).toHaveLength(1);
+      }
+      mockMessageSender.send.mockClear();
+      (worker as any).state = ProxyState.INITIALIZING;
+      const off = payloadWith({ noDebug: 'false' });
+      wire(PythonAdapterPolicy, off);
+      await (worker as any).startAdapterAndConnect(off);
+      await settle();
+      expect(configuredStatuses()).toHaveLength(0);
     });
 
     it('leaves an attach-shaped config alone — noDebug is a launch-request property', async () => {
@@ -308,6 +364,7 @@ describe('noDebug launch completion (issue #746)', () => {
       scriptArgs: [],
       stopOnEntry: false,
       justMyCode: false,
+      initialBreakpoints: [{ id: 'bp-1', file: '/path/to/main.go', line: 8 }],
       launchConfig: { noDebug: true },
       adapterCommand: { command: 'dlv', args: ['dap', '--listen', 'localhost:12345'] }
     };
@@ -330,6 +387,35 @@ describe('noDebug launch completion (issue #746)', () => {
       expect(worker.getState()).toBe(ProxyState.CONNECTED);
       expect(vi.getTimerCount()).toBe(0);
       expect(errorMessages()).toHaveLength(0);
+    });
+
+    it('runs a phase that arrived during the launch request before reporting configured (stale pin)', async () => {
+      wire(GoAdapterPolicy, GO_PAYLOAD);
+      const order: string[] = [];
+      connectionStub.sendLaunchRequest.mockImplementation(async () => {
+        // A Delve build that debugs under the flag after all: `initialized`
+        // lands while the launch request is in flight and is deferred.
+        mockDapClient.emit('initialized');
+        await settle();
+        order.push('launch-response');
+      });
+      connectionStub.setBreakpoints.mockImplementation(async () => {
+        order.push('setBreakpoints');
+        return { body: { breakpoints: [{ verified: true }] } };
+      });
+      connectionStub.sendConfigurationDone.mockImplementation(async () => { order.push('configurationDone'); });
+      const origSend = mockMessageSender.send.getMockImplementation();
+      mockMessageSender.send.mockImplementation((m) => {
+        if (m.type === 'status' && m.status === 'adapter_configured_and_launched') order.push('configured');
+        origSend?.(m);
+      });
+
+      await (worker as any).startAdapterAndConnect(GO_PAYLOAD);
+      await settle();
+
+      // Debug-mode order: the phase closes, then the parent hears configured.
+      expect(order).toEqual(['launch-response', 'setBreakpoints', 'configurationDone', 'configured']);
+      expect(configuredStatuses()).toHaveLength(1);
     });
 
     it('runs the phase once when initialized arrives late after all', async () => {

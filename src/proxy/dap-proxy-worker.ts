@@ -31,6 +31,7 @@ import { DapConnectionManager } from './dap-proxy-connection-manager.js';
 import { 
   validateProxyInitPayload
 } from '../utils/type-guards.js';
+import { coerceLaunchFlag } from '../utils/launch-flags.js';
 import { SilentDapCommandPayload } from './dap-extensions.js';
 // Import adapter policies from shared package
 import type { AdapterPolicy, AdapterSpecificState, BreakpointFields } from '@debugmcp/shared';
@@ -1013,6 +1014,9 @@ export class DapProxyWorker {
     }
 
     let configurationDoneAttempted = false;
+    // Which request the phase is on, for the notice a refusal under noDebug
+    // turns into (issue #746).
+    let stage = 'setBreakpoints';
     try {
       // Set initial breakpoints if provided
       if (this.currentInitPayload.initialBreakpoints?.length) {
@@ -1108,6 +1112,7 @@ export class DapProxyWorker {
       }
 
       // Send configuration done
+      stage = 'configurationDone';
       configurationDoneAttempted = true;
       await this.connectionManager.sendConfigurationDone(this.dapClient);
 
@@ -1118,19 +1123,21 @@ export class DapProxyWorker {
       if (this.debuggerOff) {
         // Under an honoured noDebug a refused configuration request is the
         // adapter declining to debug (CodeLLDB: "Not supported in noDebug
-        // mode"), not a broken session (issue #746). Log it, still close the
-        // phase the adapter opened — CodeLLDB withholds the launch response
-        // until configurationDone — and carry on with the debugger off.
-        this.logger!.warn(`[Worker] Configuration request refused under noDebug (continuing): ${message}`);
+        // mode"), not a broken session (issue #746). The adapter's answer
+        // goes to the caller as an adapter notice (launch warning +
+        // get_output) rather than to the log alone; the phase the adapter
+        // opened is still closed — CodeLLDB withholds the launch response
+        // until configurationDone — and the launch carries on with the
+        // debugger off.
+        this.logger!.warn(`[Worker] ${stage} refused under noDebug (continuing): ${message}`);
+        this.sendAdapterNotice(`${stage} refused under noDebug: ${message}`);
         if (!configurationDoneAttempted) {
           try {
             await this.connectionManager.sendConfigurationDone(this.dapClient);
           } catch (err) {
-            this.logger!.warn(
-              `[Worker] configurationDone refused under noDebug (continuing): ${
-                err instanceof Error ? err.message : String(err)
-              }`
-            );
+            const refusal = err instanceof Error ? err.message : String(err);
+            this.logger!.warn(`[Worker] configurationDone refused under noDebug (continuing): ${refusal}`);
+            this.sendAdapterNotice(`configurationDone refused under noDebug: ${refusal}`);
           }
         }
         this.markConfiguredAndLaunched();
@@ -1155,22 +1162,30 @@ export class DapProxyWorker {
    */
   private async completeDebuggerOffLaunch(): Promise<void> {
     this.deferInitializedHandling = false;
-    if (this.state !== ProxyState.CONNECTED) {
+    if (this.initializedEventPending) {
+      // The phase arrived while the handshake was deferring it: run it
+      // first, as debug mode would — it reports configured itself when it
+      // closes (and on the tolerant catch), so the parent hears configured
+      // after the phase, not before it.
+      this.logger!.info('[Worker] noDebug is honoured by this adapter, but "initialized" arrived during the launch request: running the configuration phase it opened first (issue #746)');
+      await this.handleInitializedEvent();
+    }
+    if (this.state === ProxyState.INITIALIZING) {
       this.logger!.info('[Worker] noDebug is honoured by this adapter: launch complete on the launch response, no configuration phase to wait for (issue #746)');
       this.markConfiguredAndLaunched();
-    }
-    if (this.initializedEventPending) {
-      await this.handleInitializedEvent();
     }
   }
 
   /**
    * The one transition to CONNECTED plus the readiness status the parent's
    * launch waits on. Reported once per launch: under an honoured noDebug the
-   * launch response and the end of a configuration phase both reach here.
+   * launch response and the end of a configuration phase both reach here,
+   * and only from INITIALIZING — a session already connected has reported,
+   * and one shutting down (the adapter went away mid-phase) must not be
+   * resurrected by a late catch.
    */
   private markConfiguredAndLaunched(): void {
-    if (this.state === ProxyState.CONNECTED) {
+    if (this.state !== ProxyState.INITIALIZING) {
       return;
     }
     this.state = ProxyState.CONNECTED;
@@ -1833,12 +1848,25 @@ export class DapProxyWorker {
   /**
    * noDebug as the adapter will see it, gated by the policy's measured word
    * (issue #710): `launchArgs` is the merged launch request — the init
-   * payload's launchConfig, or a queued launch command's dapArgs. The string
-   * form survives the message parser, which coerces only the top-level flags.
+   * payload's launchConfig, or a queued launch command's dapArgs. Read with
+   * the launcher's own coercion so the two decisions agree (issue #746).
    */
   private isDebuggerOff(launchArgs: Record<string, unknown> | undefined): boolean {
-    const noDebug = launchArgs?.noDebug === true || launchArgs?.noDebug === 'true';
-    return noDebug && this.adapterPolicy.honoursNoDebug === true;
+    return coerceLaunchFlag(launchArgs?.noDebug) && this.adapterPolicy.honoursNoDebug === true;
+  }
+
+  /**
+   * An adapter's own answer the caller should see even though the launch
+   * goes on (issue #746): the parent records it as an adapter notice — the
+   * launch-result warning and a `[mcp-debugger] Warning` output entry, the
+   * #441 path. Never throws: a notice must not fail the launch it explains.
+   */
+  private sendAdapterNotice(note: string): void {
+    try {
+      this.sendStatus('adapter_notice', { note });
+    } catch (err) {
+      this.logger?.warn(`[Worker] adapter_notice status failed (continuing): ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   /**

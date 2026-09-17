@@ -138,4 +138,29 @@ describe('SessionManager - adapter-noise output suppression (issue #361)', () =>
       }
     });
   });
+
+  describe('worker-forwarded adapter notices (issue #746)', () => {
+    it('records a notice the worker forwards like a policy annotation: session + one attributed entry', async () => {
+      const session = await launch(DebugLanguage.PYTHON);
+
+      dependencies.mockProxyManager.emit(
+        'adapter-notice',
+        'setBreakpoints refused under noDebug: Internal debugger error: Not supported in noDebug mode.'
+      );
+      // A repeat is one notice.
+      dependencies.mockProxyManager.emit(
+        'adapter-notice',
+        'setBreakpoints refused under noDebug: Internal debugger error: Not supported in noDebug mode.'
+      );
+
+      const managed = sessionManager.getSession(session.id)!;
+      expect(managed.adapterNotices).toEqual([
+        'setBreakpoints refused under noDebug: Internal debugger error: Not supported in noDebug mode.'
+      ]);
+      const outputs = managed.outputBuffer!.read(0, 100).entries.map(e => e.output);
+      expect(outputs).toEqual([
+        '[mcp-debugger] Warning: setBreakpoints refused under noDebug: Internal debugger error: Not supported in noDebug mode.\n'
+      ]);
+    });
+  });
 });

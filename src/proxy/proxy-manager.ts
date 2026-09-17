@@ -75,6 +75,8 @@ export interface ProxyManagerEvents {
   'function-breakpoints-synced': (results: FunctionBreakpointSyncResult[]) => void;
   /** Pre-launch setBreakpoints results from the worker (issue #439) */
   'breakpoints-synced': (results: BreakpointSyncResult[]) => void;
+  /** An adapter answer the caller should see although the launch goes on (issue #746) */
+  'adapter-notice': (note: string) => void;
   'dap-event': (event: string, body: unknown) => void;
 }
 
@@ -1428,6 +1430,14 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         // Emitted here, like every status-derived event (issue #439).
         this.logger.info(`[ProxyManager] Pre-launch breakpoint sync results received`);
         this.emit('breakpoints-synced', message.breakpoints ?? []);
+        break;
+
+      case 'adapter_notice':
+        // Emitted here, like every status-derived event (issue #746).
+        if (typeof message.note === 'string' && message.note.length > 0) {
+          this.logger.info(`[ProxyManager] Adapter notice: ${message.note}`);
+          this.emit('adapter-notice', message.note);
+        }
         break;
       
       case 'adapter_exited':

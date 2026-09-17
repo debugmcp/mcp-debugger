@@ -478,6 +478,18 @@ export abstract class SessionManagerCore extends EventEmitter {
     // microtask/IPC queue when restart_debugging swapped buffers) can never
     // land in the new launch's buffer and take an early seq.
     const outputBuffer = session.outputBuffer = new OutputRingBuffer();
+    // One note once: on the session for the launch-result warning, and as an
+    // attributed entry in this launch's buffer (issues #441, #746).
+    const recordAdapterNotice = (note: string): void => {
+      if (session.adapterNotices?.includes(note)) {
+        return;
+      }
+      (session.adapterNotices ??= []).push(note);
+      const noteEntry = outputBuffer.push('console', `[mcp-debugger] Warning: ${note}\n`);
+      if (noteEntry) {
+        this.emit('output-captured', sessionId, noteEntry);
+      }
+    };
     // A new adapter instance has verified nothing yet: clear per-launch
     // breakpoint state so a relaunch reports honest verification (#238).
     for (const bp of session.breakpoints.values()) {
@@ -1341,12 +1353,8 @@ export abstract class SessionManagerCore extends EventEmitter {
       // attributed explanation and record it for the launch-result warning.
       try {
         const note = policy?.annotateOutputEvent?.(category, body.output);
-        if (note && !session.adapterNotices?.includes(note)) {
-          (session.adapterNotices ??= []).push(note);
-          const noteEntry = outputBuffer.push('console', `[mcp-debugger] Warning: ${note}\n`);
-          if (noteEntry) {
-            this.emit('output-captured', sessionId, noteEntry);
-          }
+        if (note) {
+          recordAdapterNotice(note);
         }
       } catch {
         // annotation must never break output capture
@@ -1354,6 +1362,15 @@ export abstract class SessionManagerCore extends EventEmitter {
     };
     proxyManager.on('output', handleOutput);
     handlers.set('output', handleOutput);
+
+    // An adapter answer the worker forwards on its own (issue #746 — a
+    // configuration request refused under an honoured noDebug): recorded
+    // exactly like a policy annotation.
+    const handleAdapterNotice = (note: string) => {
+      recordAdapterNotice(note);
+    };
+    proxyManager.on('adapter-notice', handleAdapterNotice);
+    handlers.set('adapter-notice', handleAdapterNotice);
 
     // Store handlers in WeakMap
     this.sessionEventHandlers.set(session, handlers);
