@@ -16,6 +16,28 @@
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
 
+/**
+ * A DAP error response — the adapter's own answer to a request it declined —
+ * as MinimalDapClient rejects it. Distinct from a transport failure, a
+ * timeout or a shutdown, which reject with a plain Error: the worker's
+ * tolerance of a refusal under an honoured noDebug (issue #746) keys on
+ * this type, so nothing else is ever relabelled an adapter refusal.
+ */
+export class DapResponseError extends Error {
+  readonly response: DebugProtocol.Response;
+
+  constructor(response: DebugProtocol.Response) {
+    super(dapResponseErrorMessage(response));
+    this.name = 'DapResponseError';
+    this.response = response;
+  }
+
+  /** The request the adapter declined. */
+  get command(): string {
+    return this.response.command;
+  }
+}
+
 export const DEFAULT_DAP_FAILURE_MESSAGE = 'Request failed';
 
 /** Fill `{name}` placeholders in a DAP Message format from its variables. */

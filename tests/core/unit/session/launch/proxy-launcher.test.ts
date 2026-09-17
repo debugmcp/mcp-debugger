@@ -305,6 +305,7 @@ describe('ProxyLauncher.buildAdapterLaunchPlan', () => {
       initialBreakpoints: [],
       initialFunctionBreakpoints: [],
       dryRunSpawn: true,
+      debuggerOff: false,
       logLevel: 'debug',
       breakOnExceptions: 'uncaught',
       launchConfig: transformed,

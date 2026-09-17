@@ -186,6 +186,20 @@ describe('SessionManager - secret redaction (issue #237)', () => {
       expect(session).toBeDefined();
     });
 
+    it('masks secrets in an adapter notice the worker forwards — the buffer entry and the launch-warning record (issue #746)', async () => {
+      const { sessionManager, dependencies } = makeManager('');
+      const session = await createPausedSession(sessionManager, dependencies);
+
+      dependencies.mockProxyManager.emit('adapter-notice', `setBreakpoints refused under noDebug: bad token ${GH_PAT}`);
+
+      const managed = sessionManager.getSession(session.id)!;
+      expect(managed.adapterNotices).toEqual(['setBreakpoints refused under noDebug: bad token <redacted:github-pat>']);
+      const entries = managed.outputBuffer!.read(0, 100).entries;
+      const note = entries.find(e => e.output.includes('refused under noDebug'))!;
+      expect(note.output).toBe('[mcp-debugger] Warning: setBreakpoints refused under noDebug: bad token <redacted:github-pat>\n');
+      expect(note.redacted).toBe(true);
+    });
+
     it('leaves benign output untouched and unflagged', async () => {
       const { sessionManager, dependencies } = makeManager('');
       await createPausedSession(sessionManager, dependencies);

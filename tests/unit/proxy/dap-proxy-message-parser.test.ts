@@ -357,6 +357,13 @@ describe('MessageParser', () => {
         expect((result as any).justMyCode).toBe(false);
       });
 
+      it('should coerce debuggerOff from string "true" to boolean and reject other shapes (issue #746)', () => {
+        const parsed = MessageParser.validateInitPayload({ ...basePayload, debuggerOff: 'true' });
+        expect((parsed as any).debuggerOff).toBe(true);
+        expect(() => MessageParser.validateInitPayload({ ...basePayload, debuggerOff: 'yes' }))
+          .toThrow("Init payload 'debuggerOff' must be a boolean if provided");
+      });
+
       it('should coerce dryRunSpawn from string "true" to boolean', () => {
         const payload = { ...basePayload, dryRunSpawn: 'true' };
         const result = MessageParser.validateInitPayload(payload);

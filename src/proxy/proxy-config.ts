@@ -22,6 +22,13 @@ export interface ProxyConfig {
   initialBreakpoints?: Array<{ id?: string; file: string; line: number; condition?: string; logMessage?: string; suspendPolicy?: 'all' | 'thread' }>;
   initialFunctionBreakpoints?: Array<{ name: string; condition?: string }>;
   dryRunSpawn?: boolean;
+  /**
+   * The launcher's decision that this launch runs with the debugger off —
+   * an honoured `noDebug` (issue #710) — stamped once so the worker never
+   * re-derives it from a launch config a transform may have reshaped
+   * (issue #746).
+   */
+  debuggerOff?: boolean;
   /** Effective log level for the per-session proxy logger (issue #403) */
   logLevel?: string;
   breakOnExceptions?: ExceptionBreakMode;

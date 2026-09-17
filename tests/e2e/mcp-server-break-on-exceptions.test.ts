@@ -38,6 +38,7 @@ const ROOT = path.resolve(__dirname, '../..');
 const CRASHING_SCRIPT = path.resolve(ROOT, 'tests', 'fixtures', 'debug-scripts', 'with-errors.py');
 const JS_CRASHING_SCRIPT = path.resolve(ROOT, 'tests', 'fixtures', 'debug-scripts', 'js-throws.js');
 const JS_CLEAN_SCRIPT = path.resolve(ROOT, 'tests', 'fixtures', 'debug-scripts', 'js-clean-exit.js');
+const SIMPLE_SCRIPT = path.resolve(ROOT, 'tests', 'fixtures', 'debug-scripts', 'simple.py');
 const ATTACH_SCRIPT = path.resolve(ROOT, 'tests', 'fixtures', 'python', 'attach_then_raise.py');
 const PYTHON = process.platform === 'win32' ? 'python' : 'python3';
 
@@ -395,6 +396,40 @@ describe('Break-on-exception (issue #220)', () => {
       // The crash is distinguishable from a clean exit via the exit code
       expect(stopped!.exitCode).toBeDefined();
       expect(stopped!.exitCode).not.toBe(0);
+    }, 60000);
+
+    it('completes a noDebug launch even though debugpy opens no configuration phase (issue #746)', async () => {
+      sessionId = await createSession('python', 'py-nodebug-launch');
+      const bp = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'set_breakpoint',
+        arguments: { sessionId, file: SIMPLE_SCRIPT, line: 5 }
+      }));
+      expect(bp.success, JSON.stringify(bp)).toBe(true);
+
+      // debugpy honours the flag and — correctly, per DAP — sends no
+      // `initialized` event when it is not debugging. The launch used to wait
+      // for one and die as "Proxy exited during initialization. Code: 0".
+      const startRes = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: SIMPLE_SCRIPT,
+          dapLaunchArgs: { stopOnEntry: false, noDebug: true }
+        }
+      }));
+      expect(startRes.success, JSON.stringify(startRes)).toBe(true);
+      expect(startRes.state).not.toBe('error');
+      const warning = (startRes as { warning?: string }).warning;
+      expect(warning).toMatch(/noDebug is true/);
+      expect(warning).toMatch(/1 breakpoint\(s\)/);
+
+      const stopped = await pollUntil(async () => {
+        const snap = await getSessionSnapshot(mcpClient!, sessionId!);
+        return snap?.state === 'stopped' ? snap : undefined;
+      }, 20000);
+      expect(stopped, 'session should run to completion').toBeDefined();
+      expect(stopped!.lastStop).toBeUndefined();
+      expect(stopped!.exitCode).toBe(0);
     }, 60000);
   });
 
