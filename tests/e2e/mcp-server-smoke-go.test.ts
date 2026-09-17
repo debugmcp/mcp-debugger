@@ -565,5 +565,97 @@ describe('MCP Server Go Debugging Smoke Test @requires-go', () => {
       }
     }
   }, 60000);
-});
 
+  it('completes a noDebug launch even though Delve opens no configuration phase (issue #746)', async (ctx) => {
+    const { execSync } = await import('child_process');
+    try {
+      execSync('go version', { stdio: 'ignore' });
+      execSync('dlv version', { stdio: 'ignore' });
+    } catch {
+      console.log('[Go Smoke Test] Go/Delve not installed, skipping noDebug launch test');
+      return;
+    }
+
+    const testGoFile = path.resolve(ROOT, 'examples', 'go', 'hello_world.go');
+    // Under noDebug Delve runs the program through Go's exec.LookPath, which
+    // on Windows needs the extension (debug mode spawns the bare file fine).
+    const testBinary = path.resolve(
+      ROOT, 'examples', 'go',
+      process.platform === 'win32' ? 'hello_world_nodebug_test.exe' : 'hello_world_nodebug_test'
+    );
+    try {
+      execSync(`go build -gcflags="all=-N -l" -o "${testBinary}" "${testGoFile}"`, {
+        cwd: path.dirname(testGoFile),
+        stdio: 'pipe'
+      });
+    } catch {
+      console.log('[Go Smoke Test] Failed to compile test binary, skipping noDebug launch test');
+      return;
+    }
+
+    try {
+      const createResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'create_debug_session',
+        arguments: { language: 'go', name: 'go-nodebug-launch' }
+      }));
+      sessionId = createResponse.sessionId as string;
+
+      const bpResponse = await callToolSafely(mcpClient!, 'set_breakpoint', {
+        sessionId,
+        file: testGoFile,
+        line: 8
+      });
+      expect(bpResponse.success).toBe(true);
+
+      // Delve honours the flag and — correctly, per DAP — sends no
+      // `initialized` event when it is not debugging; the two-phase launch
+      // used to wait for one and time out.
+      const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: testBinary,
+          args: [],
+          dapLaunchArgs: { stopOnEntry: false, noDebug: true }
+        }
+      }));
+      if (!startResponse.success) {
+        skipIfSpawnBlocked(ctx, startResponse, 'Go');
+        throw new Error(`noDebug start_debugging failed: ${JSON.stringify(startResponse, null, 2)}`);
+      }
+      expect(startResponse.state).not.toBe('error');
+      expect((startResponse as { warning?: string }).warning).toMatch(/noDebug is true/);
+
+      const deadline = Date.now() + 20000;
+      let snap: { state?: string } | undefined;
+      while (Date.now() < deadline) {
+        const res = parseSdkToolResult(await mcpClient!.callTool({ name: 'list_debug_sessions', arguments: {} }));
+        snap = ((res.sessions ?? []) as Array<{ id: string; state?: string }>).find(s => s.id === sessionId);
+        if (snap?.state === 'stopped') break;
+        await new Promise(r => setTimeout(r, 500));
+      }
+      expect(snap?.state, 'program should run to completion').toBe('stopped');
+
+      const outputResult = await callToolSafely(mcpClient!, 'get_output', { sessionId });
+      const entries = (outputResult.entries ?? []) as Array<{ output?: string }>;
+      expect(entries.some(e => e.output?.includes('Hello, World!'))).toBe(true);
+    } finally {
+      if (sessionId) {
+        try {
+          await callToolSafely(mcpClient!, 'close_debug_session', { sessionId });
+        } catch {
+          // Session may already be closed
+        }
+        sessionId = null;
+      }
+      try {
+        const fs = await import('fs');
+        if (fs.existsSync(testBinary)) {
+          fs.unlinkSync(testBinary);
+        }
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+  }, 60000);
+});

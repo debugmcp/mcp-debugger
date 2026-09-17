@@ -121,6 +121,13 @@ export class DapProxyWorker {
   private initializedEventPending: boolean = false;
   private deferInitializedHandling: boolean = false;
   private initializedEventHandled: boolean = false;
+  /**
+   * True when this launch runs with the debugger off: the launch request
+   * carries an honoured `noDebug` (issue #710). Such an adapter opens no
+   * configuration phase, so the launch is complete on the launch response
+   * and a refused configuration request is not a broken session (#746).
+   */
+  private debuggerOff: boolean = false;
   private initializedEventPromise: Promise<void> | null = null;
   private initializedEventResolver: (() => void) | null = null;
   private requestTracker: CallbackRequestTracker;
@@ -545,6 +552,8 @@ export class DapProxyWorker {
       const isAttachMode = payload.launchConfig?.request === 'attach' ||
                            payload.launchConfig?.__attachMode === true;
       this.isAttachMode = isAttachMode;
+      // noDebug is a launch-request property: an attach debugs regardless.
+      this.debuggerOff = !isAttachMode && this.isDebuggerOff(payload.launchConfig);
 
       // Check if adapter requires command queueing
       if (this.adapterPolicy.requiresCommandQueueing()) {
@@ -653,17 +662,25 @@ export class DapProxyWorker {
           await this.handleInitializedEvent();
         } else if (initBehavior.sendLaunchBeforeConfig) {
           // TWO-PHASE INITIALIZED HANDLING for adapters like Go/Delve, Java/JDI bridge
-          // Phase 1: Brief wait — some adapters send initialized immediately after initialize
-          this.logger!.info('[Worker] Phase 1: Waiting briefly for "initialized" event before launch');
-          const receivedBeforeLaunch = await Promise.race([
-            this.initializedEventPromise!.then(() => true as const),
-            new Promise<false>(resolve => setTimeout(() => resolve(false), 2000))
-          ]);
-
-          if (receivedBeforeLaunch) {
-            this.logger!.info('[Worker] "initialized" event received before launch');
+          // Phase 1: Brief wait — some adapters send initialized immediately after initialize.
+          // Under an honoured noDebug there is no configuration to precede the
+          // launch, so neither phase waits (issue #746): Delve, correctly, sends
+          // no "initialized" when it is not debugging.
+          let receivedBeforeLaunch = false;
+          if (this.debuggerOff) {
+            this.logger!.info('[Worker] noDebug is honoured by this adapter: not waiting for "initialized" before or after launch (issue #746)');
           } else {
-            this.logger!.warn('[Worker] "initialized" event not received within 2s — falling back to launch-first flow');
+            this.logger!.info('[Worker] Phase 1: Waiting briefly for "initialized" event before launch');
+            receivedBeforeLaunch = await Promise.race([
+              this.initializedEventPromise!.then(() => true as const),
+              new Promise<false>(resolve => setTimeout(() => resolve(false), 2000))
+            ]);
+
+            if (receivedBeforeLaunch) {
+              this.logger!.info('[Worker] "initialized" event received before launch');
+            } else {
+              this.logger!.warn('[Worker] "initialized" event not received within 2s — falling back to launch-first flow');
+            }
           }
 
           // Standard two-phase: send launch, wait for response, then configurationDone
@@ -676,20 +693,24 @@ export class DapProxyWorker {
             payload.launchConfig
           ));
 
-          if (!receivedBeforeLaunch) {
-            // Phase 2: Wait for initialized after launch
-            this.logger!.info('[Worker] Phase 2: Waiting for "initialized" event after launch');
-            await Promise.race([
-              this.initializedEventPromise!,
-              new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('Timeout waiting for initialized event (after launch fallback)')), 10000)
-              )
-            ]);
-            this.logger!.info('[Worker] "initialized" event received after launch (fallback succeeded)');
-          }
+          if (this.debuggerOff) {
+            await this.completeDebuggerOffLaunch();
+          } else {
+            if (!receivedBeforeLaunch) {
+              // Phase 2: Wait for initialized after launch
+              this.logger!.info('[Worker] Phase 2: Waiting for "initialized" event after launch');
+              await Promise.race([
+                this.initializedEventPromise!,
+                new Promise((_, reject) =>
+                  setTimeout(() => reject(new Error('Timeout waiting for initialized event (after launch fallback)')), 10000)
+                )
+              ]);
+              this.logger!.info('[Worker] "initialized" event received after launch (fallback succeeded)');
+            }
 
-          this.deferInitializedHandling = false;
-          await this.handleInitializedEvent();
+            this.deferInitializedHandling = false;
+            await this.handleInitializedEvent();
+          }
         } else {
           // LAUNCH MODE: Send launch request FIRST, then wait for "initialized"
           // Python/debugpy sends "initialized" AFTER receiving the launch request
@@ -703,10 +724,16 @@ export class DapProxyWorker {
             payload.justMyCode,
             payload.launchConfig
           ));
+
+          if (this.debuggerOff) {
+            await this.completeDebuggerOffLaunch();
+          }
         }
       }
 
-      this.logger!.info('[Worker] Waiting for "initialized" event from adapter.');
+      if (!this.debuggerOff) {
+        this.logger!.info('[Worker] Waiting for "initialized" event from adapter.');
+      }
     } catch (error) {
       // Report before tearing down. shutdown() below waits on the debuggee
       // and sweeps the adapter's process group (hundreds of ms); meanwhile
@@ -985,6 +1012,7 @@ export class DapProxyWorker {
       throw new Error('Missing required state in initialized handler');
     }
 
+    let configurationDoneAttempted = false;
     try {
       // Set initial breakpoints if provided
       if (this.currentInitPayload.initialBreakpoints?.length) {
@@ -1080,17 +1108,73 @@ export class DapProxyWorker {
       }
 
       // Send configuration done
+      configurationDoneAttempted = true;
       await this.connectionManager.sendConfigurationDone(this.dapClient);
 
       // Update state and notify parent
-      this.state = ProxyState.CONNECTED;
-      this.reportConfiguredAndLaunched();
+      this.markConfiguredAndLaunched();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (this.debuggerOff) {
+        // Under an honoured noDebug a refused configuration request is the
+        // adapter declining to debug (CodeLLDB: "Not supported in noDebug
+        // mode"), not a broken session (issue #746). Log it, still close the
+        // phase the adapter opened — CodeLLDB withholds the launch response
+        // until configurationDone — and carry on with the debugger off.
+        this.logger!.warn(`[Worker] Configuration request refused under noDebug (continuing): ${message}`);
+        if (!configurationDoneAttempted) {
+          try {
+            await this.connectionManager.sendConfigurationDone(this.dapClient);
+          } catch (err) {
+            this.logger!.warn(
+              `[Worker] configurationDone refused under noDebug (continuing): ${
+                err instanceof Error ? err.message : String(err)
+              }`
+            );
+          }
+        }
+        this.markConfiguredAndLaunched();
+        return;
+      }
       this.logger!.error('[Worker] Error in initialized handler:', error);
       this.sendError(`Error in DAP sequence: ${message}`);
       await this.shutdown();
     }
+  }
+
+  /**
+   * Under an honoured noDebug the launch is complete when the launch request
+   * is answered: an adapter that is not debugging opens no configuration
+   * phase (debugpy and Delve send no "initialized", correctly), so there is
+   * nothing to wait for (issue #746). An adapter that opens one anyway
+   * (CodeLLDB) may have closed it — and reported — before the launch
+   * response it withholds until configurationDone; either order reports
+   * once. A phase that arrived while the handshake was still deferring it
+   * is run now: the adapter's own answers are the ground truth, and a pin
+   * that is stale for this adapter build self-corrects.
+   */
+  private async completeDebuggerOffLaunch(): Promise<void> {
+    this.deferInitializedHandling = false;
+    if (this.state !== ProxyState.CONNECTED) {
+      this.logger!.info('[Worker] noDebug is honoured by this adapter: launch complete on the launch response, no configuration phase to wait for (issue #746)');
+      this.markConfiguredAndLaunched();
+    }
+    if (this.initializedEventPending) {
+      await this.handleInitializedEvent();
+    }
+  }
+
+  /**
+   * The one transition to CONNECTED plus the readiness status the parent's
+   * launch waits on. Reported once per launch: under an honoured noDebug the
+   * launch response and the end of a configuration phase both reach here.
+   */
+  private markConfiguredAndLaunched(): void {
+    if (this.state === ProxyState.CONNECTED) {
+      return;
+    }
+    this.state = ProxyState.CONNECTED;
+    this.reportConfiguredAndLaunched();
   }
 
   /**
@@ -1188,9 +1272,7 @@ export class DapProxyWorker {
         // Under an honoured noDebug the debugger is off (issue #710): no entry
         // stop can come, and the function breakpoints will not bind either —
         // the session layer has already told the caller so.
-        const noDebug = launchArgs.noDebug === true || launchArgs.noDebug === 'true';
-        const debuggerOff = noDebug && this.adapterPolicy.honoursNoDebug === true;
-        if (launchArgs.stopOnEntry !== true && !debuggerOff) {
+        if (launchArgs.stopOnEntry !== true && !this.isDebuggerOff(launchArgs)) {
           payload.dapArgs = { ...launchArgs, stopOnEntry: true };
           this.logger?.info('[Worker] Forcing stopOnEntry=true in the js-debug launch config (pending CDP function breakpoints, issue #295)');
         }
@@ -1746,6 +1828,17 @@ export class DapProxyWorker {
     }
     this.adapterCapabilitiesSent = true;
     this.sendStatus('adapter_capabilities', { capabilities });
+  }
+
+  /**
+   * noDebug as the adapter will see it, gated by the policy's measured word
+   * (issue #710): `launchArgs` is the merged launch request — the init
+   * payload's launchConfig, or a queued launch command's dapArgs. The string
+   * form survives the message parser, which coerces only the top-level flags.
+   */
+  private isDebuggerOff(launchArgs: Record<string, unknown> | undefined): boolean {
+    const noDebug = launchArgs?.noDebug === true || launchArgs?.noDebug === 'true';
+    return noDebug && this.adapterPolicy.honoursNoDebug === true;
   }
 
   /**
