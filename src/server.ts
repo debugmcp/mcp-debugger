@@ -31,6 +31,7 @@ import {
     Breakpoint,
     FunctionBreakpoint,
     SessionLifecycleState,
+    SessionState,
     IEnvironment,
     ILogger,
     ExceptionBreakMode
@@ -529,6 +530,16 @@ export class DebugMcpServer implements ToolContext {
       }
       return result;
     }
+    // A session that is not paused has no stack to read, and the session
+    // layer's answer — "not paused", with the why when the launch runs with
+    // the debugger off (issue #749) — needs no thread. Say so before asking
+    // the adapter for one: a launch under noDebug never stops, so no thread
+    // is ever current, and debugpy refuses the `threads` discovery ("Server
+    // is not available") — a wasted round trip at best, the DAP timeout on
+    // a wedged adapter at worst.
+    if (session.state !== SessionState.PAUSED) {
+      return this.sessionManager.getStackTraceDetailed(sessionId, undefined, includeInternals);
+    }
     let currentThreadId = session.proxyManager.getCurrentThreadId();
     // If no thread ID is known (e.g. adapter omitted threadId from stopped event),
     // try to discover one via a 'threads' DAP request.
@@ -540,11 +551,14 @@ export class DebugMcpServer implements ToolContext {
           currentThreadId = threads[0].id;
         }
       } catch {
-        // threads request failed — fall through to error
+        // threads request failed — fall through
       }
     }
     if (typeof currentThreadId !== 'number') {
-        throw new ProxyNotRunningError(sessionId || 'unknown', 'get stack trace');
+      // Paused, no thread known, and the adapter named none: the proxy is
+      // alive, so "no active proxy" would be false. The session layer says
+      // what is true — no stopped thread is known for this session.
+      return this.sessionManager.getStackTraceDetailed(sessionId, undefined, includeInternals);
     }
     // ensureStackReady: the thread above was resolved implicitly (the MCP tool
     // has no threadId argument), so a paused session answering with zero

@@ -19,6 +19,7 @@ import {
   type MockSessionManager
 } from './server-test-helpers.js';
 import { OutputRingBuffer } from '../../../../src/session/output-buffer.js';
+import { SessionState } from '@debugmcp/shared';
 
 // Mock dependencies
 vi.mock('@modelcontextprotocol/sdk/server/index.js');
@@ -436,16 +437,21 @@ describe('Server Inspection Tools Tests', () => {
       expect(content.diagnostics).toEqual({ proxyLogPath: '/logs/proxy-test-session.log' });
     });
 
-    it('should handle missing thread ID', async () => {
+    it('answers a paused session with no thread to name with the session layer\'s note, not "no active proxy"', async () => {
       const mockSession = {
+        state: SessionState.PAUSED,
         failureDiagnostics: { proxyLogPath: '/logs/proxy-test-session.log' },
         proxyManager: {
-          getCurrentThreadId: vi.fn().mockReturnValue(null)
+          getCurrentThreadId: vi.fn().mockReturnValue(null),
+          sendDapRequest: vi.fn().mockResolvedValue({ body: { threads: [] } })
         }
       };
-      
       mockSessionManager.getSession.mockReturnValue(mockSession);
-      
+      mockSessionManager.getStackTraceDetailed.mockResolvedValue({
+        frames: [], totalFrameCount: 0, hiddenFrameCount: 0, allFramesInternal: false,
+        note: 'No stopped thread is known for this session.'
+      });
+
       const result = await callToolHandler({
         method: 'tools/call',
         params: {
@@ -453,11 +459,12 @@ describe('Server Inspection Tools Tests', () => {
           arguments: { sessionId: 'test-session' }
         }
       });
-      
-      // The server returns a structured failure result (success: false) with an error message
+
+      // The proxy is alive; the resolver's answer is the truthful one.
       const content = JSON.parse(result.content[0].text);
-      expect(content.success).toBe(false);
-      expect(content.error).toContain('no active proxy for session test-session');
+      expect(content.success).toBe(true);
+      expect(content.stackFrames).toEqual([]);
+      expect(content.note).toContain('No stopped thread is known for this session.');
     });
 
     it('should surface SessionManager errors as a truthful tool-level failure', async () => {

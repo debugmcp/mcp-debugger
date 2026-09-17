@@ -33,6 +33,7 @@ export interface CreateSessionParams {
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import { IProxyManager } from '../proxy/proxy-manager.js';
 import { OutputRingBuffer } from './output-buffer.js';
+import { isDebuggerOff } from './debugger-off.js';
 import type { PauseIntent } from './execution/pause-intent.js';
 import type { ProxyFailureDiagnostics } from './launch/proxy-failure-diagnostics.js';
 
@@ -139,6 +140,14 @@ export interface ManagedSession extends DebugSessionInfo {
   // attach — the user's value, or the policy's launch default when unset
   // (issue #244). Previously write-only pass-through; recorded for read-back.
   effectiveBreakOnExceptions?: ExceptionBreakMode;
+  // The launcher's decision that the current launch runs with the debugger
+  // off — noDebug on an adapter that honours it (issue #710). The raw
+  // record: written per launch, reset per launch and attach, cleared by a
+  // stop only a live debugger produces. Never read directly for a
+  // caller-facing answer — isDebuggerOff/debuggerOffWhy (debugger-off.ts)
+  // gate it on the launch being live, and DebugSessionInfo.debuggerDisabled
+  // is its projection (issue #749).
+  launchDebuggerOff?: boolean;
   // Caller-provided adapterConfig keys the adapter's attach transform did not
   // carry into the DAP attach request (issue #450). Recorded per attach by
   // ProxyLauncher.start; consumed by attachToProcess for the response warning.
@@ -289,6 +298,9 @@ export class SessionStore {
       ...(s.state === SessionState.ERROR && s.failureDiagnostics
         ? { diagnostics: s.failureDiagnostics }
         : {}),
+      // The current launch runs with the debugger off (issue #749) — while
+      // it runs; a stopped or errored session describes nothing running.
+      ...(isDebuggerOff(s) ? { debuggerDisabled: true } : {}),
       // Mirror endpoint without the token (issue #217); the isRunning gate
       // keeps the projection honest on teardown paths that skip cleanup.
       ...(s.exposure && s.proxyManager?.isRunning()

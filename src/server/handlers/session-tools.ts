@@ -175,6 +175,11 @@ export async function handleListDebugSessions(ctx: ToolContext): Promise<ToolRes
       if (session.diagnostics) {
           mappedSession.diagnostics = session.diagnostics;
       }
+      if (session.debuggerDisabled) {
+          // The current launch runs with the debugger off (issue #749);
+          // SessionStore.getAll() is the one gate on it.
+          mappedSession.debuggerDisabled = true;
+      }
       if (session.exposure) {
           // Mirror endpoint host/port; the token never leaves expose_session.
           mappedSession.exposure = session.exposure;

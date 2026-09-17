@@ -151,6 +151,8 @@ export class AttachController {
     // proxy exists emits no stop, so a stop left over from a prior run would
     // be reported as this attempt's once the session lands in ERROR (#720).
     session.lastStop = undefined;
+    // An attach debugs regardless of any earlier noDebug launch (issue #749).
+    session.launchDebuggerOff = undefined;
 
     try {
       // For attach mode, we use a placeholder scriptPath

@@ -7,6 +7,7 @@ import { isTerminalSessionState, REDACTION_NOTICE, SessionState, Variable } from
 import type { LineContext } from '../../utils/line-reader.js';
 import { buildTruncationNotice, VariableTruncationSummary } from '../../session/variable-caps.js';
 import type { ToolContext } from '../tool-context.js';
+import { debuggerOffWhy } from '../../session/debugger-off.js';
 import type { DebugResult } from '../../session/session-manager-core.js';
 
 /**
@@ -25,6 +26,16 @@ import type { DebugResult } from '../../session/session-manager-core.js';
  */
 export function carriesLastStop(state: SessionState | undefined): boolean {
   return state === SessionState.PAUSED || isTerminalSessionState(state);
+}
+
+/**
+ * The debugger-off why for a session the handler names by id (issue #749):
+ * the gated sentence from `debuggerOffWhy`, or nothing when the session is
+ * unknown or the decision does not apply.
+ */
+export function debuggerOffWhyFor(ctx: ToolContext, sessionId: string): string | undefined {
+  const session = ctx.sessionManager.getSession(sessionId);
+  return session ? debuggerOffWhy(session) : undefined;
 }
 
 /** The line-context slice the breakpoint and step payloads embed. */

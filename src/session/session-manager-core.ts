@@ -8,7 +8,8 @@ import {
   isTerminalSessionState, AdapterPolicy, SessionOutputEntry, redactSecretsInString
 } from '@debugmcp/shared';
 import type { Breakpoint, FunctionBreakpoint, StackFrame } from '@debugmcp/shared';
-import { BREAKPOINT_STOP_REASONS } from '@debugmcp/shared';
+import { USER_BREAK_REASONS } from '@debugmcp/shared';
+import { stopProvesDebuggerOn } from './debugger-off.js';
 import { isRedactionEnabled } from '../utils/redaction-mode.js';
 import { ValidationResultCache } from '../utils/language-availability.js';
 import { SessionStore, ManagedSession } from './session-store.js';
@@ -50,11 +51,6 @@ import {
   samePath
 } from './breakpoints/hit-verification.js';
 
-/**
- * Stop reasons the first-stop auto-continue must never swallow: the shared
- * breakpoint family plus an exception the user asked to break on.
- */
-export const USER_BREAK_REASONS: ReadonlySet<string> = new Set([...BREAKPOINT_STOP_REASONS, 'exception']);
 
 // Custom launch arguments interface extending DebugProtocol.LaunchRequestArguments
 export interface CustomLaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
@@ -769,6 +765,16 @@ export abstract class SessionManagerCore extends EventEmitter {
       }
 
       session.firstStopHandled = true;
+      // A stop only a live debugger produces is stronger evidence than the
+      // policy's noDebug pin: this adapter build debugs after all, so the
+      // later surfaces must stop explaining themselves in debugger-off
+      // terms (issue #749). Judged on what the adapter itself reported, not
+      // the policy's relabel: js-debug lands a pause, a step and a
+      // `debugger;` statement (relabelled 'breakpoint') under noDebug with
+      // its breakpoints still off.
+      if (stopProvesDebuggerOn(reason, rawReason, body)) {
+        session.launchDebuggerOff = undefined;
+      }
     };
     proxyManager.on('stopped', handleStopped);
     handlers.set('stopped', handleStopped);

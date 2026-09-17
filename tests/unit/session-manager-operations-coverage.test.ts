@@ -18,8 +18,7 @@ import {
   type Breakpoint,
   type CustomLaunchRequestArguments,
   type FunctionBreakpoint,
-  type ILogger
-} from '@debugmcp/shared';
+  type ILogger, NO_DEBUG_TARGET_MARKER } from '@debugmcp/shared';
 
 /** Concrete subclass for testing the abstract SessionManagerOperations */
 class TestableSessionManagerOperations extends SessionManagerOperations {
@@ -4430,6 +4429,198 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(call).toBeDefined();
       const bpArg = call![1].breakpoints[0];
       expect(bpArg).not.toHaveProperty('suspendPolicy');
+    });
+  });
+
+  /**
+   * A session whose launch runs with the debugger off (noDebug honoured,
+   * issue #710) still sends every request to the adapter and surfaces the
+   * adapter's own answer; the recorded fact supplies the why beside it
+   * (issue #749).
+   */
+  describe('a launch running with the debugger off says so on every later surface (issue #749)', () => {
+    const why = ErrorMessages.debuggerOffForLaunch;
+
+    it('has one sentence for the why, naming the fact and the remedy', () => {
+      expect(why).toMatch(/debugger is off for this launch/);
+      expect(why).toMatch(/noDebug/);
+    });
+
+    it('explains a pause that the adapter accepted but that never lands, instead of guessing at native code', async () => {
+      vi.useFakeTimers();
+      try {
+        mockSession.state = SessionState.RUNNING;
+        mockSession.launchDebuggerOff = true;
+        mockProxyManager.sendDapRequest.mockResolvedValue({});
+        const describePendingStop = vi.fn().mockReturnValue('Explained by the policy.');
+        vi.spyOn(operations as any, 'selectPolicy').mockReturnValue({ describePendingStop } as any);
+
+        const promise = operations.pause('test-session', 1);
+        await vi.advanceTimersByTimeAsync(5000);
+        const result = await promise;
+
+        // The pause was still sent: the adapter's answer is the ground truth.
+        expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('pause', expect.objectContaining({ threadId: 1 }));
+        expect(result.success).toBe(true);
+        expect(result.data?.pending).toBe(true);
+        // One message that does not promise the stop the base text promises,
+        // with the policy's own explanation kept: on js-debug the pause can
+        // land under the flag, and #678's advice is what makes it.
+        expect(result.data?.message).toBe(ErrorMessages.pausePendingDebuggerOff(5, 'Explained by the policy.'));
+        expect(result.data?.message).toContain(why);
+        expect(result.data?.message).toContain('Explained by the policy.');
+        expect(result.data?.message).not.toMatch(/blocked in native code/);
+        expect(result.data?.message).not.toMatch(/will report 'paused' once the stop lands/);
+        expect(describePendingStop).toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps the adapter's refusal of a pause as the cause, untouched, and appends the why", async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockSession.launchDebuggerOff = true;
+      const refusal = Object.assign(new Error('Internal debugger error: Not supported in noDebug mode.'), { code: 'E_NODEBUG' });
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'pause') {
+          throw refusal;
+        }
+        return {};
+      });
+
+      const thrown = await operations.pause('test-session', 1).then(
+        () => { throw new Error('expected a rejection'); },
+        (err: unknown) => err as Error & { cause?: unknown }
+      );
+      expect(thrown.message).toBe(ErrorMessages.withDebuggerOffWhy('Internal debugger error: Not supported in noDebug mode.', why));
+      expect(thrown.cause).toBe(refusal);
+      expect(refusal.message).toBe('Internal debugger error: Not supported in noDebug mode.');
+      expect((thrown.cause as { code?: string }).code).toBe('E_NODEBUG');
+    });
+
+    it('carries the why on a pause that found no debug target yet (js-debug before the child adopts)', async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockSession.launchDebuggerOff = true;
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'pause') {
+          throw new Error(`pause failed: ${NO_DEBUG_TARGET_MARKER}`);
+        }
+        return {};
+      });
+
+      const result = await operations.pause('test-session', 1);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(NO_DEBUG_TARGET_MARKER);
+      expect(result.error).toContain(why);
+    });
+
+    it('carries the why while the launch is still initializing — the proxy is up and answering', async () => {
+      mockSession.state = SessionState.INITIALIZING;
+      mockSession.launchDebuggerOff = true;
+
+      const result = await operations.getStackTraceDetailed('test-session');
+
+      expect(result.frames).toEqual([]);
+      expect(result.note).toContain(why);
+    });
+
+    it('drops the why once the launch is over — the flag describes a launch that is no longer running', async () => {
+      mockSession.state = SessionState.STOPPED;
+      mockSession.launchDebuggerOff = true;
+
+      const result = await operations.getStackTraceDetailed('test-session');
+
+      expect(result.frames).toEqual([]);
+      expect(result.note ?? '').not.toContain(why);
+    });
+
+    it('says why stepping and continuing find nothing paused', async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockSession.launchDebuggerOff = true;
+
+      const step = await operations.stepOver('test-session');
+      expect(step.success).toBe(false);
+      expect(step.error).toBe(ErrorMessages.notPaused(why));
+      expect(step.error).toContain(why);
+
+      const cont = await operations.continue('test-session');
+      expect(cont.success).toBe(false);
+      expect(cont.error).toBe(ErrorMessages.notPaused(why));
+    });
+
+    it('leaves the plain "Not paused" alone when the debugger is on', async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockSession.launchDebuggerOff = undefined;
+
+      const step = await operations.stepOver('test-session');
+      expect(step.error).toBe(ErrorMessages.notPaused());
+      expect(step.error).toBe('Not paused');
+    });
+
+    it('drops the why once the adapter has verified a breakpoint — the build debugs after all', async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockSession.launchDebuggerOff = true;
+      mockSession.breakpoints.set('bp-1', { id: 'bp-1', file: 'a.py', line: 3, verified: true } as never);
+
+      const step = await operations.stepOver('test-session');
+      expect(step.error).toBe('Not paused');
+
+      const stack = await operations.getStackTraceDetailed('test-session');
+      expect(stack.note ?? '').not.toContain(why);
+    });
+
+    it('says why a pause is refused while the launch is still initializing (issue #749)', async () => {
+      mockSession.state = SessionState.INITIALIZING;
+      mockSession.launchDebuggerOff = true;
+
+      const result = await operations.pause('test-session', 1);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Cannot pause in state: initializing');
+      expect(result.error).toContain(why);
+      expect(mockProxyManager.sendDapRequest).not.toHaveBeenCalledWith('pause', expect.anything());
+    });
+
+    it('keeps a non-Error refusal of a pause as the cause, as it was thrown', async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockSession.launchDebuggerOff = true;
+      const refusal = { code: 'E_NODEBUG', text: 'not an Error instance' };
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'pause') {
+          throw refusal;
+        }
+        return {};
+      });
+
+      const thrown = await operations.pause('test-session', 1).then(
+        () => { throw new Error('expected a rejection'); },
+        (err: unknown) => err as Error & { cause?: unknown }
+      );
+      expect(thrown.message).toContain(why);
+      expect(thrown.cause).toBe(refusal);
+    });
+
+    it('says why an expression cannot be evaluated', async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockSession.launchDebuggerOff = true;
+
+      const result = await operations.evaluateExpression('test-session', '1 + 1');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not paused');
+      expect(result.error).toContain(why);
+    });
+
+    it('says why the stack trace is empty', async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockSession.launchDebuggerOff = true;
+
+      const result = await operations.getStackTraceDetailed('test-session');
+
+      expect(result.frames).toEqual([]);
+      expect(result.note).toMatch(/not paused/i);
+      expect(result.note).toContain(why);
     });
   });
 });

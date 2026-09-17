@@ -18,6 +18,8 @@ import type { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';
 import type { IProxyManager } from '../../proxy/proxy-manager.js';
 import type { ManagedSession } from '../session-store.js';
+import { debuggerOffWhy } from '../debugger-off.js';
+import { ErrorMessages } from '../../utils/error-messages.js';
 
 /** The frame fields a tool response names when it says which frame answered. */
 export type FrameSummary = Pick<StackFrame, 'name' | 'file' | 'line'>;
@@ -135,10 +137,8 @@ export class FrameAnchorResolver {
     }
     if (session.state !== SessionState.PAUSED) {
       this.ctx.logger.warn(`[FrameAnchor ${sessionId}] Session not paused: ${session.state}.`);
-      return emptyResult(
-        `Session is not paused (state: ${session.state}); stack traces are only available while paused.`,
-        threadId
-      );
+      // With the why, when the launch runs with the debugger off (issue #749).
+      return emptyResult(ErrorMessages.stackTraceNotPaused(session.state, debuggerOffWhy(session)), threadId);
     }
 
     const effectiveThreadId = threadId ?? currentThreadId;

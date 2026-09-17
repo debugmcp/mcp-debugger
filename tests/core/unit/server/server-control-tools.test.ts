@@ -54,6 +54,93 @@ describe('Server Control Tools Tests', () => {
   });
 
   describe('set_breakpoint', () => {
+    it('appends why an unverified breakpoint cannot bind while the launch runs with the debugger off (issue #749)', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        state: 'running',
+        sessionLifecycle: 'ACTIVE',
+        launchDebuggerOff: true
+      });
+      // The request still went to the adapter; its own answer is kept.
+      mockSessionManager.setBreakpoint.mockResolvedValue({
+        breakpoint: { id: 'bp-1', file: '/path/to/test.py', line: 10, verified: false, message: 'Unbound breakpoint' }
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'set_breakpoint', arguments: { sessionId: 'test-session', file: '/path/to/test.py', line: 10 } }
+      });
+
+      expect(mockSessionManager.setBreakpoint).toHaveBeenCalled();
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      expect(content.verified).toBe(false);
+      expect(content.warning).toContain('Unbound breakpoint');
+      expect(content.warning).toContain(ErrorMessages.debuggerOffForLaunch);
+    });
+
+    it('says only that breakpoints cannot bind on a session that is paused — a stop did land (issue #749)', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        state: 'paused',
+        sessionLifecycle: 'ACTIVE',
+        launchDebuggerOff: true
+      });
+      mockSessionManager.setBreakpoint.mockResolvedValue({
+        breakpoint: { id: 'bp-1', file: '/path/to/test.py', line: 10, verified: false, message: 'Unbound breakpoint' }
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'set_breakpoint', arguments: { sessionId: 'test-session', file: '/path/to/test.py', line: 10 } }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.warning).toContain(ErrorMessages.debuggerOffForLaunchPaused);
+      expect(content.warning).not.toMatch(/no stop is expected/);
+    });
+
+    it('adds no debugger-off note once the launch is over — a queued breakpoint is an ordinary one (issue #749)', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        state: 'stopped',
+        sessionLifecycle: 'ACTIVE',
+        launchDebuggerOff: true
+      });
+      mockSessionManager.setBreakpoint.mockResolvedValue({
+        breakpoint: { id: 'bp-1', file: '/path/to/test.py', line: 10, verified: false }
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'set_breakpoint', arguments: { sessionId: 'test-session', file: '/path/to/test.py', line: 10 } }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.warning).toBeUndefined();
+    });
+
+    it('adds no debugger-off note to a breakpoint the adapter verified anyway (issue #749)', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        state: 'running',
+        sessionLifecycle: 'ACTIVE',
+        launchDebuggerOff: true
+      });
+      mockSessionManager.setBreakpoint.mockResolvedValue({
+        breakpoint: { id: 'bp-1', file: '/path/to/test.py', line: 10, verified: true }
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'set_breakpoint', arguments: { sessionId: 'test-session', file: '/path/to/test.py', line: 10 } }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.verified).toBe(true);
+      expect(content.warning).toBeUndefined();
+    });
+
     it('should set breakpoint successfully', async () => {
       const mockBreakpoint: Breakpoint = {
         id: 'bp-1',

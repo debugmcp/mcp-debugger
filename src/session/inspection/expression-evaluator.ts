@@ -8,6 +8,8 @@
  * hook (issue #237) runs before anything, including the logs, sees the result.
  */
 import { getErrorMessage } from '../../errors/debug-errors.js';
+import { debuggerOffWhy } from '../debugger-off.js';
+import { ErrorMessages } from '../../utils/error-messages.js';
 import {
   buildRedactionNotice,
   isSensitiveName,
@@ -133,7 +135,8 @@ export class ExpressionEvaluator {
       );
       return {
         success: false,
-        error: 'Cannot evaluate: debugger not paused. Ensure the debugger is stopped at a breakpoint.',
+        // With the why, when the launch runs with the debugger off (issue #749).
+        error: ErrorMessages.cannotEvaluateNotPaused(debuggerOffWhy(session)),
       };
     }
 

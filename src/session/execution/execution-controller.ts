@@ -38,6 +38,7 @@ import {
   NO_DEBUG_TARGET_MARKER,
   SessionLifecycleState,
   SessionState,
+  USER_BREAK_REASONS,
   type StackFrame
 } from '@debugmcp/shared';
 import { DebugProtocol } from '@vscode/debugprotocol';
@@ -50,7 +51,7 @@ import type {
   StepResultData,
   StopLocation
 } from '../session-manager-core.js';
-import { USER_BREAK_REASONS } from '../session-manager-core.js';
+import { debuggerOffWhy, isDebuggerOff, type DebuggerOffView } from '../debugger-off.js';
 import { samePath } from '../breakpoints/hit-verification.js';
 import type { ExecutionContext } from '../operations-context.js';
 import type { PauseCoordinator } from './pause-coordinator.js';
@@ -136,6 +137,30 @@ function isSameLine(a: StopLocation, b: StopLocation): boolean {
   return a.line === b.line && samePath(a.file, b.file);
 }
 
+/**
+ * The step/continue refusal for a session that is not paused, with the why
+ * when the session's launch runs with the debugger off (issue #749).
+ */
+function notPausedError(session: DebuggerOffView): string {
+  return ErrorMessages.notPaused(debuggerOffWhy(session));
+}
+
+/**
+ * A pause the adapter answered with an error, with the why beside the
+ * adapter's own words when the launch runs with the debugger off (issue
+ * #749). The adapter's error travels as the cause exactly as it was
+ * thrown — an Error, or whatever else the bridge rejected with.
+ */
+function withDebuggerOffWhy(session: DebuggerOffView, error: unknown, message: string): { error: Error; message: string } {
+  const err = error instanceof Error ? error : new Error(message);
+  const why = debuggerOffWhy(session);
+  if (!why) {
+    return { error: err, message: err.message };
+  }
+  const composed = ErrorMessages.withDebuggerOffWhy(err.message, why);
+  return { error: new Error(composed, { cause: error }), message: composed };
+}
+
 export class ExecutionController {
   constructor(
     private readonly ctx: ExecutionContext,
@@ -177,7 +202,7 @@ export class ExecutionController {
     }
     if (session.state !== SessionState.PAUSED) {
       this.ctx.logger.warn(`[SM ${logTag} ${sessionId}] Not paused. State: ${session.state}`);
-      return { success: false, error: 'Not paused', state: session.state };
+      return { success: false, error: notPausedError(session), state: session.state };
     }
     if (typeof threadId !== 'number') {
       this.ctx.logger.warn(`[SM ${logTag} ${sessionId}] No current thread ID.`);
@@ -201,7 +226,7 @@ export class ExecutionController {
     }
     if (session.state !== SessionState.PAUSED) {
       this.ctx.logger.warn(`[SM ${logTag} ${sessionId}] No longer paused after the origin read. State: ${session.state}`);
-      return { success: false, error: 'Not paused', state: session.state };
+      return { success: false, error: notPausedError(session), state: session.state };
     }
 
     this.ctx.logger.info(`[SM ${logTag} ${sessionId}] Sending DAP '${command}' for threadId ${threadId}`);
@@ -429,7 +454,7 @@ export class ExecutionController {
       this.ctx.logger.warn(
         `[SessionManager continue] Session ${sessionId} not paused. State: ${session.state}.`
       );
-      return { success: false, error: 'Not paused', state: session.state };
+      return { success: false, error: notPausedError(session), state: session.state };
     }
     if (typeof threadId !== 'number') {
       this.ctx.logger.warn(
@@ -505,7 +530,16 @@ export class ExecutionController {
     }
 
     if (session.state !== SessionState.RUNNING) {
-      return { success: false, error: `Cannot pause in state: ${session.state}`, state: session.state };
+      // With the why while the launch is still initializing with the
+      // debugger off (issue #749) — every other surface carries it in that
+      // state.
+      const why = debuggerOffWhy(session);
+      const refusal = `Cannot pause in state: ${session.state}`;
+      return {
+        success: false,
+        error: why ? ErrorMessages.withDebuggerOffWhy(refusal, why) : refusal,
+        state: session.state
+      };
     }
 
     this.ctx.logger.debug(`[SessionManager] pauseExecution: sending DAP pause for session=${sessionId} currentState=${session.state}`);
@@ -621,8 +655,22 @@ export class ExecutionController {
       this.ctx.logger.info(
         `[SessionManager pause] No stopped event within ${this.ctx.tunables.pauseGraceMs}ms grace window in session ${sessionId}; completing asynchronously`
       );
-      const pausePending = ErrorMessages.pausePending(this.ctx.tunables.pauseGraceMs / 1000);
       const hint = await this.describePendingStop(session, sessionId, 'pause');
+      // With the debugger off for this launch the why is known (issue #749):
+      // one message that promises no stop, with the policy's own explanation
+      // kept — on js-debug a pause can land under the flag, and #678's
+      // advice is what makes it.
+      if (isDebuggerOff(session)) {
+        return {
+          success: true,
+          state: session.state,
+          data: {
+            message: ErrorMessages.pausePendingDebuggerOff(this.ctx.tunables.pauseGraceMs / 1000, hint),
+            pending: true
+          }
+        };
+      }
+      const pausePending = ErrorMessages.pausePending(this.ctx.tunables.pauseGraceMs / 1000);
       return {
         success: true,
         state: session.state,
@@ -645,10 +693,14 @@ export class ExecutionController {
     this.ctx.logger.error(
       `[SessionManager pause] Error sending 'pause' for session ${sessionId}: ${errorMessage}`
     );
+    // The adapter's answer stands — a refusal (CodeLLDB under noDebug), or
+    // no debug target yet (js-debug before the child adopts) — with the why
+    // beside it when the launch runs with the debugger off (issue #749).
+    const answered = withDebuggerOffWhy(session, outcome.error, errorMessage);
     if (errorMessage.includes(NO_DEBUG_TARGET_MARKER)) {
-      return { success: false, error: errorMessage, state: session.state };
+      return { success: false, error: answered.message, state: session.state };
     }
-    throw outcome.error instanceof Error ? outcome.error : new Error(errorMessage);
+    throw answered.error;
   }
 
   async listThreads(sessionId: string): Promise<Array<{ id: number; name: string }>> {

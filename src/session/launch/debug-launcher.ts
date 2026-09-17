@@ -39,6 +39,7 @@ import {
 import { waitForLaunchReadiness } from './launch-readiness.js';
 import type { ProxyLauncher } from './proxy-launcher.js';
 import type { InFlightGuard } from '../in-flight-guard.js';
+import { adapterVerifiedABreakpoint } from '../debugger-off.js';
 
 /**
  * A launch flag the way the adapter will see it. The proxy launcher merges
@@ -242,6 +243,9 @@ export class DebugLauncher {
     session.lastProxyError = undefined;
     session.failureDiagnostics = undefined;
     session.lastStop = undefined;
+    // The previous launch's debugger-off decision does not carry over
+    // (issue #749); this attempt decides again below.
+    session.launchDebuggerOff = undefined;
     this.ctx.logger.info(`[SessionManager] Session ${sessionId} lifecycle state set to ACTIVE`);
 
     // Record the launch spec for restart_debugging BEFORE attempting the
@@ -275,6 +279,14 @@ export class DebugLauncher {
     const noDebug = !isAttachShaped && resolveLaunchFlag('noDebug', dapLaunchArgs, adapterLaunchConfig);
     const honoursNoDebug = policy.honoursNoDebug === true;
     const debuggerOff = noDebug && honoursNoDebug;
+    // Recorded on the session so the surfaces after this response can say
+    // why they answer in non-debugger terms (issue #749). Not for a dry run:
+    // nothing launches. Written before the proxy starts, so the core's
+    // per-launch reset (which runs inside proxyLauncher.start) is not the
+    // place to clear it — the block above is.
+    if (debuggerOff && !dryRunSpawn) {
+      session.launchDebuggerOff = true;
+    }
     const noDebugWarning = buildNoDebugLaunchWarning(
       session,
       { noDebug, stopOnEntry: resolveLaunchFlag('stopOnEntry', dapLaunchArgs, adapterLaunchConfig) },
@@ -531,14 +543,20 @@ export class DebugLauncher {
       }
 
       // The policy's word is a static pin; a stop that arrived anyway is the
-      // stronger evidence (an adapter build that ignores the flag after all) —
-      // a pause still standing, or an entry stop the core already resumed
-      // (firstStopHandled is set on every stop of this launch, resumed or not).
-      // Then the debugger was on: keep the ordinary diagnostics and say the
-      // flag had no effect rather than that no stop can come.
-      const stoppedAnyway =
-        debuggerOff && (finalState === SessionState.PAUSED || finalSession.firstStopHandled === true);
-      const noDebugNote = stoppedAnyway
+      // stronger evidence (an adapter build that ignores the flag after all):
+      // a stop only a live debugger produces — the core's stopped handler
+      // is the one judge of that and clears the recorded decision (issue
+      // #749) — or a breakpoint the adapter verified in its configuration
+      // phase, which is read from the same evidence every later surface
+      // reads. Either way the launch response and the record cannot
+      // disagree. Then the debugger was on: keep the ordinary diagnostics
+      // and say the flag had no effect rather than that the breakpoints
+      // will not fire. (A launch that ends paused on a pause or a step
+      // keeps the record and the warning: the flag still keeps its
+      // breakpoints from binding.)
+      const debuggerOnAnyway =
+        debuggerOff && (finalSession.launchDebuggerOff !== true || adapterVerifiedABreakpoint(finalSession));
+      const noDebugNote = debuggerOnAnyway
         ? buildNoDebugLaunchWarning(finalSession, { noDebug }, breakOnExceptions, false)
         : noDebugWarning;
 
@@ -546,7 +564,7 @@ export class DebugLauncher {
       // ("check the file path", "check the symbol name", "will PAUSE") that
       // has one cause when the debugger is off — the noDebug warning names
       // it, and they are withheld so they cannot contradict it (issue #710).
-      const debuggerOn = !debuggerOff || stoppedAnyway;
+      const debuggerOn = !debuggerOff || debuggerOnAnyway;
 
       // Unbound-at-launch warning (issue #308): the verified state is fresh
       // after the re-sync above, so a name the adapter could not resolve is
