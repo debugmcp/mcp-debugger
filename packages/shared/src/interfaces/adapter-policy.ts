@@ -58,6 +58,13 @@ export const BREAKPOINT_STOP_REASONS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Stop reasons the user asked for: the breakpoint family plus an exception
+ * the user asked to break on. The first-stop auto-continue must never
+ * swallow one, and one is proof a debugger is live (issues #749, #746).
+ */
+export const USER_BREAK_REASONS: ReadonlySet<string> = new Set([...BREAKPOINT_STOP_REASONS, 'exception']);
+
+/**
  * Context passed to AdapterPolicy.normalizeStopReason (issues #260/#302).
  * See that method's doc comment for the completeness rules.
  */

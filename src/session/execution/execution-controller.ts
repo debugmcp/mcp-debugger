@@ -155,10 +155,19 @@ function notPausedError(session: DebuggerOffView): string {
 function withDebuggerOffWhy(session: DebuggerOffView, error: unknown, message: string): { error: Error; message: string } {
   const err = error instanceof Error ? error : new Error(message);
   const why = debuggerOffWhy(session);
-  if (why) {
-    err.message = `${err.message} (${why})`;
+  if (!why) {
+    return { error: err, message: err.message };
   }
-  return { error: err, message: err.message };
+  const appended = `${err.message} (${why})`;
+  try {
+    // The adapter's own object, so its stack and any structured props
+    // travel; the stack's first line keeps the original message.
+    err.message = appended;
+    return { error: err, message: appended };
+  } catch {
+    // A getter-only message: wrap instead, keeping the original as the cause.
+    return { error: new Error(appended, { cause: err }), message: appended };
+  }
 }
 
 export class ExecutionController {

@@ -344,6 +344,26 @@ describe('SessionManager launches with noDebug (issue #710)', () => {
       expect(warningOf(result)).toMatch(/noDebug is true/);
     });
 
+    it("never claims no stop can come from a launch that ended paused — even on a 'pause' the record survives", async () => {
+      const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      await sessionManager.setBreakpoint(s.id, { file: '/work/src/app.py', line: 7 });
+      const proxy = dependencies.mockProxyManager;
+      proxy.start = vi.fn().mockImplementation(async (startConfig) => {
+        setMockProxyRunning(proxy, true);
+        proxy.startCalls.push(startConfig);
+        proxy.emit('adapter-configured');
+        proxy.emit('initialized');
+        proxy.emit('stopped', 1, 'pause', { reason: 'pause', threadId: 1 });
+      }) as MockProxyManager['start'];
+
+      const result = await launch(s.id, { stopOnEntry: false, noDebug: true });
+
+      expect(result.state).toBe(SessionState.PAUSED);
+      expect(warningOf(result)).not.toMatch(/no stop can arrive/);
+      // ...while the record — breakpoints still cannot bind — is kept.
+      expect(sessionManager.getSession(s.id)?.debuggerDisabled).toBe(true);
+    });
+
     it('believes a stop that arrived anyway over the policy pin', async () => {
       // The mock adapter stops at its breakpoint whatever the flag says — the
       // override pinned honoursNoDebug, so this is what a wrong pin looks like
@@ -507,7 +527,39 @@ describe('SessionManager launches with noDebug (issue #710)', () => {
       expect(sessionManager.getSession(s.id)?.debuggerDisabled).toBe(true);
     });
 
-    it.each(['breakpoint', 'function breakpoint', 'exception', 'entry', 'step'])(
+    it('survives a step taken from that pause — it proves exactly as much as the pause did', async () => {
+      pinPolicy({ honoursNoDebug: true });
+      const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      runWithoutStopping();
+      await launch(s.id, { stopOnEntry: false, noDebug: true });
+
+      // Measured on js-debug: pause lands, step_over from it lands with
+      // reason 'step', and line breakpoints still cannot bind.
+      dependencies.mockProxyManager.simulateEvent('stopped', 1, 'pause', { reason: 'pause', threadId: 1 });
+      await vi.runAllTimersAsync();
+      dependencies.mockProxyManager.simulateEvent('continued');
+      dependencies.mockProxyManager.simulateEvent('stopped', 1, 'step', { reason: 'step', threadId: 1 });
+      await vi.runAllTimersAsync();
+
+      expect(sessionManager.getSession(s.id)?.state).toBe(SessionState.PAUSED);
+      expect(sessionManager.getSession(s.id)?.debuggerDisabled).toBe(true);
+    });
+
+    it('is not consulted while the session is merely created — a launch that failed before the proxy leaves it CREATED', async () => {
+      pinPolicy({ honoursNoDebug: true });
+      const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      runWithoutStopping();
+      await launch(s.id, { stopOnEntry: false, noDebug: true });
+      expect(sessionManager.getSession(s.id)?.debuggerDisabled).toBe(true);
+
+      // The MSVC-toolchain refusal path: back to CREATED with the record intact.
+      sessionManager.getSession(s.id)!.state = SessionState.CREATED;
+
+      const listed = sessionManager.getAllSessions().find((x) => x.id === s.id);
+      expect(listed).not.toHaveProperty('debuggerDisabled');
+    });
+
+    it.each(['breakpoint', 'function breakpoint', 'exception', 'entry'])(
       "is cleared by a '%s' stop — one a disabled debugger cannot produce",
       async (reason) => {
         pinPolicy({ honoursNoDebug: true });

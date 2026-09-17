@@ -8,7 +8,7 @@ import {
   isTerminalSessionState, AdapterPolicy, SessionOutputEntry, redactSecretsInString
 } from '@debugmcp/shared';
 import type { Breakpoint, FunctionBreakpoint, StackFrame } from '@debugmcp/shared';
-import { BREAKPOINT_STOP_REASONS } from '@debugmcp/shared';
+import { USER_BREAK_REASONS } from '@debugmcp/shared';
 import { DEBUGGER_ON_STOP_REASONS } from './debugger-off.js';
 import { isRedactionEnabled } from '../utils/redaction-mode.js';
 import { ValidationResultCache } from '../utils/language-availability.js';
@@ -51,11 +51,8 @@ import {
   samePath
 } from './breakpoints/hit-verification.js';
 
-/**
- * Stop reasons the first-stop auto-continue must never swallow: the shared
- * breakpoint family plus an exception the user asked to break on.
- */
-export const USER_BREAK_REASONS: ReadonlySet<string> = new Set([...BREAKPOINT_STOP_REASONS, 'exception']);
+/** Re-exported for the execution controller; defined beside the breakpoint family in `@debugmcp/shared`. */
+export { USER_BREAK_REASONS };
 
 // Custom launch arguments interface extending DebugProtocol.LaunchRequestArguments
 export interface CustomLaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {

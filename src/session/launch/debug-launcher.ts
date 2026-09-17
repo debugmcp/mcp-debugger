@@ -541,8 +541,11 @@ export class DebugLauncher {
       // recorded decision on a stop only a live debugger produces (issue
       // #749), so the launch response and the record cannot disagree. Then
       // the debugger was on: keep the ordinary diagnostics and say the flag
-      // had no effect rather than that no stop can come.
-      const stoppedAnyway = debuggerOff && finalSession.debuggerDisabled !== true;
+      // had no effect rather than that no stop can come. A launch that ends
+      // paused on any stop at all may not claim no stop can come either,
+      // whatever the record says about breakpoints.
+      const stoppedAnyway =
+        debuggerOff && (finalSession.debuggerDisabled !== true || finalState === SessionState.PAUSED);
       const noDebugNote = stoppedAnyway
         ? buildNoDebugLaunchWarning(finalSession, { noDebug }, breakOnExceptions, false)
         : noDebugWarning;

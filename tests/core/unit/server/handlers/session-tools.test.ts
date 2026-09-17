@@ -79,10 +79,11 @@ describe('session tool handlers', () => {
 
     it('reports debuggerDisabled for a launch running with the debugger off (issue #749)', async () => {
       const now = new Date();
+      // SessionStore.getAll() is the one gate on the field (running or paused
+      // only); the handler mirrors what it was given.
       ctx.sessionManager.getAllSessions.mockReturnValue([
         { id: 'off', name: 'o', language: 'python', state: 'running', createdAt: now, debuggerDisabled: true },
-        { id: 'on', name: 'n', language: 'python', state: 'running', createdAt: now },
-        { id: 'over', name: 'v', language: 'python', state: 'stopped', createdAt: now, debuggerDisabled: true }
+        { id: 'on', name: 'n', language: 'python', state: 'running', createdAt: now }
       ]);
 
       const result = await handleListDebugSessions(ctx);
@@ -91,7 +92,6 @@ describe('session tool handlers', () => {
 
       expect(byId.off.debuggerDisabled).toBe(true);
       expect(byId.on).not.toHaveProperty('debuggerDisabled');
-      expect(byId.over).not.toHaveProperty('debuggerDisabled');
     });
   });
 });

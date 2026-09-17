@@ -4494,6 +4494,26 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect((thrown as Error & { code?: string }).code).toBe('E_NODEBUG');
     });
 
+    it('wraps a refusal whose message cannot be appended to, keeping it as the cause', async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockSession.debuggerDisabled = true;
+      const frozen = new Error('Not supported in noDebug mode.');
+      Object.defineProperty(frozen, 'message', { get: () => 'Not supported in noDebug mode.' });
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'pause') {
+          throw frozen;
+        }
+        return {};
+      });
+
+      const thrown = await operations.pause('test-session', 1).then(
+        () => { throw new Error('expected a rejection'); },
+        (err: unknown) => err as Error & { cause?: unknown }
+      );
+      expect(thrown.message).toBe(`Not supported in noDebug mode. (${why})`);
+      expect(thrown.cause).toBe(frozen);
+    });
+
     it('carries the why on a pause that found no debug target yet (js-debug before the child adopts)', async () => {
       mockSession.state = SessionState.RUNNING;
       mockSession.debuggerDisabled = true;

@@ -64,9 +64,14 @@ describe('SessionStore.getAll() debuggerDisabled projection (issue #749)', () =>
     store.get(id)!.debuggerDisabled = undefined;
     expect(store.getAll().find((s) => s.id === id)!).not.toHaveProperty('debuggerDisabled');
 
-    // Once the launch is over the flag describes nothing that is running.
+    // Only a running or paused launch: over (stopped/error), or never
+    // launched (created/initializing), the record describes nothing running.
     store.get(id)!.debuggerDisabled = true;
-    store.get(id)!.state = SessionState.STOPPED;
-    expect(store.getAll().find((s) => s.id === id)!).not.toHaveProperty('debuggerDisabled');
+    for (const state of [SessionState.STOPPED, SessionState.ERROR, SessionState.CREATED, SessionState.INITIALIZING]) {
+      store.get(id)!.state = state;
+      expect(store.getAll().find((s) => s.id === id)!, state).not.toHaveProperty('debuggerDisabled');
+    }
+    store.get(id)!.state = SessionState.PAUSED;
+    expect(store.getAll().find((s) => s.id === id)!.debuggerDisabled).toBe(true);
   });
 });

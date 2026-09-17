@@ -580,21 +580,27 @@ describe('Break-on-exception (issue #220)', () => {
       expect(step.error).toMatch(why);
 
       // ...and a pause is still sent to js-debug. Measured: js-debug lands
-      // it even under noDebug (the inspector is attached; only the debug
-      // domains are off), and that stop proves the debugger on — the session
-      // forgets the decision. Should a js-debug build refuse or never land
-      // it, the why rides on that answer instead.
+      // it even under noDebug (the inspector is attached; line breakpoints
+      // still cannot bind), and so does a step taken from it — neither
+      // proves anything about breakpoints, so the session keeps the
+      // decision. Should a js-debug build refuse or never land the pause,
+      // the why rides on that answer instead.
       // callToolSafely: a refusal reaches the wire as an MCP error, which
       // callTool would throw rather than return.
       const pause = await callToolSafely(mcpClient!, 'pause_execution', { sessionId }) as {
         success?: boolean; state?: string; error?: unknown; message?: string; data?: { message?: string };
       };
       if (pause.success && pause.state === 'paused') {
-        // A pause proves nothing about breakpoints: the session keeps the
-        // decision, and the surfaces keep explaining.
         const paused = await getSessionSnapshot(mcpClient!, sessionId);
         expect(paused?.state).toBe('paused');
         expect(paused?.debuggerDisabled).toBe(true);
+
+        const stepped = await callToolSafely(mcpClient!, 'step_over', { sessionId }) as { success?: boolean; state?: string };
+        if (stepped.success && stepped.state === 'paused') {
+          const afterStep = await getSessionSnapshot(mcpClient!, sessionId);
+          expect(afterStep?.lastStop?.reason).toBe('step');
+          expect(afterStep?.debuggerDisabled).toBe(true);
+        }
       } else {
         expect(`${String(pause.error ?? '')} ${pause.message ?? ''} ${pause.data?.message ?? ''}`).toMatch(why);
       }
