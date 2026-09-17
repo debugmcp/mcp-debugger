@@ -438,6 +438,8 @@ export class DebugLauncher {
         dryRunSpawn,
         adapterLaunchConfig: launchAdapterConfig,
         breakOnExceptions: effectiveBreakOnExceptions,
+        // Decided once, here; the worker reads the stamp (issue #746).
+        debuggerOff,
       });
       this.ctx.logger.info(`[SessionManager] ProxyManager started for session ${sessionId}`);
 

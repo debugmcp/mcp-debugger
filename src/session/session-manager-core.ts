@@ -480,12 +480,29 @@ export abstract class SessionManagerCore extends EventEmitter {
     const outputBuffer = session.outputBuffer = new OutputRingBuffer();
     // One note once: on the session for the launch-result warning, and as an
     // attributed entry in this launch's buffer (issues #441, #746).
-    const recordAdapterNotice = (note: string): void => {
+    const recordAdapterNotice = (rawNote: string): void => {
+      // A worker-forwarded note carries the adapter's own words, which may
+      // echo launch arguments: the same write-time redaction as every other
+      // buffer entry (issue #237).
+      let note = rawNote;
+      let redacted = false;
+      if (this.redactionEnabled()) {
+        const result = redactSecretsInString(rawNote);
+        if (result.redacted) {
+          note = result.value;
+          redacted = true;
+        }
+      }
       if (session.adapterNotices?.includes(note)) {
         return;
       }
       (session.adapterNotices ??= []).push(note);
-      const noteEntry = outputBuffer.push('console', `[mcp-debugger] Warning: ${note}\n`);
+      const noteEntry = outputBuffer.push(
+        'console',
+        `[mcp-debugger] Warning: ${note}\n`,
+        undefined,
+        redacted ? { redacted: true } : undefined
+      );
       if (noteEntry) {
         this.emit('output-captured', sessionId, noteEntry);
       }

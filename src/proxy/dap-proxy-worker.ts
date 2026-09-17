@@ -32,6 +32,7 @@ import {
   validateProxyInitPayload
 } from '../utils/type-guards.js';
 import { coerceLaunchFlag } from '../utils/launch-flags.js';
+import { DapResponseError } from './dap-response-error.js';
 import { SilentDapCommandPayload } from './dap-extensions.js';
 // Import adapter policies from shared package
 import type { AdapterPolicy, AdapterSpecificState, BreakpointFields } from '@debugmcp/shared';
@@ -123,12 +124,21 @@ export class DapProxyWorker {
   private deferInitializedHandling: boolean = false;
   private initializedEventHandled: boolean = false;
   /**
-   * True when this launch runs with the debugger off: the launch request
-   * carries an honoured `noDebug` (issue #710). Such an adapter opens no
-   * configuration phase, so the launch is complete on the launch response
-   * and a refused configuration request is not a broken session (#746).
+   * True when this launch runs with the debugger off: the launcher decided
+   * an honoured `noDebug` (issue #710) and stamped it on the init payload.
+   * Such an adapter opens no configuration phase, so the launch is complete
+   * on the launch response and a refused configuration request is not a
+   * broken session (issue #746).
    */
   private debuggerOff: boolean = false;
+  /** The configuration phase in flight, if `initialized` is being handled right now (#746). */
+  private initializedPhase: Promise<void> | null = null;
+  /**
+   * Whether the launch request succeeded, once it has settled (#746): a
+   * terminal DAP event dispatched from the same socket read as the launch
+   * response must report the launch configured before it is forwarded.
+   */
+  private launchOutcome: Promise<boolean> | null = null;
   private initializedEventPromise: Promise<void> | null = null;
   private initializedEventResolver: (() => void) | null = null;
   private requestTracker: CallbackRequestTracker;
@@ -553,8 +563,10 @@ export class DapProxyWorker {
       const isAttachMode = payload.launchConfig?.request === 'attach' ||
                            payload.launchConfig?.__attachMode === true;
       this.isAttachMode = isAttachMode;
-      // noDebug is a launch-request property: an attach debugs regardless.
-      this.debuggerOff = !isAttachMode && this.isDebuggerOff(payload.launchConfig);
+      // The launcher's decision, stamped on the payload: an attach never
+      // carries it, and a launch config reshaped by an adapter transform
+      // cannot desync it (issue #746).
+      this.debuggerOff = !isAttachMode && payload.debuggerOff === true;
 
       // Check if adapter requires command queueing
       if (this.adapterPolicy.requiresCommandQueueing()) {
@@ -578,11 +590,10 @@ export class DapProxyWorker {
           }
           // The emitter sits inside the adoption's try: a throw here would
           // roll back a healthy adoption, so contain it.
-          try {
-            this.reportConfiguredAndLaunched();
-          } catch (err) {
-            this.logger?.warn(`[Worker] configured status after child adoption failed: ${err instanceof Error ? err.message : String(err)}`);
-          }
+          this.sendStatusSafely(
+            'adapter_configured_and_launched',
+            this.lastStop ? { lastStop: this.lastStop } : {}
+          );
         });
         await this.drainPreConnectQueue();
       } else {
@@ -685,14 +696,7 @@ export class DapProxyWorker {
           }
 
           // Standard two-phase: send launch, wait for response, then configurationDone
-          await this.trackedHandshakeRequest('launch', () => this.connectionManager!.sendLaunchRequest(
-            this.dapClient!,
-            payload.scriptPath,
-            payload.scriptArgs,
-            payload.stopOnEntry,
-            payload.justMyCode,
-            payload.launchConfig
-          ));
+          await this.sendTrackedLaunch(payload);
 
           if (this.debuggerOff) {
             await this.completeDebuggerOffLaunch();
@@ -717,14 +721,7 @@ export class DapProxyWorker {
           // Python/debugpy sends "initialized" AFTER receiving the launch request
           this.logger!.info('[Worker] Sending launch request with scriptPath:', payload.scriptPath);
 
-          await this.trackedHandshakeRequest('launch', () => this.connectionManager!.sendLaunchRequest(
-            this.dapClient!,
-            payload.scriptPath,
-            payload.scriptArgs,
-            payload.stopOnEntry,
-            payload.justMyCode,
-            payload.launchConfig
-          ));
+          await this.sendTrackedLaunch(payload);
 
           if (this.debuggerOff) {
             await this.completeDebuggerOffLaunch();
@@ -782,6 +779,40 @@ export class DapProxyWorker {
    * deadline fires (issue #493). A rejection leaves the request marked
    * pending — its own error carries the diagnosis then.
    */
+  /**
+   * The tracked launch request, with its outcome recorded for the terminal
+   * signals (#746): under an honoured noDebug a `terminated` dispatched from
+   * the same socket read as the launch response waits for this.
+   */
+  private async sendTrackedLaunch(payload: ProxyInitPayload): Promise<void> {
+    const launch = this.trackedHandshakeRequest('launch', () => this.connectionManager!.sendLaunchRequest(
+      this.dapClient!,
+      payload.scriptPath,
+      payload.scriptArgs,
+      payload.stopOnEntry,
+      payload.justMyCode,
+      payload.launchConfig
+    ));
+    this.launchOutcome = launch.then(() => true, () => false);
+    await launch;
+  }
+
+  /**
+   * Under an honoured noDebug, a terminal DAP event must not outrun the
+   * launch response it may share a socket read with (#746): once the launch
+   * has succeeded, the launch is reported configured before the event goes
+   * out, so the parent never sees the exit of a launch it was not told
+   * completed. A launch that failed, or has not been sent, holds nothing.
+   */
+  private async settleDebuggerOffLaunch(): Promise<void> {
+    if (!this.debuggerOff || !this.launchOutcome) {
+      return;
+    }
+    if (await this.launchOutcome) {
+      await this.completeDebuggerOffLaunch();
+    }
+  }
+
   private async trackedHandshakeRequest<T>(command: string, run: () => Promise<T>): Promise<T> {
     this.sendStatus('dap_handshake_stage', { stage: 'request_pending', command });
     const result = await run();
@@ -952,6 +983,7 @@ export class DapProxyWorker {
         // Set synchronously, before any await, so a racing terminated sees it.
         this.exitedEventSeen = true;
         return this.enqueueTerminalSignal('exited', async () => {
+          await this.settleDebuggerOffLaunch();
           await this.waitForAdapterStdioDrain();
           await this.waitForChildEventFlush();
           this.terminalDapEventForwarded = true;
@@ -966,6 +998,7 @@ export class DapProxyWorker {
         // stopping the proxy, which drops late messages. Hold terminated
         // until the streams have drained so the output wins the race.
         return this.enqueueTerminalSignal('terminated', async () => {
+          await this.settleDebuggerOffLaunch();
           await this.waitForAdapterStdioDrain();
           await this.waitForChildEventFlush();
           // Must complete before terminated is forwarded: whichever of
@@ -1013,18 +1046,37 @@ export class DapProxyWorker {
       throw new Error('Missing required state in initialized handler');
     }
 
-    let configurationDoneAttempted = false;
-    // Which request the phase is on, for the notice a refusal under noDebug
-    // turns into (issue #746).
+    // Tracked while in flight: a launch response landing mid-phase under an
+    // honoured noDebug waits for it before reporting configured (#746).
+    const phase = this.runConfigurationPhase(this.currentInitPayload, this.dapClient, this.connectionManager);
+    this.initializedPhase = phase;
+    try {
+      await phase;
+    } finally {
+      if (this.initializedPhase === phase) {
+        this.initializedPhase = null;
+      }
+    }
+  }
+
+  /** The configuration phase proper: breakpoints, exception filters, configurationDone, configured. */
+  private async runConfigurationPhase(
+    initPayload: ProxyInitPayload,
+    dapClient: IDapClient,
+    connectionManager: DapConnectionManager
+  ): Promise<void> {
+    // Which request the phase is on: names the notice a refusal under
+    // noDebug turns into, and says whether configurationDone was reached
+    // (issue #746).
     let stage = 'setBreakpoints';
     try {
       // Set initial breakpoints if provided
-      if (this.currentInitPayload.initialBreakpoints?.length) {
-        this.logger!.info('[Worker] Initial breakpoints payload:', this.currentInitPayload.initialBreakpoints);
+      if (initPayload.initialBreakpoints?.length) {
+        this.logger!.info('[Worker] Initial breakpoints payload:', initPayload.initialBreakpoints);
         type InitialBreakpointEntry = BreakpointFields & { id?: string; file: string };
         const groupedBreakpoints = new Map<string, InitialBreakpointEntry[]>();
 
-        for (const breakpoint of this.currentInitPayload.initialBreakpoints) {
+        for (const breakpoint of initPayload.initialBreakpoints) {
           const filePath = path.resolve(breakpoint.file);
           if (!groupedBreakpoints.has(filePath)) {
             groupedBreakpoints.set(filePath, []);
@@ -1045,8 +1097,8 @@ export class DapProxyWorker {
 
         const syncResults: BreakpointSyncResult[] = [];
         for (const [filePath, breakpoints] of groupedBreakpoints.entries()) {
-          const response = await this.connectionManager.setBreakpoints(
-            this.dapClient,
+          const response = await connectionManager.setBreakpoints(
+            dapClient,
             filePath,
             breakpoints
           );
@@ -1071,38 +1123,33 @@ export class DapProxyWorker {
         // store. A status failure must never abort the launch;
         // setBreakpoints failures keep their existing abort semantics via
         // the outer catch.
-        try {
-          this.sendStatus('breakpoints_synced', { breakpoints: syncResults });
-        } catch (err) {
-          this.logger!.warn(
-            `[Worker] breakpoints_synced status failed (continuing): ${
-              err instanceof Error ? err.message : String(err)
-            }`
-          );
-        }
+        this.sendStatusSafely('breakpoints_synced', { breakpoints: syncResults });
       }
 
       // Initial function breakpoints (issue #271 phase 3). Like exception
       // breakpoints below, a failure must not abort the launch — adapters
       // without support reject the request, and the post-launch re-sync
       // surfaces the state honestly.
+      stage = 'setFunctionBreakpoints';
       await this.sendInitialFunctionBreakpoints();
 
       // Arm exception breakpoints when requested (issue #220). A failure must
       // not abort the launch — the outer catch tears the session down — so
       // errors are swallowed with a warning.
-      const exceptionMode = this.currentInitPayload.breakOnExceptions;
+      stage = 'setExceptionBreakpoints';
+      const exceptionMode = initPayload.breakOnExceptions;
       if (exceptionMode && exceptionMode !== 'none') {
         const exceptionFilters = resolveExceptionFilters(this.adapterPolicy, exceptionMode);
         if (exceptionFilters.length > 0) {
           try {
-            await this.connectionManager.setExceptionBreakpoints(this.dapClient, exceptionFilters);
+            await connectionManager.setExceptionBreakpoints(dapClient, exceptionFilters);
           } catch (err) {
             this.logger!.warn(
               `[Worker] setExceptionBreakpoints failed (continuing without exception breakpoints): ${
                 err instanceof Error ? err.message : String(err)
               }`
             );
+            this.noticeRefusalUnderNoDebug('setExceptionBreakpoints', err);
           }
         } else {
           this.logger!.warn(
@@ -1113,31 +1160,39 @@ export class DapProxyWorker {
 
       // Send configuration done
       stage = 'configurationDone';
-      configurationDoneAttempted = true;
-      await this.connectionManager.sendConfigurationDone(this.dapClient);
+      await connectionManager.sendConfigurationDone(dapClient);
 
       // Update state and notify parent
       this.markConfiguredAndLaunched();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (this.debuggerOff) {
-        // Under an honoured noDebug a refused configuration request is the
-        // adapter declining to debug (CodeLLDB: "Not supported in noDebug
-        // mode"), not a broken session (issue #746). The adapter's answer
-        // goes to the caller as an adapter notice (launch warning +
-        // get_output) rather than to the log alone; the phase the adapter
-        // opened is still closed — CodeLLDB withholds the launch response
-        // until configurationDone — and the launch carries on with the
-        // debugger off.
+      if (this.debuggerOff && error instanceof DapResponseError) {
+        // Under an honoured noDebug a configuration request the adapter
+        // *answered* with an error is the adapter declining to debug
+        // (CodeLLDB: "Not supported in noDebug mode"), not a broken session
+        // (issue #746) — a transport failure, a timeout or a shutdown is
+        // still one, and takes the path below. The adapter's answer goes to
+        // the caller as an adapter notice (launch warning + get_output); the
+        // phase the adapter opened is still closed — CodeLLDB withholds the
+        // launch response until configurationDone — and the launch carries
+        // on with the debugger off. Unless the session is already on its
+        // way out: then nothing is sent to a client being torn down. (A
+        // session already CONNECTED — the launch response came first and a
+        // stale-pin phase opened late — still gets the phase closed and the
+        // answer forwarded.)
+        if (this.state === ProxyState.SHUTTING_DOWN || this.state === ProxyState.TERMINATED || !this.dapClient) {
+          this.logger!.warn(`[Worker] ${stage} refused under noDebug while the session is ${this.state}; leaving it be: ${message}`);
+          return;
+        }
         this.logger!.warn(`[Worker] ${stage} refused under noDebug (continuing): ${message}`);
         this.sendAdapterNotice(`${stage} refused under noDebug: ${message}`);
-        if (!configurationDoneAttempted) {
+        if (stage !== 'configurationDone') {
           try {
-            await this.connectionManager.sendConfigurationDone(this.dapClient);
+            await connectionManager.sendConfigurationDone(dapClient);
           } catch (err) {
             const refusal = err instanceof Error ? err.message : String(err);
             this.logger!.warn(`[Worker] configurationDone refused under noDebug (continuing): ${refusal}`);
-            this.sendAdapterNotice(`configurationDone refused under noDebug: ${refusal}`);
+            this.noticeRefusalUnderNoDebug('configurationDone', err);
           }
         }
         this.markConfiguredAndLaunched();
@@ -1146,6 +1201,18 @@ export class DapProxyWorker {
       this.logger!.error('[Worker] Error in initialized handler:', error);
       this.sendError(`Error in DAP sequence: ${message}`);
       await this.shutdown();
+    }
+  }
+
+  /**
+   * A request the adapter answered with an error under an honoured noDebug
+   * (issue #746) is forwarded as an adapter notice; anything else that
+   * failed (transport, timeout) is not the adapter's answer and is left to
+   * the caller's own handling.
+   */
+  private noticeRefusalUnderNoDebug(request: string, err: unknown): void {
+    if (this.debuggerOff && err instanceof DapResponseError) {
+      this.sendAdapterNotice(`${request} refused under noDebug: ${err.message}`);
     }
   }
 
@@ -1169,6 +1236,12 @@ export class DapProxyWorker {
       // after the phase, not before it.
       this.logger!.info('[Worker] noDebug is honoured by this adapter, but "initialized" arrived during the launch request: running the configuration phase it opened first (issue #746)');
       await this.handleInitializedEvent();
+    } else if (this.initializedPhase) {
+      // Plain launch mode handles `initialized` as it arrives, so the phase
+      // may be mid-flight when the launch response lands (CodeLLDB answers
+      // launch before its configurationDone response): same rule.
+      this.logger!.info('[Worker] noDebug is honoured by this adapter, but a configuration phase is in flight: letting it close first (issue #746)');
+      await this.initializedPhase;
     }
     if (this.state === ProxyState.INITIALIZING) {
       this.logger!.info('[Worker] noDebug is honoured by this adapter: launch complete on the launch response, no configuration phase to wait for (issue #746)');
@@ -1233,6 +1306,7 @@ export class DapProxyWorker {
           err instanceof Error ? err.message : String(err)
         }`
       );
+      this.noticeRefusalUnderNoDebug('setFunctionBreakpoints', err);
     }
   }
 
@@ -1862,10 +1936,19 @@ export class DapProxyWorker {
    * #441 path. Never throws: a notice must not fail the launch it explains.
    */
   private sendAdapterNotice(note: string): void {
+    this.sendStatusSafely('adapter_notice', { note });
+  }
+
+  /**
+   * A status whose IPC failure must not fail the launch it decorates: the
+   * breakpoint echo (#439), an adapter notice (#746), the child-adoption
+   * readiness report (#704). Logged and continued.
+   */
+  private sendStatusSafely(status: string, extra: Record<string, unknown> = {}): void {
     try {
-      this.sendStatus('adapter_notice', { note });
+      this.sendStatus(status, extra);
     } catch (err) {
-      this.logger?.warn(`[Worker] adapter_notice status failed (continuing): ${err instanceof Error ? err.message : String(err)}`);
+      this.logger?.warn(`[Worker] ${status} status failed (continuing): ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

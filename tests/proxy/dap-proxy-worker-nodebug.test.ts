@@ -28,11 +28,21 @@ import type { AdapterPolicy } from '@debugmcp/shared';
 import { createMockDapClient } from '../test-utils/mocks/dap-client.js';
 import { createMockLogger } from '../test-utils/helpers/test-dependencies.js';
 import { createMockMessageSender, createMockWorkerDependencies } from '../test-utils/mocks/dap-proxy-doubles.js';
+import { DapResponseError } from '../../src/proxy/dap-response-error.js';
 
 // --- helpers ---------------------------------------------------------------
 
-/** A python-shaped init payload; `launchConfig` is what the launch request carries. */
-function payloadWith(launchConfig: Record<string, unknown> | undefined): ProxyInitPayload {
+/** The adapter's answer to a request it declines: a DAP error response, as MinimalDapClient rejects it. */
+function refusal(command: string, message = 'Internal debugger error: Not supported in noDebug mode.'): DapResponseError {
+  return new DapResponseError({ seq: 0, type: 'response', request_seq: 0, success: false, command, message });
+}
+
+/**
+ * A python-shaped init payload; `launchConfig` is what the launch request
+ * carries, `debuggerOff` the launcher's decision stamped on the payload
+ * (the worker reads the stamp, never the config).
+ */
+function payloadWith(launchConfig: Record<string, unknown> | undefined, debuggerOff?: boolean): ProxyInitPayload {
   return {
     cmd: 'init',
     sessionId: 'nodebug-session',
@@ -46,7 +56,8 @@ function payloadWith(launchConfig: Record<string, unknown> | undefined): ProxyIn
     justMyCode: true,
     initialBreakpoints: [{ id: 'bp-1', file: '/path/to/script.py', line: 5 }],
     breakOnExceptions: 'uncaught',
-    launchConfig
+    launchConfig,
+    ...(debuggerOff !== undefined ? { debuggerOff } : {})
   };
 }
 
@@ -129,7 +140,7 @@ describe('noDebug launch completion (issue #746)', () => {
 
   describe('where the adapter honours the flag (python: plain launch mode)', () => {
     it('reports configured on the launch response without waiting for an initialized event', async () => {
-      const payload = payloadWith({ noDebug: true });
+      const payload = payloadWith({ noDebug: true }, true);
       wire(PythonAdapterPolicy, payload);
 
       await (worker as any).startAdapterAndConnect(payload);
@@ -145,7 +156,7 @@ describe('noDebug launch completion (issue #746)', () => {
     });
 
     it('still runs the configuration phase when the adapter opens one, reporting configured once', async () => {
-      const payload = payloadWith({ noDebug: true });
+      const payload = payloadWith({ noDebug: true }, true);
       wire(PythonAdapterPolicy, payload);
 
       await (worker as any).startAdapterAndConnect(payload);
@@ -169,9 +180,9 @@ describe('noDebug launch completion (issue #746)', () => {
     });
 
     it('survives a refused setBreakpoints, still closes the phase with configurationDone (CodeLLDB)', async () => {
-      const payload = payloadWith({ noDebug: true });
+      const payload = payloadWith({ noDebug: true }, true);
       wire(PythonAdapterPolicy, payload);
-      connectionStub.setBreakpoints.mockRejectedValue(new Error('Internal debugger error: Not supported in noDebug mode.'));
+      connectionStub.setBreakpoints.mockRejectedValue(refusal('setBreakpoints'));
 
       // CodeLLDB withholds the launch response until configurationDone, so
       // the phase runs while the launch request is still in flight.
@@ -199,9 +210,9 @@ describe('noDebug launch completion (issue #746)', () => {
     });
 
     it("forwards the adapter's refusal to the parent as an adapter notice, naming the request", async () => {
-      const payload = payloadWith({ noDebug: true });
+      const payload = payloadWith({ noDebug: true }, true);
       wire(PythonAdapterPolicy, payload);
-      connectionStub.setBreakpoints.mockRejectedValue(new Error('Internal debugger error: Not supported in noDebug mode.'));
+      connectionStub.setBreakpoints.mockRejectedValue(refusal('setBreakpoints'));
 
       await (worker as any).startAdapterAndConnect(payload);
       mockDapClient.emit('initialized');
@@ -218,13 +229,14 @@ describe('noDebug launch completion (issue #746)', () => {
     });
 
     it('does not flip a session that is already shutting down back to CONNECTED', async () => {
-      const payload = payloadWith({ noDebug: true });
+      const payload = payloadWith({ noDebug: true }, true);
       wire(PythonAdapterPolicy, payload);
-      // The adapter went away while setBreakpoints was pending: shutdown
-      // rejects the request, and the catch must not resurrect the session.
+      // A shutdown began while the refusal was in flight: the tolerant catch
+      // must neither resurrect the session, nor send configurationDone to a
+      // client on its way out, nor forward a notice.
       connectionStub.setBreakpoints.mockImplementation(async () => {
         (worker as any).state = ProxyState.SHUTTING_DOWN;
-        throw new Error('worker shutdown');
+        throw refusal('setBreakpoints');
       });
 
       // The phase runs before the launch response here, so the early report
@@ -241,16 +253,127 @@ describe('noDebug launch completion (issue #746)', () => {
 
       expect(configuredStatuses()).toHaveLength(0);
       expect(worker.getState()).toBe(ProxyState.SHUTTING_DOWN);
+      expect(connectionStub.sendConfigurationDone).not.toHaveBeenCalled();
+      expect(mockMessageSender.send.mock.calls.filter(([m]) => m.type === 'status' && m.status === 'adapter_notice')).toHaveLength(0);
       resolveLaunch();
       await connect;
       expect(configuredStatuses()).toHaveLength(0);
     });
 
-    it('survives a refused configurationDone as well', async () => {
-      const payload = payloadWith({ noDebug: true });
+    it('treats a transport failure in the phase as the broken session it is, flag or no flag', async () => {
+      const payload = payloadWith({ noDebug: true }, true);
       wire(PythonAdapterPolicy, payload);
-      connectionStub.setBreakpoints.mockRejectedValue(new Error('Not supported in noDebug mode.'));
-      connectionStub.sendConfigurationDone.mockRejectedValue(new Error('Not supported in noDebug mode.'));
+      // Not an adapter answer: the socket dropped mid-phase.
+      connectionStub.setBreakpoints.mockRejectedValue(new Error('DAP client disconnected'));
+
+      await (worker as any).startAdapterAndConnect(payload);
+      mockDapClient.emit('initialized');
+      await settle();
+      await settle();
+
+      expect(errorMessages()).toHaveLength(1);
+      expect((errorMessages()[0][0] as ErrorMessage).message).toMatch(/Error in DAP sequence: DAP client disconnected/);
+      expect(mockMessageSender.send.mock.calls.filter(([m]) => m.type === 'status' && m.status === 'adapter_notice')).toHaveLength(0);
+      // The session went down, as it would in debug mode.
+      expect([ProxyState.SHUTTING_DOWN, ProxyState.TERMINATED]).toContain(worker.getState());
+    });
+
+    it('forwards a refused exception filter or function breakpoint as a notice too — the phase goes on', async () => {
+      const payload = payloadWith({ noDebug: true }, true);
+      wire(PythonAdapterPolicy, payload);
+      (worker as any).currentInitPayload = { ...payload, initialFunctionBreakpoints: [{ name: 'main' }] };
+      connectionStub.setExceptionBreakpoints.mockRejectedValue(refusal('setExceptionBreakpoints'));
+      mockDapClient.sendRequest.mockImplementation(async (command: string) => {
+        if (command === 'setFunctionBreakpoints') {
+          throw refusal('setFunctionBreakpoints');
+        }
+        return { body: {} };
+      });
+
+      await (worker as any).startAdapterAndConnect(payload);
+      mockDapClient.emit('initialized');
+      await settle();
+      await settle();
+
+      const notes = mockMessageSender.send.mock.calls
+        .filter(([m]) => m.type === 'status' && m.status === 'adapter_notice')
+        .map(([m]) => (m as StatusMessage & { note?: string }).note);
+      expect(notes).toEqual([
+        'setFunctionBreakpoints refused under noDebug: Internal debugger error: Not supported in noDebug mode.',
+        'setExceptionBreakpoints refused under noDebug: Internal debugger error: Not supported in noDebug mode.'
+      ]);
+      expect(connectionStub.sendConfigurationDone).toHaveBeenCalledTimes(1);
+      expect(errorMessages()).toHaveLength(0);
+    });
+
+    it('reports configured only after a phase that is still in flight when the launch response lands', async () => {
+      const payload = payloadWith({ noDebug: true }, true);
+      wire(PythonAdapterPolicy, payload);
+      const order: string[] = [];
+      // CodeLLDB: `initialized` during the launch request; the launch
+      // response arrives before the configurationDone response does.
+      let finishConfigurationDone!: () => void;
+      connectionStub.sendConfigurationDone.mockImplementation(
+        () => new Promise<void>((resolve) => { finishConfigurationDone = () => { order.push('configurationDone'); resolve(); }; })
+      );
+      connectionStub.sendLaunchRequest.mockImplementation(async () => {
+        mockDapClient.emit('initialized');
+        await settle();
+        await settle();
+        order.push('launch-response');
+      });
+      const origSend = mockMessageSender.send.getMockImplementation();
+      mockMessageSender.send.mockImplementation((m) => {
+        if (m.type === 'status' && m.status === 'adapter_configured_and_launched') order.push('configured');
+        origSend?.(m);
+      });
+
+      const connect = (worker as any).startAdapterAndConnect(payload);
+      await settle();
+      await settle();
+      await settle();
+      expect(order).toEqual(['launch-response']);
+      finishConfigurationDone();
+      await connect;
+      await settle();
+
+      expect(order).toEqual(['launch-response', 'configurationDone', 'configured']);
+    });
+
+    it('reports configured before a terminated event that arrived in the same read as the launch response', async () => {
+      const payload = payloadWith({ noDebug: true }, true);
+      wire(PythonAdapterPolicy, payload);
+      const order: string[] = [];
+      // debugpy, short program: the launch response and `terminated` are
+      // dispatched from one socket read. Modelled adversarially: the
+      // terminal path starts first and the response continuation takes a
+      // few extra ticks — the terminal path must still not win.
+      connectionStub.sendLaunchRequest.mockImplementation(async () => {
+        mockDapClient.emit('terminated', {});
+        for (let i = 0; i < 8; i++) {
+          await Promise.resolve();
+        }
+      });
+      const origSend = mockMessageSender.send.getMockImplementation();
+      mockMessageSender.send.mockImplementation((m) => {
+        if (m.type === 'status' && m.status === 'adapter_configured_and_launched') order.push('configured');
+        if (m.type === 'dapEvent' && m.event === 'terminated') order.push('terminated');
+        origSend?.(m);
+      });
+
+      await (worker as any).startAdapterAndConnect(payload);
+      for (let i = 0; i < 6; i++) {
+        await settle();
+      }
+
+      expect(order).toEqual(['configured', 'terminated']);
+    });
+
+    it('survives a refused configurationDone as well', async () => {
+      const payload = payloadWith({ noDebug: true }, true);
+      wire(PythonAdapterPolicy, payload);
+      connectionStub.setBreakpoints.mockRejectedValue(refusal('setBreakpoints'));
+      connectionStub.sendConfigurationDone.mockRejectedValue(refusal('configurationDone'));
 
       await (worker as any).startAdapterAndConnect(payload);
       mockDapClient.emit('initialized');
@@ -264,42 +387,28 @@ describe('noDebug launch completion (issue #746)', () => {
       expect(worker.getState()).toBe(ProxyState.CONNECTED);
     });
 
-    it("reads the string form 'true' the way the adapter will", async () => {
-      const payload = payloadWith({ noDebug: 'true' });
-      wire(PythonAdapterPolicy, payload);
-
-      await (worker as any).startAdapterAndConnect(payload);
+    it("reads the launcher's stamped decision, not the launch config — one decision, decided once", async () => {
+      // The stamp without the key: the launcher resolved a form (adapterLaunchConfig,
+      // a string) the worker is not asked to re-derive.
+      const stamped = payloadWith({}, true);
+      wire(PythonAdapterPolicy, stamped);
+      await (worker as any).startAdapterAndConnect(stamped);
       await settle();
-
       expect(configuredStatuses()).toHaveLength(1);
-      expect(worker.getState()).toBe(ProxyState.CONNECTED);
-    });
 
-    it('reads every other form exactly as the launcher does — the two decisions must agree', async () => {
-      // The launcher (resolveLaunchFlag) coerces 'true'/'false' and takes
-      // anything else by truthiness, which is also how debugpy reads it.
-      for (const form of ['True', 1, 'yes']) {
-        mockMessageSender.send.mockClear();
-        (worker as any).state = ProxyState.INITIALIZING;
-        const payload = payloadWith({ noDebug: form });
-        wire(PythonAdapterPolicy, payload);
-
-        await (worker as any).startAdapterAndConnect(payload);
-        await settle();
-
-        expect(configuredStatuses(), `noDebug: ${JSON.stringify(form)}`).toHaveLength(1);
-      }
+      // The key without the stamp: an honouring policy, but the launcher did
+      // not decide debugger-off (or a transform put the key there itself).
       mockMessageSender.send.mockClear();
       (worker as any).state = ProxyState.INITIALIZING;
-      const off = payloadWith({ noDebug: 'false' });
-      wire(PythonAdapterPolicy, off);
-      await (worker as any).startAdapterAndConnect(off);
+      const unstamped = payloadWith({ noDebug: true });
+      wire(PythonAdapterPolicy, unstamped);
+      await (worker as any).startAdapterAndConnect(unstamped);
       await settle();
       expect(configuredStatuses()).toHaveLength(0);
     });
 
     it('leaves an attach-shaped config alone — noDebug is a launch-request property', async () => {
-      const payload = payloadWith({ request: 'attach', noDebug: true, connect: { host: 'localhost', port: 5678 } });
+      const payload = payloadWith({ request: 'attach', noDebug: true, connect: { host: 'localhost', port: 5678 } }, false);
       wire(PythonAdapterPolicy, payload);
       connectionStub.sendAttachRequest = vi.fn().mockImplementation(async () => {
         setImmediate(() => mockDapClient.emit('initialized'));
@@ -321,7 +430,7 @@ describe('noDebug launch completion (issue #746)', () => {
     const ignoringPolicy = { ...PythonAdapterPolicy, honoursNoDebug: undefined } as AdapterPolicy;
 
     it('keeps the ordinary launch: configured only once the configuration phase closes', async () => {
-      const payload = payloadWith({ noDebug: true });
+      const payload = payloadWith({ noDebug: true }, false);
       wire(ignoringPolicy, payload);
 
       await (worker as any).startAdapterAndConnect(payload);
@@ -337,9 +446,9 @@ describe('noDebug launch completion (issue #746)', () => {
     });
 
     it('still treats a refused setBreakpoints as fatal — the debugger is on and the phase failed', async () => {
-      const payload = payloadWith({ noDebug: true });
+      const payload = payloadWith({ noDebug: true }, false);
       wire(ignoringPolicy, payload);
-      connectionStub.setBreakpoints.mockRejectedValue(new Error('boom'));
+      connectionStub.setBreakpoints.mockRejectedValue(refusal('setBreakpoints', 'boom'));
 
       await (worker as any).startAdapterAndConnect(payload);
       mockDapClient.emit('initialized');
@@ -366,6 +475,7 @@ describe('noDebug launch completion (issue #746)', () => {
       justMyCode: false,
       initialBreakpoints: [{ id: 'bp-1', file: '/path/to/main.go', line: 8 }],
       launchConfig: { noDebug: true },
+      debuggerOff: true,
       adapterCommand: { command: 'dlv', args: ['dap', '--listen', 'localhost:12345'] }
     };
 

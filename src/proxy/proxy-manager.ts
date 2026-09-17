@@ -366,6 +366,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       initialBreakpoints: config.initialBreakpoints,
       initialFunctionBreakpoints: config.initialFunctionBreakpoints,
       dryRunSpawn: config.dryRunSpawn,
+      debuggerOff: config.debuggerOff,
       logLevel: config.logLevel,
       breakOnExceptions: config.breakOnExceptions,
       launchConfig: config.launchConfig,
