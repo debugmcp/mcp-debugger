@@ -106,6 +106,9 @@ export const JsDebugAdapterPolicy = {
   // Names in late-loaded modules stay verified:false by design and bind at
   // the next pause — unverified-at-launch is not a failure here (issue #308).
   functionBreakpointsBindLate: true,
+  // Verified live: "Running with noDebug, so debug domains are disabled" —
+  // the program runs, nothing binds, no stop comes (issue #710).
+  honoursNoDebug: true,
   supportsReverseStartDebugging: true,
   childSessionStrategy: 'launchWithPendingTarget',
   buildChildStartArgs: (pendingId: string, parentConfig: Record<string, unknown>) => {

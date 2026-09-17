@@ -1185,7 +1185,12 @@ export class DapProxyWorker {
         (this.currentInitPayload?.initialFunctionBreakpoints?.length ?? 0) > 0
       ) {
         const launchArgs = (payload.dapArgs ?? {}) as Record<string, unknown>;
-        if (launchArgs.stopOnEntry !== true) {
+        // Under an honoured noDebug the debugger is off (issue #710): no entry
+        // stop can come, and the function breakpoints will not bind either —
+        // the session layer has already told the caller so.
+        const noDebug = launchArgs.noDebug === true || launchArgs.noDebug === 'true';
+        const debuggerOff = noDebug && this.adapterPolicy.honoursNoDebug === true;
+        if (launchArgs.stopOnEntry !== true && !debuggerOff) {
           payload.dapArgs = { ...launchArgs, stopOnEntry: true };
           this.logger?.info('[Worker] Forcing stopOnEntry=true in the js-debug launch config (pending CDP function breakpoints, issue #295)');
         }

@@ -12,6 +12,9 @@ import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from '
 
 export const PythonAdapterPolicy = {
   name: 'python',
+  // debugpy runs the program undebugged under noDebug (verified live); the
+  // launch currently fails init because no `initialized` follows (issue #746).
+  honoursNoDebug: true,
   supportsLogPoints: true,
   supportsFunctionBreakpoints: true,
   supportsReverseStartDebugging: false,

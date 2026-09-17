@@ -44,6 +44,8 @@ interface PinnedCapabilities {
   functionBreakpointsVia: 'dap' | 'cdp' | undefined;
   /** Whether verified:false at launch is by design rather than a warning. */
   functionBreakpointsBindLate: boolean | undefined;
+  /** Whether a `noDebug` launch actually turns the debugger off (issue #710). */
+  honoursNoDebug: boolean | undefined;
   childSessionStrategy: ChildSessionStrategy;
   requiresCommandQueueing: boolean;
   /**
@@ -62,7 +64,8 @@ interface PinnedCapabilities {
  * from its language, and the only policy delivering function breakpoints over CDP; ruby is the
  * only adapter pinning function breakpoints OFF (rdbg advertises the capability but ignores the
  * request, #636) and the only one declining a default exception mode; ruby/java/dotnet are the
- * three that reject logpoints; js and java are the two that bind function breakpoints late.
+ * three that reject logpoints; js and java are the two that bind function breakpoints late;
+ * js, python, go and cpp are the four whose debugger a `noDebug` launch turns off (#710).
  */
 const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
   [DebugLanguage.PYTHON]: {
@@ -71,6 +74,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     supportsLogPoints: true,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: undefined,
+    honoursNoDebug: true,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
     defaultExceptionBreakMode: 'uncaught'
@@ -81,6 +85,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     supportsLogPoints: false,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: undefined,
+    honoursNoDebug: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
     defaultExceptionBreakMode: undefined
@@ -91,6 +96,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     supportsLogPoints: true,
     functionBreakpointsVia: 'cdp',
     functionBreakpointsBindLate: true,
+    honoursNoDebug: true,
     childSessionStrategy: 'launchWithPendingTarget',
     requiresCommandQueueing: true,
     defaultExceptionBreakMode: 'uncaught'
@@ -101,6 +107,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     supportsLogPoints: true,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: undefined,
+    honoursNoDebug: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
     defaultExceptionBreakMode: 'uncaught'
@@ -111,6 +118,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     supportsLogPoints: true,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: undefined,
+    honoursNoDebug: true,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
     defaultExceptionBreakMode: 'uncaught'
@@ -121,6 +129,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     supportsLogPoints: false,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: true,
+    honoursNoDebug: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
     defaultExceptionBreakMode: 'uncaught'
@@ -131,6 +140,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     supportsLogPoints: false,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: undefined,
+    honoursNoDebug: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
     defaultExceptionBreakMode: 'uncaught'
@@ -141,6 +151,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     supportsLogPoints: true,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: undefined,
+    honoursNoDebug: true,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
     defaultExceptionBreakMode: 'uncaught'
@@ -151,6 +162,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     supportsLogPoints: true,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: undefined,
+    honoursNoDebug: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
     defaultExceptionBreakMode: 'uncaught'
@@ -225,6 +237,10 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
   it('declares the pinned breakpoint capabilities', () => {
     expect(policy.supportsFunctionBreakpoints).toBe(pinned.supportsFunctionBreakpoints);
     expect(policy.supportsLogPoints).toBe(pinned.supportsLogPoints);
+  });
+
+  it('pins whether a noDebug launch turns the debugger off', () => {
+    expect(policy.honoursNoDebug).toBe(pinned.honoursNoDebug);
   });
 
   it('only claims a function-breakpoint delivery quirk when it supports them at all', () => {

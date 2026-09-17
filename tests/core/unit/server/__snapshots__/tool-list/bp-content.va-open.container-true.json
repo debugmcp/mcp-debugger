@@ -223,6 +223,10 @@
                 "justMyCode": {
                   "type": "boolean",
                   "description": "Only debug user code (default true). JavaScript launch: true blackboxes node_modules via skipFiles and keeps js-debug's smart-stepper on, so a pause or step that lands in skipped code (Node internals, node_modules) is stepped through and may never land; false drops node_modules from skipFiles and turns the stepper off, so pauses and steps land inside dependencies"
+                },
+                "noDebug": {
+                  "type": "boolean",
+                  "description": "DAP's launch-without-debugging flag (default false). Where the adapter honours it (js-debug does; debugpy, Delve and CodeLLDB do too, though their launches currently fail under it) no breakpoint binds, no exception filter arms, no entry stop lands and no stop ever arrives — the response warns when breakpoints, an explicit breakOnExceptions or stopOnEntry are set alongside it. rdbg, netcoredbg and the Java bridge ignore the flag, and the rust launch never forwards it: their debugger stays on and the response says so"
                 }
               },
               "additionalProperties": true

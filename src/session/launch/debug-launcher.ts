@@ -26,6 +26,8 @@ import type { BreakpointController } from '../breakpoints/breakpoint-controller.
 import { reresolveAnchors } from '../breakpoints/anchor-resolution.js';
 import {
   buildLogpointDowngradeLaunchWarning,
+  buildNoDebugFailureNote,
+  buildNoDebugLaunchWarning,
   buildUnboundBreakpointExitWarning,
   buildRunToCompletionSummary
 } from '../breakpoints/launch-warnings.js';
@@ -37,6 +39,41 @@ import {
 import { waitForLaunchReadiness } from './launch-readiness.js';
 import type { ProxyLauncher } from './proxy-launcher.js';
 import type { InFlightGuard } from '../in-flight-guard.js';
+
+/**
+ * A launch flag the way the adapter will see it. The proxy launcher merges
+ * adapterLaunchConfig over dapLaunchArgs (the server defaults carry neither
+ * of these keys), so a value read from dapLaunchArgs alone would miss a flag
+ * set — or unset — through adapterLaunchConfig. The string forms are read
+ * the way the proxy's message parser coerces them ('true'/'false', the
+ * string-typed-args transport quirk); anything else counts by truthiness,
+ * which is how the adapters read it.
+ */
+function resolveLaunchFlag(
+  key: 'noDebug' | 'stopOnEntry',
+  dapLaunchArgs: Partial<CustomLaunchRequestArguments> | undefined,
+  adapterLaunchConfig: Record<string, unknown> | undefined
+): boolean {
+  const fromAdapterConfig = adapterLaunchConfig?.[key];
+  const value = fromAdapterConfig !== undefined ? fromAdapterConfig : dapLaunchArgs?.[key];
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return Boolean(value);
+}
+
+/**
+ * The `data` of a failed launch: the failure record, plus the noDebug note
+ * when there is one — an adapter that honours the flag but cannot complete
+ * the launch under it (debugpy, Delve, CodeLLDB today: issue #746) would
+ * otherwise report an init failure with no pointer to the flag behind it.
+ */
+function failureData<T extends object>(
+  diagnosticData: T,
+  noDebugWarning: string | undefined
+): { data?: T & { warning?: string } } {
+  const data = { ...diagnosticData, ...(noDebugWarning ? { warning: noDebugWarning } : {}) };
+  return Object.keys(data).length > 0 ? { data } : {};
+}
 
 export class DebugLauncher {
   constructor(
@@ -221,9 +258,69 @@ export class DebugLauncher {
       };
     }
 
+    // noDebug (issue #710). Whether the flag turns the debugger off is the
+    // policy's word, measured per adapter: where it does, nothing the caller
+    // asked to stop on can fire and the breakpoint-shaped launch warnings
+    // below are withheld; where the adapter ignores it, the warning says so
+    // instead. Decided here, before the dry-run branch, from the caller's own
+    // breakOnExceptions rather than the policy default resolved below: a dry
+    // run is a configuration check and a restart replays the same arguments,
+    // and both should say so.
+    const policy = this.ctx.selectPolicy(session.language);
+    // noDebug is a launch-request property; an attach-shaped start_debugging
+    // (request: 'attach' / __attachMode) attaches with the debugger on.
+    const launchArgsShape = dapLaunchArgs as Record<string, unknown> | undefined;
+    const isAttachShaped =
+      launchArgsShape?.request === 'attach' || launchArgsShape?.__attachMode === true;
+    const noDebug = !isAttachShaped && resolveLaunchFlag('noDebug', dapLaunchArgs, adapterLaunchConfig);
+    const honoursNoDebug = policy.honoursNoDebug === true;
+    const debuggerOff = noDebug && honoursNoDebug;
+    const noDebugWarning = buildNoDebugLaunchWarning(
+      session,
+      { noDebug, stopOnEntry: resolveLaunchFlag('stopOnEntry', dapLaunchArgs, adapterLaunchConfig) },
+      breakOnExceptions,
+      honoursNoDebug
+    );
+    // A launch that fails under the flag still needs to point at it, whether
+    // or not there was anything armed to warn about.
+    const noDebugFailureNote = noDebugWarning ?? (debuggerOff ? buildNoDebugFailureNote() : undefined);
+    // With the debugger off an entry stop cannot come. Everything that reads
+    // stopOnEntry from here on — the proxy config (from either source the
+    // adapter merge reads), the core's projection to RUNNING on
+    // adapter-configured, the readiness wait — sees it off, so they agree and
+    // none of them waits for a stop that cannot arrive. The warning above and
+    // session.lastLaunch (recorded earlier) keep the caller's values.
+    const launchArgs = debuggerOff ? { ...dapLaunchArgs, stopOnEntry: false } : dapLaunchArgs;
+    const launchAdapterConfig =
+      debuggerOff && adapterLaunchConfig?.stopOnEntry !== undefined
+        ? { ...adapterLaunchConfig, stopOnEntry: false }
+        : adapterLaunchConfig;
+    // Likewise readiness: python/go/cpp count only a pause as ready (they
+    // always request an entry stop and auto-continue), which cannot happen
+    // here — running is ready, and so is a pause that came anyway.
+    const isReady = (state: SessionState): boolean =>
+      debuggerOff
+        ? state === SessionState.RUNNING || state === SessionState.PAUSED
+        : policy.isSessionReady
+          ? policy.isSessionReady(state, { stopOnEntry: launchArgs?.stopOnEntry })
+          : state === SessionState.PAUSED;
+    const readinessPolicy = debuggerOff ? { ...policy, isSessionReady: undefined } : policy;
+
     try {
       // For dry run, start the proxy and wait for completion
       if (dryRunSpawn) {
+        const dryRunResult = (snapshot: { command?: string; script?: string } | undefined): DebugResult => ({
+          success: true,
+          state: SessionState.STOPPED,
+          data: {
+            ...(noDebugWarning ? { warning: noDebugWarning } : {}),
+            dryRun: true,
+            message: 'Dry run spawn command logged by proxy.',
+            command: snapshot?.command,
+            script: snapshot?.script,
+          },
+        });
+
         // Mark that we're setting up a dry run handler
         const sessionWithSetup = session as ManagedSession & { _dryRunHandlerSetup?: boolean };
         sessionWithSetup._dryRunHandlerSetup = true;
@@ -256,16 +353,7 @@ export class DebugLauncher {
           );
           delete sessionWithSetup._dryRunHandlerSetup;
 
-          return {
-            success: true,
-            state: SessionState.STOPPED,
-            data: {
-              dryRun: true,
-              message: 'Dry run spawn command logged by proxy.',
-              command: initialDryRunSnapshot?.command,
-              script: initialDryRunSnapshot?.script,
-            },
-          };
+          return dryRunResult(initialDryRunSnapshot);
         }
 
         // Wait for completion with timeout
@@ -292,16 +380,7 @@ export class DebugLauncher {
             `[SessionManager] Dry run completed for session ${sessionId}, final state: ${latestSessionState.state}`
           );
 
-          return {
-            success: true,
-            state: SessionState.STOPPED,
-            data: {
-              dryRun: true,
-              message: 'Dry run spawn command logged by proxy.',
-              command: latestSnapshot?.command,
-              script: latestSnapshot?.script,
-            },
-          };
+          return dryRunResult(latestSnapshot);
         } else {
           // Timeout occurred. The state is read once: the log read below is
           // an await, and a late dry-run-complete/exit landing during it must
@@ -333,7 +412,7 @@ export class DebugLauncher {
             success: false,
             error: dryRunTimeoutError.message,
             state,
-            ...(Object.keys(diagnosticData).length > 0 ? { data: diagnosticData } : {})
+            ...failureData(diagnosticData, noDebugFailureNote)
           };
         }
       }
@@ -343,13 +422,9 @@ export class DebugLauncher {
       // user did not specify one, launch sessions take the adapter policy's
       // default. Attach-shaped configs are excluded — pausing a process you
       // attached to on exceptions is surprising — as are dry runs (above).
-      const launchArgsShape = dapLaunchArgs as Record<string, unknown> | undefined;
-      const isAttachShaped =
-        launchArgsShape?.request === 'attach' || launchArgsShape?.__attachMode === true;
       let effectiveBreakOnExceptions = breakOnExceptions;
       if (effectiveBreakOnExceptions === undefined && !isAttachShaped) {
-        const policyDefault = this.ctx.selectPolicy(session.language)
-          .getInitializationBehavior?.().defaultExceptionBreakMode;
+        const policyDefault = policy.getInitializationBehavior?.().defaultExceptionBreakMode;
         if (policyDefault) {
           effectiveBreakOnExceptions = policyDefault;
           this.ctx.logger.info(
@@ -363,21 +438,20 @@ export class DebugLauncher {
       const launchConfigData = await this.proxyLauncher.start(session, {
         scriptPath,
         scriptArgs,
-        dapLaunchArgs,
+        dapLaunchArgs: launchArgs,
         dryRunSpawn,
-        adapterLaunchConfig,
+        adapterLaunchConfig: launchAdapterConfig,
         breakOnExceptions: effectiveBreakOnExceptions,
       });
       this.ctx.logger.info(`[SessionManager] ProxyManager started for session ${sessionId}`);
 
       // Perform language-specific handshake if required
-      const policy = this.ctx.selectPolicy(session.language);
       if (policy.performHandshake) {
         try {
           await policy.performHandshake({
             proxyManager: session.proxyManager,
             sessionId: session.id,
-            dapLaunchArgs,
+            dapLaunchArgs: launchArgs,
             scriptPath,
             scriptArgs,
             breakpoints: session.breakpoints,
@@ -395,13 +469,11 @@ export class DebugLauncher {
 
       // Use policy-defined readiness criteria when available.
       const sessionStateAfterHandshake = this.ctx.getSession(sessionId).state;
-      const alreadyReady = policy.isSessionReady
-        ? policy.isSessionReady(sessionStateAfterHandshake, { stopOnEntry: dapLaunchArgs?.stopOnEntry })
-        : sessionStateAfterHandshake === SessionState.PAUSED;
+      const alreadyReady = isReady(sessionStateAfterHandshake);
 
       if (!alreadyReady) {
         // Wait for adapter to be configured, first stop event, or termination
-        await waitForLaunchReadiness(this.ctx, { session, sessionId, policy, dapLaunchArgs });
+        await waitForLaunchReadiness(this.ctx, { session, sessionId, policy: readinessPolicy, dapLaunchArgs: launchArgs });
       } else {
         this.ctx.logger.info(
           `[SessionManager] Session ${sessionId} already ${sessionStateAfterHandshake} after handshake - skipping adapter readiness wait`
@@ -438,7 +510,7 @@ export class DebugLauncher {
           success: false,
           state: SessionState.ERROR,
           error: errorMessage,
-          ...(Object.keys(diagnosticData).length > 0 ? { data: diagnosticData } : {})
+          ...failureData(diagnosticData, noDebugFailureNote)
         };
       }
 
@@ -452,32 +524,54 @@ export class DebugLauncher {
         await this.breakpoints.resyncAll(finalSession);
       }
 
+      // The policy's word is a static pin; a stop that arrived anyway is the
+      // stronger evidence (an adapter build that ignores the flag after all) —
+      // a pause still standing, or an entry stop the core already resumed
+      // (firstStopHandled is set on every stop of this launch, resumed or not).
+      // Then the debugger was on: keep the ordinary diagnostics and say the
+      // flag had no effect rather than that no stop can come.
+      const stoppedAnyway =
+        debuggerOff && (finalState === SessionState.PAUSED || finalSession.firstStopHandled === true);
+      const noDebugNote = stoppedAnyway
+        ? buildNoDebugLaunchWarning(finalSession, { noDebug }, breakOnExceptions, false)
+        : noDebugWarning;
+
+      // The three breakpoint-shaped warnings below each diagnose a symptom
+      // ("check the file path", "check the symbol name", "will PAUSE") that
+      // has one cause when the debugger is off — the noDebug warning names
+      // it, and they are withheld so they cannot contradict it (issue #710).
+      const debuggerOn = !debuggerOff || stoppedAnyway;
+
       // Unbound-at-launch warning (issue #308): the verified state is fresh
       // after the re-sync above, so a name the adapter could not resolve is
       // reported here instead of failing silently at "the program never
       // stopped". Suppressed for bind-late adapters (js/java), where
       // unverified-at-launch is the designed deferral path.
-      const fnBpWarning = this.breakpoints.functionBreakpointLaunchWarning(finalSession);
+      const fnBpWarning = debuggerOn
+        ? this.breakpoints.functionBreakpointLaunchWarning(finalSession)
+        : undefined;
 
       // Ran-to-completion with breakpoints that never bound (issue #467):
       // state "stopped" where the caller expected "paused" is only
       // explainable via list_breakpoints today — surface the stored
       // per-breakpoint diagnostics right here where the caller is looking.
       const unboundAtExitWarning =
-        finalState === SessionState.STOPPED
+        debuggerOn && finalState === SessionState.STOPPED
           ? buildUnboundBreakpointExitWarning(finalSession)
           : undefined;
 
       // Logpoint-downgrade verdict (issue #469): the deferred set_breakpoint
       // warning promised a launch-time answer — deliver it on this response.
-      const logpointWarning = buildLogpointDowngradeLaunchWarning(finalSession);
+      const logpointWarning = debuggerOn
+        ? buildLogpointDowngradeLaunchWarning(finalSession)
+        : undefined;
 
       // Adapter degradation notes (issue #441) accumulate on the session as
       // annotated output events arrive; joining here is best-effort — a note
       // arriving after this return still lands in the output buffer as an
       // attributed [mcp-debugger] Warning entry.
       const launchWarning =
-        [fnBpWarning, logpointWarning, unboundAtExitWarning, ...(finalSession.adapterNotices ?? [])]
+        [noDebugNote, fnBpWarning, logpointWarning, unboundAtExitWarning, ...(finalSession.adapterNotices ?? [])]
           .filter(Boolean)
           .join('; ') || undefined;
 
@@ -511,9 +605,9 @@ export class DebugLauncher {
           reason:
             finalState === SessionState.PAUSED
               ? finalSession.lastStop?.reason ??
-                (dapLaunchArgs?.stopOnEntry ? 'entry' : 'unknown')
+                (launchArgs?.stopOnEntry ? 'entry' : 'unknown')
               : undefined,
-          stopOnEntrySuccessful: !!dapLaunchArgs?.stopOnEntry && finalState === SessionState.PAUSED,
+          stopOnEntrySuccessful: !!launchArgs?.stopOnEntry && finalState === SessionState.PAUSED,
         },
       };
     } catch (error) {
@@ -543,7 +637,7 @@ export class DebugLauncher {
           state: SessionState.STOPPED,
           errorType,
           errorCode,
-          ...(Object.keys(diagnosticData).length > 0 ? { data: diagnosticData } : {})
+          ...failureData(diagnosticData, noDebugFailureNote)
         };
       }
 
@@ -585,7 +679,7 @@ export class DebugLauncher {
         state: session.state,
         errorType,
         errorCode,
-        ...(Object.keys(diagnosticData).length > 0 ? { data: diagnosticData } : {})
+        ...failureData(diagnosticData, noDebugFailureNote)
       };
     }
   }

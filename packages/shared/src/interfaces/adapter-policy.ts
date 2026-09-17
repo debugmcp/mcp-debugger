@@ -265,6 +265,18 @@ export interface AdapterPolicy {
   functionBreakpointsBindLate?: boolean;
 
   /**
+   * True when the adapter honours DAP's `noDebug` launch flag by not enabling
+   * the debugger, so breakpoints, exception filters and an entry stop are
+   * inert on such a launch and the start_debugging response says so
+   * (issue #710). Measured per adapter, not assumed: js-debug, debugpy, Delve
+   * and CodeLLDB honour it; rdbg, netcoredbg, the JDI bridge and the mock
+   * adapter ignore it, and the rust launch transform never forwards it. Left
+   * undefined, the debugger is taken to stay on and a caller who set the
+   * flag is told it had no effect.
+   */
+  honoursNoDebug?: boolean;
+
+  /**
    * Strategy for how to create/attach to the child session when reverse startDebugging occurs
    */
   childSessionStrategy: ChildSessionStrategy;

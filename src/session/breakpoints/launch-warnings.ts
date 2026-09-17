@@ -8,7 +8,7 @@
  * it); as free functions the purity is the signature rather than a convention.
  */
 import path from 'path';
-import type { AdapterPolicy } from '@debugmcp/shared';
+import type { AdapterPolicy, ExceptionBreakMode } from '@debugmcp/shared';
 import { normalizeBreakpointMessage } from '../../utils/breakpoint-message.js';
 import type { ManagedSession } from '../session-store.js';
 
@@ -47,6 +47,95 @@ export function buildUnboundBreakpointExitWarning(
     `${unbound.length} breakpoint(s) never bound during this run: ${parts.join('; ')}. ` +
     `The program ran to completion without stopping there — check the file path and line, ` +
     `or list_breakpoints for the full per-breakpoint state`
+  );
+}
+
+/**
+ * noDebug launch warning (issue #710). `noDebug: true` is DAP's "launch
+ * without enabling debugging". Where the adapter honours it (the policy's
+ * `honoursNoDebug`, measured per adapter), no breakpoint binds, no exception
+ * filter arms, no entry stop lands, and no `stopped` ever arrives. That is a
+ * legitimate way to just run the program, so the warning fires only when the
+ * caller also asked for a stop — line or function breakpoints in the store,
+ * an *explicit* breakOnExceptions other than 'none' (the caller's value, not
+ * the policy default the launcher fills in afterwards, which would make every
+ * bare noDebug run warn), or stopOnEntry — and names each thing that will not
+ * fire. The breakpoint-shaped launch warnings (#308, #467, #469) presuppose a
+ * debugger and are withheld by the launcher in that case.
+ *
+ * Where the adapter ignores the flag, the debugger stays on and the caller is
+ * told so instead — the flag they set changes nothing, which is worth a line.
+ *
+ * `noDebug` and `stopOnEntry` are the flags the adapter will actually see
+ * (adapterLaunchConfig over dapLaunchArgs, the launcher's merge order); the
+ * text names the flag alone since either source may have carried it.
+ */
+export function buildNoDebugLaunchWarning(
+  session: Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints' | 'language'>,
+  launchArgs: { noDebug?: boolean; stopOnEntry?: boolean } | undefined,
+  explicitBreakOnExceptions: ExceptionBreakMode | undefined,
+  honoursNoDebug: boolean
+): string | undefined {
+  if (launchArgs?.noDebug !== true) {
+    return undefined;
+  }
+  if (!honoursNoDebug) {
+    return (
+      `noDebug has no effect with the ${session.language} adapter: the debugger stays on, ` +
+      `and breakpoints, breakOnExceptions and stopOnEntry work as usual`
+    );
+  }
+  const expected: string[] = [];
+  let lineCount = 0;
+  let logpointCount = 0;
+  for (const bp of session.breakpoints.values()) {
+    if (bp.logMessage !== undefined) {
+      logpointCount++;
+    } else {
+      lineCount++;
+    }
+  }
+  const functionCount = session.functionBreakpoints?.size ?? 0;
+  if (lineCount > 0) {
+    expected.push(`${lineCount} breakpoint(s)`);
+  }
+  if (logpointCount > 0) {
+    expected.push(`${logpointCount} logpoint(s)`);
+  }
+  if (functionCount > 0) {
+    expected.push(`${functionCount} function breakpoint(s)`);
+  }
+  if (explicitBreakOnExceptions !== undefined && explicitBreakOnExceptions !== 'none') {
+    expected.push(`breakOnExceptions='${explicitBreakOnExceptions}'`);
+  }
+  if (launchArgs.stopOnEntry === true) {
+    expected.push('stopOnEntry');
+  }
+  if (expected.length === 0) {
+    return undefined;
+  }
+  const list =
+    expected.length === 1
+      ? expected[0]
+      : `${expected.slice(0, -1).join(', ')} and ${expected[expected.length - 1]}`;
+  return (
+    `noDebug is true, so the debugger is disabled for this launch and no stop can arrive: ` +
+    `${list} will not fire. Drop noDebug to debug, or ignore this if you only meant to run the program`
+  );
+}
+
+/**
+ * The note a launch that failed under an honoured `noDebug` carries when the
+ * warning above had nothing to say (nothing was armed). It states the fact
+ * and the remedy without blaming the flag: the failure may be unrelated (a
+ * bad path), or it may be an adapter that cannot complete a launch under
+ * the flag (issue #746) — either way, the flag is what the caller needs to
+ * know before retrying paths and ports.
+ */
+export function buildNoDebugFailureNote(): string {
+  return (
+    'noDebug is true, so this launch ran with the debugger disabled. If the failure is unexpected, drop noDebug ' +
+    'and launch again — some adapters cannot complete a launch under the flag'
   );
 }
 

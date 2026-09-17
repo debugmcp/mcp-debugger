@@ -7,12 +7,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
 import { DebugLanguage, SessionState } from '@debugmcp/shared';
-import { createMockDependencies } from './session-manager-test-utils.js';
-import type { MockProxyManager } from '../../../test-utils/mocks/mock-proxy-manager.js';
-
-function setMockProxyRunning(proxyManager: MockProxyManager, running: boolean): void {
-  (proxyManager as unknown as { _isRunning: boolean })._isRunning = running;
-}
+import { createMockDependencies, setMockProxyRunning } from './session-manager-test-utils.js';
 
 describe('SessionManager.startDebugging - run to completion (issue #701)', () => {
   let sessionManager: SessionManager;

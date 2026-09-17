@@ -223,6 +223,33 @@ describe('Break-on-exception (issue #220)', () => {
       })).rejects.toThrow(/breakOnExceptions/);
     }, 30000);
 
+    it('says noDebug had no effect on an adapter that ignores it, and still pauses at the breakpoint (issue #710)', async () => {
+      sessionId = await createSession('mock', 'mock-nodebug-ignored');
+      const bp = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'set_breakpoint',
+        arguments: { sessionId, file: CRASHING_SCRIPT, line: 5 }
+      }));
+      expect(bp.success).toBe(true);
+
+      // The mock adapter never reads noDebug (like rdbg, netcoredbg and the
+      // JDI bridge): the debugger stays on, so the breakpoint fires — and
+      // the caller is told the flag did nothing rather than that it disabled
+      // the debugger.
+      const startRes = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: CRASHING_SCRIPT,
+          dapLaunchArgs: { stopOnEntry: false, noDebug: true }
+        }
+      }));
+      expect(startRes.success, JSON.stringify(startRes)).toBe(true);
+      expect(startRes.state).toBe('paused');
+      const warning = (startRes as { warning?: string }).warning;
+      expect(warning).toMatch(/noDebug has no effect with the mock adapter/);
+      expect(warning).not.toMatch(/will not fire/);
+    }, 30000);
+
     it("honors breakOnExceptions 'none' nested inside dapLaunchArgs with a warning (#305)", async () => {
       sessionId = await createSession('mock', 'mock-nested-break-on-exceptions');
 
@@ -454,6 +481,40 @@ describe('Break-on-exception (issue #220)', () => {
       // the contract the python twin asserts above
       expect(stopped!.exitCode).toBeDefined();
       expect(stopped!.exitCode).not.toBe(0);
+    }, 60000);
+
+    it('warns that a noDebug launch cannot stop at its breakpoints instead of blaming their paths (issue #710)', async () => {
+      sessionId = await createSession('javascript', 'js-nodebug-launch');
+      const bp = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'set_breakpoint',
+        arguments: { sessionId, file: JS_CLEAN_SCRIPT, line: 5 }
+      }));
+      expect(bp.success, JSON.stringify(bp)).toBe(true);
+
+      // js-debug honours the standard DAP flag ("Running with noDebug, so
+      // debug domains are disabled"): no breakpoint binds, no stop comes.
+      const startRes = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: JS_CLEAN_SCRIPT,
+          dapLaunchArgs: { stopOnEntry: false, noDebug: true }
+        }
+      }));
+      expect(startRes.success, JSON.stringify(startRes)).toBe(true);
+      const warning = (startRes as { warning?: string }).warning;
+      expect(warning).toMatch(/noDebug is true/);
+      expect(warning).toMatch(/1 breakpoint\(s\)/);
+      // The #467 diagnosis would send the caller to check a path that is fine.
+      expect(warning).not.toMatch(/check the file path and line/);
+
+      const stopped = await pollUntil(async () => {
+        const snap = await getSessionSnapshot(mcpClient!, sessionId!);
+        return snap?.state === 'stopped' ? snap : undefined;
+      }, 20000);
+      expect(stopped, 'session should run to completion').toBeDefined();
+      expect(stopped!.lastStop).toBeUndefined();
+      expect(stopped!.exitCode).toBe(0);
     }, 60000);
 
     it('reports exit code 0 for a clean run (issue #247)', async () => {
