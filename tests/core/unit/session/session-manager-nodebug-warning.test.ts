@@ -416,6 +416,36 @@ describe('SessionManager launches with noDebug (issue #710)', () => {
       expect(Date.now() - before).toBeLessThan(30000);
     });
 
+    it('believes a breakpoint the adapter verified anyway over the policy pin — before any stop', async () => {
+      // A wrong pin seen from the other side: the adapter binds the
+      // breakpoint (its configuration-phase echo says verified) and the
+      // program keeps running. The launch must not say "will not fire" of
+      // a breakpoint list_breakpoints shows bound; the record stays (a stop
+      // is what clears it) but is consulted with the evidence.
+      const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      await sessionManager.setBreakpoint(s.id, { file: '/work/src/app.py', line: 7 });
+      const [queued] = sessionManager.listBreakpoints(s.id);
+      const proxy = dependencies.mockProxyManager;
+      proxy.start = vi.fn().mockImplementation(async (startConfig) => {
+        setMockProxyRunning(proxy, true);
+        proxy.startCalls.push(startConfig);
+        proxy.emit('adapter-configured');
+        proxy.emit('initialized');
+        proxy.simulateEvent('breakpoints-synced', [
+          { id: queued.id, file: '/work/src/app.py', line: 7, verified: true, adapterId: 3 }
+        ]);
+      }) as MockProxyManager['start'];
+
+      const result = await launch(s.id, { stopOnEntry: false, noDebug: true });
+
+      expect(result.state).toBe(SessionState.RUNNING);
+      expect(warningOf(result)).toMatch(/noDebug has no effect/);
+      expect(warningOf(result)).not.toMatch(/will not fire/);
+      expect(sessionManager.listBreakpoints(s.id)[0].verified).toBe(true);
+      const listed = sessionManager.getAllSessions().find((x) => x.id === s.id);
+      expect(listed).not.toHaveProperty('debuggerDisabled');
+    });
+
     it('warns on a dry run too — it is a configuration check', async () => {
       const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
       await sessionManager.setBreakpoint(s.id, { file: '/work/src/app.py', line: 7 });

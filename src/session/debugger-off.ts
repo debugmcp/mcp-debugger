@@ -14,6 +14,33 @@ import { ErrorMessages } from '../utils/error-messages.js';
 export interface DebuggerOffView {
   state: SessionState;
   launchDebuggerOff?: boolean;
+  breakpoints?: ReadonlyMap<string, { verified: boolean }>;
+  functionBreakpoints?: ReadonlyMap<string, { verified: boolean }>;
+}
+
+/**
+ * Whether the adapter has verified a breakpoint of this launch — proof as
+ * strong as a stop that this build debugs after all, and it arrives before
+ * any hit. Measured: every adapter that honours the flag refuses or unbinds
+ * a breakpoint under it (js-debug "Unbound breakpoint", debugpy "Server is
+ * not available", Delve "noDebug mode: unable to process 'setBreakpoints'",
+ * CodeLLDB "Not supported in noDebug mode"), so a verified record can only
+ * come from a build that ignores the flag. Per-launch state (bindings are
+ * reset at each launch), so it is consulted on read rather than clearing
+ * the record the way a stop does.
+ */
+export function adapterVerifiedABreakpoint(session: DebuggerOffView): boolean {
+  for (const bp of session.breakpoints?.values() ?? []) {
+    if (bp.verified) {
+      return true;
+    }
+  }
+  for (const bp of session.functionBreakpoints?.values() ?? []) {
+    if (bp.verified) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -47,14 +74,16 @@ export function stopProvesDebuggerOn(
  * still goes to the adapter), running, or paused. Over (stopped, error) or
  * never launched (created — a launch refused before the proxy existed
  * leaves the record behind), it describes nothing that is running: a
- * breakpoint set then is an ordinary queued one for the next launch.
+ * breakpoint set then is an ordinary queued one for the next launch. And
+ * not once the adapter has verified a breakpoint (see above).
  */
 export function isDebuggerOff(session: DebuggerOffView): boolean {
   return (
     session.launchDebuggerOff === true &&
     (session.state === SessionState.INITIALIZING ||
       session.state === SessionState.RUNNING ||
-      session.state === SessionState.PAUSED)
+      session.state === SessionState.PAUSED) &&
+    !adapterVerifiedABreakpoint(session)
   );
 }
 

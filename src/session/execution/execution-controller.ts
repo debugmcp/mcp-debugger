@@ -148,7 +148,8 @@ function notPausedError(session: DebuggerOffView): string {
 /**
  * A pause the adapter answered with an error, with the why beside the
  * adapter's own words when the launch runs with the debugger off (issue
- * #749). The adapter's error is untouched and travels as the cause.
+ * #749). The adapter's error travels as the cause exactly as it was
+ * thrown — an Error, or whatever else the bridge rejected with.
  */
 function withDebuggerOffWhy(session: DebuggerOffView, error: unknown, message: string): { error: Error; message: string } {
   const err = error instanceof Error ? error : new Error(message);
@@ -157,7 +158,7 @@ function withDebuggerOffWhy(session: DebuggerOffView, error: unknown, message: s
     return { error: err, message: err.message };
   }
   const composed = ErrorMessages.withDebuggerOffWhy(err.message, why);
-  return { error: new Error(composed, { cause: err }), message: composed };
+  return { error: new Error(composed, { cause: error }), message: composed };
 }
 
 export class ExecutionController {
@@ -529,7 +530,16 @@ export class ExecutionController {
     }
 
     if (session.state !== SessionState.RUNNING) {
-      return { success: false, error: `Cannot pause in state: ${session.state}`, state: session.state };
+      // With the why while the launch is still initializing with the
+      // debugger off (issue #749) — every other surface carries it in that
+      // state.
+      const why = debuggerOffWhy(session);
+      const refusal = `Cannot pause in state: ${session.state}`;
+      return {
+        success: false,
+        error: why ? ErrorMessages.withDebuggerOffWhy(refusal, why) : refusal,
+        state: session.state
+      };
     }
 
     this.ctx.logger.debug(`[SessionManager] pauseExecution: sending DAP pause for session=${sessionId} currentState=${session.state}`);

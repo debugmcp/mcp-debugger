@@ -168,9 +168,8 @@ export const ErrorMessages = {
    * stepping and inspection. Names the fact and the remedy, never the
    * adapter's own answer, which stays as it came. "No stop is expected"
    * rather than "cannot come": js-debug still lands a pause under the flag.
-   * Used in: src/server/handlers/breakpoint-tools.ts, src/server/handlers/inspection-tools.ts,
-   *   src/session/execution/execution-controller.ts, src/session/inspection/frame-anchor-resolver.ts,
-   *   src/session/inspection/expression-evaluator.ts
+   * Used in: src/session/debugger-off.ts (`debuggerOffWhy`, the one gate every
+   *   surface reads it through — the handlers and controllers never name it)
    */
   debuggerOffForLaunch: DEBUGGER_OFF_FOR_LAUNCH,
 

@@ -4558,6 +4558,49 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(step.error).toBe('Not paused');
     });
 
+    it('drops the why once the adapter has verified a breakpoint — the build debugs after all', async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockSession.launchDebuggerOff = true;
+      mockSession.breakpoints.set('bp-1', { id: 'bp-1', file: 'a.py', line: 3, verified: true } as never);
+
+      const step = await operations.stepOver('test-session');
+      expect(step.error).toBe('Not paused');
+
+      const stack = await operations.getStackTraceDetailed('test-session');
+      expect(stack.note ?? '').not.toContain(why);
+    });
+
+    it('says why a pause is refused while the launch is still initializing (issue #749)', async () => {
+      mockSession.state = SessionState.INITIALIZING;
+      mockSession.launchDebuggerOff = true;
+
+      const result = await operations.pause('test-session', 1);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Cannot pause in state: initializing');
+      expect(result.error).toContain(why);
+      expect(mockProxyManager.sendDapRequest).not.toHaveBeenCalledWith('pause', expect.anything());
+    });
+
+    it('keeps a non-Error refusal of a pause as the cause, as it was thrown', async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockSession.launchDebuggerOff = true;
+      const refusal = { code: 'E_NODEBUG', text: 'not an Error instance' };
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'pause') {
+          throw refusal;
+        }
+        return {};
+      });
+
+      const thrown = await operations.pause('test-session', 1).then(
+        () => { throw new Error('expected a rejection'); },
+        (err: unknown) => err as Error & { cause?: unknown }
+      );
+      expect(thrown.message).toContain(why);
+      expect(thrown.cause).toBe(refusal);
+    });
+
     it('says why an expression cannot be evaluated', async () => {
       mockSession.state = SessionState.RUNNING;
       mockSession.launchDebuggerOff = true;

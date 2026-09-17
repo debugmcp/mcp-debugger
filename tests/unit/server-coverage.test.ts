@@ -200,6 +200,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       };
       mockSessionManager.getSession.mockReturnValue({
         id: 'test-session',
+        state: SessionState.PAUSED,
         sessionLifecycle: SessionLifecycleState.ACTIVE,
         proxyManager: mockProxy
       });
@@ -215,7 +216,12 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       expect(result.frames).toHaveLength(1);
     });
 
-    it('should throw when a paused getStackTrace has no thread and the threads request fails', async () => {
+    // A paused session with no current thread asks the adapter (`threads`);
+    // when that names none too, the session layer answers — "No stopped
+    // thread is known for this session." — because the proxy is alive and
+    // "no active proxy" would be false (issue #749). The error is reserved
+    // for a session with no proxy at all.
+    it('hands a paused session with no thread to the session layer when the threads request fails', async () => {
       const mockProxy = {
         getCurrentThreadId: () => null,
         isRunning: () => true,
@@ -227,12 +233,19 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
         sessionLifecycle: SessionLifecycleState.ACTIVE,
         proxyManager: mockProxy
       });
+      const noThread = {
+        frames: [], totalFrameCount: 0, hiddenFrameCount: 0, allFramesInternal: false,
+        note: 'No stopped thread is known for this session.'
+      };
+      mockSessionManager.getStackTraceDetailed.mockResolvedValue(noThread);
 
-      await expect(server.getStackTrace('test-session'))
-        .rejects.toThrow('Cannot get stack trace: no active proxy');
+      await expect(server.getStackTrace('test-session')).resolves.toBe(noThread);
+
+      expect(mockProxy.sendDapRequest).toHaveBeenCalledWith('threads', {});
+      expect(mockSessionManager.getStackTraceDetailed).toHaveBeenCalledWith('test-session', undefined, false);
     });
 
-    it('should throw when a paused getStackTrace has no thread and the threads response is empty', async () => {
+    it('hands a paused session with no thread to the session layer when the threads response is empty', async () => {
       const mockProxy = {
         getCurrentThreadId: () => null,
         isRunning: () => true,
@@ -244,17 +257,24 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
         sessionLifecycle: SessionLifecycleState.ACTIVE,
         proxyManager: mockProxy
       });
+      const noThread = {
+        frames: [], totalFrameCount: 0, hiddenFrameCount: 0, allFramesInternal: false,
+        note: 'No stopped thread is known for this session.'
+      };
+      mockSessionManager.getStackTraceDetailed.mockResolvedValue(noThread);
 
-      await expect(server.getStackTrace('test-session'))
-        .rejects.toThrow('Cannot get stack trace: no active proxy');
+      await expect(server.getStackTrace('test-session')).resolves.toBe(noThread);
+
+      expect(mockSessionManager.getStackTraceDetailed).toHaveBeenCalledWith('test-session', undefined, false);
     });
 
-    it('hands a running session with no thread to the session layer instead of claiming no active proxy (issue #749)', async () => {
+    it('answers a session that is not paused without asking the adapter for threads (issue #749)', async () => {
       // A launch that runs with the debugger off never stops, so no thread
       // is ever current, and debugpy refuses the `threads` discovery
-      // ("Server is not available"). The proxy is alive; the honest answer
-      // is the resolver's not-paused note with the why — the same answer a
-      // debug-mode running session gets once its thread is known.
+      // ("Server is not available") — and on a wedged adapter that request
+      // would block for the DAP timeout. The resolver's not-paused answer
+      // (with the why) needs no thread, so the discovery is skipped: the
+      // same answer a debug-mode running session gets, one round trip cheaper.
       const mockProxy = {
         getCurrentThreadId: () => null,
         isRunning: () => true,
@@ -275,7 +295,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
 
       await expect(server.getStackTrace('test-session')).resolves.toBe(notPaused);
 
-      expect(mockProxy.sendDapRequest).toHaveBeenCalledWith('threads', {});
+      expect(mockProxy.sendDapRequest).not.toHaveBeenCalled();
       expect(mockSessionManager.getStackTraceDetailed).toHaveBeenCalledWith('test-session', undefined, false);
     });
   });

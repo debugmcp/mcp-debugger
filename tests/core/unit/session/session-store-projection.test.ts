@@ -78,4 +78,27 @@ describe('SessionStore.getAll() debuggerDisabled projection (issue #749)', () =>
       expect(store.getAll().find((s) => s.id === id)!.debuggerDisabled, state).toBe(true);
     }
   });
+
+  it('drops the projection once the adapter has verified a breakpoint — proof this build debugs after all', () => {
+    // Measured: every adapter that honours the flag refuses or unbinds a
+    // breakpoint under it (js-debug "Unbound breakpoint", debugpy "Server is
+    // not available", Delve "noDebug mode: unable to process
+    // 'setBreakpoints'", CodeLLDB "Not supported in noDebug mode"), so a
+    // record the adapter verified can only come from a build that ignores
+    // the flag — as strong as a stop, and it arrives before any hit.
+    const { store, id } = storeWith(SessionState.RUNNING);
+    const managed = store.get(id)!;
+    managed.launchDebuggerOff = true;
+    const bp = { id: 'bp-1', file: 'a.py', line: 3, verified: false };
+    managed.breakpoints.set(bp.id, bp as never);
+    expect(store.getAll().find((s) => s.id === id)!.debuggerDisabled).toBe(true);
+
+    bp.verified = true;
+    expect(store.getAll().find((s) => s.id === id)!).not.toHaveProperty('debuggerDisabled');
+
+    // A verified function breakpoint counts the same way.
+    bp.verified = false;
+    managed.functionBreakpoints.set('fbp-1', { id: 'fbp-1', name: 'main', verified: true } as never);
+    expect(store.getAll().find((s) => s.id === id)!).not.toHaveProperty('debuggerDisabled');
+  });
 });

@@ -39,6 +39,7 @@ import {
 import { waitForLaunchReadiness } from './launch-readiness.js';
 import type { ProxyLauncher } from './proxy-launcher.js';
 import type { InFlightGuard } from '../in-flight-guard.js';
+import { adapterVerifiedABreakpoint } from '../debugger-off.js';
 
 /**
  * A launch flag the way the adapter will see it. The proxy launcher merges
@@ -542,16 +543,20 @@ export class DebugLauncher {
       }
 
       // The policy's word is a static pin; a stop that arrived anyway is the
-      // stronger evidence (an adapter build that ignores the flag after all).
-      // The core's stopped handler is the one judge of that — it clears the
-      // recorded decision on a stop only a live debugger produces (issue
-      // #749), so the launch response and the record cannot disagree. Then
-      // the debugger was on: keep the ordinary diagnostics and say the flag
-      // had no effect rather than that the breakpoints will not fire. (A
-      // launch that ends paused on a pause or a step keeps the record and
-      // the warning: the flag still keeps its breakpoints from binding.)
-      const stoppedAnyway = debuggerOff && finalSession.launchDebuggerOff !== true;
-      const noDebugNote = stoppedAnyway
+      // stronger evidence (an adapter build that ignores the flag after all):
+      // a stop only a live debugger produces — the core's stopped handler
+      // is the one judge of that and clears the recorded decision (issue
+      // #749) — or a breakpoint the adapter verified in its configuration
+      // phase, which is read from the same evidence every later surface
+      // reads. Either way the launch response and the record cannot
+      // disagree. Then the debugger was on: keep the ordinary diagnostics
+      // and say the flag had no effect rather than that the breakpoints
+      // will not fire. (A launch that ends paused on a pause or a step
+      // keeps the record and the warning: the flag still keeps its
+      // breakpoints from binding.)
+      const debuggerOnAnyway =
+        debuggerOff && (finalSession.launchDebuggerOff !== true || adapterVerifiedABreakpoint(finalSession));
+      const noDebugNote = debuggerOnAnyway
         ? buildNoDebugLaunchWarning(finalSession, { noDebug }, breakOnExceptions, false)
         : noDebugWarning;
 
@@ -559,7 +564,7 @@ export class DebugLauncher {
       // ("check the file path", "check the symbol name", "will PAUSE") that
       // has one cause when the debugger is off — the noDebug warning names
       // it, and they are withheld so they cannot contradict it (issue #710).
-      const debuggerOn = !debuggerOff || stoppedAnyway;
+      const debuggerOn = !debuggerOff || debuggerOnAnyway;
 
       // Unbound-at-launch warning (issue #308): the verified state is fresh
       // after the re-sync above, so a name the adapter could not resolve is
