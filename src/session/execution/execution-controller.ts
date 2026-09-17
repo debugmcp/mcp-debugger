@@ -38,6 +38,7 @@ import {
   NO_DEBUG_TARGET_MARKER,
   SessionLifecycleState,
   SessionState,
+  USER_BREAK_REASONS,
   type StackFrame
 } from '@debugmcp/shared';
 import { DebugProtocol } from '@vscode/debugprotocol';
@@ -50,7 +51,6 @@ import type {
   StepResultData,
   StopLocation
 } from '../session-manager-core.js';
-import { USER_BREAK_REASONS } from '../session-manager-core.js';
 import { debuggerOffWhy, isDebuggerOff, type DebuggerOffView } from '../debugger-off.js';
 import { samePath } from '../breakpoints/hit-verification.js';
 import type { ExecutionContext } from '../operations-context.js';
@@ -142,15 +142,13 @@ function isSameLine(a: StopLocation, b: StopLocation): boolean {
  * when the session's launch runs with the debugger off (issue #749).
  */
 function notPausedError(session: DebuggerOffView): string {
-  const why = debuggerOffWhy(session);
-  return why ? `Not paused: ${why}` : 'Not paused';
+  return ErrorMessages.notPaused(debuggerOffWhy(session));
 }
 
 /**
  * A pause the adapter answered with an error, with the why beside the
  * adapter's own words when the launch runs with the debugger off (issue
- * #749). The original error object is kept — its stack and any structured
- * properties are the adapter's answer too.
+ * #749). The adapter's error is untouched and travels as the cause.
  */
 function withDebuggerOffWhy(session: DebuggerOffView, error: unknown, message: string): { error: Error; message: string } {
   const err = error instanceof Error ? error : new Error(message);
@@ -158,16 +156,8 @@ function withDebuggerOffWhy(session: DebuggerOffView, error: unknown, message: s
   if (!why) {
     return { error: err, message: err.message };
   }
-  const appended = `${err.message} (${why})`;
-  try {
-    // The adapter's own object, so its stack and any structured props
-    // travel; the stack's first line keeps the original message.
-    err.message = appended;
-    return { error: err, message: appended };
-  } catch {
-    // A getter-only message: wrap instead, keeping the original as the cause.
-    return { error: new Error(appended, { cause: err }), message: appended };
-  }
+  const composed = ErrorMessages.withDebuggerOffWhy(err.message, why);
+  return { error: new Error(composed, { cause: err }), message: composed };
 }
 
 export class ExecutionController {
@@ -655,21 +645,22 @@ export class ExecutionController {
       this.ctx.logger.info(
         `[SessionManager pause] No stopped event within ${this.ctx.tunables.pauseGraceMs}ms grace window in session ${sessionId}; completing asynchronously`
       );
+      const hint = await this.describePendingStop(session, sessionId, 'pause');
       // With the debugger off for this launch the why is known (issue #749):
-      // one message that promises no stop, instead of the policy's guess at
-      // native code or a syscall.
+      // one message that promises no stop, with the policy's own explanation
+      // kept — on js-debug a pause can land under the flag, and #678's
+      // advice is what makes it.
       if (isDebuggerOff(session)) {
         return {
           success: true,
           state: session.state,
           data: {
-            message: ErrorMessages.pausePendingDebuggerOff(this.ctx.tunables.pauseGraceMs / 1000),
+            message: ErrorMessages.pausePendingDebuggerOff(this.ctx.tunables.pauseGraceMs / 1000, hint),
             pending: true
           }
         };
       }
       const pausePending = ErrorMessages.pausePending(this.ctx.tunables.pauseGraceMs / 1000);
-      const hint = await this.describePendingStop(session, sessionId, 'pause');
       return {
         success: true,
         state: session.state,

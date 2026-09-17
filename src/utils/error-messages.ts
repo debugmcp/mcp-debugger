@@ -175,17 +175,70 @@ export const ErrorMessages = {
   debuggerOffForLaunch: DEBUGGER_OFF_FOR_LAUNCH,
 
   /**
+   * The same why for a session that is paused (issue #749): a stop did land
+   * — js-debug lands a pause under noDebug — so only the binding clause is
+   * still true of it.
+   * Used in: src/session/debugger-off.ts
+   */
+  debuggerOffForLaunchPaused:
+    'the debugger is off for this launch (noDebug is true): breakpoints cannot bind; ' +
+    'drop noDebug and launch again to debug',
+
+  /**
    * The pending-pause message for a session whose launch runs with the
    * debugger off (issue #749): the pause was sent and accepted, no stop came
    * within the grace window, and — unlike `pausePending` — no stop is
-   * promised, since none is expected. The session still reports 'paused'
-   * should one land anyway (js-debug does this under noDebug).
+   * promised, since none is expected. The policy's own explanation (#678:
+   * js-debug's smart-stepper, which can also keep a pause from landing
+   * under the flag) rides along when there is one.
    * Used in: src/session/execution/execution-controller.ts
    * @param graceSeconds - The grace window duration in seconds
+   * @param policyHint - The adapter policy's explanation, when it has one
    */
-  pausePendingDebuggerOff: (graceSeconds: number) =>
+  pausePendingDebuggerOff: (graceSeconds: number, policyHint?: string) =>
     `Pause requested; no 'stopped' event within ${graceSeconds}s — ${DEBUGGER_OFF_FOR_LAUNCH}. ` +
-    `Check the session state in case a stop lands anyway.`,
+    `Check the session state in case a stop lands anyway.` +
+    (policyHint ? ` ${policyHint}` : ''),
+
+  /**
+   * An adapter's own answer with the debugger-off why beside it (issue
+   * #749): a refused pause, or one that found no debug target yet.
+   * Used in: src/session/execution/execution-controller.ts
+   */
+  withDebuggerOffWhy: (adapterMessage: string, why: string) => `${adapterMessage} (${why})`,
+
+  /**
+   * The step/continue refusal for a session that is not paused, with the
+   * why when the launch runs with the debugger off (issue #749).
+   * Used in: src/session/execution/execution-controller.ts
+   */
+  notPaused: (why?: string) => (why ? `Not paused: ${why}` : 'Not paused'),
+
+  /**
+   * The evaluate refusal for a session that is not paused, with the why
+   * when the launch runs with the debugger off (issue #749).
+   * Used in: src/session/inspection/expression-evaluator.ts
+   */
+  cannotEvaluateNotPaused: (why?: string) =>
+    why
+      ? `Cannot evaluate: debugger not paused (${why})`
+      : 'Cannot evaluate: debugger not paused. Ensure the debugger is stopped at a breakpoint.',
+
+  /**
+   * The empty stack trace's note for a session that is not paused, with the
+   * why when the launch runs with the debugger off (issue #749).
+   * Used in: src/session/inspection/frame-anchor-resolver.ts
+   */
+  stackTraceNotPaused: (state: string, why?: string) =>
+    `Session is not paused (state: ${state}); stack traces are only available while paused${why ? `; ${why}` : ''}.`,
+
+  /**
+   * get_local_variables with no frame and the session not paused, with the
+   * why when the launch runs with the debugger off (issue #749).
+   * Used in: src/server/handlers/inspection-tools.ts
+   */
+  noStackFramesNotPaused: (why?: string) =>
+    why ? `No stack frames available; ${why}.` : 'No stack frames available. The debugger may not be paused.',
 
   /**
    * Suffix appended to the attach message when the post-attach pause was

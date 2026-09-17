@@ -5,10 +5,10 @@
 import { ErrorCode as McpErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { SessionState } from '@debugmcp/shared';
 import { SessionTerminatedError } from '../../errors/debug-errors.js';
-import { debuggerOffWhy } from '../../session/debugger-off.js';
+import { ErrorMessages } from '../../utils/error-messages.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { enforceExplicitNames, requireSessionId } from '../tool-validation.js';
-import { carriesLastStop, variablePayloadExtras } from './shared.js';
+import { carriesLastStop, debuggerOffWhyFor, variablePayloadExtras } from './shared.js';
 import {
   failureResult,
   jsonResult,
@@ -335,16 +335,13 @@ export async function handleGetLocalVariables(ctx: ToolContext, args: { sessionI
         // Distinguish "not paused" from "paused but the anchored thread has
         // no frames" — the latter used to claim the debugger may not be
         // paused while list_debug_sessions said paused (issue #465).
-        const sessionNow = ctx.sessionManager.getSession(args.sessionId);
-        // The why, when the launch runs with the debugger off (issue #749).
-        const why = sessionNow ? debuggerOffWhy(sessionNow) : undefined;
-        response.message = sessionNow?.state === SessionState.PAUSED
+        const sessionState = ctx.sessionManager.getSession(args.sessionId)?.state;
+        response.message = sessionState === SessionState.PAUSED
           ? 'The session is paused, but the anchored thread reported no stack frames. ' +
             'Try get_stack_trace with a threadId from list_threads, or continue_execution ' +
             'followed by pause_execution to re-anchor on a reportable thread.'
-          : why
-            ? `No stack frames available; ${why}.`
-            : 'No stack frames available. The debugger may not be paused.';
+          // With the why, when the launch runs with the debugger off (issue #749).
+          : ErrorMessages.noStackFramesNotPaused(debuggerOffWhyFor(ctx, args.sessionId));
       } else if (!result.scopeName) {
         response.message = 'No local scope found in the current frame.';
       } else {

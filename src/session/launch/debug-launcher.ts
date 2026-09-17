@@ -244,7 +244,7 @@ export class DebugLauncher {
     session.lastStop = undefined;
     // The previous launch's debugger-off decision does not carry over
     // (issue #749); this attempt decides again below.
-    session.debuggerDisabled = undefined;
+    session.launchDebuggerOff = undefined;
     this.ctx.logger.info(`[SessionManager] Session ${sessionId} lifecycle state set to ACTIVE`);
 
     // Record the launch spec for restart_debugging BEFORE attempting the
@@ -284,7 +284,7 @@ export class DebugLauncher {
     // per-launch reset (which runs inside proxyLauncher.start) is not the
     // place to clear it — the block above is.
     if (debuggerOff && !dryRunSpawn) {
-      session.debuggerDisabled = true;
+      session.launchDebuggerOff = true;
     }
     const noDebugWarning = buildNoDebugLaunchWarning(
       session,
@@ -541,11 +541,10 @@ export class DebugLauncher {
       // recorded decision on a stop only a live debugger produces (issue
       // #749), so the launch response and the record cannot disagree. Then
       // the debugger was on: keep the ordinary diagnostics and say the flag
-      // had no effect rather than that no stop can come. A launch that ends
-      // paused on any stop at all may not claim no stop can come either,
-      // whatever the record says about breakpoints.
-      const stoppedAnyway =
-        debuggerOff && (finalSession.debuggerDisabled !== true || finalState === SessionState.PAUSED);
+      // had no effect rather than that the breakpoints will not fire. (A
+      // launch that ends paused on a pause or a step keeps the record and
+      // the warning: the flag still keeps its breakpoints from binding.)
+      const stoppedAnyway = debuggerOff && finalSession.launchDebuggerOff !== true;
       const noDebugNote = stoppedAnyway
         ? buildNoDebugLaunchWarning(finalSession, { noDebug }, breakOnExceptions, false)
         : noDebugWarning;

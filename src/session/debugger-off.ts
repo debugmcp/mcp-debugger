@@ -1,48 +1,73 @@
 /**
  * The debugger-off decision a session carries for one launch (issue #749):
- * `noDebug: true` on an adapter that honours it (issue #710). One gate and
- * one sentence, read by every surface that would otherwise answer in
- * debugger terms — set_breakpoint, list_breakpoints, pause, stepping,
- * inspection, list_debug_sessions — so the wording and the gate cannot
- * drift between them.
+ * `noDebug: true` on an adapter that honours it (issue #710). One gate, one
+ * rule for what clears it, and one sentence per state, read by every
+ * surface that would otherwise answer in debugger terms — set_breakpoint,
+ * list_breakpoints, pause, stepping, inspection, list_debug_sessions — so
+ * the wording and the gate cannot drift between them.
  */
-import { SessionState, USER_BREAK_REASONS } from '@debugmcp/shared';
+import type { DebugProtocol } from '@vscode/debugprotocol';
+import { BREAKPOINT_STOP_REASONS, SessionState } from '@debugmcp/shared';
 import { ErrorMessages } from '../utils/error-messages.js';
 
-/** The slice of a session (or its public projection) the decision is read from. */
+/** The slice of a session the decision is read from. */
 export interface DebuggerOffView {
   state: SessionState;
-  debuggerDisabled?: boolean;
+  launchDebuggerOff?: boolean;
 }
 
 /**
- * Stops only a live debugger produces: a breakpoint or exception the user
- * asked for, or an entry stop. A `stopped` with one of these reasons clears
- * the decision — the adapter build debugs after all. Neither `pause` nor
- * `step` is among them: measured on js-debug under `noDebug`, a user pause
- * lands (the inspector is attached) and so does a step taken from it, while
- * line breakpoints still cannot bind — they prove nothing about binding.
+ * Whether a stop proves the debugger is live after all — this adapter
+ * build ignores the flag, or a stale pin — and the record must go. Judged
+ * on what the adapter itself reported, not the policy's relabel. Measured
+ * on js-debug under `noDebug`: the inspector is attached, so a user pause
+ * lands, a step from it lands, and a `debugger;` statement pauses with the
+ * adapter's reason 'pause' (relabelled 'breakpoint' by the policy) — while
+ * line breakpoints still cannot bind and an uncaught throw does not stop.
+ * Proof, then, is: a breakpoint the adapter itself called one, or named in
+ * `hitBreakpointIds`; an exception stop; an entry stop.
  */
-export const DEBUGGER_ON_STOP_REASONS: ReadonlySet<string> = new Set([
-  ...USER_BREAK_REASONS,
-  'entry'
-]);
+export function stopProvesDebuggerOn(
+  reason: string,
+  rawReason: string,
+  body: DebugProtocol.StoppedEvent['body'] | undefined
+): boolean {
+  if ((body?.hitBreakpointIds?.length ?? 0) > 0) {
+    return true;
+  }
+  if (reason === 'entry' || reason === 'exception') {
+    return true;
+  }
+  return BREAKPOINT_STOP_REASONS.has(reason) && BREAKPOINT_STOP_REASONS.has(rawReason);
+}
 
 /**
  * Whether the decision applies now: recorded for this launch, and the
- * launch is running or paused. Over (stopped, error) or not yet launched
- * (created — a launch refused before the proxy existed leaves the record
- * behind — initializing, ready), it describes nothing that is running: a
+ * launch is live — initializing (the proxy is up; a breakpoint set now
+ * still goes to the adapter), running, or paused. Over (stopped, error) or
+ * never launched (created — a launch refused before the proxy existed
+ * leaves the record behind), it describes nothing that is running: a
  * breakpoint set then is an ordinary queued one for the next launch.
  */
 export function isDebuggerOff(session: DebuggerOffView): boolean {
   return (
-    session.debuggerDisabled === true &&
-    (session.state === SessionState.RUNNING || session.state === SessionState.PAUSED)
+    session.launchDebuggerOff === true &&
+    (session.state === SessionState.INITIALIZING ||
+      session.state === SessionState.RUNNING ||
+      session.state === SessionState.PAUSED)
   );
 }
 
-/** The why to place beside an answer, when the decision applies; else nothing. */
+/**
+ * The why to place beside an answer, when the decision applies; else
+ * nothing. A paused session gets the clause that is still true of it —
+ * breakpoints cannot bind — not "no stop is expected".
+ */
 export function debuggerOffWhy(session: DebuggerOffView): string | undefined {
-  return isDebuggerOff(session) ? ErrorMessages.debuggerOffForLaunch : undefined;
+  if (!isDebuggerOff(session)) {
+    return undefined;
+  }
+  return session.state === SessionState.PAUSED
+    ? ErrorMessages.debuggerOffForLaunchPaused
+    : ErrorMessages.debuggerOffForLaunch;
 }

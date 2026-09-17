@@ -152,7 +152,7 @@ export class AttachController {
     // be reported as this attempt's once the session lands in ERROR (#720).
     session.lastStop = undefined;
     // An attach debugs regardless of any earlier noDebug launch (issue #749).
-    session.debuggerDisabled = undefined;
+    session.launchDebuggerOff = undefined;
 
     try {
       // For attach mode, we use a placeholder scriptPath

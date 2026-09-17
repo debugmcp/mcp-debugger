@@ -4450,7 +4450,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       vi.useFakeTimers();
       try {
         mockSession.state = SessionState.RUNNING;
-        mockSession.debuggerDisabled = true;
+        mockSession.launchDebuggerOff = true;
         mockProxyManager.sendDapRequest.mockResolvedValue({});
         const describePendingStop = vi.fn().mockReturnValue('Explained by the policy.');
         vi.spyOn(operations as any, 'selectPolicy').mockReturnValue({ describePendingStop } as any);
@@ -4463,20 +4463,23 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('pause', expect.objectContaining({ threadId: 1 }));
         expect(result.success).toBe(true);
         expect(result.data?.pending).toBe(true);
-        // One message that does not promise the stop the base text promises.
-        expect(result.data?.message).toBe(ErrorMessages.pausePendingDebuggerOff(5));
+        // One message that does not promise the stop the base text promises,
+        // with the policy's own explanation kept: on js-debug the pause can
+        // land under the flag, and #678's advice is what makes it.
+        expect(result.data?.message).toBe(ErrorMessages.pausePendingDebuggerOff(5, 'Explained by the policy.'));
         expect(result.data?.message).toContain(why);
+        expect(result.data?.message).toContain('Explained by the policy.');
         expect(result.data?.message).not.toMatch(/blocked in native code/);
         expect(result.data?.message).not.toMatch(/will report 'paused' once the stop lands/);
-        expect(describePendingStop).not.toHaveBeenCalled();
+        expect(describePendingStop).toHaveBeenCalled();
       } finally {
         vi.useRealTimers();
       }
     });
 
-    it("keeps the adapter's refusal of a pause — the same error object — and appends the why", async () => {
+    it("keeps the adapter's refusal of a pause as the cause, untouched, and appends the why", async () => {
       mockSession.state = SessionState.RUNNING;
-      mockSession.debuggerDisabled = true;
+      mockSession.launchDebuggerOff = true;
       const refusal = Object.assign(new Error('Internal debugger error: Not supported in noDebug mode.'), { code: 'E_NODEBUG' });
       mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
         if (command === 'pause') {
@@ -4487,36 +4490,17 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       const thrown = await operations.pause('test-session', 1).then(
         () => { throw new Error('expected a rejection'); },
-        (err: unknown) => err
-      );
-      expect(thrown).toBe(refusal);
-      expect((thrown as Error).message).toBe(`Internal debugger error: Not supported in noDebug mode. (${why})`);
-      expect((thrown as Error & { code?: string }).code).toBe('E_NODEBUG');
-    });
-
-    it('wraps a refusal whose message cannot be appended to, keeping it as the cause', async () => {
-      mockSession.state = SessionState.RUNNING;
-      mockSession.debuggerDisabled = true;
-      const frozen = new Error('Not supported in noDebug mode.');
-      Object.defineProperty(frozen, 'message', { get: () => 'Not supported in noDebug mode.' });
-      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
-        if (command === 'pause') {
-          throw frozen;
-        }
-        return {};
-      });
-
-      const thrown = await operations.pause('test-session', 1).then(
-        () => { throw new Error('expected a rejection'); },
         (err: unknown) => err as Error & { cause?: unknown }
       );
-      expect(thrown.message).toBe(`Not supported in noDebug mode. (${why})`);
-      expect(thrown.cause).toBe(frozen);
+      expect(thrown.message).toBe(ErrorMessages.withDebuggerOffWhy('Internal debugger error: Not supported in noDebug mode.', why));
+      expect(thrown.cause).toBe(refusal);
+      expect(refusal.message).toBe('Internal debugger error: Not supported in noDebug mode.');
+      expect((thrown.cause as { code?: string }).code).toBe('E_NODEBUG');
     });
 
     it('carries the why on a pause that found no debug target yet (js-debug before the child adopts)', async () => {
       mockSession.state = SessionState.RUNNING;
-      mockSession.debuggerDisabled = true;
+      mockSession.launchDebuggerOff = true;
       mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
         if (command === 'pause') {
           throw new Error(`pause failed: ${NO_DEBUG_TARGET_MARKER}`);
@@ -4531,9 +4515,19 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result.error).toContain(why);
     });
 
+    it('carries the why while the launch is still initializing — the proxy is up and answering', async () => {
+      mockSession.state = SessionState.INITIALIZING;
+      mockSession.launchDebuggerOff = true;
+
+      const result = await operations.getStackTraceDetailed('test-session');
+
+      expect(result.frames).toEqual([]);
+      expect(result.note).toContain(why);
+    });
+
     it('drops the why once the launch is over — the flag describes a launch that is no longer running', async () => {
       mockSession.state = SessionState.STOPPED;
-      mockSession.debuggerDisabled = true;
+      mockSession.launchDebuggerOff = true;
 
       const result = await operations.getStackTraceDetailed('test-session');
 
@@ -4543,28 +4537,30 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     it('says why stepping and continuing find nothing paused', async () => {
       mockSession.state = SessionState.RUNNING;
-      mockSession.debuggerDisabled = true;
+      mockSession.launchDebuggerOff = true;
 
       const step = await operations.stepOver('test-session');
       expect(step.success).toBe(false);
-      expect(step.error).toBe(`Not paused: ${why}`);
+      expect(step.error).toBe(ErrorMessages.notPaused(why));
+      expect(step.error).toContain(why);
 
       const cont = await operations.continue('test-session');
       expect(cont.success).toBe(false);
-      expect(cont.error).toBe(`Not paused: ${why}`);
+      expect(cont.error).toBe(ErrorMessages.notPaused(why));
     });
 
     it('leaves the plain "Not paused" alone when the debugger is on', async () => {
       mockSession.state = SessionState.RUNNING;
-      mockSession.debuggerDisabled = undefined;
+      mockSession.launchDebuggerOff = undefined;
 
       const step = await operations.stepOver('test-session');
+      expect(step.error).toBe(ErrorMessages.notPaused());
       expect(step.error).toBe('Not paused');
     });
 
     it('says why an expression cannot be evaluated', async () => {
       mockSession.state = SessionState.RUNNING;
-      mockSession.debuggerDisabled = true;
+      mockSession.launchDebuggerOff = true;
 
       const result = await operations.evaluateExpression('test-session', '1 + 1');
 
@@ -4575,7 +4571,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     it('says why the stack trace is empty', async () => {
       mockSession.state = SessionState.RUNNING;
-      mockSession.debuggerDisabled = true;
+      mockSession.launchDebuggerOff = true;
 
       const result = await operations.getStackTraceDetailed('test-session');
 

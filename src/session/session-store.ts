@@ -140,6 +140,14 @@ export interface ManagedSession extends DebugSessionInfo {
   // attach — the user's value, or the policy's launch default when unset
   // (issue #244). Previously write-only pass-through; recorded for read-back.
   effectiveBreakOnExceptions?: ExceptionBreakMode;
+  // The launcher's decision that the current launch runs with the debugger
+  // off — noDebug on an adapter that honours it (issue #710). The raw
+  // record: written per launch, reset per launch and attach, cleared by a
+  // stop only a live debugger produces. Never read directly for a
+  // caller-facing answer — isDebuggerOff/debuggerOffWhy (debugger-off.ts)
+  // gate it on the launch being live, and DebugSessionInfo.debuggerDisabled
+  // is its projection (issue #749).
+  launchDebuggerOff?: boolean;
   // Caller-provided adapterConfig keys the adapter's attach transform did not
   // carry into the DAP attach request (issue #450). Recorded per attach by
   // ProxyLauncher.start; consumed by attachToProcess for the response warning.

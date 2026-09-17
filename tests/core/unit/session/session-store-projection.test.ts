@@ -58,20 +58,24 @@ describe('SessionStore.getAll() debuggerDisabled projection (issue #749)', () =>
     const { store, id } = storeWith(SessionState.RUNNING);
     expect(store.getAll().find((s) => s.id === id)!).not.toHaveProperty('debuggerDisabled');
 
-    store.get(id)!.debuggerDisabled = true;
+    store.get(id)!.launchDebuggerOff = true;
     expect(store.getAll().find((s) => s.id === id)!.debuggerDisabled).toBe(true);
 
-    store.get(id)!.debuggerDisabled = undefined;
+    store.get(id)!.launchDebuggerOff = undefined;
     expect(store.getAll().find((s) => s.id === id)!).not.toHaveProperty('debuggerDisabled');
 
-    // Only a running or paused launch: over (stopped/error), or never
-    // launched (created/initializing), the record describes nothing running.
-    store.get(id)!.debuggerDisabled = true;
-    for (const state of [SessionState.STOPPED, SessionState.ERROR, SessionState.CREATED, SessionState.INITIALIZING]) {
+    // Only a live launch — initializing (the proxy is up and a breakpoint
+    // set now still goes to the adapter), running or paused: over
+    // (stopped/error) or never launched (created), the record describes
+    // nothing running.
+    store.get(id)!.launchDebuggerOff = true;
+    for (const state of [SessionState.STOPPED, SessionState.ERROR, SessionState.CREATED]) {
       store.get(id)!.state = state;
       expect(store.getAll().find((s) => s.id === id)!, state).not.toHaveProperty('debuggerDisabled');
     }
-    store.get(id)!.state = SessionState.PAUSED;
-    expect(store.getAll().find((s) => s.id === id)!.debuggerDisabled).toBe(true);
+    for (const state of [SessionState.INITIALIZING, SessionState.PAUSED]) {
+      store.get(id)!.state = state;
+      expect(store.getAll().find((s) => s.id === id)!.debuggerDisabled, state).toBe(true);
+    }
   });
 });

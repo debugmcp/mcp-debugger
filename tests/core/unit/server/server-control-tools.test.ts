@@ -59,7 +59,7 @@ describe('Server Control Tools Tests', () => {
         id: 'test-session',
         state: 'running',
         sessionLifecycle: 'ACTIVE',
-        debuggerDisabled: true
+        launchDebuggerOff: true
       });
       // The request still went to the adapter; its own answer is kept.
       mockSessionManager.setBreakpoint.mockResolvedValue({
@@ -79,12 +79,33 @@ describe('Server Control Tools Tests', () => {
       expect(content.warning).toContain(ErrorMessages.debuggerOffForLaunch);
     });
 
+    it('says only that breakpoints cannot bind on a session that is paused — a stop did land (issue #749)', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        state: 'paused',
+        sessionLifecycle: 'ACTIVE',
+        launchDebuggerOff: true
+      });
+      mockSessionManager.setBreakpoint.mockResolvedValue({
+        breakpoint: { id: 'bp-1', file: '/path/to/test.py', line: 10, verified: false, message: 'Unbound breakpoint' }
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'set_breakpoint', arguments: { sessionId: 'test-session', file: '/path/to/test.py', line: 10 } }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.warning).toContain(ErrorMessages.debuggerOffForLaunchPaused);
+      expect(content.warning).not.toMatch(/no stop is expected/);
+    });
+
     it('adds no debugger-off note once the launch is over — a queued breakpoint is an ordinary one (issue #749)', async () => {
       mockSessionManager.getSession.mockReturnValue({
         id: 'test-session',
         state: 'stopped',
         sessionLifecycle: 'ACTIVE',
-        debuggerDisabled: true
+        launchDebuggerOff: true
       });
       mockSessionManager.setBreakpoint.mockResolvedValue({
         breakpoint: { id: 'bp-1', file: '/path/to/test.py', line: 10, verified: false }
@@ -104,7 +125,7 @@ describe('Server Control Tools Tests', () => {
         id: 'test-session',
         state: 'running',
         sessionLifecycle: 'ACTIVE',
-        debuggerDisabled: true
+        launchDebuggerOff: true
       });
       mockSessionManager.setBreakpoint.mockResolvedValue({
         breakpoint: { id: 'bp-1', file: '/path/to/test.py', line: 10, verified: true }

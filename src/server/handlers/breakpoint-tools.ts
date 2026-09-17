@@ -13,8 +13,7 @@ import {
 import type { FunctionBreakpointRemoval } from '../../session/session-manager-operations.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { requireSessionId, type WithSessionId } from '../tool-validation.js';
-import { readLineContext } from './shared.js';
-import { debuggerOffWhy } from '../../session/debugger-off.js';
+import { debuggerOffWhyFor, readLineContext } from './shared.js';
 import { failureResult, jsonResult, sessionErrorResultOrThrow, type ToolResult } from '../tool-result.js';
 
 /**
@@ -23,11 +22,7 @@ import { failureResult, jsonResult, sessionErrorResultOrThrow, type ToolResult }
  * its own answer is kept; a breakpoint it verified anyway needs no note.
  */
 function debuggerOffNote(ctx: ToolContext, sessionId: string, verified: boolean): string | undefined {
-  if (verified) {
-    return undefined;
-  }
-  const session = ctx.sessionManager.getSession(sessionId);
-  return session ? debuggerOffWhy(session) : undefined;
+  return verified ? undefined : debuggerOffWhyFor(ctx, sessionId);
 }
 
 export const setBreakpointTool: ToolHandler = async (ctx, args) => {
@@ -252,8 +247,7 @@ export const listBreakpointsTool: ToolHandler = async (ctx, args) => {
     // anyway is not contradicted.
     const anyUnverified =
       breakpoints.some((bp) => !bp.verified) || functionBreakpoints.some((bp) => !bp.verified);
-    const session = ctx.sessionManager.getSession(args.sessionId);
-    const why = anyUnverified && session ? debuggerOffWhy(session) : undefined;
+    const why = debuggerOffNote(ctx, args.sessionId, !anyUnverified);
     return jsonResult({
       success: true,
       breakpoints,

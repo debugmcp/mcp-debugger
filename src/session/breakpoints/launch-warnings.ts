@@ -118,8 +118,10 @@ export function buildNoDebugLaunchWarning(
     expected.length === 1
       ? expected[0]
       : `${expected.slice(0, -1).join(', ')} and ${expected[expected.length - 1]}`;
+  // What is known: the flag, and what it keeps from firing. Not "no stop
+  // can arrive" — js-debug lands a user pause under the flag (issue #749).
   return (
-    `noDebug is true, so the debugger is disabled for this launch and no stop can arrive: ` +
+    `noDebug is true, so the debugger is off for this launch: ` +
     `${list} will not fire. Drop noDebug to debug, or ignore this if you only meant to run the program`
   );
 }

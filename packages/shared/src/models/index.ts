@@ -433,17 +433,12 @@ export interface DebugSessionInfo {
   /** Present when the session is in ERROR because its proxy failed. */
   diagnostics?: SessionFailureDiagnostics;
   /**
-   * True while the current launch runs with the debugger off: the launch
-   * carried `noDebug: true` and the adapter honours it (issue #710), so no
-   * breakpoint can bind and no stop is expected. Set by the launcher, reset
-   * per launch and attach, and cleared by a `stopped` event only a live
-   * debugger produces (breakpoint, exception, entry — not a pause or a
-   * step, which js-debug lands under the flag with breakpoints still off):
-   * such a stop proves the debugger on for this adapter build. Projected,
-   * and consulted by the later surfaces (set_breakpoint, list_breakpoints,
-   * pause, stepping, inspection), only while the session is running or
-   * paused — over, or not yet launched, the record describes nothing that
-   * is running (issue #749).
+   * Present (`true`) while the current launch runs with the debugger off:
+   * the launch carried `noDebug: true` and the adapter honours it (issue
+   * #710), so no breakpoint can bind. A projection of the session's
+   * `launchDebuggerOff` record, made only while the launch is live
+   * (initializing, running or paused) — see `isDebuggerOff` in
+   * `src/session/debugger-off.ts` (issue #749).
    */
   debuggerDisabled?: boolean;
   /**

@@ -227,7 +227,7 @@ describe('inspection tool handlers', () => {
         id: 'test-session',
         state: 'running',
         sessionLifecycle: 'ACTIVE',
-        debuggerDisabled: true
+        launchDebuggerOff: true
       });
       ctx.sessionManager.getLocalVariables.mockResolvedValue({
         variables: [],
