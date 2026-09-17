@@ -40,6 +40,7 @@ const JS_CRASHING_SCRIPT = path.resolve(ROOT, 'tests', 'fixtures', 'debug-script
 const JS_CLEAN_SCRIPT = path.resolve(ROOT, 'tests', 'fixtures', 'debug-scripts', 'js-clean-exit.js');
 const SIMPLE_SCRIPT = path.resolve(ROOT, 'tests', 'fixtures', 'debug-scripts', 'simple.py');
 const JS_PAUSE_SCRIPT = path.resolve(ROOT, 'examples', 'javascript', 'pause_test.js');
+const PY_PAUSE_SCRIPT = path.resolve(ROOT, 'examples', 'python', 'pause_test.py');
 const ATTACH_SCRIPT = path.resolve(ROOT, 'tests', 'fixtures', 'python', 'attach_then_raise.py');
 const PYTHON = process.platform === 'win32' ? 'python' : 'python3';
 
@@ -432,6 +433,103 @@ describe('Break-on-exception (issue #220)', () => {
       expect(stopped, 'session should run to completion').toBeDefined();
       expect(stopped!.lastStop).toBeUndefined();
       expect(stopped!.exitCode).toBe(0);
+    }, 60000);
+
+    it('says the debugger is off on every later surface of a noDebug session (issue #749)', async () => {
+      // The clean case: debugpy attaches no debugger at all under the flag
+      // (js-debug keeps its inspector, so a pause still lands there). Every
+      // request still goes to debugpy; its own answer — "Server is not
+      // available" — is kept, and the session's recorded decision adds why.
+      sessionId = await createSession('python', 'py-nodebug-surfaces');
+      const bp = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'set_breakpoint',
+        arguments: { sessionId, file: PY_PAUSE_SCRIPT, line: 7 }
+      }));
+      expect(bp.success, JSON.stringify(bp)).toBe(true);
+
+      const startRes = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: PY_PAUSE_SCRIPT,
+          dapLaunchArgs: { stopOnEntry: false, noDebug: true }
+        }
+      }));
+      expect(startRes.success, JSON.stringify(startRes)).toBe(true);
+      expect(startRes.state).toBe('running');
+      expect((startRes as { warning?: string }).warning).toMatch(/noDebug is true/);
+
+      const why = /the debugger is off for this launch/;
+      const debugpySaid = /Server is not available/;
+
+      const running = await getSessionSnapshot(mcpClient!, sessionId);
+      expect(running?.debuggerDisabled).toBe(true);
+
+      const live = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'set_breakpoint',
+        arguments: { sessionId, file: PY_PAUSE_SCRIPT, line: 8 }
+      })) as { success?: boolean; verified?: boolean; warning?: string };
+      expect(live.success).toBe(true);
+      expect(live.verified).toBe(false);
+      expect(live.warning).toMatch(debugpySaid);
+      expect(live.warning).toMatch(why);
+
+      const listed = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'list_breakpoints',
+        arguments: { sessionId }
+      })) as { warning?: string; breakpoints?: Array<{ verified?: boolean }> };
+      expect(listed.warning).toMatch(why);
+      expect(listed.breakpoints?.every(b => b.verified === false)).toBe(true);
+
+      // No thread is ever current (nothing stops), and debugpy refuses the
+      // `threads` discovery too: the answer is the not-paused note with the
+      // why, not "no active proxy" — the proxy is alive.
+      const stack = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'get_stack_trace',
+        arguments: { sessionId }
+      })) as { success?: boolean; note?: string; error?: string };
+      expect(stack.success, JSON.stringify(stack)).toBe(true);
+      expect(stack.note).toMatch(why);
+
+      const locals = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'get_local_variables',
+        arguments: { sessionId }
+      })) as { success?: boolean; count?: number; message?: string };
+      expect(locals.success).toBe(true);
+      expect(locals.count).toBe(0);
+      expect(locals.message).toMatch(why);
+
+      const evaluated = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'evaluate_expression',
+        arguments: { sessionId, expression: 'counter' }
+      })) as { success?: boolean; error?: string };
+      expect(evaluated.success).toBe(false);
+      expect(evaluated.error).toMatch(why);
+
+      const step = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'step_over',
+        arguments: { sessionId }
+      })) as { success?: boolean; error?: string };
+      expect(step.success).toBe(false);
+      expect(step.error).toMatch(/^Not paused: /);
+      expect(step.error).toMatch(why);
+
+      // The pause is still sent. Measured: debugpy refuses it under the flag
+      // ("Server is not available"), and the refusal reaches the wire as an
+      // MCP error with the why beside it; should a debugpy build accept and
+      // land it instead, the decision stays (a pause proves nothing about
+      // breakpoints).
+      const pause = await callToolSafely(mcpClient!, 'pause_execution', { sessionId }) as {
+        success?: boolean; state?: string; error?: unknown; message?: string; data?: { message?: string };
+      };
+      if (pause.success && pause.state === 'paused') {
+        const paused = await getSessionSnapshot(mcpClient!, sessionId);
+        expect(paused?.debuggerDisabled).toBe(true);
+      } else {
+        const answer = `${String(pause.error ?? '')} ${pause.message ?? ''} ${pause.data?.message ?? ''}`;
+        expect(answer).toMatch(why);
+        expect(answer).toMatch(debugpySaid);
+      }
     }, 60000);
   });
 

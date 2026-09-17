@@ -19,6 +19,7 @@ import {
   type MockSessionManager
 } from './server-test-helpers.js';
 import { OutputRingBuffer } from '../../../../src/session/output-buffer.js';
+import { SessionState } from '@debugmcp/shared';
 
 // Mock dependencies
 vi.mock('@modelcontextprotocol/sdk/server/index.js');
@@ -436,8 +437,9 @@ describe('Server Inspection Tools Tests', () => {
       expect(content.diagnostics).toEqual({ proxyLogPath: '/logs/proxy-test-session.log' });
     });
 
-    it('should handle missing thread ID', async () => {
+    it('should handle missing thread ID on a paused session', async () => {
       const mockSession = {
+        state: SessionState.PAUSED,
         failureDiagnostics: { proxyLogPath: '/logs/proxy-test-session.log' },
         proxyManager: {
           getCurrentThreadId: vi.fn().mockReturnValue(null)

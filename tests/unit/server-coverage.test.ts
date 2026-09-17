@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { DebugMcpServer } from '../../src/server';
 import { McpError } from '@modelcontextprotocol/sdk/types.js';
-import { SessionLifecycleState } from '@debugmcp/shared';
+import { SessionLifecycleState, SessionState } from '@debugmcp/shared';
 import { createProductionDependencies } from '../../src/container/dependencies.js';
 import { SessionManager } from '../../src/session/session-manager.js';
 import {
@@ -215,7 +215,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       expect(result.frames).toHaveLength(1);
     });
 
-    it('should throw when getStackTrace has no thread and threads request fails', async () => {
+    it('should throw when a paused getStackTrace has no thread and the threads request fails', async () => {
       const mockProxy = {
         getCurrentThreadId: () => null,
         isRunning: () => true,
@@ -223,6 +223,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       };
       mockSessionManager.getSession.mockReturnValue({
         id: 'test-session',
+        state: SessionState.PAUSED,
         sessionLifecycle: SessionLifecycleState.ACTIVE,
         proxyManager: mockProxy
       });
@@ -231,7 +232,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
         .rejects.toThrow('Cannot get stack trace: no active proxy');
     });
 
-    it('should throw when getStackTrace has no thread and threads response is empty', async () => {
+    it('should throw when a paused getStackTrace has no thread and the threads response is empty', async () => {
       const mockProxy = {
         getCurrentThreadId: () => null,
         isRunning: () => true,
@@ -239,12 +240,43 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       };
       mockSessionManager.getSession.mockReturnValue({
         id: 'test-session',
+        state: SessionState.PAUSED,
         sessionLifecycle: SessionLifecycleState.ACTIVE,
         proxyManager: mockProxy
       });
 
       await expect(server.getStackTrace('test-session'))
         .rejects.toThrow('Cannot get stack trace: no active proxy');
+    });
+
+    it('hands a running session with no thread to the session layer instead of claiming no active proxy (issue #749)', async () => {
+      // A launch that runs with the debugger off never stops, so no thread
+      // is ever current, and debugpy refuses the `threads` discovery
+      // ("Server is not available"). The proxy is alive; the honest answer
+      // is the resolver's not-paused note with the why — the same answer a
+      // debug-mode running session gets once its thread is known.
+      const mockProxy = {
+        getCurrentThreadId: () => null,
+        isRunning: () => true,
+        sendDapRequest: vi.fn().mockRejectedValue(new Error('Server is not available'))
+      };
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        state: SessionState.RUNNING,
+        launchDebuggerOff: true,
+        sessionLifecycle: SessionLifecycleState.ACTIVE,
+        proxyManager: mockProxy
+      });
+      const notPaused = {
+        frames: [], totalFrameCount: 0, hiddenFrameCount: 0, allFramesInternal: false,
+        note: 'Session is running, not paused: the debugger is off for this launch (noDebug is true)'
+      };
+      mockSessionManager.getStackTraceDetailed.mockResolvedValue(notPaused);
+
+      await expect(server.getStackTrace('test-session')).resolves.toBe(notPaused);
+
+      expect(mockProxy.sendDapRequest).toHaveBeenCalledWith('threads', {});
+      expect(mockSessionManager.getStackTraceDetailed).toHaveBeenCalledWith('test-session', undefined, false);
     });
   });
 

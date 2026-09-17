@@ -31,6 +31,7 @@ import {
     Breakpoint,
     FunctionBreakpoint,
     SessionLifecycleState,
+    SessionState,
     IEnvironment,
     ILogger,
     ExceptionBreakMode
@@ -540,11 +541,22 @@ export class DebugMcpServer implements ToolContext {
           currentThreadId = threads[0].id;
         }
       } catch {
-        // threads request failed — fall through to error
+        // threads request failed — fall through
       }
     }
     if (typeof currentThreadId !== 'number') {
-        throw new ProxyNotRunningError(sessionId || 'unknown', 'get stack trace');
+      // No thread is known and the adapter named none. On a session that
+      // is not paused that is expected — nothing has stopped yet, or the
+      // launch runs with the debugger off and the adapter refuses even
+      // `threads` (debugpy: "Server is not available") — and the proxy is
+      // alive, so "no active proxy" would be false; the session layer's
+      // not-paused answer (with the why, issue #749) needs no thread. A
+      // paused session with no thread to name is the anomaly the error
+      // is for.
+      if (session.state !== SessionState.PAUSED) {
+        return this.sessionManager.getStackTraceDetailed(sessionId, undefined, includeInternals);
+      }
+      throw new ProxyNotRunningError(sessionId || 'unknown', 'get stack trace');
     }
     // ensureStackReady: the thread above was resolved implicitly (the MCP tool
     // has no threadId argument), so a paused session answering with zero
