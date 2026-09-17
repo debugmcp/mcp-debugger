@@ -283,7 +283,7 @@ export class DebugLauncher {
     );
     // A launch that fails under the flag still needs to point at it, whether
     // or not there was anything armed to warn about.
-    const noDebugFailureNote = noDebugWarning ?? (debuggerOff ? buildNoDebugFailureNote() : undefined);
+    const noDebugFailureNote = noDebugWarning ?? (debuggerOff ? buildNoDebugFailureNote(session.language) : undefined);
     // With the debugger off an entry stop cannot come. Everything that reads
     // stopOnEntry from here on — the proxy config (from either source the
     // adapter merge reads), the core's projection to RUNNING on
@@ -522,7 +522,11 @@ export class DebugLauncher {
       // by now (logpoint-only short programs), which this gated path can
       // never help — and a live re-send heals anything that changed between
       // the snapshot and now.
-      if (finalState === SessionState.RUNNING || finalState === SessionState.PAUSED) {
+      // Not with the debugger off (issue #746): the adapter has answered the
+      // pre-launch set already — CodeLLDB's refusal is echoed per breakpoint
+      // by the worker, and debugpy/Delve open no phase to answer in — and a
+      // re-send is a round trip per file whose answer resyncAll discards.
+      if ((finalState === SessionState.RUNNING || finalState === SessionState.PAUSED) && !debuggerOff) {
         await this.breakpoints.resyncAll(finalSession);
       }
 

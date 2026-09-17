@@ -1378,9 +1378,20 @@ export abstract class SessionManagerCore extends EventEmitter {
 
     // An adapter answer the worker forwards on its own (issue #746 — a
     // configuration request refused under an honoured noDebug): recorded
-    // exactly like a policy annotation.
-    proxyManager.on('adapter-notice', recordAdapterNotice);
-    handlers.set('adapter-notice', recordAdapterNotice);
+    // exactly like a policy annotation, and contained like one — a
+    // subscriber throwing on the entry must not escape into the IPC
+    // listener that dispatched the status.
+    const handleAdapterNotice = (note: string) => {
+      try {
+        recordAdapterNotice(note);
+      } catch (err) {
+        this.logger.warn(
+          `[SessionManager ${sessionId}] Recording an adapter notice failed: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    };
+    proxyManager.on('adapter-notice', handleAdapterNotice);
+    handlers.set('adapter-notice', handleAdapterNotice);
 
     // Store handlers in WeakMap
     this.sessionEventHandlers.set(session, handlers);

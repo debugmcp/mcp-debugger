@@ -140,6 +140,20 @@ describe('SessionManager - adapter-noise output suppression (issue #361)', () =>
   });
 
   describe('worker-forwarded adapter notices (issue #746)', () => {
+    it('contains a throwing output-captured subscriber, as the output path does', async () => {
+      const session = await launch(DebugLanguage.PYTHON);
+      sessionManager.on('output-captured', () => {
+        throw new Error('subscriber blew up');
+      });
+
+      expect(() =>
+        dependencies.mockProxyManager.emit('adapter-notice', 'setBreakpoints refused under noDebug: nope')
+      ).not.toThrow();
+
+      const managed = sessionManager.getSession(session.id)!;
+      expect(managed.adapterNotices).toEqual(['setBreakpoints refused under noDebug: nope']);
+    });
+
     it('records a notice the worker forwards like a policy annotation: session + one attributed entry', async () => {
       const session = await launch(DebugLanguage.PYTHON);
 

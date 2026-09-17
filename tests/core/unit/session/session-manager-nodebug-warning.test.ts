@@ -6,7 +6,7 @@
  * adapter ignores the flag, the caller is told it had no effect instead.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { buildNoDebugLaunchWarning } from '../../../../src/session/breakpoints/launch-warnings.js';
+import { buildNoDebugFailureNote, buildNoDebugLaunchWarning } from '../../../../src/session/breakpoints/launch-warnings.js';
 import type { ManagedSession } from '../../../../src/session/session-store.js';
 import { SessionManager, type SessionManagerConfig } from '../../../../src/session/session-manager.js';
 import { DebugLanguage, SessionState, type AdapterPolicy, type Breakpoint, type ExceptionBreakMode, type FunctionBreakpoint } from '@debugmcp/shared';
@@ -111,6 +111,14 @@ describe('buildNoDebugLaunchWarning', () => {
  * Where the debugger is off, the breakpoint-shaped launch warnings are
  * withheld and readiness does not wait for an entry stop that cannot come.
  */
+describe('buildNoDebugFailureNote', () => {
+  it("names Delve's exec quirk for go only", () => {
+    expect(buildNoDebugFailureNote('go')).toMatch(/Delve .*\.exe/);
+    expect(buildNoDebugFailureNote('python')).not.toMatch(/Delve/);
+    expect(buildNoDebugFailureNote('python')).toMatch(/noDebug is true, so this launch ran with the debugger disabled/);
+  });
+});
+
 describe('SessionManager launches with noDebug (issue #710)', () => {
   let sessionManager: SessionManager;
   let dependencies: ReturnType<typeof createMockDependencies>;

@@ -127,17 +127,20 @@ export function buildNoDebugLaunchWarning(
 /**
  * The note a launch that failed under an honoured `noDebug` carries when the
  * warning above had nothing to say (nothing was armed). It states the fact
- * without blaming the flag: the failure is most likely unrelated (a bad
- * path, a missing runtime — the adapter's own error says which), though an
- * adapter can behave differently under the flag (Delve launches the binary
- * through Go's exec, which on Windows wants the .exe extension) — so the
- * flag is worth knowing about before retrying paths and ports.
+ * without blaming the flag: the failure may be unrelated (a bad path, a
+ * missing runtime — the adapter's own error says which), or an adapter
+ * behaving differently under the flag — Delve launches the binary through
+ * Go's exec, which on Windows wants the .exe extension, so go gets that
+ * sentence and no one else does.
  */
-export function buildNoDebugFailureNote(): string {
+export function buildNoDebugFailureNote(language: string): string {
+  const quirk =
+    language === 'go'
+      ? ' (Delve launches the binary through Go\'s exec, which on Windows needs the .exe extension)'
+      : '';
   return (
     'noDebug is true, so this launch ran with the debugger disabled. The failure may be unrelated to the flag ' +
-    '(see the error), or an adapter behaving differently under it (Delve launches the binary through Go\'s exec, ' +
-    'which on Windows needs the .exe extension); to compare, drop noDebug and launch again'
+    `(see the error), or an adapter behaving differently under it${quirk}; to compare, drop noDebug and launch again`
   );
 }
 

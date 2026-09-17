@@ -391,6 +391,57 @@ describe('noDebug launch completion (issue #746)', () => {
       ]);
     });
 
+    it("keeps the groups the adapter accepted and stamps the refusal only on the ones it did not answer", async () => {
+      const payload = payloadWith({ noDebug: true }, true);
+      wire(PythonAdapterPolicy, { ...payload, initialBreakpoints: [
+        { id: 'bp-a', file: '/path/to/a.py', line: 5 },
+        { id: 'bp-b', file: '/path/to/b.py', line: 9 }
+      ] });
+      connectionStub.setBreakpoints.mockImplementation(async (_client: unknown, file: string) => {
+        if (file.endsWith('a.py')) {
+          return { body: { breakpoints: [{ verified: true, id: 11, line: 5 }] } };
+        }
+        throw refusal('setBreakpoints');
+      });
+
+      await (worker as any).startAdapterAndConnect(payload);
+      mockDapClient.emit('initialized');
+      await settle();
+      await settle();
+
+      const synced = mockMessageSender.send.mock.calls.find(
+        ([m]) => m.type === 'status' && m.status === 'breakpoints_synced'
+      )?.[0] as (StatusMessage & { breakpoints?: Array<Record<string, unknown>> }) | undefined;
+      expect(synced?.breakpoints).toEqual([
+        { id: 'bp-a', file: '/path/to/a.py', line: 5, verified: true, adapterId: 11, boundLine: 5 },
+        { id: 'bp-b', file: '/path/to/b.py', line: 9, verified: false, message: 'Internal debugger error: Not supported in noDebug mode.' }
+      ]);
+    });
+
+    it('echoes a refused setFunctionBreakpoints onto the function breakpoints too', async () => {
+      const payload = payloadWith({ noDebug: true }, true);
+      wire(PythonAdapterPolicy, { ...payload, initialBreakpoints: [], initialFunctionBreakpoints: [{ name: 'main' }, { name: 'helper' }] });
+      mockDapClient.sendRequest.mockImplementation(async (command: string) => {
+        if (command === 'setFunctionBreakpoints') {
+          throw refusal('setFunctionBreakpoints');
+        }
+        return { body: {} };
+      });
+
+      await (worker as any).startAdapterAndConnect(payload);
+      mockDapClient.emit('initialized');
+      await settle();
+      await settle();
+
+      const synced = mockMessageSender.send.mock.calls.find(
+        ([m]) => m.type === 'status' && m.status === 'function_breakpoints_synced'
+      )?.[0] as (StatusMessage & { functionBreakpoints?: Array<Record<string, unknown>> }) | undefined;
+      expect(synced?.functionBreakpoints).toEqual([
+        { name: 'main', verified: false, message: 'Internal debugger error: Not supported in noDebug mode.' },
+        { name: 'helper', verified: false, message: 'Internal debugger error: Not supported in noDebug mode.' }
+      ]);
+    });
+
     it('is not fooled by a transport failure on the configurationDone it sends after a refusal', async () => {
       const payload = payloadWith({ noDebug: true }, true);
       wire(PythonAdapterPolicy, payload);
@@ -620,20 +671,18 @@ describe('noDebug launch completion (issue #746)', () => {
       expect(configuredStatuses()).toHaveLength(1);
     });
 
-    it('does not report configured mid-phase when a terminated event races a phase pending from the handshake', async () => {
+    it('opens no configuration phase from the terminal slot when a phase is pending and the program has ended', async () => {
       wire(GoAdapterPolicy, GO_PAYLOAD);
       const order: string[] = [];
-      let finishConfigurationDone!: () => void;
-      connectionStub.sendConfigurationDone.mockImplementation(
-        () => new Promise<void>((resolve) => { finishConfigurationDone = () => { order.push('configurationDone'); resolve(); }; })
-      );
       connectionStub.setBreakpoints.mockImplementation(async () => {
         order.push('setBreakpoints');
         return { body: { breakpoints: [{ verified: true }] } };
       });
+      connectionStub.sendConfigurationDone.mockImplementation(async () => { order.push('configurationDone'); });
       connectionStub.sendLaunchRequest.mockImplementation(async () => {
         // A stale-pin Delve: `initialized` during the launch request (deferred),
-        // then terminated arriving with the launch response.
+        // then terminated arriving with the launch response — the program is
+        // over; a phase against it is pointless and could hang the exit.
         mockDapClient.emit('initialized');
         await settle();
         mockDapClient.emit('terminated', {});
@@ -646,19 +695,48 @@ describe('noDebug launch completion (issue #746)', () => {
         origSend?.(m);
       });
 
-      const connect = (worker as any).startAdapterAndConnect(GO_PAYLOAD);
-      for (let i = 0; i < 6; i++) {
-        await settle();
-      }
-      expect(order).not.toContain('configured');
-      finishConfigurationDone();
-      await connect;
-      for (let i = 0; i < 6; i++) {
+      await (worker as any).startAdapterAndConnect(GO_PAYLOAD);
+      for (let i = 0; i < 8; i++) {
         await settle();
       }
 
-      expect(order).toEqual(['launch-response', 'setBreakpoints', 'configurationDone', 'configured', 'terminated']);
+      expect(order).toEqual(['launch-response', 'configured', 'terminated']);
       expect(configuredStatuses()).toHaveLength(1);
+    });
+
+    it('reports configured before a dap_connection_closed that follows the launch response', async () => {
+      wire(GoAdapterPolicy, GO_PAYLOAD);
+      const order: string[] = [];
+      let onClose: (() => void) | undefined;
+      connectionStub.setupEventHandlers.mockImplementation(
+        (client: EventEmitter, handlers: Record<string, (...args: unknown[]) => void>) => {
+          if (handlers.onInitialized) client.on('initialized', handlers.onInitialized);
+          if (handlers.onTerminated) client.on('terminated', handlers.onTerminated);
+          onClose = handlers.onClose as (() => void) | undefined;
+        }
+      );
+      connectionStub.sendLaunchRequest.mockImplementation(async () => {
+        // The adapter answers launch and drops the socket in the same read.
+        onClose?.();
+        for (let i = 0; i < 8; i++) {
+          await Promise.resolve();
+        }
+        order.push('launch-response');
+      });
+      const origSend = mockMessageSender.send.getMockImplementation();
+      mockMessageSender.send.mockImplementation((m) => {
+        if (m.type === 'status' && m.status === 'adapter_configured_and_launched') order.push('configured');
+        if (m.type === 'status' && m.status === 'dap_connection_closed') order.push('closed');
+        origSend?.(m);
+      });
+
+      await (worker as any).startAdapterAndConnect(GO_PAYLOAD).catch(() => undefined);
+      for (let i = 0; i < 10; i++) {
+        await settle();
+      }
+
+      expect(order.indexOf('configured')).toBeGreaterThanOrEqual(0);
+      expect(order.indexOf('configured')).toBeLessThan(order.indexOf('closed'));
     });
 
     it('runs the phase once when initialized arrives late after all', async () => {

@@ -114,6 +114,8 @@ export class DapProxyWorker {
   private terminalSignalQueue: Promise<void> = Promise.resolve();
   /** True once an exited/terminated DAP event was forwarded to the parent (issue #258). */
   private terminalDapEventForwarded: boolean = false;
+  /** True once any terminal signal has been queued (exit, terminated, closure): the program is over (#746). */
+  private terminalSignalArrived: boolean = false;
   // Adapter-exit exitCode synthesis (issue #258): armed by policies whose
   // adapter process exit status IS the debuggee's (rdbg -c). The exit is
   // recorded synchronously so the terminated slot can synthesize a DAP
@@ -813,14 +815,19 @@ export class DapProxyWorker {
     // Bounded like the slot's other waits (the 2 s stdio-drain backstop): a
     // launch request the adapter never answers must not hold its own exit
     // behind the 30 s request timeout. Contained: nothing here may abort
-    // the forward of the terminal event that follows.
+    // the forward of the terminal event that follows. And no configuration
+    // phase is opened from here: the program has ended, a phase against it
+    // is pointless and could hang the exit — a pending one is dropped, one
+    // in flight is left to finish on its own (its report is idempotent).
     let timer: NodeJS.Timeout | undefined;
     const backstop = new Promise<false>((resolve) => {
       timer = setTimeout(() => resolve(false), TERMINAL_SIGNAL_BACKSTOP_MS);
     });
     try {
       if (await Promise.race([this.launchOutcome, backstop])) {
-        await this.completeDebuggerOffLaunch();
+        this.deferInitializedHandling = false;
+        this.initializedEventPending = false;
+        this.markConfiguredAndLaunched();
       }
     } catch (err) {
       this.logger?.warn(`[Worker] completing the debugger-off launch ahead of a terminal event failed (continuing): ${err instanceof Error ? err.message : String(err)}`);
@@ -1001,7 +1008,6 @@ export class DapProxyWorker {
         // Set synchronously, before any await, so a racing terminated sees it.
         this.exitedEventSeen = true;
         return this.enqueueTerminalSignal('exited', async () => {
-          await this.settleDebuggerOffLaunch();
           await this.waitForAdapterStdioDrain();
           await this.waitForChildEventFlush();
           this.terminalDapEventForwarded = true;
@@ -1016,7 +1022,6 @@ export class DapProxyWorker {
         // stopping the proxy, which drops late messages. Hold terminated
         // until the streams have drained so the output wins the race.
         return this.enqueueTerminalSignal('terminated', async () => {
-          await this.settleDebuggerOffLaunch();
           await this.waitForAdapterStdioDrain();
           await this.waitForChildEventFlush();
           // Must complete before terminated is forwarded: whichever of
@@ -1089,10 +1094,13 @@ export class DapProxyWorker {
     dapClient: IDapClient,
     connectionManager: DapConnectionManager
   ): Promise<void> {
-    // Which request the phase is on: names the notice a refusal under
-    // noDebug turns into, and says whether configurationDone was reached
-    // (issue #746).
+    // Which request the phase is on: says whether configurationDone was
+    // reached, and names a notice when the error carries no command of its
+    // own (issue #746).
     let stage = 'setBreakpoints';
+    // The per-file setBreakpoints answers so far: a refusal part-way echoes
+    // these as they came and stamps only the breakpoints not yet answered.
+    const syncResults: BreakpointSyncResult[] = [];
     try {
       // Set initial breakpoints if provided
       if (initPayload.initialBreakpoints?.length) {
@@ -1119,7 +1127,6 @@ export class DapProxyWorker {
           });
         }
 
-        const syncResults: BreakpointSyncResult[] = [];
         for (const [filePath, breakpoints] of groupedBreakpoints.entries()) {
           const response = await connectionManager.setBreakpoints(
             dapClient,
@@ -1190,7 +1197,7 @@ export class DapProxyWorker {
       this.markConfiguredAndLaunched();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (this.debuggerOff && error instanceof DapResponseError) {
+      if (this.isNoDebugRefusal(error)) {
         // Under an honoured noDebug a configuration request the adapter
         // *answered* with an error is the adapter declining to debug
         // (CodeLLDB: "Not supported in noDebug mode"), not a broken session
@@ -1208,34 +1215,35 @@ export class DapProxyWorker {
           this.logger!.warn(`[Worker] ${stage} refused under noDebug while the session is ${this.state}; leaving it be: ${message}`);
           return;
         }
-        this.logger!.warn(`[Worker] ${stage} refused under noDebug (continuing): ${message}`);
-        this.sendAdapterNotice(`${stage} refused under noDebug: ${message}`);
+        this.noticeRefusalUnderNoDebug(error.command || stage, error);
         if (stage === 'setBreakpoints') {
-          // The refusal is the adapter's answer for every pre-launch
-          // breakpoint: echo it so the parent's store (and list_breakpoints)
-          // carries it — this status is the only path that stamps the store
-          // for a launch that never pauses (#439).
-          this.sendStatusSafely('breakpoints_synced', {
-            breakpoints: (initPayload.initialBreakpoints ?? []).map((bp) => ({
+          // The refusal is the adapter's answer for the pre-launch
+          // breakpoints it did not answer otherwise: echo the groups it did
+          // answer as they came, stamp the rest, so the parent's store (and
+          // list_breakpoints) carries it — this status is the only path that
+          // stamps the store for a launch that never pauses (#439).
+          const answered = new Set(syncResults.map((r) => `${r.file}\u0000${r.line}\u0000${r.id ?? ''}`));
+          const stamped = (initPayload.initialBreakpoints ?? [])
+            .filter((bp) => !answered.has(`${bp.file}\u0000${bp.line}\u0000${bp.id ?? ''}`))
+            .map((bp) => ({
               ...(bp.id !== undefined ? { id: bp.id } : {}),
               file: bp.file,
               line: bp.line,
               verified: false,
               message
-            }))
-          });
+            }));
+          this.sendStatusSafely('breakpoints_synced', { breakpoints: [...syncResults, ...stamped] });
         }
         if (stage !== 'configurationDone') {
           try {
             await connectionManager.sendConfigurationDone(dapClient);
           } catch (err) {
-            if (!(err instanceof DapResponseError)) {
+            if (!this.isNoDebugRefusal(err)) {
               // Not the adapter declining — the socket dropped, a timeout:
               // the broken session it is, like any other transport failure.
               await this.failConfigurationPhase(err);
               return;
             }
-            this.logger!.warn(`[Worker] configurationDone refused under noDebug (continuing): ${err.message}`);
             this.noticeRefusalUnderNoDebug('configurationDone', err);
           }
         }
@@ -1256,13 +1264,24 @@ export class DapProxyWorker {
 
   /**
    * A request the adapter answered with an error under an honoured noDebug
-   * (issue #746) is forwarded as an adapter notice; anything else that
-   * failed (transport, timeout) is not the adapter's answer and is left to
-   * the caller's own handling.
+   * (issue #746): the adapter declining to debug, not a broken session. A
+   * transport failure, a timeout or a shutdown rejects with a plain Error
+   * and is never this.
+   */
+  private isNoDebugRefusal(err: unknown): err is DapResponseError {
+    return this.debuggerOff && err instanceof DapResponseError;
+  }
+
+  /**
+   * Forward such a refusal as an adapter notice (launch warning +
+   * get_output), named by the request the adapter declined; anything else
+   * is not the adapter's answer and is left to the caller's own handling.
    */
   private noticeRefusalUnderNoDebug(request: string, err: unknown): void {
-    if (this.debuggerOff && err instanceof DapResponseError) {
-      this.sendAdapterNotice(`${request} refused under noDebug: ${err.message}`);
+    if (this.isNoDebugRefusal(err)) {
+      const note = `${err.command || request} refused under noDebug: ${err.message}`;
+      this.logger!.warn(`[Worker] ${note} (continuing)`);
+      this.sendAdapterNotice(note);
     }
   }
 
@@ -1279,7 +1298,12 @@ export class DapProxyWorker {
    */
   private async completeDebuggerOffLaunch(): Promise<void> {
     this.deferInitializedHandling = false;
-    if (this.initializedEventPending) {
+    if (this.initializedEventPending && this.terminalSignalArrived) {
+      // The program is already over: a phase against it is pointless and
+      // could hang its exit. Dropped; the terminal slot reports configured.
+      this.initializedEventPending = false;
+      this.logger!.info('[Worker] noDebug is honoured by this adapter; a configuration phase arrived during the launch request but the program has ended — not opening it (issue #746)');
+    } else if (this.initializedEventPending) {
       // The phase arrived while the handshake was deferring it: run it
       // first, as debug mode would — it reports configured itself when it
       // closes (and on the tolerant catch), so the parent hears configured
@@ -1358,7 +1382,18 @@ export class DapProxyWorker {
           err instanceof Error ? err.message : String(err)
         }`
       );
-      this.noticeRefusalUnderNoDebug('setFunctionBreakpoints', err);
+      if (this.isNoDebugRefusal(err)) {
+        this.noticeRefusalUnderNoDebug('setFunctionBreakpoints', err);
+        // The refusal is the adapter's answer for every function breakpoint:
+        // echo it so the store carries it, as the line breakpoints get.
+        this.sendStatusSafely('function_breakpoints_synced', {
+          functionBreakpoints: this.currentInitPayload.initialFunctionBreakpoints.map((bp) => ({
+            name: bp.name,
+            verified: false,
+            message: err.message
+          }))
+        });
+      }
     }
   }
 
@@ -1984,8 +2019,9 @@ export class DapProxyWorker {
 
   /**
    * A status whose IPC failure must not fail the launch it decorates: the
-   * breakpoint echo (#439), an adapter notice (#746), the child-adoption
-   * readiness report (#704). Logged and continued.
+   * breakpoint echoes (#439, #302) and an adapter notice (#746). Logged and
+   * continued. (The child-adoption readiness report keeps its own guard
+   * around the one readiness reporter, #704.)
    */
   private sendStatusSafely(status: string, extra: Record<string, unknown> = {}): void {
     try {
@@ -2198,7 +2234,7 @@ export class DapProxyWorker {
     const boundedFlush = async (flush: Promise<void>): Promise<void> => {
       let timer: NodeJS.Timeout | undefined;
       const backstop = new Promise<void>(resolve => {
-        timer = setTimeout(resolve, 2000);
+        timer = setTimeout(resolve, TERMINAL_SIGNAL_BACKSTOP_MS);
       });
       try {
         await Promise.race([flush, backstop]);
@@ -2225,12 +2261,22 @@ export class DapProxyWorker {
    * Every producer awaits the drain barrier, so without serialization the
    * signal with the fewest awaits after the barrier wins — not the one that
    * arrived first. Each slot is bounded (drain backstop 2s), and the chain
-   * swallows rejections so one failed slot cannot block the next.
+   * swallows rejections so one failed slot cannot block the next. Under an
+   * honoured noDebug every slot first settles the launch it may share a
+   * socket read with (#746), so the parent hears configured before any
+   * exit, whichever terminal path carries it.
    */
   private enqueueTerminalSignal(label: string, task: () => Promise<void>): Promise<void> {
-    const tail = this.terminalSignalQueue.then(task).catch((err) => {
-      this.logger?.error(`[Worker] Terminal signal '${label}' failed:`, err);
-    });
+    // Recorded synchronously: a debugger-off launch completing after this
+    // point must not open a configuration phase against a program that
+    // has ended (#746).
+    this.terminalSignalArrived = true;
+    const tail = this.terminalSignalQueue
+      .then(() => this.settleDebuggerOffLaunch())
+      .then(task)
+      .catch((err) => {
+        this.logger?.error(`[Worker] Terminal signal '${label}' failed:`, err);
+      });
     this.terminalSignalQueue = tail;
     return tail;
   }
