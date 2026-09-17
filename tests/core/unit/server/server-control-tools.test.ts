@@ -79,6 +79,26 @@ describe('Server Control Tools Tests', () => {
       expect(content.warning).toContain(ErrorMessages.debuggerOffForLaunch);
     });
 
+    it('adds no debugger-off note once the launch is over — a queued breakpoint is an ordinary one (issue #749)', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        state: 'stopped',
+        sessionLifecycle: 'ACTIVE',
+        debuggerDisabled: true
+      });
+      mockSessionManager.setBreakpoint.mockResolvedValue({
+        breakpoint: { id: 'bp-1', file: '/path/to/test.py', line: 10, verified: false }
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'set_breakpoint', arguments: { sessionId: 'test-session', file: '/path/to/test.py', line: 10 } }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.warning).toBeUndefined();
+    });
+
     it('adds no debugger-off note to a breakpoint the adapter verified anyway (issue #749)', async () => {
       mockSessionManager.getSession.mockReturnValue({
         id: 'test-session',

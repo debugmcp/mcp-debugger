@@ -35,6 +35,15 @@ const IN_FLIGHT = {
 /** The launch-shaped operations one session may hold a claim for (issue #711). */
 export type InFlightOperation = keyof typeof IN_FLIGHT;
 
+/**
+ * The why a session whose current launch runs with the debugger off appends
+ * to every answer that would otherwise read in debugger terms (issue #749) —
+ * a module constant so the composed messages below can build on it.
+ */
+const DEBUGGER_OFF_FOR_LAUNCH =
+  'the debugger is off for this launch (noDebug is true): breakpoints cannot bind and no stop is expected; ' +
+  'drop noDebug and launch again to debug';
+
 export const ErrorMessages = {
   /**
    * Error message for DAP request timeouts
@@ -163,9 +172,20 @@ export const ErrorMessages = {
    *   src/session/execution/execution-controller.ts, src/session/inspection/frame-anchor-resolver.ts,
    *   src/session/inspection/expression-evaluator.ts
    */
-  debuggerOffForLaunch:
-    'the debugger is off for this launch (noDebug is true): breakpoints cannot bind and no stop is expected; ' +
-    'drop noDebug and launch again to debug',
+  debuggerOffForLaunch: DEBUGGER_OFF_FOR_LAUNCH,
+
+  /**
+   * The pending-pause message for a session whose launch runs with the
+   * debugger off (issue #749): the pause was sent and accepted, no stop came
+   * within the grace window, and — unlike `pausePending` — no stop is
+   * promised, since none is expected. The session still reports 'paused'
+   * should one land anyway (js-debug does this under noDebug).
+   * Used in: src/session/execution/execution-controller.ts
+   * @param graceSeconds - The grace window duration in seconds
+   */
+  pausePendingDebuggerOff: (graceSeconds: number) =>
+    `Pause requested; no 'stopped' event within ${graceSeconds}s — ${DEBUGGER_OFF_FOR_LAUNCH}. ` +
+    `Check the session state in case a stop lands anyway.`,
 
   /**
    * Suffix appended to the attach message when the post-attach pause was

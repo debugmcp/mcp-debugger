@@ -51,6 +51,7 @@ import type {
   StopLocation
 } from '../session-manager-core.js';
 import { USER_BREAK_REASONS } from '../session-manager-core.js';
+import { debuggerOffWhy, isDebuggerOff, type DebuggerOffView } from '../debugger-off.js';
 import { samePath } from '../breakpoints/hit-verification.js';
 import type { ExecutionContext } from '../operations-context.js';
 import type { PauseCoordinator } from './pause-coordinator.js';
@@ -140,10 +141,24 @@ function isSameLine(a: StopLocation, b: StopLocation): boolean {
  * The step/continue refusal for a session that is not paused, with the why
  * when the session's launch runs with the debugger off (issue #749).
  */
-function notPausedError(session: Pick<ManagedSession, 'debuggerDisabled'>): string {
-  return session.debuggerDisabled
-    ? `Not paused: ${ErrorMessages.debuggerOffForLaunch}`
-    : 'Not paused';
+function notPausedError(session: DebuggerOffView): string {
+  const why = debuggerOffWhy(session);
+  return why ? `Not paused: ${why}` : 'Not paused';
+}
+
+/**
+ * A pause the adapter answered with an error, with the why beside the
+ * adapter's own words when the launch runs with the debugger off (issue
+ * #749). The original error object is kept — its stack and any structured
+ * properties are the adapter's answer too.
+ */
+function withDebuggerOffWhy(session: DebuggerOffView, error: unknown, message: string): { error: Error; message: string } {
+  const err = error instanceof Error ? error : new Error(message);
+  const why = debuggerOffWhy(session);
+  if (why) {
+    err.message = `${err.message} (${why})`;
+  }
+  return { error: err, message: err.message };
 }
 
 export class ExecutionController {
@@ -631,12 +646,21 @@ export class ExecutionController {
       this.ctx.logger.info(
         `[SessionManager pause] No stopped event within ${this.ctx.tunables.pauseGraceMs}ms grace window in session ${sessionId}; completing asynchronously`
       );
+      // With the debugger off for this launch the why is known (issue #749):
+      // one message that promises no stop, instead of the policy's guess at
+      // native code or a syscall.
+      if (isDebuggerOff(session)) {
+        return {
+          success: true,
+          state: session.state,
+          data: {
+            message: ErrorMessages.pausePendingDebuggerOff(this.ctx.tunables.pauseGraceMs / 1000),
+            pending: true
+          }
+        };
+      }
       const pausePending = ErrorMessages.pausePending(this.ctx.tunables.pauseGraceMs / 1000);
-      // With the debugger off for this launch the why is known (issue #749);
-      // the policy's guess at native code or a syscall would be wrong.
-      const hint = session.debuggerDisabled
-        ? ErrorMessages.debuggerOffForLaunch
-        : await this.describePendingStop(session, sessionId, 'pause');
+      const hint = await this.describePendingStop(session, sessionId, 'pause');
       return {
         success: true,
         state: session.state,
@@ -659,15 +683,14 @@ export class ExecutionController {
     this.ctx.logger.error(
       `[SessionManager pause] Error sending 'pause' for session ${sessionId}: ${errorMessage}`
     );
+    // The adapter's answer stands — a refusal (CodeLLDB under noDebug), or
+    // no debug target yet (js-debug before the child adopts) — with the why
+    // beside it when the launch runs with the debugger off (issue #749).
+    const answered = withDebuggerOffWhy(session, outcome.error, errorMessage);
     if (errorMessage.includes(NO_DEBUG_TARGET_MARKER)) {
-      return { success: false, error: errorMessage, state: session.state };
+      return { success: false, error: answered.message, state: session.state };
     }
-    if (session.debuggerDisabled) {
-      // The adapter refused the pause (CodeLLDB under noDebug): its answer
-      // stands, with the why beside it (issue #749).
-      throw new Error(`${errorMessage} (${ErrorMessages.debuggerOffForLaunch})`);
-    }
-    throw outcome.error instanceof Error ? outcome.error : new Error(errorMessage);
+    throw answered.error;
   }
 
   async listThreads(sessionId: string): Promise<Array<{ id: number; name: string }>> {

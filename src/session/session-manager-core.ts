@@ -9,6 +9,7 @@ import {
 } from '@debugmcp/shared';
 import type { Breakpoint, FunctionBreakpoint, StackFrame } from '@debugmcp/shared';
 import { BREAKPOINT_STOP_REASONS } from '@debugmcp/shared';
+import { DEBUGGER_ON_STOP_REASONS } from './debugger-off.js';
 import { isRedactionEnabled } from '../utils/redaction-mode.js';
 import { ValidationResultCache } from '../utils/language-availability.js';
 import { SessionStore, ManagedSession } from './session-store.js';
@@ -736,10 +737,14 @@ export abstract class SessionManagerCore extends EventEmitter {
       }
 
       session.firstStopHandled = true;
-      // A stop is stronger evidence than the policy's noDebug pin: this
-      // adapter build debugs after all, so the later surfaces must stop
-      // explaining themselves in debugger-off terms (issue #749).
-      session.debuggerDisabled = undefined;
+      // A stop only a live debugger produces is stronger evidence than the
+      // policy's noDebug pin: this adapter build debugs after all, so the
+      // later surfaces must stop explaining themselves in debugger-off
+      // terms (issue #749). A pause is not such a stop — js-debug lands one
+      // under noDebug with breakpoints still off.
+      if (DEBUGGER_ON_STOP_REASONS.has(reason)) {
+        session.debuggerDisabled = undefined;
+      }
     };
     proxyManager.on('stopped', handleStopped);
     handlers.set('stopped', handleStopped);

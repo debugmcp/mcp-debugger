@@ -491,19 +491,47 @@ describe('SessionManager launches with noDebug (issue #710)', () => {
       expect(sessionManager.getSession(s.id)?.debuggerDisabled).toBeUndefined();
     });
 
-    it('is cleared by a stop that arrives anyway — the adapter proved the debugger on', async () => {
+    it('survives a pause that lands — js-debug pauses under noDebug while its breakpoints stay unbound', async () => {
       pinPolicy({ honoursNoDebug: true });
       const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
       runWithoutStopping();
       await launch(s.id, { stopOnEntry: false, noDebug: true });
       expect(sessionManager.getSession(s.id)?.debuggerDisabled).toBe(true);
 
-      // A later pause lands (js-debug does this under noDebug: measured).
+      // Measured: the inspector is attached and a user pause lands, but the
+      // debug domains — breakpoints — are off. A pause proves nothing.
       dependencies.mockProxyManager.simulateEvent('stopped', 1, 'pause', { reason: 'pause', threadId: 1 });
       await vi.runAllTimersAsync();
 
       expect(sessionManager.getSession(s.id)?.state).toBe(SessionState.PAUSED);
-      expect(sessionManager.getSession(s.id)?.debuggerDisabled).toBeUndefined();
+      expect(sessionManager.getSession(s.id)?.debuggerDisabled).toBe(true);
+    });
+
+    it.each(['breakpoint', 'function breakpoint', 'exception', 'entry', 'step'])(
+      "is cleared by a '%s' stop — one a disabled debugger cannot produce",
+      async (reason) => {
+        pinPolicy({ honoursNoDebug: true });
+        const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+        runWithoutStopping();
+        await launch(s.id, { stopOnEntry: false, noDebug: true });
+        expect(sessionManager.getSession(s.id)?.debuggerDisabled).toBe(true);
+
+        dependencies.mockProxyManager.simulateEvent('stopped', 1, reason, { reason, threadId: 1 });
+        await vi.runAllTimersAsync();
+
+        expect(sessionManager.getSession(s.id)?.debuggerDisabled).toBeUndefined();
+      }
+    );
+
+    it('is not projected once the launch is over — the next set_breakpoint is an ordinary queued one', async () => {
+      pinPolicy({ honoursNoDebug: true });
+      const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      endDuringStartup();
+      const result = await launch(s.id, { stopOnEntry: false, noDebug: true });
+      expect(result.state).toBe(SessionState.STOPPED);
+
+      const listed = sessionManager.getAllSessions().find((x) => x.id === s.id);
+      expect(listed).not.toHaveProperty('debuggerDisabled');
     });
 
     it('recomputes it on restart_debugging, which replays the same arguments', async () => {

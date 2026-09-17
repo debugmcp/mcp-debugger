@@ -536,13 +536,13 @@ export class DebugLauncher {
       }
 
       // The policy's word is a static pin; a stop that arrived anyway is the
-      // stronger evidence (an adapter build that ignores the flag after all) —
-      // a pause still standing, or an entry stop the core already resumed
-      // (firstStopHandled is set on every stop of this launch, resumed or not).
-      // Then the debugger was on: keep the ordinary diagnostics and say the
-      // flag had no effect rather than that no stop can come.
-      const stoppedAnyway =
-        debuggerOff && (finalState === SessionState.PAUSED || finalSession.firstStopHandled === true);
+      // stronger evidence (an adapter build that ignores the flag after all).
+      // The core's stopped handler is the one judge of that — it clears the
+      // recorded decision on a stop only a live debugger produces (issue
+      // #749), so the launch response and the record cannot disagree. Then
+      // the debugger was on: keep the ordinary diagnostics and say the flag
+      // had no effect rather than that no stop can come.
+      const stoppedAnyway = debuggerOff && finalSession.debuggerDisabled !== true;
       const noDebugNote = stoppedAnyway
         ? buildNoDebugLaunchWarning(finalSession, { noDebug }, breakOnExceptions, false)
         : noDebugWarning;

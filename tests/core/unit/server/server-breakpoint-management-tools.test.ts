@@ -119,6 +119,40 @@ describe('Server Breakpoint Management Tools', () => {
       expect(content.warning).toBe(ErrorMessages.debuggerOffForLaunch);
     });
 
+    it('adds no debugger-off warning when every breakpoint is verified anyway, or once the launch is over (issue #749)', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        state: 'running',
+        sessionLifecycle: 'ACTIVE',
+        debuggerDisabled: true
+      });
+      mockSessionManager.listBreakpoints.mockReturnValue([
+        { id: 'bp-1', file: '/a.py', line: 10, verified: true }
+      ]);
+      mockSessionManager.listFunctionBreakpoints.mockReturnValue([]);
+
+      let result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'list_breakpoints', arguments: { sessionId: 'test-session' } }
+      });
+      expect(JSON.parse(result.content[0].text).warning).toBeUndefined();
+
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        state: 'stopped',
+        sessionLifecycle: 'ACTIVE',
+        debuggerDisabled: true
+      });
+      mockSessionManager.listBreakpoints.mockReturnValue([
+        { id: 'bp-1', file: '/a.py', line: 10, verified: false }
+      ]);
+      result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'list_breakpoints', arguments: { sessionId: 'test-session' } }
+      });
+      expect(JSON.parse(result.content[0].text).warning).toBeUndefined();
+    });
+
     it('always includes empty function-breakpoint fields in the unfiltered response (#306)', async () => {
       mockSessionManager.listBreakpoints.mockReturnValue([]);
       mockSessionManager.listFunctionBreakpoints.mockReturnValue([]);

@@ -8,7 +8,7 @@
  * hook (issue #237) runs before anything, including the logs, sees the result.
  */
 import { getErrorMessage } from '../../errors/debug-errors.js';
-import { ErrorMessages } from '../../utils/error-messages.js';
+import { debuggerOffWhy } from '../debugger-off.js';
 import {
   buildRedactionNotice,
   isSensitiveName,
@@ -132,11 +132,12 @@ export class ExpressionEvaluator {
       this.ctx.logger.warn(
         `[SM evaluateExpression ${sessionId}] Cannot evaluate: session not paused. State: ${session.state}`
       );
+      // The why, when the launch runs with the debugger off (issue #749).
+      const why = debuggerOffWhy(session);
       return {
         success: false,
-        error: session.debuggerDisabled
-          // The why, when the launch runs with the debugger off (issue #749).
-          ? `Cannot evaluate: debugger not paused (${ErrorMessages.debuggerOffForLaunch})`
+        error: why
+          ? `Cannot evaluate: debugger not paused (${why})`
           : 'Cannot evaluate: debugger not paused. Ensure the debugger is stopped at a breakpoint.',
       };
     }

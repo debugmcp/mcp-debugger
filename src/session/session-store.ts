@@ -33,6 +33,7 @@ export interface CreateSessionParams {
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import { IProxyManager } from '../proxy/proxy-manager.js';
 import { OutputRingBuffer } from './output-buffer.js';
+import { isDebuggerOff } from './debugger-off.js';
 import type { PauseIntent } from './execution/pause-intent.js';
 import type { ProxyFailureDiagnostics } from './launch/proxy-failure-diagnostics.js';
 
@@ -289,8 +290,9 @@ export class SessionStore {
       ...(s.state === SessionState.ERROR && s.failureDiagnostics
         ? { diagnostics: s.failureDiagnostics }
         : {}),
-      // The current launch runs with the debugger off (issue #749).
-      ...(s.debuggerDisabled ? { debuggerDisabled: true } : {}),
+      // The current launch runs with the debugger off (issue #749) — while
+      // it runs; a stopped or errored session describes nothing running.
+      ...(isDebuggerOff(s) ? { debuggerDisabled: true } : {}),
       // Mirror endpoint without the token (issue #217); the isRunning gate
       // keeps the projection honest on teardown paths that skip cleanup.
       ...(s.exposure && s.proxyManager?.isRunning()

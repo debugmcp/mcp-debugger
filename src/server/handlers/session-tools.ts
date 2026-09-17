@@ -10,6 +10,7 @@ import { isContainerRuntime } from '../../utils/container-path-utils.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { assertPlainObjectArg, requireSessionId } from '../tool-validation.js';
 import { carriesLastStop, successWarning } from './shared.js';
+import { isDebuggerOff } from '../../session/debugger-off.js';
 import { failureResult, jsonResult, rethrowAsMcpError, type ToolResult } from '../tool-result.js';
 
 export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
@@ -175,7 +176,7 @@ export async function handleListDebugSessions(ctx: ToolContext): Promise<ToolRes
       if (session.diagnostics) {
           mappedSession.diagnostics = session.diagnostics;
       }
-      if (session.debuggerDisabled) {
+      if (isDebuggerOff(session)) {
           // The current launch runs with the debugger off (issue #749).
           mappedSession.debuggerDisabled = true;
       }

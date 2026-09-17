@@ -18,8 +18,7 @@ import {
   type Breakpoint,
   type CustomLaunchRequestArguments,
   type FunctionBreakpoint,
-  type ILogger
-} from '@debugmcp/shared';
+  type ILogger, NO_DEBUG_TARGET_MARKER } from '@debugmcp/shared';
 
 /** Concrete subclass for testing the abstract SessionManagerOperations */
 class TestableSessionManagerOperations extends SessionManagerOperations {
@@ -4464,26 +4463,62 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('pause', expect.objectContaining({ threadId: 1 }));
         expect(result.success).toBe(true);
         expect(result.data?.pending).toBe(true);
-        expect(result.data?.message).toBe(`${ErrorMessages.pausePending(5)} ${why}`);
+        // One message that does not promise the stop the base text promises.
+        expect(result.data?.message).toBe(ErrorMessages.pausePendingDebuggerOff(5));
+        expect(result.data?.message).toContain(why);
+        expect(result.data?.message).not.toMatch(/blocked in native code/);
+        expect(result.data?.message).not.toMatch(/will report 'paused' once the stop lands/);
         expect(describePendingStop).not.toHaveBeenCalled();
       } finally {
         vi.useRealTimers();
       }
     });
 
-    it("keeps the adapter's refusal of a pause and appends the why", async () => {
+    it("keeps the adapter's refusal of a pause — the same error object — and appends the why", async () => {
       mockSession.state = SessionState.RUNNING;
       mockSession.debuggerDisabled = true;
+      const refusal = Object.assign(new Error('Internal debugger error: Not supported in noDebug mode.'), { code: 'E_NODEBUG' });
       mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
         if (command === 'pause') {
-          throw new Error('Internal debugger error: Not supported in noDebug mode.');
+          throw refusal;
         }
         return {};
       });
 
-      await expect(operations.pause('test-session', 1)).rejects.toThrow(
-        `Internal debugger error: Not supported in noDebug mode. (${why})`
+      const thrown = await operations.pause('test-session', 1).then(
+        () => { throw new Error('expected a rejection'); },
+        (err: unknown) => err
       );
+      expect(thrown).toBe(refusal);
+      expect((thrown as Error).message).toBe(`Internal debugger error: Not supported in noDebug mode. (${why})`);
+      expect((thrown as Error & { code?: string }).code).toBe('E_NODEBUG');
+    });
+
+    it('carries the why on a pause that found no debug target yet (js-debug before the child adopts)', async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockSession.debuggerDisabled = true;
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'pause') {
+          throw new Error(`pause failed: ${NO_DEBUG_TARGET_MARKER}`);
+        }
+        return {};
+      });
+
+      const result = await operations.pause('test-session', 1);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(NO_DEBUG_TARGET_MARKER);
+      expect(result.error).toContain(why);
+    });
+
+    it('drops the why once the launch is over — the flag describes a launch that is no longer running', async () => {
+      mockSession.state = SessionState.STOPPED;
+      mockSession.debuggerDisabled = true;
+
+      const result = await operations.getStackTraceDetailed('test-session');
+
+      expect(result.frames).toEqual([]);
+      expect(result.note ?? '').not.toContain(why);
     });
 
     it('says why stepping and continuing find nothing paused', async () => {

@@ -81,7 +81,8 @@ describe('session tool handlers', () => {
       const now = new Date();
       ctx.sessionManager.getAllSessions.mockReturnValue([
         { id: 'off', name: 'o', language: 'python', state: 'running', createdAt: now, debuggerDisabled: true },
-        { id: 'on', name: 'n', language: 'python', state: 'running', createdAt: now }
+        { id: 'on', name: 'n', language: 'python', state: 'running', createdAt: now },
+        { id: 'over', name: 'v', language: 'python', state: 'stopped', createdAt: now, debuggerDisabled: true }
       ]);
 
       const result = await handleListDebugSessions(ctx);
@@ -90,6 +91,7 @@ describe('session tool handlers', () => {
 
       expect(byId.off.debuggerDisabled).toBe(true);
       expect(byId.on).not.toHaveProperty('debuggerDisabled');
+      expect(byId.over).not.toHaveProperty('debuggerDisabled');
     });
   });
 });

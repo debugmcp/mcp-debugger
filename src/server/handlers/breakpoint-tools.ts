@@ -14,7 +14,7 @@ import type { FunctionBreakpointRemoval } from '../../session/session-manager-op
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { requireSessionId, type WithSessionId } from '../tool-validation.js';
 import { readLineContext } from './shared.js';
-import { ErrorMessages } from '../../utils/error-messages.js';
+import { debuggerOffWhy } from '../../session/debugger-off.js';
 import { failureResult, jsonResult, sessionErrorResultOrThrow, type ToolResult } from '../tool-result.js';
 
 /**
@@ -23,9 +23,11 @@ import { failureResult, jsonResult, sessionErrorResultOrThrow, type ToolResult }
  * its own answer is kept; a breakpoint it verified anyway needs no note.
  */
 function debuggerOffNote(ctx: ToolContext, sessionId: string, verified: boolean): string | undefined {
-  return !verified && ctx.sessionManager.getSession(sessionId)?.debuggerDisabled
-    ? ErrorMessages.debuggerOffForLaunch
-    : undefined;
+  if (verified) {
+    return undefined;
+  }
+  const session = ctx.sessionManager.getSession(sessionId);
+  return session ? debuggerOffWhy(session) : undefined;
 }
 
 export const setBreakpointTool: ToolHandler = async (ctx, args) => {
@@ -245,8 +247,13 @@ export const listBreakpointsTool: ToolHandler = async (ctx, args) => {
       ? ctx.sessionManager.listFunctionBreakpoints(args.sessionId)
       : [];
     // Per-breakpoint records carry the adapter's own answers; the one reason
-    // none of them can bind right now goes on the response (issue #749).
-    const debuggerOff = ctx.sessionManager.getSession(args.sessionId)?.debuggerDisabled === true;
+    // the unverified ones cannot bind right now goes on the response (issue
+    // #749) — like set_breakpoint's note, a breakpoint the adapter verified
+    // anyway is not contradicted.
+    const anyUnverified =
+      breakpoints.some((bp) => !bp.verified) || functionBreakpoints.some((bp) => !bp.verified);
+    const session = ctx.sessionManager.getSession(args.sessionId);
+    const why = anyUnverified && session ? debuggerOffWhy(session) : undefined;
     return jsonResult({
       success: true,
       breakpoints,
@@ -254,7 +261,7 @@ export const listBreakpointsTool: ToolHandler = async (ctx, args) => {
       ...(args.file === undefined
         ? { functionBreakpoints, functionCount: functionBreakpoints.length }
         : {}),
-      ...(debuggerOff ? { warning: ErrorMessages.debuggerOffForLaunch } : {})
+      ...(why ? { warning: why } : {})
     });
   } catch (error) {
     return sessionErrorResultOrThrow(error);

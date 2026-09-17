@@ -436,10 +436,14 @@ export interface DebugSessionInfo {
    * True while the current launch runs with the debugger off: the launch
    * carried `noDebug: true` and the adapter honours it (issue #710), so no
    * breakpoint can bind and no stop is expected. Set by the launcher, reset
-   * per launch and attach, and cleared by the first `stopped` event that
-   * arrives anyway — a real stop proves the debugger on for this adapter
-   * build. Later surfaces (set_breakpoint, list_breakpoints, pause,
-   * stepping, inspection) read it to say why (issue #749).
+   * per launch and attach, and cleared by a `stopped` event only a live
+   * debugger produces (breakpoint, exception, entry, step — not a pause,
+   * which js-debug lands under the flag with breakpoints still off): such a
+   * stop proves the debugger on for this adapter build. Projected, and
+   * consulted by the later surfaces (set_breakpoint, list_breakpoints,
+   * pause, stepping, inspection), only while the session is running or
+   * paused — once it is stopped or in error the record describes nothing
+   * that is running (issue #749).
    */
   debuggerDisabled?: boolean;
   /**
