@@ -4432,4 +4432,101 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(bpArg).not.toHaveProperty('suspendPolicy');
     });
   });
+
+  /**
+   * A session whose launch runs with the debugger off (noDebug honoured,
+   * issue #710) still sends every request to the adapter and surfaces the
+   * adapter's own answer; the recorded fact supplies the why beside it
+   * (issue #749).
+   */
+  describe('a launch running with the debugger off says so on every later surface (issue #749)', () => {
+    const why = ErrorMessages.debuggerOffForLaunch;
+
+    it('has one sentence for the why, naming the fact and the remedy', () => {
+      expect(why).toMatch(/debugger is off for this launch/);
+      expect(why).toMatch(/noDebug/);
+    });
+
+    it('explains a pause that the adapter accepted but that never lands, instead of guessing at native code', async () => {
+      vi.useFakeTimers();
+      try {
+        mockSession.state = SessionState.RUNNING;
+        mockSession.debuggerDisabled = true;
+        mockProxyManager.sendDapRequest.mockResolvedValue({});
+        const describePendingStop = vi.fn().mockReturnValue('Explained by the policy.');
+        vi.spyOn(operations as any, 'selectPolicy').mockReturnValue({ describePendingStop } as any);
+
+        const promise = operations.pause('test-session', 1);
+        await vi.advanceTimersByTimeAsync(5000);
+        const result = await promise;
+
+        // The pause was still sent: the adapter's answer is the ground truth.
+        expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('pause', expect.objectContaining({ threadId: 1 }));
+        expect(result.success).toBe(true);
+        expect(result.data?.pending).toBe(true);
+        expect(result.data?.message).toBe(`${ErrorMessages.pausePending(5)} ${why}`);
+        expect(describePendingStop).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps the adapter's refusal of a pause and appends the why", async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockSession.debuggerDisabled = true;
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'pause') {
+          throw new Error('Internal debugger error: Not supported in noDebug mode.');
+        }
+        return {};
+      });
+
+      await expect(operations.pause('test-session', 1)).rejects.toThrow(
+        `Internal debugger error: Not supported in noDebug mode. (${why})`
+      );
+    });
+
+    it('says why stepping and continuing find nothing paused', async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockSession.debuggerDisabled = true;
+
+      const step = await operations.stepOver('test-session');
+      expect(step.success).toBe(false);
+      expect(step.error).toBe(`Not paused: ${why}`);
+
+      const cont = await operations.continue('test-session');
+      expect(cont.success).toBe(false);
+      expect(cont.error).toBe(`Not paused: ${why}`);
+    });
+
+    it('leaves the plain "Not paused" alone when the debugger is on', async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockSession.debuggerDisabled = undefined;
+
+      const step = await operations.stepOver('test-session');
+      expect(step.error).toBe('Not paused');
+    });
+
+    it('says why an expression cannot be evaluated', async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockSession.debuggerDisabled = true;
+
+      const result = await operations.evaluateExpression('test-session', '1 + 1');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not paused');
+      expect(result.error).toContain(why);
+    });
+
+    it('says why the stack trace is empty', async () => {
+      mockSession.state = SessionState.RUNNING;
+      mockSession.debuggerDisabled = true;
+
+      const result = await operations.getStackTraceDetailed('test-session');
+
+      expect(result.frames).toEqual([]);
+      expect(result.note).toMatch(/not paused/i);
+      expect(result.note).toContain(why);
+    });
+  });
 });

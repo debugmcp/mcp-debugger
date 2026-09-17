@@ -3,6 +3,7 @@
  * list_breakpoints / remove_breakpoint / clear_breakpoints
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { ErrorMessages } from '../../../../src/utils/error-messages.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { DebugMcpServer } from '../../../../src/server.js';
@@ -91,6 +92,31 @@ describe('Server Breakpoint Management Tools', () => {
       expect(content.breakpoints).toHaveLength(2);
       expect(content.breakpoints[0]).toMatchObject({ id: 'bp-1', adapterId: 3, verified: true });
       expect(mockSessionManager.listBreakpoints).toHaveBeenCalledWith('test-session', undefined);
+    });
+
+    it('says why none of the breakpoints can bind while the launch runs with the debugger off (issue #749)', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        state: 'running',
+        sessionLifecycle: 'ACTIVE',
+        debuggerDisabled: true
+      });
+      mockSessionManager.listBreakpoints.mockReturnValue([
+        { id: 'bp-1', file: '/a.py', line: 10, verified: false, message: 'Unbound breakpoint' }
+      ]);
+      mockSessionManager.listFunctionBreakpoints.mockReturnValue([]);
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'list_breakpoints', arguments: { sessionId: 'test-session' } }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      // The adapter's own per-breakpoint answer is untouched.
+      expect(content.breakpoints[0].message).toBe('Unbound breakpoint');
+      expect(content.warning).toMatch(/debugger is off for this launch/);
+      expect(content.warning).toBe(ErrorMessages.debuggerOffForLaunch);
     });
 
     it('always includes empty function-breakpoint fields in the unfiltered response (#306)', async () => {

@@ -52,3 +52,16 @@ describe('SessionStore.getAll() lastStop projection (issue #720)', () => {
     }
   });
 });
+
+describe('SessionStore.getAll() debuggerDisabled projection (issue #749)', () => {
+  it('projects debuggerDisabled only while the launch runs with the debugger off', () => {
+    const { store, id } = storeWith(SessionState.RUNNING);
+    expect(store.getAll().find((s) => s.id === id)!).not.toHaveProperty('debuggerDisabled');
+
+    store.get(id)!.debuggerDisabled = true;
+    expect(store.getAll().find((s) => s.id === id)!.debuggerDisabled).toBe(true);
+
+    store.get(id)!.debuggerDisabled = undefined;
+    expect(store.getAll().find((s) => s.id === id)!).not.toHaveProperty('debuggerDisabled');
+  });
+});

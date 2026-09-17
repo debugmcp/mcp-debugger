@@ -13,6 +13,7 @@ import {
   handleGetLocalVariables
 } from '../../../../../src/server/handlers/inspection-tools.js';
 import { SessionTerminatedError } from '../../../../../src/errors/debug-errors.js';
+import { ErrorMessages } from '../../../../../src/utils/error-messages.js';
 import { createMockToolContext } from '../server-test-helpers.js';
 
 // DebugMcpServer builds its dependencies in the constructor; mock the container
@@ -219,6 +220,27 @@ describe('inspection tool handlers', () => {
       expect(payload.success).toBe(true);
       expect(payload.count).toBe(0);
       expect(payload.message).toContain('No stack frames available');
+    });
+
+    it('says why no frame is available while the launch runs with the debugger off (issue #749)', async () => {
+      ctx.sessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        state: 'running',
+        sessionLifecycle: 'ACTIVE',
+        debuggerDisabled: true
+      });
+      ctx.sessionManager.getLocalVariables.mockResolvedValue({
+        variables: [],
+        frame: null,
+        scopeName: null
+      });
+
+      const result = await handleGetLocalVariables(ctx, { sessionId: 'test-session' });
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.success).toBe(true);
+      expect(payload.message).toContain('No stack frames available');
+      expect(payload.message).toContain(ErrorMessages.debuggerOffForLaunch);
     });
 
     it('shows "no local scope" message when frame exists but no scope', async () => {

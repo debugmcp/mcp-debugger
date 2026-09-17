@@ -242,6 +242,9 @@ export class DebugLauncher {
     session.lastProxyError = undefined;
     session.failureDiagnostics = undefined;
     session.lastStop = undefined;
+    // The previous launch's debugger-off decision does not carry over
+    // (issue #749); this attempt decides again below.
+    session.debuggerDisabled = undefined;
     this.ctx.logger.info(`[SessionManager] Session ${sessionId} lifecycle state set to ACTIVE`);
 
     // Record the launch spec for restart_debugging BEFORE attempting the
@@ -275,6 +278,14 @@ export class DebugLauncher {
     const noDebug = !isAttachShaped && resolveLaunchFlag('noDebug', dapLaunchArgs, adapterLaunchConfig);
     const honoursNoDebug = policy.honoursNoDebug === true;
     const debuggerOff = noDebug && honoursNoDebug;
+    // Recorded on the session so the surfaces after this response can say
+    // why they answer in non-debugger terms (issue #749). Not for a dry run:
+    // nothing launches. Written before the proxy starts, so the core's
+    // per-launch reset (which runs inside proxyLauncher.start) is not the
+    // place to clear it — the block above is.
+    if (debuggerOff && !dryRunSpawn) {
+      session.debuggerDisabled = true;
+    }
     const noDebugWarning = buildNoDebugLaunchWarning(
       session,
       { noDebug, stopOnEntry: resolveLaunchFlag('stopOnEntry', dapLaunchArgs, adapterLaunchConfig) },

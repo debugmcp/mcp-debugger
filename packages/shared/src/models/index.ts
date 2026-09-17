@@ -433,6 +433,16 @@ export interface DebugSessionInfo {
   /** Present when the session is in ERROR because its proxy failed. */
   diagnostics?: SessionFailureDiagnostics;
   /**
+   * True while the current launch runs with the debugger off: the launch
+   * carried `noDebug: true` and the adapter honours it (issue #710), so no
+   * breakpoint can bind and no stop is expected. Set by the launcher, reset
+   * per launch and attach, and cleared by the first `stopped` event that
+   * arrives anyway — a real stop proves the debugger on for this adapter
+   * build. Later surfaces (set_breakpoint, list_breakpoints, pause,
+   * stepping, inspection) read it to say why (issue #749).
+   */
+  debuggerDisabled?: boolean;
+  /**
    * Live DAP mirror endpoint from expose_session (issue #217), host/port
    * only — the attach token is returned solely by the expose_session tool.
    */

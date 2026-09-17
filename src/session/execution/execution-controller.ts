@@ -136,6 +136,16 @@ function isSameLine(a: StopLocation, b: StopLocation): boolean {
   return a.line === b.line && samePath(a.file, b.file);
 }
 
+/**
+ * The step/continue refusal for a session that is not paused, with the why
+ * when the session's launch runs with the debugger off (issue #749).
+ */
+function notPausedError(session: Pick<ManagedSession, 'debuggerDisabled'>): string {
+  return session.debuggerDisabled
+    ? `Not paused: ${ErrorMessages.debuggerOffForLaunch}`
+    : 'Not paused';
+}
+
 export class ExecutionController {
   constructor(
     private readonly ctx: ExecutionContext,
@@ -177,7 +187,7 @@ export class ExecutionController {
     }
     if (session.state !== SessionState.PAUSED) {
       this.ctx.logger.warn(`[SM ${logTag} ${sessionId}] Not paused. State: ${session.state}`);
-      return { success: false, error: 'Not paused', state: session.state };
+      return { success: false, error: notPausedError(session), state: session.state };
     }
     if (typeof threadId !== 'number') {
       this.ctx.logger.warn(`[SM ${logTag} ${sessionId}] No current thread ID.`);
@@ -201,7 +211,7 @@ export class ExecutionController {
     }
     if (session.state !== SessionState.PAUSED) {
       this.ctx.logger.warn(`[SM ${logTag} ${sessionId}] No longer paused after the origin read. State: ${session.state}`);
-      return { success: false, error: 'Not paused', state: session.state };
+      return { success: false, error: notPausedError(session), state: session.state };
     }
 
     this.ctx.logger.info(`[SM ${logTag} ${sessionId}] Sending DAP '${command}' for threadId ${threadId}`);
@@ -429,7 +439,7 @@ export class ExecutionController {
       this.ctx.logger.warn(
         `[SessionManager continue] Session ${sessionId} not paused. State: ${session.state}.`
       );
-      return { success: false, error: 'Not paused', state: session.state };
+      return { success: false, error: notPausedError(session), state: session.state };
     }
     if (typeof threadId !== 'number') {
       this.ctx.logger.warn(
@@ -622,7 +632,11 @@ export class ExecutionController {
         `[SessionManager pause] No stopped event within ${this.ctx.tunables.pauseGraceMs}ms grace window in session ${sessionId}; completing asynchronously`
       );
       const pausePending = ErrorMessages.pausePending(this.ctx.tunables.pauseGraceMs / 1000);
-      const hint = await this.describePendingStop(session, sessionId, 'pause');
+      // With the debugger off for this launch the why is known (issue #749);
+      // the policy's guess at native code or a syscall would be wrong.
+      const hint = session.debuggerDisabled
+        ? ErrorMessages.debuggerOffForLaunch
+        : await this.describePendingStop(session, sessionId, 'pause');
       return {
         success: true,
         state: session.state,
@@ -647,6 +661,11 @@ export class ExecutionController {
     );
     if (errorMessage.includes(NO_DEBUG_TARGET_MARKER)) {
       return { success: false, error: errorMessage, state: session.state };
+    }
+    if (session.debuggerDisabled) {
+      // The adapter refused the pause (CodeLLDB under noDebug): its answer
+      // stands, with the why beside it (issue #749).
+      throw new Error(`${errorMessage} (${ErrorMessages.debuggerOffForLaunch})`);
     }
     throw outcome.error instanceof Error ? outcome.error : new Error(errorMessage);
   }

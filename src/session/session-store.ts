@@ -289,6 +289,8 @@ export class SessionStore {
       ...(s.state === SessionState.ERROR && s.failureDiagnostics
         ? { diagnostics: s.failureDiagnostics }
         : {}),
+      // The current launch runs with the debugger off (issue #749).
+      ...(s.debuggerDisabled ? { debuggerDisabled: true } : {}),
       // Mirror endpoint without the token (issue #217); the isRunning gate
       // keeps the projection honest on teardown paths that skip cleanup.
       ...(s.exposure && s.proxyManager?.isRunning()

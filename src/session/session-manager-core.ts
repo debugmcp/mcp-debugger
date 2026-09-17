@@ -736,6 +736,10 @@ export abstract class SessionManagerCore extends EventEmitter {
       }
 
       session.firstStopHandled = true;
+      // A stop is stronger evidence than the policy's noDebug pin: this
+      // adapter build debugs after all, so the later surfaces must stop
+      // explaining themselves in debugger-off terms (issue #749).
+      session.debuggerDisabled = undefined;
     };
     proxyManager.on('stopped', handleStopped);
     handlers.set('stopped', handleStopped);

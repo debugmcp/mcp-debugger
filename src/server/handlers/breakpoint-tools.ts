@@ -14,7 +14,19 @@ import type { FunctionBreakpointRemoval } from '../../session/session-manager-op
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { requireSessionId, type WithSessionId } from '../tool-validation.js';
 import { readLineContext } from './shared.js';
+import { ErrorMessages } from '../../utils/error-messages.js';
 import { failureResult, jsonResult, sessionErrorResultOrThrow, type ToolResult } from '../tool-result.js';
+
+/**
+ * The why beside an unverified answer while the session's launch runs with
+ * the debugger off (issue #749). The request still went to the adapter and
+ * its own answer is kept; a breakpoint it verified anyway needs no note.
+ */
+function debuggerOffNote(ctx: ToolContext, sessionId: string, verified: boolean): string | undefined {
+  return !verified && ctx.sessionManager.getSession(sessionId)?.debuggerDisabled
+    ? ErrorMessages.debuggerOffForLaunch
+    : undefined;
+}
 
 export const setBreakpointTool: ToolHandler = async (ctx, args) => {
   const isFunctionBp = args.function !== undefined;
@@ -105,7 +117,10 @@ async function setFunctionBreakpointBranch(ctx: ToolContext, args: WithSessionId
       timestamp: Date.now()
     });
 
-    const warnings = [breakpoint.message, fnGate.warning, normalized?.note, nameHint, syncWarning].filter(Boolean);
+    const warnings = [
+      breakpoint.message, fnGate.warning, normalized?.note, nameHint, syncWarning,
+      debuggerOffNote(ctx, args.sessionId, breakpoint.verified)
+    ].filter(Boolean);
     return jsonResult({
       success: true,
       breakpointId: breakpoint.id,
@@ -177,7 +192,10 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): P
         }`
       : undefined;
 
-    const warnings = [breakpoint.message, logPointGate.warning, syncWarning, snapWarning].filter(Boolean);
+    const warnings = [
+      breakpoint.message, logPointGate.warning, syncWarning, snapWarning,
+      debuggerOffNote(ctx, args.sessionId, breakpoint.verified)
+    ].filter(Boolean);
     const result: ToolResult = jsonResult({
       success: true,
       breakpointId: breakpoint.id,
@@ -226,13 +244,17 @@ export const listBreakpointsTool: ToolHandler = async (ctx, args) => {
     const functionBreakpoints = args.file === undefined
       ? ctx.sessionManager.listFunctionBreakpoints(args.sessionId)
       : [];
+    // Per-breakpoint records carry the adapter's own answers; the one reason
+    // none of them can bind right now goes on the response (issue #749).
+    const debuggerOff = ctx.sessionManager.getSession(args.sessionId)?.debuggerDisabled === true;
     return jsonResult({
       success: true,
       breakpoints,
       count: breakpoints.length,
       ...(args.file === undefined
         ? { functionBreakpoints, functionCount: functionBreakpoints.length }
-        : {})
+        : {}),
+      ...(debuggerOff ? { warning: ErrorMessages.debuggerOffForLaunch } : {})
     });
   } catch (error) {
     return sessionErrorResultOrThrow(error);

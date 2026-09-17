@@ -152,6 +152,22 @@ export const ErrorMessages = {
 
 
   /**
+   * The why a session whose current launch runs with the debugger off appends
+   * to every answer that would otherwise read in debugger terms (issue #749):
+   * `dapLaunchArgs.noDebug` on an adapter that honours it (issue #710) —
+   * an unverified breakpoint, a pause that never lands, "not paused" from
+   * stepping and inspection. Names the fact and the remedy, never the
+   * adapter's own answer, which stays as it came. "No stop is expected"
+   * rather than "cannot come": js-debug still lands a pause under the flag.
+   * Used in: src/server/handlers/breakpoint-tools.ts, src/server/handlers/inspection-tools.ts,
+   *   src/session/execution/execution-controller.ts, src/session/inspection/frame-anchor-resolver.ts,
+   *   src/session/inspection/expression-evaluator.ts
+   */
+  debuggerOffForLaunch:
+    'the debugger is off for this launch (noDebug is true): breakpoints cannot bind and no stop is expected; ' +
+    'drop noDebug and launch again to debug',
+
+  /**
    * Suffix appended to the attach message when the post-attach pause was
    * requested (explicitly or by the default) but no 'stopped' event arrived
    * within the bounded wait, so the response reports state "running" with

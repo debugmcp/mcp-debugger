@@ -38,6 +38,7 @@ const ROOT = path.resolve(__dirname, '../..');
 const CRASHING_SCRIPT = path.resolve(ROOT, 'tests', 'fixtures', 'debug-scripts', 'with-errors.py');
 const JS_CRASHING_SCRIPT = path.resolve(ROOT, 'tests', 'fixtures', 'debug-scripts', 'js-throws.js');
 const JS_CLEAN_SCRIPT = path.resolve(ROOT, 'tests', 'fixtures', 'debug-scripts', 'js-clean-exit.js');
+const JS_PAUSE_SCRIPT = path.resolve(ROOT, 'examples', 'javascript', 'pause_test.js');
 const ATTACH_SCRIPT = path.resolve(ROOT, 'tests', 'fixtures', 'python', 'attach_then_raise.py');
 const PYTHON = process.platform === 'win32' ? 'python' : 'python3';
 
@@ -55,6 +56,7 @@ interface SessionSnapshot {
     };
   };
   exitCode?: number;
+  debuggerDisabled?: boolean;
 }
 
 async function getSessionSnapshot(client: Client, sessionId: string): Promise<SessionSnapshot | undefined> {
@@ -515,6 +517,84 @@ describe('Break-on-exception (issue #220)', () => {
       expect(stopped, 'session should run to completion').toBeDefined();
       expect(stopped!.lastStop).toBeUndefined();
       expect(stopped!.exitCode).toBe(0);
+    }, 60000);
+
+    it('says the debugger is off on every later surface of a noDebug session (issue #749)', async () => {
+      sessionId = await createSession('javascript', 'js-nodebug-surfaces');
+      const bp = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'set_breakpoint',
+        arguments: { sessionId, file: JS_PAUSE_SCRIPT, line: 4 }
+      }));
+      expect(bp.success, JSON.stringify(bp)).toBe(true);
+
+      // A program that stays up, so the surfaces are asked while it runs.
+      const startRes = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: JS_PAUSE_SCRIPT,
+          dapLaunchArgs: { stopOnEntry: false, noDebug: true }
+        }
+      }));
+      expect(startRes.success, JSON.stringify(startRes)).toBe(true);
+      expect(startRes.state).toBe('running');
+      expect((startRes as { warning?: string }).warning).toMatch(/noDebug is true/);
+
+      const why = /the debugger is off for this launch/;
+
+      // The session remembers the decision...
+      const running = await getSessionSnapshot(mcpClient!, sessionId);
+      expect(running?.debuggerDisabled).toBe(true);
+
+      // ...a live breakpoint still goes to js-debug, whose own answer is
+      // kept ("Unbound breakpoint") with the why beside it...
+      const live = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'set_breakpoint',
+        arguments: { sessionId, file: JS_PAUSE_SCRIPT, line: 5 }
+      })) as { success?: boolean; verified?: boolean; warning?: string };
+      expect(live.success).toBe(true);
+      expect(live.verified).toBe(false);
+      expect(live.warning).toMatch(/Unbound breakpoint/);
+      expect(live.warning).toMatch(why);
+
+      const listed = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'list_breakpoints',
+        arguments: { sessionId }
+      })) as { warning?: string; breakpoints?: Array<{ verified?: boolean }> };
+      expect(listed.warning).toMatch(why);
+      expect(listed.breakpoints?.every(b => b.verified === false)).toBe(true);
+
+      // ...inspection and stepping say why there is nothing paused...
+      const stack = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'get_stack_trace',
+        arguments: { sessionId }
+      })) as { note?: string };
+      expect(stack.note).toMatch(why);
+
+      const step = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'step_over',
+        arguments: { sessionId }
+      })) as { success?: boolean; error?: string };
+      expect(step.success).toBe(false);
+      expect(step.error).toMatch(/^Not paused: /);
+      expect(step.error).toMatch(why);
+
+      // ...and a pause is still sent to js-debug. Measured: js-debug lands
+      // it even under noDebug (the inspector is attached; only the debug
+      // domains are off), and that stop proves the debugger on — the session
+      // forgets the decision. Should a js-debug build refuse or never land
+      // it, the why rides on that answer instead.
+      const pause = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'pause_execution',
+        arguments: { sessionId }
+      })) as { success?: boolean; state?: string; error?: string; data?: { message?: string } };
+      if (pause.success && pause.state === 'paused') {
+        const paused = await getSessionSnapshot(mcpClient!, sessionId);
+        expect(paused?.state).toBe('paused');
+        expect(paused).not.toHaveProperty('debuggerDisabled');
+      } else {
+        expect(`${pause.error ?? ''} ${pause.data?.message ?? ''}`).toMatch(why);
+      }
     }, 60000);
 
     it('reports exit code 0 for a clean run (issue #247)', async () => {

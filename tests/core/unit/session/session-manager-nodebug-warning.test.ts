@@ -429,4 +429,99 @@ describe('SessionManager launches with noDebug (issue #710)', () => {
       expect(warningOf(result)).toBeUndefined();
     });
   });
+
+  /**
+   * The decision outlives the launch response (issue #749): later surfaces —
+   * set_breakpoint, list_breakpoints, pause, inspection — read it off the
+   * session to say why they answer the way they do.
+   */
+  describe('records the decision on the session (issue #749)', () => {
+    it('sets debuggerDisabled on the session for an honoured noDebug launch', async () => {
+      pinPolicy({ honoursNoDebug: true });
+      const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      runWithoutStopping();
+
+      await launch(s.id, { stopOnEntry: false, noDebug: true });
+
+      expect(sessionManager.getSession(s.id)?.debuggerDisabled).toBe(true);
+    });
+
+    it('leaves it unset where the adapter ignores the flag, and for a launch without it', async () => {
+      const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      runWithoutStopping();
+
+      await launch(s.id, { stopOnEntry: false, noDebug: true });
+      expect(sessionManager.getSession(s.id)?.debuggerDisabled).toBeUndefined();
+
+      pinPolicy({ honoursNoDebug: true });
+      runWithoutStopping();
+      await launch(s.id, { stopOnEntry: false });
+      expect(sessionManager.getSession(s.id)?.debuggerDisabled).toBeUndefined();
+    });
+
+    it('clears it on the next launch without the flag', async () => {
+      pinPolicy({ honoursNoDebug: true });
+      const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      runWithoutStopping();
+      await launch(s.id, { stopOnEntry: false, noDebug: true });
+      expect(sessionManager.getSession(s.id)?.debuggerDisabled).toBe(true);
+
+      dependencies.mockProxyManager.simulateEvent('terminated');
+      await vi.runAllTimersAsync();
+      runWithoutStopping();
+      await launch(s.id, { stopOnEntry: false });
+
+      expect(sessionManager.getSession(s.id)?.debuggerDisabled).toBeUndefined();
+    });
+
+    it('does not set it for a dry run — nothing launched', async () => {
+      pinPolicy({ honoursNoDebug: true });
+      const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      const proxy = dependencies.mockProxyManager;
+      proxy.start = vi.fn().mockImplementation(async (startConfig) => {
+        proxy.startCalls.push(startConfig);
+        process.nextTick(() => proxy.emit('dry-run-complete', 'python app.py', '/work/src/app.py'));
+      }) as MockProxyManager['start'];
+
+      const startPromise = sessionManager.startDebugging(s.id, '/work/src/app.py', [], { stopOnEntry: false, noDebug: true }, true);
+      await vi.runAllTimersAsync();
+      const result = await startPromise;
+
+      expect((result.data as { dryRun?: boolean }).dryRun).toBe(true);
+      expect(sessionManager.getSession(s.id)?.debuggerDisabled).toBeUndefined();
+    });
+
+    it('is cleared by a stop that arrives anyway — the adapter proved the debugger on', async () => {
+      pinPolicy({ honoursNoDebug: true });
+      const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      runWithoutStopping();
+      await launch(s.id, { stopOnEntry: false, noDebug: true });
+      expect(sessionManager.getSession(s.id)?.debuggerDisabled).toBe(true);
+
+      // A later pause lands (js-debug does this under noDebug: measured).
+      dependencies.mockProxyManager.simulateEvent('stopped', 1, 'pause', { reason: 'pause', threadId: 1 });
+      await vi.runAllTimersAsync();
+
+      expect(sessionManager.getSession(s.id)?.state).toBe(SessionState.PAUSED);
+      expect(sessionManager.getSession(s.id)?.debuggerDisabled).toBeUndefined();
+    });
+
+    it('recomputes it on restart_debugging, which replays the same arguments', async () => {
+      pinPolicy({ honoursNoDebug: true });
+      const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      runWithoutStopping();
+      await launch(s.id, { stopOnEntry: false, noDebug: true });
+      dependencies.mockProxyManager.simulateEvent('terminated');
+      await vi.runAllTimersAsync();
+      // A stop-free termination leaves the flag; restart resets and re-decides.
+      runWithoutStopping();
+
+      const restartPromise = sessionManager.restartDebugging(s.id);
+      await vi.runAllTimersAsync();
+      const result = await restartPromise;
+
+      expect(result.success).toBe(true);
+      expect(sessionManager.getSession(s.id)?.debuggerDisabled).toBe(true);
+    });
+  });
 });
