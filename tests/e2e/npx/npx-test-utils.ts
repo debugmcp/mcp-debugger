@@ -4,7 +4,7 @@
  * Helper functions for testing MCP debugger through npx distribution (npm pack)
  */
 
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -15,6 +15,7 @@ import { appendFile, mkdir, writeFile } from 'fs/promises';
 import { createHash } from 'crypto';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -442,8 +443,12 @@ export async function verifyPackageContents(tarballPath: string): Promise<{
   console.log('[NPX Test] Verifying package contents...');
   
   try {
-    // List tarball contents
-    const { stdout } = await execAsync(`tar -tzf "${tarballPath}"`);
+    // A relative archive argument keeps GNU tar from treating a Windows drive
+    // prefix as a remote host (#752); execFile preserves literal filenames.
+    const absoluteTarballPath = path.resolve(tarballPath);
+    const { stdout } = await execFileAsync('tar', ['-tzf', `./${path.basename(absoluteTarballPath)}`], {
+      cwd: path.dirname(absoluteTarballPath)
+    });
     const contents = stdout.toLowerCase();
     const entries = new Set(stdout.split('\n').map((line) => line.trim()).filter(Boolean));
 
