@@ -72,11 +72,11 @@ export function emptyAttrTables(): AttrTables {
 }
 
 const ATTR_RE =
-  /\bcob_field_attr\s+(a_\d+)\s*=\s*\{\s*(0x[0-9a-fA-F]+|\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(0x[0-9a-fA-F]+|\d+)\s*,\s*(NULL|&?\s*p_\d+)\s*\}/;
+  /\bcob_field_attr\s+(a_\d+)\s*=\s*\{\s*(0x[0-9a-fA-F]+|\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(0x[0-9a-fA-F]+|\d+)\s*,\s*(NULL|p_\d+|&\s*p_\d+)\s*\}/;
 const PIC_START_RE = /\bcob_pic_symbol\s+(p_\d+)\s*\[\s*\]\s*=/;
 const PIC_PAIR_RE = /\{\s*'((?:\\.|[^'\\]))'\s*,\s*(\d+)\s*\}/g;
 const CONST_RE =
-  /\bcob_field\s+(c_\d+)\s*=\s*\{\s*(\d+)\s*,\s*(?:\(\s*[^)]*\)\s*)?"((?:\\.|[^"\\])*)"\s*,\s*&\s*(a_\d+)\s*\}/;
+  /\bcob_field\s+(c_\d+)\s*=\s*\{\s*(\d+)\s*,\s*(?:\([^)]*\)\s*)?"((?:\\.|[^"\\])*)"\s*,\s*&\s*(a_\d+)\s*\}/;
 const STORAGE_ARRAY_RE = /^\s*(?:static\s+)?(?:cob_u8_t|unsigned\s+char)\s+(b_\d+)\s*\[\s*(\d+)\s*\]/;
 const STORAGE_INT_RE = /^\s*(?:static\s+)?int\s+(b_\d+)\s*(?:=\s*0\s*)?;/;
 const STORAGE_POINTER_RE = /^\s*(?:static\s+)?(?:cob_u8_t|unsigned\s+char)\s*\*\s*(b_\d+)\s*(?:=\s*NULL\s*)?;/;

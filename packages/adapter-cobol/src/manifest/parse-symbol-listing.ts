@@ -102,15 +102,17 @@ function parseRow(line: string, columns: Columns, section: CobolSection | undefi
     return undefined;
   }
   const rest = line.slice(columns.name).trim();
-  const nameMatch = /^(\S+)\s*(.*)$/.exec(rest);
-  if (!nameMatch) {
+  if (rest.length === 0) {
     return undefined;
   }
+  const nameEnd = rest.search(/\s/);
+  const name = nameEnd < 0 ? rest : rest.slice(0, nameEnd);
+  const pictureColumn = nameEnd < 0 ? '' : rest.slice(nameEnd).trim();
   const row: ListingRow = {
     type,
     level: parseInt(levelText, 10),
-    name: nameMatch[1].toUpperCase(),
-    ...splitPictureColumn(nameMatch[2])
+    name: name.toUpperCase(),
+    ...splitPictureColumn(pictureColumn)
   };
   if (section) {
     row.section = section;

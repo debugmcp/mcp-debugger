@@ -571,6 +571,11 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
 
     if (stdinFile) {
       const stdinPath = path.resolve(baseDir, stdinFile);
+      if (stdinPath.includes('"')) {
+        // The path travels inside double quotes on an LLDB command line that has no
+        // escape mechanism (see quoteLldbPath), so a quote in it cannot be expressed.
+        throw new Error(`stdinFile path cannot contain a double quote: ${stdinPath}`);
+      }
       if (!fs.existsSync(stdinPath)) {
         throw new AdapterError(`stdinFile not found: ${stdinPath}`, AdapterErrorCode.SCRIPT_NOT_FOUND);
       }
@@ -725,7 +730,10 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
 
   translateErrorMessage(error: Error): string {
     const message = error.message;
-    if (/cobc.*not found|No such file.*cobc/i.test(message)) {
+    const lower = message.toLowerCase();
+    const cobcAt = lower.indexOf('cobc');
+    const noSuchFileAt = lower.indexOf('no such file');
+    if ((cobcAt >= 0 && lower.indexOf('not found', cobcAt) >= 0) || (noSuchFileAt >= 0 && lower.indexOf('cobc', noSuchFileAt) >= 0)) {
       return this.getMissingExecutableError();
     }
     if (/configuration error/i.test(message) && /\.conf/.test(message)) {
@@ -816,7 +824,13 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
   }
 }
 
-/** LLDB settings take one token; quote paths with spaces. */
+/**
+ * `settings set` is a raw LLDB command: the value is the untokenised remainder of the
+ * line, and a file-path setting strips surrounding quotes and whitespace from it and
+ * keeps the rest verbatim, backslashes included (CommandObjectSettingsSet::DoExecute,
+ * OptionValueFileSpec::SetValueFromString). So the path goes in double quotes with
+ * nothing escaped; the caller refuses a path that itself contains a double quote.
+ */
 function quoteLldbPath(p: string): string {
-  return /\s/.test(p) ? `"${p.replace(/"/g, '\\"')}"` : p;
+  return `"${p}"`;
 }

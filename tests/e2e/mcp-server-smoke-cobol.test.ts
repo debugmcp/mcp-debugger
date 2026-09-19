@@ -356,7 +356,8 @@ describe.skipIf(SKIP_COBOL)('MCP Server COBOL Debugging Smoke Test @requires-cob
     'feeds ACCEPT FROM SYSIN from stdinFile',
     async (ctx) => {
       const sourcePath = cobolSourcePath('sysin');
-      const dir = mkdtempSync(path.join(os.tmpdir(), 'cobol-sysin-'));
+      // A space in the directory name: the path travels quoted on an LLDB command line.
+      const dir = mkdtempSync(path.join(os.tmpdir(), 'cobol sysin '));
       const stdinFile = path.join(dir, 'input.txt');
       writeFileSync(stdinFile, 'hello from sysin\n');
       sessionId = (await call('create_debug_session', { language: 'cobol', name: 'cobol-smoke-sysin' })).sessionId as string;

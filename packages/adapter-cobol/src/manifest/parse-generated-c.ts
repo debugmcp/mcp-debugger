@@ -48,7 +48,7 @@ export interface GeneratedCTexts {
   paths?: { h?: string; lh?: string; lst?: string };
 }
 
-const GENERATED_FROM_RE = /\/\*\s*Generated from\s+(.*?)\s*\*\//;
+const GENERATED_FROM_RE = /\/\*\s*Generated from\s([^*]*)\*\//;
 const SOURCE_FILE_DEFINE_RE = /^\s*#\s*define\s+COB_SOURCE_FILE\s+"((?:\\.|[^"\\])*)"/;
 const LOCAL_INCLUDE_RE = /^\s*#\s*include\s+"([^"]+\.c\.l\d*\.h)"/;
 
@@ -60,7 +60,7 @@ function translationUnitSource(cLines: string[]): string | undefined {
     }
     const header = GENERATED_FROM_RE.exec(line);
     if (header) {
-      return header[1];
+      return header[1].trim();
     }
   }
   return undefined;

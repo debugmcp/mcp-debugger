@@ -283,8 +283,8 @@ export function parseDumpRoutine(input: DumpRoutineInput): DumpRoutineResult {
 
   const conditionValues = (valueText: string): CobolConditionValue[] => {
     const values: CobolConditionValue[] = [];
-    for (const alternative of valueText.split(/\s+OR\s+/)) {
-      const [loText, hiText] = alternative.split(/\s+THRU\s+/);
+    for (const alternative of splitOnKeyword(valueText, 'OR')) {
+      const [loText, hiText] = splitOnKeyword(alternative, 'THRU');
       const lo = resolveValue(loText);
       const hi = hiText !== undefined ? resolveValue(hiText) : undefined;
       const value: CobolConditionValue = { lo: lo.text, resolved: lo.resolved && (hi ? hi.resolved : true) };
@@ -430,10 +430,10 @@ export function parseDumpRoutine(input: DumpRoutineInput): DumpRoutineResult {
     }
 
     if (call.level === 88) {
-      const valueMatch = /\bVALUE\s+(.*?)\s*(?:\/\*.*)?$/.exec(tail);
-      const raw = valueMatch ? valueMatch[1].trim() : tail;
-      item.condition = { values: valueMatch ? conditionValues(raw) : [], raw };
-      if (!valueMatch) {
+      const valueText = valueTagText(tail);
+      const raw = valueText ?? tail;
+      item.condition = { values: valueText !== undefined ? conditionValues(raw) : [], raw };
+      if (valueText === undefined) {
         diag('warn', 'level-88 item without a VALUE tag', call.name);
       }
     }
@@ -534,9 +534,10 @@ export function parseDumpRoutine(input: DumpRoutineInput): DumpRoutineResult {
         diag('warn', `unrecognised cob_dump_file call: ${t}`);
       }
     } else if (/^int\s+max_\d+\s*=/.test(t)) {
-      const m = /^int\s+max_(\d+)\s*=\s*(.+?)\s*;/.exec(t);
+      const m = /^int\s+max_(\d+)\s*=([^;]*);/.exec(t);
       if (m) {
-        const decl: MaxDecl = /^\d+$/.test(m[2]) ? { literal: parseInt(m[2], 10) } : { expr: m[2] };
+        const rhs = m[2].trim();
+        const decl: MaxDecl = /^\d+$/.test(rhs) ? { literal: parseInt(rhs, 10) } : { expr: rhs };
         maxByIndex.set(parseInt(m[1], 10), decl);
       }
     } else if (/^if\s*\(\s*max_\d+\s*>/.test(t)) {
@@ -578,6 +579,68 @@ export function parseDumpRoutine(input: DumpRoutineInput): DumpRoutineResult {
 }
 
 /** Bind each ODO's `dependingExpr` to the item whose storage it reads. */
+/**
+ * Split a VALUE list on a whitespace-delimited keyword (`OR`, `THRU`) outside quoted
+ * literals, in one left-to-right pass: `'A OR B' OR 'C'` -> `["'A OR B'", "'C'"]`.
+ */
+function splitOnKeyword(text: string, keyword: string): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  let quote: string | undefined;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quote !== undefined) {
+      if (ch === quote) {
+        quote = undefined;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (!isSpace(ch)) {
+      continue;
+    }
+    let j = i;
+    while (j < text.length && isSpace(text[j])) {
+      j++;
+    }
+    const keywordEnd = j + keyword.length;
+    if (text.startsWith(keyword, j) && keywordEnd < text.length && isSpace(text[keywordEnd])) {
+      parts.push(text.slice(start, i));
+      let k = keywordEnd;
+      while (k < text.length && isSpace(text[k])) {
+        k++;
+      }
+      start = k;
+      i = k - 1;
+    } else {
+      i = j - 1;
+    }
+  }
+  parts.push(text.slice(start));
+  return parts;
+}
+
+function isSpace(ch: string): boolean {
+  return ch === ' ' || ch === '\t' || ch === '\r' || ch === '\n' || ch === '\f' || ch === '\v';
+}
+
+/** The text after a `VALUE ` tag on a dump-comment tail, up to any trailing C comment, trimmed. */
+function valueTagText(tail: string): string | undefined {
+  const at = tail.search(/\bVALUE\s/);
+  if (at < 0) {
+    return undefined;
+  }
+  let text = tail.slice(at + 'VALUE'.length);
+  const comment = text.indexOf('/*');
+  if (comment >= 0) {
+    text = text.slice(0, comment);
+  }
+  return text.trim();
+}
+
 function resolveDependingOn(items: CobolDataItem[], diag: (level: 'warn' | 'error', message: string, item?: string) => void): void {
   for (const item of items) {
     const expr = item.occurs?.dependingExpr;

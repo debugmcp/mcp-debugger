@@ -223,6 +223,19 @@ describe('parseDumpRoutine', () => {
     expect(byName(result, 'WS-NEXT').parentId).toBeUndefined();
   });
 
+  it('splits a VALUE list on OR and THRU only outside quoted literals', () => {
+    const result = run([
+      '  cob_dump_output ("WORKING-STORAGE");',
+      '  cob_dump_field_ext ( 1, "WS-WORD", COB_SET_FLD (f0, 8, b_10, &a_4), 0, 0);',
+      "  /* cob_dump_field_ext (88, \"WS-EITHER\", COB_SET_FLD (f0, 8, b_10, &a_4), 0, 0); VALUE 'A OR B'  OR  'C THRU D' THRU 'E' */"
+    ]);
+    const values = byName(result, 'WS-EITHER').condition?.values ?? [];
+    expect(values.map((v) => [v.lo, v.hi])).toEqual([
+      ["'A OR B'", undefined],
+      ["'C THRU D'", "'E'"]
+    ]);
+  });
+
   it('resolves REDEFINES at root and nested levels and keeps flags from the tail', () => {
     const result = run([
       '  cob_dump_output ("WORKING-STORAGE");',

@@ -247,6 +247,11 @@ describe.each(VERSIONS)('cobc fixtures $dir', (facts) => {
       expect(findDataItems(program, 'ws-amount in ws-table')).toHaveLength(1);
       expect(findDataItems(program, 'WS-ID OF WS-TABLE')).toEqual([]);
       expect(findDataItems(program, 'NOPE')).toEqual([]);
+      expect(findDataItems(program, 'WS-ID   OF\tWS-GROUP')).toHaveLength(1);
+      // Two names with no qualifier keyword between them, or a dangling keyword, are not references.
+      expect(findDataItems(program, 'WS-ID WS-GROUP')).toEqual([]);
+      expect(findDataItems(program, 'OF WS-GROUP')).toEqual([]);
+      expect(findDataItems(program, 'WS-ID OF')).toEqual([]);
     });
   });
 

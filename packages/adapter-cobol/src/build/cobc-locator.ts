@@ -95,8 +95,15 @@ export function parseCobcVersion(banner: string | null): string | null {
   if (!banner) {
     return null;
   }
-  const match = /(\d+\.\d+(?:\.\d+)?)/.exec(banner);
-  return match ? match[1] : null;
+  // Anchored per whitespace token so a run of digits cannot make the scan quadratic:
+  // `cobc (GnuCOBOL) 3.2.0` -> 3.2.0, `cobc (GnuCOBOL) 3.1.2.0` -> 3.1.2.
+  for (const token of banner.split(/\s+/)) {
+    const match = /^(\d+\.\d+(?:\.\d+)?)/.exec(token);
+    if (match) {
+      return match[1];
+    }
+  }
+  return null;
 }
 
 function describeLocation(

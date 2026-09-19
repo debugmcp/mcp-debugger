@@ -240,6 +240,10 @@ export function createCobolShim(config: CobolShimArgv, deps: ShimDeps = {}): Cob
           return;
         }
         const socket = connect(port, '127.0.0.1');
+        // A DAP turn is a response then an event in two small writes. With Nagle on,
+        // the second waits for the peer's delayed ACK (~40 ms on Linux) — once per
+        // step-loop iteration. CodeLLDB disables it on its side; so does the shim.
+        socket.setNoDelay(true);
         const onError = (error: Error): void => {
           socket.destroy();
           if (now() >= deadline) {
@@ -323,6 +327,7 @@ export function createCobolShim(config: CobolShimArgv, deps: ShimDeps = {}): Cob
   };
 
   const onConnection = (socket: net.Socket): void => {
+    socket.setNoDelay(true);
     if (client) {
       logger.warn('second client connection refused');
       socket.destroy();

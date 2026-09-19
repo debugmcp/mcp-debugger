@@ -14,13 +14,8 @@ import type { CobolDataItem, CobolLineMapEntry, CobolProcRange, CobolProgram } f
  * contiguous ancestors, as in COBOL. More than one result means the reference is ambiguous.
  */
 export function findDataItems(program: CobolProgram, reference: string): CobolDataItem[] {
-  const parts = reference
-    .trim()
-    .toUpperCase()
-    .split(/\s+(?:OF|IN)\s+/)
-    .map((p) => p.trim())
-    .filter((p) => p.length > 0);
-  if (parts.length === 0) {
+  const parts = splitQualifiedReference(reference);
+  if (!parts) {
     return [];
   }
   const [name, ...qualifiers] = parts;
@@ -41,6 +36,30 @@ export function findDataItems(program: CobolProgram, reference: string): CobolDa
     }
     return true;
   });
+}
+
+/**
+ * `WS-ID OF WS-GROUP` -> `['WS-ID', 'WS-GROUP']`: whitespace-separated tokens alternating
+ * name, `OF`/`IN`, name. Anything else (two names with no keyword between them, a leading
+ * or trailing keyword) is not a data reference.
+ */
+function splitQualifiedReference(reference: string): string[] | undefined {
+  const tokens = reference.trim().toUpperCase().split(/\s+/).filter((token) => token.length > 0);
+  if (tokens.length === 0 || tokens.length % 2 === 0) {
+    return undefined;
+  }
+  const parts: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    const keywordSlot = i % 2 === 1;
+    if (keywordSlot !== (token === 'OF' || token === 'IN')) {
+      return undefined;
+    }
+    if (!keywordSlot) {
+      parts.push(token);
+    }
+  }
+  return parts;
 }
 
 /** Ancestors of an item, nearest first. */

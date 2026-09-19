@@ -398,11 +398,11 @@ describe('CobolDebugAdapter', () => {
         const launch = await transformLaunch({ program: 'hello.cob', cwd: tmp, stdinFile: 'input.txt', preRunCommands: ['settings set x y'] });
 
         const stdinPath = path.join(tmp, 'input.txt');
-        expect(launch.preRunCommands).toEqual([`settings set target.input-path ${stdinPath}`, 'settings set x y']);
+        expect(launch.preRunCommands).toEqual([`settings set target.input-path "${stdinPath}"`, 'settings set x y']);
         expect(shimOptions(launch).stdinFile).toBe(stdinPath);
       });
 
-      it('quotes the path when it contains whitespace', async () => {
+      it('quotes a path that contains whitespace verbatim, backslashes untouched', async () => {
         buildMock.mockResolvedValue(buildResult('hello'));
         const spaced = path.join(tmp, 'my inputs');
         fs.mkdirSync(spaced);
@@ -411,6 +411,12 @@ describe('CobolDebugAdapter', () => {
         const launch = await transformLaunch({ program: 'hello.cob', cwd: tmp, stdinFile: path.join('my inputs', 'in.txt') });
 
         expect((launch.preRunCommands as string[])[0]).toBe(`settings set target.input-path "${path.join(spaced, 'in.txt')}"`);
+      });
+
+      it('refuses a stdinFile path that contains a double quote', async () => {
+        buildMock.mockResolvedValue(buildResult('hello'));
+
+        await expect(transformLaunch({ program: 'hello.cob', cwd: tmp, stdinFile: 'in"put.txt' })).rejects.toThrow(/double quote/);
       });
 
       it('throws SCRIPT_NOT_FOUND for a missing stdinFile', async () => {

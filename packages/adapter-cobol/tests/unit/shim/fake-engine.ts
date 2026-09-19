@@ -121,6 +121,9 @@ export class FakeEngine {
       return;
     }
     this.socket = socket;
+    // Like CodeLLDB: a stopped event follows its step response in a second write; with
+    // Nagle on, Linux stalls each such pair ~40 ms (the 400-iteration bound test).
+    socket.setNoDelay(true);
     socket.on('data', (chunk: Buffer) => {
       for (const message of this.decoder.push(chunk)) {
         this.dispatch(message);

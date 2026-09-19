@@ -89,9 +89,10 @@ function resolveTextLiteral(literal: string, length: number, kind?: CobolConditi
   if (fill !== undefined && kind !== 'all') {
     return fill.repeat(Math.max(length, 1));
   }
-  const all = /^ALL\s+(.+)$/i.exec(literal.trim()) ?? (kind === 'all' ? [literal, literal] : null);
-  if (all) {
-    const inner = all[1].trim();
+  const trimmed = literal.trim();
+  const allInner = /^ALL\s/i.test(trimmed) ? trimmed.slice(4).trim() : kind === 'all' ? trimmed : undefined;
+  if (allInner !== undefined) {
+    const inner = allInner;
     const unquoted = /^(['"])(.*)\1$/.exec(inner);
     const unit = unquoted ? unquoted[2] : figurativeFill(inner.toUpperCase()) ?? inner;
     if (unit.length === 0) {

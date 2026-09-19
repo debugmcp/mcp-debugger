@@ -140,7 +140,7 @@ export interface DataExpr {
   offset: number;
 }
 
-const CAST_RE = /^\(\s*(?:const\s+)?(?:cob_u8_t|cob_u8_ptr|unsigned\s+char|char|void|cob_field)\s*\*?\s*\)\s*/;
+const CAST_RE = /^\(\s*(?:const\s+)?(?:cob_u8_t|cob_u8_ptr|unsigned\s+char|char|void|cob_field)\s*(?:\*\s*)?\)\s*/;
 
 /**
  * Parse the data-address expressions cobc writes into `COB_SET_FLD`, `cob_field` initialisers
@@ -179,6 +179,10 @@ export function parseDataExpr(expr: string): DataExpr | undefined {
 
 /** `/* comment *\/` text on a line, trimmed; undefined when there is none. */
 export function trailingComment(line: string): string | undefined {
-  const m = /\/\*\s*(.*?)\s*\*\//.exec(line);
-  return m ? m[1] : undefined;
+  const start = line.indexOf('/*');
+  if (start < 0) {
+    return undefined;
+  }
+  const end = line.indexOf('*/', start + 2);
+  return end < 0 ? undefined : line.slice(start + 2, end).trim();
 }
