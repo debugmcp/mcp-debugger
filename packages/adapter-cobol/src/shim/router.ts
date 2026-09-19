@@ -80,6 +80,9 @@ export function formatStringRegister(env: RouterEnv): string {
   return env.platform === 'win32' ? '$rcx' : '$rdi';
 }
 
+/** How deep the shim looks for the nearest COBOL frame above a libcob/C frame. */
+const WALK_UP_STACK_LEVELS = 64;
+
 export class Router {
   private readonly memory: MemoryReader;
   private readonly variables: VariablesHandler;
@@ -386,7 +389,7 @@ export class Router {
     if (cached || this.state.lastThreadId === undefined) {
       return cached;
     }
-    await this.fetchStack(this.state.lastThreadId, 64);
+    await this.fetchStack(this.state.lastThreadId, WALK_UP_STACK_LEVELS);
     return this.state.frame(frameId);
   }
 
@@ -520,14 +523,22 @@ export class Router {
     } else if (this.state.lastThreadId === undefined) {
       return undefined;
     } else if (this.state.framesOfThread(this.state.lastThreadId).length === 0) {
-      await this.fetchStack(this.state.lastThreadId, 64);
+      await this.fetchStack(this.state.lastThreadId, WALK_UP_STACK_LEVELS);
     }
     const threadId = frame?.threadId ?? this.state.lastThreadId;
     if (threadId === undefined) {
       return undefined;
     }
     const startIndex = frame ? frame.index + 1 : 0;
-    const nearest = this.state.framesOfThread(threadId).find((f) => f.index >= startIndex && f.isCobol);
+    const nearestCobol = (): CachedFrame | undefined =>
+      this.state.framesOfThread(threadId).find((f) => f.index >= startIndex && f.isCobol);
+    let nearest = nearestCobol();
+    if (!nearest && this.state.framesOfThread(threadId).length < WALK_UP_STACK_LEVELS) {
+      // The client may have fetched only the top of the stack (get_local_variables asks for
+      // one frame): the COBOL frame it is inside of is further down. Fetch deeper once.
+      await this.fetchStack(threadId, WALK_UP_STACK_LEVELS);
+      nearest = nearestCobol();
+    }
     if (!nearest) {
       return undefined;
     }

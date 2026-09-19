@@ -102,6 +102,35 @@ describe('cobol shim stackTrace and scopes', () => {
     expect(scopesOf(await h.client.request('scopes', { frameId: 4 })).map((s) => s.name)).toEqual(['Local']);
   });
 
+  it('fetches a deeper stack for the walk-up when the client only asked for the top frame (get_local_variables does)', async () => {
+    h = await startShim({
+      manifests: [helloManifest(ROOT)],
+      engineSetup: (engine) => engine.on('scopes', () => ({ scopes: [{ name: 'Local', variablesReference: 12, expensive: false }] }))
+    });
+    await bringUp(h);
+    const frames = [
+      frame(1, 'nanosleep', undefined, 0),
+      frame(2, 'cob_sys_sleep', undefined, 0),
+      frame(3, 'HELLO_', HELLO_COB, 40),
+      frame(4, 'main', HELLO_C, 250)
+    ];
+    h.engine.on('stackTrace', (args: DebugProtocol.StackTraceArguments) => {
+      const start = args.startFrame ?? 0;
+      const levels = args.levels && args.levels > 0 ? args.levels : frames.length;
+      return { stackFrames: frames.slice(start, start + levels), totalFrames: frames.length };
+    });
+    h.engine.emit('stopped', { reason: 'pause', threadId: 1, allThreadsStopped: true });
+    await h.client.nextEvent('stopped');
+    // Only the top frame is in the shim's cache after this.
+    await h.client.request('stackTrace', { threadId: 1, startFrame: 0, levels: 1 });
+
+    const scopes = scopesOf(await h.client.request('scopes', { frameId: 1 }));
+    expect(scopes.map((s) => s.name)).toEqual(['WORKING-STORAGE of HELLO (frame #2)']);
+    expect(h.engine.received('stackTrace')).toHaveLength(2);
+    expect(h.engine.received('stackTrace')[1].arguments).toMatchObject({ threadId: 1, levels: 64 });
+    expect(h.engine.received('scopes')).toHaveLength(0);
+  });
+
   it('adds LOCAL-STORAGE and LINKAGE only when the program has them, and appends engine scopes under --engine-scopes', async () => {
     h = await startShim({
       manifests: [callsManifest(ROOT)],

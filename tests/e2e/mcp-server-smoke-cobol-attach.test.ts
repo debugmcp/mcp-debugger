@@ -22,7 +22,7 @@ import { spawn, type ChildProcess } from 'child_process';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
-import { skipIfSpawnBlocked } from '../test-utils/helpers/adapter-spawn.js';
+import { skipIfSpawnBlocked, type SkippableContext } from '../test-utils/helpers/adapter-spawn.js';
 import { hasCobolToolchain, prepareCobolExample, cobcEnv } from './cobol-example-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -120,7 +120,7 @@ describe.skipIf(SKIP_COBOL)('MCP Server COBOL Attach Smoke Test @requires-cobol'
     return { sourcePath, binaryPath, pid: debuggee.pid! };
   }
 
-  async function attachOrSkip(ctx: { skip: () => void }, pid: number, adapterConfig: Record<string, unknown>): Promise<void> {
+  async function attachOrSkip(ctx: SkippableContext, pid: number, adapterConfig: Record<string, unknown>): Promise<void> {
     const attachResponse = await call('attach_to_process', { processId: pid, stopOnEntry: true, adapterConfig });
     if (!attachResponse.success) {
       skipIfSpawnBlocked(ctx, attachResponse, 'COBOL');
@@ -171,7 +171,8 @@ describe.skipIf(SKIP_COBOL)('MCP Server COBOL Attach Smoke Test @requires-cobol'
       const tick1 = await readTick();
       expect(tick1).toBeGreaterThanOrEqual(1);
       expect((await localsByName()).get('WS-ONE')?.value).toBe('1');
-      expect(String((await call('evaluate_expression', { expression: 'WS-TICK' })).result)).toBe(String(tick1));
+      // evaluate walks up too and says so: `3 (evaluated in frame #6 PAUSE: 0000-MAIN …)`.
+      expect(String((await call('evaluate_expression', { expression: 'WS-TICK' })).result)).toMatch(new RegExp('^' + tick1 + ' [(]evaluated in frame #[0-9]+ PAUSE'));
 
       // Let the job run, pause it again: WS-TICK moved on and is read from the new stop.
       expect((await call('continue_execution', {})).success).toBe(true);
