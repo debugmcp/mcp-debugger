@@ -121,6 +121,8 @@ export function parseDumpRoutine(input: DumpRoutineInput): DumpRoutineResult {
   let lastNon88: number | undefined;
   const maxByIndex = new Map<number, MaxDecl>();
   const loopOwner = new Map<number, number>();
+  /** Bytes of each group already claimed by its subordinates, in declaration order. */
+  const layoutNext = new Map<number, number>();
   let braceDepth = 0;
   let skipDepth: number | undefined;
 
@@ -183,11 +185,25 @@ export function parseDumpRoutine(input: DumpRoutineInput): DumpRoutineResult {
         const bound = findSetData(byField[1]);
         if (bound) {
           dataExpr = bound;
-        } else {
-          diag('warn', `field ${byField[1]} has NULL data and no COB_SET_DATA binding was found`, name);
         }
+        // Otherwise the address is derived from the enclosing group's layout (addItem).
       }
       return { size: decl.size, dataExpr, attrSymbol: decl.attrSymbol, fieldSymbol: byField[1] };
+    }
+    const setData = /^COB_SET_DATA\s*\(/.exec(expr);
+    if (setData) {
+      // A referenced EXTERNAL or BASED item: its static field carries NULL data and the
+      // dump call binds it to the runtime pointer in place (`COB_SET_DATA (f_36, b_36)`).
+      const open = expr.indexOf('(');
+      const close = findMatchingBracket(expr, open);
+      const args = splitTopLevelArgs(expr.slice(open + 1, close < 0 ? expr.length : close));
+      const fieldSymbol = (args[0] ?? '').trim();
+      const decl = args.length >= 2 ? tables.fields.get(fieldSymbol) : undefined;
+      if (!decl) {
+        diag('warn', `COB_SET_DATA names an undeclared field: ${expr}`, name);
+        return undefined;
+      }
+      return { size: decl.size, dataExpr: args[1], attrSymbol: decl.attrSymbol, fieldSymbol };
     }
     const setFld = /^COB_SET_FLD\s*\(/.exec(expr);
     if (!setFld) {
@@ -237,7 +253,11 @@ export function parseDumpRoutine(input: DumpRoutineInput): DumpRoutineResult {
     const pairs: DumpCall['pairs'] = [];
     for (let k = 0; k < ndims; k += 1) {
       const indexVar = /i_(\d+)/.exec(args[5 + 2 * k] ?? '');
-      const elem = parseInt(args[6 + 2 * k] ?? '', 10);
+      // `6UL` normally; `(cob_uli_t)(4)` for items inside an ODO table under odoslide
+      // (the -std=ibm default, or -fodoslide).
+      const elemText = (args[6 + 2 * k] ?? '').replace(/\(\s*cob_u?li_t\s*\)/g, '');
+      const elemMatch = /(\d+)/.exec(elemText);
+      const elem = elemMatch ? parseInt(elemMatch[1], 10) : Number.NaN;
       if (!indexVar || Number.isNaN(elem)) {
         diag('warn', `subscript pair ${k + 1} of ${ndims} is malformed`, name);
         continue;
@@ -334,10 +354,52 @@ export function parseDumpRoutine(input: DumpRoutineInput): DumpRoutineResult {
   };
 
   const addItem = (call: DumpCall): void => {
-    const data = parseDataExpr(call.field.dataExpr);
+    const id = items.length;
+    let parent: CobolDataItem | undefined;
+    if (call.level === 88) {
+      parent = lastNon88 !== undefined ? items[lastNon88] : undefined;
+      if (!parent) {
+        diag('warn', 'level-88 item has no preceding conditional variable; skipped', call.name);
+        return;
+      }
+    } else if (call.level === 66 || call.level === 78) {
+      parent = stack.length > 0 ? items[stack[0].id] : undefined;
+    } else if (call.level === 0) {
+      // cobc dumps `OCCURS … INDEXED BY` index-names and an FD's record area at level 0,
+      // between an 01 and its subordinates: a root of its own that must leave the level
+      // stack alone, or the table that follows would be re-parented under the index.
+      parent = undefined;
+    } else {
+      if (call.level === 1 || call.level === 77) {
+        stack = [];
+      } else {
+        while (stack.length > 0 && stack[stack.length - 1].level >= call.level) {
+          stack.pop();
+        }
+      }
+      parent = stack.length > 0 ? items[stack[stack.length - 1].id] : undefined;
+    }
+
+    let data = parseDataExpr(call.field.dataExpr);
     if (data?.kind === 'null') {
-      // The `if (b_N == NULL)` arm of a LINKAGE dump: no address to record.
-      return;
+      if (call.field.fieldSymbol && parent && call.level !== 88) {
+        // A subordinate whose static `cob_field` has NULL data and that no statement
+        // binds with COB_SET_DATA — LOCAL-STORAGE group members. cobc's own dump prints
+        // a codegen error for these; the address follows from the parent and the
+        // declaration order (subordinates are contiguous, a REDEFINES restarts at its
+        // target, which the running offset below already accounts for).
+        data = {
+          kind: parent.storage.symbol === 'cob_local_ptr' ? 'local' : 'symbol',
+          symbol: parent.storage.symbol,
+          offset: parent.offset + (layoutNext.get(parent.id) ?? 0)
+        };
+      } else {
+        if (call.field.fieldSymbol) {
+          diag('warn', `field ${call.field.fieldSymbol} has NULL data, no COB_SET_DATA binding and no enclosing group; skipped`, call.name);
+        }
+        // Else the `if (b_N == NULL)` arm of a LINKAGE/BASED dump: no address to record.
+        return;
+      }
     }
     if (!data) {
       diag('warn', `data address is not a static expression: ${call.field.dataExpr}`, call.name);
@@ -356,27 +418,6 @@ export function parseDumpRoutine(input: DumpRoutineInput): DumpRoutineResult {
       // Runtime-sized (ODO) item: the static array length bounds it.
       const decl = tables.storage.get(symbol);
       size = decl?.kind === 'array' && decl.size !== undefined ? Math.max(0, decl.size - offset) : 0;
-    }
-
-    const id = items.length;
-    let parent: CobolDataItem | undefined;
-    if (call.level === 88) {
-      parent = lastNon88 !== undefined ? items[lastNon88] : undefined;
-      if (!parent) {
-        diag('warn', 'level-88 item has no preceding conditional variable; skipped', call.name);
-        return;
-      }
-    } else if (call.level === 66 || call.level === 78) {
-      parent = stack.length > 0 ? items[stack[0].id] : undefined;
-    } else {
-      if (call.level === 1 || call.level === 77) {
-        stack = [];
-      } else {
-        while (stack.length > 0 && stack[stack.length - 1].level >= call.level) {
-          stack.pop();
-        }
-      }
-      parent = stack.length > 0 ? items[stack[stack.length - 1].id] : undefined;
     }
 
     const item: CobolDataItem = {
@@ -480,6 +521,15 @@ export function parseDumpRoutine(input: DumpRoutineInput): DumpRoutineResult {
         }
       }
       parent.children.push(id);
+      if (call.level !== 88 && call.level !== 66 && call.level !== 78 && item.storage.symbol === parent.storage.symbol) {
+        const extent = item.sizeExpr !== undefined ? 0 : item.size * (item.occurs ? item.occurs.max : 1);
+        layoutNext.set(parent.id, Math.max(layoutNext.get(parent.id) ?? 0, item.offset - parent.offset + extent));
+        if (parent.sizeExpr !== undefined && parent.size < (layoutNext.get(parent.id) ?? 0)) {
+          // A runtime-sized group outside static storage (LOCAL-STORAGE, LINKAGE): its
+          // static size is the layout's maximum extent, as the listing reports it.
+          parent.size = layoutNext.get(parent.id) ?? 0;
+        }
+      }
     } else {
       const roots = rootsFor(section);
       if (/\bREDEFINES\b/.test(tail)) {
@@ -496,7 +546,7 @@ export function parseDumpRoutine(input: DumpRoutineInput): DumpRoutineResult {
       }
     }
 
-    if (call.level !== 88 && call.level !== 66 && call.level !== 78) {
+    if (call.level !== 88 && call.level !== 66 && call.level !== 78 && call.level !== 0) {
       stack.push({ id, level: call.level });
       lastNon88 = id;
     }
@@ -652,10 +702,14 @@ function resolveDependingOn(items: CobolDataItem[], diag: (level: 'warn' | 'erro
     if (byField) {
       target = items.find((o) => o.fieldSymbol === byField[1]);
     } else {
-      const byStorage = /\b(b_\d+|cob_local_ptr)\b(?:\s*\+\s*(\d+))?/.exec(expr);
+      const byStorage = /\b(b_\d+|cob_local_ptr)\b((?:\s*\+\s*\d+(?:[uU]?[lL]{0,2})?)*)/.exec(expr);
       if (byStorage) {
         const symbol = byStorage[1];
-        const offset = byStorage[2] ? parseInt(byStorage[2], 10) : 0;
+        // Nested offsets come as separate terms (`cob_local_ptr + 16 + 4`).
+        let offset = 0;
+        for (const term of byStorage[2].matchAll(/\d+/g)) {
+          offset += parseInt(term[0], 10);
+        }
         const candidates = items.filter(
           (o) => o.level !== 88 && o.storage.symbol === symbol && o.offset === offset && o.usage !== 'GROUP'
         );

@@ -168,10 +168,15 @@ export function parseDataExpr(expr: string): DataExpr | undefined {
   if (reg) {
     return { kind: 'register', symbol: reg[1], offset: 0 };
   }
-  const plain = /^([A-Za-z_]\w*)(?:\s*\+\s*(\d+)(?:[uU]?[lL]{0,2})?)?$/.exec(s);
+  const plain = /^([A-Za-z_]\w*)((?:\s*\+\s*\d+(?:[uU]?[lL]{0,2})?)*)$/.exec(s);
   if (plain) {
     const symbol = plain[1];
-    const offset = plain[2] ? parseInt(plain[2], 10) : 0;
+    // cobc writes nested offsets as separate terms: `cob_local_ptr + 16 + 2` is a group at
+    // local offset 16 and a subordinate 2 bytes into it.
+    let offset = 0;
+    for (const term of plain[2].matchAll(/\d+/g)) {
+      offset += parseInt(term[0], 10);
+    }
     return { kind: symbol === 'cob_local_ptr' ? 'local' : 'symbol', symbol, offset };
   }
   return undefined;

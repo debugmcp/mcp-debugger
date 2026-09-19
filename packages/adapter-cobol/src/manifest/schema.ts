@@ -148,6 +148,14 @@ export interface CobolProcRange {
   cLabel?: string;
 }
 
+/** A PROCEDURE DIVISION statement, from cobc's `/* Line: N : VERB : file *\/` comments. */
+export interface CobolStatementLocation {
+  sourceFileId: number;
+  line: number;
+  /** Statement name as cobc prints it (`MOVE`, `PERFORM`, `GO TO`, `CALL`). */
+  verb: string;
+}
+
 /** One `#line` row of the generated C: generated-C line → COBOL statement location. */
 export interface CobolLineMapEntry {
   /** 1-based line in the generated `.c` where the directive takes effect. */
@@ -187,7 +195,12 @@ export interface CobolProgram {
   /** Top-level (01/77) item ids per section, in declaration order. */
   roots: Array<{ section: CobolSection; itemIds: number[] }>;
   files: Array<{ name: string; handle: string; recordItemIds: number[] }>;
-  procedure: { sections: CobolProcRange[]; paragraphs: CobolProcRange[] };
+  procedure: {
+    sections: CobolProcRange[];
+    paragraphs: CobolProcRange[];
+    /** Every statement location, copybook statements included; empty in manifests older than this field. */
+    statements: CobolStatementLocation[];
+  };
   /**
    * First line of procedural code in the program's own source file: the earliest paragraph
    * or section start (31 for a `PROCEDURE DIVISION.` header on line 30). Stops attributed to

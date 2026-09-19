@@ -19,7 +19,9 @@
  *   replacement of a possibly running executable.
  */
 import { spawn as nodeSpawn } from 'child_process';
+import { createHash } from 'crypto';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { sanitizeStderrTail } from '@debugmcp/shared';
 import { parseGeneratedC } from '../manifest/index.js';
@@ -203,6 +205,12 @@ function keyArgv(args: string[]): string[] {
       i++;
       continue;
     }
+    if (args[i] === '-I') {
+      // A copybook search dir changes what every COPY resolves to.
+      out.push(args[i], args[i + 1] ?? '');
+      i++;
+      continue;
+    }
     if (path.isAbsolute(args[i])) {
       // sources are hashed by content, not by path
       continue;
@@ -210,6 +218,29 @@ function keyArgv(args: string[]): string[] {
     out.push(args[i]);
   }
   return out;
+}
+
+/**
+ * Copybook paths from the `#line N "path"` markers of the preprocessed `.i` cobc keeps
+ * under --save-temps: every copybook the compilation read, including ones only the
+ * LINKAGE SECTION, a REDEFINES or an OCCURS subordinate uses — those get no `#line` row in
+ * the generated C. Paths are taken as written (cobc does not escape them here).
+ */
+export function copybooksFromPreprocessed(iPath: string): string[] {
+  let text: string;
+  try {
+    text = fs.readFileSync(iPath, 'latin1');
+  } catch {
+    return [];
+  }
+  const found = new Set<string>();
+  for (const match of text.matchAll(/^#line\s+\d+\s+"([^"]*)"/gm)) {
+    const p = match[1];
+    if (p.length > 0 && fs.existsSync(p)) {
+      found.add(path.resolve(p));
+    }
+  }
+  return [...found];
 }
 
 function readJson<T>(filePath: string): T | undefined {
@@ -253,7 +284,7 @@ export class GnuCobolBuilder {
   async build(request: CobolBuildRequest): Promise<CobolBuildResult> {
     const sources = this.resolveSources(request);
     const name = this.outputName(request);
-    const programRoot = this.programArtifactRoot(request);
+    const programRoot = this.ensureProgramRoot(request);
     const previous = readJson<{ key?: string; artifactDir?: string }>(path.join(programRoot, LATEST_POINTER_NAME));
     const previousIndex = previous?.artifactDir
       ? readJson<ManifestIndex>(path.join(previous.artifactDir, MANIFEST_INDEX_NAME))
@@ -298,12 +329,11 @@ export class GnuCobolBuilder {
       };
     }
 
-    const artifactDir = path.join(programRoot, buildKey);
+    const artifactDir = this.claimArtifactDir(programRoot, buildKey);
     const outputPath = this.outputPathFor(request, artifactDir, name);
     const listingPath = path.join(artifactDir, `${name}.lst`);
     const args = cobcArguments(request, outputPath, listingPath, sources);
 
-    fs.mkdirSync(artifactDir, { recursive: true });
     this.deps.logger?.info?.(`[GnuCobolBuilder] ${this.deps.cobc.path} ${args.join(' ')} (cwd ${artifactDir})`);
     const run = await this.runCobc(args, artifactDir);
     const diagnostics: string[] = [];
@@ -383,6 +413,15 @@ export class GnuCobolBuilder {
       }
     }
 
+    for (const source of sources) {
+      const preprocessed = path.join(artifactDir, `${path.basename(source, path.extname(source))}.i`);
+      for (const copybook of copybooksFromPreprocessed(preprocessed)) {
+        if (!sources.includes(copybook)) {
+          copybooks.add(copybook);
+        }
+      }
+    }
+
     const index: ManifestIndex = {
       buildKey,
       contentKey: keyFor([...sources, ...copybooks]),
@@ -403,7 +442,7 @@ export class GnuCobolBuilder {
       path.join(programRoot, LATEST_POINTER_NAME),
       JSON.stringify({ key: buildKey, artifactDir, binaryPath: index.binary, updatedAt: generatedAt }, null, 2)
     );
-    this.pruneOldArtifacts(programRoot, buildKey);
+    this.pruneOldArtifacts(programRoot, path.basename(artifactDir));
 
     return {
       success: true,
@@ -416,6 +455,46 @@ export class GnuCobolBuilder {
       diagnostics,
       argv: args
     };
+  }
+
+  /**
+   * The artifact root, created; when it cannot be (a prebuilt binary in a read-only
+   * directory), a per-user temp root keyed by the program path, with a warning.
+   */
+  private ensureProgramRoot(request: CobolBuildRequest): string {
+    const primary = this.programArtifactRoot(request);
+    try {
+      fs.mkdirSync(primary, { recursive: true });
+      return primary;
+    } catch (error) {
+      const digest = createHash('sha256').update(path.resolve(request.program)).digest('hex').slice(0, 12);
+      const fallback = path.join(os.tmpdir(), 'mcp-debugger-cobol', digest, this.outputName(request));
+      this.deps.logger?.warn?.(
+        `[GnuCobolBuilder] Cannot create ${primary} (${error instanceof Error ? error.message : String(error)}); artifacts go to ${fallback}`
+      );
+      fs.mkdirSync(fallback, { recursive: true });
+      return fallback;
+    }
+  }
+
+  /**
+   * A directory of its own for this build: `<key>`, else `<key>-2`, `-3`, … Never build
+   * in place — a paused session may still hold the previous executable, and two sessions
+   * may build the same source at once (`mkdir` without `recursive` is the claim).
+   */
+  private claimArtifactDir(programRoot: string, buildKey: string): string {
+    for (let n = 1; n < 1000; n++) {
+      const candidate = path.join(programRoot, n === 1 ? buildKey : `${buildKey}-${n}`);
+      try {
+        fs.mkdirSync(candidate);
+        return candidate;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+          throw error;
+        }
+      }
+    }
+    throw new Error(`cannot claim an artifact directory under ${programRoot}`);
   }
 
   private resolveSources(request: CobolBuildRequest): string[] {

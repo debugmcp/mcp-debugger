@@ -26,7 +26,9 @@ await build({
   platform: 'node',
   format: 'esm',
   target: 'node22',
-  sourcemap: 'inline',
+  // No source map: it was 79% of the shipped file, and the shim's log carries every
+  // decision it makes.
+  sourcemap: false,
   logLevel: 'info',
   banner: {
     js: [

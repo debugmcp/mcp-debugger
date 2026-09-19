@@ -20,7 +20,7 @@ import type { ClientConnection, ClientInbound, OutputSlot } from './client-conne
 import { parseCobolExpression } from './cobol-expression.js';
 import type { EngineClient, EngineInbound } from './engine-client.js';
 import { EvaluateHandler } from './handlers/evaluate.js';
-import { annotateStackFrames, isLandedCobolFrame } from './handlers/stack-trace.js';
+import { annotateStackFrames, isCobolProgramFrame, isLandedCobolFrame } from './handlers/stack-trace.js';
 import { VariablesHandler } from './handlers/variables.js';
 import type { ShimLogger } from './logger.js';
 import { MemoryReader } from './memory-reader.js';
@@ -60,6 +60,10 @@ type StepSignal = { kind: 'stopped'; event: DebugProtocol.Event; slot: OutputSlo
 
 interface StepLoop {
   threadId: number;
+  /** The client's request: `stepIn` continues with `stepIn` (into a CALLed program), the rest with `next`. */
+  command: string;
+  /** Where the step started; a landing on the very same statement is not a completed step. */
+  origin?: { path?: string; line: number; name: string };
   queued: StepSignal[];
   waiter?: (signal: StepSignal) => void;
   /** Wakes the loop while it still waits for the initial step's response. */
@@ -595,8 +599,16 @@ export class Router {
       this.forward(request);
       return;
     }
-    const loop: StepLoop = { threadId: args.threadId, queued: [] };
+    const loop: StepLoop = { threadId: args.threadId, command: request.command, queued: [] };
     this.stepLoop = loop;
+    void this.startStepLoop(loop, request);
+  }
+
+  private async startStepLoop(loop: StepLoop, request: DebugProtocol.Request): Promise<void> {
+    const origin = (await this.fetchStack(loop.threadId, 1))?.[0];
+    if (origin) {
+      loop.origin = { path: origin.source?.path, line: origin.line, name: origin.name };
+    }
     const responded = new Promise<DebugProtocol.Response>((resolve) => {
       this.forward(request, {
         transform: (response) => {
@@ -605,7 +617,30 @@ export class Router {
         }
       });
     });
-    void this.runStepLoop(loop, responded);
+    await this.runStepLoop(loop, responded);
+  }
+
+  /**
+   * Whether an intermediate stop completes the step. A COBOL statement does, unless it is
+   * the statement the step started on: a paragraph header line carries two `#line` blocks
+   * (Entry, then Paragraph) separated by generated code, so the first `next` from it would
+   * otherwise "complete" on the same line. With manifests loaded, a stop in the generated
+   * C `main` with no COBOL program frame above it (`step_out` of the outermost program)
+   * has nothing left to reach and is forwarded as it is.
+   */
+  private stepLanded(loop: StepLoop, top: DebugProtocol.StackFrame, frames: DebugProtocol.StackFrame[]): boolean {
+    if (isLandedCobolFrame(this.state, top)) {
+      const origin = loop.origin;
+      const sameStatement =
+        origin !== undefined &&
+        top.line === origin.line &&
+        top.name === origin.name &&
+        (top.source?.path ?? '') === (origin.path ?? '');
+      return !sameStatement;
+    }
+    // `step_out` of the outermost program lands in the generated C `main`, which no step
+    // can turn into a COBOL statement: forward that stop instead of stepping to exit.
+    return this.state.registry.programCount > 0 && top.name === 'main' && !frames.some((frame) => isCobolProgramFrame(this.state, frame));
   }
 
   private nextStepSignal(loop: StepLoop): Promise<StepSignal> {
@@ -665,9 +700,9 @@ export class Router {
           slot.resolve(event);
           return;
         }
-        const raw = await this.fetchStack(loop.threadId, 1);
+        const raw = await this.fetchStack(loop.threadId, 4);
         const top = raw?.[0];
-        if (!top || isLandedCobolFrame(this.state, top)) {
+        if (!top || this.stepLanded(loop, top, raw)) {
           slot.resolve(event);
           return;
         }
@@ -676,9 +711,12 @@ export class Router {
           slot.resolve(event);
           return;
         }
+        // `stepIn` must keep stepping in, or the CALL it started on is stepped over; LLDB
+        // skips libcob (no debug info) by itself. `stepOut` continues with `next`.
+        const continuation = loop.command === 'stepIn' ? 'stepIn' : 'next';
         let next: DebugProtocol.Response;
         try {
-          next = await this.engine.request('next', { threadId: loop.threadId });
+          next = await this.engine.request(continuation, { threadId: loop.threadId });
         } catch (error) {
           body.description = `step loop stopped early: ${errorMessage(error)}`;
           slot.resolve(event);

@@ -203,7 +203,7 @@ describe('CobolDebugAdapter', () => {
       expect(first).toEqual({ valid: true, errors: [], warnings: [] });
       expect(second.valid).toBe(true);
       expect(findCobc).toHaveBeenCalledTimes(1);
-      expect(findCobc).toHaveBeenCalledWith({ platform: 'win32' });
+      expect(findCobc).toHaveBeenCalledWith(expect.objectContaining({ platform: 'win32' }));
     });
 
     it('reports a thrown lookup as VALIDATION_ERROR', async () => {
@@ -282,14 +282,20 @@ describe('CobolDebugAdapter', () => {
       await expect(adapter.resolveExecutablePath()).resolves.toBe(cobcLinux.path);
     });
 
-    it('falls back to the prebuilt placeholder in container mode, else throws', async () => {
+    it('resolves to the prebuilt placeholder without cobc: attach and prebuilt launches need no compiler', async () => {
       vi.mocked(findCobc).mockResolvedValue(null);
-      vi.stubEnv('MCP_CONTAINER', 'true');
-      await expect(adapter.resolveExecutablePath()).resolves.toBe('cobol-prebuilt-binary');
-
       vi.stubEnv('MCP_CONTAINER', undefined);
-      const fresh = new CobolDebugAdapter(createDependencies(), 'linux');
-      await expect(fresh.resolveExecutablePath()).rejects.toMatchObject({ code: AdapterErrorCode.EXECUTABLE_NOT_FOUND });
+      await expect(adapter.resolveExecutablePath()).resolves.toBe('cobol-prebuilt-binary');
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/cobc/));
+    });
+
+    it('probes a user-supplied executablePath as cobc on later launches', async () => {
+      const existing = path.join(tmp, 'my-cobc');
+      fs.writeFileSync(existing, '');
+      vi.mocked(findCobc).mockResolvedValue(cobcLinux);
+      await expect(adapter.resolveExecutablePath(existing)).resolves.toBe(existing);
+      await transformLaunch({ program: 'app', cwd: tmp });
+      expect(findCobc).toHaveBeenLastCalledWith(expect.objectContaining({ env: expect.objectContaining({ COBC_PATH: existing }) }));
     });
   });
 
@@ -502,9 +508,9 @@ describe('CobolDebugAdapter', () => {
           format: undefined,
           copybookDirs: [],
           cobcFlags: undefined,
+          runtimeChecks: true,
           forceRebuild: false
         });
-        expect(buildMock.mock.calls[0][0]).not.toHaveProperty('runtimeChecks');
         expect(launch.program).toBe(exe);
         expect(shimOptions(launch).manifestDirs).toEqual([manifestBuild.artifactDir]);
         expect(adapter.consumeLastBuild()).toBe(manifestBuild);
@@ -553,7 +559,8 @@ describe('CobolDebugAdapter', () => {
 
         const launch = await transformLaunch({ program: 'hello.cob', cwd: tmp, manifestDirs: ['extra', result.artifactDir as string] });
 
-        expect(shimOptions(launch).manifestDirs).toEqual([path.join(tmp, 'extra'), result.artifactDir]);
+        // The fresh build first: the shim keeps the first definition of a C function.
+        expect(shimOptions(launch).manifestDirs).toEqual([result.artifactDir, path.join(tmp, 'extra')]);
       });
     });
 

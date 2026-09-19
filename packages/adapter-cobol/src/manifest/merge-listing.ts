@@ -14,8 +14,18 @@
 import type { CobolDataItem, CobolManifestDiagnostic, CobolProgram } from './schema.js';
 import type { ListingProgram, ListingRow } from './parse-symbol-listing.js';
 
+/** The listing prints names in a 30-column field, so a longer name matches by its first 30 characters. */
+const LISTING_NAME_WIDTH = 30;
+
+function nameMatches(rowName: string, itemName: string): boolean {
+  if (rowName === itemName) {
+    return true;
+  }
+  return rowName.length === LISTING_NAME_WIDTH && itemName.length > LISTING_NAME_WIDTH && itemName.startsWith(rowName);
+}
+
 function rowMatches(row: ListingRow, item: CobolDataItem): boolean {
-  return row.name === item.name && row.level === item.level && (row.section === undefined || row.section === item.section);
+  return nameMatches(row.name, item.name) && row.level === item.level && (row.section === undefined || row.section === item.section);
 }
 
 export function mergeListingIntoProgram(program: CobolProgram, listing: ListingProgram): CobolManifestDiagnostic[] {
@@ -92,8 +102,8 @@ export function mergeListingIntoProgram(program: CobolProgram, listing: ListingP
 
   const dumped = [...program.items];
   for (const item of dumped) {
-    if (item.storage.kind === 'register') {
-      continue; // special registers are not listed
+    if (item.storage.kind === 'register' || item.level === 0) {
+      continue; // special registers, index-names and FD record areas are not listed
     }
     let found = -1;
     for (let j = cursor; j < rows.length; j += 1) {

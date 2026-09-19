@@ -8,6 +8,7 @@
        0000-MAIN.
            PERFORM 9000-FROM-COPYBOOK
            MOVE "Y" TO WS-DONE
+           COPY "stmts.cpy".
            DISPLAY "COBOL_DEBUG_MARKER: price=" CP-PRICE
            STOP RUN.
        COPY "procpara.cpy".

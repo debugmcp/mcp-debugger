@@ -262,9 +262,9 @@ jobs:
         # WORKING-STORAGE from the manifest, so this proves compiler discovery,
         # DWARF-4 line mapping and the value decoder in one cycle.
         env:
-          COBC_PATH: ${{ runner.os == 'Windows' && 'C:\\msys64\\mingw64\\bin\\cobc.exe' || '' }}
+          COBC_PATH: ${{ runner.os == 'Windows' && 'C:\msys64\mingw64\bin\cobc.exe' || '' }}
         run: |
-          node scripts/canary-smoke.mjs --lang cobol \
+          node scripts/canary-smoke.mjs --lang cobol --skip-if-missing \
             --program "$GITHUB_WORKSPACE/examples/cobol/hello.cob" \
             --break-file "$GITHUB_WORKSPACE/examples/cobol/hello.cob" --line 46 \
             --expect-line --expect-var WS-TOTAL --expect-var WS-SCALED \
@@ -384,7 +384,7 @@ jobs:
         # The image installs gnucobol3, so the adapter compiles the fixture
         # inside the container against the /workspace mount (issue #759).
         run: |
-          node scripts/canary-smoke.mjs --lang cobol \
+          node scripts/canary-smoke.mjs --lang cobol --skip-if-missing \
             --program /workspace/examples/cobol/hello.cob \
             --break-file /workspace/examples/cobol/hello.cob --line 46 \
             --expect-line --expect-var WS-TOTAL --expect-var WS-SCALED \

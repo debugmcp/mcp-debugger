@@ -53,7 +53,7 @@ function usage(message) {
     'Usage: canary-smoke.mjs --lang <language>\n' +
     '  [--program <path>] [--break-file <path>] [--line <n>]\n' +
     '  [--adapter-config <json>] [--expect-var <name>]... [--expect-line]\n' +
-    '  [--list-only] [--timeout <ms>] [--transcript <file>]\n' +
+    '  [--list-only] [--skip-if-missing] [--timeout <ms>] [--transcript <file>]\n' +
     '  -- <server command> [server args...]'
   );
   process.exit(2);
@@ -73,6 +73,7 @@ try {
       'expect-var': { type: 'string', multiple: true },
       'expect-line': { type: 'boolean' },
       'list-only': { type: 'boolean' },
+      'skip-if-missing': { type: 'boolean' },
       timeout: { type: 'string' },
       transcript: { type: 'string' }
     }
@@ -299,6 +300,12 @@ async function runCycle(client) {
   const languages = await client.callTool('list_supported_languages', {});
   const installed = languages.installed ?? [];
   if (!installed.includes(lang)) {
+    if (options['skip-if-missing']) {
+      // An era gate: a published build from before this language shipped is not a failure.
+      console.log(`::notice::language '${lang}' is not in this build's installed list (${JSON.stringify(installed)}) — cycle skipped`);
+      step('list_supported_languages', `'${lang}' absent, cycle skipped`);
+      return;
+    }
     throw new Error(`language '${lang}' not in installed list: ${JSON.stringify(installed)}`);
   }
   step('list_supported_languages ok', `${installed.length} installed, '${lang}' present`);

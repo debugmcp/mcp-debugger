@@ -14,7 +14,8 @@ import type {
   CobolLineMapEntry,
   CobolManifestDiagnostic,
   CobolProcRange,
-  CobolSourceFile
+  CobolSourceFile,
+  CobolStatementLocation
 } from './schema.js';
 import { baseName, unescapeCString } from './c-text.js';
 
@@ -65,6 +66,8 @@ const END_OF_DUMP_RE = /cob_dump_output\s*\(\s*"END OF DUMP - ([^"]+)"/;
 const LINE_DIRECTIVE_RE = /^\s*#\s*line\s+(\d+)\s+"((?:\\.|[^"\\])*)"/;
 const RANGE_COMMENT_RE = /\/\*\s*Line:\s*(\d+)\s*:\s*(Paragraph|Section)\s+(\S+)\s*:\s*(.*?)\s*\*\//;
 const LAST_LINE_COMMENT_RE = /\/\*\s*Line:\s*(\d+)\s*:\s*last source line\s*:\s*(.*?)\s*\*\//;
+/** `/* Line: 89 : MOVE : path *\/` — one per PROCEDURE DIVISION statement, copybook statements included. */
+const STATEMENT_COMMENT_RE = /\/\*\s*Line:\s*(\d+)\s*:\s*([A-Z][A-Z -]*):([^*]*)\*\//;
 const RANGE_LABEL_RE = /^\s*((?:PARAGRAPH|SECTION)_\w+)\s*:/;
 
 /** Undo `cb_encode_program_id`: `__` was `-`, `_XX` was a hex-escaped character. */
@@ -211,6 +214,7 @@ export interface ProcedureMap {
   lineMap: CobolLineMapEntry[];
   sections: CobolProcRange[];
   paragraphs: CobolProcRange[];
+  statements: CobolStatementLocation[];
   procedureDivisionLine?: number;
   diagnostics: CobolManifestDiagnostic[];
 }
@@ -299,17 +303,19 @@ export function parseProcedureMap(
   // it; taking the file from that directive sidesteps the comment's own path spelling,
   // which on Windows differs from the directive's (`C:\x\y.cpy` vs `"C:\\x\\y.cpy"`).
   const ranges: CobolProcRange[] = [];
+  const statements: CobolStatementLocation[] = [];
   const lastSourceLineByFile = new Map<number, number>();
   let currentSection: string | undefined;
   for (let i = 0; i < lines.length; i += 1) {
     const range = RANGE_COMMENT_RE.exec(lines[i]);
     const lastLine = range ? null : LAST_LINE_COMMENT_RE.exec(lines[i]);
-    const match = range ?? lastLine;
+    const statement = range || lastLine ? null : STATEMENT_COMMENT_RE.exec(lines[i]);
+    const match = range ?? lastLine ?? statement;
     if (!match) {
       continue;
     }
     const cobolLine = parseInt(match[1], 10);
-    const commentPath = range ? range[4] : match[2];
+    const commentPath = range ? range[4] : lastLine ? lastLine[2] : match[3].trim();
     let fileId: number | undefined;
     let cLabel: string | undefined;
     for (let j = i + 1; j < Math.min(lines.length, i + 5); j += 1) {
@@ -327,6 +333,10 @@ export function parseProcedureMap(
     }
     if (lastLine) {
       lastSourceLineByFile.set(fileId, cobolLine);
+      continue;
+    }
+    if (statement) {
+      statements.push({ sourceFileId: fileId, line: cobolLine, verb: statement[2].trim() });
       continue;
     }
     if (!range) {
@@ -383,6 +393,7 @@ export function parseProcedureMap(
     lineMap,
     sections: ranges.filter((r) => r.kind === 'section'),
     paragraphs: ranges.filter((r) => r.kind === 'paragraph'),
+    statements,
     procedureDivisionLine,
     diagnostics
   };

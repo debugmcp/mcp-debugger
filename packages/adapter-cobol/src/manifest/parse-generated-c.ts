@@ -99,6 +99,11 @@ export function parseGeneratedCText(texts: GeneratedCTexts, generator: Generator
   const fallbackSource = translationUnitSource(cLines);
   const { segments, diagnostics: segmentDiagnostics } = splitProgramSegments(cLines);
   diagnostics.push(...segmentDiagnostics);
+  for (const segment of segments) {
+    // cobc keeps the PROGRAM-ID as written in its `.c` marker but upper-cases it in the
+    // listing; the manifest's contract is upper case (the C function names stay verbatim).
+    segment.programId = segment.programId.toUpperCase();
+  }
 
   let sawDump = false;
   const programs: CobolProgram[] = [];
@@ -130,7 +135,7 @@ export function parseGeneratedCText(texts: GeneratedCTexts, generator: Generator
       items: dump.items,
       roots: dump.roots,
       files: dump.files,
-      procedure: { sections: procedure.sections, paragraphs: procedure.paragraphs },
+      procedure: { sections: procedure.sections, paragraphs: procedure.paragraphs, statements: procedure.statements },
       lineMap: procedure.lineMap
     };
     if (procedure.procedureDivisionLine !== undefined) {
@@ -177,8 +182,20 @@ export function parseGeneratedCText(texts: GeneratedCTexts, generator: Generator
   };
 }
 
+const STRICT_UTF8 = new TextDecoder('utf-8', { fatal: true });
+
+/**
+ * cobc writes source paths in the OS's own encoding: UTF-8 on POSIX, the ANSI code page on
+ * Windows. Decode as UTF-8 when the bytes allow it, so a non-ASCII path equals the one the
+ * debugger reports; fall back to latin1 for a code-page file.
+ */
 function defaultReadFile(p: string): string {
-  return readFileSync(p, 'latin1');
+  const bytes = readFileSync(p);
+  try {
+    return STRICT_UTF8.decode(bytes);
+  } catch {
+    return bytes.toString('latin1');
+  }
 }
 
 /** Read the generated files and parse them; a missing optional file is a diagnostic, not an error. */

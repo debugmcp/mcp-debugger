@@ -96,7 +96,10 @@ export class VariablesHandler {
   ): Promise<DebugProtocol.Variable[]> {
     const total = await this.effectiveCount(frameId, entry, item, indices.length);
     const start = Math.max(0, args.start ?? 0);
-    const count = Math.min(total - start, args.count && args.count > 0 ? args.count : DEFAULT_ELEMENT_PAGE);
+    // DAP: a missing or zero `count` asks for every element (mcp-debugger sends none and
+    // caps the result itself with a truncation notice); `DEFAULT_ELEMENT_PAGE` only bounds
+    // a client that pages.
+    const count = Math.min(total - start, args.count && args.count > 0 ? args.count : total - start);
     const out: DebugProtocol.Variable[] = [];
     for (let i = start; i < start + count; i++) {
       const elementIndices = [...indices, i];

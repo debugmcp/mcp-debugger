@@ -41,21 +41,12 @@ export function decodePacked(bytes: Uint8Array, attr: CobolFieldAttr): Decoded {
   }
 
   const signNibble = bytes[n - 1] & 0x0f;
-  let negative: boolean;
-  switch (signNibble) {
-    case 0xc:
-    case 0xf:
-    case 0xa:
-    case 0xe:
-      negative = false;
-      break;
-    case 0xd:
-    case 0xb:
-      negative = true;
-      break;
-    default:
-      return invalid(`sign nibble is 0x${signNibble.toString(16)}, not one of C/F/A/E/D/B`);
+  if (signNibble < 0xa) {
+    return invalid(`sign nibble is 0x${signNibble.toString(16)}, not one of A-F`);
   }
+  // libcob's `cob_packed_get_sign`: `((p & 0x0F) == 0x0D) ? -1 : 1` — every other nibble,
+  // 0xB included, is positive.
+  const negative = signNibble === 0xd;
   if (negative && !signed) {
     return invalid(`negative sign nibble 0x${signNibble.toString(16)} on an unsigned item`);
   }

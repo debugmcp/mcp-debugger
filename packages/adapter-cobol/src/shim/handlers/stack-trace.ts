@@ -100,11 +100,24 @@ export function annotateStackFrames(state: SessionState, frames: DebugProtocol.S
   return cached;
 }
 
+/** COBOL source files as the policy recognises them (`COBOL_SOURCE_PATTERN` in @debugmcp/shared). */
+const COBOL_SOURCE_EXT = /\.(cob|cbl|cobol|cpy|copy)$/i;
+
+/** Whether a raw engine frame belongs to a COBOL program: a known body/entry function, or a COBOL source. */
+export function isCobolProgramFrame(state: SessionState, frame: DebugProtocol.StackFrame): boolean {
+  return state.registry.programByFunction(frame.name) !== undefined || COBOL_SOURCE_EXT.test(frame.source?.path ?? '');
+}
+
 /** Whether a raw engine frame is a COBOL statement the step loop may stop on (see `ManifestRegistry.isLandedLocation`). */
 export function isLandedCobolFrame(state: SessionState, frame: DebugProtocol.StackFrame): boolean {
   const sourcePath = frame.source?.path;
-  if (!state.registry.isManifestSource(sourcePath) || sourcePath === undefined) {
+  if (sourcePath === undefined) {
     return false;
+  }
+  if (!state.registry.isManifestSource(sourcePath)) {
+    // No manifest covers this file (prebuilt without sources, attach without manifestDirs):
+    // a stop on a COBOL source line is the best landing there is.
+    return COBOL_SOURCE_EXT.test(sourcePath);
   }
   const byName = state.registry.programByFunction(frame.name);
   const candidates = byName ? [byName] : state.registry.programsBySource(sourcePath);

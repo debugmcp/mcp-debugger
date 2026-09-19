@@ -208,7 +208,9 @@ export function createCobolShim(config: CobolShimArgv, deps: ShimDeps = {}): Cob
       return;
     }
     shuttingDown = true;
-    // The client is gone: give the engine the grace it needs to take the debuggee down, then leave.
+    // The client is gone: ask the engine to take the debuggee down (it never saw a
+    // `disconnect`), give it the grace period, then leave.
+    engine?.request('disconnect', { terminateDebuggee: true }, timing.disconnectGraceMs).catch(() => undefined);
     waitForEngineThenFinish(() => 0);
   };
 

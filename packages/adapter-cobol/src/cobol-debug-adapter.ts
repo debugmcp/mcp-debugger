@@ -46,7 +46,8 @@ import {
   prepareCodelldbExecutablePath,
   buildCodeLLDBArgs,
   configurePythonEnvironment,
-  resolveTerminalKind
+  resolveTerminalKind,
+  deriveSourceMapFromBinary
 } from '@debugmcp/codelldb-common';
 import {
   findCobc,
@@ -143,6 +144,8 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
   private executablePathCache = new Map<string, ExecutablePathCacheEntry>();
   private readonly cacheTimeout = 60000;
   private cobcLocation: CobcLocation | null | undefined;
+  /** A user-supplied cobc (the session's executablePath), probed before PATH and the install dirs. */
+  private preferredCobc: string | undefined;
   private lastBuild: CobolBuildResult | undefined;
   private lastShimOptions: CobolShimSessionOptions | undefined;
   private currentThreadId: number | null = null;
@@ -263,7 +266,10 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
 
   private async locateCobc(): Promise<CobcLocation | null> {
     if (this.cobcLocation === undefined) {
-      this.cobcLocation = await findCobc({ platform: this.platform });
+      this.cobcLocation = await findCobc({
+        platform: this.platform,
+        env: this.preferredCobc ? { ...process.env, COBC_PATH: this.preferredCobc } : process.env
+      });
     }
     return this.cobcLocation;
   }
@@ -284,14 +290,21 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
       } catch {
         throw new AdapterError(`Specified executable not found: ${preferredPath}`, AdapterErrorCode.EXECUTABLE_NOT_FOUND);
       }
+      // The session's executablePath names the compiler: every later launch probes it first.
+      if (this.preferredCobc !== preferredPath) {
+        this.preferredCobc = preferredPath;
+        this.cobcLocation = undefined;
+      }
     } else {
       const cobc = await this.locateCobc();
       if (cobc) {
         execPath = cobc.path;
-      } else if (process.env.MCP_CONTAINER === 'true' || process.env.MCP_COBOL_ALLOW_PREBUILT === 'true') {
-        execPath = 'cobol-prebuilt-binary';
       } else {
-        throw new AdapterError(this.getMissingExecutableError(), AdapterErrorCode.EXECUTABLE_NOT_FOUND);
+        // cobc is needed only to compile a COBOL source. Attach and prebuilt launches run
+        // on the vendored CodeLLDB alone, so this never fails the session here;
+        // transformLaunchConfig refuses a source launch with the full message.
+        this.dependencies.logger?.warn(`[CobolDebugAdapter] ${this.getMissingExecutableError()}`);
+        execPath = 'cobol-prebuilt-binary';
       }
     }
     this.executablePathCache.set(cacheKey, { path: execPath, timestamp: Date.now() });
@@ -471,7 +484,8 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
     };
 
     const cobc = await this.locateCobc();
-    const shimManifestDirs: string[] = [...(manifestDirs ?? []).map((d) => path.resolve(baseDir, d))];
+    const userManifestDirs = (manifestDirs ?? []).map((d) => path.resolve(baseDir, d));
+    const shimManifestDirs: string[] = [];
     const libraryDirs: string[] = [];
     let launchEnv: Record<string, string> = {};
 
@@ -530,6 +544,16 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
       }
     } else {
       launchConfig.program = programPath;
+      if (process.env.MCP_CONTAINER === 'true' && Object.keys(sourceMap || {}).length === 0) {
+        // Container mode (issue #363, as cpp/rust): a host-built binary embeds host paths
+        // in its DWARF, so /workspace breakpoints never match without a sourceMap.
+        const workspaceRoot = process.env.MCP_WORKSPACE_ROOT || '/workspace';
+        const derived = deriveSourceMapFromBinary(programPath, workspaceRoot);
+        if (Object.keys(derived).length > 0) {
+          launchConfig.sourceMap = derived;
+          this.dependencies.logger?.info(`[CobolDebugAdapter] Container mode: derived sourceMap from binary DWARF paths: ${JSON.stringify(derived)}`);
+        }
+      }
       if (absSources.length > 0 && cobc) {
         const builder = new GnuCobolBuilder({ cobc, platform: this.platform, logger: this.dependencies.logger });
         const result = await builder.build({
@@ -540,6 +564,9 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
           format,
           copybookDirs: absCopybookDirs,
           cobcFlags,
+          // `--debug` moves every later `#line` row; the manifest must be translated the
+          // way the binary was compiled or runtime-error stops map to the wrong statement.
+          runtimeChecks,
           forceRebuild: forceRebuild === true
         });
         this.lastBuild = result;
@@ -548,7 +575,7 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
         } else if (result.artifactDir) {
           shimManifestDirs.push(result.artifactDir);
         }
-      } else if (shimManifestDirs.length === 0) {
+      } else if (shimManifestDirs.length === 0 && userManifestDirs.length === 0) {
         this.dependencies.logger?.warn(
           absSources.length > 0
             ? '[CobolDebugAdapter] "sources" given but cobc is not available: no COBOL symbol manifest, variables show the engine (C) view only.'
@@ -585,7 +612,9 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
     }
 
     const shimOptions: CobolShimSessionOptions = {
-      manifestDirs: [...new Set(shimManifestDirs)],
+      // Fresh builds first: the shim keeps the first definition of a C function, so a
+      // caller-supplied directory holding an older manifest must not shadow this launch's.
+      manifestDirs: [...new Set([...shimManifestDirs, ...userManifestDirs])],
       engineScopes: engineScopes === true,
       stdinFile: stdinFile ? path.resolve(baseDir, stdinFile) : undefined
     };

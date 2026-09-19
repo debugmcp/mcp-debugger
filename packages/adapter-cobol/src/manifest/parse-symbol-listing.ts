@@ -65,8 +65,10 @@ function columnsFrom(header: string): Columns {
 
 /** Split the PICTURE column into picture text, usage word and clauses. */
 export function splitPictureColumn(text: string): Pick<ListingRow, 'picture' | 'usageText' | 'clauses'> {
+  // Clauses follow the picture as `, OCCURS 5`; a comma inside a picture (`ZZ,ZZ9.99`)
+  // is never followed by whitespace.
   const segments = text
-    .split(/,\s*/)
+    .split(/,\s+/)
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
   if (segments.length === 0) {
@@ -141,6 +143,11 @@ export function parseSymbolListing(text: string): SymbolListing {
     }
     if (HEADER_RE.test(line)) {
       columns = columnsFrom(line);
+      if (table) {
+        // cobc reprints the header at every page break (55 lines by default); the table
+        // continues, and so does its current section.
+        continue;
+      }
       table = { rows: [] };
       if (programId) {
         table.programId = programId;
@@ -160,7 +167,7 @@ export function parseSymbolListing(text: string): SymbolListing {
       }
       continue;
     }
-    if (/^\d+ (?:warnings?|errors?) in compilation group/.test(line) || /^GnuCOBOL /.test(line)) {
+    if (/^\d+ (?:warnings?|errors?) in compilation group/.test(line) || /^Error\/Warning summary:/.test(line)) {
       table = undefined;
       continue;
     }

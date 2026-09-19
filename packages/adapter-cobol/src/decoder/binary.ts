@@ -12,12 +12,11 @@
  * `9(4) COMP = 6` → `00 06`, `S9(9) COMP-5 = 987654321` → `b1 68 de 3a`.
  */
 
-import { COB_FLAG, COB_TYPE, hasFlag } from '../manifest/attr-constants.js';
+import { COB_FLAG, hasFlag } from '../manifest/attr-constants.js';
 import type { CobolFieldAttr } from '../manifest/schema.js';
 import { hexOf, invalidValue, numericValue } from './format.js';
 import type { Decoded } from './types.js';
 
-const BINARY_SIZES = new Set([1, 2, 4, 8]);
 
 /** Unsigned integer from bytes in the given order. */
 function readUnsigned(bytes: Uint8Array, bigEndian: boolean): bigint {
@@ -34,17 +33,19 @@ function readUnsigned(bytes: Uint8Array, bigEndian: boolean): bigint {
   return v;
 }
 
+/**
+ * libcob decides byte order on `COB_FIELD_BINARY_SWAP` alone (`cob_binary_get_sint64`,
+ * numeric.c): a COMP-5 or REAL_BINARY item that still carries the flag — codegen retypes
+ * `TALLY` that way — is stored big-endian too.
+ */
 export function isBigEndianBinary(attr: CobolFieldAttr, hostLittleEndian: boolean): boolean {
-  const native = attr.type === COB_TYPE.NUMERIC_COMP5 || hasFlag(attr.flags, COB_FLAG.REAL_BINARY);
-  if (!native && hasFlag(attr.flags, COB_FLAG.BINARY_SWAP)) {
-    return true;
-  }
-  return !hostLittleEndian;
+  return hasFlag(attr.flags, COB_FLAG.BINARY_SWAP) || !hostLittleEndian;
 }
 
 export function decodeBinary(bytes: Uint8Array, attr: CobolFieldAttr, hostLittleEndian: boolean): Decoded {
   const n = bytes.length;
-  if (!BINARY_SIZES.has(n)) {
+  // libcob reads any 1..8-byte binary (`binary-size: 1--8` under -std=mf gives 3/5/6/7).
+  if (n < 1 || n > 8) {
     return {
       value: `<binary size ${n} unsupported: 0x${hexOf(bytes)}>`,
       kind: 'unsupported'

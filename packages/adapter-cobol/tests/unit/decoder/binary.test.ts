@@ -52,8 +52,8 @@ const vectors: Vector[] = [
     expect: { value: '987654321', kind: 'numeric', mantissa: 987654321n }
   },
   {
-    name: 'native wins over a stray BINARY_SWAP on a REAL_BINARY item',
-    hex: 'b1 68 de 3a',
+    name: 'BINARY_SWAP wins over a native type: libcob decides byte order on the flag alone (TALLY)',
+    hex: '3a de 68 b1',
     attr: attr(BINARY, 9, 0, NATIVE_SIGNED | COB_FLAG.BINARY_SWAP),
     size: 4,
     expect: { value: '987654321', kind: 'numeric', mantissa: 987654321n }
@@ -134,14 +134,22 @@ const vectors: Vector[] = [
     size: 4,
     expect: { value: '0.00', kind: 'numeric', mantissa: 0n, scale: 2 }
   },
-  // --- unsupported / invalid sizes ---
+  // --- odd sizes (binary-size: 1--8 under -std=mf) ---
   {
-    name: 'binary size 3 → unsupported with the raw hex',
+    name: 'binary size 3, big-endian, sign-extended (measured: S9(5) COMP VALUE -12345 under -std=mf)',
+    hex: 'ff cf c7',
+    attr: attr(BINARY, 5, 0, SWAP_SIGNED),
+    size: 3,
+    expect: { value: '-12345', kind: 'numeric', mantissa: -12345n }
+  },
+  {
+    name: 'binary size 3, positive',
     hex: '01 02 03',
     attr: attr(BINARY, 5, 0, SWAP_SIGNED),
     size: 3,
-    expect: { value: '<binary size 3 unsupported: 0x010203>', kind: 'unsupported' }
+    expect: { value: '66051', kind: 'numeric', mantissa: 66051n }
   },
+  // --- unsupported / invalid sizes ---
   {
     name: 'binary size 16 → unsupported',
     hex: '00 '.repeat(16),

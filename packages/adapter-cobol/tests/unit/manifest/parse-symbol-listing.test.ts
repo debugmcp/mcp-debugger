@@ -122,7 +122,7 @@ function makeProgram(items: CobolDataItem[]): CobolProgram {
     items,
     roots: [],
     files: [],
-    procedure: { sections: [], paragraphs: [] },
+    procedure: { sections: [], statements: [], paragraphs: [] },
     lineMap: []
   };
 }

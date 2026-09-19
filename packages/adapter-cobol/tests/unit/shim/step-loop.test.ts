@@ -120,7 +120,7 @@ describe('cobol shim step loop', () => {
     expect(script!.commands).toEqual(['stepOut', 'next', 'next']);
   });
 
-  it('stepIn: DATA DIVISION lines of the callee do not count as landed', async () => {
+  it('stepIn: keeps stepping in through the callee entry and its DATA DIVISION initialisation', async () => {
     let script: { commands: string[] } | undefined;
     h = await startShim({
       manifests: [callsManifest(ROOT)],
@@ -138,7 +138,8 @@ describe('cobol shim step loop', () => {
     await bringUp(h);
     await h.client.request('stepIn', { threadId: 1 });
     await h.client.nextEvent('stopped');
-    expect(script!.commands).toEqual(['stepIn', 'next', 'next', 'next', 'next']);
+    // A `next` here would step over the CALL; LLDB keeps `stepIn` out of libcob by itself.
+    expect(script!.commands).toEqual(['stepIn', 'stepIn', 'stepIn', 'stepIn', 'stepIn']);
     const frames = ((await h.client.request('stackTrace', { threadId: 1 })).body as DebugProtocol.StackTraceResponse['body']).stackFrames;
     expect(frames[0].name).toBe('CALLSUB: 0000-SUB-MAIN');
     expect(frames[0].line).toBe(15);

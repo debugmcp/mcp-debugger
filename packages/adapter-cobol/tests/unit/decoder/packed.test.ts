@@ -51,7 +51,7 @@ const vectors: Vector[] = [
   { name: 'sign nibble A (positive alternate)', hex: '12 3a', attr: attr(PACKED, 3, 0, SIGNED), size: 2, expect: { value: '123', kind: 'numeric', mantissa: 123n } },
   { name: 'sign nibble E (positive alternate)', hex: '12 3e', attr: attr(PACKED, 3, 0, SIGNED), size: 2, expect: { value: '123', kind: 'numeric', mantissa: 123n } },
   { name: 'sign nibble D (negative)', hex: '12 3d', attr: attr(PACKED, 3, 0, SIGNED), size: 2, expect: { value: '-123', kind: 'numeric', mantissa: -123n } },
-  { name: 'sign nibble B (negative alternate)', hex: '12 3b', attr: attr(PACKED, 3, 0, SIGNED), size: 2, expect: { value: '-123', kind: 'numeric', mantissa: -123n } },
+  { name: 'sign nibble B (positive: libcob treats only D as negative)', hex: '12 3b', attr: attr(PACKED, 3, 0, SIGNED), size: 2, expect: { value: '123', kind: 'numeric', mantissa: 123n } },
   {
     name: 'digit nibble in the sign position → invalid',
     hex: '12 34',

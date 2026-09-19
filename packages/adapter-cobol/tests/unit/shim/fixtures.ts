@@ -75,7 +75,7 @@ export function helloManifest(root: string): CobolManifest {
     roots: [{ section: 'WORKING-STORAGE', itemIds: [0, 1, 7, 10, 11, 13, 14, 15, 16] }],
     files: [],
     procedure: {
-      sections: [],
+      sections: [], statements: [],
       paragraphs: [
         { name: '0000-MAIN', kind: 'paragraph', sourceFileId: 1, startLine: 31, endLine: 35 },
         { name: '1000-INIT', kind: 'paragraph', sourceFileId: 1, startLine: 36, endLine: 40 }
@@ -135,7 +135,7 @@ export function callsManifest(root: string): CobolManifest {
     items: mainItems,
     roots: [{ section: 'WORKING-STORAGE', itemIds: [0] }],
     files: [],
-    procedure: { sections: [], paragraphs: [{ name: '0000-MAIN', kind: 'paragraph', sourceFileId: 1, startLine: 11, endLine: 15 }] },
+    procedure: { sections: [], statements: [], paragraphs: [{ name: '0000-MAIN', kind: 'paragraph', sourceFileId: 1, startLine: 11, endLine: 15 }] },
     procedureDivisionLine: 10,
     lineMap: [{ cLine: 139, sourceFileId: 1, line: 13 }]
   };
@@ -153,7 +153,7 @@ export function callsManifest(root: string): CobolManifest {
       { section: 'LINKAGE', itemIds: [2] }
     ],
     files: [],
-    procedure: { sections: [], paragraphs: [{ name: '0000-SUB-MAIN', kind: 'paragraph', sourceFileId: 2, startLine: 14, endLine: 18 }] },
+    procedure: { sections: [], statements: [], paragraphs: [{ name: '0000-SUB-MAIN', kind: 'paragraph', sourceFileId: 2, startLine: 14, endLine: 18 }] },
     procedureDivisionLine: 13,
     lineMap: [{ cLine: 60, sourceFileId: 2, line: 15 }]
   };

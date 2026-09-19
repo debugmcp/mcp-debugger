@@ -100,6 +100,9 @@ export class ManifestRegistry {
       this.sourceKeys.add(normalisePath(source.path));
     }
     for (const program of manifest.programs) {
+      if (!Array.isArray(program.procedure.statements)) {
+        program.procedure.statements = []; // a manifest from before statement locations
+      }
       const own = manifest.sources.find((s) => s.id === program.sourceFileId);
       const entry: ProgramEntry = { program, manifest, sourceKey: own ? normalisePath(own.path) : '' };
       this.entries.push(entry);
@@ -204,6 +207,13 @@ export class ManifestRegistry {
    */
   isLandedLocation(entry: ProgramEntry, fileId: number, line: number): boolean {
     const program = entry.program;
+    if (program.procedure.statements.length > 0) {
+      // Every statement cobc attributed, copybook statements included, plus each
+      // paragraph/section header line.
+      return this.landedKeysFor(entry).has(`${fileId}:${line}`);
+    }
+    // Manifests written before statement locations existed: the program's own file from
+    // the PROCEDURE DIVISION on, other files only inside a known paragraph/section.
     const hasRanges = program.procedure.paragraphs.length > 0 || program.procedure.sections.length > 0;
     if (fileId === program.sourceFileId && program.procedureDivisionLine !== undefined) {
       if (line >= program.procedureDivisionLine) {
@@ -214,6 +224,23 @@ export class ManifestRegistry {
     }
     const location = this.procedureAt(entry, fileId, line);
     return location.paragraph !== undefined || location.section !== undefined;
+  }
+
+  private readonly landedKeys = new WeakMap<ProgramEntry, Set<string>>();
+
+  private landedKeysFor(entry: ProgramEntry): Set<string> {
+    let keys = this.landedKeys.get(entry);
+    if (!keys) {
+      keys = new Set<string>();
+      for (const statement of entry.program.procedure.statements) {
+        keys.add(`${statement.sourceFileId}:${statement.line}`);
+      }
+      for (const range of [...entry.program.procedure.paragraphs, ...entry.program.procedure.sections]) {
+        keys.add(`${range.sourceFileId}:${range.startLine}`);
+      }
+      this.landedKeys.set(entry, keys);
+    }
+    return keys;
   }
 
   itemsNamed(entry: ProgramEntry, name: string): CobolDataItem[] {

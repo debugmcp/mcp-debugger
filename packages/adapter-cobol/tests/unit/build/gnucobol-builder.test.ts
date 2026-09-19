@@ -23,6 +23,7 @@ import type { CobcLocation } from '../../../src/build/cobc-locator.js';
 import {
   GnuCobolBuilder,
   cobcArguments,
+  copybooksFromPreprocessed,
   isCobolSourceFile,
   isCobolTextFile,
   moduleExtension,
@@ -479,7 +480,7 @@ describe('GnuCobolBuilder', () => {
       expect(spawn.calls).toHaveLength(2);
     });
 
-    it('rebuilds into the same key directory when forceRebuild is set', async () => {
+    it('rebuilds under the same key but into a fresh directory when forceRebuild is set', async () => {
       const spawn = fakeSpawn();
       const builder = makeBuilder(spawn);
       const first = await builder.build(exeRequest());
@@ -489,6 +490,35 @@ describe('GnuCobolBuilder', () => {
       expect(spawn.calls).toHaveLength(2);
       expect(second.compiled).toBe(true);
       expect(second.buildKey).toBe(first.buildKey);
+      // Never in place: a paused session may still hold the first executable.
+      expect(second.artifactDir).not.toBe(first.artifactDir);
+      expect(path.basename(second.artifactDir ?? '')).toBe(`${first.buildKey}-2`);
+      expect(fs.existsSync(first.binaryPath ?? '')).toBe(true);
+      expect(readJson<{ artifactDir: string }>(path.join(artifactRoot, 'hello', LATEST_POINTER_NAME)).artifactDir).toBe(second.artifactDir);
+    });
+
+    it('changes the build key when copybookDirs change: the -I value is part of the key', async () => {
+      const spawn = fakeSpawn();
+      const builder = makeBuilder(spawn);
+      const v1 = await builder.build(exeRequest({ copybookDirs: [path.join(tmp, 'cpy-v1')] }));
+      const v2 = await builder.build(exeRequest({ copybookDirs: [path.join(tmp, 'cpy-v2')] }));
+
+      expect(v2.compiled).toBe(true);
+      expect(v2.buildKey).not.toBe(v1.buildKey);
+      expect(spawn.calls).toHaveLength(2);
+    });
+
+    it('reads every existing copybook out of a preprocessed .i, paths verbatim', () => {
+      const copybook = path.join(tmp, 'linkrec.cpy');
+      fs.writeFileSync(copybook, '       01  LK-REC PIC X(10).\n');
+      const preprocessed = path.join(tmp, 'hello.i');
+      fs.writeFileSync(
+        preprocessed,
+        [`#line 1 "${copybook}"`, '       01  LK-REC PIC X(10).', '#line 1 "/no/such/other.cpy"', '#line 9 "not-a-directive', ''].join('\n')
+      );
+
+      expect(copybooksFromPreprocessed(preprocessed)).toEqual([path.resolve(copybook)]);
+      expect(copybooksFromPreprocessed(path.join(tmp, 'missing.i'))).toEqual([]);
     });
 
     it('compiles into a new key directory when the source changes and keeps the old one', async () => {
