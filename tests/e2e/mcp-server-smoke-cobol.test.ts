@@ -42,6 +42,12 @@ const RTERROR_LINE = 13;         // ADD WS-CELL(WS-IDX) TO WS-SUM with WS-IDX = 
 const S0C7_BP_LINE = 11;         // ADD WS-PACKED TO WS-RESULT — WS-PACKED REDEFINES "ABCDE"
 // examples/cobol/calls/sub.cob
 const SUB_BP_LINE = 16;          // MOVE LS-WORK TO LK-SUM — after ADD, before the MOVEs
+const CALL_LINE = 13;            // CALL "CALLSUB" USING WS-ARG-REC in calls/main.cob
+const SUB_PARAGRAPH_LINE = 14;   // 0000-SUB-MAIN. — the paragraph header carries two #line blocks
+const SUB_FIRST_STATEMENT = 15;  // ADD LK-A TO LK-B GIVING LS-WORK
+const COPYBOOK_MOVE_LINE = 10;   // MOVE "Y" TO WS-DONE, right before COPY "stmts.cpy"
+const COPYBOOK_AFTER_LINE = 12;  // DISPLAY "COBOL_DEBUG_MARKER: price=" — first line after the copied statements
+const SHAPES_FREE_LINE = 107;    // FREE WS-BASED — every item of shapes.cob has been set
 
 type Variable = { name: string; value: string; type?: string; variablesReference?: number; expandable?: boolean };
 
@@ -408,6 +414,114 @@ describe.skipIf(SKIP_COBOL)('MCP Server COBOL Debugging Smoke Test @requires-cob
       await wait(500);
       const afterOut = (await fetchStackTrace()).find(isCobolFrame)!;
       expect(afterOut.file?.toLowerCase().endsWith('main.cob'), `expected main.cob, got ${afterOut.file}:${afterOut.line}`).toBe(true);
+
+      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+      expect((await pollState('stopped', 20000))?.exitCode).toBe(0);
+    },
+    120000
+  );
+
+  it(
+    'step_into at a CALL enters the callee, and a step from its paragraph header reaches the next statement',
+    async (ctx) => {
+      const mainSource = cobolSourcePath('calls');
+      const [subSource] = cobolExtraSources('calls');
+      sessionId = (await call('create_debug_session', { language: 'cobol', name: 'cobol-smoke-stepin' })).sessionId as string;
+      expect((await call('set_breakpoint', { file: mainSource, line: CALL_LINE })).success).toBe(true);
+
+      await startOrSkip(ctx, {
+        scriptPath: mainSource,
+        dapLaunchArgs: { stopOnEntry: false },
+        adapterLaunchConfig: { sources: [subSource] }
+      }, 'stepin');
+      expect(await reachCobolLine(CALL_LINE, 'main.cob')).toBe(true);
+
+      // step_into: the shim keeps stepping in until a callee statement (review of #760).
+      expect((await call('step_into', {})).success).toBe(true);
+      expect(await pollState('paused', 15000)).toBeDefined();
+      const entered = (await fetchStackTrace()).find(isCobolFrame)!;
+      expect(entered.file?.toLowerCase().endsWith('sub.cob'), `expected sub.cob, got ${entered.file}:${entered.line}`).toBe(true);
+      expect([SUB_PARAGRAPH_LINE, SUB_FIRST_STATEMENT]).toContain(entered.line);
+
+      // From the paragraph header (Entry block, then Paragraph block on the same line) one
+      // step_over must reach the first statement, not "complete" on the header again.
+      if (entered.line === SUB_PARAGRAPH_LINE) {
+        expect((await call('step_over', {})).success).toBe(true);
+        expect(await pollState('paused', 15000)).toBeDefined();
+        expect((await fetchStackTrace()).find(isCobolFrame)!.line).toBe(SUB_FIRST_STATEMENT);
+      }
+      expect((await call('step_over', {})).success).toBe(true);
+      expect(await pollState('paused', 15000)).toBeDefined();
+      expect((await fetchStackTrace()).find(isCobolFrame)!.line).toBe(SUB_BP_LINE);
+
+      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+      expect((await pollState('stopped', 20000))?.exitCode).toBe(0);
+    },
+    120000
+  );
+
+  it(
+    'steps through statements a copybook supplies inside a paragraph',
+    async (ctx) => {
+      const sourcePath = cobolSourcePath('copybook');
+      sessionId = (await call('create_debug_session', { language: 'cobol', name: 'cobol-smoke-copystmts' })).sessionId as string;
+      expect((await call('set_breakpoint', { file: sourcePath, line: COPYBOOK_MOVE_LINE })).success).toBe(true);
+
+      await startOrSkip(ctx, {
+        scriptPath: sourcePath,
+        dapLaunchArgs: { stopOnEntry: false },
+        adapterLaunchConfig: { copybookDirs: [cobolCopybookDir('copybook')] }
+      }, 'copystmts');
+      expect(await reachCobolLine(COPYBOOK_MOVE_LINE, 'main.cob')).toBe(true);
+
+      const landings: string[] = [];
+      for (let i = 0; i < 3; i++) {
+        expect((await call('step_over', {})).success).toBe(true);
+        expect(await pollState('paused', 15000)).toBeDefined();
+        const top = (await fetchStackTrace()).find(isCobolFrame)!;
+        landings.push(`${path.basename(top.file ?? '').toLowerCase()}:${top.line}`);
+      }
+      expect(landings).toEqual(['stmts.cpy:1', 'stmts.cpy:2', `main.cob:${COPYBOOK_AFTER_LINE}`]);
+
+      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+      expect((await pollState('stopped', 20000))?.exitCode).toBe(0);
+    },
+    120000
+  );
+
+  it(
+    'decodes INDEXED BY tables, LOCAL-STORAGE subordinates, EXTERNAL/BASED items and an ODO table under -std=ibm',
+    async (ctx) => {
+      const sourcePath = path.join(COBOL_EXAMPLES_DIR, 'shapes.cob');
+      sessionId = (await call('create_debug_session', { language: 'cobol', name: 'cobol-smoke-shapes' })).sessionId as string;
+      expect((await call('set_breakpoint', { file: sourcePath, line: SHAPES_FREE_LINE })).success).toBe(true);
+
+      await startOrSkip(ctx, {
+        scriptPath: sourcePath,
+        dapLaunchArgs: { stopOnEntry: false },
+        adapterLaunchConfig: { dialect: 'ibm' }
+      }, 'shapes');
+      expect(await reachCobolLine(SHAPES_FREE_LINE, 'shapes.cob')).toBe(true);
+
+      const evaluate = async (expression: string): Promise<string> => String((await call('evaluate_expression', { expression })).result);
+      expect(await evaluate('WS-AMOUNT(2)')).toBe('1234');           // table under its 01, not under WS-IX
+      expect(await evaluate('WS-CODE(2)')).toBe('"AB"');
+      expect(await evaluate('WS-COL(2)')).toBe('"XY"');              // odoslide `(cob_uli_t)(2)` element size
+      expect(await evaluate('LS-G2')).toBe('"CD"');                  // LOCAL-STORAGE subordinate, layout-derived address
+      expect(await evaluate('LS-TBL(2)')).toBe('"QQQ"');
+      expect(await evaluate('WS-EXT')).toBe('"external! "');         // EXTERNAL via COB_SET_DATA
+      expect(await evaluate('WS-BASED')).toBe('"BSED"');             // BASED via COB_SET_DATA
+      expect(await evaluate('WS-LINE(499)')).toBe('"L499"');
+      expect(await evaluate('WS-A-VERY-LONG-DATA-NAME-OF-THIRTY-FIVE')).toBe('"ABC"');
+
+      const locals = await localsByName();
+      expect(locals.get('WS-IX')).toBeDefined();
+      expect(locals.get('WS-EDITED')?.type).toContain('ZZ,ZZ9.99');
+      // A 500-element table comes back whole from the shim; the server's cap trims it with a notice.
+      const big = await children(locals.get('WS-BIG')!.variablesReference!);
+      const lines = await call('get_variables', { scope: big.get('WS-LINE')!.variablesReference });
+      expect((lines.variables as unknown[]).length).toBe(300);
+      expect(JSON.stringify(lines)).toMatch(/truncat/i);
 
       await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
       expect((await pollState('stopped', 20000))?.exitCode).toBe(0);

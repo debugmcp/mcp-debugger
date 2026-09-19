@@ -146,6 +146,22 @@ describe.skipIf(SKIP_DOCKER)('Docker: COBOL Debugging Smoke Tests', () => {
     }));
     expect(String(evalResponse.result)).toBe('42');
 
+    // One step_over = one COBOL statement, measured on Linux here: the shim's step loop
+    // runs its engine round-trips over loopback sockets with Nagle off (review of #760).
+    expect(parseSdkToolResult(await mcpClient!.callTool({ name: 'step_over', arguments: { sessionId } })).success).not.toBe(false);
+    let stepped: number | undefined;
+    for (let attempt = 0; attempt < 40 && stepped === undefined; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 250));
+      const sessions = parseSdkToolResult(await mcpClient!.callTool({ name: 'list_debug_sessions', arguments: {} }));
+      const session = ((sessions.sessions ?? []) as Array<{ id: string; state?: string }>).find(s => s.id === sessionId);
+      if (session?.state !== 'paused') continue;
+      const after = parseSdkToolResult(await mcpClient!.callTool({ name: 'get_stack_trace', arguments: { sessionId } }));
+      const frame = ((after.stackFrames ?? []) as Array<{ line?: number; file?: string }>).find(f => (f.file ?? '').endsWith('hello.cob'));
+      stepped = frame?.line;
+    }
+    expect([BP_LINE + 1, BP_LINE + 2, 34]).toContain(stepped);
+    console.log(`[Docker COBOL] ✓ step_over landed on hello.cob:${stepped}`);
+
     expect(parseSdkToolResult(await mcpClient!.callTool({ name: 'continue_execution', arguments: { sessionId } })).success).not.toBe(false);
     await new Promise(resolve => setTimeout(resolve, 2000));
 
