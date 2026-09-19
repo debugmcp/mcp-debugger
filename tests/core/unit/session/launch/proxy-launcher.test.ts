@@ -393,6 +393,41 @@ describe('ProxyLauncher.buildAdapterLaunchPlan', () => {
 });
 
 describe('ProxyLauncher.start', () => {
+  it('awaits an async transformAttachConfig and forwards its result as the attach config', async () => {
+    const adapter = new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE }).withAttachSupport({
+      transform: async (config) => ({ ...config, regenerated: true })
+    });
+    const proxyManager = new MockProxyManager();
+    const h = makeHarness({ adapter, proxyManager });
+
+    const attachConfig = await h.launcher.start(makeSession(), {
+      scriptPath: 'attach://pid',
+      dapLaunchArgs: launchArgs({ request: 'attach', __attachMode: true, pid: 4242 })
+    });
+
+    expect(attachConfig).toMatchObject({ request: 'attach', pid: 4242, regenerated: true });
+    expect(proxyManager.startCalls[0]).toMatchObject({ attachMode: true });
+  });
+
+  it('fails the attach with the transform\'s own message when an async transformAttachConfig rejects', async () => {
+    const adapter = new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE }).withAttachSupport({
+      transform: async () => {
+        throw new Error('manifest regeneration exploded');
+      }
+    });
+    const proxyManager = new MockProxyManager();
+    const h = makeHarness({ adapter, proxyManager });
+
+    await expect(
+      h.launcher.start(makeSession(), {
+        scriptPath: 'attach://pid',
+        dapLaunchArgs: launchArgs({ request: 'attach', __attachMode: true, pid: 4242 })
+      })
+    ).rejects.toThrow('manifest regeneration exploded');
+    expect(proxyManager.startCalls).toHaveLength(0);
+    expect(h.ctx.logger.warn).toHaveBeenCalledWith(expect.stringContaining('transformAttachConfig failed'));
+  });
+
   it('builds the adapter command from the resolved executable and hands the plan to the ProxyManager', async () => {
     const adapter = new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE });
     const proxyManager = new MockProxyManager();
