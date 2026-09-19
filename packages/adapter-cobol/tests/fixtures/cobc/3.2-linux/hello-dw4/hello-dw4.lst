@@ -1,0 +1,100 @@
+GnuCOBOL 3.2.0          /work/cobol/examples/hell Sat Sep 19 2026 14:46:06  Page 0001
+
+LINE    PG/LN  A...B............................................................
+
+000001         IDENTIFICATION DIVISION.
+000002         PROGRAM-ID. HELLO.
+000003         ENVIRONMENT DIVISION.
+000004         DATA DIVISION.
+000005         WORKING-STORAGE SECTION.
+000006         01  WS-ALPHA        PIC X(12) VALUE "HELLO".
+000007         01  WS-U            PIC 9(5) VALUE 12345.
+000008         01  WS-SCALED       PIC S9(5)V99 VALUE -123.45.
+000009         01  WS-BINARY       PIC S9(9) COMP VALUE -123456789.
+000010         01  WS-PACKED       PIC S9(7)V99 COMP-3 VALUE -12345.67.
+000011         01  WS-COMP5        PIC S9(9) COMP-5 VALUE 987654321.
+000012         01  WS-DOUBLE       COMP-2 VALUE 3.14159.
+000013         01  WS-GROUP.
+000014             05 WS-ID        PIC 9(4) VALUE 42.
+000015             05 WS-NAME      PIC X(20) VALUE "ALICE".
+000016             05 WS-STATUS    PIC X VALUE "A".
+000017                88 WS-STATUS-ACTIVE VALUE "A".
+000018                88 WS-STATUS-CLOSED VALUE "C" "X".
+000019         01  WS-TABLE.
+000020             05 WS-ENTRY OCCURS 5 TIMES.
+000021                10 WS-AMOUNT PIC 9(4).
+000022         01  WS-COUNT        PIC 9 VALUE 3.
+000023         01  WS-ODO.
+000024             05 WS-ITEM OCCURS 1 TO 9 TIMES DEPENDING ON WS-COUNT
+000025                                                      PIC X.
+000026         01  WS-RAW          PIC X(8) VALUE "00001234".
+000027         01  WS-ALT REDEFINES WS-RAW PIC 9(8).
+000028         01  WS-TOTAL        PIC S9(7)V99 COMP-3 VALUE 0.
+000029         01  WS-IDX          PIC 9(4) COMP VALUE 0.
+000030         PROCEDURE DIVISION.
+000031         0000-MAIN.
+000032             PERFORM 1000-INIT
+000033             PERFORM 2000-COMPUTE
+000034             PERFORM 3000-REPORT
+000035             STOP RUN.
+000036         1000-INIT.
+000037             MOVE "ABC" TO WS-ODO
+000038             PERFORM VARYING WS-IDX FROM 1 BY 1 UNTIL WS-IDX > 5
+000039                 COMPUTE WS-AMOUNT(WS-IDX) = WS-IDX * 100
+000040             END-PERFORM.
+000041         2000-COMPUTE.
+000042             MOVE 0 TO WS-TOTAL
+000043             PERFORM VARYING WS-IDX FROM 1 BY 1 UNTIL WS-IDX > 5
+000044                 ADD WS-AMOUNT(WS-IDX) TO WS-TOTAL
+000045             END-PERFORM
+000046             ADD WS-SCALED TO WS-TOTAL.
+000047         3000-REPORT.
+000048             DISPLAY "COBOL_DEBUG_MARKER: total=" WS-TOTAL
+000049             DISPLAY "name=" WS-NAME " id=" WS-ID.
+GnuCOBOL 3.2.0          /work/cobol/examples/hell Sat Sep 19 2026 14:46:06  Page 0002
+
+SIZE  TYPE           LVL  NAME                           PICTURE
+
+      WORKING-STORAGE SECTION
+
+00012 ALPHANUMERIC   01   WS-ALPHA                       X(12)
+
+00005 NUMERIC        01   WS-U                           9(5)
+
+00007 NUMERIC        01   WS-SCALED                      S9(5)V99
+
+00004 NUMERIC        01   WS-BINARY                      S9(9) COMP
+
+00005 NUMERIC        01   WS-PACKED                      S9(7)V99 COMP-3
+
+00004 NUMERIC        01   WS-COMP5                       S9(9) COMP-5
+
+00008 NUMERIC        01   WS-DOUBLE                      S9(17)V9(17) COMP-2
+
+00025 GROUP          01   WS-GROUP
+00004 NUMERIC        05   WS-ID                          9(4)
+00020 ALPHANUMERIC   05   WS-NAME                        X(20)
+00001 ALPHANUMERIC   05   WS-STATUS                      X
+      CONDITIONAL    88   WS-STATUS-ACTIVE
+      CONDITIONAL    88   WS-STATUS-CLOSED
+
+00020 GROUP          01   WS-TABLE
+00020 GROUP          05   WS-ENTRY                       OCCURS 5
+00004 NUMERIC        10   WS-AMOUNT                      9(4)
+
+00001 NUMERIC        01   WS-COUNT                       9
+
+00009 GROUP          01   WS-ODO
+00001 ALPHANUMERIC   05   WS-ITEM                        X, OCCURS 1 TO 9
+
+00008 ALPHANUMERIC   01   WS-RAW                         X(8)
+
+00008 NUMERIC        01   WS-ALT                         9(8), REDEFINES WS-RAW
+
+00005 NUMERIC        01   WS-TOTAL                       S9(7)V99 COMP-3
+
+00002 NUMERIC        01   WS-IDX                         9(4) COMP
+
+
+0 warnings in compilation group
+0 errors in compilation group

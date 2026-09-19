@@ -1,9 +1,9 @@
 /**
  * Cross-policy contract test.
  *
- * Nine `AdapterPolicy` implementations satisfy one interface, and until now each was tested
+ * Ten `AdapterPolicy` implementations satisfy one interface, and until now each was tested
  * only on its own terms — the rules that must hold for *every* policy lived in doc comments
- * on `adapter-policy.ts` and in the head of whoever added a language last. A tenth adapter
+ * on `adapter-policy.ts` and in the head of whoever added a language last. An eleventh adapter
  * can currently ship with, say, `functionBreakpointsVia: 'cdp'` and no
  * `supportsFunctionBreakpoints`, and nothing complains until a user hits it.
  *
@@ -62,10 +62,12 @@ interface PinnedCapabilities {
  *
  * The deviations worth knowing: `javascript -> 'js-debug'` is the one policy name that differs
  * from its language, and the only policy delivering function breakpoints over CDP; ruby is the
- * only adapter pinning function breakpoints OFF (rdbg advertises the capability but ignores the
- * request, #636) and the only one declining a default exception mode; ruby/java/dotnet are the
- * three that reject logpoints; js and java are the two that bind function breakpoints late;
- * js, python, go and cpp are the four whose debugger a `noDebug` launch turns off (#710).
+ * adapter pinning function breakpoints OFF for a debugger that advertises them (rdbg ignores the
+ * request, #636) and the only one declining a default exception mode; cobol pins both function
+ * breakpoints and logpoints OFF until its shim maps paragraph names and `{WS-NAME}` interpolation
+ * (#759); ruby/java/dotnet/cobol are the four that reject logpoints; js and java are the two that
+ * bind function breakpoints late; js, python, go, cpp and cobol are the five whose debugger a
+ * `noDebug` launch turns off (#710).
  */
 const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
   [DebugLanguage.PYTHON]: {
@@ -149,6 +151,17 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     policyName: 'cpp',
     supportsFunctionBreakpoints: true,
     supportsLogPoints: true,
+    functionBreakpointsVia: undefined,
+    functionBreakpointsBindLate: undefined,
+    honoursNoDebug: true,
+    childSessionStrategy: 'none',
+    requiresCommandQueueing: false,
+    defaultExceptionBreakMode: 'uncaught'
+  },
+  [DebugLanguage.COBOL]: {
+    policyName: 'cobol',
+    supportsFunctionBreakpoints: false,
+    supportsLogPoints: false,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: undefined,
     honoursNoDebug: true,

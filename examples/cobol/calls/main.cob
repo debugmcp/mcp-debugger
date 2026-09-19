@@ -1,0 +1,15 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CALLMAIN.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-ARG-REC.
+           05 WS-ARG-A     PIC S9(9) COMP VALUE 1000.
+           05 WS-ARG-B     PIC S9(9) COMP VALUE 234.
+           05 WS-ARG-SUM   PIC S9(9) COMP VALUE 0.
+           05 WS-ARG-NAME  PIC X(10) VALUE "CALLER".
+       PROCEDURE DIVISION.
+       0000-MAIN.
+           DISPLAY "before call"
+           CALL "CALLSUB" USING WS-ARG-REC
+           DISPLAY "COBOL_DEBUG_MARKER: sum=" WS-ARG-SUM
+           STOP RUN.

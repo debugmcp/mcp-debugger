@@ -34,6 +34,7 @@ const EXPECTATION: Record<string, 'logs' | 'error' | 'warning'> = {
   java: 'error',
   dotnet: 'error',
   ruby: 'error',
+  cobol: 'error',  // supportsLogPoints is pinned false until the shim interpolates {WS-NAME} (#759 M3)
 };
 
 // Python's bpLine has a=1, b=2 in scope — assert real interpolation there.

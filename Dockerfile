@@ -36,6 +36,7 @@ COPY packages/adapter-java/package.json ./packages/adapter-java/package.json
 COPY packages/adapter-ruby/package.json ./packages/adapter-ruby/package.json
 COPY packages/adapter-dotnet/package.json ./packages/adapter-dotnet/package.json
 COPY packages/adapter-cpp/package.json ./packages/adapter-cpp/package.json
+COPY packages/adapter-cobol/package.json ./packages/adapter-cobol/package.json
 
 # 2) Install dependencies with workspace support using the lockfile
 #    If lockfile is stale, this will fail (good signal to refresh it locally).
@@ -65,6 +66,7 @@ COPY packages/adapter-java/tsconfig*.json ./packages/adapter-java/
 COPY packages/adapter-ruby/tsconfig*.json ./packages/adapter-ruby/
 COPY packages/adapter-dotnet/tsconfig*.json ./packages/adapter-dotnet/
 COPY packages/adapter-cpp/tsconfig*.json ./packages/adapter-cpp/
+COPY packages/adapter-cobol/tsconfig*.json ./packages/adapter-cobol/
 
 COPY src ./src
 COPY scripts ./scripts/
@@ -153,7 +155,10 @@ RUN rm -rf /app/node_modules/@debugmcp && \
     cp /app/packages/adapter-cpp/package.json /app/node_modules/@debugmcp/adapter-cpp/ && \
     mkdir -p /app/node_modules/@debugmcp/adapter-rust && \
     cp -r /app/packages/adapter-rust/dist /app/node_modules/@debugmcp/adapter-rust/ && \
-    cp /app/packages/adapter-rust/package.json /app/node_modules/@debugmcp/adapter-rust/
+    cp /app/packages/adapter-rust/package.json /app/node_modules/@debugmcp/adapter-rust/ && \
+    mkdir -p /app/node_modules/@debugmcp/adapter-cobol && \
+    cp -r /app/packages/adapter-cobol/dist /app/node_modules/@debugmcp/adapter-cobol/ && \
+    cp /app/packages/adapter-cobol/package.json /app/node_modules/@debugmcp/adapter-cobol/
 
 # Rust LLDB formatter scripts (issue #441): pure-Python files shipped with
 # every Rust toolchain, which CodeLLDB never bundles. The runtime image has
@@ -207,6 +212,7 @@ RUN apt-get update && \
       lldb \
       python3-lldb \
       g++ \
+      gnucobol3 \
       openjdk-21-jdk-headless && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \

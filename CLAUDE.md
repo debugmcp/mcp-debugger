@@ -14,7 +14,7 @@ The project uses a **monorepo architecture** with dynamic adapter loading, allow
 mcp-debugger/
 ├── packages/
 │   ├── shared/             # Shared interfaces, types, and utilities
-│   ├── codelldb-common/    # Shared CodeLLDB vendoring/resolution (rust + cpp)
+│   ├── codelldb-common/    # Shared CodeLLDB vendoring/resolution (rust + cpp + cobol)
 │   ├── adapter-python/     # Python debug adapter using debugpy
 │   ├── adapter-ruby/       # Ruby debug adapter using rdbg (debug gem)
 │   ├── adapter-javascript/ # JavaScript/Node.js adapter using js-debug
@@ -23,6 +23,7 @@ mcp-debugger/
 │   ├── adapter-java/       # Java debug adapter using JDI bridge
 │   ├── adapter-dotnet/     # .NET/C# debug adapter using netcoredbg
 │   ├── adapter-cpp/        # C/C++ debug adapter using CodeLLDB
+│   ├── adapter-cobol/      # COBOL debug adapter using GnuCOBOL + CodeLLDB behind a Node DAP shim
 │   ├── adapter-mock/       # Mock adapter for testing
 │   └── mcp-debugger/       # Self-contained CLI bundle (npx distribution)
 ├── src/
@@ -36,7 +37,7 @@ mcp-debugger/
 ### Package Details
 
 - **@debugmcp/shared**: Core interfaces and types used across all packages
-- **@debugmcp/codelldb-common**: Shared CodeLLDB vendoring, resolver, and spawn glue (used by rust and cpp adapters)
+- **@debugmcp/codelldb-common**: Shared CodeLLDB vendoring, resolver, and spawn glue (used by the rust, cpp and cobol adapters)
 - **@debugmcp/adapter-python**: Python debugging support via debugpy
 - **@debugmcp/adapter-ruby**: Ruby debugging support via rdbg (debug gem)
 - **@debugmcp/adapter-javascript**: JavaScript/Node.js debugging support via js-debug
@@ -45,6 +46,7 @@ mcp-debugger/
 - **@debugmcp/adapter-java**: Java debugging support via JDI bridge
 - **@debugmcp/adapter-dotnet**: .NET/C# debugging support via netcoredbg
 - **@debugmcp/adapter-cpp**: C/C++ debugging support via CodeLLDB (launch + attach-by-PID)
+- **@debugmcp/adapter-cobol**: COBOL debugging support via GnuCOBOL (`cobc`) + CodeLLDB behind a Node DAP shim that serves COBOL-shaped scopes/values from the compiler's dump metadata (launch + attach-by-PID)
 - **@debugmcp/adapter-mock**: Mock adapter for testing and development
 - **@debugmcp/mcp-debugger**: Self-contained CLI bundle for npm distribution (npx-ready)
 
@@ -255,7 +257,7 @@ The codebase follows a **layered architecture with dependency injection** and **
 5. **DAP Proxy System** (`src/proxy/dap-proxy-*.ts`, `src/proxy/minimal-dap.ts`)
    - **ProxyRunner** (`dap-proxy-core.ts`): Pure business logic, message processing
    - **DapProxyWorker** (`dap-proxy-worker.ts`): Core worker handling debugging operations
-   - **Adapter Policies**: Language-specific behavior via policy pattern (`DefaultAdapterPolicy`, `PythonAdapterPolicy`, `JsDebugAdapterPolicy`, `RubyAdapterPolicy`, `RustAdapterPolicy`, `GoAdapterPolicy`, `JavaAdapterPolicy`, `DotnetAdapterPolicy`, `CppAdapterPolicy`, `MockAdapterPolicy`); LLDB-generic pieces shared by rust/cpp live in `lldb-policy-shared.ts`. Note: Java is fully wired to `JavaAdapterPolicy` in `DapProxyWorker.selectAdapterPolicy()` (not falling through to `DefaultAdapterPolicy`).
+   - **Adapter Policies**: Language-specific behavior via policy pattern (`DefaultAdapterPolicy`, `PythonAdapterPolicy`, `JsDebugAdapterPolicy`, `RubyAdapterPolicy`, `RustAdapterPolicy`, `GoAdapterPolicy`, `JavaAdapterPolicy`, `DotnetAdapterPolicy`, `CppAdapterPolicy`, `CobolAdapterPolicy`, `MockAdapterPolicy`); LLDB-generic pieces shared by rust/cpp/cobol live in `lldb-policy-shared.ts`. Note: Java is fully wired to `JavaAdapterPolicy` in `DapProxyWorker.selectAdapterPolicy()` (not falling through to `DefaultAdapterPolicy`).
    - **ChildSessionManager** (`src/proxy/child-session-manager.ts`): Manages DAP child sessions within a single proxy process. Currently used by the js-debug adapter (`childSessionStrategy: 'launchWithPendingTarget'`), which spawns a child debug session for the actual debuggee while the parent session manages the launch orchestration.
    - Implements full Debug Adapter Protocol (DAP) communication
 
@@ -306,7 +308,7 @@ A dual-state overlay (`SessionLifecycleState` + `ExecutionState`) is derived fro
 
 ### Adapter System
 - `src/adapters/adapter-registry.ts` - Adapter lifecycle management
-- `src/adapters/adapter-loader.ts` - Dynamic adapter loading (9 known adapters)
+- `src/adapters/adapter-loader.ts` - Dynamic adapter loading (10 known adapters)
 - `packages/shared/` - Shared interfaces and types
 - `packages/adapter-python/` - Python debug adapter (debugpy)
 - `packages/adapter-ruby/` - Ruby debug adapter (rdbg)
@@ -316,6 +318,7 @@ A dual-state overlay (`SessionLifecycleState` + `ExecutionState`) is derived fro
 - `packages/adapter-java/` - Java debug adapter (JDI bridge)
 - `packages/adapter-dotnet/` - .NET/C# debug adapter (netcoredbg)
 - `packages/adapter-cpp/` - C/C++ debug adapter (CodeLLDB)
+- `packages/adapter-cobol/` - COBOL debug adapter (GnuCOBOL + CodeLLDB, DAP shim)
 - `packages/adapter-mock/` - Mock adapter for testing
 
 ### Distribution
@@ -368,7 +371,7 @@ To add support for a new language:
 3. **Export Factory**: Export a factory class named `{Language}AdapterFactory`
 4. **Register in root `package.json`**: Add `"@debugmcp/adapter-{language}": "workspace:*"` to `optionalDependencies`
 5. **Add Vitest alias**: Add `{ find: '@debugmcp/adapter-{language}', replacement: path.resolve(__dirname, './packages/adapter-{language}/src/index.ts') }` to `resolve.alias` in `vitest.config.ts`
-6. **Update adapter count**: Update hardcoded adapter counts in tests (`adapter-loader.test.ts`, `models.test.ts`, `tests/e2e/doctor-smoke.test.ts`)
+6. **Update adapter count**: Update hardcoded adapter counts in tests (`adapter-loader.test.ts`, `models.test.ts`, `tests/e2e/doctor-smoke.test.ts`, the `PINNED` row in `adapter-policy-contract.test.ts`, `session-manager-executable-path.test.ts`), then run `node scripts/check-docs.mjs` — it fails every doc that still states the old language count. The full wiring list (loader, container preload, language discovery, skill content, bundle, build scripts, Dockerfile, canary) is in `docs/architecture/adapter-development-guide.md`
 7. **Add Tests**: Include unit and integration tests in the package. A new adapter policy is also checked by `tests/unit/shared/adapter-policy-contract.test.ts`, which asserts the cross-policy invariants (capability pinning, and that `extractLocalVariables` returns a `LocalVariableExtraction { variables, scopeRefs }` anchored on `stackFrames[0]` — use `emptyLocalVariableExtraction()` / `extractionFromScope()` from `@debugmcp/shared` rather than building the object by hand)
 8. **Run `pnpm install`**: To link the new workspace package
 
@@ -438,6 +441,15 @@ packages/adapter-{language}/
 - Attach by PID supported (`attach_to_process` with `processId`); on Linux mind `kernel.yama.ptrace_scope`
 - On Windows prefer MinGW-w64/MSYS2 g++ (DWARF); MSVC PDB fidelity is partial (`CPP_MSVC_BEHAVIOR` controls the warning)
 - Advanced CodeLLDB config passes through: `initCommands`, `targetCreateCommands` (core dumps), `processCreateCommands` (gdbserver/rr remote)
+
+### COBOL
+- GnuCOBOL 3.1.2+ (`cobc`) for source launch and COBOL-shaped variables: `apt install gnucobol3` / `brew install gnucobol` / MSYS2 `pacman -S mingw-w64-x86_64-gnucobol`; found via `COBC_PATH`, PATH, then known install dirs. Verified with 3.2 (Windows MSYS2, Ubuntu 26.04) and 3.1.2 (Ubuntu 24.04)
+- CodeLLDB is the engine (shared vendored copy); the adapter process is a Node DAP shim (`packages/adapter-cobol/dist/shim/cobol-shim.js`, esbuild-bundled by the package build) that spawns CodeLLDB and serves WORKING-STORAGE / LOCAL-STORAGE / LINKAGE scopes, decoded values and data-name `evaluate` from a symbol manifest (`<src>.cobol-symbols.json`) parsed out of cobc's `-fdump=ALL` generated C
+- Compiles with `cobc -x -g -fdump=ALL --save-temps -t <lst> -ftsymbols -A "-O0 -gdwarf-4"` (env `COBC_GEN_DUMP_COMMENTS=1`, cwd = artifact dir) into `.debug-mcp/cobol/<name>/<buildKey>/` next to the source; DWARF-4 is mandatory on MinGW; `runtimeChecks: true` adds `--debug`
+- On Windows/MSYS2 the adapter sets `COB_CONFIG_DIR`/`COB_COPY_DIR` and puts cobc's `bin` on PATH (libcob-4.dll) — outside an MSYS2 shell cobc otherwise fails with `configuration error: …default.conf`
+- Launch options in `dapLaunchArgs`: `dialect`, `format`, `copybookDirs`, `sources`, `modules` (`cobc -m` + `COB_LIBRARY_PATH`), `cobcFlags`, `runtimeChecks`, `stdinFile` (LLDB `target.input-path`; CodeLLDB's `stdio` key does not feed a file), `engineScopes`, `manifestDirs`, `forceRebuild`. A prebuilt executable (built with `cobc -g`) needs `sources` for a translate-only `cobc -C` manifest, or `manifestDirs`; without a manifest only the engine's C view is available. Prebuilt launch without cobc needs `MCP_COBOL_ALLOW_PREBUILT=true` (implied by `MCP_CONTAINER=true`)
+- Attach by PID (`manifestDirs` in `adapterConfig`); `cobol_runtime_error` exception filter = function breakpoint on libcob's `cob_runtime_error` (default `uncaught`, needs `runtimeChecks`); function breakpoints and logpoints are pinned off (milestone M3 of #759); PERFORM is entered like GO TO when stepping
+- See `docs/cobol/README.md` (guide) and `docs/cobol/spike-notes.md` (the measured facts)
 
 ### Mock (Testing)
 - No external requirements

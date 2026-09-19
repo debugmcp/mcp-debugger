@@ -1,6 +1,6 @@
 ---
 name: mcp-debugger
-description: Use when investigating a bug, failing test, or unexpected runtime behavior and the mcp-debugger MCP server is available — drives real step-through debuggers (breakpoints, stack traces, variable inspection, expression evaluation) for Python, JavaScript/TypeScript, Ruby, Rust, Go, Java, .NET/C#, and C/C++, locally or attached to remote processes.
+description: Use when investigating a bug, failing test, or unexpected runtime behavior and the mcp-debugger MCP server is available — drives real step-through debuggers (breakpoints, stack traces, variable inspection, expression evaluation) for Python, JavaScript/TypeScript, Ruby, Rust, Go, Java, .NET/C#, C/C++, and COBOL, locally or attached to remote processes.
 ---
 
 # Debugging with mcp-debugger
@@ -49,8 +49,8 @@ Rules that prevent 90% of failed sessions:
 1. State a hypothesis about where reality diverges from expectation *before* setting breakpoints.
 2. Set at most two breakpoints: last-known-good and first-known-bad. Run, inspect, halve the interval. Bisection beats stepping line-by-line from the top. Move the window mid-session with `remove_breakpoint` / `clear_breakpoints`; `list_breakpoints` shows what is currently set (with verified state and adapter ids).
    - Prefer `statement: "<line text>"` over line numbers: it matches like an Edit-tool `old_string` (whole line or a distinctive substring — whitespace-trimmed, trailing comments ignored, exact matches win), only lands on a line containing your text (inexact or multi-candidate matches are flagged in the response `warning`), lists every occurrence on ambiguity (add `nearLine` to pick one), and re-resolves across `restart_debugging` after you edit the file. When you do address by line, pass `expectedContent: "<line text or distinctive substring>"` (trailing comments ignored) so a stale or off-by-one line number fails immediately with the actual nearby lines. A response saying `requested line N, bound to line M` means the adapter moved the breakpoint — trust the bound line.
-   - `function: "name"` breaks on entry to a symbol with no file or line at all — names survive edits best. Supported by Python/Go/Rust/.NET/Java/JavaScript and C/C++ (Java accepts bare `method`, `Class.method`, or fully-qualified names and binds every concrete overload; JavaScript names are dotted runtime paths like `obj.method` bound to the current function value — main-module function declarations bind at launch, functions in lazily-loaded modules bind at the next pause).
-3. When pausing is too disruptive (hot loops, live or attached processes), use a **logpoint**: `set_breakpoint` with `logMessage: "x={x}"` streams interpolated values into `get_output` without stopping the program (Python/JS/Go/Rust and C/C++; Java, .NET and Ruby reject it with a clear error).
+   - `function: "name"` breaks on entry to a symbol with no file or line at all — names survive edits best. Supported by Python/Go/Rust/.NET/Java/JavaScript and C/C++ — not Ruby or COBOL, which reject it up front (Java accepts bare `method`, `Class.method`, or fully-qualified names and binds every concrete overload; JavaScript names are dotted runtime paths like `obj.method` bound to the current function value — main-module function declarations bind at launch, functions in lazily-loaded modules bind at the next pause).
+3. When pausing is too disruptive (hot loops, live or attached processes), use a **logpoint**: `set_breakpoint` with `logMessage: "x={x}"` streams interpolated values into `get_output` without stopping the program (Python/JS/Go/Rust and C/C++; Java, .NET, Ruby and COBOL reject it with a clear error).
 4. At each pause, record what you *learned* (variable values, actual control flow), not just where you are.
 5. When the diverging line is found, inspect every input to that line before concluding — the bug is usually an operand, not the operator.
 6. Fix, then `restart_debugging {sessionId}` — one call relaunches with the same configuration and re-applies every breakpoint (the output buffer resets; read `get_output` from `since: 0`). Confirm the observed state changed as predicted. Works even after the program exited; attach sessions are rejected (detach and re-attach instead).
@@ -72,6 +72,7 @@ attach_to_process {sessionId, host: "localhost", port: 5678, sourcePaths: ["<loc
 - **Ruby**: target ran `rdbg --open --port <port> ...` (works through `kubectl port-forward`); `localfsMap: "/app:<abs local dir>"` maps paths
 - **Java**: target JVM has `-agentlib:jdwp=transport=dt_socket,server=y,address=*:<port>`; breakpoints in not-yet-loaded classes are deferred automatically, and a fully-qualified class name as `file` needs no source files at all
 - **C/C++ (and other native)**: attach by PID instead of port — `attach_to_process {sessionId, processId: <pid>, adapterConfig: {program: "<path to binary>"}}`; in a Kubernetes ephemeral debug container use `processId: 1` with `program: "/proc/1/root/<binary path>"` (on Linux, mind `kernel.yama.ptrace_scope`)
+- **COBOL**: attach by PID like C/C++, plus `adapterConfig: {manifestDirs: ["<dir holding *.cobol-symbols.json>"]}` (an earlier source launch's `.debug-mcp/cobol/<name>/<buildKey>/`) so variables are COBOL-shaped; without it only the engine's C view is available
 
 Breakpoint paths on attach are sent **verbatim** and resolved against the **target's** filesystem (host-side existence checks are skipped). Without a mapping, use debuggee-side paths — `get_stack_trace` shows the paths the target uses — or address by symbol (`{function: "name"}`), which needs no paths. `adapterConfig` keys the adapter cannot forward into its attach request are named in the response's `warning`.
 
@@ -115,3 +116,4 @@ Read the matching reference before your first session in a language — each has
 | Java | references/java.md | javac -g required; FQCN breakpoints; redefine_classes hot-swap |
 | .NET/C# | references/dotnet.md | scriptPath = compiled .dll; Portable PDB required |
 | C/C++ | references/cpp.md | scriptPath = binary (-gdwarf-4 -O0) or lone .c/.cpp (auto-compiled); attach by PID; MinGW/DWARF on Windows |
+| COBOL | references/cobol.md | scriptPath = .cob/.cbl source (auto-compiled with GnuCOBOL) or prebuilt exe; dapLaunchArgs {dialect, format, copybookDirs, runtimeChecks, stdinFile}; COBOL-shaped variables; breakpoints in copybooks |

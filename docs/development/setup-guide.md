@@ -100,7 +100,7 @@ Most tests should pass. Some environment-specific or known-regression tests (e.g
 mcp-debugger/
 ├── packages/               # Monorepo workspace packages
 │   ├── shared/            # Shared interfaces, types, and utilities
-│   ├── codelldb-common/   # Shared CodeLLDB vendoring/resolution (rust + cpp)
+│   ├── codelldb-common/   # Shared CodeLLDB vendoring/resolution (rust + cpp + cobol)
 │   ├── adapter-python/    # Python debug adapter (debugpy)
 │   ├── adapter-javascript/# JavaScript/Node.js adapter (js-debug)
 │   ├── adapter-rust/      # Rust adapter (CodeLLDB)
@@ -108,6 +108,7 @@ mcp-debugger/
 │   ├── adapter-java/      # Java debug adapter (JDI)
 │   ├── adapter-dotnet/    # .NET debug adapter (netcoredbg)
 │   ├── adapter-cpp/       # C/C++ debug adapter (CodeLLDB)
+│   ├── adapter-cobol/     # COBOL debug adapter (GnuCOBOL + CodeLLDB)
 │   ├── adapter-ruby/      # Ruby debug adapter (rdbg)
 │   ├── adapter-mock/      # Mock adapter for testing
 │   ├── codelldb-darwin-arm64/  # Per-platform CodeLLDB binary packages. The

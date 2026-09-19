@@ -125,9 +125,9 @@ tests/
 │
 ├── e2e/                       # End-to-end tests
 │   ├── mcp-server-smoke-*.ts  # Per-language smoke tests (python, javascript, ruby, rust, go,
-│   │                          #   java, dotnet, cpp) plus attach, function-breakpoint,
+│   │                          #   java, dotnet, cpp, cobol) plus attach, function-breakpoint,
 │   │                          #   SSE, restart and stale-reap variants
-│   ├── docker/                # Docker container tests (python, javascript, rust, cpp,
+│   ├── docker/                # Docker container tests (python, javascript, rust, cpp, cobol,
 │   │                          #   cpp-attach, ruby-attach, entrypoint)
 │   └── npx/                   # NPX distribution tests (python, javascript, rust)
 │

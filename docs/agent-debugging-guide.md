@@ -1,6 +1,6 @@
 # MCP Debugger Usage Guide for AI Agents
 
-This guide explains how to correctly use the MCP Debugger tools when testing debugging functionality across all supported languages (Python, Ruby, JavaScript, Rust, Go, Java, .NET/C#, and C/C++).
+This guide explains how to correctly use the MCP Debugger tools when testing debugging functionality across all supported languages (Python, Ruby, JavaScript, Rust, Go, Java, .NET/C#, C/C++, and COBOL).
 
 ## Key Concepts
 
@@ -361,7 +361,7 @@ set_breakpoint {"sessionId": "...", "file": "/abs/app.py", "line": 51,
 - **`logMessage`** turns a breakpoint into a logpoint: it never pauses, and
   `{curly brace}` expressions are interpolated into `get_output` while the program runs at
   full speed. Supported by the Python, JavaScript, Go, Rust, C/C++, and mock adapters;
-  **not** by Java, .NET, or Ruby.
+  **not** by Java, .NET, Ruby, or COBOL.
 
 Three tools manage breakpoints after they are set. All take effect immediately while the
 program is running or paused:
@@ -445,7 +445,7 @@ capability, not a view-only credential.
 
 ## Summary
 
-The MCP Debugger is fully functional for Python, Ruby, JavaScript, Rust, Go, Java, .NET/C#, and C/C++. The key insights are:
+The MCP Debugger is fully functional for Python, Ruby, JavaScript, Rust, Go, Java, .NET/C#, C/C++, and COBOL. The key insights are:
 - **JavaScript**: Stack trace filtering hides internal, `node_modules`, and async-separator frames; may need `continue_execution` if initially stopped at internals
 - **Python**: Use variablesReference to expand variable containers
 - **Ruby**: Supports launch and attach flows through `rdbg`; use Bundler mode for Rails and RSpec-style entrypoints

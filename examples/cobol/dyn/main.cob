@@ -1,0 +1,12 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DYNMAIN.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-VALUE        PIC S9(9) COMP VALUE 41.
+       01  WS-MOD-NAME     PIC X(8) VALUE "MOD1".
+       PROCEDURE DIVISION.
+       0000-MAIN.
+           DISPLAY "before dynamic call"
+           CALL WS-MOD-NAME USING WS-VALUE
+           DISPLAY "COBOL_DEBUG_MARKER: value=" WS-VALUE
+           STOP RUN.

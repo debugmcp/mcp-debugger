@@ -36,7 +36,9 @@ with reasons. The gaps worth knowing up front:
   `processId`; a `host`/`port` target is rejected with *"C/C++ attach requires a numeric
   processId (attach-by-PID). Name/host-based attach is not supported yet."* On Linux,
   attaching to a process you did not start may also need `kernel.yama.ptrace_scope`
-  relaxed. See the [C/C++ guide](./cpp/README.md).
+  relaxed. See the [C/C++ guide](./cpp/README.md). The COBOL adapter, which runs the
+  same engine behind its DAP shim, has the same PID-only restriction
+  ([COBOL guide](./cobol/README.md)).
 - **.NET attach is also PID-only.** netcoredbg has no host/port attach, so `processId` is
   required and a `host`/`port` pair is dropped — there is no remote-attach form of the
   call. See the [.NET guide](./dotnet/README.md).
@@ -45,14 +47,14 @@ Python, Ruby, JavaScript, and Java can attach to a remote target over host/port 
 through a port mapping, `kubectl port-forward`, or an SSH tunnel — these debug sockets are
 unauthenticated).
 
-## Logpoints are rejected by Java, .NET, and Ruby
+## Logpoints are rejected by Java, .NET, Ruby, and COBOL
 
 `set_breakpoint` with `logMessage` is supported by the Python, JavaScript, Go, Rust,
-C/C++, and mock adapters. On Java, .NET, and Ruby it is a hard error
+C/C++, and mock adapters. On Java, .NET, Ruby, and COBOL it is a hard error
 (`Logpoints (logMessage) not supported by the <language> adapter`) rather than a
 silent downgrade: rdbg, for example, accepts `logMessage` and then ignores it, turning
 the logpoint into a *pausing* breakpoint — the opposite of what a logpoint promises
-(issue #469). On those three languages there is no non-pausing substitute: use a
+(issue #469); the COBOL shim does not interpolate `{WS-NAME}` yet (issue #759). On those four languages there is no non-pausing substitute: use a
 conditional breakpoint and accept the stop (on Java, `suspendPolicy: "thread"` at least
 limits the stop to one thread), or add the logging to the program itself.
 

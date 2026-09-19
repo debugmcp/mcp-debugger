@@ -48,6 +48,7 @@
     "@debugmcp/codelldb-win32-x64": "workspace:*"
   },
   "devDependencies": {
+    "@debugmcp/adapter-cobol": "workspace:*",
     "@debugmcp/adapter-cpp": "workspace:*",
     "@debugmcp/adapter-dotnet": "workspace:*",
     "@debugmcp/adapter-go": "workspace:*",

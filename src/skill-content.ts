@@ -37,7 +37,7 @@ export function buildServerInstructions(
     ? `\n- Prefer set_breakpoint {statement: "<line text>"} over line numbers: it matches like an Edit-tool old_string (whole line or a distinctive substring — whitespace-trimmed, trailing comments ignored, exact matches win), only lands on a line containing your text (inexact or multi-candidate matches are flagged in the response warning), lists every occurrence on ambiguity (disambiguate with nearLine), and re-resolves across restart_debugging after you edit the file.\n- set_breakpoint {function: "name"} breaks on entry to a symbol with no file or line at all — names survive edits best (Python/Go/Rust/.NET/Java/JavaScript; JS names are dotted runtime paths and functions in lazily-loaded modules bind at the next pause).`
     : '';
 
-  return `mcp-debugger drives real step-through debuggers (Python, JavaScript/TypeScript, Ruby, Rust, Go, Java, .NET, C/C++) as MCP tools.
+  return `mcp-debugger drives real step-through debuggers (Python, JavaScript/TypeScript, Ruby, Rust, Go, Java, .NET, C/C++, COBOL) as MCP tools.
 
 Golden path: create_debug_session -> set_breakpoint (ABSOLUTE file path) -> start_debugging (ABSOLUTE scriptPath) -> get_stack_trace -> get_scopes(frameId from the stack frame's "id" field) -> get_variables / get_local_variables / evaluate_expression -> step_* or continue_execution -> get_output -> close_debug_session (always, even on failure).
 
@@ -103,6 +103,7 @@ attach_to_process {sessionId, host, port, sourcePaths, adapterConfig}
 - Ruby: target started with "rdbg --open --port N ..." (works via kubectl port-forward); localfsMap: "/app:<abs local dir>" maps paths
 - Java: JVM flag -agentlib:jdwp=transport=dt_socket,server=y,address=*:PORT (breakpoints defer until class load); FQCN as "file" needs no source at all
 - C/C++ (and other native): attach by PID — attach_to_process {sessionId, processId, adapterConfig: {program: "<binary path>"}}
+- COBOL: attach by PID like C/C++; add adapterConfig: {manifestDirs: ["<.debug-mcp/cobol/<name>/<buildKey> dir of the running build>"]} so the shim finds the symbol manifest, or variables show only the engine's C view (regeneration from sources on attach is a later milestone)
 Breakpoint paths are sent verbatim and resolved on the TARGET's filesystem (host-side existence checks are skipped). Without a mapping, use debuggee-side paths — get_stack_trace shows them — or address by symbol ({function: "name"}), which needs no paths. adapterConfig keys the adapter cannot forward are named in the response's warning.
 detach_from_process leaves the target running.
 Kubernetes pods (port-forward vs ephemeral sidecar, copy-paste per-language presets): docs/kubernetes.md and examples/kubernetes/attach-presets.md in the mcp-debugger repo.
@@ -119,6 +120,7 @@ When a human wants to look around in their IDE, expose_session {sessionId} opens
 - Java: compile with javac -g; FQCN accepted as breakpoint "file"; redefine_classes hot-swaps changed classes.
 - .NET: scriptPath is the compiled .dll; PDBs must be Portable format.
 - C/C++: scriptPath is a compiled executable (build with -gdwarf-4 -O0; MinGW's default DWARF-5 breaks LLDB line breakpoints on Windows) or a lone .c/.cpp file (auto-compiled); attach by PID supported; MSVC PDB support is partial.
+- COBOL: scriptPath is a .cob/.cbl source (auto-compiled with GnuCOBOL: cobc -g -fdump=ALL, DWARF-4) or a prebuilt executable; dapLaunchArgs {dialect: "ibm", format: "fixed", copybookDirs: [...], runtimeChecks: true, stdinFile: "<file>"}; breakpoints work in copybooks; variables are COBOL-shaped (WORKING-STORAGE / LOCAL-STORAGE / LINKAGE scopes, COMP-3/COMP/DISPLAY decoded, 88-levels as booleans); evaluate_expression takes data-names with OF/IN, subscripts and (start:len); a libcob runtime error (subscript out of bounds, non-numeric data) pauses as an exception before the abort; step_over moves one COBOL statement (PERFORM is entered like a GO TO in this milestone).
 
 ## Crash diagnosis
 - Launch sessions pause at uncaught exceptions by default with stack + locals live ("none" opts out; "all" also stops on caught raises; Ruby has no uncaught filter so its crashes still terminate). Attach applies no default.

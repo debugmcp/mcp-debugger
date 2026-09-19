@@ -133,7 +133,7 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
   // gating tests stub it with `vi.stubEnv` after a ProcessEnvironment has already
   // snapshotted process.env, so only the live read sees them.
   if (isContainerRuntime()) {
-    const tryRegister = (lang: 'mock' | 'python' | 'javascript' | 'ruby' | 'rust' | 'go' | 'java' | 'cpp', factoryName: string) => {
+    const tryRegister = (lang: 'mock' | 'python' | 'javascript' | 'ruby' | 'rust' | 'go' | 'java' | 'cpp' | 'cobol', factoryName: string) => {
       if (isLanguageDisabled(lang)) {
         logger.info?.(`[AdapterRegistry] Skipping bundled adapter '${lang}' (disabled via env).`);
         return;
@@ -163,6 +163,7 @@ export function createProductionDependencies(config: ContainerConfig = {}): Depe
     tryRegister('go', 'GoAdapterFactory');
     tryRegister('java', 'JavaAdapterFactory');
     tryRegister('cpp', 'CppAdapterFactory');
+    tryRegister('cobol', 'CobolAdapterFactory');
   }
   
   return {

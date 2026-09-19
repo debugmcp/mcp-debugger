@@ -4,7 +4,7 @@ mcp-debugger is a Model Context Protocol (MCP) server that bridges MCP clients (
 
 ## Monorepo Structure
 
-The project uses pnpm workspaces (`packages: ['packages/*']`): the root project plus 17 packages under `packages/`:
+The project uses pnpm workspaces (`packages: ['packages/*']`): the root project plus 18 packages under `packages/`:
 
 ```
 packages/
@@ -17,7 +17,8 @@ packages/
   adapter-java/       Java debugging via JDI bridge
   adapter-dotnet/     .NET/C# debugging via netcoredbg
   adapter-cpp/        C/C++ debugging via CodeLLDB
-  codelldb-common/    Shared CodeLLDB infrastructure (vendoring, resolution, spawn glue) for the Rust and C/C++ adapters
+  adapter-cobol/      COBOL debugging via GnuCOBOL + CodeLLDB (a Node DAP shim in front of the engine adds the COBOL semantics)
+  codelldb-common/    Shared CodeLLDB infrastructure (vendoring, resolution, spawn glue) for the Rust, C/C++ and COBOL adapters
   codelldb-darwin-arm64/  Prebuilt CodeLLDB binaries, one package per platform. Published with
   codelldb-darwin-x64/    `os`/`cpu` fields so an install pulls only the matching payload; the
   codelldb-linux-arm64/   resolver in codelldb-common probes a vendored copy first, then

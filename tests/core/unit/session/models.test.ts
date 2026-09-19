@@ -211,9 +211,9 @@ describe('Session Models', () => {
         expect(DebugLanguage.MOCK).toBe('mock');
       });
 
-      it('should have exactly 9 language options including ruby, javascript, rust, go, java, dotnet, and cpp', () => {
+      it('should have exactly 10 language options including ruby, javascript, rust, go, java, dotnet, cpp, and cobol', () => {
         const languages = Object.values(DebugLanguage);
-        expect(languages).toHaveLength(9);
+        expect(languages).toHaveLength(10);
         expect(languages).toContain('ruby');
         expect(languages).toContain('javascript');
         expect(languages).toContain('rust');
@@ -221,6 +221,7 @@ describe('Session Models', () => {
         expect(languages).toContain('java');
         expect(languages).toContain('dotnet');
         expect(languages).toContain('cpp');
+        expect(languages).toContain('cobol');
       });
     });
 
