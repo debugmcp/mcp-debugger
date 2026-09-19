@@ -51,12 +51,19 @@ const GENERATED_C_PATTERN = /\.c(\.h|\.l\d*\.h)?$/i;
 /**
  * `get_local_variables` for COBOL is the union of the shim's data-division
  * scopes of the anchor frame, in declaration order (WORKING-STORAGE first).
- * Plural `scopeRefs` follow the js-debug Block+Local precedent. A frame with
- * none of these scopes (paused inside libcob, or a non-COBOL frame) yields an
- * empty extraction with a note rather than the engine's C locals: the shim's
- * `evaluate` walks up to the nearest COBOL frame, and `get_scopes` still
- * exposes whatever the engine reports.
+ * Plural `scopeRefs` follow the js-debug Block+Local precedent. For a frame
+ * outside COBOL (paused inside libcob or C$SLEEP after an attach, a C helper)
+ * the shim serves the nearest COBOL program's sections under names that say
+ * so — `WORKING-STORAGE of PAYROLL (frame #3)` — and those count here too.
+ * Only a stack with no COBOL program above the frame, or one without a
+ * symbol manifest, yields an empty extraction with a note rather than the
+ * engine's C locals.
  */
+/** A data-division scope name as the shim emits it: bare for a COBOL frame, `<SECTION> of <PROGRAM-ID> (frame #N)` when served for a frame above it. */
+export function isCobolScopeName(name: string): boolean {
+  return COBOL_SCOPE_NAMES.some((section) => name === section || name.startsWith(`${section} of `));
+}
+
 export function extractCobolLocalVariables(
   stackFrames: StackFrame[],
   scopes: Record<number, DebugProtocol.Scope[]>,
@@ -70,14 +77,12 @@ export function extractCobolLocalVariables(
     // Contract: nothing read means the plain empty extraction, no note.
     return emptyLocalVariableExtraction();
   }
-  const cobolScopes = frameScopes.filter((scope) =>
-    (COBOL_SCOPE_NAMES as readonly string[]).includes(scope.name)
-  );
+  const cobolScopes = frameScopes.filter((scope) => isCobolScopeName(scope.name));
   if (cobolScopes.length === 0) {
     // The engine reported scopes (Local/Static/…) but the shim added no COBOL
-    // ones: the frame is outside a COBOL program or has no symbol manifest.
+    // ones: no COBOL program on the stack above this frame, or no symbol manifest.
     return emptyLocalVariableExtraction(
-      'No COBOL data division scopes at this frame (paused outside a COBOL program, or no symbol manifest for it).'
+      'No COBOL data division scopes at this frame (no COBOL program on the stack above it, or no symbol manifest for it).'
     );
   }
   const collected: Variable[] = [];

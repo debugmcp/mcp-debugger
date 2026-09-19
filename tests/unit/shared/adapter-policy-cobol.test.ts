@@ -19,6 +19,7 @@ import {
 } from '@debugmcp/shared';
 import {
   extractCobolLocalVariables,
+  isCobolScopeName,
   isCobolInternalFrame,
   filterCobolStackFrames,
   matchesCobolShimCommand
@@ -234,6 +235,21 @@ describe('extractCobolLocalVariables', () => {
       scopeRefs: [10, 20, 30]
     });
     expect(extraction).not.toHaveProperty('note');
+  });
+
+  it('accepts the walk-up names the shim gives scopes it serves for a frame above the COBOL program', () => {
+    const libcobFrames = [frame(1, 'cob_sys_sleep', ''), frame(2, 'PAYROLL_', '/work/payroll.cob', 40)];
+    const scopes = { 1: [scope('WORKING-STORAGE of PAYROLL (frame #1)', 10), scope('LINKAGE of PAYROLL (frame #1)', 30), scope('Local', 90)] };
+    const variables = { 10: [v('WS-TICK', '000000042')], 30: [v('LK-ARG', '1')], 90: [v('b_8', '0x1')] };
+
+    expect(extractCobolLocalVariables(libcobFrames, scopes, variables)).toEqual({
+      variables: [v('WS-TICK', '000000042'), v('LK-ARG', '1')],
+      scopeRefs: [10, 30]
+    });
+    expect(isCobolScopeName('WORKING-STORAGE')).toBe(true);
+    expect(isCobolScopeName('WORKING-STORAGE of PAYROLL (frame #1)')).toBe(true);
+    expect(isCobolScopeName('WORKING-STORAGE-LIKE')).toBe(false);
+    expect(isCobolScopeName('Local')).toBe(false);
   });
 
   it('skips a data-division scope that has no variables, so scopeRefs only names contributors', () => {

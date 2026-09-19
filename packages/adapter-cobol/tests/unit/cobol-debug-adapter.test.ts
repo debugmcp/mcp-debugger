@@ -625,8 +625,8 @@ describe('CobolDebugAdapter', () => {
   });
 
   describe('transformAttachConfig', () => {
-    it('maps a numeric processId to the lldb attach shape with stopOnEntry defaulting to true', () => {
-      expect(adapter.transformAttachConfig({ request: 'attach', processId: 4242 })).toEqual({
+    it('maps a numeric processId to the lldb attach shape with stopOnEntry defaulting to true', async () => {
+      expect(await adapter.transformAttachConfig({ request: 'attach', processId: 4242 })).toEqual({
         type: 'lldb',
         request: 'attach',
         pid: 4242,
@@ -635,14 +635,14 @@ describe('CobolDebugAdapter', () => {
       });
     });
 
-    it('accepts a numeric string pid and honours stopOnEntry: false', () => {
-      const result = adapter.transformAttachConfig({ request: 'attach', processId: '77', stopOnEntry: false });
+    it('accepts a numeric string pid and honours stopOnEntry: false', async () => {
+      const result = await adapter.transformAttachConfig({ request: 'attach', processId: '77', stopOnEntry: false });
       expect(result.pid).toBe(77);
       expect(result.stopOnEntry).toBe(false);
     });
 
-    it('resolves manifestDirs against cwd into the private block and keeps cwd out of the engine config', () => {
-      const result = adapter.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, manifestDirs: ['m1', path.join(tmp, 'm2')], engineScopes: true });
+    it('resolves manifestDirs against cwd into the private block and keeps cwd out of the engine config', async () => {
+      const result = await adapter.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, manifestDirs: ['m1', path.join(tmp, 'm2')], engineScopes: true });
 
       expect(result[COBOL_PRIVATE_KEY]).toEqual({ manifestDirs: [path.join(tmp, 'm1'), path.join(tmp, 'm2')], engineScopes: true });
       expect(result).not.toHaveProperty('cwd');
@@ -650,12 +650,70 @@ describe('CobolDebugAdapter', () => {
       expect(result).not.toHaveProperty('engineScopes');
     });
 
-    it('passes program and advanced keys through for symbol resolution', () => {
-      const result = adapter.transformAttachConfig({ request: 'attach', processId: 7, program: '/opt/app/server', initCommands: ['x'], waitFor: true });
+    it('passes program and advanced keys through for symbol resolution', async () => {
+      const result = await adapter.transformAttachConfig({ request: 'attach', processId: 7, program: '/opt/app/server', initCommands: ['x'], waitFor: true });
       expect(result).toMatchObject({ program: '/opt/app/server', initCommands: ['x'], waitFor: true });
+      expect(buildMock).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/Attach without "sources" or "manifestDirs"/));
     });
 
-    it('rejects anything but a positive integer pid as UNSUPPORTED_OPERATION', () => {
+    it('regenerates the manifest from sources with a translate-only build beside the named program, ahead of manifestDirs', async () => {
+      buildMock.mockResolvedValue(buildResult('payroll'));
+
+      const result = await adapter.transformAttachConfig({
+        request: 'attach',
+        processId: 7,
+        cwd: tmp,
+        program: 'bin/payroll',
+        sources: ['src/payroll.cob', path.join(tmp, 'src', 'sub.cob')],
+        dialect: 'ibm',
+        copybookDirs: ['cpy'],
+        runtimeChecks: true,
+        manifestDirs: ['old']
+      });
+
+      expect(buildMock).toHaveBeenCalledWith({
+        program: path.join(tmp, 'bin', 'payroll'),
+        sources: [path.join(tmp, 'src', 'payroll.cob'), path.join(tmp, 'src', 'sub.cob')],
+        mode: 'manifest-only',
+        dialect: 'ibm',
+        format: undefined,
+        copybookDirs: [path.join(tmp, 'cpy')],
+        cobcFlags: undefined,
+        runtimeChecks: true,
+        forceRebuild: false
+      });
+      expect(result[COBOL_PRIVATE_KEY]).toEqual({ manifestDirs: [buildResult('payroll').artifactDir, path.join(tmp, 'old')], engineScopes: false });
+      // The build options are consumed here, not forwarded to the engine.
+      expect(result).toMatchObject({ pid: 7, program: 'bin/payroll' });
+      for (const key of ['sources', 'dialect', 'copybookDirs', 'runtimeChecks', 'manifestDirs']) {
+        expect(result).not.toHaveProperty(key);
+      }
+      expect(adapter.buildAdapterCommand(adapterConfig({ logDir: '' })).args).toContain(buildResult('payroll').artifactDir);
+    });
+
+    it('anchors the regeneration on the first source when no program is named', async () => {
+      buildMock.mockResolvedValue(buildResult('pause'));
+
+      await adapter.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, sources: ['pause.cob'] });
+
+      expect(buildMock).toHaveBeenCalledWith(expect.objectContaining({ program: path.join(tmp, 'pause.cob'), mode: 'manifest-only' }));
+    });
+
+    it('attaches without a manifest, with a warning, when the regeneration fails or cobc is missing', async () => {
+      buildMock.mockResolvedValue({ ...buildResult('pause'), success: false, error: 'cobc exited with code 1' });
+      const failed = await adapter.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, sources: ['pause.cob'] });
+      expect(failed[COBOL_PRIVATE_KEY]).toEqual({ manifestDirs: [], engineScopes: false });
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/Symbol manifest regeneration failed \(cobc exited with code 1\)/));
+
+      vi.mocked(findCobc).mockResolvedValue(null);
+      const fresh = new CobolDebugAdapter(createDependencies(), 'linux');
+      const noCobc = await fresh.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, sources: ['pause.cob'], manifestDirs: ['m'] });
+      expect(noCobc[COBOL_PRIVATE_KEY]).toEqual({ manifestDirs: [path.join(tmp, 'm')], engineScopes: false });
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/"sources" given but cobc is not available/));
+    });
+
+    it('rejects anything but a positive integer pid as UNSUPPORTED_OPERATION', async () => {
       for (const config of [
         { request: 'attach' as const },
         { request: 'attach' as const, processId: 'not-a-pid' },
@@ -665,7 +723,7 @@ describe('CobolDebugAdapter', () => {
       ]) {
         let caught: unknown;
         try {
-          adapter.transformAttachConfig(config);
+          await adapter.transformAttachConfig(config);
         } catch (error) {
           caught = error;
         }
@@ -734,8 +792,8 @@ describe('CobolDebugAdapter', () => {
       expect(pathEntries(after.env).some((entries) => entries[0] === cobcLinux.binDir)).toBe(true);
     });
 
-    it('reuses the manifest dirs of the last attach transform', () => {
-      adapter.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, manifestDirs: ['m'] });
+    it('reuses the manifest dirs of the last attach transform', async () => {
+      await adapter.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, manifestDirs: ['m'] });
 
       const command = adapter.buildAdapterCommand(adapterConfig({ logDir: '' }));
 

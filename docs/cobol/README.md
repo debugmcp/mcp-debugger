@@ -124,12 +124,16 @@ The build key hashes the `cobc --version` banner, the flags (minus `-o`/`-t` and
 ### Attach Mode (by PID)
 
 ```
+attach_to_process sessionId=... processId=<pid> adapterConfig={"sources": ["/proj/src/payroll.cob"], "dialect": "ibm"}
 attach_to_process sessionId=... processId=<pid> adapterConfig={"manifestDirs": ["/proj/src/.debug-mcp/cobol/PAYROLL/<buildKey>"]}
 ```
 
 - Numeric `processId` only; name/host/port attach is rejected (`COBOL attach requires a numeric processId`).
-- `manifestDirs` supplies the `*.cobol-symbols.json` files for the running program (an earlier source launch's artifact directory, or a `cobc -C` run of your own). Regenerating the manifest from `sources` at attach time is milestone M2 of #759; until then, without `manifestDirs` the session shows the engine's C view, and stepping lands on any `.cob`/`.cpy` line.
-- cobc is not needed to attach: the shim and the vendored CodeLLDB are all that runs.
+- `sources` regenerates the symbol manifest for the running program exactly as a prebuilt launch does: a translate-only `cobc -C` (the process and its binary are not touched) into `.debug-mcp/cobol/<name>/<buildKey>/` beside `program` when you name the binary (CodeLLDB's symbol hint), else beside the first source. Pass the `dialect`, `format`, `copybookDirs`, `cobcFlags` and `runtimeChecks` the binary was built with — the manifest describes the storage layout those options produce. This needs cobc; without it the attach proceeds with a warning and the engine's C view.
+- `manifestDirs` supplies ready `*.cobol-symbols.json` files instead (an earlier source launch's artifact directory, or a `cobc -C` run of your own); a manifest regenerated from `sources` outranks a `manifestDirs` entry for the same program. With neither, the session shows the engine's C view and stepping lands on any `.cob`/`.cpy` line.
+- cobc is not needed to attach with `manifestDirs`: the shim and the vendored CodeLLDB are all that runs.
+- A batch job is usually paused inside libcob or a `C$SLEEP`/I/O call, a frame with no COBOL source: `get_scopes`, `get_local_variables` and `evaluate_expression` then serve the nearest COBOL program up the stack (the scope names say which frame, `WORKING-STORAGE of PAYROLL (frame #3)`), so the data division is visible on first contact; `get_stack_trace` shows the COBOL frame's paragraph.
+- When the client that started the session goes away (the server or the proxy dies), the shim detaches: an attached process is never terminated the way a launched one is.
 - The target is held paused after attach (`stopOnEntry` is a top-level `attach_to_process` parameter and defaults to `true`; pass `false` to resume immediately).
 - Recognised `adapterConfig` keys: `processId`/`pid`, `program` (CodeLLDB's explicit-binary hint), `waitFor`, `manifestDirs`, `engineScopes`, `initCommands`, `preRunCommands`, `postRunCommands`, `exitCommands`, `targetCreateCommands`, `processCreateCommands`, `expressions`, `sourceMap`, `sourceLanguages`, `relativePathBase`, `breakpointMode`. Unlisted keys are still forwarded, with a warning naming them.
 - `detach_from_process` leaves the target running.
@@ -220,7 +224,7 @@ Every libcob runtime check (subscript out of bounds, ODO count, reference modifi
 | Function breakpoints (`function: "1000-INIT"`, sections, `PROGRAM-ID`) | Rejected up front; paragraph and section names are C labels, not functions. Milestone M3 of [#759](https://github.com/debugmcp/mcp-debugger/issues/759) |
 | Logpoints (`logMessage: "total={WS-TOTAL}"`) | Rejected up front — `{WS-NAME}` interpolation needs the shim; M3 |
 | PERFORM-aware `step_over` / `step_out`, synthesised PERFORM stack (`-fstack-extended`) | M3 (PERFORM is entered like `GO TO` today) |
-| `cobcrun` launch, manifest regeneration from `sources` on attach | M2 |
+| `cobcrun` launch | M2 |
 | Writing variables (`setVariable`, `setExpression`) | Not supported; out of scope for v1 |
 | `noDebug: true` | Honoured by the engine: `setBreakpoints` is refused with `Not supported in noDebug mode`, the program runs to exit (R12) |
 | SCREEN SECTION, EBCDIC data, CICS/DB2/IMS preprocessors, NATIONAL / DEC64 / DEC128, level-66 RENAMES, `gcobol` (GCC 15) | Out of scope |

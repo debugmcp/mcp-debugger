@@ -410,10 +410,17 @@ export class Router {
   private async onScopes(request: DebugProtocol.Request): Promise<DebugProtocol.Response | { forward: DebugProtocol.Request; transform?: ForwardMeta['transform'] }> {
     const args = this.argsOf<DebugProtocol.ScopesArguments>(request);
     const frame = await this.ensureFrame(args.frameId);
-    if (!frame || !frame.isCobol || !frame.program) {
+    // A frame outside COBOL — paused in libcob or C$SLEEP after an attach, in the
+    // runtime-error hook, in a C helper — shows the data division of the nearest COBOL
+    // program up the stack (the same walk `evaluate` does), under names that say whose
+    // it is. Only a stack with no COBOL frame above falls through to the engine.
+    const anchor = frame && frame.isCobol && frame.program ? { frame } : await this.anchorFrame(args.frameId);
+    const entry = anchor?.frame.program;
+    if (!frame || !anchor || !entry) {
       return { forward: request, transform: (response) => this.checkRefBand(response) };
     }
-    const entry = frame.program;
+    const cobolFrame = anchor.frame;
+    const suffix = cobolFrame.id === frame.id ? '' : ` of ${entry.program.programId} (frame #${cobolFrame.index})`;
     const scopes: DebugProtocol.Scope[] = [];
     for (const section of COBOL_SECTIONS) {
       const roots = this.state.registry.rootsOf(entry, section);
@@ -421,8 +428,9 @@ export class Router {
         continue;
       }
       scopes.push({
-        name: section,
-        variablesReference: this.state.allocRef({ kind: 'section', frameId: frame.id, program: entry, section }),
+        name: `${section}${suffix}`,
+        // Addresses are evaluated in the COBOL frame: its compilation unit owns the statics.
+        variablesReference: this.state.allocRef({ kind: 'section', frameId: cobolFrame.id, program: entry, section }),
         namedVariables: roots.length,
         expensive: false
       });

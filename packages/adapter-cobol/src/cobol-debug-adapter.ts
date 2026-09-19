@@ -104,6 +104,31 @@ export interface CobolLaunchConfig extends GenericLaunchConfig {
   [key: string]: unknown;
 }
 
+/** Attach sugar over CodeLLDB's attach keys: the manifest sources and the build options they were compiled with. */
+interface CobolAttachExtras {
+  manifestDirs?: string[];
+  engineScopes?: boolean;
+  /** Sources of the running program; the manifest is regenerated from them by a translate-only `cobc -C`. */
+  sources?: string[];
+  dialect?: string;
+  format?: 'fixed' | 'free';
+  copybookDirs?: string[];
+  cobcFlags?: string[];
+  runtimeChecks?: boolean;
+  forceRebuild?: boolean;
+}
+
+/** The build options a manifest regeneration takes (the binary is not rebuilt; these must match how it was compiled). */
+interface ManifestRegenerationOptions {
+  sources: string[];
+  dialect?: string;
+  format?: 'fixed' | 'free';
+  copybookDirs: string[];
+  cobcFlags?: string[];
+  runtimeChecks?: boolean;
+  forceRebuild: boolean;
+}
+
 interface ExecutablePathCacheEntry {
   path: string;
   timestamp: number;
@@ -126,6 +151,13 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
     'waitFor',
     'manifestDirs',
     'engineScopes',
+    'sources',
+    'dialect',
+    'format',
+    'copybookDirs',
+    'cobcFlags',
+    'runtimeChecks',
+    'forceRebuild',
     'initCommands',
     'preRunCommands',
     'postRunCommands',
@@ -557,32 +589,22 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
           this.dependencies.logger?.info(`[CobolDebugAdapter] Container mode: derived sourceMap from binary DWARF paths: ${JSON.stringify(derived)}`);
         }
       }
-      if (absSources.length > 0 && cobc) {
-        const builder = new GnuCobolBuilder({ cobc, platform: this.platform, logger: this.dependencies.logger });
-        const result = await builder.build({
-          program: programPath,
+      if (absSources.length > 0) {
+        const artifactDir = await this.regenerateManifest(cobc, programPath, {
           sources: absSources,
-          mode: 'manifest-only',
           dialect,
           format,
           copybookDirs: absCopybookDirs,
           cobcFlags,
-          // `--debug` moves every later `#line` row; the manifest must be translated the
-          // way the binary was compiled or runtime-error stops map to the wrong statement.
           runtimeChecks,
           forceRebuild: forceRebuild === true
         });
-        this.lastBuild = result;
-        if (!result.success) {
-          this.dependencies.logger?.warn(`[CobolDebugAdapter] Symbol manifest regeneration failed (${result.error}); COBOL variables will fall back to the engine view.`);
-        } else if (result.artifactDir) {
-          shimManifestDirs.push(result.artifactDir);
+        if (artifactDir) {
+          shimManifestDirs.push(artifactDir);
         }
-      } else if (shimManifestDirs.length === 0 && userManifestDirs.length === 0) {
+      } else if (userManifestDirs.length === 0) {
         this.dependencies.logger?.warn(
-          absSources.length > 0
-            ? '[CobolDebugAdapter] "sources" given but cobc is not available: no COBOL symbol manifest, variables show the engine (C) view only.'
-            : '[CobolDebugAdapter] Prebuilt executable without "sources" or "manifestDirs": no COBOL symbol manifest, variables show the engine (C) view only (the binary must have been built with cobc -g).'
+          '[CobolDebugAdapter] Prebuilt executable without "sources" or "manifestDirs": no COBOL symbol manifest, variables show the engine (C) view only (the binary must have been built with cobc -g).'
         );
       }
     }
@@ -626,6 +648,44 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
     return launchConfig;
   }
 
+  /**
+   * Regenerate the symbol manifest for a binary this session did not build — a prebuilt
+   * launch, or the process being attached to — by a translate-only `cobc -C` over
+   * `sources`. The binary is never touched; the artifacts land beside `anchor` (the
+   * binary when known, else the first source). Returns the artifact directory, or
+   * undefined after a warning when cobc is missing or the translation failed: the
+   * session then shows the engine's C view instead of failing.
+   */
+  private async regenerateManifest(cobc: CobcLocation | null, anchor: string, options: ManifestRegenerationOptions): Promise<string | undefined> {
+    if (!cobc) {
+      this.dependencies.logger?.warn('[CobolDebugAdapter] "sources" given but cobc is not available: no COBOL symbol manifest, variables show the engine (C) view only.');
+      return undefined;
+    }
+    const builder = new GnuCobolBuilder({ cobc, platform: this.platform, logger: this.dependencies.logger });
+    const result = await builder.build({
+      program: anchor,
+      sources: options.sources,
+      mode: 'manifest-only',
+      dialect: options.dialect,
+      format: options.format,
+      copybookDirs: options.copybookDirs,
+      cobcFlags: options.cobcFlags,
+      // `--debug` moves every later `#line` row; the manifest must be translated the
+      // way the binary was compiled or runtime-error stops map to the wrong statement.
+      runtimeChecks: options.runtimeChecks,
+      forceRebuild: options.forceRebuild
+    });
+    this.lastBuild = result;
+    if (!result.success) {
+      this.dependencies.logger?.warn(`[CobolDebugAdapter] Symbol manifest regeneration failed (${result.error}); COBOL variables will fall back to the engine view.`);
+      return undefined;
+    }
+    for (const diagnostic of result.diagnostics) {
+      this.dependencies.logger?.warn(`[CobolDebugAdapter] cobc -C: ${diagnostic}`);
+    }
+    return result.artifactDir;
+  }
+
   getDefaultLaunchConfig(): Partial<GenericLaunchConfig> {
     return { stopOnEntry: false, justMyCode: true, env: {}, cwd: process.cwd() };
   }
@@ -640,7 +700,13 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
     return true;
   }
 
-  transformAttachConfig(config: GenericAttachConfig): LanguageSpecificAttachConfig {
+  /**
+   * Attach by PID. `sources` regenerates the running program's symbol manifest the way a
+   * prebuilt launch does (translate-only, the process is not touched); `manifestDirs`
+   * supplies ready manifests. Async because that regeneration runs cobc (the launcher
+   * awaits the transform, issue #759 M2).
+   */
+  async transformAttachConfig(config: GenericAttachConfig): Promise<LanguageSpecificAttachConfig> {
     const {
       request: _request,
       identifierType: _identifierType,
@@ -655,7 +721,7 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
       env: _env,
       cwd,
       ...rest
-    } = config as GenericAttachConfig & { manifestDirs?: string[]; engineScopes?: boolean };
+    } = config as GenericAttachConfig & CobolAttachExtras;
     void _request; void _identifierType; void _processName; void _host;
     void _port; void _timeout; void _sourcePaths; void _justMyCode; void _env;
 
@@ -666,10 +732,36 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
         AdapterErrorCode.UNSUPPORTED_OPERATION
       );
     }
-    const { manifestDirs, engineScopes, ...passthrough } = rest;
+    const { manifestDirs, engineScopes, sources, dialect, format, copybookDirs, cobcFlags, runtimeChecks, forceRebuild, ...passthrough } = rest;
     const baseDir = typeof cwd === 'string' && cwd.length > 0 ? cwd : process.cwd();
+    const userManifestDirs = (manifestDirs ?? []).map((d) => path.resolve(baseDir, d));
+    const absSources = (sources ?? []).map((s) => path.resolve(baseDir, s));
+    const shimManifestDirs: string[] = [];
+    if (absSources.length > 0) {
+      // The artifacts go beside the binary when the caller named it (CodeLLDB's `program`
+      // hint), else beside the first source.
+      const program = passthrough.program;
+      const anchor = typeof program === 'string' && program.length > 0 ? path.resolve(baseDir, program) : absSources[0];
+      const artifactDir = await this.regenerateManifest(await this.locateCobc(), anchor, {
+        sources: absSources,
+        dialect,
+        format,
+        copybookDirs: (copybookDirs ?? []).map((d) => path.resolve(baseDir, d)),
+        cobcFlags,
+        runtimeChecks,
+        forceRebuild: forceRebuild === true
+      });
+      if (artifactDir) {
+        shimManifestDirs.push(artifactDir);
+      }
+    } else if (userManifestDirs.length === 0) {
+      this.dependencies.logger?.warn(
+        '[CobolDebugAdapter] Attach without "sources" or "manifestDirs": no COBOL symbol manifest, variables show the engine (C) view only.'
+      );
+    }
     const shimOptions: CobolShimSessionOptions = {
-      manifestDirs: (manifestDirs ?? []).map((d) => path.resolve(baseDir, d)),
+      // Fresh regeneration first (the shim keeps the first definition of a program).
+      manifestDirs: [...new Set([...shimManifestDirs, ...userManifestDirs])],
       engineScopes: engineScopes === true
     };
     this.lastShimOptions = shimOptions;

@@ -78,6 +78,30 @@ describe('cobol shim stackTrace and scopes', () => {
     expect(h.engine.received('scopes')).toHaveLength(1);
   });
 
+  it('serves the nearest COBOL program up the stack, named for it, when the frame is inside libcob or a C helper', async () => {
+    h = await startShim({
+      manifests: [helloManifest(ROOT)],
+      engineSetup: (engine) => engine.on('scopes', () => ({ scopes: [{ name: 'Local', variablesReference: 12, expensive: false }] }))
+    });
+    await bringUp(h);
+    // Attached to a batch job asleep in C$SLEEP: libcob frames without source on top.
+    await stopWithFrames(h, [
+      frame(1, 'nanosleep', undefined, 0),
+      frame(2, 'cob_sys_sleep', undefined, 0),
+      frame(3, 'HELLO_', HELLO_COB, 40),
+      frame(4, 'main', HELLO_C, 250)
+    ]);
+    const scopes = scopesOf(await h.client.request('scopes', { frameId: 1 }));
+    expect(scopes.map((s) => s.name)).toEqual(['WORKING-STORAGE of HELLO (frame #2)']);
+    expect(scopes[0].namedVariables).toBe(9);
+    expect(scopes[0].variablesReference).toBeGreaterThanOrEqual(1 << 30);
+    expect(h.engine.received('scopes')).toHaveLength(0);
+    // The frame the COBOL frame itself gets: bare names, same program.
+    expect(scopesOf(await h.client.request('scopes', { frameId: 3 })).map((s) => s.name)).toEqual(['WORKING-STORAGE']);
+    // Below every COBOL frame there is nothing to walk up to: the engine answers.
+    expect(scopesOf(await h.client.request('scopes', { frameId: 4 })).map((s) => s.name)).toEqual(['Local']);
+  });
+
   it('adds LOCAL-STORAGE and LINKAGE only when the program has them, and appends engine scopes under --engine-scopes', async () => {
     h = await startShim({
       manifests: [callsManifest(ROOT)],

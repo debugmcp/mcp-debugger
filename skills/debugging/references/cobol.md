@@ -32,11 +32,13 @@ close_debug_session   {"sessionId": "<id>"}
 ## Attach (by PID)
 
 ```json
+attach_to_process {"sessionId": "<id>", "processId": 4242, "adapterConfig": {"sources": ["C:/proj/src/payroll.cob"], "dialect": "ibm"}}
 attach_to_process {"sessionId": "<id>", "processId": 4242, "adapterConfig": {"manifestDirs": ["C:/proj/src/.debug-mcp/cobol/PAYROLL/<buildKey>"]}}
 ```
 
 - Numeric `processId` only (no host/port). Target held **paused** after attach (`stopOnEntry: false` to resume). `detach_from_process` leaves it running.
-- `manifestDirs` = directories holding `*.cobol-symbols.json` (an earlier source launch's artifact directory). Without it the session shows the engine's C view; regenerating from `sources` at attach time is a later milestone (#759 M2). cobc is not needed to attach.
+- `sources` (+ the `dialect`/`format`/`copybookDirs`/`runtimeChecks` the binary was built with) regenerates the symbol manifest by a translate-only `cobc -C`, beside `program` if you name the binary; `manifestDirs` = directories holding ready `*.cobol-symbols.json` (an earlier source launch's artifact directory) and needs no cobc. With neither, the session shows the engine's C view.
+- Attach usually lands inside libcob / `C$SLEEP` (no COBOL source at the top): scopes, locals and `evaluate_expression` serve the nearest COBOL program up the stack, named in the scope (`WORKING-STORAGE of PAYROLL (frame #3)`).
 - Linux: `kernel.yama.ptrace_scope=1` limits attach to child processes (`sudo sysctl kernel.yama.ptrace_scope=0`).
 
 ## Quirks
