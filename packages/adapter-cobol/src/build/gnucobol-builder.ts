@@ -226,6 +226,41 @@ function keyArgv(args: string[]): string[] {
   return out;
 }
 
+const FREE_FORMAT_DIRECTIVE = /^\s*(?:>>\s*SOURCE(?:\s+FORMAT)?(?:\s+IS)?\s+FREE|\$\s*SET\s+SOURCEFORMAT\s*"FREE")/im;
+const PROGRAM_ID_RE = /\bPROGRAM-ID\s*\.?\s*(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9][A-Za-z0-9_-]*))/i;
+
+/**
+ * The PROGRAM-ID a COBOL source declares, as written, or undefined when none is found.
+ *
+ * libcob resolves a dynamic `CALL "NAME"` to `<NAME>.<so|dll|dylib>` on COB_LIBRARY_PATH
+ * by file name, case-sensitively on Linux (measured on 3.1.2 and 3.2: `mod1.so` does not
+ * satisfy `CALL "MOD1"`), so a `-m` module is written under this name rather than the
+ * source file's basename. Comment lines go first — a commented-out old header is common:
+ * fixed format drops lines with `*` or `/` in column 7 and reads columns 8-72 only; free
+ * format (`-free`, or a `>>SOURCE FORMAT FREE` directive) drops `*>` to end of line.
+ */
+export function scanProgramId(sourcePath: string, format?: 'fixed' | 'free'): string | undefined {
+  let text: string;
+  try {
+    text = fs.readFileSync(sourcePath, 'latin1');
+  } catch {
+    return undefined;
+  }
+  const free = format === 'free' || (format !== 'fixed' && FREE_FORMAT_DIRECTIVE.test(text));
+  const code = text.split(/\r?\n/).map((line) => {
+    if (!free) {
+      if (line.length > 6 && (line[6] === '*' || line[6] === '/')) {
+        return '';
+      }
+      line = line.slice(7, 72);
+    }
+    const comment = line.indexOf('*>');
+    return comment >= 0 ? line.slice(0, comment) : line;
+  });
+  const match = PROGRAM_ID_RE.exec(code.join(' '));
+  return match ? (match[1] ?? match[2] ?? match[3]) : undefined;
+}
+
 /**
  * Copybook paths from the `#line N "path"` markers of the preprocessed `.i` cobc keeps
  * under --save-temps: every copybook the compilation read, including ones only the
@@ -283,8 +318,13 @@ export class GnuCobolBuilder {
     return path.join(root, this.outputName(request));
   }
 
+  /** The output basename: `outputName`, else the PROGRAM-ID for a module (see scanProgramId), else the source basename. */
   outputName(request: CobolBuildRequest): string {
-    return request.outputName ?? path.basename(request.program, path.extname(request.program));
+    if (request.outputName) {
+      return request.outputName;
+    }
+    const base = path.basename(request.program, path.extname(request.program));
+    return request.mode === 'module' ? scanProgramId(request.program, request.format) ?? base : base;
   }
 
   async build(request: CobolBuildRequest): Promise<CobolBuildResult> {
@@ -419,6 +459,23 @@ export class GnuCobolBuilder {
       }
     }
 
+    let binaryPath = outputPath;
+    if (request.mode === 'module' && outputPath) {
+      // The compiler's own program id is the authority; the pre-scan chose `-o` before cobc
+      // ran. A mismatch (a header the scan could not read) is repaired by renaming.
+      const declared = manifests[0]?.programs[0]?.programId;
+      if (declared === undefined) {
+        if (scanProgramId(request.program, request.format) === undefined) {
+          diagnostics.push(`No PROGRAM-ID found in ${request.program}; the module is named ${name} after the file, and a dynamic CALL must use that exact name.`);
+        }
+      } else if (declared.toUpperCase() !== name.toUpperCase()) {
+        const renamed = path.join(artifactDir, `${declared}${moduleExtension(this.platform)}`);
+        fs.renameSync(outputPath, renamed);
+        diagnostics.push(`Module renamed to ${path.basename(renamed)}: the source declares PROGRAM-ID ${declared}, which is the name a dynamic CALL resolves to.`);
+        binaryPath = renamed;
+      }
+    }
+
     for (const source of sources) {
       const preprocessed = path.join(artifactDir, `${path.basename(source, path.extname(source))}.i`);
       for (const copybook of copybooksFromPreprocessed(preprocessed)) {
@@ -433,7 +490,7 @@ export class GnuCobolBuilder {
       contentKey: keyFor([...sources, ...copybooks]),
       outputName: name,
       mode: request.mode,
-      binary: request.mode === 'manifest-only' ? request.program : outputPath,
+      binary: request.mode === 'manifest-only' ? request.program : binaryPath,
       manifests: manifestPaths,
       copybooks: [...copybooks],
       cobcVersion: this.deps.cobc.versionLine,

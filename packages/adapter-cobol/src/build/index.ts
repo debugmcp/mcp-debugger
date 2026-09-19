@@ -12,6 +12,7 @@ export type { BuildKeyInput } from './build-key.js';
 export {
   GnuCobolBuilder,
   cobcArguments,
+  scanProgramId,
   isCobolSourceFile,
   isCobolTextFile,
   moduleExtension,
