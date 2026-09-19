@@ -80,6 +80,24 @@ describe('cobol shim lifecycle', () => {
     expect(h.exitCodes).toEqual([0]);
   });
 
+  it('client close after launch: the engine is told to terminate the debuggee', async () => {
+    h = await startShim();
+    await h.client.request('launch', { program: '/bin/prog' });
+    await h.client.close();
+    await waitFor(() => h!.exitCodes.length > 0, 3000, 'exit');
+    const [disconnect] = h.engine.received('disconnect');
+    expect(disconnect?.arguments).toEqual({ terminateDebuggee: true });
+  });
+
+  it('client close after attach: the attached process is detached from, not terminated', async () => {
+    h = await startShim();
+    await h.client.request('attach', { pid: 4242 });
+    await h.client.close();
+    await waitFor(() => h!.exitCodes.length > 0, 3000, 'exit');
+    const [disconnect] = h.engine.received('disconnect');
+    expect(disconnect?.arguments).toEqual({ terminateDebuggee: false });
+  });
+
   it('engine exit: ends the client and exits with the engine code', async () => {
     h = await startShim();
     h.child.exitWith(3);

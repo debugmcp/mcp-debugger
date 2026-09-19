@@ -275,6 +275,7 @@ export class Router {
   }
 
   private onLaunchOrAttach(request: DebugProtocol.Request): void {
+    this.state.mode = request.command === 'attach' ? 'attach' : 'launch';
     const args = request.arguments as Record<string, unknown> | undefined;
     if (args && typeof args === 'object') {
       const block = args[COBOL_PRIVATE_KEY];

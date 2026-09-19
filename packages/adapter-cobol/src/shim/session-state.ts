@@ -78,6 +78,8 @@ export class SessionState {
   readonly options: ShimOptions;
   readonly registry: ManifestRegistry;
   generation = 0;
+  /** `launch` or `attach`, from the request that started the session (unset until one arrives). */
+  mode?: 'launch' | 'attach';
   lastThreadId?: number;
   engineCapabilities?: DebugProtocol.Capabilities;
   /** The user's own function breakpoints, replayed in every union with the runtime-error hook. */

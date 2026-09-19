@@ -208,9 +208,11 @@ export function createCobolShim(config: CobolShimArgv, deps: ShimDeps = {}): Cob
       return;
     }
     shuttingDown = true;
-    // The client is gone: ask the engine to take the debuggee down (it never saw a
-    // `disconnect`), give it the grace period, then leave.
-    engine?.request('disconnect', { terminateDebuggee: true }, timing.disconnectGraceMs).catch(() => undefined);
+    // The client is gone and the engine never saw a `disconnect`: send one, give it the
+    // grace period, then leave. A launched debuggee goes down with the session; an
+    // attached process is someone else's and is detached from, never terminated.
+    const terminateDebuggee = state.mode !== 'attach';
+    engine?.request('disconnect', { terminateDebuggee }, timing.disconnectGraceMs).catch(() => undefined);
     waitForEngineThenFinish(() => 0);
   };
 
