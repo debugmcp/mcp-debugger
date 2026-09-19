@@ -133,6 +133,14 @@ export function buildLanguageMetadata(languages: string[]): LanguageMetadata[] {
           requiresExecutable: true,
           defaultExecutable: 'g++'
         };
+      case DebugLanguage.COBOL:
+        return {
+          id: DebugLanguage.COBOL,
+          displayName: 'COBOL',
+          version: '1.0.0',
+          requiresExecutable: true,
+          defaultExecutable: 'cobc'
+        };
       default:
         return {
           id: lang,

@@ -339,7 +339,7 @@ packages/adapter-example/
   tsconfig.json
 ```
 
-File names are kebab-case, the convention used by 8 of the 9 shipped adapters (see [adapter-development-guide.md](./adapter-development-guide.md#package-structure)). Class names stay PascalCase.
+File names are kebab-case, the convention used by 9 of the 10 shipped adapters (see [adapter-development-guide.md](./adapter-development-guide.md#package-structure)). Class names stay PascalCase.
 
 Entry export (`src/index.ts`)
 ```typescript

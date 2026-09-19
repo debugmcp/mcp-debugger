@@ -1,0 +1,5 @@
+# Adapter auto-compile output (source-file launch path)
+.debug-mcp/
+
+# Test-harness build output
+.debug-mcp-test/

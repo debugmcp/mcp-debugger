@@ -87,6 +87,7 @@ export enum DebugLanguage {
   JAVA = 'java',
   DOTNET = 'dotnet',
   CPP = 'cpp',    // C and C++ share one adapter (CodeLLDB), like dotnet covers C#
+  COBOL = 'cobol', // GnuCOBOL programs: CodeLLDB behind the COBOL DAP shim (issue #759)
   MOCK = 'mock',  // Mock adapter for testing
 }
 

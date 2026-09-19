@@ -10,7 +10,7 @@ Goals:
 
 ## Modular by default
 
-The MCP Debugger ships without auto-installing optional adapters. The adapter loader has a hardcoded known-adapter registry for all nine languages (mock, python, javascript, ruby, rust, go, java, dotnet, cpp), but not all are built by default. JavaScript is available as an optional adapter in a separate package:
+The MCP Debugger ships without auto-installing optional adapters. The adapter loader has a hardcoded known-adapter registry for all ten languages (mock, python, javascript, ruby, rust, go, java, dotnet, cpp, cobol), but not all are built by default. JavaScript is available as an optional adapter in a separate package:
 
 - Package name: `@debugmcp/adapter-javascript`
 - Factory export: `JavascriptAdapterFactory`
@@ -58,7 +58,7 @@ The shared model defines:
 The display name ("JavaScript/TypeScript") and default executable (`node`) are defined in the adapter implementation (`packages/adapter-javascript/`) and its factory metadata, not in the shared model itself. The shared model only carries the language enum value.
 
 Unit tests were updated to reflect the addition:
-- `tests/core/unit/session/models.test.ts` now expects nine languages (python, javascript, ruby, rust, go, java, dotnet, cpp, mock) and verifies inclusion of `javascript`.
+- `tests/core/unit/session/models.test.ts` now expects ten languages (python, javascript, ruby, rust, go, java, dotnet, cpp, cobol, mock) and verifies inclusion of `javascript`.
 
 ## Verification steps
 

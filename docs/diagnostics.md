@@ -1,6 +1,6 @@
 # Diagnostics Guide
 
-Nine language adapters, each with its own external prerequisites — and nearly all real-world setup friction is environmental: debugpy missing from the active Python, `dlv` not on PATH, a JDK that is too old, `NETCOREDBG_PATH` unset, Yama blocking attach on Linux, a wrong volume mount in container mode. This guide gathers every prerequisite, failure signature, and diagnostic tool in one place.
+Ten language adapters, each with its own external prerequisites — and nearly all real-world setup friction is environmental: debugpy missing from the active Python, `dlv` not on PATH, a JDK that is too old, `NETCOREDBG_PATH` unset, Yama blocking attach on Linux, a wrong volume mount in container mode. This guide gathers every prerequisite, failure signature, and diagnostic tool in one place.
 
 ## Start here: `mcp-debugger doctor`
 
@@ -23,6 +23,7 @@ go          Go 1.26.1 C:\Program Files\Go\bin\go.exe         Delve 1.26.3 ~\go\b
 java        Java 21.0.10 C:\...\jdk-21\bin\java.exe          JDI bridge C:\...\java\out                ✅ ok
 dotnet      .NET SDK 8.0.420                                 netcoredbg 3.1.3-1 C:\...\netcoredbg.exe  ✅ ok
 cpp         C/C++ compiler g++ (MSYS2) 15.2.0                CodeLLDB 1.11.8 (vendored) C:\...         ✅ ok
+cobol       GnuCOBOL (cobc) 3.2.0 C:\...\cobc.exe            CodeLLDB 1.11.8 (vendored) C:\...         ✅ ok
 
 Platform checks
   ✅ container mode: not running in container mode
@@ -32,7 +33,7 @@ Platform checks
 Fixes
   rust: Rust MSVC toolchain detected. CodeLLDB works best with the GNU toolchain (x86_64-pc-windows-gnu) or DWARF debug info.
 
-1 of 9 adapters need attention. Run 'mcp-debugger doctor <language>' to gate the exit code on a specific language.
+1 of 10 adapters need attention. Run 'mcp-debugger doctor <language>' to gate the exit code on a specific language.
 ```
 
 Usage notes:
@@ -55,9 +56,10 @@ Usage notes:
 | dotnet | .NET 6+ SDK | netcoredbg | download from [Samsung releases](https://github.com/Samsung/netcoredbg/releases); Portable PDB symbols required | `NETCOREDBG_PATH`, `NETCOREDBG_X86_PATH` (x86 attach targets) |
 | rust | Rust toolchain (rustup) | CodeLLDB (vendored / platform packages) | nothing extra on a normal install; on Windows use the **GNU** toolchain (DWARF) | `CODELLDB_PATH` (used when no vendored copy resolves) |
 | cpp | compiler only for source-file launch (`g++`/`clang++`) | CodeLLDB (shared with rust) | nothing for prebuilt binaries; compile with `-gdwarf-4 -O0` | `CODELLDB_PATH`, `CPP_MSVC_BEHAVIOR` (`warn`\|`error`\|`continue`) |
+| cobol | GnuCOBOL 3.1.2+ (`cobc`) — for source launch and COBOL-shaped variables | CodeLLDB (shared with rust/cpp) behind the COBOL DAP shim | `apt install gnucobol3` / `brew install gnucobol` / MSYS2 `pacman -S mingw-w64-x86_64-gnucobol`; a prebuilt executable must be built with `cobc -g` (`-A -gdwarf-4` on MinGW) | `COBC_PATH`, `COB_CONFIG_DIR` (set automatically for MSYS2/Homebrew layouts), `MCP_COBOL_ALLOW_PREBUILT` |
 | mock | — | — | nothing (testing adapter) | — |
 
-CodeLLDB resolution order (rust and cpp): **vendored copy → `CODELLDB_PATH` → `@debugmcp/codelldb-<platform>` package** (npm installs exactly the one matching your platform as an optional dependency). Doctor's backend column shows which source won. If you installed with `--omit=optional`, set `CODELLDB_PATH` to a [CodeLLDB release](https://github.com/vadimcn/codelldb/releases) binary.
+CodeLLDB resolution order (rust, cpp and cobol): **vendored copy → `CODELLDB_PATH` → `@debugmcp/codelldb-<platform>` package** (npm installs exactly the one matching your platform as an optional dependency). Doctor's backend column shows which source won. If you installed with `--omit=optional`, set `CODELLDB_PATH` to a [CodeLLDB release](https://github.com/vadimcn/codelldb/releases) binary.
 
 ## Failure signatures
 
@@ -136,9 +138,20 @@ The most common symptom → cause → fix mappings per language. (The agent-faci
 | Variables `<unavailable>` (Windows) | MSVC PDB binary | Rebuild with MinGW-w64/clang (DWARF); `CPP_MSVC_BEHAVIOR` controls the warning |
 | Attach EPERM (Linux) | Yama ptrace scope | See [Linux attach and Yama](#linux-attach-and-yama-ptrace_scope) |
 
+### cobol
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Compile fails `configuration error: …\default.conf: No such file or directory` | cobc cannot find its dialect configuration (MSYS2's cobc outside an MSYS2 shell) | Set `COB_CONFIG_DIR=<prefix>/share/gnucobol/config` — automatic when cobc is found via `COBC_PATH`, PATH or a known install directory |
+| Breakpoint `verified: false`, "Resolved locations: 0", program runs through | Executable built without `-g`, or with DWARF-5 on MinGW | Let the adapter compile it, or rebuild with `cobc -g -A "-O0 -gdwarf-4"` |
+| `libcob-4.dll not found` (Windows) | GnuCOBOL's `bin` directory not on the debuggee's PATH | Automatic when cobc is found; otherwise add `<prefix>/bin` to PATH or pass it in `env` |
+| Variables are `b_N` byte arrays, `get_local_variables` empty, log warns "no COBOL symbol manifest" | Prebuilt executable without `sources`/`manifestDirs`, or cobc missing | Pass `sources` (with cobc installed) or `manifestDirs` |
+| "GnuCOBOL (cobc) not found" | Not installed or off PATH | Install GnuCOBOL or set `COBC_PATH`; for prebuilt binaries only, `MCP_COBOL_ALLOW_PREBUILT=true` |
+| Runtime error (bad subscript, non-numeric data) never pauses | `runtimeChecks` unset, so no check is compiled in | `runtimeChecks: true` in `dapLaunchArgs` |
+
 ## Linux attach and Yama ptrace_scope
 
-Attaching by PID (cpp, and any future native attach) is gated by the kernel's Yama LSM. `doctor` reads the live value; the semantics:
+Attaching by PID (cpp and cobol, and any future native attach) is gated by the kernel's Yama LSM. `doctor` reads the live value; the semantics:
 
 | `kernel.yama.ptrace_scope` | Meaning for attach |
 |---|---|
@@ -156,7 +169,7 @@ In the Docker image the server runs with `MCP_CONTAINER=true` and resolves all p
 - **`MCP_WORKSPACE_ROOT` unset or not mounted** — you forgot `-v "$(pwd)":/workspace`, so every file lookup fails. Fix the mount; see [docs/docker-support.md](./docker-support.md).
 - **Mounted but empty** — the volume points at the wrong host directory.
 
-Go and .NET are disabled in the published image via `DEBUG_MCP_DISABLE_LANGUAGES`; use a host deployment for those. Rust/C++ in-container debugging works for **Linux-compiled** binaries only.
+Go and .NET are disabled in the published image via `DEBUG_MCP_DISABLE_LANGUAGES`; use a host deployment for those. Rust/C++/COBOL in-container debugging works for **Linux-compiled** binaries only.
 
 ## Debugging the debugger
 
@@ -201,12 +214,14 @@ The runtime-affecting variables the server and its adapters read (the [developme
 | `NETCOREDBG_PATH` | Path to the netcoredbg executable |
 | `NETCOREDBG_X86_PATH` | x86 netcoredbg for attaching to 32-bit processes |
 | `PDB2PDB_PATH` | Pdb2Pdb.exe used to convert non-Portable PDBs (otherwise the copy bundled with the dotnet adapter) |
-| `CODELLDB_PATH` | CodeLLDB binary, used when no vendored copy resolves (rust + cpp) |
+| `CODELLDB_PATH` | CodeLLDB binary, used when no vendored copy resolves (rust, cpp + cobol) |
 | `CODELLDB_RUST_SYSROOT` | Rust sysroot root whose `lib/rustlib/etc` holds the LLDB formatter scripts — enables Rust type summaries without `rustc` (set automatically in the Docker image; issue #441) |
 | `CPP_MSVC_BEHAVIOR` / `RUST_MSVC_BEHAVIOR` | `warn` (default) \| `error` \| `continue` when a cpp/rust target has MSVC PDB symbols |
 | `RUST_AUTO_SUGGEST_GNU` | `0`/`false`/`no` suppresses the "switch to the GNU toolchain" suggestion (on by default) |
 | `CARGO_BUILD_TARGET` / `RUST_TARGET` / `RUSTFLAGS` | Read only as signals that a `*-pc-windows-gnu` target is in play — gates the Windows `dlltool` warning |
-| `MCP_RUST_ALLOW_PREBUILT` / `MCP_CPP_ALLOW_PREBUILT` | `true` lets the rust/cpp adapter debug a prebuilt binary with no toolchain installed (implied by `MCP_CONTAINER=true`) |
+| `MCP_RUST_ALLOW_PREBUILT` / `MCP_CPP_ALLOW_PREBUILT` / `MCP_COBOL_ALLOW_PREBUILT` | `true` lets the rust/cpp/cobol adapter debug a prebuilt binary with no toolchain installed (implied by `MCP_CONTAINER=true`) |
+| `COBC_PATH` | Pin the GnuCOBOL compiler (`cobc`) — checked before PATH and the known install directories |
+| `COB_CONFIG_DIR` / `COB_COPY_DIR` | GnuCOBOL's own dialect-configuration and copybook directories; the adapter sets them to `<prefix>/share/gnucobol/{config,copy}` when cobc's install has them and you have not (MSYS2's cobc cannot find its config outside an MSYS2 shell) |
 | `DEBUG_MCP_DISABLE_LANGUAGES` | Comma-separated languages to disable (e.g. `go,dotnet` in the Docker image) |
 | `MCP_CONTAINER` | `true` marks container mode (set by the Docker image) |
 | `MCP_WORKSPACE_ROOT` | Path-resolution root in container mode (image default `/workspace`) |
@@ -231,5 +246,5 @@ The runtime-affecting variables the server and its adapters read (the [developme
 ## Additional resources
 
 - [Troubleshooting guide](./troubleshooting.md) — narrative FAQ for session-level problems
-- Per-language guides: [python](./python/README.md) · [javascript](./javascript/README.md) · [ruby](./ruby/README.md) · [go](./go/README.md) · [java](./java/README.md) · [dotnet](./dotnet/README.md) · [rust](./rust-debugging.md) · [cpp](./cpp/README.md)
+- Per-language guides: [python](./python/README.md) · [javascript](./javascript/README.md) · [ruby](./ruby/README.md) · [go](./go/README.md) · [java](./java/README.md) · [dotnet](./dotnet/README.md) · [rust](./rust-debugging.md) · [cpp](./cpp/README.md) · [cobol](./cobol/README.md)
 - [Docker support](./docker-support.md) · [Tool reference](./tool-reference.md)

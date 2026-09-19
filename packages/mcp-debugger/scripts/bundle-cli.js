@@ -231,6 +231,19 @@ async function bundleCLI() {
     console.warn('Warning: packages/adapter-dotnet/dist/utils/ not found; .NET debugging will fail in NPX distribution.');
   }
 
+  // Copy the COBOL DAP shim (issue #759). Like the .NET bridge it runs as a
+  // separate Node process spawned by the adapter, so the self-contained
+  // esbuild output must exist on disk next to the bundle.
+  const cobolShimSrc = path.join(repoRoot, 'packages/adapter-cobol/dist/shim/cobol-shim.js');
+  if (fs.existsSync(cobolShimSrc)) {
+    const cobolShimDest = path.join(distDir, 'packages', 'adapter-cobol', 'dist', 'shim');
+    fs.mkdirSync(cobolShimDest, { recursive: true });
+    fs.copyFileSync(cobolShimSrc, path.join(cobolShimDest, 'cobol-shim.js'));
+    console.log('Copied COBOL DAP shim.');
+  } else {
+    console.warn('Warning: packages/adapter-cobol/dist/shim/cobol-shim.js not found; COBOL debugging will fail in NPX distribution.');
+  }
+
   // Copy the Java JDI bridge (source + compiled class). The bundled CLI has no
   // node_modules, so without this the jdi-resolver only finds the bridge via a
   // process.cwd() fallback that happens to work inside a repo checkout (#354).

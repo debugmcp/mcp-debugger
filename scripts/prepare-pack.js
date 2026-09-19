@@ -30,7 +30,7 @@ function getWorkspaceVersions() {
   
   // Read each workspace package
   const workspaces = [
-    'shared', 'codelldb-common', 'adapter-cpp', 'adapter-dotnet', 'adapter-go', 'adapter-java',
+    'shared', 'codelldb-common', 'adapter-cobol', 'adapter-cpp', 'adapter-dotnet', 'adapter-go', 'adapter-java',
     'adapter-javascript', 'adapter-python', 'adapter-mock', 'adapter-ruby', 'adapter-rust',
     'codelldb-win32-x64', 'codelldb-darwin-x64', 'codelldb-darwin-arm64', 'codelldb-linux-x64', 'codelldb-linux-arm64'
   ];

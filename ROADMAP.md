@@ -2,7 +2,7 @@
 
 _Last updated: 2026-08-22 (v0.24.2). This file is refreshed at each release._
 
-mcp-debugger gives AI agents step-through debugging over the Model Context Protocol: 28 tools across eight language adapters (Python, JavaScript/TypeScript, Ruby, Rust, Go, Java, .NET, C/C++), plus a mock adapter for testing. This roadmap answers two questions we hear from people evaluating the project: **is the tool surface stable enough to build on?** and **what's left before 1.0?**
+mcp-debugger gives AI agents step-through debugging over the Model Context Protocol: 28 tools across nine language adapters (Python, JavaScript/TypeScript, Ruby, Rust, Go, Java, .NET, C/C++, COBOL), plus a mock adapter for testing. This roadmap answers two questions we hear from people evaluating the project: **is the tool surface stable enough to build on?** and **what's left before 1.0?**
 
 ## Path to 1.0
 
@@ -24,7 +24,7 @@ mcp-debugger gives AI agents step-through debugging over the Model Context Proto
 To set expectations, mcp-debugger is deliberately **not** heading toward:
 
 - **An IDE-replacement UI.** This is infrastructure for agents (and the humans supervising them), not a visual debugger. The `expose_session` DAP mirror exists so your IDE can watch a live session; that's the extent of the UI ambition.
-- **Languages without a maintained DAP backend.** Adapters wrap existing, actively maintained Debug Adapter Protocol implementations (debugpy, js-debug, CodeLLDB, Delve, …). We don't write or maintain debug engines.
+- **Languages without a maintained DAP backend.** Adapters wrap existing, actively maintained Debug Adapter Protocol implementations (debugpy, js-debug, CodeLLDB, Delve, …). We don't write or maintain debug engines. A language can get a *semantic layer* over one of those engines — the COBOL adapter decorates CodeLLDB with COBOL-shaped scopes, values and stepping, using the compiler's own metadata — but it adds no engine: LLDB still does the debugging.
 - **Editing or refactoring tools.** This is a debugger. Code modification belongs to other tools in the agent's kit.
 
 ## Feedback

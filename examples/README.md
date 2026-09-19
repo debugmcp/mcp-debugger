@@ -61,6 +61,7 @@ Each of these directories mirrors the Python flow — create a session with the 
 
 | Directory | Contents | Guide |
 |---|---|---|
+| [`cobol/`](cobol/) | `hello.cob` (every storage type), `calls/` (static CALL with LINKAGE), `copybook/` (a breakpoint inside a `.cpy` paragraph), `dyn/` (a `cobc -m` module), `rterror.cob` and `s0c7.cob` (runtime-error stops), `sysin.cob`, `pause.cob`, with the lines to break on in its own [README](cobol/README.md) | [docs/cobol](../docs/cobol/README.md) |
 | [`cpp/`](cpp/) | `hello_world.c`, `hello_world.cpp`, `pause_test.cpp`, `throwing_example.cpp`, with build flags in its own [README](cpp/README.md) | [docs/cpp](../docs/cpp/README.md) |
 | [`dotnet/`](dotnet/) | `Program.cs` + `dotnet.csproj` (build first, then launch the built `.dll`), and a `pause_test` project | [docs/dotnet](../docs/dotnet/README.md) |
 | [`go/`](go/) | `hello_world.go`, `fibonacci.go`, and the `goroutines/` and `pause_test/` modules, with its own [README](go/README.md) | [docs/go](../docs/go/README.md) |

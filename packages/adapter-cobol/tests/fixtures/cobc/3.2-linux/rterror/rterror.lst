@@ -1,0 +1,35 @@
+GnuCOBOL 3.2.0          /work/cobol/examples/rter Sat Sep 19 2026 14:46:07  Page 0001
+
+LINE    PG/LN  A...B............................................................
+
+000001         IDENTIFICATION DIVISION.
+000002         PROGRAM-ID. RTERROR.
+000003         DATA DIVISION.
+000004         WORKING-STORAGE SECTION.
+000005         01  WS-TABLE.
+000006             05 WS-CELL OCCURS 3 TIMES PIC 9(3) VALUE 7.
+000007         01  WS-IDX          PIC 9(4) COMP VALUE 0.
+000008         01  WS-SUM          PIC 9(6) VALUE 0.
+000009         PROCEDURE DIVISION.
+000010         0000-MAIN.
+000011             MOVE 5 TO WS-IDX
+000012             DISPLAY "about to index " WS-IDX
+000013             ADD WS-CELL(WS-IDX) TO WS-SUM
+000014             DISPLAY "COBOL_DEBUG_MARKER: sum=" WS-SUM
+000015             STOP RUN.
+GnuCOBOL 3.2.0          /work/cobol/examples/rter Sat Sep 19 2026 14:46:07  Page 0002
+
+SIZE  TYPE           LVL  NAME                           PICTURE
+
+      WORKING-STORAGE SECTION
+
+00009 GROUP          01   WS-TABLE
+00003 NUMERIC        05   WS-CELL                        9(3), OCCURS 3
+
+00002 NUMERIC        01   WS-IDX                         9(4) COMP
+
+00006 NUMERIC        01   WS-SUM                         9(6)
+
+
+0 warnings in compilation group
+0 errors in compilation group

@@ -27,7 +27,8 @@ const sharedResolve = {
     { find: '@debugmcp/adapter-rust', replacement: path.resolve(__dirname, './packages/adapter-rust/src/index.ts') },
     { find: '@debugmcp/adapter-java', replacement: path.resolve(__dirname, './packages/adapter-java/src/index.ts') },
     { find: '@debugmcp/adapter-dotnet', replacement: path.resolve(__dirname, './packages/adapter-dotnet/src/index.ts') },
-    { find: '@debugmcp/adapter-cpp', replacement: path.resolve(__dirname, './packages/adapter-cpp/src/index.ts') }
+    { find: '@debugmcp/adapter-cpp', replacement: path.resolve(__dirname, './packages/adapter-cpp/src/index.ts') },
+    { find: '@debugmcp/adapter-cobol', replacement: path.resolve(__dirname, './packages/adapter-cobol/src/index.ts') }
   ]
 };
 
@@ -224,6 +225,7 @@ export default defineConfig({
         'packages/mcp-debugger/dist/packages/mcp-debugger/src/cli-entry.js',
         // Module init side-effects only (import statements that register adapters)
         'packages/mcp-debugger/src/batteries-included.ts',
+        'packages/adapter-cobol/src/shim/cobol-shim.ts',  // process entry: argv parsing only (issue #759)
         // Script entry point — process.argv parsing only, logic in netcoredbg-bridge-core.ts
         'packages/adapter-dotnet/src/utils/netcoredbg-bridge.ts',
         // Error definitions - mostly class constructors and type guards

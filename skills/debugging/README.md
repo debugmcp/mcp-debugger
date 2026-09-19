@@ -34,7 +34,7 @@ this directory at `node_modules/@debugmcp/mcp-debugger/skills/debugging` — no 
 ## Contents
 
 - `SKILL.md` — entry point: when to debug, golden path, root-cause discipline, attach recipes, current limitations
-- `references/python.md`, `javascript.md`, `ruby.md`, `rust.md`, `go.md`, `java.md`, `dotnet.md`, `cpp.md` — per-language prerequisites, quickstarts, quirks, troubleshooting
+- `references/python.md`, `javascript.md`, `ruby.md`, `rust.md`, `go.md`, `java.md`, `dotnet.md`, `cpp.md`, `cobol.md` — per-language prerequisites, quickstarts, quirks, troubleshooting
 
 ## Keeping it honest
 

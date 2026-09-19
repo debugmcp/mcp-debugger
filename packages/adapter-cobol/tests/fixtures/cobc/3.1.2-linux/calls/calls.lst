@@ -1,0 +1,77 @@
+GnuCOBOL 3.1.2.0        /work/cobol/examples/call Sat Sep 19 14:46:09 2026  Page 0001
+
+LINE    PG/LN  A...B............................................................
+
+000001         IDENTIFICATION DIVISION.
+000002         PROGRAM-ID. CALLMAIN.
+000003         DATA DIVISION.
+000004         WORKING-STORAGE SECTION.
+000005         01  WS-ARG-REC.
+000006             05 WS-ARG-A     PIC S9(9) COMP VALUE 1000.
+000007             05 WS-ARG-B     PIC S9(9) COMP VALUE 234.
+000008             05 WS-ARG-SUM   PIC S9(9) COMP VALUE 0.
+000009             05 WS-ARG-NAME  PIC X(10) VALUE "CALLER".
+000010         PROCEDURE DIVISION.
+000011         0000-MAIN.
+000012             DISPLAY "before call"
+000013             CALL "CALLSUB" USING WS-ARG-REC
+000014             DISPLAY "COBOL_DEBUG_MARKER: sum=" WS-ARG-SUM
+000015             STOP RUN.
+GnuCOBOL 3.1.2.0        /work/cobol/examples/call Sat Sep 19 14:46:09 2026  Page 0002
+
+SIZE  TYPE           LVL  NAME                           PICTURE
+
+      WORKING-STORAGE SECTION
+
+00022 GROUP          01   WS-ARG-REC
+00004 NUMERIC        05   WS-ARG-A                       S9(9) COMP
+00004 NUMERIC        05   WS-ARG-B                       S9(9) COMP
+00004 NUMERIC        05   WS-ARG-SUM                     S9(9) COMP
+00010 ALPHANUMERIC   05   WS-ARG-NAME                    X(10)
+
+
+0 warnings in compilation group
+0 errors in compilation group
+GnuCOBOL 3.1.2.0        /work/cobol/examples/call Sat Sep 19 14:46:09 2026  Page 0001
+
+LINE    PG/LN  A...B............................................................
+
+000001         IDENTIFICATION DIVISION.
+000002         PROGRAM-ID. CALLSUB.
+000003         DATA DIVISION.
+000004         LOCAL-STORAGE SECTION.
+000005         01  LS-WORK         PIC S9(9) COMP VALUE 0.
+000006         01  LS-TAG          PIC X(6) VALUE "LOCAL".
+000007         LINKAGE SECTION.
+000008         01  LK-ARG-REC.
+000009             05 LK-A         PIC S9(9) COMP.
+000010             05 LK-B         PIC S9(9) COMP.
+000011             05 LK-SUM       PIC S9(9) COMP.
+000012             05 LK-NAME      PIC X(10).
+000013         PROCEDURE DIVISION USING LK-ARG-REC.
+000014         0000-SUB-MAIN.
+000015             ADD LK-A TO LK-B GIVING LS-WORK
+000016             MOVE LS-WORK TO LK-SUM
+000017             MOVE "CALLEE" TO LK-NAME
+000018             GOBACK.
+GnuCOBOL 3.1.2.0        /work/cobol/examples/call Sat Sep 19 14:46:09 2026  Page 0002
+
+SIZE  TYPE           LVL  NAME                           PICTURE
+
+      LOCAL-STORAGE SECTION
+
+00004 NUMERIC        01   LS-WORK                        S9(9) COMP
+
+00006 ALPHANUMERIC   01   LS-TAG                         X(6)
+
+      LINKAGE SECTION
+
+00022 GROUP          01   LK-ARG-REC
+00004 NUMERIC        05   LK-A                           S9(9) COMP
+00004 NUMERIC        05   LK-B                           S9(9) COMP
+00004 NUMERIC        05   LK-SUM                         S9(9) COMP
+00010 ALPHANUMERIC   05   LK-NAME                        X(10)
+
+
+0 warnings in compilation group
+0 errors in compilation group

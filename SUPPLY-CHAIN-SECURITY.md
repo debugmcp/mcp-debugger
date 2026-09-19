@@ -44,6 +44,8 @@ The manifests pin the upstream version, the SHA-256 of each release asset, and (
 
 Note: the SBOMs attached to releases are generated from the source tree and enumerate package-manager dependencies; the table above (plus the pin manifests) is the authoritative disclosure for these embedded binary components.
 
+The Docker image additionally apt-installs **GnuCOBOL** (`gnucobol3`: the `cobc` compiler is GPL-3.0, its runtime library `libcob` LGPL-3.0) as a distribution package, alongside `g++`, OpenJDK and `lldb`, so the COBOL adapter can compile in-container. It is a distro package resolved at image build time like those three — nothing GnuCOBOL-related is vendored into the npm artifacts; `@debugmcp/adapter-cobol` ships only its own TypeScript output and Node DAP shim.
+
 ### Static Analysis
 
 - **CodeQL**: GitHub's CodeQL runs SAST on every push to main and on pull requests, analyzing TypeScript/JavaScript for security vulnerabilities.
