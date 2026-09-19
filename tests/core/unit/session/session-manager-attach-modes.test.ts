@@ -269,6 +269,55 @@ describe('SessionManagerOperations attach modes', () => {
       );
     });
 
+    it('anchors on the thread of the stop the debugger already reported, not the first listed thread (#759 attach)', async () => {
+      // CodeLLDB stops the target on attach and reports the stop before the threads are
+      // listed; on Windows the first listed thread is a thread-pool worker. No
+      // pause-after-attach behaviour: a C/C++-flavoured direct-connect adapter.
+      mockSession.language = DebugLanguage.CPP;
+      vi.mocked(mockDependencies.adapterRegistry.getFactoryMetadata).mockResolvedValue(
+        metadataWithModes({ launch: true, attach: 'direct-connect' })
+      );
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(
+        new FakeDebugAdapter({ language: DebugLanguage.CPP }).withAttachSupport({ directConnect: true })
+      );
+      const setCurrentThreadId = vi.fn();
+      (mockProxyManager as unknown as { setCurrentThreadId: typeof setCurrentThreadId }).setCurrentThreadId = setCurrentThreadId;
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          mockSession.state = SessionState.PAUSED;
+          mockSession.lastStop = { reason: 'exception', threadId: 37436, timestamp: Date.now() };
+          return { success: true, body: { threads: [{ id: 5128, name: 'thread #1' }, { id: 37436, name: 'thread #2' }] } };
+        }
+        return {};
+      });
+
+      const result = await operations.attachToProcess('test-session', { host: '127.0.0.1', port: 12345, stopOnEntry: true });
+
+      expect(result.success).toBe(true);
+      expect(setCurrentThreadId).toHaveBeenCalledWith(37436);
+    });
+
+    it('falls back to the thread named main, else the first thread, when no stop was observed', async () => {
+      mockSession.language = DebugLanguage.CPP;
+      vi.mocked(mockDependencies.adapterRegistry.getFactoryMetadata).mockResolvedValue(
+        metadataWithModes({ launch: true, attach: 'direct-connect' })
+      );
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(
+        new FakeDebugAdapter({ language: DebugLanguage.CPP }).withAttachSupport({ directConnect: true })
+      );
+      const setCurrentThreadId = vi.fn();
+      (mockProxyManager as unknown as { setCurrentThreadId: typeof setCurrentThreadId }).setCurrentThreadId = setCurrentThreadId;
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) =>
+        command === 'threads'
+          ? { success: true, body: { threads: [{ id: 5128, name: 'thread #1' }, { id: 9, name: 'main' }] } }
+          : {}
+      );
+
+      await operations.attachToProcess('test-session', { host: '127.0.0.1', port: 12345, stopOnEntry: true });
+
+      expect(setCurrentThreadId).toHaveBeenCalledWith(9);
+    });
+
     it('reserved keys in adapterConfig cannot flip the attach request', async () => {
       // The proxy worker re-reads request/__attachMode from the merged config
       // to choose the DAP sequence AND shutdown semantics (attach must detach

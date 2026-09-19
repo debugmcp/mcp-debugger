@@ -10,6 +10,7 @@
  * is reported. A failure after the proxy exists tears it down
  * session-preservingly and reports the proxy-log pointers alongside the error.
  */
+import type { ManagedSession } from '../session-store.js';
 import { resolveDapTimeoutOverride } from '../dap-request-helpers.js';
 import {
   SessionState,
@@ -38,6 +39,16 @@ export interface AttachRequest {
   verifyTimeout?: number;
   breakOnExceptions?: ExceptionBreakMode;
   adapterConfig?: Record<string, unknown>;
+}
+
+/**
+ * The thread of a stop the debugger has already reported for this attach, when the
+ * session is paused on it. A separate function on purpose: inside attachToProcess the
+ * flow analysis still holds the state the controller set itself, while the stop
+ * handler has moved it on since.
+ */
+function observedAttachStopThread(session: ManagedSession): number | undefined {
+  return session.state === SessionState.PAUSED ? session.lastStop?.threadId : undefined;
 }
 
 export class AttachController {
@@ -246,10 +257,21 @@ export class AttachController {
         }
         const { threads } = verification;
 
-        // Prefer a thread named "main" (common in JVM debugging)
+        // The debugger's own stop names the thread to anchor on. A debugger that
+        // stops the target on attach (CodeLLDB; the COBOL shim then re-anchors that
+        // stop on the thread inside the program, issue #759) has already reported
+        // it by the time the threads are listed, and on Windows the first listed
+        // thread is routinely a thread-pool worker. Only without such a stop does
+        // the name heuristic apply: a thread named "main" (common in JVM
+        // debugging), else the first thread.
+        const stoppedThreadId = observedAttachStopThread(session);
+        const stoppedThread = typeof stoppedThreadId === 'number' ? threads.find(t => t.id === stoppedThreadId) : undefined;
         const mainThread = threads.find(t => t.name === 'main');
-        const discoveredThreadId = mainThread ? mainThread.id : threads[0].id;
-        this.ctx.logger.info(`[SessionManager] Discovered ${threads.length} threads. Using threadId=${discoveredThreadId} (name=${mainThread?.name || threads[0].name})`);
+        const chosen = stoppedThread ?? mainThread ?? threads[0];
+        const discoveredThreadId = chosen.id;
+        this.ctx.logger.info(
+          `[SessionManager] Discovered ${threads.length} threads. Using threadId=${discoveredThreadId} (name=${chosen.name}${stoppedThread ? ', the thread of the observed attach stop' : ''})`
+        );
         proxyManager.setCurrentThreadId(discoveredThreadId);
         this.ctx.logger.info(`[SessionManager] Set threadId=${discoveredThreadId} for attach mode`);
 
