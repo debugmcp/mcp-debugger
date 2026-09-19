@@ -6,7 +6,7 @@ guide walks a first run end to end — install, verify, register with a client, 
 script that has a real bug in it.
 
 Python is used throughout because it needs the least setup. The server also debugs Ruby,
-JavaScript/TypeScript, Rust, Go, Java, .NET/C#, and C/C++ — the per-language guides are linked
+JavaScript/TypeScript, Rust, Go, Java, .NET/C#, C/C++, and COBOL — the per-language guides are linked
 at the end.
 
 ## Prerequisites
@@ -290,4 +290,4 @@ The [Troubleshooting guide](./troubleshooting.md) covers symptom-by-symptom fixe
 - [Usage guide](./usage.md) — longer debugging scenarios
 - Per-language guides: [python](./python/README.md) · [javascript](./javascript/README.md) ·
   [ruby](./ruby/README.md) · [go](./go/README.md) · [java](./java/README.md) ·
-  [dotnet](./dotnet/README.md) · [rust](./rust-debugging.md) · [cpp](./cpp/README.md)
+  [dotnet](./dotnet/README.md) · [rust](./rust-debugging.md) · [cpp](./cpp/README.md) · [cobol](./cobol/README.md)

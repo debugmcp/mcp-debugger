@@ -5,7 +5,7 @@
  * hot line does NOT pause execution; the interpolated message arrives as
  * output readable via get_output.
  *
- * Known-unsupported adapters (java, dotnet, ruby): set_breakpoint with
+ * Known-unsupported adapters (java, dotnet, ruby, cobol): set_breakpoint with
  * logMessage fails fast with a clear error. (Ruby joined this group in
  * issue #469 — rdbg does not advertise supportsLogPoints and silently
  * downgrades logpoints into pausing breakpoints.)
@@ -34,6 +34,7 @@ const EXPECTATION: Record<string, 'logs' | 'error' | 'warning'> = {
   java: 'error',
   dotnet: 'error',
   ruby: 'error',
+  cobol: 'error',  // supportsLogPoints is pinned false until the shim interpolates {WS-NAME} (#759 M3)
 };
 
 // Python's bpLine has a=1, b=2 in scope — assert real interpolation there.

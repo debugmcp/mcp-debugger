@@ -169,7 +169,7 @@ Cleanup: `afterAll` closes the MCP client and kills the server process. `afterEa
 
 ### STDIO Smoke Test Matrix
 
-`tests/e2e/mcp-server-smoke-*.test.ts` is the per-language STDIO matrix. Rather than a count that goes stale, the shape of the set: every supported language has a launch smoke test (Python, JavaScript, Rust, Go, Java, .NET, Ruby, C++), and some languages carry extra files next to it — `-attach` for Python, JavaScript, Java, .NET, Ruby and C++; `-function-bp` for JavaScript, Rust and Java. Read that as the smoke coverage that exists, not as the capability matrix: every adapter policy except Ruby's sets `supportsFunctionBreakpoints: true` and Ruby's pins `false` (`packages/shared/src/interfaces/adapter-policy-*.ts`), and only three of them have a `-function-bp` file. Java carries the largest set of behavioral extras (`evaluate`, `inner-class`, `pause`, `event-race`, `redefine`). The same glob also picks up tests that are about the server rather than a language: `-restart`, `-http-stale-reap`, and the two SSE files below. `pnpm run test:e2e:smoke` runs the whole glob.
+`tests/e2e/mcp-server-smoke-*.test.ts` is the per-language STDIO matrix. Rather than a count that goes stale, the shape of the set: every supported language has a launch smoke test (Python, JavaScript, Rust, Go, Java, .NET, Ruby, C++, COBOL), and some languages carry extra files next to it — `-attach` for Python, JavaScript, Java, .NET, Ruby and C++; `-function-bp` for JavaScript, Rust and Java. Read that as the smoke coverage that exists, not as the capability matrix: every adapter policy except Ruby's and COBOL's sets `supportsFunctionBreakpoints: true` (Ruby's and COBOL's pin `false`) (`packages/shared/src/interfaces/adapter-policy-*.ts`), and only three of them have a `-function-bp` file. Java carries the largest set of behavioral extras (`evaluate`, `inner-class`, `pause`, `event-race`, `redefine`). The same glob also picks up tests that are about the server rather than a language: `-restart`, `-http-stale-reap`, and the two SSE files below. `pnpm run test:e2e:smoke` runs the whole glob.
 
 Each per-language test follows the standard lifecycle:
 
@@ -188,7 +188,7 @@ Two SSE test files test the SSE HTTP transport: Python over SSE (`mcp-server-smo
 
 **File:** `tests/e2e/comprehensive-mcp-tools.test.ts`
 
-Tests all 28 MCP tools across 9 languages (Python, JavaScript, Mock, Rust, Ruby, Go, Java, Dotnet, C++) where the toolchain is available. Produces a PASS/FAIL/SKIP matrix report with per-tool per-language status and timing. Toolchain detection uses `hasCommand()` checks (e.g., `rustc --version`, `go version`).
+Tests all 28 MCP tools across 10 languages (Python, JavaScript, Mock, Rust, Ruby, Go, Java, Dotnet, C++, COBOL) where the toolchain is available. Produces a PASS/FAIL/SKIP matrix report with per-tool per-language status and timing. Toolchain detection uses `hasCommand()` checks (e.g., `rustc --version`, `go version`).
 
 The tool list is **derived**, not hand-maintained: the file imports `TOOL_NAMES` from `src/server/tool-schemas.ts` (`const ALL_TOOLS = [...TOOL_NAMES]`). The literal it replaced had drifted to 25 of the 28 advertised tools, so three were missing from the report with nothing to say so (issue #579). Tools the suite does not exercise now show as PENDING — the honest reading, and the reason to keep the list derived.
 

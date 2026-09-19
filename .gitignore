@@ -4,6 +4,9 @@ node_modules/
 # Build output
 dist/
 build/
+# Exception: the COBOL adapter's cobc build layer is source, not build output
+!packages/adapter-cobol/src/build/
+!packages/adapter-cobol/tests/unit/build/
 *.tsbuildinfo
 **/*.tsbuildinfo
 tsconfig.tsbuildinfo

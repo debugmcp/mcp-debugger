@@ -205,6 +205,7 @@ export class AdapterLoader {
       { name: 'java', packageName: '@debugmcp/adapter-java', description: 'Java debugger using JDI bridge', attach: 'spawn' },
       { name: 'dotnet', packageName: '@debugmcp/adapter-dotnet', description: '.NET/C# debugger using netcoredbg', attach: 'spawn' },
       { name: 'cpp', packageName: '@debugmcp/adapter-cpp', description: 'C/C++ debugger using CodeLLDB', attach: 'spawn' },
+      { name: 'cobol', packageName: '@debugmcp/adapter-cobol', description: 'COBOL debugger using GnuCOBOL and CodeLLDB', attach: 'spawn' },
     ];
 
     const results: AdapterMetadata[] = [];

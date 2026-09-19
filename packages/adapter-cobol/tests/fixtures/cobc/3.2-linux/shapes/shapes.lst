@@ -1,0 +1,210 @@
+GnuCOBOL 3.2.0               /work/cobol/examples/shapes.cob Sat Sep 19 2026 19:47:10
+
+LINE    PG/LN  A...B............................................................
+
+000001         IDENTIFICATION DIVISION.
+000002         PROGRAM-ID. shapes.
+000003        * Every data shape the manifest parser must get right (issue #759
+000004        * review): INDEXED BY, ODO under -std=ibm (odoslide), LOCAL-STORAG
+000005        * groups with subordinates and an ODO table, referenced EXTERNAL a
+000006        * BASED items, an edited picture with a comma, a 35-character name
+000007        * a lower-case PROGRAM-ID, a two-record FD, and enough items for t
+000008        * -t listing to cross its 55-line page.
+000009         ENVIRONMENT DIVISION.
+000010         INPUT-OUTPUT SECTION.
+000011         FILE-CONTROL.
+000012             SELECT REC-FILE ASSIGN TO "shapes.dat"
+000013                 ORGANIZATION IS LINE SEQUENTIAL.
+000014         DATA DIVISION.
+000015         FILE SECTION.
+000016         FD  REC-FILE.
+000017         01  REC-A.
+000018             05  REC-A-KEY            PIC X(4).
+000019             05  REC-A-BODY           PIC X(20).
+000020         01  REC-B.
+000021             05  REC-B-KEY            PIC X(4).
+000022             05  REC-B-AMOUNT         PIC 9(6)V99.
+000023             05  REC-B-FILL           PIC X(12).
+000024         WORKING-STORAGE SECTION.
+000025         01  WS-TABLE.
+000026             05  WS-ENTRY OCCURS 5 TIMES INDEXED BY WS-IX.
+000027                 10  WS-AMOUNT        PIC 9(4).
+000028                 10  WS-CODE          PIC X(2).
+000029         01  WS-COUNT                 PIC 9(2) VALUE 3.
+000030         01  WS-ODO-TABLE.
+000031             05  WS-ROW OCCURS 1 TO 9 TIMES DEPENDING ON WS-COUNT.
+000032                 10  WS-COL           PIC X(2).
+000033         01  WS-EDITED                PIC ZZ,ZZ9.99 VALUE 1234.5.
+warning: numeric literal in VALUE clause of numeric-edited item used
+000034         01  WS-A-VERY-LONG-DATA-NAME-OF-THIRTY-FIVE PIC X(3)
+000035                                      VALUE 'ABC'.
+000036         01  WS-EXT                   PIC X(10) EXTERNAL.
+000037         01  WS-BASED                 PIC X(4) BASED.
+000038         01  WS-FILLER-GROUP.
+000039             05  WS-F01               PIC 9(2) VALUE 1.
+000040             05  WS-F02               PIC 9(2) VALUE 2.
+000041             05  WS-F03               PIC 9(2) VALUE 3.
+000042             05  WS-F04               PIC 9(2) VALUE 4.
+000043             05  WS-F05               PIC 9(2) VALUE 5.
+000044             05  WS-F06               PIC 9(2) VALUE 6.
+000045             05  WS-F07               PIC 9(2) VALUE 7.
+000046             05  WS-F08               PIC 9(2) VALUE 8.
+000047             05  WS-F09               PIC 9(2) VALUE 9.
+000048             05  WS-F10               PIC 9(2) VALUE 10.
+000049             05  WS-F11               PIC 9(2) VALUE 11.
+000050             05  WS-F12               PIC 9(2) VALUE 12.
+000051             05  WS-F13               PIC 9(2) VALUE 13.
+000052             05  WS-F14               PIC 9(2) VALUE 14.
+000053             05  WS-F15               PIC 9(2) VALUE 15.
+000054             05  WS-F16               PIC 9(2) VALUE 16.
+000055             05  WS-F17               PIC 9(2) VALUE 17.
+000056             05  WS-F18               PIC 9(2) VALUE 18.
+000057             05  WS-F19               PIC 9(2) VALUE 19.
+000058             05  WS-F20               PIC 9(2) VALUE 20.
+000059             05  WS-F21               PIC 9(2) VALUE 21.
+000060             05  WS-F22               PIC 9(2) VALUE 22.
+000061             05  WS-F23               PIC 9(2) VALUE 23.
+000062             05  WS-F24               PIC 9(2) VALUE 24.
+000063             05  WS-F25               PIC 9(2) VALUE 25.
+000064             05  WS-F26               PIC 9(2) VALUE 26.
+000065             05  WS-F27               PIC 9(2) VALUE 27.
+000066             05  WS-F28               PIC 9(2) VALUE 28.
+000067             05  WS-F29               PIC 9(2) VALUE 29.
+000068             05  WS-F30               PIC 9(2) VALUE 30.
+000069             05  WS-F31               PIC 9(2) VALUE 31.
+000070             05  WS-F32               PIC 9(2) VALUE 32.
+000071             05  WS-F33               PIC 9(2) VALUE 33.
+000072             05  WS-F34               PIC 9(2) VALUE 34.
+000073             05  WS-F35               PIC 9(2) VALUE 35.
+000074             05  WS-F36               PIC 9(2) VALUE 36.
+000075             05  WS-F37               PIC 9(2) VALUE 37.
+000076             05  WS-F38               PIC 9(2) VALUE 38.
+000077             05  WS-F39               PIC 9(2) VALUE 39.
+000078             05  WS-F40               PIC 9(2) VALUE 40.
+000079         01  WS-BIG.
+000080             05  WS-LINE              PIC X(4) OCCURS 500 TIMES.
+000081         LOCAL-STORAGE SECTION.
+000082         01  LS-A                     PIC X(4).
+000083         01  LS-G.
+000084             05  LS-G1                PIC X(2).
+000085             05  LS-G2                PIC X(2).
+000086             05  LS-COUNT             PIC 9(1) VALUE 2.
+000087             05  LS-TBL               PIC X(3)
+000088                 OCCURS 1 TO 3 TIMES DEPENDING ON LS-COUNT.
+000089         PROCEDURE DIVISION.
+000090         0000-MAIN.
+000091             MOVE 1234 TO WS-AMOUNT(2).
+000092             MOVE 'AB' TO WS-CODE(2).
+000093             SET WS-IX TO 3.
+000094             MOVE 'XY' TO WS-COL(2).
+000095             MOVE 'AB' TO LS-G1.
+000096             MOVE 'CD' TO LS-G2.
+000097             MOVE 'QQQ' TO LS-TBL(2).
+000098             MOVE 'external!' TO WS-EXT.
+000099             ALLOCATE WS-BASED INITIALIZED.
+000100             MOVE 'BSED' TO WS-BASED.
+000101             MOVE 'k1' TO REC-A-KEY.
+000102             MOVE 'k2' TO REC-B-KEY.
+000103             MOVE 7 TO WS-F40.
+000104             MOVE 'L499' TO WS-LINE(499).
+000105             DISPLAY 'SHAPES ' WS-AMOUNT(2) ' ' WS-EDITED ' ' LS-G2 ' '
+000106                 WS-COL(2) ' ' WS-EXT ' ' WS-BASED ' ' WS-ENTRY(WS-IX).
+000107             FREE WS-BASED.
+000108             STOP RUN.
+
+SIZE  TYPE           LVL  NAME                           PICTURE
+
+00024 FILE                REC-FILE
+00024 GROUP          01   REC-A
+00004 ALPHANUMERIC   05   REC-A-KEY                      X(4)
+00020 ALPHANUMERIC   05   REC-A-BODY                     X(20)
+
+00024 GROUP          01   REC-B
+00004 ALPHANUMERIC   05   REC-B-KEY                      X(4)
+00008 NUMERIC        05   REC-B-AMOUNT                   9(6)V99
+00012 ALPHANUMERIC   05   REC-B-FILL                     X(12)
+
+      WORKING-STORAGE SECTION
+
+00030 GROUP          01   WS-TABLE
+00030 GROUP          05   WS-ENTRY                       OCCURS 5
+00004 NUMERIC        10   WS-AMOUNT                      9(4)
+00002 ALPHANUMERIC   10   WS-CODE                        X(2)
+
+00002 NUMERIC        01   WS-COUNT                       9(2)
+
+00018 GROUP          01   WS-ODO-TABLE
+00018 GROUP          05   WS-ROW                         OCCURS 1 TO 9
+00002 ALPHANUMERIC   10   WS-COL                         X(2)
+
+00009 NUMERIC        01   WS-EDITED                      ZZ,ZZ9.99
+
+00003 ALPHANUMERIC   01   WS-A-VERY-LONG-DATA-NAME-OF-TH X(3)
+
+00010 ALPHANUMERIC   01   WS-EXT                         X(10) EXTERNAL
+
+00004 ALPHANUMERIC   01   WS-BASED                       X(4) BASED
+
+00080 GROUP          01   WS-FILLER-GROUP
+00002 NUMERIC        05   WS-F01                         9(2)
+00002 NUMERIC        05   WS-F02                         9(2)
+00002 NUMERIC        05   WS-F03                         9(2)
+00002 NUMERIC        05   WS-F04                         9(2)
+00002 NUMERIC        05   WS-F05                         9(2)
+00002 NUMERIC        05   WS-F06                         9(2)
+00002 NUMERIC        05   WS-F07                         9(2)
+00002 NUMERIC        05   WS-F08                         9(2)
+00002 NUMERIC        05   WS-F09                         9(2)
+00002 NUMERIC        05   WS-F10                         9(2)
+00002 NUMERIC        05   WS-F11                         9(2)
+00002 NUMERIC        05   WS-F12                         9(2)
+00002 NUMERIC        05   WS-F13                         9(2)
+00002 NUMERIC        05   WS-F14                         9(2)
+00002 NUMERIC        05   WS-F15                         9(2)
+00002 NUMERIC        05   WS-F16                         9(2)
+00002 NUMERIC        05   WS-F17                         9(2)
+00002 NUMERIC        05   WS-F18                         9(2)
+00002 NUMERIC        05   WS-F19                         9(2)
+00002 NUMERIC        05   WS-F20                         9(2)
+00002 NUMERIC        05   WS-F21                         9(2)
+00002 NUMERIC        05   WS-F22                         9(2)
+00002 NUMERIC        05   WS-F23                         9(2)
+00002 NUMERIC        05   WS-F24                         9(2)
+00002 NUMERIC        05   WS-F25                         9(2)
+00002 NUMERIC        05   WS-F26                         9(2)
+00002 NUMERIC        05   WS-F27                         9(2)
+00002 NUMERIC        05   WS-F28                         9(2)
+00002 NUMERIC        05   WS-F29                         9(2)
+00002 NUMERIC        05   WS-F30                         9(2)
+00002 NUMERIC        05   WS-F31                         9(2)
+00002 NUMERIC        05   WS-F32                         9(2)
+00002 NUMERIC        05   WS-F33                         9(2)
+00002 NUMERIC        05   WS-F34                         9(2)
+00002 NUMERIC        05   WS-F35                         9(2)
+00002 NUMERIC        05   WS-F36                         9(2)
+00002 NUMERIC        05   WS-F37                         9(2)
+00002 NUMERIC        05   WS-F38                         9(2)
+00002 NUMERIC        05   WS-F39                         9(2)
+00002 NUMERIC        05   WS-F40                         9(2)
+
+02000 GROUP          01   WS-BIG
+00004 ALPHANUMERIC   05   WS-LINE                        X(4), OCCURS 500
+
+      LOCAL-STORAGE SECTION
+
+00004 ALPHANUMERIC   01   LS-A                           X(4)
+
+00014 GROUP          01   LS-G
+00002 ALPHANUMERIC   05   LS-G1                          X(2)
+00002 ALPHANUMERIC   05   LS-G2                          X(2)
+00001 NUMERIC        05   LS-COUNT                       9(1)
+00003 ALPHANUMERIC   05   LS-TBL                         X(3), OCCURS 1 TO 3
+
+
+
+Error/Warning summary:
+
+/work/cobol/examples/shapes.cob:33: warning: numeric literal in VALUE clause of numeric-edited item used
+
+1 warning in compilation group
+0 errors in compilation group

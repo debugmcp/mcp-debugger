@@ -1,0 +1,40 @@
+GnuCOBOL 3.2.0          C:/work/cobol/bld/.. Sat Sep 19 2026 10:45:40  Page 0001
+
+LINE    PG/LN  A...B............................................................
+
+000001         IDENTIFICATION DIVISION.
+000002         PROGRAM-ID. CPYMAIN.
+000003         DATA DIVISION.
+000004         WORKING-STORAGE SECTION.
+000005         COPY "wsrec.cpy".
+000001C        01  CP-REC.
+000002C            05 CP-CODE      PIC X(3) VALUE "CPY".
+000003C            05 CP-QTY       PIC 9(4) COMP-3 VALUE 12.
+000004C            05 CP-PRICE     PIC S9(5)V99 VALUE 19.99.
+000006         01  WS-DONE         PIC X VALUE "N".
+000007         PROCEDURE DIVISION.
+000008         0000-MAIN.
+000009             PERFORM 9000-FROM-COPYBOOK
+000010             MOVE "Y" TO WS-DONE
+000011             DISPLAY "COBOL_DEBUG_MARKER: price=" CP-PRICE
+000012             STOP RUN.
+000013         COPY "procpara.cpy".
+000001C        9000-FROM-COPYBOOK.
+000002C            COMPUTE CP-PRICE = CP-PRICE * CP-QTY
+000003C            DISPLAY "in copybook paragraph".
+GnuCOBOL 3.2.0          C:/work/cobol/bld/.. Sat Sep 19 2026 10:45:40  Page 0002
+
+SIZE  TYPE           LVL  NAME                           PICTURE
+
+      WORKING-STORAGE SECTION
+
+00013 GROUP          01   CP-REC
+00003 ALPHANUMERIC   05   CP-CODE                        X(3)
+00003 NUMERIC        05   CP-QTY                         9(4) COMP-3
+00007 NUMERIC        05   CP-PRICE                       S9(5)V99
+
+00001 ALPHANUMERIC   01   WS-DONE                        X
+
+
+0 warnings in compilation group
+0 errors in compilation group

@@ -5,7 +5,7 @@ Pre-release validation for mcp-debugger. Run `npm run release:dry-run` to automa
 ## Before Tagging
 
 ### Automated (via `npm run release:dry-run`)
-- [ ] Package versions match (the dry-run script checks root plus **all 17** workspace packages, including the private/bundle-only `adapter-rust`, `adapter-cpp`, and `codelldb-common`; the five `codelldb-<platform>` payload packages are checked against the **CodeLLDB pin**, not the repo version)
+- [ ] Package versions match (the dry-run script checks root plus **all 18** workspace packages, including the private/bundle-only `adapter-rust`, `adapter-cpp`, `adapter-cobol`, and `codelldb-common`; the five `codelldb-<platform>` payload packages are checked against the **CodeLLDB pin**, not the repo version)
 - [ ] `CHANGELOG.md` has `[x.y.z] - YYYY-MM-DD` entry with date
 - [ ] `CHANGELOG.md` has empty `[Unreleased]` section at top
 - [ ] `npm run build` succeeds

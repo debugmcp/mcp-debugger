@@ -36,7 +36,7 @@ const MIN_STRING_LENGTH = 6;
 const MAX_ENTRIES = 3;
 
 /** Source-ish file extensions found in DWARF path strings. */
-const SOURCE_EXT_RE = /\.(c|cc|cpp|cxx|c\+\+|h|hh|hpp|hxx|inl|rs|s|asm|m|mm)$/i;
+const SOURCE_EXT_RE = /\.(c|cc|cpp|cxx|c\+\+|h|hh|hpp|hxx|inl|rs|s|asm|m|mm|cob|cbl|cobol|cpy|copy)$/i;
 
 /** Directory prefixes that are never a user project root. */
 const SYSTEM_DIR_RE = /^\/(usr|lib|lib64|etc|opt|proc|sys|dev|run|rustc|snap|nix)(\/|$)/;

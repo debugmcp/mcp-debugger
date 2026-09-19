@@ -243,6 +243,34 @@ jobs:
             --transcript "$TRANSCRIPTS/rust.jsonl" \
             -- node "$CLI" stdio
 
+      - name: Install GnuCOBOL (cobol smoke prerequisite)
+        # Distro packages only (GPL compiler stays external, issue #759):
+        # apt gnucobol3 (3.1.2 on 24.04, 3.2 on 26.04), brew gnucobol (3.2),
+        # MSYS2 mingw64 gnucobol (3.2) via the runner's preinstalled pacman.
+        # A failed install is reported by the cobol step, not hidden here.
+        continue-on-error: true
+        run: |
+          case "${{ runner.os }}" in
+            Linux) sudo apt-get update && sudo apt-get install -y --no-install-recommends gnucobol3 ;;
+            macOS) brew install gnucobol ;;
+            Windows) /c/msys64/usr/bin/pacman.exe -Sy --noconfirm --needed mingw-w64-x86_64-gnucobol ;;
+          esac
+
+      - name: Smoke cycle (cobol — source launch through the COBOL shim)
+        # Source launch: the adapter compiles examples/cobol/hello.cob itself
+        # (cobc -g -fdump=ALL -A "-O0 -gdwarf-4") and the shim serves
+        # WORKING-STORAGE from the manifest, so this proves compiler discovery,
+        # DWARF-4 line mapping and the value decoder in one cycle.
+        env:
+          COBC_PATH: ${{ runner.os == 'Windows' && 'C:\msys64\mingw64\bin\cobc.exe' || '' }}
+        run: |
+          node scripts/canary-smoke.mjs --lang cobol --skip-if-missing \
+            --program "$GITHUB_WORKSPACE/examples/cobol/hello.cob" \
+            --break-file "$GITHUB_WORKSPACE/examples/cobol/hello.cob" --line 46 \
+            --expect-line --expect-var WS-TOTAL --expect-var WS-SCALED \
+            --transcript "$TRANSCRIPTS/cobol.jsonl" \
+            -- node "$CLI" stdio
+
       - name: Smoke cycle (npx channel)
         # Channel fidelity for the npx one-liner from the README. Skipped on
         # Windows: spawning npx.cmd without a shell is a known ENOENT
@@ -350,6 +378,17 @@ jobs:
             --adapter-config '{"sourceLanguages":["rust"]}' \
             --expect-line --expect-var name \
             --transcript "$TRANSCRIPTS/rust.jsonl" \
+            -- docker run -i --rm -v "$GITHUB_WORKSPACE:/workspace" "$IMAGE" stdio
+
+      - name: Smoke cycle (cobol — in-image GnuCOBOL)
+        # The image installs gnucobol3, so the adapter compiles the fixture
+        # inside the container against the /workspace mount (issue #759).
+        run: |
+          node scripts/canary-smoke.mjs --lang cobol --skip-if-missing \
+            --program /workspace/examples/cobol/hello.cob \
+            --break-file /workspace/examples/cobol/hello.cob --line 46 \
+            --expect-line --expect-var WS-TOTAL --expect-var WS-SCALED \
+            --transcript "$TRANSCRIPTS/cobol.jsonl" \
             -- docker run -i --rm -v "$GITHUB_WORKSPACE:/workspace" "$IMAGE" stdio
 
       - name: Upload transcripts on failure

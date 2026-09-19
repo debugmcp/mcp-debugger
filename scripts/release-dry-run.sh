@@ -31,6 +31,7 @@ JS_VER=$(node -e "console.log(require('./packages/adapter-javascript/package.jso
 RUST_VER=$(node -e "console.log(require('./packages/adapter-rust/package.json').version)")
 DOTNET_VER=$(node -e "console.log(require('./packages/adapter-dotnet/package.json').version)")
 CPP_VER=$(node -e "console.log(require('./packages/adapter-cpp/package.json').version)")
+COBOL_VER=$(node -e "console.log(require('./packages/adapter-cobol/package.json').version)")
 CODELLDB_VER=$(node -e "console.log(require('./packages/codelldb-common/package.json').version)")
 CLI_VER=$(node -e "console.log(require('./packages/mcp-debugger/package.json').version)")
 
@@ -45,10 +46,11 @@ echo "  adapter-javascript: $JS_VER"
 echo "  adapter-rust:       $RUST_VER"
 echo "  adapter-dotnet:     $DOTNET_VER"
 echo "  adapter-cpp:        $CPP_VER"
+echo "  adapter-cobol:      $COBOL_VER"
 echo "  codelldb-common:    $CODELLDB_VER"
 echo "  mcp-debugger:       $CLI_VER"
 
-if [[ "$ROOT_VER" == "$SHARED_VER" && "$ROOT_VER" == "$MOCK_VER" && "$ROOT_VER" == "$PYTHON_VER" && "$ROOT_VER" == "$RUBY_VER" && "$ROOT_VER" == "$GO_VER" && "$ROOT_VER" == "$JAVA_VER" && "$ROOT_VER" == "$JS_VER" && "$ROOT_VER" == "$RUST_VER" && "$ROOT_VER" == "$DOTNET_VER" && "$ROOT_VER" == "$CPP_VER" && "$ROOT_VER" == "$CODELLDB_VER" && "$ROOT_VER" == "$CLI_VER" ]]; then
+if [[ "$ROOT_VER" == "$SHARED_VER" && "$ROOT_VER" == "$MOCK_VER" && "$ROOT_VER" == "$PYTHON_VER" && "$ROOT_VER" == "$RUBY_VER" && "$ROOT_VER" == "$GO_VER" && "$ROOT_VER" == "$JAVA_VER" && "$ROOT_VER" == "$JS_VER" && "$ROOT_VER" == "$RUST_VER" && "$ROOT_VER" == "$DOTNET_VER" && "$ROOT_VER" == "$CPP_VER" && "$ROOT_VER" == "$COBOL_VER" && "$ROOT_VER" == "$CODELLDB_VER" && "$ROOT_VER" == "$CLI_VER" ]]; then
   pass "All package versions match ($ROOT_VER)"
 else
   fail "Package versions are inconsistent"

@@ -246,7 +246,7 @@ describe('AdapterLoader', () => {
 
       const adapters = await adapterLoader.listAvailableAdapters();
 
-      expect(adapters).toHaveLength(9);
+      expect(adapters).toHaveLength(10);
 
       const pythonAdapter = adapters.find(a => a.name === 'python');
       expect(pythonAdapter).toEqual({
@@ -325,6 +325,15 @@ describe('AdapterLoader', () => {
         name: 'cpp',
         packageName: '@debugmcp/adapter-cpp',
         description: 'C/C++ debugger using CodeLLDB',
+        installed: false,
+        attach: 'spawn'
+      });
+
+      const cobolAdapter = adapters.find(a => a.name === 'cobol');
+      expect(cobolAdapter).toEqual({
+        name: 'cobol',
+        packageName: '@debugmcp/adapter-cobol',
+        description: 'COBOL debugger using GnuCOBOL and CodeLLDB',
         installed: false,
         attach: 'spawn'
       });
@@ -441,14 +450,14 @@ describe('AdapterLoader', () => {
       expect(mockResolver.isInstalled).not.toHaveBeenCalled();
     });
 
-    it('listAvailableAdapters reports all nine adapters without importing any module', async () => {
+    it('listAvailableAdapters reports all ten adapters without importing any module', async () => {
       mockResolver.isInstalled.mockImplementation(
         async (pkg: string) => pkg === '@debugmcp/adapter-python'
       );
 
       const adapters = await adapterLoader.listAvailableAdapters();
 
-      expect(adapters).toHaveLength(9);
+      expect(adapters).toHaveLength(10);
       expect(mockModuleLoader.load).not.toHaveBeenCalled();
       expect(adapters.filter(a => a.installed).map(a => a.name)).toEqual(['python']);
       expect(adapters.find(a => a.name === 'python')).toEqual({

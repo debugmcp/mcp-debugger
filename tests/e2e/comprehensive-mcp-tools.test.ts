@@ -19,7 +19,7 @@ import {
   ROOT,
   PYTHON_SCRIPT, JS_SCRIPT, RUST_SCRIPT, GO_SCRIPT, DOTNET_SCRIPT, JAVA_SCRIPT, JAVA_CLASS_DIR, RUBY_SCRIPT, CPP_SCRIPT,
   PYTHON_BP_LINE, JS_BP_LINE, RUST_BP_LINE, GO_BP_LINE, DOTNET_BP_LINE, JAVA_BP_LINE, RUBY_BP_LINE, CPP_BP_LINE,
-  hasRust, hasGo, hasRuby, hasDotnet, hasJava, hasCpp,
+  hasRust, hasGo, hasRuby, hasDotnet, hasJava, hasCpp, hasCobol, COBOL_SCRIPT, COBOL_BP_LINE,
   ensureRustBuild, ensureGoBuild, ensureDotnetBuild, ensureJavaBuild, ensureCppBuild
 } from './language-matrix-utils.js';
 
@@ -72,6 +72,8 @@ const LANGUAGES: LangDef[] = [
     dapLaunchArgs: { mainClass: 'HelloWorld', classpath: JAVA_CLASS_DIR, cwd: JAVA_CLASS_DIR } },
   { language: 'cpp', script: CPP_SCRIPT, bpLine: CPP_BP_LINE, available: hasCpp, skipReason: hasCpp ? undefined : 'C/C++ compiler not installed',
     outputMarker: 'CPP_DEBUG_MARKER' },  // launchScript set in beforeAll after build; same output tier as rust (#223)
+  { language: 'cobol', script: COBOL_SCRIPT, bpLine: COBOL_BP_LINE, available: hasCobol, skipReason: hasCobol ? undefined : 'GnuCOBOL (cobc) not installed',
+    outputMarker: 'COBOL_DEBUG_MARKER' },  // source launch: the adapter compiles hello.cob (#759); output tier as cpp
 ];
 
 /* ---------- every advertised tool ---------- */

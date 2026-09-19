@@ -39,7 +39,7 @@ function runCli(args: string[], timeoutMs = 90_000): Promise<CliResult> {
 }
 
 describe('doctor e2e smoke', () => {
-  it('emits a schemaVersion-1 JSON report covering all nine adapters, with mock ok', async () => {
+  it('emits a schemaVersion-1 JSON report covering all ten adapters, with mock ok', async () => {
     if (!existsSync(distEntry)) {
       throw new Error('dist/index.js not found. Run "npm run build" first.');
     }
@@ -49,7 +49,7 @@ describe('doctor e2e smoke', () => {
     expect(result.code).toBe(0);
     const report = JSON.parse(result.stdout);
     expect(report.schemaVersion).toBe(1);
-    expect(report.languages).toHaveLength(9);
+    expect(report.languages).toHaveLength(10);
     const mock = report.languages.find((l: { language: string }) => l.language === 'mock');
     expect(mock.verdict).toBe('ok');
     // Adapter-owned presentation (issue #435) survives the real built bundle:

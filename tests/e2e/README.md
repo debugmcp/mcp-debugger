@@ -17,7 +17,8 @@ This directory contains end-to-end smoke tests that verify the MCP debugger serv
 - Includes a Docker availability check with graceful skip
 - `docker-entrypoint.test.ts` covers the entrypoint script itself
 - Per-language launch smoke: `docker-smoke-python.test.ts`, `docker-smoke-javascript.test.ts`,
-  `docker-smoke-rust.test.ts`, `docker-smoke-cpp.test.ts`
+  `docker-smoke-rust.test.ts`, `docker-smoke-cpp.test.ts`, `docker-smoke-cobol.test.ts` (the image
+  installs `gnucobol3`, so the adapter compiles `examples/cobol/hello.cob` in-container)
 - Attach-mode smoke: `docker-smoke-cpp-attach.test.ts` (attach by PID) and
   `docker-smoke-ruby-attach.test.ts` (the image ships no Ruby runtime, so Ruby is attach-only)
 - Shared helpers live in `docker-test-utils.ts`
@@ -160,7 +161,7 @@ npx vitest run tests/e2e/npx/  # NPX smoke tests
 
 The smoke tests provide comprehensive coverage of:
 1. **Transport Methods**: stdio, SSE, JavaScript-SSE, containerized stdio
-2. **Language Adapters**: All 9 adapters (Python, JavaScript, Rust, Go, Java, .NET/C#, Ruby, C/C++, Mock)
+2. **Language Adapters**: All 10 adapters (Python, JavaScript, Rust, Go, Java, .NET/C#, Ruby, C/C++, COBOL, Mock)
 3. **Path Resolution**: Different working directories, path translation, absolute vs relative paths
 4. **Environment Handling**: Container environment variables, volume mounts
 5. **Error Scenarios**: Proper cleanup on failure, detailed error logging

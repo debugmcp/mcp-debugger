@@ -1,0 +1,72 @@
+/**
+ * COMP / BINARY / COMP-4 (`COB_TYPE_NUMERIC_BINARY` 0x11), COMP-5 (`COB_TYPE_NUMERIC_COMP5`
+ * 0x1b, or 0x11 with `COB_FLAG_REAL_BINARY` — cobc emits both spellings), and POINTER
+ * (`COB_FLAG_IS_POINTER` on a 0x11 attr).
+ *
+ * Byte order: cobc sets `COB_FLAG_BINARY_SWAP` on COMP items when the dialect's
+ * `binary-byteorder` is big-endian (the default) and the host is little-endian, so SWAP
+ * means "the bytes are big-endian". COMP-5/REAL_BINARY items are always host order and
+ * never carry SWAP; native wins if both were ever present.
+ *
+ * Measured (GnuCOBOL 3.2, x86-64): `S9(9) COMP = -123456789` → `f8 a4 32 eb`,
+ * `9(4) COMP = 6` → `00 06`, `S9(9) COMP-5 = 987654321` → `b1 68 de 3a`.
+ */
+
+import { COB_FLAG, hasFlag } from '../manifest/attr-constants.js';
+import type { CobolFieldAttr } from '../manifest/schema.js';
+import { hexOf, invalidValue, numericValue } from './format.js';
+import type { Decoded } from './types.js';
+
+
+/** Unsigned integer from bytes in the given order. */
+function readUnsigned(bytes: Uint8Array, bigEndian: boolean): bigint {
+  let v = 0n;
+  if (bigEndian) {
+    for (let i = 0; i < bytes.length; i++) {
+      v = (v << 8n) | BigInt(bytes[i]);
+    }
+  } else {
+    for (let i = bytes.length - 1; i >= 0; i--) {
+      v = (v << 8n) | BigInt(bytes[i]);
+    }
+  }
+  return v;
+}
+
+/**
+ * libcob decides byte order on `COB_FIELD_BINARY_SWAP` alone (`cob_binary_get_sint64`,
+ * numeric.c): a COMP-5 or REAL_BINARY item that still carries the flag — codegen retypes
+ * `TALLY` that way — is stored big-endian too.
+ */
+export function isBigEndianBinary(attr: CobolFieldAttr, hostLittleEndian: boolean): boolean {
+  return hasFlag(attr.flags, COB_FLAG.BINARY_SWAP) || !hostLittleEndian;
+}
+
+export function decodeBinary(bytes: Uint8Array, attr: CobolFieldAttr, hostLittleEndian: boolean): Decoded {
+  const n = bytes.length;
+  // libcob reads any 1..8-byte binary (`binary-size: 1--8` under -std=mf gives 3/5/6/7).
+  if (n < 1 || n > 8) {
+    return {
+      value: `<binary size ${n} unsupported: 0x${hexOf(bytes)}>`,
+      kind: 'unsupported'
+    };
+  }
+  const unsigned = readUnsigned(bytes, isBigEndianBinary(attr, hostLittleEndian));
+  const bits = BigInt(n * 8);
+  const signed = hasFlag(attr.flags, COB_FLAG.HAVE_SIGN);
+  const value = signed && (unsigned >> (bits - 1n)) & 1n ? unsigned - (1n << bits) : unsigned;
+  return numericValue(value, attr.scale, 'none');
+}
+
+/** `0x` + the pointer's hex, host order, zero-padded to its full width. */
+export function decodePointer(bytes: Uint8Array, hostLittleEndian: boolean): Decoded {
+  const n = bytes.length;
+  if (n === 0) {
+    return invalidValue('<invalid pointer: no storage>', 'pointer item has size 0');
+  }
+  const raw = readUnsigned(bytes, !hostLittleEndian);
+  return {
+    value: `0x${raw.toString(16).padStart(n * 2, '0')}`,
+    kind: 'pointer'
+  };
+}

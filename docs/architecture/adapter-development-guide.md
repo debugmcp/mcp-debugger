@@ -42,7 +42,7 @@ packages/adapter-<language>/
 Naming conventions:
 - Package name: `@debugmcp/adapter-<language>`
 - Factory class: `<Language>AdapterFactory` (e.g., `GoAdapterFactory`)
-- File names: kebab-case is the recommended convention for new adapters (used by 8 of the 9 shipped adapters), e.g. `go-debug-adapter.ts`. The .NET adapter uses PascalCase (`DotnetAdapterFactory.ts`, `DotnetDebugAdapter.ts`) for historical reasons.
+- File names: kebab-case is the recommended convention for new adapters (used by 9 of the 10 shipped adapters), e.g. `go-debug-adapter.ts`. The .NET adapter uses PascalCase (`DotnetAdapterFactory.ts`, `DotnetDebugAdapter.ts`) for historical reasons.
 
 ---
 
@@ -295,59 +295,48 @@ The dynamic loader resolves adapters by **named export** — it looks for `<Lang
 
 ## Monorepo Wiring
 
-After creating the package, wire it into the monorepo. These steps are required for the adapter to be discovered.
+After creating the package, wire it into the monorepo. A language touches far more than the loader; the COBOL adapter (issue #759) is the most recent complete example, so the diff of its PR is the authoritative list. Every place, in build order:
 
-### 1. Root `package.json` — optionalDependencies
+### 1. Shared model and policy
 
-Add your adapter to the `optionalDependencies` section:
+- `DebugLanguage` enum in `packages/shared/src/models/index.ts`
+- The adapter policy (`packages/shared/src/interfaces/adapter-policy-<language>.ts`), exported from `packages/shared/src/index.ts` and wired into `getPolicyForLanguage()` in `adapter-policy-map.ts` — see [Adapter Policy](#adapter-policy)
 
-```json
-"optionalDependencies": {
-  "@debugmcp/adapter-<language>": "workspace:*"
-}
-```
+### 2. Server wiring
 
-### 2. `vitest.config.ts` — alias
+- **Loader known list** — the `known` array in `src/adapters/adapter-loader.ts` → `listAvailableAdapters()`: `{ name, packageName, description, attach }`. The `attach` mode must mirror `getMetadata().modes`
+- **Container preload** — a `tryRegister('<language>', '<Language>AdapterFactory')` call in `src/container/dependencies.ts` (skipped when the language is in `DEBUG_MCP_DISABLE_LANGUAGES`)
+- **Language-discovery metadata** — a `case DebugLanguage.<LANGUAGE>` in `buildLanguageMetadata()` in `src/server/language-discovery.ts` (display name, `requiresExecutable`, `defaultExecutable`)
+- **Skill content** — the language list and the per-language launch/attach lines in `src/skill-content.ts` (the in-band `instructions` string and the `debugging-workflow` prompt)
 
-Add an alias entry in `resolve.alias` so tests can import your package:
+### 3. Packaging
 
-```typescript
-{ find: '@debugmcp/adapter-<language>', replacement: path.resolve(__dirname, './packages/adapter-<language>/src/index.ts') }
-```
+- **Root `package.json`** — `"@debugmcp/adapter-<language>": "workspace:*"` under `optionalDependencies`. `optionalDependencies` is a shipping-surface key (`SHIPPING_SURFACE_KEYS` in `scripts/changelog-fragments.mjs`), so the same PR needs a `changelog.d/<issue>.added.md` fragment or the changelog gate fails
+- **CLI bundle** — `packages/mcp-debugger/package.json` `devDependencies`, and an entry in `packages/mcp-debugger/src/batteries-included.ts`. An adapter that spawns its own helper process (the .NET bridge, the COBOL shim) also needs a copy step in `packages/mcp-debugger/scripts/bundle-cli.js`
+- **Build order** — `scripts/build-packages.cjs` (honours `DEBUG_MCP_DISABLE_LANGUAGES`) and the workspace list in `scripts/prepare-pack.js`
+- **Vitest alias** — `resolve.alias` in `vitest.config.ts`, so tests import the package's `src/index.ts`:
 
-### 3. `DebugLanguage` enum
+  ```typescript
+  { find: '@debugmcp/adapter-<language>', replacement: path.resolve(__dirname, './packages/adapter-<language>/src/index.ts') }
+  ```
 
-Add a new value in `packages/shared/src/models/index.ts`:
+- **Dockerfile** — the `COPY packages/adapter-<language>/package.json` and `tsconfig*.json` lines in the builder stage, the `node_modules/@debugmcp/adapter-<language>` copy in the runtime stage, and any toolchain the image should ship (`apt-get install …`)
+- `pnpm install` to link the workspace package
 
-```typescript
-export enum DebugLanguage {
-  // ... existing entries
-  <LANGUAGE> = '<language>',
-}
-```
+### 4. Count assertions and contract tests
 
-### 4. Known adapters list
+Five tests pin the number of languages or enumerate them; each fails until updated:
 
-Add an entry to the `known` array in `src/adapters/adapter-loader.ts` → `listAvailableAdapters()`:
+- `tests/unit/adapters/adapter-loader.test.ts` — the `listAvailableAdapters()` length and the per-adapter `toEqual` block
+- `tests/core/unit/session/models.test.ts` — the `Object.values(DebugLanguage)` length
+- `tests/e2e/doctor-smoke.test.ts` — the `report.languages` length (runs against the built `dist/`)
+- `tests/unit/shared/adapter-policy-contract.test.ts` — the `PINNED` capability table is a deliberate duplicate of what every policy declares; add your language's row on purpose
+- `tests/core/unit/session/session-manager-executable-path.test.ts` — the per-language default `executablePath` row (or the "left undefined for the adapter to resolve" list)
 
-```typescript
-{ name: '<language>', packageName: '@debugmcp/adapter-<language>', description: '<Language> debugger using <debugger>' },
-```
+### 5. Docs and CI gates
 
-### 5. Update adapter count assertions
-
-Grep for `toHaveLength` assertions in tests that reference adapter/language counts and increment them. Known files:
-- `tests/unit/adapters/adapter-loader.test.ts`
-- `tests/core/unit/session/models.test.ts`
-- `tests/core/unit/adapters/debug-adapter-interface.test.ts`
-
-### 6. Run `pnpm install`
-
-Link the new workspace package:
-
-```bash
-pnpm install
-```
+- **Docs count gate** — `node scripts/check-docs.mjs` counts `packages/adapter-*` and fails every tracked Markdown sentence that still states the previous count of languages or language adapters (both the mock-excluded and mock-included readings are accepted); the same script validates relative links. Add `docs/<language>/README.md`, `examples/<language>/` (with its README and `.gitignore`), `skills/debugging/references/<language>.md` plus the row in `skills/debugging/SKILL.md`, and the language rows in the root `README.md`, `docs/README.md`, `docs/diagnostics.md`, `CLAUDE.md`, and the package counts in `AGENTS.md`/`ARCHITECTURE.md`/`CONTRIBUTING.md`
+- **Canary leg** — `.github/workflows/canary.yml` runs `scripts/canary-smoke.mjs --lang <language>` per language against the published npm/npx/Docker artifacts; a language whose toolchain is not preinstalled on the runners gets an install step first (`continue-on-error`, so a failed install is reported by the smoke step rather than hidden) — the COBOL leg installs `gnucobol3`/`gnucobol`/`mingw-w64-x86_64-gnucobol` that way and then source-launches `examples/cobol/hello.cob` on the npm and Docker channels
 
 ---
 
@@ -488,11 +477,12 @@ The loader:
 - [ ] Adapter policy created in `packages/shared/src/interfaces/adapter-policy-<language>.ts`
 - [ ] Policy exported from `packages/shared/src/index.ts`
 - [ ] Policy `case` added to `getPolicyForLanguage()` in `packages/shared/src/interfaces/adapter-policy-map.ts`
-- [ ] Registered in root `package.json` optionalDependencies
-- [ ] Added to known adapters list in `src/adapters/adapter-loader.ts`
+- [ ] Registered in root `package.json` optionalDependencies, with a `changelog.d/<issue>.added.md` fragment (`optionalDependencies` is a shipping-surface key for the changelog gate)
+- [ ] Added to known adapters list in `src/adapters/adapter-loader.ts`; container preload in `src/container/dependencies.ts`; language-discovery metadata in `src/server/language-discovery.ts`; skill content in `src/skill-content.ts`
+- [ ] Bundled: `packages/mcp-debugger/package.json` devDependencies and `batteries-included.ts` (plus a `bundle-cli.js` copy step if the adapter spawns a helper process); `scripts/build-packages.cjs`; `scripts/prepare-pack.js`; the Dockerfile COPY/runtime blocks
 - [ ] Vitest alias added in `vitest.config.ts`
 - [ ] If the package has its own tests under `packages/adapter-<language>/tests/`, `pnpm --filter @debugmcp/adapter-<language> test` passes from the package directory (no package-local vitest config; a package whose tests all live under `tests/adapters/<language>/` has nothing to run there)
-- [ ] Adapter count assertions updated in tests
+- [ ] Adapter count assertions updated in the five tests listed under [Count assertions and contract tests](#4-count-assertions-and-contract-tests)
 - [ ] Unit and integration tests written under `tests/adapters/<language>/`
 - [ ] The new policy passes `tests/unit/shared/adapter-policy-contract.test.ts` — the cross-policy contract that runs against the real policies via `getPolicyForLanguage`. Its pinned capability table is a deliberate duplicate of what the policies declare, so a new language means editing that table on purpose
 - [ ] `pnpm install` run to link workspace
@@ -502,3 +492,5 @@ The loader:
 - [ ] TypeScript builds to `dist/` (ESM)
 - [ ] Adapter discovers and loads via `list_supported_languages`
 - [ ] No stdout pollution in stdio mode
+- [ ] Docs added (`docs/<language>/README.md`, `examples/<language>/`, `skills/debugging/references/<language>.md` + the `SKILL.md` row) and `node scripts/check-docs.mjs` passes — it fails every doc that still states the old language count
+- [ ] Canary leg considered in `.github/workflows/canary.yml` (`scripts/canary-smoke.mjs --lang <language>`)

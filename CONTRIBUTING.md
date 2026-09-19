@@ -353,7 +353,7 @@ which appends a `Signed-off-by: Your Name <you@example.com>` trailer. If you for
 
 ```
 mcp-debugger/
-├── packages/               # 17 monorepo workspace packages
+├── packages/               # 18 monorepo workspace packages
 │   ├── shared/            # Shared interfaces, types, adapter policies, utilities
 │   ├── adapter-python/    # Python debug adapter (debugpy)
 │   ├── adapter-ruby/      # Ruby debug adapter (rdbg/debug gem)
@@ -363,7 +363,8 @@ mcp-debugger/
 │   ├── adapter-java/      # Java adapter (JDI bridge)
 │   ├── adapter-dotnet/    # .NET/C# adapter (netcoredbg)
 │   ├── adapter-cpp/       # C/C++ adapter (CodeLLDB)
-│   ├── codelldb-common/   # Shared CodeLLDB infrastructure (Rust + C/C++ adapters)
+│   ├── adapter-cobol/     # COBOL adapter (GnuCOBOL + CodeLLDB behind a DAP shim)
+│   ├── codelldb-common/   # Shared CodeLLDB infrastructure (Rust, C/C++ + COBOL adapters)
 │   ├── codelldb-win32-x64/    # Prebuilt CodeLLDB binaries, one package per
 │   ├── codelldb-linux-x64/    # platform, published with os/cpu fields so an
 │   ├── codelldb-linux-arm64/  # install pulls only the matching payload

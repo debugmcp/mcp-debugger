@@ -12,8 +12,8 @@ import { createMockDependencies } from './session-manager-test-utils.js';
 
 /**
  * Per-language default when no path is given. Python (platform- and
- * env-dependent) and cpp/rust (deliberately undefined) are covered by their
- * own tests below; the completeness guard accounts for those three.
+ * env-dependent) and cpp/rust/cobol (deliberately undefined) are covered by their
+ * own tests below; the completeness guard accounts for those four.
  */
 const DEFAULTS: ReadonlyArray<readonly [DebugLanguage, string]> = [
   [DebugLanguage.JAVASCRIPT, 'node'],
@@ -51,8 +51,8 @@ describe('SessionManager.createSession executablePath (issue #693)', () => {
     return session.executablePath;
   }
 
-  it('every DebugLanguage has a default row (or is python / cpp / rust, covered below)', () => {
-    expect(DEFAULTS.length + 1 + 2).toBe(Object.values(DebugLanguage).length);
+  it('every DebugLanguage has a default row (or is python / cpp / rust / cobol, covered below)', () => {
+    expect(DEFAULTS.length + 1 + 3).toBe(Object.values(DebugLanguage).length);
   });
 
   it.each(Object.values(DebugLanguage))('%s stores an explicit path verbatim', async (language) => {
@@ -77,7 +77,7 @@ describe('SessionManager.createSession executablePath (issue #693)', () => {
     expect(await executablePathFor(DebugLanguage.PYTHON, '/usr/bin/python3.12')).toBe('/usr/bin/python3.12');
   });
 
-  it.each([DebugLanguage.CPP, DebugLanguage.RUST])('%s leaves the path undefined for the adapter to resolve', async (language) => {
+  it.each([DebugLanguage.CPP, DebugLanguage.RUST, DebugLanguage.COBOL])('%s leaves the path undefined for the adapter to resolve', async (language) => {
     expect(await executablePathFor(language)).toBeUndefined();
   });
 });

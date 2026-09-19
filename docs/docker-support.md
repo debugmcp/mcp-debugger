@@ -108,6 +108,7 @@ The image vendors CodeLLDB for the image's own architecture — `linux-x64` or `
 - **Prebuilt binaries**: must be **Linux-compiled for the image's architecture** (x86-64 for the amd64 image, aarch64 for the arm64 one). Binaries compiled on a Windows/macOS host and mounted into the container are not debuggable by container LLDB — that's a binary-format fact, not a packaging gap. Cross-compile for Linux or compile in-container.
 - **Attach by PID**: works for native processes inside the container. Attaching to a non-descendant process needs `--cap-add=SYS_PTRACE` when the host kernel sets `kernel.yama.ptrace_scope >= 1` (Kubernetes `kubectl debug --profile=general` grants the equivalent — see the [Kubernetes debugging recipe](kubernetes.md)).
 - Rust remains **launch-only** (the rust adapter has no attach implementation).
+- **COBOL** (issue #759): the image installs the `gnucobol3` package, so a `.cob`/`.cbl` launch compiles in-container (into `.debug-mcp/cobol/` beside the source) and the COBOL adapter is preloaded; the same Linux-binary rule applies to prebuilt COBOL executables. A prebuilt binary compiled on the host from a mounted project gets the same best-effort `sourceMap` derivation from its DWARF paths that C/C++ binaries get (a caller-supplied `sourceMap` always wins); pass `sources` as `/workspace/...` paths so the regenerated manifest names the paths the debugger reports. See [docs/cobol/README.md](cobol/README.md).
 - **Rust type summaries work out of the box** (issue #441): the image vendors the Rust toolchain's LLDB formatter scripts at `/opt/rust-sysroot/lib/rustlib/etc` and sets `CODELLDB_RUST_SYSROOT=/opt/rust-sysroot`, which the rust adapter translates into CodeLLDB's `lang.rust.sysroot` setting — so `&str`/`String`/`Vec` values render as values without any `rustc` in the image. Override with `-e CODELLDB_RUST_SYSROOT=/path/to/sysroot` (a sysroot root whose `lib/rustlib/etc` holds the formatters), or disable with `-e CODELLDB_RUST_SYSROOT=` to fall back to CodeLLDB's normal `rustc --print sysroot` lookup. Caveat: the vendored formatters track the Rust version pinned in the Dockerfile; a debuggee built by a much newer/older rustc may render some std types imperfectly.
 
 ## Ruby attach in Docker (attach-only)
@@ -286,8 +287,8 @@ trusting a version quoted here:
 2. **`rust-formatters`** (a `rust:*-slim` base) exists only to copy the Rust toolchain's
    LLDB formatter scripts out of `$(rustc --print sysroot)/lib/rustlib/etc` (issue #441)
 3. The **runtime stage** (an `ubuntu:*` base) installs the debug toolchains the image
-   ships -- Python 3 plus a hash-pinned debugpy, LLDB and `python3-lldb`, `g++`, and a
-   headless JDK 21 -- then copies in the Node binary, the bundle, the runtime adapter
+   ships -- Python 3 plus a hash-pinned debugpy, LLDB and `python3-lldb`, `g++`, GnuCOBOL
+   (`gnucobol3`), and a headless JDK 21 -- then copies in the Node binary, the bundle, the runtime adapter
    packages, and the vendored CodeLLDB from the earlier stages
 4. It sets the environment the server reads at runtime: `MCP_CONTAINER=true`,
    `MCP_WORKSPACE_ROOT=/workspace`, `CODELLDB_PATH`, `CODELLDB_RUST_SYSROOT`, and
