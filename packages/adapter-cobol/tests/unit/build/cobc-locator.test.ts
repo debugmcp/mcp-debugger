@@ -2,11 +2,13 @@
  * Unit tests for the cobc locator (issue #759).
  *
  * Every probe is injected — `exists` and `probeVersion` — so nothing here
- * touches the real filesystem or spawns a compiler. Expected paths are built
+ * touches the real filesystem or spawns a compiler, except the last block,
+ * which exercises the default probe against node itself. Expected paths are built
  * with the same `path.*` calls the source uses, because `path.join` /
  * `path.delimiter` follow the host even when a `platform` argument is passed.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import {
@@ -14,6 +16,7 @@ import {
   cobcEnvironment,
   cobcCandidatePaths,
   parseCobcVersion,
+  probeCobcVersion,
   COBC_ENV_PATH_VAR,
   type CobcLocation
 } from '../../../src/build/cobc-locator.js';
@@ -323,5 +326,26 @@ describe('cobcEnvironment', () => {
 
     expect(env).not.toHaveProperty('UNSET');
     expect(base).toEqual(snapshot);
+  });
+});
+
+describe('probeCobcVersion (the default `--version` probe)', () => {
+  it('returns the first non-empty stdout line of `<command> --version`', async () => {
+    expect(await probeCobcVersion(process.execPath)).toMatch(/^v\d+\.\d+\.\d+/);
+  });
+
+  it('returns null when the command cannot be spawned', async () => {
+    expect(await probeCobcVersion(path.join(os.tmpdir(), `no-such-cobc-${process.pid}`))).toBeNull();
+  });
+
+  it.skipIf(process.platform === 'win32')('returns null on a non-zero exit even when a banner was printed', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cobc-probe-'));
+    const script = path.join(dir, 'cobc');
+    writeFileSync(script, '#!/bin/sh\necho "cobc (GnuCOBOL) 9.9.9"\nexit 1\n', { mode: 0o755 });
+    try {
+      expect(await probeCobcVersion(script)).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
