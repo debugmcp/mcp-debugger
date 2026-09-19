@@ -602,7 +602,14 @@ describe.skipIf(SKIP_COBOL)('MCP Server COBOL Debugging Smoke Test @requires-cob
       expect(await reachCobolLine(DYN_MOD_LINE, 'mod1.cob')).toBe(true);
       expect((await localsByName()).get('LK-VALUE')?.value).toBe('41');
 
-      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+      // step_out of the module returns to the caller; step_out of the entry program under
+      // cobcrun runs the job to completion — the loader has no frame to stop in (measured).
+      expect((await call('step_out', {})).success).toBe(true);
+      expect(await pollState('paused', 15000)).toBeDefined();
+      const back = (await fetchStackTrace()).find(isCobolFrame)!;
+      expect(path.basename(back.file ?? '').toLowerCase()).toBe('main.cob');
+      expect([DYN_CALL_LINE, DYN_CALL_LINE + 1]).toContain(back.line);
+      expect((await call('step_out', {})).success).toBe(true);
       expect((await pollState('stopped', 20000))?.exitCode).toBe(0);
       expect(JSON.stringify(await call('get_output', {}))).toContain('value=+000000042');
     },

@@ -158,7 +158,7 @@ describe('cobol shim stackTrace and scopes', () => {
     expect(scopesOf(await h.client.request('scopes', { frameId: 11 })).map((s) => s.name)).toEqual(['WORKING-STORAGE of HELLO (frame #2)']);
   });
 
-  it('leaves a breakpoint stop, a step stop and a real fault on the thread the engine reported', async () => {
+  it('leaves a breakpoint stop, a step stop, an entry stop and a real fault on the thread the engine reported', async () => {
     h = await startShim({ manifests: [helloManifest(ROOT)] });
     await bringUp(h);
     h.engine.on('threads', () => ({ threads: [{ id: 7, name: 'thread #3' }, { id: 1, name: 'main' }] }));
@@ -166,6 +166,7 @@ describe('cobol shim stackTrace and scopes', () => {
     for (const body of [
       { reason: 'breakpoint', threadId: 7, hitBreakpointIds: [3] },
       { reason: 'step', threadId: 7 },
+      { reason: 'entry', threadId: 7 },
       { reason: 'exception', description: 'Exception 0xc0000005 encountered at address 0x1', threadId: 7 }
     ]) {
       h.engine.emit('stopped', { allThreadsStopped: true, ...body });

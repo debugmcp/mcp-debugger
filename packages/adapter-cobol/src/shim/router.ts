@@ -83,7 +83,7 @@ export function formatStringRegister(env: RouterEnv): string {
 /** How deep the shim looks for the nearest COBOL frame above a libcob/C frame. */
 const WALK_UP_STACK_LEVELS = 64;
 
-/** Stop descriptions that are the debugger's doing, not the program's: a pause, an entry stop, the break an attach injects. */
+/** Stop descriptions that are the debugger's doing, not the program's: a pause, the break an attach injects. */
 const NEUTRAL_STOP_DESCRIPTION = /0x80000003|breakpoint|SIGSTOP|SIGTRAP|SIGINT|EXC_BREAKPOINT/i;
 
 /** True for a stop the program did not cause on its reported thread (see retargetToCobolThread). */
@@ -93,7 +93,8 @@ function isProgramNeutralStop(body: StoppedBody): boolean {
   }
   switch (body.reason) {
     case 'pause':
-    case 'entry':
+      // Not 'entry': a launch's entry stop precedes the program (no COBOL frame anywhere
+      // yet), so the walk would only cost a threads request and a stack per thread.
       return true;
     case 'exception':
       return NEUTRAL_STOP_DESCRIPTION.test(`${body.description ?? ''} ${body.text ?? ''}`);
@@ -829,9 +830,9 @@ export class Router {
    * reported on the break thread the OS injects (exception 0x80000003), a pause can land on
    * a runtime worker thread — is re-anchored on the first thread that is inside a COBOL
    * program, so the first stackTrace/scopes/evaluate a client asks for show the program
-   * rather than a thread-pool stack. Breakpoint, step and runtime-error stops are on the
-   * right thread by construction and are left alone, as is any real fault. The original
-   * thread and reason stay in the description.
+   * rather than a thread-pool stack. Breakpoint, step, entry and runtime-error stops are
+   * on the right thread by construction and are left alone, as is any real fault. The
+   * original thread and reason stay in the description.
    */
   private async retargetToCobolThread(body: StoppedBody): Promise<void> {
     if (body.threadId === undefined || this.state.registry.programCount === 0 || !isProgramNeutralStop(body)) {
