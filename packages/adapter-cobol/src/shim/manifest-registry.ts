@@ -167,7 +167,7 @@ export class ManifestRegistry {
         return true;
       }
     }
-    return /\.c(\.l?\.h)?$/i.test(base);
+    return /\.c(\.h|\.l\d*\.h)?$/i.test(base);
   }
 
   /**

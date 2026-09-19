@@ -60,11 +60,11 @@ const vectors: Vector[] = [
     expect: { value: '<invalid packed: 0x1234>', kind: 'invalid', invalid: /sign nibble is 0x4/ }
   },
   {
-    name: 'negative sign nibble on an unsigned item → invalid (an unsigned COMP-3 is stored with F)',
+    name: 'a D nibble on an unsigned item reads as positive (libcob reads no sign without HAVE_SIGN)',
     hex: '12 3d',
     attr: attr(PACKED, 3, 0, 0),
     size: 2,
-    expect: { value: '<invalid packed: 0x123d>', kind: 'invalid', invalid: /negative sign nibble 0xd on an unsigned item/ }
+    expect: { value: '123', kind: 'numeric', mantissa: 123n }
   },
   {
     name: 'positive C nibble on an unsigned item is accepted',

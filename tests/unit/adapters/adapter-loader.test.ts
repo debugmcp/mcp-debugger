@@ -450,7 +450,7 @@ describe('AdapterLoader', () => {
       expect(mockResolver.isInstalled).not.toHaveBeenCalled();
     });
 
-    it('listAvailableAdapters reports all nine adapters without importing any module', async () => {
+    it('listAvailableAdapters reports all ten adapters without importing any module', async () => {
       mockResolver.isInstalled.mockImplementation(
         async (pkg: string) => pkg === '@debugmcp/adapter-python'
       );

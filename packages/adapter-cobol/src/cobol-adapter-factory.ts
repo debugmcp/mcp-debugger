@@ -49,7 +49,7 @@ export class CobolAdapterFactory implements IAdapterFactory {
 
     const resolvedCodelldb = await resolveCodeLLDBExecutableWithSource();
     if (!resolvedCodelldb) {
-      errors.push('CodeLLDB not found. It normally ships via the @debugmcp/codelldb-* optional dependencies; set CODELLDB_PATH, or in a repo checkout run: npm run build:adapter');
+      errors.push('CodeLLDB not found. It normally ships via the @debugmcp/codelldb-* optional dependencies; set CODELLDB_PATH, or in a repo checkout run: pnpm install (vendors CodeLLDB)');
     } else {
       codelldbPath = resolvedCodelldb.path;
       codelldbSource = resolvedCodelldb.source;

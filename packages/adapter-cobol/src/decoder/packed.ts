@@ -46,9 +46,7 @@ export function decodePacked(bytes: Uint8Array, attr: CobolFieldAttr): Decoded {
   }
   // libcob's `cob_packed_get_sign`: `((p & 0x0F) == 0x0D) ? -1 : 1` — every other nibble,
   // 0xB included, is positive.
-  const negative = signNibble === 0xd;
-  if (negative && !signed) {
-    return invalid(`negative sign nibble 0x${signNibble.toString(16)} on an unsigned item`);
-  }
+  // Without HAVE_SIGN libcob reads no sign at all (`cob_packed_get_sign` returns 0).
+  const negative = signed && signNibble === 0xd;
   return numericValue(negative ? -mantissa : mantissa, attr.scale, 'nibble');
 }

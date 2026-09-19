@@ -77,7 +77,7 @@ The build key hashes the `cobc --version` banner, the flags (minus `-o`/`-t` and
 | `modules` | Sources built as dynamically CALLed modules (`cobc -m`, one artifact directory each); their directories are prepended to `COB_LIBRARY_PATH` for the launch |
 | `dialect` | `-std=<dialect>`: `ibm`, `mf`, `cobol85`, `default`, … |
 | `format` | `"fixed"` → `-fixed`, `"free"` → `-free`; omitted → cobc's own default (fixed for `.cob`) |
-| `copybookDirs` | `-I <dir>` search directories. cobc runs in the artifact directory, so copybooks next to the source need this |
+| `copybookDirs` | `-I <dir>` search directories for copybook libraries elsewhere; the program's own directory is always searched (cobc runs in the artifact directory) |
 | `cobcFlags` | Extra flags, verbatim, after the adapter's own (so they can override) |
 | `runtimeChecks` | `true` → `--debug`: all libcob runtime checks. Changes behaviour — a bad subscript aborts instead of reading past the table — and is what makes the [runtime-error stop](#runtime-errors) fire |
 | `stdinFile` | File fed to the debuggee's stdin for `ACCEPT … FROM SYSIN`. Implemented as `settings set target.input-path <file>` — CodeLLDB's own `stdio` launch key does not feed a file on either platform (R6) |

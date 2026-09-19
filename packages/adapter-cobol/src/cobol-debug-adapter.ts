@@ -231,7 +231,7 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
       if (!codelldbPath) {
         errors.push({
           code: 'CODELLDB_NOT_FOUND',
-          message: 'CodeLLDB executable not found. It normally ships via the @debugmcp/codelldb-* optional dependencies (reinstall without --omit=optional), or set CODELLDB_PATH, or in a repo checkout run: npm run build:adapter',
+          message: 'CodeLLDB executable not found. It normally ships via the @debugmcp/codelldb-* optional dependencies (reinstall without --omit=optional), or set CODELLDB_PATH, or in a repo checkout run: pnpm install (vendors CodeLLDB)',
           recoverable: true
         });
       }
@@ -254,7 +254,7 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
 
   getRequiredDependencies(): DependencyInfo[] {
     return [
-      { name: 'CodeLLDB', version: '1.11.0+', required: true, installCommand: 'npm run build:adapter' },
+      { name: 'CodeLLDB', version: '1.11.0+', required: true, installCommand: 'pnpm install (vendors CodeLLDB)' },
       {
         name: 'GnuCOBOL (cobc)',
         version: '3.1.2+',
@@ -341,7 +341,7 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
     const resolvedPath = this.resolveCodeLLDBExecutableSync();
     if (!resolvedPath) {
       throw new AdapterError(
-        'CodeLLDB executable not found. It normally ships via the @debugmcp/codelldb-* optional dependencies (reinstall without --omit=optional), or set CODELLDB_PATH, or in a repo checkout run: npm run build:adapter',
+        'CodeLLDB executable not found. It normally ships via the @debugmcp/codelldb-* optional dependencies (reinstall without --omit=optional), or set CODELLDB_PATH, or in a repo checkout run: pnpm install (vendors CodeLLDB)',
         AdapterErrorCode.ENVIRONMENT_INVALID
       );
     }
@@ -416,7 +416,7 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
   }
 
   getAdapterInstallCommand(): string {
-    return 'npm run build:adapter';
+    return 'pnpm install (vendors CodeLLDB)';
   }
 
   // ===== Debug Configuration =====
@@ -536,6 +536,9 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
         });
         if (!modResult.success) {
           throw new Error(`COBOL module compile failed for ${modSource}: ${modResult.error}`);
+        }
+        for (const diagnostic of modResult.diagnostics) {
+          this.dependencies.logger?.warn(`[CobolDebugAdapter] cobc (${modSource}): ${diagnostic}`);
         }
         if (modResult.artifactDir) {
           libraryDirs.push(modResult.artifactDir);
@@ -731,9 +734,10 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
   }
 
   async disconnect(): Promise<void> {
+    // DISCONNECTED, as the other adapters report it (the review of #760 found READY here).
     this.connected = false;
     this.currentThreadId = null;
-    this.transitionTo(AdapterState.READY);
+    this.transitionTo(AdapterState.DISCONNECTED);
     this.emit('disconnected');
   }
 

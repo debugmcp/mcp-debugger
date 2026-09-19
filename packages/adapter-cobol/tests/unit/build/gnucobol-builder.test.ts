@@ -200,6 +200,7 @@ describe('cobcArguments', () => {
       '-std=ibm',
       '-free',
       '-I', '/cpy', '-I', '/cpy2',
+      '-I', '/src',
       '--debug',
       '-Wall', '-O2',
       '-o', '/out/hello',
@@ -209,10 +210,10 @@ describe('cobcArguments', () => {
 
   it('uses -m for modules and -C (no -o) for manifest-only translation', () => {
     expect(cobcArguments({ program: '/src/mod.cob', mode: 'module' }, '/out/mod.so', '/out/mod.lst', ['/src/mod.cob'])).toEqual([
-      '-m', '-g', '-fdump=ALL', '--save-temps', '-t', '/out/mod.lst', '-ftsymbols', '-A', '-O0 -gdwarf-4', '-o', '/out/mod.so', '/src/mod.cob'
+      '-m', '-g', '-fdump=ALL', '--save-temps', '-t', '/out/mod.lst', '-ftsymbols', '-A', '-O0 -gdwarf-4', '-I', '/src', '-o', '/out/mod.so', '/src/mod.cob'
     ]);
     expect(cobcArguments({ program: '/bin/app', mode: 'manifest-only', sources }, undefined, '/out/app.lst', sources)).toEqual([
-      '-C', '-g', '-fdump=ALL', '--save-temps', '-t', '/out/app.lst', '-ftsymbols', '-A', '-O0 -gdwarf-4', '/src/hello.cob', '/src/sub.cob'
+      '-C', '-g', '-fdump=ALL', '--save-temps', '-t', '/out/app.lst', '-ftsymbols', '-A', '-O0 -gdwarf-4', '-I', '/src', '/src/hello.cob', '/src/sub.cob'
     ]);
   });
 
@@ -642,7 +643,7 @@ describe('GnuCobolBuilder', () => {
       const artifactDir = path.join(artifactRoot, 'app', result.buildKey);
       expect(result.artifactDir).toBe(artifactDir);
       expect(spawn.calls[0].args).toEqual([
-        '-C', '-g', '-fdump=ALL', '--save-temps', '-t', path.join(artifactDir, 'app.lst'), '-ftsymbols', '-A', '-O0 -gdwarf-4', program
+        '-C', '-g', '-fdump=ALL', '--save-temps', '-t', path.join(artifactDir, 'app.lst'), '-ftsymbols', '-A', '-O0 -gdwarf-4', '-I', path.dirname(program), program
       ]);
       expect(spawn.calls[0].args).not.toContain('-o');
       expect(readJson<ManifestIndex>(path.join(artifactDir, MANIFEST_INDEX_NAME))).toMatchObject({ mode: 'manifest-only', binary: exe, outputName: 'app' });

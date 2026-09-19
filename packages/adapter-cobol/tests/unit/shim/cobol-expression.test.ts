@@ -42,7 +42,8 @@ describe('parseCobolExpression', () => {
   });
 
   it('answers undefined for anything that is not a COBOL data reference', () => {
-    for (const text of ['b_17', '$rcx', '1 + 2', '42', 'WS-A + 1', 'a->b', 'WS-A(', 'WS-A()', 'OF WS-A', 'WS-A(1)(2)', '12-3', '', '/hexWS-A', 'WS-A(1:2)(3)']) {
+    // `b_17` is a valid COBOL word too (cobc accepts `_`); the resolver forwards it to the engine when no item matches.
+    for (const text of ['$rcx', '1 + 2', '42', 'WS-A + 1', 'a->b', 'WS-A(', 'WS-A()', 'OF WS-A', 'WS-A(1)(2)', '12-3', '', '/hexWS-A', 'WS-A(1:2)(3)']) {
       expect(parseCobolExpression(text), text).toBeUndefined();
     }
   });

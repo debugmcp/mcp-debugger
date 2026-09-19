@@ -186,6 +186,12 @@ export function cobcArguments(
   for (const dir of request.copybookDirs ?? []) {
     args.push('-I', dir);
   }
+  // cobc runs in the artifact directory, so copybooks beside the program are only found
+  // when its own directory is searched too (after the caller's dirs).
+  const sourceDir = sources.length > 0 ? path.dirname(sources[0]) : undefined;
+  if (sourceDir !== undefined && !(request.copybookDirs ?? []).includes(sourceDir)) {
+    args.push('-I', sourceDir);
+  }
   if (request.runtimeChecks) {
     args.push('--debug');
   }

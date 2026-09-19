@@ -9,7 +9,8 @@
  *   subexpr    := INTEGER | IDENT (('+'|'-') INTEGER)?
  *   refmod     := '(' (INTEGER|IDENT) ':' (INTEGER|IDENT)? ')'
  *
- * Identifiers are `[A-Z0-9][A-Z0-9-]*` with at least one letter, case-insensitive.
+ * Identifiers are `[A-Z0-9_][A-Z0-9_-]*` with at least one letter, case-insensitive (cobc
+ * accepts `_` in words under every -std).
  * Anything that does not parse is not a COBOL reference and goes to the engine
  * untouched (`b_17`, `$rcx`, `1+2`); the parser answers `undefined` for it
  * rather than an error, because "not ours" is the common case, not a fault.
@@ -41,7 +42,7 @@ type Token =
   | { kind: 'punct'; text: Punct };
 
 const PREFIXES: readonly ShimPrefix[] = ['/hex', '/raw', '/addr', '/len'];
-const WORD = /^[A-Z0-9]+(?:-[A-Z0-9]+)*/;
+const WORD = /^[A-Z0-9_]+(?:-[A-Z0-9_]+)*/;
 
 function tokenize(text: string): Token[] | undefined {
   const tokens: Token[] = [];

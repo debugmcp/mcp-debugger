@@ -147,7 +147,7 @@ describe('CobolDebugAdapter', () => {
       expect(adapter.isReady()).toBe(false);
       expect(adapter.getDefaultExecutableName()).toBe('cobc');
       expect(adapter.getAdapterModuleName()).toBe('codelldb');
-      expect(adapter.getAdapterInstallCommand()).toBe('npm run build:adapter');
+      expect(adapter.getAdapterInstallCommand()).toBe('pnpm install (vendors CodeLLDB)');
       expect(adapter.getCurrentThreadId()).toBeNull();
     });
 
@@ -244,7 +244,7 @@ describe('CobolDebugAdapter', () => {
 
       await adapter.disconnect();
       expect(adapter.isConnected()).toBe(false);
-      expect(adapter.getState()).toBe(AdapterState.READY);
+      expect(adapter.getState()).toBe(AdapterState.DISCONNECTED);
 
       const disposed = vi.fn();
       adapter.on('disposed', disposed);
