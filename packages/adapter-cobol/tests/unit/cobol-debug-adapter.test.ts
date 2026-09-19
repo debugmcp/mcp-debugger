@@ -16,9 +16,11 @@ import { AdapterState, AdapterError, AdapterErrorCode, DebugFeature, DebugLangua
 import type { AdapterConfig, AdapterDependencies, LanguageSpecificLaunchConfig } from '@debugmcp/shared';
 import type { CobcLocation, CobolBuildRequest, CobolBuildResult } from '../../src/build/index.js';
 
-const { shimExists, buildMock, builderCtor } = vi.hoisted(() => ({
+const { shimExists, cobcrunExists, buildMock, builderCtor } = vi.hoisted(() => ({
   /** Whether the fs switch pretends the shim entry exists. */
   shimExists: { value: true },
+  /** Whether the fs switch pretends cobcrun sits beside the canned cobc. */
+  cobcrunExists: { value: true },
   buildMock: vi.fn<(request: CobolBuildRequest) => Promise<CobolBuildResult>>(),
   builderCtor: vi.fn<(deps: unknown) => void>()
 }));
@@ -28,7 +30,11 @@ vi.mock('fs', async (importOriginal) => {
   return {
     ...actual,
     existsSync: (p: fs.PathLike): boolean =>
-      String(p).endsWith('cobol-shim.js') ? shimExists.value : actual.existsSync(p)
+      String(p).endsWith('cobol-shim.js')
+        ? shimExists.value
+        : /[\\/]cobcrun(\.exe)?$/.test(String(p))
+          ? cobcrunExists.value
+          : actual.existsSync(p)
   };
 });
 
@@ -130,6 +136,7 @@ describe('CobolDebugAdapter', () => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cobol-adapter-'));
     fs.writeFileSync(path.join(tmp, 'hello.cob'), '       PROGRAM-ID. HELLO.\n');
     vi.mocked(findCobc).mockResolvedValue(cobcLinux);
+    cobcrunExists.value = true;
     vi.mocked(resolveCodeLLDBExecutable).mockResolvedValue(CODELLDB);
     vi.mocked(resolveCodeLLDBExecutableSyncImpl).mockReturnValue(CODELLDB);
     adapter = new CobolDebugAdapter(createDependencies(), 'linux');
@@ -293,6 +300,7 @@ describe('CobolDebugAdapter', () => {
       const existing = path.join(tmp, 'my-cobc');
       fs.writeFileSync(existing, '');
       vi.mocked(findCobc).mockResolvedValue(cobcLinux);
+    cobcrunExists.value = true;
       await expect(adapter.resolveExecutablePath(existing)).resolves.toBe(existing);
       await transformLaunch({ program: 'app', cwd: tmp });
       expect(findCobc).toHaveBeenLastCalledWith(expect.objectContaining({ env: expect.objectContaining({ COBC_PATH: existing }) }));
@@ -620,6 +628,78 @@ describe('CobolDebugAdapter', () => {
         const launch = await transformLaunch({ program: 'app', cwd: tmp, manifestDirs: ['m'], env: { A: '1' } });
 
         expect(launch.env).toEqual({ A: '1' });
+      });
+    });
+  });
+
+  describe('runner: cobcrun', () => {
+    const moduleResult = (name: string): CobolBuildResult => {
+      const artifactDir = path.join(tmp, '.debug-mcp', 'cobol', name, 'abc123abc123');
+      return buildResult(name, { artifactDir, binaryPath: path.join(artifactDir, `${name}.so`), manifestPaths: [path.join(artifactDir, `${name.toLowerCase()}.cobol-symbols.json`)] });
+    };
+
+    it('builds the program as a module and launches cobcrun with the PROGRAM-ID, its directory first on COB_LIBRARY_PATH', async () => {
+      const main = moduleResult('DYNMAIN');
+      const mod = moduleResult('MOD1');
+      buildMock.mockResolvedValueOnce(main).mockResolvedValueOnce(mod);
+
+      const launch = await transformLaunch({ program: 'main.cob', cwd: tmp, runner: 'cobcrun', modules: ['mod1.cob'], args: ['--batch'] });
+
+      expect(buildMock.mock.calls[0][0]).toMatchObject({ mode: 'module', program: path.join(tmp, 'main.cob') });
+      expect(buildMock.mock.calls[1][0]).toMatchObject({ mode: 'module', program: path.join(tmp, 'mod1.cob') });
+      expect(launch.program).toBe(path.join('/opt/gnucobol/bin', 'cobcrun'));
+      expect(launch.args).toEqual(['DYNMAIN', '--batch']);
+      const libraryPath = (launch.env as Record<string, string>).COB_LIBRARY_PATH.split(path.delimiter);
+      expect(libraryPath.slice(0, 2)).toEqual([main.artifactDir, mod.artifactDir]);
+      expect(shimOptions(launch).manifestDirs).toEqual([main.artifactDir, mod.artifactDir]);
+    });
+
+    it('uses cobcrun.exe on win32', async () => {
+      buildMock.mockResolvedValueOnce(moduleResult('DYNMAIN'));
+      const win = new CobolDebugAdapter(createDependencies(), 'win32');
+
+      const launch = await transformLaunch({ program: 'main.cob', cwd: tmp, runner: 'cobcrun' }, win);
+
+      expect(launch.program).toBe(path.join('/opt/gnucobol/bin', 'cobcrun.exe'));
+      expect(launch.args).toEqual(['DYNMAIN']);
+    });
+
+    it('runs a prebuilt module by name from its own directory and regenerates its manifest from sources', async () => {
+      buildMock.mockResolvedValueOnce(buildResult('MOD1'));
+      const modulePath = path.join(tmp, 'lib', 'MOD1.so');
+
+      const launch = await transformLaunch({ program: modulePath, cwd: tmp, runner: 'cobcrun', sources: ['mod1.cob'] });
+
+      expect(launch.program).toBe(path.join('/opt/gnucobol/bin', 'cobcrun'));
+      expect(launch.args).toEqual(['MOD1']);
+      expect((launch.env as Record<string, string>).COB_LIBRARY_PATH.split(path.delimiter)[0]).toBe(path.join(tmp, 'lib'));
+      expect(buildMock).toHaveBeenCalledWith(expect.objectContaining({ mode: 'manifest-only', program: modulePath, sources: [path.join(tmp, 'mod1.cob')] }));
+      expect(shimOptions(launch).manifestDirs).toEqual([buildResult('MOD1').artifactDir]);
+    });
+
+    it('refuses a prebuilt program that is not a module file', async () => {
+      await expect(transformLaunch({ program: 'app', cwd: tmp, runner: 'cobcrun' })).rejects.toMatchObject({
+        code: AdapterErrorCode.SCRIPT_NOT_FOUND,
+        message: expect.stringMatching(/takes a COBOL source or a compiled module/)
+      });
+      expect(buildMock).not.toHaveBeenCalled();
+    });
+
+    it('fails as ENVIRONMENT_INVALID without cobc, and when cobcrun is missing beside it', async () => {
+      vi.mocked(findCobc).mockResolvedValue(null);
+      const noCobc = new CobolDebugAdapter(createDependencies(), 'linux');
+      await expect(transformLaunch({ program: path.join(tmp, 'MOD1.so'), cwd: tmp, runner: 'cobcrun' }, noCobc)).rejects.toMatchObject({
+        code: AdapterErrorCode.ENVIRONMENT_INVALID,
+        message: expect.stringMatching(/cobcrun ships beside cobc/)
+      });
+
+      vi.mocked(findCobc).mockResolvedValue(cobcLinux);
+      cobcrunExists.value = false;
+      buildMock.mockResolvedValueOnce(moduleResult('DYNMAIN'));
+      const noLoader = new CobolDebugAdapter(createDependencies(), 'linux');
+      await expect(transformLaunch({ program: 'main.cob', cwd: tmp, runner: 'cobcrun' }, noLoader)).rejects.toMatchObject({
+        code: AdapterErrorCode.ENVIRONMENT_INVALID,
+        message: expect.stringMatching(/cobcrun does not exist/)
       });
     });
   });

@@ -1,5 +1,6 @@
 export {
   findCobc,
+  cobcrunPath,
   cobcEnvironment,
   cobcCandidatePaths,
   probeCobcVersion,

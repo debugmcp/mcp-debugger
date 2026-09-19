@@ -21,6 +21,7 @@ import {
   prepareCobolExample,
   cobolSourcePath,
   cobolExtraSources,
+  cobolModuleSources,
   cobolCopybookDir,
   COBOL_EXAMPLES_DIR
 } from './cobol-example-utils.js';
@@ -48,6 +49,8 @@ const SUB_FIRST_STATEMENT = 15;  // ADD LK-A TO LK-B GIVING LS-WORK
 const COPYBOOK_MOVE_LINE = 10;   // MOVE "Y" TO WS-DONE, right before COPY "stmts.cpy"
 const COPYBOOK_AFTER_LINE = 12;  // DISPLAY "COBOL_DEBUG_MARKER: price=" — first line after the copied statements
 const SHAPES_FREE_LINE = 107;    // FREE WS-BASED — every item of shapes.cob has been set
+const DYN_CALL_LINE = 10;        // CALL WS-MOD-NAME USING WS-VALUE in dyn/main.cob (loads MOD1)
+const DYN_MOD_LINE = 8;          // ADD 1 TO LK-VALUE in dyn/mod1.cob
 
 type Variable = { name: string; value: string; type?: string; variablesReference?: number; expandable?: boolean };
 
@@ -525,6 +528,83 @@ describe.skipIf(SKIP_COBOL)('MCP Server COBOL Debugging Smoke Test @requires-cob
 
       await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
       expect((await pollState('stopped', 20000))?.exitCode).toBe(0);
+    },
+    120000
+  );
+
+  it(
+    'binds a breakpoint in a not-yet-loaded -m module once the CALL loads it (module named after its PROGRAM-ID)',
+    async (ctx) => {
+      const mainSource = cobolSourcePath('dyn');
+      const [modSource] = cobolModuleSources('dyn');
+      sessionId = (await call('create_debug_session', { language: 'cobol', name: 'cobol-smoke-modules' })).sessionId as string;
+      expect((await call('set_breakpoint', { file: modSource, line: DYN_MOD_LINE })).success).toBe(true);
+      expect((await call('set_breakpoint', { file: mainSource, line: DYN_CALL_LINE })).success).toBe(true);
+
+      await startOrSkip(ctx, {
+        scriptPath: mainSource,
+        dapLaunchArgs: { stopOnEntry: false },
+        adapterLaunchConfig: { modules: [modSource], forceRebuild: true }
+      }, 'modules');
+      expect(await reachCobolLine(DYN_CALL_LINE, 'main.cob')).toBe(true);
+
+      // Before the CALL the module is not loaded: its breakpoint is the pending one (R13).
+      const pending = (await call('list_breakpoints', {})).breakpoints as Array<{ file?: string; line?: number; verified?: boolean }>;
+      const isModBp = (b: { file?: string; line?: number }) => (b.file ?? '').toLowerCase().endsWith('mod1.cob') && b.line === DYN_MOD_LINE;
+      expect(pending.find(isModBp)?.verified, JSON.stringify(pending)).toBe(false);
+
+      // The CALL loads MOD1.dll/.so (named after the PROGRAM-ID, which is what libcob looks
+      // for), CodeLLDB re-verifies the breakpoint on load, and it hits inside MOD1.
+      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+      expect(await reachCobolLine(DYN_MOD_LINE, 'mod1.cob')).toBe(true);
+      const bound = (await call('list_breakpoints', {})).breakpoints as Array<{ file?: string; line?: number; verified?: boolean }>;
+      expect(bound.find(isModBp)?.verified, JSON.stringify(bound)).toBe(true);
+
+      const top = (await fetchStackTrace()).find(isCobolFrame)!;
+      expect(top.name).toContain('MOD1');
+      expect((await localsByName()).get('LK-VALUE')?.value).toBe('41');
+      expect((await call('step_over', {})).success).toBe(true);
+      expect(await pollState('paused', 15000)).toBeDefined();
+      expect((await localsByName()).get('LK-VALUE')?.value).toBe('42');
+
+      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+      expect((await pollState('stopped', 20000))?.exitCode).toBe(0);
+      expect(JSON.stringify(await call('get_output', {}))).toContain('value=+000000042');
+    },
+    120000
+  );
+
+  it(
+    'runs a module-only build under cobcrun (runner) and binds the program breakpoints as the loader loads the modules',
+    async (ctx) => {
+      const mainSource = cobolSourcePath('dyn');
+      const [modSource] = cobolModuleSources('dyn');
+      sessionId = (await call('create_debug_session', { language: 'cobol', name: 'cobol-smoke-cobcrun' })).sessionId as string;
+      expect((await call('set_breakpoint', { file: mainSource, line: DYN_CALL_LINE })).success).toBe(true);
+      expect((await call('set_breakpoint', { file: modSource, line: DYN_MOD_LINE })).success).toBe(true);
+
+      await startOrSkip(ctx, {
+        scriptPath: mainSource,
+        dapLaunchArgs: { stopOnEntry: false },
+        adapterLaunchConfig: { runner: 'cobcrun', modules: [modSource] }
+      }, 'cobcrun');
+
+      // The debuggee is cobcrun; DYNMAIN.dll/.so is loaded by it, and the breakpoint set
+      // before launch binds on that load.
+      expect(await reachCobolLine(DYN_CALL_LINE, 'main.cob')).toBe(true);
+      const listed = (await call('list_breakpoints', {})).breakpoints as Array<{ file?: string; line?: number; verified?: boolean }>;
+      expect(listed.find(b => (b.file ?? '').toLowerCase().endsWith('main.cob'))?.verified, JSON.stringify(listed)).toBe(true);
+      const top = (await fetchStackTrace()).find(isCobolFrame)!;
+      expect(top.name).toContain('DYNMAIN');
+      expect((await localsByName()).get('WS-VALUE')?.value).toBe('41');
+
+      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+      expect(await reachCobolLine(DYN_MOD_LINE, 'mod1.cob')).toBe(true);
+      expect((await localsByName()).get('LK-VALUE')?.value).toBe('41');
+
+      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+      expect((await pollState('stopped', 20000))?.exitCode).toBe(0);
+      expect(JSON.stringify(await call('get_output', {}))).toContain('value=+000000042');
     },
     120000
   );

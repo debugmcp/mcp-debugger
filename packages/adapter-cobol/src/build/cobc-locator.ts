@@ -15,6 +15,15 @@ import { spawn } from 'child_process';
 import { existsSync } from 'fs';
 import * as path from 'path';
 
+/**
+ * GnuCOBOL's module loader, which every install ships beside cobc (apt `gnucobol3`,
+ * MSYS2, Homebrew): `cobcrun <PROGRAM-ID> [args…]` loads `<PROGRAM-ID>.<so|dll|dylib>`
+ * from COB_LIBRARY_PATH and runs it.
+ */
+export function cobcrunPath(cobc: CobcLocation, platform: NodeJS.Platform = process.platform): string {
+  return path.join(cobc.binDir, platform === 'win32' ? 'cobcrun.exe' : 'cobcrun');
+}
+
 export interface CobcLocation {
   /** Absolute path of the cobc executable. */
   path: string;

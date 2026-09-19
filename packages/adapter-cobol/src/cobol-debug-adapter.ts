@@ -51,6 +51,7 @@ import {
 } from '@debugmcp/codelldb-common';
 import {
   findCobc,
+  cobcrunPath,
   cobcEnvironment,
   GnuCobolBuilder,
   isCobolSourceFile,
@@ -77,6 +78,12 @@ export interface CobolLaunchConfig extends GenericLaunchConfig {
   sources?: string[];
   /** Sources built as dynamically CALLed modules (`cobc -m`), placed on COB_LIBRARY_PATH. */
   modules?: string[];
+  /**
+   * `'cobcrun'`: build `program` as a module too and run it under GnuCOBOL's module loader
+   * (`cobcrun <PROGRAM-ID> args…`), the way production sites run module-only builds; a
+   * prebuilt `.so`/`.dll`/`.dylib` module is run by name from its own directory.
+   */
+  runner?: 'cobcrun';
   /** `-std=<dialect>`: ibm, mf, cobol85, default, … */
   dialect?: string;
   /** Source format; cobc's own default applies when omitted. */
@@ -103,6 +110,9 @@ export interface CobolLaunchConfig extends GenericLaunchConfig {
   console?: 'internalConsole' | 'integratedTerminal' | 'externalTerminal';
   [key: string]: unknown;
 }
+
+/** A compiled GnuCOBOL module, as `runner: 'cobcrun'` accepts it prebuilt. */
+const MODULE_FILE_PATTERN = /\.(so|dll|dylib)$/i;
 
 /** Attach sugar over CodeLLDB's attach keys: the manifest sources and the build options they were compiled with. */
 interface CobolAttachExtras {
@@ -460,6 +470,7 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
       program,
       sources,
       modules,
+      runner,
       dialect,
       format,
       copybookDirs,
@@ -532,7 +543,7 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
       const result = await builder.build({
         program: programPath,
         sources: absSources,
-        mode: 'executable',
+        mode: runner === 'cobcrun' ? 'module' : 'executable',
         dialect,
         format,
         copybookDirs: absCopybookDirs,
@@ -550,7 +561,14 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
       this.dependencies.logger?.info(
         result.compiled ? `[CobolDebugAdapter] Compiled ${programPath} -> ${result.binaryPath}` : `[CobolDebugAdapter] Reusing ${result.binaryPath} (up to date)`
       );
-      launchConfig.program = result.binaryPath;
+      if (runner === 'cobcrun') {
+        const loader = this.cobcrunLoader(cobc, result.binaryPath);
+        launchConfig.program = loader.program;
+        launchConfig.args = [loader.entry, ...(args ?? [])];
+        libraryDirs.push(path.dirname(result.binaryPath));
+      } else {
+        launchConfig.program = result.binaryPath;
+      }
       if (result.artifactDir) {
         shimManifestDirs.push(result.artifactDir);
       }
@@ -578,7 +596,27 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
         }
       }
     } else {
-      launchConfig.program = programPath;
+      if (runner === 'cobcrun') {
+        // A compiled module run by name: cobcrun resolves `<name>.<ext>` on COB_LIBRARY_PATH.
+        if (!MODULE_FILE_PATTERN.test(programPath)) {
+          throw new AdapterError(
+            `runner "cobcrun" takes a COBOL source or a compiled module (.so/.dll/.dylib); ${programPath} is neither.`,
+            AdapterErrorCode.SCRIPT_NOT_FOUND
+          );
+        }
+        if (!cobc) {
+          throw new AdapterError(
+            'runner "cobcrun" needs GnuCOBOL (cobcrun ships beside cobc), and none was found. Install GnuCOBOL 3.1.2+ or set COBC_PATH.',
+            AdapterErrorCode.ENVIRONMENT_INVALID
+          );
+        }
+        const loader = this.cobcrunLoader(cobc, programPath);
+        launchConfig.program = loader.program;
+        launchConfig.args = [loader.entry, ...(args ?? [])];
+        libraryDirs.push(path.dirname(programPath));
+      } else {
+        launchConfig.program = programPath;
+      }
       if (process.env.MCP_CONTAINER === 'true' && Object.keys(sourceMap || {}).length === 0) {
         // Container mode (issue #363, as cpp/rust): a host-built binary embeds host paths
         // in its DWARF, so /workspace breakpoints never match without a sourceMap.
@@ -646,6 +684,23 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
     this.lastShimOptions = shimOptions;
     (launchConfig as Record<string, unknown>)[COBOL_PRIVATE_KEY] = shimOptions;
     return launchConfig;
+  }
+
+  /**
+   * The debuggee for `runner: 'cobcrun'`: GnuCOBOL's module loader, given the module's
+   * name (its PROGRAM-ID, which is also the file's basename — see the builder). The
+   * program's own breakpoints stay pending until cobcrun loads the module; CodeLLDB
+   * re-verifies them on load.
+   */
+  private cobcrunLoader(cobc: CobcLocation, modulePath: string): { program: string; entry: string } {
+    const program = cobcrunPath(cobc, this.platform);
+    if (!fs.existsSync(program)) {
+      throw new AdapterError(
+        `runner "cobcrun" needs GnuCOBOL's module loader beside cobc, and ${program} does not exist.`,
+        AdapterErrorCode.ENVIRONMENT_INVALID
+      );
+    }
+    return { program, entry: path.basename(modulePath, path.extname(modulePath)) };
   }
 
   /**

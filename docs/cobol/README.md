@@ -74,7 +74,8 @@ The build key hashes the `cobc --version` banner, the flags (minus `-o`/`-t` and
 | Key | Meaning |
 |---|---|
 | `sources` | Extra `.cob` files compiled into the same executable (static link, `CALL "CALLSUB"`), or — for a prebuilt executable — the sources to regenerate its manifest from |
-| `modules` | Sources built as dynamically CALLed modules (`cobc -m`, one artifact directory each); their directories are prepended to `COB_LIBRARY_PATH` for the launch |
+| `modules` | Sources built as dynamically CALLed modules (`cobc -m`, one artifact directory each, each module file named after its PROGRAM-ID — the name libcob resolves a dynamic `CALL` to, case-sensitively on Linux); their directories are prepended to `COB_LIBRARY_PATH` for the launch |
+| `runner` | `"cobcrun"`: build the program as a module too and run it under GnuCOBOL's module loader (`cobcrun <PROGRAM-ID> args…`, the module's directory first on `COB_LIBRARY_PATH`), the way module-only production builds run. A prebuilt `.so`/`.dll`/`.dylib` module is run by name from its own directory (`sources` regenerates its manifest). The program's breakpoints bind when cobcrun loads it. cobcrun ships beside cobc in every GnuCOBOL install |
 | `dialect` | `-std=<dialect>`: `ibm`, `mf`, `cobol85`, `default`, … |
 | `format` | `"fixed"` → `-fixed`, `"free"` → `-free`; omitted → cobc's own default (fixed for `.cob`) |
 | `copybookDirs` | `-I <dir>` search directories for copybook libraries elsewhere; the program's own directory is always searched (cobc runs in the artifact directory) |
@@ -224,7 +225,6 @@ Every libcob runtime check (subscript out of bounds, ODO count, reference modifi
 | Function breakpoints (`function: "1000-INIT"`, sections, `PROGRAM-ID`) | Rejected up front; paragraph and section names are C labels, not functions. Milestone M3 of [#759](https://github.com/debugmcp/mcp-debugger/issues/759) |
 | Logpoints (`logMessage: "total={WS-TOTAL}"`) | Rejected up front — `{WS-NAME}` interpolation needs the shim; M3 |
 | PERFORM-aware `step_over` / `step_out`, synthesised PERFORM stack (`-fstack-extended`) | M3 (PERFORM is entered like `GO TO` today) |
-| `cobcrun` launch | M2 |
 | Writing variables (`setVariable`, `setExpression`) | Not supported; out of scope for v1 |
 | `noDebug: true` | Honoured by the engine: `setBreakpoints` is refused with `Not supported in noDebug mode`, the program runs to exit (R12) |
 | SCREEN SECTION, EBCDIC data, CICS/DB2/IMS preprocessors, NATIONAL / DEC64 / DEC128, level-66 RENAMES, `gcobol` (GCC 15) | Out of scope |
