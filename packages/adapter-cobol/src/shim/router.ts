@@ -83,6 +83,25 @@ export function formatStringRegister(env: RouterEnv): string {
 /** How deep the shim looks for the nearest COBOL frame above a libcob/C frame. */
 const WALK_UP_STACK_LEVELS = 64;
 
+/** Stop descriptions that are the debugger's doing, not the program's: a pause, an entry stop, the break an attach injects. */
+const NEUTRAL_STOP_DESCRIPTION = /0x80000003|breakpoint|SIGSTOP|SIGTRAP|SIGINT|EXC_BREAKPOINT/i;
+
+/** True for a stop the program did not cause on its reported thread (see retargetToCobolThread). */
+function isProgramNeutralStop(body: StoppedBody): boolean {
+  if ((body.hitBreakpointIds ?? []).length > 0) {
+    return false;
+  }
+  switch (body.reason) {
+    case 'pause':
+    case 'entry':
+      return true;
+    case 'exception':
+      return NEUTRAL_STOP_DESCRIPTION.test(`${body.description ?? ''} ${body.text ?? ''}`);
+    default:
+      return false;
+  }
+}
+
 export class Router {
   private readonly memory: MemoryReader;
   private readonly variables: VariablesHandler;
@@ -797,7 +816,50 @@ export class Router {
       this.deliverStepSignal({ kind: 'stopped', event, slot });
       return;
     }
+    try {
+      await this.retargetToCobolThread(body);
+    } catch (error) {
+      this.logger.warn('stop retarget failed', error);
+    }
     slot.resolve(event);
+  }
+
+  /**
+   * A stop the program did not cause on the reported thread — on Windows an attach is
+   * reported on the break thread the OS injects (exception 0x80000003), a pause can land on
+   * a runtime worker thread — is re-anchored on the first thread that is inside a COBOL
+   * program, so the first stackTrace/scopes/evaluate a client asks for show the program
+   * rather than a thread-pool stack. Breakpoint, step and runtime-error stops are on the
+   * right thread by construction and are left alone, as is any real fault. The original
+   * thread and reason stay in the description.
+   */
+  private async retargetToCobolThread(body: StoppedBody): Promise<void> {
+    if (body.threadId === undefined || this.state.registry.programCount === 0 || !isProgramNeutralStop(body)) {
+      return;
+    }
+    if (this.state.lastRuntimeError?.gen === this.state.generation) {
+      return;
+    }
+    const hasCobolFrame = (threadId: number): boolean => this.state.framesOfThread(threadId).some((f) => f.isCobol);
+    await this.fetchStack(body.threadId, WALK_UP_STACK_LEVELS);
+    if (hasCobolFrame(body.threadId)) {
+      return;
+    }
+    const response = await this.engine.request('threads', {});
+    const threads = (response.body as DebugProtocol.ThreadsResponse['body'] | undefined)?.threads ?? [];
+    for (const thread of threads) {
+      if (thread.id === body.threadId) {
+        continue;
+      }
+      await this.fetchStack(thread.id, WALK_UP_STACK_LEVELS);
+      if (hasCobolFrame(thread.id)) {
+        this.logger.info(`stop (${body.reason}) reported on thread ${body.threadId}, which has no COBOL frame; shown on thread ${thread.id}`);
+        body.description = `${body.description ?? body.reason ?? 'stopped'} (reported on thread ${body.threadId}; shown on thread ${thread.id}, inside the COBOL program)`;
+        body.threadId = thread.id;
+        this.state.lastThreadId = thread.id;
+        return;
+      }
+    }
   }
 
   /**

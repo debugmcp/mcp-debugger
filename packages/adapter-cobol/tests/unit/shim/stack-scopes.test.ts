@@ -119,7 +119,9 @@ describe('cobol shim stackTrace and scopes', () => {
       const levels = args.levels && args.levels > 0 ? args.levels : frames.length;
       return { stackFrames: frames.slice(start, start + levels), totalFrames: frames.length };
     });
-    h.engine.emit('stopped', { reason: 'pause', threadId: 1, allThreadsStopped: true });
+    // A breakpoint stop: the shim fetches nothing on its own (a pause would already have
+    // walked the stack to check the thread), so the client's one-frame request is all it holds.
+    h.engine.emit('stopped', { reason: 'breakpoint', hitBreakpointIds: [9], threadId: 1, allThreadsStopped: true });
     await h.client.nextEvent('stopped');
     // Only the top frame is in the shim's cache after this.
     await h.client.request('stackTrace', { threadId: 1, startFrame: 0, levels: 1 });
@@ -129,6 +131,49 @@ describe('cobol shim stackTrace and scopes', () => {
     expect(h.engine.received('stackTrace')).toHaveLength(2);
     expect(h.engine.received('stackTrace')[1].arguments).toMatchObject({ threadId: 1, levels: 64 });
     expect(h.engine.received('scopes')).toHaveLength(0);
+  });
+
+  it('re-anchors an attach/pause stop reported on a thread outside COBOL onto the thread inside the program', async () => {
+    h = await startShim({ manifests: [helloManifest(ROOT)] });
+    await bringUp(h);
+    // Windows attach: the OS injects a break thread (0x80000003); the job sleeps on its main thread.
+    const stacks: Record<number, DebugProtocol.StackFrame[]> = {
+      7: [frame(71, 'NtWaitForWorkViaWorkerFactory', undefined, 0), frame(72, 'TpCallbackMayRunLong', undefined, 0)],
+      1: [frame(11, 'NtDelayExecution', undefined, 0), frame(12, 'cob_sys_sleep', undefined, 0), frame(13, 'HELLO_', HELLO_COB, 40), frame(14, 'main', HELLO_C, 250)]
+    };
+    h.engine.on('threads', () => ({ threads: [{ id: 7, name: 'thread #3' }, { id: 1, name: 'main' }] }));
+    h.engine.on('stackTrace', (args: DebugProtocol.StackTraceArguments) => {
+      const frames = stacks[args.threadId] ?? [];
+      return { stackFrames: frames.slice(args.startFrame ?? 0, (args.startFrame ?? 0) + (args.levels || frames.length)), totalFrames: frames.length };
+    });
+    h.engine.emit('stopped', { reason: 'exception', description: 'Exception 0x80000003 encountered at address 0x7ffb59163ab0', threadId: 7, allThreadsStopped: true });
+    const stopped = await h.client.nextEvent('stopped');
+
+    expect(stopped.body).toMatchObject({ reason: 'exception', threadId: 1, allThreadsStopped: true });
+    expect(stopped.body.description).toBe('Exception 0x80000003 encountered at address 0x7ffb59163ab0 (reported on thread 7; shown on thread 1, inside the COBOL program)');
+    expect(h.engine.received('threads')).toHaveLength(1);
+    // The client's first stackTrace on the reported thread is the COBOL one, and scopes walk up within it.
+    const frames = (await h.client.request('stackTrace', { threadId: 1, startFrame: 0, levels: 20 })).body.stackFrames as DebugProtocol.StackFrame[];
+    expect(frames.map((f) => f.name)).toEqual(['NtDelayExecution', 'cob_sys_sleep', 'HELLO: 1000-INIT', 'main']);
+    expect(scopesOf(await h.client.request('scopes', { frameId: 11 })).map((s) => s.name)).toEqual(['WORKING-STORAGE of HELLO (frame #2)']);
+  });
+
+  it('leaves a breakpoint stop, a step stop and a real fault on the thread the engine reported', async () => {
+    h = await startShim({ manifests: [helloManifest(ROOT)] });
+    await bringUp(h);
+    h.engine.on('threads', () => ({ threads: [{ id: 7, name: 'thread #3' }, { id: 1, name: 'main' }] }));
+    h.engine.on('stackTrace', () => ({ stackFrames: [frame(71, 'worker', undefined, 0)], totalFrames: 1 }));
+    for (const body of [
+      { reason: 'breakpoint', threadId: 7, hitBreakpointIds: [3] },
+      { reason: 'step', threadId: 7 },
+      { reason: 'exception', description: 'Exception 0xc0000005 encountered at address 0x1', threadId: 7 }
+    ]) {
+      h.engine.emit('stopped', { allThreadsStopped: true, ...body });
+      const stopped = await h.client.nextEvent('stopped');
+      expect(stopped.body.threadId).toBe(7);
+      expect(stopped.body.description).toBe(body.description);
+    }
+    expect(h.engine.received('threads')).toHaveLength(0);
   });
 
   it('adds LOCAL-STORAGE and LINKAGE only when the program has them, and appends engine scopes under --engine-scopes', async () => {
