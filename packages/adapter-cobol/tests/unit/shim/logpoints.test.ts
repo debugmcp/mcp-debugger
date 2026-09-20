@@ -111,7 +111,7 @@ describe('cobol shim logpoints', () => {
     expect(text).toMatch(/^x=<unavailable: .*WS-NOPE.*> y=<unavailable: boom failed> \{not closed\n$/);
   });
 
-  it('a logpoint hit during a step walk logs and the step goes on', async () => {
+  it('a step that lands on a logpoint line logs it and lands there, as a step', async () => {
     h = await startShim({ manifests: [helloManifest(ROOT)], engineSetup: (engine) => installMemory(engine, helloMemory()) });
     await bringUp(h);
     const harness = h;
@@ -121,10 +121,10 @@ describe('cobol shim logpoints', () => {
       breakpoints: (args.breakpoints ?? []).map((bp) => ({ id: bp.line, line: bp.line, verified: true }))
     }));
     harness.engine.on('stackTrace', () => ({ stackFrames: [{ ...position, source: { ...position.source! } }], totalFrames: 1 }));
+    // The engine reports a step that ends on an enabled breakpoint site as a breakpoint hit.
     const stops: Array<{ frame: DebugProtocol.StackFrame; body?: Partial<DebugProtocol.StoppedEvent['body']> }> = [
       { frame: frame(1, 'HELLO_', path.join(ROOT, 'build', 'hello.c'), 127) },
       { frame: frame(1, 'HELLO_', HELLO_COB, 33), body: { reason: 'breakpoint', hitBreakpointIds: [33] } },
-      { frame: frame(1, 'HELLO_', path.join(ROOT, 'build', 'hello.c'), 150) },
       { frame: frame(1, 'HELLO_', HELLO_COB, 34) }
     ];
     harness.engine.on('next', () => {
@@ -139,10 +139,49 @@ describe('cobol shim logpoints', () => {
     await h.client.request('next', { threadId: 1 });
     const stopped = await h.client.nextEvent('stopped');
     expect(stopped.body).toMatchObject({ reason: 'step' });
-    // Hmm: the step from 32 landed at 33 (a COBOL statement) — the logpoint there logs, and the walk goes on to 34.
+    expect(stopped.body).not.toHaveProperty('hitBreakpointIds');
     expect(h.client.events('output').map((e) => (e.body as DebugProtocol.OutputEvent['body']).output)).toEqual(['passing 33\n']);
-    expect(commands).toEqual(['next', 'next', 'next', 'next']);
+    expect(commands).toEqual(['next', 'next']);
     const frames = ((await h.client.request('stackTrace', { threadId: 1 })).body as DebugProtocol.StackTraceResponse['body']).stackFrames;
-    expect(frames[0].line).toBe(34);
+    expect(frames[0].line).toBe(33);
+  });
+
+  it('a stop that answers a client pause on a logpoint line is a pause: not logged again, not resumed', async () => {
+    h = await startShim({ manifests: [helloManifest(ROOT)], engineSetup: (engine) => installMemory(engine, helloMemory()) });
+    await bringUp(h);
+    const r = rig(h, frame(1, 'HELLO_', HELLO_COB, 32));
+    await h.client.request('setBreakpoints', { source: { path: HELLO_COB }, breakpoints: [{ line: 32, logMessage: 'at 32' }] });
+    // A pause on a stopped process: CodeLLDB answers and re-reports the current stop (review of #764).
+    h.engine.on('pause', () => {
+      setImmediate(() => h!.engine.emit('stopped', { reason: 'breakpoint', threadId: 1, allThreadsStopped: true, hitBreakpointIds: [1] }));
+      return {};
+    });
+    const response = await h.client.request('pause', { threadId: 1 });
+    expect(response.success).toBe(true);
+    const stopped = await h.client.nextEvent('stopped');
+    expect(stopped.body).toMatchObject({ reason: 'pause', description: 'Paused (on a logpoint line)' });
+    expect(stopped.body).not.toHaveProperty('hitBreakpointIds');
+    await tick(30);
+    expect(h.client.events('output')).toHaveLength(0);
+    expect(r.commands).toEqual([]);
+  });
+
+  it('a logpoint sharing its line with a pausing breakpoint logs and pauses', async () => {
+    h = await startShim({ manifests: [helloManifest(ROOT)], engineSetup: (engine) => installMemory(engine, helloMemory()) });
+    await bringUp(h);
+    const r = rig(h, frame(1, 'HELLO_', HELLO_COB, 32));
+    const set = await h.client.request('setBreakpoints', {
+      source: { path: HELLO_COB },
+      breakpoints: [{ line: 32, logMessage: 'scaled={WS-SCALED}' }, { line: 32 }]
+    });
+    // One engine entry for the line; both client entries answered from it.
+    expect(r.sends[0].breakpoints).toEqual([{ line: 32 }]);
+    expect((set.body as DebugProtocol.SetBreakpointsResponse['body']).breakpoints.map((bp) => bp.id)).toEqual([1, 1]);
+    h.engine.emit('stopped', { reason: 'breakpoint', threadId: 1, allThreadsStopped: true, hitBreakpointIds: [1] });
+    const output = await h.client.nextEvent('output');
+    expect(output.body).toMatchObject({ output: 'scaled=-123.45\n' });
+    const stopped = await h.client.nextEvent('stopped');
+    expect((stopped.body as DebugProtocol.StoppedEvent['body']).hitBreakpointIds).toEqual([1]);
+    expect(r.commands).toEqual([]);
   });
 });

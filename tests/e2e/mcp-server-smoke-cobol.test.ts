@@ -47,6 +47,17 @@ const HELLO_AFTER_INIT_LINE = 33;   // PERFORM 2000-COMPUTE — the statement af
 const HELLO_PERFORM_REPORT_LINE = 34; // PERFORM 3000-REPORT
 const HELLO_STOP_RUN_LINE = 35;     // STOP RUN — the statement after PERFORM 3000-REPORT
 const REPORT_FIRST_LINE = 48;       // DISPLAY "COBOL_DEBUG_MARKER: total=" — first statement of 3000-REPORT
+// examples/cobol/perform.cob — the PERFORM shapes of the #764 review
+const PF_IF_PERFORM_LINE = 16;      // PERFORM 1000-YES (inside the IF's true branch)
+const PF_AFTER_IF_LINE = 20;        // DISPLAY "after-if count=" — what runs after the IF
+const PF_TIMES_LINE = 21;           // PERFORM 2000-BUMP 3 TIMES
+const PF_AFTER_TIMES_LINE = 22;     // DISPLAY "after-times times="
+const PF_OUTER_LINE = 23;           // PERFORM 3000-OUTER (nested)
+const PF_AFTER_OUTER_LINE = 24;     // DISPLAY "after-outer nested="
+const PF_MARKER_LINE = 26;          // DISPLAY "COBOL_DEBUG_MARKER: last=" — after PERFORM 4000-TAIL
+const PF_BUMP_BODY_LINE = 33;       // ADD 1 TO WS-TIMES (2000-BUMP's only statement, performed 3 TIMES)
+const PF_INNER_BODY_LINE = 38;      // ADD 10 TO WS-NESTED (3100-INNER, performed as 3000-OUTER's last statement)
+const PF_TAIL_PERFORM_LINE = 41;    // PERFORM 4100-TAIL-END — the last statement of the performed 4000-TAIL
 const CALL_LINE = 13;            // CALL "CALLSUB" USING WS-ARG-REC in calls/main.cob
 const SUB_PARAGRAPH_LINE = 14;   // 0000-SUB-MAIN. — the paragraph header carries two #line blocks
 const SUB_FIRST_STATEMENT = 15;  // ADD LK-A TO LK-B GIVING LS-WORK
@@ -707,6 +718,74 @@ describe.skipIf(SKIP_COBOL)('MCP Server COBOL Debugging Smoke Test @requires-cob
       expect(JSON.stringify(await call('get_output', {}))).toContain('COBOL_DEBUG_MARKER: total=');
     },
     120000
+  );
+
+  it(
+    'steps the PERFORM shapes the way the program runs: an IF branch, TIMES, nested, and a PERFORM that ends a performed paragraph',
+    async (ctx) => {
+      const source = cobolSourcePath('perform');
+      sessionId = (await call('create_debug_session', { language: 'cobol', name: 'cobol-smoke-perform-shapes' })).sessionId as string;
+      for (const line of [PF_IF_PERFORM_LINE, PF_BUMP_BODY_LINE, PF_INNER_BODY_LINE, PF_TAIL_PERFORM_LINE]) {
+        expect((await call('set_breakpoint', { file: source, line })).success).toBe(true);
+      }
+      await startOrSkip(ctx, { scriptPath: source, dapLaunchArgs: { stopOnEntry: false } }, 'perform-shapes');
+
+      const landing = async (): Promise<{ line?: number; name?: string; description?: string }> => {
+        expect(await pollState('paused', 20000)).toBeDefined();
+        const top = (await fetchStackTrace()).find(isCobolFrame)!;
+        return { line: top.line, name: top.name };
+      };
+      const stepOverTo = async (expected: number, what: string): Promise<void> => {
+        expect((await call('step_over', {})).success).toBe(true);
+        const at = await landing();
+        expect(at.line, `${what}: landed on ${at.name}@${at.line}`).toBe(expected);
+      };
+
+      // 1. A PERFORM inside the IF's true branch: step_over lands on what runs next (the
+      //    DISPLAY after END-IF), not on the ELSE branch's PERFORM that source order lists next.
+      expect(await reachCobolLine(PF_IF_PERFORM_LINE, 'perform.cob')).toBe(true);
+      await stepOverTo(PF_AFTER_IF_LINE, 'PERFORM in an IF branch');
+      expect((await localsByName()).get('WS-COUNT')?.value).toBe('1');
+
+      // 2. PERFORM … 3 TIMES from the statement before it: step to it, then over it — one stop, all iterations run.
+      await stepOverTo(PF_TIMES_LINE, 'DISPLAY to the TIMES PERFORM');
+      // (the breakpoint inside 2000-BUMP is hit on the first iteration: a user breakpoint wins over the step)
+      expect((await call('step_over', {})).success).toBe(true);
+      let at = await landing();
+      expect(at.line, `breakpoint inside the performed paragraph: ${at.name}@${at.line}`).toBe(PF_BUMP_BODY_LINE);
+      // 3. step_out from the paragraph performed 3 TIMES (first iteration, breakpoint removed): every
+      //    remaining iteration runs and the step lands on the statement after the PERFORM.
+      expect((await call('remove_breakpoint', { file: source, line: PF_BUMP_BODY_LINE })).success).toBe(true);
+      expect((await call('step_out', {})).success).toBe(true);
+      at = await landing();
+      expect(at.line, `step_out of a TIMES-performed paragraph: ${at.name}@${at.line}`).toBe(PF_AFTER_TIMES_LINE);
+      expect((await localsByName()).get('WS-TIMES')?.value).toBe('3');
+
+      // 4. A nested PERFORM: step_over runs both levels.
+      await stepOverTo(PF_OUTER_LINE, 'DISPLAY to the nested PERFORM');
+      // (the breakpoint inside 3100-INNER is hit first)
+      expect((await call('step_over', {})).success).toBe(true);
+      at = await landing();
+      expect(at.line).toBe(PF_INNER_BODY_LINE);
+      // 5. step_out from the inner paragraph, which is the outer paragraph's last statement:
+      //    the walk after the return leaves the outer paragraph too and lands at depth 0.
+      expect((await call('step_out', {})).success).toBe(true);
+      at = await landing();
+      expect(at.line, `step_out through two levels: ${at.name}@${at.line}`).toBe(PF_AFTER_OUTER_LINE);
+      expect((await localsByName()).get('WS-NESTED')?.value).toBe('11');
+
+      // 6. A PERFORM that is the last statement of a performed paragraph: step_over runs it and,
+      //    the paragraph being finished, lands on the performer's next statement.
+      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+      expect(await reachCobolLine(PF_TAIL_PERFORM_LINE, 'perform.cob')).toBe(true);
+      await stepOverTo(PF_MARKER_LINE, 'PERFORM as the last statement of a performed paragraph');
+      expect((await localsByName()).get('WS-LAST')?.value).toBe('11');
+
+      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+      expect((await pollState('stopped', 20000))?.exitCode).toBe(0);
+      expect(JSON.stringify(await call('get_output', {}))).toContain('COBOL_DEBUG_MARKER: last=');
+    },
+    180000
   );
 
   it(

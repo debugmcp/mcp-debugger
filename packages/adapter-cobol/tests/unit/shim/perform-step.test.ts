@@ -1,10 +1,11 @@
 /**
- * PERFORM-aware stepping (milestone M3): `next` on a PERFORM statement runs to the
- * statement after it instead of walking into the paragraph; `stepOut` inside a
- * performed range runs to its return and on to the statement after the PERFORM
- * that entered it. Temporary stops are a source breakpoint in the file's union
- * and an instruction breakpoint on the range's return address; both are dropped
- * on the way out, whichever way the step ends.
+ * PERFORM-aware stepping (milestone M3), driven by libcob's PERFORM stack: a `next`
+ * whose landing is deeper than its origin entered a performed range, so the shim
+ * arms an instruction breakpoint on that range's return address, resumes, and
+ * walks on from the return — once per iteration of a PERFORM … TIMES; `stepOut`
+ * inside a range arms the range's own return and is done at a shallower landing.
+ * The return stop is dropped on every exit. The flows scripted here mirror what
+ * was measured on GnuCOBOL 3.2 with examples/cobol/perform.cob (see the e2e).
  */
 import { describe, expect, it, afterEach } from 'vitest';
 import path from 'node:path';
@@ -35,23 +36,29 @@ function helloWithStatements(): CobolManifest {
   return manifest;
 }
 
+interface Stop {
+  frame: DebugProtocol.StackFrame;
+  /** The PERFORM depth the engine reports from this stop on. */
+  depth?: number;
+  stopped?: Partial<DebugProtocol.StoppedEvent['body']>;
+}
+
 interface Rig {
-  /** What `stackTrace` reports now. */
   position: DebugProtocol.StackFrame;
-  /** What the depth expression answers now. */
   depth: number;
-  /** Stops each `next` advances to (frame + depth); the last one repeats. */
-  nextStops: Array<{ frame: DebugProtocol.StackFrame; depth?: number }>;
-  /** Stops each `continue` advances to. */
-  continueStops: Array<{ frame: DebugProtocol.StackFrame; depth?: number; stopped: Partial<DebugProtocol.StoppedEvent['body']> }>;
+  /** Stops each `next`/`stepIn`/`stepOut` advances to; the last one repeats. */
+  nextStops: Stop[];
+  /** Stops each `continue` advances to; the last one repeats. */
+  continueStops: Stop[];
   commands: string[];
   breakpointSends: DebugProtocol.SetBreakpointsArguments[];
   instructionSends: DebugProtocol.SetInstructionBreakpointsArguments[];
+  returnAddressReads: string[];
 }
 
 /** A CodeLLDB-shaped engine for one COBOL program: ids per line, the PERFORM stack readable, scripted stops. */
 function rigEngine(engine: FakeEngine, start: DebugProtocol.StackFrame, depth: number): Rig {
-  const rig: Rig = { position: start, depth, nextStops: [], continueStops: [], commands: [], breakpointSends: [], instructionSends: [] };
+  const rig: Rig = { position: start, depth, nextStops: [], continueStops: [], commands: [], breakpointSends: [], instructionSends: [], returnAddressReads: [] };
   const ids = new Map<number, number>();
   let nextId = 1;
   engine.on('setBreakpoints', (args: DebugProtocol.SetBreakpointsArguments) => {
@@ -74,16 +81,14 @@ function rigEngine(engine: FakeEngine, start: DebugProtocol.StackFrame, depth: n
     if (args.expression === DEPTH_EXPRESSION) {
       return { result: String(rig.depth), variablesReference: 0 };
     }
-    if (/frame_stack\[\d+\]\.return_address_ptr/.test(args.expression)) {
+    const read = /frame_stack\[(\d+)\]\.return_address_ptr/.exec(args.expression);
+    if (read) {
+      rig.returnAddressReads.push(read[1]);
       return { result: RETURN_ADDRESS.toString(), variablesReference: 0 };
-    }
-    if (args.expression.startsWith('/py ') && args.expression.includes('ResolveLoadAddress')) {
-      // Python's repr of the path: backslashes doubled on Windows.
-      return { result: `('${HELLO_C.replace(/\\/g, '\\\\')}', 130)`, variablesReference: 0 };
     }
     throw new Error(`unexpected evaluate ${args.expression}`);
   });
-  const advance = (command: string, list: Rig['nextStops'] | Rig['continueStops']) => () => {
+  const advance = (command: string, list: Stop[]) => () => {
     rig.commands.push(command);
     const stop = list.length > 1 ? list.shift()! : list[0];
     if (!stop) {
@@ -93,8 +98,7 @@ function rigEngine(engine: FakeEngine, start: DebugProtocol.StackFrame, depth: n
     if (stop.depth !== undefined) {
       rig.depth = stop.depth;
     }
-    const extra = (stop as { stopped?: Partial<DebugProtocol.StoppedEvent['body']> }).stopped ?? {};
-    const body = { reason: 'step', threadId: 1, allThreadsStopped: true, ...extra };
+    const body = { reason: 'step', threadId: 1, allThreadsStopped: true, ...(stop.stopped ?? {}) };
     setImmediate(() => engine.emit('stopped', body));
     return {};
   };
@@ -105,18 +109,8 @@ function rigEngine(engine: FakeEngine, start: DebugProtocol.StackFrame, depth: n
   return rig;
 }
 
-const lineIdOf = (rig: Rig, line: number): number => {
-  // ids are handed out in first-seen order across sends; recover from the recorded sends
-  const seen: number[] = [];
-  for (const send of rig.breakpointSends) {
-    for (const bp of send.breakpoints ?? []) {
-      if (!seen.includes(bp.line)) {
-        seen.push(bp.line);
-      }
-    }
-  }
-  return seen.indexOf(line) + 1;
-};
+const returnHit = (): Partial<DebugProtocol.StoppedEvent['body']> => ({ reason: 'breakpoint', hitBreakpointIds: [INSTRUCTION_ID] });
+const armed = (rig: Rig): string[] => rig.instructionSends.map((s) => s.breakpoints.map((b) => b.instructionReference).join(','));
 
 describe('cobol shim PERFORM-aware stepping', () => {
   let h: Harness | undefined;
@@ -126,11 +120,18 @@ describe('cobol shim PERFORM-aware stepping', () => {
     h = undefined;
   });
 
-  it('next on a PERFORM runs to the statement after it: a temporary line, a continue, one step-shaped stop, temps dropped', async () => {
+  it('next on a PERFORM: the walk lands deeper, the range runs to its armed return, the walk goes on to the next statement', async () => {
     let rig!: Rig;
     h = await startShim({ manifests: [helloWithStatements()], engineSetup: (engine) => { rig = rigEngine(engine, frame(1, 'HELLO_', HELLO_COB, 32), 0); } });
     await bringUp(h);
-    rig.continueStops.push({ frame: frame(1, 'HELLO_', HELLO_COB, 33), depth: 0, stopped: { reason: 'breakpoint', hitBreakpointIds: [1] } });
+    rig.nextStops.push(
+      { frame: frame(1, 'HELLO_', HELLO_C, 127) },
+      { frame: frame(1, 'HELLO_', HELLO_COB, 37), depth: 1 },
+      // after the return stop: the generated C after the goto, then the next statement at depth 0
+      { frame: frame(1, 'HELLO_', HELLO_C, 141) },
+      { frame: frame(1, 'HELLO_', HELLO_COB, 33), depth: 0 }
+    );
+    rig.continueStops.push({ frame: frame(1, 'HELLO_', HELLO_C, 140), depth: 1, stopped: returnHit() });
 
     const response = await h.client.request('next', { threadId: 1 });
     expect(response.success).toBe(true);
@@ -141,29 +142,16 @@ describe('cobol shim PERFORM-aware stepping', () => {
     await tick(30);
     expect(h.client.events('stopped')).toHaveLength(1);
     expect(h.client.events('continued')).toHaveLength(0);
-    expect(rig.commands).toEqual(['continue']);
-    // The temp line 33 was armed in the file's union, then dropped; no instruction breakpoint at depth 0.
-    expect(rig.breakpointSends.map((s) => (s.breakpoints ?? []).map((b) => b.line))).toEqual([[33], []]);
-    expect(rig.instructionSends).toHaveLength(0);
+    expect(rig.commands).toEqual(['next', 'next', 'continue', 'next', 'next']);
+    // The return of the entry just pushed (frame_stack[1]) was armed, then dropped.
+    expect(rig.returnAddressReads).toEqual(['1']);
+    expect(armed(rig)).toEqual(['0x7ff6e194181e', '']);
+    expect(rig.breakpointSends).toHaveLength(0);
     const frames = ((await h.client.request('stackTrace', { threadId: 1 })).body as DebugProtocol.StackTraceResponse['body']).stackFrames;
     expect(frames[0].line).toBe(33);
   });
 
-  it('next on a PERFORM keeps the user\'s own line breakpoints in the union and surfaces one of them hit mid-way as a breakpoint', async () => {
-    let rig!: Rig;
-    h = await startShim({ manifests: [helloWithStatements()], engineSetup: (engine) => { rig = rigEngine(engine, frame(1, 'HELLO_', HELLO_COB, 32), 0); } });
-    await bringUp(h);
-    await h.client.request('setBreakpoints', { source: { path: HELLO_COB }, breakpoints: [{ line: 39 }] });
-    const userId = lineIdOf(rig, 39);
-    rig.continueStops.push({ frame: frame(1, 'HELLO_', HELLO_COB, 39), depth: 1, stopped: { reason: 'breakpoint', hitBreakpointIds: [userId] } });
-
-    await h.client.request('next', { threadId: 1 });
-    const stopped = await h.client.nextEvent('stopped');
-    expect(stopped.body).toMatchObject({ reason: 'breakpoint', hitBreakpointIds: [userId] });
-    expect(rig.breakpointSends.map((s) => (s.breakpoints ?? []).map((b) => b.line))).toEqual([[39], [39, 33], [39]]);
-  });
-
-  it('next on an ordinary statement is the statement walk: no depth read, no continue, no temps', async () => {
+  it('next on an ordinary statement reads the depth and lands as before: no return stop, no description', async () => {
     let rig!: Rig;
     h = await startShim({ manifests: [helloWithStatements()], engineSetup: (engine) => { rig = rigEngine(engine, frame(1, 'HELLO_', HELLO_COB, 37), 1); } });
     await bringUp(h);
@@ -171,49 +159,89 @@ describe('cobol shim PERFORM-aware stepping', () => {
     await h.client.request('next', { threadId: 1 });
     const stopped = await h.client.nextEvent('stopped');
     expect(stopped.body).toMatchObject({ reason: 'step' });
+    expect(stopped.body).not.toHaveProperty('description');
     expect(rig.commands).toEqual(['next', 'next']);
-    expect(rig.breakpointSends).toHaveLength(0);
-    expect(h.engine.received('evaluate')).toHaveLength(0);
+    expect(rig.instructionSends).toHaveLength(0);
+    expect(h.engine.received('evaluate').map((r) => (r.arguments as { expression: string }).expression)).toEqual([DEPTH_EXPRESSION, DEPTH_EXPRESSION]);
   });
 
-  it('stepOut inside a performed paragraph runs to its return, walks to the statement after the PERFORM, and says so', async () => {
+  it('a user breakpoint inside the performed range ends the step as a breakpoint stop, the return stop dropped', async () => {
+    let rig!: Rig;
+    h = await startShim({ manifests: [helloWithStatements()], engineSetup: (engine) => { rig = rigEngine(engine, frame(1, 'HELLO_', HELLO_COB, 32), 0); } });
+    await bringUp(h);
+    await h.client.request('setBreakpoints', { source: { path: HELLO_COB }, breakpoints: [{ line: 39 }] });
+    rig.nextStops.push({ frame: frame(1, 'HELLO_', HELLO_C, 127) }, { frame: frame(1, 'HELLO_', HELLO_COB, 37), depth: 1 });
+    rig.continueStops.push({ frame: frame(1, 'HELLO_', HELLO_COB, 39), depth: 1, stopped: { reason: 'breakpoint', hitBreakpointIds: [1] } });
+
+    await h.client.request('next', { threadId: 1 });
+    const stopped = await h.client.nextEvent('stopped');
+    expect(stopped.body).toMatchObject({ reason: 'breakpoint', hitBreakpointIds: [1] });
+    expect(rig.commands).toEqual(['next', 'next', 'continue']);
+    expect(armed(rig)).toEqual(['0x7ff6e194181e', '']);
+  });
+
+  it('stepOut inside a performed paragraph runs to its armed return and walks to the next statement at a shallower depth', async () => {
     let rig!: Rig;
     h = await startShim({ manifests: [helloWithStatements()], engineSetup: (engine) => { rig = rigEngine(engine, frame(1, 'HELLO_', HELLO_COB, 37), 1); } });
     await bringUp(h);
-    // continue → the instruction breakpoint on the return address (generated C after the goto), still depth 1
-    rig.continueStops.push({ frame: frame(1, 'HELLO_', HELLO_C, 140), depth: 1, stopped: { reason: 'breakpoint', hitBreakpointIds: [INSTRUCTION_ID] } });
-    // then the walk: two generated lines, then the COBOL statement after the PERFORM at depth 0
-    rig.nextStops.push({ frame: frame(1, 'HELLO_', HELLO_C, 141) }, { frame: frame(1, 'HELLO_', HELLO_C, 146) }, { frame: frame(1, 'HELLO_', HELLO_COB, 33), depth: 0 });
+    rig.continueStops.push({ frame: frame(1, 'HELLO_', HELLO_C, 140), depth: 1, stopped: returnHit() });
+    rig.nextStops.push({ frame: frame(1, 'HELLO_', HELLO_C, 141) }, { frame: frame(1, 'HELLO_', HELLO_COB, 33), depth: 0 });
 
     const response = await h.client.request('stepOut', { threadId: 1 });
     expect(response.success).toBe(true);
+    expect(response.command).toBe('stepOut');
     const stopped = await h.client.nextEvent('stopped');
     expect(stopped.body).toMatchObject({ reason: 'step', description: 'returned from 1000-INIT to 0000-MAIN' });
-    expect(rig.commands).toEqual(['continue', 'next', 'next', 'next']);
-    // The statement after the performer: the return address maps to hello.c:130 → line 32 → next statement 33.
-    expect(rig.breakpointSends.map((s) => (s.breakpoints ?? []).map((b) => b.line))).toEqual([[33], []]);
-    expect(rig.instructionSends.map((s) => s.breakpoints.map((b) => b.instructionReference))).toEqual([['0x7ff6e194181e'], []]);
+    expect(rig.commands).toEqual(['continue', 'next', 'next']);
+    expect(rig.returnAddressReads).toEqual(['1']);
+    expect(armed(rig)).toEqual(['0x7ff6e194181e', '']);
     await tick(30);
     expect(h.client.events('stopped')).toHaveLength(1);
   });
 
-  it('stepOut from a range a PERFORM … TIMES re-enters continues to the statement after the PERFORM', async () => {
+  it('stepOut from a paragraph performed 3 TIMES re-arms the return at each re-entry and lands after the last iteration', async () => {
     let rig!: Rig;
     h = await startShim({ manifests: [helloWithStatements()], engineSetup: (engine) => { rig = rigEngine(engine, frame(1, 'HELLO_', HELLO_COB, 37), 1); } });
     await bringUp(h);
-    rig.continueStops.push(
-      { frame: frame(1, 'HELLO_', HELLO_C, 140), depth: 1, stopped: { reason: 'breakpoint', hitBreakpointIds: [INSTRUCTION_ID] } },
-      { frame: frame(1, 'HELLO_', HELLO_COB, 33), depth: 0, stopped: { reason: 'breakpoint', hitBreakpointIds: [1] } }
+    rig.continueStops.push({ frame: frame(1, 'HELLO_', HELLO_C, 140), depth: 1, stopped: returnHit() });
+    // Each walk after a return re-enters the paragraph at its first statement (depth 1) twice, then lands at depth 0.
+    rig.nextStops.push(
+      { frame: frame(1, 'HELLO_', HELLO_C, 141) }, { frame: frame(1, 'HELLO_', HELLO_COB, 37), depth: 1 },
+      { frame: frame(1, 'HELLO_', HELLO_C, 141) }, { frame: frame(1, 'HELLO_', HELLO_COB, 37), depth: 1 },
+      { frame: frame(1, 'HELLO_', HELLO_C, 141) }, { frame: frame(1, 'HELLO_', HELLO_COB, 33), depth: 0 }
     );
-    // The walk after the return lands back inside 1000-INIT (the loop's next iteration), depth 1 again.
-    rig.nextStops.push({ frame: frame(1, 'HELLO_', HELLO_C, 141) }, { frame: frame(1, 'HELLO_', HELLO_COB, 37), depth: 1 });
 
     await h.client.request('stepOut', { threadId: 1 });
     const stopped = await h.client.nextEvent('stopped');
-    expect(stopped.body).toMatchObject({ reason: 'step', description: 'returned from 1000-INIT to 0000-MAIN' });
-    expect(rig.commands).toEqual(['continue', 'next', 'next', 'continue']);
+    expect(stopped.body).toMatchObject({ reason: 'step', description: 'returned from 1000-INIT to 0000-MAIN (3 times through the performed range)' });
+    expect(rig.commands).toEqual(['continue', 'next', 'next', 'continue', 'next', 'next', 'continue', 'next', 'next']);
+    // The origin line (37) is a real landing when walking from a return, and the entry is re-read every time.
+    expect(rig.returnAddressReads).toEqual(['1', '1', '1']);
+    expect(armed(rig)).toEqual(['0x7ff6e194181e', '', '0x7ff6e194181e', '', '0x7ff6e194181e', '']);
     const frames = ((await h.client.request('stackTrace', { threadId: 1 })).body as DebugProtocol.StackTraceResponse['body']).stackFrames;
     expect(frames[0].line).toBe(33);
+  });
+
+  it('next on a PERFORM that ends a performed paragraph: the walk after the inner return leaves the outer range too', async () => {
+    let rig!: Rig;
+    // Paused on `PERFORM 3100-INNER` at depth 1 (inside 3000-OUTER); the hello fixture stands in for the shape.
+    h = await startShim({ manifests: [helloWithStatements()], engineSetup: (engine) => { rig = rigEngine(engine, frame(1, 'HELLO_', HELLO_COB, 38), 1); } });
+    await bringUp(h);
+    rig.nextStops.push(
+      { frame: frame(1, 'HELLO_', HELLO_C, 220) },
+      { frame: frame(1, 'HELLO_', HELLO_COB, 39), depth: 2 },
+      // after the inner return: the outer paragraph's own return code, then the performer's next statement at depth 0
+      { frame: frame(1, 'HELLO_', HELLO_C, 240) },
+      { frame: frame(1, 'HELLO_', HELLO_COB, 34), depth: 0 }
+    );
+    rig.continueStops.push({ frame: frame(1, 'HELLO_', HELLO_C, 236), depth: 2, stopped: returnHit() });
+
+    await h.client.request('next', { threadId: 1 });
+    const stopped = await h.client.nextEvent('stopped');
+    expect(stopped.body).toMatchObject({ reason: 'step', description: 'stepped over the PERFORM at hello.cob:38' });
+    expect(rig.returnAddressReads).toEqual(['2']);
+    const frames = ((await h.client.request('stackTrace', { threadId: 1 })).body as DebugProtocol.StackTraceResponse['body']).stackFrames;
+    expect(frames[0].line).toBe(34);
   });
 
   it('stepOut outside any PERFORM is the engine\'s stepOut (leaving the program), not a plan', async () => {
@@ -224,33 +252,40 @@ describe('cobol shim PERFORM-aware stepping', () => {
     await h.client.request('stepOut', { threadId: 1 });
     await h.client.nextEvent('stopped');
     expect(rig.commands).toEqual(['stepOut']);
-    expect(rig.breakpointSends).toHaveLength(0);
     expect(rig.instructionSends).toHaveLength(0);
   });
 
-  it('a client continue while the plan is running drops the temporary stops before it goes to the engine', async () => {
+  it('a client continue while the range runs drops the return stop before it goes to the engine; a pause surfaces as a pause', async () => {
     let rig!: Rig;
     h = await startShim({ manifests: [helloWithStatements()], engineSetup: (engine) => { rig = rigEngine(engine, frame(1, 'HELLO_', HELLO_COB, 37), 1); } });
     await bringUp(h);
-    // The plan's continue never stops (a long PERFORM UNTIL); the client gives up and continues itself.
+    // The range never returns (a long PERFORM UNTIL); the client gives up and continues itself.
     h.engine.on('continue', () => {
       rig.commands.push('continue');
       return {};
     });
     await h.client.request('stepOut', { threadId: 1 });
     await tick(30);
-    expect(rig.breakpointSends.map((s) => (s.breakpoints ?? []).map((b) => b.line))).toEqual([[33]]);
+    expect(armed(rig)).toEqual(['0x7ff6e194181e']);
     const response = await h.client.request('continue', { threadId: 1 });
     expect(response.success).toBe(true);
     expect(rig.commands).toEqual(['continue', 'continue']);
-    expect(rig.breakpointSends.map((s) => (s.breakpoints ?? []).map((b) => b.line))).toEqual([[33], []]);
-    expect(rig.instructionSends).toHaveLength(2);
-    expect(rig.instructionSends[1].breakpoints).toEqual([]);
-    // A stop that arrives afterwards is the client's, untouched.
+    expect(armed(rig)).toEqual(['0x7ff6e194181e', '']);
     rig.position = frame(1, 'HELLO_', HELLO_COB, 39);
     h.engine.emit('stopped', { reason: 'pause', threadId: 1, allThreadsStopped: true });
     const stopped = await h.client.nextEvent('stopped');
     expect(stopped.body).toMatchObject({ reason: 'pause' });
+  });
+
+  it('a pause answered while the range runs ends the step as a pause and drops the return stop', async () => {
+    let rig!: Rig;
+    h = await startShim({ manifests: [helloWithStatements()], engineSetup: (engine) => { rig = rigEngine(engine, frame(1, 'HELLO_', HELLO_COB, 37), 1); } });
+    await bringUp(h);
+    rig.continueStops.push({ frame: frame(1, 'HELLO_', HELLO_COB, 39), depth: 1, stopped: { reason: 'pause' } });
+    await h.client.request('stepOut', { threadId: 1 });
+    const stopped = await h.client.nextEvent('stopped');
+    expect(stopped.body).toMatchObject({ reason: 'pause' });
+    expect(armed(rig)).toEqual(['0x7ff6e194181e', '']);
   });
 
   it('falls back to the statement walk when the frame has no PERFORM stack to read', async () => {
@@ -265,6 +300,6 @@ describe('cobol shim PERFORM-aware stepping', () => {
     const stopped = await h.client.nextEvent('stopped');
     expect(stopped.body).toMatchObject({ reason: 'step' });
     expect(rig.commands).toEqual(['next', 'next']);
-    expect(rig.breakpointSends).toHaveLength(0);
+    expect(rig.instructionSends).toHaveLength(0);
   });
 });

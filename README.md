@@ -548,7 +548,7 @@ See [tests/README.md](./tests/README.md) for detailed testing instructions.
 - ✅ **Python · Ruby · JavaScript/TypeScript · Go · Java · .NET/C#**: Full step-through debugging
 - 🦀 **Rust**: Full support on Linux/macOS/Windows (Windows requires the GNU toolchain; MSVC is not supported by CodeLLDB)
 - ⚙️ **C/C++**: Full step-through debugging via CodeLLDB (launch + attach-by-PID; on Windows prefer MinGW/DWARF — MSVC PDB fidelity is partial)
-- 🧮 **COBOL**: Step-through debugging via GnuCOBOL + CodeLLDB (launch + attach-by-PID; verified with GnuCOBOL 3.1.2/3.2 on Linux and Windows/MSYS2; function breakpoints and logpoints not yet)
+- 🧮 **COBOL**: Step-through debugging via GnuCOBOL + CodeLLDB (launch + attach-by-PID; verified with GnuCOBOL 3.1.2/3.2 on Linux and Windows/MSYS2; PERFORM-aware stepping, paragraph breakpoints and `{WS-NAME}` logpoints)
 - 🟢 **Runtime**: Node.js 22+
 - 📈 **Active Development**: Regular updates and improvements — see the [Roadmap](./ROADMAP.md) for the path to 1.0
 

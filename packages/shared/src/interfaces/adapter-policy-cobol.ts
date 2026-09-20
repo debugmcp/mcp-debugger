@@ -144,6 +144,10 @@ export const CobolAdapterPolicy = {
   // source breakpoint on the range's first statement (cobc emits them as C
   // labels, which LLDB cannot bind by name); a C symbol still binds natively.
   supportsFunctionBreakpoints: true,
+  // A paragraph in a `-m` module the loader has not loaded yet is resolved to its
+  // source line at once but binds (CodeLLDB re-verifies it) when the module loads,
+  // like every breakpoint in such a module (R13): not a launch warning.
+  functionBreakpointsBindLate: true,
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
   buildChildStartArgs: () => {

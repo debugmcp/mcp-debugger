@@ -29,7 +29,8 @@ export type ProcedureResolution =
   | { ok: false; reason: 'not-cobol' }
   | { ok: false; reason: 'unknown' | 'ambiguous'; message: string };
 
-const COBOL_WORD = '[A-Z0-9][A-Z0-9-]*';
+/** A COBOL user-defined word as cobc accepts it: letters, digits, `-` and `_` (`_` is what routes a C symbol here too, so the manifests are consulted first). */
+const COBOL_WORD = '[A-Z0-9_][A-Z0-9_-]*';
 const QUALIFIED_RE = new RegExp(`^(${COBOL_WORD})\\s+(?:OF|IN)\\s+(${COBOL_WORD})$`);
 const COLON_RE = new RegExp(`^(${COBOL_WORD})\\s*:\\s*(${COBOL_WORD})$`);
 const BARE_RE = new RegExp(`^${COBOL_WORD}$`);
@@ -54,10 +55,15 @@ export function firstStatementLine(entry: ProgramEntry, range: CobolProcRange): 
   return first ? first.line : range.startLine;
 }
 
-/** The first statement of a program in its own source file, else the first range header, else the PROCEDURE DIVISION line. */
+/**
+ * Where a PROGRAM-ID breakpoint binds: the first statement of the program's own source at
+ * or after its entry line (the `Entry` cobc records after any DECLARATIVES — a `USE`
+ * handler's statements come first in the source but run only when their condition
+ * trips), else the first range header, else the PROCEDURE DIVISION line.
+ */
 export function programEntryLocation(entry: ProgramEntry): { fileId: number; line: number } | undefined {
   const program = entry.program;
-  const floor = program.procedureDivisionLine ?? 0;
+  const floor = program.entryLine ?? program.procedureDivisionLine ?? 0;
   const own = program.procedure.statements
     .filter((s) => s.sourceFileId === program.sourceFileId && s.line >= floor)
     .sort((a, b) => a.line - b.line)[0];
@@ -65,42 +71,12 @@ export function programEntryLocation(entry: ProgramEntry): { fileId: number; lin
     return { fileId: program.sourceFileId, line: own.line };
   }
   const header = [...program.procedure.paragraphs, ...program.procedure.sections]
-    .filter((r) => r.sourceFileId === program.sourceFileId)
+    .filter((r) => r.sourceFileId === program.sourceFileId && r.startLine >= floor)
     .sort((a, b) => a.startLine - b.startLine)[0];
   if (header) {
     return { fileId: program.sourceFileId, line: header.startLine };
   }
   return program.procedureDivisionLine !== undefined ? { fileId: program.sourceFileId, line: program.procedureDivisionLine } : undefined;
-}
-
-/**
- * The statement after the one at (file, line) in the compiler's statement order — which
- * follows control flow across a `COPY` of procedure statements, unlike "next line in the
- * same file". Undefined when the location is not a statement or is the last one.
- */
-export function nextStatementAfter(entry: ProgramEntry, fileId: number, line: number): CobolStatementLocation | undefined {
-  const list = entry.program.procedure.statements;
-  let last = -1;
-  list.forEach((s, i) => {
-    if (s.sourceFileId === fileId && s.line === line) {
-      last = i;
-    }
-  });
-  if (last < 0) {
-    return undefined;
-  }
-  for (let i = last + 1; i < list.length; i += 1) {
-    const s = list[i];
-    if (s.sourceFileId !== fileId || s.line !== line) {
-      return s;
-    }
-  }
-  return undefined;
-}
-
-/** The statement at (file, line), when the manifest lists one. */
-export function statementAt(entry: ProgramEntry, fileId: number, line: number): CobolStatementLocation | undefined {
-  return entry.program.procedure.statements.find((s) => s.sourceFileId === fileId && s.line === line);
 }
 
 function candidatesNamed(registry: ManifestRegistry, name: string, programFilter?: string): Candidate[] {
@@ -199,7 +175,17 @@ export function resolveProcedureName(registry: ManifestRegistry, raw: string): P
       message: `${text} exists in ${programs.join(' and ')}; qualify it (${text} OF ${programs[0]})`
     };
   }
-  const paragraph = candidates.find((c) => c.kind === 'paragraph') ?? candidates[0];
-  const located = locate(registry, paragraph);
+  if (candidates.length > 1) {
+    // One program, several ranges with the name (a paragraph per SECTION is legal COBOL).
+    const places = candidates.map((c) => (c.kind === 'paragraph' && c.range.sectionName ? `section ${c.range.sectionName}` : `${c.kind} at line ${c.range.startLine}`));
+    const first = candidates.find((c) => c.kind === 'paragraph' && c.range.sectionName);
+    const hint = first ? ` (${text} OF ${first.range.sectionName})` : '';
+    return {
+      ok: false,
+      reason: 'ambiguous',
+      message: `${text} exists more than once in ${programs[0]} (${places.join(', ')}); qualify it${hint}`
+    };
+  }
+  const located = locate(registry, candidates[0]);
   return located ?? { ok: false, reason: 'unknown', message: `${text} has no source location in the manifest` };
 }

@@ -23,11 +23,11 @@ import type { EngineRequester } from './engine-client.js';
 import type { ShimLogger } from './logger.js';
 import type { ProgramEntry } from './manifest-registry.js';
 import { readPerformDepth, readPerformThrough, readReturnAddress, resolveAddressLocation } from './perform-frames.js';
-import type { CachedFrame, SessionState } from './session-state.js';
+import { SHIM_FRAME_ID_BASE, type CachedFrame, type SessionState } from './session-state.js';
 
-/** Frame ids the shim hands out for synthesised frames: above CodeLLDB's (thread-indexed thousands), below the variables band. */
-export const PERFORM_FRAME_ID_BASE = 1 << 28;
-/** How many active PERFORMs are shown; deeper stacks are runaway recursion, not a call chain worth listing. */
+/** Frame ids the shim hands out for synthesised frames (see SHIM_FRAME_ID_BASE). */
+export const PERFORM_FRAME_ID_BASE = SHIM_FRAME_ID_BASE;
+/** How many active PERFORMs are shown, innermost first; a deeper stack is runaway recursion, not a call chain worth listing. */
 export const PERFORM_STACK_MAX = 32;
 
 export interface PerformFrameInfo {
@@ -115,6 +115,7 @@ export async function insertPerformFrames(
   if (!real || !entry || real.evalFrameId !== undefined) {
     return 0;
   }
+  const generation = state.generation;
   let infos: PerformFrameInfo[];
   try {
     infos = await state.memoise(`perform-stack:${threadId}:${real.id}`, async () => {
@@ -123,7 +124,8 @@ export async function insertPerformFrames(
         return [];
       }
       const out: PerformFrameInfo[] = [];
-      for (let level = Math.min(depth, PERFORM_STACK_MAX); level >= 1; level -= 1) {
+      const floor = Math.max(1, depth - PERFORM_STACK_MAX + 1);
+      for (let level = depth; level >= floor; level -= 1) {
         const info = await readPerformEntry(engine, state, entry, real.id, level);
         if (!info) {
           break;
@@ -136,7 +138,9 @@ export async function insertPerformFrames(
     logger.warn('PERFORM stack unavailable', error);
     return 0;
   }
-  if (infos.length === 0) {
+  if (infos.length === 0 || state.generation !== generation) {
+    // Nothing to show, or the program moved on while the stack was read: the frames
+    // would describe a stop the client no longer sees.
     return 0;
   }
   const synthesised: DebugProtocol.StackFrame[] = [];

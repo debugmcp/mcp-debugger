@@ -183,6 +183,55 @@ describe('cobol shim function breakpoints', () => {
     expect(bp.message).toMatch(/^CALLSUB \(program entry\) -> sub\.cob:\d+$/);
   });
 
+  it('resolves names with underscores in the manifests first, refuses a same-program duplicate, and carries a condition', async () => {
+    const manifest = helloWithStatements();
+    const program = manifest.programs[0];
+    program.procedure.sections = [
+      { name: 'IN_SEC', kind: 'section', sourceFileId: 1, startLine: 31, endLine: 35 },
+      { name: 'OUT_SEC', kind: 'section', sourceFileId: 1, startLine: 36, endLine: 40 }
+    ];
+    program.procedure.paragraphs = [
+      { name: '100-EXIT', kind: 'paragraph', sectionName: 'IN_SEC', sourceFileId: 1, startLine: 31, endLine: 35 },
+      { name: '100-EXIT', kind: 'paragraph', sectionName: 'OUT_SEC', sourceFileId: 1, startLine: 36, endLine: 40 }
+    ];
+    let sends: DebugProtocol.SetBreakpointsArguments[] = [];
+    h = await startShim({ manifests: [manifest], engineSetup: (engine) => ({ sends } = codelldbBreakpoints(engine)) });
+    await bringUp(h);
+    const response = await h.client.request('setFunctionBreakpoints', {
+      breakpoints: [{ name: 'OUT_SEC', condition: 'WS-IDX > 2' }, { name: '100-EXIT' }, { name: '100-EXIT OF OUT_SEC' }, { name: 'HELLO_' }]
+    });
+    const bps = (response.body as DebugProtocol.SetFunctionBreakpointsResponse['body']).breakpoints;
+    expect(bps[0]).toMatchObject({ verified: true, line: 37 });
+    expect(bps[0].message).toBe('OUT_SEC (section of HELLO) -> hello.cob:37');
+    expect(bps[1].verified).toBe(false);
+    expect(bps[1].message).toMatch(/100-EXIT exists more than once in HELLO \(section IN_SEC, section OUT_SEC\); qualify it \(100-EXIT OF IN_SEC\)/);
+    expect(bps[2]).toMatchObject({ verified: true, line: 37 });
+    expect(bps[3]).toEqual({ id: 500, verified: true });
+    // The section's condition travels with its line; the unconditional paragraph on the same line drops it (both said so).
+    const last = sends[sends.length - 1];
+    expect(last.breakpoints).toEqual([{ line: 37 }]);
+    expect(bps[0].message).toBe('OUT_SEC (section of HELLO) -> hello.cob:37');
+    expect(h.engine.received('setFunctionBreakpoints')[0].arguments).toEqual({ breakpoints: [{ name: 'HELLO_' }] });
+  });
+
+  it('a PROGRAM-ID binds at the program\'s entry line, past a DECLARATIVES handler that precedes it', async () => {
+    const manifest = helloWithStatements();
+    const program = manifest.programs[0];
+    // A USE handler's paragraph and statement come first in the source; cobc's Entry comment names line 31.
+    program.procedure.paragraphs = [
+      { name: 'IO-ERR-PARA', kind: 'paragraph', sourceFileId: 1, startLine: 20, endLine: 30 },
+      ...program.procedure.paragraphs
+    ];
+    program.procedure.statements = [{ sourceFileId: 1, line: 21, verb: 'DISPLAY' }, ...program.procedure.statements];
+    program.procedureDivisionLine = 20;
+    program.entryLine = 31;
+    h = await startShim({ manifests: [manifest], engineSetup: (engine) => void codelldbBreakpoints(engine) });
+    await bringUp(h);
+    const response = await h.client.request('setFunctionBreakpoints', { breakpoints: [{ name: 'HELLO' }] });
+    const [bp] = (response.body as DebugProtocol.SetFunctionBreakpointsResponse['body']).breakpoints;
+    expect(bp).toMatchObject({ verified: true, line: 32 });
+  });
+
   it('an engine refusal of the file union leaves the function breakpoint unverified with the engine message', async () => {
     h = await startShim({
       manifests: [helloWithStatements()],

@@ -51,7 +51,8 @@ describe('cobol shim stackTrace and scopes', () => {
             return { result: '5', variablesReference: 0 };
           }
           if (args.expression.startsWith('/py ') && args.expression.includes('ResolveLoadAddress')) {
-            return { result: `('${HELLO_C.replace(/\\/g, '\\\\')}', 130)`, variablesReference: 0 };
+            // CodeLLDB reprs the Python string: quoted, backslashes doubled.
+            return { result: `'${HELLO_C.replace(/\\/g, '\\\\')}|130'`, variablesReference: 0 };
           }
           return memory(args, request);
         });

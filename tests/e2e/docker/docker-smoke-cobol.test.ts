@@ -22,6 +22,13 @@ const PERFORM_REPORT_LINE = 34;   // PERFORM 3000-REPORT
 const STOP_RUN_LINE = 35;         // STOP RUN — the statement after PERFORM 3000-REPORT
 const INIT_LOOP_BODY_LINE = 39;   // COMPUTE WS-AMOUNT(WS-IDX) = WS-IDX * 100, inside 1000-INIT's inline PERFORM
 const REPORT_FIRST_LINE = 48;     // DISPLAY "COBOL_DEBUG_MARKER: total=" — first statement of 3000-REPORT
+// examples/cobol/perform.cob — the PERFORM shapes of the #764 review
+const PF_IF_PERFORM_LINE = 16;    // PERFORM 1000-YES (inside the IF's true branch)
+const PF_AFTER_IF_LINE = 20;      // DISPLAY "after-if count=" — what runs after the IF
+const PF_TIMES_LINE = 21;         // PERFORM 2000-BUMP 3 TIMES
+const PF_AFTER_TIMES_LINE = 22;   // DISPLAY "after-times times="
+const PF_TAIL_PERFORM_LINE = 41;  // PERFORM 4100-TAIL-END — the last statement of the performed 4000-TAIL
+const PF_MARKER_LINE = 26;        // DISPLAY "COBOL_DEBUG_MARKER: last=" — the performer's next statement
 
 describe.skipIf(SKIP_DOCKER)('Docker: COBOL Debugging Smoke Tests', () => {
   let mcpClient: Client | null = null;
@@ -323,6 +330,67 @@ describe.skipIf(SKIP_DOCKER)('Docker: COBOL Debugging Smoke Tests', () => {
     expect(parseSdkToolResult(await mcpClient!.callTool({ name: 'close_debug_session', arguments: { sessionId } })).success).toBe(true);
     sessionId = null;
     console.log('[Docker COBOL] ✅ M3 checks passed');
+  }, 240000);
+
+  it('M3: steps the PERFORM shapes the way the program runs (an IF branch, TIMES, a PERFORM ending a performed paragraph)', async () => {
+    const scriptPath = 'cobol/perform.cob';
+    sessionId = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: { language: 'cobol', name: 'docker-cobol-perform-shapes' }
+    })).sessionId as string;
+    for (const line of [PF_IF_PERFORM_LINE, PF_TAIL_PERFORM_LINE]) {
+      expect(parseSdkToolResult(await mcpClient!.callTool({ name: 'set_breakpoint', arguments: { sessionId, file: scriptPath, line } })).success).toBe(true);
+    }
+    expect(parseSdkToolResult(await mcpClient!.callTool({
+      name: 'start_debugging',
+      arguments: { sessionId, scriptPath, dapLaunchArgs: { stopOnEntry: false } }
+    })).success).not.toBe(false);
+
+    const pausedFrame = async (notLine?: number): Promise<{ line?: number; name?: string } | undefined> => {
+      for (let attempt = 0; attempt < 80; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 250));
+        const sessions = parseSdkToolResult(await mcpClient!.callTool({ name: 'list_debug_sessions', arguments: {} }));
+        const session = ((sessions.sessions ?? []) as Array<{ id: string; state?: string }>).find(s => s.id === sessionId);
+        if (session?.state !== 'paused') continue;
+        const stack = parseSdkToolResult(await mcpClient!.callTool({ name: 'get_stack_trace', arguments: { sessionId } }));
+        const frame = ((stack.stackFrames ?? []) as Array<{ name?: string; line?: number; file?: string }>).find(f => (f.file ?? '').endsWith('perform.cob'));
+        if (frame && frame.line !== notLine) return frame;
+      }
+      return undefined;
+    };
+    const stepOver = async (): Promise<void> => {
+      expect(parseSdkToolResult(await mcpClient!.callTool({ name: 'step_over', arguments: { sessionId } })).success).not.toBe(false);
+    };
+
+    let frame = await pausedFrame();
+    expect(frame?.line, JSON.stringify(frame)).toBe(PF_IF_PERFORM_LINE);
+    // A PERFORM in the IF's true branch: step_over lands on what runs next, not on the ELSE branch.
+    await stepOver();
+    frame = await pausedFrame(PF_IF_PERFORM_LINE);
+    expect(frame?.line, JSON.stringify(frame)).toBe(PF_AFTER_IF_LINE);
+    // PERFORM … 3 TIMES: one step, all iterations.
+    await stepOver();
+    frame = await pausedFrame(PF_AFTER_IF_LINE);
+    expect(frame?.line, JSON.stringify(frame)).toBe(PF_TIMES_LINE);
+    await stepOver();
+    frame = await pausedFrame(PF_TIMES_LINE);
+    expect(frame?.line, JSON.stringify(frame)).toBe(PF_AFTER_TIMES_LINE);
+    const locals = parseSdkToolResult(await mcpClient!.callTool({ name: 'get_local_variables', arguments: { sessionId } }));
+    const ws = new Map(((locals.variables ?? []) as Array<{ name: string; value: string }>).map(v => [v.name, v.value]));
+    expect(ws.get('WS-TIMES')).toBe('3');
+    // A PERFORM that is the last statement of a performed paragraph: step_over lands on the performer's next statement.
+    expect(parseSdkToolResult(await mcpClient!.callTool({ name: 'continue_execution', arguments: { sessionId } })).success).not.toBe(false);
+    frame = await pausedFrame(PF_AFTER_TIMES_LINE);
+    expect(frame?.line, JSON.stringify(frame)).toBe(PF_TAIL_PERFORM_LINE);
+    await stepOver();
+    frame = await pausedFrame(PF_TAIL_PERFORM_LINE);
+    expect(frame?.line, JSON.stringify(frame)).toBe(PF_MARKER_LINE);
+    console.log('[Docker COBOL] ✓ PERFORM shapes stepped the COBOL way');
+
+    expect(parseSdkToolResult(await mcpClient!.callTool({ name: 'continue_execution', arguments: { sessionId } })).success).not.toBe(false);
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    expect(parseSdkToolResult(await mcpClient!.callTool({ name: 'close_debug_session', arguments: { sessionId } })).success).toBe(true);
+    sessionId = null;
   }, 240000);
 
   it('runs a module-only build under cobcrun (runner) and stops in the program once the loader loads it', async () => {

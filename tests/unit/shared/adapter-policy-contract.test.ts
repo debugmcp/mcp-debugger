@@ -65,8 +65,8 @@ interface PinnedCapabilities {
  * adapter pinning function breakpoints OFF for a debugger that advertises them (rdbg ignores the
  * request, #636) and the only one declining a default exception mode; cobol's function breakpoints
  * are paragraph and section names its shim resolves, and its logpoints are `{WS-NAME}` messages the
- * shim interpolates (#759); ruby/java/dotnet are the three that reject logpoints; js and java are the two that
- * bind function breakpoints late; js, python, go, cpp and cobol are the five whose debugger a
+ * shim interpolates (#759); ruby/java/dotnet are the three that reject logpoints; js, java and cobol are the three
+ * that bind function breakpoints late; js, python, go, cpp and cobol are the five whose debugger a
  * `noDebug` launch turns off (#710).
  */
 const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
@@ -163,7 +163,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     supportsFunctionBreakpoints: true,
     supportsLogPoints: true,
     functionBreakpointsVia: undefined,
-    functionBreakpointsBindLate: undefined,
+    functionBreakpointsBindLate: true,
     honoursNoDebug: true,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,

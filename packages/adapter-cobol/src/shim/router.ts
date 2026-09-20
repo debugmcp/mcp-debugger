@@ -25,11 +25,11 @@ import { annotateStackFrames, isCobolProgramFrame, isLandedCobolFrame } from './
 import { VariablesHandler } from './handlers/variables.js';
 import type { ShimLogger } from './logger.js';
 import type { FunctionBreakpointRecord } from './breakpoint-table.js';
-import { normalisePath, type ProgramEntry } from './manifest-registry.js';
-import { MemoryReader } from './memory-reader.js';
-import { hexAddress, readPerformDepth, readReturnAddress, resolveAddressLocation } from './perform-frames.js';
+import { normalisePath } from './manifest-registry.js';
+import { hexAddress, MemoryReader } from './memory-reader.js';
+import { readPerformDepth, readReturnAddress } from './perform-frames.js';
 import { insertPerformFrames } from './perform-stack.js';
-import { nextStatementAfter, resolveProcedureName, statementAt } from './procedure-names.js';
+import { resolveProcedureName } from './procedure-names.js';
 import { errorMessage, errorResponse, okResponse } from './protocol.js';
 import { engineFrameId, type CachedFrame, type SessionState } from './session-state.js';
 
@@ -37,7 +37,9 @@ export const COBOL_RUNTIME_ERROR_FILTER = 'cobol_runtime_error';
 export const RUNTIME_ERROR_FUNCTION = 'cob_runtime_error';
 export const MAX_STEP_ITERATIONS = 400;
 export const STEP_BOUND_DESCRIPTION = `stepped ${MAX_STEP_ITERATIONS} generated lines without reaching a COBOL statement`;
-export const PERFORM_BOUND_DESCRIPTION = `the performed range was re-entered ${MAX_STEP_ITERATIONS} times without reaching the statement after the PERFORM; set a breakpoint after it`;
+/** Performed-range returns one client step waits for (one per iteration of a PERFORM … TIMES/UNTIL): a runaway loop's escape is `pause`. */
+export const MAX_PERFORM_CYCLES = 100_000;
+export const PERFORM_BOUND_DESCRIPTION = `ran through the performed range ${MAX_PERFORM_CYCLES} times without returning to the step's PERFORM depth; pause, or set a breakpoint after the PERFORM`;
 
 const NATIVE_EVALUATE_PREFIX = /^\/(nat|py|se|cmd)\b/;
 const COBOL_SECTIONS: readonly CobolSection[] = ['WORKING-STORAGE', 'LOCAL-STORAGE', 'LINKAGE', 'FILE'];
@@ -63,29 +65,28 @@ export interface RouterEnv {
   arch: string;
 }
 
-type StepSignal = { kind: 'stopped'; event: DebugProtocol.Event; slot: OutputSlot } | { kind: 'aborted' };
+type StepSignal =
+  | { kind: 'stopped'; event: DebugProtocol.Event; slot: OutputSlot; /** A client `pause` was in flight when the stop arrived. */ pausePending: boolean }
+  | { kind: 'aborted' };
 
 /**
- * A PERFORM-aware step: the program runs to temporary stops instead of being stepped
- * statement by statement through the performed range (M3). `over` from a PERFORM
- * statement arms the statement after it; `out` from inside a performed range arms the
- * statement after the PERFORM that entered it; both also arm the current range's own
- * return address when inside one, so a PERFORM that is the last statement of a performed
- * paragraph steps out to the performer. A return stop is followed by the ordinary `next`
- * walk to the next COBOL statement; a landing that is still inside the range (a PERFORM
- * … TIMES / UNTIL loop re-entering it) continues to the armed statement.
+ * A PERFORM-aware step (M3), driven by libcob's PERFORM stack rather than by source
+ * order: `over` compares every COBOL landing's depth with the origin's and, when the
+ * statement entered a performed range, arms an instruction breakpoint on that range's
+ * return address, resumes, and walks on from the return — once per iteration of a
+ * PERFORM … TIMES/UNTIL; `out` arms the current range's own return and is done at a
+ * shallower landing. Depths are compared within the origin's program only.
  */
 interface PerformPlan {
   kind: 'over' | 'out';
   /** PERFORM depth where the step started. */
   depth: number;
   origin: CachedFrame;
-  /** Engine ids of the plan's own stops: the temporary source line(s) and the instruction breakpoint. */
-  ownIds: Set<number>;
-  instructionId?: number;
-  /** After the return-address stop, the loop walks `next` to the next COBOL statement. */
+  /** Walking `next` from a return stop: the first COBOL statement reached is the landing, the origin line included. */
   returning: boolean;
   finished: boolean;
+  /** Performed-range returns waited for so far. */
+  cycles: number;
 }
 
 interface StepLoop {
@@ -283,7 +284,7 @@ export class Router {
         this.onLaunchOrAttach(request);
         return;
       case 'continue':
-        this.resumeAfterDroppingTemporaryStops(request);
+        this.resumeAfterDisarming(request);
         return;
       case 'pause':
         // Remembered so the stop that answers it is known to be the debugger's doing; a
@@ -476,7 +477,7 @@ export class Router {
       for (const bp of user) {
         const resolved = resolveProcedureName(this.state.registry, bp.name);
         if (resolved.ok) {
-          const record = table.addFunctionBreakpoint(bp.name, resolved.path, resolved.line, resolved.description);
+          const record = table.addFunctionBreakpoint(bp.name, resolved.path, resolved.line, resolved.description, bp.condition);
           affected.add(normalisePath(resolved.path));
           layout.push({ kind: 'cobol', record });
           this.logger.info(`function breakpoint ${bp.name} -> ${resolved.description} at ${resolved.path}:${resolved.line}`);
@@ -653,7 +654,7 @@ export class Router {
     }
     if (this.state.options.engineScopes) {
       try {
-        const response = this.checkRefBand(await this.engine.request('scopes', args));
+        const response = this.checkRefBand(await this.engine.request('scopes', { ...args, frameId: engineFrameId(frame) }));
         const body = response.body as DebugProtocol.ScopesResponse['body'] | undefined;
         if (response.success && body && Array.isArray(body.scopes)) {
           scopes.push(...body.scopes);
@@ -684,6 +685,11 @@ export class Router {
   private onEvaluate(request: DebugProtocol.Request): void {
     const args = this.argsOf<DebugProtocol.EvaluateArguments>(request);
     const expression = (args.expression ?? '').trim();
+    // A synthesised PERFORM frame (perform-stack.ts) is read in the real frame behind it:
+    // the engine would silently evaluate an unknown frame id in its selected frame.
+    const cachedFrame = args.frameId !== undefined ? this.state.frame(args.frameId) : undefined;
+    const engineArgs: DebugProtocol.EvaluateArguments = cachedFrame?.evalFrameId !== undefined ? { ...args, frameId: cachedFrame.evalFrameId } : args;
+    request = { ...request, arguments: engineArgs };
     if (NATIVE_EVALUATE_PREFIX.test(expression)) {
       this.forward(request, { transform: (response) => this.checkRefBand(response) });
       return;
@@ -832,12 +838,21 @@ export class Router {
    * COBOL statement: a raw `next` stops on every generated-C line between two statements,
    * and `stepIn` walks the callee's entry wrapper and its DATA DIVISION initialisation before
    * the first PROCEDURE DIVISION line. The client sees one response and one final `stopped`.
+   *
+   * PERFORM awareness (M3): libcob keeps the PERFORM stack in the program's frame
+   * (perform-frames.ts). `next` compares each COBOL landing's PERFORM depth with the
+   * origin's — a deeper landing means the statement entered a performed range, so the shim
+   * arms an instruction breakpoint on that range's return address, resumes, and walks on
+   * from the return, however the PERFORM was reached (an IF branch, an inline loop, a
+   * copybook) and once per iteration of a PERFORM … TIMES/UNTIL. `stepOut` inside a range
+   * arms the range's own return and is done at a shallower landing. `stepIn` is the plain
+   * walk: it enters the paragraph.
    */
   private onStep(request: DebugProtocol.Request): void {
     const args = this.argsOf<DebugProtocol.NextArguments>(request);
     if (this.stepLoop) {
       this.logger.warn(`${request.command} while a step loop is active; forwarding without a loop`);
-      this.resumeAfterDroppingTemporaryStops(request);
+      this.resumeAfterDisarming(request);
       return;
     }
     const loop: StepLoop = { threadId: args.threadId, command: request.command, queued: [] };
@@ -849,21 +864,16 @@ export class Router {
     const origin = (await this.fetchStack(loop.threadId, 1))?.[0];
     if (origin) {
       loop.origin = { path: origin.source?.path, line: origin.line, name: origin.name };
-    }
-    let plan: PerformPlan | undefined;
-    if (origin) {
       try {
-        plan = await this.planPerformStep(loop, origin.id);
+        loop.plan = await this.planPerformStep(loop, origin.id);
       } catch (error) {
         this.logger.warn('PERFORM-aware step planning failed; stepping statement by statement', error);
-        await this.disarmTemporaryStops();
+        await this.disarmReturnStop();
       }
     }
-    if (plan) {
-      loop.plan = plan;
-      // The client asked for a step; the engine gets a `continue` towards the plan's stops, and
-      // the client's response is the shim's (a `next` answered with a `continue` response
-      // would be a protocol error).
+    if (loop.plan?.kind === 'out') {
+      // The range's return is armed: the engine gets a `continue`, and the client's response
+      // is the shim's (a `stepOut` answered with a `continue` response would be a protocol error).
       const responded = new Promise<DebugProtocol.Response>((resolve) => {
         this.serve(request, async () => {
           let response: DebugProtocol.Response;
@@ -891,164 +901,115 @@ export class Router {
   }
 
   /**
-   * Whether this step is PERFORM-aware, and its temporary stops armed if so. `next` on a
-   * PERFORM statement and `stepOut` inside a performed range qualify; `stepIn` on a PERFORM
-   * enters the paragraph (the statement walk does that), and a frame without libcob's
-   * `frame_ptr` (no DWARF, not a cobc frame) or without a manifest statement list falls
-   * back to the statement walk.
+   * The PERFORM depth the step starts at and, for `stepOut`, the armed return of the range
+   * it leaves. No plan for `stepIn`, for a frame that is not a cobc body frame or has no
+   * `frame_ptr` (no DWARF), or for `stepOut` outside any PERFORM — that one is the engine's
+   * stepOut, leaving the program.
    */
   private async planPerformStep(loop: StepLoop, frameId: number): Promise<PerformPlan | undefined> {
     if (loop.command === 'stepIn') {
       return undefined;
     }
     const origin = this.state.frame(frameId);
-    const entry = origin?.program;
-    if (!origin || !origin.isCobol || !entry || origin.sourcePath === undefined || origin.line === undefined) {
-      return undefined;
-    }
-    const fileId = this.state.registry.sourceIdByPath(entry, origin.sourcePath);
-    if (fileId === undefined || entry.program.procedure.statements.length === 0) {
-      return undefined;
-    }
-    if (loop.command === 'next' && statementAt(entry, fileId, origin.line)?.verb !== 'PERFORM') {
+    if (!origin || !origin.isCobol || !origin.program) {
       return undefined;
     }
     const depth = await readPerformDepth(this.engine, origin.id);
-    if (depth === undefined || (loop.command === 'stepOut' && depth === 0)) {
+    if (depth === undefined) {
       return undefined;
     }
-    const plan: PerformPlan = { kind: loop.command === 'next' ? 'over' : 'out', depth, origin, ownIds: new Set(), returning: false, finished: false };
-    // (a) The statement the step should end on: after this PERFORM, or after the one that
-    // performed the range `stepOut` leaves.
-    let after: { fileId: number; line: number } | undefined;
-    if (plan.kind === 'over') {
-      const next = nextStatementAfter(entry, fileId, origin.line);
-      after = next ? { fileId: next.sourceFileId, line: next.line } : undefined;
-    } else {
-      after = await this.statementAfterPerformer(entry, origin.id, depth);
-    }
-    // (b) The current range's own return: a PERFORM that is its last statement, or the
-    // range `stepOut` leaves, ends there.
-    const returnAddress = depth > 0 ? await readReturnAddress(this.engine, origin.id, depth) : undefined;
-    if (!after && returnAddress === undefined) {
-      return undefined;
-    }
-    if (after) {
-      const source = this.state.registry.sourceById(entry, after.fileId);
-      if (source) {
-        const key = this.state.breakpoints.addTemp(source.path, after.line);
-        await this.resendFile(key);
-        const id = this.state.breakpoints.engineIdOf(source.path, after.line);
-        if (id !== undefined) {
-          plan.ownIds.add(id);
-        }
+    if (loop.command === 'stepOut') {
+      if (depth === 0) {
+        return undefined;
       }
-    }
-    if (returnAddress !== undefined) {
-      const id = await this.armInstructionBreakpoint(returnAddress);
-      if (id !== undefined) {
-        plan.instructionId = id;
-        plan.ownIds.add(id);
+      const armed = await this.armReturnStop(origin.id, depth);
+      if (armed === undefined) {
+        return undefined;
       }
+      this.logger.info(`stepOut at ${origin.label} (PERFORM depth ${depth}): running to the range's return`);
+      return { kind: 'out', depth, origin, returning: false, finished: false, cycles: 0 };
     }
-    if (plan.ownIds.size === 0) {
-      await this.disarmTemporaryStops();
-      return undefined;
-    }
-    this.logger.info(
-      `${loop.command} at ${origin.label} ${path.basename(origin.sourcePath)}:${origin.line} (PERFORM depth ${depth}): ` +
-        `running to ${after ? `line ${after.line}` : 'no statement'}${returnAddress !== undefined ? ` or the range's return ${hexAddress(returnAddress)}` : ''}`
-    );
-    return plan;
+    return { kind: 'over', depth, origin, returning: false, finished: false, cycles: 0 };
   }
 
-  /** The statement after the PERFORM that entered the range at stack entry `depth`, via its return address and the engine's line table. */
-  private async statementAfterPerformer(entry: ProgramEntry, frameId: number, depth: number): Promise<{ fileId: number; line: number } | undefined> {
-    const address = await readReturnAddress(this.engine, frameId, depth);
-    if (address === undefined) {
-      return undefined;
-    }
-    const location = await resolveAddressLocation(this.engine, frameId, address);
-    if (!location) {
-      return undefined;
-    }
-    let cobol: { fileId: number; line: number } | undefined;
-    const direct = this.state.registry.sourceIdByPath(entry, location.path);
-    if (direct !== undefined) {
-      cobol = { fileId: direct, line: location.line };
-    } else if (this.state.registry.isGeneratedSource(entry, location.path)) {
-      const mapped = this.state.registry.mapGeneratedLine(entry, location.line);
-      if (mapped) {
-        cobol = { fileId: mapped.source.id, line: mapped.line };
-      }
-    }
-    if (!cobol) {
-      return undefined;
-    }
-    const next = nextStatementAfter(entry, cobol.fileId, cobol.line);
-    return next ? { fileId: next.sourceFileId, line: next.line } : undefined;
-  }
-
+  /** Ids of every instruction breakpoint the shim armed: their `breakpoint` events are not the client's. */
+  private readonly instructionBreakpointIds = new Set<number>();
   private instructionBreakpointArmed = false;
 
-  private async armInstructionBreakpoint(address: bigint): Promise<number | undefined> {
+  /**
+   * Arm an instruction breakpoint on `frame_stack[depth].return_address_ptr`, read afresh
+   * every time (a recursive PERFORM pushes a different entry at the same depth). Undefined
+   * when the address or the breakpoint is unavailable — the step then lands where it is.
+   */
+  private async armReturnStop(frameId: number, depth: number): Promise<number | undefined> {
+    const address = await readReturnAddress(this.engine, frameId, depth);
+    if (address === undefined) {
+      this.logger.warn(`PERFORM return address of frame_stack[${depth}] unavailable`);
+      return undefined;
+    }
     const response = await this.engine.request('setInstructionBreakpoints', { breakpoints: [{ instructionReference: hexAddress(address) }] });
+    this.instructionBreakpointArmed = response.success;
     const body = response.body as DebugProtocol.SetInstructionBreakpointsResponse['body'] | undefined;
     const bp = response.success ? body?.breakpoints?.[0] : undefined;
-    this.instructionBreakpointArmed = response.success;
+    if (typeof bp?.id === 'number') {
+      this.instructionBreakpointIds.add(bp.id);
+    }
     if (!bp || bp.verified === false || typeof bp.id !== 'number') {
       this.logger.warn(`instruction breakpoint at ${hexAddress(address)} not bound: ${bp?.message ?? response.message ?? 'no answer'}`);
+      await this.disarmReturnStop();
       return undefined;
     }
     return bp.id;
   }
 
-  /** Drop every temporary stop a PERFORM-aware step armed; safe to call when none is. */
-  private async disarmTemporaryStops(): Promise<void> {
-    for (const key of this.state.breakpoints.clearTemps()) {
-      await this.resendFile(key);
+  /** Drop the armed return stop; safe to call when none is. */
+  private async disarmReturnStop(): Promise<void> {
+    if (!this.instructionBreakpointArmed) {
+      return;
     }
-    if (this.instructionBreakpointArmed) {
-      this.instructionBreakpointArmed = false;
-      try {
-        await this.engine.request('setInstructionBreakpoints', { breakpoints: [] });
-      } catch (error) {
-        this.logger.warn('instruction breakpoints not cleared', error);
-      }
+    this.instructionBreakpointArmed = false;
+    try {
+      await this.engine.request('setInstructionBreakpoints', { breakpoints: [] });
+    } catch (error) {
+      this.logger.warn('instruction breakpoints not cleared', error);
     }
   }
 
-  /** A client resume/step while a PERFORM-aware step is in flight: its stops are dropped before the request goes out. */
-  private resumeAfterDroppingTemporaryStops(request: DebugProtocol.Request): void {
-    if (!this.stepLoop?.plan && !this.state.breakpoints.hasTemps() && !this.instructionBreakpointArmed) {
+  /** A client resume/step while a PERFORM-aware step is in flight: its return stop is dropped before the request goes out. */
+  private resumeAfterDisarming(request: DebugProtocol.Request): void {
+    if (!this.stepLoop?.plan && !this.instructionBreakpointArmed) {
       this.forward(request);
       return;
     }
-    this.logger.info(`${request.command} during a PERFORM-aware step: its temporary stops are dropped`);
+    this.logger.info(`${request.command} during a PERFORM-aware step: its return stop is dropped`);
     this.abortStepLoop();
     this.serve(request, async () => {
-      await this.disarmTemporaryStops();
+      await this.disarmReturnStop();
       return { forward: request };
     });
   }
 
-  /** The plan reached its statement: temps dropped, the stop reported as the step's. */
+  /** The plan reached its landing: the return stop dropped, the stop reported as the step's when a range was run. */
   private async finishPlan(loop: StepLoop, body: StoppedBody, landing: DebugProtocol.StackFrame | undefined): Promise<void> {
     const plan = loop.plan;
     if (!plan) {
       return;
     }
     plan.finished = true;
-    await this.disarmTemporaryStops();
+    await this.disarmReturnStop();
+    if (plan.kind === 'over' && plan.cycles === 0) {
+      return;
+    }
     const origin = plan.origin;
     const performer = origin.paragraph ?? origin.section ?? origin.program?.program.programId ?? origin.label;
     const landed = landing ? this.state.frame(landing.id) : undefined;
     const where = landed?.paragraph ?? landed?.section ?? landed?.label ?? 'the performer';
     body.reason = 'step';
     delete body.hitBreakpointIds;
+    const times = plan.cycles > 1 ? ` (${plan.cycles} times through the performed range)` : '';
     body.description = plan.kind === 'over'
-      ? `stepped over the PERFORM at ${origin.sourcePath ? path.basename(origin.sourcePath) : '?'}:${origin.line ?? '?'}`
-      : `returned from ${performer} to ${where}`;
+      ? `stepped over the PERFORM at ${origin.sourcePath ? path.basename(origin.sourcePath) : '?'}:${origin.line ?? '?'}${times}`
+      : `returned from ${performer} to ${where}${times}`;
   }
 
   private swallowContinued = 0;
@@ -1056,17 +1017,33 @@ export class Router {
   /**
    * Logpoints (M3): a stop on lines the client asked only to log at emits the interpolated
    * messages as `output` events and resumes the program; the client never sees the stop.
-   * Mixed hits (a pausing breakpoint on the same stop) log and pause. Returns true when
-   * the stop was consumed.
+   * Mixed hits (a pausing breakpoint on the same stop) log and pause. A stop that answers a
+   * client `pause` is the pause's, not a logpoint's: shown as a pause, never resumed.
+   * Returns true when the stop was consumed.
    */
-  private async logAndResume(body: StoppedBody): Promise<boolean> {
+  private async logAndResume(body: StoppedBody, context: StopContext): Promise<boolean> {
     const hits = body.hitBreakpointIds ?? [];
     if (hits.length === 0 || body.threadId === undefined || this.state.breakpoints.logMessagesOf(hits).length === 0) {
       return false;
     }
+    if (context.pausePending) {
+      // The engine re-reports the current stop for a pause on a stopped process (measured
+      // in the review of #764): the line was logged when it was first reached.
+      body.reason = 'pause';
+      delete body.hitBreakpointIds;
+      body.description = 'Paused (on a logpoint line)';
+      return false;
+    }
+    const generation = this.state.generation;
     await this.emitLogpoints(body.threadId, hits);
     if (!this.state.breakpoints.isLogpointOnlyHit(hits)) {
       return false;
+    }
+    if (this.state.generation !== generation || this.state.pausePending) {
+      // A newer stop or a pause arrived while the message was evaluated: that one owns the
+      // process (the pause is answered by the engine's re-reported stop). This stop is history.
+      this.logger.info('logpoint stop superseded while its message was evaluated; not resumed');
+      return true;
     }
     let response: DebugProtocol.Response;
     try {
@@ -1170,18 +1147,17 @@ export class Router {
    * Whether an intermediate stop completes the step. A COBOL statement does, unless it is
    * the statement the step started on: a paragraph header line carries two `#line` blocks
    * (Entry, then Paragraph) separated by generated code, so the first `next` from it would
-   * otherwise "complete" on the same line. With manifests loaded, a stop in the generated
-   * C `main` with no COBOL program frame above it (`step_out` of the outermost program)
-   * has nothing left to reach and is forwarded as it is.
+   * otherwise "complete" on the same line — except when walking from a performed range's
+   * return, where the origin line is a real landing (a PERFORM … TIMES re-entering the
+   * paragraph at its first statement). With manifests loaded, a stop in the generated C
+   * `main` with no COBOL program frame above it (`step_out` of the outermost program) has
+   * nothing left to reach and is forwarded as it is.
    */
   private stepLanded(loop: StepLoop, top: DebugProtocol.StackFrame, frames: DebugProtocol.StackFrame[]): boolean {
     if (isLandedCobolFrame(this.state, top)) {
       const origin = loop.origin;
-      // A PERFORM-aware step walks from the range's return, in generated C: the first COBOL
-      // statement it reaches is a landing even when it is the line the step started on (a
-      // PERFORM … TIMES re-entering the paragraph at its first statement).
       const sameStatement =
-        loop.plan === undefined &&
+        !loop.plan?.returning &&
         origin !== undefined &&
         top.line === origin.line &&
         top.name === origin.name &&
@@ -1226,10 +1202,17 @@ export class Router {
     }
   }
 
+  /**
+   * The judging loop. Two counters bound it: `walk`, engine stops since the last COBOL
+   * landing (a runaway generated-C walk), reset at every landing; and the plan's `cycles`,
+   * performed-range returns waited for (one per loop iteration). A logpoint service counts
+   * towards neither.
+   */
   private async runStepLoop(loop: StepLoop, responded: Promise<DebugProtocol.Response>): Promise<void> {
     const surface = async (event: DebugProtocol.Event, slot: OutputSlot, body: StoppedBody): Promise<void> => {
       if (loop.plan && !loop.plan.finished) {
-        await this.disarmTemporaryStops();
+        loop.plan.finished = true;
+        await this.disarmReturnStop();
       }
       this.presentHits(body);
       slot.resolve(event);
@@ -1242,102 +1225,102 @@ export class Router {
       if (!response || !response.success) {
         return;
       }
-      for (let iteration = 0; iteration < MAX_STEP_ITERATIONS; iteration++) {
+      let walk = 0;
+      for (;;) {
         const signal = await this.nextStepSignal(loop);
         if (signal.kind !== 'stopped') {
           return;
         }
-        const { event, slot } = signal;
+        const { event, slot, pausePending } = signal;
         const body = event.body as StoppedBody;
         const hits = body.hitBreakpointIds ?? [];
         const plan = loop.plan;
-        if (hits.length > 0 && this.state.breakpoints.isLogpointOnlyHit(hits) && (body.threadId === undefined || body.threadId === loop.threadId)) {
-          // A logpoint on the way: log it and keep stepping (a plan keeps running).
+        const onThread = body.threadId === undefined || body.threadId === loop.threadId;
+        const returnHit =
+          plan !== undefined && onThread && hits.length > 0 && hits.every((id) => this.instructionBreakpointIds.has(id));
+        if (!returnHit && hits.length > 0 && onThread && this.state.breakpoints.isLogpointOnlyHit(hits)) {
+          // A logpoint on a stop of the walk: logged, then judged like any step stop (the
+          // engine reports a step that ends on a breakpoint site as a breakpoint hit).
+          if (pausePending) {
+            body.reason = 'pause';
+            delete body.hitBreakpointIds;
+            body.description = 'Paused (on a logpoint line)';
+            await surface(event, slot, body);
+            return;
+          }
           await this.emitLogpoints(loop.threadId, hits);
-          const resume = plan && !plan.returning ? 'continue' : loop.command === 'stepIn' ? 'stepIn' : 'next';
-          let resumed: DebugProtocol.Response;
-          try {
-            resumed = await this.engine.request(resume, { threadId: loop.threadId });
-          } catch (error) {
-            body.description = `step loop stopped early: ${errorMessage(error)}`;
-            await surface(event, slot, body);
-            return;
+          if (this.state.pausePending) {
+            // The pause that arrived meanwhile is answered by the engine's re-reported stop.
+            slot.resolve(null);
+            continue;
           }
-          if (!resumed.success) {
-            body.description = `step loop stopped early: ${resumed.message ?? `${resume} refused`}`;
-            await surface(event, slot, body);
-            return;
-          }
-          slot.resolve(null);
-          continue;
-        }
-        const ownStop =
-          plan !== undefined &&
-          hits.length > 0 &&
-          (body.threadId === undefined || body.threadId === loop.threadId) &&
-          hits.every((id) => id === plan.instructionId || this.state.breakpoints.isTempOnlyHit([id]));
-        let continuation: 'next' | 'stepIn' | 'continue' = loop.command === 'stepIn' ? 'stepIn' : 'next';
-        if (ownStop && plan) {
-          const raw = await this.fetchStack(loop.threadId, 4);
-          const top = raw?.[0];
-          if (plan.instructionId !== undefined && hits.includes(plan.instructionId)) {
-            // The range returned: walk to the next COBOL statement from here.
-            plan.returning = true;
-          } else {
-            const depthNow = top ? await this.safeDepth(top.id) : undefined;
-            if (depthNow !== undefined && depthNow > plan.depth) {
-              // The armed statement was reached deeper in the PERFORM stack (the range
-              // performs the paragraph it sits in): not this step's landing.
-              continuation = 'continue';
-            } else {
-              await this.finishPlan(loop, body, top);
-              slot.resolve(event);
-              return;
-            }
-          }
-        } else {
-          const foreign =
-            body.reason !== 'step' ||
-            hits.length > 0 ||
-            (body.threadId !== undefined && body.threadId !== loop.threadId);
+        } else if (!returnHit) {
+          const foreign = body.reason !== 'step' || hits.length > 0 || !onThread;
           if (foreign) {
             await surface(event, slot, body);
             return;
           }
-          const raw = await this.fetchStack(loop.threadId, 4);
-          const top = raw?.[0];
-          if (!top || this.stepLanded(loop, top, raw)) {
-            if (plan?.kind === 'out' && plan.returning && top) {
-              const depthNow = await this.safeDepth(top.id);
-              if (depthNow !== undefined && depthNow >= plan.depth) {
-                // A PERFORM … TIMES / UNTIL re-entered the range: on to the armed statement.
-                plan.returning = false;
-                continuation = 'continue';
-              }
-            }
-            if (continuation !== 'continue') {
-              if (plan) {
-                await this.finishPlan(loop, body, top);
-              }
-              await surface(event, slot, body);
-              return;
-            }
-          }
         }
-        if (iteration === MAX_STEP_ITERATIONS - 1) {
-          body.description = plan ? PERFORM_BOUND_DESCRIPTION : STEP_BOUND_DESCRIPTION;
-          if (plan) {
-            plan.finished = true;
-            await this.disarmTemporaryStops();
+        const raw = await this.fetchStack(loop.threadId, 4);
+        const top = raw?.[0];
+        let continuation: 'next' | 'stepIn' | 'continue' = loop.command === 'stepIn' ? 'stepIn' : 'next';
+        if (returnHit && plan) {
+          // The performed range returned: walk on from here (generated C after the goto).
+          plan.returning = true;
+          plan.cycles += 1;
+          walk = 0;
+          await this.disarmReturnStop();
+          if (plan.cycles >= MAX_PERFORM_CYCLES) {
+            body.description = PERFORM_BOUND_DESCRIPTION;
+            await surface(event, slot, body);
+            return;
           }
-          await surface(event, slot, body);
-          return;
+        } else if (!top || this.stepLanded(loop, top, raw)) {
+          walk = 0;
+          let done = true;
+          const landed = top ? this.state.frame(top.id) : undefined;
+          if (plan && top && landed?.isCobol && landed.program === plan.origin.program) {
+            const depthNow = await this.safeDepth(top.id);
+            if (depthNow !== undefined) {
+              if (plan.kind === 'over' && depthNow > plan.depth) {
+                // The statement entered a performed range: run it to its return.
+                const armed = await this.armReturnStop(top.id, plan.depth + 1);
+                if (armed !== undefined) {
+                  done = false;
+                }
+              } else if (plan.kind === 'out' && depthNow >= plan.depth) {
+                // Still in the range (a PERFORM … TIMES re-entered it): run to its return again.
+                const armed = await this.armReturnStop(top.id, plan.depth);
+                if (armed !== undefined) {
+                  done = false;
+                }
+              }
+            }
+          }
+          if (done) {
+            if (hits.length > 0) {
+              // A logpoint line was the landing: logged above, and the stop is the step's.
+              body.reason = 'step';
+              delete body.hitBreakpointIds;
+            }
+            if (plan) {
+              await this.finishPlan(loop, body, top);
+            }
+            await surface(event, slot, body);
+            return;
+          }
+          plan!.returning = false;
+          continuation = 'continue';
+        } else {
+          walk += 1;
+          if (walk >= MAX_STEP_ITERATIONS) {
+            body.description = STEP_BOUND_DESCRIPTION;
+            await surface(event, slot, body);
+            return;
+          }
         }
         // `stepIn` must keep stepping in, or the CALL it started on is stepped over; LLDB
         // skips libcob (no debug info) by itself. `stepOut` continues with `next`.
-        if (plan?.returning) {
-          continuation = 'next';
-        }
         let next: DebugProtocol.Response;
         try {
           next = await this.engine.request(continuation, { threadId: loop.threadId });
@@ -1364,7 +1347,7 @@ export class Router {
       loop.queued.length = 0;
       this.stepLoop = undefined;
       if (loop.plan && !loop.plan.finished) {
-        void this.disarmTemporaryStops();
+        void this.disarmReturnStop();
       }
     }
   }
@@ -1388,8 +1371,13 @@ export class Router {
         return;
       case 'breakpoint': {
         // A line the client asked for passes; a function breakpoint's line is mirrored under
-        // its shim id; a line only a temporary stop asked for is the shim's business.
-        const bodies = this.state.breakpoints.translateBreakpointEvent((event.body ?? {}) as DebugProtocol.BreakpointEvent['body']);
+        // its shim id; the shim's own return stops (instruction breakpoints) are its business.
+        const raw = (event.body ?? {}) as DebugProtocol.BreakpointEvent['body'];
+        if (typeof raw.breakpoint?.id === 'number' && this.instructionBreakpointIds.has(raw.breakpoint.id)) {
+          slot.resolve(null);
+          return;
+        }
+        const bodies = this.state.breakpoints.translateBreakpointEvent(raw);
         const mirrored: DebugProtocol.Event[] = bodies.map((body) => ({ ...event, body }));
         slot.resolve(mirrored.length > 0 ? mirrored[0] : null);
         for (const extra of mirrored.slice(1)) {
@@ -1425,10 +1413,10 @@ export class Router {
       this.logger.warn('runtime-error relabel failed', error);
     }
     if (this.stepLoop) {
-      this.deliverStepSignal({ kind: 'stopped', event, slot });
+      this.deliverStepSignal({ kind: 'stopped', event, slot, pausePending: context.pausePending });
       return;
     }
-    if (await this.logAndResume(body)) {
+    if (await this.logAndResume(body, context)) {
       slot.resolve(null);
       return;
     }

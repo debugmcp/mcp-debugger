@@ -983,13 +983,13 @@ describe('CobolDebugAdapter', () => {
       expect(caps.supportsSetVariable).toBe(false);
     });
 
-    it('matches supportsFeature to the capabilities and explains the M3 deferrals', () => {
+    it('matches supportsFeature to the capabilities and names the manifest as what function breakpoints and logpoints need', () => {
       expect(adapter.supportsFeature(DebugFeature.CONDITIONAL_BREAKPOINTS)).toBe(true);
       expect(adapter.supportsFeature(DebugFeature.EXCEPTION_BREAKPOINTS)).toBe(true);
-      expect(adapter.supportsFeature(DebugFeature.FUNCTION_BREAKPOINTS)).toBe(false);
-      expect(adapter.supportsFeature(DebugFeature.LOG_POINTS)).toBe(false);
-      expect(adapter.getFeatureRequirements(DebugFeature.FUNCTION_BREAKPOINTS)[0].description).toMatch(/milestone M3/);
-      expect(adapter.getFeatureRequirements(DebugFeature.LOG_POINTS)[0].description).toMatch(/milestone M3/);
+      expect(adapter.supportsFeature(DebugFeature.FUNCTION_BREAKPOINTS)).toBe(true);
+      expect(adapter.supportsFeature(DebugFeature.LOG_POINTS)).toBe(true);
+      expect(adapter.getFeatureRequirements(DebugFeature.FUNCTION_BREAKPOINTS)[0].description).toMatch(/symbol manifest.*paragraph/);
+      expect(adapter.getFeatureRequirements(DebugFeature.LOG_POINTS)[0].description).toMatch(/symbol manifest.*WS-NAME/);
       expect(adapter.getFeatureRequirements(DebugFeature.CONDITIONAL_BREAKPOINTS)).toEqual([]);
     });
   });

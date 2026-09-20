@@ -68,6 +68,8 @@ const END_OF_DUMP_RE = /cob_dump_output\s*\(\s*"END OF DUMP - ([^"]+)"/;
 const LINE_DIRECTIVE_RE = /^\s*#\s*line\s+(\d+)\s+"((?:\\.|[^"\\])*)"/;
 const RANGE_COMMENT_RE = /\/\*\s*Line:\s*(\d+)\s*:\s*(Paragraph|Section)\s+(\S+)\s*:\s*(.*?)\s*\*\//;
 const LAST_LINE_COMMENT_RE = /\/\*\s*Line:\s*(\d+)\s*:\s*last source line\s*:\s*(.*?)\s*\*\//;
+/** `/* Line: 31 : Entry HELLO : path *\/` — where the program's own code starts, after any DECLARATIVES. */
+const ENTRY_COMMENT_RE = /\/\*\s*Line:\s*(\d+)\s*:\s*Entry\s+(\S+)\s*:\s*(.*?)\s*\*\//;
 /** `/* Line: 89 : MOVE : path *\/` — one per PROCEDURE DIVISION statement, copybook statements included. */
 const STATEMENT_COMMENT_RE = /\/\*\s*Line:\s*(\d+)\s*:\s*([A-Z][A-Z -]*):([^*]*)\*\//;
 const RANGE_LABEL_RE = /^\s*((?:PARAGRAPH|SECTION)_\w+)\s*:/;
@@ -221,6 +223,8 @@ export interface ProcedureMap {
   paragraphs: CobolProcRange[];
   statements: CobolStatementLocation[];
   procedureDivisionLine?: number;
+  /** The line of cobc's `Entry` comment for the program's own entry. */
+  entryLine?: number;
   diagnostics: CobolManifestDiagnostic[];
 }
 
@@ -311,7 +315,15 @@ export function parseProcedureMap(
   const statements: CobolStatementLocation[] = [];
   const lastSourceLineByFile = new Map<number, number>();
   let currentSection: string | undefined;
+  let entryLine: number | undefined;
   for (let i = 0; i < lines.length; i += 1) {
+    if (entryLine === undefined) {
+      const entryComment = ENTRY_COMMENT_RE.exec(lines[i]);
+      if (entryComment) {
+        entryLine = parseInt(entryComment[1], 10);
+        continue;
+      }
+    }
     const range = RANGE_COMMENT_RE.exec(lines[i]);
     const lastLine = range ? null : LAST_LINE_COMMENT_RE.exec(lines[i]);
     const statement = range || lastLine ? null : STATEMENT_COMMENT_RE.exec(lines[i]);
@@ -412,6 +424,7 @@ export function parseProcedureMap(
     paragraphs: ranges.filter((r) => r.kind === 'paragraph'),
     statements,
     procedureDivisionLine,
+    entryLine,
     diagnostics
   };
 }

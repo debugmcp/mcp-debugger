@@ -17,6 +17,7 @@
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import type { EngineRequester } from './engine-client.js';
+import { parseAddress } from './memory-reader.js';
 
 export const DEPTH_EXPRESSION = '/nat (long)(frame_ptr - frame_stack)';
 
@@ -28,20 +29,6 @@ export interface AddressLocation {
 function resultOf(response: DebugProtocol.Response): string | undefined {
   const body = response.body as { result?: unknown } | undefined;
   return response.success && typeof body?.result === 'string' ? body.result : undefined;
-}
-
-/** `140698323261470`, `0x7ff6e194181e`, `(void *) 0x00007ff6e194181e` → BigInt. */
-export function parseAddress(text: string): bigint | undefined {
-  const hex = /0x([0-9a-f]+)/i.exec(text);
-  if (hex) {
-    return BigInt(`0x${hex[1]}`);
-  }
-  const dec = /(?:^|[^0-9])([0-9]{1,20})(?![0-9])/.exec(text.trim());
-  return dec ? BigInt(dec[1]) : undefined;
-}
-
-export function hexAddress(address: bigint): string {
-  return `0x${address.toString(16)}`;
 }
 
 /** PERFORM depth in a body-function frame: 0 outside any PERFORM. Undefined when the frame has no `frame_ptr` (not a cobc frame, no DWARF). */
@@ -70,22 +57,36 @@ export async function readPerformThrough(engine: EngineRequester, frameId: numbe
   return Number.isFinite(value) ? value : undefined;
 }
 
-const LINE_ENTRY_RE = /\('((?:[^'\\]|\\.)*)',\s*(\d+)\)/;
-
 /**
  * The source line the engine's line table attributes a code address to — for a PERFORM
  * return address, the generated-C line after the `goto` (or the COBOL line when cobc
- * attributed it directly). Undefined when the address has no line entry.
+ * attributed it directly). Undefined when the address has no line entry. The Python side
+ * answers `path|line`; CodeLLDB may hand that back as a Python repr (quoted, backslashes
+ * doubled, and double-quoted when the path holds an apostrophe), which is undone here.
  */
 export async function resolveAddressLocation(engine: EngineRequester, frameId: number, address: bigint): Promise<AddressLocation | undefined> {
   const expression =
-    `/py (lambda le: (le.GetFileSpec().fullpath, le.GetLine()))(lldb.target.ResolveLoadAddress(${address.toString()}).GetLineEntry())`;
+    `/py (lambda le: "%s|%d" % (le.GetFileSpec().fullpath, le.GetLine()))(lldb.target.ResolveLoadAddress(${address.toString()}).GetLineEntry())`;
   const result = resultOf(await engine.request('evaluate', { expression, frameId, context: 'variables' }));
-  const match = result !== undefined ? LINE_ENTRY_RE.exec(result) : null;
-  if (!match) {
+  return result !== undefined ? parseLineEntry(result) : undefined;
+}
+
+/** `C:\\work\\hello.c|163`, `'C:\\\\work\\\\hello.c|163'`, `"C:\\\\O'Brien\\\\hello.c|163"` → the path and line. */
+export function parseLineEntry(text: string): AddressLocation | undefined {
+  let value = text.trim();
+  let quoted = false;
+  if (value.length >= 2 && (value[0] === "'" || value[0] === '"') && value[value.length - 1] === value[0]) {
+    value = value.slice(1, -1);
+    quoted = true;
+  }
+  const bar = value.lastIndexOf('|');
+  if (bar < 0) {
     return undefined;
   }
-  const line = Number.parseInt(match[2], 10);
-  const path = match[1].replace(/\\\\/g, '\\');
-  return path.length > 0 && line > 0 ? { path, line } : undefined;
+  const line = Number.parseInt(value.slice(bar + 1), 10);
+  let filePath = value.slice(0, bar);
+  if (quoted) {
+    filePath = filePath.replace(/\\(.)/g, '$1');
+  }
+  return filePath.length > 0 && Number.isFinite(line) && line > 0 ? { path: filePath, line } : undefined;
 }

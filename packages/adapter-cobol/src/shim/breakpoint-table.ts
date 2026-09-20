@@ -4,13 +4,18 @@
  * DAP `setBreakpoints` is replace-all per file, and the client (mcp-debugger's
  * core) only ever describes its own line breakpoints. The shim adds lines of its
  * own to the same files — a paragraph or section function breakpoint resolved
- * to its first statement (M3), a temporary stop a PERFORM-aware step arms — so
- * every send to the engine is the union: the client's entries first, in its
- * order, then the shim's lines that no client entry already covers. CodeLLDB
- * keeps a line's breakpoint id stable across re-sends as long as the line stays
- * in the list (measured), so adding or removing the shim's lines never renumbers
- * the client's; sending one line twice is what it does not tolerate (two ids or
- * a duplicated one, measured), hence the de-duplication.
+ * to its first statement (M3) — so every send to the engine is the union: the
+ * client's lines first, in its order, then the shim's lines that no client entry
+ * already covers. CodeLLDB keeps a line's breakpoint id stable across re-sends as
+ * long as the line stays in the list (measured), so adding or removing the shim's
+ * lines never renumbers the client's; sending one line twice is what it does not
+ * tolerate (two ids, or one id for both, measured), hence one entry per line. Two
+ * breakpoints on one line with different conditions therefore cannot both be
+ * honoured: the line is sent unconditional and each affected entry says so in
+ * its message. A file is always sent under the first spelling of its path the
+ * shim saw (normalised), because the engine keys its own per-file table on the
+ * raw string: a second spelling would be a second file to it and each side's
+ * replace-all would delete the other's lines.
  *
  * Function breakpoints carry shim-assigned ids (from FUNCTION_BP_ID_BASE, far
  * above the engine's small sequential ids): a hit on their line reports the
@@ -34,6 +39,8 @@ export interface FunctionBreakpointRecord {
   line: number;
   /** What resolution produced, for the response: `1000-INIT (paragraph of HELLO)`. */
   description: string;
+  /** The client's condition for it, if any. */
+  condition?: string;
   /** The engine's verdict on the line, once the file was sent. */
   verified?: boolean;
   message?: string;
@@ -52,23 +59,23 @@ export interface SentEntry {
   /** The `logMessage`s of the client's entries on this line, in order. */
   logMessages: string[];
   fnIds: number[];
-  temp: boolean;
-}
-
-/** A client entry as the engine may see it: CodeLLDB's own `{…}` interpolation would have to parse a COBOL name, and a syntax error there aborts the adapter (measured). */
-function withoutLogMessage(bp: DebugProtocol.SourceBreakpoint): DebugProtocol.SourceBreakpoint {
-  const copy = { ...bp };
-  delete copy.logMessage;
-  return copy;
+  /** The condition sent for the line, when every breakpoint on it agrees on one. */
+  condition?: string;
+  /** Some breakpoints on this line wanted a condition the line was not sent with. */
+  conditionDropped: boolean;
 }
 
 interface FileState {
   key: string;
   source: DebugProtocol.Source;
   user: DebugProtocol.SourceBreakpoint[];
-  temps: Set<number>;
   sent: SentEntry[];
   engineIdByLine: Map<number, number>;
+}
+
+/** The engine-side path of a file: `.`/`..` folded, separators native, so one file has one spelling. */
+function canonicalPath(sourcePath: string): string {
+  return path.normalize(sourcePath);
 }
 
 export interface EngineSend {
@@ -82,22 +89,19 @@ export class BreakpointTable {
   private nextFunctionId = FUNCTION_BP_ID_BASE;
 
   private fileFor(source: DebugProtocol.Source | string): FileState {
-    const sourcePath = typeof source === 'string' ? source : (source.path ?? '');
+    const sourcePath = canonicalPath(typeof source === 'string' ? source : (source.path ?? ''));
     const key = normalisePath(sourcePath);
     let file = this.files.get(key);
     if (!file) {
+      // The first spelling is the file's spelling for the engine from now on.
       file = {
         key,
-        source: typeof source === 'string' ? { name: path.basename(source), path: source } : { ...source },
+        source: { ...(typeof source === 'string' ? {} : source), name: path.basename(sourcePath), path: sourcePath },
         user: [],
-        temps: new Set(),
         sent: [],
         engineIdByLine: new Map()
       };
       this.files.set(key, file);
-    } else if (typeof source !== 'string') {
-      // The client's spelling of the path wins over the manifest's for the engine.
-      file.source = { ...source };
     }
     return file;
   }
@@ -119,44 +123,66 @@ export class BreakpointTable {
     // one there (two entries on one line get one id or a duplicated one from CodeLLDB).
     const sent: SentEntry[] = [];
     const byLine = new Map<number, SentEntry>();
-    const userSent: DebugProtocol.SourceBreakpoint[] = [];
+    const wanted = new Map<number, string[]>();
+    const want = (line: number, condition: string | undefined): void => {
+      const list = wanted.get(line) ?? [];
+      list.push((condition ?? '').trim());
+      wanted.set(line, list);
+    };
     file.user.forEach((bp, i) => {
       let entry = byLine.get(bp.line);
       if (!entry) {
-        entry = { line: bp.line, user: true, userIndices: [], logpoint: true, logMessages: [], fnIds: [], temp: false };
+        entry = { line: bp.line, user: true, userIndices: [], logpoint: true, logMessages: [], fnIds: [], conditionDropped: false };
         byLine.set(bp.line, entry);
         sent.push(entry);
-        userSent.push(withoutLogMessage(bp));
       }
       entry.userIndices.push(i);
+      want(bp.line, bp.condition);
       if (typeof bp.logMessage === 'string' && bp.logMessage.length > 0) {
         entry.logMessages.push(bp.logMessage);
       } else {
         entry.logpoint = false;
       }
     });
-    const extra = (line: number): SentEntry => {
-      let entry = byLine.get(line);
+    for (const record of this.functions.values()) {
+      if (normalisePath(record.path) !== file.key) {
+        continue;
+      }
+      let entry = byLine.get(record.line);
       if (!entry) {
-        entry = { line, user: false, userIndices: [], logpoint: false, logMessages: [], fnIds: [], temp: false };
-        byLine.set(line, entry);
+        entry = { line: record.line, user: false, userIndices: [], logpoint: false, logMessages: [], fnIds: [], conditionDropped: false };
+        byLine.set(record.line, entry);
         sent.push(entry);
       }
-      return entry;
-    };
-    for (const record of this.functions.values()) {
-      if (normalisePath(record.path) === file.key) {
-        extra(record.line).fnIds.push(record.id);
+      entry.fnIds.push(record.id);
+      want(record.line, record.condition);
+    }
+    // The line's condition: the one every breakpoint on it asked for, else none — a
+    // condition never leaks onto a breakpoint that did not ask for it, and a line with
+    // disagreeing conditions pauses unconditionally, which each entry's message says.
+    for (const entry of sent) {
+      const conditions = wanted.get(entry.line) ?? [];
+      const distinct = [...new Set(conditions)];
+      if (distinct.length === 1 && distinct[0].length > 0) {
+        entry.condition = distinct[0];
+      } else if (conditions.some((c) => c.length > 0)) {
+        entry.conditionDropped = true;
       }
     }
-    for (const line of file.temps) {
-      extra(line).temp = true;
-    }
     file.sent = sent;
-    const breakpoints: DebugProtocol.SourceBreakpoint[] = [
-      ...userSent,
-      ...sent.filter((entry) => !entry.user).map((entry) => ({ line: entry.line }))
-    ];
+    // The client's entries in its order, then the shim's; a logMessage never reaches the
+    // engine (CodeLLDB's own `{…}` interpolation aborts the adapter on a COBOL name, measured).
+    const breakpoints: DebugProtocol.SourceBreakpoint[] = sent.map((entry) => {
+      const bp: DebugProtocol.SourceBreakpoint = { line: entry.line };
+      if (entry.condition !== undefined) {
+        bp.condition = entry.condition;
+      }
+      const only = entry.userIndices.length === 1 && entry.fnIds.length === 0 ? file.user[entry.userIndices[0]] : undefined;
+      if (only?.hitCondition) {
+        bp.hitCondition = only.hitCondition;
+      }
+      return bp;
+    });
     return { key: file.key, args: { source: { ...file.source }, breakpoints } };
   }
 
@@ -179,6 +205,11 @@ export class BreakpointTable {
       }
       for (const index of entry.userIndices) {
         clientView[index] = { ...answer };
+        const wantedCondition = (file.user[index].condition ?? '').trim();
+        if (entry.conditionDropped && wantedCondition.length > 0) {
+          const note = `condition not applied: line ${entry.line} is shared by breakpoints with different conditions`;
+          clientView[index].message = answer.message ? `${answer.message}; ${note}` : note;
+        }
       }
       if (typeof answer.id === 'number') {
         file.engineIdByLine.set(entry.line, answer.id);
@@ -215,8 +246,11 @@ export class BreakpointTable {
     }
   }
 
-  addFunctionBreakpoint(name: string, sourcePath: string, line: number, description: string): FunctionBreakpointRecord {
-    const record: FunctionBreakpointRecord = { id: this.nextFunctionId++, name, path: sourcePath, line, description };
+  addFunctionBreakpoint(name: string, sourcePath: string, line: number, description: string, condition?: string): FunctionBreakpointRecord {
+    const record: FunctionBreakpointRecord = { id: this.nextFunctionId++, name, path: canonicalPath(sourcePath), line, description };
+    if (condition !== undefined && condition.trim().length > 0) {
+      record.condition = condition.trim();
+    }
     this.functions.set(record.id, record);
     this.fileFor(sourcePath);
     return record;
@@ -236,31 +270,8 @@ export class BreakpointTable {
     return [...this.functions.values()];
   }
 
-  /** Arm a temporary line (a PERFORM-aware step's stop); returns the file key to re-send. */
-  addTemp(sourcePath: string, line: number): string {
-    const file = this.fileFor(sourcePath);
-    file.temps.add(line);
-    return file.key;
-  }
-
-  /** Drop every temporary line; returns the file keys that carried one. */
-  clearTemps(): string[] {
-    const keys: string[] = [];
-    for (const file of this.files.values()) {
-      if (file.temps.size > 0) {
-        file.temps.clear();
-        keys.push(file.key);
-      }
-    }
-    return keys;
-  }
-
-  hasTemps(): boolean {
-    return [...this.files.values()].some((file) => file.temps.size > 0);
-  }
-
   engineIdOf(sourcePath: string, line: number): number | undefined {
-    return this.files.get(normalisePath(sourcePath))?.engineIdByLine.get(line);
+    return this.files.get(normalisePath(canonicalPath(sourcePath)))?.engineIdByLine.get(line);
   }
 
   /** The roles of the line an engine breakpoint id stands for, when the shim sent it. */
@@ -277,8 +288,9 @@ export class BreakpointTable {
 
   /**
    * The client's view of a stop's `hitBreakpointIds`: engine ids the client knows stay,
-   * function ids on the same lines are added, and lines only the shim asked for are
-   * dropped (their engine id means nothing to the client). Unknown ids pass through.
+   * function ids on the same lines are added, and a line only a function breakpoint
+   * asked for is reported under its function ids alone (its engine id means nothing to
+   * the client). Unknown ids pass through.
    */
   translateHitIds(ids: readonly number[]): number[] {
     const out: number[] = [];
@@ -296,14 +308,11 @@ export class BreakpointTable {
     return out;
   }
 
-  /** The logpoint messages on the lines these engine ids name (empty when none is a logpoint line). */
+  /** Every logpoint message on the lines these engine ids name — a line that also pauses included. */
   logMessagesOf(ids: readonly number[]): string[] {
     const out: string[] = [];
     for (const id of ids) {
-      const roles = this.rolesOf(id);
-      if (roles?.logpoint) {
-        out.push(...roles.logMessages);
-      }
+      out.push(...(this.rolesOf(id)?.logMessages ?? []));
     }
     return out;
   }
@@ -315,25 +324,13 @@ export class BreakpointTable {
     }
     return ids.every((id) => {
       const roles = this.rolesOf(id);
-      return roles !== undefined && roles.user && roles.logpoint && roles.fnIds.length === 0 && !roles.temp;
-    });
-  }
-
-  /** True when every id names a line only the shim's temps asked for. */
-  isTempOnlyHit(ids: readonly number[]): boolean {
-    if (ids.length === 0) {
-      return false;
-    }
-    return ids.every((id) => {
-      const roles = this.rolesOf(id);
-      return roles !== undefined && roles.temp && !roles.user && roles.fnIds.length === 0;
+      return roles !== undefined && roles.user && roles.logpoint && roles.fnIds.length === 0;
     });
   }
 
   /**
    * A `breakpoint` event from the engine, as the client should see it: the original when the
-   * line is the client's, a copy per function breakpoint on that line, nothing for a line
-   * only a temp asked for.
+   * line is the client's, a copy per function breakpoint on that line.
    */
   translateBreakpointEvent(body: DebugProtocol.BreakpointEvent['body']): Array<DebugProtocol.BreakpointEvent['body']> {
     const id = body.breakpoint?.id;

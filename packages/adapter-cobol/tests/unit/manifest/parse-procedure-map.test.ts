@@ -167,6 +167,7 @@ describe('parseProcedureMap', () => {
       { name: 'P-TWO', kind: 'paragraph', sectionName: 'LAST-SEC', sourceFileId: 0, startLine: 21, endLine: 22, cLabel: 'PARAGRAPH_P__TWO_l_7', labelId: 7 }
     ]);
     expect(outer.procedureDivisionLine).toBe(11);
+    expect(outer.entryLine).toBe(10);
   });
 
   it('handles the 3.1.2 shape without labels', () => {

@@ -979,6 +979,8 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
   supportsFeature(feature: DebugFeature): boolean {
     const supportedFeatures = [
       DebugFeature.CONDITIONAL_BREAKPOINTS,
+      DebugFeature.FUNCTION_BREAKPOINTS,
+      DebugFeature.LOG_POINTS,
       DebugFeature.EXCEPTION_BREAKPOINTS,
       DebugFeature.EXCEPTION_INFO_REQUEST,
       DebugFeature.VARIABLE_PAGING,
@@ -994,10 +996,10 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
     const requirements: FeatureRequirement[] = [];
     switch (feature) {
       case DebugFeature.FUNCTION_BREAKPOINTS:
-        requirements.push({ type: 'version', description: 'Paragraph/section breakpoints land with milestone M3 of issue #759', required: true });
+        requirements.push({ type: 'configuration', description: 'A symbol manifest for the program (a source launch, or `sources`/`manifestDirs`): paragraph, section and PROGRAM-ID names are resolved in it', required: true });
         break;
       case DebugFeature.LOG_POINTS:
-        requirements.push({ type: 'version', description: 'COBOL-name interpolation in logpoints lands with milestone M3 of issue #759', required: true });
+        requirements.push({ type: 'configuration', description: 'A symbol manifest for the program: `{WS-NAME}` is evaluated by the COBOL shim at the stop', required: true });
         break;
       case DebugFeature.DISASSEMBLE_REQUEST:
         requirements.push({ type: 'configuration', description: 'LLDB disassembler support', required: true });
