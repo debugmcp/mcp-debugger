@@ -17,7 +17,7 @@ import type { ShimLogger } from '../logger.js';
 import type { ProgramEntry } from '../manifest-registry.js';
 import { hexAddress, type MemoryReader } from '../memory-reader.js';
 import { resolveDataName } from '../name-resolver.js';
-import type { CachedFrame, SessionState } from '../session-state.js';
+import { engineFrameId, type CachedFrame, type SessionState } from '../session-state.js';
 import type { VariablesHandler } from './variables.js';
 
 export const HEX_VIEW_CAP_BYTES = 256;
@@ -90,7 +90,7 @@ export class EvaluateHandler {
       return { kind: 'response', body: { result: String(item.size), type: 'LENGTH OF', variablesReference: 0 } };
     }
     if (parsed.fn === 'ADDRESS' || parsed.prefix === '/addr') {
-      const address = await this.memory.addressOf(anchor.id, entry, item, indices.value);
+      const address = await this.memory.addressOf(engineFrameId(anchor), entry, item, indices.value);
       if (!address.ok) {
         return { kind: 'error', message: `address of ${item.qualifiedName} unavailable: ${address.error}` };
       }
@@ -110,7 +110,7 @@ export class EvaluateHandler {
 
     if (parsed.prefix === '/hex' || parsed.prefix === '/raw') {
       const length = isTable ? await this.tableByteLength(anchor, entry, item, indices.value) : item.size;
-      const read = await this.memory.readItemBytes(anchor.id, entry, item, indices.value, length);
+      const read = await this.memory.readItemBytes(engineFrameId(anchor), entry, item, indices.value, length);
       if (!read.ok) {
         return { kind: 'error', message: `${item.qualifiedName} unavailable: ${read.error}` };
       }
@@ -125,7 +125,7 @@ export class EvaluateHandler {
       };
     }
 
-    const rendered = await this.variables.render(anchor.id, entry, item, indices.value);
+    const rendered = await this.variables.render(engineFrameId(anchor), entry, item, indices.value);
     const v = rendered.variable;
     return {
       kind: 'response',
@@ -151,7 +151,7 @@ export class EvaluateHandler {
     if (!condition.condition) {
       return { kind: 'error', message: `${condition.name}: condition values unknown` };
     }
-    const rendered = await this.variables.render(anchor.id, entry, parent, []);
+    const rendered = await this.variables.render(engineFrameId(anchor), entry, parent, []);
     const value = rendered.decoded
       ? evaluateCondition(condition.condition, rendered.decoded, parent)
       : `<unavailable: ${rendered.error ?? 'parent unavailable'}>`;
@@ -179,7 +179,7 @@ export class EvaluateHandler {
     if (length.value < 1 || start.value - 1 + length.value > item.size) {
       return { kind: 'error', message: `reference modification length ${length.value} exceeds ${item.qualifiedName} from position ${start.value}` };
     }
-    const read = await this.memory.readItemBytes(anchor.id, entry, item, indices);
+    const read = await this.memory.readItemBytes(engineFrameId(anchor), entry, item, indices);
     if (!read.ok) {
       return { kind: 'error', message: `${item.qualifiedName} unavailable: ${read.error}` };
     }
@@ -198,7 +198,7 @@ export class EvaluateHandler {
 
   private async tableByteLength(anchor: CachedFrame, entry: ProgramEntry, item: CobolDataItem, indices: number[]): Promise<number> {
     const dim = item.occursDims[indices.length];
-    const count = await this.variables.effectiveCount(anchor.id, entry, item, indices.length);
+    const count = await this.variables.effectiveCount(engineFrameId(anchor), entry, item, indices.length);
     return count * dim.elemSize;
   }
 
@@ -255,7 +255,7 @@ export class EvaluateHandler {
     if (item.occursDims.length > 0) {
       return { error: `'${operand.name}' is a table element and needs its own subscripts; use a literal` };
     }
-    const read = await this.memory.readItemBytes(anchor.id, entry, item, []);
+    const read = await this.memory.readItemBytes(engineFrameId(anchor), entry, item, []);
     if (!read.ok) {
       return { error: `'${operand.name}' unavailable: ${read.error}` };
     }

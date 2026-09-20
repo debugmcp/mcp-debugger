@@ -227,6 +227,10 @@ describe.each(VERSIONS)('cobc fixtures $dir', (facts) => {
       } else {
         expect(paragraphs[1].cLabel).toBeUndefined();
       }
+      // The `l_N` label id a PERFORM frame's perform_through names. 3.2 spells it in every range
+      // label; 3.1.2 emits `l_N:` only for a jump target, so the entry paragraph has none there.
+      expect(paragraphs.slice(1).map((p) => p.labelId)).toEqual([5, 6, 7]);
+      expect(paragraphs[0].labelId).toBe(facts.labels ? 4 : undefined);
     });
 
     it('records the #line map with COBOL rows only', () => {

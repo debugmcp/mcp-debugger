@@ -44,6 +44,7 @@ const S0C7_BP_LINE = 11;         // ADD WS-PACKED TO WS-RESULT — WS-PACKED RED
 // examples/cobol/calls/sub.cob
 const SUB_BP_LINE = 16;          // MOVE LS-WORK TO LK-SUM — after ADD, before the MOVEs
 const HELLO_AFTER_INIT_LINE = 33;   // PERFORM 2000-COMPUTE — the statement after PERFORM 1000-INIT
+const HELLO_PERFORM_REPORT_LINE = 34; // PERFORM 3000-REPORT
 const HELLO_STOP_RUN_LINE = 35;     // STOP RUN — the statement after PERFORM 3000-REPORT
 const REPORT_FIRST_LINE = 48;       // DISPLAY "COBOL_DEBUG_MARKER: total=" — first statement of 3000-REPORT
 const CALL_LINE = 13;            // CALL "CALLSUB" USING WS-ARG-REC in calls/main.cob
@@ -685,8 +686,14 @@ describe.skipIf(SKIP_COBOL)('MCP Server COBOL Debugging Smoke Test @requires-cob
       expect(fn?.boundLine ?? fn?.line, JSON.stringify(fn)).toBe(REPORT_FIRST_LINE);
       await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
       expect(await reachCobolLine(REPORT_FIRST_LINE, 'hello.cob')).toBe(true);
-      top = (await fetchStackTrace()).find(isCobolFrame)!;
+      const inReport = await fetchStackTrace();
+      top = inReport.find(isCobolFrame)!;
       expect(top.name).toBe('HELLO: 3000-REPORT');
+      // The PERFORM stack is in the stack trace: the performing paragraph at its PERFORM statement.
+      const performFrame = inReport.find(f => (f.name ?? '').includes('(PERFORM 3000-REPORT)'));
+      expect(performFrame, JSON.stringify(inReport.map(f => `${f.name}@${f.line}`))).toBeDefined();
+      expect(performFrame!.name).toBe('HELLO: 0000-MAIN (PERFORM 3000-REPORT)');
+      expect(performFrame!.line).toBe(HELLO_PERFORM_REPORT_LINE);
 
       // step_out of the performed paragraph returns to the statement after `PERFORM 3000-REPORT`.
       expect((await call('step_out', {})).success).toBe(true);

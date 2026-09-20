@@ -57,8 +57,9 @@ describe('cobol shim variables', () => {
     expect(alt.value).toBe('1234');
     expect(vars.find((v) => v.name === 'WS-RAW')!.value).toBe('"00001234"');
     expect(vars.find((v) => v.name === 'WS-IDX')!.value).toBe('2');
-    // One address evaluation and one record read per root: nine roots, WS-RAW/WS-ALT share b_38.
-    expect(h.engine.received('evaluate')).toHaveLength(8);
+    // One address evaluation and one record read per root: nine roots, WS-RAW/WS-ALT share b_38 —
+    // plus the PERFORM-depth read the stack trace made at the stop (M3).
+    expect(h.engine.received('evaluate')).toHaveLength(9);
     expect(h.engine.received('readMemory')).toHaveLength(8);
   });
 

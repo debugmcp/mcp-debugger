@@ -71,6 +71,9 @@ const LAST_LINE_COMMENT_RE = /\/\*\s*Line:\s*(\d+)\s*:\s*last source line\s*:\s*
 /** `/* Line: 89 : MOVE : path *\/` — one per PROCEDURE DIVISION statement, copybook statements included. */
 const STATEMENT_COMMENT_RE = /\/\*\s*Line:\s*(\d+)\s*:\s*([A-Z][A-Z -]*):([^*]*)\*\//;
 const RANGE_LABEL_RE = /^\s*((?:PARAGRAPH|SECTION)_\w+)\s*:/;
+/** `l_5:;` — the label a PERFORM or GO TO jumps to; 3.2 also spells it inside the range label (`…_l_5`). */
+const LABEL_LINE_RE = /^\s*l_(\d+)\s*:/;
+const LABEL_SUFFIX_RE = /_l_(\d+)$/;
 
 /** Undo `cb_encode_program_id`: `__` was `-`, `_XX` was a hex-escaped character. */
 export function demangleProgramId(cName: string): string {
@@ -320,6 +323,7 @@ export function parseProcedureMap(
     const commentPath = range ? range[4] : lastLine ? lastLine[2] : match[3].trim();
     let fileId: number | undefined;
     let cLabel: string | undefined;
+    let labelId: number | undefined;
     for (let j = i + 1; j < Math.min(lines.length, i + 5); j += 1) {
       const d = directiveAt(lines, j, startLine, cBase);
       if (d && !d.isSelf && d.line === cobolLine && fileId === undefined) {
@@ -328,6 +332,14 @@ export function parseProcedureMap(
       const label = RANGE_LABEL_RE.exec(lines[j]);
       if (label) {
         cLabel = label[1];
+        const suffix = LABEL_SUFFIX_RE.exec(label[1]);
+        if (suffix && labelId === undefined) {
+          labelId = parseInt(suffix[1], 10);
+        }
+      }
+      const bare = LABEL_LINE_RE.exec(lines[j]);
+      if (bare && labelId === undefined) {
+        labelId = parseInt(bare[1], 10);
       }
     }
     if (fileId === undefined) {
@@ -361,6 +373,9 @@ export function parseProcedureMap(
     }
     if (cLabel) {
       entry.cLabel = cLabel;
+    }
+    if (labelId !== undefined) {
+      entry.labelId = labelId;
     }
     ranges.push(entry);
   }

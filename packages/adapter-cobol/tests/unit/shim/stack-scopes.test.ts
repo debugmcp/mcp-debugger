@@ -6,8 +6,10 @@ import { describe, expect, it, afterEach } from 'vitest';
 import path from 'node:path';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import { engineError, installMemory } from './fake-engine.js';
-import { callsManifest, callsMemory, helloManifest } from './fixtures.js';
+import { callsManifest, callsMemory, helloManifest, helloMemory } from './fixtures.js';
 import { bringUp, frame, startShim, stopWithFrames, tick, type Harness } from './harness.js';
+import { DEPTH_EXPRESSION } from '../../../src/shim/perform-frames.js';
+import { PERFORM_FRAME_ID_BASE } from '../../../src/shim/perform-stack.js';
 
 const ROOT = path.resolve('/work/cobol/examples');
 const HELLO_COB = path.join(ROOT, 'hello.cob');
@@ -25,6 +27,57 @@ describe('cobol shim stackTrace and scopes', () => {
   afterEach(async () => {
     await h?.cleanup();
     h = undefined;
+  });
+
+  it('lists the active PERFORMs as frames under the program, and reads their scopes in the real frame', async () => {
+    const manifest = helloManifest(ROOT);
+    manifest.programs[0].procedure.paragraphs[0].labelId = 4;
+    manifest.programs[0].procedure.paragraphs[1].labelId = 5;
+    const evaluated: Array<{ expression: string; frameId?: number }> = [];
+    h = await startShim({
+      manifests: [manifest],
+      engineSetup: (engine) => {
+        installMemory(engine, helloMemory());
+        const memory = engine.handler('evaluate')!;
+        engine.on('evaluate', (args: { expression: string; frameId?: number }, request) => {
+          evaluated.push({ expression: args.expression, frameId: args.frameId });
+          if (args.expression === DEPTH_EXPRESSION) {
+            return { result: '1', variablesReference: 0 };
+          }
+          if (args.expression.includes('frame_stack[1].return_address_ptr')) {
+            return { result: '140698323261470', variablesReference: 0 };
+          }
+          if (args.expression.includes('frame_stack[1].perform_through')) {
+            return { result: '5', variablesReference: 0 };
+          }
+          if (args.expression.startsWith('/py ') && args.expression.includes('ResolveLoadAddress')) {
+            return { result: `('${HELLO_C.replace(/\\/g, '\\\\')}', 130)`, variablesReference: 0 };
+          }
+          return memory(args, request);
+        });
+      }
+    });
+    await bringUp(h);
+    const frames = await stopWithFrames(h, [frame(1, 'HELLO_', HELLO_COB, 38), frame(2, 'HELLO', HELLO_C, 220), frame(3, 'main', HELLO_C, 250)]);
+    expect(frames.map((f) => f.name)).toEqual(['HELLO: 1000-INIT', 'HELLO: 0000-MAIN (PERFORM 1000-INIT)', 'HELLO', 'main']);
+    const perform = frames[1];
+    expect(perform.id).toBe(PERFORM_FRAME_ID_BASE);
+    expect(perform.line).toBe(32);
+    expect(perform.source?.path).toBe(HELLO_COB);
+    expect(perform.presentationHint).toBe('subtle');
+    // The PERFORM stack is read once per stop: a second stackTrace reuses it, same ids.
+    const again = ((await h.client.request('stackTrace', { threadId: 1 })).body as DebugProtocol.StackTraceResponse['body']);
+    expect(again.stackFrames[1].id).toBe(PERFORM_FRAME_ID_BASE);
+    expect(again.totalFrames).toBe(4);
+    expect(evaluated.filter((e) => e.expression === DEPTH_EXPRESSION)).toHaveLength(1);
+    // Scopes on the synthesised frame are the program's, read in the real frame (id 1).
+    const scopes = scopesOf(await h.client.request('scopes', { frameId: PERFORM_FRAME_ID_BASE }));
+    expect(scopes[0].name).toBe('WORKING-STORAGE');
+    const variables = ((await h.client.request('variables', { variablesReference: scopes[0].variablesReference })).body as DebugProtocol.VariablesResponse['body']).variables;
+    expect(variables.find((v) => v.name === 'WS-SCALED')?.value).toBe('-123.45');
+    expect(evaluated.filter((e) => e.expression.includes('b_19')).every((e) => e.frameId === 1)).toBe(true);
+    const evaluate = await h.client.request('evaluate', { expression: 'WS-ID OF WS-GROUP', frameId: PERFORM_FRAME_ID_BASE });
+    expect((evaluate.body as DebugProtocol.EvaluateResponse['body']).result).toBe('42');
   });
 
   it('labels COBOL frames "<PROGRAM-ID>: <paragraph>" and leaves entry wrapper, main and CRT frames alone', async () => {

@@ -18,6 +18,7 @@ const SKIP_DOCKER = process.env.SKIP_DOCKER_TESTS === 'true';
 const BP_LINE = 46;
 const PERFORM_INIT_LINE = 32;     // PERFORM 1000-INIT (first statement of 0000-MAIN)
 const AFTER_INIT_LINE = 33;       // PERFORM 2000-COMPUTE — the statement after it
+const PERFORM_REPORT_LINE = 34;   // PERFORM 3000-REPORT
 const STOP_RUN_LINE = 35;         // STOP RUN — the statement after PERFORM 3000-REPORT
 const INIT_LOOP_BODY_LINE = 39;   // COMPUTE WS-AMOUNT(WS-IDX) = WS-IDX * 100, inside 1000-INIT's inline PERFORM
 const REPORT_FIRST_LINE = 48;     // DISPLAY "COBOL_DEBUG_MARKER: total=" — first statement of 3000-REPORT
@@ -298,6 +299,11 @@ describe.skipIf(SKIP_DOCKER)('Docker: COBOL Debugging Smoke Tests', () => {
     expect(frame?.line, JSON.stringify(frame)).toBe(REPORT_FIRST_LINE);
     expect(frame?.name).toContain('3000-REPORT');
     console.log('[Docker COBOL] ✓ paragraph function breakpoint hit');
+    const inReport = parseSdkToolResult(await mcpClient!.callTool({ name: 'get_stack_trace', arguments: { sessionId } }));
+    const performFrame = ((inReport.stackFrames ?? []) as Array<{ name?: string; line?: number }>).find(f => (f.name ?? '').includes('(PERFORM 3000-REPORT)'));
+    expect(performFrame, JSON.stringify(inReport.stackFrames)).toBeDefined();
+    expect(performFrame!.name).toBe('HELLO: 0000-MAIN (PERFORM 3000-REPORT)');
+    expect(performFrame!.line).toBe(PERFORM_REPORT_LINE);
 
     // step_out of the performed paragraph returns to the statement after PERFORM 3000-REPORT.
     expect(parseSdkToolResult(await mcpClient!.callTool({ name: 'step_out', arguments: { sessionId } })).success).not.toBe(false);

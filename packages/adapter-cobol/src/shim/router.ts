@@ -28,9 +28,10 @@ import type { FunctionBreakpointRecord } from './breakpoint-table.js';
 import { normalisePath, type ProgramEntry } from './manifest-registry.js';
 import { MemoryReader } from './memory-reader.js';
 import { hexAddress, readPerformDepth, readReturnAddress, resolveAddressLocation } from './perform-frames.js';
+import { insertPerformFrames } from './perform-stack.js';
 import { nextStatementAfter, resolveProcedureName, statementAt } from './procedure-names.js';
 import { errorMessage, errorResponse, okResponse } from './protocol.js';
-import type { CachedFrame, SessionState } from './session-state.js';
+import { engineFrameId, type CachedFrame, type SessionState } from './session-state.js';
 
 export const COBOL_RUNTIME_ERROR_FILTER = 'cobol_runtime_error';
 export const RUNTIME_ERROR_FUNCTION = 'cob_runtime_error';
@@ -560,12 +561,25 @@ export class Router {
     }
   }
 
-  private onStackTraceResponse(request: DebugProtocol.Request, response: DebugProtocol.Response): DebugProtocol.Response {
+  private async onStackTraceResponse(request: DebugProtocol.Request, response: DebugProtocol.Response): Promise<DebugProtocol.Response> {
     const args = this.argsOf<DebugProtocol.StackTraceArguments>(request);
     const body = response.body as DebugProtocol.StackTraceResponse['body'] | undefined;
     if (response.success && body && Array.isArray(body.stackFrames)) {
       this.state.lastThreadId = args.threadId;
       annotateStackFrames(this.state, body.stackFrames, args.threadId, args.startFrame ?? 0);
+      // The PERFORM stack, under the program's frame (M3). Only a page from the top can
+      // be extended consistently; the core asks for the whole stack from frame 0.
+      if ((args.startFrame ?? 0) === 0 && this.state.registry.programCount > 0) {
+        const inserted = await insertPerformFrames(this.engine, this.state, this.logger, args.threadId, body.stackFrames);
+        if (inserted > 0) {
+          if (typeof body.totalFrames === 'number') {
+            body.totalFrames += inserted;
+          }
+          if (typeof args.levels === 'number' && args.levels > 0 && body.stackFrames.length > args.levels) {
+            body.stackFrames.length = args.levels;
+          }
+        }
+      }
     }
     return response;
   }
@@ -630,8 +644,9 @@ export class Router {
       }
       scopes.push({
         name: `${section}${suffix}`,
-        // Addresses are evaluated in the COBOL frame: its compilation unit owns the statics.
-        variablesReference: this.state.allocRef({ kind: 'section', frameId: cobolFrame.id, program: entry, section }),
+        // Addresses are evaluated in the COBOL frame: its compilation unit owns the statics
+        // (a synthesised PERFORM frame reads them in the real frame behind it).
+        variablesReference: this.state.allocRef({ kind: 'section', frameId: engineFrameId(cobolFrame), program: entry, section }),
         namedVariables: roots.length,
         expensive: false
       });

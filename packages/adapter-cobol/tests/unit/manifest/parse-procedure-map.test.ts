@@ -158,13 +158,13 @@ describe('parseProcedureMap', () => {
 
   it('builds sections and paragraphs with end lines from the next start', () => {
     expect(outer.sections).toEqual([
-      { name: 'MAIN-SEC', kind: 'section', sourceFileId: 0, startLine: 11, endLine: 19, cLabel: 'SECTION_MAIN__SEC_l_3' },
-      { name: 'LAST-SEC', kind: 'section', sourceFileId: 0, startLine: 20, endLine: 22, cLabel: 'SECTION_LAST__SEC_l_6' }
+      { name: 'MAIN-SEC', kind: 'section', sourceFileId: 0, startLine: 11, endLine: 19, cLabel: 'SECTION_MAIN__SEC_l_3', labelId: 3 },
+      { name: 'LAST-SEC', kind: 'section', sourceFileId: 0, startLine: 20, endLine: 22, cLabel: 'SECTION_LAST__SEC_l_6', labelId: 6 }
     ]);
     expect(outer.paragraphs).toEqual([
-      { name: 'P-ONE', kind: 'paragraph', sectionName: 'MAIN-SEC', sourceFileId: 0, startLine: 12, endLine: 19, cLabel: 'PARAGRAPH_P__ONE_l_4' },
-      { name: 'P-COPY', kind: 'paragraph', sectionName: 'MAIN-SEC', sourceFileId: 1, startLine: 1, endLine: 2, cLabel: 'PARAGRAPH_P__COPY_l_5' },
-      { name: 'P-TWO', kind: 'paragraph', sectionName: 'LAST-SEC', sourceFileId: 0, startLine: 21, endLine: 22, cLabel: 'PARAGRAPH_P__TWO_l_7' }
+      { name: 'P-ONE', kind: 'paragraph', sectionName: 'MAIN-SEC', sourceFileId: 0, startLine: 12, endLine: 19, cLabel: 'PARAGRAPH_P__ONE_l_4', labelId: 4 },
+      { name: 'P-COPY', kind: 'paragraph', sectionName: 'MAIN-SEC', sourceFileId: 1, startLine: 1, endLine: 2, cLabel: 'PARAGRAPH_P__COPY_l_5', labelId: 5 },
+      { name: 'P-TWO', kind: 'paragraph', sectionName: 'LAST-SEC', sourceFileId: 0, startLine: 21, endLine: 22, cLabel: 'PARAGRAPH_P__TWO_l_7', labelId: 7 }
     ]);
     expect(outer.procedureDivisionLine).toBe(11);
   });

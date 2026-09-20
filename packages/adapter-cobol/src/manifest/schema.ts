@@ -146,6 +146,11 @@ export interface CobolProcRange {
   endLine: number;
   /** C label emitted for the range when the compiler produced one (3.2+: `PARAGRAPH_<NAME>_l_<id>`). */
   cLabel?: string;
+  /**
+   * The id of the `l_<id>` label cobc jumps to for this range (`goto l_5`), on both 3.1.2
+   * and 3.2. A PERFORM frame's `perform_through` names its THRU-end range by this id.
+   */
+  labelId?: number;
 }
 
 /** A PROCEDURE DIVISION statement, from cobc's `/* Line: N : VERB : file *\/` comments. */

@@ -50,7 +50,8 @@ attach_to_process {"sessionId": "<id>", "processId": 4242, "adapterConfig": {"ma
 - **Runtime errors pause before the abort**: the launch default `breakOnExceptions: "uncaught"` (= `"all"`, one filter `cobol_runtime_error`) is a function breakpoint on libcob's `cob_runtime_error` — subscript out of bounds, non-numeric data, ref-mod out of range: the S0C7/SSRANGE analogues. **Needs `runtimeChecks: true`**, otherwise no check exists to trip. The visible top frame is the offending statement; `continue_execution` lets libcob print its message and exit 1. `STOP RUN` never triggers it.
 - **Output**: `DISPLAY` lands in `get_output` (POSIX via CodeLLDB output events; Windows via adapter stdio).
 - **Function breakpoints are paragraph, section or PROGRAM-ID names**: `set_breakpoint {function: "1000-INIT"}` (qualify with `OF PROG` / `PROG:` when several programs have the name) binds a source breakpoint on the range's first statement; a hit reports it in `hitBreakpointIds`. **Logpoints** interpolate COBOL data references: `logMessage: "total={WS-TOTAL} idx={WS-IDX}"` (or `{/nat expr}`), logged to `get_output` without pausing.
-- **Not yet**: writing variables, a synthesised PERFORM stack. Same engine as C/C++, so its quirks apply (possible launch-time system stop → one `continue_execution`; three harmless `DW_AT_ranges … range extraction failed` LLDB errors per launch on Windows).
+- **The stack trace lists the active PERFORMs** as frames under the program (`HELLO: 0000-MAIN (PERFORM 1000-INIT)` at the PERFORM line); scopes and expressions on them read the program's storage.
+- **Not yet**: writing variables. Same engine as C/C++, so its quirks apply (possible launch-time system stop → one `continue_execution`; three harmless `DW_AT_ranges … range extraction failed` LLDB errors per launch on Windows).
 
 ## Troubleshooting
 
