@@ -46,6 +46,8 @@ export class SourceFileRegistry {
 
 export interface ProgramSegment {
   programId: string;
+  /** The id before the manifest upper-cases it. */
+  programIdAsWritten?: string;
   kind: 'program' | 'function';
   /** 1-based inclusive range of the segment within the `.c` file. */
   startLine: number;

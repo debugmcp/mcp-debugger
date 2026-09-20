@@ -102,6 +102,7 @@ export function parseGeneratedCText(texts: GeneratedCTexts, generator: Generator
   for (const segment of segments) {
     // cobc keeps the PROGRAM-ID as written in its `.c` marker but upper-cases it in the
     // listing; the manifest's contract is upper case (the C function names stay verbatim).
+    segment.programIdAsWritten = segment.programId;
     segment.programId = segment.programId.toUpperCase();
   }
 
@@ -126,6 +127,7 @@ export function parseGeneratedCText(texts: GeneratedCTexts, generator: Generator
 
     const program: CobolProgram = {
       programId: segment.programId,
+      programIdAsWritten: segment.programIdAsWritten ?? segment.programId,
       cFunction: segment.cFunction,
       cEntry: segment.cEntry,
       kind: segment.kind,

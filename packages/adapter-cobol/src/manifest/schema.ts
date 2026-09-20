@@ -179,8 +179,10 @@ export interface CobolSourceFile {
 }
 
 export interface CobolProgram {
-  /** PROGRAM-ID as written (upper case). */
+  /** PROGRAM-ID, upper-cased (the manifest's lookup contract). */
   programId: string;
+  /** PROGRAM-ID exactly as the source wrote it (case kept): the file name libcob resolves a dynamic CALL to. */
+  programIdAsWritten?: string;
   /** Body function holding every statement (`HELLO_`) — the frame name CodeLLDB reports at a stop. */
   cFunction: string;
   /** Entry function (`HELLO`). */

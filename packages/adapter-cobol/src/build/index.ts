@@ -15,6 +15,7 @@ export {
   cobcArguments,
   scanProgramId,
   isCobolSourceFile,
+  isCobolModuleFile,
   isCobolTextFile,
   moduleExtension,
   executableExtension,
