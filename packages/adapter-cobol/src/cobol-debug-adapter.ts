@@ -703,6 +703,8 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
       engineScopes: engineScopes === true,
       stdinFile: stdinFile ? path.resolve(baseDir, stdinFile) : undefined
     };
+    if (isCobolSourceFile(programPath)) shimOptions.entrySource = programPath;
+    else if (runner === 'cobcrun') shimOptions.entryProgram = String((launchConfig.args as string[])[0]);
     this.lastShimOptions = shimOptions;
     (launchConfig as Record<string, unknown>)[COBOL_PRIVATE_KEY] = shimOptions;
     return launchConfig;

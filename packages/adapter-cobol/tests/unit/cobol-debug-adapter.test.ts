@@ -355,7 +355,7 @@ describe('CobolDebugAdapter', () => {
         preRunCommands: [],
         postRunCommands: []
       });
-      expect(shimOptions(launch)).toEqual({ manifestDirs: [result.artifactDir], engineScopes: false, stdinFile: undefined });
+      expect(shimOptions(launch)).toEqual({ manifestDirs: [result.artifactDir], engineScopes: false, stdinFile: undefined, entrySource: path.join(tmp, 'hello.cob') });
       expect(launch.env).toEqual({ PATH: cobcLinux.binDir, COB_CONFIG_DIR: cobcLinux.configDir });
       expect(logger.info).toHaveBeenCalledWith(expect.stringMatching(/Compiled .*hello\.cob -> /));
       expect(adapter.consumeLastBuild()).toBe(result);
