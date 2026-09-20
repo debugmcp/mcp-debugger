@@ -192,7 +192,9 @@ describe('mcp-debugger self-debugging readiness', () => {
     await paused(outer!, outerId!);
     expect(completed).toBe(false);
     const stack = await call<ToolResult & { stackFrames: Frame[] }>(outer!, 'get_stack_trace', { sessionId: outerId });
-    expect(path.normalize(stack.stackFrames[0].file)).toBe(path.normalize(file));
+    // js-debug can lowercase the Windows drive letter. Compare the full path
+    // using the host platform's case rules, rather than normalized strings.
+    expect(path.relative(file, stack.stackFrames[0].file)).toBe('');
     expect(stack.stackFrames[0].line).toBe(line);
     expect((await call(outer!, 'evaluate_expression', {
       sessionId: outerId, frameId: stack.stackFrames[0].id, expression: "req.body.method === 'tools/list'"
@@ -230,7 +232,7 @@ describe('mcp-debugger self-debugging readiness', () => {
     })).result).toBe('false');
     await call(outer!, 'step_into', { sessionId: outerId });
     const stack = await call<ToolResult & { stackFrames: Frame[] }>(outer!, 'get_stack_trace', { sessionId: outerId });
-    expect(path.normalize(stack.stackFrames[0].file)).toBe(path.join(root, 'src/session/attach/attach-verification.ts'));
+    expect(path.relative(path.join(root, 'src/session/attach/attach-verification.ts'), stack.stackFrames[0].file)).toBe('');
     expect((await call(outer!, 'evaluate_expression', {
       sessionId: outerId, frameId: stack.stackFrames[0].id, expression: 'input.verifyTimeoutMs'
     })).result).toBe('10000');
