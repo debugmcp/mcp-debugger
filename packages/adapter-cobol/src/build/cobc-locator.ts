@@ -11,7 +11,7 @@
  * - The compiler shells out to `gcc`, and the debuggee needs `libcob-4.dll`,
  *   so `<prefix>/bin` must be on PATH for both the compile and the launch.
  */
-import { spawn } from 'child_process';
+import { spawnCobc } from './cobc-spawn.js';
 import { existsSync, realpathSync } from 'fs';
 import * as path from 'path';
 
@@ -77,10 +77,10 @@ export function cobcCandidatePaths(platform: NodeJS.Platform): string[] {
 }
 
 /** Default `--version` probe: first stdout line, null on spawn failure / non-zero exit. */
-export function probeCobcVersion(command: string): Promise<string | null> {
+export function probeCobcVersion(command: string, env: NodeJS.ProcessEnv = process.env): Promise<string | null> {
   return new Promise((resolve) => {
     try {
-      const child = spawn(command, ['--version'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+      const child = spawnCobc(command, ['--version'], { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
       let output = '';
       let settled = false;
       const finish = (value: string | null): void => {
@@ -164,7 +164,7 @@ export async function findCobc(options: CobcLocatorOptions = {}): Promise<CobcLo
   const env = options.env ?? process.env;
   const platform = options.platform ?? process.platform;
   const exists = options.exists ?? existsSync;
-  const probe = options.probeVersion ?? probeCobcVersion;
+  const probe = options.probeVersion ?? ((command: string) => probeCobcVersion(command, env));
 
   const candidates: string[] = [];
   const explicit = env[COBC_ENV_PATH_VAR];

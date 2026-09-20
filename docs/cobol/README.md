@@ -19,6 +19,11 @@ MCP Client → mcp-debugger → proxy worker → cobol-shim (Node) → CodeLLDB 
 
 ## Prerequisites
 
+`COBC_PATH` may point to a native compiler or a Windows `.cmd`/`.bat` wrapper.
+Discovery (`--version`) and compilation share the same command handling, including
+paths with spaces and quoted arguments. Wrappers must forward their arguments and
+the compiler's exit code.
+
 - **CodeLLDB** — vendored; nothing to install.
 - **GnuCOBOL 3.1.2 or 3.2** (`cobc`) for source launch and for COBOL-shaped variables. Verified: 3.2 on Windows (MSYS2 mingw64, gcc 15.2) and Ubuntu 26.04, 3.1.2 on Ubuntu 24.04. macOS/Homebrew was not measured in the spike.
   - **Ubuntu/Debian**: `sudo apt install gnucobol3`
