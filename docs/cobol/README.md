@@ -164,7 +164,7 @@ Unrecognised launch keys flow through to CodeLLDB, so the [C/C++ guide's table](
 
 | Usage | Storage (measured) | Shown as |
 |---|---|---|
-| DISPLAY numeric `S9(5)V99` | `30 30 31 32 33 34 75` for `-123.45` (trailing ASCII overpunch) | `-123.45` — exactly `scale` fraction digits, `-` only when negative, never `+` |
+| DISPLAY numeric `S9(5)V99` | `30 30 31 32 33 34 75` for `-123.45` (trailing ASCII overpunch) | `-123.45` — exactly `scale` fraction digits, `-` only when negative, never `+`. Leading blanks are zero positions; embedded/trailing blanks remain invalid. |
 | `COMP` / `BINARY` `S9(9)` | `f8 a4 32 eb` for `-123456789`: big-endian two's complement (`BINARY_SWAP`), default and `-std=ibm` alike | `-123456789` |
 | `COMP-5` `S9(9)` | `b1 68 de 3a` for `987654321`: native (little-endian) order | `987654321` |
 | `COMP-3` `S9(7)V99` | `00 12 34 56 7d` for `-12345.67`, `00 01 50 00 0c` for `+1500.00` | `-12345.67`; a non-packed byte pattern renders as `<invalid packed: 0x4142434445>` instead of failing the request |
