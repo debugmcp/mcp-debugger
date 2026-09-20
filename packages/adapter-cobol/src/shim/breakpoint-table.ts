@@ -41,6 +41,8 @@ export interface FunctionBreakpointRecord {
   description: string;
   /** The client's condition for it, if any. */
   condition?: string;
+  /** Something about the line the response should say (a condition not applied). */
+  note?: string;
   /** The engine's verdict on the line, once the file was sent. */
   verified?: boolean;
   message?: string;
@@ -63,6 +65,8 @@ export interface SentEntry {
   condition?: string;
   /** Some breakpoints on this line wanted a condition the line was not sent with. */
   conditionDropped: boolean;
+  /** A client entry's `hitCondition` was not sent: the line carries more than that one breakpoint. */
+  hitConditionDropped: boolean;
 }
 
 interface FileState {
@@ -132,7 +136,7 @@ export class BreakpointTable {
     file.user.forEach((bp, i) => {
       let entry = byLine.get(bp.line);
       if (!entry) {
-        entry = { line: bp.line, user: true, userIndices: [], logpoint: true, logMessages: [], fnIds: [], conditionDropped: false };
+        entry = { line: bp.line, user: true, userIndices: [], logpoint: true, logMessages: [], fnIds: [], conditionDropped: false, hitConditionDropped: false };
         byLine.set(bp.line, entry);
         sent.push(entry);
       }
@@ -150,7 +154,7 @@ export class BreakpointTable {
       }
       let entry = byLine.get(record.line);
       if (!entry) {
-        entry = { line: record.line, user: false, userIndices: [], logpoint: false, logMessages: [], fnIds: [], conditionDropped: false };
+        entry = { line: record.line, user: false, userIndices: [], logpoint: false, logMessages: [], fnIds: [], conditionDropped: false, hitConditionDropped: false };
         byLine.set(record.line, entry);
         sent.push(entry);
       }
@@ -180,6 +184,8 @@ export class BreakpointTable {
       const only = entry.userIndices.length === 1 && entry.fnIds.length === 0 ? file.user[entry.userIndices[0]] : undefined;
       if (only?.hitCondition) {
         bp.hitCondition = only.hitCondition;
+      } else if (entry.userIndices.some((i) => file.user[i].hitCondition)) {
+        entry.hitConditionDropped = true;
       }
       return bp;
     });
@@ -205,10 +211,15 @@ export class BreakpointTable {
       }
       for (const index of entry.userIndices) {
         clientView[index] = { ...answer };
-        const wantedCondition = (file.user[index].condition ?? '').trim();
-        if (entry.conditionDropped && wantedCondition.length > 0) {
-          const note = `condition not applied: line ${entry.line} is shared by breakpoints with different conditions`;
-          clientView[index].message = answer.message ? `${answer.message}; ${note}` : note;
+        const notes: string[] = [];
+        if (entry.conditionDropped && (file.user[index].condition ?? '').trim().length > 0) {
+          notes.push(`condition not applied: line ${entry.line} is shared by breakpoints with different conditions`);
+        }
+        if (entry.hitConditionDropped && file.user[index].hitCondition) {
+          notes.push(`hitCondition not applied: line ${entry.line} carries more than this breakpoint`);
+        }
+        if (notes.length > 0) {
+          clientView[index].message = [answer.message, ...notes].filter((part) => part).join('; ');
         }
       }
       if (typeof answer.id === 'number') {
@@ -220,6 +231,9 @@ export class BreakpointTable {
           record.verified = answer.verified;
           record.message = answer.message;
           record.engineId = answer.id;
+          record.note = entry.conditionDropped && record.condition
+            ? `condition not applied: line ${entry.line} is shared by breakpoints with different conditions`
+            : undefined;
           if (typeof answer.line === 'number') {
             record.line = answer.line;
           }

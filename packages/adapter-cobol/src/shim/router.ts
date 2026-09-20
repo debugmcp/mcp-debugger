@@ -27,7 +27,7 @@ import type { ShimLogger } from './logger.js';
 import type { FunctionBreakpointRecord } from './breakpoint-table.js';
 import { normalisePath } from './manifest-registry.js';
 import { hexAddress, MemoryReader } from './memory-reader.js';
-import { readPerformDepth, readReturnAddress } from './perform-frames.js';
+import { readPerformDepth, readReturnAddress, resolveAddressLocation } from './perform-frames.js';
 import { insertPerformFrames } from './perform-stack.js';
 import { resolveProcedureName } from './procedure-names.js';
 import { errorMessage, errorResponse, okResponse } from './protocol.js';
@@ -87,6 +87,12 @@ interface PerformPlan {
   finished: boolean;
   /** Performed-range returns waited for so far. */
   cycles: number;
+  /**
+   * The PERFORM statement that runs the range: cobc 3.2 attributes the loop control of
+   * `PERFORM … UNTIL`/`VARYING` to that statement's own line inside the loop, so a landing
+   * there while walking from a return is the next iteration's test, not the step's end.
+   */
+  performLine?: { path: string; line: number };
 }
 
 interface StepLoop {
@@ -487,6 +493,14 @@ export class Router {
         } else {
           layout.push({ kind: 'failed', message: resolved.message });
           this.logger.warn(`function breakpoint ${bp.name}: ${resolved.message}`);
+          // The policy pins function breakpoints as binding late (a module paragraph binds
+          // on load), which also mutes the core's launch warning: say it here instead.
+          this.client.send({
+            seq: 0,
+            type: 'event',
+            event: 'output',
+            body: { category: 'console', output: `COBOL function breakpoint "${bp.name}": ${resolved.message}\n` }
+          } as DebugProtocol.OutputEvent);
         }
       }
       this.state.userFunctionBps = engineNames;
@@ -499,10 +513,11 @@ export class Router {
           case 'cobol': {
             const { record } = slot;
             const bound = `${path.basename(record.path)}:${record.line}`;
+            const note = record.note ? `; ${record.note}` : '';
             return {
               id: record.id,
               verified: record.verified ?? false,
-              message: record.verified ? `${record.description} -> ${bound}` : `${record.description} -> ${bound}: ${record.message ?? 'not bound by the engine'}`,
+              message: record.verified ? `${record.description} -> ${bound}${note}` : `${record.description} -> ${bound}: ${record.message ?? 'not bound by the engine'}${note}`,
               line: record.line,
               source: { name: path.basename(record.path), path: record.path }
             };
@@ -528,8 +543,9 @@ export class Router {
       return;
     }
     const send = this.state.breakpoints.setUserBreakpoints(args.source, args.breakpoints ?? []);
+    // Under the file's one spelling (the engine keys its table on the raw path string).
     this.forward(
-      { ...request, arguments: { ...args, breakpoints: send.args.breakpoints } },
+      { ...request, arguments: { ...args, source: send.args.source, breakpoints: send.args.breakpoints } },
       {
         transform: (response) => {
           const body = response.body as DebugProtocol.SetBreakpointsResponse['body'] | undefined;
@@ -926,10 +942,36 @@ export class Router {
       if (armed === undefined) {
         return undefined;
       }
-      this.logger.info(`stepOut at ${origin.label} (PERFORM depth ${depth}): running to the range's return`);
-      return { kind: 'out', depth, origin, returning: false, finished: false, cycles: 0 };
+      const performLine = await this.performLineOf(origin, armed.address);
+      this.logger.info(`stepOut at ${origin.label} (PERFORM depth ${depth}): running to the range's return${performLine ? ` (PERFORM at line ${performLine.line})` : ''}`);
+      return { kind: 'out', depth, origin, returning: false, finished: false, cycles: 0, performLine };
     }
-    return { kind: 'over', depth, origin, returning: false, finished: false, cycles: 0 };
+    const performLine = origin.sourcePath !== undefined && origin.line !== undefined ? { path: origin.sourcePath, line: origin.line } : undefined;
+    return { kind: 'over', depth, origin, returning: false, finished: false, cycles: 0, performLine };
+  }
+
+  /** The COBOL statement a performed range returns to: the PERFORM that runs it, via the return address and the line map. */
+  private async performLineOf(origin: CachedFrame, returnAddress: bigint): Promise<{ path: string; line: number } | undefined> {
+    const entry = origin.program;
+    if (!entry) {
+      return undefined;
+    }
+    try {
+      const location = await resolveAddressLocation(this.engine, origin.id, returnAddress);
+      if (!location) {
+        return undefined;
+      }
+      if (this.state.registry.sourceIdByPath(entry, location.path) !== undefined) {
+        return location;
+      }
+      if (this.state.registry.isGeneratedSource(entry, location.path)) {
+        const mapped = this.state.registry.mapGeneratedLine(entry, location.line);
+        return mapped ? { path: mapped.source.path, line: mapped.line } : undefined;
+      }
+    } catch (error) {
+      this.logger.warn('PERFORM statement of the range unavailable', error);
+    }
+    return undefined;
   }
 
   /** Ids of every instruction breakpoint the shim armed: their `breakpoint` events are not the client's. */
@@ -941,7 +983,7 @@ export class Router {
    * every time (a recursive PERFORM pushes a different entry at the same depth). Undefined
    * when the address or the breakpoint is unavailable — the step then lands where it is.
    */
-  private async armReturnStop(frameId: number, depth: number): Promise<number | undefined> {
+  private async armReturnStop(frameId: number, depth: number): Promise<{ id: number; address: bigint } | undefined> {
     const address = await readReturnAddress(this.engine, frameId, depth);
     if (address === undefined) {
       this.logger.warn(`PERFORM return address of frame_stack[${depth}] unavailable`);
@@ -959,7 +1001,7 @@ export class Router {
       await this.disarmReturnStop();
       return undefined;
     }
-    return bp.id;
+    return { id: bp.id, address };
   }
 
   /** Drop the armed return stop; safe to call when none is. */
@@ -1050,12 +1092,14 @@ export class Router {
       this.swallowContinued += 1;
       response = await this.engine.request('continue', { threadId: body.threadId });
     } catch (error) {
-      this.swallowContinued -= 1;
+      // The engine may have continued (and emitted `continued`, consuming the credit) before
+      // the answer was lost: never below zero.
+      this.swallowContinued = Math.max(0, this.swallowContinued - 1);
       this.logger.warn('resume after a logpoint failed; the stop is shown', error);
       return false;
     }
     if (!response.success) {
-      this.swallowContinued -= 1;
+      this.swallowContinued = Math.max(0, this.swallowContinued - 1);
       this.logger.warn(`resume after a logpoint refused (${response.message ?? 'no message'}); the stop is shown`);
       return false;
     }
@@ -1122,10 +1166,17 @@ export class Router {
     }
   }
 
-  /** A stop as the client sees it: hit ids it knows, plus the function breakpoints on those lines. */
+  /**
+   * A stop as the client sees it: hit ids it knows, plus the function breakpoints on those
+   * lines, never the shim's own return stops (a stop that was only one of those is a step's).
+   */
   private presentHits(body: StoppedBody): void {
     if (body.hitBreakpointIds && body.hitBreakpointIds.length > 0) {
-      const translated = this.state.breakpoints.translateHitIds(body.hitBreakpointIds);
+      const foreign = body.hitBreakpointIds.filter((id) => !this.instructionBreakpointIds.has(id));
+      if (foreign.length === 0 && body.reason === 'breakpoint') {
+        body.reason = 'step';
+      }
+      const translated = this.state.breakpoints.translateHitIds(foreign);
       if (translated.length > 0) {
         body.hitBreakpointIds = translated;
       } else {
@@ -1155,9 +1206,16 @@ export class Router {
    */
   private stepLanded(loop: StepLoop, top: DebugProtocol.StackFrame, frames: DebugProtocol.StackFrame[]): boolean {
     if (isLandedCobolFrame(this.state, top)) {
+      const plan = loop.plan;
+      if (plan?.returning) {
+        // Walking from a performed range's return: the range's first statement is a landing
+        // even when the step started there (a PERFORM … TIMES re-entering it); the PERFORM
+        // statement's own line is not — on cobc 3.2 it is the loop's UNTIL/VARYING test.
+        const performLine = plan.performLine;
+        return !(performLine !== undefined && top.line === performLine.line && normalisePath(top.source?.path ?? '') === normalisePath(performLine.path));
+      }
       const origin = loop.origin;
       const sameStatement =
-        !loop.plan?.returning &&
         origin !== undefined &&
         top.line === origin.line &&
         top.name === origin.name &&
@@ -1238,9 +1296,12 @@ export class Router {
         const onThread = body.threadId === undefined || body.threadId === loop.threadId;
         const returnHit =
           plan !== undefined && onThread && hits.length > 0 && hits.every((id) => this.instructionBreakpointIds.has(id));
-        if (!returnHit && hits.length > 0 && onThread && this.state.breakpoints.isLogpointOnlyHit(hits)) {
-          // A logpoint on a stop of the walk: logged, then judged like any step stop (the
-          // engine reports a step that ends on a breakpoint site as a breakpoint hit).
+        const logged = !returnHit && onThread && hits.length > 0 && this.state.breakpoints.logMessagesOf(hits).length > 0;
+        const logpointOnly = logged && this.state.breakpoints.isLogpointOnlyHit(hits);
+        if (logged) {
+          // A logpoint on a stop of the walk: logged, then judged like any step stop when
+          // nothing on the line pauses (the engine reports a step that ends on a breakpoint
+          // site as a breakpoint hit); a line that also pauses logs and pauses.
           if (pausePending) {
             body.reason = 'pause';
             delete body.hitBreakpointIds;
@@ -1254,7 +1315,8 @@ export class Router {
             slot.resolve(null);
             continue;
           }
-        } else if (!returnHit) {
+        }
+        if (!returnHit && !logpointOnly) {
           const foreign = body.reason !== 'step' || hits.length > 0 || !onThread;
           if (foreign) {
             await surface(event, slot, body);
@@ -1269,6 +1331,8 @@ export class Router {
           plan.returning = true;
           plan.cycles += 1;
           walk = 0;
+          delete body.hitBreakpointIds;
+          body.reason = 'step';
           await this.disarmReturnStop();
           if (plan.cycles >= MAX_PERFORM_CYCLES) {
             body.description = PERFORM_BOUND_DESCRIPTION;

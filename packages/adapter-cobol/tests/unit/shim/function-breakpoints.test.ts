@@ -131,6 +131,9 @@ describe('cobol shim function breakpoints', () => {
     expect(bps[0]).toEqual({ id: 500, verified: true });
     expect(bps[1].verified).toBe(false);
     expect(bps[1].message).toMatch(/no paragraph, section or program named 9999-NOWHERE .*HELLO/);
+    // Said out loud too: the launch warning is muted by the bind-late pin.
+    const said = h.client.events('output').map((ev) => (ev.body as DebugProtocol.OutputEvent['body']).output);
+    expect(said.some((line) => line.startsWith('COBOL function breakpoint "9999-NOWHERE": no paragraph'))).toBe(true);
     expect(bps[2]).toMatchObject({ id: FUNCTION_BP_ID_BASE, verified: true, line: 32, source: { path: HELLO_COB } });
     expect(bps[2].message).toBe('HELLO (program entry) -> hello.cob:32');
     expect(bps[3]).toEqual({ id: 501, verified: false });
@@ -202,15 +205,15 @@ describe('cobol shim function breakpoints', () => {
     });
     const bps = (response.body as DebugProtocol.SetFunctionBreakpointsResponse['body']).breakpoints;
     expect(bps[0]).toMatchObject({ verified: true, line: 37 });
-    expect(bps[0].message).toBe('OUT_SEC (section of HELLO) -> hello.cob:37');
+    expect(bps[0].message).toBe('OUT_SEC (section of HELLO) -> hello.cob:37; condition not applied: line 37 is shared by breakpoints with different conditions');
     expect(bps[1].verified).toBe(false);
     expect(bps[1].message).toMatch(/100-EXIT exists more than once in HELLO \(section IN_SEC, section OUT_SEC\); qualify it \(100-EXIT OF IN_SEC\)/);
     expect(bps[2]).toMatchObject({ verified: true, line: 37 });
     expect(bps[3]).toEqual({ id: 500, verified: true });
-    // The section's condition travels with its line; the unconditional paragraph on the same line drops it (both said so).
+    // The section's condition and the unconditional paragraph share line 37: sent unconditional, the section says so.
     const last = sends[sends.length - 1];
     expect(last.breakpoints).toEqual([{ line: 37 }]);
-    expect(bps[0].message).toBe('OUT_SEC (section of HELLO) -> hello.cob:37');
+    expect(bps[0].message).toBe('OUT_SEC (section of HELLO) -> hello.cob:37; condition not applied: line 37 is shared by breakpoints with different conditions');
     expect(h.engine.received('setFunctionBreakpoints')[0].arguments).toEqual({ breakpoints: [{ name: 'HELLO_' }] });
   });
 

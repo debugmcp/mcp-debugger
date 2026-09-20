@@ -47,6 +47,20 @@ describe('BreakpointTable', () => {
     expect(view[0].message).toBeUndefined();
     const conflicting = table.functionBreakpoints().find((r) => r.name === '2000-COMPUTE')!;
     expect(conflicting.verified).toBe(true);
+    expect(conflicting.note).toBe('condition not applied: line 32 is shared by breakpoints with different conditions');
+    const kept = table.functionBreakpoints().find((r) => r.name === '1000-INIT')!;
+    expect(kept.note).toBeUndefined();
+  });
+
+  it('sends a hitCondition only when the line carries that one breakpoint, and says so otherwise', () => {
+    const table = new BreakpointTable();
+    let send = table.setUserBreakpoints({ path: FILE }, [{ line: 32, hitCondition: '>5' }]);
+    expect(send.args.breakpoints?.[0]).toEqual({ line: 32, hitCondition: '>5' });
+    send = table.setUserBreakpoints({ path: FILE }, [{ line: 32, hitCondition: '>5' }, { line: 32 }]);
+    expect(send.args.breakpoints?.[0]).toEqual({ line: 32 });
+    const view = table.recordResponse(send.key, [{ id: 1, line: 32, verified: true }]);
+    expect(view[0].message).toBe('hitCondition not applied: line 32 carries more than this breakpoint');
+    expect(view[1].message).toBeUndefined();
   });
 
   it('is one file under every spelling of its path, sent under the first spelling seen', () => {

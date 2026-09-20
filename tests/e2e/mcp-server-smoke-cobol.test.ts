@@ -48,16 +48,21 @@ const HELLO_PERFORM_REPORT_LINE = 34; // PERFORM 3000-REPORT
 const HELLO_STOP_RUN_LINE = 35;     // STOP RUN — the statement after PERFORM 3000-REPORT
 const REPORT_FIRST_LINE = 48;       // DISPLAY "COBOL_DEBUG_MARKER: total=" — first statement of 3000-REPORT
 // examples/cobol/perform.cob — the PERFORM shapes of the #764 review
-const PF_IF_PERFORM_LINE = 16;      // PERFORM 1000-YES (inside the IF's true branch)
-const PF_AFTER_IF_LINE = 20;        // DISPLAY "after-if count=" — what runs after the IF
-const PF_TIMES_LINE = 21;           // PERFORM 2000-BUMP 3 TIMES
-const PF_AFTER_TIMES_LINE = 22;     // DISPLAY "after-times times="
-const PF_OUTER_LINE = 23;           // PERFORM 3000-OUTER (nested)
-const PF_AFTER_OUTER_LINE = 24;     // DISPLAY "after-outer nested="
-const PF_MARKER_LINE = 26;          // DISPLAY "COBOL_DEBUG_MARKER: last=" — after PERFORM 4000-TAIL
-const PF_BUMP_BODY_LINE = 33;       // ADD 1 TO WS-TIMES (2000-BUMP's only statement, performed 3 TIMES)
-const PF_INNER_BODY_LINE = 38;      // ADD 10 TO WS-NESTED (3100-INNER, performed as 3000-OUTER's last statement)
-const PF_TAIL_PERFORM_LINE = 41;    // PERFORM 4100-TAIL-END — the last statement of the performed 4000-TAIL
+const PF_IF_PERFORM_LINE = 21;      // PERFORM 1000-YES (inside the IF's true branch)
+const PF_AFTER_IF_LINE = 25;        // DISPLAY "after-if count=" — what runs after the IF
+const PF_TIMES_LINE = 26;           // PERFORM 2000-BUMP 3 TIMES
+const PF_AFTER_TIMES_LINE = 27;     // DISPLAY "after-times times="
+const PF_OUTER_LINE = 28;           // PERFORM 3000-OUTER (nested)
+const PF_AFTER_OUTER_LINE = 29;     // DISPLAY "after-outer nested="
+const PF_UNTIL_LINE = 30;           // PERFORM 5000-UNTIL UNTIL WS-UNTIL > 2 (cobc 3.2 puts the test on this line)
+const PF_AFTER_UNTIL_LINE = 31;     // DISPLAY "after-until until="
+const PF_VARY_LINE = 32;            // PERFORM 6000-VARY VARYING … (out-of-line)
+const PF_AFTER_VARY_LINE = 33;      // DISPLAY "after-vary vary="
+const PF_MARKER_LINE = 35;          // DISPLAY "COBOL_DEBUG_MARKER: last=" — after PERFORM 4000-TAIL
+const PF_BUMP_BODY_LINE = 42;       // ADD 1 TO WS-TIMES (2000-BUMP's only statement, performed 3 TIMES)
+const PF_INNER_BODY_LINE = 47;      // ADD 10 TO WS-NESTED (3100-INNER, performed as 3000-OUTER's last statement)
+const PF_TAIL_PERFORM_LINE = 50;    // PERFORM 4100-TAIL-END — the last statement of the performed 4000-TAIL
+const PF_VARY_BODY_LINE = 56;       // ADD 1 TO WS-VARY (6000-VARY's only statement, performed VARYING)
 const CALL_LINE = 13;            // CALL "CALLSUB" USING WS-ARG-REC in calls/main.cob
 const SUB_PARAGRAPH_LINE = 14;   // 0000-SUB-MAIN. — the paragraph header carries two #line blocks
 const SUB_FIRST_STATEMENT = 15;  // ADD LK-A TO LK-B GIVING LS-WORK
@@ -721,11 +726,11 @@ describe.skipIf(SKIP_COBOL)('MCP Server COBOL Debugging Smoke Test @requires-cob
   );
 
   it(
-    'steps the PERFORM shapes the way the program runs: an IF branch, TIMES, nested, and a PERFORM that ends a performed paragraph',
+    'steps the PERFORM shapes the way the program runs: an IF branch, TIMES, nested, UNTIL, VARYING, and a PERFORM that ends a performed paragraph',
     async (ctx) => {
       const source = cobolSourcePath('perform');
       sessionId = (await call('create_debug_session', { language: 'cobol', name: 'cobol-smoke-perform-shapes' })).sessionId as string;
-      for (const line of [PF_IF_PERFORM_LINE, PF_BUMP_BODY_LINE, PF_INNER_BODY_LINE, PF_TAIL_PERFORM_LINE]) {
+      for (const line of [PF_IF_PERFORM_LINE, PF_BUMP_BODY_LINE, PF_INNER_BODY_LINE, PF_VARY_BODY_LINE, PF_TAIL_PERFORM_LINE]) {
         expect((await call('set_breakpoint', { file: source, line })).success).toBe(true);
       }
       await startOrSkip(ctx, { scriptPath: source, dapLaunchArgs: { stopOnEntry: false } }, 'perform-shapes');
@@ -774,7 +779,25 @@ describe.skipIf(SKIP_COBOL)('MCP Server COBOL Debugging Smoke Test @requires-cob
       expect(at.line, `step_out through two levels: ${at.name}@${at.line}`).toBe(PF_AFTER_OUTER_LINE);
       expect((await localsByName()).get('WS-NESTED')?.value).toBe('11');
 
-      // 6. A PERFORM that is the last statement of a performed paragraph: step_over runs it and,
+      // 6. PERFORM … UNTIL: one step_over runs every iteration (on cobc 3.2 the loop test is
+      //    attributed to the PERFORM's own line — the step must not end there).
+      await stepOverTo(PF_UNTIL_LINE, 'DISPLAY to the UNTIL PERFORM');
+      await stepOverTo(PF_AFTER_UNTIL_LINE, 'PERFORM … UNTIL');
+      expect((await localsByName()).get('WS-UNTIL')?.value).toBe('3');
+
+      // 7. An out-of-line PERFORM … VARYING: the breakpoint inside is hit on the first
+      //    iteration; step_out then runs the remaining iterations to the statement after it.
+      await stepOverTo(PF_VARY_LINE, 'DISPLAY to the VARYING PERFORM');
+      expect((await call('step_over', {})).success).toBe(true);
+      at = await landing();
+      expect(at.line, `breakpoint inside the VARYING-performed paragraph: ${at.name}@${at.line}`).toBe(PF_VARY_BODY_LINE);
+      expect((await call('remove_breakpoint', { file: source, line: PF_VARY_BODY_LINE })).success).toBe(true);
+      expect((await call('step_out', {})).success).toBe(true);
+      at = await landing();
+      expect(at.line, `step_out of a VARYING-performed paragraph: ${at.name}@${at.line}`).toBe(PF_AFTER_VARY_LINE);
+      expect((await localsByName()).get('WS-VARY')?.value).toBe('3');
+
+      // 8. A PERFORM that is the last statement of a performed paragraph: step_over runs it and,
       //    the paragraph being finished, lands on the performer's next statement.
       await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
       expect(await reachCobolLine(PF_TAIL_PERFORM_LINE, 'perform.cob')).toBe(true);

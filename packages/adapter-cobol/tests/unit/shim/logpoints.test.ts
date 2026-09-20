@@ -146,6 +146,28 @@ describe('cobol shim logpoints', () => {
     expect(frames[0].line).toBe(33);
   });
 
+  it('a logpoint sharing its line with a pausing breakpoint, met during a step, logs and pauses', async () => {
+    h = await startShim({ manifests: [helloManifest(ROOT)], engineSetup: (engine) => installMemory(engine, helloMemory()) });
+    await bringUp(h);
+    const harness = h;
+    let position = frame(1, 'HELLO_', HELLO_COB, 32);
+    harness.engine.on('setBreakpoints', (args: DebugProtocol.SetBreakpointsArguments) => ({
+      breakpoints: (args.breakpoints ?? []).map((bp) => ({ id: bp.line, line: bp.line, verified: true }))
+    }));
+    harness.engine.on('stackTrace', () => ({ stackFrames: [{ ...position, source: { ...position.source! } }], totalFrames: 1 }));
+    harness.engine.on('next', () => {
+      position = frame(1, 'HELLO_', HELLO_COB, 33);
+      setImmediate(() => harness.engine.emit('stopped', { reason: 'breakpoint', threadId: 1, allThreadsStopped: true, hitBreakpointIds: [33] }));
+      return {};
+    });
+    await harness.client.request('setBreakpoints', { source: { path: HELLO_COB }, breakpoints: [{ line: 33, logMessage: 'at 33' }, { line: 33 }] });
+    await harness.client.request('next', { threadId: 1 });
+    const output = await harness.client.nextEvent('output');
+    expect(output.body).toMatchObject({ output: 'at 33\n' });
+    const stopped = await harness.client.nextEvent('stopped');
+    expect(stopped.body).toMatchObject({ reason: 'breakpoint', hitBreakpointIds: [33] });
+  });
+
   it('a stop that answers a client pause on a logpoint line is a pause: not logged again, not resumed', async () => {
     h = await startShim({ manifests: [helloManifest(ROOT)], engineSetup: (engine) => installMemory(engine, helloMemory()) });
     await bringUp(h);

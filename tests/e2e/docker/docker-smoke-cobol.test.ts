@@ -23,12 +23,18 @@ const STOP_RUN_LINE = 35;         // STOP RUN — the statement after PERFORM 30
 const INIT_LOOP_BODY_LINE = 39;   // COMPUTE WS-AMOUNT(WS-IDX) = WS-IDX * 100, inside 1000-INIT's inline PERFORM
 const REPORT_FIRST_LINE = 48;     // DISPLAY "COBOL_DEBUG_MARKER: total=" — first statement of 3000-REPORT
 // examples/cobol/perform.cob — the PERFORM shapes of the #764 review
-const PF_IF_PERFORM_LINE = 16;    // PERFORM 1000-YES (inside the IF's true branch)
-const PF_AFTER_IF_LINE = 20;      // DISPLAY "after-if count=" — what runs after the IF
-const PF_TIMES_LINE = 21;         // PERFORM 2000-BUMP 3 TIMES
-const PF_AFTER_TIMES_LINE = 22;   // DISPLAY "after-times times="
-const PF_TAIL_PERFORM_LINE = 41;  // PERFORM 4100-TAIL-END — the last statement of the performed 4000-TAIL
-const PF_MARKER_LINE = 26;        // DISPLAY "COBOL_DEBUG_MARKER: last=" — the performer's next statement
+const PF_IF_PERFORM_LINE = 21;    // PERFORM 1000-YES (inside the IF's true branch)
+const PF_AFTER_IF_LINE = 25;      // DISPLAY "after-if count=" — what runs after the IF
+const PF_TIMES_LINE = 26;         // PERFORM 2000-BUMP 3 TIMES
+const PF_AFTER_TIMES_LINE = 27;   // DISPLAY "after-times times="
+const PF_OUTER_LINE = 28;         // PERFORM 3000-OUTER (nested)
+const PF_AFTER_OUTER_LINE = 29;   // DISPLAY "after-outer nested="
+const PF_UNTIL_LINE = 30;         // PERFORM 5000-UNTIL UNTIL WS-UNTIL > 2
+const PF_AFTER_UNTIL_LINE = 31;   // DISPLAY "after-until until="
+const PF_VARY_LINE = 32;          // PERFORM 6000-VARY VARYING … (out-of-line)
+const PF_AFTER_VARY_LINE = 33;    // DISPLAY "after-vary vary="
+const PF_TAIL_PERFORM_LINE = 50;  // PERFORM 4100-TAIL-END — the last statement of the performed 4000-TAIL
+const PF_MARKER_LINE = 35;        // DISPLAY "COBOL_DEBUG_MARKER: last=" — the performer's next statement
 
 describe.skipIf(SKIP_DOCKER)('Docker: COBOL Debugging Smoke Tests', () => {
   let mcpClient: Client | null = null;
@@ -332,7 +338,7 @@ describe.skipIf(SKIP_DOCKER)('Docker: COBOL Debugging Smoke Tests', () => {
     console.log('[Docker COBOL] ✅ M3 checks passed');
   }, 240000);
 
-  it('M3: steps the PERFORM shapes the way the program runs (an IF branch, TIMES, a PERFORM ending a performed paragraph)', async () => {
+  it('M3: steps the PERFORM shapes the way the program runs (an IF branch, TIMES, nested, UNTIL, VARYING, a PERFORM ending a performed paragraph)', async () => {
     const scriptPath = 'cobol/perform.cob';
     sessionId = parseSdkToolResult(await mcpClient!.callTool({
       name: 'create_debug_session',
@@ -375,12 +381,31 @@ describe.skipIf(SKIP_DOCKER)('Docker: COBOL Debugging Smoke Tests', () => {
     await stepOver();
     frame = await pausedFrame(PF_TIMES_LINE);
     expect(frame?.line, JSON.stringify(frame)).toBe(PF_AFTER_TIMES_LINE);
-    const locals = parseSdkToolResult(await mcpClient!.callTool({ name: 'get_local_variables', arguments: { sessionId } }));
-    const ws = new Map(((locals.variables ?? []) as Array<{ name: string; value: string }>).map(v => [v.name, v.value]));
-    expect(ws.get('WS-TIMES')).toBe('3');
+    const wsAt = async (): Promise<Map<string, string>> => {
+      const locals = parseSdkToolResult(await mcpClient!.callTool({ name: 'get_local_variables', arguments: { sessionId } }));
+      return new Map(((locals.variables ?? []) as Array<{ name: string; value: string }>).map(v => [v.name, v.value]));
+    };
+    expect((await wsAt()).get('WS-TIMES')).toBe('3');
+    // Nested, UNTIL and out-of-line VARYING PERFORMs: one step_over each, every iteration run.
+    const shapes: Array<[number, number, string?, string?]> = [
+      [PF_AFTER_TIMES_LINE, PF_OUTER_LINE],
+      [PF_OUTER_LINE, PF_AFTER_OUTER_LINE, 'WS-NESTED', '11'],
+      [PF_AFTER_OUTER_LINE, PF_UNTIL_LINE],
+      [PF_UNTIL_LINE, PF_AFTER_UNTIL_LINE, 'WS-UNTIL', '3'],
+      [PF_AFTER_UNTIL_LINE, PF_VARY_LINE],
+      [PF_VARY_LINE, PF_AFTER_VARY_LINE, 'WS-VARY', '3']
+    ];
+    for (const [from, to, item, value] of shapes) {
+      await stepOver();
+      frame = await pausedFrame(from);
+      expect(frame?.line, `step_over from ${from}: ${JSON.stringify(frame)}`).toBe(to);
+      if (item) {
+        expect((await wsAt()).get(item), item).toBe(value);
+      }
+    }
     // A PERFORM that is the last statement of a performed paragraph: step_over lands on the performer's next statement.
     expect(parseSdkToolResult(await mcpClient!.callTool({ name: 'continue_execution', arguments: { sessionId } })).success).not.toBe(false);
-    frame = await pausedFrame(PF_AFTER_TIMES_LINE);
+    frame = await pausedFrame(PF_AFTER_VARY_LINE);
     expect(frame?.line, JSON.stringify(frame)).toBe(PF_TAIL_PERFORM_LINE);
     await stepOver();
     frame = await pausedFrame(PF_TAIL_PERFORM_LINE);
