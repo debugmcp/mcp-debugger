@@ -969,11 +969,11 @@ describe('CobolDebugAdapter', () => {
   });
 
   describe('capabilities and features', () => {
-    it('advertises the single cobol_runtime_error filter, on by default, and no function breakpoints or logpoints', () => {
+    it('advertises the single cobol_runtime_error filter, on by default, and the shim-resolved function breakpoints and logpoints', () => {
       const caps = adapter.getCapabilities();
 
-      expect(caps.supportsFunctionBreakpoints).toBe(false);
-      expect(caps.supportsLogPoints).toBe(false);
+      expect(caps.supportsFunctionBreakpoints).toBe(true);
+      expect(caps.supportsLogPoints).toBe(true);
       expect(caps.exceptionBreakpointFilters).toEqual([
         expect.objectContaining({ filter: 'cobol_runtime_error', label: 'COBOL: runtime error', default: true })
       ]);

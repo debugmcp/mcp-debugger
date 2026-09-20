@@ -43,6 +43,9 @@ const RTERROR_LINE = 13;         // ADD WS-CELL(WS-IDX) TO WS-SUM with WS-IDX = 
 const S0C7_BP_LINE = 11;         // ADD WS-PACKED TO WS-RESULT — WS-PACKED REDEFINES "ABCDE"
 // examples/cobol/calls/sub.cob
 const SUB_BP_LINE = 16;          // MOVE LS-WORK TO LK-SUM — after ADD, before the MOVEs
+const HELLO_AFTER_INIT_LINE = 33;   // PERFORM 2000-COMPUTE — the statement after PERFORM 1000-INIT
+const HELLO_STOP_RUN_LINE = 35;     // STOP RUN — the statement after PERFORM 3000-REPORT
+const REPORT_FIRST_LINE = 48;       // DISPLAY "COBOL_DEBUG_MARKER: total=" — first statement of 3000-REPORT
 const CALL_LINE = 13;            // CALL "CALLSUB" USING WS-ARG-REC in calls/main.cob
 const SUB_PARAGRAPH_LINE = 14;   // 0000-SUB-MAIN. — the paragraph header carries two #line blocks
 const SUB_FIRST_STATEMENT = 15;  // ADD LK-A TO LK-B GIVING LS-WORK
@@ -650,6 +653,51 @@ describe.skipIf(SKIP_COBOL)('MCP Server COBOL Debugging Smoke Test @requires-cob
 
       await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
       expect((await pollState('stopped', 20000))?.exitCode).toBe(0);
+    },
+    120000
+  );
+
+  it(
+    'steps over a PERFORM to the next statement, binds a paragraph function breakpoint, and steps out of a performed paragraph to the statement after its PERFORM',
+    async (ctx) => {
+      const source = cobolSourcePath('hello');
+      sessionId = (await call('create_debug_session', { language: 'cobol', name: 'cobol-smoke-perform' })).sessionId as string;
+      expect((await call('set_breakpoint', { file: source, line: HELLO_BP_LINE })).success).toBe(true);
+      const fnBp = await call('set_breakpoint', { function: '3000-REPORT' });
+      expect(fnBp.success, JSON.stringify(fnBp)).toBe(true);
+
+      await startOrSkip(ctx, { scriptPath: source, dapLaunchArgs: { stopOnEntry: false } }, 'perform');
+      expect(await reachCobolLine(HELLO_BP_LINE, 'hello.cob')).toBe(true);
+
+      // step_over at `PERFORM 1000-INIT` lands on the next statement of 0000-MAIN, the
+      // paragraph having run (WS-IDX left at 6 by its PERFORM VARYING) — not on its first line.
+      expect((await call('step_over', {})).success).toBe(true);
+      expect(await pollState('paused', 15000)).toBeDefined();
+      let top = (await fetchStackTrace()).find(isCobolFrame)!;
+      expect(`${path.basename(top.file ?? '').toLowerCase()}:${top.line}`).toBe(`hello.cob:${HELLO_AFTER_INIT_LINE}`);
+      expect(top.name).toBe('HELLO: 0000-MAIN');
+      expect((await localsByName()).get('WS-IDX')?.value).toBe('6');
+
+      // The paragraph function breakpoint bound to 3000-REPORT's first statement, and is hit there.
+      const listed = (await call('list_breakpoints', {})).functionBreakpoints as Array<{ functionName?: string; verified?: boolean; boundLine?: number; line?: number; message?: string }>;
+      const fn = listed.find(b => b.functionName === '3000-REPORT');
+      expect(fn?.verified, JSON.stringify(listed)).toBe(true);
+      expect(fn?.boundLine ?? fn?.line, JSON.stringify(fn)).toBe(REPORT_FIRST_LINE);
+      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+      expect(await reachCobolLine(REPORT_FIRST_LINE, 'hello.cob')).toBe(true);
+      top = (await fetchStackTrace()).find(isCobolFrame)!;
+      expect(top.name).toBe('HELLO: 3000-REPORT');
+
+      // step_out of the performed paragraph returns to the statement after `PERFORM 3000-REPORT`.
+      expect((await call('step_out', {})).success).toBe(true);
+      expect(await pollState('paused', 15000)).toBeDefined();
+      top = (await fetchStackTrace()).find(isCobolFrame)!;
+      expect(`${path.basename(top.file ?? '').toLowerCase()}:${top.line}`).toBe(`hello.cob:${HELLO_STOP_RUN_LINE}`);
+      expect(top.name).toBe('HELLO: 0000-MAIN');
+
+      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+      expect((await pollState('stopped', 20000))?.exitCode).toBe(0);
+      expect(JSON.stringify(await call('get_output', {}))).toContain('COBOL_DEBUG_MARKER: total=');
     },
     120000
   );

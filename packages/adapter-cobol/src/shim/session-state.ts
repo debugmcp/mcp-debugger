@@ -17,6 +17,7 @@
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import type { CobolSection } from '../manifest/schema.js';
 import type { CobolShimSessionOptions } from '../shim-protocol.js';
+import { BreakpointTable } from './breakpoint-table.js';
 import type { ShimLogger } from './logger.js';
 import { ManifestRegistry, type ProgramEntry } from './manifest-registry.js';
 
@@ -90,8 +91,10 @@ export class SessionState {
   readonly deepFetched = new Set<number>();
   lastThreadId?: number;
   engineCapabilities?: DebugProtocol.Capabilities;
-  /** The user's own function breakpoints, replayed in every union with the runtime-error hook. */
+  /** The client's engine-bound (C symbol) function breakpoints, replayed in every union with the runtime-error hook. */
   userFunctionBps: DebugProtocol.FunctionBreakpoint[] = [];
+  /** Every source breakpoint the engine holds, per file: the client's lines plus the shim's own. */
+  readonly breakpoints = new BreakpointTable();
   runtimeErrorArmed = false;
   runtimeErrorBpId?: number;
   lastRuntimeError?: RuntimeErrorStop;

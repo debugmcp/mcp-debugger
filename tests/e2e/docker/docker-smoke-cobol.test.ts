@@ -16,6 +16,11 @@ const SKIP_DOCKER = process.env.SKIP_DOCKER_TESTS === 'true';
 
 // examples/cobol/hello.cob — ADD WS-SCALED TO WS-TOTAL (WS-TABLE/WS-TOTAL populated)
 const BP_LINE = 46;
+const PERFORM_INIT_LINE = 32;     // PERFORM 1000-INIT (first statement of 0000-MAIN)
+const AFTER_INIT_LINE = 33;       // PERFORM 2000-COMPUTE — the statement after it
+const STOP_RUN_LINE = 35;         // STOP RUN — the statement after PERFORM 3000-REPORT
+const INIT_LOOP_BODY_LINE = 39;   // COMPUTE WS-AMOUNT(WS-IDX) = WS-IDX * 100, inside 1000-INIT's inline PERFORM
+const REPORT_FIRST_LINE = 48;     // DISPLAY "COBOL_DEBUG_MARKER: total=" — first statement of 3000-REPORT
 
 describe.skipIf(SKIP_DOCKER)('Docker: COBOL Debugging Smoke Tests', () => {
   let mcpClient: Client | null = null;
@@ -226,6 +231,92 @@ describe.skipIf(SKIP_DOCKER)('Docker: COBOL Debugging Smoke Tests', () => {
     const entries = (outputResult.entries ?? []) as Array<{ output: string }>;
     expect(entries.some(e => e.output.includes('COBOL_DEBUG_MARKER: value=+000000042')), 'MOD1 ran and returned').toBe(true);
     console.log('[Docker COBOL] ✓ module breakpoint bound on load, MOD1 resolved by PROGRAM-ID');
+  }, 240000);
+
+  it('M3: steps over a PERFORM to the next statement, hits a paragraph function breakpoint, logs a logpoint, and steps out to the statement after the PERFORM', async () => {
+    const scriptPath = 'cobol/hello.cob';
+    sessionId = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: { language: 'cobol', name: 'docker-cobol-perform' }
+    })).sessionId as string;
+
+    expect(parseSdkToolResult(await mcpClient!.callTool({
+      name: 'set_breakpoint',
+      arguments: { sessionId, file: scriptPath, line: PERFORM_INIT_LINE }
+    })).success).toBe(true);
+    const fnBp = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'set_breakpoint',
+      arguments: { sessionId, function: '3000-REPORT' }
+    }));
+    expect(fnBp.success, JSON.stringify(fnBp)).toBe(true);
+    const logpoint = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'set_breakpoint',
+      arguments: { sessionId, file: scriptPath, line: INIT_LOOP_BODY_LINE, logMessage: 'LP idx={WS-IDX} amount={WS-AMOUNT(1)}' }
+    }));
+    expect(logpoint.success, JSON.stringify(logpoint)).toBe(true);
+
+    const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'start_debugging',
+      arguments: { sessionId, scriptPath, dapLaunchArgs: { stopOnEntry: false } }
+    }));
+    expect(startResponse.success).not.toBe(false);
+
+    /** The hello.cob frame once the session is paused on a line other than `notLine`. */
+    const pausedFrame = async (notLine?: number): Promise<{ line?: number; name?: string } | undefined> => {
+      for (let attempt = 0; attempt < 60; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 250));
+        const sessions = parseSdkToolResult(await mcpClient!.callTool({ name: 'list_debug_sessions', arguments: {} }));
+        const session = ((sessions.sessions ?? []) as Array<{ id: string; state?: string }>).find(s => s.id === sessionId);
+        if (session?.state !== 'paused') continue;
+        const stack = parseSdkToolResult(await mcpClient!.callTool({ name: 'get_stack_trace', arguments: { sessionId } }));
+        const frame = ((stack.stackFrames ?? []) as Array<{ name?: string; line?: number; file?: string }>).find(f => (f.file ?? '').endsWith('hello.cob'));
+        if (frame && frame.line !== notLine) return frame;
+      }
+      return undefined;
+    };
+
+    let frame = await pausedFrame();
+    expect(frame?.line, JSON.stringify(frame)).toBe(PERFORM_INIT_LINE);
+
+    // step_over runs 1000-INIT (its inline PERFORM logs five times) and stops on the next statement.
+    expect(parseSdkToolResult(await mcpClient!.callTool({ name: 'step_over', arguments: { sessionId } })).success).not.toBe(false);
+    frame = await pausedFrame(PERFORM_INIT_LINE);
+    expect(frame?.line, JSON.stringify(frame)).toBe(AFTER_INIT_LINE);
+    expect(frame?.name).toContain('0000-MAIN');
+    const locals = parseSdkToolResult(await mcpClient!.callTool({ name: 'get_local_variables', arguments: { sessionId } }));
+    const ws = new Map(((locals.variables ?? []) as Array<{ name: string; value: string }>).map(v => [v.name, v.value]));
+    expect(ws.get('WS-IDX')).toBe('6');
+    console.log('[Docker COBOL] ✓ step_over ran the performed paragraph');
+
+    // The paragraph function breakpoint is bound to 3000-REPORT's first statement and hit there.
+    const listed = parseSdkToolResult(await mcpClient!.callTool({ name: 'list_breakpoints', arguments: { sessionId } }));
+    const fn = ((listed.functionBreakpoints ?? []) as Array<{ functionName?: string; verified?: boolean; boundLine?: number }>).find(b => b.functionName === '3000-REPORT');
+    expect(fn?.verified, JSON.stringify(listed)).toBe(true);
+    expect(fn?.boundLine).toBe(REPORT_FIRST_LINE);
+    expect(parseSdkToolResult(await mcpClient!.callTool({ name: 'continue_execution', arguments: { sessionId } })).success).not.toBe(false);
+    frame = await pausedFrame(AFTER_INIT_LINE);
+    expect(frame?.line, JSON.stringify(frame)).toBe(REPORT_FIRST_LINE);
+    expect(frame?.name).toContain('3000-REPORT');
+    console.log('[Docker COBOL] ✓ paragraph function breakpoint hit');
+
+    // step_out of the performed paragraph returns to the statement after PERFORM 3000-REPORT.
+    expect(parseSdkToolResult(await mcpClient!.callTool({ name: 'step_out', arguments: { sessionId } })).success).not.toBe(false);
+    frame = await pausedFrame(REPORT_FIRST_LINE);
+    expect(frame?.line, JSON.stringify(frame)).toBe(STOP_RUN_LINE);
+    console.log('[Docker COBOL] ✓ step_out returned to the performer');
+
+    expect(parseSdkToolResult(await mcpClient!.callTool({ name: 'continue_execution', arguments: { sessionId } })).success).not.toBe(false);
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    const outputResult = parseSdkToolResult(await mcpClient!.callTool({ name: 'get_output', arguments: { sessionId } }));
+    const entries = (outputResult.entries ?? []) as Array<{ output: string }>;
+    const text = entries.map(e => e.output).join('');
+    expect(text, text.slice(0, 600)).toContain('LP idx=1 amount=0');
+    expect(text).toContain('LP idx=5 amount=100');
+    expect(text).toContain('COBOL_DEBUG_MARKER: total=+0001376.55');
+
+    expect(parseSdkToolResult(await mcpClient!.callTool({ name: 'close_debug_session', arguments: { sessionId } })).success).toBe(true);
+    sessionId = null;
+    console.log('[Docker COBOL] ✅ M3 checks passed');
   }, 240000);
 
   it('runs a module-only build under cobcrun (runner) and stops in the program once the loader loads it', async () => {

@@ -40,8 +40,8 @@ describe('cobol shim exceptions and launch', () => {
       { filter: 'cobol_runtime_error', label: 'COBOL: runtime error (libcob cob_runtime_error)', default: true }
     ]);
     expect(caps.supportsExceptionInfoRequest).toBe(true);
-    expect(caps.supportsFunctionBreakpoints).toBe(false);
-    expect(caps.supportsLogPoints).toBe(false);
+    expect(caps.supportsFunctionBreakpoints).toBe(true);
+    expect(caps.supportsLogPoints).toBe(true);
     expect(caps.supportsSetVariable).toBe(false);
   });
 

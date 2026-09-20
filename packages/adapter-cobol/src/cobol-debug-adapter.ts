@@ -1009,7 +1009,7 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
   getCapabilities(): AdapterCapabilities {
     return {
       supportsConfigurationDoneRequest: true,
-      supportsFunctionBreakpoints: false,
+      supportsFunctionBreakpoints: true,
       supportsConditionalBreakpoints: true,
       supportsHitConditionalBreakpoints: true,
       supportsEvaluateForHovers: true,
@@ -1037,7 +1037,7 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
       supportSuspendDebuggee: false,
       supportsDelayedStackTraceLoading: true,
       supportsLoadedSourcesRequest: true,
-      supportsLogPoints: false,
+      supportsLogPoints: true,
       supportsTerminateThreadsRequest: false,
       supportsSetExpression: false,
       supportsTerminateRequest: true,

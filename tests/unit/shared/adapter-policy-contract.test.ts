@@ -63,9 +63,9 @@ interface PinnedCapabilities {
  * The deviations worth knowing: `javascript -> 'js-debug'` is the one policy name that differs
  * from its language, and the only policy delivering function breakpoints over CDP; ruby is the
  * adapter pinning function breakpoints OFF for a debugger that advertises them (rdbg ignores the
- * request, #636) and the only one declining a default exception mode; cobol pins both function
- * breakpoints and logpoints OFF until its shim maps paragraph names and `{WS-NAME}` interpolation
- * (#759); ruby/java/dotnet/cobol are the four that reject logpoints; js and java are the two that
+ * request, #636) and the only one declining a default exception mode; cobol's function breakpoints
+ * are paragraph and section names its shim resolves, and its logpoints are `{WS-NAME}` messages the
+ * shim interpolates (#759); ruby/java/dotnet are the three that reject logpoints; js and java are the two that
  * bind function breakpoints late; js, python, go, cpp and cobol are the five whose debugger a
  * `noDebug` launch turns off (#710).
  */
@@ -160,8 +160,8 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
   },
   [DebugLanguage.COBOL]: {
     policyName: 'cobol',
-    supportsFunctionBreakpoints: false,
-    supportsLogPoints: false,
+    supportsFunctionBreakpoints: true,
+    supportsLogPoints: true,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: undefined,
     honoursNoDebug: true,

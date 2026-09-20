@@ -5,7 +5,7 @@
  * hot line does NOT pause execution; the interpolated message arrives as
  * output readable via get_output.
  *
- * Known-unsupported adapters (java, dotnet, ruby, cobol): set_breakpoint with
+ * Known-unsupported adapters (java, dotnet, ruby): set_breakpoint with
  * logMessage fails fast with a clear error. (Ruby joined this group in
  * issue #469 — rdbg does not advertise supportsLogPoints and silently
  * downgrades logpoints into pausing breakpoints.)
@@ -34,12 +34,14 @@ const EXPECTATION: Record<string, 'logs' | 'error' | 'warning'> = {
   java: 'error',
   dotnet: 'error',
   ruby: 'error',
-  cobol: 'error',  // supportsLogPoints is pinned false until the shim interpolates {WS-NAME} (#759 M3)
+  cobol: 'logs',   // the shim interpolates {WS-NAME} and resumes (#759 M3)
 };
 
 // Python's bpLine has a=1, b=2 in scope — assert real interpolation there.
 const LOG_MESSAGES: Record<string, { message: string; expectInOutput?: string }> = {
   python: { message: 'LP-MARK a={a}', expectInOutput: 'LP-MARK a=1' },
+  // hello.cob line 46 (ADD WS-SCALED TO WS-TOTAL): WS-TOTAL holds the table's sum, WS-SCALED its VALUE.
+  cobol: { message: 'LP-MARK total={WS-TOTAL} scaled={WS-SCALED}', expectInOutput: 'LP-MARK total=1500.00 scaled=-123.45' },
   default: { message: 'LP-MARK plain', expectInOutput: 'LP-MARK plain' },
 };
 
