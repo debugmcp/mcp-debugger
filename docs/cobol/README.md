@@ -157,6 +157,15 @@ Unrecognised launch keys flow through to CodeLLDB, so the [C/C++ guide's table](
 6. `get_output` for DISPLAY output; `restart_debugging` rebuilds only when the build key changed
 7. `close_debug_session`
 
+### Linux attach validation
+
+The required Docker lane runs both attach forms (`sources` and `manifestDirs`)
+against a sibling COBOL process, with `SYS_PTRACE` granted inside the test container.
+It checks COBOL scopes while the job sleeps inside libcob, advancing variables after
+continue/pause, and process survival after detach. Each case prepares its own binary
+and metadata; the supplied-manifest case removes the compiler before attaching.
+The host's Yama ptrace setting is not changed.
+
 ## What the variables look like
 
 - **Scopes**: `get_scopes` on a COBOL frame returns `WORKING-STORAGE`, `LOCAL-STORAGE` and `LINKAGE` (those present in the program), in that order; `get_local_variables` is their union in declaration order. FILE SECTION records were not measured in this milestone. On a frame that is not COBOL (paused inside libcob or `C$SLEEP`, the runtime-error hook, a C helper) the scopes are the nearest COBOL program's up the stack, named `WORKING-STORAGE of PAYROLL (0000-MAIN, 3 frames up)`, and `get_local_variables` reads them; only a stack with no COBOL program above the frame, or a program without a manifest, is empty with the note `No COBOL data division scopes at this frame (no COBOL program on the stack above it, or no symbol manifest for it).`, with `get_scopes` showing whatever CodeLLDB reports. `engineScopes: true` appends CodeLLDB's scopes to COBOL frames too.
