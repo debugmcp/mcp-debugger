@@ -184,6 +184,8 @@ export interface CobolSourceFile {
 }
 
 export interface CobolProgram {
+  /** Generated-C control-flow identities; source lines alone cannot distinguish repeated COPY expansions. */
+  controlFlow?: CobolControlFlow;
   /** PROGRAM-ID, upper-cased (the manifest's lookup contract). */
   programId: string;
   /** PROGRAM-ID exactly as the source wrote it (case kept): the file name libcob resolves a dynamic CALL to. */
@@ -223,6 +225,12 @@ export interface CobolProgram {
   entryLine?: number;
   /** Every `#line` row of the generated C in order — lets the shim map a generated-C stop back to COBOL. */
   lineMap: CobolLineMapEntry[];
+}
+
+export interface CobolControlFlow {
+  hasGoto: boolean;
+  ranges: Array<{ labelId: number; startCLine: number; endCLine: number }>;
+  performs: Array<{ callCLine: number; returnCLine: number; endCLine: number; startLabel: number; endLabel: number }>;
 }
 
 export interface CobolManifestDiagnostic {

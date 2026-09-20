@@ -29,6 +29,7 @@ import { normalisePath } from './manifest-registry.js';
 import { hexAddress, MemoryReader } from './memory-reader.js';
 import { readPerformDepth, readReturnAddress, resolveAddressLocation } from './perform-frames.js';
 import { insertPerformFrames } from './perform-stack.js';
+import { PerformEscapeWatch } from './perform-escape.js';
 import { resolveProcedureName } from './procedure-names.js';
 import { errorMessage, errorResponse, okResponse } from './protocol.js';
 import { engineFrameId, type CachedFrame, type SessionState } from './session-state.js';
@@ -78,6 +79,7 @@ type StepSignal =
  * shallower landing. Depths are compared within the origin's program only.
  */
 interface PerformPlan {
+  escapeWatch?: PerformEscapeWatch;
   kind: 'over' | 'out';
   /** PERFORM depth where the step started. */
   depth: number;
@@ -894,7 +896,7 @@ export class Router {
         this.serve(request, async () => {
           let response: DebugProtocol.Response;
           try {
-            response = await this.engine.request('continue', { threadId: loop.threadId });
+            response = await this.engine.request(loop.plan?.escapeWatch ? 'next' : 'continue', { threadId: loop.threadId });
           } catch (error) {
             response = errorResponse(request, errorMessage(error));
           }
@@ -934,9 +936,16 @@ export class Router {
     if (depth === undefined) {
       return undefined;
     }
+    const escapeWatch = origin.program.program.controlFlow?.hasGoto || origin.program.program.procedure.statements.some(statement => statement.verb === 'GO TO')
+      ? new PerformEscapeWatch(this.engine, origin.program) : undefined;
     if (loop.command === 'stepOut') {
       if (depth === 0) {
         return undefined;
+      }
+      if (escapeWatch) {
+        const address = await readReturnAddress(this.engine, origin.id, depth);
+        const performLine = address === undefined ? undefined : await this.performLineOf(origin, address);
+        return { kind: 'out', depth, origin, returning: false, finished: false, cycles: 0, performLine, escapeWatch };
       }
       const armed = await this.armReturnStop(origin.id, depth);
       if (armed === undefined) {
@@ -947,7 +956,7 @@ export class Router {
       return { kind: 'out', depth, origin, returning: false, finished: false, cycles: 0, performLine };
     }
     const performLine = origin.sourcePath !== undefined && origin.line !== undefined ? { path: origin.sourcePath, line: origin.line } : undefined;
-    return { kind: 'over', depth, origin, returning: false, finished: false, cycles: 0, performLine };
+    return { kind: 'over', depth, origin, returning: false, finished: false, cycles: 0, performLine, escapeWatch };
   }
 
   /** The COBOL statement a performed range returns to: the PERFORM that runs it, via the return address and the line map. */
@@ -1039,7 +1048,7 @@ export class Router {
     }
     plan.finished = true;
     await this.disarmReturnStop();
-    if (plan.kind === 'over' && plan.cycles === 0) {
+    if (body.description || (plan.kind === 'over' && plan.cycles === 0)) {
       return;
     }
     const origin = plan.origin;
@@ -1339,14 +1348,29 @@ export class Router {
             await surface(event, slot, body);
             return;
           }
-        } else if (!top || this.stepLanded(loop, top, raw)) {
+        } else if (!top || this.stepLanded(loop, top, raw) || (plan?.escapeWatch && isLandedCobolFrame(this.state, top))) {
           walk = 0;
           let done = true;
           const landed = top ? this.state.frame(top.id) : undefined;
           if (plan && top && landed?.isCobol && landed.program === plan.origin.program) {
             const depthNow = await this.safeDepth(top.id);
             if (depthNow !== undefined) {
-              if (plan.kind === 'over' && depthNow > plan.depth) {
+              plan.escapeWatch?.observeDepth(depthNow);
+              if (plan.escapeWatch && (plan.kind === 'over' ? depthNow > plan.depth : depthNow >= plan.depth)) {
+                const outcome = await plan.escapeWatch.inspect(top.id, depthNow, landed.remappedFromC?.line);
+                if (outcome === 'inside') {
+                  done = false;
+                } else if (outcome === 'escaped' && !landed.program!.program.procedure.statements.some(statement =>
+                  statement.line === top.line && this.state.registry.sourceById(landed.program!, statement.sourceFileId)?.path === top.source?.path)) {
+                  done = false; // Walk the destination paragraph header to its first executable statement.
+                } else {
+                  body.description = outcome === 'escaped'
+                    ? `GO TO left the active PERFORM range; stopped at ${path.basename(top.source?.path ?? '?')}:${top.line}`
+                    : 'PERFORM control-flow metadata or PC location unavailable; stopped at the next COBOL statement';
+                }
+              } else if (plan.escapeWatch && !this.stepLanded(loop, top, raw)) {
+                done = false;
+              } else if (plan.kind === 'over' && depthNow > plan.depth) {
                 // The statement entered a performed range: run it to its return.
                 const armed = await this.armReturnStop(top.id, plan.depth + 1);
                 if (armed !== undefined) {
@@ -1374,7 +1398,7 @@ export class Router {
             return;
           }
           plan!.returning = false;
-          continuation = 'continue';
+          continuation = plan!.escapeWatch ? 'next' : 'continue';
         } else {
           walk += 1;
           if (walk >= MAX_STEP_ITERATIONS) {

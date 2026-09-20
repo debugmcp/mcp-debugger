@@ -37,6 +37,7 @@ function helloWithStatements(): CobolManifest {
 }
 
 interface Stop {
+  cLine?: number;
   frame: DebugProtocol.StackFrame;
   /** The PERFORM depth the engine reports from this stop on. */
   depth?: number;
@@ -44,6 +45,8 @@ interface Stop {
 }
 
 interface Rig {
+  cLine?: number;
+  controlReturns?: Record<number, number>;
   position: DebugProtocol.StackFrame;
   depth: number;
   /** Stops each `next`/`stepIn`/`stepOut` advances to; the last one repeats. */
@@ -81,10 +84,16 @@ function rigEngine(engine: FakeEngine, start: DebugProtocol.StackFrame, depth: n
     if (args.expression === DEPTH_EXPRESSION) {
       return { result: String(rig.depth), variablesReference: 0 };
     }
+    const through = /frame_stack\[(\d+)\]\.perform_through/.exec(args.expression);
+    if (through) return { result: String(Number(through[1]) + 4), variablesReference: 0 };
     const read = /frame_stack\[(\d+)\]\.return_address_ptr/.exec(args.expression);
     if (read) {
       rig.returnAddressReads.push(read[1]);
-      return { result: RETURN_ADDRESS.toString(), variablesReference: 0 };
+      return { result: (RETURN_ADDRESS + BigInt(rig.controlReturns ? Number(read[1]) : 0)).toString(), variablesReference: 0 };
+    }
+    if (args.expression.includes('GetNumLineEntries')) {
+      const address = /ResolveLoadAddress\((\d+)\)/.exec(args.expression);
+      return { result: String(address ? rig.controlReturns?.[Number(BigInt(address[1]) - RETURN_ADDRESS)] ?? 0 : rig.cLine ?? 0), variablesReference: 0 };
     }
     if (args.expression.startsWith('/py ') && args.expression.includes('ResolveLoadAddress')) {
       // The return address sits in the generated C of the PERFORM at hello.cob:32 (line map row 127 -> 32).
@@ -99,6 +108,7 @@ function rigEngine(engine: FakeEngine, start: DebugProtocol.StackFrame, depth: n
       throw new Error(`no scripted stop for ${command}`);
     }
     rig.position = stop.frame;
+    rig.cLine = stop.cLine;
     if (stop.depth !== undefined) {
       rig.depth = stop.depth;
     }
@@ -367,4 +377,95 @@ describe('cobol shim PERFORM-aware stepping', () => {
     expect(rig.commands).toEqual(['next', 'next']);
     expect(rig.instructionSends).toHaveLength(0);
   });
+
+  it.each(['next', 'stepOut'])('%s stops at a GO TO destination without waiting for a return that will never run', async command => {
+    const manifest = helloWithStatements();
+    manifest.programs[0].procedure.statements.push({ sourceFileId: 1, line: 41, verb: 'MOVE' });
+    manifest.programs[0].controlFlow = {
+      hasGoto: true,
+      ranges: [{ labelId: 5, startCLine: 200, endCLine: 249 }],
+      performs: [{ callCLine: 127, returnCLine: 140, endCLine: 149, startLabel: 5, endLabel: 5 }]
+    };
+    let rig!: Rig;
+    h = await startShim({ manifests: [manifest], engineSetup: engine => {
+      rig = rigEngine(engine, frame(1, 'HELLO_', HELLO_COB, command === 'next' ? 32 : 37), command === 'next' ? 0 : 1);
+      rig.controlReturns = { 1: 141 };
+    } });
+    await bringUp(h);
+    rig.nextStops.push(
+      { frame: frame(1, 'HELLO_', HELLO_COB, 37), depth: 1, cLine: 210 },
+      { frame: frame(1, 'HELLO_', HELLO_COB, 38), depth: 1, cLine: 220 },
+      { frame: frame(1, 'HELLO_', HELLO_COB, 41), depth: 1, cLine: 310 }
+    );
+    await h.client.request(command, { threadId: 1 });
+    const stopped = await h.client.nextEvent('stopped');
+    expect(stopped.body).toMatchObject({ reason: 'step', description: 'GO TO left the active PERFORM range; stopped at hello.cob:41' });
+    expect(rig.commands).toEqual(['next', 'next', 'next']);
+    expect(rig.instructionSends).toEqual([]);
+  });
+
+  it('distinguishes the destination from a repeated COPY source line, even when stepOut began on that same line', async () => {
+    const manifest = helloWithStatements();
+    manifest.programs[0].controlFlow = {
+      hasGoto: true, ranges: [{ labelId: 5, startCLine: 200, endCLine: 249 }],
+      performs: [{ callCLine: 127, returnCLine: 140, endCLine: 149, startLabel: 5, endLabel: 5 }]
+    };
+    let rig!: Rig;
+    h = await startShim({ manifests: [manifest], engineSetup: engine => {
+      rig = rigEngine(engine, frame(1, 'HELLO_', HELLO_COB, 37), 1);
+      rig.controlReturns = { 1: 141 };
+    } });
+    await bringUp(h);
+    rig.nextStops.push(
+      { frame: frame(1, 'HELLO_', HELLO_COB, 37), depth: 1, cLine: 210 },
+      { frame: frame(1, 'HELLO_', HELLO_COB, 37), depth: 1, cLine: 310 }
+    );
+    await h.client.request('stepOut', { threadId: 1 });
+    expect((await h.client.nextEvent('stopped')).body).toMatchObject({ reason: 'step', description: expect.stringContaining('GO TO left') });
+    expect(rig.commands).toEqual(['next', 'next']);
+  });
+
+  it('keeps a nested PERFORM outside the outer range running and recognizes a normal return before the depth pop', async () => {
+    const manifest = helloWithStatements();
+    manifest.programs[0].procedure.statements.push({ sourceFileId: 1, line: 41, verb: 'MOVE' });
+    manifest.programs[0].controlFlow = {
+      hasGoto: true, ranges: [{ labelId: 5, startCLine: 200, endCLine: 249 }, { labelId: 6, startCLine: 300, endCLine: 349 }],
+      performs: [
+        { callCLine: 127, returnCLine: 140, endCLine: 149, startLabel: 5, endLabel: 5 },
+        { callCLine: 220, returnCLine: 230, endCLine: 235, startLabel: 6, endLabel: 6 }
+      ]
+    };
+    let rig!: Rig;
+    h = await startShim({ manifests: [manifest], engineSetup: engine => {
+      rig = rigEngine(engine, frame(1, 'HELLO_', HELLO_COB, 32), 0);
+      rig.controlReturns = { 1: 141, 2: 231 };
+    } });
+    await bringUp(h);
+    rig.nextStops.push(
+      { frame: frame(1, 'HELLO_', HELLO_COB, 37), depth: 1, cLine: 210 },
+      { frame: frame(1, 'HELLO_', HELLO_COB, 38), depth: 2, cLine: 222 },
+      { frame: frame(1, 'HELLO_', HELLO_COB, 41), depth: 2, cLine: 310 },
+      { frame: frame(1, 'HELLO_', HELLO_COB, 38), depth: 2, cLine: 231 },
+      { frame: frame(1, 'HELLO_', HELLO_COB, 39), depth: 1, cLine: 240 },
+      { frame: frame(1, 'HELLO_', HELLO_COB, 33), depth: 0, cLine: 151 }
+    );
+    await h.client.request('next', { threadId: 1 });
+    expect((await h.client.nextEvent('stopped')).body?.reason).toBe('step');
+    expect(rig.position.line).toBe(33);
+    expect(rig.commands).toEqual(Array(6).fill('next'));
+  });
+
+  it('surfaces an honest single-statement fallback for old GO TO manifests without range identities', async () => {
+    const manifest = helloWithStatements();
+    manifest.programs[0].procedure.statements.push({ sourceFileId: 1, line: 39, verb: 'GO TO' });
+    let rig!: Rig;
+    h = await startShim({ manifests: [manifest], engineSetup: engine => { rig = rigEngine(engine, frame(1, 'HELLO_', HELLO_COB, 32), 0); } });
+    await bringUp(h);
+    rig.nextStops.push({ frame: frame(1, 'HELLO_', HELLO_COB, 37), depth: 1 });
+    await h.client.request('next', { threadId: 1 });
+    expect((await h.client.nextEvent('stopped')).body?.description).toContain('metadata or PC location unavailable');
+    expect(rig.commands).toEqual(['next']);
+    expect(rig.instructionSends).toEqual([]);
+  });
+
 });
