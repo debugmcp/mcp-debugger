@@ -17,6 +17,7 @@
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import type { CobolSection } from '../manifest/schema.js';
 import type { CobolShimSessionOptions } from '../shim-protocol.js';
+import { BreakpointTable } from './breakpoint-table.js';
 import type { ShimLogger } from './logger.js';
 import { ManifestRegistry, type ProgramEntry } from './manifest-registry.js';
 
@@ -46,7 +47,20 @@ export interface CachedFrame {
   line?: number;
   /** Set when the engine reported a generated-C location that the line map translated. */
   remappedFromC?: { path: string; line: number };
+  /**
+   * A synthesised PERFORM frame (see perform-stack.ts): the engine frame its storage,
+   * scopes and expressions are read in. Unset on real frames.
+   */
+  evalFrameId?: number;
 }
+
+/** The engine frame a cached frame's storage is read in: itself, or the real frame behind a synthesised one. */
+export function engineFrameId(frame: CachedFrame): number {
+  return frame.evalFrameId ?? frame.id;
+}
+
+/** Synthesised frame ids live above CodeLLDB's (thread-indexed thousands) and below the variables band. */
+export const SHIM_FRAME_ID_BASE = 1 << 28;
 
 export type ShimRef =
   | { gen: number; kind: 'section'; frameId: number; program: ProgramEntry; section: CobolSection }
@@ -90,8 +104,10 @@ export class SessionState {
   readonly deepFetched = new Set<number>();
   lastThreadId?: number;
   engineCapabilities?: DebugProtocol.Capabilities;
-  /** The user's own function breakpoints, replayed in every union with the runtime-error hook. */
+  /** The client's engine-bound (C symbol) function breakpoints, replayed in every union with the runtime-error hook. */
   userFunctionBps: DebugProtocol.FunctionBreakpoint[] = [];
+  /** Every source breakpoint the engine holds, per file: the client's lines plus the shim's own. */
+  readonly breakpoints = new BreakpointTable();
   runtimeErrorArmed = false;
   runtimeErrorBpId?: number;
   lastRuntimeError?: RuntimeErrorStop;
@@ -99,6 +115,7 @@ export class SessionState {
   private readonly frames = new Map<number, CachedFrame>();
   private readonly refs = new Map<number, ShimRef>();
   private nextRef = SHIM_REF_BASE;
+  private nextFrameId = SHIM_FRAME_ID_BASE;
   /** Per-generation memoisation of address evaluations and record reads (values are promises: concurrent readers share one engine round trip). */
   private readonly memo = new Map<string, Promise<unknown>>();
 
@@ -137,7 +154,13 @@ export class SessionState {
     this.memo.clear();
     this.deepFetched.clear();
     this.nextRef = SHIM_REF_BASE;
+    this.nextFrameId = SHIM_FRAME_ID_BASE;
     this.logger.debug(`generation ${this.generation} (${reason})`);
+  }
+
+  /** A frame id for a synthesised frame of this generation. */
+  allocFrameId(): number {
+    return this.nextFrameId++;
   }
 
   cacheFrame(frame: CachedFrame): void {

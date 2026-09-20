@@ -46,8 +46,8 @@ describe('CobolAdapterPolicy identity and pins', () => {
 
   it('pins the measured CodeLLDB noDebug behaviour and the M3-deferred breakpoint kinds', () => {
     expect(CobolAdapterPolicy.honoursNoDebug).toBe(true);
-    expect(CobolAdapterPolicy.supportsLogPoints).toBe(false);
-    expect(CobolAdapterPolicy.supportsFunctionBreakpoints).toBe(false);
+    expect(CobolAdapterPolicy.supportsLogPoints).toBe(true);
+    expect(CobolAdapterPolicy.supportsFunctionBreakpoints).toBe(true);
   });
 
   it('names the four data-division scopes as the local scopes, as a fresh array each call', () => {

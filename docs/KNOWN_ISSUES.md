@@ -47,14 +47,14 @@ Python, Ruby, JavaScript, and Java can attach to a remote target over host/port 
 through a port mapping, `kubectl port-forward`, or an SSH tunnel — these debug sockets are
 unauthenticated).
 
-## Logpoints are rejected by Java, .NET, Ruby, and COBOL
+## Logpoints are rejected by Java, .NET, and Ruby
 
 `set_breakpoint` with `logMessage` is supported by the Python, JavaScript, Go, Rust,
-C/C++, and mock adapters. On Java, .NET, Ruby, and COBOL it is a hard error
+C/C++, COBOL, and mock adapters. On Java, .NET, and Ruby it is a hard error
 (`Logpoints (logMessage) not supported by the <language> adapter`) rather than a
 silent downgrade: rdbg, for example, accepts `logMessage` and then ignores it, turning
 the logpoint into a *pausing* breakpoint — the opposite of what a logpoint promises
-(issue #469); the COBOL shim does not interpolate `{WS-NAME}` yet (issue #759). On those four languages there is no non-pausing substitute: use a
+(issue #469). On those three languages there is no non-pausing substitute: use a
 conditional breakpoint and accept the stop (on Java, `suspendPolicy: "thread"` at least
 limits the stop to one thread), or add the logging to the program itself.
 

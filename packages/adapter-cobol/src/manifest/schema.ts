@@ -146,6 +146,11 @@ export interface CobolProcRange {
   endLine: number;
   /** C label emitted for the range when the compiler produced one (3.2+: `PARAGRAPH_<NAME>_l_<id>`). */
   cLabel?: string;
+  /**
+   * The id of the `l_<id>` label cobc jumps to for this range (`goto l_5`), on both 3.1.2
+   * and 3.2. A PERFORM frame's `perform_through` names its THRU-end range by this id.
+   */
+  labelId?: number;
 }
 
 /** A PROCEDURE DIVISION statement, from cobc's `/* Line: N : VERB : file *\/` comments. */
@@ -210,6 +215,12 @@ export interface CobolProgram {
    * not recoverable — cobc's `Entry` comment names line 30 in 3.1.2 and 31 in 3.2.
    */
   procedureDivisionLine?: number;
+  /**
+   * The line cobc's `Entry` comment names: the first procedural code that runs when the
+   * program is entered, after any DECLARATIVES (whose `USE` handlers precede it in the
+   * source). A PROGRAM-ID breakpoint binds at or after it.
+   */
+  entryLine?: number;
   /** Every `#line` row of the generated C in order — lets the shim map a generated-C stop back to COBOL. */
   lineMap: CobolLineMapEntry[];
 }

@@ -140,6 +140,9 @@ export function parseGeneratedCText(texts: GeneratedCTexts, generator: Generator
       procedure: { sections: procedure.sections, paragraphs: procedure.paragraphs, statements: procedure.statements },
       lineMap: procedure.lineMap
     };
+    if (procedure.entryLine !== undefined) {
+      program.entryLine = procedure.entryLine;
+    }
     if (procedure.procedureDivisionLine !== undefined) {
       program.procedureDivisionLine = procedure.procedureDivisionLine;
     }
