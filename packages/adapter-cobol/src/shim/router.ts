@@ -30,6 +30,7 @@ import { hexAddress, MemoryReader } from './memory-reader.js';
 import { readPerformDepth, readReturnAddress, resolveAddressLocation } from './perform-frames.js';
 import { insertPerformFrames } from './perform-stack.js';
 import { resolveProcedureName } from './procedure-names.js';
+import { readRuntimeMessage } from './runtime-message.js';
 import { errorMessage, errorResponse, okResponse } from './protocol.js';
 import { engineFrameId, type CachedFrame, type SessionState } from './session-state.js';
 
@@ -109,14 +110,6 @@ interface StepLoop {
 }
 
 type StoppedBody = DebugProtocol.StoppedEvent['body'];
-
-/** The register that carries libcob's first argument (the format string) at a `cob_runtime_error` stop. */
-export function formatStringRegister(env: RouterEnv): string {
-  if (env.arch === 'arm64') {
-    return '$x0';
-  }
-  return env.platform === 'win32' ? '$rcx' : '$rdi';
-}
 
 /** How deep the shim looks for the nearest COBOL frame above a libcob/C frame. */
 const WALK_UP_STACK_LEVELS = 64;
@@ -1547,7 +1540,7 @@ export class Router {
 
   /**
    * A stop on the injected `cob_runtime_error` breakpoint is reported as an exception with
-   * libcob's format string as its text, read from the first-argument register in frame 0.
+   * libcob's formatted message as its text, read from target ABI arguments in frame 0.
    * When the breakpoint id is unknown (the engine answered without one), the frame name
    * decides.
    */
@@ -1572,7 +1565,8 @@ export class Router {
     }
     let text: string | undefined;
     if (top) {
-      text = await this.readFormatString(top.id);
+      const result = await readRuntimeMessage(this.engine, top.id);
+      text = result.message ?? `[unformatted libcob message: ${result.unavailable ?? 'arguments unavailable'}] ${result.format ?? '(format unavailable)'}`;
     }
     body.reason = 'exception';
     body.description = 'COBOL runtime error';
@@ -1591,19 +1585,4 @@ export class Router {
     this.logger.info(`runtime error stop: ${text ?? '(format string unavailable)'}`);
   }
 
-  private async readFormatString(frameId: number): Promise<string | undefined> {
-    const expression = `/nat (const char*)${formatStringRegister(this.env)}`;
-    try {
-      const response = await this.engine.request('evaluate', { expression, frameId, context: 'variables' });
-      const result = (response.body as { result?: string } | undefined)?.result;
-      if (!response.success || !result) {
-        return undefined;
-      }
-      const quoted = /"((?:[^"\\]|\\.)*)"/.exec(result);
-      return quoted ? quoted[1] : result;
-    } catch (error) {
-      this.logger.debug('format string read failed', error);
-      return undefined;
-    }
-  }
 }

@@ -345,7 +345,7 @@ describe.skipIf(SKIP_COBOL)('MCP Server COBOL Debugging Smoke Test @requires-cob
       const paused = await pollState('paused', 30000);
       expect(paused, 'session should pause at the runtime error').toBeDefined();
       expect(paused!.lastStop?.reason).toBe('exception');
-      expect(`${paused!.lastStop?.description ?? ''} ${paused!.lastStop?.text ?? ''}`).toMatch(/runtime error|out of bounds/i);
+      expect(paused!.lastStop?.text).toBe("subscript of 'WS-CELL' out of bounds: 5");
 
       // The generated-C frame is mapped back to the offending COBOL statement.
       const top = (await fetchStackTrace()).find(isCobolFrame)!;
