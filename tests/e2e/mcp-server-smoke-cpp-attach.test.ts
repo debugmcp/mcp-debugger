@@ -154,6 +154,11 @@ describe.skipIf(SKIP_CPP)('MCP Server C/C++ Attach Smoke Test @requires-cpp', ()
       })) as { success?: boolean; stackFrames?: Array<{ name?: string }> };
       expect(stackResponse.success).toBe(true);
       expect((stackResponse.stackFrames ?? []).length).toBeGreaterThan(0);
+      // The anchored thread is the program's, not the break-in thread Windows injects
+      // (CodeLLDB reports the attach stop there; review of #761): the loop's frame in
+      // pause_test.cpp is on the default stack.
+      const stackFiles = (stackResponse.stackFrames as Array<{ file?: string }>).map(f => f.file ?? '');
+      expect(stackFiles.some(f => f.endsWith('pause_test.cpp')), `expected pause_test.cpp in ${JSON.stringify(stackFiles)}`).toBe(true);
 
       const detachResponse = parseSdkToolResult(await mcpClient!.callTool({
         name: 'detach_from_process',

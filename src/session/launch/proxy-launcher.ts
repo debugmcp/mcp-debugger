@@ -362,14 +362,19 @@ export class ProxyLauncher {
     // both buckets with an edit-distance suggestion when a list is declared.
     const describeKey = (key: string): string => {
       const suggestion = supportedKeys ? didYouMean(key, supportedKeys) : null;
-      return suggestion ? `${key} (did you mean ${suggestion}?)` : key;
+      return suggestion && suggestion !== key ? `${key} (did you mean ${suggestion}?)` : key;
     };
+    // Keys the adapter declares it consumes (a manifest regeneration, a shim side
+    // channel) leave the transform's output on purpose: used, not dropped.
+    const consumedKeys = adapter.consumedAttachKeys ?? [];
 
     const dropped: string[] = [];
     const forwardedUnknown: string[] = [];
     for (const key of inputs.adapterExtraKeys) {
       if (!(key in transformedLaunchConfig)) {
-        dropped.push(describeKey(key));
+        if (!consumedKeys.includes(key)) {
+          dropped.push(describeKey(key));
+        }
       } else if (supportedKeys && !supportedKeys.includes(key)) {
         forwardedUnknown.push(describeKey(key));
       }

@@ -70,6 +70,8 @@ export interface FakeAttachSupportOptions {
   transform?: Impl<'transformAttachConfig'>;
   /** Value exposed as the readonly `supportedAttachKeys` list. */
   supportedAttachKeys?: readonly string[];
+  /** Value exposed as the readonly `consumedAttachKeys` list (keys the transform uses without forwarding). */
+  consumedAttachKeys?: readonly string[];
 }
 
 export class FakeDebugAdapter extends EventEmitter implements IDebugAdapter {
@@ -175,6 +177,8 @@ export class FakeDebugAdapter extends EventEmitter implements IDebugAdapter {
   declare getDefaultAttachConfig?: Mock<Impl<'getDefaultAttachConfig'>>;
   /** Interface-readonly; mutable here so `withAttachSupport()` can set it. */
   declare supportedAttachKeys?: readonly string[];
+  /** Interface-readonly; mutable here so `withAttachSupport()` can set it. */
+  declare consumedAttachKeys?: readonly string[];
 
   constructor(overrides: FakeDebugAdapterOverrides = {}) {
     super();

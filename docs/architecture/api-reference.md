@@ -173,8 +173,8 @@ Checks if the adapter supports detaching without terminating the debuggee.
 
 **Returns**: `true` if detach is supported
 
-#### `transformAttachConfig?(config: GenericAttachConfig): LanguageSpecificAttachConfig`
-Transforms generic attach config to language-specific format. Only called if `supportsAttach()` returns `true`.
+#### `transformAttachConfig?(config: GenericAttachConfig): LanguageSpecificAttachConfig | Promise<LanguageSpecificAttachConfig>`
+Transforms generic attach config to language-specific format. Only called if `supportsAttach()` returns `true`. May be async (the COBOL adapter regenerates its symbol manifest here); the launcher awaits it and a rejection fails the attach with the transform's message.
 
 **Parameters**: Generic attach configuration
 **Returns**: Language-specific attach configuration

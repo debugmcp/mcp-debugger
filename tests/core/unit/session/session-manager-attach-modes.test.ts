@@ -282,11 +282,18 @@ describe('SessionManagerOperations attach modes', () => {
       );
       const setCurrentThreadId = vi.fn();
       (mockProxyManager as unknown as { setCurrentThreadId: typeof setCurrentThreadId }).setCurrentThreadId = setCurrentThreadId;
-      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string, args?: unknown) => {
         if (command === 'threads') {
           mockSession.state = SessionState.PAUSED;
           mockSession.lastStop = { reason: 'exception', threadId: 37436, timestamp: Date.now() };
           return { success: true, body: { threads: [{ id: 5128, name: 'thread #1' }, { id: 37436, name: 'thread #2' }] } };
+        }
+        if (command === 'stackTrace') {
+          const { threadId } = args as { threadId: number };
+          // The stop thread's stack reaches the program's source; the first listed one is a worker.
+          return { success: true, body: { stackFrames: threadId === 37436
+            ? [{ id: 1, name: 'cob_sys_sleep', line: 0, column: 0 }, { id: 2, name: 'PAUSE_', line: 12, column: 0, source: { path: '/proj/pause.cob' } }]
+            : [{ id: 3, name: 'NtWaitForWorkViaWorkerFactory', line: 0, column: 0, source: { name: '@NtWaitForWorkViaWorkerFactory' } }] } };
         }
         return {};
       });
@@ -295,6 +302,69 @@ describe('SessionManagerOperations attach modes', () => {
 
       expect(result.success).toBe(true);
       expect(setCurrentThreadId).toHaveBeenCalledWith(37436);
+      // The stop thread was checked first and won; no other thread was unwound.
+      expect(mockProxyManager.sendDapRequest.mock.calls.filter(([command]) => command === 'stackTrace')).toHaveLength(1);
+    });
+
+    it('moves off a reported stop thread whose stack never reaches user code, to the first listed thread whose stack does (Windows attach break-in)', async () => {
+      mockSession.language = DebugLanguage.CPP;
+      vi.mocked(mockDependencies.adapterRegistry.getFactoryMetadata).mockResolvedValue(
+        metadataWithModes({ launch: true, attach: 'direct-connect' })
+      );
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(
+        new FakeDebugAdapter({ language: DebugLanguage.CPP }).withAttachSupport({ directConnect: true })
+      );
+      const setCurrentThreadId = vi.fn();
+      (mockProxyManager as unknown as { setCurrentThreadId: typeof setCurrentThreadId }).setCurrentThreadId = setCurrentThreadId;
+      const stacks: Record<number, unknown[]> = {
+        // CodeLLDB reports the attach stop on the break-in thread Windows injects: ntdll only.
+        6660: [{ id: 1, name: 'DbgBreakPoint', line: 0, column: 0 }, { id: 2, name: 'DbgUiRemoteBreakin', line: 0, column: 0, source: { name: '@DbgUiRemoteBreakin' } }],
+        5128: [{ id: 3, name: 'NtWaitForWorkViaWorkerFactory', line: 0, column: 0 }],
+        9: [{ id: 4, name: 'Sleep', line: 0, column: 0 }, { id: 5, name: 'main', line: 20, column: 0, source: { path: '/proj/examples/cpp/pause_test.cpp' } }]
+      };
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string, args?: unknown) => {
+        if (command === 'threads') {
+          mockSession.state = SessionState.PAUSED;
+          mockSession.lastStop = { reason: 'exception', threadId: 6660, description: 'Exception 0x80000003 encountered at address 0x7ffb59163ab0', timestamp: Date.now() };
+          return { success: true, body: { threads: [{ id: 5128, name: 'thread #1' }, { id: 6660, name: 'thread #3' }, { id: 9, name: 'thread #2' }] } };
+        }
+        if (command === 'stackTrace') {
+          return { success: true, body: { stackFrames: stacks[(args as { threadId: number }).threadId] ?? [] } };
+        }
+        return {};
+      });
+
+      await operations.attachToProcess('test-session', { host: '127.0.0.1', port: 12345, stopOnEntry: true });
+
+      expect(setCurrentThreadId).toHaveBeenCalledWith(9);
+      expect(mockDependencies.logger.info).toHaveBeenCalledWith(expect.stringContaining('the first thread whose stack reaches user code (the stop was reported on 6660)'));
+    });
+
+    it('keeps the reported stop thread when no listed thread reaches user code', async () => {
+      mockSession.language = DebugLanguage.CPP;
+      vi.mocked(mockDependencies.adapterRegistry.getFactoryMetadata).mockResolvedValue(
+        metadataWithModes({ launch: true, attach: 'direct-connect' })
+      );
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(
+        new FakeDebugAdapter({ language: DebugLanguage.CPP }).withAttachSupport({ directConnect: true })
+      );
+      const setCurrentThreadId = vi.fn();
+      (mockProxyManager as unknown as { setCurrentThreadId: typeof setCurrentThreadId }).setCurrentThreadId = setCurrentThreadId;
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          mockSession.state = SessionState.PAUSED;
+          mockSession.lastStop = { reason: 'exception', threadId: 6660, timestamp: Date.now() };
+          return { success: true, body: { threads: [{ id: 5128, name: 'thread #1' }, { id: 6660, name: 'thread #3' }] } };
+        }
+        if (command === 'stackTrace') {
+          return { success: true, body: { stackFrames: [{ id: 1, name: 'NtWaitForWorkViaWorkerFactory', line: 0, column: 0 }] } };
+        }
+        return {};
+      });
+
+      await operations.attachToProcess('test-session', { host: '127.0.0.1', port: 12345, stopOnEntry: true });
+
+      expect(setCurrentThreadId).toHaveBeenCalledWith(6660);
     });
 
     it('falls back to the thread named main, else the first thread, when no stop was observed', async () => {
@@ -406,6 +476,50 @@ describe('SessionManagerOperations attach modes', () => {
       expect(mockDependencies.logger.warn).toHaveBeenCalledWith(
         expect.stringContaining('localRoot')
       );
+    });
+
+    it('does not report a key the adapter declares it consumes, even though the transform did not echo it (#759)', async () => {
+      // The COBOL transform turns `sources`/`manifestDirs` into a manifest regeneration
+      // and a private shim block: used, absent from the attach request, not dropped.
+      const adapterStub = makeDirectConnectAdapter((cfg) => {
+        const { sources: _sources, manifestDirs: _dirs, ...rest } = cfg as GenericAttachConfig & { sources?: string[]; manifestDirs?: string[] };
+        void _sources; void _dirs;
+        return rest;
+      });
+      adapterStub.supportedAttachKeys = ['program', 'sources', 'manifestDirs'];
+      adapterStub.consumedAttachKeys = ['sources', 'manifestDirs'];
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapterStub);
+
+      const result = await operations.attachToProcess('test-session', {
+        host: '127.0.0.1',
+        port: 12345,
+        stopOnEntry: false,
+        adapterConfig: { sources: ['/proj/src/payroll.cob'], manifestDirs: ['/proj/m'] }
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.data?.warning).toBeUndefined();
+      expect(mockSession.attachDroppedConfigKeys).toBeUndefined();
+    });
+
+    it('never suggests a key for itself when a supported key really was dropped', async () => {
+      const adapterStub = makeDirectConnectAdapter((cfg) => {
+        const { manifestDirs: _dirs, ...rest } = cfg as GenericAttachConfig & { manifestDirs?: string[] };
+        void _dirs;
+        return rest;
+      });
+      adapterStub.supportedAttachKeys = ['program', 'manifestDirs'];
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapterStub);
+
+      const result = await operations.attachToProcess('test-session', {
+        host: '127.0.0.1',
+        port: 12345,
+        stopOnEntry: false,
+        adapterConfig: { manifestDirs: ['/proj/m'] }
+      });
+
+      expect(result.data?.warning).toContain('manifestDirs');
+      expect(result.data?.warning).not.toContain('did you mean manifestDirs');
     });
 
     it('emits no warning when the transform preserves every adapterConfig key', async () => {

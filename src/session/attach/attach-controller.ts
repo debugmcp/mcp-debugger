@@ -11,6 +11,8 @@
  * session-preservingly and reports the proxy-log pointers alongside the error.
  */
 import type { ManagedSession } from '../session-store.js';
+import type { DebugProtocol } from '@vscode/debugprotocol';
+import type { IProxyManager } from '../../proxy/proxy-manager.js';
 import { resolveDapTimeoutOverride } from '../dap-request-helpers.js';
 import {
   SessionState,
@@ -39,6 +41,15 @@ export interface AttachRequest {
   verifyTimeout?: number;
   breakOnExceptions?: ExceptionBreakMode;
   adapterConfig?: Record<string, unknown>;
+}
+
+/** How many listed threads an attach unwinds while looking for one whose stack reaches user code. */
+const ATTACH_ANCHOR_SCAN_THREADS = 16;
+
+/** A frame whose source is a real path (not a `@symbol` / `<placeholder>` the debugger made up for native code). */
+function reachesSource(frame: DebugProtocol.StackFrame): boolean {
+  const file = frame.source?.path;
+  return typeof file === 'string' && file.length > 0 && !file.startsWith('@') && !file.startsWith('<');
 }
 
 /**
@@ -266,11 +277,21 @@ export class AttachController {
         // debugging), else the first thread.
         const stoppedThreadId = observedAttachStopThread(session);
         const stoppedThread = typeof stoppedThreadId === 'number' ? threads.find(t => t.id === stoppedThreadId) : undefined;
+        // The reported stop thread is not always the program's: CodeLLDB reports the
+        // attach stop on the break-in thread Windows injects (an ntdll stack), so
+        // among the listed threads prefer the first whose stack reaches user code,
+        // the reported one first.
+        const sourced = stoppedThread
+          ? await this.threadReachingSource(sessionId, proxyManager, threads, stoppedThread.id, verifyTimeoutMs)
+          : undefined;
         const mainThread = threads.find(t => t.name === 'main');
-        const chosen = stoppedThread ?? mainThread ?? threads[0];
+        const chosen = sourced ?? stoppedThread ?? mainThread ?? threads[0];
         const discoveredThreadId = chosen.id;
+        const rule = sourced
+          ? sourced.id === stoppedThread?.id ? 'the thread of the observed attach stop' : `the first thread whose stack reaches user code (the stop was reported on ${stoppedThread?.id})`
+          : stoppedThread ? 'the thread of the observed attach stop' : mainThread ? 'named main' : 'the first listed';
         this.ctx.logger.info(
-          `[SessionManager] Discovered ${threads.length} threads. Using threadId=${discoveredThreadId} (name=${chosen.name}${stoppedThread ? ', the thread of the observed attach stop' : ''})`
+          `[SessionManager] Discovered ${threads.length} threads. Using threadId=${discoveredThreadId} (name=${chosen.name}, ${rule})`
         );
         proxyManager.setCurrentThreadId(discoveredThreadId);
         this.ctx.logger.info(`[SessionManager] Set threadId=${discoveredThreadId} for attach mode`);
@@ -419,6 +440,42 @@ export class AttachController {
         ...(Object.keys(diagnosticData).length > 0 ? { data: diagnosticData } : {})
       };
     }
+  }
+
+  /**
+   * Among `threads`, the first whose stack has a frame with a source path — the
+   * reported stop thread first, then the others in listed order, at most
+   * ATTACH_ANCHOR_SCAN_THREADS unwinds each bounded by the verify window. Undefined
+   * when none reaches user code (the caller keeps the reported thread).
+   */
+  private async threadReachingSource(
+    sessionId: string,
+    proxyManager: IProxyManager,
+    threads: DebugProtocol.Thread[],
+    stoppedThreadId: number,
+    timeoutMs: number
+  ): Promise<DebugProtocol.Thread | undefined> {
+    const ordered = [
+      ...threads.filter((t) => t.id === stoppedThreadId),
+      ...threads.filter((t) => t.id !== stoppedThreadId)
+    ].slice(0, ATTACH_ANCHOR_SCAN_THREADS);
+    for (const thread of ordered) {
+      try {
+        const response = await proxyManager.sendDapRequest<DebugProtocol.StackTraceResponse>(
+          'stackTrace',
+          { threadId: thread.id, startFrame: 0, levels: 32 },
+          { timeoutMs }
+        );
+        if ((response?.body?.stackFrames ?? []).some(reachesSource)) {
+          return thread;
+        }
+      } catch (error) {
+        this.ctx.logger.debug(
+          `[SessionManager ${sessionId}] attach anchor scan: thread ${thread.id} could not be unwound (${error instanceof Error ? error.message : String(error)})`
+        );
+      }
+    }
+    return undefined;
   }
 
   /**
