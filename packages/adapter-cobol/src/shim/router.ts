@@ -375,6 +375,7 @@ export class Router {
   }
 
   private onLaunchOrAttach(request: DebugProtocol.Request): void {
+    this.state.invalidateProcess(request.command);
     this.state.mode = request.command === 'attach' ? 'attach' : 'launch';
     const args = request.arguments as Record<string, unknown> | undefined;
     // CodeLLDB stops the target after an attach only with stopOnEntry (it resumes otherwise),
@@ -1449,8 +1450,14 @@ export class Router {
         }
         return;
       }
+      case 'process':
+      case 'module':
+        this.state.invalidateProcess(event.event);
+        slot.resolve(event);
+        return;
       case 'terminated':
       case 'exited':
+        this.state.invalidateProcess(event.event);
         this.abortStepLoop();
         slot.resolve(event);
         return;
