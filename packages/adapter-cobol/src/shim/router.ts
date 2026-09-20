@@ -585,7 +585,11 @@ export class Router {
     // DAP pages refer to the logical stack. Asking the engine for the client's
     // page first loses PERFORM frames above it and shifts every later offset.
     const response = await this.state.memoise(`logical-stack:${args.threadId}:${JSON.stringify(args.format ?? {})}`, async () => {
-      const response = await this.engine.request('stackTrace', { ...args, startFrame: 0, levels: 0 });
+      // CodeLLDB treats an explicit zero as an empty page. Omit levels for its
+      // complete native stack, then apply the client's page to the logical stack.
+      const engineArgs = { ...args, startFrame: 0 };
+      delete engineArgs.levels;
+      const response = await this.engine.request('stackTrace', engineArgs);
       const body = response.body as DebugProtocol.StackTraceResponse['body'] | undefined;
       if (!response.success || !body || !Array.isArray(body.stackFrames) || generation !== this.state.generation) return response;
       this.state.lastThreadId = args.threadId;

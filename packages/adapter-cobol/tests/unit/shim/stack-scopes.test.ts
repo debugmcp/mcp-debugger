@@ -182,7 +182,8 @@ describe('cobol shim stackTrace and scopes', () => {
     const scopes = scopesOf(await h.client.request('scopes', { frameId: 1 }));
     expect(scopes.map((s) => s.name)).toEqual(['WORKING-STORAGE of HELLO (1000-INIT, 2 frames up)']);
     expect(h.engine.received('stackTrace')).toHaveLength(1);
-    expect(h.engine.received('stackTrace')[0].arguments).toMatchObject({ threadId: 1, levels: 0 });
+    expect(h.engine.received('stackTrace')[0].arguments).toMatchObject({ threadId: 1, startFrame: 0 });
+    expect(h.engine.received('stackTrace')[0].arguments).not.toHaveProperty('levels');
     expect(h.engine.received('scopes')).toHaveLength(0);
     // Once per thread and generation: a second walk-up in the same stop reuses the deep fetch.
     await h.client.request('scopes', { frameId: 2 });
