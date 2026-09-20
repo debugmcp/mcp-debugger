@@ -533,13 +533,14 @@ export class DebugLauncher {
       // breakpoints_synced status — including for launches that are STOPPED
       // by now (logpoint-only short programs), which this gated path can
       // never help — and a live re-send heals anything that changed between
-      // the snapshot and now.
+      // the snapshot and now. Ask for a fresh echo: js-debug's unchanged-set
+      // response otherwise contains no breakpoint records to reconcile (#705).
       // Not with the debugger off (issue #746): the adapter has answered the
       // pre-launch set already — CodeLLDB's refusal is echoed per breakpoint
       // by the worker, and debugpy/Delve open no phase to answer in — and a
       // re-send is a round trip per file whose answer resyncAll discards.
       if ((finalState === SessionState.RUNNING || finalState === SessionState.PAUSED) && !debuggerOff) {
-        await this.breakpoints.resyncAll(finalSession);
+        await this.breakpoints.resyncAll(finalSession, { forceFreshEcho: true });
       }
 
       // The policy's word is a static pin; a stop that arrived anyway is the

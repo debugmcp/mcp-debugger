@@ -5,7 +5,7 @@
  * - spawn-mode attach still resolves the local toolchain
  * - launch toolchain failures on attach-capable adapters carry an attach hint
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { SessionManagerOperations } from '../../../../src/session/session-manager-operations.js';
 import type { SessionManagerDependencies } from '../../../../src/session/session-manager-core.js';
 import { SessionStore, type ManagedSession } from '../../../../src/session/session-store.js';
@@ -39,6 +39,8 @@ import type {
 } from '@debugmcp/shared';
 
 class TestableSessionManagerOperations extends SessionManagerOperations {
+  protected attachVerifyIntervalMs = 5;
+  protected attachPauseStopTimeoutMs = 10;
   protected async handleAutoContinue(_sessionId: string): Promise<void> {
     // no-op for tests
   }
@@ -88,7 +90,7 @@ describe('SessionManagerOperations attach modes', () => {
   let operations: SessionManagerOperations;
   let mockSessionStore: PartialSessionStoreMock;
   // Never installed on a ManagedSession here, so just the stubs (see session-doubles.ts).
-  let mockProxyManager: ProxyManagerMocks;
+  let mockProxyManager: ProxyManagerMocks & { setCurrentThreadId: Mock<IProxyManager['setCurrentThreadId']> };
   let mockDependencies: SessionManagerDependencies;
   let mockSession: ManagedSession;
 
@@ -96,7 +98,10 @@ describe('SessionManagerOperations attach modes', () => {
     mockProxyManager = {
       isRunning: vi.fn().mockReturnValue(true),
       getCurrentThreadId: vi.fn().mockReturnValue(1),
-      sendDapRequest: vi.fn().mockResolvedValue({}),
+      setCurrentThreadId: vi.fn(),
+      sendDapRequest: vi.fn().mockImplementation(async (command: string) =>
+        command === 'threads' ? { body: { threads: [{ id: 1, name: 'main' }] } } : {}
+      ),
       stop: vi.fn(),
       once: vi.fn(),
       off: vi.fn(),
@@ -243,7 +248,7 @@ describe('SessionManagerOperations attach modes', () => {
       const result = await operations.attachToProcess('test-session', {
         host: '127.0.0.1',
         port: 12345,
-        stopOnEntry: false, // skip the post-attach thread-verify poll
+        stopOnEntry: false, // verify the target without requesting a pause
         adapterConfig: {
           program: '/proc/1/root/pricer',
           initCommands: ['settings set target.exec-search-paths /proc/1/root'],
@@ -269,7 +274,7 @@ describe('SessionManagerOperations attach modes', () => {
       );
     });
 
-    it('anchors on the thread of the stop the debugger already reported, not the first listed thread (#759 attach)', async () => {
+    it.each([true, false])('anchors on the observed stop thread with stopOnEntry=%s (#759 attach)', async stopOnEntry => {
       // CodeLLDB stops the target on attach and reports the stop before the threads are
       // listed; on Windows the first listed thread is a thread-pool worker. No
       // pause-after-attach behaviour: a C/C++-flavoured direct-connect adapter.
@@ -298,7 +303,7 @@ describe('SessionManagerOperations attach modes', () => {
         return {};
       });
 
-      const result = await operations.attachToProcess('test-session', { host: '127.0.0.1', port: 12345, stopOnEntry: true });
+      const result = await operations.attachToProcess('test-session', { host: '127.0.0.1', port: 12345, stopOnEntry });
 
       expect(result.success).toBe(true);
       expect(setCurrentThreadId).toHaveBeenCalledWith(37436);
@@ -660,6 +665,92 @@ describe('SessionManagerOperations attach modes', () => {
     });
   });
 
+  describe('attach readiness in both pause modes (issue #758)', () => {
+    beforeEach(() => {
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(makeDirectConnectRubyAdapter());
+    });
+
+    it.each([false, true, undefined])('waits for threads with stopOnEntry=%s', async stopOnEntry => {
+      let release!: (value: { body: { threads: Array<{ id: number; name: string }> } }) => void;
+      const discovery = new Promise<{ body: { threads: Array<{ id: number; name: string }> } }>(resolve => { release = resolve; });
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') return discovery;
+        if (command === 'pause') throw new Error('already stopped');
+        return {};
+      });
+      let settled = false;
+      const attach = operations.attachToProcess('test-session', { port: 12345, stopOnEntry, verifyTimeout: 1000 })
+        .then(result => { settled = true; return result; });
+      await vi.waitFor(() => expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith(
+        'threads', {}, expect.objectContaining({ timeoutMs: expect.any(Number) })
+      ));
+      expect(settled).toBe(false);
+      expect(mockSession.state).toBe(SessionState.INITIALIZING);
+      release({ body: { threads: [{ id: 0, name: 'main' }] } });
+      expect((await attach).success).toBe(true);
+      expect(mockProxyManager.setCurrentThreadId).toHaveBeenCalledWith(0);
+      expect(mockProxyManager.sendDapRequest.mock.calls.some(([command]) => command === 'pause')).toBe(stopOnEntry !== false);
+    });
+
+    it.each([false, true])('honors verification timeout with stopOnEntry=%s', async stopOnEntry => {
+      mockProxyManager.sendDapRequest.mockResolvedValue({ body: { threads: [] } });
+      const result = await operations.attachToProcess('test-session', { port: 12345, stopOnEntry, verifyTimeout: 30 });
+      expect(result).toMatchObject({ success: false, state: SessionState.ERROR });
+      expect(result.error).toContain('zero threads');
+      expect(mockProxyManager.stop).toHaveBeenCalled();
+      expect(mockProxyManager.sendDapRequest.mock.calls.every(([command]) => command === 'threads')).toBe(true);
+      for (const [, , options] of mockProxyManager.sendDapRequest.mock.calls) {
+        expect(options.timeoutMs).toBeGreaterThan(0);
+        expect(options.timeoutMs).toBeLessThanOrEqual(30);
+      }
+    });
+
+    it.each([false, true])('reports adapter death during verification with stopOnEntry=%s', async stopOnEntry => {
+      mockProxyManager.sendDapRequest.mockImplementation(async () => {
+        const verificationErrorHandler = mockProxyManager.on.mock.calls.filter(([event]) => event === 'error').at(-1)![1];
+        verificationErrorHandler(new Error('target connection rejected'));
+        throw new Error('Proxy not initialized');
+      });
+      const result = await operations.attachToProcess('test-session', { port: 12345, stopOnEntry, verifyTimeout: 1000 });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('target connection rejected');
+      expect(result.error).not.toContain('Proxy not initialized');
+      expect(mockProxyManager.stop).toHaveBeenCalled();
+    });
+
+    it.each(['threads', 'setBreakpoints'])('preserves a breakpoint stop arriving during %s', async stopDuring => {
+      mockSession.breakpoints.set('bp', { id: 'bp', file: '/app.js', line: 1, verified: false });
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === stopDuring) {
+          mockSession.state = SessionState.PAUSED;
+          mockSession.lastStop = { reason: 'breakpoint', threadId: 7, timestamp: Date.now() };
+        }
+        return { body: { threads: [{ id: 1, name: 'main' }], breakpoints: [] } };
+      });
+      const result = await operations.attachToProcess('test-session', { port: 12345, stopOnEntry: false });
+      expect(result).toMatchObject({ success: true, state: SessionState.PAUSED });
+      expect(mockSession.lastStop?.reason).toBe('breakpoint');
+      if (stopDuring === 'threads') expect(mockProxyManager.setCurrentThreadId).toHaveBeenCalledWith(7);
+      expect(mockProxyManager.sendDapRequest.mock.calls.some(([command]) => command === 'pause')).toBe(false);
+    });
+
+    it.each(['threads', 'stackTrace', 'setBreakpoints'])('does not revive a target that terminates during %s', async endDuring => {
+      mockSession.breakpoints.set('bp', { id: 'bp', file: '/app.js', line: 1, verified: false });
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (endDuring === 'stackTrace' && command === 'threads') {
+          mockSession.state = SessionState.PAUSED;
+          mockSession.lastStop = { reason: 'breakpoint', threadId: 1, timestamp: Date.now() };
+        }
+        if (command === endDuring) mockSession.state = SessionState.STOPPED;
+        return { body: { threads: [{ id: 1, name: 'main' }], breakpoints: [] } };
+      });
+      const result = await operations.attachToProcess('test-session', { port: 12345, stopOnEntry: false });
+      expect(result).toMatchObject({ success: false, state: SessionState.STOPPED });
+      expect(mockSession.state).toBe(SessionState.STOPPED);
+      expect(mockProxyManager.stop).toHaveBeenCalled();
+    });
+  });
+
   describe('post-attach breakpoint re-sync (issue #500)', () => {
     beforeEach(() => {
       vi.mocked(mockDependencies.adapterRegistry.getFactoryMetadata).mockResolvedValue(
@@ -707,7 +798,7 @@ describe('SessionManagerOperations attach modes', () => {
         if (command === 'setBreakpoints') {
           throw new Error('adapter rejected setBreakpoints');
         }
-        return {};
+        return { body: { threads: [{ id: 1, name: 'main' }] } };
       });
 
       const result = await operations.attachToProcess('test-session', {

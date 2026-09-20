@@ -111,17 +111,23 @@ export const JsDebugAdapterPolicy = {
   honoursNoDebug: true,
   supportsReverseStartDebugging: true,
   childSessionStrategy: 'launchWithPendingTarget',
-  buildChildStartArgs: (pendingId: string, parentConfig: Record<string, unknown>) => {
-    const type = typeof parentConfig?.type === 'string' ? (parentConfig.type as string) : 'pwa-node';
+  buildChildStartArgs: (
+    pendingId: string,
+    parentConfig: Record<string, unknown>,
+    attachArguments?: Readonly<Record<string, unknown>>
+  ) => {
+    // js-debug's reverse-request values take precedence over parent extras.
+    // Our request/stopOnEntry intent never enters either adapter argument bag.
+    const config = { ...attachArguments, ...parentConfig };
+    const type = typeof config.type === 'string' ? config.type : 'pwa-node';
     // Carry the parent's forwardable attach extras (localRoot/remoteRoot,
     // sourceMaps, skipFiles, …) into the child — source resolution happens
     // here, so this is where they take effect (issue #466). The orchestration
     // keys stay pinned/excluded: address/port/attachSimplePort would make the
     // child a second direct attach to the same inspector (the #124
-    // fight-over-the-process failure), and stopOnEntry is consumed by
-    // ChildSessionManager itself, not js-debug.
+    // fight-over-the-process failure). These are adapter connection fields,
+    // not a deny-list of our start-intent fields (issue #730).
     const {
-      request: _request,
       name: _name,
       __pendingTargetId: _pendingTargetId,
       host: _host,
@@ -130,13 +136,12 @@ export const JsDebugAdapterPolicy = {
       attachSimplePort: _attachSimplePort,
       attachExistingChildren: _attachExistingChildren,
       continueOnAttach: _continueOnAttach,
-      stopOnEntry: _stopOnEntry,
       type: _type,
       ...parentExtras
-    } = parentConfig ?? {};
-    void _request; void _name; void _pendingTargetId; void _host; void _address;
+    } = config;
+    void _name; void _pendingTargetId; void _host; void _address;
     void _port; void _attachSimplePort; void _attachExistingChildren;
-    void _continueOnAttach; void _stopOnEntry; void _type;
+    void _continueOnAttach; void _type;
     return {
       command: 'attach',
       args: {
@@ -691,8 +696,8 @@ export const JsDebugAdapterPolicy = {
         attachExistingChildren: true
       };
       // Carry the caller's stopOnEntry: js-debug itself ignores it, but
-      // MinimalDapClient records the attach args and threads the intent into
-      // child session creation (issue #124).
+      // MinimalDapClient records this as parent intent separately from the
+      // arguments forwarded to child sessions (issues #124/#730).
       const stopOnEntryValue =
         typeof baseRecord.stopOnEntry === 'boolean'
           ? (baseRecord.stopOnEntry as boolean)

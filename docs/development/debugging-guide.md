@@ -100,6 +100,58 @@ connection active while the nested server is paused.
 The automated version is
 `pnpm exec vitest run --project e2e tests/e2e/mcp-server-self-debug.test.ts` after building.
 
+### Inspecting attach readiness inside the debugger
+
+The integration suite exercises the core CLI and vendored js-debug, including a debugger that
+steps through a second debugger while it attaches to a third process:
+
+```bash
+pnpm build
+pnpm exec vitest run --project integration tests/integration/mcp-server-self-debug.test.ts
+```
+
+These three cases run in the normal unit/integration CI gate and use ephemeral ports. They cover
+launch, attach without pausing, and the nested verification walkthrough below. The separate e2e
+test above also checks the published CLI bundle and nested exit-code reporting.
+
+1. Start an outer debugger **A** over stdio. Use it to launch debugger **B** as an HTTP server,
+   following the preceding recipe. Connect another MCP client to B's announced endpoint.
+2. Start **C**, `examples/javascript/attach_target.js`, with
+   `node --inspect=127.0.0.1:0 examples/javascript/attach_target.js`. Read its inspector port from
+   stderr. C increments a counter and prints a tick every second.
+3. In A, set a source breakpoint in `src/session/attach/attach-controller.ts` on
+   `const verification = await verifyAttachThreads(this.ctx, {`, with condition
+   `attachConfig.stopOnEntry === false`.
+4. Create a JavaScript session through B and call `attach_to_process` with C's inspector port,
+   `stopOnEntry: false`, and `verifyTimeout: 10000`. Keep that request pending while A inspects B.
+5. A stops inside B's attach controller. Evaluate `attachConfig.stopOnEntry`, then call
+   `step_into`. The frame enters `src/session/attach/attach-verification.ts`; evaluating
+   `input.verifyTimeoutMs` returns `10000`. Clear A's breakpoint and continue B.
+6. B's attach completes. Through B, set a breakpoint at `counter += 1;` in C and inspect
+   `counter` when it stops. Clear the breakpoint, continue, and detach. C keeps printing ticks.
+   Close B's session, close A's session to stop B, close both clients, and stop C.
+
+An observed transcript from the integration test (the counter varies):
+
+```text
+A: attachConfig.stopOnEntry -> false
+A: step_into -> src/session/attach/attach-verification.ts
+A: input.verifyTimeoutMs -> 10000
+B: attach_to_process -> success: true, state: running
+B: breakpoint in C -> counter: 65
+B: detach_from_process -> C keeps ticking
+```
+
+This walkthrough exposed #758: the old controller jumped past verification whenever
+`stopOnEntry` was false. The accompanying DAP trace exposed #762: a child answered `threads`
+before its attach response and breakpoint replay completed. Verification now waits for completed
+adoption in both pause modes. `stopOnEntry: false` suppresses the debugger's pause request; a
+breakpoint or exception can still stop the target during attach and is reported as paused.
+
+The other two integration cases queue a conditional breakpoint in B's HTTP handler before launch
+or attach, then immediately inspect the first matching MCP request after startup succeeds. They
+require a verified breakpoint and nonempty threads without caller-side readiness retries.
+
 ### 1. Server Won't Start
 
 **Symptoms**: Server exits immediately or hangs

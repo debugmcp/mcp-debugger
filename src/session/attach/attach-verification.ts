@@ -1,5 +1,5 @@
 /**
- * What makes an attach *real* before it is reported as PAUSED.
+ * What makes an attach real before success is reported, with or without a pause.
  *
  * A completed attach handshake proves only that the adapter accepted the
  * request. `verifyAttachThreads` polls DAP 'threads' until the debugger

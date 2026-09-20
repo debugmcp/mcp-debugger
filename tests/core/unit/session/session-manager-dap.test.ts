@@ -254,6 +254,10 @@ describe('SessionManager - DAP Operations', () => {
 
       const [stored] = sessionManager.listBreakpoints(session.id);
       expect(stored.verified).toBe(true);
+      expect(dependencies.mockProxyManager.dapRequestCalls).toContainEqual({
+        command: 'setBreakpoints',
+        args: expect.objectContaining({ __mcpForceFreshEcho: true })
+      });
     });
 
     it('stamps the store from the worker breakpoints-synced results (issue #439)', async () => {

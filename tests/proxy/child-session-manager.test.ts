@@ -5,9 +5,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import type { AdapterPolicy, ChildSessionConfig, ReverseRequestResult } from '@debugmcp/shared';
+import type { AdapterPolicy, ParentStart, ReverseRequestResult } from '@debugmcp/shared';
 import { JsDebugAdapterPolicy, PythonAdapterPolicy, DefaultAdapterPolicy } from '@debugmcp/shared';
 import { ChildSessionManager } from '../../src/proxy/child-session-manager.js';
+import type { CdpFunctionBreakpointBridge } from '../../src/proxy/cdp-function-breakpoint-bridge.js';
 // Mock MinimalDapClient
 class MockMinimalDapClient extends EventEmitter {
   // Knobs for death-aware adoption tests (issue #248); reset in beforeEach
@@ -194,10 +195,13 @@ describe('ChildSessionManager', () => {
   });
 
   describe('JavaScript policy (multi-session)', () => {
+    let parentStart: ParentStart;
     beforeEach(() => {
+      parentStart = { request: 'launch' };
       manager = new ChildSessionManager({
         policy: JsDebugAdapterPolicy,
         host: 'localhost',
+        getParentStart: () => parentStart,
         port: 9229
       });
     });
@@ -255,7 +259,7 @@ describe('ChildSessionManager', () => {
           pendingId: 'test-pending-race',
           host: 'localhost',
           port: 9229,
-          parentConfig: { type: 'pwa-node', request: 'launch' }
+          parentConfig: { type: 'pwa-node' }
         });
         let resolved = false;
         void createPromise.then(() => { resolved = true; }, () => { resolved = true; });
@@ -287,7 +291,7 @@ describe('ChildSessionManager', () => {
           pendingId: 'test-pending-race-init',
           host: 'localhost',
           port: 9229,
-          parentConfig: { type: 'pwa-node', request: 'launch' }
+          parentConfig: { type: 'pwa-node' }
         });
         let resolved = false;
         void createPromise.then(() => { resolved = true; }, () => { resolved = true; });
@@ -344,7 +348,7 @@ describe('ChildSessionManager', () => {
           pendingId: 'test-pending-flush',
           host: 'localhost',
           port: 9229,
-          parentConfig: { type: 'pwa-node', request: 'launch' }
+          parentConfig: { type: 'pwa-node' }
         });
         await vi.advanceTimersByTimeAsync(20000);
         await createPromise;
@@ -366,11 +370,10 @@ describe('ChildSessionManager', () => {
     });
 
     it('skips the entry-stop pause for attach-mode parents (issue #124)', async () => {
-      // MinimalDapClient.enrichChildConfig threads request:'attach' into the
-      // parentConfig of attach-mode children. For those, ensureChildStopped
-      // must be skipped entirely: attach targets emit no entry stop (waiting
-      // stalls adoption for 15s) and the SessionManager owns the post-attach
-      // pause via getAttachBehavior().pauseAfterAttach.
+      manager = new ChildSessionManager({
+        policy: JsDebugAdapterPolicy, host: 'localhost', port: 9229,
+        getParentStart: () => ({ request: 'attach', attachArguments: {} })
+      });
       vi.useFakeTimers();
       try {
         const config = {
@@ -399,34 +402,45 @@ describe('ChildSessionManager', () => {
       }
     });
 
-    describe('config enrichment on every adoption path (issue #712)', () => {
-      // The caller's intent (request mode, stopOnEntry, attach extras) used
-      // to be threaded into a child config only on the parent connection,
-      // by MinimalDapClient before it called createChildSession. A
-      // startDebugging that js-debug delivers on a child or release
-      // connection (a fork's request lands on its parent target's socket)
-      // reached createChildSession bare. The enricher is now an option the
-      // manager applies itself, at the top of createChildSession, so both
-      // entry points see the same config.
-      const enrich = (config: ChildSessionConfig): ChildSessionConfig => ({
-        ...config,
-        parentConfig: {
-          ...config.parentConfig,
-          request: 'launch',
-          stopOnEntry: false,
-          localRoot: '/enriched'
+    describe('parent intent on every adoption path (issues #712/#730)', () => {
+      const start: ParentStart = {
+        request: 'attach', stopOnEntry: false, attachArguments: { localRoot: '/forwarded' }
+      };
+
+      it('snapshots parent intent before awaiting adoption', async () => {
+        vi.useFakeTimers();
+        try {
+          let current: ParentStart = start;
+          const getParentStart = vi.fn(() => current);
+          const owner = new ChildSessionManager({
+            policy: JsDebugAdapterPolicy, host: 'localhost', port: 9229, getParentStart
+          });
+          const adoption = owner.createChildSession({
+            pendingId: 'snapshot-child', host: 'localhost', port: 9229,
+            parentConfig: Object.freeze({ type: 'pwa-node' })
+          });
+          current = { request: 'launch', stopOnEntry: true };
+          await vi.advanceTimersByTimeAsync(4000);
+          expect(await adoption).toBe('adopted');
+          expect(getParentStart).toHaveBeenCalledExactlyOnceWith();
+          const child = MockMinimalDapClient.lastInstance!;
+          expect(child.requests.find(request => request.command === 'attach')?.args).toMatchObject({ localRoot: '/forwarded' });
+          expect(child.requests.map(request => request.command)).not.toContain('pause');
+          await owner.shutdown();
+        } finally {
+          vi.useRealTimers();
         }
       });
 
-      it('applies the enricher to a bare config, so a launch-mode target skips the entry-stop stall', async () => {
+      it('uses parent intent without changing the reverse configuration', async () => {
         vi.useFakeTimers();
         try {
-          const enrichConfig = vi.fn(enrich);
+          const getParentStart = vi.fn(() => start);
           const enriched = new ChildSessionManager({
             policy: JsDebugAdapterPolicy,
             host: 'localhost',
             port: 9229,
-            enrichConfig
+            getParentStart
           });
           const bare = {
             pendingId: 'bare-launch-child',
@@ -442,12 +456,12 @@ describe('ChildSessionManager', () => {
           await vi.advanceTimersByTimeAsync(4000);
           expect(await createPromise).toBe('adopted');
 
-          expect(enrichConfig).toHaveBeenCalledWith(bare);
+          expect(getParentStart).toHaveBeenCalledExactlyOnceWith();
           const child = enriched.getActiveChild() as unknown as MockMinimalDapClient;
           expect(child.requests.map((r) => r.command)).not.toContain('pause');
           // The forwardable extra reached the child's attach request
           const attach = child.requests.find((r) => r.command === 'attach');
-          expect(attach?.args).toEqual(expect.objectContaining({ localRoot: '/enriched' }));
+          expect(attach?.args).toEqual(expect.objectContaining({ localRoot: '/forwarded' }));
           // The caller's object was not mutated
           expect(bare.parentConfig).toEqual({ type: 'pwa-node' });
         } finally {
@@ -455,15 +469,15 @@ describe('ChildSessionManager', () => {
         }
       });
 
-      it('runs a startDebugging forwarded from a child connection through the same enricher', async () => {
+      it('uses the same parent intent for a release forwarded from a child connection', async () => {
         vi.useFakeTimers();
         try {
-          const enrichConfig = vi.fn(enrich);
+          const getParentStart = vi.fn(() => start);
           const enriched = new ChildSessionManager({
             policy: JsDebugAdapterPolicy,
             host: 'localhost',
             port: 9229,
-            enrichConfig
+            getParentStart
           });
           const adoption = enriched.createChildSession({
             pendingId: 'first-child',
@@ -473,7 +487,7 @@ describe('ChildSessionManager', () => {
           });
           await vi.advanceTimersByTimeAsync(4000);
           expect(await adoption).toBe('adopted');
-          enrichConfig.mockClear();
+          getParentStart.mockClear();
 
           // js-debug delivers a fork's startDebugging on the adopted child's
           // own connection; the child-safe policy hands it back to the
@@ -489,21 +503,13 @@ describe('ChildSessionManager', () => {
           // The release runs the attach + ready-signal wait + disconnect
           await vi.advanceTimersByTimeAsync(20000);
 
-          // The bare forwarded config went through the enricher…
-          expect(enrichConfig).toHaveBeenCalledWith(
-            expect.objectContaining({
-              pendingId: 'forked-child',
-              parentConfig: { type: 'pwa-node', name: 'fork', __pendingTargetId: 'forked-child' }
-            })
-          );
-          // …and the release connection attached with the enriched config.
-          // Scoped to THIS target's attach: "the other client that sent an
-          // attach" would also match one whose release never finished.
+          expect(getParentStart).toHaveBeenCalledExactlyOnceWith();
+          // The release uses the same attach extras as direct adoption.
           const release = findReleaseClient('forked-child');
           expect(release).toBeDefined();
           expect(release!.options?.traceLabel).toBe('release:forked-c');
           const releaseAttach = release!.requests.find((r) => r.command === 'attach');
-          expect(releaseAttach?.args).toEqual(expect.objectContaining({ localRoot: '/enriched' }));
+          expect(releaseAttach?.args).toEqual(expect.objectContaining({ localRoot: '/forwarded' }));
 
           // The release RAN TO COMPLETION. Everything above holds just as well
           // for a release that timed out mid-flight or rolled back, because the
@@ -533,7 +539,7 @@ describe('ChildSessionManager', () => {
 
     it('should route commands to child when policy specifies', () => {
       // JavaScript policy routes many commands to child
-      expect(manager.shouldRouteToChild('threads')).toBe(true);
+      expect(manager.shouldRouteToChild('threads')).toBe(false); // no adopted target yet
       expect(manager.shouldRouteToChild('pause')).toBe(true);
       expect(manager.shouldRouteToChild('continue')).toBe(true);
       expect(manager.shouldRouteToChild('stackTrace')).toBe(true);
@@ -712,13 +718,14 @@ describe('ChildSessionManager', () => {
     });
 
     it('mirrors and synthesizes verified events for attach-mode parents (issue #500)', async () => {
+      parentStart = { request: 'attach', attachArguments: {} };
       vi.useFakeTimers();
       try {
         const createPromise = manager.createChildSession({
           pendingId: 'child-bp-attach',
           host: 'localhost',
           port: 9229,
-          parentConfig: { type: 'pwa-node', request: 'attach' }
+          parentConfig: { type: 'pwa-node' }
         });
         await vi.advanceTimersByTimeAsync(4000);
         await createPromise;
@@ -744,13 +751,14 @@ describe('ChildSessionManager', () => {
     });
 
     it('clears and re-sets on a short no-change echo when forceFreshEcho is set (issue #500)', async () => {
+      parentStart = { request: 'attach', attachArguments: {} };
       vi.useFakeTimers();
       try {
         const createPromise = manager.createChildSession({
           pendingId: 'child-bp-fresh-echo',
           host: 'localhost',
           port: 9229,
-          parentConfig: { type: 'pwa-node', request: 'attach' }
+          parentConfig: { type: 'pwa-node' }
         });
         await vi.advanceTimersByTimeAsync(4000);
         await createPromise;
@@ -1136,7 +1144,7 @@ describe('ChildSessionManager', () => {
       pendingId,
       host: 'localhost',
       port: 9229,
-      parentConfig: { type: 'pwa-node', request: 'launch' }
+      parentConfig: { type: 'pwa-node' }
     });
 
     beforeEach(() => {
@@ -1402,7 +1410,7 @@ describe('ChildSessionManager', () => {
           pendingId: 'cdp-child',
           host: 'localhost',
           port: 9229,
-          parentConfig: { type: 'pwa-node', request: 'launch' }
+          parentConfig: { type: 'pwa-node' }
         });
         await vi.advanceTimersByTimeAsync(20000);
         await createPromise;
@@ -1453,7 +1461,7 @@ describe('ChildSessionManager', () => {
           pendingId: 'cdp-early-stop',
           host: 'localhost',
           port: 9229,
-          parentConfig: { type: 'pwa-node', request: 'launch', stopOnEntry: true }
+          parentConfig: { type: 'pwa-node' }
         });
         await vi.advanceTimersByTimeAsync(40000);
         await createPromise;
@@ -1468,14 +1476,18 @@ describe('ChildSessionManager', () => {
 
     it('keeps skipping the entry pause with stopOnEntry false when no function breakpoints are pending', async () => {
       bridge.armed = false;
-      const mgr = makeManager(JsDebugAdapterPolicy);
+      const mgr = new ChildSessionManager({
+        policy: JsDebugAdapterPolicy, host: 'localhost', port: 9229,
+        cdpBridgeFactory: () => bridge as unknown as CdpFunctionBreakpointBridge,
+        getParentStart: () => ({ request: 'launch', stopOnEntry: false })
+      });
       vi.useFakeTimers();
       try {
         const createPromise = mgr.createChildSession({
           pendingId: 'cdp-no-entry-pause',
           host: 'localhost',
           port: 9229,
-          parentConfig: { type: 'pwa-node', request: 'launch', stopOnEntry: false }
+          parentConfig: { type: 'pwa-node' }
         });
         await vi.advanceTimersByTimeAsync(40000);
         await createPromise;
@@ -1547,7 +1559,7 @@ describe('ChildSessionManager', () => {
       pendingId: 'edge-pending-1',
       host: 'localhost',
       port: 9229,
-      parentConfig: { type: 'pwa-node', request: 'launch' }
+      parentConfig: { type: 'pwa-node' }
     };
 
     async function createChild(mgr: ChildSessionManager): Promise<void> {
@@ -1749,7 +1761,7 @@ describe('ChildSessionManager', () => {
       pendingId,
       host: 'localhost',
       port: 9229,
-      parentConfig: { type: 'pwa-node', request: 'launch' }
+      parentConfig: { type: 'pwa-node' }
     });
 
     beforeEach(() => {
@@ -1758,6 +1770,47 @@ describe('ChildSessionManager', () => {
         host: 'localhost',
         port: 9229
       });
+    });
+
+    it.each([false, true])('keeps a child with threads unready through the event flush (dies=%s, issue #762)', async dies => {
+      vi.useFakeTimers();
+      let finishFlush!: () => void;
+      const flush = new Promise<void>(resolve => { finishFlush = resolve; });
+      try {
+        manager = new ChildSessionManager({
+          policy: JsDebugAdapterPolicy, host: 'localhost', port: 9229,
+          getParentStart: () => ({ request: 'launch', stopOnEntry: false })
+        });
+        const flushSpy = vi.spyOn(manager, 'flushEvents').mockReturnValue(flush);
+        const created = vi.fn();
+        manager.on('childCreated', created);
+        const outcome = manager.createChildSession(config('early-threads')).then(
+          value => ({ value, error: undefined }), error => ({ value: undefined, error })
+        );
+        await vi.advanceTimersByTimeAsync(4000);
+        expect(flushSpy).toHaveBeenCalled();
+        const child = MockMinimalDapClient.lastInstance!;
+        expect((await child.sendRequest('threads')).body.threads).toHaveLength(1);
+        expect(manager.getChildTargetState()).toBe('adopting');
+        expect(manager.shouldRouteToChild('threads')).toBe(false);
+        expect(created).not.toHaveBeenCalled();
+        if (dies) child.emit('close');
+        finishFlush();
+        const result = await outcome;
+        if (dies) {
+          expect(result.error?.message).toContain('closed');
+          expect(manager.shouldRouteToChild('threads')).toBe(false);
+          expect(created).not.toHaveBeenCalled();
+        } else {
+          expect(result.value).toBe('adopted');
+          expect(manager.shouldRouteToChild('threads')).toBe(true);
+          expect(created).toHaveBeenCalledOnce();
+        }
+      } finally {
+        finishFlush();
+        await manager.shutdown();
+        vi.useRealTimers();
+      }
     });
 
     it('walks none → adopting → active → ended, and adopting again on re-adoption', async () => {

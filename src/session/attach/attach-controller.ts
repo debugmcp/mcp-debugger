@@ -17,6 +17,7 @@ import { resolveDapTimeoutOverride } from '../dap-request-helpers.js';
 import {
   SessionState,
   SessionLifecycleState,
+  isTerminalSessionState,
   type ExceptionBreakMode
 } from '@debugmcp/shared';
 import { ErrorMessages } from '../../utils/error-messages.js';
@@ -233,73 +234,87 @@ export class AttachController {
         }
       }
 
-      // Set session state based on stopOnEntry
-      let finalState = session.state;
+      // Async initialization can observe a stop, exit, or a concurrent close.
+      // Never resurrect a target that ended while this attach was in flight.
+      const assertTargetPresent = (): void => {
+        this.ctx.getSession(sessionId);
+        if (isTerminalSessionState(session.state) || !session.proxyManager) {
+          throw new Error(session.lastProxyError ?? 'Debug target ended during attach');
+        }
+      };
+      assertTargetPresent();
       let attachPausePending = false;
 
+      // Verify the attach actually produced a debuggable target before
+      // reporting success (#758): poll DAP 'threads' until the debugger reports
+      // at least one thread. A debugger that cannot enumerate any threads after
+      // attach is not usable — reporting success would be a lie (issue #124:
+      // JS attach reported success + "paused" while the js-debug child
+      // session never connected to the target).
+      if (!session.proxyManager) {
+        throw new Error('Proxy manager is not available after attach initialization');
+      }
+      const proxyManager = session.proxyManager;
+
+      const verifyTimeoutMs = verifyTimeoutOverride ?? this.ctx.tunables.attachVerifyTimeoutMs;
+      const pollIntervalMs = this.ctx.tunables.attachVerifyIntervalMs;
+      const verification = await verifyAttachThreads(this.ctx, {
+        proxyManager,
+        verifyTimeoutMs,
+        pollIntervalMs
+      });
+
+      if (!verification.ok) {
+        const { proxyGone, lastFailure } = verification;
+        const reason = proxyGone
+          ? ErrorMessages.attachAdapterFailed(lastFailure)
+          : ErrorMessages.attachVerifyFailed(verifyTimeoutMs, lastFailure);
+        this.ctx.logger.error(`[SessionManager] ${reason} — tearing down proxy for session ${sessionId}`);
+        // Thrown with the proxy still attached: the catch below tears it
+        // down through failProxySetup — the session-preserving teardown,
+        // which also records lastProxyPid for the leaked-worker check
+        // (#502). Nulling the handle here first would make that teardown
+        // skip its live-proxy branch.
+        throw new Error(reason);
+      }
+      assertTargetPresent();
+      const { threads } = verification;
+
+      // The debugger's own stop names the thread to anchor on. A debugger that
+      // stops the target on attach (CodeLLDB; the COBOL shim then re-anchors that
+      // stop on the thread inside the program, issue #759) has already reported
+      // it by the time the threads are listed, and on Windows the first listed
+      // thread is routinely a thread-pool worker. Only without such a stop does
+      // the name heuristic apply: a thread named "main" (common in JVM
+      // debugging), else the first thread.
+      const stoppedThreadId = observedAttachStopThread(session);
+      const stoppedThread = typeof stoppedThreadId === 'number' ? threads.find(t => t.id === stoppedThreadId) : undefined;
+      // The reported stop thread is not always the program's: CodeLLDB reports the
+      // attach stop on the break-in thread Windows injects (an ntdll stack), so
+      // among the listed threads prefer the first whose stack reaches user code,
+      // the reported one first.
+      const sourced = stoppedThread
+        ? await this.threadReachingSource(sessionId, proxyManager, threads, stoppedThread.id, verifyTimeoutMs)
+        : undefined;
+      assertTargetPresent();
+      const mainThread = threads.find(t => t.name === 'main');
+      // A stop can race the thread-list response; retain its ID even when it
+      // is absent from that snapshot (#758).
+      const observedThread = stoppedThread ?? (stoppedThreadId !== undefined
+        ? { id: stoppedThreadId, name: 'stopped thread' }
+        : undefined);
+      const chosen = sourced ?? observedThread ?? mainThread ?? threads[0];
+      const discoveredThreadId = chosen.id;
+      const rule = sourced
+        ? sourced.id === stoppedThreadId ? 'the thread of the observed attach stop' : `the first thread whose stack reaches user code (the stop was reported on ${stoppedThreadId})`
+        : observedThread ? 'the thread of the observed attach stop' : mainThread ? 'named main' : 'the first listed';
+      this.ctx.logger.info(
+        `[SessionManager] Discovered ${threads.length} threads. Using threadId=${discoveredThreadId} (name=${chosen.name}, ${rule})`
+      );
+      proxyManager.setCurrentThreadId(discoveredThreadId);
+      this.ctx.logger.info(`[SessionManager] Set threadId=${discoveredThreadId} for attach mode`);
+
       if (attachConfig.stopOnEntry !== false) {
-        // Verify the attach actually produced a debuggable target before
-        // reporting PAUSED: poll DAP 'threads' until the debugger reports at
-        // least one thread. A debugger that cannot enumerate any threads after
-        // attach is not usable — reporting success would be a lie (issue #124:
-        // JS attach reported success + "paused" while the js-debug child
-        // session never connected to the target).
-        if (!session.proxyManager) {
-          throw new Error('Proxy manager is not available after attach initialization');
-        }
-        const proxyManager = session.proxyManager;
-
-        const verifyTimeoutMs = verifyTimeoutOverride ?? this.ctx.tunables.attachVerifyTimeoutMs;
-        const pollIntervalMs = this.ctx.tunables.attachVerifyIntervalMs;
-        const verification = await verifyAttachThreads(this.ctx, {
-          proxyManager,
-          verifyTimeoutMs,
-          pollIntervalMs
-        });
-
-        if (!verification.ok) {
-          const { proxyGone, lastFailure } = verification;
-          const reason = proxyGone
-            ? ErrorMessages.attachAdapterFailed(lastFailure)
-            : ErrorMessages.attachVerifyFailed(verifyTimeoutMs, lastFailure);
-          this.ctx.logger.error(`[SessionManager] ${reason} — tearing down proxy for session ${sessionId}`);
-          // Thrown with the proxy still attached: the catch below tears it
-          // down through failProxySetup — the session-preserving teardown,
-          // which also records lastProxyPid for the leaked-worker check
-          // (#502). Nulling the handle here first would make that teardown
-          // skip its live-proxy branch.
-          throw new Error(reason);
-        }
-        const { threads } = verification;
-
-        // The debugger's own stop names the thread to anchor on. A debugger that
-        // stops the target on attach (CodeLLDB; the COBOL shim then re-anchors that
-        // stop on the thread inside the program, issue #759) has already reported
-        // it by the time the threads are listed, and on Windows the first listed
-        // thread is routinely a thread-pool worker. Only without such a stop does
-        // the name heuristic apply: a thread named "main" (common in JVM
-        // debugging), else the first thread.
-        const stoppedThreadId = observedAttachStopThread(session);
-        const stoppedThread = typeof stoppedThreadId === 'number' ? threads.find(t => t.id === stoppedThreadId) : undefined;
-        // The reported stop thread is not always the program's: CodeLLDB reports the
-        // attach stop on the break-in thread Windows injects (an ntdll stack), so
-        // among the listed threads prefer the first whose stack reaches user code,
-        // the reported one first.
-        const sourced = stoppedThread
-          ? await this.threadReachingSource(sessionId, proxyManager, threads, stoppedThread.id, verifyTimeoutMs)
-          : undefined;
-        const mainThread = threads.find(t => t.name === 'main');
-        const chosen = sourced ?? stoppedThread ?? mainThread ?? threads[0];
-        const discoveredThreadId = chosen.id;
-        const rule = sourced
-          ? sourced.id === stoppedThread?.id ? 'the thread of the observed attach stop' : `the first thread whose stack reaches user code (the stop was reported on ${stoppedThread?.id})`
-          : stoppedThread ? 'the thread of the observed attach stop' : mainThread ? 'named main' : 'the first listed';
-        this.ctx.logger.info(
-          `[SessionManager] Discovered ${threads.length} threads. Using threadId=${discoveredThreadId} (name=${chosen.name}, ${rule})`
-        );
-        proxyManager.setCurrentThreadId(discoveredThreadId);
-        this.ctx.logger.info(`[SessionManager] Set threadId=${discoveredThreadId} for attach mode`);
-
         // Some debuggers (rdbg; js-debug attaches with continueOnAttach) do
         // not suspend a running target on attach; issue an explicit pause so
         // the PAUSED state we report is real, and wait for the stop to be
@@ -333,27 +348,13 @@ export class AttachController {
             );
           }
         }
+      }
 
-        // A stopped event is the only evidence that the target is paused.
-        // handleStopped records lastStop before transitioning to PAUSED; a
-        // timeout or rejected redundant pause must not fabricate that state.
-        if (session.state === SessionState.PAUSED && session.lastStop) {
-          finalState = SessionState.PAUSED;
-          this.ctx.logger.info(
-            `[SessionManager] Session ${sessionId} is PAUSED after an observed attach stop`
-          );
-        } else {
-          this.ctx.updateState(session, SessionState.RUNNING);
-          finalState = SessionState.RUNNING;
-          this.ctx.logger.info(
-            `[SessionManager] Session ${sessionId} remains RUNNING until a stopped event is observed`
-          );
-        }
-      } else {
-        // JVM is already running (suspend=n), set RUNNING state
+      assertTargetPresent();
+      // stopOnEntry controls our pause request, not stops the target itself
+      // produced while verification was in flight (e.g. a queued breakpoint).
+      if (session.state !== SessionState.PAUSED || !session.lastStop) {
         this.ctx.updateState(session, SessionState.RUNNING);
-        finalState = SessionState.RUNNING;
-        this.ctx.logger.info(`[SessionManager] Set session ${sessionId} to RUNNING (stopOnEntry=false, process started with suspend=n)`);
       }
 
       // Attach parity with the post-launch belt-and-braces re-sync (issues
@@ -367,6 +368,9 @@ export class AttachController {
       // registered via its pending-target queue — without a fresh echo their
       // verified state is unrecoverable (issue #500).
       await this.breakpoints.resyncAll(session, { forceFreshEcho: true });
+      assertTargetPresent();
+      // A breakpoint or delayed requested pause can land during the re-send.
+      if (session.state === SessionState.PAUSED) attachPausePending = false;
       // Unverified-at-attach function breakpoints get the same launch-style
       // warning (issue #308); bind-late adapters (js/java) stay suppressed
       // inside the builder.
@@ -411,7 +415,7 @@ export class AttachController {
 
       return {
         success: true,
-        state: finalState,
+        state: session.state,
         data: attachData
       };
     } catch (error) {
@@ -433,7 +437,7 @@ export class AttachController {
       // state write would throw. Report the failure as-is.
       const state = sessionRemovedDuringTeardown(this.ctx, sessionId)
         ? SessionState.STOPPED
-        : SessionState.ERROR;
+        : isTerminalSessionState(session.state) ? session.state : SessionState.ERROR;
       if (state === SessionState.ERROR) {
         this.ctx.updateState(session, SessionState.ERROR);
       }

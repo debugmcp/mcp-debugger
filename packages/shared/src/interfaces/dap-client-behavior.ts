@@ -24,6 +24,16 @@ export interface ChildSessionConfig {
   parentConfig: Record<string, unknown>;
 }
 
+/** Our start intent, separate from the adapter's reverse-request configuration. */
+export type ParentStart =
+  | { readonly request: 'launch'; readonly stopOnEntry?: boolean }
+  | {
+    readonly request: 'attach';
+    readonly stopOnEntry?: boolean;
+    /** Adapter arguments only; request mode and entry-stop intent stay above. */
+    readonly attachArguments: Readonly<Record<string, unknown>>;
+  };
+
 /**
  * Context provided to reverse request handlers
  */

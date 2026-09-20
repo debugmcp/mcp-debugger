@@ -15,7 +15,8 @@ import {
   DefaultAdapterPolicy,
   DapClientBehavior,
   DapClientContext,
-  ChildSessionConfig,
+  type ParentStart,
+  type ChildSessionConfig,
   buildNoDebugTargetError,
   sanitizePayloadForLogging
 } from '@debugmcp/shared';
@@ -102,10 +103,9 @@ export class MinimalDapClient extends EventEmitter implements IDapClient {
   private childSessions = new Map<string, MinimalDapClient>();
   private activeChild: MinimalDapClient | null = null;
 
-  // Arguments of the last 'launch'/'attach' request sent through this client.
-  // Used to thread the caller's intent (attach mode, stopOnEntry) into child
-  // session creation — the adapter does not echo these fields (issue #124).
-  private lastStartRequestArgs: Record<string, unknown> | null = null;
+  // The adapter does not echo our start intent in reverse requests (#124).
+  // Keep it typed and separate from both sets of adapter arguments (#730).
+  private parentStart?: ParentStart;
 
   // Adapter policy and DAP behavior configuration
   private policy: AdapterPolicy;
@@ -139,10 +139,9 @@ export class MinimalDapClient extends EventEmitter implements IDapClient {
         policy: this.policy,
         host,
         port,
-        // The manager applies this to every adoption request — the ones
-        // this connection hands over below and the ones a child or release
-        // connection forwards (issue #712) — so enrichment has one site.
-        enrichConfig: (config) => this.enrichChildConfig(config)
+        // Read for every adoption/release, including requests forwarded by
+        // child connections (#712), without rewriting js-debug's config.
+        getParentStart: () => this.parentStart
       });
       
       // Wire up events from ChildSessionManager
@@ -511,47 +510,6 @@ export class MinimalDapClient extends EventEmitter implements IDapClient {
     });
   }
 
-  /**
-   * Thread the caller's attach intent into a child session config. js-debug's
-   * reverse startDebugging configuration only carries
-   * {type, name, __pendingTargetId}: without this, ChildSessionManager cannot
-   * distinguish attach-mode children from launch-mode children, nor see
-   * whether the user asked for an entry stop (issue #124). Caller-provided
-   * attach extras (localRoot/remoteRoot, sourceMaps, skipFiles, …) ride along
-   * too — the child session is where source resolution actually happens, so
-   * dropping them here would make forwarded attach options inert (issue #466).
-   * js-debug's own child keys win over the parent's.
-   *
-   * A launch-mode config gets only the request mode and the caller's
-   * stopOnEntry (issue #704): without them ChildSessionManager read every
-   * stopOnEntry:false launch as wanting an entry stop, waited 15 s for one
-   * and then paused the debuggee itself. The launch keys stay behind —
-   * js-debug binds the child target to the parent's launch config itself, so
-   * they would only ride into the child's attach request as noise. The
-   * request marker is threaded for both modes; today only 'attach' is read.
-   *
-   * Applied by ChildSessionManager at the top of createChildSession (passed
-   * as its enrichConfig option), so a startDebugging forwarded from a child
-   * or release connection is enriched too (issue #712).
-   */
-  private enrichChildConfig(config: ChildSessionConfig): ChildSessionConfig {
-    const start = this.lastStartRequestArgs;
-    if (!start) {
-      return config;
-    }
-    const parentConfig: Record<string, unknown> = {
-      // Only an attach parent's extras ride into the child's attach request;
-      // js-debug binds a launched target to the parent's launch config itself
-      ...(start.request === 'attach' ? start : {}),
-      ...(config.parentConfig ?? {}),
-      request: start.request
-    };
-    if (typeof start.stopOnEntry === 'boolean') {
-      parentConfig.stopOnEntry = start.stopOnEntry;
-    }
-    return { ...config, parentConfig };
-  }
-
   public async sendRequest<T extends DebugProtocol.Response>(
     command: string,
     args?: unknown,
@@ -570,10 +528,13 @@ export class MinimalDapClient extends EventEmitter implements IDapClient {
     // only carries {type, name, __pendingTargetId} — request mode and
     // stopOnEntry never round-trip through the adapter (issue #124).
     if (command === 'attach' || command === 'launch') {
-      this.lastStartRequestArgs = {
-        ...((args as Record<string, unknown> | undefined) ?? {}),
-        request: command
-      };
+      const { request: _request, stopOnEntry, ...attachArguments } =
+        (args as Record<string, unknown> | undefined) ?? {};
+      void _request;
+      const intent = typeof stopOnEntry === 'boolean' ? { stopOnEntry } : {};
+      this.parentStart = command === 'attach'
+        ? { request: command, ...intent, attachArguments }
+        : { request: command, ...intent };
     }
 
     // CDP-delivered function breakpoints (issue #295): the adapter has no

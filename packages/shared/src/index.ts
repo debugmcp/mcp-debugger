@@ -231,7 +231,8 @@ export type {
   DapClientBehavior,
   DapClientContext,
   ReverseRequestResult,
-  ChildSessionConfig
+  ChildSessionConfig,
+  ParentStart
 } from './interfaces/dap-client-behavior.js';
 export {
   NO_DEBUG_TARGET_MARKER,
