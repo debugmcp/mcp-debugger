@@ -832,6 +832,16 @@ describe('CobolDebugAdapter', () => {
       expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/"sources" given but cobc is not available: no COBOL symbol manifest/));
     });
 
+    it('attaches on the given manifestDirs with a warning when the regeneration fails beside them', async () => {
+      // The strict failure names "manifestDirs" as the remedy; a caller who already passed
+      // them keeps their manifests and the attach (re-review of #761).
+      buildMock.mockResolvedValue({ ...buildResult('pause'), success: false, error: 'cobc exited with code 1' });
+      const result = await adapter.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, sources: ['pause.cob'], manifestDirs: ['m'] });
+      expect(result[COBOL_PRIVATE_KEY]).toEqual({ manifestDirs: [path.join(tmp, 'm')], engineScopes: false });
+      expect(buildMock).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/Symbol manifest regeneration failed \(cobc exited with code 1\)/));
+    });
+
     it('warns when build options come without sources (nothing regenerates), and stays quiet otherwise', async () => {
       await adapter.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, manifestDirs: ['m'], dialect: 'ibm', runtimeChecks: true });
       expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/dialect, runtimeChecks given without "sources"/));

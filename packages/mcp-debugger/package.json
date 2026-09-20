@@ -41,24 +41,24 @@
   },
   "dependencies": {},
   "optionalDependencies": {
-    "@debugmcp/codelldb-darwin-arm64": "1.11.8",
-    "@debugmcp/codelldb-darwin-x64": "1.11.8",
-    "@debugmcp/codelldb-linux-arm64": "1.11.8",
-    "@debugmcp/codelldb-linux-x64": "1.11.8",
-    "@debugmcp/codelldb-win32-x64": "1.11.8"
+    "@debugmcp/codelldb-darwin-arm64": "workspace:*",
+    "@debugmcp/codelldb-darwin-x64": "workspace:*",
+    "@debugmcp/codelldb-linux-arm64": "workspace:*",
+    "@debugmcp/codelldb-linux-x64": "workspace:*",
+    "@debugmcp/codelldb-win32-x64": "workspace:*"
   },
   "devDependencies": {
-    "@debugmcp/adapter-cobol": "0.24.2",
-    "@debugmcp/adapter-cpp": "0.24.2",
-    "@debugmcp/adapter-dotnet": "0.24.2",
-    "@debugmcp/adapter-go": "0.24.2",
-    "@debugmcp/adapter-java": "0.24.2",
-    "@debugmcp/adapter-javascript": "0.24.2",
-    "@debugmcp/adapter-python": "0.24.2",
-    "@debugmcp/adapter-mock": "0.24.2",
-    "@debugmcp/adapter-ruby": "0.24.2",
-    "@debugmcp/adapter-rust": "0.24.2",
-    "@debugmcp/shared": "0.24.2"
+    "@debugmcp/adapter-cobol": "workspace:*",
+    "@debugmcp/adapter-cpp": "workspace:*",
+    "@debugmcp/adapter-dotnet": "workspace:*",
+    "@debugmcp/adapter-go": "workspace:*",
+    "@debugmcp/adapter-java": "workspace:*",
+    "@debugmcp/adapter-javascript": "workspace:*",
+    "@debugmcp/adapter-python": "workspace:*",
+    "@debugmcp/adapter-mock": "workspace:*",
+    "@debugmcp/adapter-ruby": "workspace:*",
+    "@debugmcp/adapter-rust": "workspace:*",
+    "@debugmcp/shared": "workspace:*"
   },
   "author": "Sycamore LLC <admin@debugmcp.io> (https://github.com/debugmcp)"
 }

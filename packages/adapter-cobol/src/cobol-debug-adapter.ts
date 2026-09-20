@@ -731,7 +731,9 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
    * `sources`. The binary is never touched; the artifacts land beside `anchor` (the
    * binary when known, else the first source). Returns the artifact directory, or
    * undefined after a warning when cobc is missing or the translation failed: the
-   * session then shows the engine's C view instead of failing.
+   * session then shows the engine's C view (or the `manifestDirs` manifests) instead of
+   * failing. Under `strict` a failed translation throws instead — the attach path uses
+   * it when nothing else supplies a manifest.
    */
   private async regenerateManifest(cobc: CobcLocation | null, anchor: string, options: ManifestRegenerationOptions): Promise<string | undefined> {
     const { sources, manifestDirsGiven, timeoutMs, strict, ...buildOptions } = options;
@@ -834,14 +836,16 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
       // hint), else beside the first source. The translate runs before the engine is
       // spawned, under the caller's attach timeout: it gets that budget, less a margin.
       // A translate that fails or times out fails the attach: the caller asked for the
-      // manifest, and a silent C view is the worst first contact.
+      // manifest, and a silent C view is the worst first contact — unless `manifestDirs`
+      // supplied one, in which case the attach proceeds on those with a warning (the
+      // error text would otherwise tell the caller to pass what they already passed).
       const anchor = program ?? absSources[0];
       const budget = typeof timeout === 'number' && timeout > 0 ? timeout : 30_000;
       const artifactDir = await this.regenerateManifest(await this.locateCobc(), anchor, {
         sources: absSources,
         manifestDirsGiven: userManifestDirs.length > 0,
         timeoutMs: Math.max(5_000, budget - 5_000),
-        strict: true,
+        strict: userManifestDirs.length === 0,
         ...buildOptionsOf({ dialect, format, copybookDirs, cobcFlags, runtimeChecks, forceRebuild }, baseDir)
       });
       if (artifactDir) {

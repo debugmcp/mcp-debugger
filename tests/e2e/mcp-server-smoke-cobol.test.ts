@@ -617,6 +617,44 @@ describe.skipIf(SKIP_COBOL)('MCP Server COBOL Debugging Smoke Test @requires-cob
   );
 
   it(
+    'runs a program with statically linked sources under cobcrun as one combined module and stops in the CALLed program',
+    async (ctx) => {
+      // `cobc -m -o X a.cob b.cob` is refused by cobc; several sources build one module
+      // with `-b` named after the main program, and cobcrun runs it by that PROGRAM-ID.
+      const mainSource = cobolSourcePath('calls');
+      const [subSource] = cobolExtraSources('calls');
+      sessionId = (await call('create_debug_session', { language: 'cobol', name: 'cobol-smoke-cobcrun-sources' })).sessionId as string;
+      expect((await call('set_breakpoint', { file: subSource, line: SUB_BP_LINE })).success).toBe(true);
+
+      await startOrSkip(ctx, {
+        scriptPath: mainSource,
+        dapLaunchArgs: { stopOnEntry: false },
+        adapterLaunchConfig: { runner: 'cobcrun', sources: [subSource] }
+      }, 'cobcrun-sources');
+      expect(await reachCobolLine(SUB_BP_LINE, 'sub.cob')).toBe(true);
+
+      const frames = await fetchStackTrace();
+      expect(frames[0].name).toContain('CALLSUB');
+      expect(frames.some(f => (f.name ?? '').includes('CALLMAIN')), 'caller frame should be visible').toBe(true);
+
+      const locals = await localsByName();
+      expect(locals.get('LS-WORK')?.value).toBe('1234');
+      const rec = await children(locals.get('LK-ARG-REC')!.variablesReference!);
+      expect(rec.get('LK-A')?.value).toBe('1000');
+      expect(rec.get('LK-NAME')?.value).toBe('"CALLER    "');
+
+      expect((await call('step_out', {})).success).toBe(true);
+      expect(await pollState('paused', 15000)).toBeDefined();
+      const afterOut = (await fetchStackTrace()).find(isCobolFrame)!;
+      expect(afterOut.file?.toLowerCase().endsWith('main.cob'), `expected main.cob, got ${afterOut.file}:${afterOut.line}`).toBe(true);
+
+      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+      expect((await pollState('stopped', 20000))?.exitCode).toBe(0);
+    },
+    120000
+  );
+
+  it(
     'completes a noDebug launch through the shim (issue #746 behaviour preserved)',
     async (ctx) => {
       const { sourcePath, binaryPath } = prepareCobolExample('hello');
