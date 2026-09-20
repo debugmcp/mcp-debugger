@@ -1361,7 +1361,7 @@ export class Router {
                 if (outcome === 'inside') {
                   done = false;
                 } else if (outcome === 'escaped' && !landed.program!.program.procedure.statements.some(statement =>
-                  statement.line === top.line && this.state.registry.sourceById(landed.program!, statement.sourceFileId)?.path === top.source?.path)) {
+                  statement.line === top.line && normalisePath(this.state.registry.sourceById(landed.program!, statement.sourceFileId)?.path ?? '') === normalisePath(top.source?.path ?? ''))) {
                   done = false; // Walk the destination paragraph header to its first executable statement.
                 } else {
                   body.description = outcome === 'escaped'

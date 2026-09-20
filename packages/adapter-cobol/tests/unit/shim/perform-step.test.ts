@@ -378,7 +378,10 @@ describe('cobol shim PERFORM-aware stepping', () => {
     expect(rig.instructionSends).toHaveLength(0);
   });
 
-  it.each(['next', 'stepOut'])('%s stops at a GO TO destination without waiting for a return that will never run', async command => {
+  it.each([
+    ['next', HELLO_COB], ['stepOut', HELLO_COB],
+    ['next', HELLO_COB.replace(/\\/g, '/').toUpperCase()]
+  ])('%s stops at a GO TO destination (%s) without waiting for a return that will never run', async (command, destination) => {
     const manifest = helloWithStatements();
     manifest.programs[0].procedure.statements.push({ sourceFileId: 1, line: 41, verb: 'MOVE' });
     manifest.programs[0].controlFlow = {
@@ -395,11 +398,11 @@ describe('cobol shim PERFORM-aware stepping', () => {
     rig.nextStops.push(
       { frame: frame(1, 'HELLO_', HELLO_COB, 37), depth: 1, cLine: 210 },
       { frame: frame(1, 'HELLO_', HELLO_COB, 38), depth: 1, cLine: 220 },
-      { frame: frame(1, 'HELLO_', HELLO_COB, 41), depth: 1, cLine: 310 }
+      { frame: frame(1, 'HELLO_', destination, 41), depth: 1, cLine: 310 }
     );
     await h.client.request(command, { threadId: 1 });
     const stopped = await h.client.nextEvent('stopped');
-    expect(stopped.body).toMatchObject({ reason: 'step', description: 'GO TO left the active PERFORM range; stopped at hello.cob:41' });
+    expect(stopped.body).toMatchObject({ reason: 'step', description: expect.stringMatching(/GO TO left the active PERFORM range; stopped at hello\.cob:41/i) });
     expect(rig.commands).toEqual(['next', 'next', 'next']);
     expect(rig.instructionSends).toEqual([]);
   });
