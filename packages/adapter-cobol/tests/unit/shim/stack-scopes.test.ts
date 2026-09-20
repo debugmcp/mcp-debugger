@@ -208,7 +208,8 @@ describe('cobol shim stackTrace and scopes', () => {
       engine.on('stackTrace', (args: DebugProtocol.StackTraceArguments) => ({
         stackFrames: [frame(args.threadId === 1 ? 1 : 101, 'nanosleep', undefined, 0),
           frame(args.threadId === 1 ? 2 : 102, 'HELLO_', HELLO_COB, 38),
-          ...Array.from({ length: 12 }, (_, i) => frame(3 + i, `native-${i}`, undefined, 0))],
+          ...Array.from({ length: 12 }, (_, i) => frame(3 + i, `native-${i}`, undefined, 0))]
+          .slice(args.startFrame ?? 0, args.levels === undefined ? undefined : (args.startFrame ?? 0) + args.levels),
         totalFrames: 14
       }));
     } });
