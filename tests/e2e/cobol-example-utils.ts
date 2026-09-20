@@ -17,17 +17,18 @@ const ROOT = path.resolve(__dirname, '../..');
 export const COBOL_EXAMPLES_DIR = path.join(ROOT, 'examples', 'cobol');
 const BUILD_DIR = path.join(COBOL_EXAMPLES_DIR, '.debug-mcp-test');
 
-export type CobolExampleName = 'hello' | 'calls' | 'copybook' | 'rterror' | 's0c7' | 'sysin' | 'pause';
+export type CobolExampleName = 'hello' | 'calls' | 'copybook' | 'rterror' | 's0c7' | 'sysin' | 'pause' | 'dyn';
 
-/** Main source (relative to examples/cobol) plus extra statically linked sources. */
-const SOURCES: Record<CobolExampleName, { main: string; extra?: string[]; copybookDir?: string; runtimeChecks?: boolean }> = {
+/** Main source (relative to examples/cobol) plus extra statically linked sources and dynamically CALLed modules. */
+const SOURCES: Record<CobolExampleName, { main: string; extra?: string[]; modules?: string[]; copybookDir?: string; runtimeChecks?: boolean }> = {
   hello: { main: 'hello.cob' },
   calls: { main: 'calls/main.cob', extra: ['calls/sub.cob'] },
   copybook: { main: 'copybook/main.cob', copybookDir: 'copybook' },
   rterror: { main: 'rterror.cob', runtimeChecks: true },
   s0c7: { main: 's0c7.cob', runtimeChecks: true },
   sysin: { main: 'sysin.cob' },
-  pause: { main: 'pause.cob' }
+  pause: { main: 'pause.cob' },
+  dyn: { main: 'dyn/main.cob', modules: ['dyn/mod1.cob'] }
 };
 
 export function cobolSourcePath(name: CobolExampleName): string {
@@ -36,6 +37,11 @@ export function cobolSourcePath(name: CobolExampleName): string {
 
 export function cobolExtraSources(name: CobolExampleName): string[] {
   return (SOURCES[name].extra ?? []).map((p) => path.join(COBOL_EXAMPLES_DIR, p));
+}
+
+/** Sources the example CALLs dynamically (built with `cobc -m` through the `modules` launch option). */
+export function cobolModuleSources(name: CobolExampleName): string[] {
+  return (SOURCES[name].modules ?? []).map((p) => path.join(COBOL_EXAMPLES_DIR, p));
 }
 
 export function cobolCopybookDir(name: CobolExampleName): string | undefined {

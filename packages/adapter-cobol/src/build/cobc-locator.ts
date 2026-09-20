@@ -12,8 +12,24 @@
  *   so `<prefix>/bin` must be on PATH for both the compile and the launch.
  */
 import { spawn } from 'child_process';
-import { existsSync } from 'fs';
+import { existsSync, realpathSync } from 'fs';
 import * as path from 'path';
+
+/**
+ * GnuCOBOL's module loader, which every install ships beside cobc (apt `gnucobol3`,
+ * MSYS2, Homebrew): `cobcrun <PROGRAM-ID> [args…]` loads `<PROGRAM-ID>.<so|dll|dylib>`
+ * from COB_LIBRARY_PATH and runs it.
+ */
+export function cobcrunPath(cobc: CobcLocation, platform: NodeJS.Platform = process.platform): string {
+  let binDir = cobc.binDir;
+  try {
+    // A symlinked cobc (/usr/local/bin/cobc -> /opt/gnucobol/bin/cobc) has its cobcrun beside the real one.
+    binDir = path.dirname(realpathSync(cobc.path));
+  } catch {
+    // keep the located bin dir
+  }
+  return path.join(binDir, platform === 'win32' ? 'cobcrun.exe' : 'cobcrun');
+}
 
 export interface CobcLocation {
   /** Absolute path of the cobc executable. */

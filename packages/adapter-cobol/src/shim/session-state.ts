@@ -78,6 +78,16 @@ export class SessionState {
   readonly options: ShimOptions;
   readonly registry: ManifestRegistry;
   generation = 0;
+  /** `launch` or `attach`, from the request that started the session (unset until one arrives). */
+  mode?: 'launch' | 'attach';
+  /** Stops seen so far; the first one after an attach is the attach handshake's. */
+  stopsSeen = 0;
+  /** A client `pause` was forwarded, not refused, and no stop has arrived since. */
+  pausePending = false;
+  /** The attach asked for a stop on entry, so its first stop is the handshake's (CodeLLDB resumes otherwise). */
+  attachStopExpected = false;
+  /** Threads whose full stack (WALK_UP_STACK_LEVELS deep) is cached this generation. */
+  readonly deepFetched = new Set<number>();
   lastThreadId?: number;
   engineCapabilities?: DebugProtocol.Capabilities;
   /** The user's own function breakpoints, replayed in every union with the runtime-error hook. */
@@ -125,6 +135,7 @@ export class SessionState {
     this.frames.clear();
     this.refs.clear();
     this.memo.clear();
+    this.deepFetched.clear();
     this.nextRef = SHIM_REF_BASE;
     this.logger.debug(`generation ${this.generation} (${reason})`);
   }

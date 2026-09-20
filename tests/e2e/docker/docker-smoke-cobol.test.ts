@@ -173,4 +173,107 @@ describe.skipIf(SKIP_DOCKER)('Docker: COBOL Debugging Smoke Tests', () => {
     sessionId = null;
     console.log('[Docker COBOL] ✅ All checks passed');
   }, 240000);
+
+  it('binds a breakpoint in a -m module once the CALL loads it: the module is named after its PROGRAM-ID (Linux resolves the file name case-sensitively)', async () => {
+    const mainPath = 'cobol/dyn/main.cob';
+    const modulePath = 'cobol/dyn/mod1.cob';
+    const MOD_LINE = 8; // ADD 1 TO LK-VALUE
+
+    sessionId = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: { language: 'cobol', name: 'docker-cobol-modules' }
+    })).sessionId as string;
+    expect(parseSdkToolResult(await mcpClient!.callTool({
+      name: 'set_breakpoint',
+      arguments: { sessionId, file: modulePath, line: MOD_LINE }
+    })).success).toBe(true);
+
+    const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'start_debugging',
+      arguments: {
+        sessionId,
+        scriptPath: mainPath,
+        dapLaunchArgs: { stopOnEntry: false },
+        adapterLaunchConfig: { modules: ['/workspace/cobol/dyn/mod1.cob'], forceRebuild: true }
+      }
+    }));
+    expect(startResponse.success).not.toBe(false);
+
+    let frame: { name?: string; line?: number; file?: string } | undefined;
+    for (let attempt = 0; attempt < 40 && !frame; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      const sessions = parseSdkToolResult(await mcpClient!.callTool({ name: 'list_debug_sessions', arguments: {} }));
+      const session = ((sessions.sessions ?? []) as Array<{ id: string; state?: string }>).find(s => s.id === sessionId);
+      if (session?.state !== 'paused') continue;
+      const stack = parseSdkToolResult(await mcpClient!.callTool({ name: 'get_stack_trace', arguments: { sessionId } }));
+      frame = ((stack.stackFrames ?? []) as Array<{ name?: string; line?: number; file?: string }>).find(f => (f.file ?? '').endsWith('mod1.cob'));
+    }
+    expect(frame, 'expected a stop inside mod1.cob').toBeDefined();
+    expect(frame!.line).toBe(MOD_LINE);
+    expect(frame!.name).toContain('MOD1');
+
+    const listed = parseSdkToolResult(await mcpClient!.callTool({ name: 'list_breakpoints', arguments: { sessionId } }));
+    const modBp = ((listed.breakpoints ?? []) as Array<{ file?: string; line?: number; verified?: boolean }>).find(b => (b.file ?? '').endsWith('mod1.cob'));
+    expect(modBp?.verified, JSON.stringify(listed)).toBe(true);
+
+    const localsResponse = parseSdkToolResult(await mcpClient!.callTool({ name: 'get_local_variables', arguments: { sessionId } }));
+    const locals = new Map(((localsResponse.variables ?? []) as Array<{ name: string; value: string }>).map(v => [v.name, v.value]));
+    expect(locals.get('LK-VALUE')).toBe('41');
+
+    expect(parseSdkToolResult(await mcpClient!.callTool({ name: 'continue_execution', arguments: { sessionId } })).success).not.toBe(false);
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    const outputResult = parseSdkToolResult(await mcpClient!.callTool({ name: 'get_output', arguments: { sessionId } }));
+    const entries = (outputResult.entries ?? []) as Array<{ output: string }>;
+    expect(entries.some(e => e.output.includes('COBOL_DEBUG_MARKER: value=+000000042')), 'MOD1 ran and returned').toBe(true);
+    console.log('[Docker COBOL] ✓ module breakpoint bound on load, MOD1 resolved by PROGRAM-ID');
+  }, 240000);
+
+  it('runs a module-only build under cobcrun (runner) and stops in the program once the loader loads it', async () => {
+    const mainPath = 'cobol/dyn/main.cob';
+    const CALL_LINE = 10; // CALL WS-MOD-NAME USING WS-VALUE
+
+    sessionId = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: { language: 'cobol', name: 'docker-cobol-cobcrun' }
+    })).sessionId as string;
+    expect(parseSdkToolResult(await mcpClient!.callTool({
+      name: 'set_breakpoint',
+      arguments: { sessionId, file: mainPath, line: CALL_LINE }
+    })).success).toBe(true);
+
+    const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'start_debugging',
+      arguments: {
+        sessionId,
+        scriptPath: mainPath,
+        dapLaunchArgs: { stopOnEntry: false },
+        adapterLaunchConfig: { runner: 'cobcrun', modules: ['/workspace/cobol/dyn/mod1.cob'] }
+      }
+    }));
+    expect(startResponse.success).not.toBe(false);
+
+    let frame: { name?: string; line?: number; file?: string } | undefined;
+    for (let attempt = 0; attempt < 40 && !frame; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      const sessions = parseSdkToolResult(await mcpClient!.callTool({ name: 'list_debug_sessions', arguments: {} }));
+      const session = ((sessions.sessions ?? []) as Array<{ id: string; state?: string }>).find(s => s.id === sessionId);
+      if (session?.state !== 'paused') continue;
+      const stack = parseSdkToolResult(await mcpClient!.callTool({ name: 'get_stack_trace', arguments: { sessionId } }));
+      frame = ((stack.stackFrames ?? []) as Array<{ name?: string; line?: number; file?: string }>).find(f => (f.file ?? '').endsWith('main.cob'));
+    }
+    expect(frame, 'expected a stop in main.cob under cobcrun').toBeDefined();
+    expect(frame!.line).toBe(CALL_LINE);
+    expect(frame!.name).toContain('DYNMAIN');
+
+    const localsResponse = parseSdkToolResult(await mcpClient!.callTool({ name: 'get_local_variables', arguments: { sessionId } }));
+    const locals = new Map(((localsResponse.variables ?? []) as Array<{ name: string; value: string }>).map(v => [v.name, v.value]));
+    expect(locals.get('WS-VALUE')).toBe('41');
+
+    expect(parseSdkToolResult(await mcpClient!.callTool({ name: 'continue_execution', arguments: { sessionId } })).success).not.toBe(false);
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    const outputResult = parseSdkToolResult(await mcpClient!.callTool({ name: 'get_output', arguments: { sessionId } }));
+    const entries = (outputResult.entries ?? []) as Array<{ output: string }>;
+    expect(entries.some(e => e.output.includes('COBOL_DEBUG_MARKER: value=+000000042')), 'DYNMAIN ran to completion under cobcrun').toBe(true);
+    console.log('[Docker COBOL] ✓ cobcrun runner: program breakpoint bound on load, output captured');
+  }, 240000);
 });

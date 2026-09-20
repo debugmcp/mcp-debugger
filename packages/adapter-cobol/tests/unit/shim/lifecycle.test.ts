@@ -80,6 +80,36 @@ describe('cobol shim lifecycle', () => {
     expect(h.exitCodes).toEqual([0]);
   });
 
+  it('client close after launch: the engine is told to terminate the debuggee', async () => {
+    h = await startShim();
+    await h.client.request('launch', { program: '/bin/prog' });
+    await h.client.close();
+    await waitFor(() => h!.exitCodes.length > 0, 3000, 'exit');
+    const [disconnect] = h.engine.received('disconnect');
+    expect(disconnect?.arguments).toEqual({ terminateDebuggee: true });
+  });
+
+  it('client close after attach: the attached process is detached from, not terminated', async () => {
+    h = await startShim();
+    await h.client.request('attach', { pid: 4242 });
+    await h.client.close();
+    await waitFor(() => h!.exitCodes.length > 0, 3000, 'exit');
+    const [disconnect] = h.engine.received('disconnect');
+    expect(disconnect?.arguments).toEqual({ terminateDebuggee: false });
+  });
+
+  it('client vanishes while the engine is starting: the buffered attach is never replayed, the engine is just taken down', async () => {
+    h = await startShim({ delayEngineListenMs: 120, timing: { disconnectGraceMs: 300 } });
+    void h.client.request('initialize', { clientID: 'test', adapterID: 'lldb' }, 50).catch(() => undefined);
+    void h.client.request('attach', { pid: 4242 }, 50).catch(() => undefined);
+    await tick(20);
+    await h.client.close();
+    await waitFor(() => h!.exitCodes.length > 0, 3000, 'exit');
+    expect(h.engine.received('attach')).toHaveLength(0);
+    expect(h.engine.received('initialize')).toHaveLength(0);
+    expect(h.exitCodes).toEqual([0]);
+  });
+
   it('engine exit: ends the client and exits with the engine code', async () => {
     h = await startShim();
     h.child.exitWith(3);

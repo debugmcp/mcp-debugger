@@ -59,7 +59,8 @@ Launch coordination (optional)
 Attach support (optional)
 - `supportsAttach?(): boolean` — Whether the adapter supports attaching to running processes
 - `supportsDetach?(): boolean` — Whether the adapter supports detaching without terminating the debuggee
-- `transformAttachConfig?(config: GenericAttachConfig): LanguageSpecificAttachConfig` — Transforms generic attach config to language-specific format
+- `transformAttachConfig?(config: GenericAttachConfig): LanguageSpecificAttachConfig | Promise<LanguageSpecificAttachConfig>` — Transforms generic attach config to language-specific format; may be async (awaited by the launcher)
+- `consumedAttachKeys?: readonly string[]` — adapterConfig keys the attach transform consumes itself (adapter-side work, a private side channel) rather than forwarding; their absence from the transform's output is not reported as an ignored key
 - `getDefaultAttachConfig?(): Partial<GenericAttachConfig>` — Gets default attach configuration for this language
 - `usesDirectConnectForAttach?(): boolean` — when true, attach connects directly to an already-listening DAP server (e.g. rdbg started with `--open`) instead of spawning an adapter process; `ProxyManager` skips `buildAdapterCommand` and the adapter policy returns a `'connect'` spawn config from the attach host/port
 

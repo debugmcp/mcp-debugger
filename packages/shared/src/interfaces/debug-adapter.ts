@@ -164,6 +164,16 @@ export interface IDebugAdapter extends EventEmitter {
   readonly supportedAttachKeys?: readonly string[];
 
   /**
+   * The adapterConfig keys the attach transform consumes itself — turned into
+   * adapter-side work or a private side channel rather than forwarded in the
+   * DAP attach request (the COBOL adapter's `sources` regenerate a symbol
+   * manifest, its `manifestDirs` feed the shim; issue #759). Their absence
+   * from the transform's output is not a drop, so the session layer does not
+   * report them as ignored. List them in `supportedAttachKeys` as well.
+   */
+  readonly consumedAttachKeys?: readonly string[];
+
+  /**
    * Transform generic attach config to language-specific format
    * Only called if supportsAttach() returns true
    *
@@ -175,10 +185,17 @@ export interface IDebugAdapter extends EventEmitter {
    * kept keys outside `supportedAttachKeys` warn as forwarded-unrecognized
    * with a typo suggestion (#466).
    *
+   * May be async: an adapter that has to do work before the attach request can be
+   * assembled (the COBOL adapter regenerates its symbol manifest from `sources` with a
+   * translate-only compile, issue #759) returns a promise, which the launcher awaits the
+   * way it awaits transformLaunchConfig. A rejection is the same failure as a thrown
+   * error: the attach fails with that message instead of proceeding with a config known
+   * to be incomplete.
+   *
    * @param config Generic attach configuration
    * @returns Language-specific attach configuration
    */
-  transformAttachConfig?(config: GenericAttachConfig): LanguageSpecificAttachConfig;
+  transformAttachConfig?(config: GenericAttachConfig): LanguageSpecificAttachConfig | Promise<LanguageSpecificAttachConfig>;
 
   /**
    * Get default attach configuration for this language

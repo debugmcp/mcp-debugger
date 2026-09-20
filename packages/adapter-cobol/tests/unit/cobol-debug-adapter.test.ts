@@ -16,9 +16,11 @@ import { AdapterState, AdapterError, AdapterErrorCode, DebugFeature, DebugLangua
 import type { AdapterConfig, AdapterDependencies, LanguageSpecificLaunchConfig } from '@debugmcp/shared';
 import type { CobcLocation, CobolBuildRequest, CobolBuildResult } from '../../src/build/index.js';
 
-const { shimExists, buildMock, builderCtor } = vi.hoisted(() => ({
+const { shimExists, cobcrunExists, buildMock, builderCtor } = vi.hoisted(() => ({
   /** Whether the fs switch pretends the shim entry exists. */
   shimExists: { value: true },
+  /** Whether the fs switch pretends cobcrun sits beside the canned cobc. */
+  cobcrunExists: { value: true },
   buildMock: vi.fn<(request: CobolBuildRequest) => Promise<CobolBuildResult>>(),
   builderCtor: vi.fn<(deps: unknown) => void>()
 }));
@@ -28,7 +30,11 @@ vi.mock('fs', async (importOriginal) => {
   return {
     ...actual,
     existsSync: (p: fs.PathLike): boolean =>
-      String(p).endsWith('cobol-shim.js') ? shimExists.value : actual.existsSync(p)
+      String(p).endsWith('cobol-shim.js')
+        ? shimExists.value
+        : /[\\/]cobcrun(\.exe)?$/.test(String(p))
+          ? cobcrunExists.value
+          : actual.existsSync(p)
   };
 });
 
@@ -130,6 +136,7 @@ describe('CobolDebugAdapter', () => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cobol-adapter-'));
     fs.writeFileSync(path.join(tmp, 'hello.cob'), '       PROGRAM-ID. HELLO.\n');
     vi.mocked(findCobc).mockResolvedValue(cobcLinux);
+    cobcrunExists.value = true;
     vi.mocked(resolveCodeLLDBExecutable).mockResolvedValue(CODELLDB);
     vi.mocked(resolveCodeLLDBExecutableSyncImpl).mockReturnValue(CODELLDB);
     adapter = new CobolDebugAdapter(createDependencies(), 'linux');
@@ -293,6 +300,7 @@ describe('CobolDebugAdapter', () => {
       const existing = path.join(tmp, 'my-cobc');
       fs.writeFileSync(existing, '');
       vi.mocked(findCobc).mockResolvedValue(cobcLinux);
+    cobcrunExists.value = true;
       await expect(adapter.resolveExecutablePath(existing)).resolves.toBe(existing);
       await transformLaunch({ program: 'app', cwd: tmp });
       expect(findCobc).toHaveBeenLastCalledWith(expect.objectContaining({ env: expect.objectContaining({ COBC_PATH: existing }) }));
@@ -624,9 +632,107 @@ describe('CobolDebugAdapter', () => {
     });
   });
 
+  describe('runner: cobcrun', () => {
+    const moduleResult = (name: string): CobolBuildResult => {
+      const artifactDir = path.join(tmp, '.debug-mcp', 'cobol', name, 'abc123abc123');
+      return buildResult(name, { artifactDir, binaryPath: path.join(artifactDir, `${name}.so`), manifestPaths: [path.join(artifactDir, `${name.toLowerCase()}.cobol-symbols.json`)] });
+    };
+
+    it('builds the program as a module and launches cobcrun with the PROGRAM-ID, its directory first on COB_LIBRARY_PATH', async () => {
+      const main = moduleResult('DYNMAIN');
+      const mod = moduleResult('MOD1');
+      buildMock.mockResolvedValueOnce(main).mockResolvedValueOnce(mod);
+
+      const launch = await transformLaunch({ program: 'main.cob', cwd: tmp, runner: 'cobcrun', modules: ['mod1.cob'], args: ['--batch'] });
+
+      expect(buildMock.mock.calls[0][0]).toMatchObject({ mode: 'module', program: path.join(tmp, 'main.cob') });
+      expect(buildMock.mock.calls[1][0]).toMatchObject({ mode: 'module', program: path.join(tmp, 'mod1.cob') });
+      expect(launch.program).toBe(path.join('/opt/gnucobol/bin', 'cobcrun'));
+      expect(launch.args).toEqual(['DYNMAIN', '--batch']);
+      const libraryPath = (launch.env as Record<string, string>).COB_LIBRARY_PATH.split(path.delimiter);
+      expect(libraryPath.slice(0, 2)).toEqual([main.artifactDir, mod.artifactDir]);
+      expect(shimOptions(launch).manifestDirs).toEqual([main.artifactDir, mod.artifactDir]);
+    });
+
+    it('uses cobcrun.exe on win32', async () => {
+      buildMock.mockResolvedValueOnce(moduleResult('DYNMAIN'));
+      const win = new CobolDebugAdapter(createDependencies(), 'win32');
+
+      const launch = await transformLaunch({ program: 'main.cob', cwd: tmp, runner: 'cobcrun' }, win);
+
+      expect(launch.program).toBe(path.join('/opt/gnucobol/bin', 'cobcrun.exe'));
+      expect(launch.args).toEqual(['DYNMAIN']);
+    });
+
+    it('runs a prebuilt module by name from its own directory and regenerates its manifest from sources', async () => {
+      buildMock.mockResolvedValueOnce(buildResult('MOD1'));
+      const modulePath = path.join(tmp, 'lib', 'MOD1.so');
+
+      const launch = await transformLaunch({ program: modulePath, cwd: tmp, runner: 'cobcrun', sources: ['mod1.cob'] });
+
+      expect(launch.program).toBe(path.join('/opt/gnucobol/bin', 'cobcrun'));
+      expect(launch.args).toEqual(['MOD1']);
+      expect((launch.env as Record<string, string>).COB_LIBRARY_PATH.split(path.delimiter)[0]).toBe(path.join(tmp, 'lib'));
+      expect(buildMock).toHaveBeenCalledWith(expect.objectContaining({ mode: 'manifest-only', program: modulePath, sources: [path.join(tmp, 'mod1.cob')] }));
+      expect(shimOptions(launch).manifestDirs).toEqual([buildResult('MOD1').artifactDir]);
+    });
+
+    it('refuses a prebuilt program that is not a module file for this platform', async () => {
+      await expect(transformLaunch({ program: 'app', cwd: tmp, runner: 'cobcrun' })).rejects.toMatchObject({
+        code: AdapterErrorCode.SCRIPT_NOT_FOUND,
+        message: expect.stringMatching(/takes a COBOL source or a compiled module \(\.so on this platform\)/)
+      });
+      // A Windows DLL is not a module cobcrun on Linux can load.
+      await expect(transformLaunch({ program: path.join(tmp, 'MOD1.dll'), cwd: tmp, runner: 'cobcrun' })).rejects.toMatchObject({ code: AdapterErrorCode.SCRIPT_NOT_FOUND });
+      expect(buildMock).not.toHaveBeenCalled();
+    });
+
+    it('builds a program with statically linked sources as one module (-b is the builder\'s job; the sources travel)', async () => {
+      buildMock.mockResolvedValueOnce(moduleResult('DYNMAIN'));
+      fs.writeFileSync(path.join(tmp, 'sub.cob'), '');
+      await transformLaunch({ program: 'main.cob', cwd: tmp, runner: 'cobcrun', sources: ['sub.cob'] });
+      expect(buildMock.mock.calls[0][0]).toMatchObject({ mode: 'module', program: path.join(tmp, 'main.cob'), sources: [path.join(tmp, 'sub.cob')] });
+    });
+
+    it('builds `modules` for a prebuilt program too, and needs cobc for them', async () => {
+      const mod = moduleResult('MOD1');
+      buildMock.mockResolvedValueOnce(mod);
+      const launch = await transformLaunch({ program: path.join(tmp, 'lib', 'MAIN.so'), cwd: tmp, runner: 'cobcrun', modules: ['mod1.cob'] });
+      expect(buildMock).toHaveBeenCalledWith(expect.objectContaining({ mode: 'module', program: path.join(tmp, 'mod1.cob') }));
+      const libraryPath = (launch.env as Record<string, string>).COB_LIBRARY_PATH.split(path.delimiter);
+      expect(libraryPath.slice(0, 2)).toEqual([path.join(tmp, 'lib'), mod.artifactDir]);
+      expect(shimOptions(launch).manifestDirs).toEqual([mod.artifactDir]);
+
+      vi.mocked(findCobc).mockResolvedValue(null);
+      const noCobc = new CobolDebugAdapter(createDependencies(), 'linux');
+      await expect(transformLaunch({ program: 'app', cwd: tmp, manifestDirs: ['m'], modules: ['mod1.cob'] }, noCobc)).rejects.toMatchObject({
+        code: AdapterErrorCode.ENVIRONMENT_INVALID,
+        message: expect.stringMatching(/"modules" are compiled with GnuCOBOL/)
+      });
+    });
+
+    it('fails as ENVIRONMENT_INVALID without cobc, and when cobcrun is missing beside it', async () => {
+      vi.mocked(findCobc).mockResolvedValue(null);
+      const noCobc = new CobolDebugAdapter(createDependencies(), 'linux');
+      await expect(transformLaunch({ program: path.join(tmp, 'MOD1.so'), cwd: tmp, runner: 'cobcrun' }, noCobc)).rejects.toMatchObject({
+        code: AdapterErrorCode.ENVIRONMENT_INVALID,
+        message: expect.stringMatching(/cobcrun ships beside cobc/)
+      });
+
+      vi.mocked(findCobc).mockResolvedValue(cobcLinux);
+      cobcrunExists.value = false;
+      buildMock.mockResolvedValueOnce(moduleResult('DYNMAIN'));
+      const noLoader = new CobolDebugAdapter(createDependencies(), 'linux');
+      await expect(transformLaunch({ program: 'main.cob', cwd: tmp, runner: 'cobcrun' }, noLoader)).rejects.toMatchObject({
+        code: AdapterErrorCode.ENVIRONMENT_INVALID,
+        message: expect.stringMatching(/cobcrun does not exist/)
+      });
+    });
+  });
+
   describe('transformAttachConfig', () => {
-    it('maps a numeric processId to the lldb attach shape with stopOnEntry defaulting to true', () => {
-      expect(adapter.transformAttachConfig({ request: 'attach', processId: 4242 })).toEqual({
+    it('maps a numeric processId to the lldb attach shape with stopOnEntry defaulting to true', async () => {
+      expect(await adapter.transformAttachConfig({ request: 'attach', processId: 4242 })).toEqual({
         type: 'lldb',
         request: 'attach',
         pid: 4242,
@@ -635,14 +741,14 @@ describe('CobolDebugAdapter', () => {
       });
     });
 
-    it('accepts a numeric string pid and honours stopOnEntry: false', () => {
-      const result = adapter.transformAttachConfig({ request: 'attach', processId: '77', stopOnEntry: false });
+    it('accepts a numeric string pid and honours stopOnEntry: false', async () => {
+      const result = await adapter.transformAttachConfig({ request: 'attach', processId: '77', stopOnEntry: false });
       expect(result.pid).toBe(77);
       expect(result.stopOnEntry).toBe(false);
     });
 
-    it('resolves manifestDirs against cwd into the private block and keeps cwd out of the engine config', () => {
-      const result = adapter.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, manifestDirs: ['m1', path.join(tmp, 'm2')], engineScopes: true });
+    it('resolves manifestDirs against cwd into the private block and keeps cwd out of the engine config', async () => {
+      const result = await adapter.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, manifestDirs: ['m1', path.join(tmp, 'm2')], engineScopes: true });
 
       expect(result[COBOL_PRIVATE_KEY]).toEqual({ manifestDirs: [path.join(tmp, 'm1'), path.join(tmp, 'm2')], engineScopes: true });
       expect(result).not.toHaveProperty('cwd');
@@ -650,12 +756,107 @@ describe('CobolDebugAdapter', () => {
       expect(result).not.toHaveProperty('engineScopes');
     });
 
-    it('passes program and advanced keys through for symbol resolution', () => {
-      const result = adapter.transformAttachConfig({ request: 'attach', processId: 7, program: '/opt/app/server', initCommands: ['x'], waitFor: true });
-      expect(result).toMatchObject({ program: '/opt/app/server', initCommands: ['x'], waitFor: true });
+    it('passes program and advanced keys through for symbol resolution, program resolved against cwd', async () => {
+      const result = await adapter.transformAttachConfig({ request: 'attach', processId: 7, program: '/opt/app/server', initCommands: ['x'], waitFor: true });
+      expect(result).toMatchObject({ program: path.resolve('/opt/app/server'), initCommands: ['x'], waitFor: true });
+      // A relative program is what CodeLLDB would resolve against ITS cwd (review of #761): sent absolute.
+      const relative = await adapter.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, program: 'bin/payroll' });
+      expect(relative.program).toBe(path.join(tmp, 'bin', 'payroll'));
+      expect(relative).not.toHaveProperty('cwd');
+      expect(buildMock).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/Attach without "sources" or "manifestDirs"/));
     });
 
-    it('rejects anything but a positive integer pid as UNSUPPORTED_OPERATION', () => {
+    it('regenerates the manifest from sources with a translate-only build beside the named program, ahead of manifestDirs', async () => {
+      buildMock.mockResolvedValue(buildResult('payroll'));
+
+      const result = await adapter.transformAttachConfig({
+        request: 'attach',
+        processId: 7,
+        cwd: tmp,
+        program: 'bin/payroll',
+        sources: ['src/payroll.cob', path.join(tmp, 'src', 'sub.cob')],
+        dialect: 'ibm',
+        copybookDirs: ['cpy'],
+        runtimeChecks: true,
+        manifestDirs: ['old']
+      });
+
+      expect(buildMock).toHaveBeenCalledWith({
+        program: path.join(tmp, 'bin', 'payroll'),
+        sources: [path.join(tmp, 'src', 'payroll.cob'), path.join(tmp, 'src', 'sub.cob')],
+        mode: 'manifest-only',
+        dialect: 'ibm',
+        format: undefined,
+        copybookDirs: [path.join(tmp, 'cpy')],
+        cobcFlags: undefined,
+        runtimeChecks: true,
+        forceRebuild: false
+      });
+      // The translate runs under the attach timeout (30 s default) less a margin.
+      expect(builderCtor).toHaveBeenLastCalledWith(expect.objectContaining({ timeoutMs: 25_000 }));
+      expect(result[COBOL_PRIVATE_KEY]).toEqual({ manifestDirs: [buildResult('payroll').artifactDir, path.join(tmp, 'old')], engineScopes: false });
+      // The build options are consumed here, not forwarded to the engine.
+      expect(result).toMatchObject({ pid: 7, program: path.join(tmp, 'bin', 'payroll') });
+      for (const key of ['sources', 'dialect', 'copybookDirs', 'runtimeChecks', 'manifestDirs']) {
+        expect(result).not.toHaveProperty(key);
+      }
+      expect(adapter.buildAdapterCommand(adapterConfig({ logDir: '' })).args).toContain(buildResult('payroll').artifactDir);
+    });
+
+    it('anchors the regeneration on the first source when no program is named', async () => {
+      buildMock.mockResolvedValue(buildResult('pause'));
+
+      await adapter.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, sources: ['pause.cob'] });
+
+      expect(buildMock).toHaveBeenCalledWith(expect.objectContaining({ program: path.join(tmp, 'pause.cob'), mode: 'manifest-only' }));
+    });
+
+    it('fails the attach when the regeneration fails, naming the knobs; attaches with a warning when cobc is missing', async () => {
+      buildMock.mockResolvedValue({ ...buildResult('pause'), success: false, error: 'cobc timed out after 25000 ms' });
+      await expect(adapter.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, sources: ['pause.cob'] })).rejects.toMatchObject({
+        code: AdapterErrorCode.ENVIRONMENT_INVALID,
+        message: expect.stringMatching(/regeneration failed: cobc timed out after 25000 ms\. Raise "timeout".*"manifestDirs".*omit "sources"/)
+      });
+
+      vi.mocked(findCobc).mockResolvedValue(null);
+      const fresh = new CobolDebugAdapter(createDependencies(), 'linux');
+      logger.warn.mockClear();
+      const noCobc = await fresh.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, sources: ['pause.cob'], manifestDirs: ['m'] });
+      expect(noCobc[COBOL_PRIVATE_KEY]).toEqual({ manifestDirs: [path.join(tmp, 'm')], engineScopes: false });
+      // manifestDirs still supply a manifest: an info line, not the no-manifest warning.
+      expect(logger.info).toHaveBeenCalledWith(expect.stringMatching(/"sources" given but cobc is not available; using the manifests in "manifestDirs"/));
+      expect(logger.warn).not.toHaveBeenCalledWith(expect.stringMatching(/"sources" given but cobc is not available: no COBOL symbol manifest/));
+      const bare = await fresh.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, sources: ['pause.cob'] });
+      expect(bare[COBOL_PRIVATE_KEY]).toEqual({ manifestDirs: [], engineScopes: false });
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/"sources" given but cobc is not available: no COBOL symbol manifest/));
+    });
+
+    it('attaches on the given manifestDirs with a warning when the regeneration fails beside them', async () => {
+      // The strict failure names "manifestDirs" as the remedy; a caller who already passed
+      // them keeps their manifests and the attach (re-review of #761).
+      buildMock.mockResolvedValue({ ...buildResult('pause'), success: false, error: 'cobc exited with code 1' });
+      const result = await adapter.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, sources: ['pause.cob'], manifestDirs: ['m'] });
+      expect(result[COBOL_PRIVATE_KEY]).toEqual({ manifestDirs: [path.join(tmp, 'm')], engineScopes: false });
+      expect(buildMock).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/Symbol manifest regeneration failed \(cobc exited with code 1\)/));
+    });
+
+    it('warns when build options come without sources (nothing regenerates), and stays quiet otherwise', async () => {
+      await adapter.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, manifestDirs: ['m'], dialect: 'ibm', runtimeChecks: true });
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/dialect, runtimeChecks given without "sources"/));
+      logger.warn.mockClear();
+      await adapter.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, manifestDirs: ['m'] });
+      expect(logger.warn).not.toHaveBeenCalledWith(expect.stringMatching(/given without "sources"/));
+    });
+
+    it('honours the caller\'s attach timeout as the regeneration budget', async () => {
+      buildMock.mockResolvedValue(buildResult('pause'));
+      await adapter.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, sources: ['pause.cob'], timeout: 12_000 });
+      expect(builderCtor).toHaveBeenLastCalledWith(expect.objectContaining({ timeoutMs: 7_000 }));
+    });
+
+    it('rejects anything but a positive integer pid as UNSUPPORTED_OPERATION', async () => {
       for (const config of [
         { request: 'attach' as const },
         { request: 'attach' as const, processId: 'not-a-pid' },
@@ -665,7 +866,7 @@ describe('CobolDebugAdapter', () => {
       ]) {
         let caught: unknown;
         try {
-          adapter.transformAttachConfig(config);
+          await adapter.transformAttachConfig(config);
         } catch (error) {
           caught = error;
         }
@@ -734,8 +935,8 @@ describe('CobolDebugAdapter', () => {
       expect(pathEntries(after.env).some((entries) => entries[0] === cobcLinux.binDir)).toBe(true);
     });
 
-    it('reuses the manifest dirs of the last attach transform', () => {
-      adapter.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, manifestDirs: ['m'] });
+    it('reuses the manifest dirs of the last attach transform', async () => {
+      await adapter.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, manifestDirs: ['m'] });
 
       const command = adapter.buildAdapterCommand(adapterConfig({ logDir: '' }));
 

@@ -80,6 +80,45 @@ export function formatStringRegister(env: RouterEnv): string {
   return env.platform === 'win32' ? '$rcx' : '$rdi';
 }
 
+/** How deep the shim looks for the nearest COBOL frame above a libcob/C frame. */
+const WALK_UP_STACK_LEVELS = 64;
+/** How many other threads a re-anchor unwinds looking for the COBOL program. */
+const RETARGET_MAX_THREADS = 8;
+
+/** Stop descriptions a debugger-initiated stop carries: the break an attach or a pause injects (Windows), the signal a pause sends (POSIX). */
+const NEUTRAL_STOP_DESCRIPTION = /0x80000003|breakpoint|SIGSTOP|SIGTRAP|SIGINT|EXC_BREAKPOINT/i;
+
+/** What the shim knows about why a stop happened, beyond the event's own body. */
+interface StopContext {
+  /** The first stop after an `attach`: the handshake's, not the program's. */
+  attachHandshake: boolean;
+  /** A client `pause` was forwarded and this is the stop that answers it. */
+  pausePending: boolean;
+}
+
+/**
+ * True for a stop the debugger caused, not the program (see retargetToCobolThread). An
+ * `exception` stop counts only when the shim knows a debugger stop was due — the attach
+ * handshake, or a pause it forwarded (the gate the shared LLDB policy applies too): a
+ * genuine __debugbreak()/int3/SIGTRAP in a CALLed C routine or a helper thread with
+ * no pause in flight stays where it happened.
+ */
+function isProgramNeutralStop(body: StoppedBody, context: StopContext): boolean {
+  if ((body.hitBreakpointIds ?? []).length > 0) {
+    return false;
+  }
+  switch (body.reason) {
+    case 'pause':
+      // Not 'entry': a launch's entry stop precedes the program (no COBOL frame anywhere
+      // yet), so the walk would only cost a threads request and a stack per thread.
+      return true;
+    case 'exception':
+      return (context.attachHandshake || context.pausePending) && NEUTRAL_STOP_DESCRIPTION.test(`${body.description ?? ''} ${body.text ?? ''}`);
+    default:
+      return false;
+  }
+}
+
 export class Router {
   private readonly memory: MemoryReader;
   private readonly variables: VariablesHandler;
@@ -212,6 +251,19 @@ export class Router {
       case 'attach':
         this.onLaunchOrAttach(request);
         return;
+      case 'pause':
+        // Remembered so the stop that answers it is known to be the debugger's doing; a
+        // refused pause (already stopped, not interruptible) has no stop to answer it.
+        this.state.pausePending = true;
+        this.forward(request, {
+          transform: (response) => {
+            if (!response.success) {
+              this.state.pausePending = false;
+            }
+            return response;
+          }
+        });
+        return;
       case 'setExceptionBreakpoints':
         this.onSetExceptionBreakpoints(request);
         return;
@@ -275,7 +327,11 @@ export class Router {
   }
 
   private onLaunchOrAttach(request: DebugProtocol.Request): void {
+    this.state.mode = request.command === 'attach' ? 'attach' : 'launch';
     const args = request.arguments as Record<string, unknown> | undefined;
+    // CodeLLDB stops the target after an attach only with stopOnEntry (it resumes otherwise),
+    // so only then is the session's first stop the handshake's rather than the program's.
+    this.state.attachStopExpected = request.command === 'attach' && args?.stopOnEntry !== false;
     if (args && typeof args === 'object') {
       const block = args[COBOL_PRIVATE_KEY];
       delete args[COBOL_PRIVATE_KEY];
@@ -385,7 +441,7 @@ export class Router {
     if (cached || this.state.lastThreadId === undefined) {
       return cached;
     }
-    await this.fetchStack(this.state.lastThreadId, 64);
+    await this.fetchStack(this.state.lastThreadId, WALK_UP_STACK_LEVELS);
     return this.state.frame(frameId);
   }
 
@@ -399,6 +455,9 @@ export class Router {
       }
       const raw = body.stackFrames.map((frame) => ({ ...frame, source: frame.source ? { ...frame.source } : undefined }));
       annotateStackFrames(this.state, body.stackFrames, threadId, 0);
+      if (levels >= WALK_UP_STACK_LEVELS) {
+        this.state.deepFetched.add(threadId);
+      }
       return raw;
     } catch (error) {
       this.logger.warn('internal stackTrace failed', error);
@@ -408,11 +467,26 @@ export class Router {
 
   private async onScopes(request: DebugProtocol.Request): Promise<DebugProtocol.Response | { forward: DebugProtocol.Request; transform?: ForwardMeta['transform'] }> {
     const args = this.argsOf<DebugProtocol.ScopesArguments>(request);
-    const frame = await this.ensureFrame(args.frameId);
-    if (!frame || !frame.isCobol || !frame.program) {
+    const frame = this.state.registry.programCount > 0 ? await this.ensureFrame(args.frameId) : undefined;
+    if (!frame) {
       return { forward: request, transform: (response) => this.checkRefBand(response) };
     }
-    const entry = frame.program;
+    // A frame outside COBOL — paused in libcob or C$SLEEP after an attach, in the
+    // runtime-error hook, in a C helper — shows the data division of the nearest COBOL
+    // program up the stack (the same walk `evaluate` does), under names that say whose
+    // it is. Only a stack with no COBOL frame above falls through to the engine.
+    const anchor = frame.isCobol && frame.program ? { frame } : await this.anchorFrame(args.frameId);
+    const entry = anchor?.frame.program;
+    if (!anchor || !entry) {
+      return { forward: request, transform: (response) => this.checkRefBand(response) };
+    }
+    const cobolFrame = anchor.frame;
+    // Named by paragraph and distance, not by index: the client's stack view hides
+    // internal frames, so an absolute frame number would name a frame it never showed.
+    const distance = cobolFrame.index - frame.index;
+    const suffix = cobolFrame.id === frame.id
+      ? ''
+      : ` of ${entry.program.programId} (${cobolFrame.paragraph ?? cobolFrame.section ?? cobolFrame.label}, ${distance} frame${distance === 1 ? '' : 's'} up)`;
     const scopes: DebugProtocol.Scope[] = [];
     for (const section of COBOL_SECTIONS) {
       const roots = this.state.registry.rootsOf(entry, section);
@@ -420,8 +494,9 @@ export class Router {
         continue;
       }
       scopes.push({
-        name: section,
-        variablesReference: this.state.allocRef({ kind: 'section', frameId: frame.id, program: entry, section }),
+        name: `${section}${suffix}`,
+        // Addresses are evaluated in the COBOL frame: its compilation unit owns the statics.
+        variablesReference: this.state.allocRef({ kind: 'section', frameId: cobolFrame.id, program: entry, section }),
         namedVariables: roots.length,
         expensive: false
       });
@@ -499,6 +574,10 @@ export class Router {
    * which case the result says so.
    */
   private async anchorFrame(frameId: number | undefined): Promise<{ frame: CachedFrame; note: string } | undefined> {
+    if (this.state.registry.programCount === 0) {
+      // No manifest: no frame can be COBOL, so there is nothing to walk up to.
+      return undefined;
+    }
     let frame: CachedFrame | undefined;
     if (frameId !== undefined) {
       frame = await this.ensureFrame(frameId);
@@ -511,18 +590,30 @@ export class Router {
     } else if (this.state.lastThreadId === undefined) {
       return undefined;
     } else if (this.state.framesOfThread(this.state.lastThreadId).length === 0) {
-      await this.fetchStack(this.state.lastThreadId, 64);
+      await this.fetchStack(this.state.lastThreadId, WALK_UP_STACK_LEVELS);
     }
     const threadId = frame?.threadId ?? this.state.lastThreadId;
     if (threadId === undefined) {
       return undefined;
     }
     const startIndex = frame ? frame.index + 1 : 0;
-    const nearest = this.state.framesOfThread(threadId).find((f) => f.index >= startIndex && f.isCobol);
+    const nearestCobol = (): CachedFrame | undefined =>
+      this.state.framesOfThread(threadId).find((f) => f.index >= startIndex && f.isCobol);
+    let nearest = nearestCobol();
+    if (!nearest && !this.state.deepFetched.has(threadId)) {
+      // The client may have fetched only the top of the stack (get_local_variables asks for
+      // one frame): the COBOL frame it is inside of is further down. Fetch deeper once per
+      // thread and generation; a stack that has none stays known to have none.
+      await this.fetchStack(threadId, WALK_UP_STACK_LEVELS);
+      nearest = nearestCobol();
+    }
     if (!nearest) {
       return undefined;
     }
-    return { frame: nearest, note: ` (evaluated in frame #${nearest.index} ${nearest.label})` };
+    // Named like the walk-up scopes: by label and distance, not by an engine frame index the
+    // client's filtered stack view never showed.
+    const distance = nearest.index - (frame?.index ?? 0);
+    return { frame: nearest, note: ` (evaluated in ${nearest.label}, ${distance} frame${distance === 1 ? '' : 's'} up)` };
   }
 
   private onExceptionInfo(request: DebugProtocol.Request): void {
@@ -750,6 +841,7 @@ export class Router {
         return;
       case 'continued':
         this.state.bumpGeneration('continued');
+        this.state.pausePending = false;
         slot.resolve(this.stepLoop ? null : event);
         return;
       case 'terminated':
@@ -768,6 +860,12 @@ export class Router {
     if (body.threadId !== undefined) {
       this.state.lastThreadId = body.threadId;
     }
+    const context: StopContext = {
+      attachHandshake: this.state.mode === 'attach' && this.state.attachStopExpected && this.state.stopsSeen === 0,
+      pausePending: this.state.pausePending
+    };
+    this.state.stopsSeen += 1;
+    this.state.pausePending = false;
     try {
       await this.relabelRuntimeError(body);
     } catch (error) {
@@ -777,7 +875,64 @@ export class Router {
       this.deliverStepSignal({ kind: 'stopped', event, slot });
       return;
     }
+    try {
+      await this.retargetToCobolThread(body, context);
+    } catch (error) {
+      this.logger.warn('stop retarget failed', error);
+    }
     slot.resolve(event);
+  }
+
+  /**
+   * A stop the program did not cause on the reported thread — on Windows an attach is
+   * reported on the break thread the OS injects (exception 0x80000003), a pause can land on
+   * a runtime worker thread — is re-anchored on the first thread that is inside a COBOL
+   * program, so the first stackTrace/scopes/evaluate a client asks for show the program
+   * rather than a thread-pool stack. Breakpoint, step, entry and runtime-error stops are
+   * on the right thread by construction and are left alone, as is any real fault. The
+   * original thread and reason stay in the description.
+   */
+  private async retargetToCobolThread(body: StoppedBody, context: StopContext): Promise<void> {
+    if (body.threadId === undefined || this.state.registry.programCount === 0 || !isProgramNeutralStop(body, context)) {
+      return;
+    }
+    if (this.state.lastRuntimeError?.gen === this.state.generation) {
+      return;
+    }
+    // The stop event's slot is held while this runs, so the walk is bounded: one stack
+    // for the reported thread, then the other threads' stacks in parallel (at most
+    // RETARGET_MAX_THREADS), and a stop or continue landing meanwhile abandons it — the
+    // frames it would decide on are the previous generation's.
+    const generation = this.state.generation;
+    const hasCobolFrame = (threadId: number): boolean => this.state.framesOfThread(threadId).some((f) => f.isCobol);
+    await this.fetchStack(body.threadId, WALK_UP_STACK_LEVELS);
+    if (this.state.generation !== generation || hasCobolFrame(body.threadId)) {
+      return;
+    }
+    const response = await this.engine.request('threads', {});
+    if (this.state.generation !== generation) {
+      return;
+    }
+    const others = ((response.body as DebugProtocol.ThreadsResponse['body'] | undefined)?.threads ?? [])
+      .filter((thread) => thread.id !== body.threadId)
+      .slice(0, RETARGET_MAX_THREADS);
+    await Promise.all(others.map((thread) => this.fetchStack(thread.id, WALK_UP_STACK_LEVELS)));
+    if (this.state.generation !== generation) {
+      return;
+    }
+    const target = others.find((thread) => hasCobolFrame(thread.id));
+    if (!target) {
+      return;
+    }
+    const reported = body.threadId;
+    this.logger.info(`stop (${body.reason}) reported on thread ${reported}, which has no COBOL frame; shown on thread ${target.id}`);
+    // A debugger-initiated stop, shown where the program is: `pause`, so no client asks
+    // for exceptionInfo about a thread that has no exception.
+    const original = body.description ?? body.reason ?? 'stopped';
+    body.reason = 'pause';
+    body.description = `${context.attachHandshake ? 'Attached' : 'Paused'} (reported on thread ${reported} as "${original}"; shown on thread ${target.id}, inside the COBOL program)`;
+    body.threadId = target.id;
+    this.state.lastThreadId = target.id;
   }
 
   /**

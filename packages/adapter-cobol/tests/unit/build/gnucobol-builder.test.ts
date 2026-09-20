@@ -24,6 +24,7 @@ import {
   GnuCobolBuilder,
   cobcArguments,
   copybooksFromPreprocessed,
+  scanProgramId,
   isCobolSourceFile,
   isCobolTextFile,
   moduleExtension,
@@ -142,6 +143,58 @@ function cannedManifest(sourcePath: string, copybookPath: string | undefined, di
 const readJson = <T>(file: string): T => JSON.parse(fs.readFileSync(file, 'utf8')) as T;
 
 describe('pure helpers', () => {
+  describe('scanProgramId', () => {
+    let dir: string;
+    beforeEach(() => {
+      dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cobol-pid-'));
+    });
+    afterEach(() => {
+      fs.rmSync(dir, { recursive: true, force: true });
+    });
+    const write = (text: string): string => {
+      const file = path.join(dir, 'p.cob');
+      fs.writeFileSync(file, text);
+      return file;
+    };
+
+    it('reads the PROGRAM-ID as written, skipping a commented-out header in fixed format', () => {
+      expect(scanProgramId(write('       IDENTIFICATION DIVISION.\n      * PROGRAM-ID. OLDNAME.\n       PROGRAM-ID. MyProg IS INITIAL.\n'))).toBe('MyProg');
+    });
+
+    it('accepts a quoted name, a period-less form and a name on the next line', () => {
+      expect(scanProgramId(write('       PROGRAM-ID. "pay-roll".\n'))).toBe('pay-roll');
+      expect(scanProgramId(write("       PROGRAM-ID 'X1'.\n"))).toBe('X1');
+      expect(scanProgramId(write('       PROGRAM-ID.\n           NEXTLINE.\n'))).toBe('NEXTLINE');
+    });
+
+    it('ignores the sequence area and columns past 72 in fixed format', () => {
+      expect(scanProgramId(write('000100 IDENTIFICATION DIVISION.\n000200 PROGRAM-ID. SEQ.                                                    PROGRAM-ID. TAIL.\n'))).toBe('SEQ');
+    });
+
+    it('treats a free-format source (flag or directive) as free: no columns, *> comments dropped', () => {
+      expect(scanProgramId(write('PROGRAM-ID. FREEONE. *> PROGRAM-ID. NOTME.\n'), 'free')).toBe('FREEONE');
+      expect(scanProgramId(write('>>SOURCE FORMAT IS FREE\n*> PROGRAM-ID. NOTME.\nPROGRAM-ID. DIRECTIVE.\n'))).toBe('DIRECTIVE');
+    });
+
+    it('drops a *> comment before applying fixed columns, skips a BOM and honours -free in cobcFlags', () => {
+      expect(scanProgramId(write('*>       PROGRAM-ID. NOTME.\n       PROGRAM-ID. REAL.\n'))).toBe('REAL');
+      expect(scanProgramId(write('\ufeff       PROGRAM-ID. BOMMED.\n'))).toBe('BOMMED');
+      expect(scanProgramId(write('PROGRAM-ID. FLAGGED. *> PROGRAM-ID. NOTME.\n'), undefined, ['-free'])).toBe('FLAGGED');
+    });
+
+    it('finds a column-1 PROGRAM-ID (cobc 3.2 detects free format itself) unless fixed was requested', () => {
+      expect(scanProgramId(write('IDENTIFICATION DIVISION.\nPROGRAM-ID. MOD1.\n'))).toBe('MOD1');
+      expect(scanProgramId(write('IDENTIFICATION DIVISION.\nPROGRAM-ID. MOD1.\n'), 'fixed')).toBeUndefined();
+      // The free retry still drops column-7 comment lines: a commented-out header is never picked.
+      expect(scanProgramId(write('       IDENTIFICATION DIVISION.\n      *    PROGRAM-ID. OLDNAME.\n       COPY HEADER.\n'))).toBeUndefined();
+    });
+
+    it('returns undefined for a missing file or a source without a PROGRAM-ID', () => {
+      expect(scanProgramId(path.join(dir, 'missing.cob'))).toBeUndefined();
+      expect(scanProgramId(write('       IDENTIFICATION DIVISION.\n       FUNCTION-ID. F1.\n'))).toBeUndefined();
+    });
+  });
+
   it('recognises launchable COBOL sources by extension, case-insensitively', () => {
     expect(isCobolSourceFile('/x/hello.cob')).toBe(true);
     expect(isCobolSourceFile('C:\\x\\HELLO.CBL')).toBe(true);
@@ -212,6 +265,8 @@ describe('cobcArguments', () => {
     expect(cobcArguments({ program: '/src/mod.cob', mode: 'module' }, '/out/mod.so', '/out/mod.lst', ['/src/mod.cob'])).toEqual([
       '-m', '-g', '-fdump=ALL', '--save-temps', '-t', '/out/mod.lst', '-ftsymbols', '-A', '-O0 -gdwarf-4', '-I', '/src', '-o', '/out/mod.so', '/src/mod.cob'
     ]);
+    // Several sources into one module: -b (cobc refuses `-m -o` with more than one input).
+    expect(cobcArguments({ program: '/src/main.cob', mode: 'module', sources: ['/src/sub.cob'] }, '/out/MAIN.so', '/out/MAIN.lst', ['/src/main.cob', '/src/sub.cob'])[0]).toBe('-b');
     expect(cobcArguments({ program: '/bin/app', mode: 'manifest-only', sources }, undefined, '/out/app.lst', sources)).toEqual([
       '-C', '-g', '-fdump=ALL', '--save-temps', '-t', '/out/app.lst', '-ftsymbols', '-A', '-O0 -gdwarf-4', '-I', '/src', '/src/hello.cob', '/src/sub.cob'
     ]);
@@ -409,15 +464,86 @@ describe('GnuCobolBuilder', () => {
       expect(path.basename(win.binaryPath ?? '')).toBe('hello.exe');
       expect(win.argv[win.argv.indexOf('-o') + 1]).toBe(win.binaryPath);
 
+      // A module is named after its PROGRAM-ID (HELLO in hello.cob), not the file: that is
+      // the name libcob resolves a dynamic CALL to, case-sensitively on Linux.
       const dll = await makeBuilder(fakeSpawn(), { platform: 'win32' }).build(exeRequest({ mode: 'module' }));
-      expect(path.basename(dll.binaryPath ?? '')).toBe('hello.dll');
+      expect(path.basename(dll.binaryPath ?? '')).toBe('HELLO.dll');
       expect(dll.argv[0]).toBe('-m');
+      expect(dll.argv[dll.argv.indexOf('-o') + 1]).toBe(dll.binaryPath);
+      expect(dll.artifactDir).toContain(path.join('artifacts', 'HELLO-module'));
 
       const so = await makeBuilder(fakeSpawn(), { platform: 'linux' }).build(exeRequest({ mode: 'module' }));
-      expect(path.basename(so.binaryPath ?? '')).toBe('hello.so');
+      expect(path.basename(so.binaryPath ?? '')).toBe('HELLO.so');
 
       const dylib = await makeBuilder(fakeSpawn(), { platform: 'darwin' }).build(exeRequest({ mode: 'module' }));
-      expect(path.basename(dylib.binaryPath ?? '')).toBe('hello.dylib');
+      expect(path.basename(dylib.binaryPath ?? '')).toBe('HELLO.dylib');
+    });
+
+    it('names a module after the file, with a diagnostic, when no PROGRAM-ID can be found', async () => {
+      fs.writeFileSync(program, '       IDENTIFICATION DIVISION.\n      * nothing declared yet\n');
+      const result = await makeBuilder(fakeSpawn(), { platform: 'linux' }).build(exeRequest({ mode: 'module' }));
+      expect(path.basename(result.binaryPath ?? '')).toBe('hello.so');
+      expect(result.diagnostics).toEqual([expect.stringMatching(/No PROGRAM-ID found .*named hello after the file/)]);
+    });
+
+    it('renames a module to the program id the compiler recorded when the pre-scan disagreed', async () => {
+      vi.mocked(parseGeneratedC).mockImplementation(() => ({
+        ...cannedManifest(program, undefined),
+        programs: [{ programId: 'REALNAME' } as unknown as CobolManifest['programs'][number]]
+      }));
+      const result = await makeBuilder(fakeSpawn(), { platform: 'linux' }).build(exeRequest({ mode: 'module' }));
+      expect(path.basename(result.binaryPath ?? '')).toBe('REALNAME.so');
+      expect(fs.existsSync(result.binaryPath ?? '')).toBe(true);
+      expect(fs.existsSync(path.join(result.artifactDir ?? '', 'HELLO.so'))).toBe(false);
+      expect(readJson<ManifestIndex>(path.join(result.artifactDir ?? '', MANIFEST_INDEX_NAME)).binary).toBe(result.binaryPath);
+      expect(result.diagnostics).toEqual([expect.stringMatching(/renamed to REALNAME\.so/)]);
+    });
+
+    it('names a module by the PROGRAM-ID as written, case kept, when the pre-scan missed it (review of #761)', async () => {
+      // A header the scan cannot read (here: none at all) — the compiler still recorded `SubX`.
+      fs.writeFileSync(program, '       IDENTIFICATION DIVISION.\n');
+      vi.mocked(parseGeneratedC).mockImplementation(() => ({
+        ...cannedManifest(program, undefined),
+        programs: [{ programId: 'SUBX', programIdAsWritten: 'SubX' } as unknown as CobolManifest['programs'][number]]
+      }));
+      const result = await makeBuilder(fakeSpawn(), { platform: 'linux' }).build(exeRequest({ mode: 'module' }));
+      expect(path.basename(result.binaryPath ?? '')).toBe('SubX.so');
+      expect(result.diagnostics).toEqual([expect.stringMatching(/renamed to SubX\.so: the source declares PROGRAM-ID SubX/)]);
+    });
+
+    it('keeps the file name when the declared PROGRAM-ID cannot be a file name', async () => {
+      fs.writeFileSync(program, '       IDENTIFICATION DIVISION.\n');
+      vi.mocked(parseGeneratedC).mockImplementation(() => ({
+        ...cannedManifest(program, undefined),
+        programs: [{ programId: 'A*B', programIdAsWritten: 'a*b' } as unknown as CobolManifest['programs'][number]]
+      }));
+      const result = await makeBuilder(fakeSpawn(), { platform: 'linux' }).build(exeRequest({ mode: 'module' }));
+      expect(result.success).toBe(true);
+      expect(path.basename(result.binaryPath ?? '')).toBe('hello.so');
+      expect(result.diagnostics).toEqual([expect.stringMatching(/PROGRAM-ID a\*b, which cannot be a file name/)]);
+    });
+
+    it('repairs a case-only mismatch too, and leaves an explicit outputName alone with a diagnostic', async () => {
+      fs.writeFileSync(program, '       IDENTIFICATION DIVISION.\n');
+      vi.mocked(parseGeneratedC).mockImplementation(() => ({
+        ...cannedManifest(program, undefined),
+        programs: [{ programId: 'HELLO', programIdAsWritten: 'HELLO' } as unknown as CobolManifest['programs'][number]]
+      }));
+      const renamed = await makeBuilder(fakeSpawn(), { platform: 'linux' }).build(exeRequest({ mode: 'module' }));
+      expect(path.basename(renamed.binaryPath ?? '')).toBe('HELLO.so');
+      expect(renamed.diagnostics).toEqual([expect.stringMatching(/renamed to HELLO\.so/)]);
+
+      const named = await makeBuilder(fakeSpawn(), { platform: 'linux' }).build(exeRequest({ mode: 'module', outputName: 'custom' }));
+      expect(path.basename(named.binaryPath ?? '')).toBe('custom.so');
+      expect(named.diagnostics).toEqual([expect.stringMatching(/written as custom \(outputName\) although the source declares PROGRAM-ID HELLO/)]);
+    });
+
+    it('keeps translate-only artifacts in their own <name>-manifest root, apart from a source launch of the same file', () => {
+      const builder = makeBuilder(fakeSpawn());
+      expect(builder.programArtifactRoot({ program, mode: 'manifest-only', sources: [program] })).toBe(path.join(srcDir, '.debug-mcp', 'cobol', 'hello-manifest'));
+      expect(builder.programArtifactRoot({ program: path.join(srcDir, 'hello'), mode: 'manifest-only', sources: [program] })).toBe(path.join(srcDir, '.debug-mcp', 'cobol', 'hello-manifest'));
+      expect(builder.programArtifactRoot({ program, mode: 'executable' })).toBe(path.join(srcDir, '.debug-mcp', 'cobol', 'hello'));
+      expect(builder.programArtifactRoot({ program, mode: 'module' })).toBe(path.join(srcDir, '.debug-mcp', 'cobol', 'HELLO-module'));
     });
 
     it('passes absolute, de-duplicated sources with the program first', async () => {
@@ -640,7 +766,8 @@ describe('GnuCobolBuilder', () => {
       expect(result.success).toBe(true);
       expect(result.binaryPath).toBe(exe);
       expect(fs.readFileSync(exe, 'utf8')).toBe('PREBUILT');
-      const artifactDir = path.join(artifactRoot, 'app', result.buildKey);
+      // Translate-only artifacts live in their own root, apart from a source launch of `app` (review of #761).
+      const artifactDir = path.join(artifactRoot, 'app-manifest', result.buildKey);
       expect(result.artifactDir).toBe(artifactDir);
       expect(spawn.calls[0].args).toEqual([
         '-C', '-g', '-fdump=ALL', '--save-temps', '-t', path.join(artifactDir, 'app.lst'), '-ftsymbols', '-A', '-O0 -gdwarf-4', '-I', path.dirname(program), program

@@ -107,6 +107,11 @@ export function isCobolSourceFile(filePath: string): boolean {
   return (COBOL_SOURCE_EXTENSIONS as readonly string[]).includes(ext);
 }
 
+/** A compiled GnuCOBOL module for this platform (`cobc -m` output): what `runner: 'cobcrun'` runs prebuilt. */
+export function isCobolModuleFile(filePath: string, platform: NodeJS.Platform = process.platform): boolean {
+  return filePath.toLowerCase().endsWith(moduleExtension(platform));
+}
+
 export function isCobolTextFile(filePath: string): boolean {
   const ext = path.extname(filePath).toLowerCase();
   return isCobolSourceFile(filePath) || (COBOL_COPYBOOK_EXTENSIONS as readonly string[]).includes(ext);
@@ -170,7 +175,10 @@ export function cobcArguments(
   if (request.mode === 'executable') {
     args.push('-x');
   } else if (request.mode === 'module') {
-    args.push('-m');
+    // `-m` takes one input per module; several statically linked sources go into one
+    // module with `-b` (measured: `-m -o X a.cob b.cob` is "-o option invalid in this
+    // combination" on cobc 3.2, `-b` builds a single DYNMAIN.dll that cobcrun runs).
+    args.push(sources.length > 1 ? '-b' : '-m');
   } else {
     args.push('-C');
   }
@@ -226,6 +234,59 @@ function keyArgv(args: string[]): string[] {
   return out;
 }
 
+/** What a PROGRAM-ID may look like as a module file name (COBOL words plus what cobc tolerates in quoted ids). */
+const MODULE_FILE_NAME_RE = /^[A-Za-z0-9_$.@-]+$/;
+
+const FREE_FORMAT_DIRECTIVE = /^\s*(?:>>\s*SOURCE(?:\s+FORMAT)?(?:\s+IS)?\s+FREE|\$\s*SET\s+SOURCEFORMAT\s*"FREE")/im;
+const PROGRAM_ID_RE = /\bPROGRAM-ID\s*\.?\s*(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9][A-Za-z0-9_-]*))/i;
+
+/**
+ * The PROGRAM-ID a COBOL source declares, as written, or undefined when none is found.
+ *
+ * libcob resolves a dynamic `CALL "NAME"` to `<NAME>.<so|dll|dylib>` on COB_LIBRARY_PATH
+ * by file name, case-sensitively on Linux (measured on 3.1.2 and 3.2: `mod1.so` does not
+ * satisfy `CALL "MOD1"`), so a `-m` module is written under this name rather than the
+ * source file's basename. Comment lines go first — a commented-out old header is common:
+ * fixed format drops lines with `*` or `/` in column 7 and reads columns 8-72 only; free
+ * format (`-free`, or a `>>SOURCE FORMAT FREE` directive) drops `*>` to end of line.
+ */
+export function scanProgramId(sourcePath: string, format?: 'fixed' | 'free', cobcFlags: readonly string[] = []): string | undefined {
+  let text: string;
+  try {
+    text = fs.readFileSync(sourcePath, 'latin1');
+  } catch {
+    return undefined;
+  }
+  if (text.charCodeAt(0) === 0xfeff) {
+    text = text.slice(1);
+  }
+  // `*>` opens a comment in both formats; drop it before any column rule looks at the line.
+  const lines = text.split(/\r?\n/).map((line) => {
+    const comment = line.indexOf('*>');
+    return comment >= 0 ? line.slice(0, comment) : line;
+  });
+  const flagFormat = cobcFlags.includes('-free') ? 'free' : cobcFlags.includes('-fixed') ? 'fixed' : undefined;
+  const requested = flagFormat ?? format;
+  const free = requested === 'free' || (requested !== 'fixed' && FREE_FORMAT_DIRECTIVE.test(text));
+  const scan = (asFree: boolean, dropColumnSevenComments = !asFree): string | undefined => {
+    const code = lines.map((line) => {
+      if (dropColumnSevenComments && line.length > 6 && (line[6] === '*' || line[6] === '/')) {
+        return '';
+      }
+      return asFree ? line : line.slice(7, 72);
+    });
+    const match = PROGRAM_ID_RE.exec(code.join(' '));
+    return match ? (match[1] ?? match[2] ?? match[3]) : undefined;
+  };
+  if (free) {
+    return scan(true);
+  }
+  // Fixed first (its comment rule protects against a commented-out old header), then free —
+  // cobc 3.2 detects free format itself, so a `PROGRAM-ID` in column 1 is a live one — with
+  // the column-7 comment lines still dropped, so the retry cannot pick the old header either.
+  return scan(false) ?? (requested === 'fixed' ? undefined : scan(true, true));
+}
+
 /**
  * Copybook paths from the `#line N "path"` markers of the preprocessed `.i` cobc keeps
  * under --save-temps: every copybook the compilation read, including ones only the
@@ -277,20 +338,35 @@ export class GnuCobolBuilder {
     return { ...cobcEnvironment(this.deps.cobc, this.env, this.platform), COBC_GEN_DUMP_COMMENTS: '1' };
   }
 
-  /** Where `program`'s artifacts live: `<artifactRoot>/<basename>`. */
-  programArtifactRoot(request: CobolBuildRequest): string {
+  /**
+   * Where `program`'s artifacts live: `<artifactRoot>/<name>` for an executable,
+   * `<PROGRAM-ID>-module` for a module and `<name>-manifest` for a translate-only
+   * regeneration. One root per mode: each has its own `latest.json` and prune pool, so a
+   * module build, a prebuilt launch or an attach never repoints or prunes the directory a
+   * source launch of the same file is paused on (a module named SUB and a source launch
+   * of sub.cob would otherwise share a directory on a case-insensitive filesystem).
+   */
+  programArtifactRoot(request: CobolBuildRequest, name = this.outputName(request)): string {
     const root = request.artifactRoot ?? path.join(path.dirname(request.program), ARTIFACT_ROOT_DIRNAME);
-    return path.join(root, this.outputName(request));
+    const suffix = request.mode === 'manifest-only' ? '-manifest' : request.mode === 'module' ? '-module' : '';
+    return path.join(root, `${name}${suffix}`);
   }
 
+  /** The output basename: `outputName`, else the PROGRAM-ID for a module (see scanProgramId), else the source basename. */
   outputName(request: CobolBuildRequest): string {
-    return request.outputName ?? path.basename(request.program, path.extname(request.program));
+    return request.outputName ?? this.scannedProgramId(request) ?? path.basename(request.program, path.extname(request.program));
+  }
+
+  /** The PROGRAM-ID pre-scan a module build names its output after; undefined for other modes. */
+  private scannedProgramId(request: CobolBuildRequest): string | undefined {
+    return request.mode === 'module' && !request.outputName ? scanProgramId(request.program, request.format, request.cobcFlags) : undefined;
   }
 
   async build(request: CobolBuildRequest): Promise<CobolBuildResult> {
     const sources = this.resolveSources(request);
-    const name = this.outputName(request);
-    const programRoot = this.ensureProgramRoot(request);
+    const scanned = this.scannedProgramId(request);
+    const name = request.outputName ?? scanned ?? path.basename(request.program, path.extname(request.program));
+    const programRoot = this.ensureProgramRoot(request, name);
     const previous = readJson<{ key?: string; artifactDir?: string }>(path.join(programRoot, LATEST_POINTER_NAME));
     const previousIndex = previous?.artifactDir
       ? readJson<ManifestIndex>(path.join(previous.artifactDir, MANIFEST_INDEX_NAME))
@@ -419,6 +495,38 @@ export class GnuCobolBuilder {
       }
     }
 
+    let binaryPath = outputPath;
+    if (request.mode === 'module' && outputPath) {
+      // The compiler's own program id, as written, is the authority (libcob resolves a
+      // CALL by that exact name); the pre-scan chose `-o` before cobc ran. A mismatch (a
+      // header the scan could not read) is repaired by renaming — unless the caller
+      // named the output, which is then their choice, flagged.
+      const declared = manifests[0]?.programs[0];
+      const declaredName = declared?.programIdAsWritten ?? declared?.programId;
+      if (request.outputName) {
+        if (declaredName !== undefined && declaredName !== request.outputName) {
+          diagnostics.push(`Module written as ${request.outputName} (outputName) although the source declares PROGRAM-ID ${declaredName}; a dynamic CALL "${declaredName}" will not find it under that name.`);
+        }
+      } else if (declaredName !== undefined && declaredName !== name) {
+        // A quoted PROGRAM-ID literal can carry characters no file name can (cobc accepts
+        // `"a*b"`): then the file keeps its name and the caller is told.
+        if (!MODULE_FILE_NAME_RE.test(declaredName)) {
+          diagnostics.push(`The source declares PROGRAM-ID ${declaredName}, which cannot be a file name; the module stays ${name}${moduleExtension(this.platform)} and a dynamic CALL "${declaredName}" will not find it.`);
+        } else {
+          const renamed = path.join(artifactDir, `${declaredName}${moduleExtension(this.platform)}`);
+          try {
+            fs.renameSync(outputPath, renamed);
+            diagnostics.push(`Module renamed to ${path.basename(renamed)}: the source declares PROGRAM-ID ${declaredName}, which is the name a dynamic CALL resolves to.`);
+            binaryPath = renamed;
+          } catch (error) {
+            diagnostics.push(`Module could not be renamed to ${path.basename(renamed)} (${error instanceof Error ? error.message : String(error)}); it stays ${name}${moduleExtension(this.platform)}.`);
+          }
+        }
+      } else if (scanned === undefined && declaredName === undefined) {
+        diagnostics.push(`No PROGRAM-ID found in ${request.program}; the module is named ${name} after the file, and a dynamic CALL must use that exact name.`);
+      }
+    }
+
     for (const source of sources) {
       const preprocessed = path.join(artifactDir, `${path.basename(source, path.extname(source))}.i`);
       for (const copybook of copybooksFromPreprocessed(preprocessed)) {
@@ -433,7 +541,7 @@ export class GnuCobolBuilder {
       contentKey: keyFor([...sources, ...copybooks]),
       outputName: name,
       mode: request.mode,
-      binary: request.mode === 'manifest-only' ? request.program : outputPath,
+      binary: request.mode === 'manifest-only' ? request.program : binaryPath,
       manifests: manifestPaths,
       copybooks: [...copybooks],
       cobcVersion: this.deps.cobc.versionLine,
@@ -467,14 +575,14 @@ export class GnuCobolBuilder {
    * The artifact root, created; when it cannot be (a prebuilt binary in a read-only
    * directory), a per-user temp root keyed by the program path, with a warning.
    */
-  private ensureProgramRoot(request: CobolBuildRequest): string {
-    const primary = this.programArtifactRoot(request);
+  private ensureProgramRoot(request: CobolBuildRequest, name: string): string {
+    const primary = this.programArtifactRoot(request, name);
     try {
       fs.mkdirSync(primary, { recursive: true });
       return primary;
     } catch (error) {
       const digest = createHash('sha256').update(path.resolve(request.program)).digest('hex').slice(0, 12);
-      const fallback = path.join(os.tmpdir(), 'mcp-debugger-cobol', digest, this.outputName(request));
+      const fallback = path.join(os.tmpdir(), 'mcp-debugger-cobol', digest, path.basename(primary));
       this.deps.logger?.warn?.(
         `[GnuCobolBuilder] Cannot create ${primary} (${error instanceof Error ? error.message : String(error)}); artifacts go to ${fallback}`
       );

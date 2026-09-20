@@ -139,10 +139,10 @@ describe('cobol shim evaluate', () => {
       frame(13, 'main', HELLO_C, 250)
     ]);
     const walked = body(await h.client.request('evaluate', { expression: 'WS-SCALED', frameId: 10 }));
-    expect(walked.result).toBe('-123.45 (evaluated in frame #2 HELLO: 0000-MAIN [hello.c:139])');
+    expect(walked.result).toBe('-123.45 (evaluated in HELLO: 0000-MAIN [hello.c:139], 2 frames up)');
     expect(h.engine.received('evaluate')[0].arguments).toMatchObject({ frameId: 12, context: 'variables' });
     const global = body(await h.client.request('evaluate', { expression: 'WS-COUNT' }));
-    expect(global.result).toBe('3 (evaluated in frame #2 HELLO: 0000-MAIN [hello.c:139])');
+    expect(global.result).toBe('3 (evaluated in HELLO: 0000-MAIN [hello.c:139], 2 frames up)');
   });
 
   it('refuses setExpression on a COBOL name and forwards it otherwise', async () => {

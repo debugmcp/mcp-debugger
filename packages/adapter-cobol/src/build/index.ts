@@ -1,5 +1,6 @@
 export {
   findCobc,
+  cobcrunPath,
   cobcEnvironment,
   cobcCandidatePaths,
   probeCobcVersion,
@@ -12,7 +13,9 @@ export type { BuildKeyInput } from './build-key.js';
 export {
   GnuCobolBuilder,
   cobcArguments,
+  scanProgramId,
   isCobolSourceFile,
+  isCobolModuleFile,
   isCobolTextFile,
   moduleExtension,
   executableExtension,
