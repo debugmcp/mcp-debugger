@@ -173,7 +173,7 @@ Unrecognised launch keys flow through to CodeLLDB, so the [C/C++ guide's table](
 | Group item | the concatenated bytes | a quoted preview of at most 64 bytes then ` … (N bytes)`; expands to its subordinate items |
 | `OCCURS n` / `OCCURS … DEPENDING ON` | contiguous elements | expands to one child per occurrence; the DEPENDING ON count is read live from the program (the shim decodes it itself — libcob helpers are not callable from LLDB expressions on Windows) |
 | `REDEFINES` | shares storage | listed as a sibling of the redefined item, decoded with its own picture |
-| Level-88 condition | the parent's bytes against its VALUE list | `true` / `false` (THRU ranges and multiple values included) |
+| Level-88 condition | the parent's bytes against its VALUE list | `true` / `false` (THRU ranges and multiple values included; ZERO/ZEROS/ZEROES also work on COMP-1/COMP-2 parents) |
 | `RETURN-CODE` | level 77 in the dump | an ordinary numeric item |
 
 - The sign encoding actually found in storage is recorded (`ascii-overpunch`, `ebcdic-overpunch`, `separate`, `nibble`, `none`) — an EBCDIC-style overpunch in an ASCII program is worth noticing after a data migration.
