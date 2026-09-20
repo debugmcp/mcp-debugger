@@ -135,7 +135,7 @@ describe.skipIf(SKIP_COBOL)('MCP Server COBOL Attach Smoke Test @requires-cobol'
 
   /** The newest artifact directory a regeneration for the pause binary produced (beside the binary). */
   function newestPauseArtifactDir(binaryPath: string): string {
-    const root = path.join(path.dirname(binaryPath), '.debug-mcp', 'cobol', 'pause');
+    const root = path.join(path.dirname(binaryPath), '.debug-mcp', 'cobol', 'pause-manifest');
     const dirs = readdirSync(root, { withFileTypes: true })
       .filter(d => d.isDirectory() && existsSync(path.join(root, d.name, 'manifest-index.json')))
       .map(d => path.join(root, d.name))
@@ -166,7 +166,7 @@ describe.skipIf(SKIP_COBOL)('MCP Server COBOL Attach Smoke Test @requires-cobol'
       const raw = (await call('get_stack_trace', { includeInternals: true })).stackFrames as Frame[];
       expect(raw.length).toBeGreaterThan(frames.length);
       const scopes = (await call('get_scopes', { frameId: raw[0].id })).scopes as Array<{ name: string }>;
-      expect(scopes.map(s => s.name)).toEqual([expect.stringMatching(/^WORKING-STORAGE of PAUSE \(frame #\d+\)$/)]);
+      expect(scopes.map(s => s.name)).toEqual([expect.stringMatching(/^WORKING-STORAGE of PAUSE \(0000-MAIN, \d+ frames? up\)$/)]);
 
       const tick1 = await readTick();
       expect(tick1).toBeGreaterThanOrEqual(1);

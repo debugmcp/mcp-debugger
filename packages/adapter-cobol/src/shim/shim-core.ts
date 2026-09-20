@@ -208,6 +208,10 @@ export function createCobolShim(config: CobolShimArgv, deps: ShimDeps = {}): Cob
       return;
     }
     shuttingDown = true;
+    // Whatever the client sent before the engine was up is void: replaying it would
+    // launch or attach on behalf of a client that is gone (an attach, then the grace
+    // kill, would tear down the process it attached to).
+    pendingClientMessages.length = 0;
     // The client is gone and the engine never saw a `disconnect`: send one, give it the
     // grace period, then leave. A launched debuggee goes down with the session; an
     // attached process is someone else's and is detached from, never terminated.
@@ -305,7 +309,9 @@ export function createCobolShim(config: CobolShimArgv, deps: ShimDeps = {}): Cob
       },
       timing.engineRequestTimeoutMs
     );
-    if (!client) {
+    if (!client || shuttingDown) {
+      // The client left while the engine was starting: nothing to route, the grace
+      // timer already running from onClientClosed takes the engine down.
       return;
     }
     router = new Router(
