@@ -5,7 +5,7 @@
 import { describe, expect, it, afterEach } from 'vitest';
 import path from 'node:path';
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import { installMemory } from './fake-engine.js';
+import { engineError, installMemory } from './fake-engine.js';
 import { callsManifest, callsMemory, helloManifest } from './fixtures.js';
 import { bringUp, frame, startShim, stopWithFrames, tick, type Harness } from './harness.js';
 
@@ -199,6 +199,25 @@ describe('cobol shim stackTrace and scopes', () => {
     h.engine.emit('stopped', { reason: 'exception', description: 'Exception 0x80000003 encountered at address 0x1', threadId: 7, allThreadsStopped: true });
     expect((await h.client.nextEvent('stopped')).body).toMatchObject({ reason: 'exception', threadId: 7 });
     expect(h.engine.received('threads')).toHaveLength(1);
+    // A pause the engine refuses answers nothing: it must not arm the gate for a later trap.
+    h.engine.on('pause', () => engineError('process is not running'));
+    const refused = await h.client.request('pause', { threadId: 7 });
+    expect(refused.success).toBe(false);
+    h.engine.emit('stopped', { reason: 'exception', description: 'Exception 0x80000003 encountered at address 0x1', threadId: 7, allThreadsStopped: true });
+    expect((await h.client.nextEvent('stopped')).body).toMatchObject({ reason: 'exception', threadId: 7 });
+    expect(h.engine.received('threads')).toHaveLength(1);
+  });
+
+  it('does not spend the attach-handshake credit when the attach asked for no stop on entry', async () => {
+    h = await startShim({ manifests: [helloManifest(ROOT)] });
+    await h.client.request('initialize', { clientID: 'test', adapterID: 'lldb' });
+    await h.client.request('attach', { pid: 4242, stopOnEntry: false, __cobol: { manifestDirs: [h.manifestDir] } });
+    h.engine.on('threads', () => ({ threads: [{ id: 7, name: 'thread #3' }, { id: 1, name: 'main' }] }));
+    h.engine.on('stackTrace', () => ({ stackFrames: [frame(71, 'worker', undefined, 0)], totalFrames: 1 }));
+    // CodeLLDB resumed after the attach: the first stop it reports is the program's own trap.
+    h.engine.emit('stopped', { reason: 'exception', description: 'Exception 0x80000003 encountered at address 0x1', threadId: 7, allThreadsStopped: true });
+    expect((await h.client.nextEvent('stopped')).body).toMatchObject({ reason: 'exception', threadId: 7 });
+    expect(h.engine.received('threads')).toHaveLength(0);
   });
 
   it('leaves a breakpoint stop, a step stop, an entry stop and a real fault on the thread the engine reported', async () => {

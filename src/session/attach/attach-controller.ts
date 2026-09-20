@@ -45,6 +45,10 @@ export interface AttachRequest {
 
 /** How many listed threads an attach unwinds while looking for one whose stack reaches user code. */
 const ATTACH_ANCHOR_SCAN_THREADS = 16;
+/** One unwind's own timeout: a thread that cannot be unwound must not cost the verify window. */
+const ATTACH_ANCHOR_UNWIND_TIMEOUT_MS = 3_000;
+/** The whole scan's budget, within the verify window. */
+const ATTACH_ANCHOR_SCAN_BUDGET_MS = 10_000;
 
 /** A frame whose source is a real path (not a `@symbol` / `<placeholder>` the debugger made up for native code). */
 function reachesSource(frame: DebugProtocol.StackFrame): boolean {
@@ -444,9 +448,10 @@ export class AttachController {
 
   /**
    * Among `threads`, the first whose stack has a frame with a source path — the
-   * reported stop thread first, then the others in listed order, at most
-   * ATTACH_ANCHOR_SCAN_THREADS unwinds each bounded by the verify window. Undefined
-   * when none reaches user code (the caller keeps the reported thread).
+   * reported stop thread first, then a thread named `main`, then the others in listed
+   * order; at most ATTACH_ANCHOR_SCAN_THREADS unwinds, each under its own short timeout
+   * and all within ATTACH_ANCHOR_SCAN_BUDGET_MS (or the verify window, if shorter).
+   * Undefined when none reaches user code (the caller keeps the reported thread).
    */
   private async threadReachingSource(
     sessionId: string,
@@ -455,16 +460,24 @@ export class AttachController {
     stoppedThreadId: number,
     timeoutMs: number
   ): Promise<DebugProtocol.Thread | undefined> {
+    const others = threads.filter((t) => t.id !== stoppedThreadId);
     const ordered = [
       ...threads.filter((t) => t.id === stoppedThreadId),
-      ...threads.filter((t) => t.id !== stoppedThreadId)
+      ...others.filter((t) => t.name === 'main'),
+      ...others.filter((t) => t.name !== 'main')
     ].slice(0, ATTACH_ANCHOR_SCAN_THREADS);
+    const deadline = Date.now() + Math.min(timeoutMs, ATTACH_ANCHOR_SCAN_BUDGET_MS);
     for (const thread of ordered) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        this.ctx.logger.info(`[SessionManager ${sessionId}] attach anchor scan: budget spent before thread ${thread.id}; keeping the reported thread`);
+        break;
+      }
       try {
         const response = await proxyManager.sendDapRequest<DebugProtocol.StackTraceResponse>(
           'stackTrace',
           { threadId: thread.id, startFrame: 0, levels: 32 },
-          { timeoutMs }
+          { timeoutMs: Math.min(ATTACH_ANCHOR_UNWIND_TIMEOUT_MS, remaining) }
         );
         if ((response?.body?.stackFrames ?? []).some(reachesSource)) {
           return thread;

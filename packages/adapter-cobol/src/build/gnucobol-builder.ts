@@ -234,6 +234,9 @@ function keyArgv(args: string[]): string[] {
   return out;
 }
 
+/** What a PROGRAM-ID may look like as a module file name (COBOL words plus what cobc tolerates in quoted ids). */
+const MODULE_FILE_NAME_RE = /^[A-Za-z0-9_$.@-]+$/;
+
 const FREE_FORMAT_DIRECTIVE = /^\s*(?:>>\s*SOURCE(?:\s+FORMAT)?(?:\s+IS)?\s+FREE|\$\s*SET\s+SOURCEFORMAT\s*"FREE")/im;
 const PROGRAM_ID_RE = /\bPROGRAM-ID\s*\.?\s*(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9][A-Za-z0-9_-]*))/i;
 
@@ -265,15 +268,12 @@ export function scanProgramId(sourcePath: string, format?: 'fixed' | 'free', cob
   const flagFormat = cobcFlags.includes('-free') ? 'free' : cobcFlags.includes('-fixed') ? 'fixed' : undefined;
   const requested = flagFormat ?? format;
   const free = requested === 'free' || (requested !== 'fixed' && FREE_FORMAT_DIRECTIVE.test(text));
-  const scan = (asFree: boolean): string | undefined => {
+  const scan = (asFree: boolean, dropColumnSevenComments = !asFree): string | undefined => {
     const code = lines.map((line) => {
-      if (asFree) {
-        return line;
-      }
-      if (line.length > 6 && (line[6] === '*' || line[6] === '/')) {
+      if (dropColumnSevenComments && line.length > 6 && (line[6] === '*' || line[6] === '/')) {
         return '';
       }
-      return line.slice(7, 72);
+      return asFree ? line : line.slice(7, 72);
     });
     const match = PROGRAM_ID_RE.exec(code.join(' '));
     return match ? (match[1] ?? match[2] ?? match[3]) : undefined;
@@ -281,9 +281,10 @@ export function scanProgramId(sourcePath: string, format?: 'fixed' | 'free', cob
   if (free) {
     return scan(true);
   }
-  // Fixed first (its comment rule protects against a commented-out old header), then free:
-  // cobc 3.2 detects free format itself, so a `PROGRAM-ID` in column 1 is a live one.
-  return scan(false) ?? (requested === 'fixed' ? undefined : scan(true));
+  // Fixed first (its comment rule protects against a commented-out old header), then free —
+  // cobc 3.2 detects free format itself, so a `PROGRAM-ID` in column 1 is a live one — with
+  // the column-7 comment lines still dropped, so the retry cannot pick the old header either.
+  return scan(false) ?? (requested === 'fixed' ? undefined : scan(true, true));
 }
 
 /**
@@ -338,14 +339,17 @@ export class GnuCobolBuilder {
   }
 
   /**
-   * Where `program`'s artifacts live: `<artifactRoot>/<name>`, and `<name>-manifest` for a
-   * translate-only regeneration — its own `latest.json` and prune pool, so a prebuilt
-   * launch or an attach never repoints or prunes the directory a source launch of the
-   * same file is paused on.
+   * Where `program`'s artifacts live: `<artifactRoot>/<name>` for an executable,
+   * `<PROGRAM-ID>-module` for a module and `<name>-manifest` for a translate-only
+   * regeneration. One root per mode: each has its own `latest.json` and prune pool, so a
+   * module build, a prebuilt launch or an attach never repoints or prunes the directory a
+   * source launch of the same file is paused on (a module named SUB and a source launch
+   * of sub.cob would otherwise share a directory on a case-insensitive filesystem).
    */
   programArtifactRoot(request: CobolBuildRequest, name = this.outputName(request)): string {
     const root = request.artifactRoot ?? path.join(path.dirname(request.program), ARTIFACT_ROOT_DIRNAME);
-    return path.join(root, request.mode === 'manifest-only' ? `${name}-manifest` : name);
+    const suffix = request.mode === 'manifest-only' ? '-manifest' : request.mode === 'module' ? '-module' : '';
+    return path.join(root, `${name}${suffix}`);
   }
 
   /** The output basename: `outputName`, else the PROGRAM-ID for a module (see scanProgramId), else the source basename. */
@@ -504,10 +508,20 @@ export class GnuCobolBuilder {
           diagnostics.push(`Module written as ${request.outputName} (outputName) although the source declares PROGRAM-ID ${declaredName}; a dynamic CALL "${declaredName}" will not find it under that name.`);
         }
       } else if (declaredName !== undefined && declaredName !== name) {
-        const renamed = path.join(artifactDir, `${declaredName}${moduleExtension(this.platform)}`);
-        fs.renameSync(outputPath, renamed);
-        diagnostics.push(`Module renamed to ${path.basename(renamed)}: the source declares PROGRAM-ID ${declaredName}, which is the name a dynamic CALL resolves to.`);
-        binaryPath = renamed;
+        // A quoted PROGRAM-ID literal can carry characters no file name can (cobc accepts
+        // `"a*b"`): then the file keeps its name and the caller is told.
+        if (!MODULE_FILE_NAME_RE.test(declaredName)) {
+          diagnostics.push(`The source declares PROGRAM-ID ${declaredName}, which cannot be a file name; the module stays ${name}${moduleExtension(this.platform)} and a dynamic CALL "${declaredName}" will not find it.`);
+        } else {
+          const renamed = path.join(artifactDir, `${declaredName}${moduleExtension(this.platform)}`);
+          try {
+            fs.renameSync(outputPath, renamed);
+            diagnostics.push(`Module renamed to ${path.basename(renamed)}: the source declares PROGRAM-ID ${declaredName}, which is the name a dynamic CALL resolves to.`);
+            binaryPath = renamed;
+          } catch (error) {
+            diagnostics.push(`Module could not be renamed to ${path.basename(renamed)} (${error instanceof Error ? error.message : String(error)}); it stays ${name}${moduleExtension(this.platform)}.`);
+          }
+        }
       } else if (scanned === undefined && declaredName === undefined) {
         diagnostics.push(`No PROGRAM-ID found in ${request.program}; the module is named ${name} after the file, and a dynamic CALL must use that exact name.`);
       }

@@ -185,6 +185,8 @@ describe('pure helpers', () => {
     it('finds a column-1 PROGRAM-ID (cobc 3.2 detects free format itself) unless fixed was requested', () => {
       expect(scanProgramId(write('IDENTIFICATION DIVISION.\nPROGRAM-ID. MOD1.\n'))).toBe('MOD1');
       expect(scanProgramId(write('IDENTIFICATION DIVISION.\nPROGRAM-ID. MOD1.\n'), 'fixed')).toBeUndefined();
+      // The free retry still drops column-7 comment lines: a commented-out header is never picked.
+      expect(scanProgramId(write('       IDENTIFICATION DIVISION.\n      *    PROGRAM-ID. OLDNAME.\n       COPY HEADER.\n'))).toBeUndefined();
     });
 
     it('returns undefined for a missing file or a source without a PROGRAM-ID', () => {
@@ -468,7 +470,7 @@ describe('GnuCobolBuilder', () => {
       expect(path.basename(dll.binaryPath ?? '')).toBe('HELLO.dll');
       expect(dll.argv[0]).toBe('-m');
       expect(dll.argv[dll.argv.indexOf('-o') + 1]).toBe(dll.binaryPath);
-      expect(dll.artifactDir).toContain(path.join('artifacts', 'HELLO'));
+      expect(dll.artifactDir).toContain(path.join('artifacts', 'HELLO-module'));
 
       const so = await makeBuilder(fakeSpawn(), { platform: 'linux' }).build(exeRequest({ mode: 'module' }));
       expect(path.basename(so.binaryPath ?? '')).toBe('HELLO.so');
@@ -509,6 +511,18 @@ describe('GnuCobolBuilder', () => {
       expect(result.diagnostics).toEqual([expect.stringMatching(/renamed to SubX\.so: the source declares PROGRAM-ID SubX/)]);
     });
 
+    it('keeps the file name when the declared PROGRAM-ID cannot be a file name', async () => {
+      fs.writeFileSync(program, '       IDENTIFICATION DIVISION.\n');
+      vi.mocked(parseGeneratedC).mockImplementation(() => ({
+        ...cannedManifest(program, undefined),
+        programs: [{ programId: 'A*B', programIdAsWritten: 'a*b' } as unknown as CobolManifest['programs'][number]]
+      }));
+      const result = await makeBuilder(fakeSpawn(), { platform: 'linux' }).build(exeRequest({ mode: 'module' }));
+      expect(result.success).toBe(true);
+      expect(path.basename(result.binaryPath ?? '')).toBe('hello.so');
+      expect(result.diagnostics).toEqual([expect.stringMatching(/PROGRAM-ID a\*b, which cannot be a file name/)]);
+    });
+
     it('repairs a case-only mismatch too, and leaves an explicit outputName alone with a diagnostic', async () => {
       fs.writeFileSync(program, '       IDENTIFICATION DIVISION.\n');
       vi.mocked(parseGeneratedC).mockImplementation(() => ({
@@ -529,6 +543,7 @@ describe('GnuCobolBuilder', () => {
       expect(builder.programArtifactRoot({ program, mode: 'manifest-only', sources: [program] })).toBe(path.join(srcDir, '.debug-mcp', 'cobol', 'hello-manifest'));
       expect(builder.programArtifactRoot({ program: path.join(srcDir, 'hello'), mode: 'manifest-only', sources: [program] })).toBe(path.join(srcDir, '.debug-mcp', 'cobol', 'hello-manifest'));
       expect(builder.programArtifactRoot({ program, mode: 'executable' })).toBe(path.join(srcDir, '.debug-mcp', 'cobol', 'hello'));
+      expect(builder.programArtifactRoot({ program, mode: 'module' })).toBe(path.join(srcDir, '.debug-mcp', 'cobol', 'HELLO-module'));
     });
 
     it('passes absolute, de-duplicated sources with the program first', async () => {

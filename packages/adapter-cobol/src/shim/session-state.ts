@@ -82,8 +82,10 @@ export class SessionState {
   mode?: 'launch' | 'attach';
   /** Stops seen so far; the first one after an attach is the attach handshake's. */
   stopsSeen = 0;
-  /** A client `pause` was forwarded and no stop has arrived since. */
+  /** A client `pause` was forwarded, not refused, and no stop has arrived since. */
   pausePending = false;
+  /** The attach asked for a stop on entry, so its first stop is the handshake's (CodeLLDB resumes otherwise). */
+  attachStopExpected = false;
   /** Threads whose full stack (WALK_UP_STACK_LEVELS deep) is cached this generation. */
   readonly deepFetched = new Set<number>();
   lastThreadId?: number;

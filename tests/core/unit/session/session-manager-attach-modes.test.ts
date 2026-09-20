@@ -319,14 +319,15 @@ describe('SessionManagerOperations attach modes', () => {
       const stacks: Record<number, unknown[]> = {
         // CodeLLDB reports the attach stop on the break-in thread Windows injects: ntdll only.
         6660: [{ id: 1, name: 'DbgBreakPoint', line: 0, column: 0 }, { id: 2, name: 'DbgUiRemoteBreakin', line: 0, column: 0, source: { name: '@DbgUiRemoteBreakin' } }],
-        5128: [{ id: 3, name: 'NtWaitForWorkViaWorkerFactory', line: 0, column: 0 }],
+        // A worker in user code, listed first; the program's main thread, named, listed last.
+        5128: [{ id: 3, name: 'worker', line: 40, column: 0, source: { path: '/proj/examples/cpp/worker.cpp' } }],
         9: [{ id: 4, name: 'Sleep', line: 0, column: 0 }, { id: 5, name: 'main', line: 20, column: 0, source: { path: '/proj/examples/cpp/pause_test.cpp' } }]
       };
       mockProxyManager.sendDapRequest.mockImplementation(async (command: string, args?: unknown) => {
         if (command === 'threads') {
           mockSession.state = SessionState.PAUSED;
           mockSession.lastStop = { reason: 'exception', threadId: 6660, description: 'Exception 0x80000003 encountered at address 0x7ffb59163ab0', timestamp: Date.now() };
-          return { success: true, body: { threads: [{ id: 5128, name: 'thread #1' }, { id: 6660, name: 'thread #3' }, { id: 9, name: 'thread #2' }] } };
+          return { success: true, body: { threads: [{ id: 5128, name: 'thread #1' }, { id: 6660, name: 'thread #3' }, { id: 9, name: 'main' }] } };
         }
         if (command === 'stackTrace') {
           return { success: true, body: { stackFrames: stacks[(args as { threadId: number }).threadId] ?? [] } };
@@ -336,8 +337,13 @@ describe('SessionManagerOperations attach modes', () => {
 
       await operations.attachToProcess('test-session', { host: '127.0.0.1', port: 12345, stopOnEntry: true });
 
+      // The reported thread first, then the one named main, before listed order.
       expect(setCurrentThreadId).toHaveBeenCalledWith(9);
       expect(mockDependencies.logger.info).toHaveBeenCalledWith(expect.stringContaining('the first thread whose stack reaches user code (the stop was reported on 6660)'));
+      const unwinds = mockProxyManager.sendDapRequest.mock.calls.filter(([command]) => command === 'stackTrace');
+      expect(unwinds.map(([, args]) => (args as { threadId: number }).threadId)).toEqual([6660, 9]);
+      // Each unwind carries its own short timeout, not the verify window.
+      expect(unwinds.every(([, , options]) => (options as { timeoutMs: number }).timeoutMs <= 3000)).toBe(true);
     });
 
     it('keeps the reported stop thread when no listed thread reaches user code', async () => {

@@ -812,11 +812,12 @@ describe('CobolDebugAdapter', () => {
       expect(buildMock).toHaveBeenCalledWith(expect.objectContaining({ program: path.join(tmp, 'pause.cob'), mode: 'manifest-only' }));
     });
 
-    it('attaches without a manifest, with a warning, when the regeneration fails or cobc is missing', async () => {
-      buildMock.mockResolvedValue({ ...buildResult('pause'), success: false, error: 'cobc exited with code 1' });
-      const failed = await adapter.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, sources: ['pause.cob'] });
-      expect(failed[COBOL_PRIVATE_KEY]).toEqual({ manifestDirs: [], engineScopes: false });
-      expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/Symbol manifest regeneration failed \(cobc exited with code 1\)/));
+    it('fails the attach when the regeneration fails, naming the knobs; attaches with a warning when cobc is missing', async () => {
+      buildMock.mockResolvedValue({ ...buildResult('pause'), success: false, error: 'cobc timed out after 25000 ms' });
+      await expect(adapter.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, sources: ['pause.cob'] })).rejects.toMatchObject({
+        code: AdapterErrorCode.ENVIRONMENT_INVALID,
+        message: expect.stringMatching(/regeneration failed: cobc timed out after 25000 ms\. Raise "timeout".*"manifestDirs".*omit "sources"/)
+      });
 
       vi.mocked(findCobc).mockResolvedValue(null);
       const fresh = new CobolDebugAdapter(createDependencies(), 'linux');
@@ -829,6 +830,14 @@ describe('CobolDebugAdapter', () => {
       const bare = await fresh.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, sources: ['pause.cob'] });
       expect(bare[COBOL_PRIVATE_KEY]).toEqual({ manifestDirs: [], engineScopes: false });
       expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/"sources" given but cobc is not available: no COBOL symbol manifest/));
+    });
+
+    it('warns when build options come without sources (nothing regenerates), and stays quiet otherwise', async () => {
+      await adapter.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, manifestDirs: ['m'], dialect: 'ibm', runtimeChecks: true });
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/dialect, runtimeChecks given without "sources"/));
+      logger.warn.mockClear();
+      await adapter.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, manifestDirs: ['m'] });
+      expect(logger.warn).not.toHaveBeenCalledWith(expect.stringMatching(/given without "sources"/));
     });
 
     it('honours the caller\'s attach timeout as the regeneration budget', async () => {

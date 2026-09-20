@@ -171,8 +171,8 @@ describe.skipIf(SKIP_COBOL)('MCP Server COBOL Attach Smoke Test @requires-cobol'
       const tick1 = await readTick();
       expect(tick1).toBeGreaterThanOrEqual(1);
       expect((await localsByName()).get('WS-ONE')?.value).toBe('1');
-      // evaluate walks up too and says so: `3 (evaluated in frame #6 PAUSE: 0000-MAIN …)`.
-      expect(String((await call('evaluate_expression', { expression: 'WS-TICK' })).result)).toMatch(new RegExp('^' + tick1 + ' [(]evaluated in frame #[0-9]+ PAUSE'));
+      // evaluate walks up too and says so: `3 (evaluated in PAUSE: 0000-MAIN …, 6 frames up)`.
+      expect(String((await call('evaluate_expression', { expression: 'WS-TICK' })).result)).toMatch(new RegExp('^' + tick1 + ' [(]evaluated in PAUSE: 0000-MAIN.*, [0-9]+ frames? up[)]$'));
 
       // Let the job run, pause it again: WS-TICK moved on and is read from the new stop.
       expect((await call('continue_execution', {})).success).toBe(true);

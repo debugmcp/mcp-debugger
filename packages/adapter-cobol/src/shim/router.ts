@@ -252,9 +252,17 @@ export class Router {
         this.onLaunchOrAttach(request);
         return;
       case 'pause':
-        // Remembered so the stop that answers it is known to be the debugger's doing.
+        // Remembered so the stop that answers it is known to be the debugger's doing; a
+        // refused pause (already stopped, not interruptible) has no stop to answer it.
         this.state.pausePending = true;
-        this.forward(request);
+        this.forward(request, {
+          transform: (response) => {
+            if (!response.success) {
+              this.state.pausePending = false;
+            }
+            return response;
+          }
+        });
         return;
       case 'setExceptionBreakpoints':
         this.onSetExceptionBreakpoints(request);
@@ -321,6 +329,9 @@ export class Router {
   private onLaunchOrAttach(request: DebugProtocol.Request): void {
     this.state.mode = request.command === 'attach' ? 'attach' : 'launch';
     const args = request.arguments as Record<string, unknown> | undefined;
+    // CodeLLDB stops the target after an attach only with stopOnEntry (it resumes otherwise),
+    // so only then is the session's first stop the handshake's rather than the program's.
+    this.state.attachStopExpected = request.command === 'attach' && args?.stopOnEntry !== false;
     if (args && typeof args === 'object') {
       const block = args[COBOL_PRIVATE_KEY];
       delete args[COBOL_PRIVATE_KEY];
@@ -599,7 +610,10 @@ export class Router {
     if (!nearest) {
       return undefined;
     }
-    return { frame: nearest, note: ` (evaluated in frame #${nearest.index} ${nearest.label})` };
+    // Named like the walk-up scopes: by label and distance, not by an engine frame index the
+    // client's filtered stack view never showed.
+    const distance = nearest.index - (frame?.index ?? 0);
+    return { frame: nearest, note: ` (evaluated in ${nearest.label}, ${distance} frame${distance === 1 ? '' : 's'} up)` };
   }
 
   private onExceptionInfo(request: DebugProtocol.Request): void {
@@ -827,6 +841,7 @@ export class Router {
         return;
       case 'continued':
         this.state.bumpGeneration('continued');
+        this.state.pausePending = false;
         slot.resolve(this.stepLoop ? null : event);
         return;
       case 'terminated':
@@ -846,7 +861,7 @@ export class Router {
       this.state.lastThreadId = body.threadId;
     }
     const context: StopContext = {
-      attachHandshake: this.state.mode === 'attach' && this.state.stopsSeen === 0,
+      attachHandshake: this.state.mode === 'attach' && this.state.attachStopExpected && this.state.stopsSeen === 0,
       pausePending: this.state.pausePending
     };
     this.state.stopsSeen += 1;

@@ -114,6 +114,29 @@ export interface CobolLaunchConfig extends GenericLaunchConfig {
   [key: string]: unknown;
 }
 
+/** CodeLLDB's own attach keys, passed through to the engine. */
+const COBOL_FORWARDED_ATTACH_KEYS = [
+  'processId',
+  'pid',
+  'program',
+  'stopOnEntry',
+  'waitFor',
+  'initCommands',
+  'preRunCommands',
+  'postRunCommands',
+  'exitCommands',
+  'targetCreateCommands',
+  'processCreateCommands',
+  'expressions',
+  'sourceMap',
+  'sourceLanguages',
+  'relativePathBase',
+  'breakpointMode'
+] as const;
+
+/** The build options that only mean something together with `sources`. */
+const COBOL_REGENERATION_OPTION_KEYS = ['dialect', 'format', 'copybookDirs', 'cobcFlags', 'runtimeChecks', 'forceRebuild'] as const;
+
 /**
  * Attach keys transformAttachConfig consumes (into the manifest regeneration and the
  * shim's private block) instead of forwarding to CodeLLDB: not "ignored" when absent
@@ -156,6 +179,8 @@ interface ManifestRegenerationOptions extends CobolBuildOptions {
   manifestDirsGiven?: boolean;
   /** Budget for the translate-only run (an attach has a client timeout to stay under). */
   timeoutMs?: number;
+  /** A failed translate is an error rather than a warning (attach: the caller asked for the manifest). */
+  strict?: boolean;
 }
 
 /** The options as the launch/attach config spells them, resolved against `baseDir`. */
@@ -185,36 +210,9 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
   readonly language = DebugLanguage.COBOL;
   readonly name = 'COBOL Debug Adapter';
 
-  // CodeLLDB attach options plus our sugar. Unlisted keys still reach the
-  // engine (forwarded with a warning); this list powers recognition + typo hints (#466).
-  readonly supportedAttachKeys = [
-    'processId',
-    'pid',
-    'program',
-    'cwd',
-    'stopOnEntry',
-    'waitFor',
-    'manifestDirs',
-    'engineScopes',
-    'sources',
-    'dialect',
-    'format',
-    'copybookDirs',
-    'cobcFlags',
-    'runtimeChecks',
-    'forceRebuild',
-    'initCommands',
-    'preRunCommands',
-    'postRunCommands',
-    'exitCommands',
-    'targetCreateCommands',
-    'processCreateCommands',
-    'expressions',
-    'sourceMap',
-    'sourceLanguages',
-    'relativePathBase',
-    'breakpointMode'
-  ] as const;
+  // CodeLLDB attach options (forwarded) plus our sugar (consumed). Unlisted keys still
+  // reach the engine (forwarded with a warning); this list powers recognition + typo hints (#466).
+  readonly supportedAttachKeys = [...COBOL_FORWARDED_ATTACH_KEYS, ...COBOL_CONSUMED_ATTACH_KEYS];
 
   readonly consumedAttachKeys = COBOL_CONSUMED_ATTACH_KEYS;
 
@@ -736,7 +734,7 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
    * session then shows the engine's C view instead of failing.
    */
   private async regenerateManifest(cobc: CobcLocation | null, anchor: string, options: ManifestRegenerationOptions): Promise<string | undefined> {
-    const { sources, manifestDirsGiven, timeoutMs, ...buildOptions } = options;
+    const { sources, manifestDirsGiven, timeoutMs, strict, ...buildOptions } = options;
     if (!cobc) {
       if (manifestDirsGiven) {
         this.dependencies.logger?.info('[CobolDebugAdapter] "sources" given but cobc is not available; using the manifests in "manifestDirs".');
@@ -752,6 +750,12 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
     // is why the options travel as one object from the config to here.
     const result = await this.runBuild(builder, { program: anchor, sources, mode: 'manifest-only', ...buildOptions }, 'cobc -C');
     if (!result.success) {
+      if (strict) {
+        throw new AdapterError(
+          `COBOL symbol manifest regeneration failed: ${result.error}. Raise "timeout" (it bounds the translate), pass "manifestDirs" from an earlier build, or omit "sources" to attach with the engine's C view.`,
+          AdapterErrorCode.ENVIRONMENT_INVALID
+        );
+      }
       this.dependencies.logger?.warn(`[CobolDebugAdapter] Symbol manifest regeneration failed (${result.error}); COBOL variables will fall back to the engine view.`);
       return undefined;
     }
@@ -829,21 +833,34 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
       // The artifacts go beside the binary when the caller named it (CodeLLDB's `program`
       // hint), else beside the first source. The translate runs before the engine is
       // spawned, under the caller's attach timeout: it gets that budget, less a margin.
+      // A translate that fails or times out fails the attach: the caller asked for the
+      // manifest, and a silent C view is the worst first contact.
       const anchor = program ?? absSources[0];
       const budget = typeof timeout === 'number' && timeout > 0 ? timeout : 30_000;
       const artifactDir = await this.regenerateManifest(await this.locateCobc(), anchor, {
         sources: absSources,
         manifestDirsGiven: userManifestDirs.length > 0,
         timeoutMs: Math.max(5_000, budget - 5_000),
+        strict: true,
         ...buildOptionsOf({ dialect, format, copybookDirs, cobcFlags, runtimeChecks, forceRebuild }, baseDir)
       });
       if (artifactDir) {
         shimManifestDirs.push(artifactDir);
       }
-    } else if (userManifestDirs.length === 0) {
-      this.dependencies.logger?.warn(
-        '[CobolDebugAdapter] Attach without "sources" or "manifestDirs": no COBOL symbol manifest, variables show the engine (C) view only.'
-      );
+    } else {
+      // The build options describe the regeneration: without `sources` there is none.
+      const given = { dialect, format, copybookDirs, cobcFlags, runtimeChecks, forceRebuild };
+      const unused = COBOL_REGENERATION_OPTION_KEYS.filter((key) => given[key] !== undefined);
+      if (unused.length > 0) {
+        this.dependencies.logger?.warn(
+          `[CobolDebugAdapter] Attach: ${unused.join(', ')} given without "sources" — they describe the manifest regeneration and nothing else uses them.`
+        );
+      }
+      if (userManifestDirs.length === 0) {
+        this.dependencies.logger?.warn(
+          '[CobolDebugAdapter] Attach without "sources" or "manifestDirs": no COBOL symbol manifest, variables show the engine (C) view only.'
+        );
+      }
     }
     const shimOptions: CobolShimSessionOptions = {
       // Fresh regeneration first (the shim keeps the first definition of a program).
