@@ -297,7 +297,9 @@ export interface AdapterPolicy {
    */
   buildChildStartArgs(
     pendingId: string,
-    parentConfig: Record<string, unknown>
+    parentConfig: Record<string, unknown>,
+    /** Forwardable arguments from an attach parent, separate from its start intent. */
+    attachArguments?: Readonly<Record<string, unknown>>
   ): { command: 'launch' | 'attach'; args: Record<string, unknown> };
 
   /**

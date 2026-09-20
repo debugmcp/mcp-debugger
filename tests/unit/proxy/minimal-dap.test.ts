@@ -1005,54 +1005,6 @@ describe('MinimalDapClient', () => {
       expect((client as any).activeChild).toBeNull();
     });
 
-    it('gives the ChildSessionManager an enricher carrying the parent start request (issues #124/#704/#712)', () => {
-      // The wiring under test is the only production path that threads the
-      // caller's launch/attach intent into a child adoption: js-debug's
-      // reverse startDebugging configuration carries {type, name,
-      // __pendingTargetId} and nothing else. Every other adoption test here
-      // stubs the factory and ignores its options, so nothing observed that
-      // the enricher is actually handed over.
-      const stubManager = createChildSessionManagerStub();
-      let options: ChildSessionOptions | undefined;
-      const client = new MinimalDapClient('localhost', 5678, JsDebugAdapterPolicy, {
-        childSessionManagerFactory: (opts) => {
-          options = opts;
-          return stubManager as unknown as ChildSessionManager;
-        }
-      });
-
-      expect(options?.enrichConfig).toBeTypeOf('function');
-
-      // What sendRequest records when the parent's 'launch' goes out
-      (client as unknown as { lastStartRequestArgs: Record<string, unknown> }).lastStartRequestArgs = {
-        request: 'launch',
-        stopOnEntry: false,
-        program: '/app.js'
-      };
-
-      const bare: ChildSessionConfig = {
-        pendingId: 'pending-1',
-        host: 'localhost',
-        port: 5678,
-        parentConfig: { type: 'pwa-node', name: 'fork', __pendingTargetId: 'pending-1' }
-      };
-      const enriched = options!.enrichConfig!(bare);
-
-      expect(enriched.parentConfig).toMatchObject({
-        request: 'launch',
-        stopOnEntry: false,
-        type: 'pwa-node',
-        __pendingTargetId: 'pending-1'
-      });
-      // Only an attach parent's extras ride along; js-debug binds a launched
-      // target to the parent's own launch config itself
-      expect(enriched.parentConfig).not.toHaveProperty('program');
-      // The caller's config is not mutated
-      expect(bare.parentConfig).toEqual({ type: 'pwa-node', name: 'fork', __pendingTargetId: 'pending-1' });
-
-      client.shutdown('test');
-    });
-
     it('flushChildEvents returns undefined when the policy has no child sessions (issue #378)', () => {
       const plain = new MinimalDapClient('localhost', 5678);
       expect(plain.flushChildEvents()).toBeUndefined();
@@ -2247,80 +2199,77 @@ describe('MinimalDapClient', () => {
     });
   });
 
-  describe('Child config enrichment (attach intent threading, issue #124)', () => {
-    // js-debug's reverse startDebugging configuration only carries
-    // {type, name, __pendingTargetId}; enrichChildConfig threads the caller's
-    // attach intent (request, stopOnEntry) into the child's parentConfig.
-    const baseConfig = {
-      host: 'localhost',
-      port: 1234,
-      pendingId: 'p1',
-      parentConfig: { type: 'pwa-node', name: 'Remote Process [0]' }
-    };
+  describe('parent start intent (issues #124/#704/#730)', () => {
+    let options: ChildSessionOptions;
 
-    it('returns the config unchanged when no start request was recorded', () => {
-      const c = new MinimalDapClient('localhost', 1234, JsDebugAdapterPolicy);
-      expect((c as any).enrichChildConfig(baseConfig)).toBe(baseConfig);
-      c.shutdown();
-    });
-
-    it('threads request and stopOnEntry into launch-mode child configs without the launch extras (issue #704)', () => {
-      const c = new MinimalDapClient('localhost', 1234, JsDebugAdapterPolicy);
-      (c as any).lastStartRequestArgs = {
-        request: 'launch', stopOnEntry: false, program: '/proj/app.js', cwd: '/proj', env: { A: '1' }
-      };
-      const enriched = (c as any).enrichChildConfig(baseConfig);
-      expect(enriched.parentConfig.request).toBe('launch');
-      expect(enriched.parentConfig.stopOnEntry).toBe(false);
-      expect(enriched.parentConfig.type).toBe('pwa-node');
-      // js-debug binds the child target to the parent's launch config itself;
-      // the launch keys must not ride into the child's attach request
-      expect('program' in enriched.parentConfig).toBe(false);
-      expect('cwd' in enriched.parentConfig).toBe(false);
-      expect('env' in enriched.parentConfig).toBe(false);
-      expect((baseConfig.parentConfig as Record<string, unknown>).request).toBeUndefined();
-      c.shutdown();
-    });
-
-    it('omits stopOnEntry for a launch whose request did not carry a boolean', () => {
-      const c = new MinimalDapClient('localhost', 1234, JsDebugAdapterPolicy);
-      (c as any).lastStartRequestArgs = { request: 'launch' };
-      const enriched = (c as any).enrichChildConfig(baseConfig);
-      expect(enriched.parentConfig.request).toBe('launch');
-      expect('stopOnEntry' in enriched.parentConfig).toBe(false);
-      c.shutdown();
-    });
-
-    it('re-emits the child session manager childCreated as child-adopted (issue #704)', () => {
-      const stubManager = createChildSessionManagerStub();
-      const c = new MinimalDapClient('localhost', 1234, JsDebugAdapterPolicy, {
-        childSessionManagerFactory: () => stubManager as unknown as ChildSessionManager
+    beforeEach(async () => {
+      const manager = createChildSessionManagerStub();
+      client = new MinimalDapClient('localhost', 5678, JsDebugAdapterPolicy, {
+        childSessionManagerFactory: opts => {
+          options = opts;
+          return manager;
+        }
       });
-      const adopted: unknown[] = [];
-      c.on('child-adopted', (pendingId: unknown) => adopted.push(pendingId));
-      (stubManager as unknown as EventEmitter).emit('childCreated', 'p1', { shutdown: vi.fn() });
-      expect(adopted).toEqual(['p1']);
-      c.shutdown();
+      await client.connect();
+      mockSocket.write.mockImplementation((frame: Buffer) => {
+        const request = JSON.parse(frame.toString().split('\r\n\r\n')[1]) as DebugProtocol.Request;
+        queueMicrotask(() => mockSocket.emit('data', createDapMessage({
+          type: 'response', seq: 1, request_seq: request.seq,
+          command: request.command, success: true
+        })));
+        return true;
+      });
     });
 
-    it('threads request and stopOnEntry into attach-mode child configs', () => {
-      const c = new MinimalDapClient('localhost', 1234, JsDebugAdapterPolicy);
-      (c as any).lastStartRequestArgs = { request: 'attach', stopOnEntry: false };
-      const enriched = (c as any).enrichChildConfig(baseConfig);
-      expect(enriched.parentConfig.request).toBe('attach');
-      expect(enriched.parentConfig.stopOnEntry).toBe(false);
-      expect(enriched.parentConfig.type).toBe('pwa-node');
-      // Original config must not be mutated
-      expect((baseConfig.parentConfig as Record<string, unknown>).request).toBeUndefined();
-      c.shutdown();
+    it('does not invent parent intent before a start request', () => {
+      expect(options.getParentStart).toBeTypeOf('function');
+      expect(options.getParentStart!()).toBeUndefined();
     });
 
-    it('omits stopOnEntry when the attach request did not carry a boolean', () => {
-      const c = new MinimalDapClient('localhost', 1234, JsDebugAdapterPolicy);
-      (c as any).lastStartRequestArgs = { request: 'attach' };
-      const enriched = (c as any).enrichChildConfig(baseConfig);
-      expect(enriched.parentConfig.request).toBe('attach');
-      expect('stopOnEntry' in enriched.parentConfig).toBe(false);
+    it('records launch intent without forwarding launch arguments', async () => {
+      await client.sendRequest('launch', {
+        stopOnEntry: false, program: '/app.js', cwd: '/app', env: { A: '1' }
+      });
+      expect(options.getParentStart!()).toEqual({ request: 'launch', stopOnEntry: false });
+    });
+
+    it('separates attach arguments from intent without mutating the sent configuration', async () => {
+      const args = Object.freeze({
+        request: 'attach', stopOnEntry: false, localRoot: '/app', sourceMaps: false,
+        port: 9229, customAdapterOption: 'preserved'
+      });
+      await client.sendRequest('attach', args);
+      expect(options.getParentStart!()).toEqual({
+        request: 'attach', stopOnEntry: false,
+        attachArguments: { localRoot: '/app', sourceMaps: false, port: 9229, customAdapterOption: 'preserved' }
+      });
+      const sent = JSON.parse(mockSocket.write.mock.calls.at(-1)[0].toString().split('\r\n\r\n')[1]);
+      expect(sent.arguments).toEqual(args);
+    });
+
+    it.each(['attach', 'launch'] as const)('ignores nonboolean entry intent for %s', async command => {
+      await client.sendRequest(command, { stopOnEntry: 'false' });
+      expect(options.getParentStart!()).not.toHaveProperty('stopOnEntry');
+      expect(options.getParentStart!()).not.toHaveProperty('attachArguments.stopOnEntry');
+    });
+
+    it('replaces the parent snapshot on a subsequent start', async () => {
+      await client.sendRequest('attach', { stopOnEntry: false, localRoot: '/old' });
+      const previous = options.getParentStart!();
+      await client.sendRequest('launch', { stopOnEntry: true });
+      expect(options.getParentStart!()).toEqual({ request: 'launch', stopOnEntry: true });
+      expect(previous).toEqual({ request: 'attach', stopOnEntry: false, attachArguments: { localRoot: '/old' } });
+    });
+
+    it('re-emits childCreated as child-adopted (issue #704)', () => {
+      const manager = createChildSessionManagerStub();
+      const c = new MinimalDapClient('localhost', 1234, JsDebugAdapterPolicy, {
+        childSessionManagerFactory: () => manager
+      });
+      const adopted = vi.fn();
+      c.on('child-adopted', adopted);
+      manager.emit('childCreated', 'p1', { shutdown: vi.fn() });
+      expect(adopted).toHaveBeenCalledWith('p1');
       c.shutdown();
     });
   });

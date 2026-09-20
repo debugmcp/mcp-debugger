@@ -29,6 +29,26 @@ describe('JsDebugAdapterPolicy', () => {
         continueOnAttach: true,
       });
     });
+
+    it('preserves adapter extras and child precedence while excluding parent connection controls', () => {
+      const reverse = Object.freeze({ type: 'pwa-node', name: 'child', sourceMaps: true });
+      const attachArguments = Object.freeze({
+        localRoot: '/local', remoteRoot: '/remote', sourceMaps: false,
+        customOption: { enabled: true }, address: 'remote-host', host: 'host',
+        port: 9229, attachSimplePort: 9229, attachExistingChildren: true,
+        __pendingTargetId: 'wrong', continueOnAttach: false
+      });
+      expect(JsDebugAdapterPolicy.buildChildStartArgs('pending', reverse, attachArguments)).toEqual({
+        command: 'attach',
+        args: {
+          localRoot: '/local', remoteRoot: '/remote', sourceMaps: true,
+          customOption: { enabled: true }, type: 'pwa-node',
+          request: 'attach', __pendingTargetId: 'pending', continueOnAttach: true
+        }
+      });
+      expect(reverse).not.toHaveProperty('request');
+      expect(reverse).not.toHaveProperty('localRoot');
+    });
   });
 
   describe('normalizeStopReason', () => {

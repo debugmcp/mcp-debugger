@@ -2702,11 +2702,12 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(attachLaunchArgs).toMatchObject({ request: 'attach', __attachMode: true, port: 5005 });
     });
 
-    it('should skip thread discovery when stopOnEntry is false', async () => {
+    it('verifies threads without requesting a pause when stopOnEntry is false', async () => {
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
       });
 
+      mockProxyManager.sendDapRequest.mockResolvedValue({ body: { threads: [{ id: 0, name: 'main' }] } });
       const result = await operations.attachToProcess('test-session', {
         port: 5005,
         host: 'localhost',
@@ -2714,12 +2715,13 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       });
 
       expect(result.success).toBe(true);
-      // threads request should not be made when stopOnEntry is false
+      // stopOnEntry only controls the pause; thread readiness is always verified
       const threadsCalls = mockProxyManager.sendDapRequest.mock.calls.filter(
         (call: unknown[]) => call[0] === 'threads'
       );
-      expect(threadsCalls).toEqual([]);
-      expect(mockProxyManager.setCurrentThreadId).not.toHaveBeenCalled();
+      expect(threadsCalls).toHaveLength(1);
+      expect(mockProxyManager.setCurrentThreadId).toHaveBeenCalledWith(0);
+      expect(mockProxyManager.sendDapRequest.mock.calls.some(([command]) => command === 'pause')).toBe(false);
     });
 
     it('should send a post-attach pause when the policy requests it (ruby)', async () => {
