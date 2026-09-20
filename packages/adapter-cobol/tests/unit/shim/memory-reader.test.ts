@@ -19,6 +19,21 @@ function setup() {
 }
 
 describe('root address lifetime', () => {
+  it('shares a pending process lookup, evicts a rejection and allows a successful retry', async () => {
+    const { state } = setup();
+    let reject!: (error: Error) => void;
+    const compute = vi.fn(() => new Promise<bigint>((_resolve, fail) => { reject = fail; }));
+    const first = state.memoiseProcess('address', compute, () => true);
+    expect(state.memoiseProcess('address', compute, () => true)).toBe(first);
+    const failure = expect(first).rejects.toThrow('engine closed');
+    reject(new Error('engine closed'));
+    await failure;
+    const retry = vi.fn(async () => 8192n);
+    expect(await state.memoiseProcess('address', retry, () => true)).toBe(8192n);
+    expect(await state.memoiseProcess('address', retry, () => true)).toBe(8192n);
+    expect(compute).toHaveBeenCalledTimes(1);
+    expect(retry).toHaveBeenCalledTimes(1);
+  });
   it('shares static evaluations across frames and stops but refreshes memory each stop', async () => {
     const { reader, state, entry, root, request, setBytes } = setup();
     await reader.readItemBytes(1, entry, root, []);
