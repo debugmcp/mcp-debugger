@@ -136,12 +136,18 @@ export const CobolAdapterPolicy = {
   // breakpoint requests are refused with "Not supported in noDebug mode",
   // the launch response waits for configurationDone, the program runs.
   honoursNoDebug: true,
-  // Logpoints would need `{WS-NAME}` interpolation through the shim; until
-  // that is measured, the engine's C-level logpoints stay off (milestone M3).
-  supportsLogPoints: false,
-  // Paragraph/section names are C labels, not functions; PROGRAM-ID entry
-  // points map to C functions but are not exposed yet (milestone M3).
-  supportsFunctionBreakpoints: false,
+  // `{WS-NAME}` is interpolated by the shim at the stop (its COBOL evaluator,
+  // `/nat` for C expressions), which then resumes; the engine never sees a
+  // logMessage — CodeLLDB's own interpolation aborts on a COBOL name.
+  supportsLogPoints: true,
+  // Paragraph, section and PROGRAM-ID names are resolved by the shim to a
+  // source breakpoint on the range's first statement (cobc emits them as C
+  // labels, which LLDB cannot bind by name); a C symbol still binds natively.
+  supportsFunctionBreakpoints: true,
+  // A paragraph in a `-m` module the loader has not loaded yet is resolved to its
+  // source line at once but binds (CodeLLDB re-verifies it) when the module loads,
+  // like every breakpoint in such a module (R13): not a launch warning.
+  functionBreakpointsBindLate: true,
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
   buildChildStartArgs: () => {

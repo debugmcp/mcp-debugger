@@ -17,7 +17,7 @@ const ROOT = path.resolve(__dirname, '../..');
 export const COBOL_EXAMPLES_DIR = path.join(ROOT, 'examples', 'cobol');
 const BUILD_DIR = path.join(COBOL_EXAMPLES_DIR, '.debug-mcp-test');
 
-export type CobolExampleName = 'hello' | 'calls' | 'copybook' | 'rterror' | 's0c7' | 'sysin' | 'pause' | 'dyn';
+export type CobolExampleName = 'hello' | 'calls' | 'copybook' | 'rterror' | 's0c7' | 'sysin' | 'pause' | 'dyn' | 'perform';
 
 /** Main source (relative to examples/cobol) plus extra statically linked sources and dynamically CALLed modules. */
 const SOURCES: Record<CobolExampleName, { main: string; extra?: string[]; modules?: string[]; copybookDir?: string; runtimeChecks?: boolean }> = {
@@ -28,7 +28,8 @@ const SOURCES: Record<CobolExampleName, { main: string; extra?: string[]; module
   s0c7: { main: 's0c7.cob', runtimeChecks: true },
   sysin: { main: 'sysin.cob' },
   pause: { main: 'pause.cob' },
-  dyn: { main: 'dyn/main.cob', modules: ['dyn/mod1.cob'] }
+  dyn: { main: 'dyn/main.cob', modules: ['dyn/mod1.cob'] },
+  perform: { main: 'perform.cob' }
 };
 
 export function cobolSourcePath(name: CobolExampleName): string {
