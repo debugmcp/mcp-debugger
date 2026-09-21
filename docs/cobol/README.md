@@ -168,6 +168,10 @@ The host's Yama ptrace setting is not changed.
 
 ## What the variables look like
 
+Static root addresses are cached for the process and invalidated on launch, attach,
+process and module events, or termination. Variable bytes are refreshed at every stop;
+LOCAL-STORAGE, LINKAGE, registers, EXTERNAL and BASED addresses are resolved per frame and stop.
+
 - **Scopes**: `get_scopes` on a COBOL frame returns `WORKING-STORAGE`, `LOCAL-STORAGE` and `LINKAGE` (those present in the program), in that order; `get_local_variables` is their union in declaration order. FILE SECTION records were not measured in this milestone. On a frame that is not COBOL (paused inside libcob or `C$SLEEP`, the runtime-error hook, a C helper) the scopes are the nearest COBOL program's up the stack, named `WORKING-STORAGE of PAYROLL (0000-MAIN, 3 frames up)`, and `get_local_variables` reads them; only a stack with no COBOL program above the frame, or a program without a manifest, is empty with the note `No COBOL data division scopes at this frame (no COBOL program on the stack above it, or no symbol manifest for it).`, with `get_scopes` showing whatever CodeLLDB reports. `engineScopes: true` appends CodeLLDB's scopes to COBOL frames too.
 - **Values** are decoded from the raw bytes using the compiler's attribute and rendered in COBOL terms; each variable's `type` is COBOL vocabulary (`PIC S9(5)V99 COMP-3`, `PIC X(20)`, `GROUP (25 bytes)`, `POINTER`):
 
