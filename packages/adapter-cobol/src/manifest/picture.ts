@@ -62,7 +62,7 @@ export function usageFor(attr: CobolFieldAttr | undefined, _size?: number): Cobo
  * Numeric: `[S]9(d-s)V9(s)`; a scale beyond the digit count or a negative scale is
  * expressed with `P` (`VPP9`, `9(3)PP`), the way the source must have written it.
  */
-export function reconstructPicture(attr: CobolFieldAttr | undefined, size: number): string | undefined {
+export function reconstructPicture(attr: CobolFieldAttr | undefined, size: number, cobcVersion?: string): string | undefined {
   if (!attr || attr.type === COB_TYPE.GROUP || hasFlag(attr.flags, COB_FLAG.IS_POINTER)) {
     return undefined;
   }
@@ -70,11 +70,28 @@ export function reconstructPicture(attr: CobolFieldAttr | undefined, size: numbe
     return attr.pic.map(({ symbol, count }) => rep(symbol, count)).join('');
   }
   if (isNumericType(attr.type)) {
-    const { digits, scale } = attr;
+    const { scale } = attr;
+    let digits = attr.digits;
     if (digits <= 0) {
       return undefined;
     }
     const sign = hasFlag(attr.flags, COB_FLAG.HAVE_SIGN) ? 'S' : '';
+    if (attr.type === COB_TYPE.NUMERIC_DISPLAY) {
+      // DISPLAY has one stored digit per byte; P positions have no bytes. This
+      // also recovers 3.1.2's leading P count (included in attr.digits until 3.2).
+      digits = size - (sign && hasFlag(attr.flags, COB_FLAG.SIGN_SEPARATE) ? 1 : 0);
+    } else if (scale < 0) {
+      // Both supported compilers include trailing P positions in attr.digits.
+      digits += scale;
+    } else if (scale === digits && (attr.type === COB_TYPE.NUMERIC_BINARY || attr.type === COB_TYPE.NUMERIC_PACKED || attr.type === COB_TYPE.NUMERIC_COMP5)) {
+      const version = /(?:^|[^\d])(\d+)\.(\d+)/.exec(cobcVersion ?? '');
+      const modern = version && (Number(version[1]) > 3 || (Number(version[1]) === 3 && Number(version[2]) >= 2));
+      // 3.1.2 encodes PP999 and V99999 with identical digits/scale. Packed
+      // and binary sizes cannot recover the exact digit count (e.g. PP999 and
+      // PPP99 both take two packed bytes). Let the listing supply the picture.
+      if (!modern) return undefined;
+    }
+    if (digits <= 0) return undefined;
     if (scale <= 0) {
       return sign + rep('9', digits) + rep('P', -scale);
     }

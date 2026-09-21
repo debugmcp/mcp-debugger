@@ -30,6 +30,7 @@ export interface DumpRoutineInput {
   lines: string[];
   tables: AttrTables;
   programId: string;
+  cobcVersion?: string;
 }
 
 export interface DumpRoutineResult {
@@ -450,7 +451,7 @@ export function parseDumpRoutine(input: DumpRoutineInput): DumpRoutineResult {
       item.fieldSymbol = call.field.fieldSymbol;
     }
     if (call.level !== 88) {
-      const picture = reconstructPicture(attr, size);
+      const picture = reconstructPicture(attr, size, input.cobcVersion);
       if (picture) {
         item.picture = picture;
       }

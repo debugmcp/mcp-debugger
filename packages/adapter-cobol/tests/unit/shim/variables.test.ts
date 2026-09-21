@@ -142,6 +142,22 @@ describe('cobol shim variables', () => {
     expect(stale.message).toBe('Variables reference is stale (program has resumed)');
   });
 
+  it.each(['launch', 'attach', 'process', 'module', 'terminated', 'exited'])('invalidates static addresses on %s', async signal => {
+    h = await startHello();
+    await helloWorkingStorage(h);
+    const addressReads = () => h!.engine.received('evaluate').filter(request =>
+      (request.arguments as { expression: string }).expression === '/nat (unsigned long long)(b_19)').length;
+    expect(addressReads()).toBe(1);
+    if (signal === 'launch' || signal === 'attach') await h.client.request(signal, { program: '/work/hello' });
+    else {
+      h.engine.emit(signal, {});
+      await h.client.nextEvent(signal);
+    }
+    await stopWithFrames(h, [frame(1, 'HELLO_', HELLO_COB, 32)]);
+    await helloWorkingStorage(h);
+    expect(addressReads()).toBe(2);
+  });
+
   it('REF_BAND_COLLISION under --ref-check strict is fatal (exit 2)', async () => {
     h = await startShim({
       manifests: [helloManifest(ROOT)],
