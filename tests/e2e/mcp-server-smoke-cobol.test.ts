@@ -334,6 +334,81 @@ describe.skipIf(SKIP_COBOL)('MCP Server COBOL Debugging Smoke Test @requires-cob
     120000
   );
 
+  it.for(['executable', 'cobcrun'])('stopOnEntry reaches the first COPY statement after DECLARATIVES (%s)', { timeout: 120000 }, async (runner, ctx) => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cobol-entry-'));
+    const source = path.join(dir, 'entrystop.cob');
+    const copy = path.join(dir, 'first.cpy');
+    writeFileSync(copy, 'move 7 to ws-value\n');
+    writeFileSync(source, [
+      'identification division.', 'program-id. entrystop.',
+      'environment division.', 'input-output section.', 'file-control.',
+      'select optional test-file assign to "unused-entry-file" file status ws-status.',
+      'data division.', 'file section.', 'fd test-file.', '01 test-record pic x.',
+      'working-storage section.', '01 ws-status pic xx.', '01 ws-value pic 9 value 0.',
+      'procedure division.', 'declaratives.', 'file-errors section.',
+      'use after standard error procedure on test-file.', 'display "error handler".',
+      'end declaratives.', 'main-entry.', 'copy "first.cpy".',
+      'display "entry value=" ws-value', 'stop run.'
+    ].join('\n'));
+    try {
+      sessionId = (await call('create_debug_session', { language: 'cobol', name: 'cobol-entry' })).sessionId as string;
+      await startOrSkip(ctx, {
+        scriptPath: source, dapLaunchArgs: { stopOnEntry: true },
+        adapterLaunchConfig: { format: 'free', copybookDirs: [dir], ...(runner === 'cobcrun' ? { runner } : {}) }
+      }, 'entry');
+      const paused = await pollState('paused', 30000);
+      expect(paused?.lastStop?.reason).toBe('entry');
+      const top = (await fetchStackTrace())[0];
+      expect(top.file?.replace(/\\/g, '/')).toBe(copy.replace(/\\/g, '/'));
+      expect(top.line).toBe(1);
+      expect((await call('evaluate_expression', { expression: 'ws-value' })).result).toBe('0');
+      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+      expect((await pollState('stopped', 20000))?.exitCode).toBe(0);
+    } finally {
+      if (sessionId) { await callToolSafely(mcpClient!, 'close_debug_session', { sessionId }); sessionId = null; }
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.for([
+    { name: 'direct out back to caller', operation: 'step_out', body: ['caller.', 'perform p-one', 'display "unreached"', 'stop run.', 'p-one.', 'add 1 to ws-count', 'go to caller.'], start: 'go to caller.', destination: 'perform p-one', count: '1' },
+    { name: 'normal TIMES next with GO TO', operation: 'step_over', body: ['perform p-one thru p-tail 3 times', 'display "returned"', 'stop run.', 'p-one.', 'add 1 to ws-count', 'go to p-tail.', 'p-tail.', 'continue.'], start: 'perform p-one thru p-tail 3 times', destination: 'display "returned"', count: '3' },
+    { name: 'normal TIMES out with GO TO', operation: 'step_out', body: ['perform p-one thru p-tail 3 times', 'display "returned"', 'stop run.', 'p-one.', 'add 1 to ws-count', 'go to p-tail.', 'p-tail.', 'continue.'], start: 'add 1 to ws-count', destination: 'display "returned"', count: '3' },
+    { name: 'normal UNTIL out with GO TO', operation: 'step_out', body: ['perform p-one thru p-tail until ws-count = 3', 'display "returned"', 'stop run.', 'p-one.', 'add 1 to ws-count', 'go to p-tail.', 'p-tail.', 'continue.'], start: 'add 1 to ws-count', destination: 'display "returned"', count: '3' },
+    { name: 'normal VARYING out with GO TO', operation: 'step_out', body: ['perform p-one thru p-tail varying ws-choice from 1 by 1 until ws-choice > 3', 'display "returned"', 'stop run.', 'p-one.', 'add 1 to ws-count', 'go to p-tail.', 'p-tail.', 'continue.'], start: 'add 1 to ws-count', destination: 'display "returned"', count: '3' },
+    { name: 'direct next', operation: 'step_over', body: ['perform p-one', 'display "unreached"', 'stop run.', 'p-one.', 'add 1 to ws-count', 'go to escaped.', 'escaped.', 'add 100 to ws-count', 'stop run.'], start: 'perform p-one', destination: 'add 100 to ws-count', count: '1' },
+    { name: 'direct out', operation: 'step_out', body: ['perform p-one', 'display "unreached"', 'stop run.', 'p-one.', 'add 1 to ws-count', 'go to escaped.', 'escaped.', 'add 100 to ws-count', 'stop run.'], start: 'add 1 to ws-count', destination: 'add 100 to ws-count', count: '1' },
+    { name: 'computed THRU', operation: 'step_over', body: ['perform p-one thru p-two', 'display "unreached"', 'stop run.', 'p-one.', 'add 1 to ws-count', 'go to p-two escaped depending on ws-choice.', 'p-two.', 'add 10 to ws-count.', 'escaped.', 'add 100 to ws-count', 'stop run.'], start: 'perform p-one thru p-two', destination: 'add 100 to ws-count', count: '1' },
+    { name: 'nested normal return', operation: 'step_over', body: ['perform p-outer', 'display "returned"', 'stop run.', 'p-outer.', 'add 1 to ws-count', 'perform p-inner thru p-tail.', 'p-inner.', 'go to p-tail.', 'p-tail.', 'add 10 to ws-count.'], start: 'perform p-outer', destination: 'display "returned"', count: '11' },
+    { name: 'nested escape with repeated COPY', operation: 'step_over', body: ['perform p-outer', 'display "unreached"', 'stop run.', 'p-outer.', 'copy "bump.cpy".', 'perform p-inner.', 'p-inner.', 'copy "bump.cpy".', 'go to escaped.', 'escaped.', 'copy "bump.cpy".', 'stop run.'], start: 'perform p-outer', destination: 'copy', count: '2' }
+  ])('PERFORM escape semantics: $name', { timeout: 120000 }, async (scenario, ctx) => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cobol-goto-'));
+    const source = path.join(dir, 'gotoflow.cob');
+    const copy = path.join(dir, 'bump.cpy');
+    const lines = ['identification division.', 'program-id. gotoflow.', 'data division.', 'working-storage section.', '01 ws-count pic 9(4) comp value 0.', '01 ws-choice pic 9 value 2.', 'procedure division.', 'main-entry.', ...scenario.body];
+    writeFileSync(source, lines.join('\n'));
+    writeFileSync(copy, 'add 1 to ws-count\n');
+    try {
+      sessionId = (await call('create_debug_session', { language: 'cobol', name: 'cobol-goto' })).sessionId as string;
+      expect((await call('set_breakpoint', { file: source, line: lines.indexOf(scenario.start) + 1 })).success).toBe(true);
+      await startOrSkip(ctx, { scriptPath: source, dapLaunchArgs: { stopOnEntry: false }, adapterLaunchConfig: { format: 'free', copybookDirs: [dir] } }, 'goto');
+      expect(await pollState('paused', 30000)).toBeDefined();
+      expect((await call('remove_breakpoint', { file: source, line: lines.indexOf(scenario.start) + 1 })).success).toBe(true);
+      expect((await call(scenario.operation, {})).success).toBe(true);
+      const paused = await pollState('paused', 30000);
+      expect(paused?.lastStop?.reason).toBe('step');
+      const top = (await fetchStackTrace())[0];
+      const destinationFile = scenario.destination === 'copy' ? copy : source;
+      expect(top.file?.replace(/\\/g, '/')).toBe(destinationFile.replace(/\\/g, '/'));
+      expect(top.line).toBe(scenario.destination === 'copy' ? 1 : lines.indexOf(scenario.destination) + 1);
+      expect(String((await call('evaluate_expression', { expression: 'ws-count' })).result)).toBe(scenario.count);
+      if (!scenario.name.includes('normal')) expect(paused?.lastStop?.description).toContain('GO TO left');
+    } finally {
+      if (sessionId) { await callToolSafely(mcpClient!, 'close_debug_session', { sessionId }); sessionId = null; }
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it(
     'pauses on a libcob runtime error (subscript out of bounds) before the abort',
     async (ctx) => {

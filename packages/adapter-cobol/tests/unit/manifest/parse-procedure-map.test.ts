@@ -185,3 +185,21 @@ describe('parseProcedureMap', () => {
     expect(map.procedureDivisionLine).toBeUndefined();
   });
 });
+
+
+describe('executable entry after DECLARATIVES', () => {
+  it('keeps generated order and the COPY source identity of the first statement', () => {
+    const source = [
+      "/* PROGRAM-ID 'MAIN' */", 'MAIN_ (const int entry)', '{',
+      '/* Line: 15 : DISPLAY : /work/main.cob */', '#line 15 "/work/main.cob"', 'declarative_handler();',
+      '/* Line: 30 : Entry MAIN : /work/main.cob */', '#line 30 "/work/main.cob"',
+      '/* Line: 1 : MOVE : /work/first.cpy */', '#line 1 "/work/first.cpy"', 'first_statement();',
+      '/* Line: 32 : STOP RUN : /work/main.cob */', '#line 32 "/work/main.cob"', 'stop();',
+      '}', "/* End PROGRAM-ID 'MAIN' */"
+    ].join('\n');
+    const registry = new SourceFileRegistry();
+    const { segments } = splitProgramSegments(splitLines(source));
+    const result = parseProcedureMap(segments[0], '/work/main.c', registry, '/work/main.cob');
+    expect(result.entryStatement).toEqual({ sourceFileId: registry.idFor('/work/first.cpy'), line: 1, verb: 'MOVE' });
+  });
+});
