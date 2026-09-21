@@ -143,15 +143,20 @@ function matchNumeric(value: CobolConditionValue, parent: DecodedNumeric): Match
   return compareDecimals(current, lo) >= 0 && compareDecimals(current, hi) <= 0;
 }
 
+function floatLiteral(text: string): number {
+  const literal = text.trim();
+  return NUMERIC_FIGURATIVES.has(literal.toUpperCase()) ? 0 : Number(literal);
+}
+
 function matchFloat(value: CobolConditionValue, current: number): Match {
-  const lo = Number(value.lo.trim());
+  const lo = floatLiteral(value.lo);
   if (Number.isNaN(lo)) {
     return `<unknown: non-numeric literal ${JSON.stringify(value.lo)} on a floating-point item>`;
   }
   if (value.hi === undefined) {
     return current === lo;
   }
-  const hi = Number(value.hi.trim());
+  const hi = floatLiteral(value.hi);
   if (Number.isNaN(hi)) {
     return `<unknown: non-numeric literal ${JSON.stringify(value.hi)} on a floating-point item>`;
   }

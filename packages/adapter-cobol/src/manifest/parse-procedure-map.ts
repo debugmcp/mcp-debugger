@@ -225,6 +225,7 @@ export interface ProcedureMap {
   procedureDivisionLine?: number;
   /** The line of cobc's `Entry` comment for the program's own entry. */
   entryLine?: number;
+  entryStatement?: CobolStatementLocation;
   diagnostics: CobolManifestDiagnostic[];
 }
 
@@ -316,6 +317,7 @@ export function parseProcedureMap(
   const lastSourceLineByFile = new Map<number, number>();
   let currentSection: string | undefined;
   let entryLine: number | undefined;
+  let entryStatement: CobolStatementLocation | undefined;
   for (let i = 0; i < lines.length; i += 1) {
     if (entryLine === undefined) {
       const entryComment = ENTRY_COMMENT_RE.exec(lines[i]);
@@ -363,6 +365,7 @@ export function parseProcedureMap(
     }
     if (statement) {
       statements.push({ sourceFileId: fileId, line: cobolLine, verb: statement[2].trim() });
+      if (entryLine !== undefined) entryStatement ??= statements[statements.length - 1];
       continue;
     }
     if (!range) {
@@ -425,6 +428,7 @@ export function parseProcedureMap(
     statements,
     procedureDivisionLine,
     entryLine,
+    entryStatement,
     diagnostics
   };
 }
