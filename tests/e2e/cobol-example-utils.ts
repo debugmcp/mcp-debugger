@@ -93,6 +93,15 @@ export function hasCobolToolchain(): boolean {
   return findCobcSync() !== null;
 }
 
+/** 3.1.x omits level-88 VALUE comments; the golden parser fixtures pin this limitation. */
+export function hasCobolConditionDump(): boolean {
+  const cobc = findCobcSync();
+  if (!cobc) return false;
+  const banner = spawnSync(cobc, ['--version'], { encoding: 'utf8', timeout: 5000, windowsHide: true });
+  if (banner.status !== 0) throw new Error('Could not determine GnuCOBOL version for condition expectations');
+  return !/^cobc \(GnuCOBOL\) 3\.1\./.test(banner.stdout);
+}
+
 /**
  * Environment for running cobc (and the binaries it builds) outside an MSYS2
  * shell: the install's bin dir on PATH (gcc, libcob DLL) and the dialect

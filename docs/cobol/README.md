@@ -15,7 +15,7 @@ MCP Client → mcp-debugger → proxy worker → cobol-shim (Node) → CodeLLDB 
 - **cobc → native executable with DWARF.** The adapter compiles a `.cob`/`.cbl`/`.cobol` source with GnuCOBOL into a normal native executable carrying DWARF-4 line tables, so CodeLLDB binds line breakpoints in `.cob` and `.cpy` files and reports stops with the COBOL source as the frame location (spike R3).
 - **Vendored CodeLLDB.** Same binary the Rust and C/C++ adapters use (`packages/codelldb-common`, one copy per platform, downloaded during `pnpm install`; npm installs get it via the `@debugmcp/codelldb-*` platform packages; `CODELLDB_PATH` overrides). No system LLDB or gdb.
 - **The DAP shim.** CodeLLDB alone exposes addresses, bytes, line mapping and pending breakpoints — nothing COBOL-shaped. The adapter process mcp-debugger spawns is `node cobol-shim.js --port <n> --manifest-dir <dir> … -- <codelldb> …`: the shim spawns CodeLLDB itself, forwards everything it does not understand untouched, and synthesises the COBOL parts (scopes, decoded values, `evaluate` on data-names, the statement step loop, the runtime-error stop) from a **symbol manifest** plus CodeLLDB's own `/nat` expressions and `readMemory` (R1, R2).
-- **The manifest comes from the compiler.** `cobc -fdump=ALL` makes the generated C carry a dump routine that names every data item with its level, storage expression, offset, size, attribute (type, digits, scale, flags) and OCCURS loops; `COBC_GEN_DUMP_COMMENTS=1` adds REDEFINES and 88-level conditions as comments. The builder parses that (cross-checked against the `-t … -ftsymbols` listing) into `<src>.cobol-symbols.json`, one per translation unit. The shapes are identical in GnuCOBOL 3.1.2 and 3.2.
+- **The manifest comes from the compiler.** `cobc -fdump=ALL` makes the generated C carry a dump routine that names every data item with its level, storage expression, offset, size, attribute (type, digits, scale, flags) and OCCURS loops. The builder parses that (cross-checked against the `-t … -ftsymbols` listing) into `<src>.cobol-symbols.json`, one per translation unit. On GnuCOBOL 3.2, `COBC_GEN_DUMP_COMMENTS=1` adds REDEFINES and 88-level VALUE metadata. GnuCOBOL 3.1.2 omits the 88 VALUE comments: condition names are listed, but their values show `<unknown: condition has no VALUE list>`; inspect the parent item or use GnuCOBOL 3.2 for condition evaluation.
 
 ## Prerequisites
 
@@ -256,6 +256,21 @@ The image installs the `gnucobol3` package of its Ubuntu 26.04 base (GnuCOBOL 3.
 | Runtime error never pauses | `runtimeChecks` not set | Pass `runtimeChecks: true` (recompiles with `--debug`) |
 | Stop lands on a DATA DIVISION line | VALUE initialisation carries `#line` rows | Step once more |
 | `cobc timed out after 180000 ms` | Very large compilation unit | Prebuild with cobc yourself and pass the executable plus `sources` |
+
+## Host validation
+
+PR CI requires the COBOL smoke and logpoint suites on Ubuntu 24.04 with GnuCOBOL
+3.1.2, alongside the Docker suite on GnuCOBOL 3.2. The host job checks the compiler
+version and rejects missing or skipped COBOL cases. Its `cobol-host-312` artifact
+contains the compiler banner and Vitest results.
+
+After `pnpm build`, reproduce the host lane with:
+
+```sh
+mkdir -p artifacts/cobol
+pnpm exec vitest run --project e2e tests/e2e/mcp-server-smoke-cobol.test.ts tests/e2e/mcp-server-logpoints.test.ts -t 'COBOL|\(cobol\)' --reporter=default --reporter=json --outputFile=artifacts/cobol/host-tests.json
+node scripts/check-cobol-e2e-report.mjs artifacts/cobol/host-tests.json
+```
 
 ## Additional Resources
 
