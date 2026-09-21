@@ -15,7 +15,7 @@ MCP Client → mcp-debugger → proxy worker → cobol-shim (Node) → CodeLLDB 
 - **cobc → native executable with DWARF.** The adapter compiles a `.cob`/`.cbl`/`.cobol` source with GnuCOBOL into a normal native executable carrying DWARF-4 line tables, so CodeLLDB binds line breakpoints in `.cob` and `.cpy` files and reports stops with the COBOL source as the frame location (spike R3).
 - **Vendored CodeLLDB.** Same binary the Rust and C/C++ adapters use (`packages/codelldb-common`, one copy per platform, downloaded during `pnpm install`; npm installs get it via the `@debugmcp/codelldb-*` platform packages; `CODELLDB_PATH` overrides). No system LLDB or gdb.
 - **The DAP shim.** CodeLLDB alone exposes addresses, bytes, line mapping and pending breakpoints — nothing COBOL-shaped. The adapter process mcp-debugger spawns is `node cobol-shim.js --port <n> --manifest-dir <dir> … -- <codelldb> …`: the shim spawns CodeLLDB itself, forwards everything it does not understand untouched, and synthesises the COBOL parts (scopes, decoded values, `evaluate` on data-names, the statement step loop, the runtime-error stop) from a **symbol manifest** plus CodeLLDB's own `/nat` expressions and `readMemory` (R1, R2).
-- **The manifest comes from the compiler.** `cobc -fdump=ALL` makes the generated C carry a dump routine that names every data item with its level, storage expression, offset, size, attribute (type, digits, scale, flags) and OCCURS loops; `COBC_GEN_DUMP_COMMENTS=1` adds REDEFINES and 88-level conditions as comments. The builder parses that (cross-checked against the `-t … -ftsymbols` listing) into `<src>.cobol-symbols.json`, one per translation unit. The shapes are identical in GnuCOBOL 3.1.2 and 3.2.
+- **The manifest comes from the compiler.** `cobc -fdump=ALL` makes the generated C carry a dump routine that names every data item with its level, storage expression, offset, size, attribute (type, digits, scale, flags) and OCCURS loops. The builder parses that (cross-checked against the `-t … -ftsymbols` listing) into `<src>.cobol-symbols.json`, one per translation unit. On GnuCOBOL 3.2, `COBC_GEN_DUMP_COMMENTS=1` adds REDEFINES and 88-level VALUE metadata. GnuCOBOL 3.1.2 omits the 88 VALUE comments: condition names are listed, but their values show `<unknown: condition has no VALUE list>`; inspect the parent item or use GnuCOBOL 3.2 for condition evaluation.
 
 ## Prerequisites
 
@@ -157,6 +157,15 @@ Unrecognised launch keys flow through to CodeLLDB, so the [C/C++ guide's table](
 6. `get_output` for DISPLAY output; `restart_debugging` rebuilds only when the build key changed
 7. `close_debug_session`
 
+### Linux attach validation
+
+The required Docker lane runs both attach forms (`sources` and `manifestDirs`)
+against a sibling COBOL process, with `SYS_PTRACE` granted inside the test container.
+It checks COBOL scopes while the job sleeps inside libcob, advancing variables after
+continue/pause, and process survival after detach. Each case prepares its own binary
+and metadata; the supplied-manifest case removes the compiler before attaching.
+The host's Yama ptrace setting is not changed.
+
 ## What the variables look like
 
 - **Scopes**: `get_scopes` on a COBOL frame returns `WORKING-STORAGE`, `LOCAL-STORAGE` and `LINKAGE` (those present in the program), in that order; `get_local_variables` is their union in declaration order. FILE SECTION records were not measured in this milestone. On a frame that is not COBOL (paused inside libcob or `C$SLEEP`, the runtime-error hook, a C helper) the scopes are the nearest COBOL program's up the stack, named `WORKING-STORAGE of PAYROLL (0000-MAIN, 3 frames up)`, and `get_local_variables` reads them; only a stack with no COBOL program above the frame, or a program without a manifest, is empty with the note `No COBOL data division scopes at this frame (no COBOL program on the stack above it, or no symbol manifest for it).`, with `get_scopes` showing whatever CodeLLDB reports. `engineScopes: true` appends CodeLLDB's scopes to COBOL frames too.
@@ -164,7 +173,7 @@ Unrecognised launch keys flow through to CodeLLDB, so the [C/C++ guide's table](
 
 | Usage | Storage (measured) | Shown as |
 |---|---|---|
-| DISPLAY numeric `S9(5)V99` | `30 30 31 32 33 34 75` for `-123.45` (trailing ASCII overpunch) | `-123.45` — exactly `scale` fraction digits, `-` only when negative, never `+` |
+| DISPLAY numeric `S9(5)V99` | `30 30 31 32 33 34 75` for `-123.45` (trailing ASCII overpunch) | `-123.45` — exactly `scale` fraction digits, `-` only when negative, never `+`. Leading blanks are zero positions; embedded/trailing blanks remain invalid. |
 | `COMP` / `BINARY` `S9(9)` | `f8 a4 32 eb` for `-123456789`: big-endian two's complement (`BINARY_SWAP`), default and `-std=ibm` alike | `-123456789` |
 | `COMP-5` `S9(9)` | `b1 68 de 3a` for `987654321`: native (little-endian) order | `987654321` |
 | `COMP-3` `S9(7)V99` | `00 12 34 56 7d` for `-12345.67`, `00 01 50 00 0c` for `+1500.00` | `-12345.67`; a non-packed byte pattern renders as `<invalid packed: 0x4142434445>` instead of failing the request |
@@ -256,6 +265,21 @@ The image installs the `gnucobol3` package of its Ubuntu 26.04 base (GnuCOBOL 3.
 | Runtime error never pauses | `runtimeChecks` not set | Pass `runtimeChecks: true` (recompiles with `--debug`) |
 | Stop lands on a DATA DIVISION line | VALUE initialisation carries `#line` rows | Step once more |
 | `cobc timed out after 180000 ms` | Very large compilation unit | Prebuild with cobc yourself and pass the executable plus `sources` |
+
+## Host validation
+
+PR CI requires the COBOL smoke and logpoint suites on Ubuntu 24.04 with GnuCOBOL
+3.1.2, alongside the Docker suite on GnuCOBOL 3.2. The host job checks the compiler
+version and rejects missing or skipped COBOL cases. Its `cobol-host-312` artifact
+contains the compiler banner and Vitest results.
+
+After `pnpm build`, reproduce the host lane with:
+
+```sh
+mkdir -p artifacts/cobol
+pnpm exec vitest run --project e2e tests/e2e/mcp-server-smoke-cobol.test.ts tests/e2e/mcp-server-logpoints.test.ts -t 'COBOL|\(cobol\)' --reporter=default --reporter=json --outputFile=artifacts/cobol/host-tests.json
+node scripts/check-cobol-e2e-report.mjs artifacts/cobol/host-tests.json
+```
 
 ## Additional Resources
 
