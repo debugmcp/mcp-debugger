@@ -142,6 +142,7 @@ export function createCobolShim(config: CobolShimArgv, deps: ShimDeps = {}): Cob
    * event loop, so the socket is ended and the exit waits for its close (capped).
    */
   const finish = (code: number): void => {
+    router?.cancelPendingWork();
     if (graceTimer) {
       clearTimeout(graceTimer);
       graceTimer = undefined;
@@ -203,6 +204,7 @@ export function createCobolShim(config: CobolShimArgv, deps: ShimDeps = {}): Cob
   };
 
   const onClientClosed = (): void => {
+    router?.cancelPendingWork();
     logger.info('client disconnected');
     if (shuttingDown) {
       return;
