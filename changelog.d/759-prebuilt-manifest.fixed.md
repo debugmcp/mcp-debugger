@@ -1,0 +1,1 @@
+Fail COBOL prebuilt launch and attach when requested source metadata cannot be generated, including missing compilers, unless usable existing manifests are supplied. Omitting sources still explicitly selects the engine C view.
