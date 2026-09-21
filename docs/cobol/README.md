@@ -173,6 +173,12 @@ The host's Yama ptrace setting is not changed.
 
 ## What the variables look like
 
+PICTURE text from the compiler listing takes precedence. Without a listing, scaling
+`P` positions are reconstructed from the compiler version and storage size. GnuCOBOL
+3.1.2 counts leading `P` in its digit metadata; DISPLAY size recovers the stored digits,
+but binary/packed leading scaling can be ambiguous. Those items retain their usage and
+byte size without a guessed PICTURE until a listing is supplied.
+
 Static root addresses are cached for the process and invalidated on launch, attach,
 process and module events, or termination. Variable bytes are refreshed at every stop;
 LOCAL-STORAGE, LINKAGE, registers, EXTERNAL and BASED addresses are resolved per frame and stop.
