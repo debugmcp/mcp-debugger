@@ -18,6 +18,7 @@ import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
 import { skipIfSpawnBlocked } from '../test-utils/helpers/adapter-spawn.js';
 import {
   hasCobolToolchain,
+  hasCobolConditionDump,
   prepareCobolExample,
   cobolSourcePath,
   cobolExtraSources,
@@ -228,8 +229,11 @@ describe.skipIf(SKIP_COBOL)('MCP Server COBOL Debugging Smoke Test @requires-cob
       expect(groupChildren.get('WS-ID')?.value).toBe('42');
       expect(groupChildren.get('WS-NAME')?.value).toBe('"ALICE               "');
       expect(groupChildren.get('WS-STATUS')?.value).toBe('"A"');
-      expect(groupChildren.get('WS-STATUS-ACTIVE')?.value).toBe('true');
-      expect(groupChildren.get('WS-STATUS-CLOSED')?.value).toBe('false');
+      // GnuCOBOL 3.1.2 lists the condition names but emits no VALUE metadata.
+      // Assert its explicit unknown result; 3.2 must still decode both booleans.
+      const conditionDump = hasCobolConditionDump();
+      expect(groupChildren.get('WS-STATUS-ACTIVE')?.value).toBe(conditionDump ? 'true' : '<unknown: condition has no VALUE list>');
+      expect(groupChildren.get('WS-STATUS-CLOSED')?.value).toBe(conditionDump ? 'false' : '<unknown: condition has no VALUE list>');
 
       // OCCURS: WS-TABLE -> WS-ENTRY(1..5) -> WS-AMOUNT = index * 100.
       const table = await children(ws.get('WS-TABLE')!.variablesReference!);

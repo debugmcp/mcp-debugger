@@ -8,6 +8,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { mkdirSync } from 'node:fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
@@ -23,6 +24,8 @@ export interface DockerTestConfig {
   imageName?: string;
   containerName?: string;
   workspaceMount?: string;
+  /** Separate host log directory for containers that run with a different uid. */
+  logMount?: string;
   logLevel?: string;
   forceRebuild?: boolean;
   /** Extra `docker run` arguments (e.g. ['--network', 'my-net']) */
@@ -122,6 +125,8 @@ export async function createDockerMcpClient(config: DockerTestConfig = {}): Prom
   const imageName = config.imageName || DEFAULT_IMAGE;
   const containerName = config.containerName || `mcp-debugger-test-${Date.now()}`;
   const workspaceMount = config.workspaceMount || path.resolve(ROOT, 'examples');
+  const logMount = config.logMount || path.join(ROOT, 'logs');
+  mkdirSync(logMount, { recursive: true });
   const logLevel = config.logLevel || 'info';
   
   // Clean up any existing container with same name
@@ -150,7 +155,7 @@ export async function createDockerMcpClient(config: DockerTestConfig = {}): Prom
   dockerArgs.push(
     '--name', containerName,
     '-v', `${workspaceMount}:/workspace:rw`,
-    '-v', `${ROOT}/logs:/tmp:rw`,
+    '-v', `${logMount}:/tmp:rw`,
     imageName,
     'stdio',
     '--log-level', logLevel,

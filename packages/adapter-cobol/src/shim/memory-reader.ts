@@ -7,8 +7,9 @@
  * program's own frame gives the address — it must be that frame, because file
  * statics resolve per compilation unit and `cob_local_ptr`/`b_19` are locals
  * of the body function — and one `readMemory` of the whole 01-level record
- * gives every subordinate at once. Both are memoised per generation; a record
- * over 1 MiB is read per item instead of as a whole.
+ * gives every subordinate at once. Static addresses are cached per process;
+ * dynamic addresses and bytes are memoised per stop. A record over 1 MiB is
+ * read per item instead of as a whole.
  *
  * libcob helpers (`cob_get_numdisp`) are not callable from expressions, so
  * OCCURS DEPENDING ON counts are computed by the caller from decoded bytes.
@@ -119,7 +120,11 @@ export class MemoryReader {
   }
 
   rootAddress(frameId: number, entry: ProgramEntry, root: CobolDataItem): Promise<AddressResult> {
-    const key = `addr:${frameId}:${entry.program.programId}:${root.storage.symbol}:${root.offset}`;
+    const identity = JSON.stringify([entry.program.generated.c, entry.sourceKey, entry.program.programId, root.storage.symbol, root.offset]);
+    if (root.storage.kind === 'static' && !root.flags.based && !root.flags.external) {
+      return this.state.memoiseProcess(identity, () => this.evaluateAddress(frameId, root), result => result.ok);
+    }
+    const key = `addr:${frameId}:${identity}`;
     return this.state.memoise(key, () => this.evaluateAddress(frameId, root));
   }
 
@@ -164,7 +169,7 @@ export class MemoryReader {
   }
 
   private readRecord(frameId: number, entry: ProgramEntry, root: CobolDataItem, extent: number): Promise<ReadResult> {
-    const key = `rec:${frameId}:${entry.program.programId}:${root.storage.symbol}:${root.offset}:${extent}`;
+    const key = JSON.stringify(['rec', frameId, entry.program.generated.c, entry.sourceKey, entry.program.programId, root.storage.symbol, root.offset, extent]);
     return this.state.memoise(key, async () => {
       const base = await this.rootAddress(frameId, entry, root);
       if (!base.ok) {
