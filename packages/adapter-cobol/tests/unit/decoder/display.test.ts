@@ -172,11 +172,60 @@ const vectors: Vector[] = [
     expect: { value: '0', kind: 'numeric', mantissa: 0n }
   },
   {
-    name: 'leading spaces on a partially filled field → invalid (only an all-space field is zero)',
+    name: 'leading spaces on a partially filled field are zero positions',
     hex: '20 20 31 32',
     attr: attr(DISPLAY, 4, 0, 0),
     size: 4,
-    expect: { value: '<invalid display: "  12">', kind: 'invalid', invalid: /byte 0/ }
+    expect: { value: '12', kind: 'numeric', mantissa: 12n }
+  },
+  {
+    name: 'leading spaces preserve scale and trailing overpunch',
+    hex: '20 31 72',
+    attr: attr(DISPLAY, 3, 2, SIGNED),
+    size: 3,
+    expect: { value: '-0.12', kind: 'numeric', mantissa: -12n, scale: 2, signSeen: 'ascii-overpunch' }
+  },
+  {
+    name: 'a blank leading sign position is positive',
+    hex: '20 31 32',
+    attr: attr(DISPLAY, 3, 0, LEADING_OVERPUNCH),
+    size: 3,
+    expect: { value: '12', kind: 'numeric', mantissa: 12n, signSeen: 'none' }
+  },
+  {
+    name: 'separate leading sign permits leading blanks in the digit region',
+    hex: '2d 20 31 32',
+    attr: attr(DISPLAY, 3, 0, SEP_LEADING),
+    size: 4,
+    expect: { value: '-12', kind: 'numeric', mantissa: -12n, signSeen: 'separate' }
+  },
+  {
+    name: 'separate trailing sign permits leading blanks in the digit region',
+    hex: '20 31 32 2d',
+    attr: attr(DISPLAY, 3, 0, SEP_TRAILING),
+    size: 4,
+    expect: { value: '-12', kind: 'numeric', mantissa: -12n, signSeen: 'separate' }
+  },
+  {
+    name: 'a missing separate sign remains invalid',
+    hex: '20 20 31 32',
+    attr: attr(DISPLAY, 3, 0, SEP_LEADING),
+    size: 4,
+    expect: { value: '<invalid display: "  12">', kind: 'invalid', invalid: /sign byte/ }
+  },
+  {
+    name: 'an embedded blank remains invalid after leading blanks',
+    hex: '20 31 20 32',
+    attr: attr(DISPLAY, 4, 0, 0),
+    size: 4,
+    expect: { value: '<invalid display: " 1 2">', kind: 'invalid', invalid: /byte 2/ }
+  },
+  {
+    name: 'a trailing blank remains invalid',
+    hex: '20 31 32 20',
+    attr: attr(DISPLAY, 4, 0, SIGNED),
+    size: 4,
+    expect: { value: '<invalid display: " 12 ">', kind: 'invalid', invalid: /sign byte/ }
   },
   {
     name: 'letter in a digit position → invalid with the raw text',
