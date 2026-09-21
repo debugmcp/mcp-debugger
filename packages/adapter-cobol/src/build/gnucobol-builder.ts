@@ -18,7 +18,7 @@
  * - A fresh key directory per (compiler, flags, sources) change: no in-place
  *   replacement of a possibly running executable.
  */
-import { spawn as nodeSpawn } from 'child_process';
+import { spawnCobc } from './cobc-spawn.js';
 import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -328,7 +328,7 @@ export class GnuCobolBuilder {
   constructor(private readonly deps: GnuCobolBuilderDeps) {
     this.platform = deps.platform ?? process.platform;
     this.env = deps.env ?? process.env;
-    this.spawnFn = deps.spawnFn ?? (nodeSpawn as unknown as SpawnLike);
+    this.spawnFn = deps.spawnFn ?? (spawnCobc as unknown as SpawnLike);
     this.timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.now = deps.now ?? (() => new Date());
   }

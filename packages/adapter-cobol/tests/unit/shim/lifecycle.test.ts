@@ -5,7 +5,8 @@
 import { describe, expect, it, afterEach } from 'vitest';
 import net from 'node:net';
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import { startShim, tick, waitFor, type Harness } from './harness.js';
+import { bringUp, frame, startShim, tick, waitFor, type Harness } from './harness.js';
+import { helloManifest } from './fixtures.js';
 
 describe('cobol shim lifecycle', () => {
   let h: Harness | undefined;
@@ -176,6 +177,46 @@ describe('cobol shim lifecycle', () => {
     expect(exitCodes).toEqual([1]);
     expect(logs.some((line) => line.includes('listen failed'))).toBe(true);
     await new Promise<void>((resolve) => blocker.close(() => resolve()));
+  });
+
+  it('cancels a slow stop walk while delivering the final disconnect response', async () => {
+    h = await startShim({
+      manifests: [helloManifest('/work')],
+      engineSetup: engine => {
+        engine.on('stackTrace', () => new Promise(() => undefined));
+        engine.on('disconnect', () => {
+          setImmediate(() => h?.child.exitWith(0));
+          return {};
+        });
+      }
+    });
+    await bringUp(h);
+    const walking = h.engine.waitForRequest('stackTrace');
+    h.engine.emit('stopped', { reason: 'pause', threadId: 1 });
+    await walking;
+    expect((await h.client.request('disconnect', {})).success).toBe(true);
+    await waitFor(() => h!.exitCodes.length > 0);
+    expect(h.engine.received('threads')).toHaveLength(0);
+    expect(h.client.events('stopped')).toHaveLength(0);
+    expect(h.logs.some(line => /write after end|write-after-end|ERR_STREAM_WRITE_AFTER_END/i.test(line))).toBe(false);
+  });
+
+  it('cancels a pending step plan before it can resume an attached process after disconnect', async () => {
+    let release!: (body: unknown) => void;
+    h = await startShim({ manifests: [helloManifest('/work')], engineSetup: engine => {
+      engine.on('stackTrace', () => new Promise(resolve => { release = resolve; }));
+    } });
+    await h.client.request('attach', { pid: 4242 });
+    const planning = h.engine.waitForRequest('stackTrace');
+    h.client.fire('stepOut', { threadId: 1 });
+    await planning;
+    expect((await h.client.request('disconnect', { terminateDebuggee: false })).success).toBe(true);
+    release({ stackFrames: [frame(1, 'HELLO_', '/work/hello.cob', 32)] });
+    await tick(50);
+    expect(h.engine.received('stepOut')).toHaveLength(0);
+    expect(h.engine.received('continue')).toHaveLength(0);
+    expect(h.engine.received('evaluate')).toHaveLength(0);
+    expect(h.engine.received('disconnect')[0].arguments).toEqual({ terminateDebuggee: false });
   });
 
   it('does not deadlock the handshake: initialized reaches the client before the launch response', async () => {

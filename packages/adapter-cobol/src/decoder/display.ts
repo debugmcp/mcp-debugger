@@ -9,8 +9,9 @@
  * and `signSeen` records which one was found.
  *
  * libcob itself validates nothing here (`COB_D2I(x)` is `x & 0x0F`), so the "invalid"
- * verdicts below are the debugger's own diagnostics: they tell the user the bytes are
- * not what a NUMERIC class test would accept, which is usually the bug being hunted.
+ * verdicts below are the debugger's own diagnostics. Leading blanks are accepted as
+ * zero positions, as in libcob arithmetic; embedded/trailing blanks and other malformed
+ * bytes retain their diagnostic rendering.
  */
 
 import { COB_FLAG, hasFlag } from '../manifest/attr-constants.js';
@@ -62,7 +63,6 @@ export function decodeDisplay(bytes: Uint8Array, attr: CobolFieldAttr): Decoded 
   const leading = hasFlag(attr.flags, COB_FLAG.SIGN_LEADING);
 
   // BLANK WHEN ZERO, or simply an all-space field (MOVE SPACES, an unfilled record): zero.
-  // Partially blank fields are NOT accepted — see the module comment.
   if (allBytesAre(bytes, SPACE)) {
     return numericValue(0n, attr.scale, 'none');
   }
@@ -94,8 +94,11 @@ export function decodeDisplay(bytes: Uint8Array, attr: CobolFieldAttr): Decoded 
 
   const overpunchIndex = signed && !separate ? (leading ? digitStart : digitEnd - 1) : -1;
   let mantissa = 0n;
+  let leadingBlanks = true;
   for (let i = digitStart; i < digitEnd; i++) {
     const b = bytes[i];
+    if (b === SPACE && leadingBlanks) continue;
+    leadingBlanks = false;
     let digit: number;
     if (b >= ASCII_ZERO && b <= ASCII_NINE) {
       digit = b - ASCII_ZERO;

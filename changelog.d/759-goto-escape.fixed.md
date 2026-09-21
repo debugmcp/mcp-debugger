@@ -1,0 +1,1 @@
+COBOL step-over and step-out stop at the actual destination when GO TO escapes an active PERFORM range, using compiler control-flow identities that distinguish repeated COPY expansions and nested PERFORMs. Repeated PERFORM TIMES/UNTIL/VARYING loops still finish before step-out returns.

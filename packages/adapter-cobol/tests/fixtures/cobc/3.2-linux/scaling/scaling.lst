@@ -1,0 +1,46 @@
+GnuCOBOL 3.2.0          ../scaling.cob       Sun Sep 20 2026 22:59:00  Page 0001
+
+LINE    PG/LN  A...B............................................................
+
+000001         >>source format free
+000002  identification division.
+000003  program-id. SCALING.
+000004  data division.
+000005  working-storage section.
+000006  01 LEAD-D PIC PP999.
+000007  01 TRAIL-D PIC 999PP.
+000008  01 LEAD-S PIC SPP999 SIGN LEADING SEPARATE.
+000009  01 TRAIL-S PIC S999PP SIGN TRAILING SEPARATE.
+000010  01 LEAD-P PIC PP999 COMP-3.
+000011  01 TRAIL-P PIC 999PP COMP-3.
+000012  01 LEAD-B PIC PP999 COMP.
+000013  01 TRAIL-B PIC 999PP COMP.
+000014  procedure division.
+000015      display LEAD-D TRAIL-D LEAD-S TRAIL-S LEAD-P TRAIL-P
+000016              LEAD-B TRAIL-B
+000017      goback.
+GnuCOBOL 3.2.0          ../scaling.cob       Sun Sep 20 2026 22:59:00  Page 0002
+
+SIZE  TYPE           LVL  NAME                           PICTURE
+
+      WORKING-STORAGE SECTION
+
+00003 NUMERIC        01   LEAD-D                         PP999
+
+00003 NUMERIC        01   TRAIL-D                        999PP
+
+00004 NUMERIC        01   LEAD-S                         SPP999
+
+00004 NUMERIC        01   TRAIL-S                        S999PP
+
+00002 NUMERIC        01   LEAD-P                         PP999 COMP-3
+
+00002 NUMERIC        01   TRAIL-P                        999PP COMP-3
+
+00002 NUMERIC        01   LEAD-B                         PP999 COMP
+
+00002 NUMERIC        01   TRAIL-B                        999PP COMP
+
+
+0 warnings in compilation group
+0 errors in compilation group

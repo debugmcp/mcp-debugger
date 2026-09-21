@@ -63,6 +63,9 @@ export function firstStatementLine(entry: ProgramEntry, range: CobolProcRange): 
  */
 export function programEntryLocation(entry: ProgramEntry): { fileId: number; line: number } | undefined {
   const program = entry.program;
+  if (program.entryStatement) {
+    return { fileId: program.entryStatement.sourceFileId, line: program.entryStatement.line };
+  }
   const floor = program.entryLine ?? program.procedureDivisionLine ?? 0;
   const own = program.procedure.statements
     .filter((s) => s.sourceFileId === program.sourceFileId && s.line >= floor)

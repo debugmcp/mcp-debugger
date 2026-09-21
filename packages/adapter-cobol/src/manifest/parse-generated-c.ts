@@ -14,6 +14,7 @@ import { baseName, splitLines, unescapeCString } from './c-text.js';
 import { emptyAttrTables, parseAttrsAndStorage } from './parse-attrs-and-storage.js';
 import { parseDumpRoutine } from './parse-dump-routine.js';
 import { SourceFileRegistry, parseProcedureMap, splitProgramSegments } from './parse-procedure-map.js';
+import { parseControlFlow } from './parse-control-flow.js';
 import { parseSymbolListing } from './parse-symbol-listing.js';
 import { mergeListingIntoProgram } from './merge-listing.js';
 import { validateProgram } from './validate.js';
@@ -113,7 +114,7 @@ export function parseGeneratedCText(texts: GeneratedCTexts, generator: Generator
     diagnostics.push(...procedure.diagnostics);
     registry.markProgram(procedure.sourceFileId);
 
-    const dump = parseDumpRoutine({ lines: segment.lines, tables, programId: segment.programId });
+    const dump = parseDumpRoutine({ lines: segment.lines, tables, programId: segment.programId, cobcVersion: generator.cobcVersion });
     diagnostics.push(...dump.diagnostics);
     if (dump.found) {
       sawDump = true;
@@ -143,6 +144,8 @@ export function parseGeneratedCText(texts: GeneratedCTexts, generator: Generator
     if (procedure.entryLine !== undefined) {
       program.entryLine = procedure.entryLine;
     }
+    if (procedure.entryStatement) program.entryStatement = procedure.entryStatement;
+    program.controlFlow = parseControlFlow(segment);
     if (procedure.procedureDivisionLine !== undefined) {
       program.procedureDivisionLine = procedure.procedureDivisionLine;
     }

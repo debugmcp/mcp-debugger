@@ -6,6 +6,7 @@
 import { describe, expect, it, afterEach } from 'vitest';
 import path from 'node:path';
 import type { DebugProtocol } from '@vscode/debugprotocol';
+import { TARGET_ABI_EXPRESSION } from '../../../src/shim/runtime-message.js';
 import { engineError, installMemory } from './fake-engine.js';
 import { helloManifest, helloMemory } from './fixtures.js';
 import { bringUp, frame, startShim, stopWithFrames, type Harness } from './harness.js';
@@ -132,10 +133,10 @@ describe('cobol shim exceptions and launch', () => {
   });
 
   it.each([
-    ['linux', 'x64', '$rdi'],
-    ['win32', 'x64', '$rcx'],
-    ['darwin', 'arm64', '$x0']
-  ] as const)('relabels the runtime-error stop as an exception with the format string from %s/%s (%s)', async (platform, arch, register) => {
+    ['linux', 'x64', 'x86_64-unknown-linux-gnu', { rdi: 4096n, rsi: 8192n, rdx: 5n }],
+    ['win32', 'x64', 'x86_64-pc-windows-msvc', { rcx: 4096n, rdx: 8192n, r8: 5n }],
+    ['darwin', 'arm64', 'arm64-apple-macosx', { x0: 4096n }]
+  ] as const)('relabels the runtime-error stop as an exception with formatted arguments from %s/%s (%s)', async (platform, arch, triple, registers) => {
     h = await startShim({
       manifests: [helloManifest(ROOT)],
       platform,
@@ -144,11 +145,19 @@ describe('cobol shim exceptions and launch', () => {
         engine.on('setFunctionBreakpoints', (args: DebugProtocol.SetFunctionBreakpointsArguments) => ({
           breakpoints: args.breakpoints.map((_bp, i) => ({ id: 300 + i, verified: false }))
         }));
-        engine.on('evaluate', (args: { expression: string }) =>
-          args.expression === `/nat (const char*)${register}`
-            ? { result: `0x00007ffff7a1e2c0 "subscript of '%s' out of bounds: %d"`, type: 'const char *', variablesReference: 0 }
-            : engineError('nope')
-        );
+        const stack = Buffer.alloc(16);
+        stack.writeBigUInt64LE(8192n); stack.writeBigUInt64LE(5n, 8);
+        installMemory(engine, {
+          format: { address: 4096n, bytes: Buffer.from("subscript of '%s' out of bounds: %d\0") },
+          name: { address: 8192n, bytes: Buffer.from('WS-CELL\0') },
+          stack: { address: 12288n, bytes: stack }
+        }, (args: { expression: string }) => {
+          if (args.expression === TARGET_ABI_EXPRESSION) return { result: triple + '|8|1' };
+          if (args.expression === '/py lldb.frame.GetCFA()') return { result: '12288' };
+          const register = /^\/nat \(unsigned long long\)\$(\w+)$/.exec(args.expression)?.[1];
+          const value = register ? (registers as Record<string, bigint>)[register] : undefined;
+          return value === undefined ? engineError('nope') : { result: value.toString() };
+        });
       }
     });
     await bringUp(h);
@@ -163,7 +172,7 @@ describe('cobol shim exceptions and launch', () => {
     ];
     const seen = await stopWithFrames(h, frames, { reason: 'breakpoint', hitBreakpointIds: [300] });
     const stopped = h.client.events('stopped')[0];
-    expect(stopped.body).toMatchObject({ reason: 'exception', description: 'COBOL runtime error', text: "subscript of '%s' out of bounds: %d" });
+    expect(stopped.body).toMatchObject({ reason: 'exception', description: 'COBOL runtime error', text: "subscript of 'WS-CELL' out of bounds: 5" });
     expect(stopped.body).not.toHaveProperty('hitBreakpointIds');
     expect(h.engine.received('evaluate')[0].arguments).toMatchObject({ frameId: 1, context: 'variables' });
     expect(seen[3].name).toBe('HELLO: 0000-MAIN [hello.c:139]');
@@ -173,9 +182,9 @@ describe('cobol shim exceptions and launch', () => {
     expect(info.success).toBe(true);
     expect(info.body).toEqual({
       exceptionId: 'cobol_runtime_error',
-      description: "subscript of '%s' out of bounds: %d",
+      description: "subscript of 'WS-CELL' out of bounds: 5",
       breakMode: 'always',
-      details: { message: "subscript of '%s' out of bounds: %d" }
+      details: { message: "subscript of 'WS-CELL' out of bounds: 5" }
     });
   });
 
