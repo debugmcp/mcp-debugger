@@ -155,6 +155,17 @@ export class Router {
   private readonly variables: VariablesHandler;
   private readonly evaluator: EvaluateHandler;
   private stepLoop?: StepLoop;
+  private stopping = false;
+
+  /** Cancel walks and step plans without suppressing the engine's final replies. */
+  cancelPendingWork(): void {
+    this.stopping = true;
+    this.abortStepLoop();
+  }
+
+  private get inactive(): boolean {
+    return this.stopping || this.client.isEnding;
+  }
 
   constructor(
     private readonly state: SessionState,
@@ -172,6 +183,7 @@ export class Router {
   // ---------------------------------------------------------------- inbound
 
   onClientMessage(message: ClientInbound): void {
+    if (this.inactive) return;
     switch (message.kind) {
       case 'request':
         this.onClientRequest(message.request);
@@ -205,7 +217,7 @@ export class Router {
 
   /** The engine socket went away: nothing else will arrive, so a waiting step loop must let go. */
   onEngineClosed(): void {
-    this.abortStepLoop();
+    this.cancelPendingWork();
   }
 
   // ---------------------------------------------------------------- plumbing
@@ -254,6 +266,10 @@ export class Router {
     const slot = this.client.reserve();
     decide()
       .then((outcome) => {
+        if (this.inactive) {
+          slot.resolve(null);
+          return;
+        }
         if ('forward' in outcome) {
           this.forward(outcome.forward, { slot, transform: outcome.transform });
         } else {
@@ -308,7 +324,7 @@ export class Router {
         this.onSetFunctionBreakpoints(request);
         return;
       case 'stackTrace':
-        this.forward(request, { transform: (response) => this.onStackTraceResponse(request, response) });
+        this.serve(request, () => this.onStackTrace(request));
         return;
       case 'scopes':
         this.serve(request, () => this.onScopes(request));
@@ -334,6 +350,7 @@ export class Router {
         return;
       case 'disconnect':
       case 'terminate':
+        this.cancelPendingWork();
         this.hooks.onDisconnectRequested();
         this.forward(request);
         return;
@@ -368,6 +385,7 @@ export class Router {
   }
 
   private onLaunchOrAttach(request: DebugProtocol.Request): void {
+    this.state.invalidateProcess(request.command);
     this.state.mode = request.command === 'attach' ? 'attach' : 'launch';
     const args = request.arguments as Record<string, unknown> | undefined;
     // CodeLLDB stops the target after an attach only with stopOnEntry (it resumes otherwise),
@@ -571,27 +589,35 @@ export class Router {
     }
   }
 
-  private async onStackTraceResponse(request: DebugProtocol.Request, response: DebugProtocol.Response): Promise<DebugProtocol.Response> {
+  private async onStackTrace(request: DebugProtocol.Request): Promise<DebugProtocol.Response | { forward: DebugProtocol.Request }> {
     const args = this.argsOf<DebugProtocol.StackTraceArguments>(request);
-    const body = response.body as DebugProtocol.StackTraceResponse['body'] | undefined;
-    if (response.success && body && Array.isArray(body.stackFrames)) {
+    if (this.state.registry.programCount === 0) return { forward: request };
+    const generation = this.state.generation;
+    // DAP pages refer to the logical stack. Asking the engine for the client's
+    // page first loses PERFORM frames above it and shifts every later offset.
+    const response = await this.state.memoise(`logical-stack:${args.threadId}:${JSON.stringify(args.format ?? {})}`, async () => {
+      // CodeLLDB treats an explicit zero as an empty page. Omit levels for its
+      // complete native stack, then apply the client's page to the logical stack.
+      const engineArgs = { ...args, startFrame: 0 };
+      delete engineArgs.levels;
+      const response = await this.engine.request('stackTrace', engineArgs);
+      const body = response.body as DebugProtocol.StackTraceResponse['body'] | undefined;
+      if (!response.success || !body || !Array.isArray(body.stackFrames) || generation !== this.state.generation) return response;
       this.state.lastThreadId = args.threadId;
-      annotateStackFrames(this.state, body.stackFrames, args.threadId, args.startFrame ?? 0);
-      // The PERFORM stack, under the program's frame (M3). Only a page from the top can
-      // be extended consistently; the core asks for the whole stack from frame 0.
-      if ((args.startFrame ?? 0) === 0 && this.state.registry.programCount > 0) {
-        const inserted = await insertPerformFrames(this.engine, this.state, this.logger, args.threadId, body.stackFrames);
-        if (inserted > 0) {
-          if (typeof body.totalFrames === 'number') {
-            body.totalFrames += inserted;
-          }
-          if (typeof args.levels === 'number' && args.levels > 0 && body.stackFrames.length > args.levels) {
-            body.stackFrames.length = args.levels;
-          }
-        }
-      }
-    }
-    return response;
+      annotateStackFrames(this.state, body.stackFrames, args.threadId, 0);
+      const nativeCount = body.totalFrames ?? body.stackFrames.length;
+      const inserted = await insertPerformFrames(this.engine, this.state, this.logger, args.threadId, body.stackFrames);
+      body.totalFrames = nativeCount + inserted;
+      if (generation === this.state.generation) this.state.deepFetched.add(args.threadId);
+      return response;
+    });
+    if (generation !== this.state.generation) return errorResponse(request, 'Stack became stale (program has resumed)');
+    if (!response.success) return errorResponse(request, response.message ?? 'stackTrace failed');
+    const body = response.body as DebugProtocol.StackTraceResponse['body'] | undefined;
+    if (!body || !Array.isArray(body.stackFrames)) return errorResponse(request, 'Engine returned no stack frames');
+    const start = Math.max(0, args.startFrame ?? 0);
+    const end = args.levels && args.levels > 0 ? start + args.levels : undefined;
+    return okResponse(request, { ...body, stackFrames: body.stackFrames.slice(start, end) });
   }
 
   /** The cached frame, refetching the stack once when this generation has not seen a `stackTrace` yet. */
@@ -606,8 +632,11 @@ export class Router {
 
   /** Internal `stackTrace`, annotated and cached; the raw frames are returned for callers that need the engine's view. */
   private async fetchStack(threadId: number, levels: number): Promise<DebugProtocol.StackFrame[] | undefined> {
+    if (this.inactive) return undefined;
+    const generation = this.state.generation;
     try {
       const response = await this.engine.request('stackTrace', { threadId, startFrame: 0, levels });
+      if (this.inactive || generation !== this.state.generation) return undefined;
       const body = response.body as DebugProtocol.StackTraceResponse['body'] | undefined;
       if (!response.success || !body || !Array.isArray(body.stackFrames)) {
         return undefined;
@@ -871,6 +900,7 @@ export class Router {
 
   private async startStepLoop(loop: StepLoop, request: DebugProtocol.Request): Promise<void> {
     const origin = (await this.fetchStack(loop.threadId, 1))?.[0];
+    if (this.inactive) { this.stepLoop = undefined; return; }
     if (origin) {
       loop.origin = { path: origin.source?.path, line: origin.line, name: origin.name };
       try {
@@ -880,6 +910,7 @@ export class Router {
         await this.disarmReturnStop();
       }
     }
+    if (this.inactive) { this.stepLoop = undefined; return; }
     if (loop.plan?.kind === 'out') {
       // The range's return is armed: the engine gets a `continue`, and the client's response
       // is the shim's (a `stepOut` answered with a `continue` response would be a protocol error).
@@ -924,7 +955,7 @@ export class Router {
       return undefined;
     }
     const depth = await readPerformDepth(this.engine, origin.id);
-    if (depth === undefined) {
+    if (depth === undefined || this.inactive) {
       return undefined;
     }
     if (loop.command === 'stepOut') {
@@ -945,6 +976,7 @@ export class Router {
 
   /** The COBOL statement a performed range returns to: the PERFORM that runs it, via the return address and the line map. */
   private async performLineOf(origin: CachedFrame, returnAddress: bigint): Promise<{ path: string; line: number } | undefined> {
+    if (this.inactive) return undefined;
     const entry = origin.program;
     if (!entry) {
       return undefined;
@@ -978,6 +1010,7 @@ export class Router {
    */
   private async armReturnStop(frameId: number, depth: number): Promise<{ id: number; address: bigint } | undefined> {
     const address = await readReturnAddress(this.engine, frameId, depth);
+    if (this.inactive) return undefined;
     if (address === undefined) {
       this.logger.warn(`PERFORM return address of frame_stack[${depth}] unavailable`);
       return undefined;
@@ -1003,6 +1036,7 @@ export class Router {
       return;
     }
     this.instructionBreakpointArmed = false;
+    if (this.inactive) return;
     try {
       await this.engine.request('setInstructionBreakpoints', { breakpoints: [] });
     } catch (error) {
@@ -1074,7 +1108,7 @@ export class Router {
     if (!this.state.breakpoints.isLogpointOnlyHit(hits)) {
       return false;
     }
-    if (this.state.generation !== generation || this.state.pausePending) {
+    if (this.inactive || this.state.generation !== generation || this.state.pausePending) {
       // A newer stop or a pause arrived while the message was evaluated: that one owns the
       // process (the pause is answered by the engine's re-reported stop). This stop is history.
       this.logger.info('logpoint stop superseded while its message was evaluated; not resumed');
@@ -1261,6 +1295,7 @@ export class Router {
    */
   private async runStepLoop(loop: StepLoop, responded: Promise<DebugProtocol.Response>): Promise<void> {
     const surface = async (event: DebugProtocol.Event, slot: OutputSlot, body: StoppedBody): Promise<void> => {
+      if (this.inactive) { slot.resolve(null); return; }
       if (loop.plan && !loop.plan.finished) {
         loop.plan.finished = true;
         await this.disarmReturnStop();
@@ -1273,13 +1308,13 @@ export class Router {
         loop.abort = () => resolve(undefined);
       });
       const response = await Promise.race([responded, aborted]);
-      if (!response || !response.success) {
+      if (this.inactive || !response || !response.success) {
         return;
       }
       let walk = 0;
       for (;;) {
         const signal = await this.nextStepSignal(loop);
-        if (signal.kind !== 'stopped') {
+        if (this.inactive || signal.kind !== 'stopped') {
           return;
         }
         const { event, slot, pausePending } = signal;
@@ -1317,6 +1352,7 @@ export class Router {
           }
         }
         const raw = await this.fetchStack(loop.threadId, 4);
+        if (this.inactive) { slot.resolve(null); return; }
         const top = raw?.[0];
         let continuation: 'next' | 'stepIn' | 'continue' = loop.command === 'stepIn' ? 'stepIn' : 'next';
         if (returnHit && plan) {
@@ -1379,6 +1415,7 @@ export class Router {
         // `stepIn` must keep stepping in, or the CALL it started on is stepped over; LLDB
         // skips libcob (no debug info) by itself. `stepOut` continues with `next`.
         let next: DebugProtocol.Response;
+        if (this.inactive) { slot.resolve(null); return; }
         try {
           next = await this.engine.request(continuation, { threadId: loop.threadId });
         } catch (error) {
@@ -1398,7 +1435,7 @@ export class Router {
       for (const signal of loop.queued) {
         if (signal.kind === 'stopped') {
           this.presentHits((signal.event.body ?? {}) as StoppedBody);
-          signal.slot.resolve(signal.event);
+          signal.slot.resolve(this.inactive ? null : signal.event);
         }
       }
       loop.queued.length = 0;
@@ -1442,8 +1479,14 @@ export class Router {
         }
         return;
       }
+      case 'process':
+      case 'module':
+        this.state.invalidateProcess(event.event);
+        slot.resolve(event);
+        return;
       case 'terminated':
       case 'exited':
+        this.state.invalidateProcess(event.event);
         this.abortStepLoop();
         slot.resolve(event);
         return;
@@ -1453,6 +1496,7 @@ export class Router {
   }
 
   private async onStopped(event: DebugProtocol.Event, slot: OutputSlot): Promise<void> {
+    if (this.inactive) { slot.resolve(null); return; }
     this.state.bumpGeneration('stopped');
     const body = (event.body ?? {}) as StoppedBody;
     if (body.threadId !== undefined) {
@@ -1469,6 +1513,7 @@ export class Router {
     } catch (error) {
       this.logger.warn('runtime-error relabel failed', error);
     }
+    if (this.inactive) { slot.resolve(null); return; }
     if (this.stepLoop) {
       this.deliverStepSignal({ kind: 'stopped', event, slot, pausePending: context.pausePending });
       return;
@@ -1483,7 +1528,7 @@ export class Router {
     } catch (error) {
       this.logger.warn('stop retarget failed', error);
     }
-    slot.resolve(event);
+    slot.resolve(this.inactive ? null : event);
   }
 
   /**
@@ -1509,18 +1554,18 @@ export class Router {
     const generation = this.state.generation;
     const hasCobolFrame = (threadId: number): boolean => this.state.framesOfThread(threadId).some((f) => f.isCobol);
     await this.fetchStack(body.threadId, WALK_UP_STACK_LEVELS);
-    if (this.state.generation !== generation || hasCobolFrame(body.threadId)) {
+    if (this.inactive || this.state.generation !== generation || hasCobolFrame(body.threadId)) {
       return;
     }
     const response = await this.engine.request('threads', {});
-    if (this.state.generation !== generation) {
+    if (this.inactive || this.state.generation !== generation) {
       return;
     }
     const others = ((response.body as DebugProtocol.ThreadsResponse['body'] | undefined)?.threads ?? [])
       .filter((thread) => thread.id !== body.threadId)
       .slice(0, RETARGET_MAX_THREADS);
     await Promise.all(others.map((thread) => this.fetchStack(thread.id, WALK_UP_STACK_LEVELS)));
-    if (this.state.generation !== generation) {
+    if (this.inactive || this.state.generation !== generation) {
       return;
     }
     const target = others.find((thread) => hasCobolFrame(thread.id));

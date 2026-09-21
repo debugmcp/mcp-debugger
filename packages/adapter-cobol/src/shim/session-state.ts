@@ -118,6 +118,8 @@ export class SessionState {
   private nextFrameId = SHIM_FRAME_ID_BASE;
   /** Per-generation memoisation of address evaluations and record reads (values are promises: concurrent readers share one engine round trip). */
   private readonly memo = new Map<string, Promise<unknown>>();
+  /** Successful static addresses survive stops, but never a process/module change. */
+  private readonly processMemo = new Map<string, Promise<unknown>>();
 
   constructor(options: ShimOptions, private readonly logger: ShimLogger, registry?: ManifestRegistry) {
     this.options = options;
@@ -156,6 +158,29 @@ export class SessionState {
     this.nextRef = SHIM_REF_BASE;
     this.nextFrameId = SHIM_FRAME_ID_BASE;
     this.logger.debug(`generation ${this.generation} (${reason})`);
+  }
+
+  invalidateProcess(reason: string): void {
+    this.processMemo.clear();
+    this.bumpGeneration(reason);
+  }
+
+  memoiseProcess<T>(key: string, compute: () => Promise<T>, cacheable: (value: T) => boolean): Promise<T> {
+    const existing = this.processMemo.get(key);
+    if (existing) return existing as Promise<T>;
+    const forget = (): void => {
+      // A pending read from an old process must not evict a replacement's address.
+      if (this.processMemo.get(key) === created) this.processMemo.delete(key);
+    };
+    const created = compute().then(value => {
+      if (!cacheable(value)) forget();
+      return value;
+    }, error => {
+      forget();
+      throw error;
+    });
+    this.processMemo.set(key, created);
+    return created;
   }
 
   /** A frame id for a synthesised frame of this generation. */
