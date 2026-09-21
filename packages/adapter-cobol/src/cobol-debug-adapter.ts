@@ -62,6 +62,7 @@ import {
   type CobolBuildResult
 } from './build/index.js';
 import { COBOL_PRIVATE_KEY, SHIM_ENTRY_BASENAME, buildShimArgs, type CobolShimSessionOptions } from './shim-protocol.js';
+import { inspectPeDebugInfo } from './build/pe-debug-info.js';
 import { ManifestRegistry } from './shim/manifest-registry.js';
 import { NOOP_LOGGER } from './shim/logger.js';
 
@@ -600,6 +601,7 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
         shimManifestDirs.push(result.artifactDir);
       }
     } else {
+      await this.checkPrebuiltDebugInfo(programPath);
       if (runner === 'cobcrun') {
         // A compiled module run by name: cobcrun resolves `<name>.<ext>` on COB_LIBRARY_PATH.
         if (!isCobolModuleFile(programPath, this.platform)) {
@@ -725,6 +727,20 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
     return { program, entry: path.basename(modulePath, path.extname(modulePath)) };
   }
 
+  private async checkPrebuiltDebugInfo(program: string): Promise<void> {
+    if (this.platform !== 'win32') return;
+    const info = await inspectPeDebugInfo(program);
+    if (info === 'pdb-only') {
+      throw new AdapterError(
+        'The prebuilt COBOL binary has PDB-only debug information. COBOL variable addresses require DWARF; rebuild with GnuCOBOL: cobc -g -A "-O0 -gdwarf-4". Mixed DWARF/PDB binaries are supported.',
+        AdapterErrorCode.ENVIRONMENT_INVALID
+      );
+    }
+    if (info === 'unknown') {
+      this.dependencies.logger?.warn('[CobolDebugAdapter] Could not confirm DWARF in the prebuilt Windows binary; continuing. Build with cobc -g -A "-O0 -gdwarf-4" if COBOL variables are unavailable.');
+    }
+  }
+
   /**
    * Regenerate the symbol manifest for a binary this session did not build — a prebuilt
    * launch, or the process being attached to — by a translate-only `cobc -C` over
@@ -839,6 +855,7 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
     // the same absolute path the manifest is anchored on.
     const program = typeof passthrough.program === 'string' && passthrough.program.length > 0 ? path.resolve(baseDir, passthrough.program) : undefined;
     if (program !== undefined) {
+      await this.checkPrebuiltDebugInfo(program);
       passthrough.program = program;
     }
     const shimManifestDirs: string[] = [];

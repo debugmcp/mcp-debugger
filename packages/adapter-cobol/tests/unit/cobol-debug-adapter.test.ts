@@ -15,6 +15,7 @@ import { fileURLToPath } from 'url';
 import { AdapterState, AdapterError, AdapterErrorCode, DebugFeature, DebugLanguage } from '@debugmcp/shared';
 import type { AdapterConfig, AdapterDependencies, LanguageSpecificLaunchConfig } from '@debugmcp/shared';
 import type { CobcLocation, CobolBuildRequest, CobolBuildResult } from '../../src/build/index.js';
+import { peFixture } from './build/pe-fixture.js';
 import { helloManifest } from './shim/fixtures.js';
 
 const { shimExists, cobcrunExists, buildMock, builderCtor } = vi.hoisted(() => ({
@@ -145,6 +146,26 @@ describe('CobolDebugAdapter', () => {
 
   afterEach(() => {
     fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it.each(['launch', 'attach'])('rejects PDB-only Windows prebuilt %s before the engine starts', async mode => {
+    fs.writeFileSync(path.join(tmp, 'app.exe'), peFixture({ pdb: true }));
+    const target = new CobolDebugAdapter(createDependencies(), 'win32');
+    const result = mode === 'launch'
+      ? transformLaunch({ program: 'app.exe', cwd: tmp }, target)
+      : target.transformAttachConfig({ request: 'attach', processId: 7, program: 'app.exe', cwd: tmp });
+    await expect(result).rejects.toMatchObject({ code: AdapterErrorCode.ENVIRONMENT_INVALID, message: expect.stringMatching(/PDB-only.*DWARF.*gdwarf-4/) });
+    expect(buildMock).not.toHaveBeenCalled();
+  });
+
+  it('accepts mixed Windows DWARF/PDB binaries and diagnoses unknown files without rejecting them', async () => {
+    const target = new CobolDebugAdapter(createDependencies(), 'win32');
+    fs.writeFileSync(path.join(tmp, 'app.exe'), peFixture({ dwarf: true, pdb: true }));
+    expect((await transformLaunch({ program: 'app.exe', cwd: tmp }, target)).program).toBe(path.join(tmp, 'app.exe'));
+    expect(logger.warn).not.toHaveBeenCalledWith(expect.stringMatching(/Could not confirm DWARF/));
+    fs.writeFileSync(path.join(tmp, 'app.exe'), Buffer.alloc(64));
+    await transformLaunch({ program: 'app.exe', cwd: tmp }, target);
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/Could not confirm DWARF.*continuing/));
   });
 
   describe.each(['launch', 'attach'] as const)('%s metadata fallback', mode => {
