@@ -2,6 +2,7 @@
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { buildDockerImage, createDockerMcpClient, getDockerLogs } from './docker-test-utils.js';
 import { parseSdkToolResult } from '../smoke-test-utils.js';
@@ -52,6 +53,11 @@ describe.skipIf(process.env.SKIP_DOCKER_TESTS === 'true')('Docker: COBOL attach-
     if (container && ctx.task.result?.state === 'fail') console.log(await getDockerLogs(container));
     if (sessionId && client) await call('close_debug_session').catch(() => undefined);
     if (pid && container) await exec('kill', '-KILL', String(pid)).catch(() => undefined);
+    // Only this container's dedicated log mount is changed. Preserve readable,
+    // removable local artifacts without leaving root-owned shared session logs.
+    if (container && typeof process.getuid === 'function' && typeof process.getgid === 'function') {
+      await exec('chown', '-R', `${process.getuid()}:${process.getgid()}`, '/tmp').catch(() => undefined);
+    }
     await cleanup?.();
     client = undefined;
     cleanup = undefined;
@@ -64,6 +70,7 @@ describe.skipIf(process.env.SKIP_DOCKER_TESTS === 'true')('Docker: COBOL attach-
     container = `mcp-debugger-cobol-attach-${mode}-${Date.now()}`;
     const connection = await createDockerMcpClient({
       imageName: 'mcp-debugger:test', containerName: container, logLevel: 'debug',
+      logMount: fileURLToPath(new URL(`../../../logs/${container}/`, import.meta.url)),
       // Root inside this disposable container retains the added capability even
       // when the host test helper normally selects an unprivileged numeric uid.
       extraRunArgs: ['--cap-add=SYS_PTRACE', '--user=0:0']
