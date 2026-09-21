@@ -19,6 +19,9 @@ export interface CobolShimSessionOptions {
   stdinFile?: string;
   /** Reference-namespace collision policy; tests use 'strict'. */
   refCheck?: 'strict' | 'warn';
+  /** Primary source/module identity for a launch's COBOL entry stop. */
+  entrySource?: string;
+  entryProgram?: string;
 }
 
 export interface CobolShimArgv {

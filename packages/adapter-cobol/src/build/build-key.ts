@@ -23,9 +23,12 @@ export function hashFileContents(filePath: string, read: (p: string) => Buffer =
 
 export function computeBuildKey(input: BuildKeyInput): string {
   const hash = createHash('sha256');
+  // Regenerate cached manifests when fallback picture semantics change.
+  hash.update('picture-parser:2\n');
   hash.update('control-flow-parser:1\n');
   hash.update(`cobc:${input.cobcVersion}\n`);
   hash.update(`argv:${JSON.stringify(input.argv)}\n`);
+  hash.update('entry-parser:2\n');
   const files = [...input.files].sort((a, b) => a.path.localeCompare(b.path));
   for (const file of files) {
     hash.update(`file:${file.path.toLowerCase()}:${file.contentHash}\n`);

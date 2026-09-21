@@ -334,6 +334,42 @@ describe.skipIf(SKIP_COBOL)('MCP Server COBOL Debugging Smoke Test @requires-cob
     120000
   );
 
+  it.for(['executable', 'cobcrun'])('stopOnEntry reaches the first COPY statement after DECLARATIVES (%s)', { timeout: 120000 }, async (runner, ctx) => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cobol-entry-'));
+    const source = path.join(dir, 'entrystop.cob');
+    const copy = path.join(dir, 'first.cpy');
+    writeFileSync(copy, 'move 7 to ws-value\n');
+    writeFileSync(source, [
+      'identification division.', 'program-id. entrystop.',
+      'environment division.', 'input-output section.', 'file-control.',
+      'select optional test-file assign to "unused-entry-file" file status ws-status.',
+      'data division.', 'file section.', 'fd test-file.', '01 test-record pic x.',
+      'working-storage section.', '01 ws-status pic xx.', '01 ws-value pic 9 value 0.',
+      'procedure division.', 'declaratives.', 'file-errors section.',
+      'use after standard error procedure on test-file.', 'display "error handler".',
+      'end declaratives.', 'main-entry.', 'copy "first.cpy".',
+      'display "entry value=" ws-value', 'stop run.'
+    ].join('\n'));
+    try {
+      sessionId = (await call('create_debug_session', { language: 'cobol', name: 'cobol-entry' })).sessionId as string;
+      await startOrSkip(ctx, {
+        scriptPath: source, dapLaunchArgs: { stopOnEntry: true },
+        adapterLaunchConfig: { format: 'free', copybookDirs: [dir], ...(runner === 'cobcrun' ? { runner } : {}) }
+      }, 'entry');
+      const paused = await pollState('paused', 30000);
+      expect(paused?.lastStop?.reason).toBe('entry');
+      const top = (await fetchStackTrace())[0];
+      expect(top.file?.replace(/\\/g, '/')).toBe(copy.replace(/\\/g, '/'));
+      expect(top.line).toBe(1);
+      expect((await call('evaluate_expression', { expression: 'ws-value' })).result).toBe('0');
+      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+      expect((await pollState('stopped', 20000))?.exitCode).toBe(0);
+    } finally {
+      if (sessionId) { await callToolSafely(mcpClient!, 'close_debug_session', { sessionId }); sessionId = null; }
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it.for([
     { name: 'direct out back to caller', operation: 'step_out', body: ['caller.', 'perform p-one', 'display "unreached"', 'stop run.', 'p-one.', 'add 1 to ws-count', 'go to caller.'], start: 'go to caller.', destination: 'perform p-one', count: '1' },
     { name: 'normal TIMES next with GO TO', operation: 'step_over', body: ['perform p-one thru p-tail 3 times', 'display "returned"', 'stop run.', 'p-one.', 'add 1 to ws-count', 'go to p-tail.', 'p-tail.', 'continue.'], start: 'perform p-one thru p-tail 3 times', destination: 'display "returned"', count: '3' },
@@ -388,7 +424,7 @@ describe.skipIf(SKIP_COBOL)('MCP Server COBOL Debugging Smoke Test @requires-cob
       const paused = await pollState('paused', 30000);
       expect(paused, 'session should pause at the runtime error').toBeDefined();
       expect(paused!.lastStop?.reason).toBe('exception');
-      expect(`${paused!.lastStop?.description ?? ''} ${paused!.lastStop?.text ?? ''}`).toMatch(/runtime error|out of bounds/i);
+      expect(paused!.lastStop?.text).toBe("subscript of 'WS-CELL' out of bounds: 5");
 
       // The generated-C frame is mapped back to the offending COBOL statement.
       const top = (await fetchStackTrace()).find(isCobolFrame)!;

@@ -47,6 +47,8 @@ export interface FunctionBreakpointRecord {
   verified?: boolean;
   message?: string;
   engineId?: number;
+  /** Private one-shot entry stop, excluded from client ids and function replacement. */
+  internal?: boolean;
 }
 
 /** One position of the list last sent to the engine for a file. */
@@ -91,6 +93,7 @@ export class BreakpointTable {
   private readonly files = new Map<string, FileState>();
   private readonly functions = new Map<number, FunctionBreakpointRecord>();
   private nextFunctionId = FUNCTION_BP_ID_BASE;
+  private readonly hiddenEngineIds = new Set<number>();
 
   private fileFor(source: DebugProtocol.Source | string): FileState {
     const sourcePath = canonicalPath(typeof source === 'string' ? source : (source.path ?? ''));
@@ -231,6 +234,7 @@ export class BreakpointTable {
           record.verified = answer.verified;
           record.message = answer.message;
           record.engineId = answer.id;
+          if (record.internal && !entry.user && entry.fnIds.every(id => this.functions.get(id)?.internal) && answer.id !== undefined) this.hiddenEngineIds.add(answer.id);
           record.note = entry.conditionDropped && record.condition
             ? `condition not applied: line ${entry.line} is shared by breakpoints with different conditions`
             : undefined;
@@ -274,14 +278,19 @@ export class BreakpointTable {
   clearFunctionBreakpoints(): string[] {
     const keys = new Set<string>();
     for (const record of this.functions.values()) {
+      if (record.internal) continue;
       keys.add(normalisePath(record.path));
+      this.functions.delete(record.id);
     }
-    this.functions.clear();
     return [...keys];
   }
 
   functionBreakpoints(): FunctionBreakpointRecord[] {
-    return [...this.functions.values()];
+    return [...this.functions.values()].filter(record => !record.internal);
+  }
+
+  removeInternal(record: FunctionBreakpointRecord): void {
+    if (record.internal) this.functions.delete(record.id);
   }
 
   engineIdOf(sourcePath: string, line: number): number | undefined {
@@ -311,13 +320,13 @@ export class BreakpointTable {
     for (const id of ids) {
       const roles = this.rolesOf(id);
       if (!roles) {
-        out.push(id);
+        if (!this.hiddenEngineIds.has(id)) out.push(id);
         continue;
       }
       if (roles.user) {
         out.push(id);
       }
-      out.push(...roles.fnIds);
+      out.push(...roles.fnIds.filter(id => !this.functions.get(id)?.internal));
     }
     return out;
   }
@@ -350,7 +359,7 @@ export class BreakpointTable {
     const id = body.breakpoint?.id;
     const roles = typeof id === 'number' ? this.rolesOf(id) : undefined;
     if (!roles) {
-      return [body];
+      return typeof id === 'number' && this.hiddenEngineIds.has(id) ? [] : [body];
     }
     const out: Array<DebugProtocol.BreakpointEvent['body']> = [];
     if (roles.user) {
@@ -358,6 +367,7 @@ export class BreakpointTable {
     }
     for (const fnId of roles.fnIds) {
       const record = this.functions.get(fnId);
+      if (record?.internal) continue;
       if (record) {
         record.verified = body.breakpoint.verified;
         record.message = body.breakpoint.message;
