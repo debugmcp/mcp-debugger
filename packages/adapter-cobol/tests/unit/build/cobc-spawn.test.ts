@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,6 +21,27 @@ describe('compiler command spawning', () => {
     const code = await new Promise<number | null>((resolve, reject) => { child.on('error', reject); child.on('close', resolve); });
     expect(code).toBe(0);
     expect(JSON.parse(output)).toEqual(['configured', args]);
+  });
+
+  it('ships compiler spawning without an installed dependency tree', async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), 'cobc-packaged-'));
+    copyFileSync(new URL('../../../dist/build/cobc-spawn.js', import.meta.url), path.join(dir, 'cobc-spawn.js'));
+    writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ type: 'module' }));
+    const script = path.join(dir, 'probe.mjs');
+    writeFileSync(script, `
+      import { spawnCobc } from './cobc-spawn.js';
+      const child = spawnCobc(process.execPath, ['-e', 'console.log(process.argv[1])', 'packaged & working'], { stdio: 'inherit' });
+      child.on('error', error => { throw error; });
+      child.on('close', code => { process.exitCode = code ?? 1; });
+    `);
+    const child = spawnCobc(process.execPath, [script], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NODE_PATH: '' } });
+    let output = '';
+    let error = '';
+    child.stdout!.on('data', chunk => { output += String(chunk); });
+    child.stderr!.on('data', chunk => { error += String(chunk); });
+    const code = await new Promise<number | null>((resolve, reject) => { child.on('error', reject); child.on('close', resolve); });
+    expect(code, error).toBe(0);
+    expect(output.trim()).toBe('packaged & working');
   });
 
   it.skipIf(process.platform !== 'win32').each(['cmd', 'bat'])('discovers and builds through a real .%s wrapper with spaces and metacharacters', async extension => {
