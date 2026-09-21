@@ -52,6 +52,6 @@ await build({
   sourcemap: false,
   logLevel: 'info',
   banner: {
-    js: "import { createRequire as __createRequire } from 'node:module';\nconst require = __createRequire(import.meta.url);"
+    js: "import { createRequire as __cobolSpawnCreateRequire } from 'node:module';\nconst require = __cobolSpawnCreateRequire(import.meta.url);"
   }
 });
