@@ -15,6 +15,8 @@ import { fileURLToPath } from 'url';
 import { AdapterState, AdapterError, AdapterErrorCode, DebugFeature, DebugLanguage } from '@debugmcp/shared';
 import type { AdapterConfig, AdapterDependencies, LanguageSpecificLaunchConfig } from '@debugmcp/shared';
 import type { CobcLocation, CobolBuildRequest, CobolBuildResult } from '../../src/build/index.js';
+import { peFixture } from './build/pe-fixture.js';
+import { helloManifest } from './shim/fixtures.js';
 
 const { shimExists, cobcrunExists, buildMock, builderCtor } = vi.hoisted(() => ({
   /** Whether the fs switch pretends the shim entry exists. */
@@ -144,6 +146,58 @@ describe('CobolDebugAdapter', () => {
 
   afterEach(() => {
     fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it.each(['launch', 'attach'])('rejects PDB-only Windows prebuilt %s before the engine starts', async mode => {
+    fs.writeFileSync(path.join(tmp, 'app.exe'), peFixture({ pdb: true }));
+    const target = new CobolDebugAdapter(createDependencies(), 'win32');
+    const result = mode === 'launch'
+      ? transformLaunch({ program: 'app.exe', cwd: tmp }, target)
+      : target.transformAttachConfig({ request: 'attach', processId: 7, program: 'app.exe', cwd: tmp });
+    await expect(result).rejects.toMatchObject({ code: AdapterErrorCode.ENVIRONMENT_INVALID, message: expect.stringMatching(/PDB-only.*DWARF.*gdwarf-4/) });
+    expect(buildMock).not.toHaveBeenCalled();
+  });
+
+  it('accepts mixed Windows DWARF/PDB binaries and diagnoses unknown files without rejecting them', async () => {
+    const target = new CobolDebugAdapter(createDependencies(), 'win32');
+    fs.writeFileSync(path.join(tmp, 'app.exe'), peFixture({ dwarf: true, pdb: true }));
+    expect((await transformLaunch({ program: 'app.exe', cwd: tmp }, target)).program).toBe(path.join(tmp, 'app.exe'));
+    expect(logger.warn).not.toHaveBeenCalledWith(expect.stringMatching(/Could not confirm DWARF/));
+    fs.writeFileSync(path.join(tmp, 'app.exe'), Buffer.alloc(64));
+    await transformLaunch({ program: 'app.exe', cwd: tmp }, target);
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/Could not confirm DWARF.*continuing/));
+  });
+
+  describe.each(['launch', 'attach'] as const)('%s metadata fallback', mode => {
+    const transform = (target: CobolDebugAdapter, cwd: string, sources?: string[], manifestDirs?: string[]) => mode === 'launch'
+      ? transformLaunch({ program: 'app', cwd, sources, manifestDirs }, target)
+      : target.transformAttachConfig({ request: 'attach', processId: 7, cwd, sources, manifestDirs });
+
+    it.each(['missing', 'empty', 'malformed', 'no-programs'])('rejects %s manifest directories after translation failure', async fixture => {
+      buildMock.mockResolvedValue(buildResult('app', { success: false, error: 'bad source' }));
+      const dir = path.join(tmp, 'fallback');
+      if (fixture !== 'missing') fs.mkdirSync(dir);
+      if (fixture === 'malformed') fs.writeFileSync(path.join(dir, 'bad.cobol-symbols.json'), '{');
+      if (fixture === 'no-programs') fs.writeFileSync(path.join(dir, 'empty.cobol-symbols.json'), JSON.stringify({ ...helloManifest(tmp), programs: [] }));
+      await expect(transform(adapter, tmp, ['hello.cob'], [dir])).rejects.toMatchObject({ code: AdapterErrorCode.ENVIRONMENT_INVALID });
+    });
+
+    it.each(['missing compiler', 'translation failure'])('uses a readable manifest on %s', async reason => {
+      if (reason === 'missing compiler') vi.mocked(findCobc).mockResolvedValue(null);
+      buildMock.mockResolvedValue(buildResult('app', { success: false, error: 'bad source' }));
+      const dir = path.join(tmp, 'fallback');
+      fs.mkdirSync(dir);
+      fs.writeFileSync(path.join(dir, 'hello.cobol-symbols.json'), JSON.stringify(helloManifest(tmp)));
+      const result = await transform(adapter, tmp, ['hello.cob'], [dir]);
+      expect(result[COBOL_PRIVATE_KEY]).toMatchObject({ manifestDirs: [dir] });
+    });
+
+    it('permits the explicit C view without sources or a compiler', async () => {
+      vi.mocked(findCobc).mockResolvedValue(null);
+      const result = await transform(adapter, tmp);
+      expect(result[COBOL_PRIVATE_KEY]).toMatchObject({ manifestDirs: [] });
+      expect(buildMock).not.toHaveBeenCalled();
+    });
   });
 
   describe('identity and metadata', () => {
@@ -524,14 +578,13 @@ describe('CobolDebugAdapter', () => {
         expect(adapter.consumeLastBuild()).toBe(manifestBuild);
       });
 
-      it('only warns when manifest regeneration fails, and still launches', async () => {
+      it('fails launch when requested manifest regeneration fails', async () => {
         buildMock.mockResolvedValue(buildResult('app', { success: false, error: 'cobc exited with code 1' }));
 
-        const launch = await transformLaunch({ program: 'app', cwd: tmp, sources: ['hello.cob'] });
-
-        expect(launch.program).toBe(path.join(tmp, 'app'));
-        expect(shimOptions(launch).manifestDirs).toEqual([]);
-        expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/Symbol manifest regeneration failed \(cobc exited with code 1\)/));
+        await expect(transformLaunch({ program: 'app', cwd: tmp, sources: ['hello.cob'] })).rejects.toMatchObject({
+          code: AdapterErrorCode.ENVIRONMENT_INVALID,
+          message: expect.stringMatching(/regeneration failed: cobc exited with code 1/)
+        });
       });
 
       it('warns about the missing manifest when neither sources nor manifestDirs are given', async () => {
@@ -542,15 +595,15 @@ describe('CobolDebugAdapter', () => {
         expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/Prebuilt executable without "sources" or "manifestDirs"/));
       });
 
-      it('warns differently when sources are given but cobc is unavailable', async () => {
+      it('fails launch when sources are given but cobc is unavailable', async () => {
         vi.mocked(findCobc).mockResolvedValue(null);
 
-        const launch = await transformLaunch({ program: 'app', cwd: tmp, sources: ['hello.cob'] });
+        await expect(transformLaunch({ program: 'app', cwd: tmp, sources: ['hello.cob'] })).rejects.toMatchObject({
+          code: AdapterErrorCode.ENVIRONMENT_INVALID,
+          message: expect.stringMatching(/requires GnuCOBOL.*omit "sources"/)
+        });
 
         expect(builderCtor).not.toHaveBeenCalled();
-        expect(launch.program).toBe(path.join(tmp, 'app'));
-        expect(launch.env).toEqual({});
-        expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/"sources" given but cobc is not available/));
       });
 
       it('passes manifestDirs through resolved against cwd, without building or warning', async () => {
@@ -812,7 +865,7 @@ describe('CobolDebugAdapter', () => {
       expect(buildMock).toHaveBeenCalledWith(expect.objectContaining({ program: path.join(tmp, 'pause.cob'), mode: 'manifest-only' }));
     });
 
-    it('fails the attach when the regeneration fails, naming the knobs; attaches with a warning when cobc is missing', async () => {
+    it('fails regeneration without a fallback and accepts usable manifests without cobc', async () => {
       buildMock.mockResolvedValue({ ...buildResult('pause'), success: false, error: 'cobc timed out after 25000 ms' });
       await expect(adapter.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, sources: ['pause.cob'] })).rejects.toMatchObject({
         code: AdapterErrorCode.ENVIRONMENT_INVALID,
@@ -822,20 +875,25 @@ describe('CobolDebugAdapter', () => {
       vi.mocked(findCobc).mockResolvedValue(null);
       const fresh = new CobolDebugAdapter(createDependencies(), 'linux');
       logger.warn.mockClear();
+      fs.mkdirSync(path.join(tmp, 'm'));
+      fs.writeFileSync(path.join(tmp, 'm', 'hello.cobol-symbols.json'), JSON.stringify(helloManifest(tmp)));
       const noCobc = await fresh.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, sources: ['pause.cob'], manifestDirs: ['m'] });
       expect(noCobc[COBOL_PRIVATE_KEY]).toEqual({ manifestDirs: [path.join(tmp, 'm')], engineScopes: false });
       // manifestDirs still supply a manifest: an info line, not the no-manifest warning.
       expect(logger.info).toHaveBeenCalledWith(expect.stringMatching(/"sources" given but cobc is not available; using the manifests in "manifestDirs"/));
       expect(logger.warn).not.toHaveBeenCalledWith(expect.stringMatching(/"sources" given but cobc is not available: no COBOL symbol manifest/));
-      const bare = await fresh.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, sources: ['pause.cob'] });
-      expect(bare[COBOL_PRIVATE_KEY]).toEqual({ manifestDirs: [], engineScopes: false });
-      expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/"sources" given but cobc is not available: no COBOL symbol manifest/));
+      await expect(fresh.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, sources: ['pause.cob'] })).rejects.toMatchObject({
+        code: AdapterErrorCode.ENVIRONMENT_INVALID,
+        message: expect.stringMatching(/requires GnuCOBOL/)
+      });
     });
 
     it('attaches on the given manifestDirs with a warning when the regeneration fails beside them', async () => {
       // The strict failure names "manifestDirs" as the remedy; a caller who already passed
       // them keeps their manifests and the attach (re-review of #761).
       buildMock.mockResolvedValue({ ...buildResult('pause'), success: false, error: 'cobc exited with code 1' });
+      fs.mkdirSync(path.join(tmp, 'm'));
+      fs.writeFileSync(path.join(tmp, 'm', 'hello.cobol-symbols.json'), JSON.stringify(helloManifest(tmp)));
       const result = await adapter.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, sources: ['pause.cob'], manifestDirs: ['m'] });
       expect(result[COBOL_PRIVATE_KEY]).toEqual({ manifestDirs: [path.join(tmp, 'm')], engineScopes: false });
       expect(buildMock).toHaveBeenCalledTimes(1);

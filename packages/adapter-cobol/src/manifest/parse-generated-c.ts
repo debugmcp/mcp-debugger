@@ -113,7 +113,7 @@ export function parseGeneratedCText(texts: GeneratedCTexts, generator: Generator
     diagnostics.push(...procedure.diagnostics);
     registry.markProgram(procedure.sourceFileId);
 
-    const dump = parseDumpRoutine({ lines: segment.lines, tables, programId: segment.programId });
+    const dump = parseDumpRoutine({ lines: segment.lines, tables, programId: segment.programId, cobcVersion: generator.cobcVersion });
     diagnostics.push(...dump.diagnostics);
     if (dump.found) {
       sawDump = true;

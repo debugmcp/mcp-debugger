@@ -38,3 +38,20 @@ await build({
     ].join('\n')
   }
 });
+
+// Runtime images copy adapter dist trees without their npm dependency trees.
+// Bundle the compiler spawning helper too, so cross-spawn's Windows quoting
+// and its transitive dependencies remain available in Docker and NPX packages.
+await build({
+  entryPoints: [path.join(pkgRoot, 'src', 'build', 'cobc-spawn.ts')],
+  outfile: path.join(pkgRoot, 'dist', 'build', 'cobc-spawn.js'),
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  target: 'node22',
+  sourcemap: false,
+  logLevel: 'info',
+  banner: {
+    js: "import { createRequire as __cobolSpawnCreateRequire } from 'node:module';\nconst require = __cobolSpawnCreateRequire(import.meta.url);"
+  }
+});
