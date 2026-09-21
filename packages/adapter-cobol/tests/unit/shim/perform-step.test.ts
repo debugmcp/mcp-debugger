@@ -437,6 +437,30 @@ describe('cobol shim PERFORM-aware stepping', () => {
     expect(h.client.events('stopped')).toHaveLength(1);
   });
 
+  it('stepOut starting on GO TO stops before reexecuting the caller PERFORM', async () => {
+    const manifest = helloWithStatements();
+    manifest.programs[0].procedure.statements.push({ sourceFileId: 1, line: 41, verb: 'MOVE' });
+    manifest.programs[0].controlFlow = {
+      hasGoto: true, ranges: [{ labelId: 5, startCLine: 200, endCLine: 249 }],
+      performs: [{ callCLine: 124, returnCLine: 140, endCLine: 149, startLabel: 5, endLabel: 5 }]
+    };
+    let rig!: Rig;
+    h = await startShim({ manifests: [manifest], engineSetup: engine => {
+      rig = rigEngine(engine, frame(1, 'HELLO_', HELLO_COB, 37), 1);
+      rig.controlReturns = { 1: 141 };
+      rig.cLine = 210;
+    } });
+    await bringUp(h);
+    rig.nextStops.push(
+      { frame: frame(1, 'HELLO_', HELLO_COB, 32), depth: 1, cLine: 128 },
+      { frame: frame(1, 'HELLO_', HELLO_COB, 41), depth: 1, cLine: 310 }
+    );
+    await h.client.request('stepOut', { threadId: 1 });
+    expect((await h.client.nextEvent('stopped')).body?.description).toContain('GO TO left');
+    expect(rig.position.line).toBe(32);
+    expect(rig.commands).toEqual(['next']);
+  });
+
   it('distinguishes the destination from a repeated COPY source line, even when stepOut began on that same line', async () => {
     const manifest = helloWithStatements();
     manifest.programs[0].controlFlow = {

@@ -331,6 +331,7 @@ describe.skipIf(SKIP_COBOL)('MCP Server COBOL Debugging Smoke Test @requires-cob
   );
 
   it.for([
+    { name: 'direct out back to caller', operation: 'step_out', body: ['caller.', 'perform p-one', 'display "unreached"', 'stop run.', 'p-one.', 'add 1 to ws-count', 'go to caller.'], start: 'go to caller.', destination: 'perform p-one', count: '1' },
     { name: 'normal TIMES next with GO TO', operation: 'step_over', body: ['perform p-one thru p-tail 3 times', 'display "returned"', 'stop run.', 'p-one.', 'add 1 to ws-count', 'go to p-tail.', 'p-tail.', 'continue.'], start: 'perform p-one thru p-tail 3 times', destination: 'display "returned"', count: '3' },
     { name: 'normal TIMES out with GO TO', operation: 'step_out', body: ['perform p-one thru p-tail 3 times', 'display "returned"', 'stop run.', 'p-one.', 'add 1 to ws-count', 'go to p-tail.', 'p-tail.', 'continue.'], start: 'add 1 to ws-count', destination: 'display "returned"', count: '3' },
     { name: 'normal UNTIL out with GO TO', operation: 'step_out', body: ['perform p-one thru p-tail until ws-count = 3', 'display "returned"', 'stop run.', 'p-one.', 'add 1 to ws-count', 'go to p-tail.', 'p-tail.', 'continue.'], start: 'add 1 to ws-count', destination: 'display "returned"', count: '3' },

@@ -944,6 +944,9 @@ export class Router {
       }
       if (escapeWatch) {
         const callLine = await escapeWatch.callLine(origin.id, depth);
+        // A step starting on GO TO can jump straight back to its caller's PERFORM.
+        // Record that we were inside the range before judging that first destination.
+        await escapeWatch.inspect(origin.id, depth, origin.remappedFromC?.line);
         const mapped = callLine === undefined ? undefined : this.state.registry.mapGeneratedLine(origin.program, callLine);
         const address = mapped ? undefined : await readReturnAddress(this.engine, origin.id, depth);
         const performLine = mapped ? { path: mapped.source.path, line: mapped.line }
