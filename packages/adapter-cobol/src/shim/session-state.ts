@@ -84,7 +84,7 @@ export type RefLookup = { ok: true; ref: ShimRef } | { ok: false; stale: boolean
 export interface RuntimeErrorStop {
   gen: number;
   threadId?: number;
-  /** libcob's format string, when the register read succeeded. */
+  /** Formatted libcob message, or an explicitly labelled unformatted fallback. */
   text?: string;
 }
 
