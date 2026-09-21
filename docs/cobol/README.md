@@ -209,6 +209,10 @@ Data-names, evaluated against the nearest COBOL frame:
 
 ## Stepping
 
+Stack pages count synthesized PERFORM frames as ordinary frames: `startFrame` and
+`levels` apply to the complete COBOL stack. Frame IDs and `totalFrames` stay stable
+across pages at one stop, including when the first requested page starts below frame 0.
+
 - **Statement granularity.** Each COBOL statement expands to roughly ten generated-C line-table rows; a raw engine `next` stops on each of them (R11). The shim loops the engine's `next`/`stepIn`/`stepOut` until it reaches a statement the manifest knows (cobc's own per-statement record, copybook statements included) or a paragraph/section header, so `step_over` moves one COBOL statement. A step never completes on the statement it started from: a paragraph header line carries two line-table blocks, and the first step from it reaches the next statement. Without a manifest for the file (a prebuilt binary launched with neither `sources` nor `manifestDirs`), any stop on a `.cob`/`.cbl`/`.cpy` line counts.
 - **`step_into` on `CALL`** keeps stepping in until a callee statement: the entry wrapper, `<PROG>_module_init` (3.1.2 only) and the callee's DATA DIVISION VALUE-initialisation lines the engine walks through on the way are stepped past, and LLDB steps over libcob (no debug info) by itself. It lands on the callee's paragraph header or its first statement.
 - **`step_out` of the outermost program** stops in the generated C `main` (there is no COBOL statement left to reach); `continue` from there runs the program to its exit. Under `runner: "cobcrun"` there is no such frame — the loader has no debug info to stop in — so `step_out` of the entry program runs the job to completion (measured: `Step completed as session exited`, exit 0).

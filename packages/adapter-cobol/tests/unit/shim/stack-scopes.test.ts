@@ -156,7 +156,7 @@ describe('cobol shim stackTrace and scopes', () => {
     expect(scopesOf(await h.client.request('scopes', { frameId: 4 })).map((s) => s.name)).toEqual(['Local']);
   });
 
-  it('fetches a deeper stack for the walk-up when the client only asked for the top frame (get_local_variables does)', async () => {
+  it('reuses the logical stack for walk-up when the client only asked for the top frame', async () => {
     h = await startShim({
       manifests: [helloManifest(ROOT)],
       engineSetup: (engine) => engine.on('scopes', () => ({ scopes: [{ name: 'Local', variablesReference: 12, expensive: false }] }))
@@ -173,22 +173,72 @@ describe('cobol shim stackTrace and scopes', () => {
       const levels = args.levels && args.levels > 0 ? args.levels : frames.length;
       return { stackFrames: frames.slice(start, start + levels), totalFrames: frames.length };
     });
-    // A breakpoint stop: the shim fetches nothing on its own (a pause would already have
-    // walked the stack to check the thread), so the client's one-frame request is all it holds.
+    // A breakpoint stop does not prefetch the stack.
     h.engine.emit('stopped', { reason: 'breakpoint', hitBreakpointIds: [9], threadId: 1, allThreadsStopped: true });
     await h.client.nextEvent('stopped');
-    // Only the top frame is in the shim's cache after this.
+    // The client sees one frame; the shim caches the whole logical stack before slicing it.
     await h.client.request('stackTrace', { threadId: 1, startFrame: 0, levels: 1 });
 
     const scopes = scopesOf(await h.client.request('scopes', { frameId: 1 }));
     expect(scopes.map((s) => s.name)).toEqual(['WORKING-STORAGE of HELLO (1000-INIT, 2 frames up)']);
-    expect(h.engine.received('stackTrace')).toHaveLength(2);
-    expect(h.engine.received('stackTrace')[1].arguments).toMatchObject({ threadId: 1, levels: 64 });
+    expect(h.engine.received('stackTrace')).toHaveLength(1);
+    expect(h.engine.received('stackTrace')[0].arguments).toMatchObject({ threadId: 1, startFrame: 0 });
+    expect(h.engine.received('stackTrace')[0].arguments).not.toHaveProperty('levels');
     expect(h.engine.received('scopes')).toHaveLength(0);
     // Once per thread and generation: a second walk-up in the same stop reuses the deep fetch.
     await h.client.request('scopes', { frameId: 2 });
     await h.client.request('evaluate', { expression: 'WS-COUNT', frameId: 2 });
-    expect(h.engine.received('stackTrace')).toHaveLength(2);
+    expect(h.engine.received('stackTrace')).toHaveLength(1);
+  });
+
+  it.each([2, 5, 30])('pages nested PERFORM frames with stable IDs when the first page starts at %i', async firstStart => {
+    const manifest = helloManifest(ROOT);
+    manifest.programs[0].procedure.paragraphs[1].labelId = 5;
+    let depth = 2;
+    h = await startShim({ manifests: [manifest], engineSetup: engine => {
+      installMemory(engine, helloMemory());
+      const memory = engine.handler('evaluate')!;
+      engine.on('evaluate', (args, request) => {
+        if (args.expression === DEPTH_EXPRESSION) return { result: String(args.frameId === 2 ? depth : 0) };
+        if (/frame_stack\[\d+\]\.return_address_ptr/.test(args.expression)) return { result: '4096' };
+        if (/frame_stack\[\d+\]\.perform_through/.test(args.expression)) return { result: '5' };
+        if (args.expression.startsWith('/py ')) return { result: `${HELLO_COB}|32` };
+        return memory(args, request);
+      });
+      engine.on('stackTrace', (args: DebugProtocol.StackTraceArguments) => ({
+        stackFrames: [frame(args.threadId === 1 ? 1 : 101, 'nanosleep', undefined, 0),
+          frame(args.threadId === 1 ? 2 : 102, 'HELLO_', HELLO_COB, 38),
+          ...Array.from({ length: 12 }, (_, i) => frame(3 + i, `native-${i}`, undefined, 0))]
+          .slice(args.startFrame ?? 0, args.levels === undefined ? undefined : (args.startFrame ?? 0) + args.levels),
+        totalFrames: 14
+      }));
+    } });
+    await bringUp(h);
+    const page = async (startFrame: number, levels?: number, threadId = 1) => {
+      const result = await h!.client.request('stackTrace', { threadId, startFrame, levels });
+      expect(result.success).toBe(true);
+      return result.body as DebugProtocol.StackTraceResponse['body'];
+    };
+    const first = await page(firstStart, 1);
+    const all = await page(0, 0);
+    expect(all.totalFrames).toBe(16);
+    expect(all.stackFrames.slice(0, 5).map(f => f.id)).toEqual([1, 2, PERFORM_FRAME_ID_BASE, PERFORM_FRAME_ID_BASE + 1, 3]);
+    expect(first.stackFrames).toEqual(all.stackFrames.slice(firstStart, firstStart + 1));
+    const pages = await Promise.all([page(0, 2), page(2, 3), page(5)]);
+    expect(pages.flatMap(p => p.stackFrames)).toEqual(all.stackFrames);
+    expect(pages.every(p => p.totalFrames === 16)).toBe(true);
+    expect((await page(2, 1)).stackFrames).toEqual([all.stackFrames[2]]);
+    expect(h.engine.received('stackTrace')).toHaveLength(1);
+    expect(scopesOf(await h.client.request('scopes', { frameId: all.stackFrames[3].id }))[0].name).toBe('WORKING-STORAGE');
+    expect((await h.client.request('evaluate', { expression: 'WS-SCALED', frameId: all.stackFrames[3].id })).body.result).toBe('-123.45');
+    expect((await page(0, 0, 2)).totalFrames).toBe(14);
+    h.engine.emit('continued', { threadId: 1 });
+    await h.client.nextEvent('continued');
+    depth = 0;
+    h.engine.emit('stopped', { reason: 'breakpoint', threadId: 1 });
+    await h.client.nextEvent('stopped');
+    expect((await page(0)).totalFrames).toBe(14);
+    expect(h.engine.received('stackTrace')).toHaveLength(3);
   });
 
   it('forwards scopes without a walk-up when no manifest is loaded (nothing could be COBOL)', async () => {

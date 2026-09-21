@@ -331,7 +331,7 @@ export class Router {
         this.onSetFunctionBreakpoints(request);
         return;
       case 'stackTrace':
-        this.forward(request, { transform: (response) => this.onStackTraceResponse(request, response) });
+        this.serve(request, () => this.onStackTrace(request));
         return;
       case 'scopes':
         this.serve(request, () => this.onScopes(request));
@@ -596,27 +596,35 @@ export class Router {
     }
   }
 
-  private async onStackTraceResponse(request: DebugProtocol.Request, response: DebugProtocol.Response): Promise<DebugProtocol.Response> {
+  private async onStackTrace(request: DebugProtocol.Request): Promise<DebugProtocol.Response | { forward: DebugProtocol.Request }> {
     const args = this.argsOf<DebugProtocol.StackTraceArguments>(request);
-    const body = response.body as DebugProtocol.StackTraceResponse['body'] | undefined;
-    if (response.success && body && Array.isArray(body.stackFrames)) {
+    if (this.state.registry.programCount === 0) return { forward: request };
+    const generation = this.state.generation;
+    // DAP pages refer to the logical stack. Asking the engine for the client's
+    // page first loses PERFORM frames above it and shifts every later offset.
+    const response = await this.state.memoise(`logical-stack:${args.threadId}:${JSON.stringify(args.format ?? {})}`, async () => {
+      // CodeLLDB treats an explicit zero as an empty page. Omit levels for its
+      // complete native stack, then apply the client's page to the logical stack.
+      const engineArgs = { ...args, startFrame: 0 };
+      delete engineArgs.levels;
+      const response = await this.engine.request('stackTrace', engineArgs);
+      const body = response.body as DebugProtocol.StackTraceResponse['body'] | undefined;
+      if (!response.success || !body || !Array.isArray(body.stackFrames) || generation !== this.state.generation) return response;
       this.state.lastThreadId = args.threadId;
-      annotateStackFrames(this.state, body.stackFrames, args.threadId, args.startFrame ?? 0);
-      // The PERFORM stack, under the program's frame (M3). Only a page from the top can
-      // be extended consistently; the core asks for the whole stack from frame 0.
-      if ((args.startFrame ?? 0) === 0 && this.state.registry.programCount > 0) {
-        const inserted = await insertPerformFrames(this.engine, this.state, this.logger, args.threadId, body.stackFrames);
-        if (inserted > 0) {
-          if (typeof body.totalFrames === 'number') {
-            body.totalFrames += inserted;
-          }
-          if (typeof args.levels === 'number' && args.levels > 0 && body.stackFrames.length > args.levels) {
-            body.stackFrames.length = args.levels;
-          }
-        }
-      }
-    }
-    return response;
+      annotateStackFrames(this.state, body.stackFrames, args.threadId, 0);
+      const nativeCount = body.totalFrames ?? body.stackFrames.length;
+      const inserted = await insertPerformFrames(this.engine, this.state, this.logger, args.threadId, body.stackFrames);
+      body.totalFrames = nativeCount + inserted;
+      if (generation === this.state.generation) this.state.deepFetched.add(args.threadId);
+      return response;
+    });
+    if (generation !== this.state.generation) return errorResponse(request, 'Stack became stale (program has resumed)');
+    if (!response.success) return errorResponse(request, response.message ?? 'stackTrace failed');
+    const body = response.body as DebugProtocol.StackTraceResponse['body'] | undefined;
+    if (!body || !Array.isArray(body.stackFrames)) return errorResponse(request, 'Engine returned no stack frames');
+    const start = Math.max(0, args.startFrame ?? 0);
+    const end = args.levels && args.levels > 0 ? start + args.levels : undefined;
+    return okResponse(request, { ...body, stackFrames: body.stackFrames.slice(start, end) });
   }
 
   /** The cached frame, refetching the stack once when this generation has not seen a `stackTrace` yet. */
