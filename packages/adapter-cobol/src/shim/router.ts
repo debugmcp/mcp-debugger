@@ -21,6 +21,7 @@ import type { ClientConnection, ClientInbound, OutputSlot } from './client-conne
 import { parseCobolExpression } from './cobol-expression.js';
 import type { EngineClient, EngineInbound } from './engine-client.js';
 import { EvaluateHandler } from './handlers/evaluate.js';
+import { entryStopLocation } from './entry-stop.js';
 import { annotateStackFrames, isCobolProgramFrame, isLandedCobolFrame } from './handlers/stack-trace.js';
 import { VariablesHandler } from './handlers/variables.js';
 import type { ShimLogger } from './logger.js';
@@ -29,7 +30,9 @@ import { normalisePath } from './manifest-registry.js';
 import { hexAddress, MemoryReader } from './memory-reader.js';
 import { readPerformDepth, readReturnAddress, resolveAddressLocation } from './perform-frames.js';
 import { insertPerformFrames } from './perform-stack.js';
+import { PerformEscapeWatch } from './perform-escape.js';
 import { resolveProcedureName } from './procedure-names.js';
+import { readRuntimeMessage } from './runtime-message.js';
 import { errorMessage, errorResponse, okResponse } from './protocol.js';
 import { engineFrameId, type CachedFrame, type SessionState } from './session-state.js';
 
@@ -78,6 +81,7 @@ type StepSignal =
  * shallower landing. Depths are compared within the origin's program only.
  */
 interface PerformPlan {
+  escapeWatch?: PerformEscapeWatch;
   kind: 'over' | 'out';
   /** PERFORM depth where the step started. */
   depth: number;
@@ -109,14 +113,6 @@ interface StepLoop {
 }
 
 type StoppedBody = DebugProtocol.StoppedEvent['body'];
-
-/** The register that carries libcob's first argument (the format string) at a `cob_runtime_error` stop. */
-export function formatStringRegister(env: RouterEnv): string {
-  if (env.arch === 'arm64') {
-    return '$x0';
-  }
-  return env.platform === 'win32' ? '$rcx' : '$rdi';
-}
 
 /** How deep the shim looks for the nearest COBOL frame above a libcob/C frame. */
 const WALK_UP_STACK_LEVELS = 64;
@@ -162,6 +158,17 @@ export class Router {
   private readonly variables: VariablesHandler;
   private readonly evaluator: EvaluateHandler;
   private stepLoop?: StepLoop;
+  private stopping = false;
+
+  /** Cancel walks and step plans without suppressing the engine's final replies. */
+  cancelPendingWork(): void {
+    this.stopping = true;
+    this.abortStepLoop();
+  }
+
+  private get inactive(): boolean {
+    return this.stopping || this.client.isEnding;
+  }
 
   constructor(
     private readonly state: SessionState,
@@ -179,6 +186,7 @@ export class Router {
   // ---------------------------------------------------------------- inbound
 
   onClientMessage(message: ClientInbound): void {
+    if (this.inactive) return;
     switch (message.kind) {
       case 'request':
         this.onClientRequest(message.request);
@@ -212,7 +220,7 @@ export class Router {
 
   /** The engine socket went away: nothing else will arrive, so a waiting step loop must let go. */
   onEngineClosed(): void {
-    this.abortStepLoop();
+    this.cancelPendingWork();
   }
 
   // ---------------------------------------------------------------- plumbing
@@ -261,6 +269,10 @@ export class Router {
     const slot = this.client.reserve();
     decide()
       .then((outcome) => {
+        if (this.inactive) {
+          slot.resolve(null);
+          return;
+        }
         if ('forward' in outcome) {
           this.forward(outcome.forward, { slot, transform: outcome.transform });
         } else {
@@ -289,6 +301,15 @@ export class Router {
       case 'attach':
         this.onLaunchOrAttach(request);
         return;
+      case 'configurationDone':
+        this.serve(request, async () => {
+          if (this.entryStop) {
+            await this.resendFile(normalisePath(this.entryStop.path));
+            if (this.entryStop.engineId === undefined) throw new Error(`cannot arm COBOL entry stop: ${this.entryStop.message ?? 'engine returned no breakpoint id'}`);
+          }
+          return { forward: request };
+        });
+        return;
       case 'continue':
         this.resumeAfterDisarming(request);
         return;
@@ -315,7 +336,7 @@ export class Router {
         this.onSetFunctionBreakpoints(request);
         return;
       case 'stackTrace':
-        this.forward(request, { transform: (response) => this.onStackTraceResponse(request, response) });
+        this.serve(request, () => this.onStackTrace(request));
         return;
       case 'scopes':
         this.serve(request, () => this.onScopes(request));
@@ -341,6 +362,7 @@ export class Router {
         return;
       case 'disconnect':
       case 'terminate':
+        this.cancelPendingWork();
         this.hooks.onDisconnectRequested();
         this.forward(request);
         return;
@@ -375,21 +397,49 @@ export class Router {
   }
 
   private onLaunchOrAttach(request: DebugProtocol.Request): void {
+    this.state.invalidateProcess(request.command);
     this.state.mode = request.command === 'attach' ? 'attach' : 'launch';
     const args = request.arguments as Record<string, unknown> | undefined;
     // CodeLLDB stops the target after an attach only with stopOnEntry (it resumes otherwise),
     // so only then is the session's first stop the handshake's rather than the program's.
     this.state.attachStopExpected = request.command === 'attach' && args?.stopOnEntry !== false;
+    let options: Partial<CobolShimSessionOptions> | undefined;
     if (args && typeof args === 'object') {
       const block = args[COBOL_PRIVATE_KEY];
       delete args[COBOL_PRIVATE_KEY];
       if (block && typeof block === 'object') {
-        this.state.applySessionOptions(block as Partial<CobolShimSessionOptions>);
+        options = block as Partial<CobolShimSessionOptions>;
+        this.state.applySessionOptions(options);
       }
     }
     this.state.ensureManifests();
+    if (request.command === 'launch' && args?.stopOnEntry === true && args.noDebug !== true) {
+      const location = entryStopLocation(this.state.registry, options);
+      if (location) {
+        this.entryStop = this.state.breakpoints.addFunctionBreakpoint('<entry>', location.path, location.line, 'COBOL entry');
+        this.entryStop.internal = true;
+        args.stopOnEntry = false;
+      } else {
+        this.client.send({ seq: 0, type: 'event', event: 'output', body: { category: 'console', output: 'COBOL entry location unavailable or ambiguous; stopping at the engine entry. Supply sources or matching manifests.\n' } } as DebugProtocol.OutputEvent);
+      }
+    }
     this.logger.info(`${request.command}: ${this.state.registry.programCount} program(s) from ${this.state.options.manifestDirs.length} manifest dir(s)`);
     this.forward(request);
+  }
+
+  private entryStop?: FunctionBreakpointRecord;
+
+  /** A visible stop completes entry handling; user breakpoints, pause and exceptions keep their reason. */
+  private async finishEntryStop(body: StoppedBody, hit: boolean): Promise<void> {
+    const record = this.entryStop;
+    if (!record) return;
+    this.entryStop = undefined;
+    if (hit && body.reason === 'breakpoint' && (body.hitBreakpointIds?.length ?? 0) === 0) {
+      body.reason = 'entry';
+      body.description = 'COBOL program entry';
+    }
+    this.state.breakpoints.removeInternal(record);
+    await this.resendFile(normalisePath(record.path));
   }
 
   private onSetExceptionBreakpoints(request: DebugProtocol.Request): void {
@@ -578,27 +628,35 @@ export class Router {
     }
   }
 
-  private async onStackTraceResponse(request: DebugProtocol.Request, response: DebugProtocol.Response): Promise<DebugProtocol.Response> {
+  private async onStackTrace(request: DebugProtocol.Request): Promise<DebugProtocol.Response | { forward: DebugProtocol.Request }> {
     const args = this.argsOf<DebugProtocol.StackTraceArguments>(request);
-    const body = response.body as DebugProtocol.StackTraceResponse['body'] | undefined;
-    if (response.success && body && Array.isArray(body.stackFrames)) {
+    if (this.state.registry.programCount === 0) return { forward: request };
+    const generation = this.state.generation;
+    // DAP pages refer to the logical stack. Asking the engine for the client's
+    // page first loses PERFORM frames above it and shifts every later offset.
+    const response = await this.state.memoise(`logical-stack:${args.threadId}:${JSON.stringify(args.format ?? {})}`, async () => {
+      // CodeLLDB treats an explicit zero as an empty page. Omit levels for its
+      // complete native stack, then apply the client's page to the logical stack.
+      const engineArgs = { ...args, startFrame: 0 };
+      delete engineArgs.levels;
+      const response = await this.engine.request('stackTrace', engineArgs);
+      const body = response.body as DebugProtocol.StackTraceResponse['body'] | undefined;
+      if (!response.success || !body || !Array.isArray(body.stackFrames) || generation !== this.state.generation) return response;
       this.state.lastThreadId = args.threadId;
-      annotateStackFrames(this.state, body.stackFrames, args.threadId, args.startFrame ?? 0);
-      // The PERFORM stack, under the program's frame (M3). Only a page from the top can
-      // be extended consistently; the core asks for the whole stack from frame 0.
-      if ((args.startFrame ?? 0) === 0 && this.state.registry.programCount > 0) {
-        const inserted = await insertPerformFrames(this.engine, this.state, this.logger, args.threadId, body.stackFrames);
-        if (inserted > 0) {
-          if (typeof body.totalFrames === 'number') {
-            body.totalFrames += inserted;
-          }
-          if (typeof args.levels === 'number' && args.levels > 0 && body.stackFrames.length > args.levels) {
-            body.stackFrames.length = args.levels;
-          }
-        }
-      }
-    }
-    return response;
+      annotateStackFrames(this.state, body.stackFrames, args.threadId, 0);
+      const nativeCount = body.totalFrames ?? body.stackFrames.length;
+      const inserted = await insertPerformFrames(this.engine, this.state, this.logger, args.threadId, body.stackFrames);
+      body.totalFrames = nativeCount + inserted;
+      if (generation === this.state.generation) this.state.deepFetched.add(args.threadId);
+      return response;
+    });
+    if (generation !== this.state.generation) return errorResponse(request, 'Stack became stale (program has resumed)');
+    if (!response.success) return errorResponse(request, response.message ?? 'stackTrace failed');
+    const body = response.body as DebugProtocol.StackTraceResponse['body'] | undefined;
+    if (!body || !Array.isArray(body.stackFrames)) return errorResponse(request, 'Engine returned no stack frames');
+    const start = Math.max(0, args.startFrame ?? 0);
+    const end = args.levels && args.levels > 0 ? start + args.levels : undefined;
+    return okResponse(request, { ...body, stackFrames: body.stackFrames.slice(start, end) });
   }
 
   /** The cached frame, refetching the stack once when this generation has not seen a `stackTrace` yet. */
@@ -613,8 +671,11 @@ export class Router {
 
   /** Internal `stackTrace`, annotated and cached; the raw frames are returned for callers that need the engine's view. */
   private async fetchStack(threadId: number, levels: number): Promise<DebugProtocol.StackFrame[] | undefined> {
+    if (this.inactive) return undefined;
+    const generation = this.state.generation;
     try {
       const response = await this.engine.request('stackTrace', { threadId, startFrame: 0, levels });
+      if (this.inactive || generation !== this.state.generation) return undefined;
       const body = response.body as DebugProtocol.StackTraceResponse['body'] | undefined;
       if (!response.success || !body || !Array.isArray(body.stackFrames)) {
         return undefined;
@@ -878,6 +939,7 @@ export class Router {
 
   private async startStepLoop(loop: StepLoop, request: DebugProtocol.Request): Promise<void> {
     const origin = (await this.fetchStack(loop.threadId, 1))?.[0];
+    if (this.inactive) { this.stepLoop = undefined; return; }
     if (origin) {
       loop.origin = { path: origin.source?.path, line: origin.line, name: origin.name };
       try {
@@ -887,6 +949,7 @@ export class Router {
         await this.disarmReturnStop();
       }
     }
+    if (this.inactive) { this.stepLoop = undefined; return; }
     if (loop.plan?.kind === 'out') {
       // The range's return is armed: the engine gets a `continue`, and the client's response
       // is the shim's (a `stepOut` answered with a `continue` response would be a protocol error).
@@ -894,7 +957,7 @@ export class Router {
         this.serve(request, async () => {
           let response: DebugProtocol.Response;
           try {
-            response = await this.engine.request('continue', { threadId: loop.threadId });
+            response = await this.engine.request(loop.plan?.escapeWatch ? 'next' : 'continue', { threadId: loop.threadId });
           } catch (error) {
             response = errorResponse(request, errorMessage(error));
           }
@@ -931,12 +994,25 @@ export class Router {
       return undefined;
     }
     const depth = await readPerformDepth(this.engine, origin.id);
-    if (depth === undefined) {
+    if (depth === undefined || this.inactive) {
       return undefined;
     }
+    const escapeWatch = origin.program.program.controlFlow?.hasGoto || origin.program.program.procedure.statements.some(statement => statement.verb === 'GO TO')
+      ? new PerformEscapeWatch(this.engine, origin.program) : undefined;
     if (loop.command === 'stepOut') {
       if (depth === 0) {
         return undefined;
+      }
+      if (escapeWatch) {
+        const callLine = await escapeWatch.callLine(origin.id, depth);
+        // A step starting on GO TO can jump straight back to its caller's PERFORM.
+        // Record that we were inside the range before judging that first destination.
+        await escapeWatch.inspect(origin.id, depth, origin.remappedFromC?.line);
+        const mapped = callLine === undefined ? undefined : this.state.registry.mapGeneratedLine(origin.program, callLine);
+        const address = mapped ? undefined : await readReturnAddress(this.engine, origin.id, depth);
+        const performLine = mapped ? { path: mapped.source.path, line: mapped.line }
+          : address === undefined ? undefined : await this.performLineOf(origin, address);
+        return { kind: 'out', depth, origin, returning: false, finished: false, cycles: 0, performLine, escapeWatch };
       }
       const armed = await this.armReturnStop(origin.id, depth);
       if (armed === undefined) {
@@ -947,11 +1023,12 @@ export class Router {
       return { kind: 'out', depth, origin, returning: false, finished: false, cycles: 0, performLine };
     }
     const performLine = origin.sourcePath !== undefined && origin.line !== undefined ? { path: origin.sourcePath, line: origin.line } : undefined;
-    return { kind: 'over', depth, origin, returning: false, finished: false, cycles: 0, performLine };
+    return { kind: 'over', depth, origin, returning: false, finished: false, cycles: 0, performLine, escapeWatch };
   }
 
   /** The COBOL statement a performed range returns to: the PERFORM that runs it, via the return address and the line map. */
   private async performLineOf(origin: CachedFrame, returnAddress: bigint): Promise<{ path: string; line: number } | undefined> {
+    if (this.inactive) return undefined;
     const entry = origin.program;
     if (!entry) {
       return undefined;
@@ -985,6 +1062,7 @@ export class Router {
    */
   private async armReturnStop(frameId: number, depth: number): Promise<{ id: number; address: bigint } | undefined> {
     const address = await readReturnAddress(this.engine, frameId, depth);
+    if (this.inactive) return undefined;
     if (address === undefined) {
       this.logger.warn(`PERFORM return address of frame_stack[${depth}] unavailable`);
       return undefined;
@@ -1010,6 +1088,7 @@ export class Router {
       return;
     }
     this.instructionBreakpointArmed = false;
+    if (this.inactive) return;
     try {
       await this.engine.request('setInstructionBreakpoints', { breakpoints: [] });
     } catch (error) {
@@ -1039,7 +1118,7 @@ export class Router {
     }
     plan.finished = true;
     await this.disarmReturnStop();
-    if (plan.kind === 'over' && plan.cycles === 0) {
+    if (body.description || (plan.kind === 'over' && plan.cycles === 0)) {
       return;
     }
     const origin = plan.origin;
@@ -1081,7 +1160,7 @@ export class Router {
     if (!this.state.breakpoints.isLogpointOnlyHit(hits)) {
       return false;
     }
-    if (this.state.generation !== generation || this.state.pausePending) {
+    if (this.inactive || this.state.generation !== generation || this.state.pausePending) {
       // A newer stop or a pause arrived while the message was evaluated: that one owns the
       // process (the pause is answered by the engine's re-reported stop). This stop is history.
       this.logger.info('logpoint stop superseded while its message was evaluated; not resumed');
@@ -1210,7 +1289,7 @@ export class Router {
       if (plan?.returning) {
         // Walking from a performed range's return: the range's first statement is a landing
         // even when the step started there (a PERFORM … TIMES re-entering it); the PERFORM
-        // statement's own line is not — on cobc 3.2 it is the loop's UNTIL/VARYING test.
+        // statement's own line is not — UNTIL/VARYING loops can stop there for their test.
         const performLine = plan.performLine;
         return !(performLine !== undefined && top.line === performLine.line && normalisePath(top.source?.path ?? '') === normalisePath(performLine.path));
       }
@@ -1268,6 +1347,7 @@ export class Router {
    */
   private async runStepLoop(loop: StepLoop, responded: Promise<DebugProtocol.Response>): Promise<void> {
     const surface = async (event: DebugProtocol.Event, slot: OutputSlot, body: StoppedBody): Promise<void> => {
+      if (this.inactive) { slot.resolve(null); return; }
       if (loop.plan && !loop.plan.finished) {
         loop.plan.finished = true;
         await this.disarmReturnStop();
@@ -1280,13 +1360,13 @@ export class Router {
         loop.abort = () => resolve(undefined);
       });
       const response = await Promise.race([responded, aborted]);
-      if (!response || !response.success) {
+      if (this.inactive || !response || !response.success) {
         return;
       }
       let walk = 0;
       for (;;) {
         const signal = await this.nextStepSignal(loop);
-        if (signal.kind !== 'stopped') {
+        if (this.inactive || signal.kind !== 'stopped') {
           return;
         }
         const { event, slot, pausePending } = signal;
@@ -1324,6 +1404,7 @@ export class Router {
           }
         }
         const raw = await this.fetchStack(loop.threadId, 4);
+        if (this.inactive) { slot.resolve(null); return; }
         const top = raw?.[0];
         let continuation: 'next' | 'stepIn' | 'continue' = loop.command === 'stepIn' ? 'stepIn' : 'next';
         if (returnHit && plan) {
@@ -1339,14 +1420,34 @@ export class Router {
             await surface(event, slot, body);
             return;
           }
-        } else if (!top || this.stepLanded(loop, top, raw)) {
+        } else if (!top || this.stepLanded(loop, top, raw) || (plan?.escapeWatch && isLandedCobolFrame(this.state, top))) {
           walk = 0;
           let done = true;
           const landed = top ? this.state.frame(top.id) : undefined;
           if (plan && top && landed?.isCobol && landed.program === plan.origin.program) {
             const depthNow = await this.safeDepth(top.id);
             if (depthNow !== undefined) {
-              if (plan.kind === 'over' && depthNow > plan.depth) {
+              plan.escapeWatch?.observeDepth(depthNow);
+              if (plan.escapeWatch && plan.kind === 'out' && depthNow < plan.depth) {
+                // The statement walk reached the caller without an instruction return stop.
+                // Skip its PERFORM loop test just as the return-breakpoint route does.
+                plan.returning = true;
+              }
+              if (plan.escapeWatch && (plan.kind === 'over' ? depthNow > plan.depth : depthNow >= plan.depth)) {
+                const outcome = await plan.escapeWatch.inspect(top.id, depthNow, landed.remappedFromC?.line);
+                if (outcome === 'inside') {
+                  done = false;
+                } else if (outcome === 'escaped' && !landed.program!.program.procedure.statements.some(statement =>
+                  statement.line === top.line && normalisePath(this.state.registry.sourceById(landed.program!, statement.sourceFileId)?.path ?? '') === normalisePath(top.source?.path ?? ''))) {
+                  done = false; // Walk the destination paragraph header to its first executable statement.
+                } else {
+                  body.description = outcome === 'escaped'
+                    ? `GO TO left the active PERFORM range; stopped at ${path.basename(top.source?.path ?? '?')}:${top.line}`
+                    : 'PERFORM control-flow metadata or PC location unavailable; stopped at the next COBOL statement';
+                }
+              } else if (plan.escapeWatch && !this.stepLanded(loop, top, raw)) {
+                done = false;
+              } else if (plan.kind === 'over' && depthNow > plan.depth) {
                 // The statement entered a performed range: run it to its return.
                 const armed = await this.armReturnStop(top.id, plan.depth + 1);
                 if (armed !== undefined) {
@@ -1373,8 +1474,8 @@ export class Router {
             await surface(event, slot, body);
             return;
           }
-          plan!.returning = false;
-          continuation = 'continue';
+          if (!plan!.escapeWatch) plan!.returning = false;
+          continuation = plan!.escapeWatch ? 'next' : 'continue';
         } else {
           walk += 1;
           if (walk >= MAX_STEP_ITERATIONS) {
@@ -1386,6 +1487,7 @@ export class Router {
         // `stepIn` must keep stepping in, or the CALL it started on is stepped over; LLDB
         // skips libcob (no debug info) by itself. `stepOut` continues with `next`.
         let next: DebugProtocol.Response;
+        if (this.inactive) { slot.resolve(null); return; }
         try {
           next = await this.engine.request(continuation, { threadId: loop.threadId });
         } catch (error) {
@@ -1405,7 +1507,7 @@ export class Router {
       for (const signal of loop.queued) {
         if (signal.kind === 'stopped') {
           this.presentHits((signal.event.body ?? {}) as StoppedBody);
-          signal.slot.resolve(signal.event);
+          signal.slot.resolve(this.inactive ? null : signal.event);
         }
       }
       loop.queued.length = 0;
@@ -1449,8 +1551,14 @@ export class Router {
         }
         return;
       }
+      case 'process':
+      case 'module':
+        this.state.invalidateProcess(event.event);
+        slot.resolve(event);
+        return;
       case 'terminated':
       case 'exited':
+        this.state.invalidateProcess(event.event);
         this.abortStepLoop();
         slot.resolve(event);
         return;
@@ -1460,6 +1568,7 @@ export class Router {
   }
 
   private async onStopped(event: DebugProtocol.Event, slot: OutputSlot): Promise<void> {
+    if (this.inactive) { slot.resolve(null); return; }
     this.state.bumpGeneration('stopped');
     const body = (event.body ?? {}) as StoppedBody;
     if (body.threadId !== undefined) {
@@ -1476,6 +1585,7 @@ export class Router {
     } catch (error) {
       this.logger.warn('runtime-error relabel failed', error);
     }
+    if (this.inactive) { slot.resolve(null); return; }
     if (this.stepLoop) {
       this.deliverStepSignal({ kind: 'stopped', event, slot, pausePending: context.pausePending });
       return;
@@ -1484,13 +1594,15 @@ export class Router {
       slot.resolve(null);
       return;
     }
+    const entryHit = this.entryStop?.engineId !== undefined && (body.hitBreakpointIds ?? []).includes(this.entryStop.engineId);
     this.presentHits(body);
+    await this.finishEntryStop(body, entryHit);
     try {
       await this.retargetToCobolThread(body, context);
     } catch (error) {
       this.logger.warn('stop retarget failed', error);
     }
-    slot.resolve(event);
+    slot.resolve(this.inactive ? null : event);
   }
 
   /**
@@ -1516,18 +1628,18 @@ export class Router {
     const generation = this.state.generation;
     const hasCobolFrame = (threadId: number): boolean => this.state.framesOfThread(threadId).some((f) => f.isCobol);
     await this.fetchStack(body.threadId, WALK_UP_STACK_LEVELS);
-    if (this.state.generation !== generation || hasCobolFrame(body.threadId)) {
+    if (this.inactive || this.state.generation !== generation || hasCobolFrame(body.threadId)) {
       return;
     }
     const response = await this.engine.request('threads', {});
-    if (this.state.generation !== generation) {
+    if (this.inactive || this.state.generation !== generation) {
       return;
     }
     const others = ((response.body as DebugProtocol.ThreadsResponse['body'] | undefined)?.threads ?? [])
       .filter((thread) => thread.id !== body.threadId)
       .slice(0, RETARGET_MAX_THREADS);
     await Promise.all(others.map((thread) => this.fetchStack(thread.id, WALK_UP_STACK_LEVELS)));
-    if (this.state.generation !== generation) {
+    if (this.inactive || this.state.generation !== generation) {
       return;
     }
     const target = others.find((thread) => hasCobolFrame(thread.id));
@@ -1547,7 +1659,7 @@ export class Router {
 
   /**
    * A stop on the injected `cob_runtime_error` breakpoint is reported as an exception with
-   * libcob's format string as its text, read from the first-argument register in frame 0.
+   * libcob's formatted message as its text, read from target ABI arguments in frame 0.
    * When the breakpoint id is unknown (the engine answered without one), the frame name
    * decides.
    */
@@ -1572,7 +1684,8 @@ export class Router {
     }
     let text: string | undefined;
     if (top) {
-      text = await this.readFormatString(top.id);
+      const result = await readRuntimeMessage(this.engine, top.id);
+      text = result.message ?? `[unformatted libcob message: ${result.unavailable ?? 'arguments unavailable'}] ${result.format ?? '(format unavailable)'}`;
     }
     body.reason = 'exception';
     body.description = 'COBOL runtime error';
@@ -1591,19 +1704,4 @@ export class Router {
     this.logger.info(`runtime error stop: ${text ?? '(format string unavailable)'}`);
   }
 
-  private async readFormatString(frameId: number): Promise<string | undefined> {
-    const expression = `/nat (const char*)${formatStringRegister(this.env)}`;
-    try {
-      const response = await this.engine.request('evaluate', { expression, frameId, context: 'variables' });
-      const result = (response.body as { result?: string } | undefined)?.result;
-      if (!response.success || !result) {
-        return undefined;
-      }
-      const quoted = /"((?:[^"\\]|\\.)*)"/.exec(result);
-      return quoted ? quoted[1] : result;
-    } catch (error) {
-      this.logger.debug('format string read failed', error);
-      return undefined;
-    }
-  }
 }

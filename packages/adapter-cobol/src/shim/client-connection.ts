@@ -48,6 +48,7 @@ export class ClientConnection {
   private readonly reverseSeqs = new Map<number, number>();
   private outSeq = 0;
   private closed = false;
+  private ending = false;
 
   constructor(
     private readonly socket: Socket,
@@ -59,8 +60,15 @@ export class ClientConnection {
     });
     socket.on('data', (chunk: Buffer) => this.onData(chunk));
     socket.on('error', (error) => this.logger.warn('client socket error', error));
+    socket.on('end', () => {
+      this.ending = true;
+      this.queue.length = 0;
+      this.reverseSeqs.clear();
+    });
     socket.on('close', () => {
       this.closed = true;
+      this.queue.length = 0;
+      this.reverseSeqs.clear();
       this.handlers.onClose();
     });
   }
@@ -69,13 +77,18 @@ export class ClientConnection {
     return this.closed;
   }
 
+  get isEnding(): boolean {
+    return this.ending || this.closed || this.socket.writableEnded || this.socket.destroyed;
+  }
+
   /** Reserve the next output position; resolve it when the message (or nothing) is ready. */
   reserve(): OutputSlot {
+    if (this.isEnding) return { resolve: () => undefined };
     const entry: QueueEntry = { settled: false, message: null };
     this.queue.push(entry);
     return {
       resolve: (message) => {
-        if (entry.settled) {
+        if (entry.settled || this.isEnding) {
           return;
         }
         entry.settled = true;
@@ -91,12 +104,20 @@ export class ClientConnection {
   }
 
   end(): void {
-    if (!this.closed) {
-      this.socket.end();
-    }
+    if (this.isEnding) return;
+    // An unfinished walk must not hold the final disconnect response behind it.
+    // Flush already completed messages in order; late resolutions are discarded.
+    for (const entry of this.queue) entry.settled = true;
+    this.drain();
+    this.ending = true;
+    this.reverseSeqs.clear();
+    this.socket.end();
   }
 
   destroy(): void {
+    this.ending = true;
+    this.queue.length = 0;
+    this.reverseSeqs.clear();
     if (!this.closed) {
       this.socket.destroy();
     }
@@ -112,7 +133,7 @@ export class ClientConnection {
   }
 
   private write(message: DebugProtocol.ProtocolMessage): void {
-    if (this.closed) {
+    if (this.isEnding) {
       return;
     }
     const engineSeq = message.seq;
@@ -124,6 +145,7 @@ export class ClientConnection {
   }
 
   private onData(chunk: Buffer): void {
+    if (this.isEnding) return;
     for (const message of this.decoder.push(chunk)) {
       this.dispatch(message);
     }

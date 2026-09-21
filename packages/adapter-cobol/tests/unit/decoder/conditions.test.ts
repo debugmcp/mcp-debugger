@@ -236,13 +236,30 @@ describe('evaluateCondition: text and group parents', () => {
 });
 
 describe('evaluateCondition: floating-point parents', () => {
+  it.each([
+    [COB_TYPE.NUMERIC_FLOAT, 4, 'COMP-1'],
+    [COB_TYPE.NUMERIC_DOUBLE, 8, 'COMP-2']
+  ] as const)('matches figurative zero and zero range endpoints on %s', (type, size, usage) => {
+    const parentItem = item(attr(type, 0, 0, SIGNED), size, { usage });
+    for (const value of [0, -0, 1, -1]) {
+      const bytes = Buffer.alloc(size);
+      if (size === 4) bytes.writeFloatLE(value); else bytes.writeDoubleLE(value);
+      const parent = decodeItem(bytes, parentItem, LE);
+      for (const zero of ['ZERO', 'ZEROS', 'ZEROES', ' zero ']) {
+        expect(evaluateCondition(values(zero), parent, parentItem)).toBe(value === 0 ? 'true' : 'false');
+        expect(evaluateCondition(values([zero, '1']), parent, parentItem)).toBe(value >= 0 ? 'true' : 'false');
+        expect(evaluateCondition(values(['-1', zero]), parent, parentItem)).toBe(value <= 0 ? 'true' : 'false');
+      }
+    }
+  });
+
   it('compares as numbers', () => {
     const parentItem = item(attr(COB_TYPE.NUMERIC_DOUBLE, 34, 17, 0x0201), 8, { usage: 'COMP-2' });
     const p = decodeItem(hex('6e 86 1b f0 f9 21 09 40'), parentItem, LE); // ✔ 3.14159
     expect(evaluateCondition(values(['3', '4']), p, parentItem)).toBe('true');
     expect(evaluateCondition(values('3.14159'), p, parentItem)).toBe('true');
     expect(evaluateCondition(values('3.14'), p, parentItem)).toBe('false');
-    expect(evaluateCondition(values('ZERO'), p, parentItem)).toMatch(/^<unknown: non-numeric literal "ZERO" on a floating-point item>/);
+    expect(evaluateCondition(values('ZERO'), p, parentItem)).toBe('false');
     expect(evaluateCondition(values(['1', 'X']), p, parentItem)).toMatch(/^<unknown: non-numeric literal "X"/);
   });
 
@@ -250,6 +267,7 @@ describe('evaluateCondition: floating-point parents', () => {
     const parentItem = item(attr(COB_TYPE.NUMERIC_DOUBLE, 34, 17, 0x0201), 8, { usage: 'COMP-2' });
     const p = decodeItem(hex('00 00 00 00 00 00 f8 7f'), parentItem, LE);
     expect(evaluateCondition(values('0'), p, parentItem)).toBe('<unknown: parent is NaN>');
+    expect(evaluateCondition(values('ZERO'), p, parentItem)).toBe('<unknown: parent is NaN>');
   });
 });
 
