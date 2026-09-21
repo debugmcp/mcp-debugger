@@ -361,7 +361,28 @@ jobs:
       run: docker build -t mcp-debugger:local .
     
     - name: Run container tests
-      run: pnpm run test:e2e:container
+      run: |
+        mkdir -p artifacts/cobol
+        pnpm run test:e2e:container --reporter=default --reporter=json --outputFile=artifacts/cobol/container-tests.json
+    - name: Require both COBOL attach cases to pass
+      run: |
+        node --input-type=module <<'NODE'
+        import { readFileSync } from 'node:fs';
+        const report = JSON.parse(readFileSync('artifacts/cobol/container-tests.json', 'utf8'));
+        const suite = report.testResults?.find(result => result.name.endsWith('/docker-smoke-cobol-attach.test.ts'));
+        const cases = suite?.assertionResults ?? [];
+        if (cases.length !== 2 || cases.some(test => test.status !== 'passed')) {
+          throw new Error('Both COBOL attach cases must pass; missing or skipped cases fail this lane');
+        }
+        console.log('COBOL Linux attach: 2 passed, 0 skipped');
+        NODE
+    - name: Upload container validation evidence
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: cobol-linux-attach
+        path: artifacts/cobol/
+        if-no-files-found: warn
 
   cobol-host:
     name: COBOL Host (GnuCOBOL 3.1.2)
