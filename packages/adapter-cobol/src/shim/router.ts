@@ -943,8 +943,11 @@ export class Router {
         return undefined;
       }
       if (escapeWatch) {
-        const address = await readReturnAddress(this.engine, origin.id, depth);
-        const performLine = address === undefined ? undefined : await this.performLineOf(origin, address);
+        const callLine = await escapeWatch.callLine(origin.id, depth);
+        const mapped = callLine === undefined ? undefined : this.state.registry.mapGeneratedLine(origin.program, callLine);
+        const address = mapped ? undefined : await readReturnAddress(this.engine, origin.id, depth);
+        const performLine = mapped ? { path: mapped.source.path, line: mapped.line }
+          : address === undefined ? undefined : await this.performLineOf(origin, address);
         return { kind: 'out', depth, origin, returning: false, finished: false, cycles: 0, performLine, escapeWatch };
       }
       const armed = await this.armReturnStop(origin.id, depth);
@@ -1219,7 +1222,7 @@ export class Router {
       if (plan?.returning) {
         // Walking from a performed range's return: the range's first statement is a landing
         // even when the step started there (a PERFORM … TIMES re-entering it); the PERFORM
-        // statement's own line is not — on cobc 3.2 it is the loop's UNTIL/VARYING test.
+        // statement's own line is not — UNTIL/VARYING loops can stop there for their test.
         const performLine = plan.performLine;
         return !(performLine !== undefined && top.line === performLine.line && normalisePath(top.source?.path ?? '') === normalisePath(performLine.path));
       }
@@ -1356,6 +1359,11 @@ export class Router {
             const depthNow = await this.safeDepth(top.id);
             if (depthNow !== undefined) {
               plan.escapeWatch?.observeDepth(depthNow);
+              if (plan.escapeWatch && plan.kind === 'out' && depthNow < plan.depth) {
+                // The statement walk reached the caller without an instruction return stop.
+                // Skip its PERFORM loop test just as the return-breakpoint route does.
+                plan.returning = true;
+              }
               if (plan.escapeWatch && (plan.kind === 'over' ? depthNow > plan.depth : depthNow >= plan.depth)) {
                 const outcome = await plan.escapeWatch.inspect(top.id, depthNow, landed.remappedFromC?.line);
                 if (outcome === 'inside') {
@@ -1397,7 +1405,7 @@ export class Router {
             await surface(event, slot, body);
             return;
           }
-          plan!.returning = false;
+          if (!plan!.escapeWatch) plan!.returning = false;
           continuation = plan!.escapeWatch ? 'next' : 'continue';
         } else {
           walk += 1;

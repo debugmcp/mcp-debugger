@@ -46,6 +46,7 @@ interface Stop {
 
 interface Rig {
   cLine?: number;
+  returnLocationCLine?: number;
   controlReturns?: Record<number, number>;
   position: DebugProtocol.StackFrame;
   depth: number;
@@ -97,7 +98,7 @@ function rigEngine(engine: FakeEngine, start: DebugProtocol.StackFrame, depth: n
     }
     if (args.expression.startsWith('/py ') && args.expression.includes('ResolveLoadAddress')) {
       // The return address sits in the generated C of the PERFORM at hello.cob:32 (line map row 127 -> 32).
-      return { result: `'${HELLO_C.replace(/\\/g, '\\\\')}|130'`, variablesReference: 0 };
+      return { result: `'${HELLO_C.replace(/\\/g, '\\\\')}|${rig.returnLocationCLine ?? 130}'`, variablesReference: 0 };
     }
     throw new Error(`unexpected evaluate ${args.expression}`);
   });
@@ -405,6 +406,35 @@ describe('cobol shim PERFORM-aware stepping', () => {
     expect(stopped.body).toMatchObject({ reason: 'step', description: expect.stringMatching(/GO TO left the active PERFORM range; stopped at hello\.cob:41/i) });
     expect(rig.commands).toEqual(['next', 'next', 'next']);
     expect(rig.instructionSends).toEqual([]);
+  });
+
+  it('stepOut walks repeated loop-control stops after a GO TO-containing range returns', async () => {
+    const manifest = helloWithStatements();
+    manifest.programs[0].controlFlow = {
+      hasGoto: true, ranges: [{ labelId: 5, startCLine: 200, endCLine: 249 }],
+      performs: [{ callCLine: 124, returnCLine: 140, endCLine: 149, startLabel: 5, endLabel: 5 }]
+    };
+    let rig!: Rig;
+    h = await startShim({ manifests: [manifest], engineSetup: engine => {
+      rig = rigEngine(engine, frame(1, 'HELLO_', HELLO_COB, 37), 1);
+      // A shared return block points into the performed paragraph, not its caller.
+      rig.controlReturns = { 1: 244 };
+      rig.returnLocationCLine = 244;
+    } });
+    await bringUp(h);
+    rig.nextStops.push(
+      { frame: frame(1, 'HELLO_', HELLO_COB, 32), depth: 0 },
+      { frame: frame(1, 'HELLO_', HELLO_COB, 32), depth: 0 },
+      { frame: frame(1, 'HELLO_', HELLO_COB, 37), depth: 1, cLine: 210 },
+      { frame: frame(1, 'HELLO_', HELLO_COB, 32), depth: 0 },
+      { frame: frame(1, 'HELLO_', HELLO_COB, 33), depth: 0 }
+    );
+    await h.client.request('stepOut', { threadId: 1 });
+    expect((await h.client.nextEvent('stopped')).body?.reason).toBe('step');
+    expect(rig.position.line).toBe(33);
+    expect(rig.commands).toEqual(Array(5).fill('next'));
+    expect(rig.instructionSends).toEqual([]);
+    expect(h.client.events('stopped')).toHaveLength(1);
   });
 
   it('distinguishes the destination from a repeated COPY source line, even when stepOut began on that same line', async () => {

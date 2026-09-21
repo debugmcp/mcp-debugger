@@ -35,16 +35,27 @@ export class PerformEscapeWatch {
     for (const key of this.active.keys()) if (key > depth) this.active.delete(key);
   }
 
+  /** The unique caller's generated-C line, even when GCC shares its return block. */
+  async callLine(frameId: number, depth: number): Promise<number | undefined> {
+    try {
+      const current = await this.activeRange(frameId, depth);
+      if (current?.calls.length !== 1) return undefined;
+      const call = current.calls[0];
+      // callCLine is the compiler's statement comment; its #line directive follows it.
+      return this.entry.program.lineMap.find(row => row.cLine >= call.callCLine && row.cLine < call.returnCLine)?.cLine;
+    } catch { return undefined; }
+  }
+
   async inspect(frameId: number, depth: number, generatedLine?: number): Promise<'inside' | 'escaped' | 'unavailable'> {
     try { return await this.inspectRange(frameId, depth, generatedLine); }
     catch { return 'unavailable'; }
   }
 
-  private async inspectRange(frameId: number, depth: number, generatedLine?: number): Promise<'inside' | 'escaped' | 'unavailable'> {
+  private async activeRange(frameId: number, depth: number): Promise<ActiveRange | undefined> {
     const flow = this.entry.program.controlFlow;
-    if (!flow) return 'unavailable';
+    if (!flow) return undefined;
     const [address, through] = await Promise.all([readReturnAddress(this.engine, frameId, depth), readPerformThrough(this.engine, frameId, depth)]);
-    if (address === undefined || through === undefined) return 'unavailable';
+    if (address === undefined || through === undefined) return undefined;
     let current = this.active.get(depth);
     if (current?.address !== address || current.calls[0].endLabel !== through) {
       const returning = await generatedLineAt(this.engine, this.entry, frameId, address);
@@ -54,14 +65,20 @@ export class PerformEscapeWatch {
       const exact = returning === undefined ? [] : candidates.filter(candidate => returning >= candidate.callCLine && returning <= candidate.endCLine);
       const calls = exact.length === 1 ? exact : candidates;
       const call = calls[0];
-      if (!call || calls.some(candidate => candidate.startLabel !== call.startLabel)) return 'unavailable';
+      if (!call || calls.some(candidate => candidate.startLabel !== call.startLabel)) return undefined;
       const start = call && flow.ranges.find(range => range.labelId === call.startLabel);
       const end = call && flow.ranges.find(range => range.labelId === call.endLabel);
-      if (!call || !start || !end || end.endCLine < start.startCLine) return 'unavailable';
+      if (!call || !start || !end || end.endCLine < start.startCLine) return undefined;
       current = { address, calls, start: start.startCLine, end: end.endCLine, entered: false };
       this.active.set(depth, current);
     }
     this.observeDepth(depth);
+    return current;
+  }
+
+  private async inspectRange(frameId: number, depth: number, generatedLine?: number): Promise<'inside' | 'escaped' | 'unavailable'> {
+    const current = await this.activeRange(frameId, depth);
+    if (!current) return 'unavailable';
     const line = generatedLine ?? await generatedLineAt(this.engine, this.entry, frameId);
     if (line === undefined) return 'unavailable';
     // The goto to the normal return precedes frame_ptr--: its old depth is still visible.
