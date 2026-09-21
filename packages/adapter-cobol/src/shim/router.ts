@@ -21,6 +21,7 @@ import type { ClientConnection, ClientInbound, OutputSlot } from './client-conne
 import { parseCobolExpression } from './cobol-expression.js';
 import type { EngineClient, EngineInbound } from './engine-client.js';
 import { EvaluateHandler } from './handlers/evaluate.js';
+import { entryStopLocation } from './entry-stop.js';
 import { annotateStackFrames, isCobolProgramFrame, isLandedCobolFrame } from './handlers/stack-trace.js';
 import { VariablesHandler } from './handlers/variables.js';
 import type { ShimLogger } from './logger.js';
@@ -298,6 +299,15 @@ export class Router {
       case 'attach':
         this.onLaunchOrAttach(request);
         return;
+      case 'configurationDone':
+        this.serve(request, async () => {
+          if (this.entryStop) {
+            await this.resendFile(normalisePath(this.entryStop.path));
+            if (this.entryStop.engineId === undefined) throw new Error(`cannot arm COBOL entry stop: ${this.entryStop.message ?? 'engine returned no breakpoint id'}`);
+          }
+          return { forward: request };
+        });
+        return;
       case 'continue':
         this.resumeAfterDisarming(request);
         return;
@@ -391,16 +401,43 @@ export class Router {
     // CodeLLDB stops the target after an attach only with stopOnEntry (it resumes otherwise),
     // so only then is the session's first stop the handshake's rather than the program's.
     this.state.attachStopExpected = request.command === 'attach' && args?.stopOnEntry !== false;
+    let options: Partial<CobolShimSessionOptions> | undefined;
     if (args && typeof args === 'object') {
       const block = args[COBOL_PRIVATE_KEY];
       delete args[COBOL_PRIVATE_KEY];
       if (block && typeof block === 'object') {
-        this.state.applySessionOptions(block as Partial<CobolShimSessionOptions>);
+        options = block as Partial<CobolShimSessionOptions>;
+        this.state.applySessionOptions(options);
       }
     }
     this.state.ensureManifests();
+    if (request.command === 'launch' && args?.stopOnEntry === true && args.noDebug !== true) {
+      const location = entryStopLocation(this.state.registry, options);
+      if (location) {
+        this.entryStop = this.state.breakpoints.addFunctionBreakpoint('<entry>', location.path, location.line, 'COBOL entry');
+        this.entryStop.internal = true;
+        args.stopOnEntry = false;
+      } else {
+        this.client.send({ seq: 0, type: 'event', event: 'output', body: { category: 'console', output: 'COBOL entry location unavailable or ambiguous; stopping at the engine entry. Supply sources or matching manifests.\n' } } as DebugProtocol.OutputEvent);
+      }
+    }
     this.logger.info(`${request.command}: ${this.state.registry.programCount} program(s) from ${this.state.options.manifestDirs.length} manifest dir(s)`);
     this.forward(request);
+  }
+
+  private entryStop?: FunctionBreakpointRecord;
+
+  /** A visible stop completes entry handling; user breakpoints, pause and exceptions keep their reason. */
+  private async finishEntryStop(body: StoppedBody, hit: boolean): Promise<void> {
+    const record = this.entryStop;
+    if (!record) return;
+    this.entryStop = undefined;
+    if (hit && body.reason === 'breakpoint' && (body.hitBreakpointIds?.length ?? 0) === 0) {
+      body.reason = 'entry';
+      body.description = 'COBOL program entry';
+    }
+    this.state.breakpoints.removeInternal(record);
+    await this.resendFile(normalisePath(record.path));
   }
 
   private onSetExceptionBreakpoints(request: DebugProtocol.Request): void {
@@ -1522,7 +1559,9 @@ export class Router {
       slot.resolve(null);
       return;
     }
+    const entryHit = this.entryStop?.engineId !== undefined && (body.hitBreakpointIds ?? []).includes(this.entryStop.engineId);
     this.presentHits(body);
+    await this.finishEntryStop(body, entryHit);
     try {
       await this.retargetToCobolThread(body, context);
     } catch (error) {

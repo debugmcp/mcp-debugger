@@ -314,3 +314,6 @@ node scripts/check-cobol-e2e-report.mjs artifacts/cobol/host-tests.json
 - [`skills/debugging/references/cobol.md`](../../skills/debugging/references/cobol.md) — agent-facing quick reference
 - [C/C++ guide](../cpp/README.md) — the engine-level behaviour (CodeLLDB) this adapter inherits
 - Tracking issue: [#759](https://github.com/debugmcp/mcp-debugger/issues/759)
+
+
+`stopOnEntry: true` pauses at the primary program's first executable COBOL statement after DECLARATIVES, including an entry statement in a COPY source. The shim arms a private source breakpoint before configuration completes, so it can bind when a `cobcrun` module loads. User breakpoints, pause requests and runtime exceptions retain priority. With missing or ambiguous program metadata, the session reports the limitation and uses the engine's entry stop. `noDebug` and attach keep their existing behavior.

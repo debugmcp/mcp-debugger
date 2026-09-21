@@ -221,6 +221,8 @@ export interface CobolProgram {
    * source). A PROGRAM-ID breakpoint binds at or after it.
    */
   entryLine?: number;
+  /** First executable statement after the compiler's Entry marker, including COPY sources. */
+  entryStatement?: CobolStatementLocation;
   /** Every `#line` row of the generated C in order — lets the shim map a generated-C stop back to COBOL. */
   lineMap: CobolLineMapEntry[];
 }

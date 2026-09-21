@@ -27,6 +27,7 @@ export function computeBuildKey(input: BuildKeyInput): string {
   hash.update('picture-parser:2\n');
   hash.update(`cobc:${input.cobcVersion}\n`);
   hash.update(`argv:${JSON.stringify(input.argv)}\n`);
+  hash.update('entry-parser:2\n');
   const files = [...input.files].sort((a, b) => a.path.localeCompare(b.path));
   for (const file of files) {
     hash.update(`file:${file.path.toLowerCase()}:${file.contentHash}\n`);

@@ -143,6 +143,7 @@ export function parseGeneratedCText(texts: GeneratedCTexts, generator: Generator
     if (procedure.entryLine !== undefined) {
       program.entryLine = procedure.entryLine;
     }
+    if (procedure.entryStatement) program.entryStatement = procedure.entryStatement;
     if (procedure.procedureDivisionLine !== undefined) {
       program.procedureDivisionLine = procedure.procedureDivisionLine;
     }
