@@ -48,7 +48,6 @@ import {
 import {
   createBackendLogger,
   sanitizeBackendEnvOverrides,
-  sanitizeStderrTail,
   sharedUtilsLoaded,
 } from './backend-logger.mjs';
 import {
@@ -58,6 +57,7 @@ import {
 } from './docker-backend.mjs';
 import { buildBackendEnvironment, resolveBackendPort, updateBackendEnvOverrides } from './backend-env.mjs';
 import { LifecycleQueue } from './lifecycle-queue.mjs';
+import { runBuild } from './build-runner.mjs';
 import { isBackendUnavailableError, dedupeMcpErrorPrefix, assertBackendAvailable } from './tool-error.mjs';
 
 // ---------------------------------------------------------------------------
@@ -75,11 +75,6 @@ const BACKEND_CMD = process.env.DEV_PROXY_BACKEND_CMD || null;
 
 const parsedTimeout = parseInt(process.env.DEV_PROXY_BUILD_TIMEOUT_MS || '', 10);
 const BUILD_TIMEOUT_MS = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 120000;
-// Well above any tsc/esbuild transcript. execSync's 1 MiB default kills an
-// over-chatty build with the same SIGTERM a timeout uses (ENOBUFS), which
-// used to be reported as a timeout.
-const BUILD_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
-
 // How long a request will wait for an in-flight backend start or restart.
 // Deliberately NOT tied to HEALTH_POLL_TIMEOUT_MS: that bounds how patient the
 // proxy is with its own child, whereas this bounds how long a CLIENT is made to
@@ -169,6 +164,8 @@ class BackendManager {
     this.mcpClient = null;
     /** @type {StdioClientTransport | null} */
     this.stdioTransport = null;
+    /** Keep ownership even when the SDK clears transport.pid during close(). */
+    this.stdioPid = null;
     /** @type {number | null} */
     this.startedAt = null;
     /** @type {'http' | 'sse' | 'stdio'} */
@@ -181,6 +178,11 @@ class BackendManager {
     this.expectedChildExit = false;
     /** Initial start, restart tools, and shutdown must never overlap. */
     this.lifecycleQueue = new LifecycleQueue();
+    /** Shutdown interrupts a build before waiting for the lifecycle queue. */
+    this.shutdownController = new AbortController();
+    this.buildInProgress = false;
+    /** Readers already waiting on the queue can use the old backend during a build. */
+    this.buildWaiters = new Set();
     /** Unique owner for Docker containers started by this stable proxy process. */
     this.dockerOwnerId = `${process.pid}-${randomUUID()}`;
   }
@@ -222,6 +224,7 @@ class BackendManager {
   }
 
   async _start() {
+    this._assertOpen();
     if (this.state === 'running' || this.state === 'starting') {
       log(`Backend already ${this.state}, skipping start`);
       return;
@@ -238,6 +241,9 @@ class BackendManager {
         await this._connectClient(command, args);
       } catch (err) {
         await this._killDockerContainer();
+        await this._disconnectClient();
+        await this._forceKillPid(this.stdioPid);
+        this.stdioPid = null;
         this.state = 'stopped';
         this.startedAt = null;
         throw err;
@@ -248,6 +254,7 @@ class BackendManager {
 
       // Kill any orphan process holding the port from a previous crash
       await this._ensurePortFree();
+      this._assertOpen();
 
       // stdin is a pipe + MCP_EXIT_ON_STDIN_CLOSE so the backend can detect
       // our death (pipe closes) and we can ask it to shut down gracefully
@@ -297,7 +304,16 @@ class BackendManager {
   }
 
   stop() {
+    // Terminal: queued restarts must not resurrect a backend after stdin EOF.
+    // Aborting SSE's live fetch can close the transport before queued _stop()
+    // runs. Mark the intent first so it cannot take the backend-crash path.
+    if (this.transportCloseState) this.transportCloseState.expected = true;
+    this.shutdownController.abort();
     return this.lifecycleQueue.run(() => this._stop());
+  }
+
+  _assertOpen() {
+    if (this.shutdownController.signal.aborted) throw new Error('Proxy is shutting down');
   }
 
   async _stop() {
@@ -310,7 +326,7 @@ class BackendManager {
     this.expectedChildExit = true;
 
     // For stdio mode, grab the PID before closing (close clears the process ref)
-    const stdioPid = this.stdioTransport?.pid ?? null;
+    const stdioPid = this.stdioPid ?? this.stdioTransport?.pid ?? null;
 
     // The outer MCP SDK gives a stdio server roughly two seconds to exit after
     // its stdin closes. The inner StdioClientTransport can itself wait longer
@@ -337,56 +353,61 @@ class BackendManager {
     await this._killDockerContainer();
 
     this.stdioTransport = null;
+    this.stdioPid = null;
     this.state = 'stopped';
     this.startedAt = null;
     log('Backend stopped');
   }
 
-  restart() {
+  restart(args, onRestart) {
+    // Copy/validate now, but apply in queue order (#756). Omission inherits
+    // the preceding applied settings, not the map at the time of submission.
+    const env = Object.hasOwn(args ?? {}, 'env')
+      ? updateBackendEnvOverrides({}, args)
+      : undefined;
+    const rebuild = args?.rebuild === true;
     return this.lifecycleQueue.run(async () => {
+      this._assertOpen();
+      const buildOutput = rebuild ? await this.rebuild() : undefined;
+      this._assertOpen();
+      if (env !== undefined) this.backendEnvOverrides = env;
       this.state = 'restarting';
-      await this._stop();
-      await this._start();
+      try {
+        await this._stop();
+        await this._start();
+        // Capture before releasing the queue, including before the async
+        // notification: the next operation cannot rewrite this response.
+        return {
+          success: true,
+          action: rebuild ? 'rebuild_and_restart' : 'restart',
+          ...(rebuild ? { buildOutput } : {}),
+          status: this.getStatus(),
+        };
+      } finally {
+        // A failed build never gets here: only an attempted restart changes
+        // the inventory. A failed startup must announce the loss of tools.
+        await onRestart();
+      }
     });
   }
 
-  applyEnvUpdate(args) {
-    this.backendEnvOverrides = updateBackendEnvOverrides(this.backendEnvOverrides, args);
-  }
-
-  rebuild() {
+  async rebuild() {
     log(`Running build: ${BUILD_CMD}`);
-    let result;
+    this.buildInProgress = true;
+    for (const wake of this.buildWaiters) wake();
     try {
-      result = execSync(BUILD_CMD, {
+      const result = await runBuild({
+        command: BUILD_CMD,
         cwd: PROJECT_ROOT,
-        encoding: 'utf-8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-        timeout: BUILD_TIMEOUT_MS,
-        maxBuffer: BUILD_MAX_BUFFER_BYTES,
         env: { ...process.env },
+        timeoutMs: BUILD_TIMEOUT_MS,
+        signal: this.shutdownController.signal,
       });
-    } catch (err) {
-      // execSync's error message embeds raw build stderr — sanitize before it
-      // reaches tool responses via err.message (issue #154). Include stdout
-      // too: build tools (tsc via npm) print their diagnostics there. The raw
-      // execSync error rides on `cause` for programmatic consumers; the tool
-      // handlers serialize `message` alone, so it never reaches a response.
-      const output = [err.stdout, err.stderr].filter(Boolean).join('\n') || err.message || String(err);
-      const tail = sanitizeStderrTail(output, { maxLines: 20, maxChars: 2000 });
-      // Only the timeout is a kill by this proxy. `err.killed` is never set by
-      // execSync, and signal SIGTERM alone does not identify it: a buffer
-      // overflow (ENOBUFS) arrives the same way.
-      if (err.code === 'ETIMEDOUT') {
-        throw new Error(
-          `Build timed out after ${Math.floor(BUILD_TIMEOUT_MS / 1000)}s — the build may still have succeeded, re-run manually to confirm. Output before the timeout:\n${tail}`,
-          { cause: err }
-        );
-      }
-      throw new Error(`Build failed: ${tail}`, { cause: err });
+      log('Build succeeded');
+      return result;
+    } finally {
+      this.buildInProgress = false;
     }
-    log('Build succeeded');
-    return sanitizeStderrTail(result, { maxLines: 50, maxChars: 2000 });
   }
 
   /**
@@ -394,12 +415,31 @@ class BackendManager {
    * during the initial start or a restart sees the backend it is about to get
    * rather than the one it has (issue #716). Re-arms itself for every restart,
    * because it reads the live queue instead of a one-shot gate.
+   * During a build, the existing backend is usable. Wake readers that were
+   * already waiting before that build began, without abandoning their bounds.
    *
    * @param {{ timeoutMs?: number, signal?: AbortSignal }} [options]
    * @returns {Promise<boolean>} true when the backend settled within the bound.
    */
   whenReady({ timeoutMs = DISCOVERY_WAIT_MS, signal } = {}) {
-    return this.lifecycleQueue.idle({ timeoutMs, signal });
+    if (signal?.aborted) return Promise.resolve(false);
+    const done = new AbortController();
+    const waitSignal = signal ? AbortSignal.any([signal, done.signal]) : done.signal;
+    let wake;
+    const availableDuringBuild = new Promise((resolve) => {
+      wake = () => {
+        if (this.buildInProgress && this.state === 'running' && this.mcpClient) resolve(true);
+      };
+      this.buildWaiters.add(wake);
+      wake();
+    });
+    return Promise.race([
+      availableDuringBuild,
+      this.lifecycleQueue.idle({ timeoutMs, signal: waitSignal }),
+    ]).finally(() => {
+      this.buildWaiters.delete(wake);
+      done.abort();
+    });
   }
 
   async callTool(name, args, { signal } = {}) {
@@ -433,6 +473,7 @@ class BackendManager {
       uptime: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : null,
       projectRoot: PROJECT_ROOT,
       buildCmd: BUILD_CMD,
+      buildInProgress: this.buildInProgress,
       backendTransport: this.backendTransport,
       backendCmd: BACKEND_CMD || null,
       backendEnvOverrides: sanitizedEnv.values,
@@ -462,6 +503,7 @@ class BackendManager {
     const deadline = Date.now() + HEALTH_POLL_TIMEOUT_MS;
 
     while (Date.now() < deadline) {
+      this._assertOpen();
       // A backend that dies at spawn refuses connections exactly like one that
       // has not bound yet, so ECONNREFUSED alone cannot tell them apart. Poll
       // liveness instead: without this a dead child parked the first tools/list
@@ -470,7 +512,7 @@ class BackendManager {
         throw new Error('Backend exited before becoming healthy');
       }
       try {
-        const resp = await fetch(url);
+        const resp = await fetch(url, { signal: this.shutdownController.signal });
         if (resp.ok) {
           log('Backend health check passed');
           return;
@@ -532,7 +574,13 @@ class BackendManager {
         }
       };
 
-      await this.mcpClient.connect(transport);
+      // connect() starts the transport synchronously, so capture ownership
+      // before awaiting initialization. On cancellation the SDK starts an
+      // unawaited close() and immediately clears transport.pid; relying on
+      // that getter afterward would orphan a backend still initializing.
+      const connecting = this.mcpClient.connect(transport, { signal: this.shutdownController.signal });
+      this.stdioPid = transport.pid;
+      await connecting;
       log('MCP Client connected to backend via stdio');
     } else if (this.backendTransport === 'http') {
       // Streamable HTTP mode: SDK handles reconnection internally; no phantom hack needed
@@ -555,7 +603,7 @@ class BackendManager {
         }
       };
 
-      await this.mcpClient.connect(transport);
+      await this.mcpClient.connect(transport, { signal: this.shutdownController.signal });
       log('MCP Client connected to backend via Streamable HTTP');
     } else {
       // SSE mode (legacy): connect to running HTTP server
@@ -573,7 +621,10 @@ class BackendManager {
               log('Blocking EventSource auto-reconnection (returning 204)');
               return new Response(null, { status: 204 });
             }
-            const resp = await globalThis.fetch(url, init);
+            const signal = init?.signal
+              ? AbortSignal.any([init.signal, this.shutdownController.signal])
+              : this.shutdownController.signal;
+            const resp = await globalThis.fetch(url, { ...init, signal });
             initialFetchDone = true;
             return resp;
           },
@@ -596,7 +647,7 @@ class BackendManager {
         }
       };
 
-      await this.mcpClient.connect(transport);
+      await this.mcpClient.connect(transport, { signal: this.shutdownController.signal });
       log('MCP Client connected to backend via SSE');
     }
   }
@@ -771,7 +822,7 @@ const DEV_TOOLS = [
   {
     name: 'dev_server_status',
     description:
-      'Get the current status of the mcp-debugger backend (state, PID, uptime, transport, project root, port, and display-safe environment overrides).',
+      'Get the current status of the mcp-debugger backend (state, PID, uptime, buildInProgress, transport, project root, port, and display-safe environment overrides).',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -800,80 +851,19 @@ function devToolFailure(err) {
   };
 }
 
-/**
- * Build, then restart. A failed build never reaches restart(): the running
- * backend — and so the client's tool inventory — is untouched, so no
- * tools/list_changed is sent for it. Only a restart can change the inventory.
- */
-async function rebuildThenRestart(backend, server) {
-  let buildOutput;
-  try {
-    buildOutput = backend.rebuild();
-  } catch (err) {
-    return devToolFailure(err);
-  }
-  try {
-    await backend.restart();
-    await server.sendToolListChanged();
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(
-            {
-              success: true,
-              action: 'rebuild_and_restart',
-              buildOutput,
-              status: backend.getStatus(),
-            },
-            null,
-            2
-          ),
-        },
-      ],
-    };
-  } catch (err) {
-    await notifyToolListChanged(server);
-    return devToolFailure(err);
-  }
-}
-
 async function handleDevTool(backend, server, name, args) {
   switch (name) {
-    case 'dev_restart_debugger': {
-      // A rejected env update changes nothing either: no notification.
-      try {
-        backend.applyEnvUpdate(args);
-      } catch (err) {
-        return devToolFailure(err);
-      }
-      if (args?.rebuild) {
-        return rebuildThenRestart(backend, server);
-      }
-      try {
-        await backend.restart();
-        await server.sendToolListChanged();
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify({ success: true, action: 'restart', status: backend.getStatus() }, null, 2),
-            },
-          ],
-        };
-      } catch (err) {
-        await notifyToolListChanged(server);
-        return devToolFailure(err);
-      }
-    }
-
+    case 'dev_restart_debugger':
     case 'dev_rebuild_and_restart': {
       try {
-        backend.applyEnvUpdate(args);
+        const result = await backend.restart(
+          { ...args, rebuild: name === 'dev_rebuild_and_restart' || args?.rebuild === true },
+          () => notifyToolListChanged(server)
+        );
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
       } catch (err) {
         return devToolFailure(err);
       }
-      return rebuildThenRestart(backend, server);
     }
 
     case 'dev_server_status': {
