@@ -132,6 +132,8 @@ export interface ManagedSession extends DebugSessionInfo {
   // failing to load Rust formatters). Reset per launch, deduped; joined into
   // the start_debugging warning when they arrive before the launch resolves.
   adapterNotices?: string[];
+  /** Transform diagnostics, retained even when preparation fails before a proxy exists (#709). */
+  launchConfigNotices?: string[];
   // Live capabilities from the adapter's DAP initialize response (issue #243).
   // Reset on each launch; gates best-effort requests like exceptionInfo and
   // lets tooling validate static policy tables against the real adapter.

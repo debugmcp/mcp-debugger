@@ -104,7 +104,10 @@ describe('SessionManager - Error Recovery', () => {
         }, 10);
       });
       
-      const startPromise = sessionManager.startDebugging(session.id, 'test.py');
+      // This mock only reports configuration, so request a running launch.
+      // An entry-stop launch must wait for a stopped event, including when
+      // stopOnEntry came from the session defaults rather than call args.
+      const startPromise = sessionManager.startDebugging(session.id, 'test.py', undefined, { stopOnEntry: false });
       
       // Advance timers to process the timeout
       await vi.advanceTimersByTimeAsync(100);

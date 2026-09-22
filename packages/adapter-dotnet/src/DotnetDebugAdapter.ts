@@ -87,7 +87,7 @@ interface DotnetLaunchConfig extends LanguageSpecificLaunchConfig {
   program?: string;
   args?: string[];
   cwd?: string;
-  env?: Record<string, string>;
+  env?: GenericLaunchConfig['env'];
   justMyCode?: boolean;
   stopOnEntry?: boolean;
   console?: 'internalConsole' | 'integratedTerminal' | 'externalTerminal';

@@ -64,16 +64,22 @@ function resolveLaunchFlag(
 }
 
 /**
- * The `data` of a failed launch: the failure record, plus the noDebug note
- * when there is one — a launch that failed with the debugger off would
- * otherwise report the failure with no pointer to the flag it ran under.
+ * Keep configuration and adapter warnings alongside a failed launch's
+ * diagnostics, including failures before the proxy starts.
  */
 function failureData<T extends object>(
   diagnosticData: T,
-  noDebugWarning: string | undefined
+  warning: string | undefined
 ): { data?: T & { warning?: string } } {
-  const data = { ...diagnosticData, ...(noDebugWarning ? { warning: noDebugWarning } : {}) };
+  const data = { ...diagnosticData, ...(warning ? { warning } : {}) };
   return Object.keys(data).length > 0 ? { data } : {};
+}
+
+/** Preparation and adapter notes share the existing warning surface, once each. */
+function launchWarnings(session: ManagedSession, ...notes: (string | undefined)[]): string | undefined {
+  return [...new Set([
+    ...notes, ...(session.launchConfigNotices ?? []), ...(session.adapterNotices ?? [])
+  ].filter((note): note is string => Boolean(note)))].join('; ') || undefined;
 }
 
 export class DebugLauncher {
@@ -243,6 +249,8 @@ export class DebugLauncher {
     session.lastProxyError = undefined;
     session.failureDiagnostics = undefined;
     session.lastStop = undefined;
+    session.launchConfigNotices = [];
+    session.adapterNotices = [];
     // The previous launch's debugger-off decision does not carry over
     // (issue #749); this attempt decides again below.
     session.launchDebuggerOff = undefined;
@@ -303,6 +311,7 @@ export class DebugLauncher {
     // none of them waits for a stop that cannot arrive. The warning above and
     // session.lastLaunch (recorded earlier) keep the caller's values.
     const launchArgs = debuggerOff ? { ...dapLaunchArgs, stopOnEntry: false } : dapLaunchArgs;
+    let effectiveLaunchArgs = launchArgs;
     const launchAdapterConfig =
       debuggerOff && adapterLaunchConfig?.stopOnEntry !== undefined
         ? { ...adapterLaunchConfig, stopOnEntry: false }
@@ -314,7 +323,7 @@ export class DebugLauncher {
       debuggerOff
         ? state === SessionState.RUNNING || state === SessionState.PAUSED
         : policy.isSessionReady
-          ? policy.isSessionReady(state, { stopOnEntry: launchArgs?.stopOnEntry })
+          ? policy.isSessionReady(state, { stopOnEntry: effectiveLaunchArgs?.stopOnEntry })
           : state === SessionState.PAUSED;
     const readinessPolicy = debuggerOff ? { ...policy, isSessionReady: undefined } : policy;
 
@@ -325,7 +334,7 @@ export class DebugLauncher {
           success: true,
           state: SessionState.STOPPED,
           data: {
-            ...(noDebugWarning ? { warning: noDebugWarning } : {}),
+            warning: launchWarnings(session, noDebugWarning),
             dryRun: true,
             message: 'Dry run spawn command logged by proxy.',
             command: snapshot?.command,
@@ -424,7 +433,7 @@ export class DebugLauncher {
             success: false,
             error: dryRunTimeoutError.message,
             state,
-            ...failureData(diagnosticData, noDebugFailureNote)
+            ...failureData(diagnosticData, launchWarnings(session, noDebugFailureNote))
           };
         }
       }
@@ -457,6 +466,12 @@ export class DebugLauncher {
         // Decided once, here; the worker reads the stamp (issue #746).
         debuggerOff,
       });
+      effectiveLaunchArgs = {
+        ...launchArgs,
+        stopOnEntry: typeof launchConfigData.stopOnEntry === 'boolean'
+          ? launchConfigData.stopOnEntry
+          : launchArgs?.stopOnEntry
+      };
       this.ctx.logger.info(`[SessionManager] ProxyManager started for session ${sessionId}`);
 
       // Perform language-specific handshake if required
@@ -465,7 +480,7 @@ export class DebugLauncher {
           await policy.performHandshake({
             proxyManager: session.proxyManager,
             sessionId: session.id,
-            dapLaunchArgs: launchArgs,
+            dapLaunchArgs: effectiveLaunchArgs,
             scriptPath,
             scriptArgs,
             breakpoints: session.breakpoints,
@@ -487,7 +502,7 @@ export class DebugLauncher {
 
       if (!alreadyReady) {
         // Wait for adapter to be configured, first stop event, or termination
-        await waitForLaunchReadiness(this.ctx, { session, sessionId, policy: readinessPolicy, dapLaunchArgs: launchArgs });
+        await waitForLaunchReadiness(this.ctx, { session, sessionId, policy: readinessPolicy, dapLaunchArgs: effectiveLaunchArgs });
       } else {
         this.ctx.logger.info(
           `[SessionManager] Session ${sessionId} already ${sessionStateAfterHandshake} after handshake - skipping adapter readiness wait`
@@ -524,7 +539,7 @@ export class DebugLauncher {
           success: false,
           state: SessionState.ERROR,
           error: errorMessage,
-          ...failureData(diagnosticData, noDebugFailureNote)
+          ...failureData(diagnosticData, launchWarnings(session, noDebugFailureNote))
         };
       }
 
@@ -595,10 +610,7 @@ export class DebugLauncher {
       // annotated output events arrive; joining here is best-effort — a note
       // arriving after this return still lands in the output buffer as an
       // attributed [mcp-debugger] Warning entry.
-      const launchWarning =
-        [noDebugNote, fnBpWarning, logpointWarning, unboundAtExitWarning, ...(finalSession.adapterNotices ?? [])]
-          .filter(Boolean)
-          .join('; ') || undefined;
+      const launchWarning = launchWarnings(finalSession, noDebugNote, fnBpWarning, logpointWarning, unboundAtExitWarning);
 
       this.ctx.logger.info(
         `[SessionManager] Debugging started for session ${sessionId}. State: ${finalState}`
@@ -630,9 +642,9 @@ export class DebugLauncher {
           reason:
             finalState === SessionState.PAUSED
               ? finalSession.lastStop?.reason ??
-                (launchArgs?.stopOnEntry ? 'entry' : 'unknown')
+                (effectiveLaunchArgs?.stopOnEntry ? 'entry' : 'unknown')
               : undefined,
-          stopOnEntrySuccessful: !!launchArgs?.stopOnEntry && finalState === SessionState.PAUSED,
+          stopOnEntrySuccessful: !!effectiveLaunchArgs?.stopOnEntry && finalState === SessionState.PAUSED,
         },
       };
     } catch (error) {
@@ -662,7 +674,7 @@ export class DebugLauncher {
           state: SessionState.STOPPED,
           errorType,
           errorCode,
-          ...failureData(diagnosticData, noDebugFailureNote)
+          ...failureData(diagnosticData, launchWarnings(session, noDebugFailureNote))
         };
       }
 
@@ -704,7 +716,7 @@ export class DebugLauncher {
         state: session.state,
         errorType,
         errorCode,
-        ...failureData(diagnosticData, noDebugFailureNote)
+        ...failureData(diagnosticData, launchWarnings(session, noDebugFailureNote))
       };
     }
   }
