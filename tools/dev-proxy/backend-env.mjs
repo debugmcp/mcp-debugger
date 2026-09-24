@@ -8,8 +8,12 @@ function setOwnProperty(target, key, value) {
 }
 
 function copyStringMap(source) {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) {
+    throw new Error('env must be an object whose values are strings');
+  }
   const copy = {};
   for (const [key, value] of Object.entries(source)) {
+    if (typeof value !== 'string') throw new Error('env must be an object whose values are strings');
     setOwnProperty(copy, key, value);
   }
   return copy;

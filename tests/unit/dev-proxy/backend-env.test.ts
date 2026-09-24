@@ -23,6 +23,10 @@ describe('dev-proxy backend port (issue #689)', () => {
 });
 
 describe('dev-proxy backend environment overrides', () => {
+  it.each([null, [], 'wrong', { FLAG: 1 }])('rejects an invalid env map: %j', (env) => {
+    expect(() => updateBackendEnvOverrides({}, { env })).toThrow('env must be an object whose values are strings');
+  });
+
   it('preserves overrides when env is omitted', () => {
     const current = { DAP_TRACE: '1' };
     expect(updateBackendEnvOverrides(current, {})).toBe(current);
