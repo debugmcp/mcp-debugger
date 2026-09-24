@@ -139,6 +139,8 @@ RUN rm -rf /app/node_modules/@debugmcp && \
     cp -r /app/packages/adapter-javascript/dist /app/node_modules/@debugmcp/adapter-javascript/ && \
     cp -r /app/packages/adapter-javascript/vendor /app/node_modules/@debugmcp/adapter-javascript/ && \
     cp /app/packages/adapter-javascript/package.json /app/node_modules/@debugmcp/adapter-javascript/ && \
+    mkdir -p /app/node_modules/@debugmcp/adapter-javascript/node_modules && \
+    cp -rL /app/packages/adapter-javascript/node_modules/dotenv /app/node_modules/@debugmcp/adapter-javascript/node_modules/ && \
     mkdir -p /app/node_modules/@debugmcp/adapter-java && \
     cp -r /app/packages/adapter-java/dist /app/node_modules/@debugmcp/adapter-java/ && \
     cp -r /app/packages/adapter-java/java /app/node_modules/@debugmcp/adapter-java/ && \
@@ -265,6 +267,10 @@ RUN mkdir -p /app/node_modules/@debugmcp/adapter-java/java/out && \
 COPY --from=builder /app/node_modules/@vscode /app/node_modules/@vscode
 COPY --from=builder /app/node_modules/which /app/node_modules/which
 COPY --from=builder /app/node_modules/.pnpm/isexe@4.0.0/node_modules/isexe /app/node_modules/isexe
+
+# Dynamic adapters run outside the server bundle. Fail the build if their
+# runtime dependency copy is incomplete, instead of shipping a broken launch.
+RUN node --input-type=module -e "await import('@debugmcp/adapter-javascript')"
 
 # Expose ports
 EXPOSE 3001 5679

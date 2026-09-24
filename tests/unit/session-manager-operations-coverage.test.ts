@@ -1123,7 +1123,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockSession.logDir = '/tmp/session-logs';
       vi.mocked(mockDependencies.fileSystem.readTail).mockResolvedValueOnce('adapter never answered');
 
-      vi.spyOn(internals(operations).proxyLauncher, 'start').mockResolvedValue(undefined);
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockResolvedValue({});
       vi.spyOn(internals(operations).launcher, 'waitForDryRunCompletion').mockResolvedValue(false);
 
       const result = await operations.startDebugging('test-session', 'dry-run.py', undefined, undefined, true);
@@ -1169,6 +1169,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       const waitSpy = vi.spyOn(internals(operations).launcher, 'waitForDryRunCompletion');
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = dryRunProxy as any;
+        return {};
       });
 
       const result = await operations.startDebugging('test-session', 'dry-run.py', undefined, undefined, true);
@@ -1404,6 +1405,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       const startProxySpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = proxyStub;
+        return {};
       });
       try {
         const result = await operations.startDebugging('test-session', 'main.py');
@@ -1447,6 +1449,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       const startProxySpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = proxyStub;
+        return {};
       });
       try {
         const result = await operations.startDebugging('test-session', 'main.py');
@@ -1485,6 +1488,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockSession.state = SessionState.CREATED;
       const startProxySpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = proxyStub;
+        return {};
       });
 
       const policy = {
@@ -1542,6 +1546,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockSession.state = SessionState.CREATED;
       const startProxySpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = proxyStub;
+        return {};
       });
 
       let result: any;
@@ -1585,6 +1590,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockSession.state = SessionState.CREATED;
       const startProxySpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = proxyStub;
+        return {};
       });
 
       let result: any;
@@ -1611,6 +1617,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       const startProxySpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = dryRunProxy;
+        return {};
       });
       const waitSpy = vi.spyOn(internals(operations).launcher, 'waitForDryRunCompletion').mockResolvedValue(true);
 
@@ -1647,6 +1654,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       const startProxySpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = proxyStub;
         mockSession.state = SessionState.PAUSED;
+        return {};
       });
 
       const policy = {
@@ -1691,6 +1699,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       const startProxySpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = proxyStub;
         mockSession.state = SessionState.PAUSED;
+        return {};
       });
 
       const policy = {
@@ -1734,6 +1743,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       const startProxySpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = proxyStub;
+        return {};
       });
 
       const policy = {
@@ -2250,6 +2260,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       );
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
+        return {};
       });
 
       const result = await operations.attachToProcess('test-session', {
@@ -2283,6 +2294,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       // Mock the proxy launch to succeed and set up the proxy
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
+        return {};
       });
 
       const result = await operations.attachToProcess('test-session', {
@@ -2322,6 +2334,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
+        return {};
       });
 
       const result = await operations.attachToProcess('test-session', {
@@ -2346,6 +2359,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
+        return {};
       });
 
       const result = await operations.attachToProcess('test-session', {
@@ -2399,6 +2413,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
+        return {};
       });
 
       const result = await operations.attachToProcess('test-session', {
@@ -2427,6 +2442,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
+        return {};
       });
 
       const result = await operations.attachToProcess('test-session', {
@@ -2465,6 +2481,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
+        return {};
       });
 
       const startedAt = Date.now();
@@ -2542,6 +2559,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
+        return {};
       });
 
       const result = await operations.attachToProcess('test-session', {
@@ -2573,6 +2591,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
+        return {};
       });
 
       const result = await operations.attachToProcess('test-session', {
@@ -2606,6 +2625,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
+        return {};
       });
 
       const result = await operations.attachToProcess('test-session', {
@@ -2637,6 +2657,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
+        return {};
       });
 
       const result = await operations.attachToProcess('test-session', {
@@ -2655,6 +2676,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     it('should reject a non-positive verifyTimeout without starting a proxy', async () => {
       const startSpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
+        return {};
       });
       mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
         if (command === 'threads') {
@@ -2681,6 +2703,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       // it must not ride the config spread into the DAP attach arguments.
       const startSpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
+        return {};
       });
       mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
         if (command === 'threads') {
@@ -2705,6 +2728,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     it('verifies threads without requesting a pause when stopOnEntry is false', async () => {
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
+        return {};
       });
 
       mockProxyManager.sendDapRequest.mockResolvedValue({ body: { threads: [{ id: 0, name: 'main' }] } });
@@ -2737,6 +2761,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
+        return {};
       });
 
       const result = await operations.attachToProcess('test-session', {
@@ -2774,6 +2799,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       });
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
+        return {};
       });
 
       const result = await operations.attachToProcess('test-session', {
@@ -2805,6 +2831,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
+        return {};
       });
 
       const result = await operations.attachToProcess('test-session', {
@@ -2831,6 +2858,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
+        return {};
       });
 
       const result = await operations.attachToProcess('test-session', {
@@ -2859,6 +2887,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = mockProxyManager;
+        return {};
       });
 
       const result = await operations.attachToProcess('test-session', {
@@ -3070,14 +3099,19 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockSession.language = DebugLanguage.CPP;
       mockSession.state = SessionState.CREATED;
 
-      const result = await operations.startDebugging('test-session', '/work/msvc.exe', []);
+      const result = await operations.startDebugging(
+        'test-session', '/work/msvc.exe', [], undefined, undefined, { request: 'launch' }
+      );
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('MSVC_TOOLCHAIN_DETECTED');
       expect(result.canContinue).toBe(false);
-      expect(result.data).toEqual(
-        expect.objectContaining({ toolchainValidation: validation, message: validation.message })
-      );
+      // Preparation notices survive this failure too, like every other one (#709).
+      expect(result.data).toEqual(expect.objectContaining({
+        toolchainValidation: validation,
+        message: validation.message,
+        warning: 'adapterLaunchConfig.request: ignored; reserved for the launch/attach operation'
+      }));
       expect(mockSession.state).toBe(SessionState.CREATED);
       expect(mockAdapter.dispose).toHaveBeenCalledTimes(1);
     });

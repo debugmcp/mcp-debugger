@@ -127,6 +127,7 @@ export type ProxyLaunchContext = Pick<
   | 'selectPolicy'
   | 'findFreePort'
   | 'setupProxyEventHandlers'
+  | 'redactionEnabled'
 >;
 
 /**

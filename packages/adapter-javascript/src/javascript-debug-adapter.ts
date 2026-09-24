@@ -8,6 +8,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
+import { readFile } from 'node:fs/promises';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import {
   AdapterState,
@@ -20,6 +21,7 @@ import {
   type AdapterCommand,
   type AdapterConfig,
   type GenericLaunchConfig,
+  type LaunchConfigDiagnostic,
   type LanguageSpecificLaunchConfig,
   type GenericAttachConfig,
   type LanguageSpecificAttachConfig,
@@ -41,6 +43,8 @@ import { detectBinary } from './utils/typescript-detector.js';
 import { determineOutFiles, isESMProject, hasTsConfigPaths } from './utils/config-transformer.js';
 import { JsDebugLaunchBarrier } from './utils/js-debug-launch-barrier.js';
 import { jsDebugCandidatePaths } from './utils/js-debug-resolver.js';
+import { JS_LAUNCH_CONSUMED_KEYS, JS_SUPPORTED_LAUNCH_KEYS, normalizeJsLaunchInputs } from './utils/launch-config.js';
+import { resolveLaunchEnvironment } from './utils/launch-environment.js';
 
 /**
  * Base path js-debug uses to resolve source-map `sources` on attach (issue
@@ -54,20 +58,6 @@ function defaultAttachCwd(): string {
   }
   return process.cwd();
 }
-
-/**
- * Generic launch inputs transformLaunchConfig folds into derived js-debug keys
- * (env merge, skip list, runtime selection, source-map settings, …) or that
- * select the DAP sequence upstream. They never reach js-debug under their own
- * name; everything else the caller passes is forwarded as-is (issue #703).
- */
-const JS_LAUNCH_CONSUMED_KEYS: ReadonlySet<string> = new Set([
-  'program', 'args', 'cwd', 'env', 'stopOnEntry', 'justMyCode',
-  'sourceMaps', 'outFiles', 'resolveSourceMapLocations', 'runtimeExecutable',
-  'runtimeArgs', 'skipFiles', 'smartStep', '__workspaceFolder',
-  '__workspaceCachePath', 'pauseForSourceMap', 'autoAttachChildProcesses',
-  'request', '__attachMode'
-]);
 
 /**
  * The pwa-node launch shape mcp-debugger owns: a caller value is dropped
@@ -191,6 +181,15 @@ export function scrubInheritedExitCodeShim(env: Record<string, string>): void {
 export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapter {
   readonly language = 'javascript' as unknown as DebugLanguage;
   readonly name = 'JavaScript/TypeScript Debug Adapter';
+  readonly supportedLaunchKeys = JS_SUPPORTED_LAUNCH_KEYS;
+  readonly consumedLaunchKeys = [...JS_LAUNCH_CONSUMED_KEYS];
+  private launchConfigDiagnostics: LaunchConfigDiagnostic[] = [];
+
+  consumeLaunchConfigDiagnostics(): readonly LaunchConfigDiagnostic[] {
+    const diagnostics = this.launchConfigDiagnostics;
+    this.launchConfigDiagnostics = [];
+    return diagnostics;
+  }
 
   // js-debug pwa-node attach options https://github.com/microsoft/vscode-js-debug/blob/main/package.json
   // plus the generic keys transformAttachConfig special-cases. Unlisted keys
@@ -525,7 +524,11 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
 
   async transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig> {
     // Base fields and defaults - paths already resolved by server
-    const u = (config || {}) as Record<string, unknown>;
+    this.launchConfigDiagnostics = [];
+    const u = normalizeJsLaunchInputs((config || {}) as Record<string, unknown>, this.launchConfigDiagnostics);
+    for (const { key, message } of this.launchConfigDiagnostics) {
+      this.dependencies.logger?.warn?.(`[JavascriptDebugAdapter] launch ${key}: ${message}`);
+    }
     const program = typeof u.program === 'string' ? u.program : '';
     
     // Use cwd as provided (already resolved by server) or derive from program
@@ -556,25 +559,22 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     // source-map pause can never disagree on what counts as TypeScript
     const isTS = isJsTranspiledProgram(program);
 
-    // Env: copy string values from process.env, merge user env (string-only), set NODE_ENV
-    const mergedEnv: Record<string, string> = {};
+    const inheritedEnv: Record<string, string> = {};
     for (const [k, v] of Object.entries(process.env)) {
-      if (typeof v === 'string') mergedEnv[k] = v;
+      if (typeof v === 'string') Object.defineProperty(inheritedEnv, k, { value: v, enumerable: true, writable: true, configurable: true });
     }
     // Scrub the INHERITED shim env before the caller's env is overlaid, not
     // after: a caller who sets MCP_DEBUGGER_EXITCODE_CLAIMED themselves is
     // opting the debuggee out of our exit handler, and a scrub running later
     // silently replaced that with our own claim (issue #731).
-    scrubInheritedExitCodeShim(mergedEnv);
-    const userEnv = (u.env as Record<string, unknown> | undefined);
-    if (userEnv && typeof userEnv === 'object') {
-      for (const [k, v] of Object.entries(userEnv)) {
-        if (typeof v === 'string') mergedEnv[k] = v;
-      }
-    }
-    mergedEnv.NODE_ENV = userEnv && typeof userEnv.NODE_ENV === 'string'
-      ? (userEnv.NODE_ENV as string)
-      : 'development';
+    scrubInheritedExitCodeShim(inheritedEnv);
+    const mergedEnv = await resolveLaunchEnvironment({
+      inherited: inheritedEnv, env: u.env, envFile: u.envFile, cwd,
+      readFile: file => this.dependencies.fileSystem?.readFile
+        ? this.dependencies.fileSystem.readFile(file, 'utf8')
+        : readFile(file, 'utf8'),
+      diagnostics: this.launchConfigDiagnostics
+    });
 
     // js-debug never emits a DAP 'exited' event, so preload a shim that
     // records the debuggee's exit code for the proxy worker to replay as a
@@ -792,16 +792,22 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
         continue;
       }
       if (JS_LAUNCH_PINNED_KEYS.has(key)) {
-        pinned.push(key);
+        // A value that matches the pinned one (request: 'launch') was not ignored.
+        if (value !== result[key]) {
+          pinned.push(key);
+          this.launchConfigDiagnostics.push({ key, message: 'ignored; mcp-debugger pins the js-debug launch shape' });
+        }
         continue;
       }
       if (JS_LAUNCH_NOT_FOR_LAUNCH_KEYS.has(key)) {
         ignored.push(key);
+        this.launchConfigDiagnostics.push({ key, message: 'ignored; not applicable to a parent launch' });
         continue;
       }
       // js-debug reads trace.stdio when trace is an object: null would throw
-      if (key === 'trace' && typeof value !== 'boolean' && (typeof value !== 'object' || value === null)) {
+      if (key === 'trace' && typeof value !== 'boolean' && (typeof value !== 'object' || value === null || Array.isArray(value))) {
         ignored.push(key);
+        this.launchConfigDiagnostics.push({ key, message: 'ignored; expected a boolean or an options object' });
         continue;
       }
       output[key] = value;
@@ -890,7 +896,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
    * DAP 'exited' event js-debug never sends. Missing shim asset degrades
    * gracefully to today's behavior (no exitCode), never a failed launch.
    */
-  private injectExitCodeShim(env: Record<string, string>): void {
+  private injectExitCodeShim(env: Record<string, string | null>): void {
     // The inherited shim env is already gone: transformLaunchConfig scrubs the
     // process.env copy before overlaying the caller's env, so this only ever
     // stamps (issue #731). Keeping the scrub out of here is what lets a

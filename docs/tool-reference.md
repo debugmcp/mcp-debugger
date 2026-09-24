@@ -388,6 +388,22 @@ Starts debugging a script.
 }
 ```
 
+**JavaScript launch configuration:** Both launch option objects accept js-debug settings;
+`adapterLaunchConfig` wins when a key appears in both. The effective `stopOnEntry` value controls
+the entry pause and is replayed by `restart_debugging`. An honoured `noDebug` disables that pause.
+
+Ignored or malformed options produce a `warning` naming the input object and key. Unrecognized
+options remain forwarded, with a warning and a spelling suggestion when available. Warnings also
+appear once in `get_output` after launch setup, are returned by `dryRunSpawn`, and are retained in
+`data.warning` when preparation fails. A subsequent launch starts with fresh notices.
+
+For JavaScript, `envFile` resolves relative to the effective `cwd` (absolute paths work too).
+Its dotenv values override the inherited environment; explicit `env` entries override the file,
+and `null` removes a variable. This also applies to `NODE_ENV` and `NODE_OPTIONS`; without a file
+or explicit override, the existing `NODE_ENV=development` default applies. A missing file produces
+a warning; another read error fails the launch. The server's own environment is unchanged.
+See the [JavaScript configuration guide](javascript/README.md#custom-configuration).
+
 **Pause Reasons:**
 - `"breakpoint"`: Stopped at a breakpoint
 - `"step"`: Stopped after a step operation

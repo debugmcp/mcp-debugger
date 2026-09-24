@@ -142,7 +142,7 @@ You can provide custom DAP launch arguments:
   "tool": "start_debugging",
   "params": {
     "sessionId": "session-id",
-    "scriptPath": "app.js",
+    "scriptPath": "/path/to/project/app.js",
     "dapLaunchArgs": {
       "env": {
         "NODE_ENV": "development"
@@ -154,6 +154,40 @@ You can provide custom DAP launch arguments:
 }
 ```
 
+Both `dapLaunchArgs` and `adapterLaunchConfig` accept launch settings. When the same key appears
+in both, `adapterLaunchConfig` wins, including `stopOnEntry`. Setting it to `true` keeps the target
+paused at entry; `restart_debugging` replays that intent. An honoured `noDebug` disables the entry pause.
+
+Use `envFile` to load dotenv values relative to the effective `cwd`, then override individual values
+with `env`. A `null` value removes an inherited or file-defined variable:
+
+```json
+{
+  "sessionId": "session-id",
+  "scriptPath": "/path/to/project/app.js",
+  "adapterLaunchConfig": {
+    "cwd": "/path/to/project",
+    "envFile": ".env.debug",
+    "env": { "PORT": "3001", "LEGACY_FLAG": null },
+    "stopOnEntry": true
+  }
+}
+```
+
+Environment precedence is inherited values, then the existing `NODE_ENV=development` fallback,
+then the file, then explicit `env` entries. File or explicit values for `NODE_ENV` and `NODE_OPTIONS`
+take effect in the target; mcp-debugger adds its exit-code recorder after these overrides. Windows
+environment keys match without regard to case. A missing file warns and continues; another read
+error fails the launch. Loading a file never changes the server's own environment.
+
+Check the response's `warning` for ignored, malformed or unrecognized options. For example,
+`sourceMapPathOverides` remains forwarded but warns with the suggestion `sourceMapPathOverrides`;
+`runtimeArgs: "--inspect"` warns because it needs an array. The warning names the input object and
+key without quoting its value. Notices also reach `get_output`, appear on dry runs, and survive
+preparation failures in `data.warning`. Each new launch clears prior notices.
+
+The [launch configuration self-debugging example](launch-config-self-debug.md) demonstrates how
+to inspect these decisions inside a running mcp-debugger server.
 
 ## Advanced Features
 

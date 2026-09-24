@@ -101,7 +101,8 @@ function makeHarness(options: HarnessOptions = {}): Harness {
     updateSession: vi.fn(),
     selectPolicy: () => policy as unknown as AdapterPolicy,
     findFreePort: vi.fn(async () => 5678),
-    setupProxyEventHandlers: vi.fn()
+    setupProxyEventHandlers: vi.fn(),
+    redactionEnabled: vi.fn(() => true)
   };
   return { launcher: new ProxyLauncher(ctx), ctx, policy };
 }
@@ -393,6 +394,79 @@ describe('ProxyLauncher.buildAdapterLaunchPlan', () => {
 });
 
 describe('ProxyLauncher.start', () => {
+  it.each([
+    [undefined, true], [false, true], [true, false]
+  ])('uses DAP stopOnEntry=%s with adapter override=%s consistently', async (dapStop, adapterStop) => {
+    const adapter = new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE });
+    const proxyManager = new MockProxyManager();
+    const h = makeHarness({ adapter, proxyManager });
+    const config = await h.launcher.start(makeSession(), {
+      scriptPath: SCRIPT, dapLaunchArgs: { stopOnEntry: dapStop }, adapterLaunchConfig: { stopOnEntry: adapterStop }
+    });
+    expect(config.stopOnEntry).toBe(adapterStop);
+    expect(proxyManager.startCalls[0].stopOnEntry).toBe(adapterStop);
+    expect(h.ctx.setupProxyEventHandlers).toHaveBeenCalledWith(expect.anything(), proxyManager,
+      expect.objectContaining({ stopOnEntry: adapterStop }));
+  });
+
+  it('retains caller provenance and diagnostics across a failed transform, then clears them on attach', async () => {
+    const adapter = Object.assign(new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE }), {
+      supportedLaunchKeys: ['program', 'outFiles'],
+      consumeLaunchConfigDiagnostics: vi.fn(() => [{ key: 'outFiles', message: 'expected an array of strings; using the default' }])
+    });
+    adapter.transformLaunchConfig.mockRejectedValueOnce(new Error('Cannot read envFile (EACCES)'));
+    const proxyManager = new MockProxyManager();
+    const h = makeHarness({ adapter, proxyManager });
+    const session = makeSession();
+    await expect(h.launcher.start(session, { scriptPath: SCRIPT,
+      dapLaunchArgs: launchArgs({ outFiles: 'from-dap' }), adapterLaunchConfig: { outFiles: 'from-adapter' }
+    })).rejects.toThrow('Cannot read envFile');
+    expect(session.launchConfigNotices).toEqual(['adapterLaunchConfig.outFiles: expected an array of strings; using the default']);
+    adapter.withAttachSupport();
+    await h.launcher.start(session, { scriptPath: 'attach://pid', dapLaunchArgs: launchArgs({ request: 'attach' }) });
+    expect(session.launchConfigNotices).toEqual([]);
+  });
+
+  it('reports caller-only drops and forwarded typos from either bag with the winning provenance', async () => {
+    const adapter = Object.assign(new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE }), {
+      supportedLaunchKeys: ['program', 'outFiles', 'sourceMapPathOverrides', 'envFile'],
+      consumedLaunchKeys: ['envFile']
+    });
+    adapter.transformLaunchConfig.mockImplementation(async config => {
+      const { dropped: _dropped, envFile: _envFile, ...rest } = config as Record<string, unknown>;
+      return rest;
+    });
+    const session = makeSession();
+    const h = makeHarness({ adapter, proxyManager: new MockProxyManager() });
+    await h.launcher.start(session, { scriptPath: SCRIPT,
+      dapLaunchArgs: launchArgs({ dropped: 'secret', sourceMapPathOverides: {} }),
+      adapterLaunchConfig: { envFile: 'app.env', request: 'attach' }
+    });
+    expect(session.launchConfigNotices).toEqual([
+      'dapLaunchArgs.dropped: ignored by the launch transform',
+      'dapLaunchArgs.sourceMapPathOverides: forwarded to the adapter but unrecognized (did you mean sourceMapPathOverrides?)',
+      'adapterLaunchConfig.request: ignored; reserved for the launch/attach operation'
+    ]);
+  });
+
+  it('redacts caller keys in launch notices unless redaction is disabled', async () => {
+    const token = `ghp_${'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8'}`;
+    const adapter = Object.assign(new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE }), {
+      supportedLaunchKeys: ['program']
+    });
+    const h = makeHarness({ adapter, proxyManager: new MockProxyManager() });
+    const session = makeSession();
+    await h.launcher.start(session, { scriptPath: SCRIPT, dapLaunchArgs: launchArgs({}), adapterLaunchConfig: { [token]: true } });
+    expect(session.launchConfigNotices).toEqual([
+      'adapterLaunchConfig.<redacted:github-pat>: forwarded to the adapter but unrecognized'
+    ]);
+    expect(JSON.stringify(vi.mocked(h.ctx.logger.warn).mock.calls)).not.toContain(token);
+
+    vi.mocked(h.ctx.redactionEnabled).mockReturnValue(false);
+    await h.launcher.start(session, { scriptPath: SCRIPT, dapLaunchArgs: launchArgs({}), adapterLaunchConfig: { [token]: true } });
+    expect(session.launchConfigNotices).toEqual([`adapterLaunchConfig.${token}: forwarded to the adapter but unrecognized`]);
+  });
+
   it('awaits an async transformAttachConfig and forwards its result as the attach config', async () => {
     const adapter = new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE }).withAttachSupport({
       transform: async (config) => ({ ...config, regenerated: true })

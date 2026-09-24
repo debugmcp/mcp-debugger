@@ -38,6 +38,16 @@ start_debugging {
 
 Conditional breakpoints are supported: `set_breakpoint { ..., "condition": "count > 5" }`.
 
+`adapterLaunchConfig` accepts the same launch settings and wins over `dapLaunchArgs` for a shared
+key, including `stopOnEntry`. Read the launch response's `warning`: it names ignored, malformed
+or unrecognized keys and suggests likely spellings. Unknown keys are still forwarded. Notices
+also appear in `get_output`; preparation failures retain them in `data.warning`.
+
+`envFile: ".env.debug"` loads dotenv values relative to the effective `cwd`. File values override
+inherited values, explicit `env` entries override the file, and `env: { "KEY": null }` removes a
+variable. File/explicit `NODE_ENV` and `NODE_OPTIONS` values take effect too. A missing file warns;
+other read errors fail the launch.
+
 ## Attach / remote
 
 Start the target Node process with the inspector listening, then attach by port:

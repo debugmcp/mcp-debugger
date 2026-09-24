@@ -1,4 +1,4 @@
-/** CI-run real js-debug coverage for #705/#730/#758/#762. */
+/** CI-run real js-debug coverage for #705/#709/#730/#758/#762/#791/#792. */
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -82,10 +82,10 @@ function endpointFrom(output: string): string | undefined {
   return output.match(/MCP endpoint available at (http:\/\/[^/\s]+\/mcp)/)?.[1];
 }
 
-async function launchNested(): Promise<string> {
+async function launchNested(env: Record<string, string> = {}): Promise<string> {
   const result = await call(outer!, 'start_debugging', {
     sessionId: outerId, scriptPath: entry, args: ['http', '--port', '0'],
-    dapLaunchArgs: { stopOnEntry: false, env: { MCP_EXIT_ON_STDIN_CLOSE: '0' } }
+    dapLaunchArgs: { stopOnEntry: false, env: { ...env, MCP_EXIT_ON_STDIN_CLOSE: '0' } }
   });
   expect(result.state).toBe('running');
   let output = '';
@@ -158,6 +158,66 @@ afterEach(async () => {
 }, 30_000);
 
 describe('mcp-debugger self-debugging readiness', () => {
+  it('inspects its own launch configuration and steps past the decision to keep an entry stop', async () => {
+    await startOuter();
+    await connectNested(await launchNested({ MCP_LAUNCH_CONFIG_VALUE: 'inherited', MCP_LAUNCH_CONFIG_REMOVE: 'inherited' }));
+    innerId = await createSession(nested!, 'self-debug-launch-config');
+    const condition = `session.id === ${JSON.stringify(innerId)}`;
+    const preparationFile = path.join(root, 'src/session/launch/proxy-launcher.ts');
+    const preparationLine = sourceLine(preparationFile, 'this.ctx.setupProxyEventHandlers(session, proxyManager, effectiveLaunchArgs);');
+    const stopFile = path.join(root, 'src/session/session-manager-core.ts');
+    const stopLine = sourceLine(stopFile, 'if (shouldAutoContinue) {');
+    await call(outer!, 'set_breakpoint', { sessionId: outerId, file: preparationFile, line: preparationLine, condition });
+    await call(outer!, 'set_breakpoint', { sessionId: outerId, file: stopFile, line: stopLine, condition });
+    const fixture = path.join(root, 'tests/fixtures/javascript-launch-config');
+    const launch = call<ToolResult & { warning?: string; data?: { stopOnEntrySuccessful?: boolean } }>(nested!, 'start_debugging', {
+      sessionId: innerId, scriptPath: path.join(fixture, 'target.cjs'),
+      dapLaunchArgs: { stopOnEntry: false },
+      adapterLaunchConfig: { stopOnEntry: true, cwd: fixture, envFile: 'environment.env',
+        env: { MCP_LAUNCH_CONFIG_REMOVE: null }, outFiles: 'bad', sourceMapPathOverides: {} }
+    }).then(value => ({ value, error: undefined }), error => ({ value: undefined, error }));
+
+    await paused(outer!, outerId!);
+    let stack = await call<ToolResult & { stackFrames: Frame[] }>(outer!, 'get_stack_trace', { sessionId: outerId });
+    expect(path.relative(preparationFile, stack.stackFrames[0].file)).toBe('');
+    const prepared = await call(outer!, 'evaluate_expression', {
+      sessionId: outerId, frameId: stack.stackFrames[0].id,
+      expression: 'JSON.stringify({core:effectiveLaunchArgs.stopOnEntry,worker:plan.proxyConfig.stopOnEntry,value:plan.launchConfig.env.MCP_LAUNCH_CONFIG_VALUE,removed:plan.launchConfig.env.MCP_LAUNCH_CONFIG_REMOVE})'
+    });
+    expect(prepared.result).toContain('"core":true,"worker":true');
+    expect(prepared.result).toContain('"value":"file","removed":null');
+    await call(outer!, 'step_over', { sessionId: outerId });
+    stack = await call<ToolResult & { stackFrames: Frame[] }>(outer!, 'get_stack_trace', { sessionId: outerId });
+    expect((await call(outer!, 'evaluate_expression', {
+      sessionId: outerId, frameId: stack.stackFrames[0].id,
+      expression: 'session.adapterNotices.some(note => note.includes("adapterLaunchConfig.outFiles"))'
+    })).result).toBe('true');
+    await call(outer!, 'continue_execution', { sessionId: outerId });
+
+    await paused(outer!, outerId!);
+    stack = await call<ToolResult & { stackFrames: Frame[] }>(outer!, 'get_stack_trace', { sessionId: outerId });
+    expect(path.relative(stopFile, stack.stackFrames[0].file)).toBe('');
+    expect(stack.stackFrames[0].line).toBe(stopLine);
+    const decision = await call(outer!, 'evaluate_expression', {
+      sessionId: outerId, frameId: stack.stackFrames[0].id,
+      expression: 'JSON.stringify({requested:session.lastLaunch.adapterLaunchConfig.stopOnEntry,core:effectiveLaunchArgs.stopOnEntry,shouldAutoContinue,reason})'
+    });
+    expect(decision.result).toContain('"requested":true,"core":true,"shouldAutoContinue":false');
+    await call(outer!, 'step_over', { sessionId: outerId });
+    await call(outer!, 'clear_breakpoints', { sessionId: outerId });
+    await call(outer!, 'continue_execution', { sessionId: outerId });
+    const result = await launch;
+    expect(result.error).toBeUndefined();
+    expect(result.value?.state).toBe('paused');
+    expect(result.value?.data?.stopOnEntrySuccessful).toBe(true);
+    expect(result.value?.warning).toContain('did you mean sourceMapPathOverrides?');
+    const innerStack = await call<ToolResult & { stackFrames: Frame[] }>(nested!, 'get_stack_trace', { sessionId: innerId });
+    const targetEnv = await call(nested!, 'evaluate_expression', { sessionId: innerId, frameId: innerStack.stackFrames[0].id,
+      expression: "JSON.stringify({value:process.env.MCP_LAUNCH_CONFIG_VALUE,removed:Object.hasOwn(process.env,'MCP_LAUNCH_CONFIG_REMOVE'),nodeEnv:process.env.NODE_ENV,stackLimit:Error.stackTraceLimit})" });
+    expect(targetEnv.result).toContain('"value":"file","removed":false,"nodeEnv":"production","stackLimit":37');
+    console.log('Self-debug launch evidence:', { prepared: prepared.result, decision: decision.result, target: targetEnv.result });
+  }, 60_000);
+
   it.each(['launch', 'attach'] as const)('catches the first matching MCP request after %s returns', async mode => {
     await startOuter();
     const file = path.join(root, 'src/cli/http-command.ts');

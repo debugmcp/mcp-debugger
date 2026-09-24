@@ -821,7 +821,7 @@ describe('JavascriptDebugAdapter.transformLaunchConfig passthrough (issue #703)'
 
     const bad = await adapter.transformLaunchConfig({ program, resolveSourceMapLocations: 'dist/**' } as any) as Record<string, unknown>;
     expect(bad.resolveSourceMapLocations).toEqual(['**', '!**/node_modules/**']);
-    expect(d.logger.warn.mock.calls.map(([m]) => String(m)).join('\n')).toMatch(/resolveSourceMapLocations must be null or an array/);
+    expect(d.logger.warn.mock.calls.map(([m]) => String(m)).join('\n')).toMatch(/resolveSourceMapLocations: expected null or an array/);
 
     const attach = adapter.transformAttachConfig({ host: 'h', port: 1, resolveSourceMapLocations: { no: true } } as any) as Record<string, unknown>;
     expect(attach.resolveSourceMapLocations).toEqual(['**', '!**/node_modules/**']);

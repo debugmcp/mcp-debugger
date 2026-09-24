@@ -173,6 +173,19 @@ export interface IDebugAdapter extends EventEmitter {
    */
   readonly consumedAttachKeys?: readonly string[];
 
+  /** Known launch options; unrecognized options are still forwarded (#709). */
+  readonly supportedLaunchKeys?: readonly string[];
+
+  /** Launch inputs consumed locally rather than sent under their original key. */
+  readonly consumedLaunchKeys?: readonly string[];
+
+  /**
+   * Drain diagnostics from the last launch transform, including a failed one.
+   * Messages describe handling, never caller values. The session layer adds
+   * the input key and filters out defaults/generated inputs (#709).
+   */
+  consumeLaunchConfigDiagnostics?(): readonly LaunchConfigDiagnostic[];
+
   /**
    * Transform generic attach config to language-specific format
    * Only called if supportsAttach() returns true
@@ -382,10 +395,17 @@ export interface GenericLaunchConfig {
   program?: string;
   stopOnEntry?: boolean;
   justMyCode?: boolean;
-  env?: Record<string, string>;
+  /** DAP environment overrides; null removes a variable where supported. */
+  env?: Record<string, string | null>;
   cwd?: string;
   args?: string[];
   // Common debug configuration options
+}
+
+/** An adapter's explanation of how it handled one launch input. */
+export interface LaunchConfigDiagnostic {
+  key: string;
+  message: string;
 }
 
 /**

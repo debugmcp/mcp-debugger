@@ -9,6 +9,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
 import { DebugLanguage, RustAdapterPolicy } from '@debugmcp/shared';
 import { createMockDependencies } from './session-manager-test-utils.js';
+import { FakeDebugAdapter } from '../../../test-utils/fakes/fake-debug-adapter.js';
 
 const DWARF_NOISE =
   "error: hello_world.exe 0x00002b54: DW_TAG_member '_M_local_buf' refers to type 0x0000000000010ac0 which extends beyond the bounds of 0x00002b4b\n";
@@ -140,6 +141,24 @@ describe('SessionManager - adapter-noise output suppression (issue #361)', () =>
   });
 
   describe('worker-forwarded adapter notices (issue #746)', () => {
+    it('keeps preparation notices after the launch reset even when an output subscriber throws (#709)', async () => {
+      const adapter = Object.assign(new FakeDebugAdapter(), {
+        consumeLaunchConfigDiagnostics: () => [{ key: 'outFiles', message: 'expected an array of strings; using the default' }]
+      });
+      vi.mocked(dependencies.adapterRegistry!.create).mockResolvedValue(adapter);
+      const session = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      sessionManager.on('output-captured', () => { throw new Error('subscriber blew up'); });
+
+      const result = await sessionManager.startDebugging(session.id, 'main', undefined, undefined, false, { outFiles: 'bad' });
+      await vi.runAllTimersAsync();
+
+      expect(result.success).toBe(true);
+      const managed = sessionManager.getSession(session.id)!;
+      expect(managed.adapterNotices).toEqual(['adapterLaunchConfig.outFiles: expected an array of strings; using the default']);
+      expect(managed.outputBuffer!.read(0, 100).entries).toHaveLength(1);
+      expect(result.data?.warning).toBe(managed.adapterNotices![0]);
+    });
+
     it('contains a throwing output-captured subscriber, as the output path does', async () => {
       const session = await launch(DebugLanguage.PYTHON);
       sessionManager.on('output-captured', () => {

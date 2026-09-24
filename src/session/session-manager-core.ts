@@ -1399,6 +1399,11 @@ export abstract class SessionManagerCore extends EventEmitter {
     proxyManager.on('adapter-notice', handleAdapterNotice);
     handlers.set('adapter-notice', handleAdapterNotice);
 
+    // Preparation precedes this generation's reset. Seed its notices only
+    // after the notice array and output buffer have been initialized, using
+    // the same containment for subscribers that throw as worker notices.
+    for (const note of session.launchConfigNotices ?? []) handleAdapterNotice(note);
+
     // Store handlers in WeakMap
     this.sessionEventHandlers.set(session, handlers);
     this.logger.debug(`[SessionManager] Attached ${handlers.size} event handlers for session ${sessionId}`);

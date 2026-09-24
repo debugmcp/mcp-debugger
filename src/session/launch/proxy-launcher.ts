@@ -19,7 +19,8 @@ import {
   type IDebugAdapter,
   type GenericLaunchConfig,
   type GenericAttachConfig,
-  type LanguageSpecificLaunchConfig
+  type LanguageSpecificLaunchConfig,
+  redactSecretsInString
 } from '@debugmcp/shared';
 import { AdapterLease } from '../../adapters/adapter-lease.js';
 import { DebugSessionCreationError, PythonNotFoundError } from '../../errors/debug-errors.js';
@@ -30,6 +31,7 @@ import { ErrorMessages } from '../../utils/error-messages.js';
 import type { CustomLaunchRequestArguments } from '../session-manager-core.js';
 import type { ManagedSession, ToolchainValidationState } from '../session-store.js';
 import type { ProxyLaunchContext } from '../operations-context.js';
+import { callerLaunchInputs, collectLaunchConfigNotices, type CallerLaunchInput } from './launch-config-diagnostics.js';
 
 
 /**
@@ -67,6 +69,7 @@ export interface LaunchInputs {
   isAttachMode: boolean;
   genericLaunchConfig: Record<string, unknown>;
   adapterExtraKeys: string[];
+  callerLaunchInputs: Record<string, CallerLaunchInput>;
   adapterConfig: AdapterConfig;
 }
 
@@ -87,6 +90,7 @@ export class ProxyLauncher {
     // projection before any fallible setup so an adapter-acquire, filesystem,
     // or transform failure cannot inherit an earlier MSVC classification.
     this.ctx.updateSession(session.id, { toolchainValidation: undefined });
+    session.launchConfigNotices = [];
 
     // Log entrance for Windows CI debugging
     this.ctx.logger.info(
@@ -120,7 +124,13 @@ export class ProxyLauncher {
       session.proxyManager = proxyManager;
 
       // Set up event handlers
-      this.ctx.setupProxyEventHandlers(session, proxyManager, inputs.effectiveLaunchArgs);
+      // The core must see the same entry-stop intent the worker sees (#791).
+      // Attach retains its separate pause/verification semantics.
+      const effectiveLaunchArgs = inputs.isAttachMode ? inputs.effectiveLaunchArgs : {
+        ...inputs.effectiveLaunchArgs,
+        stopOnEntry: plan.proxyConfig.stopOnEntry
+      };
+      this.ctx.setupProxyEventHandlers(session, proxyManager, effectiveLaunchArgs);
 
       // Start the proxy
       await proxyManager.start(plan.proxyConfig);
@@ -263,6 +273,7 @@ export class ProxyLauncher {
       isAttachMode,
       genericLaunchConfig,
       adapterExtraKeys,
+      callerLaunchInputs: callerLaunchInputs(dapLaunchArgs, adapterLaunchConfig),
       adapterConfig
     };
   }
@@ -280,7 +291,22 @@ export class ProxyLauncher {
     inputs: LaunchInputs,
     request: ProxyLaunchRequest
   ): Promise<AdapterLaunchPlan> {
-    const transformedLaunchConfig = await this.transformAdapterConfig(session, adapter, inputs);
+    let transformedLaunchConfig: LanguageSpecificLaunchConfig | undefined;
+    try {
+      transformedLaunchConfig = await this.transformAdapterConfig(session, adapter, inputs);
+    } finally {
+      if (!inputs.isAttachMode) {
+        // Notices name caller keys. Redact them here, the same way the output
+        // buffer they are seeded into does (#237): a launch that fails before
+        // the proxy starts returns them straight from the session, and one
+        // redacted text lets the launch warning dedupe against its seeded copy.
+        const notices = collectLaunchConfigNotices(adapter, inputs.callerLaunchInputs, transformedLaunchConfig);
+        session.launchConfigNotices = this.ctx.redactionEnabled()
+          ? notices.map(notice => redactSecretsInString(notice).value)
+          : notices;
+        for (const notice of session.launchConfigNotices) this.ctx.logger.warn(`[SessionManager] ${notice}`);
+      }
+    }
 
     this.recordAttachKeyDiff(session, adapter, inputs, transformedLaunchConfig);
 
@@ -479,7 +505,8 @@ export class ProxyLauncher {
 
     const launchConfigData: LanguageSpecificLaunchConfig = { ...transformedLaunchConfig };
 
-    const stopOnEntryProvided = typeof dapLaunchArgs?.stopOnEntry === 'boolean';
+    const stopOnEntryProvided = typeof request.adapterLaunchConfig?.stopOnEntry === 'boolean' ||
+      typeof dapLaunchArgs?.stopOnEntry === 'boolean';
 
     // Let adapter policy override stopOnEntry default when user hasn't specified it.
     // E.g., Go/Delve needs stopOnEntry=false to avoid "unknown goroutine" issues.
@@ -491,12 +518,13 @@ export class ProxyLauncher {
         launchConfigData.stopOnEntry = policyDefaults.defaultStopOnEntry;
       }
     }
+    if (request.debuggerOff) launchConfigData.stopOnEntry = false;
 
     this.ctx.logger.info(
       `[SessionManager] Launch config stopOnEntry adjustments for ${sessionId}: base=${String(
         transformedLaunchConfig.stopOnEntry
       )}, final=${String(launchConfigData.stopOnEntry)}, userProvided=${String(
-        dapLaunchArgs?.stopOnEntry
+        request.adapterLaunchConfig?.stopOnEntry ?? dapLaunchArgs?.stopOnEntry
       )}`
     );
 

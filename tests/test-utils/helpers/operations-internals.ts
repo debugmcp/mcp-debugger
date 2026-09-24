@@ -30,15 +30,15 @@ export type ProxyLaunchRequestView =
 };
 
 /**
- * `ProxyLauncher.start` as these tests drive it. One further loosening: spies
- * resolve `undefined` for a launch config nothing downstream reads, which the
- * real `Promise<LanguageSpecificLaunchConfig>` return type would reject.
+ * `ProxyLauncher.start` as these tests drive it. Keep the production return
+ * contract: launch readiness reads the effective config, so even a minimal
+ * spy must return an object.
  */
 export interface ProxyLauncherView {
   start(
     session: ManagedSession,
     request: ProxyLaunchRequestView
-  ): Promise<LanguageSpecificLaunchConfig | void>;
+  ): Promise<LanguageSpecificLaunchConfig>;
 }
 
 /** The collaborators tests reach into. Add to this rather than re-casting. */
