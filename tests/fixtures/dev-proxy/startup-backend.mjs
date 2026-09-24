@@ -1,8 +1,17 @@
 import { access } from 'node:fs/promises';
+import { appendFileSync } from 'node:fs';
 import { setTimeout } from 'node:timers/promises';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import {
+  CallToolRequestSchema, ListToolsRequestSchema, ListResourcesRequestSchema, ReadResourceRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
+
+if (process.env.DEV_PROXY_FIXTURE_EVENTS) {
+  appendFileSync(process.env.DEV_PROXY_FIXTURE_EVENTS, JSON.stringify({
+    kind: 'backend-start', pid: process.pid, tool: process.env.DEV_PROXY_FIXTURE_TOOL,
+  }) + '\n');
+}
 
 if (process.env.DEV_PROXY_FIXTURE_FAIL === '1') process.exit(1);
 
@@ -25,7 +34,7 @@ if (releaseFile) {
   }
 }
 
-const server = new Server({ name: 'startup-fixture', version: '1.0.0' }, { capabilities: { tools: {} } });
+const server = new Server({ name: 'startup-fixture', version: '1.0.0' }, { capabilities: { tools: {}, resources: {} } });
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [{
     name: process.env.DEV_PROXY_FIXTURE_TOOL || 'fixture_tool',
@@ -35,8 +44,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 }));
 // Answering at all is the point: it proves the proxy forwarded the call rather
 // than refusing it while the backend was still starting.
-server.setRequestHandler(CallToolRequestSchema, async (request) => ({
-  content: [{ type: 'text', text: `startup fixture handled ${request.params.name}` }],
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  if (request.params.arguments?.floodStderr) {
+    // More than a pipe's capacity: answering proves the proxy drained stderr
+    // while a build was running, rather than leaving this write blocked.
+    await new Promise((resolve, reject) => {
+      process.stderr.write(('fixture noise '.repeat(40) + '\n').repeat(512), (err) => err ? reject(err) : resolve());
+    });
+  }
+  return { content: [{ type: 'text', text: `startup fixture handled ${request.params.name}` }] };
+});
+server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+  resources: [{ uri: 'fixture://status', name: 'status' }],
+}));
+server.setRequestHandler(ReadResourceRequestSchema, async () => ({
+  contents: [{ uri: 'fixture://status', text: process.env.DEV_PROXY_FIXTURE_TOOL || 'fixture_tool' }],
 }));
 process.stdin.on('end', () => process.exit(0));
 await server.connect(new StdioServerTransport());

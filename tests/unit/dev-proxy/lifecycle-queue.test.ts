@@ -34,6 +34,26 @@ describe('dev-proxy LifecycleQueue', () => {
     await expect(failed).rejects.toThrow('startup failed');
     await expect(recovered).resolves.toBe('restarted');
   });
+
+  it('counts queued and running operations until each settles, failures included', async () => {
+    const queue = new LifecycleQueue();
+    let finishBuild!: () => void;
+    let finishRestart!: () => void;
+    const buildGate = new Promise<void>((resolve) => { finishBuild = resolve; });
+    const restartGate = new Promise<void>((resolve) => { finishRestart = resolve; });
+    expect(queue.pending).toBe(0);
+
+    const build = queue.run(async () => { await buildGate; throw new Error('build failed'); });
+    const restart = queue.run(async () => { await restartGate; return 'restarted'; });
+    expect(queue.pending).toBe(2);
+
+    finishBuild();
+    await expect(build).rejects.toThrow('build failed');
+    expect(queue.pending).toBe(1);
+    finishRestart();
+    await restart;
+    expect(queue.pending).toBe(0);
+  });
 });
 
 describe('dev-proxy LifecycleQueue.idle (issue #716)', () => {

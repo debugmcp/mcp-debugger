@@ -13,6 +13,12 @@ export class LifecycleQueue {
   tail: Promise<unknown>;
 
   /**
+   * Operations queued or running. Lets a reader tell a stopped backend from
+   * one whose restart is already queued, so it is not told to queue another.
+   */
+  pending: number;
+
+  /**
    * Queue `operation` behind everything already queued and run it once its
    * turn comes — whether the operation ahead of it settled or threw.
    *
