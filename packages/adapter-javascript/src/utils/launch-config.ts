@@ -17,6 +17,9 @@ export const JS_LAUNCH_CONSUMED_KEYS: ReadonlySet<string> = new Set([
 export const JS_SUPPORTED_LAUNCH_KEYS: readonly string[] = [
   ...JS_LAUNCH_CONSUMED_KEYS,
   'type', 'request', 'name', 'console', 'outputCapture', 'noDebug', 'trace',
+  // Declared on js-debug's browser configs, but its breakpoint manager reads
+  // it for every session, node launches included.
+  'perScriptSourcemaps',
   'sourceMapPathOverrides', 'timeouts', 'timeout',
   'restart', 'runtimeVersion', 'nodeVersionHint', 'localRoot', 'remoteRoot',
   'rootPath', 'sourceMapRenames', 'runtimeSourcemapPausePatterns',

@@ -792,8 +792,9 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
         continue;
       }
       if (JS_LAUNCH_PINNED_KEYS.has(key)) {
-        pinned.push(key);
+        // A value that matches the pinned one (request: 'launch') was not ignored.
         if (value !== result[key]) {
+          pinned.push(key);
           this.launchConfigDiagnostics.push({ key, message: 'ignored; mcp-debugger pins the js-debug launch shape' });
         }
         continue;

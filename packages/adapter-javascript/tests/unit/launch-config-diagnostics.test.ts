@@ -26,12 +26,23 @@ describe('JavaScript launch diagnostics (#709)', () => {
   });
 
   it('accepts explicit empty lists, null source-map locations and matching pinned values', async () => {
-    const subject = adapter();
+    const logger = { info: vi.fn(), warn: vi.fn() };
+    const subject = new JavascriptDebugAdapter({ logger } as unknown as AdapterDependencies);
     const result = await subject.transformLaunchConfig({ program: '/project/app.js', outFiles: [], skipFiles: [],
-      runtimeArgs: [], resolveSourceMapLocations: null, console: 'internalConsole', type: 'pwa-node', envFile: null
+      runtimeArgs: [], resolveSourceMapLocations: null, console: 'internalConsole', type: 'pwa-node', envFile: null,
+      request: 'launch'
     } as GenericLaunchConfig);
     expect(result).toMatchObject({ outFiles: [], skipFiles: [], resolveSourceMapLocations: null });
     expect(subject.consumeLaunchConfigDiagnostics()).toEqual([]);
+    // Nothing was ignored, so the server log must not say so either.
+    expect(logger.warn.mock.calls.map(([message]) => String(message)).join('\n')).not.toContain('pins the js-debug launch shape');
+  });
+
+  it('recognizes perScriptSourcemaps, which js-debug reads for node sessions too', async () => {
+    const subject = adapter();
+    const result = await subject.transformLaunchConfig({ program: '/project/app.js', perScriptSourcemaps: 'yes' } as GenericLaunchConfig);
+    expect(result.perScriptSourcemaps).toBe('yes');
+    expect(subject.supportedLaunchKeys).toContain('perScriptSourcemaps');
   });
 
   it('filters mixed lists before runtime helpers and resets diagnostics on each transform', async () => {

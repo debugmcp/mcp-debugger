@@ -19,7 +19,8 @@ import {
   type IDebugAdapter,
   type GenericLaunchConfig,
   type GenericAttachConfig,
-  type LanguageSpecificLaunchConfig
+  type LanguageSpecificLaunchConfig,
+  redactSecretsInString
 } from '@debugmcp/shared';
 import { AdapterLease } from '../../adapters/adapter-lease.js';
 import { DebugSessionCreationError, PythonNotFoundError } from '../../errors/debug-errors.js';
@@ -295,7 +296,14 @@ export class ProxyLauncher {
       transformedLaunchConfig = await this.transformAdapterConfig(session, adapter, inputs);
     } finally {
       if (!inputs.isAttachMode) {
-        session.launchConfigNotices = collectLaunchConfigNotices(adapter, inputs.callerLaunchInputs, transformedLaunchConfig);
+        // Notices name caller keys. Redact them here, the same way the output
+        // buffer they are seeded into does (#237): a launch that fails before
+        // the proxy starts returns them straight from the session, and one
+        // redacted text lets the launch warning dedupe against its seeded copy.
+        const notices = collectLaunchConfigNotices(adapter, inputs.callerLaunchInputs, transformedLaunchConfig);
+        session.launchConfigNotices = this.ctx.redactionEnabled()
+          ? notices.map(notice => redactSecretsInString(notice).value)
+          : notices;
         for (const notice of session.launchConfigNotices) this.ctx.logger.warn(`[SessionManager] ${notice}`);
       }
     }
@@ -516,7 +524,7 @@ export class ProxyLauncher {
       `[SessionManager] Launch config stopOnEntry adjustments for ${sessionId}: base=${String(
         transformedLaunchConfig.stopOnEntry
       )}, final=${String(launchConfigData.stopOnEntry)}, userProvided=${String(
-        dapLaunchArgs?.stopOnEntry
+        request.adapterLaunchConfig?.stopOnEntry ?? dapLaunchArgs?.stopOnEntry
       )}`
     );
 

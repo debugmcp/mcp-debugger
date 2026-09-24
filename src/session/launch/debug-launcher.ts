@@ -696,6 +696,7 @@ export class DebugLauncher {
         const behavior = (toolchainValidation.behavior ?? 'warn').toLowerCase();
         const canContinue = behavior !== 'error';
         const updatedSession = this.ctx.getSession(sessionId);
+        const warning = launchWarnings(session, noDebugFailureNote);
         return {
           success: false,
           error: 'MSVC_TOOLCHAIN_DETECTED',
@@ -703,6 +704,7 @@ export class DebugLauncher {
           data: {
             message: toolchainValidation.message ?? errorMessage,
             toolchainValidation,
+            ...(warning ? { warning } : {}),
           },
           canContinue,
           errorType,

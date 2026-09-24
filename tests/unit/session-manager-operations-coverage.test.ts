@@ -3099,14 +3099,19 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockSession.language = DebugLanguage.CPP;
       mockSession.state = SessionState.CREATED;
 
-      const result = await operations.startDebugging('test-session', '/work/msvc.exe', []);
+      const result = await operations.startDebugging(
+        'test-session', '/work/msvc.exe', [], undefined, undefined, { request: 'launch' }
+      );
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('MSVC_TOOLCHAIN_DETECTED');
       expect(result.canContinue).toBe(false);
-      expect(result.data).toEqual(
-        expect.objectContaining({ toolchainValidation: validation, message: validation.message })
-      );
+      // Preparation notices survive this failure too, like every other one (#709).
+      expect(result.data).toEqual(expect.objectContaining({
+        toolchainValidation: validation,
+        message: validation.message,
+        warning: 'adapterLaunchConfig.request: ignored; reserved for the launch/attach operation'
+      }));
       expect(mockSession.state).toBe(SessionState.CREATED);
       expect(mockAdapter.dispose).toHaveBeenCalledTimes(1);
     });
