@@ -5,6 +5,11 @@ import { sanitizeStderrTail } from './backend-logger.mjs';
 
 const execFileAsync = promisify(execFile);
 const MAX_BUFFER_BYTES = 64 * 1024 * 1024;
+// setTimeout clamps anything larger to 1 ms, which would fail every build at once.
+const MAX_TIMER_MS = 2 ** 31 - 1;
+// Same bound as the server's orphan reaper: a deep npm → cmd → node tree on a
+// busy box can take longer than a second to sweep.
+const TASKKILL_TIMEOUT_MS = 5000;
 
 /**
  * Terminate only a build we spawned: its dedicated process group on POSIX,
@@ -16,14 +21,18 @@ export async function terminateBuildTree(pid, {
   kill = process.kill.bind(process),
   runFile = execFileAsync,
   graceMs = 250,
+  exited = false,
 } = {}) {
   if (!pid) return;
   if (platform === 'win32') {
+    // Once the shell has exited its PID can be reused, and taskkill /T would
+    // sweep an unrelated tree while being unable to find the build's own.
+    if (exited) return;
     try {
       // Sweep while the parent is still alive: taskkill discovers its children
       // through that parent, and cannot reconstruct the tree after it exits.
       await runFile('taskkill', ['/PID', String(pid), '/T', '/F'], {
-        windowsHide: true, timeout: 1000, killSignal: 'SIGKILL',
+        windowsHide: true, timeout: TASKKILL_TIMEOUT_MS, killSignal: 'SIGKILL',
       });
     } catch (err) {
       if (err.code !== 128 && err.code !== 'ESRCH') throw err;
@@ -111,7 +120,8 @@ export function runBuild({
       // Own the termination promise even if the child closes before it does.
       // Otherwise a shell's early close would release the lifecycle queue
       // while a grandchild that ignored SIGTERM was still running.
-      Promise.resolve().then(() => terminateTree(child?.pid, { platform })).catch((err) => {
+      const exited = child ? child.exitCode !== null || child.signalCode !== null : false;
+      Promise.resolve().then(() => terminateTree(child?.pid, { platform, exited })).catch((err) => {
         cleanupFailure = err;
       }).finally(() => {
         terminating = false;
@@ -161,7 +171,7 @@ export function runBuild({
       }
       finish();
     });
-    deadline = setTimeout(() => cancel(new Error('Build deadline elapsed'), 'timeout'), timeoutMs);
+    deadline = setTimeout(() => cancel(new Error('Build deadline elapsed'), 'timeout'), Math.min(timeoutMs, MAX_TIMER_MS));
     signal?.addEventListener('abort', onAbort, { once: true });
     if (signal?.aborted) onAbort();
   });

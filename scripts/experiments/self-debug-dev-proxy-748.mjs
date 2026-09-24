@@ -70,7 +70,9 @@ try {
   }
   assert(paused, 'function breakpoint did not fire');
   const stack = await call('get_stack_trace');
-  const frame = stack.stackFrames.find(f => f.name.includes('rebuild') && f.file === file);
+  // js-debug reports Windows paths with a lower-case drive letter.
+  const sameFile = (a, b) => process.platform === 'win32' ? a?.toLowerCase() === b.toLowerCase() : a === b;
+  const frame = stack.stackFrames.find(f => f.name.includes('rebuild') && sameFile(f.file, file));
   assert(frame, JSON.stringify(stack));
   const queue = await call('evaluate_expression', { frameId: frame.id, expression: 'this.lifecycleQueue.tail' });
   assert.match(queue.result, /pending/);

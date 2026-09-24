@@ -2,11 +2,14 @@
 export class LifecycleQueue {
   constructor() {
     this.tail = Promise.resolve();
+    /** Operations queued or running: lets a reader tell "stopped" from "stopped, restart queued". */
+    this.pending = 0;
   }
 
   /** @template T @param {() => Promise<T>} operation @returns {Promise<T>} */
   run(operation) {
-    const result = this.tail.then(operation, operation);
+    this.pending++;
+    const result = this.tail.then(operation, operation).finally(() => { this.pending--; });
     this.tail = result.catch(() => {});
     return result;
   }

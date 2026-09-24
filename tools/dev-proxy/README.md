@@ -114,7 +114,7 @@ Environment variables (all optional):
 |----------|---------|-------------|
 | `DEV_PROXY_PORT` | `3001` | Port for the backend server (`http` and `sse` modes) |
 | `DEV_PROXY_BUILD_CMD` | `npm run build` | Build command to run |
-| `DEV_PROXY_BUILD_TIMEOUT_MS` | `120000` | Build timeout in milliseconds; must be positive (invalid values use the default) |
+| `DEV_PROXY_BUILD_TIMEOUT_MS` | `120000` | Build timeout in milliseconds; must be positive (invalid values use the default; values above 2147483647, about 24.8 days, are capped there) |
 | `DEV_PROXY_ROOT` | Auto-detected | Project root directory |
 | `DEV_PROXY_BACKEND_TRANSPORT` | `http` | Backend transport: `http` (default), `sse` (legacy/deprecated), or `stdio` |
 | `DEV_PROXY_BACKEND_CMD` | Source CLI | Custom backend command, including `docker run ...` commands |

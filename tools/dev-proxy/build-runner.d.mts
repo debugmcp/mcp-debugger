@@ -7,6 +7,8 @@ export interface TreeTerminationOptions {
     windowsHide: boolean; timeout: number; killSignal: NodeJS.Signals;
   }) => Promise<unknown>;
   graceMs?: number;
+  /** The shell already exited: on Windows its PID is no longer ours to sweep. */
+  exited?: boolean;
 }
 
 /** Terminate a dedicated POSIX build process group or a Windows build tree. */

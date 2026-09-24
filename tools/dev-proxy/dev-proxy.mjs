@@ -242,7 +242,7 @@ class BackendManager {
       } catch (err) {
         await this._killDockerContainer();
         await this._disconnectClient();
-        await this._forceKillPid(this.stdioPid);
+        await this._forceKillStdioBackend();
         this.stdioPid = null;
         this.state = 'stopped';
         this.startedAt = null;
@@ -325,9 +325,6 @@ class BackendManager {
     log('Stopping backend...');
     this.expectedChildExit = true;
 
-    // For stdio mode, grab the PID before closing (close clears the process ref)
-    const stdioPid = this.stdioPid ?? this.stdioTransport?.pid ?? null;
-
     // The outer MCP SDK gives a stdio server roughly two seconds to exit after
     // its stdin closes. The inner StdioClientTransport can itself wait longer
     // than that before killing a detached Docker CLI, so remove the labeled
@@ -343,9 +340,9 @@ class BackendManager {
     if (this.backendTransport === 'sse' || this.backendTransport === 'http') {
       // HTTP / SSE mode: manually kill the child we spawned
       await this._killChild();
-    } else if (stdioPid) {
-      // stdio mode: extra safety — force-kill on Windows if process lingers
-      await this._forceKillPid(stdioPid);
+    } else {
+      // stdio mode: extra safety — force-kill if the process lingers
+      await this._forceKillStdioBackend();
     }
 
     // A killed Docker CLI can detach without stopping its container. Ownership
@@ -451,12 +448,23 @@ class BackendManager {
     }
     if (this.state !== 'running' || !this.mcpClient) {
       throw new Error(
-        this.state === 'stopped'
+        this.needsRestart()
           ? `Backend is stopped — cannot call tool "${name}". Use dev_restart_debugger to start it.`
-          : `Backend is ${this.state} and did not settle within ${DISCOVERY_WAIT_MS}ms — cannot call tool "${name}" yet. Retry once dev_server_status reports "running".`
+          : `Backend is ${this.state}${this.lifecycleQueue.pending > 0 ? ` with a ${this.buildInProgress ? 'build' : 'restart'} in progress` : ''} and did not settle within ${DISCOVERY_WAIT_MS}ms — cannot call tool "${name}" yet. Retry once dev_server_status reports "running".`
       );
     }
     return await this.mcpClient.callTool({ name, arguments: args });
+  }
+
+  /**
+   * Only a stopped backend with no restart already queued wants restarting.
+   * Requests are now served while a build runs, so a crashed backend can be
+   * "stopped" while dev_rebuild_and_restart is about to replace it; telling
+   * the caller to restart then queues a second restart that kills the fresh
+   * backend (#716).
+   */
+  needsRestart() {
+    return this.state === 'stopped' && this.lifecycleQueue.pending === 0;
   }
 
   getStatus() {
@@ -566,6 +574,9 @@ class BackendManager {
 
       transport.onclose = () => {
         log('Stdio transport closed');
+        // The SDK reports close only once the child has exited, so its PID is
+        // no longer ours: a later force-kill could hit a process that reused it.
+        if (this.stdioTransport === transport) this.stdioPid = null;
         if (!closeState.expected && this.transportCloseState === closeState && this.state === 'running') {
           this.state = 'stopped';
           this.startedAt = null;
@@ -687,12 +698,14 @@ class BackendManager {
     await this._killDockerContainer();
   }
 
-  async _forceKillPid(pid) {
+  async _forceKillPid(pid, { stillOwned } = {}) {
     // Safety net for stdio mode: force-kill the backend PID if it lingers after transport close
     if (!pid) return;
     try {
       // Give the abort signal a moment to propagate
       await new Promise((r) => setTimeout(r, 500));
+      // The child may have exited during that grace period (see stdio onclose).
+      if (stillOwned && !stillOwned()) return;
       if (process.platform === 'win32') {
         execSync(`taskkill /pid ${pid} /F`, { stdio: 'ignore' });
       } else {
@@ -702,6 +715,17 @@ class BackendManager {
     } catch {
       // Process already dead — expected
     }
+  }
+
+  /**
+   * Force-kill the stdio backend only while its PID is still ours. stdioPid
+   * outlives transport.pid (which the SDK clears as close() begins) and is
+   * cleared once the child has exited, so a crashed backend's PID is never
+   * reused as a kill target by a later restart.
+   */
+  async _forceKillStdioBackend() {
+    const pid = this.stdioPid;
+    await this._forceKillPid(pid, { stillOwned: () => this.stdioPid === pid });
   }
 
   async _ensurePortFree() {
@@ -943,7 +967,7 @@ async function main() {
         // Only a stopped backend wants restarting. Telling an agent to restart
         // one that is mid-start queues a second restart that kills it (#716).
         body.hint =
-          backend.state === 'stopped'
+          backend.needsRestart()
             ? `The mcp-debugger backend is not reachable (state: ${backend.state}). Use dev_server_status to check, or dev_restart_debugger to restart it.`
             : `The mcp-debugger backend is ${backend.state} and did not settle within ${DISCOVERY_WAIT_MS}ms. Retry the call; use dev_server_status to watch it — do NOT restart it.`;
       }

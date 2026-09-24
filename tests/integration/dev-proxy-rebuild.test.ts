@@ -282,6 +282,30 @@ describe('dev-proxy responsive rebuilds (#748, #756, #757)', () => {
     expect(h.notifications).toHaveLength(2);
   });
 
+  it('does not tell a caller to restart a crashed backend that a queued rebuild will replace', async () => {
+    const h = await connect({ DEV_PROXY_DISCOVERY_WAIT_MS: '200' });
+    const before = await h.status();
+    process.kill(before.pid!, 'SIGKILL');
+    await expect.poll(async () => (await h.status()).state, { timeout: 5000 }).toBe('stopped');
+    const rebuild = observe(h.call('dev_rebuild_and_restart'));
+    await h.waitFor('build-start', 1);
+
+    // Requests are served during a build now, so this one sees "stopped" while
+    // the rebuild is about to replace it. A restart hint here would queue a
+    // second restart that kills the fresh backend (#716).
+    const refused = await h.call('initial');
+    expect(refused.isError).toBe(true);
+    const body = payload<{ error: string; hint: string }>(refused);
+    expect(body.error).toContain('stopped with a build in progress');
+    expect(body.error).not.toContain('dev_restart_debugger');
+    expect(body.hint).toContain('do NOT restart');
+
+    await h.release(1);
+    const completed = payload<RestartResult>((await rebuild).result!);
+    expect(completed).toMatchObject({ success: true, status: { state: 'running' } });
+    expect((await h.call('initial')).isError).not.toBe(true);
+  });
+
   it('kills timeout descendants even if they ignore SIGTERM and leaves the backend serving', async () => {
     const h = await connect({ DEV_PROXY_BUILD_CHILD: '1', DEV_PROXY_BUILD_IGNORE_TERM: '1', DEV_PROXY_BUILD_TIMEOUT_MS: '2000' });
     const before = await h.status();

@@ -93,6 +93,32 @@ describe('asynchronous dev-proxy build runner', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('caps a timeout beyond the timer range instead of expiring it at once', async () => {
+    const { child, terminateTree, options } = fixture({ timeoutMs: 9_999_999_999 });
+    const result = runBuild(options);
+    // An unclamped delay overflows to 1 ms and would cancel the build here.
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(terminateTree).not.toHaveBeenCalled();
+    child.emit('close', 0, null);
+    await expect(result).resolves.toBe('');
+  });
+
+  it('tells tree termination whether the shell has already exited', async () => {
+    const running = fixture({ platform: 'win32', maxBufferBytes: 1 });
+    const first = expect(runBuild(running.options)).rejects.toThrow('Build output exceeded');
+    running.child.stdout.write('xx');
+    await first;
+    expect(running.terminateTree).toHaveBeenCalledWith(4242, { platform: 'win32', exited: false });
+
+    const exited = fixture({ platform: 'win32', maxBufferBytes: 1 });
+    const second = expect(runBuild(exited.options)).rejects.toThrow('Build output exceeded');
+    // The shell exited, but a descendant still holds the output pipe open.
+    Object.assign(exited.child, { exitCode: 0 });
+    exited.child.stdout.write('xx');
+    await second;
+    expect(exited.terminateTree).toHaveBeenCalledWith(4242, { platform: 'win32', exited: true });
+  });
+
   it('does not spawn after shutdown and removes its abort listener on success', async () => {
     const controller = new AbortController();
     controller.abort();
@@ -174,11 +200,21 @@ describe('build process tree termination', () => {
     const runFile = vi.fn(async () => {});
     await terminateBuildTree(4242, { platform: 'win32', runFile });
     expect(runFile).toHaveBeenCalledWith('taskkill', ['/PID', '4242', '/T', '/F'], {
-      windowsHide: true, timeout: 1000, killSignal: 'SIGKILL',
+      windowsHide: true, timeout: 5000, killSignal: 'SIGKILL',
     });
     runFile.mockRejectedValueOnce(Object.assign(new Error('gone'), { code: 128 }));
     await expect(terminateBuildTree(4242, { platform: 'win32', runFile })).resolves.toBeUndefined();
     runFile.mockRejectedValueOnce(new Error('taskkill failed'));
     await expect(terminateBuildTree(4242, { platform: 'win32', runFile })).rejects.toThrow('taskkill failed');
+  });
+
+  it('never sweeps a Windows PID whose shell has already exited, since it may be reused', async () => {
+    const runFile = vi.fn(async () => {});
+    await terminateBuildTree(4242, { platform: 'win32', runFile, exited: true });
+    expect(runFile).not.toHaveBeenCalled();
+    // A POSIX group cannot be reused while any member lives, so it is still swept.
+    const kill = vi.fn();
+    await terminateBuildTree(4242, { platform: 'linux', kill, graceMs: 0, exited: true });
+    expect(kill.mock.calls).toEqual([[-4242, 'SIGTERM'], [-4242, 'SIGKILL']]);
   });
 });
