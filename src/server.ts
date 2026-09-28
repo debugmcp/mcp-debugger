@@ -338,12 +338,13 @@ export class DebugMcpServer implements ToolContext {
     sessionId: string,
     functionName: string,
     condition?: string
-  ): Promise<{ breakpoint: FunctionBreakpoint; warning?: string }> {
+  ): Promise<{ breakpoint: FunctionBreakpoint; warning?: string; refusal?: string }> {
     this.validateSessionExists(sessionId);
     return this.sessionManager.setFunctionBreakpoint(sessionId, { functionName, condition });
   }
 
-  public async setBreakpoint(req: SetBreakpointRequest): Promise<{ breakpoint: Breakpoint; warning?: string }> {
+  /** `refusal`: the adapter's own answer when the live re-send was refused, as stamped on the record (issue #754). */
+  public async setBreakpoint(req: SetBreakpointRequest): Promise<{ breakpoint: Breakpoint; warning?: string; refusal?: string }> {
     this.validateSessionExists(req.sessionId);
 
     // Addressing-parameter combinations (issue #271)

@@ -53,7 +53,7 @@ export type ProxyStatusMessage =
   | { type: 'status'; sessionId: string; status: 'adapter_connected'; data?: unknown }
   | { type: 'status'; sessionId: string; status: 'adapter_configured_and_launched'; lastStop?: DebugProtocol.StoppedEvent['body']; data?: unknown }
   | { type: 'status'; sessionId: string; status: 'adapter_capabilities'; capabilities: DebugProtocol.Capabilities; data?: unknown }
-  | { type: 'status'; sessionId: string; status: 'function_breakpoints_synced'; functionBreakpoints: Array<{ name: string; verified: boolean; id?: number; line?: number; source?: string }>; data?: unknown }
+  | { type: 'status'; sessionId: string; status: 'function_breakpoints_synced'; functionBreakpoints: Array<{ name: string; verified: boolean; id?: number; line?: number; source?: string; message?: string }>; data?: unknown }
   | { type: 'status'; sessionId: string; status: 'breakpoints_synced'; breakpoints: Array<{ id?: string; file: string; line: number; verified: boolean; adapterId?: number; boundLine?: number; message?: string }>; data?: unknown }
   | { type: 'status'; sessionId: string; status: 'adapter_notice'; note: string; data?: unknown }
   | { type: 'status'; sessionId: string; status: 'adapter_spawned'; pid?: number; data?: unknown }

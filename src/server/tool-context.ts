@@ -93,8 +93,8 @@ export interface ToolContext {
     sessionId: string,
     functionName: string,
     condition?: string
-  ): Promise<{ breakpoint: FunctionBreakpoint; warning?: string }>;
-  setBreakpoint(req: SetBreakpointRequest): Promise<{ breakpoint: Breakpoint; warning?: string }>;
+  ): Promise<{ breakpoint: FunctionBreakpoint; warning?: string; refusal?: string }>;
+  setBreakpoint(req: SetBreakpointRequest): Promise<{ breakpoint: Breakpoint; warning?: string; refusal?: string }>;
   listBreakpoints(sessionId: string, file?: string): Breakpoint[];
   removeBreakpoint(sessionId: string, breakpointId: string): Promise<{ removed?: Breakpoint | FunctionBreakpoint; warning?: string }>;
   removeBreakpointsByLocation(sessionId: string, file: string, line: number): Promise<{ removed: Breakpoint[]; warning?: string }>;

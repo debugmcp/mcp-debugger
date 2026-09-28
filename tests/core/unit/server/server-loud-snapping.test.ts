@@ -159,12 +159,14 @@ describe('set_breakpoint loud snapping (#271)', () => {
     expect(content.warning).toContain('adapter exploded');
   });
 
-  it('does not repeat the adapter\'s answer when the record carries it and the sync warning quotes it (issue #754)', async () => {
-    // A failed live re-send stamps the adapter's message on the record AND
-    // reports it in the sync warning; the response says it once.
+  it('does not repeat the adapter\'s answer when the record carries the refusal the sync warning quotes (issue #754)', async () => {
+    // A refused live re-send stamps the adapter's message on the record AND
+    // reports it in the sync warning; the session layer hands the refusal
+    // back, and the response says it once.
     mockSessionManager.setBreakpoint.mockResolvedValue({
       breakpoint: { id: 'bp-1', file: '/path/to/test.py', line: 3, requestedLine: 3, verified: false, message: 'Server is not available' },
-      warning: 'Breakpoint state updated, but live sync failed: Server is not available'
+      warning: 'Breakpoint state updated, but live sync failed: Server is not available',
+      refusal: 'Server is not available'
     });
 
     const result = await callSetBreakpoint();
@@ -173,5 +175,19 @@ describe('set_breakpoint loud snapping (#271)', () => {
     expect(content.success).toBe(true);
     expect(content.message).toBe('Server is not available');
     expect(content.warning).toBe('Breakpoint state updated, but live sync failed: Server is not available');
+  });
+
+  it('keeps a record message that is not the refusal, even when the sync warning happens to contain it', async () => {
+    mockSessionManager.setBreakpoint.mockResolvedValue({
+      breakpoint: { id: 'bp-1', file: '/path/to/test.py', line: 3, requestedLine: 3, verified: false, message: 'adapter' },
+      warning: "Breakpoint state updated, but live sync failed: Debug adapter did not respond to 'setBreakpoints' request within 30s"
+    });
+
+    const result = await callSetBreakpoint();
+    const content = JSON.parse(result.content[0].text);
+
+    expect(content.warning).toBe(
+      "adapter; Breakpoint state updated, but live sync failed: Debug adapter did not respond to 'setBreakpoints' request within 30s"
+    );
   });
 });

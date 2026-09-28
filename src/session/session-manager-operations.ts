@@ -242,7 +242,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       /** Content anchor for restart re-resolution (content mode, #271) */
       anchor?: { statement: string; nearLine?: number };
     }
-  ): Promise<{ breakpoint: Breakpoint; warning?: string }> {
+  ): Promise<{ breakpoint: Breakpoint; warning?: string; refusal?: string }> {
     return this.breakpoints.setBreakpoint(sessionId, bp);
   }
 
@@ -278,7 +278,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       functionName: string;
       condition?: string;
     }
-  ): Promise<{ breakpoint: FunctionBreakpoint; warning?: string }> {
+  ): Promise<{ breakpoint: FunctionBreakpoint; warning?: string; refusal?: string }> {
     return this.breakpoints.setFunctionBreakpoint(sessionId, bp);
   }
 

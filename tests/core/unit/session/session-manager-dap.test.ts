@@ -21,6 +21,7 @@ import {
 } from './session-manager-test-utils.js';
 import { ErrorMessages } from '../../../../src/utils/error-messages.js';
 import { ProxyNotRunningError } from '../../../../src/errors/debug-errors.js';
+import { DapResponseError } from '../../../../src/proxy/dap-response-error.js';
 
 /**
  * A `breakpoint` event body as the proxy delivers it for a CHILD session event.
@@ -595,10 +596,35 @@ describe('SessionManager - DAP Operations', () => {
       expect(result.removed?.id).toBe(bp1.id);
       expect(result.warning).toContain('live sync failed');
       expect(sessionManager.listBreakpoints(session.id)).toHaveLength(1);
-      // The adapter's answer is on the surviving record too (issue #754).
+      // The mock's failure is a plain Error — a transport failure, not the
+      // adapter's answer — so the surviving record is left as it was (issue #754).
+      expect(sessionManager.listBreakpoints(session.id)[0].message).toBeUndefined();
+    });
+
+    it('stamps the adapter\'s refusal on the surviving record when a remove\'s re-send is refused (issue #754)', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+      await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+      const { breakpoint: bp1 } = await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 10 });
+      await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 20 });
+      dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+        if (command === 'setBreakpoints') {
+          throw new DapResponseError({ seq: 1, type: 'response', request_seq: 1, success: false, command, message: 'Server is not available' });
+        }
+        return {};
+      });
+
+      const result = await sessionManager.removeBreakpoint(session.id, bp1.id);
+
+      expect(result.removed?.id).toBe(bp1.id);
+      expect(result.warning).toContain('live sync failed: Server is not available');
       expect(sessionManager.listBreakpoints(session.id)[0]).toMatchObject({
+        line: 20,
         verified: false,
-        message: 'Mock DAP request failure: setBreakpoints'
+        message: 'Server is not available'
       });
     });
 
@@ -610,7 +636,7 @@ describe('SessionManager - DAP Operations', () => {
       await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 10 });
       dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
         if (command === 'setBreakpoints') {
-          throw new Error('adapter rejected setBreakpoints');
+          throw new DapResponseError({ seq: 1, type: 'response', request_seq: 1, success: false, command, message: 'adapter rejected setBreakpoints' });
         }
         return {};
       });
@@ -620,7 +646,8 @@ describe('SessionManager - DAP Operations', () => {
       const result = await launched;
 
       expect(result.success).toBe(true);
-      expect(result.data?.warning).toContain('Breakpoint state updated, but live sync failed: adapter rejected setBreakpoints');
+      expect(result.data?.warning).toContain('The debugger refused the re-send of the breakpoints for test.py: adapter rejected setBreakpoints');
+      expect(result.data?.warning).not.toContain('Breakpoint state updated');
       expect(sessionManager.listBreakpoints(session.id)[0]).toMatchObject({
         verified: false,
         message: 'adapter rejected setBreakpoints'

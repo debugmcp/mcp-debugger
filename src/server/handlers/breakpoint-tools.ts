@@ -25,18 +25,6 @@ function debuggerOffNote(ctx: ToolContext, sessionId: string, verified: boolean)
   return verified ? undefined : debuggerOffWhyFor(ctx, sessionId);
 }
 
-/**
- * The record's own message, unless the live-sync warning already quotes it:
- * a refused re-send stamps the adapter's answer on the record AND reports it
- * in the sync warning (issue #754), and the response says it once.
- */
-function recordMessageUnlessQuoted(message: string | undefined, syncWarning: string | undefined): string | undefined {
-  if (message && syncWarning && syncWarning.includes(message)) {
-    return undefined;
-  }
-  return message;
-}
-
 export const setBreakpointTool: ToolHandler = async (ctx, args) => {
   const isFunctionBp = args.function !== undefined;
   if (!isFunctionBp && (!args.file || (args.line === undefined && args.statement === undefined))) {
@@ -112,9 +100,12 @@ async function setFunctionBreakpointBranch(ctx: ToolContext, args: WithSessionId
     // reported in the warning; neither blocks the request.
     const { requestedName, effectiveName, normalized, hint: nameHint } =
       ctx.sessionManager.resolveFunctionBreakpointName(args.sessionId, args.function!);
-    const { breakpoint, warning: syncWarning } = await ctx.setFunctionBreakpoint(
+    const { breakpoint, warning: syncWarning, refusal: syncRefusal } = await ctx.setFunctionBreakpoint(
       args.sessionId, effectiveName, args.condition
     );
+    // A refused live re-send stamps the adapter's answer on the record AND
+    // reports it in the sync warning (issue #754); the response says it once.
+    const recordMessage = syncRefusal !== undefined && breakpoint.message === syncRefusal ? undefined : breakpoint.message;
 
     ctx.logger.info('debug:breakpoint', {
       event: 'set',
@@ -127,7 +118,7 @@ async function setFunctionBreakpointBranch(ctx: ToolContext, args: WithSessionId
     });
 
     const warnings = [
-      recordMessageUnlessQuoted(breakpoint.message, syncWarning), fnGate.warning, normalized?.note, nameHint, syncWarning,
+      recordMessage, fnGate.warning, normalized?.note, nameHint, syncWarning,
       debuggerOffNote(ctx, args.sessionId, breakpoint.verified)
     ].filter(Boolean);
     return jsonResult({
@@ -161,7 +152,7 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): P
       ? ctx.validateLogPointSupport(args.sessionId)
       : {};
 
-    const { breakpoint, warning: syncWarning } = await ctx.setBreakpoint({
+    const { breakpoint, warning: syncWarning, refusal: syncRefusal } = await ctx.setBreakpoint({
       sessionId: args.sessionId,
       // Non-function path: the entry guard above ensures file is set
       file: args.file!,
@@ -201,8 +192,11 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): P
         }`
       : undefined;
 
+    // A refused live re-send stamps the adapter's answer on the record AND
+    // reports it in the sync warning (issue #754); the response says it once.
+    const recordMessage = syncRefusal !== undefined && breakpoint.message === syncRefusal ? undefined : breakpoint.message;
     const warnings = [
-      recordMessageUnlessQuoted(breakpoint.message, syncWarning), logPointGate.warning, syncWarning, snapWarning,
+      recordMessage, logPointGate.warning, syncWarning, snapWarning,
       debuggerOffNote(ctx, args.sessionId, breakpoint.verified)
     ].filter(Boolean);
     const result: ToolResult = jsonResult({

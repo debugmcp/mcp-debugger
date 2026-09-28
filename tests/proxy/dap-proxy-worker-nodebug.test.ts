@@ -442,6 +442,33 @@ describe('noDebug launch completion (issue #746)', () => {
       ]);
     });
 
+    it('echoes the adapter\'s per-entry message on a successful setFunctionBreakpoints too (issue #754)', async () => {
+      const payload = payloadWith({}, true);
+      wire(PythonAdapterPolicy, { ...payload, initialBreakpoints: [], initialFunctionBreakpoints: [{ name: 'main' }, { name: 'nope' }] });
+      mockDapClient.sendRequest.mockImplementation(async (command: string) => {
+        if (command === 'setFunctionBreakpoints') {
+          return { body: { breakpoints: [
+            { verified: true, id: 7, line: 3, source: { path: '/src/main.py' } },
+            { verified: false, message: 'Cannot resolve symbol nope' }
+          ] } };
+        }
+        return { body: {} };
+      });
+
+      await (worker as any).startAdapterAndConnect(payload);
+      mockDapClient.emit('initialized');
+      await settle();
+      await settle();
+
+      const synced = mockMessageSender.send.mock.calls.find(
+        ([m]) => m.type === 'status' && m.status === 'function_breakpoints_synced'
+      )?.[0] as (StatusMessage & { functionBreakpoints?: Array<Record<string, unknown>> }) | undefined;
+      expect(synced?.functionBreakpoints).toEqual([
+        { name: 'main', verified: true, id: 7, line: 3, source: '/src/main.py' },
+        { name: 'nope', verified: false, message: 'Cannot resolve symbol nope' }
+      ]);
+    });
+
     it('is not fooled by a transport failure on the configurationDone it sends after a refusal', async () => {
       const payload = payloadWith({ noDebug: true }, true);
       wire(PythonAdapterPolicy, payload);
