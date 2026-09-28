@@ -50,5 +50,9 @@ export function collectLaunchConfigNotices(
       notices.push(`${name}: ${message}${suggestion && suggestion !== key ? ` (did you mean ${suggestion}?)` : ''}`);
     }
   }
+  // Launch-scoped notices are about the launch as a whole, not a caller key (#796).
+  for (const diagnostic of diagnostics) {
+    if (diagnostic.scope === 'launch') notices.push(diagnostic.message);
+  }
   return [...new Set(notices)];
 }

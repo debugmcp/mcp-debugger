@@ -2,8 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AdapterDependencies, GenericLaunchConfig } from '@debugmcp/shared';
 import { JavascriptDebugAdapter } from '../../src/javascript-debug-adapter.js';
 
+// The exit-code preload resolves through fileSystem.existsSync; a harness
+// without one would carry the missing-shim launch notice on every transform (#796).
+const shimPresent = { existsSync: () => true };
+
 function adapter() {
-  return new JavascriptDebugAdapter({ logger: { info: vi.fn(), warn: vi.fn() } } as unknown as AdapterDependencies);
+  return new JavascriptDebugAdapter({ logger: { info: vi.fn(), warn: vi.fn() }, fileSystem: shimPresent } as unknown as AdapterDependencies);
 }
 
 describe('JavaScript launch diagnostics (#709)', () => {
@@ -27,7 +31,7 @@ describe('JavaScript launch diagnostics (#709)', () => {
 
   it('accepts explicit empty lists, null source-map locations and matching pinned values', async () => {
     const logger = { info: vi.fn(), warn: vi.fn() };
-    const subject = new JavascriptDebugAdapter({ logger } as unknown as AdapterDependencies);
+    const subject = new JavascriptDebugAdapter({ logger, fileSystem: shimPresent } as unknown as AdapterDependencies);
     const result = await subject.transformLaunchConfig({ program: '/project/app.js', outFiles: [], skipFiles: [],
       runtimeArgs: [], resolveSourceMapLocations: null, console: 'internalConsole', type: 'pwa-node', envFile: null,
       request: 'launch'
@@ -57,7 +61,7 @@ describe('JavaScript launch diagnostics (#709)', () => {
 
   it('consumes envFile and keeps null env entries in the DAP result', async () => {
     const subject = new JavascriptDebugAdapter({
-      logger: { info: vi.fn(), warn: vi.fn() }, fileSystem: { readFile: vi.fn(async () => 'REMOVE=file\nFILE_ONLY=works\n') }
+      logger: { info: vi.fn(), warn: vi.fn() }, fileSystem: { ...shimPresent, readFile: vi.fn(async () => 'REMOVE=file\nFILE_ONLY=works\n') }
     } as unknown as AdapterDependencies);
     const result = await subject.transformLaunchConfig({ program: '/project/app.js', envFile: 'app.env', env: { REMOVE: null } } as GenericLaunchConfig);
     expect(result.env).toMatchObject({ REMOVE: null, FILE_ONLY: 'works' });

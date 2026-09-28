@@ -54,6 +54,30 @@ describe('Server Control Tools Tests', () => {
   });
 
   describe('set_breakpoint', () => {
+    it('stores a breakpoint on a TERMINATED session for the next launch (issue #806)', async () => {
+      // The program has exited (or only dry-ran); the breakpoint is queued
+      // verified:false and the next launch carries it. Remove/list/clear already
+      // accepted this state; set must too.
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        state: 'stopped',
+        sessionLifecycle: SessionLifecycleState.TERMINATED
+      });
+      mockSessionManager.setBreakpoint.mockResolvedValue({
+        breakpoint: { id: 'bp-1', file: '/path/to/test.py', line: 10, verified: false }
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'set_breakpoint', arguments: { sessionId: 'test-session', file: '/path/to/test.py', line: 10 } }
+      });
+
+      expect(mockSessionManager.setBreakpoint).toHaveBeenCalled();
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      expect(content.verified).toBe(false);
+    });
+
     it('appends why an unverified breakpoint cannot bind while the launch runs with the debugger off (issue #749)', async () => {
       mockSessionManager.getSession.mockReturnValue({
         id: 'test-session',
@@ -283,6 +307,42 @@ describe('Server Control Tools Tests', () => {
   });
 
   describe('start_debugging', () => {
+    it('relaunches a TERMINATED session, after a dry run or a finished program (issue #793)', async () => {
+      // A dry run and a run to completion both end lifecycle-TERMINATED with the
+      // session still present: the between-launches state, not a closed session.
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        state: 'stopped',
+        sessionLifecycle: SessionLifecycleState.TERMINATED
+      });
+      mockSessionManager.startDebugging.mockResolvedValue({
+        success: true,
+        state: 'paused',
+        data: { reason: 'breakpoint' }
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'start_debugging',
+          arguments: { sessionId: 'test-session', scriptPath: '/path/to/test.py' }
+        }
+      });
+
+      expect(mockSessionManager.startDebugging).toHaveBeenCalledWith(
+        'test-session',
+        expect.stringContaining('/path/to/test.py'),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined
+      );
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      expect(content.state).toBe('paused');
+    });
+
     it('should start debugging successfully', async () => {
       // Mock session validation
       mockSessionManager.getSession.mockReturnValue({
@@ -1085,6 +1145,23 @@ describe('Server Control Tools Tests', () => {
           arguments: {}
         }
       })).rejects.toThrow('Missing required parameter: sessionId');
+    });
+  });
+  describe('tools that need a live debuggee still refuse a TERMINATED session (issue #793)', () => {
+    it.each(['continue_execution', 'step_over', 'step_into', 'step_out'])('%s answers Session is terminated', async (name) => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.TERMINATED
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name, arguments: { sessionId: 'test-session' } }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(false);
+      expect(content.error).toContain('Session is terminated: test-session');
     });
   });
 });
