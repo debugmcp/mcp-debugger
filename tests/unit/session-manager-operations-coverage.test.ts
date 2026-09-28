@@ -2059,14 +2059,19 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
   });
 
   describe('Terminated Session Scenarios', () => {
-    it('should reject operations on terminated session', async () => {
+    it('rejects execution on a terminated session but stores a breakpoint for the next launch (issues #793/#806)', async () => {
       mockSession.sessionLifecycle = SessionLifecycleState.TERMINATED;
 
       await expect(() => operations.continue('test-session'))
         .rejects.toThrow(SessionTerminatedError);
 
-      await expect(() => operations.setBreakpoint('test-session', { file: 'test.py', line: 10 }))
-        .rejects.toThrow(SessionTerminatedError);
+      // Between launches the breakpoint is queued, not sent: the session is
+      // not RUNNING/PAUSED, so the live sync is skipped and no DAP request goes out.
+      const { breakpoint, warning } = await operations.setBreakpoint('test-session', { file: 'test.py', line: 10 });
+      expect(breakpoint).toMatchObject({ file: 'test.py', line: 10, verified: false });
+      expect(warning).toBeUndefined();
+      expect(mockSession.breakpoints.get(breakpoint.id)).toBe(breakpoint);
+      expect(mockProxyManager.sendDapRequest).not.toHaveBeenCalledWith('setBreakpoints', expect.anything());
     });
   });
 

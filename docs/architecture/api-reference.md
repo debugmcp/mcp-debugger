@@ -314,13 +314,13 @@ startDebugging(
 
 Delegates to `DebugLauncher` (`src/session/launch/debug-launcher.ts`), which owns the launch sequence end to end.
 
-**Returns**: `DebugResult` — `{ success, state, error?, data?, canContinue?, errorType?, errorCode? }`. For a dry run, `data` carries `dryRun`, `command` and `script`.
+**Returns**: `DebugResult` — `{ success, state, error?, data?, canContinue?, errorType?, errorCode? }`. For a dry run, `data` carries `dryRun`, `command` and `script`. A dry run leaves the session lifecycle-TERMINATED but present; `startDebugging` accepts a present session in any lifecycle state — `DebugLauncher.launch` tears down any leftover proxy and resets the per-launch state (issue #793).
 
 #### `restartDebugging(sessionId: string): Promise<DebugResult>`
 Replays the session's last real launch and re-applies breakpoints (content anchors are re-resolved). Launch-mode sessions only. Exposed as the `restart_debugging` MCP tool.
 
 #### `setBreakpoint(sessionId: string, bp: { file: string; line: number; condition?: string; logMessage?: string; suspendPolicy?: 'all' | 'thread'; requestedLine?: number; anchor?: { statement: string; nearLine?: number } }): Promise<{ breakpoint: Breakpoint; warning?: string }>`
-Sets a breakpoint in a file. Internally sends a DAP `setBreakpoints` request for all breakpoints in the same source file. `requestedLine` records the originally requested line for loud snapping; `anchor` stores the content anchor that `restartDebugging` re-resolves (issue #271); `warning` carries live-sync failures. Neither extra field ever enters the DAP payload.
+Sets a breakpoint in a file. Internally sends a DAP `setBreakpoints` request for all breakpoints in the same source file. `requestedLine` records the originally requested line for loud snapping; `anchor` stores the content anchor that `restartDebugging` re-resolves (issue #271); `warning` carries live-sync failures. Neither extra field ever enters the DAP payload. Accepts a session in any lifecycle state; with no live debuggee the breakpoint is stored (`verified: false`, no warning) and applied on the next launch (issue #806).
 
 **Returns**: Breakpoint information plus an optional sync warning
 
