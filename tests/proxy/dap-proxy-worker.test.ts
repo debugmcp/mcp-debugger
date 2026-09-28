@@ -1294,7 +1294,7 @@ describe('DapProxyWorker', () => {
         payload.stopOnEntry,
         payload.justMyCode,
         payload.launchConfig,
-        'launch'
+        { requestCommand: 'launch' }
       );
       const statusCall = mockMessageSender.send.mock.calls.find(
         ([message]) => message.type === 'status' && message.status === 'adapter_configured_and_launched'
@@ -2442,7 +2442,7 @@ describe('DapProxyWorker', () => {
         payload.stopOnEntry,
         payload.justMyCode,
         payload.launchConfig,
-        'launch'
+        { requestCommand: 'launch' }
       );
       expect(connectionStub.sendConfigurationDone).toHaveBeenCalledTimes(1);
 
@@ -2741,26 +2741,40 @@ describe('DapProxyWorker', () => {
       (worker as any).logger = mockLogger;
       (worker as any).dapClient = mockDapClient;
       (worker as any).connectionManager = connectionStub;
+      // A per-launch choice, fed the effective entry-stop request (the
+      // transformed config's value wins over the tool's).
       (worker as any).adapterPolicy = {
         name: 'rdbg-stub',
-        getInitializationBehavior: () => ({ launchRequestCommand: 'attach' })
+        getInitializationBehavior: () => ({
+          launchRequestCommand: ({ stopOnEntry }: { stopOnEntry: boolean }) => (stopOnEntry ? 'attach' : 'launch')
+        })
       };
       const payload = {
-        cmd: 'init', sessionId: 's', scriptPath: 'app.rb', scriptArgs: ['--x'], stopOnEntry: true,
-        justMyCode: true, launchConfig: { nonstop: false, localfs: true }
+        cmd: 'init', sessionId: 's', scriptPath: 'app.rb', scriptArgs: ['--x'], stopOnEntry: false,
+        justMyCode: true, launchConfig: { stopOnEntry: true, nonstop: false, localfs: true }
       };
 
       await (worker as any).sendTrackedLaunch(payload);
 
       expect(connectionStub.sendLaunchRequest).toHaveBeenCalledWith(
-        mockDapClient, 'app.rb', ['--x'], true, true, { nonstop: false, localfs: true }, 'attach'
+        mockDapClient, 'app.rb', ['--x'], false, true, { stopOnEntry: true, nonstop: false, localfs: true }, { requestCommand: 'attach' }
       );
-      // The stage names what the caller asked for (a launch), not the wire verb.
+
+      connectionStub.sendLaunchRequest.mockClear();
+      await (worker as any).sendTrackedLaunch({ ...payload, launchConfig: { stopOnEntry: false, nonstop: true, localfs: true } });
+      expect(connectionStub.sendLaunchRequest).toHaveBeenLastCalledWith(
+        mockDapClient, 'app.rb', ['--x'], false, true, { stopOnEntry: false, nonstop: true, localfs: true }, { requestCommand: 'launch' }
+      );
+      // The stage names what the caller asked for (a launch), not the wire
+      // verb — for both launches above.
       const stages = mockMessageSender.send.mock.calls
         .map(([message]) => message)
         .filter((message) => message.type === 'status' && message.status === 'dap_handshake_stage')
         .map((message) => `${message.stage}:${message.command}`);
-      expect(stages).toEqual(['request_pending:launch', 'response_received:launch']);
+      expect(stages).toEqual([
+        'request_pending:launch', 'response_received:launch',
+        'request_pending:launch', 'response_received:launch'
+      ]);
     });
 
     it('handleTerminate should auto-detach in attach mode', async () => {

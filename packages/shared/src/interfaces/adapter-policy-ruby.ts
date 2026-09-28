@@ -169,9 +169,12 @@ export const RubyAdapterPolicy = {
       // rdbg's DAP `launch` handler goes nonstop unconditionally
       // (server_dap.rb: `when 'launch' … @nonstop = true`) and only `attach`
       // reads `nonstop`, so a `launch` request can never stop at entry. The
-      // rdbg process is ours, spawned suspended at load, so the launch goes
-      // out as `attach` with `nonstop` derived from stopOnEntry (issue #798).
-      launchRequestCommand: 'attach',
+      // rdbg process is ours, spawned suspended at load, so a launch that
+      // asks for the entry stop goes out as `attach { nonstop: false }`
+      // (issue #798). One that does not keeps the `launch` verb — byte for
+      // byte what shipped before, and safe on debug gems older than 1.7.0,
+      // whose attach handler ignores `nonstop` and would hold the pause.
+      launchRequestCommand: ({ stopOnEntry }) => (stopOnEntry ? 'attach' : 'launch'),
       // rdbg can process 'initialize' (proving it with the 'initialized' event)
       // yet never send the response — its DAP send silently skips writing when
       // the socket slot is momentarily unset (issue #492). Don't let the missing

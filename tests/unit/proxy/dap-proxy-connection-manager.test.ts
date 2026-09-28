@@ -462,7 +462,7 @@ describe('DapConnectionManager', () => {
         true,
         true,
         { nonstop: false, localfs: true },
-        'attach'
+        { requestCommand: 'attach' }
       );
 
       expect(mockDapClient.sendRequest).toHaveBeenCalledWith('attach', {

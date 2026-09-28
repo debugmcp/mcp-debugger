@@ -263,8 +263,8 @@ describe('RubyAdapterPolicy behavior surface', () => {
     });
     expect(RubyAdapterPolicy.getInitializationBehavior?.()).toEqual({
       sendLaunchBeforeConfig: true,
-      // only rdbg's attach handler honours nonstop (issue #798)
-      launchRequestCommand: 'attach',
+      // only rdbg's attach handler honours nonstop (issue #798): a per-launch choice
+      launchRequestCommand: expect.any(Function),
       // rdbg can emit 'initialized' yet never send the initialize response;
       // the proxy must not park on the response forever (issue #492)
       initializeResponseOptional: true,
@@ -315,8 +315,12 @@ describe('RubyAdapterPolicy behavior surface', () => {
   // request. The policy therefore sends the launch as `attach`; with
   // stopOnEntry rdbg answers configurationDone with `stopped reason: 'pause'`
   // at the script's first line, and without it rdbg continues by itself.
-  it('sends its launch as a DAP attach request (issue #798)', () => {
-    expect(RubyAdapterPolicy.getInitializationBehavior().launchRequestCommand).toBe('attach');
+  it('sends a launch that asks for an entry stop as a DAP attach request, and any other as launch (issue #798)', () => {
+    const choose = RubyAdapterPolicy.getInitializationBehavior().launchRequestCommand as (launch: { stopOnEntry: boolean }) => string;
+    expect(choose({ stopOnEntry: true })).toBe('attach');
+    // Byte for byte what shipped before, and safe on debug gems older than
+    // 1.7.0 whose attach handler ignores nonstop and would hold the pause.
+    expect(choose({ stopOnEntry: false })).toBe('launch');
   });
 
   it('reports rdbg\'s load-time pause as the entry stop only for a launch that asked for one (issue #798)', () => {

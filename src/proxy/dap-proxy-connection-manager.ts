@@ -206,9 +206,10 @@ export class DapConnectionManager {
   /**
    * Send a launch request with proper configuration.
    *
-   * `requestCommand` is the DAP verb the launch goes out as — 'launch' unless
-   * the policy's `launchRequestCommand` says otherwise (rdbg honours `nonstop`
-   * only on `attach`, issue #798). The arguments are the same either way.
+   * `options.requestCommand` is the DAP verb the launch goes out as — 'launch'
+   * unless the policy's `launchRequestCommand` says otherwise (rdbg honours
+   * `nonstop` only on `attach`, issue #798). The arguments are the same
+   * either way.
    */
   async sendLaunchRequest(
     client: IDapClient,
@@ -217,8 +218,9 @@ export class DapConnectionManager {
     stopOnEntry: boolean = true,
     justMyCode: boolean = true,
     launchConfig?: Record<string, unknown>,
-    requestCommand: 'launch' | 'attach' = 'launch'
+    options?: { requestCommand?: 'launch' | 'attach' }
   ): Promise<void> {
+    const requestCommand = options?.requestCommand ?? 'launch';
     this.logger.info('[ConnectionManager] Received scriptPath:', scriptPath);
     
     const baseLaunchArgs = launchConfig ? { ...launchConfig } : {};

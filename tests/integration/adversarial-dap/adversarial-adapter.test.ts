@@ -141,9 +141,8 @@ describe.sequential('adversarial TCP DAP adapter', () => {
     expect(manager.isRunning()).toBe(true);
   });
 
-  // The Ruby policy sends its launch as rdbg's `attach` verb (issue #798), so
-  // the launch-stage scenarios key on `attach` — the request on the wire —
-  // while the diagnosis still names the launch the caller asked for.
+  // The harness launches with stopOnEntry:false, so the Ruby policy keeps the
+  // `launch` verb (issue #798: only an entry-stop launch goes out as attach).
   it('reports the launch stage when initialize recovers but launch never responds', async () => {
     const { manager, config } = await createManager({
       commands: {
@@ -151,7 +150,7 @@ describe.sequential('adversarial TCP DAP adapter', () => {
           dropResponse: true,
           eventsBeforeResponse: [{ event: 'initialized' }]
         },
-        attach: { dropResponse: true }
+        launch: { dropResponse: true }
       }
     }, 4500);
 
@@ -215,7 +214,7 @@ describe.sequential('adversarial TCP DAP adapter', () => {
     const { manager, config } = await createManager({
       commands: {
         initialize: { eventsAfterResponse: [{ event: 'initialized' }] },
-        attach: { close: 'mid-response', closeAfterBytes: 18 }
+        launch: { close: 'mid-response', closeAfterBytes: 18 }
       }
     }, 5000);
 

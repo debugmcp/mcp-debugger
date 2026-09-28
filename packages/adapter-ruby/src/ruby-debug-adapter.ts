@@ -22,6 +22,7 @@ import {
 } from '@debugmcp/shared';
 import { DebugLanguage } from '@debugmcp/shared';
 import { AdapterDependencies } from '@debugmcp/shared';
+import type { LaunchConfigDiagnostic } from '@debugmcp/shared';
 import {
   findRubyExecutable,
   findRdbgExecutable,
@@ -266,9 +267,9 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
     // short script finishes before the proxy can connect. What happens to
     // that pause is decided by the DAP request the proxy then sends (issue
     // #798): rdbg's `launch` handler releases it unconditionally on
-    // configurationDone, so the launch goes out as `attach` with `nonstop`
-    // derived from stopOnEntry — false reports the pause as a stopped event
-    // (the entry stop), true lets rdbg continue by itself.
+    // configurationDone (the default, stopOnEntry:false), while an entry-stop
+    // launch (stopOnEntry:true) goes out as `attach { nonstop: false }`, and
+    // rdbg then reports the pause as a stopped event — the entry stop.
     const rdbgArgs = [
       '--open',
       '--host', config.adapterHost,
@@ -336,6 +337,15 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
     return 'gem install debug';
   }
 
+  /** What transformLaunchConfig did not take as given (issue #798); cleared on read. */
+  private launchConfigDiagnostics: LaunchConfigDiagnostic[] = [];
+
+  consumeLaunchConfigDiagnostics(): readonly LaunchConfigDiagnostic[] {
+    const diagnostics = this.launchConfigDiagnostics;
+    this.launchConfigDiagnostics = [];
+    return diagnostics;
+  }
+
   async transformLaunchConfig(config: GenericLaunchConfig): Promise<RubyLaunchConfig> {
     const rawConfig = config as Record<string, unknown>;
     const script = typeof rawConfig.program === 'string'
@@ -350,23 +360,42 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
       request: 'launch',
       name: 'Ruby: Current File',
       script,
-      // rdbg's attach handler — the one the launch goes through (issue #798)
-      // — reads `localfs || localfsMap` with no default, where its launch
-      // handler defaulted to true: `localfs: false` is only meaningful next
-      // to a map, and alone it would leave rdbg with no path mapping at all
-      // (every setBreakpoints refused).
+      // rdbg's attach handler — the one an entry-stop launch goes through
+      // (issue #798) — reads `localfs || localfsMap` with no default, where
+      // its launch handler defaults to true: `localfs: false` is only
+      // meaningful next to a map, and alone it would leave rdbg with no path
+      // mapping at all (every setBreakpoints refused).
       localfs: rawConfig.localfs === false && typeof rawConfig.localfsMap === 'string' ? false : true,
       debugPort: typeof rawConfig.debugPort === 'string' ? rawConfig.debugPort : undefined,
       useTerminal: false,
       showProtocolLog: process.env.DEBUG === '1' || process.env.DEBUG === 'true',
       stopOnEntry: config.stopOnEntry ?? false,
-      // The launch is sent as a DAP `attach` (the policy's launchRequestCommand)
-      // because only rdbg's attach handler honours nonstop (issue #798). An
-      // explicit `nonstop` from adapterLaunchConfig wins, like localfs above.
-      nonstop: typeof rawConfig.nonstop === 'boolean' ? rawConfig.nonstop : !(config.stopOnEntry ?? false),
+      // An entry-stop launch is sent as a DAP `attach` (the policy's
+      // launchRequestCommand) because only rdbg's attach handler honours
+      // nonstop (issue #798): stopOnEntry is the one lever, and rdbg's own key
+      // is derived from it — a caller's `nonstop` would contradict the entry
+      // stop the session reports, so it is ignored and said so below.
+      nonstop: !(config.stopOnEntry ?? false),
       justMyCode: config.justMyCode ?? true,
       cwd: config.cwd ?? process.cwd()
     };
+
+    // What the transform did not take as given, for the launch result (the
+    // launcher joins these into `warning`, as for the other adapters' dropped
+    // keys — issues #450/#466).
+    this.launchConfigDiagnostics = [];
+    if (typeof rawConfig.nonstop === 'boolean') {
+      this.launchConfigDiagnostics.push({
+        key: 'nonstop',
+        message: `adapterLaunchConfig.nonstop: ignored — rdbg's nonstop is derived from stopOnEntry (${rubyConfig.stopOnEntry ? 'false, the entry stop' : 'true, run on'})`
+      });
+    }
+    if (rawConfig.localfs === false && typeof rawConfig.localfsMap !== 'string' && rubyConfig.stopOnEntry) {
+      this.launchConfigDiagnostics.push({
+        key: 'localfs',
+        message: 'adapterLaunchConfig.localfs: false was sent as true — with stopOnEntry the launch goes to rdbg\'s attach handler, which has no default path mapping; pass localfsMap to map paths'
+      });
+    }
 
     if (typeof rawConfig.command === 'string') {
       rubyConfig.command = rawConfig.command;

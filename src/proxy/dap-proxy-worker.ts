@@ -806,7 +806,13 @@ export class DapProxyWorker {
     // handshake stage stays 'launch' either way: it is what the caller asked
     // for, and what the init-timeout diagnosis should name — the DAP trace
     // shows the verb on the wire.
-    const requestCommand = this.adapterPolicy.getInitializationBehavior().launchRequestCommand ?? 'launch';
+    const verb = this.adapterPolicy.getInitializationBehavior().launchRequestCommand;
+    // The effective entry-stop request, resolved the way sendLaunchRequest
+    // resolves it: the transformed config's value wins over the tool's.
+    const stopOnEntry = typeof payload.launchConfig?.stopOnEntry === 'boolean'
+      ? payload.launchConfig.stopOnEntry
+      : payload.stopOnEntry;
+    const requestCommand = typeof verb === 'function' ? verb({ stopOnEntry: stopOnEntry === true }) : (verb ?? 'launch');
     const launch = this.trackedHandshakeRequest('launch', () => this.connectionManager!.sendLaunchRequest(
       this.dapClient!,
       payload.scriptPath,
@@ -814,7 +820,7 @@ export class DapProxyWorker {
       payload.stopOnEntry,
       payload.justMyCode,
       payload.launchConfig,
-      requestCommand
+      { requestCommand }
     ));
     this.launchOutcome = launch.then(() => true, () => false);
     await launch;

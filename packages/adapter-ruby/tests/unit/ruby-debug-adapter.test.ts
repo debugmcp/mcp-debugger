@@ -287,21 +287,36 @@ describe('RubyDebugAdapter', () => {
     expect(config.stopOnEntry).toBe(stopOnEntry ?? false);
   });
 
-  it('honours an explicit nonstop from the launch config over the stopOnEntry derivation (issue #798)', async () => {
+  it('ignores an explicit nonstop — stopOnEntry is the lever — and says so (issue #798)', async () => {
     const adapter = new RubyDebugAdapter(createDependencies());
     const held = await adapter.transformLaunchConfig({ program: '/workspace/app.rb', nonstop: false } as LanguageSpecificLaunchConfig);
-    expect(held.nonstop).toBe(false);
+    expect(held.nonstop).toBe(true);
+    expect(adapter.consumeLaunchConfigDiagnostics()).toEqual([
+      { key: 'nonstop', message: expect.stringContaining("adapterLaunchConfig.nonstop: ignored — rdbg's nonstop is derived from stopOnEntry (true, run on)") }
+    ]);
+    // Consumed once.
+    expect(adapter.consumeLaunchConfigDiagnostics()).toEqual([]);
     const released = await adapter.transformLaunchConfig({ program: '/workspace/app.rb', stopOnEntry: true, nonstop: true } as LanguageSpecificLaunchConfig);
-    expect(released.nonstop).toBe(true);
+    expect(released.nonstop).toBe(false);
+    expect(adapter.consumeLaunchConfigDiagnostics()[0]?.message).toContain('(false, the entry stop)');
   });
 
-  it('sends localfs: false only next to a localfsMap, since rdbg\'s attach handler has no default (issue #798)', async () => {
+  it('sends localfs: false only next to a localfsMap, since rdbg\'s attach handler has no default, and says so on the attach path (issue #798)', async () => {
     const adapter = new RubyDebugAdapter(createDependencies());
+    // Default launch: the `launch` verb, whose rdbg handler defaults the map — nothing to say.
     const alone = await adapter.transformLaunchConfig({ program: '/workspace/app.rb', localfs: false } as LanguageSpecificLaunchConfig);
     expect(alone.localfs).toBe(true);
-    const mapped = await adapter.transformLaunchConfig({ program: '/workspace/app.rb', localfs: false, localfsMap: '/local:/remote' } as LanguageSpecificLaunchConfig);
+    expect(adapter.consumeLaunchConfigDiagnostics()).toEqual([]);
+    // Entry-stop launch: the attach verb, no default — the coercion is reported.
+    const attachPath = await adapter.transformLaunchConfig({ program: '/workspace/app.rb', stopOnEntry: true, localfs: false } as LanguageSpecificLaunchConfig);
+    expect(attachPath.localfs).toBe(true);
+    expect(adapter.consumeLaunchConfigDiagnostics()).toEqual([
+      { key: 'localfs', message: expect.stringContaining('adapterLaunchConfig.localfs: false was sent as true') }
+    ]);
+    const mapped = await adapter.transformLaunchConfig({ program: '/workspace/app.rb', stopOnEntry: true, localfs: false, localfsMap: '/local:/remote' } as LanguageSpecificLaunchConfig);
     expect(mapped.localfs).toBe(false);
     expect(mapped.localfsMap).toBe('/local:/remote');
+    expect(adapter.consumeLaunchConfigDiagnostics()).toEqual([]);
   });
 
   it('transforms attach config for an existing rdbg port', () => {
