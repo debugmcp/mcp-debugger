@@ -325,7 +325,7 @@ Sets a breakpoint in a file. Internally sends a DAP `setBreakpoints` request for
 **Returns**: Breakpoint information plus an optional sync warning
 
 #### `setFunctionBreakpoint(sessionId: string, bp: { functionName: string; condition?: string }): Promise<{ breakpoint: FunctionBreakpoint; warning?: string }>`
-Sets a symbol-addressed (function) breakpoint (issue #271 phase 3).
+Sets a symbol-addressed (function) breakpoint (issue #271 phase 3). Accepts a session in any lifecycle state; with no live debuggee the breakpoint is stored (`verified: false`, no warning) and applied on the next launch (issue #806).
 
 #### `resolveFunctionBreakpointName(sessionId: string, requestedName: string): FunctionBreakpointNameResolution`
 Resolves a function-breakpoint name through the session's adapter policy — the shared answer behind `set_breakpoint` and `remove_breakpoint` (issue #559). Synchronous.

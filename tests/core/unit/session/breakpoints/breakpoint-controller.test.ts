@@ -22,13 +22,7 @@ function sessionWith(lines: Array<[id: string, file: string]>, functions: string
 }
 
 function makeController(): BreakpointController {
-  const ctx: BreakpointContext = {
-    logger: createMockLogger(),
-    getSession: vi.fn(),
-    selectPolicy: vi.fn(),
-    selectStorePolicy: vi.fn()
-  };
-  return new BreakpointController(ctx);
+  return makeControllerWithCtx().controller;
 }
 
 function makeControllerWithCtx(): { controller: BreakpointController; ctx: BreakpointContext } {

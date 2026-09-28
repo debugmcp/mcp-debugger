@@ -2060,7 +2060,10 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
   describe('Terminated Session Scenarios', () => {
     it('rejects execution on a terminated session but stores a breakpoint for the next launch (issues #793/#806)', async () => {
+      // The dry-run exit window: STOPPED (lifecycle TERMINATED) while the
+      // proxy double still reports running — the live sync must skip on state.
       mockSession.sessionLifecycle = SessionLifecycleState.TERMINATED;
+      mockSession.state = SessionState.STOPPED;
 
       await expect(() => operations.continue('test-session'))
         .rejects.toThrow(SessionTerminatedError);

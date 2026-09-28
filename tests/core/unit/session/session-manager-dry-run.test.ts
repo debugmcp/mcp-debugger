@@ -57,6 +57,39 @@ describe('SessionManager - Dry Run Race Condition Tests', () => {
       ]);
     });
 
+    it('after a run to completion, a dry run keeps the breakpoints and the last real launch, so restart still replays', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        name: 'DryRunAfterExit'
+      });
+      await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 9 });
+      await sessionManager.startDebugging(session.id, 'test.py', ['--real']);
+      await vi.runAllTimersAsync();
+      dependencies.mockProxyManager.simulateEvent('terminated');
+      await vi.runAllTimersAsync();
+
+      const dry = await sessionManager.startDebugging(session.id, 'test.py', [], {}, true);
+      await vi.runAllTimersAsync();
+      expect(dry.success).toBe(true);
+
+      // A dry run is a launch attempt: it resets the per-launch state (output
+      // buffer, exitCode) like any launch, but the stored breakpoints and the
+      // last REAL launch survive it.
+      expect(sessionManager.listBreakpoints(session.id)).toHaveLength(1);
+      expect(sessionManager.getSession(session.id)?.lastLaunch?.scriptArgs).toEqual(['--real']);
+
+      const restartPromise = sessionManager.restartDebugging(session.id);
+      await vi.runAllTimersAsync();
+      const restarted = await restartPromise;
+      expect(restarted.success).toBe(true);
+      const startCalls = dependencies.mockProxyManager.startCalls;
+      expect(startCalls).toHaveLength(3);
+      expect(startCalls[2].scriptArgs).toEqual(['--real']);
+      expect(startCalls[2].initialBreakpoints).toEqual([
+        expect.objectContaining({ file: 'test.py', line: 9 })
+      ]);
+    });
+
     it('should wait for dry run completion beyond 500ms', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,

@@ -117,12 +117,7 @@ export class DebugMcpServer implements ToolContext {
    * @internal ToolContext service.
    */
   public validateSession(sessionId: string): void {
-    const session = this.sessionManager.getSession(sessionId);
-    if (!session) {
-      // Typed subclass of McpError (same code/message) so per-tool catch blocks
-      // can convert session-lifecycle failures into {success: false} results
-      throw new SessionNotFoundError(sessionId);
-    }
+    const session = this.validateSessionExists(sessionId);
     if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
       throw new SessionTerminatedError(sessionId);
     }
@@ -136,13 +131,18 @@ export class DebugMcpServer implements ToolContext {
    * stored verified:false and applied by the next launch, whose response
    * carries the adapter's own answer (issues #793, #806). list/remove/
    * clear_breakpoints and get_output rely on the SessionManager's own lookup
-   * for the same reason.
-   * @internal ToolContext service.
+   * for the same reason. Returns the session so validateSession builds on
+   * the same lookup (facade-only; handlers reach it through the tool methods).
+   * @internal
    */
-  public validateSessionExists(sessionId: string): void {
-    if (!this.sessionManager.getSession(sessionId)) {
+  public validateSessionExists(sessionId: string): NonNullable<ReturnType<SessionManager['getSession']>> {
+    const session = this.sessionManager.getSession(sessionId);
+    if (!session) {
+      // Typed subclass of McpError (same code/message) so per-tool catch blocks
+      // can convert session-lifecycle failures into {success: false} results
       throw new SessionNotFoundError(sessionId);
     }
+    return session;
   }
 
   /**
