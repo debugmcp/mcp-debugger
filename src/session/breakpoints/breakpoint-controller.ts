@@ -8,13 +8,18 @@
  * a change is expressed by re-sending the surviving set; and a failed re-send
  * is reported as a `warning`, never thrown, because the stored set is still
  * correct and gets re-applied on the next launch.
+ *
+ * Set, remove and clear all work in every lifecycle state short of
+ * close_debug_session: before the first launch and after the program has
+ * exited (or a dry run) the mutation is stored and waits for the next launch;
+ * only a RUNNING or PAUSED session with a live proxy triggers a re-send
+ * (issues #793, #806).
  */
 import { getErrorMessage } from '../../errors/debug-errors.js';
 import { v4 as uuidv4 } from 'uuid';
 import {
   Breakpoint,
   FunctionBreakpoint,
-  SessionLifecycleState,
   SessionState,
   toFunctionBreakpoint,
   toSourceBreakpoint,
@@ -22,7 +27,6 @@ import {
   type DebugLanguage
 } from '@debugmcp/shared';
 import { DebugProtocol } from '@vscode/debugprotocol';
-import { SessionTerminatedError } from '../../errors/debug-errors.js';
 import { consumeChildSourced } from '../../utils/child-origin-events.js';
 import { normalizeBreakpointMessage } from '../../utils/breakpoint-message.js';
 import type { ManagedSession } from '../session-store.js';
@@ -91,11 +95,6 @@ export class BreakpointController {
     }
   ): Promise<{ breakpoint: Breakpoint; warning?: string }> {
     const session = this.ctx.getSession(sessionId);
-
-    // Check if session is terminated
-    if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
-      throw new SessionTerminatedError(sessionId);
-    }
 
     const bpId = uuidv4();
 
@@ -347,10 +346,6 @@ export class BreakpointController {
     }
   ): Promise<{ breakpoint: FunctionBreakpoint; warning?: string }> {
     const session = this.ctx.getSession(sessionId);
-
-    if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
-      throw new SessionTerminatedError(sessionId);
-    }
 
     const newBreakpoint: FunctionBreakpoint = {
       id: uuidv4(),

@@ -404,8 +404,16 @@ export interface GenericLaunchConfig {
 
 /** An adapter's explanation of how it handled one launch input. */
 export interface LaunchConfigDiagnostic {
+  /** The caller's launch key this is about — or, with scope 'launch', a label for a notice about the launch as a whole. */
   key: string;
   message: string;
+  /**
+   * 'launch': not tied to a caller input. The launcher renders the message
+   * as-is instead of matching `key` against the caller's keys (issue #796 —
+   * e.g. the JavaScript adapter's exit-code preload is missing from this
+   * distribution, so exit codes will not be captured).
+   */
+  scope?: 'launch';
 }
 
 /**

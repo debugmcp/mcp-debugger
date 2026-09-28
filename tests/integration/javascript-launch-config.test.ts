@@ -11,9 +11,10 @@ const scriptPath = path.join(fixture, 'target.cjs');
 const scrubbed = new Set(['NODE_OPTIONS', 'DEBUG_MCP_SKIP_AUTO_START', 'MCP_DEBUGGER_EXITCODE_FILE',
   'MCP_DEBUGGER_EXITCODE_CLAIMED', 'DEBUG', 'DAP_TRACE_FILE']);
 interface Result {
-  success: boolean; state?: string; warning?: string; message?: string;
-  data?: { warning?: string; stopOnEntrySuccessful?: boolean; exitCode?: number };
+  success: boolean; state?: string; warning?: string; message?: string; error?: string;
+  data?: { warning?: string; stopOnEntrySuccessful?: boolean; exitCode?: number; dryRun?: boolean };
 }
+interface Listed { id: string; state: string; exitCode?: number; lastStop?: { reason?: string } }
 let client: Client;
 let sessionId: string | undefined;
 
@@ -28,6 +29,11 @@ async function launch(args: Record<string, unknown> = {}): Promise<Result> {
   const result = await call('start_debugging', { scriptPath, ...args });
   expect(result.success, JSON.stringify(result)).toBe(true);
   return result;
+}
+
+async function listedSession(): Promise<Listed | undefined> {
+  const listed = await call<Result & { sessions: Listed[] }>('list_debug_sessions');
+  return listed.sessions.find(session => session.id === sessionId);
 }
 
 async function inspect(): Promise<string> {
@@ -126,12 +132,59 @@ describe('JavaScript launch configuration', () => {
     expect(dry.warning).toContain('adapterLaunchConfig.runtimeArgs');
   });
 
+  it('keeps the session usable after a dry run: the real launch on the same session binds the breakpoint set before it (issue #793)', async () => {
+    // Line 9 (`if (process.argv.includes('--exit'))`) runs on both fixture paths.
+    const bp = await call('set_breakpoint', { file: scriptPath, line: 9 });
+    expect(bp.success, JSON.stringify(bp)).toBe(true);
+    const dry = await launch({ dryRunSpawn: true });
+    expect(dry.state).toBe('stopped');
+    expect(dry.data?.dryRun).toBe(true);
+    // Before #793 this call was refused with "Session is terminated: <id>".
+    // It lands inside the dry-run worker's exit window, so the launcher's
+    // leftover-proxy teardown runs on a still-live proxy every time.
+    await launch({ dapLaunchArgs: { stopOnEntry: false } });
+    await expect.poll(async () => (await listedSession())?.state, { timeout: 15_000 }).toBe('paused');
+    expect((await listedSession())?.lastStop?.reason).toBe('breakpoint');
+    const listed = await call<Result & { breakpoints: Array<{ line: number; verified: boolean }> }>('list_breakpoints');
+    expect(listed.breakpoints).toEqual([expect.objectContaining({ line: 9, verified: true })]);
+  }, 60_000);
+
+  it('accepts a breakpoint set after the program ran to completion and hits it on the relaunch (issue #806)', async () => {
+    await launch({ args: ['--exit'], dapLaunchArgs: { stopOnEntry: false } });
+    await expect.poll(async () => (await listedSession())?.exitCode, { timeout: 15_000 }).toBe(7);
+    expect((await listedSession())?.state).toBe('stopped');
+    // Before #806 this call was refused with "Session is terminated: <id>",
+    // while remove/list/clear_breakpoints and restart_debugging were accepted.
+    const bp = await call('set_breakpoint', { file: scriptPath, line: 9 });
+    expect(bp.success, JSON.stringify(bp)).toBe(true);
+    const restarted = await call('restart_debugging');
+    expect(restarted.success, JSON.stringify(restarted)).toBe(true);
+    await expect.poll(async () => (await listedSession())?.state, { timeout: 15_000 }).toBe('paused');
+    expect((await listedSession())?.lastStop?.reason).toBe('breakpoint');
+  }, 60_000);
+
   it('keeps noDebug running and preserves exit-code recording with envFile', async () => {
     const result = await launch({ args: ['--exit'], adapterLaunchConfig: {
       noDebug: true, stopOnEntry: true, envFile: path.join(fixture, 'environment.env')
     } });
     expect(result.data?.stopOnEntrySuccessful).toBe(false);
     expect(result.warning).toContain('noDebug');
+    await expect.poll(async () => {
+      const listed = await call<Result & { sessions: Array<{ id: string; exitCode?: number }> }>('list_debug_sessions');
+      return listed.sessions.find(session => session.id === sessionId)?.exitCode;
+    }, { timeout: 15_000 }).toBe(7);
+  }, 60_000);
+  it('reports the debuggee exit code for a debugger-on launch (issue #735)', async () => {
+    // js-debug never sends `exited`; the code comes from the preload shim's
+    // recorded value (#247). The noDebug case above covered only that flag.
+    // The poll on list_debug_sessions is the guarantee; the summary branch is
+    // reached only when the fixture exits before launch readiness resolves,
+    // which js-debug's handshake usually wins.
+    const result = await launch({ args: ['--exit'], dapLaunchArgs: { stopOnEntry: false } });
+    if (result.state === 'stopped') {
+      expect(result.data?.exitCode, JSON.stringify(result)).toBe(7);
+      expect(result.message).toContain('exited with code 7');
+    }
     await expect.poll(async () => {
       const listed = await call<Result & { sessions: Array<{ id: string; exitCode?: number }> }>('list_debug_sessions');
       return listed.sessions.find(session => session.id === sessionId)?.exitCode;

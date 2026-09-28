@@ -22,14 +22,69 @@ function sessionWith(lines: Array<[id: string, file: string]>, functions: string
 }
 
 function makeController(): BreakpointController {
+  return makeControllerWithCtx().controller;
+}
+
+function makeControllerWithCtx(): { controller: BreakpointController; ctx: BreakpointContext } {
   const ctx: BreakpointContext = {
     logger: createMockLogger(),
     getSession: vi.fn(),
     selectPolicy: vi.fn(),
     selectStorePolicy: vi.fn()
   };
-  return new BreakpointController(ctx);
+  return { controller: new BreakpointController(ctx), ctx };
 }
+
+/** A session whose program has exited (or that only dry-ran): lifecycle TERMINATED, still in the store. */
+function terminatedSession(proxyManager?: unknown): ManagedSession {
+  return {
+    id: 'sess-1',
+    language: 'mock',
+    state: 'stopped',
+    sessionLifecycle: 'terminated',
+    proxyManager,
+    breakpoints: new Map<string, Breakpoint>(),
+    functionBreakpoints: new Map<string, FunctionBreakpoint>()
+  } as unknown as ManagedSession;
+}
+
+describe('BreakpointController set on a terminated session (between launches, issues #793/#806)', () => {
+  it('stores a line breakpoint verified:false, with no warning, when no proxy is live', async () => {
+    const { controller, ctx } = makeControllerWithCtx();
+    const session = terminatedSession(undefined);
+    vi.mocked(ctx.getSession).mockReturnValue(session);
+
+    const { breakpoint, warning } = await controller.setBreakpoint('sess-1', { file: '/app/a.py', line: 7 });
+
+    expect(breakpoint).toMatchObject({ file: '/app/a.py', line: 7, verified: false });
+    expect(warning).toBeUndefined();
+    expect(session.breakpoints.get(breakpoint.id)).toBe(breakpoint);
+  });
+
+  it('sends nothing to a proxy that is still up after a dry run (state stopped)', async () => {
+    const sendDapRequest = vi.fn();
+    const { controller, ctx } = makeControllerWithCtx();
+    const session = terminatedSession({ isRunning: () => true, sendDapRequest });
+    vi.mocked(ctx.getSession).mockReturnValue(session);
+
+    const { breakpoint } = await controller.setBreakpoint('sess-1', { file: '/app/a.py', line: 7 });
+
+    expect(breakpoint.verified).toBe(false);
+    expect(sendDapRequest).not.toHaveBeenCalled();
+  });
+
+  it('stores a function breakpoint verified:false, with no warning, when no proxy is live', async () => {
+    const { controller, ctx } = makeControllerWithCtx();
+    const session = terminatedSession(undefined);
+    vi.mocked(ctx.getSession).mockReturnValue(session);
+
+    const { breakpoint, warning } = await controller.setFunctionBreakpoint('sess-1', { functionName: 'main' });
+
+    expect(breakpoint).toMatchObject({ functionName: 'main', verified: false });
+    expect(warning).toBeUndefined();
+    expect(session.functionBreakpoints.get(breakpoint.id)).toBe(breakpoint);
+  });
+});
 
 describe('BreakpointController.resyncAll', () => {
   it('re-sends each file once with the option forwarded, then the function breakpoints', async () => {

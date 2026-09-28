@@ -548,9 +548,9 @@ describe('SessionManager - DAP Operations', () => {
   });
 
   describe('breakpoint management after the debuggee exits', () => {
-    // Unlike setBreakpoint, list/remove/clear deliberately work in TERMINATED
-    // lifecycle: a terminated-but-unclosed session keeps its queued breakpoints
-    // so they can be adjusted before a relaunch (restart workflow, issue #238).
+    // set/list/remove/clear all work in TERMINATED lifecycle: a
+    // terminated-but-unclosed session keeps its queued breakpoints so they can
+    // be adjusted before a relaunch (restart workflow, issues #238, #806).
     it('lists, removes, and clears store-only once the session is terminated', async () => {
       const session = await sessionManager.createSession({
         language: DebugLanguage.MOCK,
