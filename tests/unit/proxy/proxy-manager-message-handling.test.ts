@@ -679,6 +679,27 @@ describe('ProxyManager Message Handling', () => {
       await expect(hungPromise).rejects.toThrow(/cancelled during proxy shutdown/i);
       await stopPromise;
     });
+
+    it('records a pre-detach resume outcome that arrives after stop() (issue #763)', async () => {
+      // close_debug_session: stop() sets isStopped before the worker's
+      // auto-detach runs, so the outcome of its resume is a late message —
+      // the one late message kept, or a refused resume on close leaves no trace.
+      const { proxyManager } = makeStoppableProxyManager();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (proxyManager as any).isStopped = true;
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (proxyManager as any).handleProxyMessage({
+        type: 'status', sessionId: 'drain-session', status: 'pre_detach_resume',
+        trigger: 'close', threadId: 5, resumed: false, error: 'process is running'
+      });
+
+      expect(proxyManager.getPreDetachResume()).toEqual({ trigger: 'close', threadId: 5, resumed: false, error: 'process is running' });
+      // Any other late message is still dropped.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (proxyManager as any).handleProxyMessage({ type: 'status', sessionId: 'drain-session', status: 'adapter_connected' });
+      expect(proxyManager.getPreDetachResume()).toEqual({ trigger: 'close', threadId: 5, resumed: false, error: 'process is running' });
+    });
   });
 
   describe('DAP request handling edge cases', () => {

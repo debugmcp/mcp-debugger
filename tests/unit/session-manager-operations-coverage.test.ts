@@ -102,6 +102,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     mockProxyManager = {
       isRunning: vi.fn().mockReturnValue(true),
       getCurrentThreadId: vi.fn().mockReturnValue(1),
+      getPreDetachResume: vi.fn().mockReturnValue(undefined),
       sendDapRequest: vi.fn().mockResolvedValue({}),
       stop: vi.fn(),
       once: vi.fn(),
@@ -3656,20 +3657,24 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(mockProxyManager.stop).toHaveBeenCalled();
     });
 
-    it('detachFromProcess with terminateProcess=true should call closeSession', async () => {
+    it('detachFromProcess with terminateProcess=true tells the adapter to terminate, then closes the session', async () => {
       mockSession.state = SessionState.PAUSED;
       // closeSession uses sessionStore.get (not getOrThrow)
       mockSessionStore.get.mockReturnValue(mockSession);
       mockProxyManager.stop.mockResolvedValue(undefined);
+      mockProxyManager.sendDapRequest.mockResolvedValue({});
 
       const result = await operations.detachFromProcess('test-session', true);
 
       expect(result.success).toBe(true);
       expect(result.data?.message).toContain('terminated process');
-      // Should NOT have sent disconnect with terminateDebuggee=false
+      // The result says terminated, so the adapter is told to terminate (issue
+      // #763 review): the close's own teardown would only detach — and resume.
+      expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('disconnect', { terminateDebuggee: true });
       expect(mockProxyManager.sendDapRequest).not.toHaveBeenCalledWith('disconnect', {
         terminateDebuggee: false
       });
+      expect(mockProxyManager.stop).toHaveBeenCalled();
     });
 
     it('detachFromProcess should update session state to STOPPED and lifecycle to TERMINATED', async () => {
@@ -3702,6 +3707,101 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       await expect(operations.detachFromProcess('unknown-session'))
         .rejects.toThrow(SessionNotFoundError);
+    });
+
+    // Issue #763: on Windows, CodeLLDB's detach resumes every thread with the
+    // resume state its last stop left behind — after a step that is
+    // "stepping", so the thread single-steps with no debugger attached and the
+    // process dies with STATUS_SINGLE_STEP. The WORKER sends the continue
+    // ahead of every attach-mode disconnect where the policy asks and reports
+    // the outcome as 'pre_detach_resume'; the session layer only sends the
+    // disconnect and reads that outcome back into the detach result.
+    describe('resume before detach (issue #763)', () => {
+      const resumingPolicy = {
+        getAttachBehavior: () => ({
+          resumeBeforeDetach: true,
+          resumeBeforeDetachReason: 'CodeLLDB on Windows single-steps a stepped thread on detach (STATUS_SINGLE_STEP)'
+        })
+      };
+
+      it('reports resumedBeforeDetach when the worker continued the target ahead of the disconnect', async () => {
+        mockSession.state = SessionState.PAUSED;
+        mockProxyManager.sendDapRequest.mockResolvedValue({});
+        mockProxyManager.getPreDetachResume.mockReturnValue({ trigger: 'detach', threadId: 25096, resumed: true });
+
+        const result = await operations.detachFromProcess('test-session', false);
+
+        expect(result.success).toBe(true);
+        // The session layer sends only the disconnect; the continue is the worker's.
+        expect(mockProxyManager.sendDapRequest.mock.calls.map((call) => call[0])).toEqual(['disconnect']);
+        expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('disconnect', { terminateDebuggee: false });
+        expect(result.data?.resumedBeforeDetach).toBe(true);
+        expect(result.data?.warning).toBeUndefined();
+        expect(result.data?.message).toContain('process still running');
+      });
+
+      it('reports nothing about a resume when no resume was called for', async () => {
+        mockSession.state = SessionState.PAUSED;
+        mockProxyManager.sendDapRequest.mockResolvedValue({});
+        mockProxyManager.getPreDetachResume.mockReturnValue(undefined);
+
+        const result = await operations.detachFromProcess('test-session', false);
+
+        expect(result.success).toBe(true);
+        expect(result.data?.resumedBeforeDetach).toBeUndefined();
+        expect(result.data?.warning).toBeUndefined();
+      });
+
+      it('still detaches, and frames the refusal with the policy\'s reason, when the continue was refused', async () => {
+        mockSession.state = SessionState.PAUSED;
+        mockProxyManager.sendDapRequest.mockResolvedValue({});
+        mockProxyManager.getPreDetachResume.mockReturnValue({
+          trigger: 'detach', threadId: 25096, resumed: false, error: 'process is not stopped'
+        });
+        const selectPolicySpy = vi.spyOn(operations as any, 'selectPolicy').mockReturnValue(resumingPolicy as any);
+        try {
+          const result = await operations.detachFromProcess('test-session', false);
+
+          expect(result.success).toBe(true);
+          expect(result.data?.resumedBeforeDetach).toBe(false);
+          expect(result.data?.warning).toBe(
+            'Could not resume the stopped target before detaching (process is not stopped); ' +
+            'CodeLLDB on Windows single-steps a stepped thread on detach (STATUS_SINGLE_STEP)'
+          );
+          expect(mockProxyManager.stop).toHaveBeenCalled();
+          expect(mockSession.state).toBe(SessionState.STOPPED);
+        } finally {
+          selectPolicySpy.mockRestore();
+        }
+      });
+
+      it('frames a refusal generically when the policy gives no reason', async () => {
+        mockSession.state = SessionState.PAUSED;
+        mockProxyManager.sendDapRequest.mockResolvedValue({});
+        mockProxyManager.getPreDetachResume.mockReturnValue({ trigger: 'detach', threadId: 7, resumed: false });
+        const selectPolicySpy = vi.spyOn(operations as any, 'selectPolicy')
+          .mockReturnValue({ getAttachBehavior: () => ({ resumeBeforeDetach: true }) } as any);
+        try {
+          const result = await operations.detachFromProcess('test-session', false);
+
+          expect(result.data?.warning).toBe(
+            'Could not resume the stopped target before detaching (no answer); the adapter asked for that resume before detaching'
+          );
+        } finally {
+          selectPolicySpy.mockRestore();
+        }
+      });
+
+      it('reads the outcome even when the disconnect itself failed', async () => {
+        mockSession.state = SessionState.PAUSED;
+        mockProxyManager.sendDapRequest.mockRejectedValue(new Error('Connection lost'));
+        mockProxyManager.getPreDetachResume.mockReturnValue({ trigger: 'detach', threadId: 25096, resumed: true });
+
+        const result = await operations.detachFromProcess('test-session', false);
+
+        expect(result.success).toBe(true);
+        expect(result.data?.resumedBeforeDetach).toBe(true);
+      });
     });
   });
 

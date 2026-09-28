@@ -533,18 +533,47 @@ export class AttachController {
       };
     }
 
+    let resumedBeforeDetach: boolean | undefined;
+    let warning: string | undefined;
+
     try {
       if (terminateProcess) {
-        // Terminate the process
-        await this.ctx.closeSession(sessionId);
-      } else {
-        // Disconnect without terminating - send DAP disconnect request
+        // Terminate the process: say so to the adapter first. closeSession's
+        // own teardown detaches an attach target with terminateDebuggee=false
+        // (and, since issue #763, resumes it first), which would leave running
+        // the process this result reports as terminated.
         try {
           await session.proxyManager.sendDapRequest('disconnect', {
+            terminateDebuggee: true
+          });
+        } catch (disconnectError) {
+          this.ctx.logger.warn(`[SessionManager] Terminating disconnect failed, closing the session anyway:`, disconnectError);
+        }
+        await this.ctx.closeSession(sessionId);
+      } else {
+        const proxyManager = session.proxyManager;
+
+        // Disconnect without terminating - send DAP disconnect request. In
+        // attach mode the worker resumes a stopped target ahead of it where
+        // the policy asks (issue #763: CodeLLDB on Windows kills a target
+        // detached right after a step) and reports the outcome as the
+        // 'pre_detach_resume' status, read back below for the result.
+        try {
+          await proxyManager.sendDapRequest('disconnect', {
             terminateDebuggee: false
           });
         } catch (disconnectError) {
           this.ctx.logger.warn(`[SessionManager] Disconnect request failed, continuing with cleanup:`, disconnectError);
+        }
+
+        const resume = proxyManager.getPreDetachResume();
+        if (resume) {
+          resumedBeforeDetach = resume.resumed;
+          if (!resume.resumed) {
+            const reason = this.ctx.selectPolicy(session.language).getAttachBehavior?.()?.resumeBeforeDetachReason
+              ?? 'the adapter asked for that resume before detaching';
+            warning = `Could not resume the stopped target before detaching (${resume.error ?? 'no answer'}); ${reason}`;
+          }
         }
 
         // Stop the proxy manager — it may already be gone if the disconnect
@@ -578,7 +607,9 @@ export class AttachController {
         data: {
           message: terminateProcess
             ? 'Detached and terminated process'
-            : 'Detached from process (process still running)'
+            : 'Detached from process (process still running)',
+          ...(resumedBeforeDetach !== undefined ? { resumedBeforeDetach } : {}),
+          ...(warning !== undefined ? { warning } : {})
         }
       };
     } catch (error) {

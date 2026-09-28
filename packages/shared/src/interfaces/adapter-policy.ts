@@ -87,6 +87,15 @@ export interface StopReasonContext {
   lineBreakpointCount: number;
   /** Function-breakpoint count from the session store — always present. */
   functionBreakpointCount: number;
+  /**
+   * How the session came up — a launch or an attach (issue #798). Lets a
+   * policy tell a launch's own entry stop from an attach's post-attach one.
+   */
+  sessionMode?: 'launch' | 'attach';
+  /** True for the first stop the session has seen since its launch/attach. */
+  firstStop?: boolean;
+  /** The effective stopOnEntry of the launch, when known. */
+  stopOnEntry?: boolean;
 }
 
 /**
@@ -655,6 +664,21 @@ export interface AdapterPolicy {
     /** Whether the adapter sends 'initialized' before receiving 'launch', requiring
      *  the proxy to defer initialized handling and send launch before configurationDone. */
     sendLaunchBeforeConfig?: boolean;
+    /**
+     * The DAP request a LAUNCH goes out as (default 'launch'), a literal or a
+     * choice per launch. rdbg's `launch` handler goes nonstop unconditionally
+     * and only its `attach` handler reads `nonstop`, so a Ruby launch that
+     * asks for an entry stop — whose rdbg process this server spawns
+     * suspended at load — is sent as `attach` (issue #798); a launch that does
+     * not keeps the `launch` verb, byte-identical to before (on debug gems
+     * older than 1.7.0 the attach handler ignores `nonstop` and would hold
+     * the pause). The session stays a launch: attach MODE is keyed on the
+     * config's `request`, which this does not touch, and the handshake stage
+     * still names the launch. Honoured by the worker's own handshake
+     * (sendTrackedLaunch); a command-queueing policy drives its launch
+     * through the session's DAP commands, which are sent as given.
+     */
+    launchRequestCommand?: 'launch' | 'attach' | ((launch: { stopOnEntry: boolean }) => 'launch' | 'attach');
     /** Whether the adapter requires attach to be sent BEFORE the initialized event.
      *  Some adapters send initialized only AFTER processing the attach request, so waiting
      *  for initialized before sending attach causes a deadlock. */
@@ -707,8 +731,25 @@ export interface AdapterPolicy {
    * the discovered thread's id. The JDI bridge suspends the whole VM on a
    * pause-all and re-anchors its stopped event to a thread that can actually
    * report frames (issue #465).
+   * resumeBeforeDetach: have the worker send a DAP 'continue' on the last
+   * stopped thread before any attach-mode 'disconnect' — the session's
+   * detach, close_debug_session's auto-detach and the shutdown path alike —
+   * while the target is stopped (issue #763). CodeLLDB on Windows needs it:
+   * ProcessWindows::DoDetach (LLVM PR 115712) resumes every thread with the
+   * resume state of its last stop before DebugActiveProcessStop, and after a
+   * step that state is still "stepping" — the thread single-steps with no
+   * debugger attached and the process dies with STATUS_SINGLE_STEP
+   * (0x80000004). A continue recomputes the state; a running target is
+   * detached without that resume loop at all.
+   * resumeBeforeDetachReason: the policy's own words for why, framed into
+   * the detach result's warning when the continue is refused.
    */
-  getAttachBehavior?(): { pauseAfterAttach?: boolean; pauseAllThreads?: boolean };
+  getAttachBehavior?(): {
+    pauseAfterAttach?: boolean;
+    pauseAllThreads?: boolean;
+    resumeBeforeDetach?: boolean;
+    resumeBeforeDetachReason?: string;
+  };
 
   /**
    * Get the configuration for starting the debug adapter connection.

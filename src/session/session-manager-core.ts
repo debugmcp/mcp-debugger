@@ -96,6 +96,13 @@ export interface DebugResultData extends ProxyFailureDiagnostics {
   breakpointsReapplied?: number;
   outputReset?: boolean;
   anchorResolution?: AnchorResolution;
+  /**
+   * Detach result field (issue #763): whether the paused target was resumed
+   * ahead of the disconnect — `false` when the policy asked for it and the
+   * continue was refused (`warning` then says so). Absent when the policy
+   * asks for no resume or the target was not paused.
+   */
+  resumedBeforeDetach?: boolean;
 }
 
 /**
@@ -564,6 +571,17 @@ export abstract class SessionManagerCore extends EventEmitter {
       // before the reason drives auto-continue, lastStop, and exceptionInfo.
       let reason = rawReason;
       let pauseIntent: ReturnType<typeof getCurrentPauseIntent>;
+      // Mode facts, shared by the stop-reason normalization below and the
+      // auto-continue decision after it. Attach sessions have no launch entry
+      // stop to skip: any stop observed after attach is either the deliberate
+      // post-attach pause issued by attachToProcess (pauseAfterAttach policies)
+      // or a real debug event, and auto-continuing those resumed the target
+      // right after we paused it (issue #124), so auto-continue is launch-only.
+      const isFirstStop = !session.firstStopHandled;
+      const launchArgsRecord = effectiveLaunchArgs as Record<string, unknown>;
+      const isAttachSession =
+        launchArgsRecord.request === 'attach' ||
+        launchArgsRecord.__attachMode === true;
       try {
         const policy = this.sessionStore.selectPolicy(session.language);
         // Collect the adapter-assigned ids of all user breakpoints so the
@@ -595,9 +613,16 @@ export abstract class SessionManagerCore extends EventEmitter {
         const userBreakpointIds: ReadonlySet<number> | undefined =
           lineComplete && fnComplete ? new Set([...lineIds, ...fnIds]) : undefined;
         pauseIntent = getCurrentPauseIntent(session);
+        // Mode facts for policies whose adapter reports a launch's entry stop
+        // under a generic reason (rdbg's `pause`, issue #798): a launch or an
+        // attach, the first stop or a later one, and whether the launch asked
+        // for an entry stop at all.
         const normalized = policy.normalizeStopReason?.(rawReason, body, {
           pausePending: pauseIntent !== undefined,
           ...(pauseIntent ? { pauseSource: pauseIntent.source } : {}),
+          sessionMode: isAttachSession ? 'attach' : 'launch',
+          firstStop: isFirstStop,
+          stopOnEntry: effectiveLaunchArgs.stopOnEntry === true,
           userBreakpointIds,
           functionBreakpointIds: fnComplete ? fnIds : undefined,
           lineBreakpointCount: session.breakpoints.size,
@@ -633,16 +658,11 @@ export abstract class SessionManagerCore extends EventEmitter {
       // Even on the very first stop, these must NOT be auto-continued —
       // the user set the breakpoint or hit the exception deliberately.
       const userBreakReasons = USER_BREAK_REASONS;
-      const isFirstStop = !session.firstStopHandled;
       // Attach sessions have no launch entry stop to skip: any stop observed
       // after attach is either the deliberate post-attach pause issued by
       // attachToProcess (pauseAfterAttach policies) or a real debug event.
       // Auto-continuing those resumed the target right after we paused it
       // (issue #124), so auto-continue is launch-only.
-      const launchArgsRecord = effectiveLaunchArgs as Record<string, unknown>;
-      const isAttachSession =
-        launchArgsRecord.request === 'attach' ||
-        launchArgsRecord.__attachMode === true;
       // A stop that answers a pause the user asked for is never the launch's
       // entry stop, whatever its reason or position (issue #704): with no
       // forced entry pause on a stopOnEntry:false js launch, the user's own

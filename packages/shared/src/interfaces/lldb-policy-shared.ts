@@ -521,3 +521,33 @@ export function getLldbDapClientBehavior(): DapClientBehavior {
     suppressPostAttachConfigDone: false
   };
 }
+
+/**
+ * Attach-mode tweaks shared by the CodeLLDB-backed policies (issue #763).
+ *
+ * On Windows, LLDB's ProcessWindows::DoDetach (since LLVM PR 115712) calls
+ * TargetThreadWindows::DoResume() on every thread before
+ * DebugActiveProcessStop, and DoResume sets the x86 trap flag whenever the
+ * thread's temporary resume state is still eStateStepping — which a completed
+ * `next`/`stepIn` leaves behind, since only Thread::ShouldResume recomputes
+ * it. The detached thread then takes a single-step exception with no debugger
+ * attached and the process exits with STATUS_SINGLE_STEP (0x80000004).
+ * Measured on Windows 11 / CodeLLDB 1.11.8: step_over → detach and step_into
+ * → detach kill the target every time; step_over → continue → detach, and a
+ * detach with no step, leave it running. A DAP continue ahead of the
+ * disconnect is the fix on the debugger's own terms (`resumeBeforeDetach`);
+ * the ptrace-based Linux/macOS plugins have no such resume loop, so the
+ * request stays win32-only.
+ */
+export function getLldbAttachBehavior(
+  platform: NodeJS.Platform = process.platform
+): { resumeBeforeDetach: boolean; resumeBeforeDetachReason?: string } {
+  if (platform !== 'win32') {
+    return { resumeBeforeDetach: false };
+  }
+  return {
+    resumeBeforeDetach: true,
+    resumeBeforeDetachReason:
+      'on Windows, CodeLLDB detaching a thread whose last resume was a step ends the process with STATUS_SINGLE_STEP (0x80000004)'
+  };
+}

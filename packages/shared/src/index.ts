@@ -218,6 +218,7 @@ export { PythonAdapterPolicy } from './interfaces/adapter-policy-python.js';
 export { RubyAdapterPolicy } from './interfaces/adapter-policy-ruby.js';
 export { RustAdapterPolicy } from './interfaces/adapter-policy-rust.js';
 export { CppAdapterPolicy } from './interfaces/adapter-policy-cpp.js';
+export { getLldbAttachBehavior } from './interfaces/lldb-policy-shared.js';
 export { CobolAdapterPolicy, COBOL_SCOPE_NAMES, COBOL_RUNTIME_ERROR_FILTER } from './interfaces/adapter-policy-cobol.js';
 export { DapFrameDecoder, encodeDapMessage } from './dap/dap-framing.js';
 export type { DapFrameDecoderErrorContext, DapFrameDecoderOptions } from './dap/dap-framing.js';
