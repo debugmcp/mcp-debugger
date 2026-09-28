@@ -10,7 +10,7 @@ import { fileURLToPath } from 'url';
 import { promisify } from 'util';
 import { exec } from 'child_process';
 import { buildDockerImage, createDockerMcpClient, hostToContainerPath, getDockerLogs } from './docker-test-utils.js';
-import { parseSdkToolResult } from '../smoke-test-utils.js';
+import { parseSdkToolResult, pollUntil } from '../smoke-test-utils.js';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 
 const execAsync = promisify(exec);
@@ -377,15 +377,11 @@ describe.skipIf(SKIP_DOCKER)('Docker: JavaScript Debugging Smoke Tests', () => {
     // A `stopped` state alone proves nothing here: the image used to omit the
     // adapter's exitcode-shim.cjs preload, so the session ended stopped with
     // no exitCode at all (issue #796). Wait for the code itself.
-    let exitCode: number | undefined;
-    for (let i = 0; i < 40; i++) {
+    const exitCode = await pollUntil(async () => {
       const listResponse = parseSdkToolResult(await mcpClient!.callTool({ name: 'list_debug_sessions', arguments: {} }));
-      const sessions = (listResponse.sessions ?? []) as Array<{ id?: string; sessionId?: string; state: string; exitCode?: number }>;
-      const mine = sessions.find(s2 => (s2.id ?? s2.sessionId) === sessionId);
-      exitCode = mine?.exitCode;
-      if (exitCode !== undefined) break;
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
+      const sessions = (listResponse.sessions ?? []) as Array<{ id: string; exitCode?: number }>;
+      return sessions.find(s2 => s2.id === sessionId)?.exitCode;
+    }, 20_000, 500);
     expect(exitCode).toBe(7);
 
     await mcpClient!.callTool({ name: 'close_debug_session', arguments: { sessionId } });
