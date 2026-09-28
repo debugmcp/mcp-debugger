@@ -330,6 +330,9 @@ describe('diagnose', () => {
     expect(python.verdict).toBe('broken');
     expect(python.errors[0]).toContain('corrupted dist');
     expect(python.errors[0]).not.toContain('the registry returned no factory');
+    // Doctor and the server agree structurally (issue #795): the modes carry
+    // the same load reason instead of failing open.
+    expect(python.modes?.launch).toEqual({ supported: true, available: false, reason: 'corrupted dist' });
     expect(report.exitCode).toBe(1);
   });
 

@@ -308,6 +308,8 @@ From `@debugmcp/shared` (selected)
 Dynamic loader error messages
 - Missing package:
   - `Failed to load adapter for 'python' from package '@debugmcp/adapter-python'. Adapter not installed. Install with: npm install @debugmcp/adapter-python`
+- Package on disk but its import failed (a missing dependency, a broken dist — issue #795):
+  - `Failed to load adapter for 'python' from package '@debugmcp/adapter-python'. The package is installed but importing it failed: Cannot find package 'dotenv' imported from … — its dependency 'dotenv' is missing or broken. Reinstall it (npm install @debugmcp/adapter-python) or rebuild it.`
 - Missing factory:
   - `Factory class PythonAdapterFactory not found in @debugmcp/adapter-python`
 

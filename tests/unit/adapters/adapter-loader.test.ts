@@ -139,11 +139,140 @@ describe('AdapterLoader', () => {
       }) as unknown as NodeJS.Require;
       vi.mocked(createRequire as any).mockReturnValue(mockRequire as any);
 
-      await expect(adapterLoader.loadAdapter('nonexistent')).rejects.toThrow(
+      // The resolver is injected: the verdict must not depend on what this
+      // machine has on disk (a real language name in a built tree would
+      // otherwise flip it to "installed but importing it failed").
+      const resolver: PackageResolver = { isInstalled: vi.fn().mockResolvedValue(false) };
+      const loader = new AdapterLoader(mockLogger, mockModuleLoader, resolver);
+
+      await expect(loader.loadAdapter('nonexistent')).rejects.toThrow(
         "Failed to load adapter for 'nonexistent' from package '@debugmcp/adapter-nonexistent'. Adapter not installed. Install with: npm install @debugmcp/adapter-nonexistent"
       );
 
       expect(mockLogger.warn).toHaveBeenCalled();
+    });
+
+    // Issue #795: a package that IS on disk but whose import fails (a missing
+    // transitive dependency, measured with `dotenv` removed from an installed
+    // adapter-javascript) must not be reported as "Adapter not installed" —
+    // and the primary import's error, the one naming the real cause, must
+    // survive the fallback attempts instead of being discarded.
+    it('names the missing dependency when the adapter package is installed but its import fails (issue #795)', async () => {
+      const primary = Object.assign(
+        new Error("Cannot find package 'dotenv' imported from /app/node_modules/@debugmcp/adapter-javascript/dist/utils/launch-environment.js"),
+        { code: 'ERR_MODULE_NOT_FOUND' }
+      );
+      (mockModuleLoader.load as Mock).mockRejectedValue(primary);
+      const { createRequire } = await import('module');
+      // The fallback candidates' errors only say the candidate path is absent.
+      const mockRequire = vi.fn().mockImplementation(() => {
+        throw Object.assign(new Error("Cannot find module '/app/packages/adapter-javascript/dist/index.js'"), { code: 'MODULE_NOT_FOUND' });
+      }) as unknown as NodeJS.Require;
+      vi.mocked(createRequire as any).mockReturnValue(mockRequire as any);
+      const resolver: PackageResolver = { isInstalled: vi.fn().mockResolvedValue(true) };
+      const loader = new AdapterLoader(mockLogger, mockModuleLoader, resolver);
+
+      const failure: Error & { cause?: unknown } = await loader.loadAdapter('javascript').then(
+        () => { throw new Error('expected loadAdapter to reject'); },
+        (error: unknown) => error as Error & { cause?: unknown }
+      );
+
+      expect(failure).toBeInstanceOf(Error);
+      expect(failure.message).toContain("Failed to load adapter for 'javascript' from package '@debugmcp/adapter-javascript'");
+      expect(failure.message).toContain("Cannot find package 'dotenv' imported from");
+      expect(failure.message).toContain("its dependency 'dotenv' is missing");
+      expect(failure.message).not.toContain('Adapter not installed');
+      expect(failure.cause).toBe(primary);
+      expect(resolver.isInstalled).toHaveBeenCalledWith('@debugmcp/adapter-javascript', expect.any(Array));
+      expect(mockLogger.error).toHaveBeenCalledWith(expect.stringContaining("dependency 'dotenv'"));
+    });
+
+    it('still reports a genuinely absent package as not installed, with the primary error as cause (issue #795)', async () => {
+      const primary = Object.assign(
+        new Error("Cannot find package '@debugmcp/adapter-nonexistent' imported from /app/dist/adapters/adapter-loader.js"),
+        { code: 'ERR_MODULE_NOT_FOUND' }
+      );
+      (mockModuleLoader.load as Mock).mockRejectedValue(primary);
+      const { createRequire } = await import('module');
+      vi.mocked(createRequire as any).mockReturnValue(vi.fn().mockImplementation(() => {
+        throw Object.assign(new Error('Cannot find module'), { code: 'MODULE_NOT_FOUND' });
+      }) as any);
+      const resolver: PackageResolver = { isInstalled: vi.fn().mockResolvedValue(false) };
+      const loader = new AdapterLoader(mockLogger, mockModuleLoader, resolver);
+
+      const failure: Error & { cause?: unknown } = await loader.loadAdapter('nonexistent').then(
+        () => { throw new Error('expected loadAdapter to reject'); },
+        (error: unknown) => error as Error & { cause?: unknown }
+      );
+
+      expect(failure.message).toBe(
+        "Failed to load adapter for 'nonexistent' from package '@debugmcp/adapter-nonexistent'. Adapter not installed. Install with: npm install @debugmcp/adapter-nonexistent"
+      );
+      expect(failure.cause).toBe(primary);
+    });
+
+    it('surfaces the fallback import error when only it names the real cause (issue #795, source-checkout layout)', async () => {
+      // node_modules/@debugmcp/adapter-javascript absent, packages/adapter-javascript/dist
+      // present, dotenv missing: the primary error only says the bare specifier
+      // is absent; the ESM fallback's error is the one that names dotenv.
+      const primary = Object.assign(
+        new Error("Cannot find package '@debugmcp/adapter-javascript' imported from /app/dist/adapters/adapter-loader.js"),
+        { code: 'ERR_MODULE_NOT_FOUND' }
+      );
+      const fallback = Object.assign(
+        new Error("Cannot find package 'dotenv' imported from /app/packages/adapter-javascript/dist/utils/launch-environment.js"),
+        { code: 'ERR_MODULE_NOT_FOUND' }
+      );
+      (mockModuleLoader.load as Mock).mockImplementation(async (specifier: string) => {
+        if (specifier === '@debugmcp/adapter-javascript') throw primary;
+        throw fallback;
+      });
+      const { createRequire } = await import('module');
+      vi.mocked(createRequire as any).mockReturnValue(vi.fn().mockImplementation((fsPath: string) => {
+        throw Object.assign(new Error(`Cannot find module '${fsPath}'`), { code: 'MODULE_NOT_FOUND' });
+      }) as any);
+      const resolver: PackageResolver = { isInstalled: vi.fn().mockResolvedValue(true) };
+      const loader = new AdapterLoader(mockLogger, mockModuleLoader, resolver);
+
+      const failure: Error & { cause?: unknown } = await loader.loadAdapter('javascript').then(
+        () => { throw new Error('expected loadAdapter to reject'); },
+        (error: unknown) => error as Error & { cause?: unknown }
+      );
+
+      expect(failure.message).toContain("Cannot find package 'dotenv' imported from");
+      expect(failure.message).toContain("its dependency 'dotenv' is missing");
+      expect(failure.message).not.toContain("Cannot find package '@debugmcp/adapter-javascript'");
+      expect(failure.cause).toBe(fallback);
+      // Every attempt is on the record at warn level, not only under debug logging.
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringMatching(/Cannot find package '@debugmcp\/adapter-javascript'[\s\S]*Cannot find package 'dotenv'/)
+      );
+    });
+
+    it('does not call a missing file inside the package a dependency (issue #795)', async () => {
+      // A nested dependency's broken main, or the package's own dist, is a
+      // path — the message keeps Node's words but adds no dependency note.
+      const primary = Object.assign(
+        new Error("Cannot find module '/app/node_modules/@debugmcp/adapter-javascript/node_modules/foo/lib/index.js' imported from /app/node_modules/@debugmcp/adapter-javascript/dist/index.js"),
+        { code: 'ERR_MODULE_NOT_FOUND' }
+      );
+      (mockModuleLoader.load as Mock).mockRejectedValue(primary);
+      const { createRequire } = await import('module');
+      vi.mocked(createRequire as any).mockReturnValue(vi.fn().mockImplementation((fsPath: string) => {
+        throw Object.assign(new Error(`Cannot find module '${fsPath}'`), { code: 'MODULE_NOT_FOUND' });
+      }) as any);
+      const resolver: PackageResolver = { isInstalled: vi.fn().mockResolvedValue(true) };
+      const loader = new AdapterLoader(mockLogger, mockModuleLoader, resolver);
+
+      const failure: Error = await loader.loadAdapter('javascript').then(
+        () => { throw new Error('expected loadAdapter to reject'); },
+        (error: unknown) => error as Error
+      );
+
+      expect(failure.message).toContain(
+        "The package is installed but importing it failed: Cannot find module '/app/node_modules/@debugmcp/adapter-javascript/node_modules/foo/lib/index.js'"
+      );
+      expect(failure.message).not.toContain('its dependency');
     });
 
     it('should throw error when factory class is not found', async () => {
@@ -491,6 +620,34 @@ describe('AdapterLoader', () => {
       expect(access).not.toHaveBeenCalled();
     });
 
+    it('reports installed when only the package manifest resolves (built output wiped, package on disk)', async () => {
+      // "npm install" would answer "up to date" here; the verdict must be the
+      // installed-but-broken one whose advice (rebuild) applies (issue #795).
+      const resolve = vi.fn().mockImplementation((id: string) => {
+        if (id === '@debugmcp/adapter-python/package.json') return '/fake/node_modules/@debugmcp/adapter-python/package.json';
+        throw Object.assign(new Error('nope'), { code: 'MODULE_NOT_FOUND' });
+      });
+      const access = vi.fn().mockRejectedValue(new Error('ENOENT'));
+      const resolver = createDefaultPackageResolver({ resolve, access });
+
+      await expect(resolver.isInstalled('@debugmcp/adapter-python', [])).resolves.toBe(true);
+      expect(access).not.toHaveBeenCalled();
+    });
+
+    it('reports installed when a fallback package directory has its manifest but no dist', async () => {
+      const resolve = vi.fn().mockImplementation(() => {
+        throw Object.assign(new Error('nope'), { code: 'MODULE_NOT_FOUND' });
+      });
+      const access = vi.fn().mockImplementation(async (p: string) => {
+        if (!p.endsWith('package.json')) throw new Error('ENOENT');
+      });
+      const resolver = createDefaultPackageResolver({ resolve, access });
+      const candidate = pathToFileURL(path.resolve('/repo/packages/adapter-python/dist/index.js')).href;
+
+      await expect(resolver.isInstalled('@debugmcp/adapter-python', [candidate])).resolves.toBe(true);
+      expect(access).toHaveBeenCalledWith(path.resolve('/repo/packages/adapter-python/package.json'));
+    });
+
     it('falls back to fs access over the monorepo fallback paths', async () => {
       const resolve = vi.fn().mockImplementation(() => {
         throw Object.assign(new Error('nope'), { code: 'MODULE_NOT_FOUND' });
@@ -510,7 +667,8 @@ describe('AdapterLoader', () => {
         pathToFileURL(path.resolve('/repo/packages/adapter-javascript/dist/index.js')).href
       ];
       await expect(resolver.isInstalled('@debugmcp/adapter-javascript', fallbackUrls)).resolves.toBe(true);
-      expect(access).toHaveBeenCalledTimes(2);
+      // candidate 1's entry, candidate 1's package.json, candidate 2's entry
+      expect(access).toHaveBeenCalledTimes(3);
     });
 
     it('reports not installed when nothing resolves', async () => {

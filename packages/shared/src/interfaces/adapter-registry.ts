@@ -406,11 +406,34 @@ export interface AdapterRegistryConfig {
  * Error thrown when requested adapter is not found
  */
 export class AdapterNotFoundError extends Error {
+  /**
+   * @param options.cause the loader's failure when the language IS known but
+   *   its adapter could not be loaded (issue #795): the message then carries
+   *   the loader's own words instead of "not registered", and the cause is
+   *   kept for callers that want the chain.
+   */
   constructor(
     public language: string,
-    public availableLanguages: string[]
+    public availableLanguages: string[],
+    options?: { cause?: unknown }
   ) {
-    super(`No debug adapter registered for language: ${language}. Available: ${availableLanguages.join(', ')}`);
+    const cause = options?.cause;
+    const rawReason = cause instanceof Error ? cause.message : typeof cause === 'string' ? cause : '';
+    // The loader's messages end in a full stop (or an ellipsis) of their own;
+    // a cause with no words at all falls back to the not-registered sentence.
+    // Stripped character by character: a regex over library input here is
+    // CodeQL's js/polynomial-redos.
+    let reason = rawReason.trimEnd();
+    while (reason.endsWith('.') || reason.endsWith('…')) {
+      reason = reason.slice(0, -1);
+    }
+    reason = reason.trim();
+    super(
+      reason
+        ? `No debug adapter could be loaded for language: ${language} — ${reason}. Available: ${availableLanguages.join(', ')}`
+        : `No debug adapter registered for language: ${language}. Available: ${availableLanguages.join(', ')}`,
+      cause !== undefined ? { cause } : undefined
+    );
     this.name = 'AdapterNotFoundError';
   }
 }
