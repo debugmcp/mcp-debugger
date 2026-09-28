@@ -263,6 +263,8 @@ describe('RubyAdapterPolicy behavior surface', () => {
     });
     expect(RubyAdapterPolicy.getInitializationBehavior?.()).toEqual({
       sendLaunchBeforeConfig: true,
+      // only rdbg's attach handler honours nonstop (issue #798)
+      launchRequestCommand: 'attach',
       // rdbg can emit 'initialized' yet never send the initialize response;
       // the proxy must not park on the response forever (issue #492)
       initializeResponseOptional: true,
@@ -305,6 +307,29 @@ describe('RubyAdapterPolicy behavior surface', () => {
   it('considers the session ready only when paused', () => {
     expect(RubyAdapterPolicy.isSessionReady?.('paused' as never)).toBe(true);
     expect(RubyAdapterPolicy.isSessionReady?.('running' as never)).toBe(false);
+  });
+
+  // Issue #798: rdbg's DAP `launch` handler goes nonstop unconditionally
+  // (server_dap.rb: `when 'launch' … @nonstop = true`) and only `attach`
+  // reads `nonstop`, so a launch can never stop at entry as a `launch`
+  // request. The policy therefore sends the launch as `attach`; with
+  // stopOnEntry rdbg answers configurationDone with `stopped reason: 'pause'`
+  // at the script's first line, and without it rdbg continues by itself.
+  it('sends its launch as a DAP attach request (issue #798)', () => {
+    expect(RubyAdapterPolicy.getInitializationBehavior().launchRequestCommand).toBe('attach');
+  });
+
+  it('reports rdbg\'s unrequested load-time pause as the entry stop (issue #798)', () => {
+    const body = { reason: 'pause', threadId: 1, allThreadsStopped: true } as DebugProtocol.StoppedEvent['body'];
+    const counts = { lineBreakpointCount: 0, functionBreakpointCount: 0 };
+    // The stop-at-load pause: nothing asked for it.
+    expect(RubyAdapterPolicy.normalizeStopReason?.('pause', body, { pausePending: false, ...counts })).toBe('entry');
+    // The user's own pause_execution, or the post-attach pause, stays a pause.
+    expect(RubyAdapterPolicy.normalizeStopReason?.('pause', body, { pausePending: true, pauseSource: 'user', ...counts })).toBeUndefined();
+    expect(RubyAdapterPolicy.normalizeStopReason?.('pause', body, { pausePending: true, pauseSource: 'attach', ...counts })).toBeUndefined();
+    // Other reasons are untouched.
+    expect(RubyAdapterPolicy.normalizeStopReason?.('breakpoint', { ...body, reason: 'breakpoint' }, { pausePending: false, ...counts })).toBeUndefined();
+    expect(RubyAdapterPolicy.normalizeStopReason?.('step', { ...body, reason: 'step' }, { pausePending: false, ...counts })).toBeUndefined();
   });
 
   it('answers runInTerminal reverse requests and ignores others', async () => {

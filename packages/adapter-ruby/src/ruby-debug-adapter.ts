@@ -47,6 +47,12 @@ interface RubyLaunchConfig extends LanguageSpecificLaunchConfig {
   debugPort?: string;
   localfs?: boolean;
   localfsMap?: string;
+  /**
+   * rdbg reads `nonstop` on its `attach` handler only, which is how the
+   * launch request is sent (issue #798): false keeps the stop-at-load pause
+   * and rdbg reports it on configurationDone, true lets rdbg continue.
+   */
+  nonstop?: boolean;
   useTerminal?: boolean;
   showProtocolLog?: boolean;
   useBundler?: boolean;
@@ -257,9 +263,12 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
     // on connect); --open=vscode would try to launch a local VS Code instead.
     //
     // No --nonstop: rdbg must suspend at load and wait for the client, or a
-    // short script finishes before the proxy can connect. The stop-at-entry
-    // pause is released by SessionManager.handleAutoContinue when
-    // stopOnEntry=false, matching how other adapters handle entry stops.
+    // short script finishes before the proxy can connect. What happens to
+    // that pause is decided by the DAP request the proxy then sends (issue
+    // #798): rdbg's `launch` handler releases it unconditionally on
+    // configurationDone, so the launch goes out as `attach` with `nonstop`
+    // derived from stopOnEntry — false reports the pause as a stopped event
+    // (the entry stop), true lets rdbg continue by itself.
     const rdbgArgs = [
       '--open',
       '--host', config.adapterHost,
@@ -346,6 +355,9 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
       useTerminal: false,
       showProtocolLog: process.env.DEBUG === '1' || process.env.DEBUG === 'true',
       stopOnEntry: config.stopOnEntry ?? false,
+      // The launch is sent as a DAP `attach` (the policy's launchRequestCommand)
+      // because only rdbg's attach handler honours nonstop (issue #798).
+      nonstop: !(config.stopOnEntry ?? false),
       justMyCode: config.justMyCode ?? true,
       cwd: config.cwd ?? process.cwd()
     };

@@ -351,6 +351,18 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
     }
   });
 
+  it('sends its launch as a DAP launch, except where the adapter only honours entry stops on attach (issue #798)', () => {
+    // rdbg's `launch` handler goes nonstop unconditionally and only `attach`
+    // reads `nonstop`; the rdbg process is spawned by us, so the "attach" is
+    // to our own suspended child. Every other adapter launches as `launch`.
+    const command = policy.getInitializationBehavior().launchRequestCommand;
+    if (language === DebugLanguage.RUBY) {
+      expect(command).toBe('attach');
+    } else {
+      expect(command).toBeUndefined();
+    }
+  });
+
   // ===== 8. State lifecycle =====
 
   it('creates a fresh, uninitialized state on every call', () => {

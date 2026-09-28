@@ -450,6 +450,33 @@ describe('DapConnectionManager', () => {
       });
     });
 
+    it('sends the launch as the DAP verb the policy asks for (issue #798)', async () => {
+      // rdbg honours nonstop only on `attach`, so the Ruby policy's launch
+      // goes out as an attach request with the very same arguments.
+      mockDapClient.sendRequest.mockResolvedValue(undefined);
+
+      await connectionManager.sendLaunchRequest(
+        mockDapClient,
+        scriptPath,
+        [],
+        true,
+        true,
+        { nonstop: false, localfs: true },
+        'attach'
+      );
+
+      expect(mockDapClient.sendRequest).toHaveBeenCalledWith('attach', {
+        program: scriptPath,
+        stopOnEntry: true,
+        noDebug: false,
+        args: [],
+        console: 'internalConsole',
+        justMyCode: true,
+        nonstop: false,
+        localfs: true
+      });
+    });
+
     it('should send launch request with custom arguments', async () => {
       mockDapClient.sendRequest.mockResolvedValue(undefined);
 

@@ -655,6 +655,15 @@ export interface AdapterPolicy {
     /** Whether the adapter sends 'initialized' before receiving 'launch', requiring
      *  the proxy to defer initialized handling and send launch before configurationDone. */
     sendLaunchBeforeConfig?: boolean;
+    /**
+     * The DAP request a LAUNCH goes out as (default 'launch'). rdbg's `launch`
+     * handler goes nonstop unconditionally and only its `attach` handler reads
+     * `nonstop`, so a Ruby launch — whose rdbg process this server spawns
+     * suspended at load — is sent as `attach` to stop at entry (issue #798).
+     * The session stays a launch: attach MODE is keyed on the config's
+     * `request`, which this does not touch.
+     */
+    launchRequestCommand?: 'launch' | 'attach';
     /** Whether the adapter requires attach to be sent BEFORE the initialized event.
      *  Some adapters send initialized only AFTER processing the attach request, so waiting
      *  for initialized before sending attach causes a deadlock. */

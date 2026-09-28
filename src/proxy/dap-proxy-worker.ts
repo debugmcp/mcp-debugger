@@ -801,13 +801,18 @@ export class DapProxyWorker {
    * the same socket read as the launch response waits for this.
    */
   private async sendTrackedLaunch(payload: ProxyInitPayload): Promise<void> {
-    const launch = this.trackedHandshakeRequest('launch', () => this.connectionManager!.sendLaunchRequest(
+    // The DAP verb the launch goes out as: 'launch' unless the policy names
+    // 'attach' (rdbg stops at entry only on attach, issue #798). The
+    // handshake stage carries the verb actually sent.
+    const requestCommand = this.adapterPolicy.getInitializationBehavior().launchRequestCommand ?? 'launch';
+    const launch = this.trackedHandshakeRequest(requestCommand, () => this.connectionManager!.sendLaunchRequest(
       this.dapClient!,
       payload.scriptPath,
       payload.scriptArgs,
       payload.stopOnEntry,
       payload.justMyCode,
-      payload.launchConfig
+      payload.launchConfig,
+      requestCommand
     ));
     this.launchOutcome = launch.then(() => true, () => false);
     await launch;

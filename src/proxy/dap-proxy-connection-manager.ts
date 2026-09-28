@@ -204,7 +204,11 @@ export class DapConnectionManager {
   }
 
   /**
-   * Send a launch request with proper configuration
+   * Send a launch request with proper configuration.
+   *
+   * `requestCommand` is the DAP verb the launch goes out as — 'launch' unless
+   * the policy's `launchRequestCommand` says otherwise (rdbg honours `nonstop`
+   * only on `attach`, issue #798). The arguments are the same either way.
    */
   async sendLaunchRequest(
     client: IDapClient,
@@ -212,7 +216,8 @@ export class DapConnectionManager {
     scriptArgs: string[] = [],
     stopOnEntry: boolean = true,
     justMyCode: boolean = true,
-    launchConfig?: Record<string, unknown>
+    launchConfig?: Record<string, unknown>,
+    requestCommand: 'launch' | 'attach' = 'launch'
   ): Promise<void> {
     this.logger.info('[ConnectionManager] Received scriptPath:', scriptPath);
     
@@ -250,9 +255,9 @@ export class DapConnectionManager {
     }
 
     // Sanitized: launch configs can carry the debuggee's full environment
-    this.logger.info('[ConnectionManager] Sending "launch" request to adapter with args:', sanitizePayloadForLogging(launchArgs));
-    await client.sendRequest('launch', launchArgs);
-    this.logger.info('[ConnectionManager] DAP "launch" request sent.');
+    this.logger.info(`[ConnectionManager] Sending "${requestCommand}" request (launch) to adapter with args:`, sanitizePayloadForLogging(launchArgs));
+    await client.sendRequest(requestCommand, launchArgs);
+    this.logger.info(`[ConnectionManager] DAP "${requestCommand}" request (launch) sent.`);
   }
 
   /**

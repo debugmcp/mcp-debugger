@@ -266,6 +266,27 @@ describe('RubyDebugAdapter', () => {
     expect(config.stopOnEntry).toBe(true);
   });
 
+  // Issue #798: rdbg's DAP `launch` handler goes nonstop unconditionally and
+  // only `attach` reads `nonstop`, so the launch request is sent as `attach`
+  // (the policy's launchRequestCommand) with nonstop derived from stopOnEntry.
+  // `request` stays 'launch' — it is what the worker keys attach MODE on.
+  it.each([
+    [true, false],
+    [false, true],
+    [undefined, true]
+  ])('derives nonstop from stopOnEntry=%s (nonstop=%s) and keeps request: launch (issue #798)', async (stopOnEntry, nonstop) => {
+    const adapter = new RubyDebugAdapter(createDependencies());
+    const config = await adapter.transformLaunchConfig({
+      program: '/workspace/app.rb',
+      ...(stopOnEntry === undefined ? {} : { stopOnEntry })
+    } as LanguageSpecificLaunchConfig);
+
+    expect(config.request).toBe('launch');
+    expect(config.nonstop).toBe(nonstop);
+    expect(config.localfs).toBe(true);
+    expect(config.stopOnEntry).toBe(stopOnEntry ?? false);
+  });
+
   it('transforms attach config for an existing rdbg port', () => {
     const adapter = new RubyDebugAdapter(createDependencies());
     const config = adapter.transformAttachConfig({

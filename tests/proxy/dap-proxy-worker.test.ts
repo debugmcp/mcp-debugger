@@ -1293,7 +1293,8 @@ describe('DapProxyWorker', () => {
         payload.scriptArgs,
         payload.stopOnEntry,
         payload.justMyCode,
-        payload.launchConfig
+        payload.launchConfig,
+        'launch'
       );
       const statusCall = mockMessageSender.send.mock.calls.find(
         ([message]) => message.type === 'status' && message.status === 'adapter_configured_and_launched'
@@ -1720,13 +1721,15 @@ describe('DapProxyWorker', () => {
           .map(([m]) => m as StatusMessage & { pid?: number; stage?: string; command?: string })
           .filter((m) => m.type === 'status' && (m.status === 'adapter_spawned' || m.status === 'dap_handshake_stage'))
           .map((m) => (m.status === 'adapter_spawned' ? `spawned:${m.pid}` : `${m.stage}:${m.command ?? ''}`));
+        // The launch goes out as rdbg's `attach` (issue #798), and the stage
+        // names the verb actually sent.
         expect(progress).toEqual([
           'spawned:4242',
           'transport_connected:',
           'request_pending:initialize',
           'response_received:initialize',
-          'request_pending:launch',
-          'response_received:launch'
+          'request_pending:attach',
+          'response_received:attach'
         ]);
       });
 
@@ -2438,7 +2441,8 @@ describe('DapProxyWorker', () => {
         payload.scriptArgs,
         payload.stopOnEntry,
         payload.justMyCode,
-        payload.launchConfig
+        payload.launchConfig,
+        'launch'
       );
       expect(connectionStub.sendConfigurationDone).toHaveBeenCalledTimes(1);
 
@@ -2730,6 +2734,32 @@ describe('DapProxyWorker', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it('sends the tracked launch as the DAP verb the policy names (issue #798)', async () => {
+      const connectionStub = { sendLaunchRequest: vi.fn().mockResolvedValue(undefined) };
+      (worker as any).logger = mockLogger;
+      (worker as any).dapClient = mockDapClient;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = {
+        name: 'rdbg-stub',
+        getInitializationBehavior: () => ({ launchRequestCommand: 'attach' })
+      };
+      const payload = {
+        cmd: 'init', sessionId: 's', scriptPath: 'app.rb', scriptArgs: ['--x'], stopOnEntry: true,
+        justMyCode: true, launchConfig: { nonstop: false, localfs: true }
+      };
+
+      await (worker as any).sendTrackedLaunch(payload);
+
+      expect(connectionStub.sendLaunchRequest).toHaveBeenCalledWith(
+        mockDapClient, 'app.rb', ['--x'], true, true, { nonstop: false, localfs: true }, 'attach'
+      );
+      const stages = mockMessageSender.send.mock.calls
+        .map(([message]) => message)
+        .filter((message) => message.type === 'status' && message.status === 'dap_handshake_stage')
+        .map((message) => `${message.stage}:${message.command}`);
+      expect(stages).toEqual(['request_pending:attach', 'response_received:attach']);
     });
 
     it('handleTerminate should auto-detach in attach mode', async () => {

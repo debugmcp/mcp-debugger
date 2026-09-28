@@ -89,6 +89,13 @@ export const RubyAdapterPolicy = {
     };
   },
   isSessionReady: (state: SessionState) => state === SessionState.PAUSED,
+  // rdbg reports its stop-at-load as `stopped reason: 'pause'` on
+  // configurationDone when the launch went out as `attach { nonstop: false }`
+  // (issue #798). Nothing asked for that pause, which is how it is told from
+  // the user's pause_execution and the post-attach pause (both register a
+  // pause intent first): it is the entry stop.
+  normalizeStopReason: (reason, _body, context) =>
+    reason === 'pause' && !context.pausePending ? 'entry' : undefined,
   validateExecutable: async (rubyCmd: string): Promise<boolean> => {
     const { spawn } = await import('child_process');
 
@@ -149,6 +156,12 @@ export const RubyAdapterPolicy = {
   getInitializationBehavior: () => {
     return {
       sendLaunchBeforeConfig: true,
+      // rdbg's DAP `launch` handler goes nonstop unconditionally
+      // (server_dap.rb: `when 'launch' … @nonstop = true`) and only `attach`
+      // reads `nonstop`, so a `launch` request can never stop at entry. The
+      // rdbg process is ours, spawned suspended at load, so the launch goes
+      // out as `attach` with `nonstop` derived from stopOnEntry (issue #798).
+      launchRequestCommand: 'attach',
       // rdbg can process 'initialize' (proving it with the 'initialized' event)
       // yet never send the response — its DAP send silently skips writing when
       // the socket slot is momentarily unset (issue #492). Don't let the missing
