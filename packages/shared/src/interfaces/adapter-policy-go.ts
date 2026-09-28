@@ -367,6 +367,9 @@ export const GoAdapterPolicy = {
     return Number.isSafeInteger(status) && status >= 0 ? status : undefined;
   },
 
+  /** In debug mode Delve prints the status line only in reply to `disconnect` (issue #753). */
+  exitStatusReportedOnDisconnect: true,
+
   /**
    * Get the configuration for spawning the Go debug adapter (dlv)
    */

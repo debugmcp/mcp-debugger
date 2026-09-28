@@ -4422,6 +4422,28 @@ describe('DapProxyWorker', () => {
       expect(exitedBodies()).toEqual([{ exitCode: 0 }]);
     });
 
+    it('parses the line but never reorders the shutdown for a policy that does not declare exitStatusReportedOnDisconnect', async () => {
+      wireHandlers({ policy: { ...GoAdapterPolicy, exitStatusReportedOnDisconnect: false }, onDisconnect: () => { connectionHandlers.onOutput?.(STATUS_LINE(0)); } });
+
+      await connectionHandlers.onTerminated?.({});
+
+      expect(disconnectStub).not.toHaveBeenCalled();
+      expect(eventNames()).toEqual(['terminated']);
+    });
+
+    it('closes the DAP mirror before the early disconnect, as the ordinary shutdown does (#217)', async () => {
+      const mirrorStop = vi.fn(async () => undefined);
+      wireHandlers({ onDisconnect: () => { connectionHandlers.onOutput?.(STATUS_LINE(0)); } });
+      (worker as any).mirrorServer = { stop: mirrorStop };
+
+      await connectionHandlers.onTerminated?.({});
+
+      expect(mirrorStop).toHaveBeenCalledWith({ notifyClients: true });
+      expect(mirrorStop.mock.invocationCallOrder[0]).toBeLessThan(disconnectStub.mock.invocationCallOrder[0]);
+      expect((worker as any).mirrorServer).toBeNull();
+      expect(exitedBodies()).toEqual([{ exitCode: 0 }]);
+    });
+
     it('does nothing for a policy without the hook, even when the output looks like Delve', async () => {
       wireHandlers({ policy: PythonAdapterPolicy });
       connectionHandlers.onOutput?.(STATUS_LINE(5));

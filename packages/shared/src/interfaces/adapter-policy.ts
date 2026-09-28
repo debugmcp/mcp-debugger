@@ -393,14 +393,27 @@ export interface AdapterPolicy {
    * console category and its exact wording — never debuggee stdout — and
    * return undefined for anything that is not a real exit code (a negative
    * status is a signal kill, not a code). Optional — absent means the worker
-   * never parses output for a code. An adapter may print the line only in
-   * reply to `disconnect` (Delve in debug mode): when `terminated` arrives
-   * with nothing observed, the worker sends the disconnect first and re-checks.
+   * never parses output for a code. Pair it with
+   * exitStatusReportedOnDisconnect when the adapter prints the line only in
+   * reply to `disconnect`.
    *
    * @param category The DAP output category ('stdout', 'stderr', 'console', ...)
    * @param text The event's output text (may span multiple lines)
    */
   debuggeeExitCodeFromOutput?(category: string, text: string): number | undefined;
+
+  /**
+   * True when the adapter states the exit status (the line
+   * debuggeeExitCodeFromOutput reads) only in reply to the DAP `disconnect`
+   * request — Delve in debug mode (issue #753). The proxy worker then sends
+   * the disconnect BEFORE forwarding `terminated` whenever `terminated`
+   * arrives with no status observed (closing the DAP mirror first, as the
+   * ordinary shutdown does), so the code can still be replayed as `exited`
+   * ahead of `terminated`; without this flag the worker only parses lines
+   * that arrive on their own and never reorders its shutdown. Bounded by the
+   * disconnect request's own 1 s cap. Optional — absent means false.
+   */
+  exitStatusReportedOnDisconnect?: boolean;
 
   /**
    * Normalize an adapter-specific DAP stop reason into a canonical reason

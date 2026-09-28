@@ -12,14 +12,15 @@
  * newer Go. A developer whose local Go is newer than their dlv's window fails
  * (not skips) this test — upgrade dlv.
  */
-import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { getGoSearchPaths } from '@debugmcp/adapter-go';
 import { skipIfSpawnBlocked, type SkippableContext } from '../../../test-utils/helpers/adapter-spawn.js';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -35,7 +36,13 @@ function hasCommand(cmd: string, args: string[]): boolean {
     return false;
   }
 }
-const hasGo = hasCommand('go', ['version']) && hasCommand(process.env.DLV_PATH ?? 'dlv', ['version']);
+/** The gate mirrors the Go adapter's own lookup (DLV_PATH, PATH, then getGoSearchPaths — e.g. ~/go/bin), so "skipped" means the product could not have run Delve either. */
+function hasDelve(): boolean {
+  if (hasCommand(process.env.DLV_PATH ?? 'dlv', ['version'])) return true;
+  const exe = process.platform === 'win32' ? 'dlv.exe' : 'dlv';
+  return getGoSearchPaths().some(dir => hasCommand(path.join(dir, exe), ['version']));
+}
+const hasGo = hasCommand('go', ['version']) && hasDelve();
 
 interface Result { success: boolean; state?: string; message?: string; data?: { exitCode?: number } }
 interface Listed { id: string; state: string; exitCode?: number }
@@ -60,8 +67,6 @@ async function outputText(): Promise<string> {
 }
 
 describe.skipIf(!hasGo)('Go exit code from Delve\'s console status line (issue #753)', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-go-exit-'));
-
   beforeEach(async () => {
     client = new Client({ name: 'go-exit-code-integration', version: '1' });
     const env = Object.fromEntries(Object.entries(process.env).filter(
@@ -84,10 +89,6 @@ describe.skipIf(!hasGo)('Go exit code from Delve\'s console status line (issue #
       await client?.close();
     }
   }, 15_000);
-
-  afterAll(() => {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  });
 
   /** Launch, then require the exit code on the run-to-completion summary (when the launch saw it) and on list_debug_sessions. */
   async function launchAndExpectExit(args: Record<string, unknown>, expected: number, ctx: SkippableContext): Promise<void> {
@@ -113,8 +114,15 @@ describe.skipIf(!hasGo)('Go exit code from Delve\'s console status line (issue #
   }, 90_000);
 
   it('reports the exit code under noDebug, where Delve prints the status before terminated', async (ctx) => {
-    const binary = path.join(tmp, process.platform === 'win32' ? 'exit_code.exe' : 'exit_code');
-    execFileSync('go', ['build', '-gcflags=all=-N -l', '-o', binary, '.'], { cwd: fixtureDir, stdio: 'ignore' });
-    await launchAndExpectExit({ scriptPath: binary, args: ['7'], dapLaunchArgs: { noDebug: true } }, 7, ctx);
+    // Delve runs a noDebug target through Go's exec, so on Windows the binary needs its .exe.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-go-exit-'));
+    try {
+      const binary = path.join(tmp, process.platform === 'win32' ? 'exit_code.exe' : 'exit_code');
+      const build = spawnSync('go', ['build', '-gcflags=all=-N -l', '-o', binary, '.'], { cwd: fixtureDir, encoding: 'utf8', stdio: ['ignore', 'ignore', 'pipe'] });
+      expect(build.status, `go build failed: ${build.stderr}`).toBe(0);
+      await launchAndExpectExit({ scriptPath: binary, args: ['7'], dapLaunchArgs: { noDebug: true } }, 7, ctx);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   }, 90_000);
 });

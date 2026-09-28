@@ -559,6 +559,10 @@ describe('GoAdapterPolicy', () => {
       expect(read('console', text)).toBeUndefined();
     });
 
+    it('declares that Delve reports the status only in reply to disconnect', () => {
+      expect(GoAdapterPolicy.exitStatusReportedOnDisconnect).toBe(true);
+    });
+
     it('treats a negative status (signal kill) as no exit code', () => {
       expect(read('console', 'Process 1 has exited with status -1\n')).toBeUndefined();
     });

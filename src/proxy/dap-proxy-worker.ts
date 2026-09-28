@@ -127,9 +127,11 @@ export class DapProxyWorker {
   // debuggeeExitCodeFromOutput. Delve prints the status as a console line —
   // before terminated under noDebug, but in debug mode only in reply to
   // disconnect, which shutdown() sends AFTER terminated is forwarded, i.e.
-  // after the parent has stripped its exited listener. The terminated slot
-  // therefore sends the disconnect itself when nothing has been observed, and
-  // whichever path sends it first marks dapDisconnectSent so it goes once.
+  // after the parent has stripped its exited listener. For a policy that
+  // declares exitStatusReportedOnDisconnect the terminated slot therefore
+  // sends the disconnect itself when nothing has been observed; every sender
+  // (that slot, the attach auto-detach, performShutdown) marks
+  // dapDisconnectSent so the request goes out once.
   private observedDebuggeeExitCode: number | undefined = undefined;
   private outputExitSynthesisAttempted: boolean = false;
   private dapDisconnectSent: boolean = false;
@@ -1774,8 +1776,9 @@ export class DapProxyWorker {
     // is called without an explicit detach_from_process first.
     // For launch mode, we let shutdown() handle it with terminateDebuggee=true so
     // the launched process is properly cleaned up.
-    if (this.isAttachMode && this.state === ProxyState.CONNECTED && this.connectionManager && this.dapClient) {
+    if (this.isAttachMode && this.state === ProxyState.CONNECTED && this.connectionManager && this.dapClient && !this.dapDisconnectSent) {
       this.logger?.info('[Worker] Attach mode: auto-detaching with terminateDebuggee=false before shutdown.');
+      this.dapDisconnectSent = true;
       try {
         await this.connectionManager.disconnect(this.dapClient, false);
       } catch (e) {
@@ -2114,8 +2117,7 @@ export class DapProxyWorker {
       const raw = (await this.dependencies.fileSystem.readFile(exitFile, 'utf8')).trim();
       const exitCode = Number.parseInt(raw, 10);
       if (Number.isFinite(exitCode)) {
-        this.logger?.info?.(`[Worker] Synthesizing 'exited' from recorded debuggee exit code ${exitCode}`);
-        this.sendDapEvent('exited', { exitCode });
+        this.emitSynthesizedExited(exitCode, `[Worker] Synthesizing 'exited' from recorded debuggee exit code ${exitCode}`);
       } else {
         this.logger?.warn?.(`[Worker] Unparseable exit code file content: '${raw}'`);
       }
@@ -2177,12 +2179,21 @@ export class DapProxyWorker {
 
     const exitCode = this.adapterExitCode;
     if (typeof exitCode === 'number') {
-      this.exitedEventSeen = true;
-      this.logger?.info?.(`[Worker] Synthesizing 'exited' from adapter process exit code ${exitCode} (issue #258)`);
-      this.sendDapEvent('exited', { exitCode });
+      this.emitSynthesizedExited(exitCode, `[Worker] Synthesizing 'exited' from adapter process exit code ${exitCode} (issue #258)`);
     } else {
       this.logger?.info?.('[Worker] Adapter exit code unavailable (signal kill or still running); exitCode stays unknown');
     }
+  }
+
+  /**
+   * The one place a synthesized 'exited' leaves the worker: latch
+   * exitedEventSeen so no later synthesis path (js shim #247, adapter process
+   * status #258, console line #753) emits a second one, then forward.
+   */
+  private emitSynthesizedExited(exitCode: number, why: string): void {
+    this.exitedEventSeen = true;
+    this.logger?.info?.(why);
+    this.sendDapEvent('exited', { exitCode });
   }
 
   /**
@@ -2213,13 +2224,17 @@ export class DapProxyWorker {
    * terminated and is already recorded. In debug mode Delve prints it only in
    * reply to disconnect, which shutdown() would send AFTER terminated is
    * forwarded — too late, the parent strips its exited listener on
-   * terminated. So when nothing has been observed, send the disconnect from
-   * here first: Delve writes the line before the disconnect response, so once
-   * the request settles the code is either recorded or absent. Bounded by the
-   * connection manager's 1 s cap (no timer of its own); skipped when a
-   * shutdown already sent the disconnect (close_debug_session mid-run —
-   * Delve's post-disconnect terminated lands in this slot). No line means no
-   * code: terminated goes out alone, as before. Nothing is guessed.
+   * terminated. So for a policy that also declares
+   * exitStatusReportedOnDisconnect, when nothing has been observed, send the
+   * disconnect from here first — closing the DAP mirror ahead of it exactly
+   * as performShutdown does (#217), since client.disconnect() strips the
+   * mirror's event forwarder: Delve writes the line before the disconnect
+   * response, so once the request settles the code is either recorded or
+   * absent. Bounded by the connection manager's 1 s cap (no timer of its
+   * own); skipped when a shutdown already sent the disconnect
+   * (close_debug_session mid-run — Delve's post-disconnect terminated lands
+   * in this slot). No line means no code: terminated goes out alone, as
+   * before. Nothing is guessed.
    */
   private async maybeSynthesizeExitedFromOutput(): Promise<void> {
     if (
@@ -2233,6 +2248,7 @@ export class DapProxyWorker {
 
     if (
       this.observedDebuggeeExitCode === undefined &&
+      this.adapterPolicy.exitStatusReportedOnDisconnect === true &&
       !this.dapDisconnectSent &&
       this.shutdownPromise === null &&
       this.connectionManager &&
@@ -2240,6 +2256,7 @@ export class DapProxyWorker {
     ) {
       this.dapDisconnectSent = true;
       this.logger?.info?.('[Worker] No exit status observed; sending DAP disconnect ahead of terminated so the adapter reports it (issue #753)');
+      await this.closeMirror({ notifyClients: true });
       try {
         await this.connectionManager.disconnect(this.dapClient, !this.isAttachMode);
       } catch (err) {
@@ -2251,9 +2268,7 @@ export class DapProxyWorker {
 
     const exitCode = this.observedDebuggeeExitCode;
     if (typeof exitCode === 'number') {
-      this.exitedEventSeen = true;
-      this.logger?.info?.(`[Worker] Synthesizing 'exited' from adapter-reported exit status ${exitCode} (issue #753)`);
-      this.sendDapEvent('exited', { exitCode });
+      this.emitSynthesizedExited(exitCode, `[Worker] Synthesizing 'exited' from adapter-reported exit status ${exitCode} (issue #753)`);
     } else {
       this.logger?.info?.('[Worker] Adapter reported no exit status; exitCode stays unknown');
     }
