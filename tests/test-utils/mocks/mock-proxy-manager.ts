@@ -3,7 +3,7 @@
  */
 import { EventEmitter } from 'events';
 import { DebugProtocol } from '@vscode/debugprotocol';
-import { IProxyManager, ProxyManagerEvents } from '../../../src/proxy/proxy-manager.js';
+import { IProxyManager, ProxyManagerEvents, type PreDetachResume } from '../../../src/proxy/proxy-manager.js';
 import { ProxyConfig } from '../../../src/proxy/proxy-config.js';
 
 /** Error message thrown by start() when shouldFailStart is set; import this in
@@ -213,6 +213,13 @@ export class MockProxyManager extends EventEmitter implements IProxyManager {
 
   setCurrentThreadId(threadId: number): void {
     this._currentThreadId = threadId;
+  }
+
+  /** Issue #763: what a test wants the detach to report (default: no resume called for). */
+  preDetachResume: PreDetachResume | undefined = undefined;
+
+  getPreDetachResume(): PreDetachResume | undefined {
+    return this.preDetachResume;
   }
 
   // Test helpers

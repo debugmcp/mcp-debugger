@@ -20,6 +20,7 @@ import {
   isLldbInitialized,
   isLldbConnected,
   getLldbDapClientBehavior,
+  getLldbAttachBehavior,
   isLldbInternalFrame,
   filterLldbStackFrames,
   lldbShouldSuppressOutputEvent,
@@ -159,6 +160,9 @@ export const RustAdapterPolicy = {
    * Rust DAP client behaviors - minimal since Rust doesn't use child sessions
    */
   getDapClientBehavior: getLldbDapClientBehavior,
+
+  // Shared CodeLLDB engine: the same Windows detach hazard as cpp (issue #763).
+  getAttachBehavior: () => getLldbAttachBehavior(),
 
   /**
    * Get the configuration for spawning the Rust debug adapter (CodeLLDB).

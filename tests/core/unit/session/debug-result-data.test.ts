@@ -21,6 +21,7 @@ describe('DebugResultData type contract (issue #590)', () => {
       | 'breakpointsReapplied'
       | 'outputReset'
       | 'anchorResolution'
+      | 'resumedBeforeDetach'
     >();
   });
 });

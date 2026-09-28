@@ -29,6 +29,7 @@ import {
   isLldbInitialized,
   isLldbConnected,
   getLldbDapClientBehavior,
+  getLldbAttachBehavior,
   isLldbInternalFrame,
   lldbShouldSuppressOutputEvent
 } from './lldb-policy-shared.js';
@@ -228,6 +229,10 @@ export const CobolAdapterPolicy = {
   },
 
   getDapClientBehavior: getLldbDapClientBehavior,
+
+  // The shim fronts CodeLLDB, so an attach carries the same Windows detach
+  // hazard as cpp (issue #763).
+  getAttachBehavior: () => getLldbAttachBehavior(),
 
   getAdapterSpawnConfig: (payload, platform: NodeJS.Platform = process.platform, arch: NodeJS.Architecture = process.arch) =>
     buildLldbSpawnConfig(payload, platform, arch)

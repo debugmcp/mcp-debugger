@@ -96,6 +96,13 @@ export interface DebugResultData extends ProxyFailureDiagnostics {
   breakpointsReapplied?: number;
   outputReset?: boolean;
   anchorResolution?: AnchorResolution;
+  /**
+   * Detach result field (issue #763): whether the paused target was resumed
+   * ahead of the disconnect — `false` when the policy asked for it and the
+   * continue was refused (`warning` then says so). Absent when the policy
+   * asks for no resume or the target was not paused.
+   */
+  resumedBeforeDetach?: boolean;
 }
 
 /**
