@@ -1144,6 +1144,12 @@ export abstract class SessionManagerCore extends EventEmitter {
         if (result.source) {
           target.boundFile = result.source;
         }
+        // The adapter's own words survive into the store (issue #754): a
+        // refused pre-launch set is echoed with its refusal (#750), like the
+        // line-breakpoint echo below.
+        if (result.message !== undefined) {
+          target.message = normalizeBreakpointMessage(result.message, target.verified);
+        }
       }
     };
     proxyManager.on('function-breakpoints-synced', handleFunctionBreakpointsSynced);

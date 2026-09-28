@@ -477,9 +477,13 @@ describe('Break-on-exception (issue #220)', () => {
       const listed = parseSdkToolResult(await mcpClient!.callTool({
         name: 'list_breakpoints',
         arguments: { sessionId }
-      })) as { warning?: string; breakpoints?: Array<{ verified?: boolean }> };
+      })) as { warning?: string; breakpoints?: Array<{ verified?: boolean; message?: string }> };
       expect(listed.warning).toMatch(why);
       expect(listed.breakpoints?.every(b => b.verified === false)).toBe(true);
+      // debugpy's own answer to the refused re-send survives on every record
+      // the re-send covered (issue #754), not only in the one response above.
+      expect(listed.breakpoints?.length).toBeGreaterThan(0);
+      expect(listed.breakpoints?.every(b => debugpySaid.test(b.message ?? ''))).toBe(true);
 
       // No thread is ever current (nothing stops), and debugpy refuses the
       // `threads` discovery too: the answer is the not-paused note with the

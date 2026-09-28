@@ -153,6 +153,14 @@ export class BreakpointController {
     // Collect ALL breakpoints for this source file (DAP setBreakpoints is replace-all)
     const allBpsForFile = Array.from(session.breakpoints.values())
       .filter(bp => bp.file === file);
+    // For child-mirroring adapters (js-debug), setBreakpoints responses
+    // come from the parent session, which owns no runtime: its verified
+    // flags are pessimistic and its ids belong to a different id space
+    // than the child events that carry the real verification. Treat the
+    // child as authoritative — never let a parent response downgrade
+    // verified state or clobber child adapter ids.
+    const childAuthoritative =
+      !!this.ctx.selectPolicy(session.language)?.getDapClientBehavior?.().mirrorBreakpointsToChild;
 
     try {
       this.ctx.logger.info(
@@ -176,14 +184,6 @@ export class BreakpointController {
         response.body.breakpoints
       ) {
         const responseBps = response.body.breakpoints;
-        // For child-mirroring adapters (js-debug), setBreakpoints responses
-        // come from the parent session, which owns no runtime: its verified
-        // flags are pessimistic and its ids belong to a different id space
-        // than the child events that carry the real verification. Treat the
-        // child as authoritative — never let a parent response downgrade
-        // verified state or clobber child adapter ids.
-        const childAuthoritative =
-          !!this.ctx.selectPolicy(session.language)?.getDapClientBehavior?.().mirrorBreakpointsToChild;
         // A response the proxy marked child-sourced (issue #500) carries the
         // child session's own answer — the authoritative one — so it stamps
         // fully instead of upgrade-only.
@@ -261,7 +261,35 @@ export class BreakpointController {
         error
       );
       const message = getErrorMessage(error);
+      this.stampRefusal(allBpsForFile, message, childAuthoritative);
       return { synced: false, warning: this.buildLiveSyncWarning(session, message) };
+    }
+  }
+
+  /**
+   * A refused live re-send is the adapter's answer for every record it
+   * covered (issue #754): stamp it the way the worker's breakpoints_synced
+   * echo stamps a refused pre-launch set (#750), so list_breakpoints and the
+   * exit summary carry the debugger's own words rather than a bare
+   * verified:false. The same two exemptions as a successful answer: a stop
+   * already proved a record bound (#673), and a child-mirroring policy's
+   * child-verified record outranks the parent's answer (#500).
+   */
+  private stampRefusal(
+    records: Array<Breakpoint | FunctionBreakpoint>,
+    message: string,
+    childAuthoritative: boolean
+  ): void {
+    for (const record of records) {
+      if (record.verifiedBy === 'hit') {
+        continue;
+      }
+      if (childAuthoritative && record.verified === true) {
+        continue;
+      }
+      record.verified = false;
+      record.verifiedBy = undefined;
+      record.message = normalizeBreakpointMessage(message, false);
     }
   }
 
@@ -379,16 +407,27 @@ export class BreakpointController {
   async resyncAll(
     session: ManagedSession,
     options?: { forceFreshEcho?: boolean }
-  ): Promise<void> {
+  ): Promise<string[]> {
+    // The per-send warnings, in send order, for the caller's result (issue
+    // #754): a refused re-send is stamped on the records by the send itself,
+    // and its warning used to be discarded here.
+    const warnings: string[] = [];
     if (session.breakpoints.size > 0) {
       const files = [...new Set(Array.from(session.breakpoints.values()).map((bp) => bp.file))];
       for (const file of files) {
-        await this.syncBreakpointsForFile(session, file, options);
+        const outcome = await this.syncBreakpointsForFile(session, file, options);
+        if (outcome.warning) {
+          warnings.push(outcome.warning);
+        }
       }
     }
     if ((session.functionBreakpoints?.size ?? 0) > 0) {
-      await this.syncFunctionBreakpoints(session);
+      const outcome = await this.syncFunctionBreakpoints(session);
+      if (outcome.warning) {
+        warnings.push(outcome.warning);
+      }
     }
+    return warnings;
   }
 
   /**
@@ -408,6 +447,8 @@ export class BreakpointController {
     }
 
     const allFnBps = Array.from(session.functionBreakpoints.values());
+    const childAuthoritative =
+      !!this.ctx.selectPolicy(session.language)?.getDapClientBehavior?.().mirrorBreakpointsToChild;
 
     try {
       this.ctx.logger.info(
@@ -453,6 +494,7 @@ export class BreakpointController {
         error
       );
       const message = getErrorMessage(error);
+      this.stampRefusal(allFnBps, message, childAuthoritative);
       return { synced: false, warning: this.buildLiveSyncWarning(session, message) };
     }
   }

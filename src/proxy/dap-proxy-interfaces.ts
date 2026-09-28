@@ -141,6 +141,8 @@ export interface FunctionBreakpointSyncResult {
   id?: number;
   line?: number;
   source?: string;
+  /** The adapter's own message — a refused pre-launch set echoes its refusal here (issues #750, #754). */
+  message?: string;
   /**
    * On terminal statuses (issue #258): true when the worker had already seen
    * orderly debuggee termination (a terminated/exited DAP event was forwarded

@@ -554,8 +554,11 @@ export class DebugLauncher {
       // pre-launch set already — CodeLLDB's refusal is echoed per breakpoint
       // by the worker, and debugpy/Delve open no phase to answer in — and a
       // re-send is a round trip per file whose answer resyncAll discards.
+      // A refused re-send is stamped on the records by the send itself and its
+      // warning joins the launch result below (issue #754).
+      let resyncWarnings: string[] = [];
       if ((finalState === SessionState.RUNNING || finalState === SessionState.PAUSED) && !debuggerOff) {
-        await this.breakpoints.resyncAll(finalSession, { forceFreshEcho: true });
+        resyncWarnings = await this.breakpoints.resyncAll(finalSession, { forceFreshEcho: true });
       }
 
       // The policy's word is a static pin; a stop that arrived anyway is the
@@ -610,7 +613,9 @@ export class DebugLauncher {
       // annotated output events arrive; joining here is best-effort — a note
       // arriving after this return still lands in the output buffer as an
       // attributed [mcp-debugger] Warning entry.
-      const launchWarning = launchWarnings(finalSession, noDebugNote, fnBpWarning, logpointWarning, unboundAtExitWarning);
+      const launchWarning = launchWarnings(
+        finalSession, noDebugNote, fnBpWarning, logpointWarning, unboundAtExitWarning, ...resyncWarnings
+      );
 
       this.ctx.logger.info(
         `[SessionManager] Debugging started for session ${sessionId}. State: ${finalState}`

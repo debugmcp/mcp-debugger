@@ -595,6 +595,36 @@ describe('SessionManager - DAP Operations', () => {
       expect(result.removed?.id).toBe(bp1.id);
       expect(result.warning).toContain('live sync failed');
       expect(sessionManager.listBreakpoints(session.id)).toHaveLength(1);
+      // The adapter's answer is on the surviving record too (issue #754).
+      expect(sessionManager.listBreakpoints(session.id)[0]).toMatchObject({
+        verified: false,
+        message: 'Mock DAP request failure: setBreakpoints'
+      });
+    });
+
+    it('joins a refused post-launch re-send into the launch result and stamps the records (issue #754)', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+      await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 10 });
+      dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+        if (command === 'setBreakpoints') {
+          throw new Error('adapter rejected setBreakpoints');
+        }
+        return {};
+      });
+
+      const launched = sessionManager.startDebugging(session.id, 'test.py', undefined, { stopOnEntry: true });
+      await vi.runAllTimersAsync();
+      const result = await launched;
+
+      expect(result.success).toBe(true);
+      expect(result.data?.warning).toContain('Breakpoint state updated, but live sync failed: adapter rejected setBreakpoints');
+      expect(sessionManager.listBreakpoints(session.id)[0]).toMatchObject({
+        verified: false,
+        message: 'adapter rejected setBreakpoints'
+      });
     });
   });
 
@@ -4209,7 +4239,7 @@ describe('SessionManager - DAP Operations', () => {
 
       dependencies.mockProxyManager.simulateEvent('function-breakpoints-synced', [
         { name: 'main', verified: true, id: 7, line: 3, source: '/src/main.rs' },
-        { name: 'main', verified: false },
+        { name: 'main', verified: false, message: 'Not supported in noDebug mode' },
         { name: 'unknown_name', verified: true, id: 9 }
       ]);
 
@@ -4218,10 +4248,14 @@ describe('SessionManager - DAP Operations', () => {
       expect(first.verified).toBe(true);
       expect(first.boundLine).toBe(3);
       expect(first.boundFile).toBe('/src/main.rs');
+      expect(first.message).toBeUndefined();
       // Duplicate names consume distinct entries in order.
       const second = managed.functionBreakpoints.get('f2')!;
       expect(second.adapterId).toBeUndefined();
       expect(second.verified).toBe(false);
+      // The worker echoes a refused pre-launch set with the adapter's message
+      // (#750); the store keeps it (issue #754).
+      expect(second.message).toBe('Not supported in noDebug mode');
     });
   });
 });

@@ -807,6 +807,9 @@ describe('SessionManagerOperations attach modes', () => {
         stopOnEntry: false
       });
       expect(result.success).toBe(true);
+      // The adapter's answer reaches the attach result and the record (issue #754).
+      expect(result.data?.warning).toContain('Breakpoint state updated, but live sync failed: adapter rejected setBreakpoints');
+      expect(mockSession.breakpoints.get('bp-1')).toMatchObject({ verified: false, message: 'adapter rejected setBreakpoints' });
     });
 
     it('sends no re-sync traffic when no breakpoints are queued', async () => {

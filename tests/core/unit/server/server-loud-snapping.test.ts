@@ -158,4 +158,20 @@ describe('set_breakpoint loud snapping (#271)', () => {
     expect(content.success).toBe(true);
     expect(content.warning).toContain('adapter exploded');
   });
+
+  it('does not repeat the adapter\'s answer when the record carries it and the sync warning quotes it (issue #754)', async () => {
+    // A failed live re-send stamps the adapter's message on the record AND
+    // reports it in the sync warning; the response says it once.
+    mockSessionManager.setBreakpoint.mockResolvedValue({
+      breakpoint: { id: 'bp-1', file: '/path/to/test.py', line: 3, requestedLine: 3, verified: false, message: 'Server is not available' },
+      warning: 'Breakpoint state updated, but live sync failed: Server is not available'
+    });
+
+    const result = await callSetBreakpoint();
+    const content = JSON.parse(result.content[0].text);
+
+    expect(content.success).toBe(true);
+    expect(content.message).toBe('Server is not available');
+    expect(content.warning).toBe('Breakpoint state updated, but live sync failed: Server is not available');
+  });
 });
