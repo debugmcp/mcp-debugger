@@ -123,11 +123,12 @@ sequenceDiagram
 
 ## Error Handling
 
-- If the adapter package is not installed:
-  - `MODULE_NOT_FOUND` or `ERR_MODULE_NOT_FOUND` is observed from the Node import
-  - AdapterLoader throws a message including a suggested npm install command:
-    - `npm install @debugmcp/adapter-<language>`
-  - When this error propagates through AdapterRegistry, it is normalized to an `AdapterNotFoundError`
+- If the import fails with `MODULE_NOT_FOUND` / `ERR_MODULE_NOT_FOUND`, the code alone does not decide the verdict (issue #795):
+  - every attempt (the bare package name, then each fallback path via ESM import and `createRequire`) is kept, and the error reported is the first that names something other than the specifier it was asked for — a missing dependency, a broken file inside the package
+  - the package resolver then checks whether the package is on disk (its entry or its `package.json` resolves, or a fallback directory holds one); if not, AdapterLoader throws `Adapter not installed. Install with: npm install @debugmcp/adapter-<language>`
+  - if it is on disk, the message reads `The package is installed but importing it failed: <Node's own words>`, names the missing dependency when the import named a bare specifier, and advises a reinstall or rebuild
+  - when this error propagates through AdapterRegistry it becomes an `AdapterNotFoundError` whose message carries the loader's reason (`No debug adapter could be loaded for language: <lang> — …`) with the failed language left out of the `Available` list and the loader's error as `cause`; a `FactoryValidationError` from registering the loaded factory is re-thrown as itself
+  - `list_supported_languages` reports both modes unavailable with the same reason, the launch gate refuses `create_debug_session`/`start_debugging` with it, and `mcp-debugger doctor` reports the language as broken
 - If the factory class is not found:
   - Loader throws: `Factory class <Name> not found`
   - Ensure the adapter exports the expected named class

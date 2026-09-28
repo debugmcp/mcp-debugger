@@ -4,9 +4,52 @@ import { createLogger } from '../utils/logger.js';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { promises as fsPromises } from 'fs';
+import { dirname, join } from 'path';
+import { getErrorMessage } from '../errors/debug-errors.js';
+import { ErrorMessages } from '../utils/error-messages.js';
 
 export interface ModuleLoader {
   load(modulePath: string): Promise<Record<string, unknown>>;
+}
+
+/** One failed import during loadAdapter: what was asked for, and how it failed. */
+interface ImportAttempt {
+  specifier: string;
+  error: unknown;
+}
+
+const MODULE_NOT_FOUND_CODES = new Set(['ERR_MODULE_NOT_FOUND', 'MODULE_NOT_FOUND']);
+
+/** The specifier Node's module-not-found message names, when it names one. */
+function missingSpecifierOf(message: string): string | undefined {
+  return /Cannot find (?:package|module) '([^']+)'/.exec(message)?.[1];
+}
+
+/** A bare package specifier — not a path or URL: the shape a missing dependency takes. */
+function isBareSpecifier(specifier: string): boolean {
+  return !/^(?:\.{1,2}[\\/]|[\\/]|[A-Za-z]:[\\/]|file:)/.test(specifier);
+}
+
+/**
+ * Whether a failed import says no more than "the thing you asked for is not
+ * there": module-not-found naming the bare package, the candidate path
+ * itself, or nothing at all. Such an attempt tells the user nothing the next
+ * would not; an error naming anything else — a dependency the package
+ * imports, a file inside it — is the one worth reporting (issue #795).
+ */
+function namesOnlyItself(attempt: ImportAttempt, packageName: string): boolean {
+  const code = (attempt.error as { code?: string } | null)?.code;
+  if (code === undefined || !MODULE_NOT_FOUND_CODES.has(code)) return false;
+  const missing = missingSpecifierOf(getErrorMessage(attempt.error));
+  return missing === undefined || missing === packageName || missing === attempt.specifier;
+}
+
+function tryFileURLToPath(url: string): string | undefined {
+  try {
+    return fileURLToPath(url);
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -30,22 +73,33 @@ export function createDefaultPackageResolver(io: {
   const access = io.access ?? (async (fsPath: string) => { await fsPromises.access(fsPath); });
   return {
     async isInstalled(packageName: string, fallbackUrls: string[]): Promise<boolean> {
-      try {
-        resolve(packageName);
-        return true;
-      } catch (error) {
-        // An exports map that hides the CJS entry still proves the package is
-        // present on disk (ESM-only packages under require.resolve).
-        if ((error as { code?: string })?.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED') {
+      // The entry, or failing that the manifest: a package whose built output
+      // was wiped (or never built) is still on disk, and "npm install" is not
+      // the remedy for it (issue #795).
+      for (const specifier of [packageName, `${packageName}/package.json`]) {
+        try {
+          resolve(specifier);
           return true;
+        } catch (error) {
+          // An exports map that hides the CJS entry (or the manifest) still
+          // proves the package is present on disk (ESM-only packages under
+          // require.resolve).
+          if ((error as { code?: string })?.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED') {
+            return true;
+          }
         }
       }
       for (const url of fallbackUrls) {
-        try {
-          await access(fileURLToPath(url));
-          return true;
-        } catch {
-          // try next candidate
+        // Each candidate is <package dir>/dist/index.js; the manifest sits two
+        // levels up.
+        const entry = fileURLToPath(url);
+        for (const fsPath of [entry, join(dirname(dirname(entry)), 'package.json')]) {
+          try {
+            await access(fsPath);
+            return true;
+          } catch {
+            // try next candidate
+          }
         }
       }
       return false;
@@ -107,42 +161,40 @@ export class AdapterLoader {
       try {
         loadedModule = await this.moduleLoader.load(packageName);
       } catch (primaryError) {
-        // Try multiple fallback locations in order of likelihood
-        const candidates = this.getFallbackModulePaths(language);
+        // Every failed attempt is kept (issue #795): the one to report is the
+        // first whose error names something other than the specifier it was
+        // itself asked for — a dependency the package imports, a broken dist —
+        // where a candidate that is simply absent says only that.
+        const attempts: ImportAttempt[] = [{ specifier: packageName, error: primaryError }];
         let loaded = false;
-        let lastError: unknown = undefined;
-        for (const url of candidates) {
+        for (const url of this.getFallbackModulePaths(language)) {
           this.logger.debug?.(`[AdapterLoader] Primary import failed for ${packageName}, trying fallback URL: ${url}`);
           try {
             loadedModule = await this.moduleLoader.load(url);
             loaded = true;
             break;
-          } catch {
-            // Try createRequire for this candidate (helps in CJS/bundled contexts)
-            try {
-              const req = createRequire(import.meta.url);
-              const fsPath = fileURLToPath(url);
-              loadedModule = req(fsPath) as Record<string, unknown>;
-              this.logger.debug?.(`[AdapterLoader] Loaded via createRequire from ${fsPath}`);
-              loaded = true;
-              break;
-            } catch (err2) {
-              lastError = err2;
-              continue;
-            }
+          } catch (esmError) {
+            attempts.push({ specifier: url, error: esmError });
+          }
+          // Try createRequire for this candidate (helps in CJS/bundled contexts)
+          const fsPath = tryFileURLToPath(url);
+          if (fsPath === undefined) continue;
+          try {
+            const req = createRequire(import.meta.url);
+            loadedModule = req(fsPath) as Record<string, unknown>;
+            this.logger.debug?.(`[AdapterLoader] Loaded via createRequire from ${fsPath}`);
+            loaded = true;
+            break;
+          } catch (requireError) {
+            attempts.push({ specifier: fsPath, error: requireError });
           }
         }
         if (!loaded) {
-          // The primary import's error names the real cause — a dependency
-          // the adapter imports is missing, a broken dist — where the
-          // fallbacks' errors mostly say a candidate path is absent (issue
-          // #795). Re-throw the primary; the fallback residue is a breadcrumb.
-          this.logger.debug?.(
-            `[AdapterLoader] Fallback candidates for ${packageName} failed too: ${
-              lastError instanceof Error ? lastError.message : String(lastError ?? 'no candidate loaded')
-            }`
+          this.logger.warn?.(
+            `[AdapterLoader] Every import of ${packageName} failed: ` +
+              attempts.map((attempt) => `${attempt.specifier}: ${getErrorMessage(attempt.error)}`).join(' | ')
           );
-          throw primaryError;
+          throw (attempts.find((attempt) => !namesOnlyItself(attempt, packageName)) ?? attempts[0]).error;
         }
       }
 
@@ -161,11 +213,8 @@ export class AdapterLoader {
       return factory;
 
     } catch (error: unknown) {
-      const err = (error as { code?: string; message?: string } | Error | null) ?? null;
-      const errLike = err as { code?: string; message?: string } | null;
-      const code = errLike?.code;
-      const message = errLike?.message ?? String(error);
-      const baseMsg = `Failed to load adapter for '${language}' from package '${packageName}'.`;
+      const code = (error as { code?: string } | null)?.code;
+      const message = getErrorMessage(error);
       const moduleNotFound = code === 'ERR_MODULE_NOT_FOUND' || code === 'MODULE_NOT_FOUND';
       // A module-not-found code alone does not mean the ADAPTER is missing
       // (issue #795): an installed package whose own import fails — a
@@ -176,21 +225,22 @@ export class AdapterLoader {
         ? await this.resolver.isInstalled(packageName, this.getFallbackModulePaths(language)).catch(() => false)
         : true;
       if (moduleNotFound && !installed) {
-        const msg = `${baseMsg} Adapter not installed. Install with: npm install ${packageName}`;
+        const msg = ErrorMessages.adapterLoad.notInstalled(language, packageName);
         this.logger.warn?.(`[AdapterLoader] ${msg}`);
         throw new Error(msg, { cause: error });
       }
       if (moduleNotFound) {
-        const missing = /Cannot find (?:package|module) '([^']+)'/.exec(message)?.[1];
-        const dependencyNote =
-          missing && missing !== packageName && !missing.includes(`adapter-${language.toLowerCase()}`)
-            ? ` — its dependency '${missing}' is missing or broken`
-            : '';
-        const msg = `${baseMsg} The package is installed but importing it failed: ${message}${dependencyNote}. Reinstall it (npm install ${packageName}) or rebuild it.`;
+        // Only a bare specifier is a dependency the package imports; a path —
+        // the package's own dist, a nested dependency's broken main — is left
+        // to Node's words, which already name it.
+        const missing = missingSpecifierOf(message);
+        const dependency =
+          missing !== undefined && missing !== packageName && isBareSpecifier(missing) ? missing : undefined;
+        const msg = ErrorMessages.adapterLoad.importFailed(language, packageName, message, dependency);
         this.logger.error?.(`[AdapterLoader] ${msg}`);
         throw new Error(msg, { cause: error });
       }
-      const msg = `${baseMsg} Error: ${message}. If the package is installed, try reinstalling or rebuilding.`;
+      const msg = ErrorMessages.adapterLoad.failed(language, packageName, message);
       this.logger.error?.(`[AdapterLoader] ${msg}`);
       throw new Error(msg, { cause: error });
     }

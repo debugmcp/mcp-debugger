@@ -137,8 +137,10 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
           await this.register(language, loadedFactory);
           factory = loadedFactory;
         } catch (err) {
-          // Re-throw registration errors as-is; only convert loader failures to AdapterNotFoundError
-          if (err instanceof AdapterNotFoundError) throw err;
+          // Re-throw registration errors as-is — a factory that loaded but
+          // failed validation is a validation defect, not a load failure —
+          // and only convert loader failures to AdapterNotFoundError.
+          if (err instanceof AdapterNotFoundError || err instanceof FactoryValidationError) throw err;
           if (this.factories.has(language)) throw err;
           // The language may well be "available" by the metadata probe (its
           // package directory exists) — that is the case that just failed to

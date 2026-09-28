@@ -418,11 +418,12 @@ export class AdapterNotFoundError extends Error {
     options?: { cause?: unknown }
   ) {
     const cause = options?.cause;
-    const rawReason = cause instanceof Error ? cause.message : typeof cause === 'string' ? cause : undefined;
-    // The loader's messages end in a full stop of their own.
-    const reason = rawReason?.replace(/\.\s*$/, '');
+    const rawReason = cause instanceof Error ? cause.message : typeof cause === 'string' ? cause : '';
+    // The loader's messages end in a full stop (or an ellipsis) of their own;
+    // a cause with no words at all falls back to the not-registered sentence.
+    const reason = rawReason.replace(/[.…]+\s*$/, '').trim();
     super(
-      reason !== undefined
+      reason
         ? `No debug adapter could be loaded for language: ${language} — ${reason}. Available: ${availableLanguages.join(', ')}`
         : `No debug adapter registered for language: ${language}. Available: ${availableLanguages.join(', ')}`,
       cause !== undefined ? { cause } : undefined

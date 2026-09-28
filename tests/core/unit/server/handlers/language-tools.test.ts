@@ -35,7 +35,7 @@ describe('handleListSupportedLanguages', () => {
     expect(payload.count).toBe(2);
   });
 
-  it('warns per language when the adapter package is present but fails to import (issue #795)', async () => {
+  it('reports the modes unavailable with the import failure when the adapter package is present but fails to import (issue #795)', async () => {
     // Measured with dotenv removed next to an installed adapter-javascript:
     // the entry read installed:true, launch available:true, and nothing said
     // the import had failed until start_debugging did.
@@ -50,10 +50,14 @@ describe('handleListSupportedLanguages', () => {
     const payload = JSON.parse(result.content[0].text);
 
     const python = payload.available.find((entry: { language: string }) => entry.language === 'python');
-    expect(python.installed).toBe(true);
-    expect(python.warning).toContain('The adapter package is present but could not be loaded');
-    expect(python.warning).toContain("Cannot find package 'dotenv'");
-    expect(payload.available.find((entry: { language: string }) => entry.language === 'mock').warning).toBeUndefined();
+    expect(python.installed).toBe(true); // the metadata probe: the package is on disk
+    expect(python.modes.launch).toEqual({ supported: true, available: false, reason: loadError.message });
+    // The mock registry declares attach 'none'; the load failure does not
+    // rewrite an unsupported mode's reason.
+    expect(python.modes.attach.supported).toBe(false);
+    expect(python).not.toHaveProperty('warning');
+    const mock = payload.available.find((entry: { language: string }) => entry.language === 'mock');
+    expect(mock.modes.launch.available).toBe(true);
   });
 
   it('falls back to installed list when listAvailableAdapters fails', async () => {
