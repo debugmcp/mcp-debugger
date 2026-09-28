@@ -137,4 +137,17 @@ describe('JavaScript launch configuration', () => {
       return listed.sessions.find(session => session.id === sessionId)?.exitCode;
     }, { timeout: 15_000 }).toBe(7);
   }, 60_000);
+  it('reports the debuggee exit code for a debugger-on launch (issue #735)', async () => {
+    // js-debug never sends `exited`; the code comes from the preload shim's
+    // recorded value (#247). The noDebug case above covered only that flag.
+    const result = await launch({ args: ['--exit'], dapLaunchArgs: { stopOnEntry: false } });
+    if (result.state === 'stopped') {
+      expect(result.data?.exitCode, JSON.stringify(result)).toBe(7);
+      expect(result.message).toContain('exited with code 7');
+    }
+    await expect.poll(async () => {
+      const listed = await call<Result & { sessions: Array<{ id: string; exitCode?: number }> }>('list_debug_sessions');
+      return listed.sessions.find(session => session.id === sessionId)?.exitCode;
+    }, { timeout: 15_000 }).toBe(7);
+  }, 60_000);
 });

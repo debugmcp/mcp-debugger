@@ -354,6 +354,44 @@ describe.skipIf(SKIP_DOCKER)('Docker: JavaScript Debugging Smoke Tests', () => {
     sessionId = null;
   }, 120000);
 
+  it.each([
+    ['debug mode', {}],
+    ['noDebug', { noDebug: true }]
+  ])('reports the debuggee exit code after run-to-completion in Docker, %s (issue #796)', async (_label, adapterLaunchConfig) => {
+    const hostScriptPath = path.join(ROOT, 'examples', 'javascript', 'exit_code_test.js');
+    const scriptPath = hostToContainerPath(hostScriptPath);
+
+    const createResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: { language: 'javascript', name: 'docker-js-exit-code' }
+    }));
+    expect(createResponse.sessionId).toBeDefined();
+    sessionId = createResponse.sessionId as string;
+
+    const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'start_debugging',
+      arguments: { sessionId, scriptPath, dapLaunchArgs: { stopOnEntry: false }, adapterLaunchConfig }
+    }));
+    expect(startResponse.success).toBe(true);
+
+    // A `stopped` state alone proves nothing here: the image used to omit the
+    // adapter's exitcode-shim.cjs preload, so the session ended stopped with
+    // no exitCode at all (issue #796). Wait for the code itself.
+    let exitCode: number | undefined;
+    for (let i = 0; i < 40; i++) {
+      const listResponse = parseSdkToolResult(await mcpClient!.callTool({ name: 'list_debug_sessions', arguments: {} }));
+      const sessions = (listResponse.sessions ?? []) as Array<{ id?: string; sessionId?: string; state: string; exitCode?: number }>;
+      const mine = sessions.find(s2 => (s2.id ?? s2.sessionId) === sessionId);
+      exitCode = mine?.exitCode;
+      if (exitCode !== undefined) break;
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    expect(exitCode).toBe(7);
+
+    await mcpClient!.callTool({ name: 'close_debug_session', arguments: { sessionId } });
+    sessionId = null;
+  }, 120000);
+
   it('should step into nested JavaScript frames in Docker', async () => {
     const hostScriptPath = path.join(ROOT, 'examples', 'javascript', 'mcp_target.js');
     const scriptPath = hostToContainerPath(hostScriptPath);

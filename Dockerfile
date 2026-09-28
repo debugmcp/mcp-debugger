@@ -138,6 +138,7 @@ RUN rm -rf /app/node_modules/@debugmcp && \
     cp /app/packages/adapter-python/package.json /app/node_modules/@debugmcp/adapter-python/ && \
     cp -r /app/packages/adapter-javascript/dist /app/node_modules/@debugmcp/adapter-javascript/ && \
     cp -r /app/packages/adapter-javascript/vendor /app/node_modules/@debugmcp/adapter-javascript/ && \
+    cp -r /app/packages/adapter-javascript/assets /app/node_modules/@debugmcp/adapter-javascript/ && \
     cp /app/packages/adapter-javascript/package.json /app/node_modules/@debugmcp/adapter-javascript/ && \
     mkdir -p /app/node_modules/@debugmcp/adapter-javascript/node_modules && \
     cp -rL /app/packages/adapter-javascript/node_modules/dotenv /app/node_modules/@debugmcp/adapter-javascript/node_modules/ && \
@@ -271,6 +272,11 @@ COPY --from=builder /app/node_modules/.pnpm/isexe@4.0.0/node_modules/isexe /app/
 # Dynamic adapters run outside the server bundle. Fail the build if their
 # runtime dependency copy is incomplete, instead of shipping a broken launch.
 RUN node --input-type=module -e "await import('@debugmcp/adapter-javascript')"
+
+# The JavaScript adapter's exit-code preload (issue #796): js-debug never
+# sends a DAP exited event, so exitCode comes from this shim, which the
+# adapter degrades silently without. Fail the build if the copy is missing.
+RUN test -f /app/node_modules/@debugmcp/adapter-javascript/assets/exitcode-shim.cjs
 
 # Expose ports
 EXPOSE 3001 5679

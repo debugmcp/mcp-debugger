@@ -50,6 +50,11 @@ console.log('Bundle path:', bundlePath);
       {
         name: 'proxy bundle',
         path: 'proxy/proxy-bundle.cjs'
+      },
+      {
+        // js-debug never sends exited; exitCode comes from this preload (issue #796)
+        name: 'exit-code shim (JavaScript)',
+        path: 'assets/exitcode-shim.cjs'
       }
     ];
     const optionalAssets = [
