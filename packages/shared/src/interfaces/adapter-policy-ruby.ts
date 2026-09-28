@@ -89,6 +89,23 @@ export const RubyAdapterPolicy = {
     };
   },
   isSessionReady: (state: SessionState) => state === SessionState.PAUSED,
+  // rdbg reports its stop-at-load as `stopped reason: 'pause'` on
+  // configurationDone when the launch went out as `attach { nonstop: false }`
+  // (issue #798). That is the entry stop, and only that: the first stop of a
+  // LAUNCH that asked for one, with no pause intent pending. Every other
+  // rdbg pause stays a pause — the user's pause_execution and the post-attach
+  // pause (both register an intent first), a real attach's load-time pause
+  // (an attach, not a launch), and a signal delivered to the target
+  // (rdbg's suspend_trap): relabelling one of those 'entry' would hand it
+  // to the stopOnEntry:false auto-continue.
+  normalizeStopReason: (reason, _body, context) =>
+    reason === 'pause' &&
+    !context.pausePending &&
+    context.sessionMode === 'launch' &&
+    context.firstStop === true &&
+    context.stopOnEntry === true
+      ? 'entry'
+      : undefined,
   validateExecutable: async (rubyCmd: string): Promise<boolean> => {
     const { spawn } = await import('child_process');
 
@@ -149,6 +166,15 @@ export const RubyAdapterPolicy = {
   getInitializationBehavior: () => {
     return {
       sendLaunchBeforeConfig: true,
+      // rdbg's DAP `launch` handler goes nonstop unconditionally
+      // (server_dap.rb: `when 'launch' … @nonstop = true`) and only `attach`
+      // reads `nonstop`, so a `launch` request can never stop at entry. The
+      // rdbg process is ours, spawned suspended at load, so a launch that
+      // asks for the entry stop goes out as `attach { nonstop: false }`
+      // (issue #798). One that does not keeps the `launch` verb — byte for
+      // byte what shipped before, and safe on debug gems older than 1.7.0,
+      // whose attach handler ignores `nonstop` and would hold the pause.
+      launchRequestCommand: ({ stopOnEntry }) => (stopOnEntry ? 'attach' : 'launch'),
       // rdbg can process 'initialize' (proving it with the 'initialized' event)
       // yet never send the response — its DAP send silently skips writing when
       // the socket slot is momentarily unset (issue #492). Don't let the missing

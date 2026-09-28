@@ -398,7 +398,7 @@ packages/adapter-{language}/
 - Ruby 2.7+ must be installed (3.1+ recommended — bundles the debug gem)
 - The `debug` gem (rdbg) must be available: `gem install debug`
 - Auto-detects ruby/rdbg from PATH and common install locations, or use `RUBY_PATH`/`RDBG_PATH` env vars
-- Launch always stops at load (the entry pause is auto-continued for `stopOnEntry=false`); attach connects directly to a running `rdbg --open` DAP socket without spawning an adapter process, including remote targets via port mapping/`kubectl port-forward` (see `docs/ruby/README.md`)
+- Launch always suspends at load; with `stopOnEntry=false` the DAP `launch` goes out as-is and rdbg continues by itself on `configurationDone` (no entry stop is ever reported), and with `stopOnEntry=true` the launch is sent to rdbg as an `attach { nonstop: false }` request — only rdbg's attach handler honours `nonstop` (issue #798; debug gems older than 1.7.0 ignore it, which is why the default launch keeps the `launch` verb) — and rdbg reports the pause as the entry stop; attach connects directly to a running `rdbg --open` DAP socket without spawning an adapter process, including remote targets via port mapping/`kubectl port-forward` (see `docs/ruby/README.md`)
 - On Windows, rdbg's `.bat` shim is bypassed by running the sibling rdbg script via the Ruby interpreter (Node cannot spawn `.bat` without a shell)
 
 ### JavaScript/Node.js
