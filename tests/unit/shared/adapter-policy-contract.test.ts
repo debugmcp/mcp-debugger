@@ -20,6 +20,7 @@ import {
   DebugLanguage,
   DefaultAdapterPolicy,
   emptyLocalVariableExtraction,
+  getLldbAttachBehavior,
   getPolicyForLanguage,
   resolveExceptionFilters,
   type AdapterPolicy,
@@ -345,9 +346,39 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
 
     const attachBehavior = policy.getAttachBehavior?.();
     if (attachBehavior !== undefined) {
-      for (const value of Object.values(attachBehavior)) {
-        expect(typeof value).toBe('boolean');
+      for (const [key, value] of Object.entries(attachBehavior)) {
+        // The one non-boolean is the policy's own words for the resume-before-detach warning.
+        expect(typeof value).toBe(key === 'resumeBeforeDetachReason' ? 'string' : 'boolean');
       }
+    }
+  });
+
+  it('asks for a resume before detach exactly where CodeLLDB on Windows needs one (issue #763)', () => {
+    // ProcessWindows::DoDetach resumes every thread with the resume state its
+    // last stop left behind; after a step that is "stepping", so the trap flag
+    // is set for a thread no debugger watches and the process dies with
+    // STATUS_SINGLE_STEP. The three CodeLLDB-backed policies declare the
+    // pre-detach continue on win32 only; the worker applies it ahead of any
+    // disconnect that leaves the target running, so rust — which has no
+    // attach mode — reaches it through detach_from_process on a launch
+    // session. No other policy declares it at all.
+    const lldbEngines = new Set<DebugLanguage>([DebugLanguage.CPP, DebugLanguage.RUST, DebugLanguage.COBOL]);
+    const attachBehavior = policy.getAttachBehavior?.();
+    if (lldbEngines.has(language)) {
+      expect(attachBehavior?.resumeBeforeDetach).toBe(process.platform === 'win32');
+      if (process.platform === 'win32') {
+        expect(attachBehavior?.resumeBeforeDetachReason).toContain('STATUS_SINGLE_STEP');
+      }
+      // The platform gate itself, independent of the host running the test.
+      expect(getLldbAttachBehavior('win32')).toEqual({
+        resumeBeforeDetach: true,
+        resumeBeforeDetachReason: expect.stringContaining('STATUS_SINGLE_STEP')
+      });
+      expect(getLldbAttachBehavior('linux')).toEqual({ resumeBeforeDetach: false });
+      expect(getLldbAttachBehavior('darwin')).toEqual({ resumeBeforeDetach: false });
+    } else {
+      expect(attachBehavior?.resumeBeforeDetach).toBeUndefined();
+      expect(attachBehavior?.resumeBeforeDetachReason).toBeUndefined();
     }
   });
 

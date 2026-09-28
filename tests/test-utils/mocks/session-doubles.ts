@@ -50,6 +50,7 @@ export function createPartialSessionStore(session: ManagedSession): PartialSessi
 export type ProxyManagerMockKeys =
   | 'isRunning'
   | 'getCurrentThreadId'
+  | 'getPreDetachResume'
   | 'sendDapRequest'
   | 'stop'
   | 'once'
