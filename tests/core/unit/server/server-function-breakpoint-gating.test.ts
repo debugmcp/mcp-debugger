@@ -87,6 +87,20 @@ describe('set_breakpoint function gating (#271 phase 3)', () => {
     });
   }
 
+  it('stores a function breakpoint on a TERMINATED session for the next launch (issue #806)', async () => {
+    mockSessionManager.getSessionPolicy.mockReturnValue({ name: 'python', supportsFunctionBreakpoints: true });
+    mockSessionManager.getSession.mockReturnValue({ id: 'test-session', sessionLifecycle: 'terminated' });
+
+    const result = await callSetFunctionBreakpoint();
+
+    expect(mockSessionManager.setFunctionBreakpoint).toHaveBeenCalledWith(
+      'test-session',
+      expect.objectContaining({ functionName: 'load_prices' })
+    );
+    const content = JSON.parse(result.content[0].text);
+    expect(content.success).toBe(true);
+  });
+
   it('rejects when the adapter policy declares no function-breakpoint support', async () => {
     // Synthetic language: real adapters that gate function breakpoints off
     // (js-debug) carry their own reason string, tested below

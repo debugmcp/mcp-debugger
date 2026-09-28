@@ -107,20 +107,42 @@ export class DebugMcpServer implements ToolContext {
   }
 
   /**
-   * Validate session exists and is not terminated
+   * Session gate for tools that need a LIVE debuggee (execution control,
+   * pause, threads, inspection, evaluate, source context, mirror): an unknown
+   * id throws SessionNotFoundError, a lifecycle-TERMINATED session throws
+   * SessionTerminatedError. A TERMINATED-but-present session is the
+   * between-launches state (the program exited, or only a dry run ran), so
+   * tools that prepare the next launch or read the last one use
+   * validateSessionExists instead (issues #793, #806).
    * @internal ToolContext service.
    */
   public validateSession(sessionId: string): void {
+    const session = this.validateSessionExists(sessionId);
+    if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
+      throw new SessionTerminatedError(sessionId);
+    }
+  }
+
+  /**
+   * Existence-only gate: start_debugging, restart_debugging, set_breakpoint
+   * and set_breakpoint {function} accept a terminated-but-unclosed session.
+   * The launcher tears down any leftover proxy and resets the per-launch state
+   * itself (DebugLauncher.launch), and a breakpoint set between launches is
+   * stored verified:false and applied by the next launch, whose response
+   * carries the adapter's own answer (issues #793, #806). list/remove/
+   * clear_breakpoints and get_output rely on the SessionManager's own lookup
+   * for the same reason. Returns the session so validateSession builds on
+   * the same lookup (facade-only; handlers reach it through the tool methods).
+   * @internal
+   */
+  public validateSessionExists(sessionId: string): NonNullable<ReturnType<SessionManager['getSession']>> {
     const session = this.sessionManager.getSession(sessionId);
     if (!session) {
       // Typed subclass of McpError (same code/message) so per-tool catch blocks
       // can convert session-lifecycle failures into {success: false} results
       throw new SessionNotFoundError(sessionId);
     }
-    // Check the new lifecycle state instead of legacy state
-    if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
-      throw new SessionTerminatedError(sessionId);
-    }
+    return session;
   }
 
   /**
@@ -240,7 +262,7 @@ export class DebugMcpServer implements ToolContext {
     adapterLaunchConfig?: Record<string, unknown>,
     breakOnExceptions?: ExceptionBreakMode
   ): Promise<DebugResult> {
-    this.validateSession(sessionId);
+    this.validateSessionExists(sessionId);
 
     // Check script file exists for immediate feedback
     const fileCheck = await this.fileChecker.checkExists(scriptPath);
@@ -264,12 +286,9 @@ export class DebugMcpServer implements ToolContext {
   }
 
   public async restartDebugging(sessionId: string): Promise<DebugResult> {
-    // Deliberately no validateSession(): a finished debuggee is
-    // lifecycle-TERMINATED, and restarting after exit is the primary use
-    // case (cf. handleGetOutput). Session existence is still enforced.
-    if (!this.sessionManager.getSession(sessionId)) {
-      throw new SessionNotFoundError(sessionId);
-    }
+    // A finished debuggee is lifecycle-TERMINATED and restarting after exit
+    // is the primary use case (cf. handleGetOutput).
+    this.validateSessionExists(sessionId);
     return this.sessionManager.restartDebugging(sessionId);
   }
 
@@ -320,12 +339,12 @@ export class DebugMcpServer implements ToolContext {
     functionName: string,
     condition?: string
   ): Promise<{ breakpoint: FunctionBreakpoint; warning?: string }> {
-    this.validateSession(sessionId);
+    this.validateSessionExists(sessionId);
     return this.sessionManager.setFunctionBreakpoint(sessionId, { functionName, condition });
   }
 
   public async setBreakpoint(req: SetBreakpointRequest): Promise<{ breakpoint: Breakpoint; warning?: string }> {
-    this.validateSession(req.sessionId);
+    this.validateSessionExists(req.sessionId);
 
     // Addressing-parameter combinations (issue #271)
     if (req.statement !== undefined && req.line !== undefined) {
@@ -466,10 +485,10 @@ export class DebugMcpServer implements ToolContext {
     };
   }
 
-  // The breakpoint management tools below deliberately skip validateSession's
-  // TERMINATED rejection (cf. handleGetOutput): a terminated-but-unclosed
-  // session keeps its breakpoints so they can be listed and adjusted between
-  // launches. Session existence is still enforced by the SessionManager.
+  // The breakpoint management tools below take no server-side gate at all: a
+  // terminated-but-unclosed session keeps its breakpoints so they can be
+  // listed and adjusted between launches (the validateSessionExists policy);
+  // session existence is enforced by the SessionManager's own lookup.
   public listBreakpoints(sessionId: string, file?: string): Breakpoint[] {
     return this.sessionManager.listBreakpoints(sessionId, file);
   }
