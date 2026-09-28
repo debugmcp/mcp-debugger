@@ -10,7 +10,7 @@ import { fileURLToPath } from 'url';
 import { promisify } from 'util';
 import { exec } from 'child_process';
 import { buildDockerImage, createDockerMcpClient, hostToContainerPath, getDockerLogs } from './docker-test-utils.js';
-import { parseSdkToolResult } from '../smoke-test-utils.js';
+import { parseSdkToolResult, pollUntil } from '../smoke-test-utils.js';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 
 const execAsync = promisify(exec);
@@ -349,6 +349,40 @@ describe.skipIf(SKIP_DOCKER)('Docker: JavaScript Debugging Smoke Tests', () => {
     expect(combined).toContain('Before swap');
     expect(combined).toContain('After swap');
     expect(combined).toContain('LOGPOINT a=');
+
+    await mcpClient!.callTool({ name: 'close_debug_session', arguments: { sessionId } });
+    sessionId = null;
+  }, 120000);
+
+  it.each([
+    ['debug mode', {}],
+    ['noDebug', { noDebug: true }]
+  ])('reports the debuggee exit code after run-to-completion in Docker, %s (issue #796)', async (_label, adapterLaunchConfig) => {
+    const hostScriptPath = path.join(ROOT, 'examples', 'javascript', 'exit_code_test.js');
+    const scriptPath = hostToContainerPath(hostScriptPath);
+
+    const createResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: { language: 'javascript', name: 'docker-js-exit-code' }
+    }));
+    expect(createResponse.sessionId).toBeDefined();
+    sessionId = createResponse.sessionId as string;
+
+    const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'start_debugging',
+      arguments: { sessionId, scriptPath, dapLaunchArgs: { stopOnEntry: false }, adapterLaunchConfig }
+    }));
+    expect(startResponse.success).toBe(true);
+
+    // A `stopped` state alone proves nothing here: the image used to omit the
+    // adapter's exitcode-shim.cjs preload, so the session ended stopped with
+    // no exitCode at all (issue #796). Wait for the code itself.
+    const exitCode = await pollUntil(async () => {
+      const listResponse = parseSdkToolResult(await mcpClient!.callTool({ name: 'list_debug_sessions', arguments: {} }));
+      const sessions = (listResponse.sessions ?? []) as Array<{ id: string; exitCode?: number }>;
+      return sessions.find(s2 => s2.id === sessionId)?.exitCode;
+    }, 20_000, 500);
+    expect(exitCode).toBe(7);
 
     await mcpClient!.callTool({ name: 'close_debug_session', arguments: { sessionId } });
     sessionId = null;

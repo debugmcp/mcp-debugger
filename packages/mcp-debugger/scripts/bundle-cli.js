@@ -274,7 +274,9 @@ async function bundleCLI() {
     fs.copyFileSync(exitShimSrc, path.join(assetsDest, 'exitcode-shim.cjs'));
     console.log('Copied exitcode-shim.cjs.');
   } else {
-    console.warn('Warning: exitcode-shim.cjs not found; JS debuggee exit codes will not be captured in NPX distribution.');
+    // Fail the bundle rather than ship a package whose JavaScript sessions end
+    // with no exitCode (issue #796, the same class the Docker image had).
+    throw new Error(`exitcode-shim.cjs not found at ${exitShimSrc}; the npm bundle must ship the JavaScript exit-code preload (issue #796)`);
   }
 
   // Copy the agent skill so the package is a pi coding-agent package (issue

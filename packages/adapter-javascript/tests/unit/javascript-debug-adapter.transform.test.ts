@@ -332,6 +332,27 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
       expect(requireArg).not.toContain('\\');
     });
 
+    it('reports a missing shim as a launch notice instead of degrading silently (issue #796)', async () => {
+      const withoutShim = new JavascriptDebugAdapter({
+        ...deps,
+        fileSystem: { existsSync: () => false }
+      } as unknown as import('@debugmcp/shared').AdapterDependencies);
+      const cfg = await withoutShim.transformLaunchConfig({
+        program: path.resolve('/proj/app.js')
+      } as any);
+
+      const env = cfg.env as Record<string, string>;
+      expect(env.MCP_DEBUGGER_EXITCODE_FILE).toBeUndefined();
+      expect(env.NODE_OPTIONS ?? '').not.toContain('exitcode-shim');
+      expect(withoutShim.consumeLaunchConfigDiagnostics()).toContainEqual(
+        expect.objectContaining({
+          key: 'exitcode-shim.cjs',
+          scope: 'launch',
+          message: expect.stringContaining('exit codes will not be captured: exitcode-shim.cjs not found')
+        })
+      );
+    });
+
     it('preserves pre-existing NODE_OPTIONS content', async () => {
       const withFs = new JavascriptDebugAdapter(depsWithFs);
       const cfg = await withFs.transformLaunchConfig({
