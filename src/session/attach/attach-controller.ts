@@ -543,37 +543,27 @@ export class AttachController {
       } else {
         const proxyManager = session.proxyManager;
 
-        // Issue #763: on Windows, CodeLLDB's detach (ProcessWindows::DoDetach,
-        // LLVM PR 115712) resumes every thread with the resume state of its
-        // last stop before DebugActiveProcessStop. After a step that state is
-        // still "stepping", so the thread single-steps with no debugger
-        // attached and the process dies with STATUS_SINGLE_STEP (0x80000004)
-        // — measured 2/2 for step_over and step_into on Windows 11. A
-        // continue recomputes that state, and a target already running is
-        // detached without the resume loop, so the policies that declare
-        // resumeBeforeDetach get one ahead of the disconnect. The disconnect
-        // itself, and its answer, are unchanged.
-        const attachBehavior = this.ctx.selectPolicy(session.language).getAttachBehavior?.();
-        if (attachBehavior?.resumeBeforeDetach === true && session.state === SessionState.PAUSED) {
-          const threadId = proxyManager.getCurrentThreadId();
-          try {
-            await proxyManager.sendDapRequest('continue', threadId !== null ? { threadId } : {});
-            resumedBeforeDetach = true;
-          } catch (continueError) {
-            resumedBeforeDetach = false;
-            const reason = continueError instanceof Error ? continueError.message : String(continueError);
-            warning = `Could not resume the paused target before detaching (${reason}); on Windows, CodeLLDB detaching a thread whose last resume was a step can end the process with STATUS_SINGLE_STEP (0x80000004)`;
-            this.ctx.logger.warn(`[SessionManager] Pre-detach continue failed for session ${sessionId}, detaching anyway:`, continueError);
-          }
-        }
-
-        // Disconnect without terminating - send DAP disconnect request
+        // Disconnect without terminating - send DAP disconnect request. In
+        // attach mode the worker resumes a stopped target ahead of it where
+        // the policy asks (issue #763: CodeLLDB on Windows kills a target
+        // detached right after a step) and reports the outcome as the
+        // 'pre_detach_resume' status, read back below for the result.
         try {
           await proxyManager.sendDapRequest('disconnect', {
             terminateDebuggee: false
           });
         } catch (disconnectError) {
           this.ctx.logger.warn(`[SessionManager] Disconnect request failed, continuing with cleanup:`, disconnectError);
+        }
+
+        const resume = proxyManager.getPreDetachResume();
+        if (resume) {
+          resumedBeforeDetach = resume.resumed;
+          if (!resume.resumed) {
+            const reason = this.ctx.selectPolicy(session.language).getAttachBehavior?.()?.resumeBeforeDetachReason
+              ?? 'the adapter asked for that resume before detaching';
+            warning = `Could not resume the stopped target before detaching (${resume.error ?? 'no answer'}); ${reason}`;
+          }
         }
 
         // Stop the proxy manager — it may already be gone if the disconnect

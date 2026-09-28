@@ -541,6 +541,13 @@ export function getLldbDapClientBehavior(): DapClientBehavior {
  */
 export function getLldbAttachBehavior(
   platform: NodeJS.Platform = process.platform
-): { resumeBeforeDetach: boolean } {
-  return { resumeBeforeDetach: platform === 'win32' };
+): { resumeBeforeDetach: boolean; resumeBeforeDetachReason?: string } {
+  if (platform !== 'win32') {
+    return { resumeBeforeDetach: false };
+  }
+  return {
+    resumeBeforeDetach: true,
+    resumeBeforeDetachReason:
+      'on Windows, CodeLLDB detaching a thread whose last resume was a step ends the process with STATUS_SINGLE_STEP (0x80000004)'
+  };
 }

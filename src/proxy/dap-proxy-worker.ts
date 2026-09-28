@@ -81,6 +81,11 @@ export const MAX_QUEUED_COMMANDS = 256;
 export const INITIALIZE_RESPONSE_GRACE_MS = 2000;
 /** Bound on each terminal-signal wait (stdio drain, child flush, the debugger-off launch outcome). */
 const TERMINAL_SIGNAL_BACKSTOP_MS = 2000;
+/**
+ * How long the pre-detach resume (issue #763) may wait for the adapter's
+ * continue response before the disconnect goes out regardless.
+ */
+const PRE_DETACH_RESUME_TIMEOUT_MS = 3000;
 
 export class DapProxyWorker {
   private logger: ILogger | null = null;
@@ -1515,6 +1520,7 @@ export class DapProxyWorker {
       }
 
       // Track request (payload.timeoutMs overrides the tracker default when present)
+      await this.beforeForwardingDapCommand(payload);
       this.requestTracker.track(payload.requestId, payload.dapCommand, payload.timeoutMs);
 
       // Log setBreakpoints for debugging
@@ -1540,12 +1546,6 @@ export class DapProxyWorker {
         ? await this.dapClient.sendRequest(payload.dapCommand, dapArgs, payload.timeoutMs)
         : await this.dapClient.sendRequest(payload.dapCommand, dapArgs);
 
-      // The session's own detach comes through here; mark it so the attach-mode
-      // auto-detach in handleTerminate does not send a second disconnect
-      // (measured on the wire during issue #763).
-      if (payload.dapCommand === 'disconnect') {
-        this.dapDisconnectSent = true;
-      }
 
       // Update adapter state if needed
       if (this.adapterPolicy.updateStateOnCommand) {
@@ -1626,6 +1626,7 @@ export class DapProxyWorker {
           continue;
         }
 
+        await this.beforeForwardingDapCommand(payload);
         this.requestTracker.track(payload.requestId, payload.dapCommand, payload.timeoutMs);
         const response = payload.timeoutMs !== undefined
           ? await this.dapClient!.sendRequest(payload.dapCommand, payload.dapArgs, payload.timeoutMs)
@@ -1785,6 +1786,7 @@ export class DapProxyWorker {
     // the launched process is properly cleaned up.
     if (this.isAttachMode && this.state === ProxyState.CONNECTED && this.connectionManager && this.dapClient && !this.dapDisconnectSent) {
       this.logger?.info('[Worker] Attach mode: auto-detaching with terminateDebuggee=false before shutdown.');
+      await this.resumeBeforeDetach('close');
       this.dapDisconnectSent = true;
       try {
         await this.connectionManager.disconnect(this.dapClient, false);
@@ -1842,6 +1844,9 @@ export class DapProxyWorker {
     // exit status only in reply to disconnect), in which case the client is
     // already torn down and only the shutdown() below remains.
     if (this.connectionManager && this.dapClient && !this.dapDisconnectSent) {
+      if (this.isAttachMode) {
+        await this.resumeBeforeDetach('shutdown');
+      }
       this.dapDisconnectSent = true;
       const terminateDebuggee = !this.isAttachMode;
       await this.connectionManager.disconnect(this.dapClient, terminateDebuggee);
@@ -1997,6 +2002,64 @@ export class DapProxyWorker {
    * The lastStop check dedupes against a real continued event that arrived
    * first; steps produce a fresh stopped moments later regardless.
    */
+  /**
+   * Issue #763: before an attach-mode DAP disconnect, resume the target when
+   * the policy asks. CodeLLDB on Windows: ProcessWindows::DoDetach resumes
+   * every thread with the resume state of its last stop, and after a step
+   * that is "stepping" — the detached thread single-steps into a process no
+   * debugger watches and it dies with STATUS_SINGLE_STEP (0x80000004). Sent
+   * on the last stopped thread while the worker knows the target stopped (a
+   * thread that never stopped never stepped; a resume already forwarded
+   * cleared lastStop, and a stop that lands after this check cannot be
+   * helped). Bounded, and never blocks the disconnect: the outcome goes to
+   * the parent as 'pre_detach_resume' for the detach result. One place for
+   * every attach-mode sender — the session's detach, close_debug_session's
+   * auto-detach and the shutdown path.
+   */
+  private async resumeBeforeDetach(trigger: 'detach' | 'close' | 'shutdown'): Promise<void> {
+    if (!this.isAttachMode || !this.dapClient) {
+      return;
+    }
+    if (this.adapterPolicy.getAttachBehavior?.()?.resumeBeforeDetach !== true) {
+      return;
+    }
+    const stop = this.lastStop;
+    if (!stop || typeof stop.threadId !== 'number') {
+      this.logger?.info(`[Worker] Pre-detach resume (${trigger}): no stopped thread on record, nothing to resume`);
+      return;
+    }
+    const args = { threadId: stop.threadId };
+    try {
+      const response = await this.dapClient.sendRequest<DebugProtocol.ContinueResponse>(
+        'continue', args, PRE_DETACH_RESUME_TIMEOUT_MS
+      );
+      this.noteResumeCommand('continue', args, response);
+      this.logger?.info(`[Worker] Pre-detach resume (${trigger}): continued thread ${stop.threadId} ahead of the disconnect (issue #763)`);
+      this.sendStatusSafely('pre_detach_resume', { trigger, threadId: stop.threadId, resumed: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger?.warn(`[Worker] Pre-detach resume (${trigger}) refused, detaching anyway: ${message}`);
+      this.sendStatusSafely('pre_detach_resume', { trigger, threadId: stop.threadId, resumed: false, error: message });
+    }
+  }
+
+  /**
+   * The session's own disconnect (detach_from_process) comes through the
+   * command paths: resume first where the policy asks, and mark the request
+   * sent before it goes out so the attach-mode auto-detach in
+   * handleTerminate does not repeat it (measured on the wire during issue
+   * #763) — "sent" means it went out, not that it was answered. Launch-mode
+   * disconnects are left alone: performShutdown's terminateDebuggee=true
+   * disconnect must still follow one the session sent with false.
+   */
+  private async beforeForwardingDapCommand(payload: DapCommandPayload): Promise<void> {
+    if (payload.dapCommand !== 'disconnect' || !this.isAttachMode) {
+      return;
+    }
+    await this.resumeBeforeDetach('detach');
+    this.dapDisconnectSent = true;
+  }
+
   private noteResumeCommand(command: string, args: unknown, response: unknown): void {
     if (!['continue', 'next', 'stepIn', 'stepOut', 'goto'].includes(command)) {
       return;

@@ -2748,40 +2748,139 @@ describe('DapProxyWorker', () => {
       expect(worker.getState()).toBe(ProxyState.TERMINATED);
     });
 
-    it('does not auto-detach again after the session already forwarded a disconnect (issue #763)', async () => {
-      // detach_from_process sends its own DAP disconnect through the generic
-      // command path; measured on the wire (CodeLLDB attach on Windows), the
-      // adapter then received a second one from handleTerminate's auto-detach.
-      const sendRequest = vi.fn().mockResolvedValue({});
-      const processStub = { shutdown: vi.fn().mockResolvedValue(undefined) };
-      const connectionStub = { disconnect: vi.fn().mockResolvedValue(undefined) };
-      (worker as any).logger = mockLogger;
-      (worker as any).dapClient = { ...mockDapClient, sendRequest };
-      (worker as any).adapterPolicy = {
+    // Issue #763: CodeLLDB on Windows kills a target detached right after a
+    // step (ProcessWindows::DoDetach resumes a thread whose last resume was a
+    // step with the trap flag set). Policies that declare resumeBeforeDetach
+    // get a DAP continue on the last stopped thread ahead of EVERY
+    // attach-mode disconnect — the session's own, the close's auto-detach and
+    // the shutdown path — and the outcome reaches the parent as
+    // 'pre_detach_resume'.
+    describe('resume before detach (issue #763)', () => {
+      const resumingPolicy = {
         name: 'lldb-stub',
         shouldQueueCommand: () => ({ shouldQueue: false }),
         getInitializationBehavior: () => ({}),
+        getAttachBehavior: () => ({ resumeBeforeDetach: true }),
         createInitialState: () => ({})
       };
-      (worker as any).adapterState = {};
-      (worker as any).processManager = processStub;
-      (worker as any).connectionManager = connectionStub;
-      (worker as any).state = ProxyState.CONNECTED;
-      (worker as any).isAttachMode = true;
+      const stoppedBody = { reason: 'step', threadId: 25096, allThreadsStopped: true };
+      const statuses = () => mockMessageSender.send.mock.calls
+        .map(([message]) => message as { type: string; status?: string; [key: string]: unknown })
+        .filter((message) => message.type === 'status' && message.status === 'pre_detach_resume')
+        .map(({ trigger, threadId, resumed, error }) => ({ trigger, threadId, resumed, error }));
 
-      await (worker as any).handleDapCommand({
-        requestId: 'detach-1',
-        cmd: 'dap',
-        sessionId: 's',
-        dapCommand: 'disconnect',
-        dapArgs: { terminateDebuggee: false }
+      function wire(policy: unknown, lastStop: unknown, sendRequest = vi.fn().mockResolvedValue({})) {
+        const processStub = { shutdown: vi.fn().mockResolvedValue(undefined) };
+        const connectionStub = { disconnect: vi.fn().mockResolvedValue(undefined) };
+        (worker as any).logger = mockLogger;
+        (worker as any).dapClient = { ...mockDapClient, sendRequest };
+        (worker as any).adapterPolicy = policy;
+        (worker as any).adapterState = {};
+        (worker as any).processManager = processStub;
+        (worker as any).connectionManager = connectionStub;
+        (worker as any).state = ProxyState.CONNECTED;
+        (worker as any).isAttachMode = true;
+        (worker as any).lastStop = lastStop;
+        return { sendRequest, processStub, connectionStub };
+      }
+
+      it('continues the last stopped thread ahead of a forwarded disconnect and reports it', async () => {
+        const { sendRequest, connectionStub } = wire(resumingPolicy, stoppedBody);
+
+        await (worker as any).handleDapCommand({
+          requestId: 'detach-1', cmd: 'dap', sessionId: 's', dapCommand: 'disconnect', dapArgs: { terminateDebuggee: false }
+        });
+
+        expect(sendRequest.mock.calls.map((call) => call[0])).toEqual(['continue', 'disconnect']);
+        expect(sendRequest).toHaveBeenNthCalledWith(1, 'continue', { threadId: 25096 }, 3000);
+        expect(sendRequest).toHaveBeenNthCalledWith(2, 'disconnect', { terminateDebuggee: false });
+        expect(statuses()).toEqual([{ trigger: 'detach', threadId: 25096, resumed: true, error: undefined }]);
+        // The resume cleared the stop, and the forwarded disconnect is marked
+        // sent, so handleTerminate neither resumes nor detaches again.
+        await worker.handleTerminate();
+        expect(sendRequest.mock.calls.map((call) => call[0])).toEqual(['continue', 'disconnect']);
+        expect(connectionStub.disconnect).not.toHaveBeenCalled();
+        expect(mockDapClient.shutdown).toHaveBeenCalled();
+        expect(worker.getState()).toBe(ProxyState.TERMINATED);
       });
-      expect(sendRequest).toHaveBeenCalledWith('disconnect', { terminateDebuggee: false });
 
-      await worker.handleTerminate();
+      it('sends no continue when the worker has no stop on record (a thread that never stopped never stepped)', async () => {
+        const { sendRequest } = wire(resumingPolicy, null);
 
-      expect(connectionStub.disconnect).not.toHaveBeenCalled();
-      expect(worker.getState()).toBe(ProxyState.TERMINATED);
+        await (worker as any).handleDapCommand({
+          requestId: 'detach-2', cmd: 'dap', sessionId: 's', dapCommand: 'disconnect', dapArgs: { terminateDebuggee: false }
+        });
+
+        expect(sendRequest.mock.calls.map((call) => call[0])).toEqual(['disconnect']);
+        expect(statuses()).toEqual([]);
+      });
+
+      it('sends no continue when the policy does not ask, but still marks the disconnect sent', async () => {
+        const { sendRequest, connectionStub } = wire({ ...resumingPolicy, getAttachBehavior: undefined }, stoppedBody);
+
+        await (worker as any).handleDapCommand({
+          requestId: 'detach-3', cmd: 'dap', sessionId: 's', dapCommand: 'disconnect', dapArgs: { terminateDebuggee: false }
+        });
+        await worker.handleTerminate();
+
+        expect(sendRequest.mock.calls.map((call) => call[0])).toEqual(['disconnect']);
+        expect(connectionStub.disconnect).not.toHaveBeenCalled();
+        expect(statuses()).toEqual([]);
+      });
+
+      it('still sends the disconnect, and reports the refusal, when the continue is refused', async () => {
+        const sendRequest = vi.fn().mockImplementation(async (command: string) => {
+          if (command === 'continue') {
+            throw new Error('process is not stopped');
+          }
+          return {};
+        });
+        wire(resumingPolicy, stoppedBody, sendRequest);
+
+        await (worker as any).handleDapCommand({
+          requestId: 'detach-4', cmd: 'dap', sessionId: 's', dapCommand: 'disconnect', dapArgs: { terminateDebuggee: false }
+        });
+
+        expect(sendRequest.mock.calls.map((call) => call[0])).toEqual(['continue', 'disconnect']);
+        expect(statuses()).toEqual([{ trigger: 'detach', threadId: 25096, resumed: false, error: 'process is not stopped' }]);
+      });
+
+      it('continues ahead of the auto-detach that close_debug_session triggers', async () => {
+        const { sendRequest, connectionStub } = wire(resumingPolicy, stoppedBody);
+
+        await worker.handleTerminate();
+
+        expect(sendRequest).toHaveBeenCalledWith('continue', { threadId: 25096 }, 3000);
+        expect(connectionStub.disconnect).toHaveBeenCalledWith(expect.anything(), false);
+        expect(sendRequest.mock.invocationCallOrder[0]).toBeLessThan(connectionStub.disconnect.mock.invocationCallOrder[0]);
+        expect(statuses()).toEqual([{ trigger: 'close', threadId: 25096, resumed: true, error: undefined }]);
+      });
+
+      it('continues ahead of the shutdown path\'s attach-mode disconnect', async () => {
+        const { sendRequest, connectionStub } = wire(resumingPolicy, stoppedBody);
+        (worker as any).adapterProcess = { pid: 4242 };
+
+        await worker.shutdown();
+
+        expect(sendRequest).toHaveBeenCalledWith('continue', { threadId: 25096 }, 3000);
+        expect(connectionStub.disconnect).toHaveBeenCalledWith(expect.anything(), false);
+        expect(sendRequest.mock.invocationCallOrder[0]).toBeLessThan(connectionStub.disconnect.mock.invocationCallOrder[0]);
+        expect(statuses()).toEqual([{ trigger: 'shutdown', threadId: 25096, resumed: true, error: undefined }]);
+      });
+
+      it('leaves a launch-mode disconnect alone: no continue, and the shutdown disconnect still follows', async () => {
+        const { sendRequest, connectionStub } = wire(resumingPolicy, stoppedBody);
+        (worker as any).isAttachMode = false;
+
+        await (worker as any).handleDapCommand({
+          requestId: 'detach-5', cmd: 'dap', sessionId: 's', dapCommand: 'disconnect', dapArgs: { terminateDebuggee: false }
+        });
+        await worker.handleTerminate();
+
+        expect(sendRequest.mock.calls.map((call) => call[0])).toEqual(['disconnect']);
+        expect(connectionStub.disconnect).toHaveBeenCalledWith(expect.anything(), true);
+        expect(statuses()).toEqual([]);
+      });
     });
   });
 
