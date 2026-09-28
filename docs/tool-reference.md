@@ -1182,6 +1182,7 @@ Lists all supported debugging languages with metadata.
 **Notes:**
 - `installed[]` keeps its historical meaning: adapter package loadable and not disabled. `count` is its length.
 - `available[]` carries one entry per known adapter, with per-mode availability (issue #331) and a `description` when the adapter registry supplies one. `supported` says whether the adapter implements the mode at all; `available` says whether it is usable in this runtime right now (with a `reason` when it isn't).
+- An entry carries a `warning` when the adapter package is present but importing it failed — a dependency it imports is missing from the distribution, say (issue #795). The modes stay advisory (the probe fails open), and a launch of that language fails with the same words: `No debug adapter could be loaded for language: <lang> — Failed to load adapter … The package is installed but importing it failed: Cannot find package '<dep>' …`. A genuinely absent package still reads `Adapter not installed. Install with: npm install @debugmcp/adapter-<lang>`.
 - Attach for Python and Ruby is a direct connection to a debugpy/rdbg DAP socket, so it stays available even when the local toolchain is missing — the container image uses exactly this to offer Ruby attach without a Ruby runtime.
 - Disabled languages (`DEBUG_MCP_DISABLE_LANGUAGES`) stay listed with a disabled reason on both modes.
 - `languages[]` is the backward-compatible metadata shape: `id`, `displayName`, `version`, `requiresExecutable`, and `defaultExecutable` for the languages that have one (`mock` does not).

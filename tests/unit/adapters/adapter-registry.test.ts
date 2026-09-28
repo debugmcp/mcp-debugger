@@ -224,6 +224,44 @@ describe('AdapterRegistry', () => {
     ).rejects.toBeInstanceOf(AdapterNotFoundError);
   });
 
+  it('carries the loader\'s reason and does not list the language among the available ones (issue #795)', async () => {
+    // Measured: "No debug adapter registered for language: javascript.
+    // Available: mock, python, javascript, ..." — the language in its own
+    // not-registered error, the dotenv cause dropped.
+    const registry = new AdapterRegistry({ enableDynamicLoading: true });
+    const loadError = new Error(
+      "Failed to load adapter for 'javascript' from package '@debugmcp/adapter-javascript'. Importing it failed: Cannot find package 'dotenv' imported from …"
+    );
+    vi.spyOn(registry as any, 'loader', 'get').mockReturnValue({
+      loadAdapter: vi.fn().mockRejectedValue(loadError),
+      listAvailableAdapters: vi.fn().mockResolvedValue([
+        { name: 'python', installed: true },
+        { name: 'javascript', installed: true },
+        { name: 'ruby', installed: true }
+      ])
+    });
+
+    const failure: AdapterNotFoundError = await registry.create('javascript', {
+      sessionId: 's1',
+      adapterHost: '127.0.0.1',
+      adapterPort: 9000,
+      logDir: '/tmp/logs',
+      scriptPath: '/tmp/app.js',
+      executablePath: '',
+      launchConfig: {}
+    }).then(
+      () => { throw new Error('expected create to reject'); },
+      (error: unknown) => error as AdapterNotFoundError
+    );
+
+    expect(failure).toBeInstanceOf(AdapterNotFoundError);
+    expect(failure.message).toBe(
+      "No debug adapter could be loaded for language: javascript — Failed to load adapter for 'javascript' from package '@debugmcp/adapter-javascript'. Importing it failed: Cannot find package 'dotenv' imported from …. Available: python, ruby"
+    );
+    expect(failure.cause).toBe(loadError);
+    expect(failure.availableLanguages).toEqual(['python', 'ruby']);
+  });
+
   describe('getFactory / getFactoryResult', () => {
     it('returns a registered factory without touching the loader', async () => {
       const registry = new AdapterRegistry();

@@ -140,8 +140,13 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
           // Re-throw registration errors as-is; only convert loader failures to AdapterNotFoundError
           if (err instanceof AdapterNotFoundError) throw err;
           if (this.factories.has(language)) throw err;
-          const available = await this.listLanguages().catch(() => this.getSupportedLanguages());
-          throw new AdapterNotFoundError(language, available);
+          // The language may well be "available" by the metadata probe (its
+          // package directory exists) — that is the case that just failed to
+          // load, so it does not belong in the list of what can be created
+          // (issue #795). The loader's own words travel as the cause.
+          const available = (await this.listLanguages().catch(() => this.getSupportedLanguages()))
+            .filter((name) => name !== language);
+          throw new AdapterNotFoundError(language, available, { cause: err });
         }
       } else {
         // Legacy behavior: not dynamically loading -> throw not found using registered languages only

@@ -17,6 +17,13 @@ export interface AvailableLanguage {
   installed: boolean;
   description?: string;
   modes: LanguageModes;
+  /**
+   * The adapter package is present but importing it failed (issue #795 — a
+   * transitive dependency missing from the distribution). The modes stay
+   * advisory (the probe fails open), so this is where the caller learns that
+   * a launch of the language will fail with the same words.
+   */
+  warning?: string;
 }
 
 export async function handleListSupportedLanguages(ctx: ToolContext): Promise<ToolResult> {
@@ -73,12 +80,21 @@ export async function handleListSupportedLanguages(ctx: ToolContext): Promise<To
             logger: ctx.logger
           }
         );
+        const loadError = probe.factoryLoadError;
         return {
           language: entry.language,
           package: entry.package,
           installed: entry.installed,
           description: entry.description,
-          modes: probe.modes
+          modes: probe.modes,
+          ...(loadError !== undefined
+            ? {
+                warning:
+                  `The adapter package is present but could not be loaded, so a launch of this language will fail with the same reason: ${
+                    loadError instanceof Error ? loadError.message : String(loadError)
+                  }`
+              }
+            : {})
         };
       })
     );

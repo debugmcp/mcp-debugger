@@ -106,7 +106,7 @@ export class AdapterLoader {
       let loadedModule: Record<string, unknown> | undefined;
       try {
         loadedModule = await this.moduleLoader.load(packageName);
-      } catch {
+      } catch (primaryError) {
         // Try multiple fallback locations in order of likelihood
         const candidates = this.getFallbackModulePaths(language);
         let loaded = false;
@@ -133,8 +133,16 @@ export class AdapterLoader {
           }
         }
         if (!loaded) {
-          // Re-throw last error to be handled by outer catch
-          throw lastError ?? new Error('Adapter fallback resolution failed');
+          // The primary import's error names the real cause — a dependency
+          // the adapter imports is missing, a broken dist — where the
+          // fallbacks' errors mostly say a candidate path is absent (issue
+          // #795). Re-throw the primary; the fallback residue is a breadcrumb.
+          this.logger.debug?.(
+            `[AdapterLoader] Fallback candidates for ${packageName} failed too: ${
+              lastError instanceof Error ? lastError.message : String(lastError ?? 'no candidate loaded')
+            }`
+          );
+          throw primaryError;
         }
       }
 
@@ -158,15 +166,33 @@ export class AdapterLoader {
       const code = errLike?.code;
       const message = errLike?.message ?? String(error);
       const baseMsg = `Failed to load adapter for '${language}' from package '${packageName}'.`;
-      if (code === 'ERR_MODULE_NOT_FOUND' || code === 'MODULE_NOT_FOUND') {
+      const moduleNotFound = code === 'ERR_MODULE_NOT_FOUND' || code === 'MODULE_NOT_FOUND';
+      // A module-not-found code alone does not mean the ADAPTER is missing
+      // (issue #795): an installed package whose own import fails — a
+      // transitive dependency absent from the image — raises the very same
+      // code. Only a package the resolver cannot find on disk is "not
+      // installed"; everything else is reported with the import's own words.
+      const installed = moduleNotFound
+        ? await this.resolver.isInstalled(packageName, this.getFallbackModulePaths(language)).catch(() => false)
+        : true;
+      if (moduleNotFound && !installed) {
         const msg = `${baseMsg} Adapter not installed. Install with: npm install ${packageName}`;
         this.logger.warn?.(`[AdapterLoader] ${msg}`);
-        throw new Error(msg);
-      } else {
-        const msg = `${baseMsg} Error: ${message}. If the package is installed, try reinstalling or rebuilding.`;
-        this.logger.error?.(`[AdapterLoader] ${msg}`);
-        throw new Error(msg);
+        throw new Error(msg, { cause: error });
       }
+      if (moduleNotFound) {
+        const missing = /Cannot find (?:package|module) '([^']+)'/.exec(message)?.[1];
+        const dependencyNote =
+          missing && missing !== packageName && !missing.includes(`adapter-${language.toLowerCase()}`)
+            ? ` — its dependency '${missing}' is missing or broken`
+            : '';
+        const msg = `${baseMsg} The package is installed but importing it failed: ${message}${dependencyNote}. Reinstall it (npm install ${packageName}) or rebuild it.`;
+        this.logger.error?.(`[AdapterLoader] ${msg}`);
+        throw new Error(msg, { cause: error });
+      }
+      const msg = `${baseMsg} Error: ${message}. If the package is installed, try reinstalling or rebuilding.`;
+      this.logger.error?.(`[AdapterLoader] ${msg}`);
+      throw new Error(msg, { cause: error });
     }
   }
 

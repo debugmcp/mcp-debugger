@@ -35,6 +35,27 @@ describe('handleListSupportedLanguages', () => {
     expect(payload.count).toBe(2);
   });
 
+  it('warns per language when the adapter package is present but fails to import (issue #795)', async () => {
+    // Measured with dotenv removed next to an installed adapter-javascript:
+    // the entry read installed:true, launch available:true, and nothing said
+    // the import had failed until start_debugging did.
+    const loadError = new Error(
+      "Failed to load adapter for 'python' from package '@debugmcp/adapter-python'. The package is installed but importing it failed: Cannot find package 'dotenv' imported from /app/dist/x.js — its dependency 'dotenv' is missing or broken. Reinstall it (npm install @debugmcp/adapter-python) or rebuild it."
+    );
+    ctx.sessionManager.adapterRegistry.getFactoryResult = vi.fn().mockImplementation(async (language: string) =>
+      language === 'python' ? { loadError } : { factory: undefined }
+    );
+
+    const result = await handleListSupportedLanguages(ctx);
+    const payload = JSON.parse(result.content[0].text);
+
+    const python = payload.available.find((entry: { language: string }) => entry.language === 'python');
+    expect(python.installed).toBe(true);
+    expect(python.warning).toContain('The adapter package is present but could not be loaded');
+    expect(python.warning).toContain("Cannot find package 'dotenv'");
+    expect(payload.available.find((entry: { language: string }) => entry.language === 'mock').warning).toBeUndefined();
+  });
+
   it('falls back to installed list when listAvailableAdapters fails', async () => {
     ctx.sessionManager.adapterRegistry.listAvailableAdapters.mockRejectedValue(
       new Error('metadata unavailable')
