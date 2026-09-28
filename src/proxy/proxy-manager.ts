@@ -85,15 +85,14 @@ export interface ProxyManagerEvents {
  */
 /**
  * The worker's pre-detach resume outcome (issue #763): whether the target
- * was continued ahead of an attach-mode disconnect, on which thread, and
- * which sender triggered it. Absent when no resume was called for.
+ * was continued ahead of a detaching disconnect, on which thread, and which
+ * sender triggered it. Absent when no resume was called for. One shape with
+ * the status message it comes from.
  */
-export interface PreDetachResume {
-  trigger: 'detach' | 'close' | 'shutdown';
-  threadId?: number;
-  resumed: boolean;
-  error?: string;
-}
+export type PreDetachResume = Omit<
+  Extract<ProxyStatusMessage, { status: 'pre_detach_resume' }>,
+  'type' | 'sessionId' | 'status' | 'data'
+>;
 
 export interface IProxyManager extends EventEmitter {
   start(config: ProxyConfig): Promise<void>;
@@ -1146,9 +1145,36 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     }
   }
 
+  /**
+   * The worker resumed (or failed to resume) a stopped target ahead of a
+   * detaching disconnect (issue #763); the detach result reports it, and the
+   * log keeps it for the senders that have no result (close, shutdown).
+   */
+  private recordPreDetachResume(message: Extract<ProxyStatusMessage, { status: 'pre_detach_resume' }>): void {
+    const { trigger, threadId, resumed, error } = message;
+    this.preDetachResume = {
+      trigger,
+      ...(threadId !== undefined ? { threadId } : {}),
+      resumed,
+      ...(error !== undefined ? { error } : {})
+    };
+    this.logger.info(
+      `[ProxyManager] Pre-detach resume (${trigger}): ${resumed ? 'continued' : 'refused'}${error !== undefined ? ` — ${error}` : ''}`
+    );
+  }
+
   private handleProxyMessage(rawMessage: unknown): void {
     // Skip all message processing after stop() to prevent emitting events with no listeners
     if (this.isStopped) {
+      // One exception: the close/shutdown senders' pre-detach resume outcome
+      // (issue #763) arrives after stop() set the flag — it changes no state
+      // and emits nothing, so record it rather than lose the only trace of a
+      // refused resume on close_debug_session.
+      const late = rawMessage as { type?: string; status?: string } | undefined;
+      if (late?.type === 'status' && late.status === 'pre_detach_resume') {
+        this.recordPreDetachResume(rawMessage as Extract<ProxyStatusMessage, { status: 'pre_detach_resume' }>);
+        return;
+      }
       this.logger.debug(`[ProxyManager] Ignoring late message after stop (session ${this.sessionId})`);
       return;
     }
@@ -1431,18 +1457,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         break;
 
       case 'pre_detach_resume':
-        // The worker resumed (or failed to resume) a stopped attach target
-        // ahead of a disconnect (issue #763); the detach result reports it.
-        this.preDetachResume = {
-          trigger: message.trigger,
-          ...(typeof message.threadId === 'number' ? { threadId: message.threadId } : {}),
-          resumed: message.resumed === true,
-          ...(typeof message.error === 'string' ? { error: message.error } : {})
-        };
-        this.logger.info(
-          `[ProxyManager] Pre-detach resume (${message.trigger}): ${message.resumed === true ? 'continued' : 'refused'}` +
-          (typeof message.error === 'string' ? ` — ${message.error}` : '')
-        );
+        this.recordPreDetachResume(message);
         break;
 
       case 'dap_handshake_stage':

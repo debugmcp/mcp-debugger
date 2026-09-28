@@ -2868,7 +2868,10 @@ describe('DapProxyWorker', () => {
         expect(statuses()).toEqual([{ trigger: 'shutdown', threadId: 25096, resumed: true, error: undefined }]);
       });
 
-      it('leaves a launch-mode disconnect alone: no continue, and the shutdown disconnect still follows', async () => {
+      it('resumes ahead of a launch session\'s detaching disconnect too, and the shutdown\'s terminating disconnect still follows', async () => {
+        // detach_from_process on a LAUNCH session detaches as well; the same
+        // LLDB resume loop awaits its stepped thread. Only the attach-mode
+        // bookkeeping (dapDisconnectSent) is mode-specific.
         const { sendRequest, connectionStub } = wire(resumingPolicy, stoppedBody);
         (worker as any).isAttachMode = false;
 
@@ -2877,8 +2880,33 @@ describe('DapProxyWorker', () => {
         });
         await worker.handleTerminate();
 
-        expect(sendRequest.mock.calls.map((call) => call[0])).toEqual(['disconnect']);
+        expect(sendRequest.mock.calls.map((call) => call[0])).toEqual(['continue', 'disconnect']);
         expect(connectionStub.disconnect).toHaveBeenCalledWith(expect.anything(), true);
+        expect(statuses()).toEqual([{ trigger: 'detach', threadId: 25096, resumed: true, error: undefined }]);
+      });
+
+      it('sends no continue ahead of a disconnect that terminates the target', async () => {
+        const { sendRequest } = wire(resumingPolicy, stoppedBody);
+
+        await (worker as any).handleDapCommand({
+          requestId: 'detach-6', cmd: 'dap', sessionId: 's', dapCommand: 'disconnect', dapArgs: { terminateDebuggee: true }
+        });
+
+        expect(sendRequest.mock.calls.map((call) => call[0])).toEqual(['disconnect']);
+        expect(statuses()).toEqual([]);
+      });
+
+      it('sends no continue once the debuggee has ended: terminated clears the stop on record', async () => {
+        const { sendRequest, connectionStub } = wire(resumingPolicy, stoppedBody);
+        // The real handler is registered by setupDapEventHandlers; drive the
+        // same state change it makes.
+        (worker as any).lastStop = null;
+        (worker as any).adapterProcess = { pid: 4242 };
+
+        await worker.shutdown();
+
+        expect(sendRequest).not.toHaveBeenCalledWith('continue', expect.anything(), expect.anything());
+        expect(connectionStub.disconnect).toHaveBeenCalledWith(expect.anything(), false);
         expect(statuses()).toEqual([]);
       });
     });

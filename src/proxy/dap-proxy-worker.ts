@@ -1025,6 +1025,9 @@ export class DapProxyWorker {
         this.sendDapEvent('breakpoint', body);
       },
       onExited: (body) => {
+        // No stop survives the debuggee's end: the pre-detach resume (issue
+        // #763) must not chase a target that is gone.
+        this.lastStop = null;
         this.logger!.info(`[Worker] DAP event: exited exitCode=${body.exitCode}`);
         // A real exited event stays authoritative - suppress synthesis (issue #247).
         // Set synchronously, before any await, so a racing terminated sees it.
@@ -1037,6 +1040,9 @@ export class DapProxyWorker {
         });
       },
       onTerminated: (body) => {
+        // No stop survives the debuggee's end: the pre-detach resume (issue
+        // #763) must not chase a target that is gone.
+        this.lastStop = null;
         this.logger!.info(`[Worker] DAP event: terminated body=${JSON.stringify(body)}`);
         // When adapter stdio is forwarded as debuggee output, the exit-time
         // flush of a block-buffered pipe arrives milliseconds AFTER the DAP
@@ -1791,13 +1797,17 @@ export class DapProxyWorker {
     if (this.isAttachMode && this.state === ProxyState.CONNECTED && this.connectionManager && this.dapClient && !this.dapDisconnectSent) {
       this.logger?.info('[Worker] Attach mode: auto-detaching with terminateDebuggee=false before shutdown.');
       await this.resumeBeforeDetach('close');
-      this.dapDisconnectSent = true;
-      try {
-        await this.connectionManager.disconnect(this.dapClient, false);
-      } catch (e) {
-        this.logger?.warn('[Worker] Auto-detach disconnect failed (best effort):', e);
+      // The resume may have waited: the adapter can have ended or dropped the
+      // socket meanwhile, and a concurrent shutdown may have torn the client down.
+      if (this.connectionManager && this.dapClient && !this.dapDisconnectSent) {
+        this.dapDisconnectSent = true;
+        try {
+          await this.connectionManager.disconnect(this.dapClient, false);
+        } catch (e) {
+          this.logger?.warn('[Worker] Auto-detach disconnect failed (best effort):', e);
+        }
+        this.dapClient = null;
       }
-      this.dapClient = null;
     }
 
     await this.shutdown();
@@ -2021,7 +2031,7 @@ export class DapProxyWorker {
    * auto-detach and the shutdown path.
    */
   private async resumeBeforeDetach(trigger: 'detach' | 'close' | 'shutdown'): Promise<void> {
-    if (!this.isAttachMode || !this.dapClient) {
+    if (!this.dapClient) {
       return;
     }
     if (this.adapterPolicy.getAttachBehavior?.()?.resumeBeforeDetach !== true) {
@@ -2057,11 +2067,19 @@ export class DapProxyWorker {
    * disconnect must still follow one the session sent with false.
    */
   private async beforeForwardingDapCommand(payload: DapCommandPayload): Promise<void> {
-    if (payload.dapCommand !== 'disconnect' || !this.isAttachMode) {
+    if (payload.dapCommand !== 'disconnect') {
       return;
     }
-    await this.resumeBeforeDetach('detach');
-    this.dapDisconnectSent = true;
+    // A disconnect that leaves the target running is a detach whatever the
+    // session's mode — detach_from_process on a launch session detaches too,
+    // and the same LLDB resume loop awaits its stepped thread.
+    const detaching = (payload.dapArgs as { terminateDebuggee?: boolean } | undefined)?.terminateDebuggee === false;
+    if (detaching) {
+      await this.resumeBeforeDetach('detach');
+    }
+    if (this.isAttachMode) {
+      this.dapDisconnectSent = true;
+    }
   }
 
   private noteResumeCommand(command: string, args: unknown, response: unknown): void {

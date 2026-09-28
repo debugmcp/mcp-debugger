@@ -3657,20 +3657,24 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(mockProxyManager.stop).toHaveBeenCalled();
     });
 
-    it('detachFromProcess with terminateProcess=true should call closeSession', async () => {
+    it('detachFromProcess with terminateProcess=true tells the adapter to terminate, then closes the session', async () => {
       mockSession.state = SessionState.PAUSED;
       // closeSession uses sessionStore.get (not getOrThrow)
       mockSessionStore.get.mockReturnValue(mockSession);
       mockProxyManager.stop.mockResolvedValue(undefined);
+      mockProxyManager.sendDapRequest.mockResolvedValue({});
 
       const result = await operations.detachFromProcess('test-session', true);
 
       expect(result.success).toBe(true);
       expect(result.data?.message).toContain('terminated process');
-      // Should NOT have sent disconnect with terminateDebuggee=false
+      // The result says terminated, so the adapter is told to terminate (issue
+      // #763 review): the close's own teardown would only detach — and resume.
+      expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('disconnect', { terminateDebuggee: true });
       expect(mockProxyManager.sendDapRequest).not.toHaveBeenCalledWith('disconnect', {
         terminateDebuggee: false
       });
+      expect(mockProxyManager.stop).toHaveBeenCalled();
     });
 
     it('detachFromProcess should update session state to STOPPED and lifecycle to TERMINATED', async () => {

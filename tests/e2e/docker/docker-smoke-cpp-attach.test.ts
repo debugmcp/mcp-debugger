@@ -160,10 +160,11 @@ describe.skipIf(SKIP_DOCKER)('Docker: C/C++ attach-by-PID', () => {
     console.log('[Docker CPP Attach] ✓ Stepped, then detached');
 
     await new Promise(resolve => setTimeout(resolve, 1000));
-    const { stdout: pidAfter } = await execAsync(
-      `docker exec ${containerName} pgrep -f ${TARGET_BINARY}`
-    );
-    expect(pidAfter.trim().split(/\s+/).map(Number), 'the target must survive the detach').toContain(pid);
+    // pgrep exits 1 when nothing matches, which execAsync reports as a
+    // rejection: read that as "not running" so the labelled assertion speaks.
+    const survivors = await execAsync(`docker exec ${containerName} pgrep -f ${TARGET_BINARY}`)
+      .then(({ stdout }) => stdout.trim().split(/\s+/).filter(Boolean).map(Number), () => [] as number[]);
+    expect(survivors, 'the target must survive the detach').toContain(pid);
     console.log('[Docker CPP Attach] ✓ Target still running after detach');
 
     const closeResult = await mcpClient!.callTool({

@@ -358,9 +358,10 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
     // last stop left behind; after a step that is "stepping", so the trap flag
     // is set for a thread no debugger watches and the process dies with
     // STATUS_SINGLE_STEP. The three CodeLLDB-backed policies declare the
-    // pre-detach continue on win32 only (rust reaches it only through
-    // detach_from_process on a launch session — it has no attach mode); no
-    // other policy declares it at all.
+    // pre-detach continue on win32 only; the worker applies it ahead of any
+    // disconnect that leaves the target running, so rust — which has no
+    // attach mode — reaches it through detach_from_process on a launch
+    // session. No other policy declares it at all.
     const lldbEngines = new Set<DebugLanguage>([DebugLanguage.CPP, DebugLanguage.RUST, DebugLanguage.COBOL]);
     const attachBehavior = policy.getAttachBehavior?.();
     if (lldbEngines.has(language)) {

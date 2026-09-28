@@ -538,7 +538,17 @@ export class AttachController {
 
     try {
       if (terminateProcess) {
-        // Terminate the process
+        // Terminate the process: say so to the adapter first. closeSession's
+        // own teardown detaches an attach target with terminateDebuggee=false
+        // (and, since issue #763, resumes it first), which would leave running
+        // the process this result reports as terminated.
+        try {
+          await session.proxyManager.sendDapRequest('disconnect', {
+            terminateDebuggee: true
+          });
+        } catch (disconnectError) {
+          this.ctx.logger.warn(`[SessionManager] Terminating disconnect failed, closing the session anyway:`, disconnectError);
+        }
         await this.ctx.closeSession(sessionId);
       } else {
         const proxyManager = session.proxyManager;
