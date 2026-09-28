@@ -140,6 +140,9 @@ describe.sequential('adversarial TCP DAP adapter', () => {
     expect(manager.isRunning()).toBe(true);
   });
 
+  // The Ruby policy sends its launch as rdbg's `attach` verb (issue #798), so
+  // the launch-stage scenarios key on `attach` and the diagnosis names the
+  // request that was actually on the wire.
   it('reports the launch stage when initialize recovers but launch never responds', async () => {
     const { manager, config } = await createManager({
       commands: {
@@ -147,18 +150,18 @@ describe.sequential('adversarial TCP DAP adapter', () => {
           dropResponse: true,
           eventsBeforeResponse: [{ event: 'initialized' }]
         },
-        launch: { dropResponse: true }
+        attach: { dropResponse: true }
       }
     }, 4500);
 
     const error = await captureError(manager.start(config));
 
     expect(error.message).toContain('within 4.5s');
-    expect(error.message).toContain('the "launch" request never received a response');
+    expect(error.message).toContain('the "attach" request never received a response');
     expect(error.message).toMatch(/adapter process is running \(PID \d+\)/);
     expect(error.initProgress).toMatchObject({
       transportConnected: true,
-      pendingCommand: 'launch'
+      pendingCommand: 'attach'
     });
   });
 
@@ -189,7 +192,7 @@ describe.sequential('adversarial TCP DAP adapter', () => {
     const { manager, config } = await createManager({
       commands: {
         initialize: { eventsAfterResponse: [{ event: 'initialized' }] },
-        launch: { close: 'mid-response', closeAfterBytes: 18 }
+        attach: { close: 'mid-response', closeAfterBytes: 18 }
       }
     }, 5000);
 
