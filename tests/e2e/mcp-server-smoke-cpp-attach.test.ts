@@ -175,4 +175,95 @@ describe.skipIf(SKIP_CPP)('MCP Server C/C++ Attach Smoke Test @requires-cpp', ()
     },
     90000
   );
+
+  it(
+    'leaves the target alive when detaching right after a step (issue #763)',
+    async (ctx) => {
+      // On Windows, CodeLLDB's detach resumes each thread with the resume
+      // state of its last stop; after a step that is "stepping", so the trap
+      // flag is set for a process no debugger watches and it dies with
+      // STATUS_SINGLE_STEP (0x80000004). Measured 2/2 on Windows 11 with
+      // step_over and step_into; step_out (which ends on a return breakpoint)
+      // and a plain attach/detach survive. The invariant pinned here is the
+      // user-visible one: a detach leaves the target running whatever the
+      // last debugger action was.
+      const { binaryPath } = prepareCppExample('pause_test');
+      expect(existsSync(binaryPath)).toBe(true);
+
+      debuggee = spawn(binaryPath, [], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true
+      });
+      const pid = debuggee.pid;
+      expect(pid).toBeDefined();
+      await wait(700);
+      expect(debuggee.exitCode).toBeNull();
+
+      const createResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'create_debug_session',
+        arguments: { language: 'cpp', name: 'cpp-attach-step-detach' }
+      }));
+      expect(createResponse.success).toBe(true);
+      sessionId = createResponse.sessionId as string;
+
+      const attachResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'attach_to_process',
+        arguments: { sessionId, processId: pid, stopOnEntry: true, adapterConfig: { program: binaryPath } }
+      }));
+      if (!attachResponse.success) {
+        skipIfSpawnBlocked(ctx, attachResponse, 'C/C++');
+        const message = String(attachResponse.message ?? attachResponse.error ?? '').toLowerCase();
+        if (message.includes('ptrace') || message.includes('operation not permitted')) {
+          ctx.skip();
+        }
+        throw new Error(`attach_to_process failed: ${JSON.stringify(attachResponse, null, 2)}`);
+      }
+
+      let paused = false;
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const sessions = parseSdkToolResult(await mcpClient!.callTool({
+          name: 'list_debug_sessions',
+          arguments: {}
+        }));
+        const session = ((sessions.sessions ?? []) as Array<{ id: string; state?: string }>)
+          .find(s => s.id === sessionId);
+        if (session?.state === 'paused') {
+          paused = true;
+          break;
+        }
+        await wait(400);
+      }
+      expect(paused, 'attached session should be paused (stopOnEntry)').toBe(true);
+
+      const stepResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'step_over',
+        arguments: { sessionId }
+      }));
+      expect(stepResponse.success, `step_over failed: ${JSON.stringify(stepResponse)}`).toBe(true);
+      expect(stepResponse.state).toBe('paused');
+
+      const detachResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'detach_from_process',
+        arguments: { sessionId }
+      }));
+      expect(detachResponse.success).toBe(true);
+      sessionId = null;
+
+      // The invariant first: the target survives. (Without the fix this is
+      // where Windows fails — exitCode 2147483652 = 0x80000004.)
+      await wait(700);
+      expect(debuggee.exitCode, 'the target must survive a detach that follows a step').toBeNull();
+
+      // Then the mechanism: on Windows the paused target was resumed ahead of
+      // the disconnect, and the debugger accepted it.
+      const detachData = (detachResponse.data ?? {}) as { resumedBeforeDetach?: boolean; warning?: string };
+      if (process.platform === 'win32') {
+        expect(detachData.resumedBeforeDetach).toBe(true);
+      }
+      expect(detachData.warning).toBeUndefined();
+
+      debuggee.kill('SIGKILL');
+    },
+    90000
+  );
 });

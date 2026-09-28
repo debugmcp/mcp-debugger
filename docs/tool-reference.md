@@ -1266,6 +1266,7 @@ Detaches the debugger from an attached process, leaving the process running.
 **Notes:**
 - With `terminateProcess: true` the whole session is closed and the message reads `Detached and terminated process`.
 - Detaching sends DAP `disconnect` with `terminateDebuggee: false`, then stops the proxy; the session ends in `"stopped"` either way, so a later re-attach needs a new session.
+- C/C++, Rust and COBOL on Windows: when the target is paused, a DAP `continue` goes out ahead of the `disconnect` and `data.resumedBeforeDetach` is `true`. CodeLLDB's Windows detach resumes each thread with the resume state of its last stop, and after a `step_over`/`step_into` that state is still "stepping" — the thread would single-step with no debugger attached and the process exit with `STATUS_SINGLE_STEP` (`0x80000004`) (issue #763). If the debugger refuses the continue, the detach still proceeds with `resumedBeforeDetach: false` and `data.warning` names the risk.
 - Detaching a session with no active debug process reports `success: false` with `No active debug session to detach from` in `message`.
 
 ---

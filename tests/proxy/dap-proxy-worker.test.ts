@@ -2747,6 +2747,42 @@ describe('DapProxyWorker', () => {
       expect(connectionStub.disconnect).toHaveBeenCalledWith(mockDapClient, false);
       expect(worker.getState()).toBe(ProxyState.TERMINATED);
     });
+
+    it('does not auto-detach again after the session already forwarded a disconnect (issue #763)', async () => {
+      // detach_from_process sends its own DAP disconnect through the generic
+      // command path; measured on the wire (CodeLLDB attach on Windows), the
+      // adapter then received a second one from handleTerminate's auto-detach.
+      const sendRequest = vi.fn().mockResolvedValue({});
+      const processStub = { shutdown: vi.fn().mockResolvedValue(undefined) };
+      const connectionStub = { disconnect: vi.fn().mockResolvedValue(undefined) };
+      (worker as any).logger = mockLogger;
+      (worker as any).dapClient = { ...mockDapClient, sendRequest };
+      (worker as any).adapterPolicy = {
+        name: 'lldb-stub',
+        shouldQueueCommand: () => ({ shouldQueue: false }),
+        getInitializationBehavior: () => ({}),
+        createInitialState: () => ({})
+      };
+      (worker as any).adapterState = {};
+      (worker as any).processManager = processStub;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).state = ProxyState.CONNECTED;
+      (worker as any).isAttachMode = true;
+
+      await (worker as any).handleDapCommand({
+        requestId: 'detach-1',
+        cmd: 'dap',
+        sessionId: 's',
+        dapCommand: 'disconnect',
+        dapArgs: { terminateDebuggee: false }
+      });
+      expect(sendRequest).toHaveBeenCalledWith('disconnect', { terminateDebuggee: false });
+
+      await worker.handleTerminate();
+
+      expect(connectionStub.disconnect).not.toHaveBeenCalled();
+      expect(worker.getState()).toBe(ProxyState.TERMINATED);
+    });
   });
 
   describe('Child-event flush settle (issue #378)', () => {

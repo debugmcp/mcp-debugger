@@ -1539,7 +1539,14 @@ export class DapProxyWorker {
       const response = payload.timeoutMs !== undefined
         ? await this.dapClient.sendRequest(payload.dapCommand, dapArgs, payload.timeoutMs)
         : await this.dapClient.sendRequest(payload.dapCommand, dapArgs);
-      
+
+      // The session's own detach comes through here; mark it so the attach-mode
+      // auto-detach in handleTerminate does not send a second disconnect
+      // (measured on the wire during issue #763).
+      if (payload.dapCommand === 'disconnect') {
+        this.dapDisconnectSent = true;
+      }
+
       // Update adapter state if needed
       if (this.adapterPolicy.updateStateOnCommand) {
         this.adapterPolicy.updateStateOnCommand(payload.dapCommand, dapArgs, this.adapterState);

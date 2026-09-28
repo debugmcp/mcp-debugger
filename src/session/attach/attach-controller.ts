@@ -533,14 +533,43 @@ export class AttachController {
       };
     }
 
+    let resumedBeforeDetach: boolean | undefined;
+    let warning: string | undefined;
+
     try {
       if (terminateProcess) {
         // Terminate the process
         await this.ctx.closeSession(sessionId);
       } else {
+        const proxyManager = session.proxyManager;
+
+        // Issue #763: on Windows, CodeLLDB's detach (ProcessWindows::DoDetach,
+        // LLVM PR 115712) resumes every thread with the resume state of its
+        // last stop before DebugActiveProcessStop. After a step that state is
+        // still "stepping", so the thread single-steps with no debugger
+        // attached and the process dies with STATUS_SINGLE_STEP (0x80000004)
+        // — measured 2/2 for step_over and step_into on Windows 11. A
+        // continue recomputes that state, and a target already running is
+        // detached without the resume loop, so the policies that declare
+        // resumeBeforeDetach get one ahead of the disconnect. The disconnect
+        // itself, and its answer, are unchanged.
+        const attachBehavior = this.ctx.selectPolicy(session.language).getAttachBehavior?.();
+        if (attachBehavior?.resumeBeforeDetach === true && session.state === SessionState.PAUSED) {
+          const threadId = proxyManager.getCurrentThreadId();
+          try {
+            await proxyManager.sendDapRequest('continue', threadId !== null ? { threadId } : {});
+            resumedBeforeDetach = true;
+          } catch (continueError) {
+            resumedBeforeDetach = false;
+            const reason = continueError instanceof Error ? continueError.message : String(continueError);
+            warning = `Could not resume the paused target before detaching (${reason}); on Windows, CodeLLDB detaching a thread whose last resume was a step can end the process with STATUS_SINGLE_STEP (0x80000004)`;
+            this.ctx.logger.warn(`[SessionManager] Pre-detach continue failed for session ${sessionId}, detaching anyway:`, continueError);
+          }
+        }
+
         // Disconnect without terminating - send DAP disconnect request
         try {
-          await session.proxyManager.sendDapRequest('disconnect', {
+          await proxyManager.sendDapRequest('disconnect', {
             terminateDebuggee: false
           });
         } catch (disconnectError) {
@@ -578,7 +607,9 @@ export class AttachController {
         data: {
           message: terminateProcess
             ? 'Detached and terminated process'
-            : 'Detached from process (process still running)'
+            : 'Detached from process (process still running)',
+          ...(resumedBeforeDetach !== undefined ? { resumedBeforeDetach } : {}),
+          ...(warning !== undefined ? { warning } : {})
         }
       };
     } catch (error) {

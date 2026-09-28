@@ -707,8 +707,16 @@ export interface AdapterPolicy {
    * the discovered thread's id. The JDI bridge suspends the whole VM on a
    * pause-all and re-anchors its stopped event to a thread that can actually
    * report frames (issue #465).
+   * resumeBeforeDetach: send a DAP 'continue' before the detach's
+   * 'disconnect' when the target is paused (issue #763). CodeLLDB on Windows
+   * needs it: ProcessWindows::DoDetach (LLVM PR 115712) resumes every thread
+   * with the resume state of its last stop before DebugActiveProcessStop, and
+   * after a step that state is still "stepping" — the thread single-steps
+   * with no debugger attached and the process dies with STATUS_SINGLE_STEP
+   * (0x80000004). A continue recomputes the state; a running target is
+   * detached without that resume loop at all.
    */
-  getAttachBehavior?(): { pauseAfterAttach?: boolean; pauseAllThreads?: boolean };
+  getAttachBehavior?(): { pauseAfterAttach?: boolean; pauseAllThreads?: boolean; resumeBeforeDetach?: boolean };
 
   /**
    * Get the configuration for starting the debug adapter connection.

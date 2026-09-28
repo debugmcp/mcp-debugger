@@ -3703,6 +3703,101 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       await expect(operations.detachFromProcess('unknown-session'))
         .rejects.toThrow(SessionNotFoundError);
     });
+
+    // Issue #763: on Windows, CodeLLDB's detach resumes every thread with the
+    // resume state its last stop left behind — after a step that is
+    // "stepping", so the thread single-steps with no debugger attached and the
+    // process dies with STATUS_SINGLE_STEP. A policy that declares
+    // resumeBeforeDetach gets a DAP continue ahead of the disconnect when the
+    // target is paused; the disconnect itself is unchanged.
+    describe('resume before detach (issue #763)', () => {
+      const resumingPolicy = { getAttachBehavior: () => ({ resumeBeforeDetach: true }) };
+
+      it('sends continue on the current thread, then disconnect, when the policy asks and the target is paused', async () => {
+        mockSession.state = SessionState.PAUSED;
+        mockProxyManager.getCurrentThreadId.mockReturnValue(25096);
+        mockProxyManager.sendDapRequest.mockResolvedValue({});
+        const selectPolicySpy = vi.spyOn(operations as any, 'selectPolicy').mockReturnValue(resumingPolicy as any);
+        try {
+          const result = await operations.detachFromProcess('test-session', false);
+
+          expect(result.success).toBe(true);
+          expect(mockProxyManager.sendDapRequest.mock.calls.map((call) => call[0])).toEqual(['continue', 'disconnect']);
+          expect(mockProxyManager.sendDapRequest).toHaveBeenNthCalledWith(1, 'continue', { threadId: 25096 });
+          expect(mockProxyManager.sendDapRequest).toHaveBeenNthCalledWith(2, 'disconnect', { terminateDebuggee: false });
+          expect(result.data?.resumedBeforeDetach).toBe(true);
+          expect(result.data?.warning).toBeUndefined();
+          expect(result.data?.message).toContain('process still running');
+        } finally {
+          selectPolicySpy.mockRestore();
+        }
+      });
+
+      it('sends only disconnect when the policy does not ask to resume', async () => {
+        // The default python policy declares pauseAfterAttach only.
+        mockSession.state = SessionState.PAUSED;
+        mockProxyManager.sendDapRequest.mockResolvedValue({});
+
+        const result = await operations.detachFromProcess('test-session', false);
+
+        expect(result.success).toBe(true);
+        expect(mockProxyManager.sendDapRequest.mock.calls.map((call) => call[0])).toEqual(['disconnect']);
+        expect(result.data?.resumedBeforeDetach).toBeUndefined();
+      });
+
+      it('sends only disconnect when the target is not paused', async () => {
+        mockSession.state = SessionState.RUNNING;
+        mockProxyManager.sendDapRequest.mockResolvedValue({});
+        const selectPolicySpy = vi.spyOn(operations as any, 'selectPolicy').mockReturnValue(resumingPolicy as any);
+        try {
+          const result = await operations.detachFromProcess('test-session', false);
+
+          expect(result.success).toBe(true);
+          expect(mockProxyManager.sendDapRequest.mock.calls.map((call) => call[0])).toEqual(['disconnect']);
+          expect(result.data?.resumedBeforeDetach).toBeUndefined();
+        } finally {
+          selectPolicySpy.mockRestore();
+        }
+      });
+
+      it('still disconnects, and says so in warning, when the continue is refused', async () => {
+        mockSession.state = SessionState.PAUSED;
+        mockProxyManager.getCurrentThreadId.mockReturnValue(25096);
+        mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+          if (command === 'continue') {
+            throw new Error('process is not stopped');
+          }
+          return {};
+        });
+        const selectPolicySpy = vi.spyOn(operations as any, 'selectPolicy').mockReturnValue(resumingPolicy as any);
+        try {
+          const result = await operations.detachFromProcess('test-session', false);
+
+          expect(result.success).toBe(true);
+          expect(mockProxyManager.sendDapRequest.mock.calls.map((call) => call[0])).toEqual(['continue', 'disconnect']);
+          expect(result.data?.resumedBeforeDetach).toBe(false);
+          expect(result.data?.warning).toContain('process is not stopped');
+          expect(result.data?.warning).toContain('STATUS_SINGLE_STEP');
+          expect(mockProxyManager.stop).toHaveBeenCalled();
+        } finally {
+          selectPolicySpy.mockRestore();
+        }
+      });
+
+      it('sends continue without a thread id when the proxy knows none', async () => {
+        mockSession.state = SessionState.PAUSED;
+        mockProxyManager.getCurrentThreadId.mockReturnValue(null);
+        mockProxyManager.sendDapRequest.mockResolvedValue({});
+        const selectPolicySpy = vi.spyOn(operations as any, 'selectPolicy').mockReturnValue(resumingPolicy as any);
+        try {
+          await operations.detachFromProcess('test-session', false);
+
+          expect(mockProxyManager.sendDapRequest).toHaveBeenNthCalledWith(1, 'continue', {});
+        } finally {
+          selectPolicySpy.mockRestore();
+        }
+      });
+    });
   });
 
   describe('selectPolicy coverage', () => {

@@ -351,6 +351,21 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
     }
   });
 
+  it('asks for a resume before detach exactly where CodeLLDB on Windows needs one (issue #763)', () => {
+    // ProcessWindows::DoDetach resumes every thread with the resume state its
+    // last stop left behind; after a step that is "stepping", so the trap flag
+    // is set for a thread no debugger watches and the process dies with
+    // STATUS_SINGLE_STEP. The three CodeLLDB-backed policies declare the
+    // pre-detach continue on win32 only; no other policy declares it at all.
+    const lldbEngines = new Set<DebugLanguage>([DebugLanguage.CPP, DebugLanguage.RUST, DebugLanguage.COBOL]);
+    const resumeBeforeDetach = policy.getAttachBehavior?.()?.resumeBeforeDetach;
+    if (lldbEngines.has(language)) {
+      expect(resumeBeforeDetach).toBe(process.platform === 'win32');
+    } else {
+      expect(resumeBeforeDetach).toBeUndefined();
+    }
+  });
+
   // ===== 8. State lifecycle =====
 
   it('creates a fresh, uninitialized state on every call', () => {
