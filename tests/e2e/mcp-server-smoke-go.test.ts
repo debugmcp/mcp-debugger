@@ -636,8 +636,9 @@ describe('MCP Server Go Debugging Smoke Test @requires-go', () => {
       }
       expect(snap?.state, 'program should run to completion').toBe('stopped');
 
-      // No exitCode assertion: Delve reports the status only as a console
-      // line ("Process N has exited with status 0"), in debug mode too.
+      // Delve reports the status only as a console line ("Process N has exited
+      // with status 0"); the proxy reads it back as the exit code (issue #753).
+      expect((snap as { exitCode?: number } | undefined)?.exitCode).toBe(0);
       const outputResult = await callToolSafely(mcpClient!, 'get_output', { sessionId });
       const entries = (outputResult.entries ?? []) as Array<{ output?: string }>;
       expect(entries.some(e => e.output?.includes('Hello, World!'))).toBe(true);
