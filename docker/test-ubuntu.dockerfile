@@ -1,6 +1,6 @@
 FROM node:26-slim@sha256:deae974a69e140f44f434ab29cb519fb5f8fe250fd364b8ca446bd0761acdc6a AS node-base
 
-FROM ubuntu:26.04@sha256:513c074113a871b51a8d16ab445c88779d6452d937a164fb5cc479f32668a41d
+FROM ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78
 
 # Copy Node.js from official image (avoids curl|bash install pattern)
 COPY --from=node-base /usr/local/bin/node /usr/local/bin/node
