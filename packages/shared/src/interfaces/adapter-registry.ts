@@ -421,7 +421,13 @@ export class AdapterNotFoundError extends Error {
     const rawReason = cause instanceof Error ? cause.message : typeof cause === 'string' ? cause : '';
     // The loader's messages end in a full stop (or an ellipsis) of their own;
     // a cause with no words at all falls back to the not-registered sentence.
-    const reason = rawReason.replace(/[.…]+\s*$/, '').trim();
+    // Stripped character by character: a regex over library input here is
+    // CodeQL's js/polynomial-redos.
+    let reason = rawReason.trimEnd();
+    while (reason.endsWith('.') || reason.endsWith('…')) {
+      reason = reason.slice(0, -1);
+    }
+    reason = reason.trim();
     super(
       reason
         ? `No debug adapter could be loaded for language: ${language} — ${reason}. Available: ${availableLanguages.join(', ')}`
