@@ -31,6 +31,45 @@ describe('computeModeAvailability', () => {
     });
   });
 
+  it('reports both modes unavailable with the import failure when the adapter could not be loaded (issue #795)', async () => {
+    const loadError = new Error(
+      "Failed to load adapter for 'ruby' from package '@debugmcp/adapter-ruby'. The package is installed but importing it failed: Cannot find package 'dotenv' imported from /app/x.js"
+    );
+    const modes = await computeModeAvailability({
+      language: 'ruby',
+      packageName: '@debugmcp/adapter-ruby',
+      installed: true,
+      disabled: false,
+      attach: 'direct-connect',
+      loadError
+    });
+    expect(modes).toEqual({
+      launch: { supported: true, available: false, reason: loadError.message },
+      attach: { supported: true, available: false, reason: loadError.message }
+    });
+  });
+
+  it('keeps the not-implemented attach reason and falls back to a sentence for a silent load failure', async () => {
+    const modes = await computeModeAvailability({
+      language: 'mock',
+      packageName: '@debugmcp/adapter-mock',
+      installed: true,
+      disabled: false,
+      attach: 'none',
+      loadError: new Error('')
+    });
+    expect(modes.launch).toEqual({
+      supported: true,
+      available: false,
+      reason: ErrorMessages.modeUnavailableReason.loadFailed('@debugmcp/adapter-mock')
+    });
+    expect(modes.attach).toEqual({
+      supported: false,
+      available: false,
+      reason: ErrorMessages.modeUnavailableReason.attachNotImplemented('mock')
+    });
+  });
+
   it('keeps attach available when the toolchain probe fails on a direct-connect adapter', async () => {
     const modes = await computeModeAvailability({
       language: 'ruby',
@@ -250,7 +289,7 @@ describe('probeLanguageEntry (issue #435)', () => {
     expect(probe.modes.attach.supported).toBe(false); // treated as 'none'
   });
 
-  it('records a factory load failure and fails open like the server', async () => {
+  it('records a factory load failure and reports both modes unavailable for that reason', async () => {
     const probe = await probeLanguageEntry(entry(), {
       registry: { getFactory: vi.fn().mockRejectedValue(new Error('import exploded')) },
       disabledSet: new Set()
@@ -258,8 +297,10 @@ describe('probeLanguageEntry (issue #435)', () => {
 
     expect(probe.factory).toBeUndefined();
     expect(probe.factoryLoadError).toBeInstanceOf(Error);
-    // No factory means no probe: availability is assumed (issue #360 contract)
-    expect(probe.modes.launch.available).toBe(true);
+    // An adapter that cannot import cannot start a session in either mode
+    // (issue #795); only the launch gate keeps failing open.
+    expect(probe.modes.launch).toEqual({ supported: true, available: false, reason: 'import exploded' });
+    expect(probe.modes.attach).toEqual({ supported: true, available: false, reason: 'import exploded' });
   });
 
   it('assumes availability when the registry has no getFactory at all', async () => {
@@ -373,7 +414,9 @@ describe('probeLanguageEntry (issue #435)', () => {
 
       expect(probe.factory).toBeUndefined();
       expect(probe.factoryLoadError).toBe(loadError);
-      expect(probe.modes.launch.available).toBe(true); // fail-open contract
+      // The modes tell the truth (issue #795); only the launch gate fails open.
+      expect(probe.modes.launch).toEqual({ supported: true, available: false, reason: loadError.message });
+      expect(probe.modes.attach).toEqual({ supported: true, available: false, reason: loadError.message });
     });
 
     it('records a throwing getFactoryResult as factoryLoadError and fails open', async () => {
@@ -387,7 +430,7 @@ describe('probeLanguageEntry (issue #435)', () => {
 
       expect(probe.factory).toBeUndefined();
       expect(probe.factoryLoadError).toBeInstanceOf(Error);
-      expect(probe.modes.launch.available).toBe(true);
+      expect(probe.modes.launch).toEqual({ supported: true, available: false, reason: 'result exploded' });
     });
 
     it('treats a contract-violating undefined resolution as no factory, not a load error', async () => {
@@ -517,14 +560,17 @@ describe('checkLaunchToolchain (issues #360, #435)', () => {
     });
   });
 
-  it('fails open when getFactory rejects, resolves no factory, or the factory has no validate', async () => {
+  it('refuses with the import failure when getFactory rejects — a load failure is an assessment, not a guess (issue #795)', async () => {
     await expect(
       checkLaunchToolchain(
         'python',
         { getFactory: vi.fn().mockRejectedValue(new Error('import exploded')) },
         cache()
       )
-    ).resolves.toEqual({ available: true });
+    ).resolves.toEqual({ available: false, reason: 'import exploded' });
+  });
+
+  it('fails open when getFactory resolves no factory, or the factory has no validate', async () => {
     await expect(
       checkLaunchToolchain('python', { getFactory: vi.fn().mockResolvedValue(undefined) }, cache())
     ).resolves.toEqual({ available: true });
@@ -547,18 +593,21 @@ describe('checkLaunchToolchain (issues #360, #435)', () => {
     });
   });
 
-  it('fails open on a getFactoryResult loadError (load failures never block a launch)', async () => {
+  it("refuses on a getFactoryResult loadError with the loader's own words (issue #795)", async () => {
+    // The registry keeps no negative cache: the same import would fail again
+    // inside start_debugging, after the proxy had been spawned.
     const registry = {
       getFactory: vi.fn(),
       getFactoryResult: vi.fn().mockResolvedValue({ loadError: new Error('corrupted dist') })
     };
 
     await expect(checkLaunchToolchain('python', registry, cache())).resolves.toEqual({
-      available: true
+      available: false,
+      reason: 'corrupted dist'
     });
   });
 
-  it('warns with the real load failure while failing open — the breadcrumb must not be discarded', async () => {
+  it('warns with the real load failure while refusing — the breadcrumb must not be discarded', async () => {
     const warn = vi.fn();
     const registry = {
       getFactory: vi.fn(),
@@ -566,9 +615,10 @@ describe('checkLaunchToolchain (issues #360, #435)', () => {
     };
 
     await expect(checkLaunchToolchain('python', registry, cache(), { warn })).resolves.toEqual({
-      available: true
+      available: false,
+      reason: 'corrupted dist'
     });
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('corrupted dist'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('refusing launch. corrupted dist'));
   });
 
   it('runs validate once across two gate checks through the shared cache', async () => {
@@ -635,7 +685,7 @@ describe('checkLaunchToolchain (issues #360, #435)', () => {
           getFactory: vi.fn(),
           getFactoryResult: vi.fn(async () => ({ loadError: new Error('nope') }))
         }),
-        expectAvailable: true
+        expectAvailable: false
       }
     ];
 

@@ -1180,8 +1180,9 @@ Lists all supported debugging languages with metadata.
 ```
 
 **Notes:**
-- `installed[]` keeps its historical meaning: adapter package loadable and not disabled. `count` is its length.
+- `installed[]` keeps its historical meaning: adapter package present on disk (the metadata probe) and not disabled. `count` is its length. Whether the package can actually be used is what `modes` says.
 - `available[]` carries one entry per known adapter, with per-mode availability (issue #331) and a `description` when the adapter registry supplies one. `supported` says whether the adapter implements the mode at all; `available` says whether it is usable in this runtime right now (with a `reason` when it isn't).
+- When the adapter package is present but importing it failed — a dependency it imports is missing from the distribution, say (issue #795) — both modes read `available: false` with the loader's own words as the `reason`: `Failed to load adapter for '<lang>' from package '@debugmcp/adapter-<lang>'. The package is installed but importing it failed: Cannot find package '<dep>' imported from … — its dependency '<dep>' is missing or broken. Reinstall it (npm install @debugmcp/adapter-<lang>) or rebuild it.` `create_debug_session` and `start_debugging` refuse with the same reason, and `mcp-debugger doctor` reports the language as broken. A genuinely absent package reads `Adapter package @debugmcp/adapter-<lang> is not installed.` on the modes, and the loader's `Adapter not installed. Install with: npm install @debugmcp/adapter-<lang>` when a launch is attempted anyway.
 - Attach for Python and Ruby is a direct connection to a debugpy/rdbg DAP socket, so it stays available even when the local toolchain is missing — the container image uses exactly this to offer Ruby attach without a Ruby runtime.
 - Disabled languages (`DEBUG_MCP_DISABLE_LANGUAGES`) stay listed with a disabled reason on both modes.
 - `languages[]` is the backward-compatible metadata shape: `id`, `displayName`, `version`, `requiresExecutable`, and `defaultExecutable` for the languages that have one (`mock` does not).

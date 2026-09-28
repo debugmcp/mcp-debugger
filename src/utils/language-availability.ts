@@ -13,6 +13,7 @@ import type {
   IAdapterFactory
 } from '@debugmcp/shared';
 import { ErrorMessages } from './error-messages.js';
+import { getErrorMessage } from '../errors/debug-errors.js';
 
 export interface ModeAvailability {
   /** Whether the adapter implements this mode at all */
@@ -39,6 +40,12 @@ export interface ModeAvailabilityInput {
    * is installed and not disabled. Optional: absent means "assume valid".
    */
   validate?: () => Promise<FactoryValidationResult>;
+  /**
+   * The factory's dynamic-load failure, when the package is installed but
+   * importing it failed (issue #795). Reported as both modes' reason: an
+   * adapter that cannot import cannot start a session either way.
+   */
+  loadError?: unknown;
   logger?: { warn?: (message: string) => void };
 }
 
@@ -83,9 +90,13 @@ export class ValidationResultCache {
  * gates on the toolchain only — disabled languages are refused upstream
  * (server.ts create_debug_session), before this runs.
  *
- * Fail-open contract: any probe failure (registry without getFactory, missing
- * factory, load error, thrown validate) reports available — enforcement must
- * never block a launch the advisory probe can't assess.
+ * Fail-open contract: any probe failure the probe cannot assess (registry
+ * without getFactory, missing factory, thrown validate) reports available —
+ * enforcement must never block a launch on a guess. A factory that failed to
+ * IMPORT is not a guess (issue #795): the registry keeps no negative cache,
+ * so the same import fails again inside start_debugging, later and with the
+ * proxy already spawned. The gate refuses with the loader's own words — the
+ * reason list_supported_languages reports on both modes.
  */
 export async function checkLaunchToolchain(
   language: string,
@@ -104,12 +115,12 @@ export async function checkLaunchToolchain(
       }
     );
     if (probe.factoryLoadError !== undefined) {
-      // The real import failure is in hand (getFactoryResult plumbed it) —
-      // leave the breadcrumb even though the gate fails open, or the later
-      // launch death shows only an unrelated proxy/spawn error.
+      // The real import failure is in hand (getFactoryResult plumbed it); the
+      // modes below carry it as the refusal reason. The breadcrumb stays for
+      // the server log.
       logger?.warn?.(
-        `[language-availability] adapter factory for '${language}' failed to load; allowing launch. ` +
-          `${probe.factoryLoadError instanceof Error ? probe.factoryLoadError.message : String(probe.factoryLoadError)}`
+        `[language-availability] adapter factory for '${language}' failed to load; refusing launch. ` +
+          `${getErrorMessage(probe.factoryLoadError)}`
       );
     }
     if (probe.modes.launch.available) {
@@ -263,6 +274,7 @@ export async function probeLanguageEntry(
     installed: entry.installed,
     disabled,
     attach,
+    loadError: factoryLoadError,
     validate: probeable
       ? async () => {
           try {
@@ -306,6 +318,19 @@ export async function computeModeAvailability(input: ModeAvailabilityInput): Pro
     return {
       launch: { supported: true, available: false, reason },
       attach: { supported: attachSupported, available: false, reason }
+    };
+  }
+
+  if (input.loadError !== undefined) {
+    // On disk but not importable (issue #795): the loader's own words are the
+    // reason, and both modes need the factory (registry.create is the one
+    // path launch and attach share).
+    const reason = getErrorMessage(input.loadError) || ErrorMessages.modeUnavailableReason.loadFailed(packageName);
+    return {
+      launch: { supported: true, available: false, reason },
+      attach: attachSupported
+        ? { supported: true, available: false, reason }
+        : { supported: false, available: false, reason: ErrorMessages.modeUnavailableReason.attachNotImplemented(language) }
     };
   }
 

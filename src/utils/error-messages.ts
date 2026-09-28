@@ -361,5 +361,31 @@ export const ErrorMessages = {
     /** Launch-gate fallback when validation failed with an empty errors list */
     launchFallback: (language: string) =>
       `The '${language}' debug adapter is not available in this runtime.`,
+    /**
+     * The adapter package is on disk but importing it failed, and the failure
+     * carried no words of its own (issue #795). The usual reason is the
+     * loader's own message, which already says what to do.
+     */
+    loadFailed: (packageName: string) =>
+      `Adapter package ${packageName} is present but could not be loaded.`,
+  },
+
+  /**
+   * AdapterLoader's verdicts on a failed dynamic import (issue #795). Each is
+   * the whole user-facing sentence, so the tool result, the server log and
+   * docs/tool-reference.md quote one source.
+   */
+  adapterLoad: {
+    notInstalled: (language: string, packageName: string) =>
+      `Failed to load adapter for '${language}' from package '${packageName}'. Adapter not installed. Install with: npm install ${packageName}`,
+    /**
+     * @param detail the import's own words (Node's `Cannot find package 'x' imported from …`)
+     * @param dependency the bare specifier the import could not find, when it named one
+     */
+    importFailed: (language: string, packageName: string, detail: string, dependency?: string) =>
+      `Failed to load adapter for '${language}' from package '${packageName}'. The package is installed but importing it failed: ${detail}` +
+      `${dependency ? ` — its dependency '${dependency}' is missing or broken` : ''}. Reinstall it (npm install ${packageName}) or rebuild it.`,
+    failed: (language: string, packageName: string, detail: string) =>
+      `Failed to load adapter for '${language}' from package '${packageName}'. Error: ${detail}. If the package is installed, try reinstalling or rebuilding.`,
   },
 };

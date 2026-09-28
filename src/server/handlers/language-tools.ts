@@ -78,6 +78,9 @@ export async function handleListSupportedLanguages(ctx: ToolContext): Promise<To
           package: entry.package,
           installed: entry.installed,
           description: entry.description,
+          // A package on disk whose import failed reports both modes
+          // unavailable with the loader's own reason (issue #795); doctor
+          // reads the same probe and calls it broken.
           modes: probe.modes
         };
       })

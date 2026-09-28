@@ -224,6 +224,87 @@ describe('AdapterRegistry', () => {
     ).rejects.toBeInstanceOf(AdapterNotFoundError);
   });
 
+  it('carries the loader\'s reason and does not list the language among the available ones (issue #795)', async () => {
+    // Measured: "No debug adapter registered for language: javascript.
+    // Available: mock, python, javascript, ..." — the language in its own
+    // not-registered error, the dotenv cause dropped.
+    const registry = new AdapterRegistry({ enableDynamicLoading: true });
+    const loadError = new Error(
+      "Failed to load adapter for 'javascript' from package '@debugmcp/adapter-javascript'. Importing it failed: Cannot find package 'dotenv' imported from /app/dist/adapters/adapter-loader.js"
+    );
+    vi.spyOn(registry as any, 'loader', 'get').mockReturnValue({
+      loadAdapter: vi.fn().mockRejectedValue(loadError),
+      listAvailableAdapters: vi.fn().mockResolvedValue([
+        { name: 'python', installed: true },
+        { name: 'javascript', installed: true },
+        { name: 'ruby', installed: true }
+      ])
+    });
+
+    const failure: AdapterNotFoundError = await registry.create('javascript', {
+      sessionId: 's1',
+      adapterHost: '127.0.0.1',
+      adapterPort: 9000,
+      logDir: '/tmp/logs',
+      scriptPath: '/tmp/app.js',
+      executablePath: '',
+      launchConfig: {}
+    }).then(
+      () => { throw new Error('expected create to reject'); },
+      (error: unknown) => error as AdapterNotFoundError
+    );
+
+    expect(failure).toBeInstanceOf(AdapterNotFoundError);
+    expect(failure.message).toBe(
+      "No debug adapter could be loaded for language: javascript — Failed to load adapter for 'javascript' from package '@debugmcp/adapter-javascript'. Importing it failed: Cannot find package 'dotenv' imported from /app/dist/adapters/adapter-loader.js. Available: python, ruby"
+    );
+    expect(failure.cause).toBe(loadError);
+    expect(failure.availableLanguages).toEqual(['python', 'ruby']);
+  });
+
+  it('re-throws a FactoryValidationError from registering a dynamically loaded factory as itself', async () => {
+    // A factory that loaded but failed validation is a validation defect, not
+    // a load failure — callers that suggest `npm install` on
+    // AdapterNotFoundError must not be steered there (issue #795 review).
+    const registry = new AdapterRegistry({ enableDynamicLoading: true });
+    const invalid = createFactory({
+      validate: vi.fn().mockResolvedValue({ valid: false, errors: [{ message: 'python 2 is not supported' }], warnings: [] })
+    });
+    vi.spyOn(registry as any, 'loader', 'get').mockReturnValue({
+      loadAdapter: vi.fn().mockResolvedValue(invalid),
+      listAvailableAdapters: vi.fn().mockResolvedValue([{ name: 'python', installed: true }])
+    });
+
+    await expect(
+      registry.create('python', {
+        sessionId: 's1',
+        adapterHost: '127.0.0.1',
+        adapterPort: 9000,
+        logDir: '/tmp/logs',
+        scriptPath: '/tmp/app.py',
+        executablePath: '',
+        launchConfig: {}
+      })
+    ).rejects.toBeInstanceOf(FactoryValidationError);
+  });
+
+  describe('AdapterNotFoundError message (issue #795)', () => {
+    it('falls back to the not-registered wording when the cause has no message', () => {
+      const error = new AdapterNotFoundError('python', ['mock'], { cause: new Error('') });
+      expect(error.message).toBe('No debug adapter registered for language: python. Available: mock');
+      expect(error.cause).toBeInstanceOf(Error);
+    });
+
+    it("strips the reason's own terminal punctuation so the sentence reads once", () => {
+      expect(new AdapterNotFoundError('python', ['mock'], { cause: new Error('dist is corrupt.') }).message).toBe(
+        'No debug adapter could be loaded for language: python — dist is corrupt. Available: mock'
+      );
+      expect(new AdapterNotFoundError('python', ['mock'], { cause: 'see the log…' }).message).toBe(
+        'No debug adapter could be loaded for language: python — see the log. Available: mock'
+      );
+    });
+  });
+
   describe('getFactory / getFactoryResult', () => {
     it('returns a registered factory without touching the loader', async () => {
       const registry = new AdapterRegistry();

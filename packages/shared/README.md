@@ -186,7 +186,7 @@ The language policies are singleton object constants implementing the `AdapterPo
 |--------|------|-------------|
 | `AdapterError` | class | Base error for adapter operations |
 | `AdapterErrorCode` | enum | Error codes for adapter errors |
-| `AdapterNotFoundError` | class | Thrown when a requested adapter is not registered |
+| `AdapterNotFoundError` | class | Thrown when a requested adapter is not registered, or could not be loaded (then the message carries the loader's reason and the loader's error is the `cause`) |
 | `FactoryValidationError` | class | Thrown when factory validation fails |
 | `DuplicateRegistrationError` | class | Thrown when registering a duplicate adapter |
 

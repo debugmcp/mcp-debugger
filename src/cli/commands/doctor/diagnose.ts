@@ -226,9 +226,9 @@ async function diagnoseLanguage(
 
   if (!probe.factory) {
     // An installed adapter whose factory cannot even be loaded cannot start
-    // any session — that is broken, and a gated run must fail. (The server
-    // fails open here; probe.modes reflects that so the divergence stays
-    // visible rather than silent.)
+    // any session — that is broken, and a gated run must fail. probe.modes
+    // carries the same reason on both modes and the launch gate refuses on it
+    // (issue #795), so the server and this verdict agree.
     const loadDetail =
       probe.factoryLoadError instanceof Error
         ? `: ${probe.factoryLoadError.message}`
@@ -239,7 +239,7 @@ async function diagnoseLanguage(
       errors: [
         `Adapter factory could not be loaded${loadDetail} — the installed ${entry.packageName} ` +
           `may be corrupt or version-skewed; try reinstalling it. ` +
-          `(The server assumes availability when it cannot probe.)`
+          `(The server reports both modes unavailable and refuses a launch for this reason.)`
       ],
       warnings: [],
       modes: probe.modes,
