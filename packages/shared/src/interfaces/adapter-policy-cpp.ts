@@ -27,6 +27,7 @@ import {
   isLldbInitialized,
   isLldbConnected,
   getLldbDapClientBehavior,
+  getLldbAttachBehavior,
   isLldbInternalFrame,
   filterLldbStackFrames,
   lldbShouldSuppressOutputEvent
@@ -134,6 +135,8 @@ export const CppAdapterPolicy = {
   },
 
   getDapClientBehavior: getLldbDapClientBehavior,
+
+  getAttachBehavior: () => getLldbAttachBehavior(),
 
   getAdapterSpawnConfig: (payload, platform: NodeJS.Platform = process.platform, arch: NodeJS.Architecture = process.arch) =>
     buildLldbSpawnConfig(payload, platform, arch)

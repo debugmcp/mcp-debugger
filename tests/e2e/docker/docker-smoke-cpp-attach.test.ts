@@ -142,12 +142,30 @@ describe.skipIf(SKIP_DOCKER)('Docker: C/C++ attach-by-PID', () => {
     expect(((stackResponse.stackFrames ?? []) as unknown[]).length).toBeGreaterThan(0);
     console.log('[Docker CPP Attach] ✓ Threads and stack inspected while paused');
 
-    // Step 5: Resume, then close the session
-    const continueResult = await mcpClient!.callTool({
-      name: 'continue_execution',
+    // Step 5: Step once, then detach — the target must survive a detach that
+    // follows a step (issue #763: on Windows, CodeLLDB's detach single-steps a
+    // thread whose last resume was a step and the process dies with
+    // STATUS_SINGLE_STEP; the Linux lane pins the invariant itself).
+    const stepResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'step_over',
       arguments: { sessionId }
-    });
-    expect(parseSdkToolResult(continueResult).success).not.toBe(false);
+    }));
+    expect(stepResponse.success, `step_over failed: ${JSON.stringify(stepResponse)}`).toBe(true);
+
+    const detachResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'detach_from_process',
+      arguments: { sessionId }
+    }));
+    expect(detachResponse.success).toBe(true);
+    console.log('[Docker CPP Attach] ✓ Stepped, then detached');
+
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    // pgrep exits 1 when nothing matches, which execAsync reports as a
+    // rejection: read that as "not running" so the labelled assertion speaks.
+    const survivors = await execAsync(`docker exec ${containerName} pgrep -f ${TARGET_BINARY}`)
+      .then(({ stdout }) => stdout.trim().split(/\s+/).filter(Boolean).map(Number), () => [] as number[]);
+    expect(survivors, 'the target must survive the detach').toContain(pid);
+    console.log('[Docker CPP Attach] ✓ Target still running after detach');
 
     const closeResult = await mcpClient!.callTool({
       name: 'close_debug_session',

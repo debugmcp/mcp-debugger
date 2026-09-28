@@ -98,6 +98,7 @@ describe('SessionManagerOperations attach modes', () => {
     mockProxyManager = {
       isRunning: vi.fn().mockReturnValue(true),
       getCurrentThreadId: vi.fn().mockReturnValue(1),
+      getPreDetachResume: vi.fn().mockReturnValue(undefined),
       setCurrentThreadId: vi.fn(),
       sendDapRequest: vi.fn().mockImplementation(async (command: string) =>
         command === 'threads' ? { body: { threads: [{ id: 1, name: 'main' }] } } : {}

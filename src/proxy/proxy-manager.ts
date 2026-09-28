@@ -83,6 +83,17 @@ export interface ProxyManagerEvents {
 /**
  * Interface for proxy managers.
  */
+/**
+ * The worker's pre-detach resume outcome (issue #763): whether the target
+ * was continued ahead of a detaching disconnect, on which thread, and which
+ * sender triggered it. Absent when no resume was called for. One shape with
+ * the status message it comes from.
+ */
+export type PreDetachResume = Omit<
+  Extract<ProxyStatusMessage, { status: 'pre_detach_resume' }>,
+  'type' | 'sessionId' | 'status' | 'data'
+>;
+
 export interface IProxyManager extends EventEmitter {
   start(config: ProxyConfig): Promise<void>;
   stop(): Promise<void>;
@@ -100,6 +111,11 @@ export interface IProxyManager extends EventEmitter {
   getProxyPid(): number | null;
   getCurrentThreadId(): number | null;
   setCurrentThreadId(threadId: number): void;
+  /**
+   * The worker's pre-detach resume outcome (issue #763), recorded from its
+   * 'pre_detach_resume' status; undefined when no resume was called for.
+   */
+  getPreDetachResume(): PreDetachResume | undefined;
 
   // Typed event emitter methods
   on<K extends keyof ProxyManagerEvents>(
@@ -204,6 +220,8 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   private lastProxyPid: number | null = null;
   private sessionId: string | null = null;
   private currentThreadId: number | null = null;
+  /** The worker's pre-detach resume outcome (issue #763), once reported. */
+  private preDetachResume: PreDetachResume | undefined = undefined;
   private pendingDapRequests = new Map<string, {
     resolve: (response: DebugProtocol.Response) => void;
     reject: (error: Error) => void;
@@ -692,6 +710,10 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     return this.currentThreadId;
   }
 
+  getPreDetachResume(): PreDetachResume | undefined {
+    return this.preDetachResume;
+  }
+
   setCurrentThreadId(threadId: number): void {
     this.currentThreadId = threadId;
     // Mirror into the functional-core snapshot so an adopted anchor (the
@@ -1123,9 +1145,36 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     }
   }
 
+  /**
+   * The worker resumed (or failed to resume) a stopped target ahead of a
+   * detaching disconnect (issue #763); the detach result reports it, and the
+   * log keeps it for the senders that have no result (close, shutdown).
+   */
+  private recordPreDetachResume(message: Extract<ProxyStatusMessage, { status: 'pre_detach_resume' }>): void {
+    const { trigger, threadId, resumed, error } = message;
+    this.preDetachResume = {
+      trigger,
+      ...(threadId !== undefined ? { threadId } : {}),
+      resumed,
+      ...(error !== undefined ? { error } : {})
+    };
+    this.logger.info(
+      `[ProxyManager] Pre-detach resume (${trigger}): ${resumed ? 'continued' : 'refused'}${error !== undefined ? ` — ${error}` : ''}`
+    );
+  }
+
   private handleProxyMessage(rawMessage: unknown): void {
     // Skip all message processing after stop() to prevent emitting events with no listeners
     if (this.isStopped) {
+      // One exception: the close/shutdown senders' pre-detach resume outcome
+      // (issue #763) arrives after stop() set the flag — it changes no state
+      // and emits nothing, so record it rather than lose the only trace of a
+      // refused resume on close_debug_session.
+      const late = rawMessage as { type?: string; status?: string } | undefined;
+      if (late?.type === 'status' && late.status === 'pre_detach_resume') {
+        this.recordPreDetachResume(rawMessage as Extract<ProxyStatusMessage, { status: 'pre_detach_resume' }>);
+        return;
+      }
       this.logger.debug(`[ProxyManager] Ignoring late message after stop (session ${this.sessionId})`);
       return;
     }
@@ -1405,6 +1454,10 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         // event to emit.
         this.initProgress.adapterPid = typeof message.pid === 'number' ? message.pid : undefined;
         this.logger.info(`[ProxyManager] Adapter process spawned (PID ${message.pid ?? 'unknown'})`);
+        break;
+
+      case 'pre_detach_resume':
+        this.recordPreDetachResume(message);
         break;
 
       case 'dap_handshake_stage':
