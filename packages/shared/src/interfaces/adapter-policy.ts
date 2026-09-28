@@ -87,6 +87,15 @@ export interface StopReasonContext {
   lineBreakpointCount: number;
   /** Function-breakpoint count from the session store — always present. */
   functionBreakpointCount: number;
+  /**
+   * How the session came up — a launch or an attach (issue #798). Lets a
+   * policy tell a launch's own entry stop from an attach's post-attach one.
+   */
+  sessionMode?: 'launch' | 'attach';
+  /** True for the first stop the session has seen since its launch/attach. */
+  firstStop?: boolean;
+  /** The effective stopOnEntry of the launch, when known. */
+  stopOnEntry?: boolean;
 }
 
 /**
@@ -655,6 +664,21 @@ export interface AdapterPolicy {
     /** Whether the adapter sends 'initialized' before receiving 'launch', requiring
      *  the proxy to defer initialized handling and send launch before configurationDone. */
     sendLaunchBeforeConfig?: boolean;
+    /**
+     * The DAP request a LAUNCH goes out as (default 'launch'), a literal or a
+     * choice per launch. rdbg's `launch` handler goes nonstop unconditionally
+     * and only its `attach` handler reads `nonstop`, so a Ruby launch that
+     * asks for an entry stop — whose rdbg process this server spawns
+     * suspended at load — is sent as `attach` (issue #798); a launch that does
+     * not keeps the `launch` verb, byte-identical to before (on debug gems
+     * older than 1.7.0 the attach handler ignores `nonstop` and would hold
+     * the pause). The session stays a launch: attach MODE is keyed on the
+     * config's `request`, which this does not touch, and the handshake stage
+     * still names the launch. Honoured by the worker's own handshake
+     * (sendTrackedLaunch); a command-queueing policy drives its launch
+     * through the session's DAP commands, which are sent as given.
+     */
+    launchRequestCommand?: 'launch' | 'attach' | ((launch: { stopOnEntry: boolean }) => 'launch' | 'attach');
     /** Whether the adapter requires attach to be sent BEFORE the initialized event.
      *  Some adapters send initialized only AFTER processing the attach request, so waiting
      *  for initialized before sending attach causes a deadlock. */

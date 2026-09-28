@@ -86,7 +86,8 @@ describe('Ruby adapter - session smoke (integration)', () => {
     expect(command.args).toContain('--host');
     expect(command.args).toContain(String(adapterPort));
     // Stop-at-load is mandatory: --nonstop would let short scripts finish
-    // before the proxy connects (the entry stop is auto-continued instead).
+    // before the proxy connects. The pause is released (or reported as the
+    // entry stop) by the DAP attach request the proxy sends (issue #798).
     expect(command.args).not.toContain('--nonstop');
     // Never the vscode frontend mode, which tries to launch an editor.
     expect(command.args.every(arg => !arg.includes('vscode'))).toBe(true);

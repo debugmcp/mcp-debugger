@@ -810,13 +810,26 @@ export class DapProxyWorker {
    * the same socket read as the launch response waits for this.
    */
   private async sendTrackedLaunch(payload: ProxyInitPayload): Promise<void> {
+    // The DAP verb the launch goes out as: 'launch' unless the policy names
+    // 'attach' (rdbg stops at entry only on attach, issue #798). The
+    // handshake stage stays 'launch' either way: it is what the caller asked
+    // for, and what the init-timeout diagnosis should name — the DAP trace
+    // shows the verb on the wire.
+    const verb = this.adapterPolicy.getInitializationBehavior().launchRequestCommand;
+    // The effective entry-stop request, resolved the way sendLaunchRequest
+    // resolves it: the transformed config's value wins over the tool's.
+    const stopOnEntry = typeof payload.launchConfig?.stopOnEntry === 'boolean'
+      ? payload.launchConfig.stopOnEntry
+      : payload.stopOnEntry;
+    const requestCommand = typeof verb === 'function' ? verb({ stopOnEntry: stopOnEntry === true }) : (verb ?? 'launch');
     const launch = this.trackedHandshakeRequest('launch', () => this.connectionManager!.sendLaunchRequest(
       this.dapClient!,
       payload.scriptPath,
       payload.scriptArgs,
       payload.stopOnEntry,
       payload.justMyCode,
-      payload.launchConfig
+      payload.launchConfig,
+      { requestCommand }
     ));
     this.launchOutcome = launch.then(() => true, () => false);
     await launch;

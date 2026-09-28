@@ -4115,13 +4115,17 @@ describe('SessionManager - DAP Operations', () => {
       expect(normalizeStopReason).toHaveBeenCalledWith(
         'breakpoint',
         expect.objectContaining({ hitBreakpointIds: [5] }),
-        {
+        // The #798 mode facts ride along with the id sets this pins.
+        expect.objectContaining({
           pausePending: false,
+          sessionMode: 'launch',
+          firstStop: expect.any(Boolean),
+          stopOnEntry: expect.any(Boolean),
           userBreakpointIds: new Set([1, 5]),
           functionBreakpointIds: new Set([5]),
           lineBreakpointCount: 1,
           functionBreakpointCount: 1
-        }
+        })
       );
       expect(managed.lastStop?.reason).toBe('function breakpoint');
       expect(managed.lastStop?.rawReason).toBe('breakpoint');
@@ -4142,13 +4146,17 @@ describe('SessionManager - DAP Operations', () => {
       expect(normalizeStopReason).toHaveBeenCalledWith(
         'breakpoint',
         expect.anything(),
-        {
+        // The #798 mode facts ride along with the id sets this pins.
+        expect.objectContaining({
           pausePending: false,
+          sessionMode: 'launch',
+          firstStop: expect.any(Boolean),
+          stopOnEntry: expect.any(Boolean),
           userBreakpointIds: undefined,
           functionBreakpointIds: new Set([5]),
           lineBreakpointCount: 1,
           functionBreakpointCount: 1
-        }
+        })
       );
     });
 
@@ -4167,13 +4175,17 @@ describe('SessionManager - DAP Operations', () => {
       expect(normalizeStopReason).toHaveBeenCalledWith(
         'breakpoint',
         expect.anything(),
-        {
+        // The #798 mode facts ride along with the id sets this pins.
+        expect.objectContaining({
           pausePending: false,
+          sessionMode: 'launch',
+          firstStop: expect.any(Boolean),
+          stopOnEntry: expect.any(Boolean),
           userBreakpointIds: undefined,
           functionBreakpointIds: undefined,
           lineBreakpointCount: 1,
           functionBreakpointCount: 1
-        }
+        })
       );
     });
 

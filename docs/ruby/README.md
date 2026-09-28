@@ -51,9 +51,18 @@ rdbg --open --host 127.0.0.1 --port <free-port> -c -- ruby /abs/path/app.rb
 ```
 
 `rdbg` suspends the script at load and waits for the debugger to connect, so breakpoints
-are configured before any code runs — even for scripts that finish in milliseconds. With
-`stopOnEntry: false` (the default) the entry pause is released automatically and execution
-runs to your first breakpoint; with `stopOnEntry: true` you get control at the first line.
+are configured before any code runs — even for scripts that finish in milliseconds. What
+happens to that pause is decided by the DAP request mcp-debugger then sends: rdbg's `launch`
+handler releases it unconditionally (it never reads `stopOnEntry`), and only its `attach`
+handler honours `nonstop`. With `stopOnEntry: false` (the default) the launch goes out as a
+plain `launch`, rdbg continues by itself on `configurationDone` and execution runs to your
+first breakpoint — no entry stop is ever reported. With `stopOnEntry: true` the launch goes
+out as an `attach { nonstop: false }` to the rdbg process mcp-debugger itself spawned
+(issue #798): rdbg reports the load-time pause as the entry stop, `start_debugging` returns
+`paused` with `reason: "entry"`, and you have control at the first line. On that path rdbg
+reads `localfs || localfsMap` with no default, so an `adapterLaunchConfig.localfs: false`
+only takes effect next to a `localfsMap` (alone it is sent as `true`, and the response says
+so); rdbg's own `nonstop` key is derived from `stopOnEntry` and not user-settable.
 
 Conditional breakpoints are supported:
 

@@ -16,7 +16,7 @@ create_debug_session { "language": "ruby", "name": "rb-bug-hunt" }
 set_breakpoint  { "sessionId": "<id>", "file": "/abs/path/app.rb", "line": 15 }
 start_debugging { "sessionId": "<id>", "scriptPath": "/abs/path/app.rb" }
   -> rdbg suspends the script at load, breakpoints are configured before any code runs,
-     then execution auto-continues to your breakpoint (stopOnEntry defaults to false)
+     then rdbg runs on to your breakpoint by itself (stopOnEntry defaults to false)
 
 get_stack_trace { "sessionId": "<id>" }
 get_scopes      { "sessionId": "<id>", "frameId": <top frame id> }   # rdbg reports "Local variables"
@@ -71,7 +71,7 @@ For containers/pods, use the **debuggee's** filesystem paths in `set_breakpoint`
 
 ## Quirks
 
-- **Launch always stops at load.** rdbg suspends the script before the first line so breakpoints bind even for scripts that finish in milliseconds. With `stopOnEntry: false` (default) that entry pause is released automatically; with `dapLaunchArgs: { "stopOnEntry": true }` you get control at the first line.
+- **Launch always suspends at load.** rdbg holds the script before the first line so breakpoints bind even for scripts that finish in milliseconds. With `stopOnEntry: false` (default) rdbg releases that pause by itself once configuration is done — no entry stop is ever reported; with `dapLaunchArgs: { "stopOnEntry": true }` the launch is sent to rdbg as an attach that holds the pause, rdbg reports it as the entry stop, and you get control at the first line (`state: paused`, `reason: "entry"`).
 - **Debuggee output is captured in launch mode.** rdbg hands the debuggee the adapter process's stdio; the proxy forwards it as `get_output` entries (categories `stdout`/`stderr`, rdbg's own `DEBUGGER:` banners excluded). **Attach mode captures nothing** — the target's stdio stays wherever the process was started; inspect state via `evaluate_expression` / `get_local_variables` there instead.
 - **evaluate_expression runs in rdbg's `repl` context** — expressions can read *and modify* program state (`x = 5` works). Useful for testing fixes live.
 - **Scope name is `Local variables`** (not "Locals"); `get_local_variables` handles this for you. Locals are only reported while stopped.

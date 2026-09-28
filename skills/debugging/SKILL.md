@@ -110,7 +110,7 @@ Read the matching reference before your first session in a language — each has
 |---|---|---|
 | Python | references/python.md | expand "special variables" containers; late breakpoint verification |
 | JavaScript/TS | references/javascript.md | child-session architecture; internals filtered from stacks |
-| Ruby | references/ruby.md | entry pause auto-continued; attach captures no stdout |
+| Ruby | references/ruby.md | stops at load only with stopOnEntry (rdbg continues by itself otherwise); attach captures no stdout |
 | Rust | references/rust.md | GNU toolchain on Windows; scriptPath = source file, adapter finds Cargo project |
 | Go | references/go.md | Delve native DAP; optimized-binary locals warning |
 | Java | references/java.md | javac -g required; FQCN breakpoints; redefine_classes hot-swap |

@@ -353,6 +353,23 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
     }
   });
 
+  it('sends its launch as a DAP launch, except where the adapter only honours entry stops on attach (issue #798)', () => {
+    // rdbg's `launch` handler goes nonstop unconditionally and only `attach`
+    // reads `nonstop`; the rdbg process is spawned by us, so the "attach" is
+    // to our own suspended child — and only when an entry stop was asked for,
+    // since a debug gem older than 1.7.0 would hold the pause on attach.
+    // Every other adapter launches as `launch`.
+    const command = policy.getInitializationBehavior().launchRequestCommand;
+    if (language === DebugLanguage.RUBY) {
+      expect(typeof command).toBe('function');
+      const choose = command as (launch: { stopOnEntry: boolean }) => 'launch' | 'attach';
+      expect(choose({ stopOnEntry: true })).toBe('attach');
+      expect(choose({ stopOnEntry: false })).toBe('launch');
+    } else {
+      expect(command).toBeUndefined();
+    }
+  });
+
   it('asks for a resume before detach exactly where CodeLLDB on Windows needs one (issue #763)', () => {
     // ProcessWindows::DoDetach resumes every thread with the resume state its
     // last stop left behind; after a step that is "stepping", so the trap flag
