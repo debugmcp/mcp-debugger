@@ -83,9 +83,13 @@ export const INITIALIZE_RESPONSE_GRACE_MS = 2000;
 const TERMINAL_SIGNAL_BACKSTOP_MS = 2000;
 /**
  * How long the pre-detach resume (issue #763) may wait for the adapter's
- * continue response before the disconnect goes out regardless.
+ * continue response before the disconnect goes out regardless. Budgeted
+ * against the parent's 5 s stop deadline (ProxyManager.stop force-kills the
+ * worker after it): resume 2 s + the attach disconnect's 1 s cap + the 500 ms
+ * post-detach wait leaves room for the adapter tree-kill. Measured answers
+ * arrive in milliseconds; the cap only matters for a wedged adapter.
  */
-const PRE_DETACH_RESUME_TIMEOUT_MS = 3000;
+const PRE_DETACH_RESUME_TIMEOUT_MS = 2000;
 
 export class DapProxyWorker {
   private logger: ILogger | null = null;

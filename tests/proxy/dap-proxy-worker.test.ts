@@ -2792,7 +2792,7 @@ describe('DapProxyWorker', () => {
         });
 
         expect(sendRequest.mock.calls.map((call) => call[0])).toEqual(['continue', 'disconnect']);
-        expect(sendRequest).toHaveBeenNthCalledWith(1, 'continue', { threadId: 25096 }, 3000);
+        expect(sendRequest).toHaveBeenNthCalledWith(1, 'continue', { threadId: 25096 }, 2000);
         expect(sendRequest).toHaveBeenNthCalledWith(2, 'disconnect', { terminateDebuggee: false });
         expect(statuses()).toEqual([{ trigger: 'detach', threadId: 25096, resumed: true, error: undefined }]);
         // The resume cleared the stop, and the forwarded disconnect is marked
@@ -2850,7 +2850,7 @@ describe('DapProxyWorker', () => {
 
         await worker.handleTerminate();
 
-        expect(sendRequest).toHaveBeenCalledWith('continue', { threadId: 25096 }, 3000);
+        expect(sendRequest).toHaveBeenCalledWith('continue', { threadId: 25096 }, 2000);
         expect(connectionStub.disconnect).toHaveBeenCalledWith(expect.anything(), false);
         expect(sendRequest.mock.invocationCallOrder[0]).toBeLessThan(connectionStub.disconnect.mock.invocationCallOrder[0]);
         expect(statuses()).toEqual([{ trigger: 'close', threadId: 25096, resumed: true, error: undefined }]);
@@ -2862,7 +2862,7 @@ describe('DapProxyWorker', () => {
 
         await worker.shutdown();
 
-        expect(sendRequest).toHaveBeenCalledWith('continue', { threadId: 25096 }, 3000);
+        expect(sendRequest).toHaveBeenCalledWith('continue', { threadId: 25096 }, 2000);
         expect(connectionStub.disconnect).toHaveBeenCalledWith(expect.anything(), false);
         expect(sendRequest.mock.invocationCallOrder[0]).toBeLessThan(connectionStub.disconnect.mock.invocationCallOrder[0]);
         expect(statuses()).toEqual([{ trigger: 'shutdown', threadId: 25096, resumed: true, error: undefined }]);
