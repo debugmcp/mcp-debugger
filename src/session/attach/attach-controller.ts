@@ -376,9 +376,10 @@ export class AttachController {
       // Unverified-at-attach function breakpoints get the same launch-style
       // warning (issue #308); bind-late adapters (js/java) stay suppressed
       // inside the builder.
-      // Withheld when the adapter refused the re-send itself (issue #754):
-      // the cause is in the resync warning, the symptom would restate it.
-      const attachFnBpWarning = resync.functionBreakpointsRefused
+      // Withheld when the re-send itself failed, refused or never answered
+      // (issue #754): the cause is in the resync warning, the symptom would
+      // restate it.
+      const attachFnBpWarning = resync.functionBreakpointsFailed
         ? undefined
         : this.breakpoints.functionBreakpointLaunchWarning(session);
 

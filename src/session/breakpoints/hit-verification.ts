@@ -20,7 +20,7 @@
  * while the CDP breakpoint underneath keeps firing.
  */
 import type { Breakpoint, FunctionBreakpoint } from '@debugmcp/shared';
-import { normalizeBreakpointMessage } from '../../utils/breakpoint-message.js';
+import { isProvisionalBreakpointMessage, normalizeBreakpointMessage } from '../../utils/breakpoint-message.js';
 import type { ManagedSession } from '../session-store.js';
 
 const windowsPathish = /^[a-z]:[\\/]/i;
@@ -74,9 +74,83 @@ export function resetBinding(record: Breakpoint | FunctionBreakpoint): void {
   record.verified = false;
   record.verifiedBy = undefined;
   record.message = undefined;
+  record.messageOrigin = undefined;
   record.adapterId = undefined;
   record.boundFile = undefined;
   record.boundLine = undefined;
+}
+
+/**
+ * The hit-proven rule (issue #673): a stop already proved this record bound,
+ * so an adapter answer of "unbound" for it is not evidence it stopped firing
+ * — js-debug answers that on every replace-all for a location it cannot map
+ * to a source while the breakpoint underneath keeps firing. The id is kept
+ * current when the answer's id space is the record's (`acceptId`, default
+ * true) and nothing else changes. Returns true when the answer was absorbed
+ * this way; the caller then skips its usual stamping.
+ */
+export function keepHitProven(
+  record: Breakpoint | FunctionBreakpoint,
+  answer: { verified?: boolean; id?: number },
+  options: { acceptId?: boolean } = {}
+): boolean {
+  if (answer.verified !== false || record.verifiedBy !== 'hit') {
+    return false;
+  }
+  if (typeof answer.id === 'number' && options.acceptId !== false) {
+    record.adapterId = answer.id;
+  }
+  return true;
+}
+
+/**
+ * Store the adapter's own verdict on the record, normalized for its current
+ * `verified` state (issue #471): it displaces whatever note was there,
+ * a stamped refusal included (#754).
+ */
+export function setAdapterMessage(
+  record: Breakpoint | FunctionBreakpoint,
+  message: string | undefined,
+  verified: boolean
+): void {
+  record.message = normalizeBreakpointMessage(message, verified);
+  record.messageOrigin = undefined;
+}
+
+/**
+ * Re-settle the stored note after `verified` changed without a fresh adapter
+ * message: a provisional "unbound" note or a stamped refusal cannot outlive
+ * the verification that contradicts it (issues #471, #754); any other note —
+ * capability drift, a re-resolved anchor — passes through.
+ */
+export function settleStoredMessage(record: Breakpoint | FunctionBreakpoint): void {
+  if (record.verified && record.messageOrigin === 'refusal') {
+    record.message = undefined;
+    record.messageOrigin = undefined;
+    return;
+  }
+  record.message = normalizeBreakpointMessage(record.message, record.verified);
+}
+
+/**
+ * Stamp the adapter's refusal of a re-send onto an unverified record (issue
+ * #754) where it displaces nothing curated: an absent note, a provisional
+ * one, an earlier refusal — marked, or the same words the pre-launch echo
+ * (#750) stamped unmarked. A curated note (capability drift, a re-resolved
+ * anchor) stays; the refusal still reaches the caller through the warning.
+ */
+export function stampRefusalMessage(record: Breakpoint | FunctionBreakpoint, refusal: string): void {
+  const current = record.message;
+  const replaceable =
+    current === undefined ||
+    isProvisionalBreakpointMessage(current) ||
+    record.messageOrigin === 'refusal' ||
+    current === refusal;
+  if (!replaceable) {
+    return;
+  }
+  record.message = normalizeBreakpointMessage(refusal, false);
+  record.messageOrigin = 'refusal';
 }
 
 export interface HitUpgrade {
@@ -109,7 +183,7 @@ export function applyHitBreakpointIds(
       if (!line.verified) {
         line.verified = true;
         line.verifiedBy = 'hit';
-        line.message = normalizeBreakpointMessage(line.message, true);
+        settleStoredMessage(line);
         upgraded.push({ kind: 'line', breakpoint: line, adapterId: id });
       }
       continue;
@@ -118,7 +192,7 @@ export function applyHitBreakpointIds(
     if (fn && !fn.verified) {
       fn.verified = true;
       fn.verifiedBy = 'hit';
-      fn.message = normalizeBreakpointMessage(fn.message, true);
+      settleStoredMessage(fn);
       upgraded.push({ kind: 'function', breakpoint: fn, adapterId: id });
     }
   }

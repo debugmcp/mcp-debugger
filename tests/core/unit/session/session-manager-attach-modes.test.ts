@@ -814,7 +814,7 @@ describe('SessionManagerOperations attach modes', () => {
       expect(mockSession.breakpoints.get('bp-1')!.message).toBeUndefined();
     });
 
-    it('a refused re-sync puts the adapter\'s answer in the attach result and on the records, once per file (issue #754)', async () => {
+    it('a refused re-sync puts the adapter\'s answer in the attach result and on the unverified records, one sentence per answer (issue #754)', async () => {
       mockSession.breakpoints.set('bp-1', { id: 'bp-1', file: '/abs/app.js', line: 11, verified: false });
       mockSession.breakpoints.set('bp-2', { id: 'bp-2', file: '/abs/app.js', line: 22, verified: false });
       mockSession.breakpoints.set('bp-3', { id: 'bp-3', file: '/abs/lib.js', line: 5, verified: false });
@@ -832,12 +832,14 @@ describe('SessionManagerOperations attach modes', () => {
       });
 
       expect(result.success).toBe(true);
+      // Files refused with the same words share one sentence.
       expect(result.data?.warning).toBe(
-        'The debugger refused the re-send of the breakpoints for app.js: /abs/app.js is not available; ' +
-        'The debugger refused the re-send of the breakpoints for lib.js: /abs/app.js is not available'
+        'The debugger refused the re-send of the breakpoints for app.js, lib.js: /abs/app.js is not available'
       );
       for (const id of ['bp-1', 'bp-2', 'bp-3']) {
-        expect(mockSession.breakpoints.get(id)).toMatchObject({ verified: false, message: '/abs/app.js is not available' });
+        expect(mockSession.breakpoints.get(id)).toMatchObject({
+          verified: false, message: '/abs/app.js is not available', messageOrigin: 'refusal'
+        });
       }
     });
 

@@ -556,7 +556,7 @@ export class DebugLauncher {
       // re-send would only be a round trip per file the debugger declines.
       // A refused re-send is stamped on the records by the send itself and its
       // warning joins the launch result below (issue #754).
-      let resync: ResyncOutcome = { warnings: [], functionBreakpointsRefused: false };
+      let resync: ResyncOutcome = { warnings: [], functionBreakpointsFailed: false };
       if ((finalState === SessionState.RUNNING || finalState === SessionState.PAUSED) && !debuggerOff) {
         resync = await this.breakpoints.resyncAll(finalSession, { forceFreshEcho: true });
       }
@@ -590,11 +590,11 @@ export class DebugLauncher {
       // reported here instead of failing silently at "the program never
       // stopped". Suppressed for bind-late adapters (js/java), where
       // unverified-at-launch is the designed deferral path.
-      // Withheld when the adapter refused the post-launch function-breakpoint
-      // re-send (issue #754): the cause is in the resync warning below, and
-      // the symptom sentence would only restate it as a name problem (the
-      // #710 rule — a known cause displaces the symptom).
-      const fnBpWarning = debuggerOn && !resync.functionBreakpointsRefused
+      // Withheld when the post-launch function-breakpoint re-send failed —
+      // refused or never answered (issue #754): the cause is in the resync
+      // warning below, and the symptom sentence would only restate it as a
+      // name problem (the #710 rule — a known cause displaces the symptom).
+      const fnBpWarning = debuggerOn && !resync.functionBreakpointsFailed
         ? this.breakpoints.functionBreakpointLaunchWarning(finalSession)
         : undefined;
 

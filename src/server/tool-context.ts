@@ -24,6 +24,7 @@ import type {
   Variable
 } from '@debugmcp/shared';
 import type { SessionManager } from '../session/session-manager.js';
+import type { BreakpointSyncFailure } from '../session/breakpoints/breakpoint-controller.js';
 import type { DebugResult, StepResultData } from '../session/session-manager-core.js';
 import type { FrameSummary, StackTraceResult } from '../session/session-manager-data.js';
 import type { VariableTruncationSummary } from '../session/variable-caps.js';
@@ -93,8 +94,8 @@ export interface ToolContext {
     sessionId: string,
     functionName: string,
     condition?: string
-  ): Promise<{ breakpoint: FunctionBreakpoint; warning?: string; refusal?: string }>;
-  setBreakpoint(req: SetBreakpointRequest): Promise<{ breakpoint: Breakpoint; warning?: string; refusal?: string }>;
+  ): Promise<{ breakpoint: FunctionBreakpoint; warning?: string; failure?: BreakpointSyncFailure }>;
+  setBreakpoint(req: SetBreakpointRequest): Promise<{ breakpoint: Breakpoint; warning?: string; failure?: BreakpointSyncFailure }>;
   listBreakpoints(sessionId: string, file?: string): Breakpoint[];
   removeBreakpoint(sessionId: string, breakpointId: string): Promise<{ removed?: Breakpoint | FunctionBreakpoint; warning?: string }>;
   removeBreakpointsByLocation(sessionId: string, file: string, line: number): Promise<{ removed: Breakpoint[]; warning?: string }>;

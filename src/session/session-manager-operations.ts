@@ -12,6 +12,7 @@ import {
   type ExceptionBreakMode
 } from '@debugmcp/shared';
 import { SessionManagerData } from './session-manager-data.js';
+import type { BreakpointSyncFailure } from './breakpoints/breakpoint-controller.js';
 import type { OperationsContext } from './operations-context.js';
 import {
   BreakpointController,
@@ -242,7 +243,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       /** Content anchor for restart re-resolution (content mode, #271) */
       anchor?: { statement: string; nearLine?: number };
     }
-  ): Promise<{ breakpoint: Breakpoint; warning?: string; refusal?: string }> {
+  ): Promise<{ breakpoint: Breakpoint; warning?: string; failure?: BreakpointSyncFailure }> {
     return this.breakpoints.setBreakpoint(sessionId, bp);
   }
 
@@ -278,7 +279,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       functionName: string;
       condition?: string;
     }
-  ): Promise<{ breakpoint: FunctionBreakpoint; warning?: string; refusal?: string }> {
+  ): Promise<{ breakpoint: FunctionBreakpoint; warning?: string; failure?: BreakpointSyncFailure }> {
     return this.breakpoints.setFunctionBreakpoint(sessionId, bp);
   }
 

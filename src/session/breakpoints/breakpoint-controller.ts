@@ -28,41 +28,53 @@ import {
 } from '@debugmcp/shared';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import { consumeChildSourced } from '../../utils/child-origin-events.js';
-import { normalizeBreakpointMessage } from '../../utils/breakpoint-message.js';
+import { isProvisionalBreakpointMessage } from '../../utils/breakpoint-message.js';
 import { DapResponseError } from '../../proxy/dap-response-error.js';
 import type { ManagedSession } from '../session-store.js';
 import type { BreakpointContext } from '../operations-context.js';
-import { buildFunctionBreakpointLaunchWarning } from './launch-warnings.js';
-import { applyBoundLocation } from './hit-verification.js';
+import { buildFunctionBreakpointLaunchWarning, fileLabel } from './launch-warnings.js';
+import { applyBoundLocation, keepHitProven, setAdapterMessage, stampRefusalMessage } from './hit-verification.js';
+
+/**
+ * Labels for a set of files in one sentence: the basename, unless two files
+ * share it — then those keep their full path so the reader can tell them
+ * apart.
+ */
+function fileLabels(files: string[]): string[] {
+  const labels = files.map(fileLabel);
+  return files.map((file, i) => (labels.indexOf(labels[i]) === labels.lastIndexOf(labels[i]) ? labels[i] : file));
+}
+
+/** How a DAP re-send failed (issue #754). */
+export interface BreakpointSyncFailure {
+  /** The error text: the adapter's own answer, or the transport's. */
+  message: string;
+  /**
+   * The adapter itself declined the request (a DapResponseError): its words
+   * were stamped onto the unverified records the re-send covered. A transport
+   * failure, a timeout or a shutdown is not the adapter's answer and leaves
+   * every record as it was.
+   */
+  refused: boolean;
+}
 
 /** Outcome of a DAP re-send: whether it reached the adapter, and why not. */
 export interface BreakpointSyncOutcome {
   synced: boolean;
   warning?: string;
-  /**
-   * The adapter's own answer when it refused the re-send (issue #754) — the
-   * text stamped onto the records the re-send covered. Absent for a transport
-   * failure, a timeout or a shutdown, which leave the records as they were.
-   */
-  refusal?: string;
-  /** The error text of any failed re-send, refusal or not. */
-  failure?: string;
+  failure?: BreakpointSyncFailure;
 }
 
 /** What `resyncAll` hands back for the launch/attach result (issue #754). */
 export interface ResyncOutcome {
-  /** One sentence per failed re-send, deduplicated, in send order. */
+  /** One sentence per distinct failure, in send order. */
   warnings: string[];
   /**
-   * The function-breakpoint re-send was refused by the adapter: the
-   * unbound-at-launch symptom warning is withheld, the cause being reported.
+   * The function-breakpoint re-send failed — refused or never answered: the
+   * unbound-at-launch symptom warning is withheld, the cause being reported
+   * (the #710 rule: a known cause displaces the symptom).
    */
-  functionBreakpointsRefused: boolean;
-}
-
-/** The file's last path segment, whichever separator the caller used. */
-function fileLabel(file: string): string {
-  return file.split(/[\\/]/).pop() || file;
+  functionBreakpointsFailed: boolean;
 }
 
 /**
@@ -118,7 +130,7 @@ export class BreakpointController {
       /** Content anchor for restart re-resolution (content mode, #271) */
       anchor?: { statement: string; nearLine?: number };
     }
-  ): Promise<{ breakpoint: Breakpoint; warning?: string; refusal?: string }> {
+  ): Promise<{ breakpoint: Breakpoint; warning?: string; failure?: BreakpointSyncFailure }> {
     const session = this.ctx.getSession(sessionId);
 
     const bpId = uuidv4();
@@ -150,7 +162,7 @@ export class BreakpointController {
     );
 
     const sync = await this.syncBreakpointsForFile(session, bp.file);
-    return { breakpoint: newBreakpoint, warning: sync.warning, refusal: sync.refusal };
+    return { breakpoint: newBreakpoint, warning: sync.warning, failure: sync.failure };
   }
 
   /**
@@ -223,14 +235,10 @@ export class BreakpointController {
           // A stop already proved this breakpoint bound (issue #673): an
           // "unbound" answer for a location the adapter cannot map is not
           // evidence it stopped firing. Keep the id current and nothing else.
-          const hitProven = bpInfo.verified === false && record.verifiedBy === 'hit';
+          const hitProven = authoritative && keepHitProven(record, bpInfo);
           if (!authoritative) {
             record.verified = record.verified || bpInfo.verified;
-          } else if (hitProven) {
-            if (typeof bpInfo.id === 'number') {
-              record.adapterId = bpInfo.id;
-            }
-          } else {
+          } else if (!hitProven) {
             record.verified = bpInfo.verified;
             record.verifiedBy = record.verified ? 'adapter' : undefined;
             // The child's ids — provisional included — are the real ids for
@@ -244,13 +252,11 @@ export class BreakpointController {
             applyBoundLocation(record, bpInfo.source?.path, bpInfo.line);
           }
           if (!keepChildState && !hitProven) {
-            // Normalize before storing (issue #471): raw l10n keys like
-            // js-debug's "breakpoint.provisionalBreakpoint" must never sit in
-            // the store, and a provisional note must not survive verification.
-            allBpsForFile[i].message = normalizeBreakpointMessage(
-              bpInfo.message,
-              allBpsForFile[i].verified
-            );
+            // The adapter's own verdict, normalized (issue #471): raw l10n
+            // keys like js-debug's "breakpoint.provisionalBreakpoint" must
+            // never sit in the store, a provisional note must not survive
+            // verification, and it displaces a stamped refusal (#754).
+            setAdapterMessage(allBpsForFile[i], bpInfo.message, allBpsForFile[i].verified);
           }
           // Enhance "no symbols" message for .NET with PDB format guidance
           if (bpInfo.message && session.language === 'dotnet' &&
@@ -284,85 +290,93 @@ export class BreakpointController {
         `[SessionManager] Error sending setBreakpoints to proxy for session ${sessionId}:`,
         error
       );
-      return this.failedSync(session, error, allBpsForFile, childAuthoritative);
+      return this.failedSync(session, error, allBpsForFile);
     }
   }
 
-  /** Whether the session's policy mirrors breakpoints to a child session (js-debug). */
+  /**
+   * Whether the session's policy mirrors breakpoints to a child session
+   * (js-debug). Never throws — the sync methods it feeds promise the same —
+   * so a policy without client behaviour, or one that throws, reads as "no".
+   */
   private mirrorsToChild(session: ManagedSession): boolean {
-    return !!this.ctx.selectPolicy(session.language)?.getDapClientBehavior?.().mirrorBreakpointsToChild;
+    try {
+      return !!this.ctx.selectPolicy(session.language)?.getDapClientBehavior?.().mirrorBreakpointsToChild;
+    } catch {
+      return false;
+    }
   }
 
   /**
    * The outcome of a re-send the proxy rejected. Only the adapter's own
    * answer (a DapResponseError — the adapter declined the request) is
-   * stamped onto the records the re-send covered (issue #754), the way the
-   * worker's breakpoints_synced echo stamps a refused pre-launch set (#750),
-   * so list_breakpoints and the exit summary carry the debugger's words
-   * rather than a bare verified:false. A transport failure, a timeout or a
-   * shutdown is not the adapter's answer: the previous set may well still be
-   * armed, so those leave the records alone and are only reported.
+   * stamped onto the unverified records the re-send covered (issue #754),
+   * the way the worker's breakpoints_synced echo stamps a refused pre-launch
+   * set (#750), so list_breakpoints and the exit summary carry the
+   * debugger's words rather than a bare verified:false. A transport failure,
+   * a timeout or a shutdown is not the adapter's answer: the previous set
+   * may well still be armed, so those leave the records alone and are only
+   * reported.
    */
   private failedSync(
     session: ManagedSession,
     error: unknown,
-    records: Array<Breakpoint | FunctionBreakpoint>,
-    childAuthoritative: boolean
+    records: Array<Breakpoint | FunctionBreakpoint>
   ): BreakpointSyncOutcome {
     const message = getErrorMessage(error);
     const refused = error instanceof DapResponseError;
     if (refused) {
-      this.stampRefusal(records, message, childAuthoritative);
+      this.stampRefusal(records, message);
     }
     return {
       synced: false,
       warning: this.buildLiveSyncWarning(session, message),
-      failure: message,
-      ...(refused ? { refusal: message } : {})
+      failure: { message, refused }
     };
   }
 
   /**
-   * Stamp the adapter's refusal onto every record the re-send covered, with
-   * the same two exemptions as a successful answer: a stop already proved a
-   * record bound (#673), and a child-mirroring policy's child-verified record
-   * outranks the parent's answer (#500). An unverified record claims no
-   * binding location (as the breakpoint-event handler clears it).
+   * Stamp the adapter's refusal onto the UNVERIFIED records the re-send
+   * covered. A refusal answers the request, not any one breakpoint: a record
+   * the adapter verified before — or a stop proved bound (#673), or a
+   * child-mirroring policy's child verified (#500) — stands, since the
+   * adapter never said it was gone and its previous set may still be armed,
+   * and a verified record needs no explanation beside it. An unverified
+   * record claims no binding location (as the breakpoint-event handler
+   * clears it), and the stamp never displaces a curated note.
    */
-  private stampRefusal(
-    records: Array<Breakpoint | FunctionBreakpoint>,
-    message: string,
-    childAuthoritative: boolean
-  ): void {
+  private stampRefusal(records: Array<Breakpoint | FunctionBreakpoint>, message: string): void {
     for (const record of records) {
-      if (record.verifiedBy === 'hit') {
+      if (record.verified === true) {
         continue;
       }
-      if (childAuthoritative && record.verified === true) {
-        continue;
-      }
-      record.verified = false;
       record.verifiedBy = undefined;
       record.boundFile = undefined;
       record.boundLine = undefined;
-      record.message = normalizeBreakpointMessage(message, false);
+      stampRefusalMessage(record, message);
     }
   }
 
   /**
-   * Compose the live-sync failure warning. For ruby attach sessions whose
-   * error is rdbg's "<path> is not available", append topology guidance
-   * (issue #357): the path was rejected on the debug TARGET's filesystem
-   * (e.g. container server + host rdbg, or vice versa) — expected behavior,
-   * not a debugger fault. Same hint-append style as the netcoredbg
-   * no-symbols guidance above.
+   * Topology guidance for a ruby attach session whose refusal is rdbg's
+   * "<path> is not available" (issue #357): the path was rejected on the
+   * debug TARGET's filesystem (e.g. container server + host rdbg, or vice
+   * versa) — expected behavior, not a debugger fault. Appended to the live
+   * warning and the resync report alike.
+   */
+  private liveSyncHint(session: ManagedSession, message: string): string {
+    if (session.attachMode && session.language === 'ruby' && /is not available/.test(message)) {
+      return ' (Hint: attach sessions send breakpoint paths to the remote debugger verbatim; the path must be valid on the debug target\'s filesystem. Use target-side paths, or pass localfsMap in the attach config to map local paths to remote ones.)';
+    }
+    return '';
+  }
+
+  /**
+   * Compose the live-sync failure warning, hint appended — same style as the
+   * netcoredbg no-symbols guidance above.
    */
   private buildLiveSyncWarning(session: ManagedSession, message: string): string {
-    let warning = `Breakpoint state updated, but live sync failed: ${message}`;
-    if (session.attachMode && session.language === 'ruby' && /is not available/.test(message)) {
-      warning += ' (Hint: attach sessions send breakpoint paths to the remote debugger verbatim; the path must be valid on the debug target\'s filesystem. Use target-side paths, or pass localfsMap in the attach config to map local paths to remote ones.)';
-    }
-    return warning;
+    return `Breakpoint state updated, but live sync failed: ${message}${this.liveSyncHint(session, message)}`;
   }
 
   /**
@@ -428,7 +442,7 @@ export class BreakpointController {
       functionName: string;
       condition?: string;
     }
-  ): Promise<{ breakpoint: FunctionBreakpoint; warning?: string; refusal?: string }> {
+  ): Promise<{ breakpoint: FunctionBreakpoint; warning?: string; failure?: BreakpointSyncFailure }> {
     const session = this.ctx.getSession(sessionId);
 
     const newBreakpoint: FunctionBreakpoint = {
@@ -445,7 +459,7 @@ export class BreakpointController {
     );
 
     const sync = await this.syncFunctionBreakpoints(session);
-    return { breakpoint: newBreakpoint, warning: sync.warning, refusal: sync.refusal };
+    return { breakpoint: newBreakpoint, warning: sync.warning, failure: sync.failure };
   }
 
   /**
@@ -466,29 +480,58 @@ export class BreakpointController {
   ): Promise<ResyncOutcome> {
     // The per-send failures, phrased for the launch/attach result (issue
     // #754): a refused re-send is stamped on the records by the send itself,
-    // and its answer used to be discarded here. Deduplicated — an adapter
-    // that refuses every file says the same thing each time.
-    const warnings = new Set<string>();
-    let functionBreakpointsRefused = false;
-    const describe = (what: string, outcome: BreakpointSyncOutcome): void => {
-      if (outcome.refusal !== undefined) {
-        warnings.add(`The debugger refused the re-send of ${what}: ${outcome.refusal}`);
-      } else if (outcome.failure !== undefined) {
-        warnings.add(`The re-send of ${what} failed: ${outcome.failure}`);
-      }
-    };
+    // and its answer used to be discarded here. The files an adapter refused
+    // with the same words share one sentence — one that refuses every file
+    // says the same thing each time — and distinct answers keep their own.
+    const lineFailures = new Map<string, { failure: BreakpointSyncFailure; files: string[] }>();
+    const key = (failure: BreakpointSyncFailure): string => `${failure.refused ? 'refused' : 'failed'}:${failure.message}`;
     if (session.breakpoints.size > 0) {
       const files = [...new Set(Array.from(session.breakpoints.values()).map((bp) => bp.file))];
       for (const file of files) {
-        describe(`the breakpoints for ${fileLabel(file)}`, await this.syncBreakpointsForFile(session, file, options));
+        const outcome = await this.syncBreakpointsForFile(session, file, options);
+        if (outcome.failure === undefined) {
+          continue;
+        }
+        const entry = lineFailures.get(key(outcome.failure)) ?? { failure: outcome.failure, files: [] };
+        entry.files.push(file);
+        lineFailures.set(key(outcome.failure), entry);
       }
     }
+    const warnings = [...lineFailures.values()].map(({ failure, files }) =>
+      this.describeResendFailure(session, `the breakpoints for ${fileLabels(files).join(', ')}`, failure)
+    );
+    let functionBreakpointsFailed = false;
     if ((session.functionBreakpoints?.size ?? 0) > 0) {
       const outcome = await this.syncFunctionBreakpoints(session);
-      functionBreakpointsRefused = outcome.refusal !== undefined;
-      describe('the function breakpoints', outcome);
+      if (outcome.failure !== undefined) {
+        functionBreakpointsFailed = true;
+        // The curated notes the records carry (capability drift, say) used to
+        // reach the launch result through the symptom warning this failure
+        // now withholds; they ride along with the cause instead.
+        const notes = [
+          ...new Set(
+            Array.from(session.functionBreakpoints.values())
+              .map((bp) => bp.message)
+              .filter((m): m is string => m !== undefined && m !== outcome.failure!.message && !isProvisionalBreakpointMessage(m))
+          )
+        ];
+        const curated = Array.from(session.functionBreakpoints.values())
+          .filter((bp) => bp.messageOrigin !== 'refusal' && bp.message !== undefined && notes.includes(bp.message))
+          .map((bp) => bp.message as string);
+        warnings.push(
+          this.describeResendFailure(session, 'the function breakpoints', outcome.failure) +
+            (curated.length > 0 ? ` (${[...new Set(curated)].join('; ')})` : '')
+        );
+      }
     }
-    return { warnings: [...warnings], functionBreakpointsRefused };
+    return { warnings, functionBreakpointsFailed };
+  }
+
+  /** One sentence for a failed re-send: the adapter's refusal, or the transport's failure, hint appended. */
+  private describeResendFailure(session: ManagedSession, what: string, failure: BreakpointSyncFailure): string {
+    return failure.refused
+      ? `The debugger refused the re-send of ${what}: ${failure.message}${this.liveSyncHint(session, failure.message)}`
+      : `The re-send of ${what} failed: ${failure.message}`;
   }
 
   /**
@@ -508,7 +551,6 @@ export class BreakpointController {
     }
 
     const allFnBps = Array.from(session.functionBreakpoints.values());
-    const childAuthoritative = this.mirrorsToChild(session);
 
     try {
       this.ctx.logger.info(
@@ -528,16 +570,13 @@ export class BreakpointController {
           // A stop already proved this breakpoint bound (issue #673): an
           // "unbound" answer keeps the id current and nothing else — the
           // same rule the line path applies.
-          if (bpInfo.verified === false && record.verifiedBy === 'hit') {
-            if (typeof bpInfo.id === 'number') {
-              record.adapterId = bpInfo.id;
-            }
+          if (keepHitProven(record, bpInfo)) {
             continue;
           }
           record.verified = bpInfo.verified;
           record.verifiedBy = record.verified ? 'adapter' : undefined;
           record.adapterId = bpInfo.id ?? record.adapterId;
-          record.message = normalizeBreakpointMessage(bpInfo.message, record.verified);
+          setAdapterMessage(record, bpInfo.message, record.verified);
           if (typeof bpInfo.line === 'number') {
             record.boundLine = bpInfo.line;
           }
@@ -564,7 +603,7 @@ export class BreakpointController {
         `[SessionManager] Error sending setFunctionBreakpoints to proxy for session ${sessionId}:`,
         error
       );
-      return this.failedSync(session, error, allFnBps, childAuthoritative);
+      return this.failedSync(session, error, allFnBps);
     }
   }
 

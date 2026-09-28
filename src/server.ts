@@ -12,6 +12,7 @@ import {
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
 import { buildServerInstructions } from './skill-content.js';
+import type { BreakpointSyncFailure } from './session/breakpoints/breakpoint-controller.js';
 import {
   SessionNotFoundError,
   SessionTerminatedError,
@@ -338,13 +339,13 @@ export class DebugMcpServer implements ToolContext {
     sessionId: string,
     functionName: string,
     condition?: string
-  ): Promise<{ breakpoint: FunctionBreakpoint; warning?: string; refusal?: string }> {
+  ): Promise<{ breakpoint: FunctionBreakpoint; warning?: string; failure?: BreakpointSyncFailure }> {
     this.validateSessionExists(sessionId);
     return this.sessionManager.setFunctionBreakpoint(sessionId, { functionName, condition });
   }
 
   /** `refusal`: the adapter's own answer when the live re-send was refused, as stamped on the record (issue #754). */
-  public async setBreakpoint(req: SetBreakpointRequest): Promise<{ breakpoint: Breakpoint; warning?: string; refusal?: string }> {
+  public async setBreakpoint(req: SetBreakpointRequest): Promise<{ breakpoint: Breakpoint; warning?: string; failure?: BreakpointSyncFailure }> {
     this.validateSessionExists(req.sessionId);
 
     // Addressing-parameter combinations (issue #271)

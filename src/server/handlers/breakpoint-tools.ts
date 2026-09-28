@@ -15,6 +15,19 @@ import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { requireSessionId, type WithSessionId } from '../tool-validation.js';
 import { debuggerOffWhyFor, readLineContext } from './shared.js';
 import { failureResult, jsonResult, sessionErrorResultOrThrow, type ToolResult } from '../tool-result.js';
+import type { BreakpointSyncFailure } from '../../session/breakpoints/breakpoint-controller.js';
+
+/**
+ * The record's message for the response — unless it is the adapter's refusal
+ * the sync warning already quotes (issue #754): a refused live re-send stamps
+ * the answer on the record AND reports it, and the response says it once.
+ */
+function messageBesideWarning(
+  breakpoint: { message?: string },
+  failure: BreakpointSyncFailure | undefined
+): string | undefined {
+  return failure?.refused && breakpoint.message === failure.message ? undefined : breakpoint.message;
+}
 
 /**
  * The why beside an unverified answer while the session's launch runs with
@@ -100,12 +113,10 @@ async function setFunctionBreakpointBranch(ctx: ToolContext, args: WithSessionId
     // reported in the warning; neither blocks the request.
     const { requestedName, effectiveName, normalized, hint: nameHint } =
       ctx.sessionManager.resolveFunctionBreakpointName(args.sessionId, args.function!);
-    const { breakpoint, warning: syncWarning, refusal: syncRefusal } = await ctx.setFunctionBreakpoint(
+    const { breakpoint, warning: syncWarning, failure: syncFailure } = await ctx.setFunctionBreakpoint(
       args.sessionId, effectiveName, args.condition
     );
-    // A refused live re-send stamps the adapter's answer on the record AND
-    // reports it in the sync warning (issue #754); the response says it once.
-    const recordMessage = syncRefusal !== undefined && breakpoint.message === syncRefusal ? undefined : breakpoint.message;
+    const recordMessage = messageBesideWarning(breakpoint, syncFailure);
 
     ctx.logger.info('debug:breakpoint', {
       event: 'set',
@@ -152,7 +163,7 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): P
       ? ctx.validateLogPointSupport(args.sessionId)
       : {};
 
-    const { breakpoint, warning: syncWarning, refusal: syncRefusal } = await ctx.setBreakpoint({
+    const { breakpoint, warning: syncWarning, failure: syncFailure } = await ctx.setBreakpoint({
       sessionId: args.sessionId,
       // Non-function path: the entry guard above ensures file is set
       file: args.file!,
@@ -192,9 +203,7 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): P
         }`
       : undefined;
 
-    // A refused live re-send stamps the adapter's answer on the record AND
-    // reports it in the sync warning (issue #754); the response says it once.
-    const recordMessage = syncRefusal !== undefined && breakpoint.message === syncRefusal ? undefined : breakpoint.message;
+    const recordMessage = messageBesideWarning(breakpoint, syncFailure);
     const warnings = [
       recordMessage, logPointGate.warning, syncWarning, snapWarning,
       debuggerOffNote(ctx, args.sessionId, breakpoint.verified)

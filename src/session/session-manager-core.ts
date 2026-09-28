@@ -34,7 +34,6 @@ import { ISessionStoreFactory } from '../factories/session-store-factory.js';
 import { IProxyManager } from '../proxy/proxy-manager.js';
 import { IProxyManagerFactory } from '../factories/proxy-manager-factory.js';
 import type { BreakpointSyncResult, FunctionBreakpointSyncResult } from '../proxy/dap-proxy-interfaces.js';
-import { normalizeBreakpointMessage } from '../utils/breakpoint-message.js';
 import { consumeChildOrigin } from '../utils/child-origin-events.js';
 import { isPidAlive } from '../utils/jvm-orphan-reaper.js';
 import { IAdapterRegistry } from '@debugmcp/shared';
@@ -47,8 +46,11 @@ import type { AnchorResolution } from './breakpoints/anchor-resolution.js';
 import {
   applyBoundLocation,
   applyHitBreakpointIds,
+  keepHitProven,
   resetBinding,
-  samePath
+  samePath,
+  setAdapterMessage,
+  settleStoredMessage
 } from './breakpoints/hit-verification.js';
 
 
@@ -862,7 +864,9 @@ export abstract class SessionManagerCore extends EventEmitter {
             fnTarget.boundFile = eventBp.source.path;
           }
           if (eventBp.message !== undefined) {
-            fnTarget.message = eventBp.message;
+            setAdapterMessage(fnTarget, eventBp.message, fnTarget.verified);
+          } else {
+            settleStoredMessage(fnTarget);
           }
           this.logger.info('debug:breakpoint', {
             event: 'changed',
@@ -925,14 +929,11 @@ export abstract class SessionManagerCore extends EventEmitter {
         );
         return;
       }
-      if (eventBp.verified === false && target.verifiedBy === 'hit') {
+      if (keepHitProven(target, eventBp, { acceptId: !mirrorsToChild || fromChild })) {
         // A stop already proved this breakpoint bound (issue #673). js-debug
         // answers "unbound" on every replace-all for a location it cannot
-        // map to a source; the CDP breakpoint underneath keeps firing. Keep
-        // the id current and nothing else.
-        if (typeof eventBp.id === 'number' && (!mirrorsToChild || fromChild)) {
-          target.adapterId = eventBp.id;
-        }
+        // map to a source; the CDP breakpoint underneath keeps firing. The
+        // id was kept current (when it is the child's) and nothing else.
         this.logger.debug(
           `[SessionManager ${sessionId}] Keeping hit-proven breakpoint ${target.file}:${target.line} verified despite an unverified echo (id=${eventBp.id})`
         );
@@ -947,15 +948,16 @@ export abstract class SessionManagerCore extends EventEmitter {
         target.boundFile = undefined;
         target.boundLine = undefined;
       }
-      // A provisional "unbound" note must not survive verification, and a
-      // leaked l10n key must not reach the user (issue #471). When the event
-      // carries no message, re-normalize the stored one: js-debug's bind event
-      // omits `message`, so a provisional note stamped earlier would otherwise
-      // outlive the verification it contradicts.
-      target.message = normalizeBreakpointMessage(
-        eventBp.message !== undefined ? eventBp.message : target.message,
-        target.verified
-      );
+      // A provisional "unbound" note or a stamped refusal must not survive
+      // verification, and a leaked l10n key must not reach the user (issues
+      // #471, #754). When the event carries no message, settle the stored
+      // one: js-debug's bind event omits `message`, so a note stamped earlier
+      // would otherwise outlive the verification it contradicts.
+      if (eventBp.message !== undefined) {
+        setAdapterMessage(target, eventBp.message, target.verified);
+      } else {
+        settleStoredMessage(target);
+      }
       // The id: any non-mirroring adapter's, or the child's — provisional or
       // not. js-debug keeps an entry's id across re-sends, and the #495
       // hazard was the PARENT's colliding id space, which the child-origin
@@ -1108,6 +1110,7 @@ export abstract class SessionManagerCore extends EventEmitter {
               `[SessionManager ${sessionId}] Logpoint at ${bp.file}:${bp.line} but the adapter does not advertise supportsLogPoints — it may pause instead of logging`
             );
             bp.message = 'Adapter does not advertise logpoint support — this may pause instead of logging';
+            bp.messageOrigin = undefined;
           }
         }
       }
@@ -1131,6 +1134,7 @@ export abstract class SessionManagerCore extends EventEmitter {
             `[SessionManager ${sessionId}] Function breakpoint on ${bp.functionName} but the adapter does not advertise supportsFunctionBreakpoints — it will not bind`
           );
           bp.message = 'Adapter does not advertise function-breakpoint support — this breakpoint will not bind';
+          bp.messageOrigin = undefined;
         }
       }
     };
@@ -1154,21 +1158,35 @@ export abstract class SessionManagerCore extends EventEmitter {
           continue;
         }
         consumed.add(target.id);
+        // The same rules as every other writer (issue #754): a stop that
+        // already proved the record bound outranks an unbound echo (#673),
+        // provenance is stamped, an unverified record claims no binding
+        // location, and the adapter's own words survive into the store — a
+        // refused pre-launch set is echoed with its refusal (#750) — while a
+        // verifying echo without words drops a stamped refusal.
+        if (keepHitProven(target, { verified: result.verified, id: result.id })) {
+          continue;
+        }
         target.verified = result.verified;
+        target.verifiedBy = target.verified ? 'adapter' : undefined;
         if (typeof result.id === 'number') {
           target.adapterId = result.id;
         }
-        if (typeof result.line === 'number') {
-          target.boundLine = result.line;
+        if (target.verified) {
+          if (typeof result.line === 'number') {
+            target.boundLine = result.line;
+          }
+          if (result.source) {
+            target.boundFile = result.source;
+          }
+        } else {
+          target.boundFile = undefined;
+          target.boundLine = undefined;
         }
-        if (result.source) {
-          target.boundFile = result.source;
-        }
-        // The adapter's own words survive into the store (issue #754): a
-        // refused pre-launch set is echoed with its refusal (#750), like the
-        // line-breakpoint echo below.
         if (result.message !== undefined) {
-          target.message = normalizeBreakpointMessage(result.message, target.verified);
+          setAdapterMessage(target, result.message, target.verified);
+        } else {
+          settleStoredMessage(target);
         }
       }
     };
@@ -1212,15 +1230,15 @@ export abstract class SessionManagerCore extends EventEmitter {
         if (typeof result.boundLine === 'number') {
           target.line = result.boundLine;
         }
-        // Stamp message only when present — a clean sync must not wipe the
-        // capability-drift warning handleAdapterCapabilities may have set.
-        // (Normalization drops only provisional "unbound" notes, so a sync
-        // that verifies without a message clears a stale one while other
-        // stored messages pass through untouched — issue #471.)
+        // The adapter's words when present; otherwise settle the stored note
+        // — a clean sync must not wipe the capability-drift warning
+        // handleAdapterCapabilities may have set, while a provisional
+        // "unbound" note or a stamped refusal cannot outlive the
+        // verification that contradicts it (issues #471, #754).
         if (result.message !== undefined) {
-          target.message = normalizeBreakpointMessage(result.message, target.verified);
-        } else if (target.message !== undefined && target.verified) {
-          target.message = normalizeBreakpointMessage(target.message, target.verified);
+          setAdapterMessage(target, result.message, target.verified);
+        } else {
+          settleStoredMessage(target);
         }
         this.logger.info('debug:breakpoint', {
           event: 'verified',
@@ -1458,6 +1476,7 @@ export abstract class SessionManagerCore extends EventEmitter {
         hint = undefined;
       }
       bp.message = `Never bound during this run — the debugger never resolved '${bp.functionName}', so the program never stopped there. Check the symbol name${hint ? ` (${hint})` : ''}`;
+      bp.messageOrigin = undefined;
       neverBound.push(bp.functionName);
     }
     if (neverBound.length > 0) {
