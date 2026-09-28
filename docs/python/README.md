@@ -78,7 +78,7 @@ Optional tuning:
 
 - `dapLaunchArgs`: `{ "stopOnEntry": true }` pauses on the first line (the default is `false`); `{ "justMyCode": false }` steps into library code (the default is `true`).
 - `breakOnExceptions`: launch sessions default to `"uncaught"`, so a crashing script pauses at the crash site with stack and locals intact instead of terminating the session. `"all"` also pauses on caught/raised exceptions; `"none"` opts out. Python edge case: debugpy treats `sys.exit(n)` with a **non-zero** code as an unhandled `SystemExit` and pauses there (`sys.exit(0)` runs to completion) — pass `"none"` if your script legitimately exits non-zero that way.
-- `dryRunSpawn: true` validates the spawn configuration without actually starting a debug session.
+- `dryRunSpawn: true` validates the spawn configuration without actually starting a debug session; the session stays usable for the real launch afterwards.
 
 ### 4. Control Execution
 
