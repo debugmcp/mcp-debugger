@@ -116,6 +116,31 @@ describe('SessionManager - restart and relaunch', () => {
     });
   });
 
+  describe('breakpoints set between launches (issues #793/#806)', () => {
+    it('accepts a breakpoint after the program exited and carries it into the next startDebugging', async () => {
+      const session = await createLaunchedSession();
+      dependencies.mockProxyManager.simulateEvent('terminated');
+      await vi.runAllTimersAsync();
+      expect(sessionManager.getSession(session.id)?.sessionLifecycle).toBe('terminated');
+
+      // Refused with SessionTerminatedError before #806: remove/list/clear were
+      // accepted in this state, set was not.
+      const { breakpoint, warning } = await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 20 });
+      expect(breakpoint.verified).toBe(false);
+      expect(warning).toBeUndefined();
+
+      const result = await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+
+      expect(result.success).toBe(true);
+      const startCalls = dependencies.mockProxyManager.startCalls;
+      expect(startCalls).toHaveLength(2);
+      expect(startCalls[1].initialBreakpoints).toEqual([
+        expect.objectContaining({ file: 'test.py', line: 20 })
+      ]);
+    });
+  });
+
   describe('restartDebugging', () => {
     it('replays the last launch with identical config and re-applies breakpoints', async () => {
       const session = await sessionManager.createSession({

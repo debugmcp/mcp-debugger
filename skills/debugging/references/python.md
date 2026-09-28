@@ -30,7 +30,7 @@ close_debug_session { "sessionId": "<id>" }
 
 Shortcut: `get_local_variables { "sessionId": "<id>" }` does stack -> scopes -> variables in one call and filters out `__builtins__` and special variables (pass `includeSpecial: true` to see them).
 
-Optional launch tuning via `dapLaunchArgs`: `{ "stopOnEntry": true }` to pause on the first line, `{ "justMyCode": false }` to step into library code. `dryRunSpawn: true` tests the spawn without debugging.
+Optional launch tuning via `dapLaunchArgs`: `{ "stopOnEntry": true }` to pause on the first line, `{ "justMyCode": false }` to step into library code. `dryRunSpawn: true` tests the spawn without debugging; the same session then takes the real `start_debugging`.
 
 ## Attach / remote
 
