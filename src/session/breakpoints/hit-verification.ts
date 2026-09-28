@@ -20,7 +20,7 @@
  * while the CDP breakpoint underneath keeps firing.
  */
 import type { Breakpoint, FunctionBreakpoint } from '@debugmcp/shared';
-import { isProvisionalBreakpointMessage, normalizeBreakpointMessage } from '../../utils/breakpoint-message.js';
+import { normalizeBreakpointMessage } from '../../utils/breakpoint-message.js';
 import type { ManagedSession } from '../session-store.js';
 
 const windowsPathish = /^[a-z]:[\\/]/i;
@@ -134,23 +134,27 @@ export function settleStoredMessage(record: Breakpoint | FunctionBreakpoint): vo
 
 /**
  * Stamp the adapter's refusal of a re-send onto an unverified record (issue
- * #754) where it displaces nothing curated: an absent note, a provisional
- * one, an earlier refusal — marked, or the same words the pre-launch echo
- * (#750) stamped unmarked. A curated note (capability drift, a re-resolved
- * anchor) stays; the refusal still reaches the caller through the warning.
+ * #754). It displaces an absent note, a provisional one, the adapter's own
+ * earlier verdict and an earlier refusal — everything but a curated note of
+ * the server's own (capability drift, a re-resolved anchor), which stays;
+ * the refusal still reaches the caller through the warning.
  */
 export function stampRefusalMessage(record: Breakpoint | FunctionBreakpoint, refusal: string): void {
-  const current = record.message;
-  const replaceable =
-    current === undefined ||
-    isProvisionalBreakpointMessage(current) ||
-    record.messageOrigin === 'refusal' ||
-    current === refusal;
-  if (!replaceable) {
+  if (record.messageOrigin === 'curated') {
     return;
   }
   record.message = normalizeBreakpointMessage(refusal, false);
   record.messageOrigin = 'refusal';
+}
+
+/**
+ * Store a note of the server's own — capability drift, a re-resolved anchor,
+ * never bound — marked so a later refusal cannot displace it and the resync
+ * report can quote it beside a refused function re-send.
+ */
+export function setCuratedMessage(record: Breakpoint | FunctionBreakpoint, message: string): void {
+  record.message = message;
+  record.messageOrigin = 'curated';
 }
 
 export interface HitUpgrade {

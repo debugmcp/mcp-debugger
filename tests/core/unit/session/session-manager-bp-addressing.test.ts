@@ -3,6 +3,7 @@
  * options-object setBreakpoint contract, requestedLine bookkeeping (loud
  * snapping), and sync-warning propagation.
  */
+import { DapResponseError } from '../../../../src/proxy/dap-response-error.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
 import { DebugLanguage } from '@debugmcp/shared';
@@ -167,6 +168,36 @@ describe('SessionManager - breakpoint addressing (#271)', () => {
       };
       expect(data.anchorResolution?.stale).toHaveLength(1);
       expect(String(data.warning)).toMatch(/anchor/i);
+    });
+
+    it("keeps the stale-anchor note when the relaunch's re-send is refused (issue #754)", async () => {
+      const session = await createLaunchedSession();
+      await sessionManager.setBreakpoint(session.id, {
+        file: 'test.py',
+        line: 3,
+        requestedLine: 3,
+        anchor: { statement: 'total = sum(prices)' }
+      });
+      await terminate();
+      stubFileContent('def f():\n    prices = load()\n    grand_total = compute(prices)\n');
+      dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+        if (command === 'setBreakpoints') {
+          throw new DapResponseError({ seq: 1, type: 'response', request_seq: 1, success: false, command, message: 'Server is not available' });
+        }
+        return { success: true, body: {} };
+      });
+
+      const result = await restart(session.id);
+
+      expect(result.success).toBe(true);
+      const [stored] = sessionManager.listBreakpoints(session.id);
+      // The refusal answered the re-send, not this breakpoint: our note wins.
+      expect(stored.message).toContain('not found at restart');
+      expect(stored.messageOrigin).toBe('curated');
+      expect(String(result.data?.warning)).toMatch(/anchor/i);
+      expect(String(result.data?.warning)).toContain(
+        'The debugger refused the re-send of the breakpoints for test.py: Server is not available'
+      );
     });
 
     it('disambiguates duplicate statements toward the breakpoint\'s previous line', async () => {

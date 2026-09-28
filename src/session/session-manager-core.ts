@@ -50,6 +50,7 @@ import {
   resetBinding,
   samePath,
   setAdapterMessage,
+  setCuratedMessage,
   settleStoredMessage
 } from './breakpoints/hit-verification.js';
 
@@ -856,12 +857,28 @@ export abstract class SessionManagerCore extends EventEmitter {
         const fnTarget = Array.from(session.functionBreakpoints.values())
           .find(bp => bp.adapterId === eventBp.id);
         if (fnTarget) {
-          fnTarget.verified = eventBp.verified;
-          if (typeof eventBp.line === 'number') {
-            fnTarget.boundLine = eventBp.line;
+          // The same rules as the line branch below (issue #754): a stop that
+          // proved the record bound outranks an unbound event (#673),
+          // provenance is stamped, an unverified record claims no binding
+          // location, and the adapter's words displace a stamped refusal.
+          if (keepHitProven(fnTarget, eventBp)) {
+            this.logger.debug(
+              `[SessionManager ${sessionId}] Keeping hit-proven function breakpoint '${fnTarget.functionName}' verified despite an unverified event (id=${eventBp.id})`
+            );
+            return;
           }
-          if (eventBp.source?.path) {
-            fnTarget.boundFile = eventBp.source.path;
+          fnTarget.verified = eventBp.verified;
+          fnTarget.verifiedBy = fnTarget.verified ? 'adapter' : undefined;
+          if (fnTarget.verified) {
+            if (typeof eventBp.line === 'number') {
+              fnTarget.boundLine = eventBp.line;
+            }
+            if (eventBp.source?.path) {
+              fnTarget.boundFile = eventBp.source.path;
+            }
+          } else {
+            fnTarget.boundFile = undefined;
+            fnTarget.boundLine = undefined;
           }
           if (eventBp.message !== undefined) {
             setAdapterMessage(fnTarget, eventBp.message, fnTarget.verified);
@@ -1109,8 +1126,7 @@ export abstract class SessionManagerCore extends EventEmitter {
             this.logger.warn(
               `[SessionManager ${sessionId}] Logpoint at ${bp.file}:${bp.line} but the adapter does not advertise supportsLogPoints — it may pause instead of logging`
             );
-            bp.message = 'Adapter does not advertise logpoint support — this may pause instead of logging';
-            bp.messageOrigin = undefined;
+            setCuratedMessage(bp, 'Adapter does not advertise logpoint support — this may pause instead of logging');
           }
         }
       }
@@ -1133,8 +1149,7 @@ export abstract class SessionManagerCore extends EventEmitter {
           this.logger.warn(
             `[SessionManager ${sessionId}] Function breakpoint on ${bp.functionName} but the adapter does not advertise supportsFunctionBreakpoints — it will not bind`
           );
-          bp.message = 'Adapter does not advertise function-breakpoint support — this breakpoint will not bind';
-          bp.messageOrigin = undefined;
+          setCuratedMessage(bp, 'Adapter does not advertise function-breakpoint support — this breakpoint will not bind');
         }
       }
     };
@@ -1224,11 +1239,16 @@ export abstract class SessionManagerCore extends EventEmitter {
           continue;
         }
         target.verified = result.verified;
+        target.verifiedBy = target.verified ? 'adapter' : undefined;
         if (typeof result.adapterId === 'number') {
           target.adapterId = result.adapterId;
         }
         if (typeof result.boundLine === 'number') {
           target.line = result.boundLine;
+        }
+        if (!target.verified) {
+          target.boundFile = undefined;
+          target.boundLine = undefined;
         }
         // The adapter's words when present; otherwise settle the stored note
         // — a clean sync must not wipe the capability-drift warning
@@ -1475,8 +1495,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       } catch {
         hint = undefined;
       }
-      bp.message = `Never bound during this run — the debugger never resolved '${bp.functionName}', so the program never stopped there. Check the symbol name${hint ? ` (${hint})` : ''}`;
-      bp.messageOrigin = undefined;
+      setCuratedMessage(bp, `Never bound during this run — the debugger never resolved '${bp.functionName}', so the program never stopped there. Check the symbol name${hint ? ` (${hint})` : ''}`);
       neverBound.push(bp.functionName);
     }
     if (neverBound.length > 0) {

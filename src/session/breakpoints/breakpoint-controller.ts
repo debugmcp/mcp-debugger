@@ -28,7 +28,6 @@ import {
 } from '@debugmcp/shared';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import { consumeChildSourced } from '../../utils/child-origin-events.js';
-import { isProvisionalBreakpointMessage } from '../../utils/breakpoint-message.js';
 import { DapResponseError } from '../../proxy/dap-response-error.js';
 import type { ManagedSession } from '../session-store.js';
 import type { BreakpointContext } from '../operations-context.js';
@@ -290,7 +289,7 @@ export class BreakpointController {
         `[SessionManager] Error sending setBreakpoints to proxy for session ${sessionId}:`,
         error
       );
-      return this.failedSync(session, error, allBpsForFile);
+      return this.failedSync(session, error, allBpsForFile, childAuthoritative);
     }
   }
 
@@ -321,12 +320,13 @@ export class BreakpointController {
   private failedSync(
     session: ManagedSession,
     error: unknown,
-    records: Array<Breakpoint | FunctionBreakpoint>
+    records: Array<Breakpoint | FunctionBreakpoint>,
+    childAuthoritative: boolean
   ): BreakpointSyncOutcome {
     const message = getErrorMessage(error);
     const refused = error instanceof DapResponseError;
     if (refused) {
-      this.stampRefusal(records, message);
+      this.stampRefusal(records, message, childAuthoritative);
     }
     return {
       synced: false,
@@ -343,16 +343,24 @@ export class BreakpointController {
    * adapter never said it was gone and its previous set may still be armed,
    * and a verified record needs no explanation beside it. An unverified
    * record claims no binding location (as the breakpoint-event handler
-   * clears it), and the stamp never displaces a curated note.
+   * clears it) — unless a child-mirroring policy's child owns those facts
+   * (#500), where the parent's refusal is no more authoritative than its
+   * answers — and the stamp never displaces a curated note.
    */
-  private stampRefusal(records: Array<Breakpoint | FunctionBreakpoint>, message: string): void {
+  private stampRefusal(
+    records: Array<Breakpoint | FunctionBreakpoint>,
+    message: string,
+    childAuthoritative: boolean
+  ): void {
     for (const record of records) {
       if (record.verified === true) {
         continue;
       }
-      record.verifiedBy = undefined;
-      record.boundFile = undefined;
-      record.boundLine = undefined;
+      if (!childAuthoritative) {
+        record.verifiedBy = undefined;
+        record.boundFile = undefined;
+        record.boundLine = undefined;
+      }
       stampRefusalMessage(record, message);
     }
   }
@@ -366,7 +374,7 @@ export class BreakpointController {
    */
   private liveSyncHint(session: ManagedSession, message: string): string {
     if (session.attachMode && session.language === 'ruby' && /is not available/.test(message)) {
-      return ' (Hint: attach sessions send breakpoint paths to the remote debugger verbatim; the path must be valid on the debug target\'s filesystem. Use target-side paths, or pass localfsMap in the attach config to map local paths to remote ones.)';
+      return "Hint: attach sessions send breakpoint paths to the remote debugger verbatim; the path must be valid on the debug target's filesystem. Use target-side paths, or pass localfsMap in the attach config to map local paths to remote ones.";
     }
     return '';
   }
@@ -376,7 +384,8 @@ export class BreakpointController {
    * netcoredbg no-symbols guidance above.
    */
   private buildLiveSyncWarning(session: ManagedSession, message: string): string {
-    return `Breakpoint state updated, but live sync failed: ${message}${this.liveSyncHint(session, message)}`;
+    const hint = this.liveSyncHint(session, message);
+    return `Breakpoint state updated, but live sync failed: ${message}${hint ? ` (${hint})` : ''}`;
   }
 
   /**
@@ -485,6 +494,7 @@ export class BreakpointController {
     // says the same thing each time — and distinct answers keep their own.
     const lineFailures = new Map<string, { failure: BreakpointSyncFailure; files: string[] }>();
     const key = (failure: BreakpointSyncFailure): string => `${failure.refused ? 'refused' : 'failed'}:${failure.message}`;
+    let hint = '';
     if (session.breakpoints.size > 0) {
       const files = [...new Set(Array.from(session.breakpoints.values()).map((bp) => bp.file))];
       for (const file of files) {
@@ -495,42 +505,46 @@ export class BreakpointController {
         const entry = lineFailures.get(key(outcome.failure)) ?? { failure: outcome.failure, files: [] };
         entry.files.push(file);
         lineFailures.set(key(outcome.failure), entry);
+        hint ||= this.liveSyncHint(session, outcome.failure.message);
       }
     }
     const warnings = [...lineFailures.values()].map(({ failure, files }) =>
-      this.describeResendFailure(session, `the breakpoints for ${fileLabels(files).join(', ')}`, failure)
+      this.describeResendFailure(`the breakpoints for ${fileLabels(files).join(', ')}`, failure)
     );
     let functionBreakpointsFailed = false;
     if ((session.functionBreakpoints?.size ?? 0) > 0) {
       const outcome = await this.syncFunctionBreakpoints(session);
       if (outcome.failure !== undefined) {
         functionBreakpointsFailed = true;
+        hint ||= this.liveSyncHint(session, outcome.failure.message);
         // The curated notes the records carry (capability drift, say) used to
         // reach the launch result through the symptom warning this failure
         // now withholds; they ride along with the cause instead.
-        const notes = [
+        const curated = [
           ...new Set(
             Array.from(session.functionBreakpoints.values())
-              .map((bp) => bp.message)
-              .filter((m): m is string => m !== undefined && m !== outcome.failure!.message && !isProvisionalBreakpointMessage(m))
+              .filter((bp) => bp.messageOrigin === 'curated' && bp.message !== undefined)
+              .map((bp) => bp.message as string)
           )
         ];
-        const curated = Array.from(session.functionBreakpoints.values())
-          .filter((bp) => bp.messageOrigin !== 'refusal' && bp.message !== undefined && notes.includes(bp.message))
-          .map((bp) => bp.message as string);
         warnings.push(
-          this.describeResendFailure(session, 'the function breakpoints', outcome.failure) +
-            (curated.length > 0 ? ` (${[...new Set(curated)].join('; ')})` : '')
+          this.describeResendFailure('the function breakpoints', outcome.failure) +
+            (curated.length > 0 ? ` (${curated.join('; ')})` : '')
         );
       }
+    }
+    // The topology hint once, however many files the target refused (rdbg
+    // names the path, so every file is a distinct answer).
+    if (hint) {
+      warnings.push(hint);
     }
     return { warnings, functionBreakpointsFailed };
   }
 
-  /** One sentence for a failed re-send: the adapter's refusal, or the transport's failure, hint appended. */
-  private describeResendFailure(session: ManagedSession, what: string, failure: BreakpointSyncFailure): string {
+  /** One sentence for a failed re-send: the adapter's refusal, or the transport's failure. */
+  private describeResendFailure(what: string, failure: BreakpointSyncFailure): string {
     return failure.refused
-      ? `The debugger refused the re-send of ${what}: ${failure.message}${this.liveSyncHint(session, failure.message)}`
+      ? `The debugger refused the re-send of ${what}: ${failure.message}`
       : `The re-send of ${what} failed: ${failure.message}`;
   }
 
@@ -551,6 +565,7 @@ export class BreakpointController {
     }
 
     const allFnBps = Array.from(session.functionBreakpoints.values());
+    const childAuthoritative = this.mirrorsToChild(session);
 
     try {
       this.ctx.logger.info(
@@ -577,11 +592,17 @@ export class BreakpointController {
           record.verifiedBy = record.verified ? 'adapter' : undefined;
           record.adapterId = bpInfo.id ?? record.adapterId;
           setAdapterMessage(record, bpInfo.message, record.verified);
-          if (typeof bpInfo.line === 'number') {
-            record.boundLine = bpInfo.line;
-          }
-          if (bpInfo.source?.path) {
-            record.boundFile = bpInfo.source.path;
+          if (record.verified) {
+            if (typeof bpInfo.line === 'number') {
+              record.boundLine = bpInfo.line;
+            }
+            if (bpInfo.source?.path) {
+              record.boundFile = bpInfo.source.path;
+            }
+          } else {
+            // An unverified record claims no binding location.
+            record.boundFile = undefined;
+            record.boundLine = undefined;
           }
           if (allFnBps[i].verified) {
             this.ctx.logger.info('debug:breakpoint', {
@@ -603,7 +624,7 @@ export class BreakpointController {
         `[SessionManager] Error sending setFunctionBreakpoints to proxy for session ${sessionId}:`,
         error
       );
-      return this.failedSync(session, error, allFnBps);
+      return this.failedSync(session, error, allFnBps, childAuthoritative);
     }
   }
 

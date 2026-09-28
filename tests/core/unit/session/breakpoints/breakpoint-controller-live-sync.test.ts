@@ -28,7 +28,7 @@ import { createMockLogger } from '../../../../test-utils/helpers/test-dependenci
 
 const REFUSAL = 'Server is not available';
 const LOCALFS_HINT =
-  " (Hint: attach sessions send breakpoint paths to the remote debugger verbatim; the path must be valid on the debug target's filesystem. Use target-side paths, or pass localfsMap in the attach config to map local paths to remote ones.)";
+  "Hint: attach sessions send breakpoint paths to the remote debugger verbatim; the path must be valid on the debug target's filesystem. Use target-side paths, or pass localfsMap in the attach config to map local paths to remote ones.";
 
 /** The adapter's own error response to a request, as the proxy rejects it. */
 function refusalOf(command: string, message = REFUSAL): DapResponseError {
@@ -158,20 +158,37 @@ describe("BreakpointController live re-send refusal stamps the adapter's answer 
     expect(session.breakpoints.get('a')).toMatchObject({ verified: false, message: REFUSAL });
   });
 
-  it('never displaces a curated note, but replaces a provisional one, an older refusal, and the same words stamped unmarked', async () => {
+  it("stamps the parent's refusal on an unverified record under a child-mirroring policy, keeping the child's binding facts", async () => {
+    const { controller } = makeController({ getDapClientBehavior: () => ({ mirrorBreakpointsToChild: true }) });
+    const { session } = refusingSession([
+      { id: 'pending', file: '/app/a.ts', line: 3, boundFile: '/app/dist/a.js', boundLine: 9 }
+    ]);
+
+    await controller.syncBreakpointsForFile(session, '/app/a.ts');
+
+    // The parent's refusal is no more authoritative than its answers: the
+    // words land, the child-owned binding location stays.
+    expect(session.breakpoints.get('pending')).toMatchObject({
+      verified: false, message: REFUSAL, messageOrigin: 'refusal', boundFile: '/app/dist/a.js', boundLine: 9
+    });
+  });
+
+  it("never displaces a curated note, but replaces a provisional note, the adapter's earlier verdict, an older refusal, and the same words stamped unmarked", async () => {
     const { controller } = makeController();
     const curated = 'Adapter does not advertise logpoint support — this may pause instead of logging';
     const { session } = refusingSession([
-      { id: 'curated', file: '/app/a.py', line: 1, message: curated },
+      { id: 'curated', file: '/app/a.py', line: 1, message: curated, messageOrigin: 'curated' },
       { id: 'provisional', file: '/app/a.py', line: 2, message: 'Unbound breakpoint' },
       { id: 'older', file: '/app/a.py', line: 3, message: 'Older refusal', messageOrigin: 'refusal' },
-      { id: 'echoed', file: '/app/a.py', line: 4, message: REFUSAL }
+      { id: 'echoed', file: '/app/a.py', line: 4, message: REFUSAL },
+      { id: 'verdict', file: '/app/a.py', line: 5, message: 'Cannot resolve line 5' }
     ]);
 
     await controller.syncBreakpointsForFile(session, '/app/a.py');
 
-    expect(session.breakpoints.get('curated')).toMatchObject({ verified: false, message: curated });
-    expect(session.breakpoints.get('curated')!.messageOrigin).toBeUndefined();
+    expect(session.breakpoints.get('curated')).toMatchObject({ verified: false, message: curated, messageOrigin: 'curated' });
+    // The adapter's earlier verdict is older information than its refusal.
+    expect(session.breakpoints.get('verdict')).toMatchObject({ message: REFUSAL, messageOrigin: 'refusal' });
     expect(session.breakpoints.get('provisional')).toMatchObject({ message: REFUSAL, messageOrigin: 'refusal' });
     expect(session.breakpoints.get('older')).toMatchObject({ message: REFUSAL, messageOrigin: 'refusal' });
     // The pre-launch echo (#750) stamps the same words without the marker;
@@ -204,11 +221,13 @@ describe("BreakpointController live re-send refusal stamps the adapter's answer 
     const { controller } = makeController();
     const { session, sendDapRequest } = refusingSession([], [
       { id: 'f1', functionName: 'main', verified: true, verifiedBy: 'hit', adapterId: 4 },
-      { id: 'f2', functionName: 'helper', message: REFUSAL, messageOrigin: 'refusal' }
+      { id: 'f2', functionName: 'helper', message: REFUSAL, messageOrigin: 'refusal' },
+      { id: 'f3', functionName: 'gone', verified: true, verifiedBy: 'adapter', adapterId: 5, boundFile: '/app/lib.py', boundLine: 3 }
     ]);
     sendDapRequest.mockResolvedValue({ body: { breakpoints: [
       { verified: false, id: 40, message: 'Cannot resolve symbol' },
-      { verified: true, id: 41, line: 12, source: { path: '/app/lib.py' } }
+      { verified: true, id: 41, line: 12, source: { path: '/app/lib.py' } },
+      { verified: false, id: 50, message: 'Cannot resolve symbol' }
     ] } });
 
     const outcome = await controller.syncFunctionBreakpoints(session);
@@ -221,6 +240,13 @@ describe("BreakpointController live re-send refusal stamps the adapter's answer 
     expect(f2).toMatchObject({ verified: true, verifiedBy: 'adapter', adapterId: 41, boundLine: 12, boundFile: '/app/lib.py' });
     expect(f2.message).toBeUndefined();
     expect(f2.messageOrigin).toBeUndefined();
+    // An answer of "unbound" for a record the adapter had bound before: no
+    // binding location is claimed any more.
+    const f3 = session.functionBreakpoints.get('f3')!;
+    expect(f3).toMatchObject({ verified: false, adapterId: 50, message: 'Cannot resolve symbol' });
+    expect(f3.verifiedBy).toBeUndefined();
+    expect(f3.boundFile).toBeUndefined();
+    expect(f3.boundLine).toBeUndefined();
   });
 
   it("stamps nothing when the re-send succeeded; the adapter's answer displaces a stamped refusal either way", async () => {
@@ -335,16 +361,19 @@ describe('BreakpointController.resyncAll hands the failures back (issue #754)', 
     });
   });
 
-  it('carries the ruby attach topology hint on a refused re-send, like the live warning does (issue #357)', async () => {
+  it('carries the ruby attach topology hint once, however many files the target refused (issue #357)', async () => {
     const { controller } = makeController();
-    vi.spyOn(controller, 'syncBreakpointsForFile').mockResolvedValue(refused('/host/app.rb is not available'));
-    const { session } = refusingSession([{ id: 'a', file: '/host/app.rb', line: 1 }]);
+    vi.spyOn(controller, 'syncBreakpointsForFile').mockImplementation(async (_session, file) => refused(`${file} is not available`));
+    const { session } = refusingSession([{ id: 'a', file: '/host/app.rb', line: 1 }, { id: 'b', file: '/host/lib.rb', line: 1 }]);
     Object.assign(session, { language: 'ruby', attachMode: true });
 
     const { warnings } = await controller.resyncAll(session);
 
+    // rdbg names the path, so every file is a distinct answer; the hint is one sentence at the end.
     expect(warnings).toEqual([
-      `The debugger refused the re-send of the breakpoints for app.rb: /host/app.rb is not available${LOCALFS_HINT}`
+      'The debugger refused the re-send of the breakpoints for app.rb: /host/app.rb is not available',
+      'The debugger refused the re-send of the breakpoints for lib.rb: /host/lib.rb is not available',
+      LOCALFS_HINT
     ]);
   });
 
@@ -353,9 +382,11 @@ describe('BreakpointController.resyncAll hands the failures back (issue #754)', 
     const drift = 'Adapter does not advertise function-breakpoint support — this breakpoint will not bind';
     vi.spyOn(controller, 'syncFunctionBreakpoints').mockResolvedValue(refused('Unsupported request'));
     const { session } = refusingSession([], [
-      { id: 'f1', functionName: 'main', message: drift },
+      { id: 'f1', functionName: 'main', message: drift, messageOrigin: 'curated' },
       { id: 'f2', functionName: 'helper', message: 'Unsupported request', messageOrigin: 'refusal' },
-      { id: 'f3', functionName: 'other', message: drift }
+      { id: 'f3', functionName: 'other', message: drift, messageOrigin: 'curated' },
+      // An earlier adapter verdict is not a curated note.
+      { id: 'f4', functionName: 'stale', message: 'Cannot resolve symbol stale' }
     ]);
 
     const { warnings } = await controller.resyncAll(session);

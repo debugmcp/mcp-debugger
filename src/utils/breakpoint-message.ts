@@ -38,11 +38,6 @@ const PROVISIONAL_MESSAGES = new Set([
  * @param verified the breakpoint's verified state as of the same update
  * @returns the message to store, or `undefined` to leave the field unset
  */
-/** Whether `message` is an adapter's provisional "not bound yet" note. */
-export function isProvisionalBreakpointMessage(message: string): boolean {
-  return PROVISIONAL_MESSAGES.has(message);
-}
-
 export function normalizeBreakpointMessage(
   message: string | undefined,
   verified: boolean

@@ -19,6 +19,7 @@ import {
 import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import { checkLaunchToolchain } from '../../utils/language-availability.js';
+import { setCuratedMessage } from '../breakpoints/hit-verification.js';
 import type { CustomLaunchRequestArguments, DebugResult } from '../session-manager-core.js';
 import type { ManagedSession, ToolchainValidationState } from '../session-store.js';
 import type { LaunchContext } from '../operations-context.js';
@@ -797,13 +798,17 @@ export class DebugLauncher {
       const staleCount = anchorResolution?.stale.length ?? 0;
       // Stamp stale-anchor notes AFTER the relaunch: the per-launch
       // breakpoint state reset (#238) clears message on every new launch,
-      // and a real adapter message should still win over ours.
+      // and a real adapter verdict should still win over ours — a refusal of
+      // the relaunch's re-send is not one (issue #754), so the note displaces it.
       if (anchorResolution) {
         const bps = this.ctx.getSession(sessionId).breakpoints;
         for (const staleEntry of anchorResolution.stale) {
           const bp = bps.get(staleEntry.breakpointId);
-          if (bp && !bp.message) {
-            bp.message = `Anchor "${staleEntry.statement}" not found at restart; breakpoint kept at last known line ${staleEntry.line}`;
+          if (bp && (bp.message === undefined || bp.messageOrigin === 'refusal')) {
+            setCuratedMessage(
+              bp,
+              `Anchor "${staleEntry.statement}" not found at restart; breakpoint kept at last known line ${staleEntry.line}`
+            );
           }
         }
       }

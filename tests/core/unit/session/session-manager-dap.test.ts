@@ -278,6 +278,7 @@ describe('SessionManager - DAP Operations', () => {
 
       const [stored] = sessionManager.listBreakpoints(session.id);
       expect(stored.verified).toBe(true);
+      expect(stored.verifiedBy).toBe('adapter');
       expect(stored.adapterId).toBe(5);
       expect(stored.line).toBe(11);
       expect(stored.message).toBe('Resolved');
@@ -744,6 +745,7 @@ describe('SessionManager - DAP Operations', () => {
       const curated = sessionManager.listBreakpoints(session.id).find((bp) => bp.id === second.id)!;
       const drift = 'Adapter does not advertise logpoint support — this may pause instead of logging';
       curated.message = drift;
+      curated.messageOrigin = 'curated';
 
       dependencies.mockProxyManager.simulateEvent('breakpoints-synced', [
         { id: stored.id, file: 'test.py', line: 10, verified: true, adapterId: 55 },
@@ -755,6 +757,29 @@ describe('SessionManager - DAP Operations', () => {
       expect(stored.messageOrigin).toBeUndefined();
       expect(curated.verified).toBe(true);
       expect(curated.message).toBe(drift);
+    });
+
+    it('applies the record rules to a function breakpoint event too: hit-proven stands, an unverified event clears the binding location (issue #754)', async () => {
+      const { session } = await createSessionWithUnverifiedBp(55);
+      const managed = sessionManager.getSession(session.id)!;
+      managed.functionBreakpoints.set('proven', {
+        id: 'proven', functionName: 'main', verified: true, verifiedBy: 'hit', adapterId: 7, boundFile: '/src/main.rs', boundLine: 3
+      });
+      managed.functionBreakpoints.set('gone', {
+        id: 'gone', functionName: 'helper', verified: true, verifiedBy: 'adapter', adapterId: 8, boundFile: '/src/h.rs', boundLine: 2
+      });
+
+      dependencies.mockProxyManager.simulateEvent('breakpoint', { reason: 'changed', breakpoint: { id: 7, verified: false } });
+      dependencies.mockProxyManager.simulateEvent('breakpoint', { reason: 'changed', breakpoint: { id: 8, verified: false } });
+
+      expect(managed.functionBreakpoints.get('proven')).toMatchObject({
+        verified: true, verifiedBy: 'hit', adapterId: 7, boundFile: '/src/main.rs', boundLine: 3
+      });
+      const gone = managed.functionBreakpoints.get('gone')!;
+      expect(gone.verified).toBe(false);
+      expect(gone.verifiedBy).toBeUndefined();
+      expect(gone.boundFile).toBeUndefined();
+      expect(gone.boundLine).toBeUndefined();
     });
 
     it('falls back to file and line matching and adopts the adapter id', async () => {
