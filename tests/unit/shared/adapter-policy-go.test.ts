@@ -531,4 +531,36 @@ describe('GoAdapterPolicy', () => {
       expect(result).toBe(false);
     });
   });
+  // ===== Exit code from Delve's console line (issue #753) =====
+
+  describe('debuggeeExitCodeFromOutput', () => {
+    const read = (category: string, text: string) => GoAdapterPolicy.debuggeeExitCodeFromOutput(category, text);
+
+    it.each([
+      ['Process 26436 has exited with status 0\n', 0],
+      ['Process 26436 has exited with status 7\n', 7],
+      ['Process 1 has exited with status 3221225781\n', 3221225781],
+      ['Process 26436 has exited with status 0\r\n', 0]
+    ])('reads the status out of %j', (text, expected) => {
+      expect(read('console', text)).toBe(expected);
+    });
+
+    it('ignores the same words on the debuggee\'s own stdout', () => {
+      expect(read('stdout', 'Process 1 has exited with status 7\n')).toBeUndefined();
+    });
+
+    it.each([
+      'Detaching\n',
+      'Detaching and terminating target process\n',
+      "Type 'dlv help' for list of commands.\n",
+      'Process 1 has exited with status 0 and more\n',
+      'Hello, World!\n'
+    ])('returns undefined for other console text: %j', (text) => {
+      expect(read('console', text)).toBeUndefined();
+    });
+
+    it('treats a negative status (signal kill) as no exit code', () => {
+      expect(read('console', 'Process 1 has exited with status -1\n')).toBeUndefined();
+    });
+  });
 });

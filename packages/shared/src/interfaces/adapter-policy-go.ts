@@ -348,6 +348,26 @@ export const GoAdapterPolicy = {
   },
 
   /**
+   * Delve never sends a DAP `exited` event; the status is one console line,
+   * proc.ErrProcessExited.Error() — "Process %d has exited with status %d" —
+   * logged before `terminated` under noDebug and, in debug mode, only from
+   * stopDebugSession in reply to `disconnect` (issue #753). Console category
+   * only: a debuggee printing the same words to stdout is not Delve speaking.
+   * Go's ExitCode() is -1 for a signal-killed process — not a code.
+   */
+  debuggeeExitCodeFromOutput: (category: string, text: string): number | undefined => {
+    if (category !== 'console') {
+      return undefined;
+    }
+    const match = /^Process \d+ has exited with status (-?\d+)$/.exec(text.trim());
+    if (!match) {
+      return undefined;
+    }
+    const status = Number.parseInt(match[1], 10);
+    return Number.isSafeInteger(status) && status >= 0 ? status : undefined;
+  },
+
+  /**
    * Get the configuration for spawning the Go debug adapter (dlv)
    */
   getAdapterSpawnConfig: (payload) => {
