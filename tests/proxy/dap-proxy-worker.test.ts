@@ -4290,6 +4290,195 @@ describe('DapProxyWorker', () => {
     });
   });
 
+  describe('console-reported exit code synthesis (issue #753)', () => {
+    let connectionHandlers: Record<string, (arg?: unknown) => unknown>;
+    let shutdownSpy: ReturnType<typeof vi.spyOn> | undefined;
+    let disconnectStub: Mock;
+
+    const STATUS_LINE = (code: number) => ({ category: 'console', output: `Process 26436 has exited with status ${code}\n` });
+    const DETACHING = { category: 'console', output: 'Detaching\n' };
+
+    /**
+     * Wire the worker like a live Go session. `onDisconnect` plays Delve: it
+     * runs when the worker sends the DAP disconnect request and before that
+     * request resolves, which is when Delve prints the console lines its
+     * disconnect handler logs (the exit status, then "Detaching").
+     */
+    const wireHandlers = (opts: {
+      policy?: AdapterPolicy;
+      onDisconnect?: () => void | Promise<void>;
+      spyShutdown?: boolean;
+      attach?: boolean;
+    } = {}) => {
+      connectionHandlers = {};
+      disconnectStub = vi.fn(async () => { await opts.onDisconnect?.(); });
+      const connectionStub = {
+        setupEventHandlers: vi.fn((_client: unknown, handlers: Record<string, (arg?: unknown) => unknown>) => {
+          Object.assign(connectionHandlers, handlers);
+        }),
+        disconnect: disconnectStub
+      };
+      const policy = opts.policy ?? GoAdapterPolicy;
+      (worker as any).logger = mockLogger;
+      (worker as any).dapClient = mockDapClient;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = policy;
+      (worker as any).adapterState = policy.createInitialState();
+      (worker as any).currentInitPayload = { launchConfig: {} };
+      (worker as any).isAttachMode = opts.attach === true;
+      shutdownSpy = opts.spyShutdown === false
+        ? undefined
+        : vi.spyOn(worker as any, 'shutdown').mockResolvedValue(undefined) as ReturnType<typeof vi.spyOn>;
+      (worker as any).setupDapEventHandlers();
+      mockMessageSender.send.mockClear();
+    };
+
+    const dapEvents = () =>
+      mockMessageSender.send.mock.calls
+        .map(call => call[0] as { type: string; event?: string; body?: unknown })
+        .filter(msg => msg.type === 'dapEvent');
+    const eventNames = () => dapEvents().map(e => e.event);
+    const exitedBodies = () => dapEvents().filter(e => e.event === 'exited').map(e => e.body);
+
+    afterEach(() => {
+      shutdownSpy?.mockRestore();
+    });
+
+    it('uses a status line seen before terminated (the noDebug order) without touching the connection', async () => {
+      wireHandlers();
+      connectionHandlers.onOutput?.(STATUS_LINE(0));
+
+      await connectionHandlers.onTerminated?.({});
+
+      expect(eventNames()).toEqual(['output', 'exited', 'terminated']);
+      expect(exitedBodies()).toEqual([{ exitCode: 0 }]);
+      expect(disconnectStub).not.toHaveBeenCalled();
+    });
+
+    it('sends the disconnect first when terminated arrives with no status seen (the debug-mode order), then exited, then terminated', async () => {
+      wireHandlers({ onDisconnect: () => {
+        connectionHandlers.onOutput?.(STATUS_LINE(7));
+        connectionHandlers.onOutput?.(DETACHING);
+      } });
+
+      await connectionHandlers.onTerminated?.({});
+
+      expect(disconnectStub).toHaveBeenCalledTimes(1);
+      expect(disconnectStub).toHaveBeenCalledWith(mockDapClient, true);
+      expect(eventNames()).toEqual(['output', 'output', 'exited', 'terminated']);
+      // The line itself still reaches the session (and get_output).
+      expect(dapEvents()[0].body).toEqual(STATUS_LINE(7));
+      expect(exitedBodies()).toEqual([{ exitCode: 7 }]);
+    });
+
+    it('reports exit code 0 as a code, not as absent', async () => {
+      wireHandlers({ onDisconnect: () => { connectionHandlers.onOutput?.(STATUS_LINE(0)); } });
+
+      await connectionHandlers.onTerminated?.({});
+
+      expect(exitedBodies()).toEqual([{ exitCode: 0 }]);
+    });
+
+    it('forwards terminated alone when the adapter prints no status (nothing is guessed)', async () => {
+      wireHandlers({ onDisconnect: () => { connectionHandlers.onOutput?.(DETACHING); } });
+
+      await connectionHandlers.onTerminated?.({});
+
+      expect(disconnectStub).toHaveBeenCalledTimes(1);
+      expect(eventNames()).toEqual(['output', 'terminated']);
+    });
+
+    it('keeps a real exited event authoritative and sends no early disconnect', async () => {
+      wireHandlers({ onDisconnect: () => { connectionHandlers.onOutput?.(STATUS_LINE(0)); } });
+
+      await connectionHandlers.onExited?.({ exitCode: 3 });
+      await connectionHandlers.onTerminated?.({});
+
+      expect(exitedBodies()).toEqual([{ exitCode: 3 }]);
+      expect(disconnectStub).not.toHaveBeenCalled();
+    });
+
+    it("survives Delve's second terminated (sent after the disconnect response): one exited, one disconnect", async () => {
+      let second: unknown;
+      wireHandlers({ onDisconnect: () => {
+        connectionHandlers.onOutput?.(STATUS_LINE(0));
+        second = connectionHandlers.onTerminated?.({});
+      } });
+
+      await connectionHandlers.onTerminated?.({});
+      await second;
+
+      expect(exitedBodies()).toEqual([{ exitCode: 0 }]);
+      expect(disconnectStub).toHaveBeenCalledTimes(1);
+      expect(shutdownSpy).toHaveBeenCalled();
+    });
+
+    it('asks the adapter to leave an attached target alive', async () => {
+      wireHandlers({ attach: true, onDisconnect: () => { connectionHandlers.onOutput?.(STATUS_LINE(0)); } });
+
+      await connectionHandlers.onTerminated?.({});
+
+      expect(disconnectStub).toHaveBeenCalledWith(mockDapClient, false);
+      expect(exitedBodies()).toEqual([{ exitCode: 0 }]);
+    });
+
+    it('parses the line but never reorders the shutdown for a policy that does not declare exitStatusReportedOnDisconnect', async () => {
+      wireHandlers({ policy: { ...GoAdapterPolicy, exitStatusReportedOnDisconnect: false }, onDisconnect: () => { connectionHandlers.onOutput?.(STATUS_LINE(0)); } });
+
+      await connectionHandlers.onTerminated?.({});
+
+      expect(disconnectStub).not.toHaveBeenCalled();
+      expect(eventNames()).toEqual(['terminated']);
+    });
+
+    it('closes the DAP mirror before the early disconnect, as the ordinary shutdown does (#217)', async () => {
+      const mirrorStop = vi.fn(async () => undefined);
+      wireHandlers({ onDisconnect: () => { connectionHandlers.onOutput?.(STATUS_LINE(0)); } });
+      (worker as any).mirrorServer = { stop: mirrorStop };
+
+      await connectionHandlers.onTerminated?.({});
+
+      expect(mirrorStop).toHaveBeenCalledWith({ notifyClients: true });
+      expect(mirrorStop.mock.invocationCallOrder[0]).toBeLessThan(disconnectStub.mock.invocationCallOrder[0]);
+      expect((worker as any).mirrorServer).toBeNull();
+      expect(exitedBodies()).toEqual([{ exitCode: 0 }]);
+    });
+
+    it('does nothing for a policy without the hook, even when the output looks like Delve', async () => {
+      wireHandlers({ policy: PythonAdapterPolicy });
+      connectionHandlers.onOutput?.(STATUS_LINE(5));
+
+      await connectionHandlers.onTerminated?.({});
+
+      expect(eventNames()).toEqual(['output', 'terminated']);
+      expect(disconnectStub).not.toHaveBeenCalled();
+    });
+
+    it('lets the real shutdown skip the disconnect the terminated slot already sent', async () => {
+      wireHandlers({ spyShutdown: false, onDisconnect: () => { connectionHandlers.onOutput?.(STATUS_LINE(0)); } });
+
+      await connectionHandlers.onTerminated?.({});
+      await (worker as any).shutdownPromise;
+
+      expect(disconnectStub).toHaveBeenCalledTimes(1);
+      expect(exitedBodies()).toEqual([{ exitCode: 0 }]);
+      expect(worker.getState()).toBe(ProxyState.TERMINATED);
+    });
+
+    it('sends no second disconnect when a shutdown is already under way (close_debug_session mid-run)', async () => {
+      wireHandlers({ spyShutdown: false });
+
+      const closing = worker.shutdown();
+      // Delve answers the shutdown's disconnect with a terminated of its own.
+      const late = connectionHandlers.onTerminated?.({});
+      await Promise.all([closing, late]);
+
+      expect(disconnectStub).toHaveBeenCalledTimes(1);
+      expect(exitedBodies()).toEqual([]);
+      expect(eventNames()).toEqual(['terminated']);
+    });
+  });
+
   describe('DAP mirror (issue #217)', () => {
     interface FakeMirror {
       start: Mock;

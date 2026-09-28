@@ -382,6 +382,40 @@ export interface AdapterPolicy {
   annotateOutputEvent?(category: string, text: string): string | undefined;
 
   /**
+   * Read the debuggee's exit code out of a DAP 'output' event, for adapters
+   * that state it only as console text and never send `exited` (issue #753 —
+   * Delve prints `Process N has exited with status S`). Consulted by the proxy
+   * worker on every output event, which is still forwarded unchanged so
+   * get_output keeps the adapter's line; the first code returned is replayed
+   * as a synthesized DAP `exited` event ahead of `terminated`, exactly as the
+   * js-debug shim's recorded code (#247) and rdbg's process status (#258)
+   * are. Implementations must be conservative: match the adapter's own
+   * console category and its exact wording — never debuggee stdout — and
+   * return undefined for anything that is not a real exit code (a negative
+   * status is a signal kill, not a code). Optional — absent means the worker
+   * never parses output for a code. Pair it with
+   * exitStatusReportedOnDisconnect when the adapter prints the line only in
+   * reply to `disconnect`.
+   *
+   * @param category The DAP output category ('stdout', 'stderr', 'console', ...)
+   * @param text The event's output text (may span multiple lines)
+   */
+  debuggeeExitCodeFromOutput?(category: string, text: string): number | undefined;
+
+  /**
+   * True when the adapter states the exit status (the line
+   * debuggeeExitCodeFromOutput reads) only in reply to the DAP `disconnect`
+   * request — Delve in debug mode (issue #753). The proxy worker then sends
+   * the disconnect BEFORE forwarding `terminated` whenever `terminated`
+   * arrives with no status observed (closing the DAP mirror first, as the
+   * ordinary shutdown does), so the code can still be replayed as `exited`
+   * ahead of `terminated`; without this flag the worker only parses lines
+   * that arrive on their own and never reorders its shutdown. Bounded by the
+   * disconnect request's own 1 s cap. Optional — absent means false.
+   */
+  exitStatusReportedOnDisconnect?: boolean;
+
+  /**
    * Normalize an adapter-specific DAP stop reason into a canonical reason
    * ('pause', 'breakpoint', 'step', 'exception', ...). Some adapters report
    * misleading raw reasons — e.g. CodeLLDB surfaces a user-initiated pause as

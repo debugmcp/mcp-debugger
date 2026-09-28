@@ -167,6 +167,10 @@ Note: goroutines reach the MCP tools as DAP threads. `list_threads` returns them
 
 The Go adapter supports exception breakpoints with two built-in filters: `unrecovered-panic` (break on unrecovered panics) and `runtime-fatal-throw` (break on fatal runtime errors). Delve has no caught/uncaught distinction, so both the `uncaught` and `all` exception break modes arm the same two filters; launch sessions default to `breakOnExceptions: "uncaught"`, which arms both, and launch is the only mode Go has. These are declared in the adapter's capabilities and sent to Delve during session configuration. Custom exception breakpoint configuration can also be provided via `dapLaunchArgs`.
 
+### Exit Code
+
+Delve never sends a DAP `exited` event; it prints `Process N has exited with status S` to the console instead — under `noDebug` before `terminated`, and in debug mode only in reply to the `disconnect` request. mcp-debugger reads that line back (issue #753), so `exitCode` appears in `list_debug_sessions` and in the `start_debugging` run-to-completion summary exactly as for every other language, and the line itself stays visible in `get_output` (with Delve's `Detaching`). A session closed while the program is still running reports no code — Delve prints `Detaching and terminating target process` instead, and nothing is guessed.
+
 ## Debugging Tips
 
 1. **Always build with debug flags**: Use `-gcflags="all=-N -l"` to disable optimizations

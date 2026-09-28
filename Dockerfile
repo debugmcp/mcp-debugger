@@ -138,6 +138,7 @@ RUN rm -rf /app/node_modules/@debugmcp && \
     cp /app/packages/adapter-python/package.json /app/node_modules/@debugmcp/adapter-python/ && \
     cp -r /app/packages/adapter-javascript/dist /app/node_modules/@debugmcp/adapter-javascript/ && \
     cp -r /app/packages/adapter-javascript/vendor /app/node_modules/@debugmcp/adapter-javascript/ && \
+    cp -r /app/packages/adapter-javascript/assets /app/node_modules/@debugmcp/adapter-javascript/ && \
     cp /app/packages/adapter-javascript/package.json /app/node_modules/@debugmcp/adapter-javascript/ && \
     mkdir -p /app/node_modules/@debugmcp/adapter-javascript/node_modules && \
     cp -rL /app/packages/adapter-javascript/node_modules/dotenv /app/node_modules/@debugmcp/adapter-javascript/node_modules/ && \
@@ -174,7 +175,7 @@ FROM rust:1.98.0-slim@sha256:17d1ba895198f9934c6314ec5346a0d5115372f3243390c3d73
 RUN cp -r "$(rustc --print sysroot)/lib/rustlib/etc" /rust-etc
 
 # Stage 2: Create runtime image with full LLDB dependencies
-FROM ubuntu:26.04@sha256:513c074113a871b51a8d16ab445c88779d6452d937a164fb5cc479f32668a41d
+FROM ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78
 # Disabled languages: go has no attach implementation and no Delve here,
 # dotnet has no netcoredbg here. Ruby is intentionally present but attach-only
 # (adapter shipped, no Ruby runtime — attach connects directly to a remote
@@ -271,6 +272,11 @@ COPY --from=builder /app/node_modules/.pnpm/isexe@4.0.0/node_modules/isexe /app/
 # Dynamic adapters run outside the server bundle. Fail the build if their
 # runtime dependency copy is incomplete, instead of shipping a broken launch.
 RUN node --input-type=module -e "await import('@debugmcp/adapter-javascript')"
+
+# The JavaScript adapter's exit-code preload (issue #796): js-debug never
+# sends a DAP exited event, so exitCode comes from this shim, which the
+# adapter degrades silently without. Fail the build if the copy is missing.
+RUN test -f /app/node_modules/@debugmcp/adapter-javascript/assets/exitcode-shim.cjs
 
 # Expose ports
 EXPOSE 3001 5679
