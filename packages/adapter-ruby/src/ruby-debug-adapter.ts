@@ -350,14 +350,20 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
       request: 'launch',
       name: 'Ruby: Current File',
       script,
-      localfs: rawConfig.localfs === false ? false : true,
+      // rdbg's attach handler — the one the launch goes through (issue #798)
+      // — reads `localfs || localfsMap` with no default, where its launch
+      // handler defaulted to true: `localfs: false` is only meaningful next
+      // to a map, and alone it would leave rdbg with no path mapping at all
+      // (every setBreakpoints refused).
+      localfs: rawConfig.localfs === false && typeof rawConfig.localfsMap === 'string' ? false : true,
       debugPort: typeof rawConfig.debugPort === 'string' ? rawConfig.debugPort : undefined,
       useTerminal: false,
       showProtocolLog: process.env.DEBUG === '1' || process.env.DEBUG === 'true',
       stopOnEntry: config.stopOnEntry ?? false,
       // The launch is sent as a DAP `attach` (the policy's launchRequestCommand)
-      // because only rdbg's attach handler honours nonstop (issue #798).
-      nonstop: !(config.stopOnEntry ?? false),
+      // because only rdbg's attach handler honours nonstop (issue #798). An
+      // explicit `nonstop` from adapterLaunchConfig wins, like localfs above.
+      nonstop: typeof rawConfig.nonstop === 'boolean' ? rawConfig.nonstop : !(config.stopOnEntry ?? false),
       justMyCode: config.justMyCode ?? true,
       cwd: config.cwd ?? process.cwd()
     };

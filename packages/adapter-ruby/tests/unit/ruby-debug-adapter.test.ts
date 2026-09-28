@@ -287,6 +287,23 @@ describe('RubyDebugAdapter', () => {
     expect(config.stopOnEntry).toBe(stopOnEntry ?? false);
   });
 
+  it('honours an explicit nonstop from the launch config over the stopOnEntry derivation (issue #798)', async () => {
+    const adapter = new RubyDebugAdapter(createDependencies());
+    const held = await adapter.transformLaunchConfig({ program: '/workspace/app.rb', nonstop: false } as LanguageSpecificLaunchConfig);
+    expect(held.nonstop).toBe(false);
+    const released = await adapter.transformLaunchConfig({ program: '/workspace/app.rb', stopOnEntry: true, nonstop: true } as LanguageSpecificLaunchConfig);
+    expect(released.nonstop).toBe(true);
+  });
+
+  it('sends localfs: false only next to a localfsMap, since rdbg\'s attach handler has no default (issue #798)', async () => {
+    const adapter = new RubyDebugAdapter(createDependencies());
+    const alone = await adapter.transformLaunchConfig({ program: '/workspace/app.rb', localfs: false } as LanguageSpecificLaunchConfig);
+    expect(alone.localfs).toBe(true);
+    const mapped = await adapter.transformLaunchConfig({ program: '/workspace/app.rb', localfs: false, localfsMap: '/local:/remote' } as LanguageSpecificLaunchConfig);
+    expect(mapped.localfs).toBe(false);
+    expect(mapped.localfsMap).toBe('/local:/remote');
+  });
+
   it('transforms attach config for an existing rdbg port', () => {
     const adapter = new RubyDebugAdapter(createDependencies());
     const config = adapter.transformAttachConfig({

@@ -319,17 +319,26 @@ describe('RubyAdapterPolicy behavior surface', () => {
     expect(RubyAdapterPolicy.getInitializationBehavior().launchRequestCommand).toBe('attach');
   });
 
-  it('reports rdbg\'s unrequested load-time pause as the entry stop (issue #798)', () => {
+  it('reports rdbg\'s load-time pause as the entry stop only for a launch that asked for one (issue #798)', () => {
     const body = { reason: 'pause', threadId: 1, allThreadsStopped: true } as DebugProtocol.StoppedEvent['body'];
     const counts = { lineBreakpointCount: 0, functionBreakpointCount: 0 };
-    // The stop-at-load pause: nothing asked for it.
-    expect(RubyAdapterPolicy.normalizeStopReason?.('pause', body, { pausePending: false, ...counts })).toBe('entry');
+    const entry = { pausePending: false, sessionMode: 'launch' as const, firstStop: true, stopOnEntry: true, ...counts };
+    // The stop-at-load pause of a stopOnEntry launch: nothing asked for it, first stop, a launch.
+    expect(RubyAdapterPolicy.normalizeStopReason?.('pause', body, entry)).toBe('entry');
     // The user's own pause_execution, or the post-attach pause, stays a pause.
-    expect(RubyAdapterPolicy.normalizeStopReason?.('pause', body, { pausePending: true, pauseSource: 'user', ...counts })).toBeUndefined();
-    expect(RubyAdapterPolicy.normalizeStopReason?.('pause', body, { pausePending: true, pauseSource: 'attach', ...counts })).toBeUndefined();
+    expect(RubyAdapterPolicy.normalizeStopReason?.('pause', body, { ...entry, pausePending: true, pauseSource: 'user' })).toBeUndefined();
+    expect(RubyAdapterPolicy.normalizeStopReason?.('pause', body, { ...entry, pausePending: true, pauseSource: 'attach' })).toBeUndefined();
+    // A real attach's load-time pause is not an entry stop.
+    expect(RubyAdapterPolicy.normalizeStopReason?.('pause', body, { ...entry, sessionMode: 'attach' })).toBeUndefined();
+    // A later pause (a signal delivered to the target) is not the entry stop —
+    // relabelling it would hand it to the stopOnEntry:false auto-continue.
+    expect(RubyAdapterPolicy.normalizeStopReason?.('pause', body, { ...entry, firstStop: false })).toBeUndefined();
+    expect(RubyAdapterPolicy.normalizeStopReason?.('pause', body, { ...entry, stopOnEntry: false })).toBeUndefined();
+    // A context that says nothing about the mode maps nothing.
+    expect(RubyAdapterPolicy.normalizeStopReason?.('pause', body, { pausePending: false, ...counts })).toBeUndefined();
     // Other reasons are untouched.
-    expect(RubyAdapterPolicy.normalizeStopReason?.('breakpoint', { ...body, reason: 'breakpoint' }, { pausePending: false, ...counts })).toBeUndefined();
-    expect(RubyAdapterPolicy.normalizeStopReason?.('step', { ...body, reason: 'step' }, { pausePending: false, ...counts })).toBeUndefined();
+    expect(RubyAdapterPolicy.normalizeStopReason?.('breakpoint', { ...body, reason: 'breakpoint' }, entry)).toBeUndefined();
+    expect(RubyAdapterPolicy.normalizeStopReason?.('step', { ...body, reason: 'step' }, entry)).toBeUndefined();
   });
 
   it('answers runInTerminal reverse requests and ignores others', async () => {

@@ -803,9 +803,11 @@ export class DapProxyWorker {
   private async sendTrackedLaunch(payload: ProxyInitPayload): Promise<void> {
     // The DAP verb the launch goes out as: 'launch' unless the policy names
     // 'attach' (rdbg stops at entry only on attach, issue #798). The
-    // handshake stage carries the verb actually sent.
+    // handshake stage stays 'launch' either way: it is what the caller asked
+    // for, and what the init-timeout diagnosis should name — the DAP trace
+    // shows the verb on the wire.
     const requestCommand = this.adapterPolicy.getInitializationBehavior().launchRequestCommand ?? 'launch';
-    const launch = this.trackedHandshakeRequest(requestCommand, () => this.connectionManager!.sendLaunchRequest(
+    const launch = this.trackedHandshakeRequest('launch', () => this.connectionManager!.sendLaunchRequest(
       this.dapClient!,
       payload.scriptPath,
       payload.scriptArgs,

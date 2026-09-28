@@ -595,9 +595,17 @@ export abstract class SessionManagerCore extends EventEmitter {
         const userBreakpointIds: ReadonlySet<number> | undefined =
           lineComplete && fnComplete ? new Set([...lineIds, ...fnIds]) : undefined;
         pauseIntent = getCurrentPauseIntent(session);
+        // Mode facts for policies whose adapter reports a launch's entry stop
+        // under a generic reason (rdbg's `pause`, issue #798): a launch or an
+        // attach, the first stop or a later one, and whether the launch asked
+        // for an entry stop at all.
+        const stopArgs = effectiveLaunchArgs as Record<string, unknown>;
         const normalized = policy.normalizeStopReason?.(rawReason, body, {
           pausePending: pauseIntent !== undefined,
           ...(pauseIntent ? { pauseSource: pauseIntent.source } : {}),
+          sessionMode: stopArgs.request === 'attach' || stopArgs.__attachMode === true ? 'attach' : 'launch',
+          firstStop: !session.firstStopHandled,
+          stopOnEntry: effectiveLaunchArgs.stopOnEntry === true,
           userBreakpointIds,
           functionBreakpointIds: fnComplete ? fnIds : undefined,
           lineBreakpointCount: session.breakpoints.size,

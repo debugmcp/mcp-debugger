@@ -91,11 +91,21 @@ export const RubyAdapterPolicy = {
   isSessionReady: (state: SessionState) => state === SessionState.PAUSED,
   // rdbg reports its stop-at-load as `stopped reason: 'pause'` on
   // configurationDone when the launch went out as `attach { nonstop: false }`
-  // (issue #798). Nothing asked for that pause, which is how it is told from
-  // the user's pause_execution and the post-attach pause (both register a
-  // pause intent first): it is the entry stop.
+  // (issue #798). That is the entry stop, and only that: the first stop of a
+  // LAUNCH that asked for one, with no pause intent pending. Every other
+  // rdbg pause stays a pause — the user's pause_execution and the post-attach
+  // pause (both register an intent first), a real attach's load-time pause
+  // (an attach, not a launch), and a signal delivered to the target
+  // (rdbg's suspend_trap): relabelling one of those 'entry' would hand it
+  // to the stopOnEntry:false auto-continue.
   normalizeStopReason: (reason, _body, context) =>
-    reason === 'pause' && !context.pausePending ? 'entry' : undefined,
+    reason === 'pause' &&
+    !context.pausePending &&
+    context.sessionMode === 'launch' &&
+    context.firstStop === true &&
+    context.stopOnEntry === true
+      ? 'entry'
+      : undefined,
   validateExecutable: async (rubyCmd: string): Promise<boolean> => {
     const { spawn } = await import('child_process');
 

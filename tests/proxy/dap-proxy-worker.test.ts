@@ -1721,15 +1721,15 @@ describe('DapProxyWorker', () => {
           .map(([m]) => m as StatusMessage & { pid?: number; stage?: string; command?: string })
           .filter((m) => m.type === 'status' && (m.status === 'adapter_spawned' || m.status === 'dap_handshake_stage'))
           .map((m) => (m.status === 'adapter_spawned' ? `spawned:${m.pid}` : `${m.stage}:${m.command ?? ''}`));
-        // The launch goes out as rdbg's `attach` (issue #798), and the stage
-        // names the verb actually sent.
+        // The launch goes out as rdbg's `attach` (issue #798), but the stage
+        // names the launch the caller asked for.
         expect(progress).toEqual([
           'spawned:4242',
           'transport_connected:',
           'request_pending:initialize',
           'response_received:initialize',
-          'request_pending:attach',
-          'response_received:attach'
+          'request_pending:launch',
+          'response_received:launch'
         ]);
       });
 
@@ -2755,11 +2755,12 @@ describe('DapProxyWorker', () => {
       expect(connectionStub.sendLaunchRequest).toHaveBeenCalledWith(
         mockDapClient, 'app.rb', ['--x'], true, true, { nonstop: false, localfs: true }, 'attach'
       );
+      // The stage names what the caller asked for (a launch), not the wire verb.
       const stages = mockMessageSender.send.mock.calls
         .map(([message]) => message)
         .filter((message) => message.type === 'status' && message.status === 'dap_handshake_stage')
         .map((message) => `${message.stage}:${message.command}`);
-      expect(stages).toEqual(['request_pending:attach', 'response_received:attach']);
+      expect(stages).toEqual(['request_pending:launch', 'response_received:launch']);
     });
 
     it('handleTerminate should auto-detach in attach mode', async () => {

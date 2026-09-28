@@ -57,7 +57,8 @@ async function reservePort(): Promise<number> {
 
 async function createManager(
   scenario: Scenario,
-  initializationTimeoutMs = 6000
+  initializationTimeoutMs = 6000,
+  language: DebugLanguage = DebugLanguage.RUBY
 ): Promise<{ manager: ProxyManager; config: ProxyConfig }> {
   const port = await reservePort();
   const sessionId = `adversarial-dap-${process.pid}-${++sessionSequence}`;
@@ -80,7 +81,7 @@ async function createManager(
     manager,
     config: {
       sessionId,
-      language: DebugLanguage.RUBY,
+      language,
       executablePath: process.execPath,
       adapterHost: '127.0.0.1',
       adapterPort: port,
@@ -89,7 +90,7 @@ async function createManager(
       stopOnEntry: false,
       justMyCode: true,
       launchConfig: {
-        type: 'rdbg',
+        type: language === DebugLanguage.RUBY ? 'rdbg' : language,
         request: 'launch',
         script: path.join(tempDir, 'target.rb'),
         stopOnEntry: false
@@ -141,8 +142,8 @@ describe.sequential('adversarial TCP DAP adapter', () => {
   });
 
   // The Ruby policy sends its launch as rdbg's `attach` verb (issue #798), so
-  // the launch-stage scenarios key on `attach` and the diagnosis names the
-  // request that was actually on the wire.
+  // the launch-stage scenarios key on `attach` — the request on the wire —
+  // while the diagnosis still names the launch the caller asked for.
   it('reports the launch stage when initialize recovers but launch never responds', async () => {
     const { manager, config } = await createManager({
       commands: {
@@ -157,11 +158,33 @@ describe.sequential('adversarial TCP DAP adapter', () => {
     const error = await captureError(manager.start(config));
 
     expect(error.message).toContain('within 4.5s');
-    expect(error.message).toContain('the "attach" request never received a response');
+    expect(error.message).toContain('the "launch" request never received a response');
     expect(error.message).toMatch(/adapter process is running \(PID \d+\)/);
     expect(error.initProgress).toMatchObject({
       transportConnected: true,
-      pendingCommand: 'attach'
+      pendingCommand: 'launch'
+    });
+  });
+
+  it('reports the launch stage for a policy that launches as a plain DAP launch (go)', async () => {
+    // The verb every other adapter uses; keeps the default requestCommand
+    // path of the handshake integration-tested now that Ruby launches as
+    // attach. Go, like Ruby, sends its launch before configurationDone and
+    // waits for the answer, so a dropped launch response stalls the handshake.
+    const { manager, config } = await createManager({
+      commands: {
+        initialize: { eventsAfterResponse: [{ event: 'initialized' }] },
+        launch: { dropResponse: true }
+      }
+    }, 4500, DebugLanguage.GO);
+
+    const error = await captureError(manager.start(config));
+
+    expect(error.message).toContain('within 4.5s');
+    expect(error.message).toContain('the "launch" request never received a response');
+    expect(error.initProgress).toMatchObject({
+      transportConnected: true,
+      pendingCommand: 'launch'
     });
   });
 
