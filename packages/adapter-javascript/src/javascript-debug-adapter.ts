@@ -922,9 +922,11 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     }
 
     if (!shimPath) {
-      this.dependencies.logger?.warn?.(
-        '[JavascriptDebugAdapter] exitcode-shim.cjs not found; debuggee exit code will not be captured'
-      );
+      // Not a caller key: a launch-scoped notice the launcher renders as-is, so
+      // the first launch says it instead of the server log alone (issue #796).
+      const message = `exit codes will not be captured: exitcode-shim.cjs not found (looked in ${candidates.join(', ')})`;
+      this.dependencies.logger?.warn?.(`[JavascriptDebugAdapter] ${message}`);
+      this.launchConfigDiagnostics.push({ key: 'exitcode-shim.cjs', scope: 'launch', message });
       return;
     }
 

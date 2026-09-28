@@ -273,7 +273,8 @@ The message names the reason, and each one is by design:
 - *"Cannot restart an attach session…"* — there is no launch configuration to replay.
   Detach and attach again instead.
 - *"Nothing to restart: this session has not been launched…"* — `start_debugging` has not
-  run, or only a dry run (`dryRunSpawn: true`) was performed.
+  run, or only a dry run (`dryRunSpawn: true`) was performed. Call `start_debugging` on the
+  same session: a dry run leaves it usable, and the breakpoints already set apply to the real launch.
 - *"A launch/restart/attach/detach is already in progress for this session…"* — another
   launch-shaped call has not returned yet. Not specific to `restart_debugging`; see
   [A Launch-Shaped Call Is Refused as "Already in Progress"](#a-launch-shaped-call-is-refused-as-already-in-progress).

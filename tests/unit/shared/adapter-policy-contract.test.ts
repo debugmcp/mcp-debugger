@@ -332,6 +332,11 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
 
     expect(policy.getDebuggerConfiguration()).toBeTypeOf('object');
 
+    // A console-reported exit code (issue #753) is read from the adapter's own
+    // console text only — never from debuggee stdout, never from arbitrary text.
+    expect(policy.debuggeeExitCodeFromOutput?.('stdout', 'Process 1 has exited with status 7\n')).toBeUndefined();
+    expect(policy.debuggeeExitCodeFromOutput?.('console', 'Hello, World!\n')).toBeUndefined();
+
     const clientBehavior = policy.getDapClientBehavior();
     expect(clientBehavior).toBeTypeOf('object');
     if (clientBehavior.childInitTimeout !== undefined) {
