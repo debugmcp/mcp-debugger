@@ -317,7 +317,7 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
       if (!cobc) {
         warnings.push({
           code: 'COBC_NOT_FOUND',
-          message: 'GnuCOBOL (cobc) not found. Prebuilt-executable debugging still works at the engine level, but source launch and the COBOL symbol manifest (COBOL-shaped variables) need cobc: install GnuCOBOL 3.1.2+ (apt gnucobol3, brew gnucobol, MSYS2 mingw-w64-x86_64-gnucobol) or set COBC_PATH.'
+          message: 'GnuCOBOL (cobc) not found. Prebuilt-executable debugging still works at the engine level, but source launch and the COBOL symbol manifest (COBOL-shaped variables) need cobc: install GnuCOBOL 3.1.2+ (apt gnucobol3, brew gnucobol, MSYS2 mingw-w64-ucrt-x86_64-gnucobol) or set COBC_PATH.'
         });
       }
     } catch (error) {
@@ -337,7 +337,7 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
         name: 'GnuCOBOL (cobc)',
         version: '3.1.2+',
         required: false,
-        installCommand: 'apt install gnucobol3 (Debian/Ubuntu), brew install gnucobol (macOS), pacman -S mingw-w64-x86_64-gnucobol (MSYS2 on Windows)'
+        installCommand: 'apt install gnucobol3 (Debian/Ubuntu), brew install gnucobol (macOS), pacman -S mingw-w64-ucrt-x86_64-gnucobol (MSYS2 on Windows)'
       }
     ];
   }
@@ -980,7 +980,7 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
       'COBOL debugging needs CodeLLDB (vendored / @debugmcp/codelldb-* packages / CODELLDB_PATH) and, for source launch and COBOL-shaped variables, GnuCOBOL 3.1.2+:',
       '  Debian/Ubuntu: apt install gnucobol3',
       '  macOS: brew install gnucobol',
-      '  Windows: MSYS2, then pacman -S mingw-w64-x86_64-gnucobol (set COBC_PATH if cobc is not on PATH)',
+      '  Windows: MSYS2, then pacman -S mingw-w64-ucrt-x86_64-gnucobol (set COBC_PATH if cobc is not on PATH)',
       'Programs are compiled with: cobc -x -g -fdump=ALL --save-temps -A "-O0 -gdwarf-4" (DWARF-4 is required for LLDB line breakpoints on MinGW).'
     ].join('\n');
   }

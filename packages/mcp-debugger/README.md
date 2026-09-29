@@ -86,7 +86,7 @@ All language adapters are bundled into the CLI package. No separate installation
 - **Java**: JDK 21+ (compile targets with `javac -g`)
 - **.NET**: netcoredbg + a compatible .NET runtime (Portable PDBs)
 - **C/C++**: none for prebuilt binaries (CodeLLDB vendored); a compiler (g++/clang++) only for lone-source-file launch
-- **COBOL**: GnuCOBOL 3.1.2+ (`cobc`: `apt install gnucobol3`, `brew install gnucobol`, MSYS2 `mingw-w64-x86_64-gnucobol`) for source launch and COBOL-shaped variables; CodeLLDB vendored
+- **COBOL**: GnuCOBOL 3.1.2+ (`cobc`: `apt install gnucobol3`, `brew install gnucobol`, MSYS2 `mingw-w64-ucrt-x86_64-gnucobol`) for source launch and COBOL-shaped variables; CodeLLDB vendored
 
 > **CodeLLDB platform note:** the CodeLLDB debug engine ships via per-platform optional dependencies (`@debugmcp/codelldb-<platform>`) — npm installs exactly the one matching your os/cpu, so Rust, C/C++ and COBOL debugging work out of the box on Windows, macOS, and Linux. Installs with `--omit=optional` skip it; point `CODELLDB_PATH` at a [CodeLLDB](https://github.com/vadimcn/codelldb/releases) binary instead, or use the Docker image.
 
