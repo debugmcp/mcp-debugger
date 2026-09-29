@@ -1,8 +1,8 @@
 /**
  * waitForLaunchReadiness: which signals settle a launch that was not already
- * ready after the handshake, and what each settlement reports. The module had
- * no direct tests before; these pin the outcomes over a bare proxy-manager
- * emitter.
+ * ready after the handshake, and what each settlement reports (issue #815
+ * added the caller's ceiling and the outcome). These pin the outcomes over a
+ * bare proxy-manager emitter.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';

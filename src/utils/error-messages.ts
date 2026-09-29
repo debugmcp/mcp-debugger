@@ -175,8 +175,8 @@ export const ErrorMessages = {
         `The session will report 'paused' when it does — check list_debug_sessions, or call ` +
         `pause_execution to interrupt.`
       : `The program is still running after ${graceSeconds}s and nothing is armed to stop it soon ` +
-        `(no breakpoints, no entry stop, no caught-exception filter): it will pause on an uncaught ` +
-        `exception where that filter is on, or report its exit. Check list_debug_sessions or ` +
+        `(no breakpoints, no entry stop, no caught-exception filter): it will stop only for an uncaught ` +
+        `exception the debugger catches by default, or report its exit. Check list_debug_sessions or ` +
         `get_output, or set breakpoints and call restart_debugging.`,
 
 

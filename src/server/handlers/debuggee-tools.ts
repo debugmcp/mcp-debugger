@@ -37,10 +37,10 @@ export const startDebuggingTool: ToolHandler = async (ctx, args) => {
     if (debugResult.data) {
       responsePayload.data = debugResult.data;
     }
-    // `pending` is part of the public tool-result contract, like the step
-    // tools' (issue #598): a launch answered while the program still runs —
-    // nothing armed stopped it within the readiness window (issue #815) — is
-    // visible at the top level.
+    // `pending` is part of the public tool-result contract, as for the step
+    // tools (issue #144) and attach_to_process (issue #598): a launch answered
+    // while the program still runs — nothing armed stopped it within the
+    // readiness window (issue #815) — is visible at the top level.
     if (debugResult.data?.pending) {
       responsePayload.pending = true;
     }
