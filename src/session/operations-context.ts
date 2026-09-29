@@ -41,6 +41,8 @@ export interface OperationsTunables {
   readonly attachPauseStopTimeoutMs: number;
   readonly stepGraceMs: number;
   readonly pauseGraceMs: number;
+  readonly launchReadyCeilingMs: number;
+  readonly launchGraceMs: number;
 }
 
 /**
@@ -142,6 +144,7 @@ export type LaunchContext = Pick<
   | 'adapterRegistry'
   | 'launchValidationCache'
   | 'dryRunTimeoutMs'
+  | 'tunables'
   | 'getSession'
   | 'updateSession'
   | 'updateState'

@@ -1753,18 +1753,127 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       };
       const selectPolicySpy = vi.spyOn(operations as any, 'selectPolicy').mockReturnValue(policy as any);
 
+      // Nothing is armed to stop this launch, so the wait is the short grace
+      // window (issue #815), and the session never left INITIALIZING: the
+      // adapter, not the program, is what did not answer.
       const startPromise = operations.startDebugging('test-session', 'timeout.py');
-      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(5000);
       const result = await startPromise;
 
       expect(mockLogger.warn).toHaveBeenCalledWith(
         expect.stringContaining('Timed out waiting for debug adapter to be ready')
       );
       expect(result.success).toBe(true);
+      expect(result.data?.pending).toBeUndefined();
 
       startProxySpy.mockRestore();
       selectPolicySpy.mockRestore();
       vi.useRealTimers();
+    });
+
+    // A launch that never stops (issue #815): every policy but js-debug is
+    // ready only on a pause, and the real proxy reports adapter-configured
+    // before the readiness wait listens, so the wait settles only on a stop,
+    // an exit, or its ceiling. The ceiling is short when nothing is armed to
+    // stop the program, the full 30 s when something is — and either way the
+    // answer says the program is still running, with pending: true.
+    describe('readiness ceiling for a launch that never stops (issue #815)', () => {
+      function proxyThatConfiguresAndRuns(): any {
+        const proxyStub: any = {
+          hasDryRunCompleted: vi.fn().mockReturnValue(false),
+          once: vi.fn(),
+          removeListener: vi.fn(),
+          on: vi.fn(),
+          off: vi.fn(),
+          sendDapRequest: vi.fn().mockResolvedValue(undefined),
+          isRunning: vi.fn().mockReturnValue(true)
+        };
+        proxyStub.once.mockReturnValue(proxyStub);
+        proxyStub.removeListener.mockReturnValue(proxyStub);
+        proxyStub.on.mockReturnValue(proxyStub);
+        proxyStub.off.mockReturnValue(proxyStub);
+        return proxyStub;
+      }
+
+      function arrangeRunningLaunch() {
+        vi.useFakeTimers();
+        mockSession.proxyManager = undefined;
+        mockSession.state = SessionState.INITIALIZING;
+        const proxyStub = proxyThatConfiguresAndRuns();
+        const startProxySpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
+          // The core projected RUNNING on adapter-configured before start() resolved.
+          mockSession.proxyManager = proxyStub;
+          mockSession.state = SessionState.RUNNING;
+          return {};
+        });
+        const policy = { isSessionReady: (state: SessionState) => state === SessionState.PAUSED };
+        const selectPolicySpy = vi.spyOn(operations as any, 'selectPolicy').mockReturnValue(policy as any);
+        return {
+          restore: () => { startProxySpy.mockRestore(); selectPolicySpy.mockRestore(); vi.useRealTimers(); }
+        };
+      }
+
+      it('answers a launch with nothing armed after the short grace window, pending and still running', async () => {
+        const { restore } = arrangeRunningLaunch();
+        try {
+          const startPromise = operations.startDebugging('test-session', 'server.py');
+          await vi.advanceTimersByTimeAsync(4999);
+          let settled = false;
+          void startPromise.then(() => { settled = true; });
+          await Promise.resolve();
+          expect(settled).toBe(false);
+          await vi.advanceTimersByTimeAsync(1);
+          const result = await startPromise;
+
+          expect(result.success).toBe(true);
+          expect(result.state).toBe(SessionState.RUNNING);
+          expect(result.data?.pending).toBe(true);
+          expect(result.data?.message).toMatch(/Current state: running/);
+          expect(result.data?.message).toMatch(/still running after 5s/);
+          expect(result.data?.message).toMatch(/nothing is armed to stop it/);
+          expect(mockLogger.warn).not.toHaveBeenCalledWith(
+            expect.stringContaining('Timed out waiting for debug adapter to be ready')
+          );
+        } finally {
+          restore();
+        }
+      });
+
+      it('keeps the full ceiling when a breakpoint is armed, then says what was not reached', async () => {
+        const { restore } = arrangeRunningLaunch();
+        mockSession.breakpoints.set('bp1', { id: 'bp1', file: '/work/server.py', line: 12, verified: false });
+        try {
+          const startPromise = operations.startDebugging('test-session', 'server.py');
+          let settled = false;
+          void startPromise.then(() => { settled = true; });
+          await vi.advanceTimersByTimeAsync(29_999);
+          expect(settled).toBe(false);
+          await vi.advanceTimersByTimeAsync(1);
+          const result = await startPromise;
+
+          expect(result.state).toBe(SessionState.RUNNING);
+          expect(result.data?.pending).toBe(true);
+          expect(result.data?.message).toMatch(/still running after 30s without reaching 1 breakpoint\(s\)/);
+        } finally {
+          mockSession.breakpoints.clear();
+          restore();
+        }
+      });
+
+      it('shrinks with the launchGraceMs tunable', async () => {
+        const { restore } = arrangeRunningLaunch();
+        (operations as unknown as { launchGraceMs: number }).launchGraceMs = 1000;
+        try {
+          const startPromise = operations.startDebugging('test-session', 'server.py');
+          await vi.advanceTimersByTimeAsync(1000);
+          const result = await startPromise;
+          expect(result.data?.pending).toBe(true);
+          expect(result.data?.message).toMatch(/still running after 1s/);
+        } finally {
+          (operations as unknown as { launchGraceMs: number }).launchGraceMs = 5000;
+          restore();
+        }
+      });
     });
   });
 

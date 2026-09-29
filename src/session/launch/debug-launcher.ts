@@ -37,7 +37,8 @@ import {
   logProxyFailure,
   sessionRemovedDuringTeardown
 } from './proxy-failure-diagnostics.js';
-import { waitForLaunchReadiness } from './launch-readiness.js';
+import { waitForLaunchReadiness, type LaunchReadinessOutcome } from './launch-readiness.js';
+import { describeLaunchArming } from './launch-arming.js';
 import type { ProxyLauncher } from './proxy-launcher.js';
 import type { InFlightGuard } from '../in-flight-guard.js';
 import { adapterVerifiedABreakpoint } from '../debugger-off.js';
@@ -317,9 +318,10 @@ export class DebugLauncher {
       debuggerOff && adapterLaunchConfig?.stopOnEntry !== undefined
         ? { ...adapterLaunchConfig, stopOnEntry: false }
         : adapterLaunchConfig;
-    // Likewise readiness: python/go/cpp count only a pause as ready (they
-    // always request an entry stop and auto-continue), which cannot happen
-    // here — running is ready, and so is a pause that came anyway.
+    // Likewise readiness: every policy but js-debug counts only a pause as
+    // ready (their adapters default stopOnEntry to false; the pause they wait
+    // for is the first breakpoint), which cannot happen here — running is
+    // ready, and so is a pause that came anyway.
     const isReady = (state: SessionState): boolean =>
       debuggerOff
         ? state === SessionState.RUNNING || state === SessionState.PAUSED
@@ -498,12 +500,28 @@ export class DebugLauncher {
       }
 
       // Use policy-defined readiness criteria when available.
-      const sessionStateAfterHandshake = this.ctx.getSession(sessionId).state;
+      const sessionAfterHandshake = this.ctx.getSession(sessionId);
+      const sessionStateAfterHandshake = sessionAfterHandshake.state;
       const alreadyReady = isReady(sessionStateAfterHandshake);
 
+      // What could stop the program soon decides how long its first stop gets
+      // (issue #815): the full ceiling when breakpoints, an entry stop or a
+      // caught-exception filter are armed, a short grace window when nothing
+      // is. Every policy but js-debug is ready only on a pause, and the real
+      // proxy reports adapter-configured before the wait below can listen, so
+      // an unarmed launch that never stops (a server, a long loop) used to be
+      // answered after 30 s with no word about the wait. Read after the
+      // handshake: the adapter's capabilities (logpoints) are known by now.
+      const arming = describeLaunchArming(sessionAfterHandshake, effectiveLaunchArgs?.stopOnEntry);
+      const readinessCeilingMs = arming.armed
+        ? this.ctx.tunables.launchReadyCeilingMs
+        : this.ctx.tunables.launchGraceMs;
+      let readiness: LaunchReadinessOutcome = 'configured';
       if (!alreadyReady) {
-        // Wait for adapter to be configured, first stop event, or termination
-        await waitForLaunchReadiness(this.ctx, { session, sessionId, policy: readinessPolicy, dapLaunchArgs: effectiveLaunchArgs });
+        // Wait for adapter to be configured, first stop event, termination, or the ceiling
+        readiness = await waitForLaunchReadiness(this.ctx, {
+          session, sessionId, policy: readinessPolicy, dapLaunchArgs: effectiveLaunchArgs, ceilingMs: readinessCeilingMs
+        });
       } else {
         this.ctx.logger.info(
           `[SessionManager] Session ${sessionId} already ${sessionStateAfterHandshake} after handshake - skipping adapter readiness wait`
@@ -633,6 +651,15 @@ export class DebugLauncher {
           ? buildRunToCompletionSummary(finalSession)
           : undefined;
 
+      // The wait ran out while the program kept running (issue #815): say so,
+      // and what was or was not armed, with pending: true the way a step that
+      // has not landed does — the stop, if one comes, shows in
+      // list_debug_sessions as the state flips to paused.
+      const stillRunning =
+        readiness === 'ceiling' && finalState === SessionState.RUNNING
+          ? ErrorMessages.launchStillRunning(readinessCeilingMs / 1000, arming.armed ? arming.summary : undefined)
+          : undefined;
+
       return {
         success: true,
         state: finalState,
@@ -640,7 +667,9 @@ export class DebugLauncher {
           ...(launchWarning ? { warning: launchWarning } : {}),
           message:
             `Debugging started for ${scriptPath}. Current state: ${finalState}` +
-            (runToCompletion ? `. ${runToCompletion.summary}` : ''),
+            (runToCompletion ? `. ${runToCompletion.summary}` : '') +
+            (stillRunning ? `. ${stillRunning}` : ''),
+          ...(stillRunning ? { pending: true } : {}),
           ...(runToCompletion?.data ?? {}),
           // Prefer the actual DAP stop reason (issue #214) — the first stop is
           // not always a breakpoint (e.g. an uncaught exception before any

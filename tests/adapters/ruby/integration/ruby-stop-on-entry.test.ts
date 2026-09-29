@@ -117,9 +117,28 @@ describe.skipIf(!hasRuby)('Ruby launch entry stop (issue #798)', () => {
     expect(output.entries.some(entry => entry.output.includes('15: FizzBuzz'))).toBe(true);
   }, 60_000);
 
+  // A launch with nothing armed to stop it used to wait out the full 30 s
+  // readiness ceiling and then answer `running` with no word about the wait
+  // (issue #815): rdbg reports adapter-configured before the wait listens and
+  // the Ruby policy is ready only on a pause. Now the wait is a short grace
+  // window and the answer says the program is still running.
+  it('answers a launch with nothing armed as running and pending, well before the old 30 s ceiling (issue #815)', async () => {
+    const longRunning = path.join(root, 'examples/ruby/long_running.rb');
+    const before = Date.now();
+    const result = await call<Result & { pending?: boolean }>('start_debugging', { scriptPath: longRunning });
+    const elapsedMs = Date.now() - before;
+    expect(result.success, JSON.stringify(result)).toBe(true);
+    expect(result.state).toBe('running');
+    expect(result.pending).toBe(true);
+    expect(result.message).toMatch(/still running after \d+s/);
+    expect(result.message).toMatch(/nothing is armed to stop it/);
+    expect(elapsedMs, `start_debugging took ${elapsedMs}ms`).toBeLessThan(20_000);
+    expect((await listedSession())?.state).toBe('running');
+  }, 60_000);
+
   it('runs a launch without stopOnEntry to its first breakpoint, as before', async () => {
-    // The default path is unchanged in substance: the attach request goes
-    // out with nonstop: true, rdbg continues by itself on configurationDone,
+    // The default path is unchanged in substance: the launch request goes
+    // out as a plain `launch`, rdbg continues by itself on configurationDone,
     // and the launch pauses at the first breakpoint.
     const bp = await call('set_breakpoint', { file: fizzbuzz, line: 15 });
     expect(bp.success, JSON.stringify(bp)).toBe(true);

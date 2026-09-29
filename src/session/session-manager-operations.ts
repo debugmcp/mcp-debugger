@@ -107,6 +107,18 @@ export abstract class SessionManagerOperations extends SessionManagerData {
   protected pauseGraceMs = 5000;
 
   /**
+   * The readiness wait after a launch's handshake (issue #815): how long the
+   * first stop gets before start_debugging answers with the session as it is
+   * (RUNNING, data.pending = true). The full ceiling when something is armed
+   * to stop the program — breakpoints, an entry stop, a caught-exception
+   * filter — and the short grace window when nothing is. Neither is a deadline
+   * on the debuggee: a stop that lands later is reported by handleStopped.
+   * Protected so tests can shrink the windows.
+   */
+  protected launchReadyCeilingMs = 30000;
+  protected launchGraceMs = 5000;
+
+  /**
    * The view of this facade that the operation collaborators get. Every member
    * is late bound (arrows for methods, getters for fields and tunables) so that
    * reassigning `selectPolicy` or writing `stepGraceMs` on a live instance —
@@ -130,7 +142,9 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         get attachVerifyIntervalMs() { return facade().attachVerifyIntervalMs; },
         get attachPauseStopTimeoutMs() { return facade().attachPauseStopTimeoutMs; },
         get stepGraceMs() { return facade().stepGraceMs; },
-        get pauseGraceMs() { return facade().pauseGraceMs; }
+        get pauseGraceMs() { return facade().pauseGraceMs; },
+        get launchReadyCeilingMs() { return facade().launchReadyCeilingMs; },
+        get launchGraceMs() { return facade().launchGraceMs; }
       },
       getSession: (sessionId) => this._getSessionById(sessionId),
       updateSession: (sessionId, updates) => this.sessionStore.update(sessionId, updates),
