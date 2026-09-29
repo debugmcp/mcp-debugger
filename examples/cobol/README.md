@@ -7,7 +7,7 @@ Example programs for debugging GnuCOBOL with mcp-debugger's COBOL adapter (CodeL
 - GnuCOBOL 3.1.2+ (`cobc`) — the adapter compiles these on launch:
   - **Ubuntu/Debian**: `sudo apt install gnucobol3`
   - **macOS**: `brew install gnucobol`
-  - **Windows**: MSYS2, then `pacman -S mingw-w64-x86_64-gnucobol` (set `COBC_PATH` if `cobc.exe` is not on PATH)
+  - **Windows**: MSYS2, then `pacman -S mingw-w64-ucrt-x86_64-gnucobol` (set `COBC_PATH` if `cobc.exe` is not on PATH)
 - CodeLLDB is vendored; nothing else to install.
 
 The adapter compiles with `cobc -x -g -fdump=ALL --save-temps -t <lst> -ftsymbols -A "-O0 -gdwarf-4"` into `.debug-mcp/cobol/<name>/<buildKey>/` next to the source. Build one yourself the same way if you want a prebuilt target (`-gdwarf-4` matters on MinGW).

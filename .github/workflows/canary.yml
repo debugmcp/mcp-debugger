@@ -246,14 +246,16 @@ jobs:
       - name: Install GnuCOBOL (cobol smoke prerequisite)
         # Distro packages only (GPL compiler stays external, issue #759):
         # apt gnucobol3 (3.1.2 on 24.04, 3.2 on 26.04), brew gnucobol (3.2),
-        # MSYS2 mingw64 gnucobol (3.2) via the runner's preinstalled pacman.
+        # MSYS2 ucrt64 gnucobol (3.2) via the runner's preinstalled pacman (MSYS2
+        # builds gnucobol for ucrt64/clang64/clangarm64 only; the mingw64 package
+        # is gone, so `pacman -S mingw-w64-x86_64-gnucobol` fails "target not found").
         # A failed install is reported by the cobol step, not hidden here.
         continue-on-error: true
         run: |
           case "${{ runner.os }}" in
             Linux) sudo apt-get update && sudo apt-get install -y --no-install-recommends gnucobol3 ;;
             macOS) brew install gnucobol ;;
-            Windows) /c/msys64/usr/bin/pacman.exe -Sy --noconfirm --needed mingw-w64-x86_64-gnucobol ;;
+            Windows) /c/msys64/usr/bin/pacman.exe -Sy --noconfirm --needed mingw-w64-ucrt-x86_64-gnucobol ;;
           esac
 
       - name: Smoke cycle (cobol — source launch through the COBOL shim)
@@ -262,7 +264,7 @@ jobs:
         # WORKING-STORAGE from the manifest, so this proves compiler discovery,
         # DWARF-4 line mapping and the value decoder in one cycle.
         env:
-          COBC_PATH: ${{ runner.os == 'Windows' && 'C:\msys64\mingw64\bin\cobc.exe' || '' }}
+          COBC_PATH: ${{ runner.os == 'Windows' && 'C:\msys64\ucrt64\bin\cobc.exe' || '' }}
         run: |
           node scripts/canary-smoke.mjs --lang cobol --skip-if-missing \
             --program "$GITHUB_WORKSPACE/examples/cobol/hello.cob" \
@@ -276,9 +278,16 @@ jobs:
         # Windows: spawning npx.cmd without a shell is a known ENOENT
         # (tests/e2e/npx/npx-test-utils.ts); the scratch-prefix install above
         # is the documented reliable path there (docs/release-checklist.md).
+        #
+        # Runs from outside the checkout: this repo is itself an npm workspace
+        # that declares @debugmcp/mcp-debugger, so when the checkout's version
+        # equals CANARY_VERSION (every release gate) npx takes the uninstalled
+        # workspace package as satisfying the spec and fails with
+        # "mcp-debugger: not found" instead of fetching the published one.
         if: ${{ matrix.leg == 'default' && runner.os != 'Windows' }}
+        working-directory: ${{ runner.temp }}
         run: |
-          node scripts/canary-smoke.mjs --lang mock \
+          node "$GITHUB_WORKSPACE/scripts/canary-smoke.mjs" --lang mock \
             --program "$GITHUB_WORKSPACE/examples/python/simple_test.py" --line 11 \
             --transcript "$TRANSCRIPTS/npx-mock.jsonl" \
             -- npx -y "@debugmcp/mcp-debugger@${CANARY_VERSION}" stdio

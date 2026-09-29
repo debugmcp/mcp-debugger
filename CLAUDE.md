@@ -443,7 +443,7 @@ packages/adapter-{language}/
 - Advanced CodeLLDB config passes through: `initCommands`, `targetCreateCommands` (core dumps), `processCreateCommands` (gdbserver/rr remote)
 
 ### COBOL
-- GnuCOBOL 3.1.2+ (`cobc`) for source launch and COBOL-shaped variables: `apt install gnucobol3` / `brew install gnucobol` / MSYS2 `pacman -S mingw-w64-x86_64-gnucobol`; found via `COBC_PATH`, PATH, then known install dirs. Verified with 3.2 (Windows MSYS2, Ubuntu 26.04) and 3.1.2 (Ubuntu 24.04)
+- GnuCOBOL 3.1.2+ (`cobc`) for source launch and COBOL-shaped variables: `apt install gnucobol3` / `brew install gnucobol` / MSYS2 `pacman -S mingw-w64-ucrt-x86_64-gnucobol`; found via `COBC_PATH`, PATH, then known install dirs. Verified with 3.2 (Windows MSYS2, Ubuntu 26.04) and 3.1.2 (Ubuntu 24.04)
 - CodeLLDB is the engine (shared vendored copy); the adapter process is a Node DAP shim (`packages/adapter-cobol/dist/shim/cobol-shim.js`, esbuild-bundled by the package build) that spawns CodeLLDB and serves WORKING-STORAGE / LOCAL-STORAGE / LINKAGE scopes, decoded values and data-name `evaluate` from a symbol manifest (`<src>.cobol-symbols.json`) parsed out of cobc's `-fdump=ALL` generated C
 - Compiles with `cobc -x -g -fdump=ALL --save-temps -t <lst> -ftsymbols -A "-O0 -gdwarf-4"` (env `COBC_GEN_DUMP_COMMENTS=1`, cwd = artifact dir) into `.debug-mcp/cobol/<name>/<buildKey>/` next to the source; DWARF-4 is mandatory on MinGW; `runtimeChecks: true` adds `--debug`
 - On Windows/MSYS2 the adapter sets `COB_CONFIG_DIR`/`COB_COPY_DIR` and puts cobc's `bin` on PATH (libcob-4.dll) — outside an MSYS2 shell cobc otherwise fails with `configuration error: …default.conf`
