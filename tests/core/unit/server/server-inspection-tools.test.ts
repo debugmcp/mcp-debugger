@@ -19,7 +19,7 @@ import {
   type MockSessionManager
 } from './server-test-helpers.js';
 import { OutputRingBuffer } from '../../../../src/session/output-buffer.js';
-import { SessionState } from '@debugmcp/shared';
+import { CppAdapterPolicy, JsDebugAdapterPolicy, SessionState } from '@debugmcp/shared';
 
 // Mock dependencies
 vi.mock('@modelcontextprotocol/sdk/server/index.js');
@@ -349,30 +349,78 @@ describe('Server Inspection Tools Tests', () => {
       expect(content.note.match(/includeInternals: true/g)).toHaveLength(1);
     });
 
-    it('notes frames whose file is a source-map label rather than an openable path (issue #655)', async () => {
-      const mockSession = {
-        proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(1) }
-      };
-      mockSessionManager.getSession.mockReturnValue(mockSession);
-      mockSessionManager.getStackTraceDetailed.mockResolvedValue({
-        frames: [
-          { id: 1, name: 'jsonResult', file: '/app/dist/tool-result.js', line: 13 },
-          { id: 2, name: 'handler', file: '../src/handlers/tools.ts', line: 89, unresolvedSource: true }
-        ],
-        totalFrameCount: 2, hiddenFrameCount: 0, allFramesInternal: false
+    // The unresolvedSource note (issue #655) is adapter-neutral, and the
+    // session's policy adds what such a frame IS under its debugger (issue
+    // #816): the js-debug remedy used to be appended to every adapter's stack.
+    describe('unresolvedSource note (issues #655/#816)', () => {
+      const jsFrames = [
+        { id: 1, name: 'jsonResult', file: '/app/dist/tool-result.js', line: 13 },
+        { id: 2, name: 'handler', file: '../src/handlers/tools.ts', line: 89, unresolvedSource: true }
+      ];
+      // Measured on a Windows cpp attach (CodeLLDB 1.11.8): native frames come
+      // as `@symbol` labels with a non-zero sourceReference and no path.
+      const cppFrames = [
+        { id: 1005, name: 'NtWaitForSingleObject', file: '@NtWaitForSingleObject', line: 8, unresolvedSource: true },
+        { id: 1006, name: 'WaitForSingleObjectEx', file: '@WaitForSingleObjectEx', line: 48, unresolvedSource: true },
+        { id: 1012, name: 'main', file: 'C:\\work\\examples\\cpp\\pause_test.cpp', line: 20 },
+        { id: 1015, name: 'BaseThreadInitThunk', file: '@BaseThreadInitThunk', line: 11, unresolvedSource: true }
+      ];
+
+      async function stackNote(session: Record<string, unknown>, frames: unknown[], policy: unknown): Promise<string> {
+        mockSessionManager.getSession.mockReturnValue({
+          proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(1) },
+          ...session
+        });
+        mockSessionManager.getSessionPolicy.mockReturnValue(policy);
+        mockSessionManager.getStackTraceDetailed.mockResolvedValue({
+          frames, totalFrameCount: frames.length, hiddenFrameCount: 0, allFramesInternal: false
+        });
+        const result = await callToolHandler({
+          method: 'tools/call',
+          params: { name: 'get_stack_trace', arguments: { sessionId: 'test-session' } }
+        });
+        const content = JSON.parse(result.content[0].text);
+        expect(content.success).toBe(true);
+        expect(content.hiddenFrames).toBeUndefined();
+        return content.note as string;
+      }
+
+      it('notes source-map labels on a js-debug attach with the attach-side sourceMaps switch (issue #655)', async () => {
+        const note = await stackNote({ language: 'javascript', attachMode: true }, jsFrames, JsDebugAdapterPolicy);
+        expect(note).toContain('1 frame(s) have no source file on this host (unresolvedSource: true)');
+        expect(note).toContain('not an openable path');
+        expect(note).toMatch(/source-mapped/);
+        expect(note).toContain('adapterConfig.sourceMaps: false');
       });
 
-      const result = await callToolHandler({
-        method: 'tools/call',
-        params: { name: 'get_stack_trace', arguments: { sessionId: 'test-session' } }
+      it('names the launch-side sourceMaps switch on a js-debug launch', async () => {
+        const note = await stackNote({ language: 'javascript' }, jsFrames, JsDebugAdapterPolicy);
+        expect(note).toContain('adapterLaunchConfig.sourceMaps: false');
+        expect(note).not.toContain('adapterConfig.sourceMaps');
       });
 
-      const content = JSON.parse(result.content[0].text);
-      expect(content.success).toBe(true);
-      expect(content.hiddenFrames).toBeUndefined();
-      expect(content.stackFrames[1].unresolvedSource).toBe(true);
-      expect(content.note).toContain('1 frame(s) are source-mapped to files not present on this host');
-      expect(content.note).toContain('adapterConfig.sourceMaps: false');
+      it("explains CodeLLDB's native frames as such and never offers the js-debug remedy (issue #816)", async () => {
+        const note = await stackNote({ language: 'cpp', attachMode: true }, cppFrames, CppAdapterPolicy);
+        expect(note).toContain('3 frame(s) have no source file on this host (unresolvedSource: true)');
+        expect(note).toMatch(/native frames without debug info/);
+        expect(note).toMatch(/program's own frames/);
+        expect(note).not.toMatch(/sourceMaps|source-mapped|\.js paths/);
+      });
+
+      it('keeps the adapter-neutral sentence alone for a policy with nothing to add', async () => {
+        const note = await stackNote({ language: 'java' }, jsFrames, {});
+        expect(note).toContain('1 frame(s) have no source file on this host (unresolvedSource: true)');
+        expect(note).toContain('do not pass it to get_source_context');
+        expect(note).not.toMatch(/sourceMaps|native frames/);
+      });
+
+      it('costs only the sentence when the policy hook throws', async () => {
+        const note = await stackNote({ language: 'cpp' }, cppFrames, {
+          describeUnresolvedSource: () => { throw new Error('boom'); }
+        });
+        expect(note).toContain('3 frame(s) have no source file on this host (unresolvedSource: true)');
+        expect(note).not.toMatch(/boom|native frames/);
+      });
     });
 
     it('explains the kept-first-frame fallback when every frame is internal (issue #346)', async () => {

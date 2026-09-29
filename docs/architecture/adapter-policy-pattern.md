@@ -84,6 +84,8 @@ export interface AdapterPolicy {
   // === Stack frame filtering (optional) ===
   filterStackFrames?(frames: StackFrame[], includeInternals: boolean): StackFrame[];
   isInternalFrame?(frame: StackFrame): boolean;
+  // What a frame flagged unresolvedSource IS under this debugger, for the get_stack_trace note (issue #816)
+  describeUnresolvedSource?(info: { count: number; attachMode: boolean }): string | undefined;
 
   // === Variable extraction (optional) ===
   extractLocalVariables?(stackFrames, scopes, variables, includeSpecial?): LocalVariableExtraction;

@@ -30,6 +30,19 @@ describe('CppAdapterPolicy', () => {
     expect('functionBreakpointNameHint' in CppAdapterPolicy).toBe(false);
   });
 
+  // CodeLLDB reports a frame without debug info as `@symbol` with a non-zero
+  // sourceReference and no path (measured: `{name: '@NtWaitForSingleObject',
+  // sourceReference: 1004}`); the stack note must say what that is under
+  // this debugger, not offer js-debug's sourceMaps switch (issue #816).
+  it("explains unresolvedSource frames as native frames without debug info, never as source maps", () => {
+    const text = CppAdapterPolicy.describeUnresolvedSource({ count: 9, attachMode: true });
+    expect(text).toMatch(/They are native frames without debug info/);
+    expect(text).toMatch(/program's own frames/);
+    expect(text).not.toMatch(/sourceMaps|source-mapped|\.js/);
+    // Singular for one frame; the mode changes nothing (no remedy names a key).
+    expect(CppAdapterPolicy.describeUnresolvedSource({ count: 1, attachMode: false })).toMatch(/It is a native frame without debug info/);
+  });
+
   describe('normalizeStopReason (shared CodeLLDB quirks)', () => {
     const normalize = CppAdapterPolicy.normalizeStopReason!;
 

@@ -12,7 +12,8 @@ import type {
   AdapterSpecificState,
   CommandHandling,
   LocalVariableExtraction,
-  StopReasonContext
+  StopReasonContext,
+  UnresolvedSourceContext
 } from './adapter-policy.js';
 import { emptyLocalVariableExtraction, extractionFromScope } from './adapter-policy.js';
 import type { StackFrame, Variable } from '../models/index.js';
@@ -269,6 +270,23 @@ export function filterLldbStackFrames(frames: StackFrame[], includeInternals: bo
     return frames;
   }
   return frames.filter((frame) => !isLldbInternalFrame(frame));
+}
+
+/**
+ * What an unresolvedSource frame is under CodeLLDB (issue #816): a frame
+ * without debug info, which CodeLLDB reports as `@symbol` with a non-zero
+ * sourceReference and no path (measured on a Windows attach: `{name:
+ * '@NtWaitForSingleObject', sourceReference: 1004}`) — system libraries, the
+ * CRT start-up, the Windows break-in thread. Nothing is source-mapped, so the
+ * js-debug remedy does not apply; the program's own frames carry a path.
+ * Shared by the rust, cpp and cobol policies.
+ */
+export function describeLldbUnresolvedSource(info: UnresolvedSourceContext): string {
+  const subject = info.count === 1 ? 'It is a native frame' : 'They are native frames';
+  return (
+    `${subject} without debug info (system libraries, CRT start-up) that CodeLLDB names by ` +
+    "symbol; the program's own frames are the ones with a file path."
+  );
 }
 
 /**

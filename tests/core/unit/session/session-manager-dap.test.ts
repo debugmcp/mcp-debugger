@@ -3030,6 +3030,30 @@ describe('SessionManager - DAP Operations', () => {
       expect(result.hiddenFrameCount).toBe(2);
       expect(result.allFramesInternal).toBe(false);
     });
+
+    // Measured on a Windows cpp attach (CodeLLDB 1.11.8): frames without debug
+    // info come as `source: {name: '@Symbol', sourceReference: N}` and no path,
+    // so the unresolvedSource rule (sourceReference != 0, not a '<…>' placeholder)
+    // flags them — the flag is right, the note's explanation is the policy's
+    // to give (issue #816).
+    it("flags CodeLLDB's @symbol frames (sourceReference, no path) as unresolvedSource, not the program's frame", async () => {
+      const CPP_ATTACH_FRAMES = [
+        { id: 1005, name: 'NtWaitForSingleObject', line: 8, column: 0, source: { name: '@NtWaitForSingleObject', sourceReference: 1004 } },
+        { id: 1006, name: 'WaitForSingleObjectEx', line: 48, column: 0, source: { name: '@WaitForSingleObjectEx', sourceReference: 1005 }, presentationHint: 'subtle' },
+        { id: 1012, name: 'main', line: 20, column: 36, source: { name: 'pause_test.cpp', path: 'C:\\work\\examples\\cpp\\pause_test.cpp' } },
+        { id: 1015, name: 'BaseThreadInitThunk', line: 11, column: 0, source: { name: '@BaseThreadInitThunk', sourceReference: 1002 }, presentationHint: 'subtle' }
+      ];
+      const session = await pausedSessionWithFrames(CPP_ATTACH_FRAMES);
+      (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => RustAdapterPolicy;
+
+      const result = await sessionManager.getStackTraceDetailed(session.id);
+
+      const byName = new Map(result.frames.map(f => [f.name, f]));
+      expect(byName.get('NtWaitForSingleObject')).toMatchObject({ file: '@NtWaitForSingleObject', unresolvedSource: true });
+      expect(byName.get('BaseThreadInitThunk')).toMatchObject({ file: '@BaseThreadInitThunk', unresolvedSource: true });
+      expect(byName.get('main')).toMatchObject({ file: 'C:\\work\\examples\\cpp\\pause_test.cpp' });
+      expect(byName.get('main')?.unresolvedSource).toBeUndefined();
+    });
   });
 
   describe('Paused frame hidden by the display filter (issue #672)', () => {

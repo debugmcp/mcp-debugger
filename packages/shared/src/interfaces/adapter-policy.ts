@@ -209,6 +209,18 @@ export interface PendingStopContext {
   fromFrame?: StackFrame;
 }
 
+/** Context passed to AdapterPolicy.describeUnresolvedSource (issue #816). */
+export interface UnresolvedSourceContext {
+  /** How many of the reported frames carry `unresolvedSource: true`. */
+  count: number;
+  /**
+   * True for attach sessions — a remedy that names a configuration key spells
+   * it the attach way (`adapterConfig.…`) rather than the launch way
+   * (`adapterLaunchConfig.…`).
+   */
+  attachMode: boolean;
+}
+
 export interface AdapterPolicy {
   /**
    * Identifying name for diagnostics (e.g., 'default', 'js-debug')
@@ -359,6 +371,19 @@ export interface AdapterPolicy {
    * means the adapter has nothing to add.
    */
   describePendingStop?(info: PendingStopContext): string | undefined;
+
+  /**
+   * Say what a frame flagged `unresolvedSource` IS under this adapter, for
+   * the `get_stack_trace` note (issue #816) — and the remedy, when there is
+   * one. The flag itself is adapter-neutral (a non-zero `sourceReference`
+   * with no openable path), but what it means is not: js-debug reports a
+   * source map naming a file the package did not ship (`sourceMaps: false`
+   * shows the generated paths), CodeLLDB a native frame without debug info
+   * (the program's own frames are the ones with a path). The handler appends
+   * the sentence to its adapter-neutral one; undefined leaves that one
+   * standing alone. Optional — absent means the adapter has nothing to add.
+   */
+  describeUnresolvedSource?(info: UnresolvedSourceContext): string | undefined;
 
   /**
    * Return true to drop a DAP 'output' event that is known adapter-internal

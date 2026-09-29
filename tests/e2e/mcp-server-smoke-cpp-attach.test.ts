@@ -162,7 +162,7 @@ describe.skipIf(SKIP_CPP)('MCP Server C/C++ Attach Smoke Test @requires-cpp', ()
       const stackResponse = parseSdkToolResult(await mcpClient!.callTool({
         name: 'get_stack_trace',
         arguments: { sessionId }
-      })) as { success?: boolean; stackFrames?: Array<{ name?: string }> };
+      })) as { success?: boolean; stackFrames?: Array<{ name?: string; unresolvedSource?: boolean }>; note?: string };
       expect(stackResponse.success).toBe(true);
       expect((stackResponse.stackFrames ?? []).length).toBeGreaterThan(0);
       // The anchored thread is the program's, not the break-in thread Windows injects
@@ -170,6 +170,14 @@ describe.skipIf(SKIP_CPP)('MCP Server C/C++ Attach Smoke Test @requires-cpp', ()
       // pause_test.cpp is on the default stack.
       const stackFiles = (stackResponse.stackFrames as Array<{ file?: string }>).map(f => f.file ?? '');
       expect(stackFiles.some(f => f.endsWith('pause_test.cpp')), `expected pause_test.cpp in ${JSON.stringify(stackFiles)}`).toBe(true);
+      // Frames CodeLLDB names by symbol (`@NtWaitForSingleObject`, the CRT start-up)
+      // have no source; the note must explain them as native frames, never with
+      // js-debug's sourceMaps remedy (issue #816).
+      const note = stackResponse.note ?? '';
+      expect(note).not.toMatch(/sourceMaps|source-mapped/);
+      if ((stackResponse.stackFrames ?? []).some(f => f.unresolvedSource)) {
+        expect(note).toMatch(/native frames without debug info/);
+      }
 
       const detachResponse = parseSdkToolResult(await mcpClient!.callTool({
         name: 'detach_from_process',
