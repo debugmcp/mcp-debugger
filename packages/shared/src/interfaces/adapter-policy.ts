@@ -94,7 +94,12 @@ export interface StopReasonContext {
   sessionMode?: 'launch' | 'attach';
   /** True for the first stop the session has seen since its launch/attach. */
   firstStop?: boolean;
-  /** The effective stopOnEntry of the launch, when known. */
+  /**
+   * Whether the session asked for an initial stop, read per mode: a launch
+   * stops on entry only when the caller asked (`stopOnEntry === true`); an
+   * attach stops unless the caller opted out (`stopOnEntry !== false`, the
+   * adapters' own default — issue #817).
+   */
   stopOnEntry?: boolean;
 }
 

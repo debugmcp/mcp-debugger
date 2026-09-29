@@ -2787,6 +2787,31 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(mockSession.lastStop).toBeUndefined();
     });
 
+    // The core reads the attach's stopOnEntry from the dapLaunchArgs handed to
+    // the proxy launcher (issue #817): adapterConfig wins the launcher's merge
+    // on the wire, so a value given only there — or given there against the
+    // top-level parameter — must be what the core sees too.
+    it('hands the core the stopOnEntry the adapter receives when adapterConfig carries one (issue #817)', async () => {
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) =>
+        command === 'threads' ? { body: { threads: [{ id: 1, name: 'main' }] } } : {}
+      );
+      const seen: Array<Record<string, unknown> | undefined> = [];
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async (_session, request) => {
+        seen.push(request.dapLaunchArgs as Record<string, unknown> | undefined);
+        mockSession.proxyManager = mockProxyManager;
+        return {};
+      });
+
+      await operations.attachToProcess('test-session', { port: 12345, host: '127.0.0.1', adapterConfig: { stopOnEntry: false } });
+      await operations.attachToProcess('test-session', { port: 12345, host: '127.0.0.1', stopOnEntry: true, adapterConfig: { stopOnEntry: false } });
+      await operations.attachToProcess('test-session', { port: 12345, host: '127.0.0.1', stopOnEntry: false });
+      await operations.attachToProcess('test-session', { port: 12345, host: '127.0.0.1', adapterConfig: { program: '/bin/app' } });
+
+      expect(seen.map((args) => args?.stopOnEntry)).toEqual([false, false, false, undefined]);
+      // The wrapper key never rides into the DAP attach arguments (issue #336).
+      expect(seen.every((args) => args?.adapterConfig === undefined)).toBe(true);
+    });
+
     it('reports PAUSED only after the post-attach stopped event records lastStop', async () => {
       mockSession.language = DebugLanguage.RUBY;
       let stopped: (() => void) | undefined;
