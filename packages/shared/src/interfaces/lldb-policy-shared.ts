@@ -39,7 +39,8 @@ export const LLDB_LOCAL_SCOPE_NAMES = ['Local', 'Locals'] as const;
  *    threadId}`) even precedes the attach response. That first stop of an
  *    attach that asked to stop is 'pause' too — gated on the break-in code,
  *    so a real __debugbreak() met first by an attach that opted out stays an
- *    exception.
+ *    exception. (Measured on Windows; the POSIX shape of this stop is not
+ *    pinned yet — a SIGSTOP would fall under the first rule.)
  *
  * 2. An exception-filter hit (rust_panic, cpp_throw) is reported as reason
  *    'breakpoint' because CodeLLDB implements filters as internal
@@ -93,8 +94,9 @@ export function normalizeLldbStopReason(
   }
   // The attach's own initial stop (issue #817): first stop of an attach that
   // did not opt out of stopOnEntry, with no pause in flight, reported through
-  // the Windows break-in code. (POSIX reports the same stop as SIGSTOP, which
-  // the rule above already covers.)
+  // the Windows break-in code. (On POSIX a ptrace attach stops the target
+  // with SIGSTOP, which the rule above would cover; that shape has not been
+  // measured for this stop — the cpp attach e2e logs it off Windows.)
   if (
     context.sessionMode === 'attach' &&
     context.firstStop === true &&
