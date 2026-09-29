@@ -103,12 +103,31 @@ export const getStackTraceTool: ToolHandler = async (ctx, args) => {
         : `${stackTrace.hiddenFrameCount} internal frame(s) hidden — pass includeInternals: true to see them.`);
     }
     // Frames whose file is a label rather than an openable path (issue #655):
-    // say so once, so an agent does not feed them to get_source_context.
-    const unresolvedCount = stackTrace.frames.filter((frame) => frame.unresolvedSource).length;
-    if (unresolvedCount > 0) {
+    // say so once, so an agent does not feed them to get_source_context. What
+    // such a frame IS differs by debugger — a js-debug source map naming a
+    // file the package did not ship, a CodeLLDB native frame without debug
+    // info — so the adapter's policy supplies that sentence (issue #816); a
+    // throwing hook costs only the sentence.
+    const unresolvedFrames = stackTrace.frames.filter((frame) => frame.unresolvedSource);
+    if (unresolvedFrames.length > 0) {
       notes.push(
-        `${unresolvedCount} frame(s) are source-mapped to files not present on this host (unresolvedSource: true) — their file is a label, not an openable path; attach with adapterConfig.sourceMaps: false to see the generated .js paths instead.`
+        `${unresolvedFrames.length} frame(s) have no openable source path on this host (unresolvedSource: true) — their file is a label, not a path; do not pass it to get_source_context.`
       );
+      let explanation: string | undefined;
+      try {
+        explanation = ctx.sessionManager
+          .getSessionPolicy(args.sessionId)
+          .describeUnresolvedSource?.({
+            count: unresolvedFrames.length,
+            files: unresolvedFrames.map((frame) => frame.file),
+            attachMode: sessionBefore?.attachMode === true
+          }) || undefined;
+      } catch (error) {
+        ctx.logger.debug(`[get_stack_trace ${args.sessionId}] unresolvedSource explanation failed:`, error);
+      }
+      if (explanation) {
+        notes.push(explanation);
+      }
     }
     if (notes.length > 0) {
       payload.note = notes.join(' ');

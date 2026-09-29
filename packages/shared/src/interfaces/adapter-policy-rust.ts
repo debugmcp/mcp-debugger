@@ -23,6 +23,7 @@ import {
   getLldbAttachBehavior,
   isLldbInternalFrame,
   filterLldbStackFrames,
+  describeLldbUnresolvedSource,
   lldbShouldSuppressOutputEvent,
   lldbAnnotateOutputEvent
 } from './lldb-policy-shared.js';
@@ -70,6 +71,9 @@ export const RustAdapterPolicy = {
    */
   filterStackFrames: filterLldbStackFrames,
   isInternalFrame: isLldbInternalFrame,
+  // A `@symbol` frame is native code without debug info, not a source map
+  // (issue #816).
+  describeUnresolvedSource: describeLldbUnresolvedSource,
 
   /**
    * Extract local variables for Rust, filtering out special variables by default

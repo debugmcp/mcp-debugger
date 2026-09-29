@@ -6,7 +6,7 @@
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import * as path from 'path';
-import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction, QueuedDapCommand, StopReasonContext, PendingStopContext } from './adapter-policy.js';
+import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction, QueuedDapCommand, StopReasonContext, PendingStopContext, UnresolvedSourceContext } from './adapter-policy.js';
 import {
   jsLaunchBlackboxesNodeModules,
   jsLaunchSkipsNodeInternals,
@@ -296,6 +296,20 @@ export const JsDebugAdapterPolicy = {
     }
     return undefined;
   },
+
+  /**
+   * An unresolvedSource frame under js-debug is a source map's `sources`
+   * entry the package did not ship (issue #655): the frame is the debuggee's
+   * own code, reported under a `.ts` label with a non-zero sourceReference.
+   * The remedy is the sourceMaps switch, spelled for the session's mode
+   * (issue #816).
+   */
+  describeUnresolvedSource: (info: UnresolvedSourceContext): string =>
+    `${info.count === 1 ? 'It is' : 'They are'} source-mapped to files the package did not ship ` +
+    '(a .js.map whose sources are not on disk); ' +
+    (info.attachMode
+      ? 'attach with adapterConfig.sourceMaps: false to see the generated .js paths instead.'
+      : 'relaunch with adapterLaunchConfig.sourceMaps: false to see the generated .js paths instead.'),
 
   /**
    * Filter stack frames to optionally remove Node.js internals and

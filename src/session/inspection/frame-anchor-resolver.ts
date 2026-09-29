@@ -176,9 +176,11 @@ export class FrameAnchorResolver {
         // A non-zero sourceReference is the adapter saying "not a file you
         // can open here" (js-debug sets it for every source it could not
         // find on disk — a source-mapped '../src/x.ts' the package never
-        // shipped). Placeholder paths (<node_internals>, <eval>) carry one
-        // too but are self-describing, so only real-looking paths are
-        // flagged (issue #655).
+        // shipped, issue #655; CodeLLDB for a native frame without debug
+        // info, which it names '@symbol', issue #816). Placeholder paths
+        // (<node_internals>, <eval>) carry one too but are self-describing,
+        // so only real-looking paths are flagged. What the flag means under
+        // each adapter is the policy's to say (describeUnresolvedSource).
         const unresolvedSource =
           typeof frame.source?.sourceReference === 'number' &&
           frame.source.sourceReference !== 0 &&

@@ -31,6 +31,7 @@ import {
   getLldbDapClientBehavior,
   getLldbAttachBehavior,
   isLldbInternalFrame,
+  describeLldbUnresolvedSource,
   lldbShouldSuppressOutputEvent
 } from './lldb-policy-shared.js';
 
@@ -163,6 +164,9 @@ export const CobolAdapterPolicy = {
 
   filterStackFrames: filterCobolStackFrames,
   isInternalFrame: isCobolInternalFrame,
+  // The engine is CodeLLDB: a `@symbol` frame is native code without debug
+  // info, not a source map (issue #816).
+  describeUnresolvedSource: describeLldbUnresolvedSource,
 
   extractLocalVariables: extractCobolLocalVariables,
 

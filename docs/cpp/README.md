@@ -87,7 +87,7 @@ Data breakpoints (hardware watchpoints), disassembly view, instruction stepping,
 3. `set_breakpoint` on the source file (or `function: "name"` for function breakpoints — a bare `main` works fine in C/C++)
 4. `start_debugging` with the executable (or source) path
 5. Step (`step_over`/`step_into`/`step_out`), `continue_execution`, `pause_execution`
-6. Inspect: `get_stack_trace`, `get_local_variables`, `evaluate_expression` (LLDB expressions, e.g. `ptr->field`, `vec.size()`)
+6. Inspect: `get_stack_trace`, `get_local_variables`, `evaluate_expression` (LLDB expressions, e.g. `ptr->field`, `vec.size()`). Frames CodeLLDB names by symbol (`@NtWaitForSingleObject`, `@BaseThreadInitThunk`, `@__tmainCRTStartup`) are native code without debug info — system libraries and CRT start-up; they carry `unresolvedSource: true` and the `note` says so. The program's own frames are the ones with a file path (issue #816)
 7. `get_output` for captured stdout/stderr (Windows: forwarded via adapter stdio; POSIX: CodeLLDB output events)
 8. `close_debug_session`
 

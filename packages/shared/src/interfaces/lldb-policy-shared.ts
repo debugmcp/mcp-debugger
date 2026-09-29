@@ -12,7 +12,8 @@ import type {
   AdapterSpecificState,
   CommandHandling,
   LocalVariableExtraction,
-  StopReasonContext
+  StopReasonContext,
+  UnresolvedSourceContext
 } from './adapter-policy.js';
 import { emptyLocalVariableExtraction, extractionFromScope } from './adapter-policy.js';
 import type { StackFrame, Variable } from '../models/index.js';
@@ -293,6 +294,34 @@ export function filterLldbStackFrames(frames: StackFrame[], includeInternals: bo
     return frames;
   }
   return frames.filter((frame) => !isLldbInternalFrame(frame));
+}
+
+/**
+ * What an unresolvedSource frame is under CodeLLDB (issue #816). The usual
+ * case is a frame without debug info, which CodeLLDB reports as `@symbol` with
+ * a non-zero sourceReference and no path (measured on a Windows attach:
+ * `{name: '@NtWaitForSingleObject', sourceReference: 1004}`) — system
+ * libraries, the CRT start-up, the Windows break-in thread. The other case is
+ * a paused frame the display filter kept whose source is a relative build
+ * path (glibc's `../sysdeps/…`, issue #672): it has debug info, the file is
+ * just not on this host. Nothing is source-mapped in either, so the js-debug
+ * remedy does not apply; the program's own frames carry a full path. Shared
+ * by the rust, cpp and cobol policies.
+ */
+export function describeLldbUnresolvedSource(info: UnresolvedSourceContext): string {
+  const plural = info.count !== 1;
+  const allSymbolic = info.files.length > 0 && info.files.every((file) => file.startsWith('@'));
+  if (allSymbolic) {
+    return (
+      `${plural ? 'They are native frames' : 'It is a native frame'} without debug info (system libraries, ` +
+      "CRT start-up) that CodeLLDB names by symbol; the program's own frames are the ones with a file path."
+    );
+  }
+  return (
+    `${plural ? 'They are frames' : 'It is a frame'} whose source CodeLLDB could not place on this host — ` +
+    'native code it names by symbol (@…), or a runtime built elsewhere whose relative path (../sysdeps/…) is ' +
+    "not present here; the program's own frames are the ones with a full path."
+  );
 }
 
 /**
