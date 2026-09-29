@@ -497,10 +497,14 @@ export interface StackFrame {
   /** Column number */
   column?: number;
   /**
-   * True when the adapter reports this frame's source is not a file on this
-   * host (DAP `sourceReference != 0` with a non-placeholder path) — typically
-   * a source-mapped original the package did not ship. `file` is then a
-   * label, not an openable path (issue #655).
+   * True when `file` is a label rather than an openable path: the adapter
+   * reported the source with a non-zero DAP `sourceReference` and no
+   * placeholder path (js-debug for a source-mapped original the package did
+   * not ship, issue #655; CodeLLDB for a native frame without debug info it
+   * names `@symbol`, issue #816), or the paused frame the display filter kept
+   * carries a relative label (the JDI bridge's `java/io/PrintStream.java`,
+   * issue #672). What it means under each adapter is the policy's to say
+   * (`describeUnresolvedSource`); the `get_stack_trace` note carries it.
    */
   unresolvedSource?: boolean;
 }

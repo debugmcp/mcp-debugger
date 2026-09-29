@@ -6,7 +6,7 @@
  * "initialized" during the initialize handshake, before the launch request.
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction } from './adapter-policy.js';
+import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction, UnresolvedSourceContext } from './adapter-policy.js';
 import { emptyLocalVariableExtraction, extractionFromScope } from './adapter-policy.js';
 import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
@@ -232,6 +232,22 @@ export const JavaAdapterPolicy = {
     // Never hide the entire stack: a thread parked deep in JDK code (e.g. a
     // pause inside Thread.sleep on a pure-JDK stack) must still show frames.
     return filtered.length > 0 ? filtered : frames;
+  },
+
+  /**
+   * An unresolvedSource frame under the JDI bridge (issues #672/#816) is a
+   * class the bridge has no file path for: `resolveSourcePath` knows a path
+   * only for classes a breakpoint was set in, and names every other one by
+   * package path (`java/io/PrintStream.java`, `com/example/Foo.java`). The
+   * class may well have source — it is the path the bridge lacks.
+   */
+  describeUnresolvedSource: (info: UnresolvedSourceContext): string => {
+    const example = info.files[0] ? ` (${info.files[0]})` : '';
+    return (
+      `${info.count === 1 ? 'It is a class' : 'They are classes'} the JDI bridge names by package path${example} ` +
+      'because it has no file path for them: a breakpoint set in a class\'s source file teaches the bridge its ' +
+      "path, and the JDK's own classes have no source on this host."
+    );
   },
 
   isInternalFrame: (frame: StackFrame): boolean => {

@@ -95,15 +95,15 @@ describe('JsDebugAdapterPolicy', () => {
     const hook = JsDebugAdapterPolicy.describeUnresolvedSource!;
 
     it('names the source map and the attach-side switch for an attach session', () => {
-      const text = hook({ count: 2, attachMode: true });
-      expect(text).toMatch(/source-mapped/);
+      const text = hook({ count: 2, files: ['../src/a.ts', '../src/b.ts'], attachMode: true });
+      expect(text).toMatch(/They are source-mapped/);
       expect(text).toContain('adapterConfig.sourceMaps: false');
       expect(text).not.toContain('adapterLaunchConfig');
     });
 
     it('names the launch-side switch for a launch session', () => {
-      const text = hook({ count: 1, attachMode: false });
-      expect(text).toMatch(/source-mapped/);
+      const text = hook({ count: 1, files: ['../src/a.ts'], attachMode: false });
+      expect(text).toMatch(/It is source-mapped/);
       expect(text).toContain('adapterLaunchConfig.sourceMaps: false');
       expect(text).not.toContain('adapterConfig.sourceMaps');
     });

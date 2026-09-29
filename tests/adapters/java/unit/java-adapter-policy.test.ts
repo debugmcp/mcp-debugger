@@ -455,6 +455,27 @@ describe('JavaAdapterPolicy', () => {
     });
   });
 
+  // The bridge knows a class's file path only when a breakpoint was set in
+  // it; every other class is named by package path and flagged
+  // unresolvedSource when it is the kept paused frame (issues #672/#816).
+  describe('describeUnresolvedSource', () => {
+    it('explains a package-path label and how the bridge learns a real path', () => {
+      const text = JavaAdapterPolicy.describeUnresolvedSource!({
+        count: 1, files: ['java/io/PrintStream.java'], attachMode: false
+      });
+      expect(text).toMatch(/It is a class the JDI bridge names by package path \(java\/io\/PrintStream\.java\)/);
+      expect(text).toMatch(/breakpoint set in a class's source file teaches the bridge its path/);
+      expect(text).not.toMatch(/sourceMaps|native frames/);
+    });
+
+    it('pluralises and quotes the first label', () => {
+      const text = JavaAdapterPolicy.describeUnresolvedSource!({
+        count: 2, files: ['com/example/Foo.java', 'com/example/Bar.java'], attachMode: true
+      });
+      expect(text).toMatch(/They are classes the JDI bridge names by package path \(com\/example\/Foo\.java\)/);
+    });
+  });
+
   describe('validateExecutable', () => {
     it('should return true for valid java command', async () => {
       // This test uses the actual system java if available

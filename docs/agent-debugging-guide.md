@@ -125,7 +125,7 @@ evaluate_expression(sessionId=session_id, expression="a + b")  # Returns: "3"
 ## Common Issues and Solutions
 
 ### Issue: JavaScript shows Node.js internals in stack trace
-**Solution:** Use `continue_execution` to move past internal frames. Stack trace filtering hides Node internals, `node_modules` dependency frames, and async separators by default; `includeInternals: true` shows them. A frame marked `unresolvedSource: true` has no file you can open (for JavaScript, a source-map label for a file the package did not ship; for C/C++/Rust/COBOL, a native frame without debug info) — the `note` says which.
+**Solution:** Use `continue_execution` to move past internal frames. Stack trace filtering hides Node internals, `node_modules` dependency frames, and async separators by default; `includeInternals: true` shows them. A frame marked `unresolvedSource: true` has no file path you can open (for JavaScript, a source-map label for a file the package did not ship; for C/C++/Rust/COBOL, a native frame without debug info; for Java, a class the JDI bridge names by package path) — the `note` says which.
 
 ### Issue: Python shows "special variables" instead of actual variables
 **Solution:** This is normal hierarchical organization. Use the `variablesReference` to expand:

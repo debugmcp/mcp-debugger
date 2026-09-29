@@ -108,16 +108,20 @@ export const getStackTraceTool: ToolHandler = async (ctx, args) => {
     // file the package did not ship, a CodeLLDB native frame without debug
     // info — so the adapter's policy supplies that sentence (issue #816); a
     // throwing hook costs only the sentence.
-    const unresolvedCount = stackTrace.frames.filter((frame) => frame.unresolvedSource).length;
-    if (unresolvedCount > 0) {
+    const unresolvedFrames = stackTrace.frames.filter((frame) => frame.unresolvedSource);
+    if (unresolvedFrames.length > 0) {
       notes.push(
-        `${unresolvedCount} frame(s) have no source file on this host (unresolvedSource: true) — their file is a label, not an openable path; do not pass it to get_source_context.`
+        `${unresolvedFrames.length} frame(s) have no openable source path on this host (unresolvedSource: true) — their file is a label, not a path; do not pass it to get_source_context.`
       );
       let explanation: string | undefined;
       try {
         explanation = ctx.sessionManager
           .getSessionPolicy(args.sessionId)
-          .describeUnresolvedSource?.({ count: unresolvedCount, attachMode: sessionBefore?.attachMode === true }) || undefined;
+          .describeUnresolvedSource?.({
+            count: unresolvedFrames.length,
+            files: unresolvedFrames.map((frame) => frame.file),
+            attachMode: sessionBefore?.attachMode === true
+          }) || undefined;
       } catch (error) {
         ctx.logger.debug(`[get_stack_trace ${args.sessionId}] unresolvedSource explanation failed:`, error);
       }

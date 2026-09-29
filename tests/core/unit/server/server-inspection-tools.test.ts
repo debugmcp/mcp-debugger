@@ -19,7 +19,7 @@ import {
   type MockSessionManager
 } from './server-test-helpers.js';
 import { OutputRingBuffer } from '../../../../src/session/output-buffer.js';
-import { CppAdapterPolicy, JsDebugAdapterPolicy, SessionState } from '@debugmcp/shared';
+import { CppAdapterPolicy, JavaAdapterPolicy, JsDebugAdapterPolicy, SessionState, type AdapterPolicy } from '@debugmcp/shared';
 
 // Mock dependencies
 vi.mock('@modelcontextprotocol/sdk/server/index.js');
@@ -366,7 +366,7 @@ describe('Server Inspection Tools Tests', () => {
         { id: 1015, name: 'BaseThreadInitThunk', file: '@BaseThreadInitThunk', line: 11, unresolvedSource: true }
       ];
 
-      async function stackNote(session: Record<string, unknown>, frames: unknown[], policy: unknown): Promise<string> {
+      async function stackTraceOf(session: Record<string, unknown>, frames: unknown[], policy: Partial<AdapterPolicy>) {
         mockSessionManager.getSession.mockReturnValue({
           proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(1) },
           ...session
@@ -382,15 +382,19 @@ describe('Server Inspection Tools Tests', () => {
         const content = JSON.parse(result.content[0].text);
         expect(content.success).toBe(true);
         expect(content.hiddenFrames).toBeUndefined();
-        return content.note as string;
+        return content as { note: string; stackFrames: Array<{ unresolvedSource?: boolean }> };
       }
+      const stackNote = async (session: Record<string, unknown>, frames: unknown[], policy: Partial<AdapterPolicy>) =>
+        (await stackTraceOf(session, frames, policy)).note;
 
       it('notes source-map labels on a js-debug attach with the attach-side sourceMaps switch (issue #655)', async () => {
-        const note = await stackNote({ language: 'javascript', attachMode: true }, jsFrames, JsDebugAdapterPolicy);
-        expect(note).toContain('1 frame(s) have no source file on this host (unresolvedSource: true)');
-        expect(note).toContain('not an openable path');
-        expect(note).toMatch(/source-mapped/);
-        expect(note).toContain('adapterConfig.sourceMaps: false');
+        const content = await stackTraceOf({ language: 'javascript', attachMode: true }, jsFrames, JsDebugAdapterPolicy);
+        // The flag itself reaches the payload, not only the note.
+        expect(content.stackFrames.map((frame) => frame.unresolvedSource)).toEqual([undefined, true]);
+        expect(content.note).toContain('1 frame(s) have no openable source path on this host (unresolvedSource: true)');
+        expect(content.note).toContain('a label, not a path');
+        expect(content.note).toMatch(/source-mapped/);
+        expect(content.note).toContain('adapterConfig.sourceMaps: false');
       });
 
       it('names the launch-side sourceMaps switch on a js-debug launch', async () => {
@@ -401,24 +405,35 @@ describe('Server Inspection Tools Tests', () => {
 
       it("explains CodeLLDB's native frames as such and never offers the js-debug remedy (issue #816)", async () => {
         const note = await stackNote({ language: 'cpp', attachMode: true }, cppFrames, CppAdapterPolicy);
-        expect(note).toContain('3 frame(s) have no source file on this host (unresolvedSource: true)');
+        expect(note).toContain('3 frame(s) have no openable source path on this host (unresolvedSource: true)');
         expect(note).toMatch(/native frames without debug info/);
         expect(note).toMatch(/program's own frames/);
         expect(note).not.toMatch(/sourceMaps|source-mapped|\.js paths/);
       });
 
-      it('keeps the adapter-neutral sentence alone for a policy with nothing to add', async () => {
-        const note = await stackNote({ language: 'java' }, jsFrames, {});
-        expect(note).toContain('1 frame(s) have no source file on this host (unresolvedSource: true)');
-        expect(note).toContain('do not pass it to get_source_context');
+      it('explains a Java class the JDI bridge names by package path (issue #672 flag, #816 wording)', async () => {
+        const javaFrames = [
+          { id: 1, name: 'java.io.PrintStream.println', file: 'java/io/PrintStream.java', line: 1028, unresolvedSource: true },
+          { id: 2, name: 'com.example.App.main', file: 'C:\\work\\src\\com\\example\\App.java', line: 12 }
+        ];
+        const note = await stackNote({ language: 'java' }, javaFrames, JavaAdapterPolicy);
+        expect(note).toContain('1 frame(s) have no openable source path on this host (unresolvedSource: true)');
+        expect(note).toMatch(/names by package path \(java\/io\/PrintStream\.java\)/);
         expect(note).not.toMatch(/sourceMaps|native frames/);
+      });
+
+      it('keeps the adapter-neutral sentence alone for a policy with nothing to add', async () => {
+        const note = await stackNote({ language: 'python' }, jsFrames, {});
+        expect(note).toContain('1 frame(s) have no openable source path on this host (unresolvedSource: true)');
+        expect(note).toContain('do not pass it to get_source_context');
+        expect(note).not.toMatch(/sourceMaps|native frames|package path/);
       });
 
       it('costs only the sentence when the policy hook throws', async () => {
         const note = await stackNote({ language: 'cpp' }, cppFrames, {
           describeUnresolvedSource: () => { throw new Error('boom'); }
         });
-        expect(note).toContain('3 frame(s) have no source file on this host (unresolvedSource: true)');
+        expect(note).toContain('3 frame(s) have no openable source path on this host (unresolvedSource: true)');
         expect(note).not.toMatch(/boom|native frames/);
       });
     });

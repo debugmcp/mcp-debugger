@@ -214,6 +214,13 @@ export interface UnresolvedSourceContext {
   /** How many of the reported frames carry `unresolvedSource: true`. */
   count: number;
   /**
+   * The flagged frames' `file` labels, in stack order — what the adapter
+   * reported in place of a path (CodeLLDB's `@symbol`, js-debug's
+   * `../src/x.ts`, the JDI bridge's `java/io/PrintStream.java`), so a policy
+   * can tell its cases apart before it speaks.
+   */
+  files: readonly string[];
+  /**
    * True for attach sessions — a remedy that names a configuration key spells
    * it the attach way (`adapterConfig.…`) rather than the launch way
    * (`adapterLaunchConfig.…`).
@@ -375,13 +382,15 @@ export interface AdapterPolicy {
   /**
    * Say what a frame flagged `unresolvedSource` IS under this adapter, for
    * the `get_stack_trace` note (issue #816) — and the remedy, when there is
-   * one. The flag itself is adapter-neutral (a non-zero `sourceReference`
-   * with no openable path), but what it means is not: js-debug reports a
-   * source map naming a file the package did not ship (`sourceMaps: false`
-   * shows the generated paths), CodeLLDB a native frame without debug info
-   * (the program's own frames are the ones with a path). The handler appends
-   * the sentence to its adapter-neutral one; undefined leaves that one
-   * standing alone. Optional — absent means the adapter has nothing to add.
+   * one. The flag itself is adapter-neutral (a non-zero `sourceReference`, or
+   * a kept paused frame whose file is a relative label — no openable path
+   * either way), but what it means is not: js-debug reports a source map
+   * naming a file the package did not ship (`sourceMaps: false` shows the
+   * generated paths), CodeLLDB a native frame without debug info (the
+   * program's own frames are the ones with a path), the JDI bridge a class it
+   * names by package path. The handler appends the sentence to its
+   * adapter-neutral one; undefined leaves that one standing alone. Optional —
+   * absent means the adapter has nothing to add.
    */
   describeUnresolvedSource?(info: UnresolvedSourceContext): string | undefined;
 
