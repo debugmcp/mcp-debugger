@@ -72,6 +72,49 @@ describe('CppAdapterPolicy', () => {
       expect(normalize('exception', body, baseContext)).toBeUndefined();
       expect(normalize('exception', body, { ...baseContext, pausePending: true })).toBe('pause');
     });
+
+    // An attach's own initial stop (issue #817): CodeLLDB stops the target
+    // itself, so no pause intent exists to arm; on Windows the
+    // DebugBreakProcess break-in is reported as 0x80000003 on a helper thread
+    // (measured body: {allThreadsStopped, description, reason, threadId}).
+    describe("the attach's initial stop (issue #817)", () => {
+      const breakIn = {
+        reason: 'exception',
+        description: 'Exception 0x80000003 encountered at address 0x7ff958103ab0'
+      };
+      const attachFirst: StopReasonContext = {
+        ...baseContext,
+        sessionMode: 'attach',
+        firstStop: true,
+        stopOnEntry: true
+      };
+
+      it("maps the break-in of a default attach to 'pause'", () => {
+        expect(normalize('exception', breakIn, attachFirst)).toBe('pause');
+      });
+
+      it('keeps a break-in when the attach opted out of the initial stop (a real __debugbreak came first)', () => {
+        expect(normalize('exception', breakIn, { ...attachFirst, stopOnEntry: false })).toBeUndefined();
+      });
+
+      it('keeps a break-in on a later stop of the attach session', () => {
+        expect(normalize('exception', breakIn, { ...attachFirst, firstStop: false })).toBeUndefined();
+      });
+
+      it("keeps a launch's first-stop break-in (a launch entry stop arrives as 'entry', not as an exception)", () => {
+        expect(normalize('exception', breakIn, { ...attachFirst, sessionMode: 'launch' })).toBeUndefined();
+      });
+
+      it('keeps a first-stop exception whose detail is not the break-in code', () => {
+        expect(
+          normalize(
+            'exception',
+            { reason: 'exception', description: 'Exception 0xc0000005 encountered at address 0x1' },
+            attachFirst
+          )
+        ).toBeUndefined();
+      });
+    });
   });
 
   describe('extractLocalVariables (shared LLDB scope handling)', () => {

@@ -152,6 +152,18 @@ describe('RustAdapterPolicy', () => {
       ).toBeUndefined();
     });
 
+    // The shared normalizer also owns an attach's own initial stop (issue
+    // #817): CodeLLDB stops the target itself, so no pause intent is armed,
+    // and Windows reports the DebugBreakProcess break-in as 0x80000003.
+    it("maps the break-in of an attach's own initial stop to pause (issue #817)", () => {
+      const breakIn = { reason: 'exception', description: 'Exception 0x80000003 encountered at address 0x7ff958103ab0' };
+      const attachFirst: Partial<StopReasonContext> = { sessionMode: 'attach', firstStop: true, stopOnEntry: true };
+      expect(normalize('exception', breakIn, ctx(attachFirst))).toBe('pause');
+      expect(normalize('exception', breakIn, ctx({ ...attachFirst, stopOnEntry: false }))).toBeUndefined();
+      expect(normalize('exception', breakIn, ctx({ ...attachFirst, firstStop: false }))).toBeUndefined();
+      expect(normalize('exception', breakIn, ctx({ ...attachFirst, sessionMode: 'launch' }))).toBeUndefined();
+    });
+
     it('never touches step or pause reasons', () => {
       expect(normalize('step', { reason: 'step' }, ctx())).toBeUndefined();
       expect(normalize('pause', { reason: 'pause' }, ctx({ pausePending: true }))).toBeUndefined();

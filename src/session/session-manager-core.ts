@@ -620,14 +620,22 @@ export abstract class SessionManagerCore extends EventEmitter {
         pauseIntent = getCurrentPauseIntent(session);
         // Mode facts for policies whose adapter reports a launch's entry stop
         // under a generic reason (rdbg's `pause`, issue #798): a launch or an
-        // attach, the first stop or a later one, and whether the launch asked
-        // for an entry stop at all.
+        // attach, the first stop or a later one, and whether the session asked
+        // for an entry stop at all. The two modes default differently: a launch
+        // stops on entry only when asked (`=== true`), an attach stops unless
+        // told not to (`!== false`) — the reading the attach controller and the
+        // adapters (CodeLLDB's `stopOnEntry ?? true`) apply. A default attach
+        // reaches here as `stopOnEntry: undefined`: the launch default (false)
+        // is spread first and the caller's undefined key over it (issue #817).
+        const stopOnEntry = isAttachSession
+          ? effectiveLaunchArgs.stopOnEntry !== false
+          : effectiveLaunchArgs.stopOnEntry === true;
         const normalized = policy.normalizeStopReason?.(rawReason, body, {
           pausePending: pauseIntent !== undefined,
           ...(pauseIntent ? { pauseSource: pauseIntent.source } : {}),
           sessionMode: isAttachSession ? 'attach' : 'launch',
           firstStop: isFirstStop,
-          stopOnEntry: effectiveLaunchArgs.stopOnEntry === true,
+          stopOnEntry,
           userBreakpointIds,
           functionBreakpointIds: fnComplete ? fnIds : undefined,
           lineBreakpointCount: session.breakpoints.size,

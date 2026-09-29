@@ -162,7 +162,12 @@ describe.skipIf(SKIP_CPP)('MCP Server C/C++ Attach Smoke Test @requires-cpp', ()
       const stackResponse = parseSdkToolResult(await mcpClient!.callTool({
         name: 'get_stack_trace',
         arguments: { sessionId }
-      })) as { success?: boolean; stackFrames?: Array<{ name?: string }> };
+      })) as {
+        success?: boolean;
+        stackFrames?: Array<{ name?: string }>;
+        stopReason?: string;
+        lastStop?: { reason?: string; rawReason?: string; description?: string };
+      };
       expect(stackResponse.success).toBe(true);
       expect((stackResponse.stackFrames ?? []).length).toBeGreaterThan(0);
       // The anchored thread is the program's, not the break-in thread Windows injects
@@ -170,6 +175,18 @@ describe.skipIf(SKIP_CPP)('MCP Server C/C++ Attach Smoke Test @requires-cpp', ()
       // pause_test.cpp is on the default stack.
       const stackFiles = (stackResponse.stackFrames as Array<{ file?: string }>).map(f => f.file ?? '');
       expect(stackFiles.some(f => f.endsWith('pause_test.cpp')), `expected pause_test.cpp in ${JSON.stringify(stackFiles)}`).toBe(true);
+      // The attach's initial stop is the attach, not a crash (issue #817). On
+      // Windows CodeLLDB reports the DebugBreakProcess break-in as an
+      // 0x80000003 exception; the session says 'pause' and keeps the adapter's
+      // own words beside it. Other platforms: measured raw shapes are not
+      // pinned yet — log them so a local run records what LLDB reported.
+      if (process.platform === 'win32') {
+        expect(stackResponse.stopReason, JSON.stringify(stackResponse.lastStop)).toBe('pause');
+        expect(stackResponse.lastStop?.rawReason).toBe('exception');
+        expect(stackResponse.lastStop?.description).toMatch(/0x80000003/);
+      } else {
+        console.log(`[cpp attach] post-attach stop on ${process.platform}: ${JSON.stringify(stackResponse.lastStop)}`);
+      }
 
       const detachResponse = parseSdkToolResult(await mcpClient!.callTool({
         name: 'detach_from_process',
