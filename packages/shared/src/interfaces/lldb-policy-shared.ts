@@ -31,6 +31,16 @@ export const LLDB_LOCAL_SCOPE_NAMES = ['Local', 'Locals'] as const;
  *    any platform-specific exception detail, so its generation-scoped
  *    intent is authoritative; public pauses retain the narrower Windows
  *    detail checks so coincident real exceptions are not mislabeled.
+ *    An attach's own initial stop is the same break-in with no intent to
+ *    lean on (issue #817): CodeLLDB stops the target itself when the attach
+ *    did not opt out of stopOnEntry, so the session layer never arms a pause,
+ *    and the stopped event (measured: `{allThreadsStopped, description:
+ *    "Exception 0x80000003 encountered at address 0x…", reason: "exception",
+ *    threadId}`) even precedes the attach response. That first stop of an
+ *    attach that asked to stop is 'pause' too — gated on the break-in code,
+ *    so a real __debugbreak() met first by an attach that opted out stays an
+ *    exception. (Measured on Windows; the POSIX shape of this stop is not
+ *    pinned yet — a SIGSTOP would fall under the first rule.)
  *
  * 2. An exception-filter hit (rust_panic, cpp_throw) is reported as reason
  *    'breakpoint' because CodeLLDB implements filters as internal
@@ -80,6 +90,20 @@ export function normalizeLldbStopReason(
     return 'pause';
   }
   if (context.pauseSource === 'attach') {
+    return 'pause';
+  }
+  // The attach's own initial stop (issue #817): first stop of an attach that
+  // did not opt out of stopOnEntry, with no pause in flight, reported through
+  // the Windows break-in code. (On POSIX a ptrace attach stops the target
+  // with SIGSTOP, which the rule above would cover; that shape has not been
+  // measured for this stop — the cpp attach e2e logs it off Windows.)
+  if (
+    context.sessionMode === 'attach' &&
+    context.firstStop === true &&
+    context.stopOnEntry === true &&
+    !context.pausePending &&
+    /0x80000003/i.test(detail)
+  ) {
     return 'pause';
   }
   // Windows delivers a user-initiated pause via DebugBreakProcess: the

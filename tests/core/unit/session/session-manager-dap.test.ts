@@ -3838,6 +3838,45 @@ describe('SessionManager - DAP Operations', () => {
       expect(managed.pauseIntent).toBeUndefined();
     });
 
+    // Measured (Windows 11, CodeLLDB 1.11.8, examples/cpp/pause_test.cpp): the
+    // stopped event of a default cpp attach is {allThreadsStopped, description:
+    // "Exception 0x80000003 encountered at address 0x7ff9…", reason:
+    // "exception", threadId} and arrives before the attach response, with no
+    // pause intent armed (issue #817).
+    it("normalizes the break-in of a cpp attach's own initial stop to pause and keeps the raw reason (issue #817)", async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.CPP,
+        executablePath: 'lldb'
+      });
+      // The stop lands while the attach is still in flight (the mock emits no
+      // stop of its own for an attach-shaped start, and the cpp policy is ready
+      // only on a pause), the way CodeLLDB's does.
+      const attaching = sessionManager.startDebugging(
+        session.id,
+        'attach://remote',
+        undefined,
+        { request: 'attach', __attachMode: true, stopOnEntry: undefined } as never
+      );
+      await vi.advanceTimersByTimeAsync(10);
+      const description = 'Exception 0x80000003 encountered at address 0x7ff958103ab0';
+      dependencies.mockProxyManager.simulateStopped(20764, 'exception', {
+        reason: 'exception',
+        threadId: 20764,
+        allThreadsStopped: true,
+        description
+      });
+      const result = await attaching;
+      expect(result.success).toBe(true);
+      expect(result.state).toBe(SessionState.PAUSED);
+
+      const managed = sessionManager.getSession(session.id)!;
+      expect(managed.state).toBe(SessionState.PAUSED);
+      expect(managed.lastStop?.reason).toBe('pause');
+      expect(managed.lastStop?.rawReason).toBe('exception');
+      expect(managed.lastStop?.description).toBe(description);
+      expect(managed.lastStop?.threadId).toBe(20764);
+    });
+
     it('leaves a real rust exception stop unnormalized (no rawReason)', async () => {
       const session = await createPausedRustSession();
 
@@ -4305,6 +4344,53 @@ describe('SessionManager - DAP Operations', () => {
           functionBreakpointCount: 1
         })
       );
+    });
+
+    // An attach reads stopOnEntry the way the attach controller and CodeLLDB
+    // do — "stop unless told not to" (issue #817). A default attach reaches the
+    // core as `stopOnEntry: undefined` (the launch default false is spread
+    // first, the caller's undefined key over it), which a launch-style
+    // `=== true` reading turned into false.
+    it("reports an attach's stopOnEntry as true unless the caller opted out (issue #817)", async () => {
+      const normalizeStopReason = installPolicySpy();
+      const attachContext = async (stopOnEntry: boolean | undefined) => {
+        const session = await sessionManager.createSession({
+          language: DebugLanguage.MOCK,
+          executablePath: 'python'
+        });
+        await sessionManager.startDebugging(
+          session.id,
+          'attach://remote',
+          undefined,
+          { request: 'attach', __attachMode: true, stopOnEntry } as never
+        );
+        await vi.runAllTimersAsync();
+        dependencies.mockProxyManager.simulateStopped(1, 'exception', {
+          reason: 'exception',
+          threadId: 1,
+          description: 'Exception 0x80000003 encountered at address 0x7ff958103ab0'
+        });
+        return normalizeStopReason.mock.calls.at(-1)![2];
+      };
+
+      expect(await attachContext(undefined)).toMatchObject({ sessionMode: 'attach', firstStop: true, stopOnEntry: true });
+      expect(await attachContext(false)).toMatchObject({ sessionMode: 'attach', firstStop: true, stopOnEntry: false });
+      // The mock proxy simulates an entry stop of its own for an explicit
+      // stopOnEntry: true, so the simulated break-in is that session's second stop.
+      expect(await attachContext(true)).toMatchObject({ sessionMode: 'attach', firstStop: false, stopOnEntry: true });
+    });
+
+    it("reports a launch's stopOnEntry as true only when the caller asked for one", async () => {
+      const normalizeStopReason = installPolicySpy();
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+      await sessionManager.startDebugging(session.id, 'test.py', undefined, { stopOnEntry: undefined } as never);
+      await vi.runAllTimersAsync();
+      dependencies.mockProxyManager.simulateStopped(1, 'breakpoint', { reason: 'breakpoint', threadId: 1 });
+
+      expect(normalizeStopReason.mock.calls.at(-1)![2]).toMatchObject({ sessionMode: 'launch', stopOnEntry: false });
     });
 
     it('warns at launch about unbound function breakpoints on eager adapters (#308)', async () => {
