@@ -37,6 +37,14 @@ jobs:
         node-version: '22.x'
         cache: 'pnpm'
 
+    # Every publishing job needs this one, so a CHANGELOG section that is missing, or too long
+    # for a GitHub Release body without a Highlights block, stops the release here instead of
+    # in create-release after npm, Docker and PyPI have already published.
+    - name: Check release notes fit
+      env:
+        RELEASE_REF: ${{ github.event.inputs.ref || github.ref }}
+      run: node scripts/release-notes.mjs "$RELEASE_REF" --check
+
     - name: Setup Python 3.11
       uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
       with:
@@ -572,7 +580,14 @@ jobs:
       with:
         fetch-depth: 0
         ref: ${{ github.event.inputs.ref || github.ref }}
-    
+
+    # Pinned rather than relying on the runner image's Node: this job runs after every publish,
+    # so it must not depend on anything that can drift underneath it.
+    - name: Setup Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      with:
+        node-version: '22.x'
+
     - name: Resolve release ref
       run: |
         if [ -n "${{ github.event.inputs.ref }}" ]; then
@@ -592,19 +607,17 @@ jobs:
         name: provenance
         path: provenance
 
+    # The CHANGELOG section goes to a file, not a step output: interpolating a ~100 KB output into
+    # the release script is fragile, and a section over GitHub's release-body limit is replaced by
+    # its Highlights block and a link (scripts/release-notes.mjs; build-and-test already checked it).
     - name: Generate changelog
       id: changelog
       run: |
         # Extract version from tag
         VERSION=${RELEASE_REF#refs/tags/v}
         echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+        node scripts/release-notes.mjs "$VERSION" --out release-changelog.md
 
-        # Get changelog for this version
-        CHANGELOG=$(sed -n "/^## \[$VERSION\]/,/^## \[/p" CHANGELOG.md | sed '$ d')
-        echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
-        echo "$CHANGELOG" >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
-    
     # SBOMs (SPDX + CycloneDX) are generated from the exact release ref and
     # attached to the GitHub release — required by many corporate/government
     # procurement processes (EO 14028) and useful for downstream scanners.
@@ -630,12 +643,14 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        # Create the release body in a file
-        cat << 'EOF' > release_notes.md
-        ## 🎉 Release ${{ steps.changelog.outputs.VERSION }}
-        
-        ${{ steps.changelog.outputs.CHANGELOG }}
-        
+        # Create the release body in a file: heading, the changelog body chosen by
+        # scripts/release-notes.mjs, then the fixed installation and verification text.
+        {
+          printf '## 🎉 Release %s\n\n' "${{ steps.changelog.outputs.VERSION }}"
+          cat release-changelog.md
+          printf '\n'
+        } > release_notes.md
+        cat << 'EOF' >> release_notes.md
         ### 📦 Installation
         
         **Docker:**

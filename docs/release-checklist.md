@@ -8,6 +8,7 @@ Pre-release validation for mcp-debugger. Run `npm run release:dry-run` to automa
 - [ ] Package versions match (the dry-run script checks root plus **all 18** workspace packages, including the private/bundle-only `adapter-rust`, `adapter-cpp`, `adapter-cobol`, and `codelldb-common`; the five `codelldb-<platform>` payload packages are checked against the **CodeLLDB pin**, not the repo version)
 - [ ] `CHANGELOG.md` has `[x.y.z] - YYYY-MM-DD` entry with date
 - [ ] `CHANGELOG.md` has empty `[Unreleased]` section at top
+- [ ] Release notes fit (`node scripts/release-notes.mjs <version> --check`): GitHub rejects release bodies over 125,000 characters, so a section over 100,000 must open with a `### Highlights` block, which the release then posts with a link to the full section. `release.yml` runs the same check in `build-and-test`, before anything publishes
 - [ ] `npm run build` succeeds
 - [ ] `npm run test:unit` passes
 - [ ] `npm pack --dry-run` succeeds for packages in `PUBLISHED_PKGS` (see `scripts/release-dry-run.sh`)

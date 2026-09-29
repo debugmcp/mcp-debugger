@@ -93,6 +93,14 @@ else
   fail "CHANGELOG missing [Unreleased] section at top"
 fi
 
+# The GitHub Release body is cut from this section; GitHub rejects bodies over 125,000
+# characters, so a long section must open with a ### Highlights block (release-notes.mjs).
+if NOTES_CHECK=$(node scripts/release-notes.mjs "$ROOT_VER" --check 2>&1); then
+  pass "$NOTES_CHECK"
+else
+  fail "Release notes: $NOTES_CHECK"
+fi
+
 # Fragments must have been collated into CHANGELOG.md before tagging, or their
 # entries silently miss the release notes (issue #546).
 PENDING_FRAGMENTS=$(find changelog.d -name '*.md' ! -name 'README.md' 2>/dev/null | wc -l | tr -d ' ')
