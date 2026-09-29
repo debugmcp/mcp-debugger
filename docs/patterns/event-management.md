@@ -347,14 +347,19 @@ proxyManager.on('exit', onExit);
 **Location**: `src/session/launch/launch-readiness.ts` (`waitForLaunchReadiness`)
 
 ```typescript
-// Wait for the adapter to be configured, the first stop event, or termination.
-// Readiness can be satisfied by: stopped, adapter-configured, terminated,
-// exited, or exit. The wait never rejects — every outcome resolves, including
-// the 30s ceiling, so the caller reports whatever state the session is in
-// rather than failing a launch that is merely slow.
+// Wait for the adapter to be configured, the first stop event, termination,
+// or the ceiling. Readiness can be satisfied by: stopped, adapter-configured,
+// terminated, exited, or exit. The wait never rejects — every outcome resolves
+// with a word on how it settled ('stopped' | 'configured' | 'ended' |
+// 'ceiling' | 'already-terminal'), so the caller reports the session as it is
+// and says "still running" for a ceiling rather than failing a launch that is
+// merely slow. The ceiling is the caller's (issue #815): the full 30 s when
+// something is armed to stop the program, a short grace window when nothing
+// is — every policy but js-debug is ready only on a pause, and the real proxy
+// reports adapter-configured before this wait can listen.
 // `session.proxyManager` is re-read on every access: a terminal event handler
 // may null it while the wait is in flight.
-return new Promise<void>((resolve) => {
+return new Promise<LaunchReadinessOutcome>((resolve) => {
   let resolved = false;
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
@@ -367,18 +372,23 @@ return new Promise<void>((resolve) => {
     session.proxyManager?.removeListener('exit', handleExit);
   };
 
-  const handleStopped = () => {
-    if (!resolved) { resolved = true; cleanup(); resolve(); }
+  const settle = (outcome: LaunchReadinessOutcome, narration: string) => {
+    if (resolved) return;
+    resolved = true; cleanup();
+    ctx.logger.info(`[SessionManager] Session ${sessionId} ${narration}`);
+    resolve(outcome);
   };
+
+  const handleStopped = () => settle('stopped', 'stopped on entry');
   const handleConfigured = () => {
     // The adapter policy decides whether "configured and running" counts as
     // ready; without one, it does unless the caller asked to stop on entry.
     const readyOnRunning = policy.isSessionReady
       ? policy.isSessionReady(SessionState.RUNNING, { stopOnEntry: dapLaunchArgs?.stopOnEntry })
       : !dapLaunchArgs?.stopOnEntry;
-    if (!resolved && readyOnRunning) { resolved = true; cleanup(); resolve(); }
+    if (readyOnRunning) settle('configured', `running (stopOnEntry=${dapLaunchArgs?.stopOnEntry ?? false})`);
   };
-  // handleTerminated / handleExited / handleExit follow the same shape.
+  // handleTerminated / handleExited / handleExit settle 'ended'.
 
   // Checked BEFORE any listener is registered: the caller decided readiness
   // synchronously just before this call and nothing has been awaited since,
@@ -387,7 +397,7 @@ return new Promise<void>((resolve) => {
   const currentState = ctx.getSession(sessionId).state;
   if (currentState === SessionState.STOPPED || currentState === SessionState.ERROR) {
     resolved = true;
-    resolve();
+    resolve('already-terminal');
     return;
   }
 
@@ -397,16 +407,23 @@ return new Promise<void>((resolve) => {
   session.proxyManager?.once('exited', handleExited);
   session.proxyManager?.once('exit', handleExit);
 
-  // Ceiling after 30 seconds: log and resolve, never reject.
+  // The ceiling: a program that is running has simply not stopped — the caller
+  // answers pending: true. A session still initializing here is the adapter not
+  // answering, which is what the warning has always meant. Resolve, never reject.
   timeoutId = setTimeout(() => {
-    if (!resolved) {
-      resolved = true; cleanup();
-      ctx.logger.warn(ErrorMessages.adapterReadyTimeout(30));
-      resolve();
+    if (resolved) return;
+    resolved = true; cleanup();
+    if (session.state === SessionState.RUNNING || session.state === SessionState.PAUSED) {
+      ctx.logger.info(`[SessionManager] Session ${sessionId} still running after the ${ceilingMs / 1000}s readiness ceiling; answering with pending`);
+    } else {
+      ctx.logger.warn(ErrorMessages.adapterReadyTimeout(ceilingMs / 1000));
     }
-  }, 30000);
+    resolve('ceiling');
+  }, ceilingMs);
 });
 ```
+
+The launcher (`src/session/launch/debug-launcher.ts`) picks `ceilingMs` from `describeLaunchArming(session, stopOnEntry)` (`launch-arming.ts`): `launchReadyCeilingMs` (30 s) when line/function breakpoints, a pausing logpoint, `stopOnEntry` or `breakOnExceptions: 'all'` are armed, `launchGraceMs` (5 s) otherwise — both `SessionManagerOperations` tunables. A `'ceiling'` outcome with the session `RUNNING` becomes `data.pending: true` and `ErrorMessages.launchStillRunning(...)` on the launch response, hoisted to the top level by the `start_debugging`/`restart_debugging` handlers.
 
 ## Testing Event Patterns
 

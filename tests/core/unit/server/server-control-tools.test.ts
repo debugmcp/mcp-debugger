@@ -343,6 +343,35 @@ describe('Server Control Tools Tests', () => {
       expect(content.state).toBe('paused');
     });
 
+    it('hoists pending to the top level when the launch answers while the program still runs (issue #815)', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: 'ACTIVE'
+      });
+      const message =
+        'Debugging started for /path/to/server.py. Current state: running. The program is still running after 5s and nothing is armed to stop it soon';
+      mockSessionManager.startDebugging.mockResolvedValue({
+        success: true,
+        state: 'running',
+        data: { message, pending: true }
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'start_debugging',
+          arguments: { sessionId: 'test-session', scriptPath: '/path/to/server.py' }
+        }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      expect(content.state).toBe('running');
+      expect(content.pending).toBe(true);
+      expect(content.message).toBe(message);
+      expect(content.data.pending).toBe(true);
+    });
+
     it('should start debugging successfully', async () => {
       // Mock session validation
       mockSessionManager.getSession.mockReturnValue({

@@ -390,6 +390,12 @@ Starts debugging a script.
 }
 ```
 
+**When the launch answers:** after the adapter's handshake, `start_debugging` waits for the program's first stop, its exit, or a ceiling, and reports the session as it is at that moment (issue #815):
+
+- **A stop arrives** — `state: "paused"` with `reason` (the example above), which is why a launch with breakpoints set answers "paused at the first breakpoint" for every adapter but js-debug (js-debug counts a configured, running program as ready when no entry stop was requested, and answers `running` right away — see issue #823).
+- **The program ends first** — `state: "stopped"` with the run-to-completion summary and `exitCode` below.
+- **Neither, within the ceiling** — `state: "running"` with **`pending: true`** (top level and in `data`, like `step_over`) and a `message` that says so. The ceiling depends on what the launch has armed: with line breakpoints (a logpoint counts when the adapter does not run it on), function breakpoints, `stopOnEntry` or `breakOnExceptions: "all"`, the first stop gets 30 s and the message names what was not reached (`The program is still running after 30s without reaching 2 breakpoint(s)…`); with nothing armed — the `"uncaught"` default does not count, a crash is not a stop that comes soon — the wait is a 5 s grace window and the message says why no stop is coming (`…nothing is armed to stop it soon (no breakpoints, no entry stop, no caught-exception filter)…`) and what to do (`list_debug_sessions`, `get_output`, or set breakpoints and `restart_debugging`). A server or a long-running script therefore answers in about 5 s instead of 30. The stop, if one comes later, is reported by `list_debug_sessions` as the state flips to `paused`.
+
 **JavaScript launch configuration:** Both launch option objects accept js-debug settings;
 `adapterLaunchConfig` wins when a key appears in both. The effective `stopOnEntry` value controls
 the entry pause and is replayed by `restart_debugging`. An honoured `noDebug` disables that pause.
@@ -465,6 +471,7 @@ Restarts the debuggee in one call: terminates the current program (if still runn
 - Restart is implemented uniformly as terminate + relaunch (the DAP-spec-blessed emulation; no adapter advertises native restart), so every launch-mode language works identically. Native DAP `restart` is a possible future optimization.
 - The launch configuration is replayed verbatim (script, args, `dapLaunchArgs`, `adapterLaunchConfig`, `breakOnExceptions`); there are no per-restart overrides — call `start_debugging` for a different configuration.
 - **The output buffer starts fresh**: `outputReset: true` signals that `get_output` cursors from the previous launch are stale — read from `since: 0`.
+- The readiness wait and its `pending: true` answer are the same as `start_debugging`'s ("When the launch answers" above): a relaunch with nothing armed answers `running` after the short grace window.
 - Not available for **attach sessions** (no launch configuration to replay — detach and re-attach instead) or for sessions that were never launched, including dry-run-only sessions — call `start_debugging` on the same session instead.
 
 ---

@@ -182,7 +182,7 @@
       },
       {
         "name": "start_debugging",
-        "description": "Start debugging a script",
+        "description": "Start debugging a script. Answers with the session as it is after the program's first stop, its exit, or a readiness window: \"paused\" with a reason (a launch with breakpoints answers at the first one), \"stopped\" with the exit code, or \"running\" with pending:true when the program is still running — after ~5s when nothing is armed to stop it (no breakpoints, no entry stop, no caught-exception filter; the \"uncaught\" default does not count), after 30s when something is; the message says what was or was not reached. A later stop shows in list_debug_sessions as the state flips to \"paused\"",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -243,7 +243,7 @@
       },
       {
         "name": "restart_debugging",
-        "description": "Restart the debuggee: terminate the current program (if still running) and relaunch it with the same configuration as the last start_debugging. All current breakpoints are re-applied automatically. The get_output buffer starts fresh — read from since=0 after a restart. Works while running, paused, or after the program has exited. Not available for attach sessions or sessions never launched",
+        "description": "Restart the debuggee: terminate the current program (if still running) and relaunch it with the same configuration as the last start_debugging. All current breakpoints are re-applied automatically. The get_output buffer starts fresh — read from since=0 after a restart. Works while running, paused, or after the program has exited. Not available for attach sessions or sessions never launched. Answers like start_debugging, including \"running\" with pending:true when the relaunch has not stopped within its readiness window",
         "inputSchema": {
           "type": "object",
           "properties": {

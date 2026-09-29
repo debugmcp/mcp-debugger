@@ -159,6 +159,26 @@ export const ErrorMessages = {
     `(the program may be blocked in native code or a syscall). The session will report ` +
     `'paused' once the stop lands. Check the session state to confirm.`,
 
+  /**
+   * A launch answered while the program is still running (issue #815): the
+   * readiness wait reached its ceiling with no stop and no exit. Not an error —
+   * the stop, if one comes, is reported by list_debug_sessions. Two wordings:
+   * with something armed, what was not reached yet; with nothing armed, why no
+   * stop is coming soon and what to do instead.
+   * Used in: src/session/launch/debug-launcher.ts
+   * @param graceSeconds - The window that ran out, in seconds
+   * @param armedSummary - The armed clauses ("2 breakpoint(s) and an entry stop"); undefined when nothing is armed
+   */
+  launchStillRunning: (graceSeconds: number, armedSummary: string | undefined) =>
+    armedSummary
+      ? `The program is still running after ${graceSeconds}s without reaching ${armedSummary}. ` +
+        `The session will report 'paused' when it does — check list_debug_sessions, or call ` +
+        `pause_execution to interrupt.`
+      : `The program is still running after ${graceSeconds}s and nothing is armed to stop it soon ` +
+        `(no breakpoints, no entry stop, no caught-exception filter): it will stop only for an uncaught ` +
+        `exception the debugger catches by default, or report its exit. Check list_debug_sessions or ` +
+        `get_output, or set breakpoints and call restart_debugging.`,
+
 
   /**
    * The why a session whose current launch runs with the debugger off appends

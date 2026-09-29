@@ -108,6 +108,32 @@ describe('restart_debugging tool', () => {
     expect(content.data.warning).toBe('1 statement anchor(s) no longer match');
   });
 
+  it('hoists pending to the top level when the relaunch is still running at the readiness ceiling (issue #815)', async () => {
+    mockSessionManager.getSession.mockReturnValue({
+      id: 'test-session',
+      sessionLifecycle: 'terminated'
+    });
+    const message =
+      'Debugging started for /work/server.py. Current state: running. The program is still running after 5s and nothing is armed to stop it soon';
+    mockSessionManager.restartDebugging.mockResolvedValue({
+      success: true,
+      state: 'running',
+      data: { message, pending: true, breakpointsReapplied: 0, outputReset: true }
+    });
+
+    const result = await callToolHandler({
+      method: 'tools/call',
+      params: { name: 'restart_debugging', arguments: { sessionId: 'test-session' } }
+    });
+
+    const content = JSON.parse(result.content[0].text);
+    expect(content.success).toBe(true);
+    expect(content.state).toBe('running');
+    expect(content.pending).toBe(true);
+    expect(content.message).toBe(message);
+    expect(content.data.pending).toBe(true);
+  });
+
   it('withholds the warning on a failed restart, where the error is the message', async () => {
     mockSessionManager.getSession.mockReturnValue({
       id: 'test-session',
