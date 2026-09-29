@@ -115,7 +115,9 @@ export class AttachController {
     const { verifyTimeout, breakOnExceptions, adapterConfig, ...adapterAttachConfig } = attachConfig;
     if (adapterConfig && adapterConfig.stopOnEntry !== undefined) {
       this.ctx.logger.warn(
-        '[SessionManager] adapterConfig.stopOnEntry reaches the adapter but does not affect post-attach pause verification; prefer the top-level stopOnEntry parameter'
+        '[SessionManager] adapterConfig.stopOnEntry reaches the adapter (and is what the stop-reason reading of the ' +
+          'attach\'s initial stop follows) but does not affect post-attach pause verification; prefer the top-level ' +
+          'stopOnEntry parameter'
       );
     }
     // Same rules as every per-request 'timeout' override: positive finite
@@ -186,9 +188,16 @@ export class AttachController {
       // The actual attach logic will be handled by the adapter via dapLaunchArgs
       const placeholderPath = 'attach://remote';
 
-      // Pass attach config through dapLaunchArgs with special request type
+      // Pass attach config through dapLaunchArgs with special request type.
+      // stopOnEntry as the adapter will receive it: adapterConfig wins the
+      // merge the proxy launcher applies (issue #336), and the core's mode
+      // facts — the stop-reason reading of the attach's initial stop (issue
+      // #817) and the RUNNING projection — must follow the value that reached
+      // the debugger, not a top-level default the adapter never saw. The
+      // verification gate below keeps reading the top-level parameter.
       const attachLaunchArgs = {
         ...adapterAttachConfig,
+        ...(typeof adapterConfig?.stopOnEntry === 'boolean' ? { stopOnEntry: adapterConfig.stopOnEntry } : {}),
         request: 'attach',
         __attachMode: true  // Internal flag to signal attach mode
       };

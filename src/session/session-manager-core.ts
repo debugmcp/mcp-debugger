@@ -587,6 +587,16 @@ export abstract class SessionManagerCore extends EventEmitter {
       const isAttachSession =
         launchArgsRecord.request === 'attach' ||
         launchArgsRecord.__attachMode === true;
+      // Whether the session asked for an initial stop. The two modes default
+      // differently: a launch stops on entry only when asked (`=== true`), an
+      // attach stops unless told not to (`!== false`) — the reading the attach
+      // controller and the adapters (CodeLLDB's `stopOnEntry ?? true`) apply.
+      // A default attach reaches here as `stopOnEntry: undefined`: the launch
+      // default (false) is spread first and the caller's undefined key over it
+      // (issue #817).
+      const stopOnEntry = isAttachSession
+        ? effectiveLaunchArgs.stopOnEntry !== false
+        : effectiveLaunchArgs.stopOnEntry === true;
       try {
         const policy = this.sessionStore.selectPolicy(session.language);
         // Collect the adapter-assigned ids of all user breakpoints so the
@@ -619,15 +629,16 @@ export abstract class SessionManagerCore extends EventEmitter {
           lineComplete && fnComplete ? new Set([...lineIds, ...fnIds]) : undefined;
         pauseIntent = getCurrentPauseIntent(session);
         // Mode facts for policies whose adapter reports a launch's entry stop
-        // under a generic reason (rdbg's `pause`, issue #798): a launch or an
-        // attach, the first stop or a later one, and whether the launch asked
-        // for an entry stop at all.
+        // under a generic reason (rdbg's `pause`, issue #798) or an attach's
+        // own initial stop as an exception (CodeLLDB's Windows break-in, issue
+        // #817): a launch or an attach, the first stop or a later one, and
+        // whether the session asked for an initial stop at all.
         const normalized = policy.normalizeStopReason?.(rawReason, body, {
           pausePending: pauseIntent !== undefined,
           ...(pauseIntent ? { pauseSource: pauseIntent.source } : {}),
           sessionMode: isAttachSession ? 'attach' : 'launch',
           firstStop: isFirstStop,
-          stopOnEntry: effectiveLaunchArgs.stopOnEntry === true,
+          stopOnEntry,
           userBreakpointIds,
           functionBreakpointIds: fnComplete ? fnIds : undefined,
           lineBreakpointCount: session.breakpoints.size,
@@ -676,7 +687,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       const answersUserPause = pauseIntent?.source === 'user';
       const shouldAutoContinue =
         !isAttachSession &&
-        !effectiveLaunchArgs.stopOnEntry &&
+        !stopOnEntry &&
         !answersUserPause &&
         (reason === 'entry' ||
           (firstStopMayBeNonEntry && isFirstStop && !userBreakReasons.has(reason)));

@@ -79,6 +79,22 @@ describe('CobolAdapterPolicy identity and pins', () => {
     });
   });
 
+  // The shim relabels the Windows break-in only when it re-anchors the stop to
+  // a COBOL thread; the shared LLDB normalizer covers the rest (issue #817).
+  it("shares the LLDB normalizer: an attach's own initial break-in is 'pause'", () => {
+    const breakIn = { reason: 'exception', description: 'Exception 0x80000003 encountered at address 0x7ff958103ab0' };
+    const attachFirst = {
+      pausePending: false,
+      lineBreakpointCount: 0,
+      functionBreakpointCount: 0,
+      sessionMode: 'attach' as const,
+      firstStop: true,
+      stopOnEntry: true
+    };
+    expect(CobolAdapterPolicy.normalizeStopReason('exception', breakIn, attachFirst)).toBe('pause');
+    expect(CobolAdapterPolicy.normalizeStopReason('exception', breakIn, { ...attachFirst, firstStop: false })).toBeUndefined();
+  });
+
   it('treats initialized as the child-ready event', () => {
     expect(CobolAdapterPolicy.isChildReadyEvent({ type: 'event', event: 'initialized', seq: 1 })).toBe(true);
     expect(CobolAdapterPolicy.isChildReadyEvent({ type: 'event', event: 'stopped', seq: 1 })).toBe(false);
