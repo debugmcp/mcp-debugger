@@ -96,7 +96,9 @@ describe('RustAdapterPolicy', () => {
   // Shared with cpp/cobol (issue #816): a CodeLLDB `@symbol` frame is native
   // code without debug info, not a source map the package did not ship.
   it('explains unresolvedSource frames in CodeLLDB terms', () => {
-    const text = RustAdapterPolicy.describeUnresolvedSource!({ count: 3, attachMode: false });
+    const text = RustAdapterPolicy.describeUnresolvedSource({
+      count: 3, files: ['@__libc_start_main', '@_start', '@__rust_start'], attachMode: false
+    });
     expect(text).toMatch(/native frames without debug info/);
     expect(text).not.toMatch(/sourceMaps/);
   });
