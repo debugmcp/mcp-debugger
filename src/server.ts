@@ -343,6 +343,7 @@ export class DebugMcpServer implements ToolContext {
     return this.sessionManager.setFunctionBreakpoint(sessionId, { functionName, condition });
   }
 
+  /** `refusal`: the adapter's own answer when the live re-send was refused, as stamped on the record (issue #754). */
   public async setBreakpoint(req: SetBreakpointRequest): Promise<{ breakpoint: Breakpoint; warning?: string }> {
     this.validateSessionExists(req.sessionId);
 

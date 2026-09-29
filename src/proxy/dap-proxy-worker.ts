@@ -1272,7 +1272,8 @@ export class DapProxyWorker {
               file: bp.file,
               line: bp.line,
               verified: false,
-              message
+              message,
+              refused: true
             }));
           this.sendStatusSafely('breakpoints_synced', { breakpoints: [...syncResults, ...stamped] });
         }
@@ -1415,7 +1416,10 @@ export class DapProxyWorker {
           verified: results[i]?.verified === true,
           ...(typeof results[i]?.id === 'number' ? { id: results[i].id } : {}),
           ...(typeof results[i]?.line === 'number' ? { line: results[i].line } : {}),
-          ...(results[i]?.source?.path ? { source: results[i].source.path } : {})
+          ...(results[i]?.source?.path ? { source: results[i].source.path } : {}),
+          // The adapter's own words about the entry (issue #754), as the
+          // line-breakpoint echo carries them.
+          ...(results[i]?.message !== undefined ? { message: results[i].message } : {})
         }))
       });
     } catch (err) {
@@ -1432,7 +1436,8 @@ export class DapProxyWorker {
           functionBreakpoints: this.currentInitPayload.initialFunctionBreakpoints.map((bp) => ({
             name: bp.name,
             verified: false,
-            message: err.message
+            message: err.message,
+            refused: true
           }))
         });
       }
@@ -1612,7 +1617,7 @@ export class DapProxyWorker {
       this.requestTracker.complete(payload.requestId);
       const message = error instanceof Error ? error.message : String(error);
       this.logger!.error(`[Worker] DAP command ${payload.dapCommand} failed:`, { error: message });
-      this.sendDapResponse(payload.requestId, false, undefined, message);
+      this.sendDapResponse(payload.requestId, false, error instanceof DapResponseError ? error.response : undefined, message);
     }
   }
 
@@ -1671,7 +1676,7 @@ export class DapProxyWorker {
         this.requestTracker.complete(payload.requestId);
         const message = error instanceof Error ? error.message : String(error);
         this.logger!.error(`[Worker] Queued DAP command ${payload.dapCommand} failed:`, { error: message });
-        this.sendDapResponse(payload.requestId, false, undefined, message);
+        this.sendDapResponse(payload.requestId, false, error instanceof DapResponseError ? error.response : undefined, message);
       }
     }
   }
@@ -2180,16 +2185,23 @@ export class DapProxyWorker {
     this.dependencies.messageSender.send(message);
   }
 
+  /**
+   * A failed response may carry the adapter's own error response alongside
+   * the error text (issue #754): the parent then rejects with a typed
+   * refusal, telling "the adapter said no" from a transport failure, a
+   * timeout or a shutdown, which travel as text only.
+   */
   private sendDapResponse(requestId: string, success: boolean, response?: unknown, error?: string): void {
     const message: DapResponseMessage = {
       type: 'dapResponse',
       requestId,
       success,
       sessionId: this.currentSessionId || 'unknown',
-      ...(success && response ? { 
-        body: (response as DebugProtocol.Response).body, 
-        response: response as DebugProtocol.Response 
-      } : { error })
+      ...(response ? {
+        body: (response as DebugProtocol.Response).body,
+        response: response as DebugProtocol.Response
+      } : {}),
+      ...(success ? {} : { error })
     };
     this.dependencies.messageSender.send(message);
   }

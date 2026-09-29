@@ -243,6 +243,16 @@ export interface Breakpoint {
   verifiedBy?: 'adapter' | 'hit';
   /** Validation message from DAP adapter */
   message?: string;
+  /**
+   * Who wrote `message` when it is not the adapter's verdict on this
+   * breakpoint (issue #754). `'refusal'`: the adapter refused the last
+   * re-send that covered the breakpoint — a note that explains an unverified
+   * record and is dropped the moment anything verifies it. `'curated'`: a
+   * note of the server's own (capability drift, a re-resolved anchor at
+   * restart, never bound), which a refusal never displaces. Absent: the
+   * adapter's own words about the breakpoint. Never sent to the adapter.
+   */
+  messageOrigin?: 'curated' | 'refusal';
   /** Breakpoint id assigned by the debug adapter (from setBreakpoints responses / breakpoint events) */
   adapterId?: number;
   /**
@@ -292,6 +302,8 @@ export interface FunctionBreakpoint {
   verifiedBy?: 'adapter' | 'hit';
   /** Validation message from DAP adapter */
   message?: string;
+  /** See Breakpoint.messageOrigin (issue #754) */
+  messageOrigin?: 'curated' | 'refusal';
   /** Breakpoint id assigned by the debug adapter */
   adapterId?: number;
   /** Source file the adapter bound the function to (from the DAP response) */

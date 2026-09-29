@@ -27,6 +27,7 @@ import type {
   ProxyDapResponseMessage,
   ProxyMessage
 } from '../dap-core/types.js';
+import { DapResponseError } from './dap-response-error.js';
 import { disposeAdapterQuietly } from '../adapters/adapter-disposal.js';
 import { ErrorMessages, ProxyInitProgress } from '../utils/error-messages.js';
 import { ProxyConfig } from './proxy-config.js';
@@ -1328,7 +1329,14 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       }
       pending.resolve((message.response || message.body) as DebugProtocol.Response);
     } else {
-      pending.reject(new Error(message.error || `DAP request '${pending.command}' failed`));
+      // The adapter's own error response travels as `response` (issue #754):
+      // reject with DapResponseError so a caller can tell a refusal from a
+      // transport failure, a timeout or a shutdown, which reject plainly.
+      pending.reject(
+        message.response
+          ? new DapResponseError(message.response)
+          : new Error(message.error || `DAP request '${pending.command}' failed`)
+      );
     }
   }
 

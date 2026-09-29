@@ -21,6 +21,7 @@ import {
 } from './session-manager-test-utils.js';
 import { ErrorMessages } from '../../../../src/utils/error-messages.js';
 import { ProxyNotRunningError } from '../../../../src/errors/debug-errors.js';
+import { DapResponseError } from '../../../../src/proxy/dap-response-error.js';
 
 /**
  * A `breakpoint` event body as the proxy delivers it for a CHILD session event.
@@ -277,6 +278,7 @@ describe('SessionManager - DAP Operations', () => {
 
       const [stored] = sessionManager.listBreakpoints(session.id);
       expect(stored.verified).toBe(true);
+      expect(stored.verifiedBy).toBe('adapter');
       expect(stored.adapterId).toBe(5);
       expect(stored.line).toBe(11);
       expect(stored.message).toBe('Resolved');
@@ -595,6 +597,63 @@ describe('SessionManager - DAP Operations', () => {
       expect(result.removed?.id).toBe(bp1.id);
       expect(result.warning).toContain('live sync failed');
       expect(sessionManager.listBreakpoints(session.id)).toHaveLength(1);
+      // The mock's failure is a plain Error — a transport failure, not the
+      // adapter's answer — so the surviving record is left as it was (issue #754).
+      expect(sessionManager.listBreakpoints(session.id)[0].message).toBeUndefined();
+    });
+
+    it('leaves a verified survivor standing when a remove\'s re-send is refused, and warns (issue #754)', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+      await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+      const { breakpoint: bp1 } = await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 10 });
+      await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 20 });
+      dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+        if (command === 'setBreakpoints') {
+          throw new DapResponseError({ seq: 1, type: 'response', request_seq: 1, success: false, command, message: 'Server is not available' });
+        }
+        return {};
+      });
+
+      const result = await sessionManager.removeBreakpoint(session.id, bp1.id);
+
+      expect(result.removed?.id).toBe(bp1.id);
+      expect(result.warning).toContain('live sync failed: Server is not available');
+      // The refusal answers the request, not the breakpoint: the adapter had
+      // verified line 20 and never said it was gone, so it stands as it was.
+      const [survivor] = sessionManager.listBreakpoints(session.id);
+      expect(survivor).toMatchObject({ line: 20, verified: true, verifiedBy: 'adapter' });
+      expect(survivor.message).toBeUndefined();
+      expect(survivor.messageOrigin).toBeUndefined();
+    });
+
+    it('joins a refused post-launch re-send into the launch result and stamps the records (issue #754)', async () => {
+      const session = await sessionManager.createSession({
+        language: DebugLanguage.MOCK,
+        executablePath: 'python'
+      });
+      await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 10 });
+      dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+        if (command === 'setBreakpoints') {
+          throw new DapResponseError({ seq: 1, type: 'response', request_seq: 1, success: false, command, message: 'adapter rejected setBreakpoints' });
+        }
+        return {};
+      });
+
+      const launched = sessionManager.startDebugging(session.id, 'test.py', undefined, { stopOnEntry: true });
+      await vi.runAllTimersAsync();
+      const result = await launched;
+
+      expect(result.success).toBe(true);
+      expect(result.data?.warning).toContain('The debugger refused the re-send of the breakpoints for test.py: adapter rejected setBreakpoints');
+      expect(result.data?.warning).not.toContain('Breakpoint state updated');
+      expect(sessionManager.listBreakpoints(session.id)[0]).toMatchObject({
+        verified: false,
+        message: 'adapter rejected setBreakpoints'
+      });
     });
   });
 
@@ -639,6 +698,103 @@ describe('SessionManager - DAP Operations', () => {
       const [stored] = sessionManager.listBreakpoints(session.id);
       expect(stored.verified).toBe(true);
       expect(stored.line).toBe(16);
+    });
+
+    // A refusal stamped by a refused live re-send (issue #754) explains an
+    // unverified record; it must not outlive the verification that
+    // contradicts it, whichever path verifies the record.
+    it('drops a stamped refusal when a breakpoint event verifies the record without a message (issue #754)', async () => {
+      const { session } = await createSessionWithUnverifiedBp(55);
+      const [stored] = sessionManager.listBreakpoints(session.id);
+      stored.message = 'Server is not available';
+      stored.messageOrigin = 'refusal';
+
+      dependencies.mockProxyManager.simulateEvent('breakpoint', {
+        reason: 'changed',
+        breakpoint: { id: 55, verified: true, line: 10 }
+      });
+
+      expect(stored).toMatchObject({ verified: true, verifiedBy: 'adapter' });
+      expect(stored.message).toBeUndefined();
+      expect(stored.messageOrigin).toBeUndefined();
+    });
+
+    it('drops a stamped refusal when a stop names the record in hitBreakpointIds (issue #754)', async () => {
+      const { session } = await createSessionWithUnverifiedBp(55);
+      const [stored] = sessionManager.listBreakpoints(session.id);
+      stored.message = 'Server is not available';
+      stored.messageOrigin = 'refusal';
+
+      dependencies.mockProxyManager.simulateStopped(1, 'breakpoint', {
+        reason: 'breakpoint',
+        threadId: 1,
+        hitBreakpointIds: [55]
+      });
+
+      expect(stored).toMatchObject({ verified: true, verifiedBy: 'hit' });
+      expect(stored.message).toBeUndefined();
+      expect(stored.messageOrigin).toBeUndefined();
+    });
+
+    it('drops a stamped refusal when the pre-launch echo verifies the record without a message, keeping a curated note (issue #754)', async () => {
+      const { session } = await createSessionWithUnverifiedBp(55);
+      const [stored] = sessionManager.listBreakpoints(session.id);
+      stored.message = 'Server is not available';
+      stored.messageOrigin = 'refusal';
+      const { breakpoint: second } = await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 20 });
+      const curated = sessionManager.listBreakpoints(session.id).find((bp) => bp.id === second.id)!;
+      const drift = 'Adapter does not advertise logpoint support — this may pause instead of logging';
+      curated.message = drift;
+      curated.messageOrigin = 'curated';
+
+      dependencies.mockProxyManager.simulateEvent('breakpoints-synced', [
+        { id: stored.id, file: 'test.py', line: 10, verified: true, adapterId: 55 },
+        { id: curated.id, file: 'test.py', line: 20, verified: true, adapterId: 56 }
+      ]);
+
+      expect(stored.verified).toBe(true);
+      expect(stored.message).toBeUndefined();
+      expect(stored.messageOrigin).toBeUndefined();
+      expect(curated.verified).toBe(true);
+      expect(curated.message).toBe(drift);
+    });
+
+    it('marks a refused pre-launch echo as a refusal, so a later verification drops it (issue #754)', async () => {
+      const { session } = await createSessionWithUnverifiedBp(55);
+      const [stored] = sessionManager.listBreakpoints(session.id);
+
+      dependencies.mockProxyManager.simulateEvent('breakpoints-synced', [
+        { id: stored.id, file: 'test.py', line: 10, verified: false, message: 'Not supported in noDebug mode', refused: true }
+      ]);
+      expect(stored).toMatchObject({ verified: false, message: 'Not supported in noDebug mode', messageOrigin: 'refusal' });
+
+      dependencies.mockProxyManager.simulateEvent('breakpoint', { reason: 'changed', breakpoint: { id: 55, verified: true, line: 10 } });
+      expect(stored.verified).toBe(true);
+      expect(stored.message).toBeUndefined();
+      expect(stored.messageOrigin).toBeUndefined();
+    });
+
+    it('applies the record rules to a function breakpoint event too: hit-proven stands, an unverified event clears the binding location (issue #754)', async () => {
+      const { session } = await createSessionWithUnverifiedBp(55);
+      const managed = sessionManager.getSession(session.id)!;
+      managed.functionBreakpoints.set('proven', {
+        id: 'proven', functionName: 'main', verified: true, verifiedBy: 'hit', adapterId: 7, boundFile: '/src/main.rs', boundLine: 3
+      });
+      managed.functionBreakpoints.set('gone', {
+        id: 'gone', functionName: 'helper', verified: true, verifiedBy: 'adapter', adapterId: 8, boundFile: '/src/h.rs', boundLine: 2
+      });
+
+      dependencies.mockProxyManager.simulateEvent('breakpoint', { reason: 'changed', breakpoint: { id: 7, verified: false } });
+      dependencies.mockProxyManager.simulateEvent('breakpoint', { reason: 'changed', breakpoint: { id: 8, verified: false } });
+
+      expect(managed.functionBreakpoints.get('proven')).toMatchObject({
+        verified: true, verifiedBy: 'hit', adapterId: 7, boundFile: '/src/main.rs', boundLine: 3
+      });
+      const gone = managed.functionBreakpoints.get('gone')!;
+      expect(gone.verified).toBe(false);
+      expect(gone.verifiedBy).toBeUndefined();
+      expect(gone.boundFile).toBeUndefined();
+      expect(gone.boundLine).toBeUndefined();
     });
 
     it('falls back to file and line matching and adopts the adapter id', async () => {
@@ -1066,8 +1222,11 @@ describe('SessionManager - DAP Operations', () => {
       it('keeps a non-provisional note through the hit but drops a provisional one', async () => {
         const { session, storeId } = await jsSessionWithProvisionalStub(5, { file: 'app.js', line: 20 });
         const stale = "Anchor 'const self = this' not found at restart; breakpoint kept at last known line 20";
-        (sessionManager as unknown as { sessionStore: { get(id: string): { breakpoints: Map<string, { message?: string }> } } })
-          .sessionStore.get(session.id).breakpoints.get(storeId)!.message = stale;
+        const record = (sessionManager as unknown as {
+          sessionStore: { get(id: string): { breakpoints: Map<string, { message?: string; messageOrigin?: 'curated' | 'refusal' }> } };
+        }).sessionStore.get(session.id).breakpoints.get(storeId)!;
+        record.message = stale;
+        record.messageOrigin = 'curated';
 
         hit(5);
 
@@ -1090,6 +1249,22 @@ describe('SessionManager - DAP Operations', () => {
         const bp = find(session.id, storeId);
         expect(bp.verified).toBe(true);
         expect(bp.adapterId).toBe(5);
+      });
+
+      it("drops a stamped refusal when a mirroring policy's pre-launch echo verifies the record (issue #754)", async () => {
+        const { session, storeId } = await jsSessionWithProvisionalStub(5, { file: 'app.js', line: 20 });
+        const record = find(session.id, storeId);
+        record.message = 'Server is not available';
+        record.messageOrigin = 'refusal';
+
+        dependencies.mockProxyManager.simulateEvent('breakpoints-synced', [
+          { id: storeId, file: 'app.js', line: 20, verified: true, adapterId: 5 }
+        ]);
+
+        const bp = find(session.id, storeId);
+        expect(bp.verified).toBe(true);
+        expect(bp.message).toBeUndefined();
+        expect(bp.messageOrigin).toBeUndefined();
       });
 
       it('ignores non-numeric hit ids and still applies the numeric ones', async () => {
@@ -4221,7 +4396,7 @@ describe('SessionManager - DAP Operations', () => {
 
       dependencies.mockProxyManager.simulateEvent('function-breakpoints-synced', [
         { name: 'main', verified: true, id: 7, line: 3, source: '/src/main.rs' },
-        { name: 'main', verified: false },
+        { name: 'main', verified: false, message: 'Not supported in noDebug mode', refused: true },
         { name: 'unknown_name', verified: true, id: 9 }
       ]);
 
@@ -4230,10 +4405,55 @@ describe('SessionManager - DAP Operations', () => {
       expect(first.verified).toBe(true);
       expect(first.boundLine).toBe(3);
       expect(first.boundFile).toBe('/src/main.rs');
+      expect(first.message).toBeUndefined();
       // Duplicate names consume distinct entries in order.
       const second = managed.functionBreakpoints.get('f2')!;
       expect(second.adapterId).toBeUndefined();
       expect(second.verified).toBe(false);
+      // The worker echoes a refused pre-launch set with the adapter's message
+      // (#750); the store keeps it, marked as the refusal it is (issue #754).
+      expect(second.message).toBe('Not supported in noDebug mode');
+      expect(second.messageOrigin).toBe('refusal');
+    });
+
+    it('stamps provenance and binding facts from the function-breakpoints-synced echo like the line echo does (issue #754)', async () => {
+      const session = await createPausedSession(sessionManager, dependencies);
+      const managed = sessionManager.getSession(session.id)!;
+      managed.functionBreakpoints.set('bound', { id: 'bound', functionName: 'main', verified: false });
+      managed.functionBreakpoints.set('unbound', {
+        id: 'unbound', functionName: 'helper', verified: false, boundFile: '/old.rs', boundLine: 4,
+        message: 'Server is not available', messageOrigin: 'refusal'
+      });
+      managed.functionBreakpoints.set('proven', { id: 'proven', functionName: 'proven', verified: true, verifiedBy: 'hit', adapterId: 1 });
+      managed.functionBreakpoints.set('cleared', {
+        id: 'cleared', functionName: 'cleared', verified: false, message: 'Server is not available', messageOrigin: 'refusal'
+      });
+
+      dependencies.mockProxyManager.simulateEvent('function-breakpoints-synced', [
+        { name: 'main', verified: true, id: 7, line: 3, source: '/src/main.rs' },
+        { name: 'helper', verified: false, message: 'Not supported in noDebug mode' },
+        { name: 'proven', verified: false, id: 2 },
+        { name: 'cleared', verified: true, id: 8 }
+      ]);
+
+      expect(managed.functionBreakpoints.get('bound')).toMatchObject({
+        verified: true, verifiedBy: 'adapter', adapterId: 7, boundLine: 3, boundFile: '/src/main.rs'
+      });
+      // An unverified echo: provenance cleared, no binding location claimed,
+      // the adapter's words displace the stamped refusal.
+      const unbound = managed.functionBreakpoints.get('unbound')!;
+      expect(unbound).toMatchObject({ verified: false, message: 'Not supported in noDebug mode' });
+      expect(unbound.verifiedBy).toBeUndefined();
+      expect(unbound.boundFile).toBeUndefined();
+      expect(unbound.boundLine).toBeUndefined();
+      expect(unbound.messageOrigin).toBeUndefined();
+      // The hit-proven rule (#673): an unbound echo keeps the record verified, id current.
+      expect(managed.functionBreakpoints.get('proven')).toMatchObject({ verified: true, verifiedBy: 'hit', adapterId: 2 });
+      // A verifying echo without words drops a stamped refusal.
+      const cleared = managed.functionBreakpoints.get('cleared')!;
+      expect(cleared).toMatchObject({ verified: true, verifiedBy: 'adapter', adapterId: 8 });
+      expect(cleared.message).toBeUndefined();
+      expect(cleared.messageOrigin).toBeUndefined();
     });
   });
 });

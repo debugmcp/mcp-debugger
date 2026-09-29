@@ -79,3 +79,20 @@ describe('DapResponseError', () => {
     expect(err.command).toBe('setBreakpoints');
   });
 });
+
+describe('DapResponseError', () => {
+  it("keeps the adapter's answer reachable but out of every enumeration (issue #754)", () => {
+    const response = failed({
+      message: 'Server is not available',
+      body: { error: { id: 1, format: 'secret {v}', variables: { v: 'x' } } }
+    });
+    const error = new DapResponseError(response);
+
+    expect(error.response).toBe(response);
+    expect(error.command).toBe('evaluate');
+    expect(error.message).toBe('secret x');
+    // A structured log or a spread of the error carries the message alone.
+    expect(Object.keys(error)).not.toContain('response');
+    expect({ ...error }).not.toHaveProperty('response');
+  });
+});

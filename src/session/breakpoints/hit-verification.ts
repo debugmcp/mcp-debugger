@@ -19,7 +19,7 @@
  * replace-all for a `node_modules` location it cannot map to a UI location,
  * while the CDP breakpoint underneath keeps firing.
  */
-import type { Breakpoint, FunctionBreakpoint } from '@debugmcp/shared';
+import type { AdapterPolicy, Breakpoint, FunctionBreakpoint } from '@debugmcp/shared';
 import { normalizeBreakpointMessage } from '../../utils/breakpoint-message.js';
 import type { ManagedSession } from '../session-store.js';
 
@@ -74,9 +74,113 @@ export function resetBinding(record: Breakpoint | FunctionBreakpoint): void {
   record.verified = false;
   record.verifiedBy = undefined;
   record.message = undefined;
+  record.messageOrigin = undefined;
   record.adapterId = undefined;
   record.boundFile = undefined;
   record.boundLine = undefined;
+}
+
+/**
+ * The hit-proven rule (issue #673): a stop already proved this record bound,
+ * so an adapter answer of "unbound" for it is not evidence it stopped firing
+ * — js-debug answers that on every replace-all for a location it cannot map
+ * to a source while the breakpoint underneath keeps firing. The id is kept
+ * current when the answer's id space is the record's (`acceptId`, default
+ * true) and nothing else changes. Returns true when the answer was absorbed
+ * this way; the caller then skips its usual stamping.
+ */
+export function keepHitProven(
+  record: Breakpoint | FunctionBreakpoint,
+  answer: { verified?: boolean; id?: number },
+  options: { acceptId?: boolean } = {}
+): boolean {
+  if (answer.verified !== false || record.verifiedBy !== 'hit') {
+    return false;
+  }
+  if (typeof answer.id === 'number' && options.acceptId !== false) {
+    record.adapterId = answer.id;
+  }
+  return true;
+}
+
+/**
+ * Store the adapter's answer about the record, normalized for its current
+ * `verified` state (issue #471). Words displace whatever note was there — a
+ * stamped refusal and a curated note included: the adapter's words about the
+ * breakpoint win over ours (#754). No words: a curated note stands (the
+ * adapter said nothing against it); on a verified record everything else — a
+ * provisional "unbound" note, a stamped refusal, the adapter's own earlier
+ * verdict — is stale and dropped; on an unverified record the existing
+ * explanation stays.
+ */
+export function setAdapterMessage(
+  record: Breakpoint | FunctionBreakpoint,
+  message: string | undefined,
+  verified: boolean
+): void {
+  if (message !== undefined) {
+    record.message = normalizeBreakpointMessage(message, verified);
+    record.messageOrigin = undefined;
+    return;
+  }
+  if (record.messageOrigin === 'curated') {
+    return;
+  }
+  if (verified) {
+    record.message = undefined;
+    record.messageOrigin = undefined;
+    return;
+  }
+  record.message = normalizeBreakpointMessage(record.message, verified);
+}
+
+/**
+ * Re-settle the stored note after `verified` changed without a fresh adapter
+ * message — the no-words case of setAdapterMessage.
+ */
+export function settleStoredMessage(record: Breakpoint | FunctionBreakpoint): void {
+  setAdapterMessage(record, undefined, record.verified);
+}
+
+/**
+ * Whether the session's policy mirrors breakpoints to a child session
+ * (js-debug, issues #500/#495). A lookup that throws — an unknown language, a
+ * policy without client behaviour — reads as "no": the default handling, the
+ * same answer in every writer that asks.
+ */
+export function mirrorsBreakpointsToChild(
+  lookup: () => Pick<AdapterPolicy, 'getDapClientBehavior'> | undefined
+): boolean {
+  try {
+    return !!lookup()?.getDapClientBehavior?.().mirrorBreakpointsToChild;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Stamp the adapter's refusal of a re-send onto an unverified record (issue
+ * #754). It displaces an absent note, a provisional one, the adapter's own
+ * earlier verdict and an earlier refusal — everything but a curated note of
+ * the server's own (capability drift, a re-resolved anchor), which stays;
+ * the refusal still reaches the caller through the warning.
+ */
+export function stampRefusalMessage(record: Breakpoint | FunctionBreakpoint, refusal: string): void {
+  if (record.messageOrigin === 'curated') {
+    return;
+  }
+  record.message = normalizeBreakpointMessage(refusal, false);
+  record.messageOrigin = 'refusal';
+}
+
+/**
+ * Store a note of the server's own — capability drift, a re-resolved anchor,
+ * never bound — marked so a later refusal cannot displace it and the resync
+ * report can quote it beside a refused function re-send.
+ */
+export function setCuratedMessage(record: Breakpoint | FunctionBreakpoint, message: string): void {
+  record.message = message;
+  record.messageOrigin = 'curated';
 }
 
 export interface HitUpgrade {
@@ -89,8 +193,9 @@ export interface HitUpgrade {
  * Upgrade every unverified line or function breakpoint a stop's
  * `hitBreakpointIds` resolves to (by `adapterId`; the child's provisional ids
  * are stamped there as soon as its replay answers). A provisional "unbound"
- * message cannot outlive the hit that disproves it; any other note (a stale
- * content anchor reported at restart) is kept. Upgrade-only: verified records
+ * note, a stamped refusal or a stale adapter verdict cannot outlive the hit
+ * that disproves it; a curated note (a stale content anchor reported at
+ * restart) is kept. Upgrade-only: verified records
  * are untouched, unknown or non-numeric ids are ignored.
  */
 export function applyHitBreakpointIds(
@@ -109,7 +214,7 @@ export function applyHitBreakpointIds(
       if (!line.verified) {
         line.verified = true;
         line.verifiedBy = 'hit';
-        line.message = normalizeBreakpointMessage(line.message, true);
+        settleStoredMessage(line);
         upgraded.push({ kind: 'line', breakpoint: line, adapterId: id });
       }
       continue;
@@ -118,7 +223,7 @@ export function applyHitBreakpointIds(
     if (fn && !fn.verified) {
       fn.verified = true;
       fn.verifiedBy = 'hit';
-      fn.message = normalizeBreakpointMessage(fn.message, true);
+      settleStoredMessage(fn);
       upgraded.push({ kind: 'function', breakpoint: fn, adapterId: id });
     }
   }

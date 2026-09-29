@@ -7,10 +7,19 @@
  * (their tests called them off the prototype with a bare receiver to prove
  * it); as free functions the purity is the signature rather than a convention.
  */
-import path from 'path';
 import type { AdapterPolicy, ExceptionBreakMode } from '@debugmcp/shared';
 import { normalizeBreakpointMessage } from '../../utils/breakpoint-message.js';
 import type { ManagedSession } from '../session-store.js';
+
+/**
+ * The file's last path segment, whichever separator the record's path uses —
+ * a client's Windows path reaches a Linux host verbatim, and `path.basename`
+ * there would echo the whole thing. The one spelling of a file in every
+ * breakpoint sentence (launch/attach warnings, the resync report).
+ */
+export function fileLabel(file: string): string {
+  return file.split(/[\\/]/).pop() || file;
+}
 
 /** One line breakpoint the program ran past without stopping (issue #701). */
 export interface UnhitBreakpointSummary {
@@ -41,7 +50,7 @@ export function buildUnboundBreakpointExitWarning(
     // Some stamp paths store the raw js-debug l10n key — translate it
     // rather than showing 'breakpoint.provisionalBreakpoint' (issue #471).
     const message = normalizeBreakpointMessage(bp.message, bp.verified);
-    return `${path.basename(bp.file)}:${bp.line}${message ? ` (${message})` : ''}`;
+    return `${fileLabel(bp.file)}:${bp.line}${message ? ` (${message})` : ''}`;
   });
   return (
     `${unbound.length} breakpoint(s) never bound during this run: ${parts.join('; ')}. ` +
@@ -210,7 +219,7 @@ export function buildRunToCompletionSummary(
     return { summary: `${ended}.`, data };
   }
   const verifiedNames = [
-    ...unhitBreakpoints.filter(bp => bp.verified).map(bp => `${path.basename(bp.file)}:${bp.line}`),
+    ...unhitBreakpoints.filter(bp => bp.verified).map(bp => `${fileLabel(bp.file)}:${bp.line}`),
     ...unhitFunctions.filter(bp => bp.verified).map(bp => `function '${bp.functionName}'`)
   ];
   const verifiedClause = verifiedNames.length > 0
@@ -237,7 +246,7 @@ export function buildLogpointDowngradeLaunchWarning(
   const downgraded: string[] = [];
   for (const bp of session.breakpoints.values()) {
     if (bp.logMessage !== undefined) {
-      downgraded.push(`${path.basename(bp.file)}:${bp.line}`);
+      downgraded.push(`${fileLabel(bp.file)}:${bp.line}`);
     }
   }
   if (downgraded.length === 0) {

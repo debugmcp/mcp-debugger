@@ -19,10 +19,11 @@ import {
 import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import { checkLaunchToolchain } from '../../utils/language-availability.js';
+import { setCuratedMessage } from '../breakpoints/hit-verification.js';
 import type { CustomLaunchRequestArguments, DebugResult } from '../session-manager-core.js';
 import type { ManagedSession, ToolchainValidationState } from '../session-store.js';
 import type { LaunchContext } from '../operations-context.js';
-import type { BreakpointController } from '../breakpoints/breakpoint-controller.js';
+import type { BreakpointController, ResyncOutcome } from '../breakpoints/breakpoint-controller.js';
 import { reresolveAnchors } from '../breakpoints/anchor-resolution.js';
 import {
   buildLogpointDowngradeLaunchWarning,
@@ -553,9 +554,12 @@ export class DebugLauncher {
       // Not with the debugger off (issue #746): the adapter has answered the
       // pre-launch set already — CodeLLDB's refusal is echoed per breakpoint
       // by the worker, and debugpy/Delve open no phase to answer in — and a
-      // re-send is a round trip per file whose answer resyncAll discards.
+      // re-send would only be a round trip per file the debugger declines.
+      // A refused re-send is stamped on the records by the send itself and its
+      // warning joins the launch result below (issue #754).
+      let resync: ResyncOutcome = { warnings: [], functionBreakpointsFailed: false };
       if ((finalState === SessionState.RUNNING || finalState === SessionState.PAUSED) && !debuggerOff) {
-        await this.breakpoints.resyncAll(finalSession, { forceFreshEcho: true });
+        resync = await this.breakpoints.resyncAll(finalSession, { forceFreshEcho: true });
       }
 
       // The policy's word is a static pin; a stop that arrived anyway is the
@@ -587,7 +591,11 @@ export class DebugLauncher {
       // reported here instead of failing silently at "the program never
       // stopped". Suppressed for bind-late adapters (js/java), where
       // unverified-at-launch is the designed deferral path.
-      const fnBpWarning = debuggerOn
+      // Withheld when the post-launch function-breakpoint re-send failed —
+      // refused or never answered (issue #754): the cause is in the resync
+      // warning below, and the symptom sentence would only restate it as a
+      // name problem (the #710 rule — a known cause displaces the symptom).
+      const fnBpWarning = debuggerOn && !resync.functionBreakpointsFailed
         ? this.breakpoints.functionBreakpointLaunchWarning(finalSession)
         : undefined;
 
@@ -610,7 +618,9 @@ export class DebugLauncher {
       // annotated output events arrive; joining here is best-effort — a note
       // arriving after this return still lands in the output buffer as an
       // attributed [mcp-debugger] Warning entry.
-      const launchWarning = launchWarnings(finalSession, noDebugNote, fnBpWarning, logpointWarning, unboundAtExitWarning);
+      const launchWarning = launchWarnings(
+        finalSession, noDebugNote, fnBpWarning, logpointWarning, unboundAtExitWarning, ...resync.warnings
+      );
 
       this.ctx.logger.info(
         `[SessionManager] Debugging started for session ${sessionId}. State: ${finalState}`
@@ -788,13 +798,17 @@ export class DebugLauncher {
       const staleCount = anchorResolution?.stale.length ?? 0;
       // Stamp stale-anchor notes AFTER the relaunch: the per-launch
       // breakpoint state reset (#238) clears message on every new launch,
-      // and a real adapter message should still win over ours.
+      // and a real adapter verdict should still win over ours — a refusal of
+      // the relaunch's re-send is not one (issue #754), so the note displaces it.
       if (anchorResolution) {
         const bps = this.ctx.getSession(sessionId).breakpoints;
         for (const staleEntry of anchorResolution.stale) {
           const bp = bps.get(staleEntry.breakpointId);
-          if (bp && !bp.message) {
-            bp.message = `Anchor "${staleEntry.statement}" not found at restart; breakpoint kept at last known line ${staleEntry.line}`;
+          if (bp && (bp.message === undefined || bp.messageOrigin === 'refusal')) {
+            setCuratedMessage(
+              bp,
+              `Anchor "${staleEntry.statement}" not found at restart; breakpoint kept at last known line ${staleEntry.line}`
+            );
           }
         }
       }

@@ -17,6 +17,17 @@ import { debuggerOffWhyFor, readLineContext } from './shared.js';
 import { failureResult, jsonResult, sessionErrorResultOrThrow, type ToolResult } from '../tool-result.js';
 
 /**
+ * The record's message for the response — unless it is the adapter's refusal
+ * the sync warning already quotes (issue #754): a refused live re-send stamps
+ * the answer on the record AND reports it, and the response says it once. A
+ * record this call just created carries `messageOrigin: 'refusal'` exactly
+ * when this call's re-send was refused.
+ */
+function messageBesideWarning(breakpoint: { message?: string; messageOrigin?: string }): string | undefined {
+  return breakpoint.messageOrigin === 'refusal' ? undefined : breakpoint.message;
+}
+
+/**
  * The why beside an unverified answer while the session's launch runs with
  * the debugger off (issue #749). The request still went to the adapter and
  * its own answer is kept; a breakpoint it verified anyway needs no note.
@@ -103,6 +114,7 @@ async function setFunctionBreakpointBranch(ctx: ToolContext, args: WithSessionId
     const { breakpoint, warning: syncWarning } = await ctx.setFunctionBreakpoint(
       args.sessionId, effectiveName, args.condition
     );
+    const recordMessage = messageBesideWarning(breakpoint);
 
     ctx.logger.info('debug:breakpoint', {
       event: 'set',
@@ -115,7 +127,7 @@ async function setFunctionBreakpointBranch(ctx: ToolContext, args: WithSessionId
     });
 
     const warnings = [
-      breakpoint.message, fnGate.warning, normalized?.note, nameHint, syncWarning,
+      recordMessage, fnGate.warning, normalized?.note, nameHint, syncWarning,
       debuggerOffNote(ctx, args.sessionId, breakpoint.verified)
     ].filter(Boolean);
     return jsonResult({
@@ -189,8 +201,9 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): P
         }`
       : undefined;
 
+    const recordMessage = messageBesideWarning(breakpoint);
     const warnings = [
-      breakpoint.message, logPointGate.warning, syncWarning, snapWarning,
+      recordMessage, logPointGate.warning, syncWarning, snapWarning,
       debuggerOffNote(ctx, args.sessionId, breakpoint.verified)
     ].filter(Boolean);
     const result: ToolResult = jsonResult({

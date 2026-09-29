@@ -24,12 +24,18 @@ import type { DebugProtocol } from '@vscode/debugprotocol';
  * this type, so nothing else is ever relabelled an adapter refusal.
  */
 export class DapResponseError extends Error {
-  readonly response: DebugProtocol.Response;
+  /**
+   * The adapter's full answer, for callers that ask for it. Non-enumerable:
+   * every request the adapter refuses rejects with this type (issue #754), and
+   * a structured log or a spread of the error must carry the message alone —
+   * the body can echo the request's expression or variables.
+   */
+  declare readonly response: DebugProtocol.Response;
 
   constructor(response: DebugProtocol.Response) {
     super(dapResponseErrorMessage(response));
     this.name = 'DapResponseError';
-    this.response = response;
+    Object.defineProperty(this, 'response', { value: response, enumerable: false, writable: false, configurable: false });
   }
 
   /** The request the adapter declined. */

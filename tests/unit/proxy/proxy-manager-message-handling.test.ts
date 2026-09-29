@@ -11,6 +11,7 @@ import { EventEmitter } from 'events';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import { TestProxyManager } from '../test-utils/test-proxy-manager.js';
+import { DapResponseError } from '../../../src/proxy/dap-response-error.js';
 import { ProxyConfig } from '../../../src/proxy/proxy-config.js';
 import { DebugLanguage, type IProxyProcess } from '@debugmcp/shared';
 import { FakeDebugAdapter } from '../../test-utils/fakes/fake-debug-adapter.js';
@@ -678,6 +679,52 @@ describe('ProxyManager Message Handling', () => {
 
       await expect(hungPromise).rejects.toThrow(/cancelled during proxy shutdown/i);
       await stopPromise;
+    });
+
+    // Issue #754: the adapter's own error response travels with the failed
+    // dapResponse, so callers can tell "the adapter said no" (typed) from a
+    // transport failure, a timeout or a shutdown (plain Error).
+    it('rejects with DapResponseError when the failed response carries the adapter\'s answer, plainly otherwise', async () => {
+      const { proxyManager, fakeProcess } = makeStoppableProxyManager();
+
+      const nextTick = () => new Promise<void>((resolve) => setImmediate(resolve));
+      const refused = proxyManager.sendDapRequest('continue', { threadId: 1 });
+      await nextTick();
+      const refusedId = (fakeProcess.sendCommand.mock.calls[0][0] as { requestId: string }).requestId;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (proxyManager as any).handleProxyMessage({
+        type: 'dapResponse',
+        sessionId: 'drain-session',
+        requestId: refusedId,
+        success: false,
+        error: 'Server is not available',
+        response: { type: 'response', seq: 2, request_seq: 1, command: 'continue', success: false, message: 'Server is not available' }
+      });
+      const refusal = await refused.then(() => undefined, (error: unknown) => error);
+      expect(refusal).toBeInstanceOf(DapResponseError);
+      expect((refusal as Error).message).toBe('Server is not available');
+
+      // Handling a message syncs isInitialized from the functional core's
+      // state, which this harness never initialized; re-arm for the second request.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (proxyManager as any).isInitialized = true;
+      const failed = proxyManager.sendDapRequest('continue', { threadId: 1 });
+      await nextTick();
+      const failedId = (fakeProcess.sendCommand.mock.calls[1][0] as { requestId: string }).requestId;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (proxyManager as any).handleProxyMessage({
+        type: 'dapResponse',
+        sessionId: 'drain-session',
+        requestId: failedId,
+        success: false,
+        error: 'DAP client not connected'
+      });
+      const failure = await failed.then(() => undefined, (error: unknown) => error);
+      expect(failure).toBeInstanceOf(Error);
+      expect(failure).not.toBeInstanceOf(DapResponseError);
+      expect((failure as Error).message).toBe('DAP client not connected');
+
+      await proxyManager.stop();
     });
 
     it('records a pre-detach resume outcome that arrives after stop() (issue #763)', async () => {

@@ -132,6 +132,12 @@ export interface BreakpointSyncResult {
   /** Line the adapter actually bound (may differ from requested) */
   boundLine?: number;
   message?: string;
+  /**
+   * `message` is the adapter's refusal of the whole pre-launch set (issues
+   * #750, #754), not its verdict on this breakpoint — the parent marks the
+   * record accordingly.
+   */
+  refused?: boolean;
 }
 
 /** One entry of StatusMessage.functionBreakpoints (issue #302). */
@@ -141,6 +147,10 @@ export interface FunctionBreakpointSyncResult {
   id?: number;
   line?: number;
   source?: string;
+  /** The adapter's own message — a refused pre-launch set echoes its refusal here (issues #750, #754). */
+  message?: string;
+  /** `message` is the refusal of the whole set, not a verdict on this breakpoint (#754). */
+  refused?: boolean;
   /**
    * On terminal statuses (issue #258): true when the worker had already seen
    * orderly debuggee termination (a terminated/exited DAP event was forwarded

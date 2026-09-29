@@ -367,14 +367,21 @@ export class AttachController {
       // with an empty echo, and pre-attach breakpoints were already
       // registered via its pending-target queue — without a fresh echo their
       // verified state is unrecoverable (issue #500).
-      await this.breakpoints.resyncAll(session, { forceFreshEcho: true });
+      // A refused re-send is stamped on the records by the send itself; its
+      // warning joins the attach result below (issue #754).
+      const resync = await this.breakpoints.resyncAll(session, { forceFreshEcho: true });
       assertTargetPresent();
       // A breakpoint or delayed requested pause can land during the re-send.
       if (session.state === SessionState.PAUSED) attachPausePending = false;
       // Unverified-at-attach function breakpoints get the same launch-style
       // warning (issue #308); bind-late adapters (js/java) stay suppressed
       // inside the builder.
-      const attachFnBpWarning = this.breakpoints.functionBreakpointLaunchWarning(session);
+      // Withheld when the re-send itself failed, refused or never answered
+      // (issue #754): the cause is in the resync warning, the symptom would
+      // restate it.
+      const attachFnBpWarning = resync.functionBreakpointsFailed
+        ? undefined
+        : this.breakpoints.functionBreakpointLaunchWarning(session);
 
       const attachedTo = attachConfig.processId
         ? `Attached to process PID ${attachConfig.processId}`
@@ -395,7 +402,7 @@ export class AttachController {
       const forwardedKeys = session.attachForwardedUnknownConfigKeys;
       session.attachDroppedConfigKeys = undefined;
       session.attachForwardedUnknownConfigKeys = undefined;
-      const warningParts: string[] = [];
+      const warningParts: string[] = [...resync.warnings];
       if (attachFnBpWarning) {
         warningParts.push(attachFnBpWarning);
       }
