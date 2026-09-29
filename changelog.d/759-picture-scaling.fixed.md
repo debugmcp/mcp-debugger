@@ -1,1 +1,0 @@
-Reconstruct COBOL P scaling positions using storage size and compiler version, fixing trailing P counts and GnuCOBOL 3.1.2 DISPLAY pictures. Preserve listing pictures and omit ambiguous 3.1.2 binary/packed fallbacks instead of inventing a picture.
