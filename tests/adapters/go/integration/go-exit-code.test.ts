@@ -122,7 +122,9 @@ describe.skipIf(!hasGo)('Go exit code from Delve\'s console status line (issue #
       expect(build.status, `go build failed: ${build.stderr}`).toBe(0);
       await launchAndExpectExit({ scriptPath: binary, args: ['7'], dapLaunchArgs: { noDebug: true } }, 7, ctx);
     } finally {
-      fs.rmSync(tmp, { recursive: true, force: true });
+      // On Windows the exited debuggee's image can stay locked for a moment after the session
+      // ends, so the first rmdir may hit EBUSY; rmSync retries EBUSY/EPERM with these options.
+      fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   }, 90_000);
 });
