@@ -25,7 +25,7 @@ paths with spaces and quoted arguments. Wrappers must forward their arguments an
 the compiler's exit code.
 
 - **CodeLLDB** — vendored; nothing to install.
-- **GnuCOBOL 3.1.2 or 3.2** (`cobc`) for source launch and for COBOL-shaped variables. Verified: 3.2 on Windows (MSYS2 mingw64, gcc 15.2) and Ubuntu 26.04, 3.1.2 on Ubuntu 24.04. macOS/Homebrew was not measured in the spike.
+- **GnuCOBOL 3.1.2 or 3.2** (`cobc`) for source launch and for COBOL-shaped variables. Verified: 3.2 on Windows (MSYS2 mingw64, gcc 15.2; MSYS2 ucrt64 in the release canary) and Ubuntu 26.04, 3.1.2 on Ubuntu 24.04. macOS/Homebrew was not measured in the spike.
   - **Ubuntu/Debian**: `sudo apt install gnucobol3`
   - **macOS**: `brew install gnucobol`
   - **Windows**: MSYS2, then `pacman -S mingw-w64-ucrt-x86_64-gnucobol` (cobc lands in `C:\msys64\ucrt64\bin`). MSYS2 builds GnuCOBOL for its `ucrt64`, `clang64` and `clangarm64` environments only; the older `mingw-w64-x86_64-gnucobol` (mingw64) package is gone from the repositories, though an existing mingw64 install keeps working and is still found automatically
