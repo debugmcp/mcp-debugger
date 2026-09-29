@@ -759,6 +759,21 @@ describe('SessionManager - DAP Operations', () => {
       expect(curated.message).toBe(drift);
     });
 
+    it('marks a refused pre-launch echo as a refusal, so a later verification drops it (issue #754)', async () => {
+      const { session } = await createSessionWithUnverifiedBp(55);
+      const [stored] = sessionManager.listBreakpoints(session.id);
+
+      dependencies.mockProxyManager.simulateEvent('breakpoints-synced', [
+        { id: stored.id, file: 'test.py', line: 10, verified: false, message: 'Not supported in noDebug mode', refused: true }
+      ]);
+      expect(stored).toMatchObject({ verified: false, message: 'Not supported in noDebug mode', messageOrigin: 'refusal' });
+
+      dependencies.mockProxyManager.simulateEvent('breakpoint', { reason: 'changed', breakpoint: { id: 55, verified: true, line: 10 } });
+      expect(stored.verified).toBe(true);
+      expect(stored.message).toBeUndefined();
+      expect(stored.messageOrigin).toBeUndefined();
+    });
+
     it('applies the record rules to a function breakpoint event too: hit-proven stands, an unverified event clears the binding location (issue #754)', async () => {
       const { session } = await createSessionWithUnverifiedBp(55);
       const managed = sessionManager.getSession(session.id)!;
@@ -1207,8 +1222,11 @@ describe('SessionManager - DAP Operations', () => {
       it('keeps a non-provisional note through the hit but drops a provisional one', async () => {
         const { session, storeId } = await jsSessionWithProvisionalStub(5, { file: 'app.js', line: 20 });
         const stale = "Anchor 'const self = this' not found at restart; breakpoint kept at last known line 20";
-        (sessionManager as unknown as { sessionStore: { get(id: string): { breakpoints: Map<string, { message?: string }> } } })
-          .sessionStore.get(session.id).breakpoints.get(storeId)!.message = stale;
+        const record = (sessionManager as unknown as {
+          sessionStore: { get(id: string): { breakpoints: Map<string, { message?: string; messageOrigin?: 'curated' | 'refusal' }> } };
+        }).sessionStore.get(session.id).breakpoints.get(storeId)!;
+        record.message = stale;
+        record.messageOrigin = 'curated';
 
         hit(5);
 
@@ -1231,6 +1249,22 @@ describe('SessionManager - DAP Operations', () => {
         const bp = find(session.id, storeId);
         expect(bp.verified).toBe(true);
         expect(bp.adapterId).toBe(5);
+      });
+
+      it("drops a stamped refusal when a mirroring policy's pre-launch echo verifies the record (issue #754)", async () => {
+        const { session, storeId } = await jsSessionWithProvisionalStub(5, { file: 'app.js', line: 20 });
+        const record = find(session.id, storeId);
+        record.message = 'Server is not available';
+        record.messageOrigin = 'refusal';
+
+        dependencies.mockProxyManager.simulateEvent('breakpoints-synced', [
+          { id: storeId, file: 'app.js', line: 20, verified: true, adapterId: 5 }
+        ]);
+
+        const bp = find(session.id, storeId);
+        expect(bp.verified).toBe(true);
+        expect(bp.message).toBeUndefined();
+        expect(bp.messageOrigin).toBeUndefined();
       });
 
       it('ignores non-numeric hit ids and still applies the numeric ones', async () => {
@@ -4362,7 +4396,7 @@ describe('SessionManager - DAP Operations', () => {
 
       dependencies.mockProxyManager.simulateEvent('function-breakpoints-synced', [
         { name: 'main', verified: true, id: 7, line: 3, source: '/src/main.rs' },
-        { name: 'main', verified: false, message: 'Not supported in noDebug mode' },
+        { name: 'main', verified: false, message: 'Not supported in noDebug mode', refused: true },
         { name: 'unknown_name', verified: true, id: 9 }
       ]);
 
@@ -4377,8 +4411,9 @@ describe('SessionManager - DAP Operations', () => {
       expect(second.adapterId).toBeUndefined();
       expect(second.verified).toBe(false);
       // The worker echoes a refused pre-launch set with the adapter's message
-      // (#750); the store keeps it (issue #754).
+      // (#750); the store keeps it, marked as the refusal it is (issue #754).
       expect(second.message).toBe('Not supported in noDebug mode');
+      expect(second.messageOrigin).toBe('refusal');
     });
 
     it('stamps provenance and binding facts from the function-breakpoints-synced echo like the line echo does (issue #754)', async () => {

@@ -19,7 +19,7 @@
  * replace-all for a `node_modules` location it cannot map to a UI location,
  * while the CDP breakpoint underneath keeps firing.
  */
-import type { Breakpoint, FunctionBreakpoint } from '@debugmcp/shared';
+import type { AdapterPolicy, Breakpoint, FunctionBreakpoint } from '@debugmcp/shared';
 import { normalizeBreakpointMessage } from '../../utils/breakpoint-message.js';
 import type { ManagedSession } from '../session-store.js';
 
@@ -104,32 +104,58 @@ export function keepHitProven(
 }
 
 /**
- * Store the adapter's own verdict on the record, normalized for its current
- * `verified` state (issue #471): it displaces whatever note was there,
- * a stamped refusal included (#754).
+ * Store the adapter's answer about the record, normalized for its current
+ * `verified` state (issue #471). Words displace whatever note was there — a
+ * stamped refusal and a curated note included: the adapter's words about the
+ * breakpoint win over ours (#754). No words: a curated note stands (the
+ * adapter said nothing against it); on a verified record everything else — a
+ * provisional "unbound" note, a stamped refusal, the adapter's own earlier
+ * verdict — is stale and dropped; on an unverified record the existing
+ * explanation stays.
  */
 export function setAdapterMessage(
   record: Breakpoint | FunctionBreakpoint,
   message: string | undefined,
   verified: boolean
 ): void {
-  record.message = normalizeBreakpointMessage(message, verified);
-  record.messageOrigin = undefined;
-}
-
-/**
- * Re-settle the stored note after `verified` changed without a fresh adapter
- * message: a provisional "unbound" note or a stamped refusal cannot outlive
- * the verification that contradicts it (issues #471, #754); any other note —
- * capability drift, a re-resolved anchor — passes through.
- */
-export function settleStoredMessage(record: Breakpoint | FunctionBreakpoint): void {
-  if (record.verified && record.messageOrigin === 'refusal') {
+  if (message !== undefined) {
+    record.message = normalizeBreakpointMessage(message, verified);
+    record.messageOrigin = undefined;
+    return;
+  }
+  if (record.messageOrigin === 'curated') {
+    return;
+  }
+  if (verified) {
     record.message = undefined;
     record.messageOrigin = undefined;
     return;
   }
-  record.message = normalizeBreakpointMessage(record.message, record.verified);
+  record.message = normalizeBreakpointMessage(record.message, verified);
+}
+
+/**
+ * Re-settle the stored note after `verified` changed without a fresh adapter
+ * message — the no-words case of setAdapterMessage.
+ */
+export function settleStoredMessage(record: Breakpoint | FunctionBreakpoint): void {
+  setAdapterMessage(record, undefined, record.verified);
+}
+
+/**
+ * Whether the session's policy mirrors breakpoints to a child session
+ * (js-debug, issues #500/#495). A lookup that throws — an unknown language, a
+ * policy without client behaviour — reads as "no": the default handling, the
+ * same answer in every writer that asks.
+ */
+export function mirrorsBreakpointsToChild(
+  lookup: () => Pick<AdapterPolicy, 'getDapClientBehavior'> | undefined
+): boolean {
+  try {
+    return !!lookup()?.getDapClientBehavior?.().mirrorBreakpointsToChild;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -167,8 +193,9 @@ export interface HitUpgrade {
  * Upgrade every unverified line or function breakpoint a stop's
  * `hitBreakpointIds` resolves to (by `adapterId`; the child's provisional ids
  * are stamped there as soon as its replay answers). A provisional "unbound"
- * message cannot outlive the hit that disproves it; any other note (a stale
- * content anchor reported at restart) is kept. Upgrade-only: verified records
+ * note, a stamped refusal or a stale adapter verdict cannot outlive the hit
+ * that disproves it; a curated note (a stale content anchor reported at
+ * restart) is kept. Upgrade-only: verified records
  * are untouched, unknown or non-numeric ids are ignored.
  */
 export function applyHitBreakpointIds(

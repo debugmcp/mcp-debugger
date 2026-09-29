@@ -270,7 +270,7 @@ describe("BreakpointController live re-send refusal stamps the adapter's answer 
     expect(session.breakpoints.get('b')!.messageOrigin).toBeUndefined();
   });
 
-  it("hands the failure back to setBreakpoint alongside the warning, for the handler's dedupe", async () => {
+  it("hands the warning back to setBreakpoint; the new record's marker tells the handler the words are the refusal", async () => {
     const { controller, ctx } = makeController();
     const { session } = refusingSession([]);
     vi.mocked(ctx.getSession).mockReturnValue(session);
@@ -279,7 +279,57 @@ describe("BreakpointController live re-send refusal stamps the adapter's answer 
 
     expect(result.breakpoint).toMatchObject({ verified: false, message: REFUSAL, messageOrigin: 'refusal' });
     expect(result.warning).toBe(`Breakpoint state updated, but live sync failed: ${REFUSAL}`);
-    expect(result.failure).toEqual({ message: REFUSAL, refused: true });
+    expect(result).not.toHaveProperty('failure');
+  });
+
+  it('a verifying answer without words drops a stale verdict but keeps a curated note; an unverified one keeps the explanation', async () => {
+    const { controller } = makeController();
+    const drift = 'Adapter does not advertise logpoint support — this may pause instead of logging';
+    const { session, sendDapRequest } = refusingSession([
+      { id: 'verdict', file: '/app/a.py', line: 1, message: 'Cannot resolve line 1' },
+      { id: 'curated', file: '/app/a.py', line: 2, message: drift, messageOrigin: 'curated' },
+      { id: 'refused', file: '/app/a.py', line: 3, message: REFUSAL, messageOrigin: 'refusal' }
+    ]);
+    sendDapRequest.mockResolvedValue({ body: { breakpoints: [
+      { verified: true, id: 1 },
+      { verified: true, id: 2 },
+      { verified: false, id: 3 }
+    ] } });
+
+    await controller.syncBreakpointsForFile(session, '/app/a.py');
+
+    expect(session.breakpoints.get('verdict')).toMatchObject({ verified: true });
+    expect(session.breakpoints.get('verdict')!.message).toBeUndefined();
+    expect(session.breakpoints.get('curated')).toMatchObject({ verified: true, message: drift, messageOrigin: 'curated' });
+    expect(session.breakpoints.get('refused')).toMatchObject({ verified: false, message: REFUSAL, messageOrigin: 'refusal' });
+  });
+
+  it('clears the binding location when a live answer unbinds a record the adapter had bound elsewhere', async () => {
+    const { controller } = makeController();
+    const { session, sendDapRequest } = refusingSession([
+      { id: 'b', file: '/app/a.ts', line: 3, verified: true, verifiedBy: 'adapter', adapterId: 2, boundFile: '/app/dist/a.js', boundLine: 80 }
+    ]);
+    sendDapRequest.mockResolvedValue({ body: { breakpoints: [{ verified: false, id: 2, message: 'Unbound breakpoint' }] } });
+
+    await controller.syncBreakpointsForFile(session, '/app/a.ts');
+
+    const b = session.breakpoints.get('b')!;
+    expect(b).toMatchObject({ verified: false, message: 'Unbound breakpoint' });
+    expect(b.verifiedBy).toBeUndefined();
+    expect(b.boundFile).toBeUndefined();
+    expect(b.boundLine).toBeUndefined();
+  });
+
+  it('treats function breakpoints as never child-mirrored: a refusal under js-debug clears their binding facts too', async () => {
+    const { controller } = makeController({ getDapClientBehavior: () => ({ mirrorBreakpointsToChild: true }) });
+    const { session } = refusingSession([], [{ id: 'f', functionName: 'main', boundFile: '/old.js', boundLine: 4 }]);
+
+    await controller.syncFunctionBreakpoints(session);
+
+    const f = session.functionBreakpoints.get('f')!;
+    expect(f).toMatchObject({ verified: false, message: REFUSAL, messageOrigin: 'refusal' });
+    expect(f.boundFile).toBeUndefined();
+    expect(f.boundLine).toBeUndefined();
   });
 
   it('reports a policy whose client behaviour throws as a failed re-send, never as a rejection', async () => {

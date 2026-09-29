@@ -47,11 +47,13 @@ import {
   applyBoundLocation,
   applyHitBreakpointIds,
   keepHitProven,
+  mirrorsBreakpointsToChild,
   resetBinding,
   samePath,
   setAdapterMessage,
   setCuratedMessage,
-  settleStoredMessage
+  settleStoredMessage,
+  stampRefusalMessage
 } from './breakpoints/hit-verification.js';
 
 
@@ -842,13 +844,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       if (!eventBp) {
         return;
       }
-      let mirrorsToChild = false;
-      try {
-        mirrorsToChild =
-          !!this.sessionStore.selectPolicy(session.language).getDapClientBehavior().mirrorBreakpointsToChild;
-      } catch {
-        // Unknown policy: treat as non-mirroring — default handling below
-      }
+      const mirrorsToChild = mirrorsBreakpointsToChild(() => this.sessionStore.selectPolicy(session.language));
       // Function breakpoints (issue #271 phase 3) match by adapterId ONLY —
       // DAP breakpoint events carry no function name, and letting them join
       // the (file,line) fallback below would let a function breakpoint bound
@@ -880,11 +876,7 @@ export abstract class SessionManagerCore extends EventEmitter {
             fnTarget.boundFile = undefined;
             fnTarget.boundLine = undefined;
           }
-          if (eventBp.message !== undefined) {
-            setAdapterMessage(fnTarget, eventBp.message, fnTarget.verified);
-          } else {
-            settleStoredMessage(fnTarget);
-          }
+          setAdapterMessage(fnTarget, eventBp.message, fnTarget.verified);
           this.logger.info('debug:breakpoint', {
             event: 'changed',
             sessionId,
@@ -970,11 +962,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       // #471, #754). When the event carries no message, settle the stored
       // one: js-debug's bind event omits `message`, so a note stamped earlier
       // would otherwise outlive the verification it contradicts.
-      if (eventBp.message !== undefined) {
-        setAdapterMessage(target, eventBp.message, target.verified);
-      } else {
-        settleStoredMessage(target);
-      }
+      setAdapterMessage(target, eventBp.message, target.verified);
       // The id: any non-mirroring adapter's, or the child's — provisional or
       // not. js-debug keeps an entry's id across re-sends, and the #495
       // hazard was the PARENT's colliding id space, which the child-origin
@@ -1198,10 +1186,12 @@ export abstract class SessionManagerCore extends EventEmitter {
           target.boundFile = undefined;
           target.boundLine = undefined;
         }
-        if (result.message !== undefined) {
-          setAdapterMessage(target, result.message, target.verified);
+        if (result.refused === true && result.message !== undefined) {
+          // The worker echoes a refused pre-launch set with the adapter's
+          // refusal (#750): a note about the request, marked as such (#754).
+          stampRefusalMessage(target, result.message);
         } else {
-          settleStoredMessage(target);
+          setAdapterMessage(target, result.message, target.verified);
         }
       }
     };
@@ -1219,13 +1209,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       // skip handleInitializedEvent), but guard anyway: parent responses
       // are non-authoritative for mirroring policies — never downgrade
       // child-verified state or clobber child-space adapter ids.
-      let mirrorsToChild = false;
-      try {
-        mirrorsToChild =
-          !!this.sessionStore.selectPolicy(session.language).getDapClientBehavior().mirrorBreakpointsToChild;
-      } catch {
-        // Unknown policy: default handling
-      }
+      const mirrorsToChild = mirrorsBreakpointsToChild(() => this.sessionStore.selectPolicy(session.language));
       for (const result of results) {
         if (typeof result.id !== 'string') {
           continue; // legacy payload without an echo key
@@ -1236,6 +1220,7 @@ export abstract class SessionManagerCore extends EventEmitter {
         }
         if (mirrorsToChild) {
           target.verified = target.verified || result.verified;
+          settleStoredMessage(target);
           continue;
         }
         target.verified = result.verified;
@@ -1255,10 +1240,12 @@ export abstract class SessionManagerCore extends EventEmitter {
         // handleAdapterCapabilities may have set, while a provisional
         // "unbound" note or a stamped refusal cannot outlive the
         // verification that contradicts it (issues #471, #754).
-        if (result.message !== undefined) {
-          setAdapterMessage(target, result.message, target.verified);
+        if (result.refused === true && result.message !== undefined) {
+          // The worker echoes a refused pre-launch set with the adapter's
+          // refusal (#750): a note about the request, marked as such (#754).
+          stampRefusalMessage(target, result.message);
         } else {
-          settleStoredMessage(target);
+          setAdapterMessage(target, result.message, target.verified);
         }
         this.logger.info('debug:breakpoint', {
           event: 'verified',

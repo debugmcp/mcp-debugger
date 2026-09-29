@@ -386,8 +386,8 @@ describe('noDebug launch completion (issue #746)', () => {
         ([m]) => m.type === 'status' && m.status === 'breakpoints_synced'
       )?.[0] as (StatusMessage & { breakpoints?: Array<{ id?: string; verified: boolean; message?: string }> }) | undefined;
       expect(synced?.breakpoints).toEqual([
-        { id: 'bp-1', file: '/path/to/script.py', line: 5, verified: false, message: 'Internal debugger error: Not supported in noDebug mode.' },
-        { id: 'bp-2', file: '/path/to/other.py', line: 9, verified: false, message: 'Internal debugger error: Not supported in noDebug mode.' }
+        { id: 'bp-1', file: '/path/to/script.py', line: 5, verified: false, message: 'Internal debugger error: Not supported in noDebug mode.', refused: true },
+        { id: 'bp-2', file: '/path/to/other.py', line: 9, verified: false, message: 'Internal debugger error: Not supported in noDebug mode.', refused: true }
       ]);
     });
 
@@ -414,7 +414,7 @@ describe('noDebug launch completion (issue #746)', () => {
       )?.[0] as (StatusMessage & { breakpoints?: Array<Record<string, unknown>> }) | undefined;
       expect(synced?.breakpoints).toEqual([
         { id: 'bp-a', file: '/path/to/a.py', line: 5, verified: true, adapterId: 11, boundLine: 5 },
-        { id: 'bp-b', file: '/path/to/b.py', line: 9, verified: false, message: 'Internal debugger error: Not supported in noDebug mode.' }
+        { id: 'bp-b', file: '/path/to/b.py', line: 9, verified: false, message: 'Internal debugger error: Not supported in noDebug mode.', refused: true }
       ]);
     });
 
@@ -437,8 +437,8 @@ describe('noDebug launch completion (issue #746)', () => {
         ([m]) => m.type === 'status' && m.status === 'function_breakpoints_synced'
       )?.[0] as (StatusMessage & { functionBreakpoints?: Array<Record<string, unknown>> }) | undefined;
       expect(synced?.functionBreakpoints).toEqual([
-        { name: 'main', verified: false, message: 'Internal debugger error: Not supported in noDebug mode.' },
-        { name: 'helper', verified: false, message: 'Internal debugger error: Not supported in noDebug mode.' }
+        { name: 'main', verified: false, message: 'Internal debugger error: Not supported in noDebug mode.', refused: true },
+        { name: 'helper', verified: false, message: 'Internal debugger error: Not supported in noDebug mode.', refused: true }
       ]);
     });
 

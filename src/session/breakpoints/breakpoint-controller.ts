@@ -32,7 +32,13 @@ import { DapResponseError } from '../../proxy/dap-response-error.js';
 import type { ManagedSession } from '../session-store.js';
 import type { BreakpointContext } from '../operations-context.js';
 import { buildFunctionBreakpointLaunchWarning, fileLabel } from './launch-warnings.js';
-import { applyBoundLocation, keepHitProven, setAdapterMessage, stampRefusalMessage } from './hit-verification.js';
+import {
+  applyBoundLocation,
+  keepHitProven,
+  mirrorsBreakpointsToChild,
+  setAdapterMessage,
+  stampRefusalMessage
+} from './hit-verification.js';
 
 /**
  * Labels for a set of files in one sentence: the basename, unless two files
@@ -129,7 +135,7 @@ export class BreakpointController {
       /** Content anchor for restart re-resolution (content mode, #271) */
       anchor?: { statement: string; nearLine?: number };
     }
-  ): Promise<{ breakpoint: Breakpoint; warning?: string; failure?: BreakpointSyncFailure }> {
+  ): Promise<{ breakpoint: Breakpoint; warning?: string }> {
     const session = this.ctx.getSession(sessionId);
 
     const bpId = uuidv4();
@@ -161,7 +167,9 @@ export class BreakpointController {
     );
 
     const sync = await this.syncBreakpointsForFile(session, bp.file);
-    return { breakpoint: newBreakpoint, warning: sync.warning, failure: sync.failure };
+    // A refused re-send has marked the new record (messageOrigin 'refusal');
+    // the handler reads that to say the adapter's words once.
+    return { breakpoint: newBreakpoint, warning: sync.warning };
   }
 
   /**
@@ -249,6 +257,11 @@ export class BreakpointController {
             // Where it bound: a different file is reported as
             // boundFile/boundLine, a same-file move lands in `line`.
             applyBoundLocation(record, bpInfo.source?.path, bpInfo.line);
+            if (!record.verified) {
+              // An unverified record claims no binding location.
+              record.boundFile = undefined;
+              record.boundLine = undefined;
+            }
           }
           if (!keepChildState && !hitProven) {
             // The adapter's own verdict, normalized (issue #471): raw l10n
@@ -299,11 +312,7 @@ export class BreakpointController {
    * so a policy without client behaviour, or one that throws, reads as "no".
    */
   private mirrorsToChild(session: ManagedSession): boolean {
-    try {
-      return !!this.ctx.selectPolicy(session.language)?.getDapClientBehavior?.().mirrorBreakpointsToChild;
-    } catch {
-      return false;
-    }
+    return mirrorsBreakpointsToChild(() => this.ctx.selectPolicy(session.language));
   }
 
   /**
@@ -451,7 +460,7 @@ export class BreakpointController {
       functionName: string;
       condition?: string;
     }
-  ): Promise<{ breakpoint: FunctionBreakpoint; warning?: string; failure?: BreakpointSyncFailure }> {
+  ): Promise<{ breakpoint: FunctionBreakpoint; warning?: string }> {
     const session = this.ctx.getSession(sessionId);
 
     const newBreakpoint: FunctionBreakpoint = {
@@ -468,7 +477,9 @@ export class BreakpointController {
     );
 
     const sync = await this.syncFunctionBreakpoints(session);
-    return { breakpoint: newBreakpoint, warning: sync.warning, failure: sync.failure };
+    // A refused re-send has marked the new record (messageOrigin 'refusal');
+    // the handler reads that to say the adapter's words once.
+    return { breakpoint: newBreakpoint, warning: sync.warning };
   }
 
   /**
@@ -565,7 +576,6 @@ export class BreakpointController {
     }
 
     const allFnBps = Array.from(session.functionBreakpoints.values());
-    const childAuthoritative = this.mirrorsToChild(session);
 
     try {
       this.ctx.logger.info(
@@ -624,7 +634,9 @@ export class BreakpointController {
         `[SessionManager] Error sending setFunctionBreakpoints to proxy for session ${sessionId}:`,
         error
       );
-      return this.failedSync(session, error, allFnBps, childAuthoritative);
+      // Function breakpoints are never child-mirrored (js-debug's are
+      // CDP-delivered, issue #295): the answer is always authoritative.
+      return this.failedSync(session, error, allFnBps, false);
     }
   }
 

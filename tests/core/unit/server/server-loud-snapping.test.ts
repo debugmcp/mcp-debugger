@@ -164,9 +164,8 @@ describe('set_breakpoint loud snapping (#271)', () => {
     // reports it in the sync warning; the session layer hands the refusal
     // back, and the response says it once.
     mockSessionManager.setBreakpoint.mockResolvedValue({
-      breakpoint: { id: 'bp-1', file: '/path/to/test.py', line: 3, requestedLine: 3, verified: false, message: 'Server is not available' },
-      warning: 'Breakpoint state updated, but live sync failed: Server is not available',
-      failure: { message: 'Server is not available', refused: true }
+      breakpoint: { id: 'bp-1', file: '/path/to/test.py', line: 3, requestedLine: 3, verified: false, message: 'Server is not available', messageOrigin: 'refusal' },
+      warning: 'Breakpoint state updated, but live sync failed: Server is not available'
     });
 
     const result = await callSetBreakpoint();

@@ -1272,7 +1272,8 @@ export class DapProxyWorker {
               file: bp.file,
               line: bp.line,
               verified: false,
-              message
+              message,
+              refused: true
             }));
           this.sendStatusSafely('breakpoints_synced', { breakpoints: [...syncResults, ...stamped] });
         }
@@ -1435,7 +1436,8 @@ export class DapProxyWorker {
           functionBreakpoints: this.currentInitPayload.initialFunctionBreakpoints.map((bp) => ({
             name: bp.name,
             verified: false,
-            message: err.message
+            message: err.message,
+            refused: true
           }))
         });
       }

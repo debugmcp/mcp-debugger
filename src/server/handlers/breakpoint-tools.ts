@@ -15,18 +15,16 @@ import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { requireSessionId, type WithSessionId } from '../tool-validation.js';
 import { debuggerOffWhyFor, readLineContext } from './shared.js';
 import { failureResult, jsonResult, sessionErrorResultOrThrow, type ToolResult } from '../tool-result.js';
-import type { BreakpointSyncFailure } from '../../session/breakpoints/breakpoint-controller.js';
 
 /**
  * The record's message for the response — unless it is the adapter's refusal
  * the sync warning already quotes (issue #754): a refused live re-send stamps
- * the answer on the record AND reports it, and the response says it once.
+ * the answer on the record AND reports it, and the response says it once. A
+ * record this call just created carries `messageOrigin: 'refusal'` exactly
+ * when this call's re-send was refused.
  */
-function messageBesideWarning(
-  breakpoint: { message?: string },
-  failure: BreakpointSyncFailure | undefined
-): string | undefined {
-  return failure?.refused && breakpoint.message === failure.message ? undefined : breakpoint.message;
+function messageBesideWarning(breakpoint: { message?: string; messageOrigin?: string }): string | undefined {
+  return breakpoint.messageOrigin === 'refusal' ? undefined : breakpoint.message;
 }
 
 /**
@@ -113,10 +111,10 @@ async function setFunctionBreakpointBranch(ctx: ToolContext, args: WithSessionId
     // reported in the warning; neither blocks the request.
     const { requestedName, effectiveName, normalized, hint: nameHint } =
       ctx.sessionManager.resolveFunctionBreakpointName(args.sessionId, args.function!);
-    const { breakpoint, warning: syncWarning, failure: syncFailure } = await ctx.setFunctionBreakpoint(
+    const { breakpoint, warning: syncWarning } = await ctx.setFunctionBreakpoint(
       args.sessionId, effectiveName, args.condition
     );
-    const recordMessage = messageBesideWarning(breakpoint, syncFailure);
+    const recordMessage = messageBesideWarning(breakpoint);
 
     ctx.logger.info('debug:breakpoint', {
       event: 'set',
@@ -163,7 +161,7 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): P
       ? ctx.validateLogPointSupport(args.sessionId)
       : {};
 
-    const { breakpoint, warning: syncWarning, failure: syncFailure } = await ctx.setBreakpoint({
+    const { breakpoint, warning: syncWarning } = await ctx.setBreakpoint({
       sessionId: args.sessionId,
       // Non-function path: the entry guard above ensures file is set
       file: args.file!,
@@ -203,7 +201,7 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): P
         }`
       : undefined;
 
-    const recordMessage = messageBesideWarning(breakpoint, syncFailure);
+    const recordMessage = messageBesideWarning(breakpoint);
     const warnings = [
       recordMessage, logPointGate.warning, syncWarning, snapWarning,
       debuggerOffNote(ctx, args.sessionId, breakpoint.verified)
