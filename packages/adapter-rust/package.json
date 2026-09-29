@@ -1,6 +1,6 @@
 {
   "name": "@debugmcp/adapter-rust",
-  "version": "0.25.0-beta.1",
+  "version": "0.25.0",
   "private": true,
   "description": "Rust debug adapter for MCP Debugger using CodeLLDB",
   "type": "module",
