@@ -270,6 +270,7 @@ async endSession(exitCode: number) {
 
 ## Version History
 
+- **v0.25.0** - COBOL adapter (GnuCOBOL + CodeLLDB behind a DAP shim), 10 adapters total; CodeLLDB ships as per-platform npm packages
 - **v0.24.0** - C/C++ adapter, 9 adapters total; shared `@debugmcp/codelldb-common` CodeLLDB vendoring for Rust and C/C++
 - **v0.22.0** - Ruby adapter, 8 adapters total
 - **v0.19.0** - .NET/C# adapter, 7 language adapters total

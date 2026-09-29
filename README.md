@@ -45,7 +45,7 @@ Microsoft's [DebugMCP](https://github.com/microsoft/DebugMCP) exposes VS Code's 
 
 If your agent runs in a terminal, a pipeline, or a cloud sandbox — or needs to attach to a process on another machine — you want mcp-debugger.
 
-> 🆕 **v0.24.0** — **C/C++ debugging** lands (CodeLLDB: prebuilt binaries, auto-compiled single sources, attach by PID), alongside statement/function-addressed breakpoints, logpoints, `restart_debugging`, breakpoint management tools, buffered `get_output`, break-on-uncaught-exceptions by default, a read-only IDE mirror (`expose_session`), default-on secret redaction, and a multi-language Docker image (Python, JS, Java, Rust, C/C++ native; Ruby attach). See the [CHANGELOG](./CHANGELOG.md) for the full release history.
+> 🆕 **v0.25.0** — **COBOL debugging** lands (GnuCOBOL + CodeLLDB, with COBOL-shaped variables, PERFORM-aware stepping and paragraph breakpoints), and **Rust and C/C++ work out of the box on every platform npm installs** now that CodeLLDB ships as per-platform packages. Also new: `mcp-debugger doctor`, a Kubernetes debugging recipe, an HTTP transport locked to `127.0.0.1` with Host/Origin checks, launch responses that say how a run ended, exit codes for Go and Docker JavaScript, and a lighter startup. See the [CHANGELOG](./CHANGELOG.md) for the full release history.
 
 ## ✨ Key Features
 

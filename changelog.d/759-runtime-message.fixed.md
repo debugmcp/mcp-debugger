@@ -1,1 +1,0 @@
-Format COBOL runtime errors from read-only target ABI arguments, including the offending field and value. Unsupported formats or unreadable arguments retain an explicitly labelled raw-format fallback.
