@@ -91,6 +91,24 @@ describe('JsDebugAdapterPolicy', () => {
     expect(JsDebugAdapterPolicy.isAsyncBoundaryFrame!({ id: 4, name: 'VM123', file: '<unknown_source>', line: 3 })).toBe(false);
   });
 
+  describe('describeUnresolvedSource (issue #816)', () => {
+    const hook = JsDebugAdapterPolicy.describeUnresolvedSource!;
+
+    it('names the source map and the attach-side switch for an attach session', () => {
+      const text = hook({ count: 2, files: ['../src/a.ts', '../src/b.ts'], attachMode: true });
+      expect(text).toMatch(/They are source-mapped/);
+      expect(text).toContain('adapterConfig.sourceMaps: false');
+      expect(text).not.toContain('adapterLaunchConfig');
+    });
+
+    it('names the launch-side switch for a launch session', () => {
+      const text = hook({ count: 1, files: ['../src/a.ts'], attachMode: false });
+      expect(text).toMatch(/It is source-mapped/);
+      expect(text).toContain('adapterLaunchConfig.sourceMaps: false');
+      expect(text).not.toContain('adapterConfig.sourceMaps');
+    });
+  });
+
   describe('describePendingStop (issue #678)', () => {
     const hook = JsDebugAdapterPolicy.describePendingStop!;
     const depFrame = { id: 1, name: 'handle', file: 'C:\\app\\node_modules\\router\\index.js', line: 160 };

@@ -227,6 +227,14 @@ describe('filterCobolStackFrames', () => {
     expect(CobolAdapterPolicy.filterStackFrames).toBe(filterCobolStackFrames);
     expect(CobolAdapterPolicy.isInternalFrame).toBe(isCobolInternalFrame);
   });
+
+  it('explains unresolvedSource frames the CodeLLDB way — native code without debug info (issue #816)', () => {
+    const text = CobolAdapterPolicy.describeUnresolvedSource({
+      count: 2, files: ['@BaseThreadInitThunk', '@RtlUserThreadStart'], attachMode: true
+    });
+    expect(text).toMatch(/native frames without debug info/);
+    expect(text).not.toMatch(/sourceMaps/);
+  });
 });
 
 describe('extractCobolLocalVariables', () => {

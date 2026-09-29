@@ -30,6 +30,37 @@ describe('CppAdapterPolicy', () => {
     expect('functionBreakpointNameHint' in CppAdapterPolicy).toBe(false);
   });
 
+  // CodeLLDB reports a frame without debug info as `@symbol` with a non-zero
+  // sourceReference and no path (measured: `{name: '@NtWaitForSingleObject',
+  // sourceReference: 1004}`); the stack note must say what that is under
+  // this debugger, not offer js-debug's sourceMaps switch (issue #816).
+  it("explains unresolvedSource frames as native frames without debug info, never as source maps", () => {
+    const files = ['@NtWaitForSingleObject', '@WaitForSingleObjectEx', '@BaseThreadInitThunk'];
+    const text = CppAdapterPolicy.describeUnresolvedSource({ count: 3, files, attachMode: true });
+    expect(text).toMatch(/They are native frames without debug info/);
+    expect(text).toMatch(/program's own frames/);
+    expect(text).not.toMatch(/sourceMaps|source-mapped|\.js/);
+    // Singular for one frame; the mode changes nothing (no remedy names a key).
+    expect(
+      CppAdapterPolicy.describeUnresolvedSource({ count: 1, files: ['@RtlUserThreadStart'], attachMode: false })
+    ).toMatch(/It is a native frame without debug info/);
+  });
+
+  // The kept paused frame of a step into glibc carries a relative build path
+  // (../sysdeps/…, issue #672): it has debug info, the file is just not here.
+  it('does not call a frame with a relative runtime path "without debug info"', () => {
+    const text = CppAdapterPolicy.describeUnresolvedSource({
+      count: 1, files: ['../sysdeps/unix/sysv/linux/clock_nanosleep.c'], attachMode: false
+    });
+    expect(text).toMatch(/It is a frame whose source CodeLLDB could not place on this host/);
+    expect(text).toMatch(/relative path/);
+    expect(text).not.toMatch(/without debug info/);
+    // A mix keeps the wider wording.
+    expect(
+      CppAdapterPolicy.describeUnresolvedSource({ count: 2, files: ['@_start', '../sysdeps/x.c'], attachMode: false })
+    ).toMatch(/They are frames whose source CodeLLDB could not place/);
+  });
+
   describe('normalizeStopReason (shared CodeLLDB quirks)', () => {
     const normalize = CppAdapterPolicy.normalizeStopReason!;
 

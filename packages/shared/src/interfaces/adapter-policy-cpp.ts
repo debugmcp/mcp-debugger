@@ -30,6 +30,7 @@ import {
   getLldbAttachBehavior,
   isLldbInternalFrame,
   filterLldbStackFrames,
+  describeLldbUnresolvedSource,
   lldbShouldSuppressOutputEvent
 } from './lldb-policy-shared.js';
 
@@ -63,6 +64,9 @@ export const CppAdapterPolicy = {
    */
   filterStackFrames: filterLldbStackFrames,
   isInternalFrame: isLldbInternalFrame,
+  // A `@symbol` frame is native code without debug info, not a source map
+  // (issue #816).
+  describeUnresolvedSource: describeLldbUnresolvedSource,
 
   extractLocalVariables: extractLldbLocalVariables,
 
