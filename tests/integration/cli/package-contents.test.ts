@@ -20,7 +20,7 @@ describe('package contents verification (issue #752)', () => {
       'package/dist/vendor/debugpy/__init__.py',
       'package/dist/mock.js',
       'package/skills/debugging/SKILL.md',
-      'package/pi.mcp.json',
+      'package/pi.mcp-adapter.json',
     ];
     for (const entry of entries) {
       const filePath = path.join(tempDir, entry);

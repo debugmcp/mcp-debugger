@@ -26,7 +26,7 @@ const PACKAGE_DIR = path.join(ROOT, 'packages', 'mcp-debugger');
 const PACKAGE_DIST_DIR = path.join(PACKAGE_DIR, 'dist');
 const PACK_CACHE_DIR = path.join(PACKAGE_DIR, 'package-cache');
 const PACKAGE_JSON_PATH = path.join(PACKAGE_DIR, 'package.json');
-const PI_MCP_JSON_PATH = path.join(PACKAGE_DIR, 'pi.mcp.json');
+const PI_MCP_JSON_PATH = path.join(PACKAGE_DIR, 'pi.mcp-adapter.json');
 const PACKAGE_SKILLS_DIR = path.join(PACKAGE_DIR, 'skills');
 const PACKAGE_BACKUP_PATH = path.join(PACKAGE_DIR, 'package.json.backup');
 const ROOT_DIST_DIR = path.join(ROOT, 'dist');
@@ -461,7 +461,7 @@ export async function verifyPackageContents(tarballPath: string): Promise<{
     const hasMock = contents.includes('mock');
     // The pi package surface (issue #714): the shipped skill and the adapter entry.
     const hasSkill = entries.has('package/skills/debugging/SKILL.md');
-    const hasPiManifest = entries.has('package/pi.mcp.json');
+    const hasPiManifest = entries.has('package/pi.mcp-adapter.json');
     
     // Get the total tarball size (cli.mjs presence confirms the CLI bundle
     // was included; the size measured is the whole tarball, not cli.mjs)

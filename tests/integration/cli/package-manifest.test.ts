@@ -38,7 +38,7 @@ function walk(dir: string, base = dir): string[] {
 
 describe('published package pi manifest (issue #714)', () => {
   it('declares the skill directory and the adapter config, both covered by "files"', () => {
-    expect(manifest.pi).toEqual({ skills: ['./skills'], mcp: ['./pi.mcp.json'] });
+    expect(manifest.pi).toEqual({ skills: ['./skills'], mcp: ['./pi.mcp-adapter.json'] });
     for (const entry of [...(manifest.pi?.skills ?? []), ...(manifest.pi?.mcp ?? [])]) {
       const top = entry.replace(/^\.\//, '').split('/')[0];
       expect(manifest.files, `${top} is not in package.json "files"`).toContain(top);
@@ -49,7 +49,7 @@ describe('published package pi manifest (issue #714)', () => {
   });
 
   it('contributes the same stdio server entry every client recipe uses', () => {
-    const config = JSON.parse(readFileSync(path.join(packageDir, 'pi.mcp.json'), 'utf8')) as {
+    const config = JSON.parse(readFileSync(path.join(packageDir, 'pi.mcp-adapter.json'), 'utf8')) as {
       mcpServers: Record<string, unknown>;
     };
     expect(Object.keys(config.mcpServers)).toEqual(['mcp-debugger']);
