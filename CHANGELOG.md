@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.1] - 2026-09-30
+
+### Added
+- **Listed in the official MCP Registry as `io.github.debugmcp/mcp-debugger`** — the repository carries a `server.json` naming the npm package (run with `npx`, stdio) and the Docker image (stdio, with the project mounted at `/workspace`). The CLI package declares `mcpName` and the image carries the `io.modelcontextprotocol.server.name` label, which the registry checks before it accepts a version. Each release publishes the listing after npm and Docker, logging in with GitHub Actions OIDC, so no secret is stored; prerelease tags are skipped (#835)
+
+### Security
+- **npm packages publish with no stored token** — every `@debugmcp/*` package now publishes through npm trusted publishing (OIDC) from the release workflow, so CI holds no npm or PyPI token; the `NPM_TOKEN` path is gone from `release.yml` (#837)
+
 ## [0.25.0] - 2026-09-29
 
 ### Highlights
