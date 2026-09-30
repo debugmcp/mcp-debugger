@@ -169,6 +169,34 @@ async function syncVersions() {
     }
   }
 
+  // The MCP Registry listing (issue #835) names the published npm version and
+  // the Docker tag, so server.json moves with every release cut. The registry
+  // verifies both artifacts at exactly these versions when the release publishes.
+  const serverJsonPath = path.join(__dirname, '..', 'server.json');
+  if (fs.existsSync(serverJsonPath)) {
+    try {
+      const server = JSON.parse(fs.readFileSync(serverJsonPath, 'utf8'));
+      const before = JSON.stringify(server);
+      server.version = targetVersion;
+      for (const entry of server.packages || []) {
+        if (entry.registryType === 'oci') {
+          entry.identifier = entry.identifier.replace(/:[^:/]+$/, `:${targetVersion}`);
+        } else {
+          entry.version = targetVersion;
+        }
+      }
+      if (JSON.stringify(server) !== before) {
+        fs.writeFileSync(serverJsonPath, JSON.stringify(server, null, 2) + '\n');
+        versionChanges.push(`  ✅ server.json (MCP Registry): → ${targetVersion}`);
+        updatedCount++;
+      } else {
+        versionChanges.push(`  ⏩ server.json (MCP Registry): already at ${targetVersion}`);
+      }
+    } catch (err) {
+      console.error(`  ❌ Error updating server.json: ${err.message}`);
+    }
+  }
+
   console.log('📋 Version changes:');
   versionChanges.forEach(change => console.log(change));
 

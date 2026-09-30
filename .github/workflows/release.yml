@@ -567,6 +567,70 @@ jobs:
           multiple.sigstore.json
         if-no-files-found: error
 
+  # Official MCP Registry listing (issue #835). The registry proves ownership by
+  # reading `mcpName` from the npm package and the io.modelcontextprotocol.server.name
+  # label from the Docker image, at exactly the versions server.json names, so this
+  # runs after both have published. GitHub Actions OIDC proves the io.github.debugmcp
+  # namespace, so no secret is stored. Prerelease tags stay off the registry.
+  mcp-registry-publish:
+    name: Publish to the MCP Registry
+    needs: [npm-publish, docker-publish]
+    if: ${{ !contains(github.event.inputs.ref || github.ref, '-') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # GitHub OIDC login for the io.github.debugmcp namespace
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      with:
+        ref: ${{ github.event.inputs.ref || github.ref }}
+        persist-credentials: false
+
+    - name: Setup Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      with:
+        node-version: '22.x'
+
+    - name: Check server.json names this release
+      env:
+        RELEASE_REF: ${{ github.event.inputs.ref || github.ref }}
+      run: node scripts/check-mcp-registry-metadata.mjs --version "${RELEASE_REF#refs/tags/v}"
+
+    # A fresh version takes a few minutes to reach npm's read path (about three at
+    # v0.25.0), and the registry verifies mcpName by reading it, so wait for it.
+    - name: Wait for the npm version to show mcpName
+      env:
+        RELEASE_REF: ${{ github.event.inputs.ref || github.ref }}
+      run: |
+        VERSION="${RELEASE_REF#refs/tags/v}"
+        for attempt in $(seq 1 30); do
+          NAME=$(npm view "@debugmcp/mcp-debugger@${VERSION}" mcpName 2>/dev/null || true)
+          if [ "$NAME" = "io.github.debugmcp/mcp-debugger" ]; then
+            echo "npm shows @debugmcp/mcp-debugger@${VERSION} mcpName=${NAME}"
+            exit 0
+          fi
+          sleep 20
+        done
+        echo "::error::@debugmcp/mcp-debugger@${VERSION} did not show mcpName within 10 minutes"
+        exit 1
+
+    - name: Install mcp-publisher (pinned, checksum-verified)
+      env:
+        MCP_PUBLISHER_VERSION: v1.8.1
+        MCP_PUBLISHER_SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc
+      run: |
+        curl -fsSL -o mcp-publisher.tar.gz \
+          "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz"
+        echo "${MCP_PUBLISHER_SHA256}  mcp-publisher.tar.gz" | sha256sum -c -
+        tar xzf mcp-publisher.tar.gz mcp-publisher
+
+    - name: Publish server.json
+      run: |
+        ./mcp-publisher login github-oidc
+        ./mcp-publisher publish server.json
+
   create-release:
     name: Create GitHub Release
     needs: [docker-publish, pypi-publish, npm-publish, provenance]

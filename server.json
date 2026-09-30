@@ -1,0 +1,64 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.debugmcp/mcp-debugger",
+  "title": "mcp-debugger",
+  "description": "Step-through debugging for AI agents: breakpoints, stepping and live variables in nine languages",
+  "websiteUrl": "https://debugmcp.io",
+  "repository": {
+    "url": "https://github.com/debugmcp/mcp-debugger",
+    "source": "github",
+    "id": "999492182"
+  },
+  "version": "0.25.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@debugmcp/mcp-debugger",
+      "version": "0.25.0",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "stdio",
+          "valueHint": "transport",
+          "description": "Serve MCP over stdio"
+        }
+      ]
+    },
+    {
+      "registryType": "oci",
+      "identifier": "docker.io/debugmcp/mcp-debugger:0.25.0",
+      "runtimeHint": "docker",
+      "transport": {
+        "type": "stdio"
+      },
+      "runtimeArguments": [
+        {
+          "type": "named",
+          "name": "--mount",
+          "value": "type=bind,src={workspace_path},dst=/workspace",
+          "description": "Mount the project to debug at /workspace; the container resolves source paths under it",
+          "isRequired": true,
+          "variables": {
+            "workspace_path": {
+              "description": "Host directory containing the code to debug",
+              "format": "filepath",
+              "isRequired": true
+            }
+          }
+        }
+      ],
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "stdio",
+          "valueHint": "transport",
+          "description": "Serve MCP over stdio"
+        }
+      ]
+    }
+  ]
+}
