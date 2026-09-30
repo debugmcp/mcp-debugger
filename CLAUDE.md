@@ -323,6 +323,7 @@ A dual-state overlay (`SessionLifecycleState` + `ExecutionState`) is derived fro
 
 ### Distribution
 - `packages/mcp-debugger/` - Self-contained CLI bundle for npm/npx distribution
+- `server.json` - Official MCP Registry listing (`io.github.debugmcp/mcp-debugger`): versions move with `scripts/sync-versions.cjs`; the name must match the CLI's `mcpName` and the Dockerfile's `io.modelcontextprotocol.server.name` label (`scripts/check-mcp-registry-metadata.mjs`); `release.yml`'s `mcp-registry-publish` job publishes it after npm and Docker (OIDC, no secret; skipped for prereleases)
 
 ### Supporting Infrastructure
 - `src/container/dependencies.ts` - Dependency injection container

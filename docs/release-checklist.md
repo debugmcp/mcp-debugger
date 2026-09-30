@@ -46,7 +46,7 @@ Pre-release validation for mcp-debugger. Run `npm run release:dry-run` to automa
 
 ## After Tagging
 
-- [ ] Monitor GitHub Actions → Release workflow (all **6** jobs: build-and-test, docker-publish, npm-publish, pypi-publish, **provenance**, create-release)
+- [ ] Monitor GitHub Actions → Release workflow (all **7** jobs: build-and-test, docker-publish, npm-publish, pypi-publish, **provenance**, **mcp-registry-publish** (skipped for prerelease tags), create-release)
 - [ ] GitHub Release has all expected assets: one `.tgz` per published package, `multiple.intoto.jsonl`, `multiple.sigstore.json`, `sbom.spdx.json`, `sbom.cyclonedx.json`
 - [ ] GitHub Release body has the correct changelog content
 - [ ] Verify provenance: `gh attestation verify debugmcp-mcp-debugger-x.y.z.tgz --repo debugmcp/mcp-debugger` (download the asset first)
@@ -54,6 +54,7 @@ Pre-release validation for mcp-debugger. Run `npm run release:dry-run` to automa
 - [ ] **Run the canary as the release gate**: `gh workflow run canary.yml -f version=x.y.z` and confirm every leg is green (Actions → "Canary (published artifacts)"). It installs the published npm package (default and `--omit=optional` + `CODELLDB_PATH` legs), runs npx, pulls the Docker image, and drives a breakpoint→variables→continue cycle in mock/python/rust on x64/arm64 Linux, arm64 macOS, and Windows — superseding the manual npx/docker spot checks below
 - [ ] Fallback manual checks (when the canary can't run): `npx @debugmcp/mcp-debugger@x.y.z stdio` works (if the npx cache misbehaves, `npm install --prefix <tmp-dir>` is the reliable smoke path); `docker pull debugmcp/mcp-debugger:x.y.z` works
 - [ ] Verify: PyPI has `debug-mcp-server-launcher==x.y.z`
+- [ ] Verify the official MCP Registry lists the version: `curl -s "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.debugmcp/mcp-debugger"` shows `x.y.z`. The listing comes from `server.json` (moved by `scripts/sync-versions.cjs`, checked by `scripts/check-mcp-registry-metadata.mjs` in the dry-run); the registry verifies the npm package's `mcpName` and the Docker image's `io.modelcontextprotocol.server.name` label at exactly that version, and the job logs in with GitHub Actions OIDC (no secret) (#835)
 - [ ] Verify the pi package surface: on a clean machine with pi installed, `pi install npm:@debugmcp/mcp-debugger@x.y.z` then `pi list` shows the package with the `mcp-debugger` skill and (with `pi-mcp-adapter` present) its MCP server entry
 - [ ] **Website content review** — audit https://debugmcp.io against what this release shipped (language matrix, tool count, feature claims, comparison table) and update `debugmcp/website`
 - [ ] Update `SECURITY.md` supported-versions table if a new minor line started (should have happened pre-tag)

@@ -187,6 +187,10 @@ ENV DEBUG_MCP_DISABLE_LANGUAGES=go,dotnet
 # Set application directory
 WORKDIR /app
 
+# Ownership proof for the official MCP Registry (issue #835): the registry reads this
+# label from the image named in server.json before it accepts a listing.
+LABEL io.modelcontextprotocol.server.name="io.github.debugmcp/mcp-debugger"
+
 # Set container marker for runtime
 ENV MCP_CONTAINER=true
 # The network transports bind loopback by default (issue #680). A container's

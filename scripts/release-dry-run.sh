@@ -78,6 +78,14 @@ for pkg_dir in "${CODELLDB_PLATFORM_PKGS[@]}"; do
   fi
 done
 
+# MCP Registry listing (issue #835): server.json, the CLI's mcpName and the Docker
+# label must agree, and server.json must name this version (sync-versions moves it).
+if REGISTRY_CHECK=$(node scripts/check-mcp-registry-metadata.mjs --version "$ROOT_VER" 2>&1); then
+  pass "$REGISTRY_CHECK"
+else
+  fail "MCP Registry metadata: $REGISTRY_CHECK"
+fi
+
 # --- 2. CHANGELOG has this version with a date ---
 echo ""
 echo "── CHANGELOG ──"
