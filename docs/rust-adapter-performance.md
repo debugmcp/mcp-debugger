@@ -89,9 +89,8 @@ order, first hit wins:
    `optionalDependencies` of the published CLI (`packages/mcp-debugger/package.json`) for
    `darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64`, and `win32-x64`. This is the
    intended path for `npm`/`npx` users: the package manager installs only the entry matching
-   the host's os/cpu, so no manual vendoring step is needed. **These five packages have not
-   been published to npm yet** — they first publish alongside the next release; until then
-   only paths 1 and 2 are available. Installing with `--omit=optional` skips them by design,
+   the host's os/cpu, so no manual vendoring step is needed. They are published
+   (first at v0.25.0, versioned by the CodeLLDB release, currently 1.11.8). Installing with `--omit=optional` skips them by design,
    in which case set `CODELLDB_PATH`.
 
 ## Recommendations
