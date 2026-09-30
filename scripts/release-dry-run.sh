@@ -201,10 +201,10 @@ echo ""
 echo "── Publishing credentials ──"
 
 if command -v gh > /dev/null 2>&1; then
-  # Check secrets exist (NPM_TOKEN = granular access token for npm publish;
-  # PyPI needs no secret - trusted publishing via OIDC)
+  # Check secrets exist. npm and PyPI need none: both publish through trusted
+  # publishing (OIDC). Docker Hub has no OIDC publishing, so its login stays a secret.
   SECRETS_LIST=$(gh secret list 2>/dev/null || echo "")
-  for secret in NPM_TOKEN DOCKER_USERNAME DOCKER_PASSWORD; do
+  for secret in DOCKER_USERNAME DOCKER_PASSWORD; do
     if echo "$SECRETS_LIST" | grep -q "^${secret}"; then
       pass "GitHub secret $secret exists"
     else

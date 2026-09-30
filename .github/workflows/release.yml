@@ -281,7 +281,7 @@ jobs:
 
     # No registry-url here: setup-node would write an _authToken=${NODE_AUTH_TOKEN}
     # placeholder into .npmrc, which breaks token-less OIDC publishes when the
-    # env var is unset. The token step below writes its own scoped .npmrc.
+    # env var is unset. Publishing is token-free throughout (OIDC).
     - name: Setup Node.js
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
       with:
@@ -385,25 +385,25 @@ jobs:
         npm pack --dry-run -w @debugmcp/codelldb-linux-x64
         npm pack --dry-run -w @debugmcp/codelldb-linux-arm64
 
-    # CodeLLDB platform packages (issue #383). Published BEFORE the CLI package
-    # so its optionalDependencies always resolve on the registry. Versioned by
-    # the CodeLLDB release and tagged latest explicitly (they are shared across
-    # beta/latest channels), so re-releases at an unchanged pin are skipped by
-    # the npm-view guards. First publish must use the token flow; once the five
-    # exist, configure trusted publishers and move them into the OIDC step.
-    - name: Publish CodeLLDB platform packages to npm (token, first publish)
-      env:
-        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    # Every published @debugmcp package publishes through npm trusted publishing
+    # (OIDC): no token anywhere. npm mints a short-lived, repository-bound
+    # credential from this workflow's identity and records provenance. Each
+    # package needs this repo + release.yml as its trusted publisher on npmjs.com.
+    #
+    # A brand-new package cannot publish this way: npm attaches a trusted
+    # publisher only to a package that already exists (npm/cli#8544), and staged
+    # publishing cannot create one either. A new package needs one first publish
+    # by hand (with 2FA) or with a temporary token, then a trusted publisher,
+    # before it joins these steps (docs/release-checklist.md).
+    #
+    # CodeLLDB platform packages (issue #383) go first so the CLI's
+    # optionalDependencies always resolve. They are versioned by the CodeLLDB
+    # release and tagged latest explicitly (shared across beta/latest channels),
+    # so every re-release at an unchanged pin walks the "already exists" path.
+    # The guard tells a true 404 from a transient registry error: publishing
+    # over an existing version would kill the job.
+    - name: Publish CodeLLDB platform packages to npm (OIDC trusted publishing)
       run: |
-        # trap (not a trailing rm) so the token file cannot survive a
-        # mid-loop publish failure on the runner.
-        trap 'rm -f "$HOME/.npmrc"' EXIT
-        echo "//registry.npmjs.org/:_authToken=\${NODE_AUTH_TOKEN}" > "$HOME/.npmrc"
-
-        # "already exists" is the NORMAL path here (every re-release at an
-        # unchanged CodeLLDB pin walks it), so the guard must distinguish a
-        # true 404 from a transient registry error - publishing over an
-        # existing version would otherwise kill the job before the OIDC step.
         for pkg in codelldb-win32-x64 codelldb-darwin-x64 codelldb-darwin-arm64 codelldb-linux-x64 codelldb-linux-arm64; do
           set +e
           VIEW_OUT=$(npm view @debugmcp/${pkg}@${CODELLDB_PKG_VERSION} version 2>&1)
@@ -420,78 +420,26 @@ jobs:
           fi
         done
 
-    # Existing packages publish via OIDC trusted publishing: no token anywhere,
-    # npm mints a short-lived credential from the workflow's OIDC identity and
-    # generates provenance automatically. Each package must have this repo +
-    # workflow configured as a trusted publisher on npmjs.com BEFORE tagging.
-    - name: Publish existing packages to npm (OIDC trusted publishing)
+    - name: Publish packages to npm (OIDC trusted publishing)
       run: |
-        # Publish packages in dependency order if the target version does NOT yet exist
-        if npm view @debugmcp/shared@${SHARED_VERSION} version >/dev/null 2>&1; then
-          echo "@debugmcp/shared@${SHARED_VERSION} already exists, skipping"
-        else
-          npm publish -w @debugmcp/shared --access public --provenance --tag ${NPM_TAG}
-        fi
-
-        if npm view @debugmcp/adapter-mock@${ADAPTER_MOCK_VERSION} version >/dev/null 2>&1; then
-          echo "@debugmcp/adapter-mock@${ADAPTER_MOCK_VERSION} already exists, skipping"
-        else
-          npm publish -w @debugmcp/adapter-mock --access public --provenance --tag ${NPM_TAG}
-        fi
-
-        if npm view @debugmcp/adapter-python@${ADAPTER_PYTHON_VERSION} version >/dev/null 2>&1; then
-          echo "@debugmcp/adapter-python@${ADAPTER_PYTHON_VERSION} already exists, skipping"
-        else
-          npm publish -w @debugmcp/adapter-python --access public --provenance --tag ${NPM_TAG}
-        fi
-
-        if npm view @debugmcp/adapter-ruby@${ADAPTER_RUBY_VERSION} version >/dev/null 2>&1; then
-          echo "@debugmcp/adapter-ruby@${ADAPTER_RUBY_VERSION} already exists, skipping"
-        else
-          npm publish -w @debugmcp/adapter-ruby --access public --provenance --tag ${NPM_TAG}
-        fi
-
-        if npm view @debugmcp/mcp-debugger@${CLI_VERSION} version >/dev/null 2>&1; then
-          echo "@debugmcp/mcp-debugger@${CLI_VERSION} already exists, skipping"
-        else
-          npm publish -w @debugmcp/mcp-debugger --access public --provenance --tag ${NPM_TAG}
-        fi
-
-    # First-time publishes cannot use trusted publishing (the trusted-publisher
-    # config lives on an existing npm package). These four publish with the
-    # scoped NPM_TOKEN this release only; once they exist, configure trusted
-    # publishers for them and move them into the OIDC step above.
-    - name: Publish new packages to npm (token, first publish)
-      env:
-        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      run: |
-        echo "//registry.npmjs.org/:_authToken=\${NODE_AUTH_TOKEN}" > "$HOME/.npmrc"
-
-        if npm view @debugmcp/adapter-javascript@${ADAPTER_JAVASCRIPT_VERSION} version >/dev/null 2>&1; then
-          echo "@debugmcp/adapter-javascript@${ADAPTER_JAVASCRIPT_VERSION} already exists, skipping"
-        else
-          npm publish -w @debugmcp/adapter-javascript --access public --provenance --tag ${NPM_TAG}
-        fi
-
-        if npm view @debugmcp/adapter-go@${ADAPTER_GO_VERSION} version >/dev/null 2>&1; then
-          echo "@debugmcp/adapter-go@${ADAPTER_GO_VERSION} already exists, skipping"
-        else
-          npm publish -w @debugmcp/adapter-go --access public --provenance --tag ${NPM_TAG}
-        fi
-
-        if npm view @debugmcp/adapter-java@${ADAPTER_JAVA_VERSION} version >/dev/null 2>&1; then
-          echo "@debugmcp/adapter-java@${ADAPTER_JAVA_VERSION} already exists, skipping"
-        else
-          npm publish -w @debugmcp/adapter-java --access public --provenance --tag ${NPM_TAG}
-        fi
-
-        if npm view @debugmcp/adapter-dotnet@${ADAPTER_DOTNET_VERSION} version >/dev/null 2>&1; then
-          echo "@debugmcp/adapter-dotnet@${ADAPTER_DOTNET_VERSION} already exists, skipping"
-        else
-          npm publish -w @debugmcp/adapter-dotnet --access public --provenance --tag ${NPM_TAG}
-        fi
-
-        rm -f "$HOME/.npmrc"
+        # Dependency order: shared first, the CLI last. Re-runs are safe: a
+        # version that already exists is skipped.
+        publish_if_missing() {
+          if npm view "@debugmcp/$1@$2" version >/dev/null 2>&1; then
+            echo "@debugmcp/$1@$2 already exists, skipping"
+          else
+            npm publish -w "@debugmcp/$1" --access public --provenance --tag "${NPM_TAG}"
+          fi
+        }
+        publish_if_missing shared "${SHARED_VERSION}"
+        publish_if_missing adapter-mock "${ADAPTER_MOCK_VERSION}"
+        publish_if_missing adapter-python "${ADAPTER_PYTHON_VERSION}"
+        publish_if_missing adapter-ruby "${ADAPTER_RUBY_VERSION}"
+        publish_if_missing adapter-javascript "${ADAPTER_JAVASCRIPT_VERSION}"
+        publish_if_missing adapter-go "${ADAPTER_GO_VERSION}"
+        publish_if_missing adapter-java "${ADAPTER_JAVA_VERSION}"
+        publish_if_missing adapter-dotnet "${ADAPTER_DOTNET_VERSION}"
+        publish_if_missing mcp-debugger "${CLI_VERSION}"
 
     # The packed tarballs become GitHub Release assets, attested by the
     # provenance job below (OpenSSF Scorecard Signed-Releases).
