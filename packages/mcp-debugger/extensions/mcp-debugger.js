@@ -19,7 +19,7 @@
  *
  * The factory only registers; pi connects the server when a session starts.
  */
-import { basename, dirname, join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const packageDir = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -27,9 +27,10 @@ const packageDir = join(dirname(fileURLToPath(import.meta.url)), '..');
 /** Absolute path of the bundled CLI the server runs. */
 export const CLI_PATH = join(packageDir, 'dist', 'cli.mjs');
 
-/** The Node binary to run the CLI with. */
+/** The Node binary to run the CLI with. Splits on both separators, so any platform's path reads alike. */
 export function nodeCommand(execPath = process.execPath) {
-  return /^node(\.exe)?$/i.test(basename(execPath)) ? execPath : 'node';
+  const name = execPath.split(/[\\/]/).pop() ?? '';
+  return /^node(\.exe)?$/i.test(name) ? execPath : 'node';
 }
 
 /** The `mcpServers`-shaped entry this extension registers. */
