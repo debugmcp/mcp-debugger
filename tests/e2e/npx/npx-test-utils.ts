@@ -26,7 +26,7 @@ const PACKAGE_DIR = path.join(ROOT, 'packages', 'mcp-debugger');
 const PACKAGE_DIST_DIR = path.join(PACKAGE_DIR, 'dist');
 const PACK_CACHE_DIR = path.join(PACKAGE_DIR, 'package-cache');
 const PACKAGE_JSON_PATH = path.join(PACKAGE_DIR, 'package.json');
-const PI_MCP_JSON_PATH = path.join(PACKAGE_DIR, 'pi.mcp.json');
+const PI_EXTENSIONS_DIR = path.join(PACKAGE_DIR, 'extensions');
 const PACKAGE_SKILLS_DIR = path.join(PACKAGE_DIR, 'skills');
 const PACKAGE_BACKUP_PATH = path.join(PACKAGE_DIR, 'package.json.backup');
 const ROOT_DIST_DIR = path.join(ROOT, 'dist');
@@ -142,10 +142,10 @@ async function computePackFingerprint(): Promise<string> {
   const hash = createHash('sha256');
   hash.update(await fs.readFile(PACKAGE_JSON_PATH));
   await hashDirectoryContents(PACKAGE_DIST_DIR, hash, PACKAGE_DIR);
-  // The pi package surface (issue #714) ships alongside dist.
+  // The pi package surface (issues #714, #841) ships alongside dist.
   await hashDirectoryContents(PACKAGE_SKILLS_DIR, hash, PACKAGE_DIR);
-  if (await pathExists(PI_MCP_JSON_PATH)) {
-    hash.update(await fs.readFile(PI_MCP_JSON_PATH));
+  if (await pathExists(PI_EXTENSIONS_DIR)) {
+    await hashDirectoryContents(PI_EXTENSIONS_DIR, hash, PACKAGE_DIR);
   }
   return hash.digest('hex');
 }
@@ -437,7 +437,7 @@ export async function verifyPackageContents(tarballPath: string): Promise<{
   hasPython: boolean;
   hasMock: boolean;
   hasSkill: boolean;
-  hasPiManifest: boolean;
+  hasPiExtension: boolean;
   tarballSize: number;
 }> {
   console.log('[NPX Test] Verifying package contents...');
@@ -459,9 +459,9 @@ export async function verifyPackageContents(tarballPath: string): Promise<{
       entries.has('package/dist/vendor/js-debug/vsDebugServer.js');
     const hasPython = contents.includes('python') || contents.includes('debugpy');
     const hasMock = contents.includes('mock');
-    // The pi package surface (issue #714): the shipped skill and the adapter entry.
+    // The pi package surface (issues #714, #841): the shipped skill and the MCP extension.
     const hasSkill = entries.has('package/skills/debugging/SKILL.md');
-    const hasPiManifest = entries.has('package/pi.mcp.json');
+    const hasPiExtension = entries.has('package/extensions/mcp-debugger.js');
     
     // Get the total tarball size (cli.mjs presence confirms the CLI bundle
     // was included; the size measured is the whole tarball, not cli.mjs)
@@ -477,11 +477,11 @@ export async function verifyPackageContents(tarballPath: string): Promise<{
       hasPython,
       hasMock,
       hasSkill,
-      hasPiManifest,
+      hasPiExtension,
       tarballSize
     });
 
-    return { hasJavaScript, hasPython, hasMock, hasSkill, hasPiManifest, tarballSize };
+    return { hasJavaScript, hasPython, hasMock, hasSkill, hasPiExtension, tarballSize };
   } catch (error) {
     console.error('[NPX Test] Package verification failed:', error);
     throw error;

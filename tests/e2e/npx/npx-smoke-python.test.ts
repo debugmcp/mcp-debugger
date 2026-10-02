@@ -82,7 +82,7 @@ describe.sequential('NPX: Python Debugging Smoke Tests', () => {
   it('ships the agent skill and the pi manifest in the tarball (#714)', async () => {
     const contents = await verifyPackageContents(tarballPath!);
     expect(contents.hasSkill).toBe(true);
-    expect(contents.hasPiManifest).toBe(true);
+    expect(contents.hasPiExtension).toBe(true);
   });
 
   it('should list supported languages including Python', async () => {

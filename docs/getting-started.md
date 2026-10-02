@@ -132,14 +132,15 @@ codex mcp list
 
 ### pi coding agent
 
-pi reaches MCP servers through the community `pi-mcp-adapter` extension. The published package
-is a pi package that ships the agent skill and a server entry for the adapter (from v0.25.0):
+pi 0.99 and later has built-in MCP support. The published package is a pi package: installing it
+adds the agent skill and an extension that registers the server with pi's MCP support:
 
 ```bash
-pi install npm:pi-mcp-adapter
 pi install npm:@debugmcp/mcp-debugger
 pi list
 ```
+
+To add only the server, without the skill: `pi mcp add mcp-debugger -- npx -y @debugmcp/mcp-debugger stdio`.
 
 ### Over Streamable HTTP
 

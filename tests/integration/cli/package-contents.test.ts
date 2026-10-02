@@ -20,7 +20,7 @@ describe('package contents verification (issue #752)', () => {
       'package/dist/vendor/debugpy/__init__.py',
       'package/dist/mock.js',
       'package/skills/debugging/SKILL.md',
-      'package/pi.mcp.json',
+      'package/extensions/mcp-debugger.js',
     ];
     for (const entry of entries) {
       const filePath = path.join(tempDir, entry);
@@ -48,7 +48,7 @@ describe('package contents verification (issue #752)', () => {
       hasPython: true,
       hasMock: true,
       hasSkill: true,
-      hasPiManifest: true,
+      hasPiExtension: true,
       tarballSize: (await stat(tarballPath)).size,
     });
   });
