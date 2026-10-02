@@ -24,7 +24,8 @@ mkdir -p ~/.copilot/skills && cp -r skills/debugging ~/.copilot/skills/mcp-debug
 ```
 
 **pi coding agent**: the published npm package is a pi package that ships this skill, so
-`pi install npm:@debugmcp/mcp-debugger` installs it alongside the MCP server entry (from v0.25.0).
+`pi install npm:@debugmcp/mcp-debugger` installs it and registers the server with pi's built-in
+MCP support (pi 0.99 or later).
 
 **From the npm package** (any harness that can point at a skills directory): the package ships
 this directory at `node_modules/@debugmcp/mcp-debugger/skills/debugging` — no clone needed.

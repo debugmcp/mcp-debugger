@@ -17,16 +17,16 @@
   "files": [
     "dist",
     "skills",
-    "pi.mcp.json",
+    "extensions",
     "README.md",
     "LICENSE"
   ],
   "pi": {
+    "extensions": [
+      "./extensions/mcp-debugger.js"
+    ],
     "skills": [
       "./skills"
-    ],
-    "mcp": [
-      "./pi.mcp.json"
     ]
   },
   "engines": {

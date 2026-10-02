@@ -161,21 +161,24 @@ claude mcp list
 
 ### For the pi coding agent
 
-pi has no built-in MCP support — MCP servers reach it through the community
-[`pi-mcp-adapter`](https://github.com/nicobailon/pi-mcp-adapter) extension. The published
-`@debugmcp/mcp-debugger` package is itself a pi package (from v0.25.0): it ships the
-`mcp-debugger` agent skill and a server entry for the adapter, so one install registers both:
+pi 0.99 and later has built-in MCP support. The published `@debugmcp/mcp-debugger` package is
+also a pi package: one install adds the `mcp-debugger` agent skill and an extension that registers
+the server with pi's MCP support:
 
 ```bash
-pi install npm:pi-mcp-adapter          # prerequisite: the MCP bridge for pi
-pi install npm:@debugmcp/mcp-debugger  # registers the stdio server and the mcp-debugger skill
-pi list                                # shows the package, its skill, and its MCP server
+pi install npm:@debugmcp/mcp-debugger  # the mcp-debugger skill, and the server via pi's built-in MCP
+pi list                                # shows the package
 ```
 
-The adapter namespaces contributed servers by package, so the tools appear under
-`debugmcp_mcp-debugger__mcp-debugger`; `mcp({ search: "breakpoint" })` finds them either way.
-The server entry runs the published package via `npx`. To debug a source build instead,
-register the [dev proxy](tools/dev-proxy/README.md) in the adapter's own config.
+The extension runs the CLI that `pi install` put on disk, so the server matches the skill and
+starts without an `npx` download. It registers with `deferred` exposure: pi lists the debugger in
+its system prompt, and the model loads the tools it needs with `tool_search`, named
+`mcp__mcp_debugger__<tool>`. `/mcp` shows the server and changes its exposure for a session. A
+`mcp-debugger` entry in `~/.pi/agent/mcp.json` replaces the registration, for example to debug a
+source build through the [dev proxy](tools/dev-proxy/README.md).
+
+To add only the server, without the skill: `pi mcp add mcp-debugger -- npx -y @debugmcp/mcp-debugger stdio`.
+pi older than 0.99 has no built-in MCP support; the extension then does nothing, so upgrade pi.
 
 ### Using Docker
 
