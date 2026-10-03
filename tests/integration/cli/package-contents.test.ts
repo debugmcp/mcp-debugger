@@ -31,7 +31,7 @@ describe('package contents verification (issue #752)', () => {
     // Spaces and a literal dollar sign must survive without shell expansion.
     const tarballName = 'package $contents.tgz';
     tarballPath = path.join(tempDir, tarballName);
-    await execFileAsync('tar', ['-czf', `./${tarballName}`, 'package'], { cwd: tempDir });
+    await execFileAsync('tar', ['-czf', `./${tarballName}`, 'package'], { windowsHide: true, cwd: tempDir });
   });
 
   afterAll(async () => {

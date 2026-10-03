@@ -11,6 +11,7 @@ console.log('[Parent] Starting IPC test...');
 const child = spawn(process.execPath, [
   path.join(__dirname, '..', 'dist', 'proxy', 'proxy-bootstrap.js')
 ], {
+  windowsHide: true,
   stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
   cwd: path.join(__dirname, '..')
 });

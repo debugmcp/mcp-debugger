@@ -31,7 +31,7 @@ const scrubbed = new Set(['NODE_OPTIONS', 'DEBUG_MCP_SKIP_AUTO_START', 'MCP_DEBU
 
 function hasCommand(cmd: string, args: string[]): boolean {
   try {
-    return spawnSync(cmd, args, { stdio: 'ignore' }).status === 0;
+    return spawnSync(cmd, args, { windowsHide: true, stdio: 'ignore' }).status === 0;
   } catch {
     return false;
   }
@@ -118,7 +118,7 @@ describe.skipIf(!hasGo)('Go exit code from Delve\'s console status line (issue #
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-go-exit-'));
     try {
       const binary = path.join(tmp, process.platform === 'win32' ? 'exit_code.exe' : 'exit_code');
-      const build = spawnSync('go', ['build', '-gcflags=all=-N -l', '-o', binary, '.'], { cwd: fixtureDir, encoding: 'utf8', stdio: ['ignore', 'ignore', 'pipe'] });
+      const build = spawnSync('go', ['build', '-gcflags=all=-N -l', '-o', binary, '.'], { windowsHide: true, cwd: fixtureDir, encoding: 'utf8', stdio: ['ignore', 'ignore', 'pipe'] });
       expect(build.status, `go build failed: ${build.stderr}`).toBe(0);
       await launchAndExpectExit({ scriptPath: binary, args: ['7'], dapLaunchArgs: { noDebug: true } }, 7, ctx);
     } finally {

@@ -138,7 +138,7 @@ describe('mock-adapter-process stopped events (issue #355)', () => {
 
   beforeAll(() => {
     if (!fs.existsSync(PROCESS_JS)) {
-      execSync('npx tsc -b', { cwd: PKG_ROOT, stdio: 'inherit' });
+      execSync('npx tsc -b', { windowsHide: true, cwd: PKG_ROOT, stdio: 'inherit' });
     }
   }, 120_000);
 
@@ -154,6 +154,7 @@ describe('mock-adapter-process stopped events (issue #355)', () => {
     // Bind explicitly to 127.0.0.1: the process's default host 'localhost'
     // can resolve to ::1 on CI runners while the client dials 127.0.0.1.
     child = spawn(process.execPath, [PROCESS_JS, '--port', String(port), '--host', '127.0.0.1'], {
+      windowsHide: true,
       stdio: ['ignore', 'ignore', 'ignore'],
     });
     client = new DapTestClient();

@@ -15,6 +15,7 @@ async function testCoverageSummary() {
   // Use separate arguments to avoid path issues with spaces
   const vitestArgs = ['vitest', 'run', '--coverage', '--reporter=json', '--outputFile', jsonFile];
   const testProcess = spawn('npx', vitestArgs, {
+    windowsHide: true,
     stdio: ['inherit', 'pipe', 'pipe'],
     shell: true,
     cwd: process.cwd()

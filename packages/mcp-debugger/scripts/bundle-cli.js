@@ -305,10 +305,12 @@ async function bundleCLI() {
   const preparePackScript = path.join(repoRoot, 'scripts', 'prepare-pack.js');
   try {
     execSync(`node "${preparePackScript}" prepare`, {
+      windowsHide: true,
       cwd: repoRoot,
       stdio: 'inherit'
     });
     execSync('pnpm pack --pack-destination package', {
+      windowsHide: true,
       cwd: packageRoot,
       stdio: 'inherit'
     });
@@ -335,6 +337,7 @@ async function bundleCLI() {
     }
   } finally {
     execSync(`node "${preparePackScript}" restore`, {
+      windowsHide: true,
       cwd: repoRoot,
       stdio: 'inherit'
     });

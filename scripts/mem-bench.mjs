@@ -176,7 +176,7 @@ async function sampleHost(pid) {
     const { stdout } = await execFileAsync('powershell.exe', [
       '-NoProfile', '-Command',
       `Get-Process -Id ${pid} | Select-Object WorkingSet64,PrivateMemorySize64,PeakWorkingSet64 | ConvertTo-Json`
-    ]);
+    ], { windowsHide: true });
     const info = JSON.parse(stdout);
     return {
       rssKB: Math.round(info.WorkingSet64 / 1024),
@@ -185,7 +185,7 @@ async function sampleHost(pid) {
     };
   }
   // darwin (and other POSIX): ps reports KB, no peak available
-  const { stdout } = await execFileAsync('ps', ['-o', 'rss=', '-p', String(pid)]);
+  const { stdout } = await execFileAsync('ps', ['-o', 'rss=', '-p', String(pid)], { windowsHide: true });
   return { rssKB: Number(stdout.trim()), peakKB: null, privateKB: null };
 }
 
@@ -193,7 +193,7 @@ async function sampleHost(pid) {
 // entrypoint and entry.sh exec's node). Never sample transport.pid for the
 // docker target — that is the docker CLI process on the host.
 async function sampleDocker(containerName) {
-  const { stdout } = await execFileAsync('docker', ['exec', containerName, 'cat', '/proc/1/status']);
+  const { stdout } = await execFileAsync('docker', ['exec', containerName, 'cat', '/proc/1/status'], { windowsHide: true });
   return parseProcStatus(stdout);
 }
 
@@ -269,6 +269,7 @@ function ensureDockerImage() {
   }
   console.log(`[mem-bench] ensuring docker image ${dockerImage()} is current (docker-build-if-needed)...`);
   const result = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'docker-build-if-needed.js')], {
+    windowsHide: true,
     cwd: ROOT, stdio: 'inherit'
   });
   if (result.status !== 0) {
@@ -279,7 +280,7 @@ function ensureDockerImage() {
 
 async function countProcEntries(containerName) {
   try {
-    const { stdout } = await execFileAsync('docker', ['exec', containerName, 'sh', '-c', 'ls /proc | grep -c "^[0-9]"']);
+    const { stdout } = await execFileAsync('docker', ['exec', containerName, 'sh', '-c', 'ls /proc | grep -c "^[0-9]"'], { windowsHide: true });
     return Number(stdout.trim());
   } catch {
     return null;
@@ -292,15 +293,15 @@ const liveContainers = new Set();
 
 function removeContainer(name) {
   liveContainers.delete(name);
-  spawnSync('docker', ['rm', '-f', name], { stdio: 'ignore' });
+  spawnSync('docker', ['rm', '-f', name], { windowsHide: true, stdio: 'ignore' });
 }
 
 function sweepStrayContainers() {
-  const result = spawnSync('docker', ['ps', '-aq', '--filter', `name=${CONTAINER_PREFIX}`], { encoding: 'utf8' });
+  const result = spawnSync('docker', ['ps', '-aq', '--filter', `name=${CONTAINER_PREFIX}`], { windowsHide: true, encoding: 'utf8' });
   const ids = (result.stdout || '').split('\n').map((s) => s.trim()).filter(Boolean);
   if (ids.length > 0) {
     console.log(`[mem-bench] removing ${ids.length} stray ${CONTAINER_PREFIX}* container(s)`);
-    spawnSync('docker', ['rm', '-f', ...ids], { stdio: 'ignore' });
+    spawnSync('docker', ['rm', '-f', ...ids], { windowsHide: true, stdio: 'ignore' });
   }
 }
 
@@ -439,7 +440,7 @@ class ResultCollector {
 
 function gitInfo() {
   const run = (args) => {
-    const r = spawnSync('git', args, { cwd: ROOT, encoding: 'utf8' });
+    const r = spawnSync('git', args, { windowsHide: true, cwd: ROOT, encoding: 'utf8' });
     return r.status === 0 ? r.stdout.trim() : null;
   };
   return {
@@ -458,7 +459,7 @@ function hostInfo(target) {
     totalMemGB: Math.round(os.totalmem() / 1024 ** 3)
   };
   if (target === 'docker') {
-    const r = spawnSync('docker', ['--version'], { encoding: 'utf8' });
+    const r = spawnSync('docker', ['--version'], { windowsHide: true, encoding: 'utf8' });
     info.docker = r.status === 0 ? r.stdout.trim() : 'unavailable';
   }
   return info;

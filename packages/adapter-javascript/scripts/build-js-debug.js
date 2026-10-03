@@ -363,6 +363,7 @@ function execCmd(cmd, args, opts = {}) {
   const useShellFallback = process.platform === 'win32' && opts.shellFallback;
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, {
+      windowsHide: true,
       cwd: opts.cwd || PKG_ROOT,
       stdio: opts.stdio || 'pipe',
       shell: useShellFallback || false,

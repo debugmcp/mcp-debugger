@@ -25,6 +25,7 @@ const PKG_DIR = path.join(REPO_ROOT, 'packages', 'mcp-debugger');
 function run(cmd, args, opts = {}) {
   process.stderr.write(`[build-npx-tarball] ${cmd} ${args.join(' ')}\n`);
   const result = spawnSync(cmd, args, {
+    windowsHide: true,
     stdio: 'inherit',
     shell: process.platform === 'win32',
     cwd: REPO_ROOT,
@@ -47,6 +48,7 @@ run('node', ['scripts/prepare-pack.js', 'prepare']);
 // the pack directly so the original package.json is restored either way.
 process.stderr.write(`[build-npx-tarball] npm pack --pack-destination ${TARBALL_DIR}\n`);
 const packResult = spawnSync('npm', ['pack', '--pack-destination', TARBALL_DIR], {
+  windowsHide: true,
   stdio: 'inherit',
   shell: process.platform === 'win32',
   cwd: PKG_DIR,

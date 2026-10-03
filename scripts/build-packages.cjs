@@ -32,7 +32,7 @@ for (const pkg of packages) {
   const result = spawnSync(
     'pnpm',
     ['--filter', pkg, 'run', buildScript],
-    { stdio: 'inherit', shell: process.platform === 'win32' }
+    { windowsHide: true, stdio: 'inherit', shell: process.platform === 'win32' }
   );
 
   if (result.status !== 0) {

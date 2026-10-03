@@ -38,7 +38,7 @@ const problems = [];
 const report = (file, line, msg) => problems.push({ file, line, msg });
 
 function trackedMarkdown() {
-  const out = execFileSync('git', ['ls-files', '*.md'], { cwd: ROOT, encoding: 'utf8' });
+  const out = execFileSync('git', ['ls-files', '*.md'], { windowsHide: true, cwd: ROOT, encoding: 'utf8' });
   return out.split('\n').filter((f) => f && !FROZEN.some((p) => f.startsWith(p)));
 }
 

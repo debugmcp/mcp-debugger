@@ -73,6 +73,7 @@ export async function scanDarwin(): Promise<ScannedProcess[]> {
   // args the reapers depend on. -A lists all users' processes (matchers
   // filter by owner_pid liveness anyway).
   const { stdout } = await execFileAsync('ps', ['-ww', '-A', '-o', 'pid=,command='], {
+    windowsHide: true,
     timeout: LIST_TIMEOUT_MS,
     maxBuffer: LIST_MAX_BUFFER,
   });

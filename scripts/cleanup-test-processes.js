@@ -30,7 +30,7 @@ console.log('===============================================');
 
 function executeCommand(cmd, silent = false) {
   try {
-    const result = execSync(cmd, { encoding: 'utf8', stdio: silent ? 'pipe' : 'inherit' });
+    const result = execSync(cmd, { windowsHide: true, encoding: 'utf8', stdio: silent ? 'pipe' : 'inherit' });
     return result;
   } catch (error) {
     if (!silent) {

@@ -13,6 +13,7 @@ async function showFailures() {
   // Run tests with JSON reporter
   // Use separate arguments to avoid path issues with spaces
   const testProcess = spawn('npx', ['vitest', 'run', '--reporter=json', '--outputFile', jsonFile], {
+    windowsHide: true,
     stdio: 'inherit',
     shell: true
   });

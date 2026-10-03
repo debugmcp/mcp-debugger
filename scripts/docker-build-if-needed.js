@@ -34,7 +34,7 @@ async function restorePackageManifestIfNeeded() {
   if (existsSync(PACKAGE_BACKUP_PATH)) {
     console.log('[Docker Build] Restoring package.json after interrupted pack operation...');
     try {
-      execSync('node scripts/prepare-pack.js restore', { stdio: 'inherit' });
+      execSync('node scripts/prepare-pack.js restore', { windowsHide: true, stdio: 'inherit' });
     } catch (error) {
       console.warn('[Docker Build] Warning: failed to restore package.json backup:', error);
     }
@@ -74,9 +74,9 @@ async function main() {
   }
 
   try {
-    execSync('docker --version', { stdio: 'ignore' });
+    execSync('docker --version', { windowsHide: true, stdio: 'ignore' });
     // Also verify that Docker can actually build (e.g., buildx is available)
-    execSync('docker buildx version', { stdio: 'ignore' });
+    execSync('docker buildx version', { windowsHide: true, stdio: 'ignore' });
   } catch {
     console.log('[Docker Build] Docker CLI not installed - skipping build');
     return;
@@ -84,7 +84,7 @@ async function main() {
 
   // Docker CLI exists — now verify the daemon is actually running
   try {
-    execSync('docker info', { stdio: 'ignore' });
+    execSync('docker info', { windowsHide: true, stdio: 'ignore' });
   } catch {
     console.error('[Docker Build] ERROR: Docker Desktop is not running. Please start Docker Desktop and try again.');
     process.exit(1);
@@ -102,6 +102,7 @@ async function main() {
     // ORIGINAL build time, so comparing against Created marks the image as
     // outdated forever. LastTagTime advances on every successful build.
     const output = execSync(`docker inspect ${IMAGE_NAME} --format="{{.Created}}|{{json .Metadata.LastTagTime}}"`, {
+      windowsHide: true,
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'ignore']
     });
@@ -184,13 +185,14 @@ async function main() {
       console.log(`[Docker Build] Building ${IMAGE_NAME}...`);
       const timestamp = Date.now();
       execSync(`docker build . -t ${IMAGE_NAME} --build-arg CACHEBUST=${timestamp}`, {
+        windowsHide: true,
         stdio: 'inherit',
         env: { ...process.env, DOCKER_BUILDKIT: '1' }
       });
       console.log('[Docker Build] Build completed successfully');
 
       try {
-        execSync(`docker inspect ${IMAGE_NAME}`, { stdio: 'ignore' });
+        execSync(`docker inspect ${IMAGE_NAME}`, { windowsHide: true, stdio: 'ignore' });
         console.log('[Docker Build] Image verified successfully');
       } catch {
         console.error('[Docker Build] ERROR: Image was not created!');

@@ -142,6 +142,7 @@ function runTsc(root) {
   }
 
   const result = spawnSync(process.execPath, [tsc, '-p', PROJECT, '--pretty', 'false'], {
+    windowsHide: true,
     cwd: root,
     encoding: 'utf-8',
     maxBuffer: 64 * 1024 * 1024

@@ -21,7 +21,7 @@ console.log('   Script directory:', __dirname);
 
 // Get TypeScript version
 try {
-  const tscVersion = execSync('npx tsc --version', { encoding: 'utf8' }).trim();
+  const tscVersion = execSync('npx tsc --version', { windowsHide: true, encoding: 'utf8' }).trim();
   console.log('   TypeScript version:', tscVersion);
 } catch (e) {
   console.log('   TypeScript version: Could not determine');
@@ -50,6 +50,7 @@ if (!fs.existsSync(indexDtsPath)) {
   console.log('\n🔍 Running TypeScript with diagnostics...');
   try {
     const diagnostics = execSync('npx tsc --listFiles --noEmit', {
+      windowsHide: true,
       cwd: path.join(__dirname, '..'),
       encoding: 'utf8'
     });
@@ -63,6 +64,7 @@ if (!fs.existsSync(indexDtsPath)) {
   console.log('\n🔍 Checking for TypeScript errors...');
   try {
     execSync('npx tsc --noEmit', {
+      windowsHide: true,
       cwd: path.join(__dirname, '..'),
       stdio: 'pipe'
     });
@@ -77,6 +79,7 @@ if (!fs.existsSync(indexDtsPath)) {
     // Try building with different settings
     console.log('   Running tsc with explicit declaration generation...');
     execSync('npx tsc --declaration --emitDeclarationOnly --outDir dist', {
+      windowsHide: true,
       cwd: path.join(__dirname, '..'),
       stdio: 'inherit'
     });
@@ -87,6 +90,7 @@ if (!fs.existsSync(indexDtsPath)) {
       // If still no declarations, try one more approach
       console.log('   Trying with module commonjs...');
       execSync('npx tsc --declaration --module commonjs --outDir dist', {
+        windowsHide: true,
         cwd: path.join(__dirname, '..'),
         stdio: 'inherit'
       });
@@ -97,6 +101,7 @@ if (!fs.existsSync(indexDtsPath)) {
         // Last resort - try with a minimal config
         console.log('   Trying with minimal config...');
         execSync('npx tsc src/index.ts --declaration --outDir dist --moduleResolution node --module commonjs', {
+          windowsHide: true,
           cwd: path.join(__dirname, '..'),
           stdio: 'inherit'
         });

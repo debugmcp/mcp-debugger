@@ -15,7 +15,7 @@ async function runTest() {
   
   // Clean up any existing container
   try {
-    execSync(`docker rm -f ${containerName}`, { stdio: 'ignore' });
+    execSync(`docker rm -f ${containerName}`, { windowsHide: true, stdio: 'ignore' });
   } catch {
     // Ignore error if container doesn't exist
   }
@@ -213,7 +213,7 @@ async function runTest() {
     
     console.log('\n--- Getting container logs ---');
     try {
-      const logs = execSync(`docker logs ${containerName} --tail 50`, { encoding: 'utf8' });
+      const logs = execSync(`docker logs ${containerName} --tail 50`, { windowsHide: true, encoding: 'utf8' });
       console.log('Container logs:', logs);
     } catch (e) {
       console.error('Could not get logs:', e.message);
@@ -228,12 +228,12 @@ async function runTest() {
     // Clean up
     console.log('\nCleaning up...');
     try {
-      execSync(`docker stop ${containerName}`, { stdio: 'ignore' });
+      execSync(`docker stop ${containerName}`, { windowsHide: true, stdio: 'ignore' });
     } catch {
       // Ignore error if container already stopped
     }
     try {
-      execSync(`docker rm ${containerName}`, { stdio: 'ignore' });
+      execSync(`docker rm ${containerName}`, { windowsHide: true, stdio: 'ignore' });
     } catch {
       // Ignore error if container already removed
     }

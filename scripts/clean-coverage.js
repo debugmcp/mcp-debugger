@@ -58,7 +58,7 @@ async function cleanCoverage() {
       console.log('[Clean Coverage] Attempting to remove via Docker helper container...');
       const dockerCommand = `docker run --rm -v "${dockerMountPath}:/workspace" --entrypoint sh alpine:3.19 -c "chmod -R +w /workspace/coverage 2>/dev/null || true && rm -rf /workspace/coverage"`;
       try {
-        execSync(dockerCommand, { stdio: 'inherit' });
+        execSync(dockerCommand, { windowsHide: true, stdio: 'inherit' });
         console.log('[Clean Coverage] Successfully removed coverage directory via Docker');
         return;
       } catch (dockerError) {
@@ -70,7 +70,7 @@ async function cleanCoverage() {
 
     console.log('[Clean Coverage] Coverage directory owned by root, attempting sudo removal...');
     try {
-      execSync(`sudo rm -rf "${COVERAGE_DIR}"`, { stdio: 'inherit' });
+      execSync(`sudo rm -rf "${COVERAGE_DIR}"`, { windowsHide: true, stdio: 'inherit' });
       console.log('[Clean Coverage] Successfully removed root-owned coverage directory');
     } catch (sudoError) {
       console.error('[Clean Coverage] Failed to remove root-owned coverage directory with sudo.');

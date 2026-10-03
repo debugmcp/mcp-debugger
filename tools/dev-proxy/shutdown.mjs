@@ -179,7 +179,7 @@ export function killChildGracefully(child, opts = {}) {
     ((pid) => {
       if (platform === 'win32') {
         // execFileSync (no shell) — pid is numeric, but avoid shell interpolation on principle
-        execFileSync('taskkill', ['/pid', String(pid), '/F'], { stdio: 'ignore' });
+        execFileSync('taskkill', ['/pid', String(pid), '/F'], { windowsHide: true, stdio: 'ignore' });
       } else {
         child.kill('SIGKILL');
       }

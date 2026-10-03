@@ -13,7 +13,8 @@ const containerName = `mcp-debugger-js-debug-${Date.now()}`;
 
 async function execCommand(cmd, args = []) {
   return new Promise((resolve, reject) => {
-    const proc = spawn(cmd, args, { 
+    const proc = spawn(cmd, args, {
+      windowsHide: true,
       shell: true,
       stdio: 'pipe',
       encoding: 'utf8'
