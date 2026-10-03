@@ -128,7 +128,7 @@ class McpStdioClient {
     this.exited = false;
     this.disposed = false;
     this.spawnFailed = false;
-    this.child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    this.child = spawn(command, args, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     this.spawnError = new Promise((resolve) => {
       this.child.once('error', (err) => {
         this.spawnFailed = true;

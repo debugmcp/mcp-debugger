@@ -52,6 +52,7 @@ class SSEStressTester {
         '-p', port.toString(),
         '--log-level', 'error' // Minimize logging during stress test
       ], {
+        windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
         cwd: projectRoot
       });

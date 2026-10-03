@@ -18,7 +18,7 @@ export class ProcessManagerImpl implements IProcessManager {
   }
 
   async exec(command: string): Promise<{ stdout: string; stderr: string }> {
-    const promisifiedResult = await execAsync(command);
+    const promisifiedResult = await execAsync(command, { windowsHide: true });
 
     // promisify(exec) resolves to { stdout: string, stderr: string }
     if (typeof promisifiedResult === 'object' && promisifiedResult !== null && 'stdout' in promisifiedResult && 'stderr' in promisifiedResult) {

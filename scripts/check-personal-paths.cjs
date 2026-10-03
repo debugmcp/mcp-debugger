@@ -51,7 +51,7 @@ const binaryExtensions = [
 // Get staged files
 function getStagedFiles() {
   try {
-    const output = execSync('git diff --cached --name-only --diff-filter=ACM', { encoding: 'utf8' });
+    const output = execSync('git diff --cached --name-only --diff-filter=ACM', { windowsHide: true, encoding: 'utf8' });
     return output
       .split('\n')
       .filter(file => file && !isBinaryFile(file))

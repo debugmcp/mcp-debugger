@@ -24,7 +24,8 @@ function log(message, color = colors.reset) {
 
 function exec(command, cwd = process.cwd()) {
   try {
-    return execSync(command, { 
+    return execSync(command, {
+      windowsHide: true,
       cwd, 
       encoding: 'utf8',
       stdio: 'pipe' 
@@ -36,7 +37,8 @@ function exec(command, cwd = process.cwd()) {
 
 function execWithOutput(command, cwd = process.cwd()) {
   try {
-    execSync(command, { 
+    execSync(command, {
+      windowsHide: true,
       cwd, 
       stdio: 'inherit' 
     });

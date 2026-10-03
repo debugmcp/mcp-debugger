@@ -32,7 +32,7 @@ function findJavac() {
   // Try javac in PATH
   try {
     const cmd = process.platform === 'win32' ? 'where javac' : 'which javac';
-    const result = execSync(cmd, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    const result = execSync(cmd, { windowsHide: true, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
     if (result) return result.split('\n')[0].trim();
   } catch {
     // not in PATH
@@ -45,6 +45,7 @@ function getJavacMajorVersion(javac) {
   try {
     // `javac -version` prints "javac <major>.<minor>.<patch>" on stdout (JDK 9+)
     const output = execFileSync(javac, ['-version'], {
+      windowsHide: true,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe']
     });
@@ -111,6 +112,7 @@ function main() {
       SOURCE_FILE,
       '-d', OUT_DIR
     ], {
+      windowsHide: true,
       stdio: 'inherit',
       cwd: JAVA_DIR
     });

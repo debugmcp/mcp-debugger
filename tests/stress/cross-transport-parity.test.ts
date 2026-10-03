@@ -50,6 +50,7 @@ class TransportTester {
         '-p', port.toString(),
         '--log-level', 'error'
       ], {
+        windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
         cwd: PROJECT_ROOT
       });

@@ -31,6 +31,7 @@ interface RunResult {
 
 function runScript(extraEnv: Record<string, string>): RunResult {
   const result = spawnSync(process.execPath, [scriptPath], {
+    windowsHide: true,
     env: {
       ...process.env,
       // Neutralize anything the parent environment (dev box or CI runner)

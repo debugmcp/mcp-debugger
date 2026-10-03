@@ -355,7 +355,7 @@ export function gitManifestResolver(mergeBase, headSha) {
   // stderr is piped, not inherited: a manifest missing on one side is an expected outcome
   // handled below, and letting git's `fatal:` reach the log once per file only adds noise.
   const show = rev => execFileSync('git', ['show', rev],
-    { encoding: 'utf-8', maxBuffer: 32e6, stdio: ['ignore', 'pipe', 'pipe'] });
+    { windowsHide: true, encoding: 'utf-8', maxBuffer: 32e6, stdio: ['ignore', 'pipe', 'pipe'] });
 
   return file => {
     try {
@@ -382,7 +382,7 @@ function resolverFromEnv() {
 
   try {
     const mergeBase = execFileSync('git', ['merge-base', baseRef, headSha],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+      { windowsHide: true, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
     return gitManifestResolver(mergeBase, headSha);
   } catch (error) {
     // Refusing here would fail PRs for an unrelated reason; the path-only gate is the safe

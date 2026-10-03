@@ -158,7 +158,7 @@ describe('release notes', () => {
       dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-notes-'));
       const file = path.join(dir, 'CHANGELOG.md');
       fs.writeFileSync(file, changelog(body));
-      return spawnSync(process.execPath, [SCRIPT, ...args, '--changelog', file], { encoding: 'utf-8' });
+      return spawnSync(process.execPath, [SCRIPT, ...args, '--changelog', file], { windowsHide: true, encoding: 'utf-8' });
     }
 
     it('--check reports the mode and exits 0 when the notes fit', () => {
@@ -187,7 +187,7 @@ describe('release notes', () => {
     });
 
     it('prints usage and exits 1 without a version', () => {
-      const result = spawnSync(process.execPath, [SCRIPT], { encoding: 'utf-8' });
+      const result = spawnSync(process.execPath, [SCRIPT], { windowsHide: true, encoding: 'utf-8' });
       expect(result.status).toBe(1);
       expect(result.stderr).toContain('Usage: node scripts/release-notes.mjs');
     });

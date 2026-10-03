@@ -47,7 +47,7 @@ for (let i = 1; i <= RUNS; i++) {
 
   const started = Date.now();
   // `npx` resolves the local vitest binary cross-platform (Windows + CI).
-  const result = spawnSync('npx', args, { stdio: 'inherit', shell: true });
+  const result = spawnSync('npx', args, { windowsHide: true, stdio: 'inherit', shell: true });
   const secs = ((Date.now() - started) / 1000).toFixed(1);
 
   if (result.status === 0) {

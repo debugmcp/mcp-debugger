@@ -406,7 +406,7 @@ async function probe() {
     try {
       if (adapterProc && !adapterProc.killed) {
         if (process.platform === 'win32') {
-          spawn('taskkill', ['/PID', String(adapterProc.pid), '/T', '/F'], { stdio: 'ignore' }).on('error', () => {});
+          spawn('taskkill', ['/PID', String(adapterProc.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }).on('error', () => {});
         } else {
           try { adapterProc.kill('SIGTERM'); } catch {}
           setTimeout(() => { try { adapterProc.kill('SIGKILL'); } catch {} }, 300);

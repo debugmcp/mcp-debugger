@@ -24,6 +24,7 @@ if (process.argv.includes('--child')) {
   let child;
   if (process.env.DEV_PROXY_BUILD_CHILD === '1') {
     child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--child'], {
+      windowsHide: true,
       stdio: ['ignore', 'inherit', 'inherit'],
     });
   }

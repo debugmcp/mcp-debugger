@@ -32,6 +32,7 @@ function nodeOptionsFor(shim: string): string {
 function runNode(script: string, exitFile: string, extraEnv: Record<string, string> = {}): number {
   try {
     execFileSync(process.execPath, ['-e', script], {
+      windowsHide: true,
       env: {
         ...process.env,
         NODE_OPTIONS: nodeOptionsFor(shimPath),
@@ -83,7 +84,7 @@ describe('exitcode-shim.cjs', () => {
     // must hold the ROOT's code even though the child exited last-but-first.
     const script = [
       "const { spawnSync } = require('child_process');",
-      "spawnSync(process.execPath, ['-e', 'process.exit(3)'], { env: process.env, stdio: 'ignore' });",
+      "spawnSync(process.execPath, ['-e', 'process.exit(3)'], { windowsHide: true, env: process.env, stdio: 'ignore' });",
       'process.exit(5);'
     ].join('\n');
     const status = runNode(script, exitFile);
@@ -105,6 +106,7 @@ describe('exitcode-shim.cjs', () => {
       "const { spawnSync } = require('child_process');",
       "process.on('exit', () => {",
       "  spawnSync(process.execPath, ['-e', 'process.exit(9)'], {",
+      '    windowsHide: true,',
       "    env: { ...process.env, MCP_DEBUGGER_EXITCODE_CLAIMED: '' },",
       "    stdio: 'ignore'",
       '  });',
@@ -127,6 +129,7 @@ describe('exitcode-shim.cjs', () => {
     const script = [
       "const { spawnSync } = require('child_process');",
       "spawnSync(process.execPath, ['-e', 'process.exit(4)'], {",
+      '  windowsHide: true,',
       "  env: { ...process.env, MCP_DEBUGGER_EXITCODE_CLAIMED: '', MCP_DEBUGGER_EXITCODE_FILE: process.env.INNER_EXIT_FILE },",
       "  stdio: 'ignore'",
       '});',
@@ -142,6 +145,7 @@ describe('exitcode-shim.cjs', () => {
   it('does nothing when MCP_DEBUGGER_EXITCODE_FILE is unset', () => {
     const exitFile = nextExitFile();
     execFileSync(process.execPath, ['-e', 'process.exit(0)'], {
+      windowsHide: true,
       env: { ...process.env, NODE_OPTIONS: nodeOptionsFor(shimPath) },
       stdio: 'pipe'
     });

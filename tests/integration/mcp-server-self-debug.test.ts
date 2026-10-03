@@ -70,6 +70,7 @@ function sourceLine(file: string, statement: string): number {
 async function spawnInspected(script: string, args: string[] = []): Promise<number> {
   targetOutput = '';
   target = spawn(process.execPath, ['--inspect=127.0.0.1:0', script, ...args], {
+    windowsHide: true,
     cwd: root, env: environment(), stdio: ['ignore', 'pipe', 'pipe']
   });
   target.stdout!.on('data', chunk => { targetOutput += chunk.toString(); });

@@ -260,6 +260,7 @@ class BackendManager {
       // our death (pipe closes) and we can ask it to shut down gracefully
       // before force-killing (issue #122).
       this.child = spawn(command, args, {
+        windowsHide: true,
         cwd: PROJECT_ROOT,
         stdio: ['pipe', 'pipe', 'pipe'],
         env: this._buildBackendEnv({ forceStdinClose: true }),
@@ -707,7 +708,7 @@ class BackendManager {
       // The child may have exited during that grace period (see stdio onclose).
       if (stillOwned && !stillOwned()) return;
       if (process.platform === 'win32') {
-        execSync(`taskkill /pid ${pid} /F`, { stdio: 'ignore' });
+        execSync(`taskkill /pid ${pid} /F`, { windowsHide: true, stdio: 'ignore' });
       } else {
         process.kill(pid, 0); // Check if alive (throws if dead)
         process.kill(pid, 'SIGKILL');
@@ -742,7 +743,7 @@ class BackendManager {
         // Use netstat to find the PID holding the port
         const output = execSync(
           `netstat -ano | findstr ":${BACKEND_PORT}" | findstr "LISTENING"`,
-          { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+          { windowsHide: true, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
         );
         // Parse last column (PID) from first matching line
         const match = output.trim().split('\n')[0]?.match(/\s(\d+)\s*$/);
@@ -751,7 +752,7 @@ class BackendManager {
         // Use lsof on Unix
         const output = execSync(
           `lsof -ti tcp:${BACKEND_PORT} -sTCP:LISTEN`,
-          { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+          { windowsHide: true, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
         );
         pid = parseInt(output.trim().split('\n')[0], 10);
       }
@@ -761,7 +762,7 @@ class BackendManager {
         if (process.platform === 'win32') {
           try {
             const taskInfo = execSync(`tasklist /fi "PID eq ${pid}" /fo csv /nh`,
-              { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+              { windowsHide: true, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
             if (!taskInfo.toLowerCase().includes('node')) {
               log(`Port ${BACKEND_PORT} held by non-node PID ${pid} — skipping kill`);
               return;
