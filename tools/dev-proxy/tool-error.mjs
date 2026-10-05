@@ -53,6 +53,62 @@ export function isBackendUnavailableError(err, backendState) {
 }
 
 /**
+ * How long one backend tool call may take before the proxy gives up on it
+ * (issue #854). The SDK client's default is 60 s, which cut off every call
+ * that is slow by design: the server lets a caller ask evaluate_expression,
+ * redefine_classes and wait_for_stop for up to 600 s. The MCP client in front
+ * of the proxy enforces its own request timeout, so this only has to stay
+ * out of the way — the tool maximum plus room for the answer to travel.
+ */
+export const BACKEND_CALL_TIMEOUT_MS = 660_000;
+
+/**
+ * The request options for one backend tool call: the timeout above, and the
+ * caller's abort signal so a call the client cancelled (or abandoned) is
+ * cancelled in the backend too instead of running on for nobody.
+ *
+ * @param {AbortSignal | undefined} signal
+ */
+export function backendCallOptions(signal) {
+  return { timeout: BACKEND_CALL_TIMEOUT_MS, ...(signal ? { signal } : {}) };
+}
+
+/** True when the SDK gave up waiting for the backend's answer (-32001), anywhere in the cause chain. */
+function isRequestTimeout(err) {
+  let e = err;
+  for (let depth = 0; e && depth < 4; depth++) {
+    if (/** @type {{code?: unknown}} */ (e).code === -32001) {
+      return true;
+    }
+    e = /** @type {{cause?: unknown}} */ (e).cause;
+  }
+  return false;
+}
+
+/**
+ * The hint to put beside a failed backend tool call, or undefined when the
+ * failure is the backend's own answer (issue #304). Three honest cases:
+ * the backend wants restarting; a start or restart is still in flight
+ * (retry, do not restart — #716); or the backend is running and simply did
+ * not answer this call in time, which is not "did not settle" (issue #854).
+ *
+ * @param {unknown} err - the error thrown by BackendManager.callTool
+ * @param {{state: string, needsRestart: boolean, discoveryWaitMs: number}} backend
+ */
+export function backendFailureHint(err, backend) {
+  if (!isBackendUnavailableError(err, backend.state)) {
+    return undefined;
+  }
+  if (backend.needsRestart) {
+    return `The mcp-debugger backend is not reachable (state: ${backend.state}). Use dev_server_status to check, or dev_restart_debugger to restart it.`;
+  }
+  if (backend.state === 'running' && isRequestTimeout(err)) {
+    return `The mcp-debugger backend is running but did not answer this call within ${BACKEND_CALL_TIMEOUT_MS / 1000}s; the call may still be executing there. Use dev_server_status to watch it — do NOT restart it.`;
+  }
+  return `The mcp-debugger backend is ${backend.state} and did not settle within ${backend.discoveryWaitMs}ms. Retry the call; use dev_server_status to watch it — do NOT restart it.`;
+}
+
+/**
  * Collapse repeated identical "MCP error <code>: " prefixes to one.
  *
  * The SDK's McpError constructor bakes the prefix into .message; when the

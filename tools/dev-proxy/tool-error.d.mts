@@ -38,3 +38,29 @@ export function dedupeMcpErrorPrefix<T>(message: T): T;
  *   no client — rather than dereferencing a null `mcpClient`
  */
 export function assertBackendAvailable(backend: { state: string; mcpClient: unknown }): void;
+
+/**
+ * How long one backend tool call may take before the proxy gives up on it:
+ * above the 600 s a tool's own `timeout` argument may ask for, so the MCP
+ * client in front of the proxy is what bounds a slow call (issue #854).
+ */
+export const BACKEND_CALL_TIMEOUT_MS: number;
+
+/**
+ * The request options for one backend tool call: `BACKEND_CALL_TIMEOUT_MS`,
+ * and the caller's abort signal when there is one, so a call the client
+ * cancelled is cancelled in the backend too.
+ */
+export function backendCallOptions(signal: AbortSignal | undefined): { timeout: number; signal?: AbortSignal };
+
+/**
+ * The hint to put beside a failed backend tool call, or `undefined` when the
+ * failure is the backend's own answer. A backend that wants restarting is
+ * pointed at `dev_restart_debugger`; one that is mid-start is to be retried,
+ * not restarted; a running backend whose call hit the request timeout is
+ * reported as a call that was not answered (issue #854).
+ */
+export function backendFailureHint(
+  err: unknown,
+  backend: { state: string; needsRestart: boolean; discoveryWaitMs: number }
+): string | undefined;
