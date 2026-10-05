@@ -349,6 +349,49 @@ describe.skipIf(SKIP_CPP)('MCP Server C/C++ Debugging Smoke Test @requires-cpp',
   );
 
   it(
+    "answers a short program's launch with its end, its exit code and all of its output (issue #856)",
+    async (ctx) => {
+      const { binaryPath } = prepareCppExample('hello_world');
+
+      const createResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'create_debug_session',
+        arguments: { language: 'cpp', name: 'cpp-short-program' }
+      }));
+      expect(createResponse.success).toBe(true);
+      sessionId = createResponse.sessionId as string;
+
+      const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: { sessionId, scriptPath: binaryPath, dapLaunchArgs: { stopOnEntry: false } }
+      }));
+      if (!startResponse.success) {
+        skipIfSpawnBlocked(ctx, startResponse, 'C/C++');
+        throw new Error(`start_debugging failed: ${JSON.stringify(startResponse, null, 2)}`);
+      }
+
+      // hello_world is over in milliseconds, so its end is the launch's
+      // answer. On Windows the proxy used to hold CodeLLDB's `exited` until
+      // the adapter's stdio pipes closed — which they never do while CodeLLDB
+      // lives — so every exit was reported 2 s late and this launch answered
+      // `running` with pending: true for a program that had already ended.
+      expect(startResponse.state, JSON.stringify(startResponse)).toBe('stopped');
+      expect(startResponse.pending).toBeUndefined();
+      expect((startResponse.data as { exitCode?: number } | undefined)?.exitCode).toBe(0);
+
+      // Reporting the exit sooner must not cost the program's last words:
+      // they are still read off the pipe before the exit is forwarded.
+      const outputResult = await callToolSafely(mcpClient!, 'get_output', { sessionId });
+      const stdout = ((outputResult.entries ?? []) as Array<{ category?: string; output?: string }>)
+        .filter(e => e.category === 'stdout')
+        .map(e => e.output ?? '')
+        .join('');
+      expect(stdout).toContain('CPP_DEBUG_MARKER: Hello from C++ answer=42');
+      expect(stdout).toContain('values has 3 elements');
+    },
+    90000
+  );
+
+  it(
     'completes a noDebug launch although CodeLLDB refuses the configuration requests (issue #746)',
     async (ctx) => {
       const { sourcePath, binaryPath } = prepareCppExample('hello_world');
