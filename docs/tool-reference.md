@@ -391,11 +391,17 @@ Starts debugging a script.
 }
 ```
 
-**When the launch answers:** after the adapter's handshake, `start_debugging` waits for the program's first stop, its exit, or a ceiling, and reports the session as it is at that moment (issue #815):
+**When the launch answers:** once the program is launched, `start_debugging` holds its answer for a short window and reports the session as it is when the first of three things happens — the same way in every language (issues #815, #823, #826):
 
-- **A stop arrives** — `state: "paused"` with `reason` (the example above), which is why a launch with breakpoints set answers "paused at the first breakpoint" for every adapter but js-debug (js-debug counts a configured, running program as ready when no entry stop was requested, and answers `running` right away — see issue #823).
-- **The program ends first** — `state: "stopped"` with the run-to-completion summary and `exitCode` below.
-- **Neither, within the ceiling** — `state: "running"` with **`pending: true`** (top level and in `data`, like `step_over`) and a `message` that says so. The ceiling depends on what the launch has armed: with line breakpoints (a logpoint counts when the adapter does not run it on), function breakpoints, `stopOnEntry` or `breakOnExceptions: "all"`, the first stop gets 30 s and the message names what was not reached (`The program is still running after 30s without reaching 2 breakpoint(s)…`); with nothing armed — the `"uncaught"` default does not count, a crash is not a stop that comes soon — the wait is a 5 s grace window and the message says why no stop is coming (`…nothing is armed to stop it soon (no breakpoints, no entry stop, no caught-exception filter)…`) and what to do (`wait_for_stop`, `get_output`, or set breakpoints and `restart_debugging`). A server or a long-running script therefore answers in about 5 s instead of 30. Nothing is cancelled when the window passes — whatever is armed stays armed: [`wait_for_stop`](#wait_for_stop) blocks until the program stops or ends, and `list_debug_sessions` reports the state without waiting.
+- **The program stops** — `state: "paused"` with `reason` (the example above). A breakpoint reached as the program starts is answered here, in the one call.
+- **The program ends** — `state: "stopped"` with the run-to-completion summary and `exitCode` below.
+- **The hold elapses** — `state: "running"` with **`pending: true`** (top level and in `data`, like `step_over`) and a `message` that says what is armed: `…has not reached 2 breakpoint(s) yet. Nothing was cancelled: what is armed stays armed…`; or, with nothing armed (the `"uncaught"` default does not count — a crash is not a stop you are waiting for), `…nothing is armed to stop it (no breakpoints, no entry stop, no caught-exception filter)…`; or, for a `noDebug` launch, that the debugger is off. What is armed is read when the answer is built, so a breakpoint set while the launch was in flight is named.
+
+The hold is not a limit on the program. Nothing is cancelled when it elapses: breakpoints and exception filters stay armed for the life of the process, and the program pauses when it reaches one — in a second or in a day. The hold only decides whether this call reports the first stop itself. It is deliberately short (about a second, sized from the measured time each adapter takes from launch to a first breakpoint; the number is a tunable, not part of this contract), so that a launch whose breakpoint needs an outside trigger — a request handler in a server — hands control back at once. To wait for the stop, call [`wait_for_stop`](#wait_for_stop), which blocks until the program stops or ends for as long as you say; `list_debug_sessions` reports the state without waiting.
+
+Two things are outside the hold. A `stopOnEntry` launch is answered at its entry stop however long the program takes to reach it, because that stop is certain to come. And whatever precedes the launch — compiling a source file, starting the adapter — happens before the hold begins.
+
+A breakpoint set, removed or cleared while a launch is still starting is delivered to the adapter as soon as the program is launched (issue #851).
 
 **JavaScript launch configuration:** Both launch option objects accept js-debug settings;
 `adapterLaunchConfig` wins when a key appears in both. The effective `stopOnEntry` value controls
@@ -472,7 +478,7 @@ Restarts the debuggee in one call: terminates the current program (if still runn
 - Restart is implemented uniformly as terminate + relaunch (the DAP-spec-blessed emulation; no adapter advertises native restart), so every launch-mode language works identically. Native DAP `restart` is a possible future optimization.
 - The launch configuration is replayed verbatim (script, args, `dapLaunchArgs`, `adapterLaunchConfig`, `breakOnExceptions`); there are no per-restart overrides — call `start_debugging` for a different configuration.
 - **The output buffer starts fresh**: `outputReset: true` signals that `get_output` cursors from the previous launch are stale — read from `since: 0`.
-- The readiness wait and its `pending: true` answer are the same as `start_debugging`'s ("When the launch answers" above): a relaunch with nothing armed answers `running` after the short grace window.
+- The hold and its `pending: true` answer are the same as `start_debugging`'s ("When the launch answers" above): a relaunch that has not stopped when the hold elapses answers `running`, and `wait_for_stop` collects its stop.
 - Not available for **attach sessions** (no launch configuration to replay — detach and re-attach instead) or for sessions that were never launched, including dry-run-only sessions — call `start_debugging` on the same session instead.
 
 ---

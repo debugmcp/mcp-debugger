@@ -166,21 +166,34 @@ describe('ErrorMessages', () => {
       expect(ErrorMessages.attachPausePending).toContain('stopOnEntry: false');
     });
 
+    // The launch answer carries no duration: how long start_debugging holds
+    // is a tunable, not part of the contract (issues #823, #826).
     it('a launch still running with something armed says it stays armed', () => {
-      const message = ErrorMessages.launchStillRunning(30, '2 breakpoint(s)');
-      expect(message).toMatch(/still running after 30s without reaching 2 breakpoint\(s\)/);
+      const message = ErrorMessages.launchStillRunning('2 breakpoint(s)');
+      expect(message).toMatch(/has not reached 2 breakpoint\(s\) yet/);
       expect(message).toMatch(/Nothing was cancelled/);
       expect(message).toMatch(/stays? armed/);
       expect(message).toContain('wait_for_stop');
+      expect(message).not.toMatch(/after \d/);
       expect(message).not.toMatch(/check list_debug_sessions/);
     });
 
     it('a launch still running with nothing armed says what can still end the wait', () => {
-      const message = ErrorMessages.launchStillRunning(5, undefined);
-      expect(message).toMatch(/still running after 5s/);
+      const message = ErrorMessages.launchStillRunning(undefined);
       expect(message).toMatch(/nothing is armed to stop it/);
+      expect(message).not.toMatch(/stays? armed/);
+      expect(message).not.toMatch(/after \d/);
       expect(message).toContain('wait_for_stop');
       expect(message).toContain('get_output');
+    });
+
+    it('a launch still running with the debugger off promises no stop', () => {
+      const message = ErrorMessages.launchStillRunning('2 breakpoint(s)', ErrorMessages.debuggerOffForLaunch);
+      expect(message).toContain(ErrorMessages.debuggerOffForLaunch);
+      expect(message).not.toMatch(/stays? armed/);
+      expect(message).not.toMatch(/has not reached/);
+      expect(message).toMatch(/wait for it to end/);
+      expect(message).toContain('wait_for_stop');
     });
 
     it('wait_for_stop itself says nothing was cancelled, and names what is still armed', () => {

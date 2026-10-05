@@ -6,7 +6,6 @@
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction } from './adapter-policy.js';
 import { emptyLocalVariableExtraction, extractionFromScope } from './adapter-policy.js';
-import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
 
@@ -127,8 +126,6 @@ export const PythonAdapterPolicy = {
     };
   },
 
-  isSessionReady: (state: SessionState) => state === SessionState.PAUSED,
-  
   /**
    * Validate that a Python command is a real Python executable, not a Windows Store alias.
    * This validation is critical on Windows to avoid false positives.

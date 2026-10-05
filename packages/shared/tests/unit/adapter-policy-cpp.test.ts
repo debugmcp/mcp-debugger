@@ -4,7 +4,6 @@ import * as path from 'path';
 import { CppAdapterPolicy } from '../../src/interfaces/adapter-policy-cpp.js';
 import type { StopReasonContext } from '../../src/interfaces/adapter-policy.js';
 import type { StackFrame, Variable } from '../../src/models/index.js';
-import { SessionState } from '@debugmcp/shared';
 
 const baseContext: StopReasonContext = {
   pausePending: false,
@@ -251,11 +250,6 @@ describe('CppAdapterPolicy', () => {
       expect(CppAdapterPolicy.matchesAdapter!({ command: '/opt/codelldb', args: [] })).toBe(true);
       expect(CppAdapterPolicy.matchesAdapter!({ command: 'node', args: ['debugpy'] })).toBe(false);
     });
-  });
-
-  it('reports session ready when paused', () => {
-    expect(CppAdapterPolicy.isSessionReady!(SessionState.PAUSED)).toBe(true);
-    expect(CppAdapterPolicy.isSessionReady!(SessionState.RUNNING)).toBe(false);
   });
 
   it('throws when building child session args', () => {

@@ -15,7 +15,6 @@ import {
   resolveJsPauseForSourceMap
 } from './js-launch-defaults.js';
 import { emptyLocalVariableExtraction, extractionFromScope, resolveExceptionFilters } from './adapter-policy.js';
-import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
 import { toSourceBreakpoint } from '../utils/to-source-breakpoint.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
@@ -521,9 +520,6 @@ export const JsDebugAdapterPolicy = {
       supportsVariableType: true  // JavaScript debugger supports variable type information
     };
   },
-
-  isSessionReady: (state: SessionState, options: { stopOnEntry?: boolean }) =>
-    state === SessionState.PAUSED || (!options.stopOnEntry && state === SessionState.RUNNING),
 
   /**
    * js-debug attaches with continueOnAttach, so a running target stays

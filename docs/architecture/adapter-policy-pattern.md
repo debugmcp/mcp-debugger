@@ -91,12 +91,6 @@ export interface AdapterPolicy {
   extractLocalVariables?(stackFrames, scopes, variables, includeSpecial?): LocalVariableExtraction;
   getLocalScopeName?(): string | string[];
 
-  // === Session readiness (optional) ===
-  // Whether a launch is reportable in this state. Every policy but js-debug answers PAUSED only,
-  // so the launcher waits for the first stop — for the full ceiling when something is armed to
-  // stop the program, for a short grace window when nothing is (issue #815; launch-arming.ts).
-  isSessionReady?(state: SessionState, options: { stopOnEntry?: boolean }): boolean;
-
   // === Non-file source identifiers (optional, e.g. Java FQCNs) ===
   isNonFileSourceIdentifier?(sourceIdentifier: string): boolean;
 

@@ -153,7 +153,7 @@ describe('SessionManager launches with noDebug (issue #710)', () => {
    * Replace the mock proxy's start with one that configures the adapter and
    * never stops — emitting synchronously inside start(), the way the real
    * worker reports adapter-configured before start() resolves, so the
-   * launcher's readiness listener is not yet registered when it fires.
+   * program is already running when the launch's wait begins.
    */
   function runWithoutStopping(): void {
     const proxy = dependencies.mockProxyManager;
@@ -259,8 +259,10 @@ describe('SessionManager launches with noDebug (issue #710)', () => {
       expect(result.success).toBe(true);
       expect(result.state).toBe(SessionState.RUNNING);
       expect(warningOf(result)).toMatch(/stopOnEntry will not fire/);
-      // Readiness resolved on adapter-configured, not on the 30 s ceiling.
+      // Answered when the short hold elapsed — not at the 30 s ceiling a
+      // launch still waiting for its entry stop would sit out.
       expect(Date.now() - before).toBeLessThan(30000);
+      expect(result.data?.pending).toBe(true);
       // The adapter was asked for no entry stop either: one value everywhere.
       const sent = dependencies.mockProxyManager.startCalls.at(-1) as { stopOnEntry?: boolean } | undefined;
       expect(sent?.stopOnEntry).toBe(false);
@@ -268,9 +270,9 @@ describe('SessionManager launches with noDebug (issue #710)', () => {
       expect(sessionManager.getSession(s.id)?.lastLaunch?.dapLaunchArgs?.stopOnEntry).toBe(true);
     });
 
-    it('does not wait on a policy whose readiness is a pause (python/go/cpp always request an entry stop)', async () => {
-      pinPolicy({ honoursNoDebug: true, isSessionReady: (state: SessionState) => state === SessionState.PAUSED });
+    it('answers a noDebug launch that keeps running like any other — after the hold, pending — and in debugger-off terms', async () => {
       const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      await sessionManager.setBreakpoint(s.id, { file: '/work/src/app.py', line: 7 });
       runWithoutStopping();
 
       const before = Date.now();
@@ -279,6 +281,13 @@ describe('SessionManager launches with noDebug (issue #710)', () => {
       expect(result.success).toBe(true);
       expect(result.state).toBe(SessionState.RUNNING);
       expect(Date.now() - before).toBeLessThan(30000);
+      expect(result.data?.pending).toBe(true);
+      // The breakpoint is in the store, but it is not what the launch is
+      // waiting on: with the debugger off no stop is expected at all.
+      expect(result.data?.message).toMatch(/the debugger is off for this launch/);
+      expect(result.data?.message).not.toMatch(/has not reached/);
+      expect(result.data?.message).not.toMatch(/stays armed/);
+      expect(result.data?.message).toContain('wait_for_stop');
     });
 
     it('names a stopOnEntry that came in through adapterLaunchConfig, and neutralizes it there too', async () => {

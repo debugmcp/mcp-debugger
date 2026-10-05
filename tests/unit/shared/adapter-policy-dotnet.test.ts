@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { DotnetAdapterPolicy } from '../../../packages/shared/src/interfaces/adapter-policy-dotnet.js';
 import type { StopReasonContext } from '../../../packages/shared/src/interfaces/adapter-policy.js';
-import { SessionState } from '@debugmcp/shared';
 
 describe('DotnetAdapterPolicy', () => {
   // ===== Identity =====
@@ -181,17 +180,6 @@ describe('DotnetAdapterPolicy', () => {
   it('defaults to "netcoredbg" when no path or env var', () => {
     vi.stubEnv('NETCOREDBG_PATH', undefined);
     expect(DotnetAdapterPolicy.resolveExecutablePath()).toBe('netcoredbg');
-  });
-
-  // ===== Session readiness =====
-
-  it('isSessionReady returns true only when PAUSED', () => {
-    expect(DotnetAdapterPolicy.isSessionReady(SessionState.PAUSED)).toBe(true);
-    expect(DotnetAdapterPolicy.isSessionReady(SessionState.RUNNING)).toBe(false);
-    // SessionState has no IDLE member — this line used to read
-    // `SessionState.IDLE`, i.e. it passed `undefined` and only ever proved
-    // that undefined is not PAUSED. CREATED is the real pre-launch state.
-    expect(DotnetAdapterPolicy.isSessionReady(SessionState.CREATED)).toBe(false);
   });
 
   // ===== Command queueing =====

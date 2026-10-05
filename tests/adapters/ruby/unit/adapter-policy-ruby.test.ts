@@ -304,11 +304,6 @@ describe('RubyAdapterPolicy behavior surface', () => {
     expect(state.configurationDone).toBe(true);
   });
 
-  it('considers the session ready only when paused', () => {
-    expect(RubyAdapterPolicy.isSessionReady?.('paused' as never)).toBe(true);
-    expect(RubyAdapterPolicy.isSessionReady?.('running' as never)).toBe(false);
-  });
-
   // Issue #798: rdbg's DAP `launch` handler goes nonstop unconditionally
   // (server_dap.rb: `when 'launch' … @nonstop = true`) and only `attach`
   // reads `nonstop`, so a launch can never stop at entry as a `launch`

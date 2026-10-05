@@ -36,7 +36,6 @@
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction, StopReasonContext } from './adapter-policy.js';
 import { emptyLocalVariableExtraction, extractionFromScope } from './adapter-policy.js';
-import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
 
@@ -186,8 +185,6 @@ export const DotnetAdapterPolicy = {
       supportsVariableType: true
     };
   },
-
-  isSessionReady: (state: SessionState) => state === SessionState.PAUSED,
 
   /**
    * Validate that netcoredbg is available and functional.

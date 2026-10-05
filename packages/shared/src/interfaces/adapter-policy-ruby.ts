@@ -1,7 +1,6 @@
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction } from './adapter-policy.js';
 import { emptyLocalVariableExtraction, extractionFromScope } from './adapter-policy.js';
-import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
 
@@ -88,7 +87,6 @@ export const RubyAdapterPolicy = {
       supportsVariableType: true
     };
   },
-  isSessionReady: (state: SessionState) => state === SessionState.PAUSED,
   // rdbg reports its stop-at-load as `stopped reason: 'pause'` on
   // configurationDone when the launch went out as `attach { nonstop: false }`
   // (issue #798). That is the entry stop, and only that: the first stop of a

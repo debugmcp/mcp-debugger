@@ -108,16 +108,22 @@ export abstract class SessionManagerOperations extends SessionManagerData {
   protected pauseGraceMs = 5000;
 
   /**
-   * The readiness wait after a launch's handshake (issue #815): how long the
-   * first stop gets before start_debugging answers with the session as it is
-   * (RUNNING, data.pending = true). The full ceiling when something is armed
-   * to stop the program — breakpoints, an entry stop, a caught-exception
-   * filter — and the short grace window when nothing is. Neither is a deadline
-   * on the debuggee: a stop that lands later is reported by handleStopped.
-   * Protected so tests can shrink the windows.
+   * The two waits after a launch's handshake (launch-readiness.ts; issues
+   * #815, #823, #826). `launchReadyCeilingMs` is how long the adapter gets to
+   * report the program launched — or to deliver the entry stop a stopOnEntry
+   * launch asked for, which is certain to come — before the launch is
+   * answered as never having become ready. `launchHoldMs` is how long a
+   * launched program's first stop is then held for before start_debugging
+   * answers with the session as it is (RUNNING, data.pending = true): one
+   * value for every adapter and whatever is armed, sized from measured
+   * launch-to-first-stop latency — at most 172 ms across the nine language
+   * adapters on an idle machine, 678 ms with every core saturated — and kept
+   * out of the tool contract so it can be retuned. Neither is a deadline on
+   * the debuggee: a stop that lands later is reported by handleStopped and
+   * collected with wait_for_stop. Protected so tests can shrink the windows.
    */
   protected launchReadyCeilingMs = 30000;
-  protected launchGraceMs = 5000;
+  protected launchHoldMs = 1000;
 
   /**
    * How long wait_for_stop waits when the caller names no timeout (issue
@@ -153,7 +159,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         get stepGraceMs() { return facade().stepGraceMs; },
         get pauseGraceMs() { return facade().pauseGraceMs; },
         get launchReadyCeilingMs() { return facade().launchReadyCeilingMs; },
-        get launchGraceMs() { return facade().launchGraceMs; },
+        get launchHoldMs() { return facade().launchHoldMs; },
         get waitForStopDefaultMs() { return facade().waitForStopDefaultMs; }
       },
       getSession: (sessionId) => this._getSessionById(sessionId),

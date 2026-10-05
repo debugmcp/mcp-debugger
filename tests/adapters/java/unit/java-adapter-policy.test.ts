@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
 import { JavaAdapterPolicy } from '@debugmcp/shared';
-import { SessionState } from '@debugmcp/shared';
 
 describe('JavaAdapterPolicy', () => {
   describe('basic properties', () => {
@@ -121,20 +120,6 @@ describe('JavaAdapterPolicy', () => {
 
       JavaAdapterPolicy.updateStateOnEvent('initialized', {}, state);
       expect(JavaAdapterPolicy.isConnected(state)).toBe(true);
-    });
-  });
-
-  describe('isSessionReady', () => {
-    it('should be ready when PAUSED', () => {
-      expect(JavaAdapterPolicy.isSessionReady(SessionState.PAUSED)).toBe(true);
-    });
-
-    it('should not be ready when RUNNING', () => {
-      expect(JavaAdapterPolicy.isSessionReady(SessionState.RUNNING)).toBe(false);
-    });
-
-    it('should not be ready when CREATED', () => {
-      expect(JavaAdapterPolicy.isSessionReady(SessionState.CREATED)).toBe(false);
     });
   });
 
