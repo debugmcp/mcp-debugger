@@ -19,7 +19,7 @@ import {
   ProxyNotRunningError
 } from './errors/debug-errors.js';
 import { SessionManager, SessionManagerConfig } from './session/session-manager.js';
-import type { DebugResult, StepResultData } from './session/session-manager-core.js';
+import type { DebugResult, StepResultData, WaitForStopResultData } from './session/session-manager-core.js';
 import { FrameSummary, StackTraceResult } from './session/session-manager-data.js';
 import { VariableTruncationSummary } from './session/variable-caps.js';
 import { createProductionDependencies } from './container/dependencies.js';
@@ -107,8 +107,9 @@ export class DebugMcpServer implements ToolContext {
   }
 
   /**
-   * Session gate for tools that need a LIVE debuggee (execution control,
-   * pause, threads, inspection, evaluate, source context, mirror): an unknown
+   * Session gate for tools that need a LIVE debuggee (execution control —
+   * all but wait_for_stop, see validateSessionExists — pause, threads,
+   * inspection, evaluate, source context, mirror): an unknown
    * id throws SessionNotFoundError, a lifecycle-TERMINATED session throws
    * SessionTerminatedError. A TERMINATED-but-present session is the
    * between-launches state (the program exited, or only a dry run ran), so
@@ -124,8 +125,10 @@ export class DebugMcpServer implements ToolContext {
   }
 
   /**
-   * Existence-only gate: start_debugging, restart_debugging, set_breakpoint
-   * and set_breakpoint {function} accept a terminated-but-unclosed session.
+   * Existence-only gate: start_debugging, restart_debugging, set_breakpoint,
+   * set_breakpoint {function} and wait_for_stop accept a terminated-but-unclosed
+   * session — the first four prepare the next launch, the last reports how the
+   * finished one ended (issue #849).
    * The launcher tears down any leftover proxy and resets the per-launch state
    * itself (DebugLauncher.launch), and a breakpoint set between launches is
    * stored verified:false and applied by the next launch, whose response
@@ -626,6 +629,20 @@ export class DebugMcpServer implements ToolContext {
   public async stepOut(sessionId: string): Promise<DebugResult<StepResultData>> {
     this.validateSession(sessionId);
     return this.sessionManager.stepOut(sessionId);
+  }
+
+  /**
+   * Existence-only gate (issue #849): a session whose program has finished is
+   * exactly what a wait may be asked about, and the answer is how it ended —
+   * not SessionTerminatedError.
+   */
+  public async waitForStop(
+    sessionId: string,
+    timeoutMs?: number,
+    signal?: AbortSignal
+  ): Promise<DebugResult<WaitForStopResultData>> {
+    this.validateSessionExists(sessionId);
+    return this.sessionManager.waitForStop(sessionId, timeoutMs, signal);
   }
 
   constructor(options: DebugMcpServerOptions = {}) {

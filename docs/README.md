@@ -17,7 +17,7 @@ Everything here describes the current code. Historical material lives in
 
 | | |
 |---|---|
-| [Tool reference](tool-reference.md) | All 28 tools: parameters, response shapes, error cases. The authoritative API doc. |
+| [Tool reference](tool-reference.md) | All 29 tools: parameters, response shapes, error cases. The authoritative API doc. |
 | [Usage guide](usage.md) | The session golden path and how the tools compose. |
 | [Agent debugging guide](agent-debugging-guide.md) | Tool-usage patterns for AI agents driving the server. |
 | [Stack trace filtering](stack-trace-filtering.md) | Why frames are hidden, and how to see them anyway. |

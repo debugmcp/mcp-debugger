@@ -86,6 +86,9 @@ Once connected, three additional tools are available:
 | `dev_server_status` | Check backend state, PID, uptime, build progress, transport, project root, port, and display-safe environment overrides. |
 
 All regular mcp-debugger tools (create_debug_session, set_breakpoint, etc.) are forwarded transparently to the backend.
+A forwarded call carries the caller's cancellation signal and is given 660 s before the proxy gives up on it — above the
+600 s a tool's own `timeout` argument may ask for (`evaluate_expression`, `redefine_classes`, `wait_for_stop`), so the
+MCP client's request timeout, not the proxy, is what bounds a slow call (issue #854).
 
 Requests wait while the backend is starting or restarting, for up to `DEV_PROXY_DISCOVERY_WAIT_MS`
 (15 seconds by default), so a healthy backend's debugging tools appear in the first inventory and a

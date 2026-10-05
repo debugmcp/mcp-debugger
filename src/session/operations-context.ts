@@ -43,6 +43,7 @@ export interface OperationsTunables {
   readonly pauseGraceMs: number;
   readonly launchReadyCeilingMs: number;
   readonly launchGraceMs: number;
+  readonly waitForStopDefaultMs: number;
 }
 
 /**
@@ -66,6 +67,13 @@ export interface OperationsContext {
   updateSession(sessionId: string, updates: Partial<ManagedSession>): void;
   /** `_updateSessionState` — legacy state plus the derived dual-state overlay. */
   updateState(session: ManagedSession, newState: SessionState): void;
+  /**
+   * Be told whenever the session's state changes — every `_updateSessionState`
+   * transition, and the session's removal. The listener gets no arguments and
+   * runs inside the transition: read the state when the call stack has unwound
+   * (see `waitForSessionState`), not from within it. Returns the unsubscribe.
+   */
+  onStateChange(sessionId: string, listener: () => void): () => void;
 
   /**
    * The data layer's policy lookup: total, and overridable by tests.
@@ -181,15 +189,17 @@ export type BreakpointContext = Pick<
 >;
 
 /**
- * Stepping / continue / pause / threads. The policy and the detailed stack
- * serve the pending-stop explanation (issue #678): the raw origin frame of a
- * step, and the adapter's account of why it may never land.
+ * Stepping / continue / pause / threads / waiting for a stop. The policy and
+ * the detailed stack serve the pending-stop explanation (issue #678): the raw
+ * origin frame of a step, and the adapter's account of why it may never land.
+ * The state subscription serves wait_for_stop (issue #849).
  */
 export type ExecutionContext = Pick<
   OperationsContext,
   | 'logger'
   | 'getSession'
   | 'updateState'
+  | 'onStateChange'
   | 'getStackTrace'
   | 'getStackTraceDetailed'
   | 'selectPolicy'

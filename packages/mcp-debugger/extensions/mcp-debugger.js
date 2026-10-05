@@ -11,7 +11,7 @@
  *   the same Node binary when the host process is Node, and on `node` from PATH otherwise.
  * - `deferred` exposure: pi lists the server, with its description, in the system prompt's
  *   `mcp_servers` section, and the model loads the tools it needs with `tool_search`, instead of
- *   every prompt carrying all 28 tool schemas. `/mcp` changes it for the session; a `mcp-debugger`
+ *   every prompt carrying all 29 tool schemas. `/mcp` changes it for the session; a `mcp-debugger`
  *   entry in `mcp.json` overrides this registration entirely.
  * - `timeout` (per request, in seconds): pi's default of 60 is shorter than a slow launch, which
  *   can spend proxy start-up, the 30 s readiness wait and a compile (C/C++, COBOL) in one call.

@@ -130,6 +130,91 @@ describe('ErrorMessages', () => {
     expect(message).toContain('15s');
     expect(message).toContain('debug adapter');
   });
+
+  // Every "pending" answer says two things a caller needs: the thing it asked
+  // for is still in effect, and wait_for_stop is how to wait for it (issue #849).
+  describe('pending answers point at wait_for_stop (issue #849)', () => {
+    it('a step that has not landed is still in effect', () => {
+      const message = ErrorMessages.stepStillRunning(5);
+      expect(message).toContain('after 5s');
+      expect(message).toMatch(/step is still in effect/);
+      expect(message).toContain('wait_for_stop');
+      expect(message).toContain('pause_execution');
+      expect(message).not.toMatch(/Check the session state/);
+    });
+
+    it('a pause that has not landed is still in effect', () => {
+      const message = ErrorMessages.pausePending(5);
+      expect(message).toContain('within 5s');
+      expect(message).toMatch(/pause is still in effect/);
+      expect(message).toMatch(/will report 'paused' once the stop lands/);
+      expect(message).toContain('wait_for_stop');
+      expect(message).not.toMatch(/Check the session state/);
+    });
+
+    it('a pause with the debugger off promises no stop, and still names the tool', () => {
+      const message = ErrorMessages.pausePendingDebuggerOff(5, 'Policy hint.');
+      expect(message).toContain(ErrorMessages.debuggerOffForLaunch);
+      expect(message).toContain('wait_for_stop');
+      expect(message).toContain('Policy hint.');
+      expect(message).not.toMatch(/will report 'paused' once the stop lands/);
+    });
+
+    it('a post-attach pause that has not landed names the tool', () => {
+      expect(ErrorMessages.attachPausePending).toMatch(/^post-attach pause pending/);
+      expect(ErrorMessages.attachPausePending).toContain('wait_for_stop');
+      expect(ErrorMessages.attachPausePending).toContain('stopOnEntry: false');
+    });
+
+    it('a launch still running with something armed says it stays armed', () => {
+      const message = ErrorMessages.launchStillRunning(30, '2 breakpoint(s)');
+      expect(message).toMatch(/still running after 30s without reaching 2 breakpoint\(s\)/);
+      expect(message).toMatch(/Nothing was cancelled/);
+      expect(message).toMatch(/stays? armed/);
+      expect(message).toContain('wait_for_stop');
+      expect(message).not.toMatch(/check list_debug_sessions/);
+    });
+
+    it('a launch still running with nothing armed says what can still end the wait', () => {
+      const message = ErrorMessages.launchStillRunning(5, undefined);
+      expect(message).toMatch(/still running after 5s/);
+      expect(message).toMatch(/nothing is armed to stop it/);
+      expect(message).toContain('wait_for_stop');
+      expect(message).toContain('get_output');
+    });
+
+    it('wait_for_stop itself says nothing was cancelled, and names what is still armed', () => {
+      const message = ErrorMessages.waitForStopPending(30, 'running', { armedSummary: '2 breakpoint(s)' });
+      expect(message).toMatch(/still running after 30s without reaching 2 breakpoint\(s\)/);
+      expect(message).toMatch(/Nothing was cancelled/);
+      expect(message).toMatch(/stays? armed/);
+      expect(message).toContain('wait_for_stop');
+    });
+
+    it('wait_for_stop with nothing armed promises no pause: it says what can still end the wait', () => {
+      const message = ErrorMessages.waitForStopPending(30, 'running');
+      expect(message).toMatch(/still running after 30s/);
+      expect(message).toMatch(/no breakpoint or caught-exception filter is armed/);
+      expect(message).not.toMatch(/stays? armed/);
+      expect(message).not.toMatch(/becomes 'paused' when/);
+      expect(message).toMatch(/uncaught exception/);
+      expect(message).toMatch(/exit/);
+      expect(message).toContain('wait_for_stop');
+    });
+
+    it('wait_for_stop with the debugger off waits for the exit and promises no stop', () => {
+      const message = ErrorMessages.waitForStopPending(30, 'running', { debuggerOffWhy: ErrorMessages.debuggerOffForLaunch });
+      expect(message).toContain(ErrorMessages.debuggerOffForLaunch);
+      expect(message).not.toMatch(/stay armed/);
+      expect(message).toMatch(/wait for it to end/);
+    });
+
+    it('wait_for_stop on a launch that has not completed says so', () => {
+      const message = ErrorMessages.waitForStopPending(2, 'initializing');
+      expect(message).toMatch(/still starting after 2s/);
+      expect(message).not.toMatch(/stay armed/);
+    });
+  });
 });
 
 describe('getErrorMessage', () => {

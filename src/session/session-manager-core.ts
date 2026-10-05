@@ -7,7 +7,7 @@ import {
   SessionState, SessionLifecycleState, DebugLanguage, DebugSessionInfo, mapLegacyState,
   isTerminalSessionState, AdapterPolicy, SessionOutputEntry, redactSecretsInString
 } from '@debugmcp/shared';
-import type { Breakpoint, FunctionBreakpoint, StackFrame } from '@debugmcp/shared';
+import type { Breakpoint, FunctionBreakpoint, SessionStopInfo, StackFrame } from '@debugmcp/shared';
 import { USER_BREAK_REASONS } from '@debugmcp/shared';
 import { stopProvesDebuggerOn } from './debugger-off.js';
 import { isRedactionEnabled } from '../utils/redaction-mode.js';
@@ -145,6 +145,20 @@ export type PauseResultData = DebugResultData & {
   location?: StopLocation;
 };
 
+/**
+ * What wait_for_stop returns (issue #849): `message` always. For a paused
+ * session, the stop record the session listing shows and — when the stack was
+ * readable — where it is. A session that ended keeps `lastStop` only for a
+ * stop that landed during the wait itself. The other two answers use
+ * `DebugResultData`'s own fields: `exitCode` for a session that ended and
+ * reported one, `pending` when the timeout passed first.
+ */
+export type WaitForStopResultData = DebugResultData & {
+  message: string;
+  lastStop?: SessionStopInfo;
+  location?: StopLocation;
+};
+
 /** What a successful attach returns on top of the common fields. */
 export type AttachResultData = DebugResultData;
 
@@ -204,6 +218,14 @@ export abstract class SessionManagerCore extends EventEmitter {
   
   // WeakMap to store event handlers for cleanup
   protected sessionEventHandlers = new WeakMap<ManagedSession, Map<string, (...args: unknown[]) => void>>();
+
+  /**
+   * Who wants to know when a session's state changes (issue #849): told after
+   * every `_updateSessionState` transition and when the session is removed.
+   * A plain per-session registry rather than an EventEmitter channel, so any
+   * number of concurrent waits stays clear of the emitter's listener ceiling.
+   */
+  private readonly sessionStateListeners = new Map<string, Set<() => void>>();
 
   /**
    * TTL cache for launch-gate toolchain probes (issue #360) — shares the
@@ -298,6 +320,47 @@ export abstract class SessionManagerCore extends EventEmitter {
       sessionLifecycle: lifecycle,
       executionState: execution
     });
+    this.notifySessionStateListeners(session.id);
+  }
+
+  /**
+   * Subscribe to one session's state changes; returns the unsubscribe. The
+   * listener runs inside the transition, so it must not read the state as
+   * final there: an auto-continued entry stop enters PAUSED and leaves it
+   * again before the `stopped` handler returns. `waitForSessionState` is the
+   * reader built for that.
+   */
+  protected onSessionStateChange(sessionId: string, listener: () => void): () => void {
+    let listeners = this.sessionStateListeners.get(sessionId);
+    if (!listeners) {
+      listeners = new Set();
+      this.sessionStateListeners.set(sessionId, listeners);
+    }
+    listeners.add(listener);
+    return () => {
+      const current = this.sessionStateListeners.get(sessionId);
+      if (current?.delete(listener) && current.size === 0) {
+        this.sessionStateListeners.delete(sessionId);
+      }
+    };
+  }
+
+  private notifySessionStateListeners(sessionId: string): void {
+    const listeners = this.sessionStateListeners.get(sessionId);
+    if (!listeners) {
+      return;
+    }
+    // A copy: a listener may unsubscribe while it is being told.
+    for (const listener of [...listeners]) {
+      try {
+        listener();
+      } catch (error) {
+        // A listener must never be able to break a state transition.
+        this.logger.warn(
+          `[SessionManager] Session state listener threw for session ${sessionId}: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    }
   }
 
   /**
@@ -363,6 +426,9 @@ export abstract class SessionManagerCore extends EventEmitter {
 
     this.logger.info(`Session ${sessionId} marked as STOPPED/TERMINATED.`);
     this.sessionStore.remove(sessionId);
+    // Anything still waiting on this session learns it is gone (issue #849).
+    this.notifySessionStateListeners(sessionId);
+    this.sessionStateListeners.delete(sessionId);
     this.verifyProxyReaped(sessionId, session.lastProxyPid);
     return true;
   }

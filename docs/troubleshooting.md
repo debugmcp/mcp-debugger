@@ -319,8 +319,8 @@ arrived inside the grace window — usually because the program is blocked in na
 a syscall and cannot reach a safe stop point yet. The session flips to `paused` once the
 stop lands.
 
-**What to do**: poll `list_debug_sessions` (or call `get_stack_trace`) until the state is
-`paused`, then inspect as usual. If it never pauses, the target is genuinely wedged
+**What to do**: call `wait_for_stop` — it blocks until the stop lands and returns it (or
+poll `list_debug_sessions` until the state is `paused`) — then inspect as usual. If it never pauses, the target is genuinely wedged
 somewhere the debugger cannot interrupt — for compiled languages, consider a breakpoint on
 a line the program will reach instead.
 
@@ -371,7 +371,7 @@ above when you need the wire protocol rather than the summary.
    - Sometimes a fresh conversation helps
 
 2. Verify the tool surface reached the client:
-   - The server advertises 28 tools; your client should list all of them (`/mcp` in
+   - The server advertises 29 tools; your client should list all of them (`/mcp` in
      Claude Code or Codex)
    - Call `list_supported_languages` first — it needs no session and proves the round trip
 

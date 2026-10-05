@@ -40,7 +40,7 @@ export function registerToolHandlers(server: Server, ctx: ToolContext): void {
 
   server.setRequestHandler(
     CallToolRequestSchema,
-    async (request): Promise<ServerResult> => {
+    async (request, extra): Promise<ServerResult> => {
       const toolName = request.params.name;
       const args = coerceToolArguments((request.params.arguments ?? {}) as Record<string, unknown>) as ToolArguments;
 
@@ -62,7 +62,7 @@ export function registerToolHandlers(server: Server, ctx: ToolContext): void {
           throw new McpError(McpErrorCode.MethodNotFound, `Unknown tool: ${toolName}`);
         }
         assertRequiredToolArguments(definition, args as unknown as Record<string, unknown>);
-        const result = await TOOL_HANDLERS[toolName](ctx, args, toolName);
+        const result = await TOOL_HANDLERS[toolName](ctx, args, toolName, { signal: extra?.signal });
         
         // Log tool response; success mirrors the payload's own success flag (issue #397)
         ctx.logger.info('tool:response', {

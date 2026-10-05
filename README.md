@@ -266,7 +266,7 @@ mcp-debugger exposes debugging operations as MCP tools that can be called with s
 
 ## 🛠️ Available Tools
 
-All **28 tools** below are implemented — see the [tool reference](docs/tool-reference.md) for parameters and response shapes.
+All **29 tools** below are implemented — see the [tool reference](docs/tool-reference.md) for parameters and response shapes.
 
 | Tool | Description | Status |
 |------|-------------|--------|
@@ -292,6 +292,7 @@ All **28 tools** below are implemented — see the [tool reference](docs/tool-re
 | `step_into` | Step into a function | ✅ Implemented |
 | `step_out` | Step out of a function | ✅ Implemented |
 | `continue_execution` | Continue running | ✅ Implemented |
+| `wait_for_stop` | Block until the session next pauses or ends | ✅ Implemented |
 | `pause_execution` | Pause running execution | ✅ Implemented |
 | `evaluate_expression` | Evaluate expressions in debug context | ✅ Implemented |
 | `get_source_context` | Get source code context | ✅ Implemented |
@@ -546,7 +547,7 @@ See [tests/README.md](./tests/README.md) for detailed testing instructions.
 
 ## 📊 Project Status
 
-- ✅ **Production Ready**: nine language adapters, 28 tools, and polished multi-language distribution
+- ✅ **Production Ready**: nine language adapters, 29 tools, and polished multi-language distribution
 - ✅ **Clean architecture** with a dynamic adapter pattern
 - ✅ **Python · Ruby · JavaScript/TypeScript · Go · Java · .NET/C#**: Full step-through debugging
 - 🦀 **Rust**: Full support on Linux/macOS/Windows (Windows requires the GNU toolchain; MSVC is not supported by CodeLLDB)

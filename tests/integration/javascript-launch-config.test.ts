@@ -15,6 +15,9 @@ interface Result {
   data?: { warning?: string; stopOnEntrySuccessful?: boolean; exitCode?: number; dryRun?: boolean };
 }
 interface Listed { id: string; state: string; exitCode?: number; lastStop?: { reason?: string } }
+interface Waited extends Result {
+  pending?: boolean; exitCode?: number; lastStop?: { reason?: string }; location?: { file: string; line: number };
+}
 let client: Client;
 let sessionId: string | undefined;
 
@@ -174,6 +177,47 @@ describe('JavaScript launch configuration', () => {
       return listed.sessions.find(session => session.id === sessionId)?.exitCode;
     }, { timeout: 15_000 }).toBe(7);
   }, 60_000);
+  it('wait_for_stop answers pending on an idle program, then blocks until a breakpoint set on it is hit (issue #849)', async () => {
+    const launched = await launch({ dapLaunchArgs: { stopOnEntry: false } });
+    expect(launched.state).toBe('running');
+    // Nothing armed: the wait runs out, and says the program is still running.
+    const idle = await call<Waited>('wait_for_stop', { timeout: 300 });
+    expect(idle, JSON.stringify(idle)).toMatchObject({ success: true, state: 'running', pending: true });
+    expect(idle.message).toContain('wait_for_stop');
+    // Line 13 is inside the fixture's interval callback, so it is reached
+    // again and again by the program that is already running.
+    const bp = await call('set_breakpoint', { file: scriptPath, line: 13 });
+    expect(bp.success, JSON.stringify(bp)).toBe(true);
+    const stopped = await call<Waited>('wait_for_stop', { timeout: 20_000 });
+    expect(stopped.state, JSON.stringify(stopped)).toBe('paused');
+    expect(stopped.pending).toBeUndefined();
+    expect(stopped.lastStop?.reason).toBe('breakpoint');
+    expect(stopped.location?.line).toBe(13);
+    expect((await listedSession())?.lastStop?.reason).toBe('breakpoint');
+    // continue_execution does not wait; wait_for_stop collects the next hit.
+    expect((await call('continue_execution')).success).toBe(true);
+    const again = await call<Waited>('wait_for_stop', { timeout: 20_000 });
+    expect(again.state, JSON.stringify(again)).toBe('paused');
+    expect(again.location?.line).toBe(13);
+  }, 60_000);
+
+  it('wait_for_stop reports how the program ended, and keeps answering on the finished session (issue #849)', async () => {
+    await launch({ args: ['--exit'], dapLaunchArgs: { stopOnEntry: false } });
+    const ended = await call<Waited>('wait_for_stop', { timeout: 20_000 });
+    expect(ended, JSON.stringify(ended)).toMatchObject({ success: true, state: 'stopped', exitCode: 7 });
+    expect(ended.message).toContain('exited with code 7');
+    expect(ended.pending).toBeUndefined();
+    // The session is over but not closed: the same question gets the same answer.
+    const asked = await call<Waited>('wait_for_stop', { timeout: 300 });
+    expect(asked).toMatchObject({ success: true, state: 'stopped', exitCode: 7 });
+  }, 60_000);
+
+  it('wait_for_stop refuses a session that was never started (issue #849)', async () => {
+    const refused = await call<Waited>('wait_for_stop', { timeout: 300 });
+    expect(refused.success).toBe(false);
+    expect(refused.error).toContain('has not been started');
+  });
+
   it('reports the debuggee exit code for a debugger-on launch (issue #735)', async () => {
     // js-debug never sends `exited`; the code comes from the preload shim's
     // recorded value (#247). The noDebug case above covered only that flag.

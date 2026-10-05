@@ -2,13 +2,13 @@
 
 _Last updated: 2026-09-29 (v0.25.0). This file is refreshed at each release._
 
-mcp-debugger gives AI agents step-through debugging over the Model Context Protocol: 28 tools across nine language adapters (Python, JavaScript/TypeScript, Ruby, Rust, Go, Java, .NET, C/C++, COBOL), plus a mock adapter for testing. This roadmap answers two questions we hear from people evaluating the project: **is the tool surface stable enough to build on?** and **what's left before 1.0?**
+mcp-debugger gives AI agents step-through debugging over the Model Context Protocol: 29 tools across nine language adapters (Python, JavaScript/TypeScript, Ruby, Rust, Go, Java, .NET, C/C++, COBOL), plus a mock adapter for testing. This roadmap answers two questions we hear from people evaluating the project: **is the tool surface stable enough to build on?** and **what's left before 1.0?**
 
 ## Path to 1.0
 
 1.0 is defined by criteria, not dates. We cut 1.0 when all of the following hold:
 
-- **Tool-schema freeze.** The 28-tool surface and its response shapes are declared stable under SemVer: breaking changes to tool names, parameters, or response shapes require a major version. Prerequisite work: complete full parameter/response documentation in the [tool reference](docs/tool-reference.md) for the four tools currently summarized without schemas (`list_supported_languages`, `attach_to_process`, `detach_from_process`, `list_threads`).
+- **Tool-schema freeze.** The 29-tool surface and its response shapes are declared stable under SemVer: breaking changes to tool names, parameters, or response shapes require a major version. Prerequisite work: complete full parameter/response documentation in the [tool reference](docs/tool-reference.md) for the four tools currently summarized without schemas (`list_supported_languages`, `attach_to_process`, `detach_from_process`, `list_threads`).
 - **Per-platform CodeLLDB packages published and verified.** ✅ Met in v0.25.0: the five `@debugmcp/codelldb-*` platform packages (which let npm installs pull only the native debug engine for the current platform) are live on npm with provenance, and the release-gate canary verified them across install channels (npx, global npm with and without optional dependencies, Docker) on x64/arm64 Linux, arm64 macOS and Windows.
 - **A full release cycle with no breaking behavioral changes.** One complete minor release soaks with no regressions that change documented tool behavior.
 - **Supply-chain milestones.** OpenSSF Best Practices Silver, and build-provenance attestations covering every distributed artifact — npm tarballs, the Docker image and the PyPI launcher are all attested as of v0.25.0 ([#422](https://github.com/debugmcp/mcp-debugger/issues/422)); OpenSSF Silver remains.

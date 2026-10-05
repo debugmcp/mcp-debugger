@@ -63,7 +63,7 @@ describe('schema-driven required arguments', () => {
       environment: mockDependencies.environment
     });
     expect(definitions.map(({ name }) => name)).toEqual([...TOOL_NAMES]);
-    expect(definitions).toHaveLength(28);
+    expect(definitions).toHaveLength(29);
 
     for (const definition of definitions) {
       const required = definition.inputSchema.required ?? [];

@@ -120,9 +120,9 @@ export const ErrorMessages = {
    */
   stepStillRunning: (graceSeconds: number) =>
     `Step dispatched; the program is still executing after ${graceSeconds}s ` +
-    `(e.g. stepping over a long-running call). The session remains 'running' and will ` +
-    `become 'paused' when the step completes. Check the session state, or call ` +
-    `pause_execution to interrupt.`,
+    `(e.g. stepping over a long-running call). The step is still in effect: the session ` +
+    `remains 'running' and will become 'paused' when it completes. Call wait_for_stop to ` +
+    `block until then, or pause_execution to interrupt.`,
 
   /**
    * A step whose recorded stop is a breakpoint or an exception rather than
@@ -156,13 +156,70 @@ export const ErrorMessages = {
    */
   pausePending: (graceSeconds: number) =>
     `Pause requested; no 'stopped' event within ${graceSeconds}s ` +
-    `(the program may be blocked in native code or a syscall). The session will report ` +
-    `'paused' once the stop lands. Check the session state to confirm.`,
+    `(the program may be blocked in native code or a syscall). The pause is still in effect: ` +
+    `the session will report 'paused' once the stop lands. Call wait_for_stop to block until then.`,
+
+  /**
+   * wait_for_stop reached its timeout with the session still live (issue
+   * #849). Not an error, and nothing was cancelled — said outright, because
+   * "did the timeout disarm my breakpoint?" is the first thing a pending
+   * answer makes a caller wonder. Four wordings: the program is running with
+   * something armed that it has not reached; it is running with nothing armed,
+   * where promising a pause would send the caller round a loop that cannot
+   * end that way — so it says what can still end the wait instead; it is
+   * running with the debugger off for the launch (issue #749), where no stop
+   * is expected and the wait is for its exit; the launch or attach has not
+   * completed yet.
+   * Used in: src/session/execution/execution-controller.ts
+   * @param seconds - The wait that ran out, in seconds
+   * @param state - The live state the session is still in
+   * @param why.armedSummary - What is armed ("2 breakpoint(s)"); absent when nothing is
+   * @param why.debuggerOffWhy - The debugger-off sentence, when it applies
+   */
+  waitForStopPending: (
+    seconds: number,
+    state: 'running' | 'initializing',
+    why: { armedSummary?: string; debuggerOffWhy?: string } = {}
+  ) => {
+    if (state === 'initializing') {
+      return `The session is still starting after ${seconds}s (its launch or attach has not completed). ` +
+        `Call wait_for_stop again to keep waiting.`;
+    }
+    if (why.debuggerOffWhy) {
+      return `The program is still running after ${seconds}s — ${why.debuggerOffWhy}. ` +
+        `Call wait_for_stop again to wait for it to end.`;
+    }
+    if (why.armedSummary) {
+      return `The program is still running after ${seconds}s without reaching ${why.armedSummary}. ` +
+        `Nothing was cancelled: what is armed stays armed, and the session becomes 'paused' when the program ` +
+        `gets there. Call wait_for_stop again to keep waiting, or pause_execution to interrupt it.`;
+    }
+    return `The program is still running after ${seconds}s, and no breakpoint or caught-exception filter is armed ` +
+      `to stop it: unless a step or a pause is still in flight, it will stop only for an uncaught exception the ` +
+      `debugger catches by default, or report its exit. Call wait_for_stop again to wait for either, or ` +
+      `pause_execution to interrupt it.`;
+  },
+
+  /**
+   * wait_for_stop on a session that has no debuggee yet (issue #849).
+   * Used in: src/session/execution/execution-controller.ts
+   */
+  waitForStopNotStarted: () =>
+    'Nothing to wait for: this session has not been started. Call start_debugging (or attach_to_process) first.',
+
+  /**
+   * The session a wait_for_stop was waiting on was closed underneath it
+   * (issue #849).
+   * Used in: src/session/execution/execution-controller.ts
+   */
+  sessionClosedWhileWaiting: (sessionId: string) =>
+    `Session ${sessionId} was closed while waiting for a stop.`,
 
   /**
    * A launch answered while the program is still running (issue #815): the
-   * readiness wait reached its ceiling with no stop and no exit. Not an error —
-   * the stop, if one comes, is reported by list_debug_sessions. Two wordings:
+   * readiness wait reached its ceiling with no stop and no exit. Not an error,
+   * and nothing was cancelled — the stop, if one comes, is collected with
+   * wait_for_stop (issue #849; list_debug_sessions shows it too). Two wordings:
    * with something armed, what was not reached yet; with nothing armed, why no
    * stop is coming soon and what to do instead.
    * Used in: src/session/launch/debug-launcher.ts
@@ -172,12 +229,12 @@ export const ErrorMessages = {
   launchStillRunning: (graceSeconds: number, armedSummary: string | undefined) =>
     armedSummary
       ? `The program is still running after ${graceSeconds}s without reaching ${armedSummary}. ` +
-        `The session will report 'paused' when it does — check list_debug_sessions, or call ` +
-        `pause_execution to interrupt.`
+        `Nothing was cancelled: what is armed stays armed, and the session will report 'paused' when the program ` +
+        `gets there — call wait_for_stop to block until then, or pause_execution to interrupt.`
       : `The program is still running after ${graceSeconds}s and nothing is armed to stop it soon ` +
         `(no breakpoints, no entry stop, no caught-exception filter): it will stop only for an uncaught ` +
-        `exception the debugger catches by default, or report its exit. Check list_debug_sessions or ` +
-        `get_output, or set breakpoints and call restart_debugging.`,
+        `exception the debugger catches by default, or report its exit. Call wait_for_stop to wait for ` +
+        `either, read get_output, or set breakpoints and call restart_debugging.`,
 
 
   /**
@@ -216,7 +273,7 @@ export const ErrorMessages = {
    */
   pausePendingDebuggerOff: (graceSeconds: number, policyHint?: string) =>
     `Pause requested; no 'stopped' event within ${graceSeconds}s — ${DEBUGGER_OFF_FOR_LAUNCH}. ` +
-    `Check the session state in case a stop lands anyway.` +
+    `wait_for_stop reports a stop if one lands anyway.` +
     (policyHint ? ` ${policyHint}` : ''),
 
   /**
@@ -269,7 +326,8 @@ export const ErrorMessages = {
    * Used in: src/session/attach/attach-controller.ts, src/server/handlers/session-tools.ts
    */
   attachPausePending:
-    'post-attach pause pending — the target stops when it next executes code (pass stopOnEntry: false to attach without pausing)',
+    'post-attach pause pending — the target stops when it next executes code; call wait_for_stop to block until it does ' +
+    '(pass stopOnEntry: false to attach without pausing)',
 
   /**
    * Error message for attach verification failures

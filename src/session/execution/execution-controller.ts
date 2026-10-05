@@ -1,14 +1,21 @@
 /**
- * Execution control: stepping, continue, pause, and the thread list.
+ * Execution control: stepping, continue, pause, waiting for a stop, and the
+ * thread list.
  *
- * Everything here shares one shape. The DAP request only acknowledges that the
- * debugger accepted the command; the state change arrives later as a `stopped`
- * event handled by the core listener. So each operation registers its
- * listeners BEFORE sending, and settles on whichever comes first — the stop,
- * the debuggee ending, or a grace window elapsing. The grace window is not a
- * deadline on the debuggee: it converts "still running" into an honest
- * `pending: true` success rather than a failure, and the operation completes
- * asynchronously afterwards.
+ * The operations that drive the debuggee — step, continue, pause — share one
+ * shape. The DAP request only acknowledges that the debugger accepted the
+ * command; the state change arrives later as a `stopped` event handled by the
+ * core listener. So each of them registers its listeners BEFORE sending, and
+ * settles on whichever comes first — the stop, the debuggee ending, or a grace
+ * window elapsing. The grace window is not a deadline on the debuggee: it
+ * converts "still running" into an honest `pending: true` success rather than
+ * a failure, and the operation completes asynchronously afterwards.
+ *
+ * `waitForStop` (issue #849) is the explicit continuation of that `pending`
+ * answer, and the one operation here that sends nothing: it waits on the
+ * session's state through `waitForSessionState` for as long as its caller
+ * says. It registers no event listeners, so rule 1 below has nothing to
+ * arbitrate for it; it does obey rule 2.
  *
  * THE SETTLE CONTRACT (issue #574). Two rules:
  *
@@ -49,12 +56,17 @@ import type {
   DebugResult,
   PauseResultData,
   StepResultData,
-  StopLocation
+  StopLocation,
+  WaitForStopResultData
 } from '../session-manager-core.js';
 import { debuggerOffWhy, isDebuggerOff, type DebuggerOffView } from '../debugger-off.js';
 import { samePath } from '../breakpoints/hit-verification.js';
 import type { ExecutionContext } from '../operations-context.js';
 import type { PauseCoordinator } from './pause-coordinator.js';
+import { waitForSessionState } from './session-state-wait.js';
+import { resolveDapTimeoutOverride } from '../dap-request-helpers.js';
+import { describeProgramEnd } from '../breakpoints/launch-warnings.js';
+import { describeLaunchArming } from '../launch/launch-arming.js';
 
 /** What distinguishes the three step flavours: everything else is shared. */
 interface StepKind {
@@ -721,6 +733,132 @@ export class ExecutionController {
       throw new Error(response.message || `DAP 'threads' request failed`);
     }
     return (response?.body?.threads ?? []).map(t => ({ id: t.id, name: t.name }));
+  }
+
+  /**
+   * Block until the session next pauses or ends, or the caller's timeout
+   * passes (issue #849) — the explicit wait behind every `pending: true` and
+   * behind `continue_execution`, which does not wait at all.
+   *
+   * The wait is on the session's state, not on the adapter's `stopped`
+   * event, so a stop the core auto-continues is not reported. The answer is
+   * built from the session as it is once the wait has settled (and, for a
+   * pause, once the stack has been read): a session that is already paused or
+   * already over answers at once; a wait that ran out, or whose caller went
+   * away, answers `pending: true` with the session still live.
+   */
+  async waitForStop(
+    sessionId: string,
+    timeoutMs?: number,
+    signal?: AbortSignal
+  ): Promise<DebugResult<WaitForStopResultData>> {
+    const session = this.ctx.getSession(sessionId);
+
+    const timeoutCheck = resolveDapTimeoutOverride(timeoutMs, 'SessionManager waitForStop', this.ctx.logger);
+    if (timeoutCheck.error) {
+      return { success: false, error: timeoutCheck.error, state: session.state };
+    }
+    if (session.state === SessionState.CREATED) {
+      return { success: false, error: ErrorMessages.waitForStopNotStarted(), state: session.state };
+    }
+    const waitMs = timeoutCheck.timeoutMs ?? this.ctx.tunables.waitForStopDefaultMs;
+
+    // The stop on record before this wait began. A different record afterwards
+    // is a stop that landed during it — the discipline step and pause use to
+    // tell their own stop from an earlier one.
+    const lastStopBefore = session.lastStop;
+
+    const outcome = await waitForSessionState(
+      this.ctx,
+      sessionId,
+      (state) => state === SessionState.PAUSED || isTerminalSessionState(state),
+      { timeoutMs: waitMs, signal }
+    );
+    if (outcome === 'gone') {
+      return {
+        success: false,
+        error: ErrorMessages.sessionClosedWhileWaiting(sessionId),
+        state: SessionState.STOPPED
+      };
+    }
+
+    // Where it stopped, best effort: the same short settle and stack read a
+    // step or a pause does. It is a DAP round trip, so the state is read
+    // again afterwards rather than trusted across it.
+    let location: StopLocation | undefined;
+    if (session.state === SessionState.PAUSED) {
+      try {
+        await new Promise(resolve => setTimeout(resolve, 10));
+        const [topFrame] = await this.ctx.getStackTrace(sessionId);
+        if (topFrame) {
+          location = { file: topFrame.file, line: topFrame.line, column: topFrame.column };
+        }
+      } catch (error) {
+        this.ctx.logger.debug(`[SessionManager waitForStop ${sessionId}] Could not capture location:`, error);
+      }
+    }
+
+    const state = session.state;
+    // Rule 2 of the settle contract: a session that is over by now is
+    // reported as ended, with the stop that landed during this wait if there
+    // was one — an exception stop and the exit can arrive in one tick. A stop
+    // from before the wait is not this wait's to report: the program was
+    // resumed past it.
+    const stopDuringWait =
+      session.lastStop && session.lastStop !== lastStopBefore ? { lastStop: session.lastStop } : {};
+    if (state === SessionState.PAUSED && session.lastStop) {
+      const where = location ? ` at ${location.file}:${location.line}` : '';
+      return {
+        success: true,
+        state,
+        data: {
+          message: `Paused (${session.lastStop.reason})${where}`,
+          lastStop: session.lastStop,
+          ...(location ? { location } : {})
+        }
+      };
+    }
+    if (state === SessionState.ERROR) {
+      const detail = session.lastProxyError ? `: ${session.lastProxyError}` : '';
+      return {
+        success: true,
+        state,
+        data: { message: `The debug session ended in an error state${detail}`, ...stopDuringWait }
+      };
+    }
+    if (state === SessionState.STOPPED) {
+      return {
+        success: true,
+        state,
+        data: {
+          message: `${describeProgramEnd(session.exitCode)}.`,
+          ...(typeof session.exitCode === 'number' ? { exitCode: session.exitCode } : {}),
+          ...stopDuringWait
+        }
+      };
+    }
+    this.ctx.logger.info(
+      `[SessionManager waitForStop] Session ${sessionId} still ${state} after ${waitMs}ms (${outcome}); answering with pending`
+    );
+    // What is armed now words the answer: with something armed, that it stays
+    // armed; with nothing, no pause is promised. An entry stop is not part of
+    // it — that belongs to the launch, which is behind a running program.
+    const arming = describeLaunchArming(session, false);
+    return {
+      success: true,
+      state,
+      data: {
+        message: ErrorMessages.waitForStopPending(
+          waitMs / 1000,
+          state === SessionState.INITIALIZING ? 'initializing' : 'running',
+          {
+            ...(arming.armed ? { armedSummary: arming.summary } : {}),
+            ...(debuggerOffWhy(session) ? { debuggerOffWhy: debuggerOffWhy(session) } : {})
+          }
+        ),
+        pending: true
+      }
+    };
   }
 
   /**

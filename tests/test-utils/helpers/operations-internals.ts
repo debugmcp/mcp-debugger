@@ -12,6 +12,7 @@ import type { ExecutionController } from '../../../src/session/execution/executi
 import type { DebugLauncher } from '../../../src/session/launch/debug-launcher.js';
 import type { ProxyLaunchRequest } from '../../../src/session/launch/proxy-launcher.js';
 import type { ManagedSession } from '../../../src/session/session-store.js';
+import type { OperationsContext } from '../../../src/session/operations-context.js';
 import type { LanguageSpecificLaunchConfig } from '@debugmcp/shared';
 
 /**
@@ -46,6 +47,8 @@ export interface OperationsInternals {
   execution: ExecutionController;
   launcher: DebugLauncher;
   proxyLauncher: ProxyLauncherView;
+  /** The late-bound view the collaborators get; a test subscribes to state changes through it. */
+  opsContext: OperationsContext;
   /** Protected on SessionManagerCore; spied on to model a concurrent close during teardown. */
   stopProxyPreservingSession(session: ManagedSession): Promise<void>;
 }

@@ -36,14 +36,14 @@ export const ErrorMessages = {
   
   stepStillRunning: (graceSeconds: number) =>
     `Step dispatched; the program is still executing after ${graceSeconds}s ` +
-    `(e.g. stepping over a long-running call). The session remains 'running' and will ` +
-    `become 'paused' when the step completes. Check the session state, or call ` +
-    `pause_execution to interrupt.`,
+    `(e.g. stepping over a long-running call). The step is still in effect: the session ` +
+    `remains 'running' and will become 'paused' when it completes. Call wait_for_stop to ` +
+    `block until then, or pause_execution to interrupt.`,
 
   pausePending: (graceSeconds: number) =>
     `Pause requested; no 'stopped' event within ${graceSeconds}s ` +
-    `(the program may be blocked in native code or a syscall). The session will report ` +
-    `'paused' once the stop lands. Check the session state to confirm.`,
+    `(the program may be blocked in native code or a syscall). The pause is still in effect: ` +
+    `the session will report 'paused' once the stop lands. Call wait_for_stop to block until then.`,
 
   attachVerifyFailed: (timeoutMs: number, lastFailure: string) =>
     `Attach did not become debuggable: no threads reported within ${timeoutMs}ms ` +

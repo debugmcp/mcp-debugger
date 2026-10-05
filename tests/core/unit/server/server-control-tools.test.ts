@@ -1016,6 +1016,39 @@ describe('Server Control Tools Tests', () => {
     });
   });
 
+  describe('wait_for_stop (issue #849)', () => {
+    it('reaches the session manager with the coerced timeout and the request signal', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        state: 'running',
+        sessionLifecycle: 'ACTIVE'
+      });
+      mockSessionManager.waitForStop.mockResolvedValue({
+        success: true,
+        state: 'paused',
+        data: { message: 'Paused (breakpoint)', lastStop: { reason: 'breakpoint', threadId: 1, timestamp: 1 } }
+      });
+      const controller = new AbortController();
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        // A string: the SSE transport quirk the schema-driven coercion exists for.
+        params: { name: 'wait_for_stop', arguments: { sessionId: 'test-session', timeout: '45000' } }
+      }, { signal: controller.signal });
+
+      expect(mockSessionManager.waitForStop).toHaveBeenCalledWith('test-session', 45000, controller.signal);
+      const content = JSON.parse(result.content[0].text);
+      expect(content).toMatchObject({ success: true, state: 'paused', lastStop: { reason: 'breakpoint' } });
+    });
+
+    it('requires only sessionId', async () => {
+      await expect(callToolHandler({
+        method: 'tools/call',
+        params: { name: 'wait_for_stop', arguments: {} }
+      })).rejects.toThrow(/sessionId/);
+    });
+  });
+
   describe('pause_execution', () => {
     it('should pause execution successfully', async () => {
       mockSessionManager.getSession.mockReturnValue({

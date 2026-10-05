@@ -29,6 +29,7 @@ Do NOT reach for it when a single glance at the code or one log line would answe
    ... or get_local_variables {sessionId} for the common case
 7. evaluate_expression    {sessionId, expression: "x + y"}
 8. step_over / step_into / step_out / continue_execution
+   wait_for_stop          {sessionId}                          -> blocks until the next stop or the exit (continue_execution does not wait)
 9. get_output             {sessionId}                          -> captured debuggee stdout/stderr
 10. close_debug_session   {sessionId}                          -> ALWAYS, even on failure
 ```
@@ -38,8 +39,8 @@ Rules that prevent 90% of failed sessions:
 - **Absolute paths only** for `file` and `scriptPath` (relative paths are rejected in host mode).
 - **Use real frame IDs.** Take `id` from `get_stack_trace` frames; it is adapter-assigned and is not 0-indexed.
 - **Expand variable containers.** If a variable entry carries a `variablesReference`, call `get_variables` again with that reference to see children (Python's "special variables", object fields, array elements).
-- **Respect session state.** Stepping, evaluation, and variable reads require `PAUSED`. After `continue_execution` the session is `RUNNING`; after a step or breakpoint hit it returns to `PAUSED` with a persisted stop reason telling you why it stopped (`breakpoint`, `step`, `entry`, `exception`, ...).
-- **A `start_debugging` that answers `running` with `pending: true` is not stuck.** The program did not stop within the readiness window (30 s with breakpoints or an entry stop armed, 5 s with nothing armed — a server, a long loop); the message says what was or was not armed. Check `list_debug_sessions` for the state to flip to `paused`, read `get_output`, or set breakpoints and `restart_debugging`.
+- **Respect session state.** Stepping, evaluation, and variable reads require `PAUSED`. After `continue_execution` the session is `RUNNING`; after a step or breakpoint hit it returns to `PAUSED` with a persisted stop reason telling you why it stopped (`breakpoint`, `step`, `entry`, `exception`, ...). `continue_execution` returns at once — call `wait_for_stop {sessionId}` to block until the program stops again or ends; it answers with the stop (`lastStop`, `location`) or the exit code.
+- **A `start_debugging` that answers `running` with `pending: true` is not stuck.** The program did not stop within the readiness window (30 s with breakpoints or an entry stop armed, 5 s with nothing armed — a server, a long loop); the message says what was or was not armed. Nothing was cancelled — breakpoints stay armed. Call `wait_for_stop` to block until it stops or ends (the same goes for any step, pause or attach that answers `pending: true`), read `get_output`, or set breakpoints and `restart_debugging`. `wait_for_stop` takes a `timeout` in ms (default 30000); when it runs out it answers `pending: true` again — just call it again.
 - **Breakpoints may verify late.** Some adapters (debugpy, JDI) report breakpoints unverified until the module/class loads; that is normal, not an error.
 - **`<redacted:...>` placeholders are masking, not program state.** Credential-shaped values and values of sensitive variable names (`password`, `api_key`, ...) are masked by default in variable/evaluate/output results; a `redaction` field reports what was hidden. The real value is intact in the debuggee — don't "fix" it, and don't retry the read. The user can disable masking by restarting the server with `DEBUG_MCP_NO_REDACT=1`.
 - **If `get_variables` demands `names`, the server is in least-privilege mode** (`DEBUG_MCP_VARIABLE_ACCESS=explicit`): pass the exact variable names you need (`names: ["user", "total"]`; case-sensitive, misses reported in `notFound`) instead of dumping the scope. `evaluate_expression` still works for targeted reads.
@@ -68,7 +69,7 @@ For an already-running process (including remote machines, containers, and Kuber
 attach_to_process {sessionId, host: "localhost", port: 5678, sourcePaths: ["<local src>"], adapterConfig: {...}}
 ```
 
-- **Attach pauses the target by default** (omitting `stopOnEntry` means `true` — the opposite of `start_debugging`). Pass `stopOnEntry: false` for a live service you must not freeze. A response with `pending: true` means the pause lands when the target next runs code; `continue_execution` releases it.
+- **Attach pauses the target by default** (omitting `stopOnEntry` means `true` — the opposite of `start_debugging`). Pass `stopOnEntry: false` for a live service you must not freeze. A response with `pending: true` means the pause lands when the target next runs code (`wait_for_stop` blocks until it does); `continue_execution` releases it.
 - **Python**: target ran `python -m debugpy --listen <host>:<port> ...`; to address breakpoints by local-checkout path, map it onto the debuggee tree with `adapterConfig: {pathMappings: [{localRoot: "<abs local>", remoteRoot: "/app"}]}`
 - **Ruby**: target ran `rdbg --open --port <port> ...` (works through `kubectl port-forward`); `localfsMap: "/app:<abs local dir>"` maps paths
 - **Java**: target JVM has `-agentlib:jdwp=transport=dt_socket,server=y,address=*:<port>`; breakpoints in not-yet-loaded classes are deferred automatically, and a fully-qualified class name as `file` needs no source files at all

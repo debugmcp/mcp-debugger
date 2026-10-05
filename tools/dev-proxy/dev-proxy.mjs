@@ -58,7 +58,7 @@ import {
 import { buildBackendEnvironment, resolveBackendPort, updateBackendEnvOverrides } from './backend-env.mjs';
 import { LifecycleQueue } from './lifecycle-queue.mjs';
 import { runBuild } from './build-runner.mjs';
-import { isBackendUnavailableError, dedupeMcpErrorPrefix, assertBackendAvailable } from './tool-error.mjs';
+import { dedupeMcpErrorPrefix, assertBackendAvailable, backendCallOptions, backendFailureHint } from './tool-error.mjs';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -454,7 +454,9 @@ class BackendManager {
           : `Backend is ${this.state}${this.lifecycleQueue.pending > 0 ? ` with a ${this.buildInProgress ? 'build' : 'restart'} in progress` : ''} and did not settle within ${DISCOVERY_WAIT_MS}ms — cannot call tool "${name}" yet. Retry once dev_server_status reports "running".`
       );
     }
-    return await this.mcpClient.callTool({ name, arguments: args });
+    // Not the SDK defaults: those cap every call at 60 s and leave a call the
+    // client cancelled running in the backend (issue #854).
+    return await this.mcpClient.callTool({ name, arguments: args }, undefined, backendCallOptions(signal));
   }
 
   /**
@@ -964,13 +966,16 @@ async function main() {
       // InvalidParams) proves the backend is alive — pass it through without
       // the restart hint, which would send agents on a false detour (#304).
       const body = { error: dedupeMcpErrorPrefix(err.message) };
-      if (isBackendUnavailableError(err, backend.state)) {
-        // Only a stopped backend wants restarting. Telling an agent to restart
-        // one that is mid-start queues a second restart that kills it (#716).
-        body.hint =
-          backend.needsRestart()
-            ? `The mcp-debugger backend is not reachable (state: ${backend.state}). Use dev_server_status to check, or dev_restart_debugger to restart it.`
-            : `The mcp-debugger backend is ${backend.state} and did not settle within ${DISCOVERY_WAIT_MS}ms. Retry the call; use dev_server_status to watch it — do NOT restart it.`;
+      // Only a stopped backend wants restarting. Telling an agent to restart
+      // one that is mid-start queues a second restart that kills it (#716),
+      // and a running backend that was merely slow is neither (#854).
+      const hint = backendFailureHint(err, {
+        state: backend.state,
+        needsRestart: backend.needsRestart(),
+        discoveryWaitMs: DISCOVERY_WAIT_MS,
+      });
+      if (hint) {
+        body.hint = hint;
       }
       return {
         content: [{ type: 'text', text: JSON.stringify(body, null, 2) }],

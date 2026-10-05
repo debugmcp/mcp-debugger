@@ -12,7 +12,14 @@
  * that, in parallel runs, can destroy every other agent's sessions.
  */
 import { describe, it, expect } from 'vitest';
-import { isBackendUnavailableError, dedupeMcpErrorPrefix, assertBackendAvailable } from '../../../tools/dev-proxy/tool-error.mjs';
+import {
+  isBackendUnavailableError,
+  dedupeMcpErrorPrefix,
+  assertBackendAvailable,
+  backendCallOptions,
+  backendFailureHint,
+  BACKEND_CALL_TIMEOUT_MS
+} from '../../../tools/dev-proxy/tool-error.mjs';
 
 describe('dev-proxy isBackendUnavailableError', () => {
   it.each(['stopped', 'starting', 'restarting'])(
@@ -125,5 +132,57 @@ describe('dev-proxy assertBackendAvailable', () => {
 
   it('passes for a running backend with a client', () => {
     expect(() => assertBackendAvailable({ state: 'running', mcpClient: {} })).not.toThrow();
+  });
+});
+
+// Issue #854: the proxy used to forward every call with the SDK's default
+// options, so a backend call was cut off at 60 s whatever the tool's own
+// timeout said, and a client that gave up left the backend working.
+describe('dev-proxy backendCallOptions (issue #854)', () => {
+  it('gives a backend call longer than any tool may legitimately take', () => {
+    // The server clamps caller-supplied tool timeouts to 600 s.
+    expect(BACKEND_CALL_TIMEOUT_MS).toBeGreaterThan(600_000);
+    expect(backendCallOptions(undefined)).toEqual({ timeout: BACKEND_CALL_TIMEOUT_MS });
+  });
+
+  it('forwards the caller abort signal so a cancelled call is cancelled in the backend too', () => {
+    const signal = new AbortController().signal;
+    expect(backendCallOptions(signal)).toEqual({ timeout: BACKEND_CALL_TIMEOUT_MS, signal });
+  });
+});
+
+describe('dev-proxy backendFailureHint (issue #854)', () => {
+  const timeout = Object.assign(new Error('MCP error -32001: Request timed out'), { code: -32001 });
+  const refused = Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
+
+  it('says nothing for an application error from a running backend', () => {
+    const invalid = Object.assign(new Error('MCP error -32602: bad line'), { code: -32602 });
+    expect(backendFailureHint(invalid, { state: 'running', needsRestart: false, discoveryWaitMs: 15000 })).toBeUndefined();
+  });
+
+  it('points at dev_restart_debugger only when the backend wants restarting', () => {
+    const hint = backendFailureHint(refused, { state: 'stopped', needsRestart: true, discoveryWaitMs: 15000 });
+    expect(hint).toMatch(/not reachable \(state: stopped\)/);
+    expect(hint).toMatch(/dev_restart_debugger/);
+  });
+
+  it('tells the caller to retry, not restart, while a start or restart is in flight', () => {
+    const hint = backendFailureHint(refused, { state: 'starting', needsRestart: false, discoveryWaitMs: 15000 });
+    expect(hint).toMatch(/is starting and did not settle within 15000ms/);
+    expect(hint).toMatch(/do NOT restart/);
+  });
+
+  it('reports a request timeout from a running backend as a call that was not answered, not as a backend that did not settle', () => {
+    const hint = backendFailureHint(timeout, { state: 'running', needsRestart: false, discoveryWaitMs: 15000 });
+    expect(hint).toMatch(/is running but did not answer this call within 660s/);
+    expect(hint).toMatch(/may still be executing/);
+    expect(hint).not.toMatch(/did not settle/);
+    expect(hint).toMatch(/do NOT restart/);
+  });
+
+  it('finds the timeout code one cause down', () => {
+    const wrapped = Object.assign(new Error('call failed'), { cause: timeout });
+    const hint = backendFailureHint(wrapped, { state: 'running', needsRestart: false, discoveryWaitMs: 15000 });
+    expect(hint).toMatch(/did not answer this call/);
   });
 });

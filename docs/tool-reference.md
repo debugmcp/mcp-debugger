@@ -20,6 +20,7 @@ This document provides a complete reference for all tools available in mcp-debug
    - [step_into](#step_into)
    - [step_out](#step_out)
    - [continue_execution](#continue_execution)
+   - [wait_for_stop](#wait_for_stop)
    - [pause_execution](#pause_execution)
 4. [State Inspection](#state-inspection)
    - [Secret redaction](#secret-redaction)
@@ -81,7 +82,7 @@ Creates a new debugging session.
 **Notes:**
 - Session IDs are UUIDs in the format `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
 - Sessions start in `"created"` state
-- When a `port` parameter is provided in `create_debug_session`, the server performs an inline attach (creating the session and immediately attaching to a running process on that port). The response then mirrors `attach_to_process`: alongside `sessionId` it carries `state`, the attach `data` payload, an optional `warning`, and — when a requested post-attach pause has not landed yet — `pending: true`, with `message` saying so (`…; post-attach pause pending — the target stops when it next executes code (pass stopOnEntry: false to attach without pausing)`)
+- When a `port` parameter is provided in `create_debug_session`, the server performs an inline attach (creating the session and immediately attaching to a running process on that port). The response then mirrors `attach_to_process`: alongside `sessionId` it carries `state`, the attach `data` payload, an optional `warning`, and — when a requested post-attach pause has not landed yet — `pending: true`, with `message` saying so (`…; post-attach pause pending — the target stops when it next executes code; call wait_for_stop to block until it does (pass stopOnEntry: false to attach without pausing)`)
 
 ---
 
@@ -394,7 +395,7 @@ Starts debugging a script.
 
 - **A stop arrives** — `state: "paused"` with `reason` (the example above), which is why a launch with breakpoints set answers "paused at the first breakpoint" for every adapter but js-debug (js-debug counts a configured, running program as ready when no entry stop was requested, and answers `running` right away — see issue #823).
 - **The program ends first** — `state: "stopped"` with the run-to-completion summary and `exitCode` below.
-- **Neither, within the ceiling** — `state: "running"` with **`pending: true`** (top level and in `data`, like `step_over`) and a `message` that says so. The ceiling depends on what the launch has armed: with line breakpoints (a logpoint counts when the adapter does not run it on), function breakpoints, `stopOnEntry` or `breakOnExceptions: "all"`, the first stop gets 30 s and the message names what was not reached (`The program is still running after 30s without reaching 2 breakpoint(s)…`); with nothing armed — the `"uncaught"` default does not count, a crash is not a stop that comes soon — the wait is a 5 s grace window and the message says why no stop is coming (`…nothing is armed to stop it soon (no breakpoints, no entry stop, no caught-exception filter)…`) and what to do (`list_debug_sessions`, `get_output`, or set breakpoints and `restart_debugging`). A server or a long-running script therefore answers in about 5 s instead of 30. The stop, if one comes later, is reported by `list_debug_sessions` as the state flips to `paused`.
+- **Neither, within the ceiling** — `state: "running"` with **`pending: true`** (top level and in `data`, like `step_over`) and a `message` that says so. The ceiling depends on what the launch has armed: with line breakpoints (a logpoint counts when the adapter does not run it on), function breakpoints, `stopOnEntry` or `breakOnExceptions: "all"`, the first stop gets 30 s and the message names what was not reached (`The program is still running after 30s without reaching 2 breakpoint(s)…`); with nothing armed — the `"uncaught"` default does not count, a crash is not a stop that comes soon — the wait is a 5 s grace window and the message says why no stop is coming (`…nothing is armed to stop it soon (no breakpoints, no entry stop, no caught-exception filter)…`) and what to do (`wait_for_stop`, `get_output`, or set breakpoints and `restart_debugging`). A server or a long-running script therefore answers in about 5 s instead of 30. Nothing is cancelled when the window passes — whatever is armed stays armed: [`wait_for_stop`](#wait_for_stop) blocks until the program stops or ends, and `list_debug_sessions` reports the state without waiting.
 
 **JavaScript launch configuration:** Both launch option objects accept js-debug settings;
 `adapterLaunchConfig` wins when a key appears in both. The effective `stopOnEntry` value controls
@@ -522,11 +523,11 @@ message adds `The program is back at the line the step was issued from.` A `paus
   "success": true,
   "state": "running",
   "pending": true,
-  "message": "Step dispatched; the program is still executing after 5s (e.g. stepping over a long-running call). The session remains 'running' and will become 'paused' when the step completes. Check the session state, or call pause_execution to interrupt."
+  "message": "Step dispatched; the program is still executing after 5s (e.g. stepping over a long-running call). The step is still in effect: the session remains 'running' and will become 'paused' when it completes. Call wait_for_stop to block until then, or pause_execution to interrupt."
 }
 ```
 
-The step is not cancelled: the session becomes `"paused"` on its own when it completes (poll `list_debug_sessions`), or call `pause_execution` to interrupt it.
+The step is not cancelled: the session becomes `"paused"` on its own when it completes — call [`wait_for_stop`](#wait_for_stop) to block until it does (or poll `list_debug_sessions`), or call `pause_execution` to interrupt it.
 
 The adapter may append one sentence to that message explaining why the step may never land — the JavaScript adapter
 does so for a step issued from a frame its `skipFiles` blackbox while `smartStep` is on (issue #678) — so match a
@@ -591,9 +592,12 @@ Continues execution until the next breakpoint or program end.
 ```json
 {
   "success": true,
-  "message": "Continued execution"
+  "message": "Continued execution",
+  "state": "running"
 }
 ```
+
+`continue_execution` returns as soon as the adapter acknowledges the resume; it does not wait for the next stop. `state` is the session state at that moment — normally `"running"`, and `"paused"` when a breakpoint fired before the acknowledgement arrived. Call [`wait_for_stop`](#wait_for_stop) to block until the program stops again or ends.
 
 **Error Response:**
 ```json
@@ -602,6 +606,64 @@ Continues execution until the next breakpoint or program end.
   "message": "MCP error -32603: Failed to continue execution: Managed session not found: {sessionId}"
 }
 ```
+
+---
+
+### wait_for_stop
+
+Blocks until the session next pauses or ends, then says why and where. This is the explicit wait behind every `pending: true` answer and behind `continue_execution`, which returns as soon as the adapter acknowledges the resume — call it instead of polling `list_debug_sessions`.
+
+**Parameters:**
+- `sessionId` (string, required): The ID of the debug session.
+- `timeout` (number, optional): How long to wait, in milliseconds (default `30000`, max `600000`; larger values are clamped). Not a limit on the program: it keeps running under the debugger either way, and its breakpoints and exception filters stay armed. Your MCP client may enforce its own request timeout (60 s is a common default) — keep `timeout` below it and call again on `pending: true`.
+
+**Response** (the session is paused — it already was, or a stop arrived during the wait):
+```json
+{
+  "success": true,
+  "state": "paused",
+  "message": "Paused (breakpoint) at /abs/path/app.py:42",
+  "lastStop": { "reason": "breakpoint", "threadId": 1, "timestamp": 1791213582583 },
+  "location": { "file": "/abs/path/app.py", "line": 42, "column": 1 },
+  "context": {
+    "lineContent": "    total = price * qty",
+    "surrounding": [
+      { "line": 41, "content": "def subtotal(price, qty):" },
+      { "line": 42, "content": "    total = price * qty" },
+      { "line": 43, "content": "    return total" }
+    ]
+  }
+}
+```
+
+**Response** (the program ended):
+```json
+{
+  "success": true,
+  "state": "stopped",
+  "message": "The program exited with code 3.",
+  "exitCode": 3
+}
+```
+
+**Response** (neither happened within `timeout`):
+```json
+{
+  "success": true,
+  "state": "running",
+  "pending": true,
+  "message": "The program is still running after 30s without reaching 1 breakpoint(s). Nothing was cancelled: what is armed stays armed, and the session becomes 'paused' when the program gets there. Call wait_for_stop again to keep waiting, or pause_execution to interrupt it."
+}
+```
+
+**Notes:**
+- The wait is on the session's state, not on the adapter's raw `stopped` event, so a stop the server resumes by itself — the entry stop of a `stopOnEntry: false` launch — is never reported. The answer is the first stop `list_debug_sessions` would also show.
+- A session that is already paused answers at once with its current stop, and asking twice without resuming returns the same stop twice. After `continue_execution` (or a step that answered `pending: true`) the session is `running`, so the next call waits for the next stop.
+- `lastStop` is the record `list_debug_sessions` reports: `reason`, `rawReason` when the adapter's own reason was normalized, `threadId`, and `description`/`text` for an exception. `lastStop.exceptionInfo` is filled in a moment after an exception stop — re-query `list_debug_sessions` if it is absent. `location` and `context` are best-effort: they appear when the stack could be read, and `location` is the first visible frame, as for the step tools.
+- `exitCode` is present only when the debuggee reported one. A session that ended in an error answers `state: "error"` with the reason in `message`. A finished session keeps answering the same way until it is closed. When a stop landed during the wait and the program ended before it could be inspected — an uncaught exception and the exit arriving together — the ended answer carries that stop as `lastStop`; a stop from before the wait is not repeated.
+- `pending: true` sits at the top level, as for the step tools. The message says what the wait is still for: with breakpoints (or `breakOnExceptions: "all"`) armed it names them and says they stay armed; with nothing armed it promises no pause — the program will stop only for an uncaught exception the debugger catches, or report its exit — so a caller is not sent round a loop that cannot end in a stop. When the launch runs with the debugger off (`dapLaunchArgs.noDebug`, honoured), the message says so and that the wait is for the program's exit; when the launch or attach itself has not completed, it says the session is still starting.
+- A session that was never started answers `success: false` (`Nothing to wait for: this session has not been started…`). So does a session closed while the call was waiting, and a `timeout` that is not a positive number.
+- Several calls may wait on one session at once. A call whose request is cancelled, or whose client disconnects, releases its wait.
 
 ---
 
@@ -632,7 +694,7 @@ Pauses a running program. The DAP pause request only acknowledges that the debug
   "success": true,
   "state": "running",
   "data": {
-    "message": "Pause requested; no 'stopped' event within 5s (the program may be blocked in native code or a syscall). The session will report 'paused' once the stop lands. Check the session state to confirm.",
+    "message": "Pause requested; no 'stopped' event within 5s (the program may be blocked in native code or a syscall). The pause is still in effect: the session will report 'paused' once the stop lands. Call wait_for_stop to block until then.",
     "pending": true
   }
 }
@@ -643,7 +705,7 @@ launch whose `smartStep` is on and whose `skipFiles` blackbox Node internals (is
 by `data.pending`, not by the message text.
 
 **Notes:**
-- The `"state"` field is the session state at the moment the tool answers: `"paused"` once the stop has been observed, and `"running"` **only on the pending path** — the request was delivered but the program has not stopped yet. On that path, poll `list_debug_sessions` (or watch a subsequent tool call) to see the state flip to `"paused"` when the target next executes code.
+- The `"state"` field is the session state at the moment the tool answers: `"paused"` once the stop has been observed, and `"running"` **only on the pending path** — the request was delivered but the program has not stopped yet. On that path, call [`wait_for_stop`](#wait_for_stop) to block until the state flips to `"paused"` when the target next executes code (or poll `list_debug_sessions`).
 - `pending` sits inside `data` here, unlike the step tools, which hoist it to the top level of the response.
 - `data.location` is best-effort: it appears on the observed path when the post-stop stack trace could be read.
 - When the stop is observed before the tool returns, `data.stopReason` carries the (normalized) stop reason and — if the adapter reported a misleading raw reason that was normalized — `data.rawStopReason` carries the original. Example: CodeLLDB delivers an explicit pause via SIGSTOP and reports `"exception"`; the result is `stopReason: "pause", rawStopReason: "exception"`. js-debug similarly reports pauses as `"step"`. The same raw reason appears as `lastStop.rawReason` in `list_debug_sessions`. Stale stops from before the pause request are never echoed.
@@ -1232,16 +1294,16 @@ When the requested pause has not landed by the time the tool answers (an idle No
   "success": true,
   "state": "running",
   "pending": true,
-  "message": "Attached to process at 127.0.0.1:9229; post-attach pause pending — the target stops when it next executes code (pass stopOnEntry: false to attach without pausing)",
+  "message": "Attached to process at 127.0.0.1:9229; post-attach pause pending — the target stops when it next executes code; call wait_for_stop to block until it does (pass stopOnEntry: false to attach without pausing)",
   "data": {
-    "message": "Attached to process at 127.0.0.1:9229; post-attach pause pending — the target stops when it next executes code (pass stopOnEntry: false to attach without pausing)",
+    "message": "Attached to process at 127.0.0.1:9229; post-attach pause pending — the target stops when it next executes code; call wait_for_stop to block until it does (pass stopOnEntry: false to attach without pausing)",
     "pending": true
   }
 }
 ```
 
 **Notes:**
-- `state` is `"paused"` only once a stopped event has actually been observed; otherwise the attach reports `"running"`. When a requested post-attach pause is accepted but its stopped event has not arrived within the bounded wait, the response is successful with `state: "running"` and `pending: true` (at the top level and in `data`) and the `message` names the pending pause; the late stopped event is the only transition to `paused`, and every paused session has a `lastStop`.
+- `state` is `"paused"` only once a stopped event has actually been observed; otherwise the attach reports `"running"`. When a requested post-attach pause is accepted but its stopped event has not arrived within the bounded wait, the response is successful with `state: "running"` and `pending: true` (at the top level and in `data`) and the `message` names the pending pause; the late stopped event is the only transition to `paused` — [`wait_for_stop`](#wait_for_stop) blocks until it arrives — and every paused session has a `lastStop`.
 - The initial stop of an attach is reported as `lastStop.reason: "pause"` (`stopReason: "pause"` in `get_stack_trace`) by every adapter, whether the debugger paused the target on request or, as CodeLLDB does, stopped it itself. On Windows, CodeLLDB reports that stop as the `DebugBreakProcess` break-in — an `0x80000003` exception on a helper thread — so the adapter's own words stay beside the pause as `lastStop.rawReason: "exception"` and `description: "Exception 0x80000003 encountered at address …"` (issue #817). Only the first stop of an attach that did not pass `stopOnEntry: false` is read this way: a break-in met later, or first by an attach that opted out of the initial stop, is a real `__debugbreak()` and keeps `reason: "exception"`.
 - When `processId` was used, the message reads `Attached to process PID <pid>` instead.
 - The response `warning` reports two distinct `adapterConfig` key outcomes (issues #450/#466): keys the adapter's attach transform genuinely drops (e.g. Python's ptvsd-era `localRoot`/`remoteRoot` — use `pathMappings`) are named as **ignored**, while keys mcp-debugger doesn't recognize are **forwarded to the adapter as-is** and named with an edit-distance suggestion for near-misses (`pathMapping (did you mean pathMappings?)`) — "ignored" means dropped, "forwarded as-is" means the adapter still sees them. The same field also carries the launch-style warning for function breakpoints still unverified at attach (issue #308).
