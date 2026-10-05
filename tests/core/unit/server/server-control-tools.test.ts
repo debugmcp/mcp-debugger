@@ -349,7 +349,7 @@ describe('Server Control Tools Tests', () => {
         sessionLifecycle: 'ACTIVE'
       });
       const message =
-        'Debugging started for /path/to/server.py. Current state: running. The program is still running after 5s and nothing is armed to stop it soon';
+        'Debugging started for /path/to/server.py. Current state: running. The program is running and nothing is armed to stop it';
       mockSessionManager.startDebugging.mockResolvedValue({
         success: true,
         state: 'running',

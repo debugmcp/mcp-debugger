@@ -108,13 +108,13 @@ describe('restart_debugging tool', () => {
     expect(content.data.warning).toBe('1 statement anchor(s) no longer match');
   });
 
-  it('hoists pending to the top level when the relaunch is still running at the readiness ceiling (issue #815)', async () => {
+  it('hoists pending to the top level when the relaunch is still running when its hold elapses (issues #815, #823)', async () => {
     mockSessionManager.getSession.mockReturnValue({
       id: 'test-session',
       sessionLifecycle: 'terminated'
     });
     const message =
-      'Debugging started for /work/server.py. Current state: running. The program is still running after 5s and nothing is armed to stop it soon';
+      'Debugging started for /work/server.py. Current state: running. The program is running and nothing is armed to stop it';
     mockSessionManager.restartDebugging.mockResolvedValue({
       success: true,
       state: 'running',

@@ -177,6 +177,38 @@ describe('JavaScript launch configuration', () => {
       return listed.sessions.find(session => session.id === sessionId)?.exitCode;
     }, { timeout: 15_000 }).toBe(7);
   }, 60_000);
+  it('answers pending for a breakpoint the program reaches only later, and wait_for_stop collects it (issue #823)', async () => {
+    // Line 13 runs every 100 ms; the condition holds from the 25th tick, well
+    // after the launch's short hold. Before #823 a JavaScript launch answered
+    // a bare `running` here — no `pending`, no word about the breakpoint —
+    // while every other adapter held the call open for up to 30 s.
+    const bp = await call('set_breakpoint', { file: scriptPath, line: 13, condition: '(globalThis.launchConfigTicks ?? 0) >= 25' });
+    expect(bp.success, JSON.stringify(bp)).toBe(true);
+    const launched: Waited = await launch({ dapLaunchArgs: { stopOnEntry: false } });
+    expect(launched.state, JSON.stringify(launched)).toBe('running');
+    expect(launched.pending).toBe(true);
+    expect(launched.message).toContain('1 breakpoint(s)');
+    expect(launched.message).toContain('wait_for_stop');
+    const stopped = await call<Waited>('wait_for_stop', { timeout: 20_000 });
+    expect(stopped.state, JSON.stringify(stopped)).toBe('paused');
+    expect(stopped.lastStop?.reason).toBe('breakpoint');
+    expect(stopped.location?.line).toBe(13);
+  }, 60_000);
+
+  it('answers a breakpoint reached as the program starts from the launch itself (issue #823)', async () => {
+    // Line 9 runs at module load. The launch normally answers with the stop;
+    // on a machine slow enough to outlast the hold it answers pending and
+    // wait_for_stop has the stop — either way the caller ends up paused there.
+    const bp = await call('set_breakpoint', { file: scriptPath, line: 9 });
+    expect(bp.success, JSON.stringify(bp)).toBe(true);
+    const launched: Waited = await launch({ dapLaunchArgs: { stopOnEntry: false } });
+    const stopped = launched.pending ? await call<Waited>('wait_for_stop', { timeout: 20_000 }) : launched;
+    expect(stopped.state, JSON.stringify(stopped)).toBe('paused');
+    expect((await listedSession())?.lastStop?.reason).toBe('breakpoint');
+    const stack = await call<Result & { stackFrames: Array<{ line: number }> }>('get_stack_trace');
+    expect(stack.stackFrames[0]?.line).toBe(9);
+  }, 60_000);
+
   it('wait_for_stop answers pending on an idle program, then blocks until a breakpoint set on it is hit (issue #849)', async () => {
     const launched = await launch({ dapLaunchArgs: { stopOnEntry: false } });
     expect(launched.state).toBe('running');

@@ -5,7 +5,6 @@
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import type { AdapterPolicy } from './adapter-policy.js';
-import { SessionState } from '@debugmcp/shared';
 import {
   normalizeLldbStopReason,
   extractLldbLocalVariables,
@@ -112,8 +111,6 @@ export const RustAdapterPolicy = {
     };
   },
 
-  isSessionReady: (state: SessionState) => state === SessionState.PAUSED,
-  
   /**
    * Validate that the CodeLLDB adapter is available and executable
    */

@@ -1,12 +1,13 @@
 /**
- * What a launch has armed that could stop it soon (issue #815): the pausing
- * line breakpoints, the function breakpoints, a requested entry stop and a
- * caught-exception filter. The readiness wait gives an armed launch the full
- * ceiling to reach its first stop; an unarmed launch gets a short grace
- * window, since nothing it carries can stop it before it ends — an
- * uncaught-exception filter (the launch default on most adapters) stops it
- * only at a crash, which is not "soon", and counting it would make every
- * launch armed.
+ * What a launch has armed that could stop it (issue #815): the pausing line
+ * breakpoints, the function breakpoints, a requested entry stop and a
+ * caught-exception filter. It words the answer of a launch, or of a
+ * wait_for_stop, whose program is still running — what has not been reached
+ * yet, or that nothing is armed — and decides nothing else: how long a
+ * launch holds its answer does not depend on it (issues #823, #826). An
+ * uncaught-exception filter (the launch default on most adapters) is left
+ * out: it stops the program only at a crash, which is not a stop a caller
+ * is waiting for, and counting it would make every launch armed.
  */
 import type { ManagedSession } from '../session-store.js';
 

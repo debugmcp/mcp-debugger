@@ -39,7 +39,7 @@ export function buildServerInstructions(
 
   return `mcp-debugger drives real step-through debuggers (Python, JavaScript/TypeScript, Ruby, Rust, Go, Java, .NET, C/C++, COBOL) as MCP tools.
 
-Golden path: create_debug_session -> set_breakpoint (ABSOLUTE file path) -> start_debugging (ABSOLUTE scriptPath) -> get_stack_trace -> get_scopes(frameId from the stack frame's "id" field) -> get_variables / get_local_variables / evaluate_expression -> step_* or continue_execution (+ wait_for_stop) -> get_output -> close_debug_session (always, even on failure).
+Golden path: create_debug_session -> set_breakpoint (ABSOLUTE file path) -> start_debugging (ABSOLUTE scriptPath; answers paused at a breakpoint reached as the program starts, otherwise pending:true -> wait_for_stop) -> get_stack_trace -> get_scopes(frameId from the stack frame's "id" field) -> get_variables / get_local_variables / evaluate_expression -> step_* or continue_execution (+ wait_for_stop) -> get_output -> close_debug_session (always, even on failure).
 
 Key rules:
 - Stepping/evaluation/variable reads require the session to be PAUSED; the stop reason on each pause tells you why it stopped.
@@ -75,7 +75,7 @@ Prefer the debugger over print-debugging whenever you would need more than one e
 ## Golden path (launch)
 1. create_debug_session {language} -> sessionId
 ${setBreakpointStep}
-3. start_debugging {sessionId, scriptPath: ABSOLUTE path}
+3. start_debugging {sessionId, scriptPath: ABSOLUTE path} — answers paused when a breakpoint is reached as the program starts; otherwise running with pending:true, and wait_for_stop {sessionId} collects the stop (for a server: send the request first)
 4. get_stack_trace {sessionId} — use each frame's "id" field; it is adapter-assigned, never assume 0
 5. get_scopes {sessionId, frameId} -> variablesReference per scope
 6. get_variables {sessionId, scope: variablesReference} or get_local_variables {sessionId}

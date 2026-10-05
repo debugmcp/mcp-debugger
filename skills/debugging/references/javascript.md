@@ -68,7 +68,7 @@ Shorthand: `create_debug_session { "language": "javascript", "host": "127.0.0.1"
 ## Quirks
 
 - **Child-session architecture.** js-debug runs a parent session for launch orchestration and spawns a child session for the actual debuggee. This is invisible to you: the proxy routes evaluate/step/stack commands to the active context automatically. Never create a second MCP session for the "other" half.
-- **Entry pause auto-continues.** With `stopOnEntry: false` (the default) the debugger automatically continues past entry breakpoints, so execution runs straight to your first breakpoint. Set `dapLaunchArgs: { "stopOnEntry": true }` only when you want control at the first line.
+- **Entry pause auto-continues.** With `stopOnEntry: false` (the default) the debugger automatically continues past entry breakpoints, so execution runs straight to your first breakpoint. A breakpoint reached as the program starts is in the `start_debugging` answer; one reached later — a route handler, a timer — leaves the launch answering `pending: true`, and `wait_for_stop` collects it. Set `dapLaunchArgs: { "stopOnEntry": true }` only when you want control at the first line.
 - **Stack filtering hides Node internals.** `get_stack_trace` returns user frames only by default; pass `includeInternals: true` if you genuinely need Node.js internal frames. If execution initially stops inside internals, just `continue_execution`.
 - **TypeScript auto-detection.** Point `scriptPath` at the `.ts` file when `tsx`/`ts-node` is available. If neither is installed you get a warning (not an error) — fall back to the compiled `.js` with source maps.
 - **Child processes are not auto-attached.** `autoAttachChildProcesses` defaults to `false`; pass it as `true` in `dapLaunchArgs` to debug `spawn`-ed Node children.
@@ -84,6 +84,6 @@ Shorthand: `create_debug_session { "language": "javascript", "host": "127.0.0.1"
 | Session fails to start | Node not found or script has a syntax error | Check Node on PATH or pass `executablePath`; run the script plainly first |
 | Stopped in a Node internal frame at start | Debugger paused before reaching user code | `continue_execution` — it will run to your breakpoint |
 | `.ts` debugging fails | No `tsx`/`ts-node` available | Install one, or debug the compiled `.js` output |
-| Variables empty / "Session is not paused" | Inspection while running | Wait for `paused` state, then use frame IDs from `get_stack_trace` |
+| Variables empty / "Session is not paused" | Inspection while running | Call `wait_for_stop` (it blocks until the program pauses), then use frame IDs from `get_stack_trace` |
 | Attach connection refused | Target not started with `--inspect=<port>` or port unreachable | Restart target with the inspector flag; verify the port |
 | Need adapter diagnostics | — | Relaunch with `dapLaunchArgs: { "trace": true }` |

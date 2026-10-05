@@ -12,7 +12,6 @@
  * back to RustAdapterPolicy, whose engine behavior is identical.
  */
 import type { AdapterPolicy } from './adapter-policy.js';
-import { SessionState } from '@debugmcp/shared';
 import {
   normalizeLldbStopReason,
   extractLldbLocalVariables,
@@ -97,8 +96,6 @@ export const CppAdapterPolicy = {
       supportsMemoryReferences: true
     };
   },
-
-  isSessionReady: (state: SessionState) => state === SessionState.PAUSED,
 
   validateExecutable: validateCodeLLDBExecutable,
 

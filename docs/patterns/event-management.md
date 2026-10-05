@@ -344,86 +344,35 @@ proxyManager.on('exit', onExit);
 
 ### Event Race Conditions
 
-**Location**: `src/session/launch/launch-readiness.ts` (`waitForLaunchReadiness`)
+**Location**: `src/session/execution/session-state-wait.ts` (`waitForSessionState`), used by the launch (`src/session/launch/launch-readiness.ts`) and by `wait_for_stop`
+
+A wait on the adapter's `stopped` event can settle on a stop the caller never sees. The core's own `stopped` handler runs first, and for an entry stop the launch did not ask for it resumes the program before it returns — `handleAutoContinue` → `continue()`, which writes RUNNING ahead of its first await — so the session is PAUSED for the length of one call stack. A waiter that listens to the event answers "stopped" for a program that is running.
+
+The launch's waits therefore read the session's *state*, and read it again only once the code that changed it has unwound:
 
 ```typescript
-// Wait for the adapter to be configured, the first stop event, termination,
-// or the ceiling. Readiness can be satisfied by: stopped, adapter-configured,
-// terminated, exited, or exit. The wait never rejects — every outcome resolves
-// with a word on how it settled ('stopped' | 'configured' | 'ended' |
-// 'ceiling' | 'already-terminal'), so the caller reports the session as it is
-// and says "still running" for a ceiling rather than failing a launch that is
-// merely slow. The ceiling is the caller's (issue #815): the full 30 s when
-// something is armed to stop the program, a short grace window when nothing
-// is — every policy but js-debug is ready only on a pause, and the real proxy
-// reports adapter-configured before this wait can listen.
-// `session.proxyManager` is re-read on every access: a terminal event handler
-// may null it while the wait is in flight.
-return new Promise<LaunchReadinessOutcome>((resolve) => {
-  let resolved = false;
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-
-  const cleanup = () => {
-    if (timeoutId) clearTimeout(timeoutId);
-    session.proxyManager?.removeListener('stopped', handleStopped);
-    session.proxyManager?.removeListener('adapter-configured', handleConfigured);
-    session.proxyManager?.removeListener('terminated', handleTerminated);
-    session.proxyManager?.removeListener('exited', handleExited);
-    session.proxyManager?.removeListener('exit', handleExit);
-  };
-
-  const settle = (outcome: LaunchReadinessOutcome, narration: string) => {
-    if (resolved) return;
-    resolved = true; cleanup();
-    ctx.logger.info(`[SessionManager] Session ${sessionId} ${narration}`);
-    resolve(outcome);
-  };
-
-  const handleStopped = () => settle('stopped', 'stopped on entry');
-  const handleConfigured = () => {
-    // The adapter policy decides whether "configured and running" counts as
-    // ready; without one, it does unless the caller asked to stop on entry.
-    const readyOnRunning = policy.isSessionReady
-      ? policy.isSessionReady(SessionState.RUNNING, { stopOnEntry: dapLaunchArgs?.stopOnEntry })
-      : !dapLaunchArgs?.stopOnEntry;
-    if (readyOnRunning) settle('configured', `running (stopOnEntry=${dapLaunchArgs?.stopOnEntry ?? false})`);
-  };
-  // handleTerminated / handleExited / handleExit settle 'ended'.
-
-  // Checked BEFORE any listener is registered: the caller decided readiness
-  // synchronously just before this call and nothing has been awaited since,
-  // so the only state worth re-checking is a launch that is already terminal
-  // — and settling here costs no registrations to remove.
-  const currentState = ctx.getSession(sessionId).state;
-  if (currentState === SessionState.STOPPED || currentState === SessionState.ERROR) {
-    resolved = true;
-    resolve('already-terminal');
+// Level-triggered: check now, then after every state change — in a microtask,
+// so the re-read sees the state as the changing call stack left it.
+if (check()) {
+  return;
+}
+disposers.push(ctx.onStateChange(sessionId, () => {
+  if (settled || recheckQueued) {
     return;
   }
-
-  session.proxyManager?.once('stopped', handleStopped);
-  session.proxyManager?.once('adapter-configured', handleConfigured);
-  session.proxyManager?.once('terminated', handleTerminated);
-  session.proxyManager?.once('exited', handleExited);
-  session.proxyManager?.once('exit', handleExit);
-
-  // The ceiling: a program that is running has simply not stopped — the caller
-  // answers pending: true. A session still initializing here is the adapter not
-  // answering, which is what the warning has always meant. Resolve, never reject.
-  timeoutId = setTimeout(() => {
-    if (resolved) return;
-    resolved = true; cleanup();
-    if (session.state === SessionState.RUNNING || session.state === SessionState.PAUSED) {
-      ctx.logger.info(`[SessionManager] Session ${sessionId} still running after the ${ceilingMs / 1000}s readiness ceiling; answering with pending`);
-    } else {
-      ctx.logger.warn(ErrorMessages.adapterReadyTimeout(ceilingMs / 1000));
+  recheckQueued = true;
+  queueMicrotask(() => {
+    recheckQueued = false;
+    if (!settled) {
+      check(); // PAUSED -> RUNNING inside one stopped handler is never seen
     }
-    resolve('ceiling');
-  }, ceilingMs);
-});
+  });
+}));
 ```
 
-The launcher (`src/session/launch/debug-launcher.ts`) picks `ceilingMs` from `describeLaunchArming(session, stopOnEntry)` (`launch-arming.ts`): `launchReadyCeilingMs` (30 s) when line/function breakpoints, a pausing logpoint, `stopOnEntry` or `breakOnExceptions: 'all'` are armed, `launchGraceMs` (5 s) otherwise — both `SessionManagerOperations` tunables. A `'ceiling'` outcome with the session `RUNNING` becomes `data.pending: true` and `ErrorMessages.launchStillRunning(...)` on the launch response, hoisted to the top level by the `start_debugging`/`restart_debugging` handlers.
+`ctx.onStateChange` is fed by `_updateSessionState`, the single writer of `session.state`, so no transition can be missed, and the wait never rejects: it settles as matched, timed out, aborted, or — when the session is removed underneath it — gone.
+
+The launcher (`src/session/launch/debug-launcher.ts`) makes two such waits through `waitForLaunchReadiness`. The first lasts until the program is launched — the session has left `INITIALIZING` — and is bounded by `launchReadyCeilingMs` (30 s): that is the adapter's doing, not a guess about the program, and it covers the entry stop of a `stopOnEntry` launch. The second is the hold for the program's first stop, `launchHoldMs` (1 s), the same for every adapter and whatever is armed (issues #823, #826). A launch still `RUNNING` when the hold elapses becomes `data.pending: true` and `ErrorMessages.launchStillRunning(...)` on the launch response — worded from `describeLaunchArming(session, stopOnEntry)` (`launch-arming.ts`) as read at that moment — hoisted to the top level by the `start_debugging`/`restart_debugging` handlers. Between the two waits the launcher re-sends the breakpoints if they changed while the launch was starting (issue #851). After them it asks the adapter for a fresh echo of the breakpoints only when the launch is `PAUSED`: a program still `RUNNING` when the hold elapsed may already have ended with its exit not yet forwarded — the worker holds `exited`/`terminated` until the adapter's output has drained — and a re-send that reaches what is left of it comes back unverified (issue #856).
 
 ## Testing Event Patterns
 

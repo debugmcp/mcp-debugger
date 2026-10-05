@@ -4,11 +4,13 @@
  *
  * The shape of a launch is: gate on the toolchain, tear down any previous
  * proxy (session-preservingly), record the launch spec for restart, start the
- * proxy through the ProxyLauncher, run the policy handshake, wait for
- * readiness, re-sync breakpoints against the live debuggee, then report the
- * state plus every launch-time warning the session accumulated. A failure at
- * any point after the proxy exists tears it down and reports the proxy-log
- * pointers alongside the error.
+ * proxy through the ProxyLauncher, run the policy handshake, wait until the
+ * program is launched and then hold briefly for its first stop
+ * (launch-readiness.ts — the same for every adapter, issues #823/#826),
+ * re-sync breakpoints against the debuggee if it is paused, then report the
+ * state plus every launch-time warning the session accumulated. A failure at any point
+ * after the proxy exists tears it down and reports the proxy-log pointers
+ * alongside the error.
  */
 import {
   SessionState,
@@ -37,11 +39,11 @@ import {
   logProxyFailure,
   sessionRemovedDuringTeardown
 } from './proxy-failure-diagnostics.js';
-import { waitForLaunchReadiness, type LaunchReadinessOutcome } from './launch-readiness.js';
+import { waitForLaunchReadiness } from './launch-readiness.js';
 import { describeLaunchArming } from './launch-arming.js';
 import type { ProxyLauncher } from './proxy-launcher.js';
 import type { InFlightGuard } from '../in-flight-guard.js';
-import { adapterVerifiedABreakpoint } from '../debugger-off.js';
+import { adapterVerifiedABreakpoint, debuggerOffWhy } from '../debugger-off.js';
 
 /**
  * A launch flag the way the adapter will see it. The proxy launcher merges
@@ -82,6 +84,32 @@ function launchWarnings(session: ManagedSession, ...notes: (string | undefined)[
   return [...new Set([
     ...notes, ...(session.launchConfigNotices ?? []), ...(session.adapterNotices ?? [])
   ].filter((note): note is string => Boolean(note)))].join('; ') || undefined;
+}
+
+/**
+ * Which breakpoints the session holds: taken before the proxy starts and
+ * compared once the program is launched. A different `signature` means a
+ * set_breakpoint, remove_breakpoint or clear_breakpoints landed while the
+ * launch was starting, when the breakpoint layer can only store the change
+ * (issue #851). `files` and `hasFunctionBreakpoints` say what the proxy's own
+ * snapshot handed the adapter, so that what was removed meanwhile can be
+ * cleared there too — a re-send only visits what the store still holds.
+ */
+interface BreakpointSetSnapshot {
+  signature: string;
+  files: Set<string>;
+  hasFunctionBreakpoints: boolean;
+}
+
+function snapshotBreakpointSet(
+  session: Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints'>
+): BreakpointSetSnapshot {
+  const functionIds = [...(session.functionBreakpoints?.keys() ?? [])];
+  return {
+    signature: [...[...session.breakpoints.keys()].sort(), '|', ...functionIds.sort()].join(','),
+    files: new Set([...session.breakpoints.values()].map((bp) => bp.file)),
+    hasFunctionBreakpoints: functionIds.length > 0
+  };
 }
 
 export class DebugLauncher {
@@ -318,17 +346,6 @@ export class DebugLauncher {
       debuggerOff && adapterLaunchConfig?.stopOnEntry !== undefined
         ? { ...adapterLaunchConfig, stopOnEntry: false }
         : adapterLaunchConfig;
-    // Likewise readiness: every policy but js-debug counts only a pause as
-    // ready (their adapters default stopOnEntry to false; the pause they wait
-    // for is the first breakpoint), which cannot happen here — running is
-    // ready, and so is a pause that came anyway.
-    const isReady = (state: SessionState): boolean =>
-      debuggerOff
-        ? state === SessionState.RUNNING || state === SessionState.PAUSED
-        : policy.isSessionReady
-          ? policy.isSessionReady(state, { stopOnEntry: effectiveLaunchArgs?.stopOnEntry })
-          : state === SessionState.PAUSED;
-    const readinessPolicy = debuggerOff ? { ...policy, isSessionReady: undefined } : policy;
 
     try {
       // For dry run, start the proxy and wait for completion
@@ -458,6 +475,10 @@ export class DebugLauncher {
       }
       session.effectiveBreakOnExceptions = effectiveBreakOnExceptions;
 
+      // What the proxy is about to start with (issue #851): its own snapshot
+      // of the breakpoints is taken inside start().
+      const breakpointsAtStart = snapshotBreakpointSet(session);
+
       // Start the proxy manager
       const launchConfigData = await this.proxyLauncher.start(session, {
         scriptPath,
@@ -499,34 +520,51 @@ export class DebugLauncher {
         }
       }
 
-      // Use policy-defined readiness criteria when available.
-      const sessionAfterHandshake = this.ctx.getSession(sessionId);
-      const sessionStateAfterHandshake = sessionAfterHandshake.state;
-      const alreadyReady = isReady(sessionStateAfterHandshake);
-
-      // What could stop the program soon decides how long its first stop gets
-      // (issue #815): the full ceiling when breakpoints, an entry stop or a
-      // caught-exception filter are armed, a short grace window when nothing
-      // is. Every policy but js-debug is ready only on a pause, and the real
-      // proxy reports adapter-configured before the wait below can listen, so
-      // an unarmed launch that never stops (a server, a long loop) used to be
-      // answered after 30 s with no word about the wait. Read after the
-      // handshake: the adapter's capabilities (logpoints) are known by now.
-      const arming = describeLaunchArming(sessionAfterHandshake, effectiveLaunchArgs?.stopOnEntry);
-      const readinessCeilingMs = arming.armed
-        ? this.ctx.tunables.launchReadyCeilingMs
-        : this.ctx.tunables.launchGraceMs;
-      let readiness: LaunchReadinessOutcome = 'configured';
-      if (!alreadyReady) {
-        // Wait for adapter to be configured, first stop event, termination, or the ceiling
-        readiness = await waitForLaunchReadiness(this.ctx, {
-          session, sessionId, policy: readinessPolicy, dapLaunchArgs: effectiveLaunchArgs, ceilingMs: readinessCeilingMs
-        });
-      } else {
-        this.ctx.logger.info(
-          `[SessionManager] Session ${sessionId} already ${sessionStateAfterHandshake} after handshake - skipping adapter readiness wait`
-        );
-      }
+      // The launch is answered when the launched program stops, when it
+      // ends, or when a short hold elapses — whichever comes first, and the
+      // same for every adapter and whatever is armed (issues #823, #826). No
+      // policy has a say in it: js-debug used to count a running program as
+      // "ready" and answer at once, so its launch response alone could not be
+      // read as "where did it stop"; the others waited up to 30 s when
+      // something was armed, which is the wrong trade for a breakpoint that
+      // needs an outside trigger (a request handler). The hold is not a limit
+      // on the program — its breakpoints stay armed — and wait_for_stop
+      // (issue #849) is the explicit way to wait longer. The noDebug case
+      // needs no branch: a launch with the debugger off simply never stops,
+      // so it is answered by its exit or by the hold.
+      let earlyResync: ResyncOutcome | undefined;
+      const readiness = await waitForLaunchReadiness(this.ctx, {
+        sessionId,
+        launchedCeilingMs: this.ctx.tunables.launchReadyCeilingMs,
+        holdMs: this.ctx.tunables.launchHoldMs,
+        // A breakpoint set, removed or cleared while the launch was starting
+        // was only stored: the breakpoint layer talks to the adapter when the
+        // session is running or paused, and the proxy's own snapshot had
+        // already been taken. Deliver the difference now, before the hold —
+        // it used to wait for the re-sync after the wait, 30 s later with the
+        // program running past it all the while (issue #851).
+        beforeHold: async () => {
+          const launched = this.ctx.getSession(sessionId);
+          const now = snapshotBreakpointSet(launched);
+          if (debuggerOff || now.signature === breakpointsAtStart.signature) {
+            return;
+          }
+          this.ctx.logger.info(
+            `[SessionManager] Breakpoints of session ${sessionId} changed while the launch was starting; sending them before the hold`
+          );
+          earlyResync = await this.breakpoints.resyncAll(launched, { forceFreshEcho: true });
+          // What the adapter was handed at start and the store no longer
+          // holds: an empty replace-all is the only thing that clears it.
+          for (const file of breakpointsAtStart.files) {
+            if (!now.files.has(file)) {
+              await this.breakpoints.syncBreakpointsForFile(launched, file);
+            }
+          }
+          if (breakpointsAtStart.hasFunctionBreakpoints && !now.hasFunctionBreakpoints) {
+            await this.breakpoints.syncFunctionBreakpoints(launched);
+          }
+        }
+      });
 
       // Re-fetch session to get the most up-to-date state
       const finalSession = this.ctx.getSession(sessionId);
@@ -562,21 +600,35 @@ export class DebugLauncher {
         };
       }
 
-      // Belt-and-braces re-sync (issues #236/#439, function breakpoints
-      // #271 phase 3): the store is normally already stamped by the worker's
-      // breakpoints_synced status — including for launches that are STOPPED
-      // by now (logpoint-only short programs), which this gated path can
-      // never help — and a live re-send heals anything that changed between
-      // the snapshot and now. Ask for a fresh echo: js-debug's unchanged-set
-      // response otherwise contains no breakpoint records to reconcile (#705).
+      // Belt-and-braces re-sync for a launch that is PAUSED (issues
+      // #236/#439, function breakpoints #271 phase 3): the store is normally
+      // already stamped by the worker's breakpoints_synced status and kept
+      // current by the adapter's breakpoint events, and a re-send to the
+      // stopped program heals anything that changed between the snapshot and
+      // now. Ask for a fresh echo: js-debug's unchanged-set response
+      // otherwise contains no breakpoint records to reconcile (#705).
+      // Not for a launch still RUNNING when the hold elapsed (issue #856).
+      // From here a live program cannot be told from one whose exit is on its
+      // way — the worker holds exited/terminated until the adapter's output
+      // has drained, a full 2 s for CodeLLDB on Windows — and a re-send that
+      // reaches what is left of the program is answered "could not be
+      // resolved": a logpoint that had already fired read verified: false
+      // afterwards. Such a launch loses nothing by going without: the
+      // proxy's own send and its stamp stand (which is all a launch that is
+      // STOPPED by now ever had), a breakpoint set during the hold went
+      // straight to the adapter because the session was RUNNING, and one set
+      // while the launch was starting was delivered before the hold (issue
+      // #851, above).
       // Not with the debugger off (issue #746): the adapter has answered the
       // pre-launch set already — CodeLLDB's refusal is echoed per breakpoint
       // by the worker, and debugpy/Delve open no phase to answer in — and a
       // re-send would only be a round trip per file the debugger declines.
       // A refused re-send is stamped on the records by the send itself and its
       // warning joins the launch result below (issue #754).
-      let resync: ResyncOutcome = { warnings: [], functionBreakpointsFailed: false };
-      if ((finalState === SessionState.RUNNING || finalState === SessionState.PAUSED) && !debuggerOff) {
+      // A launch that already re-sent before the hold (issue #851) keeps
+      // that answer rather than clearing and re-setting a second time.
+      let resync: ResyncOutcome = earlyResync ?? { warnings: [], functionBreakpointsFailed: false };
+      if (!earlyResync && finalState === SessionState.PAUSED && !debuggerOff) {
         resync = await this.breakpoints.resyncAll(finalSession, { forceFreshEcho: true });
       }
 
@@ -604,11 +656,14 @@ export class DebugLauncher {
       // it, and they are withheld so they cannot contradict it (issue #710).
       const debuggerOn = !debuggerOff || debuggerOnAnyway;
 
-      // Unbound-at-launch warning (issue #308): the verified state is fresh
-      // after the re-sync above, so a name the adapter could not resolve is
-      // reported here instead of failing silently at "the program never
-      // stopped". Suppressed for bind-late adapters (js/java), where
-      // unverified-at-launch is the designed deferral path.
+      // Unbound-at-launch warning (issue #308): a name the adapter could not
+      // resolve is reported here instead of failing silently at "the program
+      // never stopped". The verified state it reads is fresh from the re-sync
+      // above for a launch that paused; for one answered while running it is
+      // what the worker's pre-launch send and the adapter's breakpoint events
+      // left, a rejected request included — the worker echoes that, and it is
+      // quoted as a refusal (issue #856). Suppressed for bind-late adapters
+      // (js/java), where unverified-at-launch is the designed deferral path.
       // Withheld when the post-launch function-breakpoint re-send failed —
       // refused or never answered (issue #754): the cause is in the resync
       // warning below, and the symptom sentence would only restate it as a
@@ -651,14 +706,20 @@ export class DebugLauncher {
           ? buildRunToCompletionSummary(finalSession)
           : undefined;
 
-      // The wait ran out while the program kept running (issue #815): say so,
-      // and what was or was not armed, with pending: true the way a step that
-      // has not landed does — the stop, if one comes, is collected with
-      // wait_for_stop (list_debug_sessions shows the state flip too).
-      const stillRunning =
-        readiness === 'ceiling' && finalState === SessionState.RUNNING
-          ? ErrorMessages.launchStillRunning(readinessCeilingMs / 1000, arming.armed ? arming.summary : undefined)
-          : undefined;
+      // The hold elapsed with the program still running: say so, with
+      // pending: true the way a step that has not landed does, and say what
+      // is armed — read now, not when the launch began, so a breakpoint set
+      // during the hold is named (issue #826). The arming no longer decides
+      // how long the launch waits; it only words this answer. The stop, if
+      // one comes, is collected with wait_for_stop.
+      let stillRunning: string | undefined;
+      if (readiness === 'running' && finalState === SessionState.RUNNING) {
+        const arming = describeLaunchArming(finalSession, effectiveLaunchArgs?.stopOnEntry);
+        stillRunning = ErrorMessages.launchStillRunning(
+          arming.armed ? arming.summary : undefined,
+          debuggerOnAnyway ? undefined : debuggerOffWhy(finalSession)
+        );
+      }
 
       return {
         success: true,

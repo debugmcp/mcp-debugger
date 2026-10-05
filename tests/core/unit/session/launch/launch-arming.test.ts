@@ -1,8 +1,8 @@
 /**
  * describeLaunchArming (issue #815): what a launch has armed that could stop
- * it soon — the pausing line breakpoints, the function breakpoints, an entry
- * stop, a caught-exception filter — which decides how long the readiness wait
- * gives the first stop before answering "still running".
+ * it — the pausing line breakpoints, the function breakpoints, an entry
+ * stop, a caught-exception filter — which words the "still running" answer
+ * of a launch or a wait_for_stop (issues #823, #826).
  */
 import { describe, it, expect } from 'vitest';
 import type { Breakpoint, FunctionBreakpoint } from '@debugmcp/shared';

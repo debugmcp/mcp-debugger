@@ -442,6 +442,52 @@ describe('noDebug launch completion (issue #746)', () => {
       ]);
     });
 
+    it('echoes a setFunctionBreakpoints the adapter rejected with the debugger on as well: nothing re-asks a launch answered while running (issue #856)', async () => {
+      const payload = payloadWith({}, false);
+      wire(PythonAdapterPolicy, { ...payload, initialBreakpoints: [], initialFunctionBreakpoints: [{ name: 'main' }, { name: 'helper' }] });
+      mockDapClient.sendRequest.mockImplementation(async (command: string) => {
+        if (command === 'setFunctionBreakpoints') {
+          throw refusal('setFunctionBreakpoints', 'function breakpoints are not supported here');
+        }
+        return { body: {} };
+      });
+
+      await (worker as any).startAdapterAndConnect(payload);
+      mockDapClient.emit('initialized');
+      await settle();
+      await settle();
+
+      const synced = mockMessageSender.send.mock.calls.find(
+        ([m]) => m.type === 'status' && m.status === 'function_breakpoints_synced'
+      )?.[0] as (StatusMessage & { functionBreakpoints?: Array<Record<string, unknown>> }) | undefined;
+      expect(synced?.functionBreakpoints).toEqual([
+        { name: 'main', verified: false, message: 'function breakpoints are not supported here', refused: true },
+        { name: 'helper', verified: false, message: 'function breakpoints are not supported here', refused: true }
+      ]);
+      // An answer about the request, not a noDebug notice: the debugger is on.
+      expect(mockMessageSender.send.mock.calls.some(([m]) => m.type === 'status' && m.status === 'adapter_notice')).toBe(false);
+    });
+
+    it('does not echo a setFunctionBreakpoints that failed without an answer from the adapter', async () => {
+      const payload = payloadWith({}, false);
+      wire(PythonAdapterPolicy, { ...payload, initialBreakpoints: [], initialFunctionBreakpoints: [{ name: 'main' }] });
+      mockDapClient.sendRequest.mockImplementation(async (command: string) => {
+        if (command === 'setFunctionBreakpoints') {
+          throw new Error('DAP client disconnected');
+        }
+        return { body: {} };
+      });
+
+      await (worker as any).startAdapterAndConnect(payload);
+      mockDapClient.emit('initialized');
+      await settle();
+      await settle();
+
+      expect(mockMessageSender.send.mock.calls.some(
+        ([m]) => m.type === 'status' && m.status === 'function_breakpoints_synced'
+      )).toBe(false);
+    });
+
     it('echoes the adapter\'s per-entry message on a successful setFunctionBreakpoints too (issue #754)', async () => {
       const payload = payloadWith({}, true);
       wire(PythonAdapterPolicy, { ...payload, initialBreakpoints: [], initialFunctionBreakpoints: [{ name: 'main' }, { name: 'nope' }] });

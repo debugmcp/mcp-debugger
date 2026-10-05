@@ -184,6 +184,19 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     vi.clearAllMocks();
   });
 
+  /**
+   * What an adapter event does to the session, done the way the core's
+   * handlers do it — through the state writer — so that the launch's waits,
+   * which read the session's state rather than proxy events (issues #823,
+   * #849), see it. A pause needs its stop on record first, as in the core.
+   */
+  function moveSessionTo(state: SessionState, lastStop?: ManagedSession['lastStop']): void {
+    if (lastStop) {
+      mockSession.lastStop = lastStop;
+    }
+    internals(operations).opsContext.updateState(mockSession, state);
+  }
+
   describe('ProxyLauncher.start edge cases', () => {
     it('bubbles meaningful error when log directory creation fails', async () => {
       vi.mocked(mockDependencies.fileSystem.ensureDir).mockRejectedValueOnce(new Error('disk full'));
@@ -1363,11 +1376,10 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       const stopSpy = vi.spyOn(internals(operations), 'stopProxyPreservingSession');
       const closeSpy = vi.spyOn(operations as any, 'closeSession');
 
-      // Make the "adapter-configured" event fire immediately to avoid 30s wait
-      mockProxyManager.once.mockImplementation((event: string, callback: Function) => {
-        if (event === 'adapter-configured' || event === 'stopped') {
-          callback();
-        }
+      // The relaunched program ends at once, so the launch has its answer
+      // without sitting out a wait.
+      mockProxyManager.start.mockImplementation(async () => {
+        moveSessionTo(SessionState.STOPPED);
       });
 
       await operations.startDebugging('test-session', 'test.py');
@@ -1395,17 +1407,13 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       };
       proxyStub.on.mockReturnValue(proxyStub);
       proxyStub.off.mockReturnValue(proxyStub);
-      proxyStub.once.mockImplementation((event: string, handler: () => void) => {
-        if (event === 'exit') {
-          mockSession.state = SessionState.ERROR;
-          mockSession.lastProxyExit = { code: 134, signal: 'SIGABRT', expected: false };
-          handler();
-        }
-        return proxyStub;
-      });
 
       const startProxySpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = proxyStub;
+        // The proxy died: the core's exit handler records how and moves the
+        // session to ERROR.
+        mockSession.lastProxyExit = { code: 134, signal: 'SIGABRT', expected: false };
+        moveSessionTo(SessionState.ERROR);
         return {};
       });
       try {
@@ -1439,17 +1447,12 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       };
       proxyStub.on.mockReturnValue(proxyStub);
       proxyStub.off.mockReturnValue(proxyStub);
-      proxyStub.once.mockImplementation((event: string, handler: () => void) => {
-        if (event === 'exited') {
-          mockSession.state = SessionState.STOPPED;
-          mockSession.exitCode = 0;
-          handler();
-        }
-        return proxyStub;
-      });
 
       const startProxySpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = proxyStub;
+        // The program ran to completion before the launch could see it run.
+        mockSession.exitCode = 0;
+        moveSessionTo(SessionState.STOPPED);
         return {};
       });
       try {
@@ -1461,7 +1464,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       }
     });
 
-    it('completes handshake and waits for stop event', async () => {
+    it('completes the handshake and answers with the entry stop a stopOnEntry launch asked for', async () => {
       vi.stubEnv('CI', 'true');
       vi.stubEnv('GITHUB_ACTIONS', undefined);
 
@@ -1477,13 +1480,6 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       proxyStub.on.mockReturnValue(proxyStub);
       proxyStub.off.mockReturnValue(proxyStub);
       proxyStub.removeListener.mockReturnValue(proxyStub);
-      proxyStub.once.mockImplementation((event: string, handler: () => void) => {
-        if (event === 'stopped') {
-          mockSession.state = SessionState.PAUSED;
-          handler();
-        }
-        return proxyStub;
-      });
 
       mockSession.proxyManager = undefined;
       mockSession.state = SessionState.CREATED;
@@ -1492,11 +1488,12 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         return {};
       });
 
+      // The entry stop arrives after the handshake: the session stays
+      // INITIALIZING until then, and the launch waits for it.
       const policy = {
-        performHandshake: vi.fn().mockResolvedValue(undefined),
-        isSessionReady: vi.fn().mockImplementation(
-          (state: SessionState) => state === SessionState.PAUSED
-        ),
+        performHandshake: vi.fn().mockImplementation(async () => {
+          setTimeout(() => moveSessionTo(SessionState.PAUSED, { reason: 'entry', threadId: 1, timestamp: Date.now() }), 5);
+        })
       };
       const selectPolicySpy = vi.spyOn(operations as any, 'selectPolicy').mockReturnValue(policy as any);
 
@@ -1511,10 +1508,10 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(policy.performHandshake).toHaveBeenCalledWith(
         expect.objectContaining({ sessionId: 'test-session' })
       );
-      expect(policy.isSessionReady).toHaveBeenCalled();
       expect(result?.success).toBe(true);
       expect(result?.state).toBe(SessionState.PAUSED);
       expect(result?.data?.reason).toBe('entry');
+      expect(result?.data?.stopOnEntrySuccessful).toBe(true);
     });
 
     it('records the transient entry stop before exposing PAUSED during auto-continue (#598)', async () => {
@@ -1533,20 +1530,14 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       proxyStub.on.mockReturnValue(proxyStub);
       proxyStub.off.mockReturnValue(proxyStub);
       proxyStub.removeListener.mockReturnValue(proxyStub);
-      proxyStub.once.mockImplementation((event: string, handler: () => void) => {
-        if (event === 'stopped') {
-          // Mirror core ordering: lastStop is recorded before PAUSED.
-          mockSession.lastStop = { reason: 'entry', threadId: 1, timestamp: Date.now() };
-          mockSession.state = SessionState.PAUSED;
-          handler();
-        }
-        return proxyStub;
-      });
 
       mockSession.proxyManager = undefined;
       mockSession.state = SessionState.CREATED;
       const startProxySpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = proxyStub;
+        // Mirror core ordering: lastStop is recorded before PAUSED. (This
+        // suite's auto-continue is a no-op, so the session stays there.)
+        moveSessionTo(SessionState.PAUSED, { reason: 'entry', threadId: 1, timestamp: Date.now() });
         return {};
       });
 
@@ -1578,19 +1569,12 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       proxyStub.on.mockReturnValue(proxyStub);
       proxyStub.off.mockReturnValue(proxyStub);
       proxyStub.removeListener.mockReturnValue(proxyStub);
-      proxyStub.once.mockImplementation((event: string, handler: () => void) => {
-        if (event === 'stopped') {
-          mockSession.state = SessionState.PAUSED;
-          mockSession.lastStop = { reason: 'breakpoint', threadId: 1, timestamp: Date.now() };
-          handler();
-        }
-        return proxyStub;
-      });
 
       mockSession.proxyManager = undefined;
       mockSession.state = SessionState.CREATED;
       const startProxySpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = proxyStub;
+        moveSessionTo(SessionState.PAUSED, { reason: 'breakpoint', threadId: 1, timestamp: Date.now() });
         return {};
       });
 
@@ -1638,7 +1622,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       );
     });
 
-    it('skips readiness wait when policy reports session ready', async () => {
+    it('answers at once when the handshake left the session paused: there is nothing to hold for', async () => {
       const proxyStub: any = {
         hasDryRunCompleted: vi.fn().mockReturnValue(false),
         once: vi.fn(),
@@ -1654,16 +1638,16 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       const startProxySpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
         mockSession.proxyManager = proxyStub;
-        mockSession.state = SessionState.PAUSED;
+        moveSessionTo(SessionState.PAUSED, { reason: 'breakpoint', threadId: 1, timestamp: Date.now() });
         return {};
       });
 
-      const policy = {
-        performHandshake: vi.fn().mockResolvedValue(undefined),
-        isSessionReady: vi.fn().mockReturnValue(true),
-      };
+      const policy = { performHandshake: vi.fn().mockResolvedValue(undefined) };
       const selectPolicySpy = vi.spyOn(operations as any, 'selectPolicy').mockReturnValue(policy as any);
 
+      // Real timers: a launch that held for anything would not answer inside
+      // this test's own budget, let alone inside the 100 ms asserted here.
+      const startedAt = Date.now();
       let result: any;
       try {
         result = await operations.startDebugging('test-session', 'main.py');
@@ -1673,14 +1657,15 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       }
 
       expect(policy.performHandshake).toHaveBeenCalled();
-      expect(policy.isSessionReady).toHaveBeenCalled();
+      // The waits are on the session's state: no proxy listener is involved.
       expect(proxyStub.once).not.toHaveBeenCalled();
       expect(proxyStub.removeListener).not.toHaveBeenCalled();
       expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('skipping adapter readiness wait')
+        expect.stringContaining('stopped by the time the launch completed')
       );
       expect(result?.success).toBe(true);
       expect(result?.state).toBe(SessionState.PAUSED);
+      expect(Date.now() - startedAt).toBeLessThan(900);
     });
 
     it('logs warning when handshake throws but continues', async () => {
@@ -1704,8 +1689,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       });
 
       const policy = {
-        performHandshake: vi.fn().mockRejectedValue(new Error('handshake failed')),
-        isSessionReady: vi.fn().mockReturnValue(true),
+        performHandshake: vi.fn().mockRejectedValue(new Error('handshake failed'))
       };
       const selectPolicySpy = vi.spyOn(operations as any, 'selectPolicy').mockReturnValue(policy as any);
 
@@ -1748,16 +1732,19 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       });
 
       const policy = {
-        performHandshake: vi.fn().mockResolvedValue(undefined),
-        isSessionReady: vi.fn().mockReturnValue(false),
+        performHandshake: vi.fn().mockResolvedValue(undefined)
       };
       const selectPolicySpy = vi.spyOn(operations as any, 'selectPolicy').mockReturnValue(policy as any);
 
-      // Nothing is armed to stop this launch, so the wait is the short grace
-      // window (issue #815), and the session never left INITIALIZING: the
-      // adapter, not the program, is what did not answer.
+      // The session never left INITIALIZING: the adapter, not the program, is
+      // what did not answer. That is not the short hold for a first stop — it
+      // gets the full ceiling, and no `pending`, because nothing is running.
       const startPromise = operations.startDebugging('test-session', 'timeout.py');
-      await vi.advanceTimersByTimeAsync(5000);
+      let settled = false;
+      void startPromise.then(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
       const result = await startPromise;
 
       expect(mockLogger.warn).toHaveBeenCalledWith(
@@ -1771,13 +1758,12 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       vi.useRealTimers();
     });
 
-    // A launch that never stops (issue #815): every policy but js-debug is
-    // ready only on a pause, and the real proxy reports adapter-configured
-    // before the readiness wait listens, so the wait settles only on a stop,
-    // an exit, or its ceiling. The ceiling is short when nothing is armed to
-    // stop the program, the full 30 s when something is — and either way the
-    // answer says the program is still running, with pending: true.
-    describe('readiness ceiling for a launch that never stops (issue #815)', () => {
+    // A launch that does not stop (issues #815, #823, #826): the real proxy
+    // reports adapter-configured before the launch's wait begins, so the
+    // program is already running and the wait settles only on a stop, an
+    // exit, or the hold elapsing. The hold is the same whatever is armed, and
+    // the answer says the program is running, with pending: true.
+    describe('the hold for a launch that does not stop (issues #815, #823, #826)', () => {
       function proxyThatConfiguresAndRuns(): any {
         const proxyStub: any = {
           hasDryRunCompleted: vi.fn().mockReturnValue(false),
@@ -1803,24 +1789,23 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         const startProxySpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
           // The core projected RUNNING on adapter-configured before start() resolved.
           mockSession.proxyManager = proxyStub;
-          mockSession.state = SessionState.RUNNING;
+          moveSessionTo(SessionState.RUNNING);
           return {};
         });
-        const policy = { isSessionReady: (state: SessionState) => state === SessionState.PAUSED };
-        const selectPolicySpy = vi.spyOn(operations as any, 'selectPolicy').mockReturnValue(policy as any);
         return {
-          restore: () => { startProxySpy.mockRestore(); selectPolicySpy.mockRestore(); vi.useRealTimers(); }
+          restore: () => { startProxySpy.mockRestore(); vi.useRealTimers(); }
         };
       }
 
-      it('answers a launch with nothing armed after the short grace window, pending and still running', async () => {
+      const holdMs = () => (operations as unknown as { launchHoldMs: number }).launchHoldMs;
+
+      it('answers a launch with nothing armed when the hold elapses, pending and still running', async () => {
         const { restore } = arrangeRunningLaunch();
         try {
           const startPromise = operations.startDebugging('test-session', 'server.py');
-          await vi.advanceTimersByTimeAsync(4999);
           let settled = false;
           void startPromise.then(() => { settled = true; });
-          await Promise.resolve();
+          await vi.advanceTimersByTimeAsync(holdMs() - 1);
           expect(settled).toBe(false);
           await vi.advanceTimersByTimeAsync(1);
           const result = await startPromise;
@@ -1829,8 +1814,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
           expect(result.state).toBe(SessionState.RUNNING);
           expect(result.data?.pending).toBe(true);
           expect(result.data?.message).toMatch(/Current state: running/);
-          expect(result.data?.message).toMatch(/still running after 5s/);
           expect(result.data?.message).toMatch(/nothing is armed to stop it/);
+          expect(result.data?.message).toContain('wait_for_stop');
           expect(mockLogger.warn).not.toHaveBeenCalledWith(
             expect.stringContaining('Timed out waiting for debug adapter to be ready')
           );
@@ -1839,38 +1824,59 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         }
       });
 
-      it('keeps the full ceiling when a breakpoint is armed, then says what was not reached', async () => {
+      it('holds no longer when a breakpoint is armed, and says what has not been reached', async () => {
         const { restore } = arrangeRunningLaunch();
         mockSession.breakpoints.set('bp1', { id: 'bp1', file: '/work/server.py', line: 12, verified: false });
         try {
           const startPromise = operations.startDebugging('test-session', 'server.py');
-          let settled = false;
-          void startPromise.then(() => { settled = true; });
-          await vi.advanceTimersByTimeAsync(29_999);
-          expect(settled).toBe(false);
-          await vi.advanceTimersByTimeAsync(1);
+          await vi.advanceTimersByTimeAsync(holdMs());
           const result = await startPromise;
 
           expect(result.state).toBe(SessionState.RUNNING);
           expect(result.data?.pending).toBe(true);
-          expect(result.data?.message).toMatch(/still running after 30s without reaching 1 breakpoint\(s\)/);
+          expect(result.data?.message).toMatch(/has not reached 1 breakpoint\(s\) yet/);
+          expect(result.data?.message).toMatch(/stays armed/);
+          expect(result.data?.message).toContain('wait_for_stop');
         } finally {
           mockSession.breakpoints.clear();
           restore();
         }
       });
 
-      it('shrinks with the launchGraceMs tunable', async () => {
+      it('answers with the stop when it lands inside the hold', async () => {
         const { restore } = arrangeRunningLaunch();
-        (operations as unknown as { launchGraceMs: number }).launchGraceMs = 1000;
+        mockSession.breakpoints.set('bp1', { id: 'bp1', file: '/work/server.py', line: 12, verified: false });
         try {
           const startPromise = operations.startDebugging('test-session', 'server.py');
-          await vi.advanceTimersByTimeAsync(1000);
+          await vi.advanceTimersByTimeAsync(Math.floor(holdMs() / 2));
+          moveSessionTo(SessionState.PAUSED, { reason: 'breakpoint', threadId: 1, timestamp: Date.now() });
+          await vi.advanceTimersByTimeAsync(0);
+          const result = await startPromise;
+
+          expect(result.state).toBe(SessionState.PAUSED);
+          expect(result.data?.reason).toBe('breakpoint');
+          expect(result.data?.pending).toBeUndefined();
+        } finally {
+          mockSession.breakpoints.clear();
+          restore();
+        }
+      });
+
+      it('follows the launchHoldMs tunable', async () => {
+        const { restore } = arrangeRunningLaunch();
+        const original = holdMs();
+        (operations as unknown as { launchHoldMs: number }).launchHoldMs = 250;
+        try {
+          const startPromise = operations.startDebugging('test-session', 'server.py');
+          let settled = false;
+          void startPromise.then(() => { settled = true; });
+          await vi.advanceTimersByTimeAsync(249);
+          expect(settled).toBe(false);
+          await vi.advanceTimersByTimeAsync(1);
           const result = await startPromise;
           expect(result.data?.pending).toBe(true);
-          expect(result.data?.message).toMatch(/still running after 1s/);
         } finally {
-          (operations as unknown as { launchGraceMs: number }).launchGraceMs = 5000;
+          (operations as unknown as { launchHoldMs: number }).launchHoldMs = original;
           restore();
         }
       });

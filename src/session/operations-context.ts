@@ -42,7 +42,7 @@ export interface OperationsTunables {
   readonly stepGraceMs: number;
   readonly pauseGraceMs: number;
   readonly launchReadyCeilingMs: number;
-  readonly launchGraceMs: number;
+  readonly launchHoldMs: number;
   readonly waitForStopDefaultMs: number;
 }
 
@@ -141,9 +141,10 @@ export type ProxyLaunchContext = Pick<
 >;
 
 /**
- * Launch-mode sessions: the toolchain gate, state and store updates, the
- * dry-run window, the proxy-failure record (hence the filesystem) and the
- * session-preserving teardown of a previous proxy.
+ * Launch-mode sessions: the toolchain gate, state and store updates (and the
+ * state subscription the readiness waits read), the dry-run window, the
+ * proxy-failure record (hence the filesystem) and the session-preserving
+ * teardown of a previous proxy.
  */
 export type LaunchContext = Pick<
   OperationsContext,
@@ -156,6 +157,7 @@ export type LaunchContext = Pick<
   | 'getSession'
   | 'updateSession'
   | 'updateState'
+  | 'onStateChange'
   | 'selectPolicy'
   | 'stopProxyPreservingSession'
 >;

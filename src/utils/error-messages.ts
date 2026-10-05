@@ -216,25 +216,34 @@ export const ErrorMessages = {
     `Session ${sessionId} was closed while waiting for a stop.`,
 
   /**
-   * A launch answered while the program is still running (issue #815): the
-   * readiness wait reached its ceiling with no stop and no exit. Not an error,
-   * and nothing was cancelled — the stop, if one comes, is collected with
-   * wait_for_stop (issue #849; list_debug_sessions shows it too). Two wordings:
-   * with something armed, what was not reached yet; with nothing armed, why no
-   * stop is coming soon and what to do instead.
+   * A launch answered while the program is still running (issues #815, #823,
+   * #826): the short hold for its first stop elapsed with no stop and no
+   * exit. Not an error, and nothing was cancelled — the stop, if one comes,
+   * is collected with wait_for_stop (issue #849). No duration in the text:
+   * how long the launch holds is a tunable, not part of the contract. Three
+   * wordings: with something armed, what has not been reached and that it
+   * stays armed; with nothing armed, why no stop is coming and what can
+   * still end the wait; with the debugger off for the launch (issue #749),
+   * that no stop is expected.
    * Used in: src/session/launch/debug-launcher.ts
-   * @param graceSeconds - The window that ran out, in seconds
    * @param armedSummary - The armed clauses ("2 breakpoint(s) and an entry stop"); undefined when nothing is armed
+   * @param debuggerOffWhy - The debugger-off sentence, when it applies
    */
-  launchStillRunning: (graceSeconds: number, armedSummary: string | undefined) =>
-    armedSummary
-      ? `The program is still running after ${graceSeconds}s without reaching ${armedSummary}. ` +
+  launchStillRunning: (armedSummary: string | undefined, debuggerOffWhy?: string) => {
+    if (debuggerOffWhy) {
+      return `The program is running — ${debuggerOffWhy}. ` +
+        `Call wait_for_stop to wait for it to end, or read get_output.`;
+    }
+    if (armedSummary) {
+      return `The program is running and has not reached ${armedSummary} yet. ` +
         `Nothing was cancelled: what is armed stays armed, and the session will report 'paused' when the program ` +
-        `gets there — call wait_for_stop to block until then, or pause_execution to interrupt.`
-      : `The program is still running after ${graceSeconds}s and nothing is armed to stop it soon ` +
-        `(no breakpoints, no entry stop, no caught-exception filter): it will stop only for an uncaught ` +
-        `exception the debugger catches by default, or report its exit. Call wait_for_stop to wait for ` +
-        `either, read get_output, or set breakpoints and call restart_debugging.`,
+        `gets there — call wait_for_stop to block until then, or pause_execution to interrupt.`;
+    }
+    return `The program is running and nothing is armed to stop it ` +
+      `(no breakpoints, no entry stop, no caught-exception filter): it will stop only for an uncaught ` +
+      `exception the debugger catches by default, or report its exit. Call wait_for_stop to wait for ` +
+      `either, read get_output, or set breakpoints — they take effect on the running program.`;
+  },
 
 
   /**

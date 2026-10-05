@@ -39,8 +39,8 @@ export const startDebuggingTool: ToolHandler = async (ctx, args) => {
     }
     // `pending` is part of the public tool-result contract, as for the step
     // tools (issue #144) and attach_to_process (issue #598): a launch answered
-    // while the program still runs — nothing armed stopped it within the
-    // readiness window (issue #815) — is visible at the top level.
+    // while the program still runs — it did not stop within the launch's
+    // short hold (issues #815, #823) — is visible at the top level.
     if (debugResult.data?.pending) {
       responsePayload.pending = true;
     }
@@ -81,8 +81,8 @@ export const restartDebuggingTool: ToolHandler = async (ctx, args) => {
       if (restartWarning) {
         responsePayload.warning = restartWarning;
       }
-      // A relaunch that is still running at the readiness ceiling (issue
-      // #815): same top-level pending as start_debugging.
+      // A relaunch that is still running when the hold elapses (issues
+      // #815, #823): same top-level pending as start_debugging.
       if (debugResult.data.pending) {
         responsePayload.pending = true;
       }

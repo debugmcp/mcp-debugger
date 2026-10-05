@@ -117,12 +117,11 @@ describe.skipIf(!hasRuby)('Ruby launch entry stop (issue #798)', () => {
     expect(output.entries.some(entry => entry.output.includes('15: FizzBuzz'))).toBe(true);
   }, 60_000);
 
-  // A launch with nothing armed to stop it used to wait out the full 30 s
-  // readiness ceiling and then answer `running` with no word about the wait
-  // (issue #815): rdbg reports adapter-configured before the wait listens and
-  // the Ruby policy is ready only on a pause. Now the wait is a short grace
-  // window and the answer says the program is still running.
-  it('answers a launch with nothing armed as running and pending, well before the old 30 s ceiling (issue #815)', async () => {
+  // A launch with nothing armed to stop it used to wait out a full 30 s and
+  // then answer `running` with no word about the wait (issue #815). Every
+  // launch now holds only briefly for its first stop, whatever is armed
+  // (issue #823), and the answer says the program is running and how to wait.
+  it('answers a launch with nothing armed as running and pending after the short hold (issues #815, #823)', async () => {
     const longRunning = path.join(root, 'examples/ruby/long_running.rb');
     const before = Date.now();
     const result = await call<Result & { pending?: boolean }>('start_debugging', { scriptPath: longRunning });
@@ -130,8 +129,10 @@ describe.skipIf(!hasRuby)('Ruby launch entry stop (issue #798)', () => {
     expect(result.success, JSON.stringify(result)).toBe(true);
     expect(result.state).toBe('running');
     expect(result.pending).toBe(true);
-    expect(result.message).toMatch(/still running after \d+s/);
     expect(result.message).toMatch(/nothing is armed to stop it/);
+    expect(result.message).toContain('wait_for_stop');
+    // The hold is a tunable, not part of the contract: the answer names no duration.
+    expect(result.message).not.toMatch(/after \d+(\.\d+)?s/);
     expect(elapsedMs, `start_debugging took ${elapsedMs}ms`).toBeLessThan(20_000);
     expect((await listedSession())?.state).toBe('running');
   }, 60_000);
@@ -142,11 +143,21 @@ describe.skipIf(!hasRuby)('Ruby launch entry stop (issue #798)', () => {
     // and the launch pauses at the first breakpoint.
     const bp = await call('set_breakpoint', { file: fizzbuzz, line: 15 });
     expect(bp.success, JSON.stringify(bp)).toBe(true);
-    const result = await call('start_debugging', { scriptPath: fizzbuzz });
+    const result = await call<Result & { pending?: boolean }>('start_debugging', { scriptPath: fizzbuzz });
     expect(result.success, JSON.stringify(result)).toBe(true);
-    expect(result.state).toBe('paused');
     expect(result.data?.stopOnEntrySuccessful).toBe(false);
-    expect(result.data?.reason).toBe('breakpoint');
+    // rdbg reaches line 15 within milliseconds, so the launch normally answers
+    // with the stop itself. The contract allows either: a launch that has not
+    // stopped when its short hold elapses answers pending, and wait_for_stop
+    // collects the stop (issue #823) — which is what a loaded machine would do.
+    if (result.pending) {
+      const waited = await call<Result & { lastStop?: { reason?: string } }>('wait_for_stop', { timeout: 20_000 });
+      expect(waited.state, JSON.stringify(waited)).toBe('paused');
+      expect(waited.lastStop?.reason).toBe('breakpoint');
+    } else {
+      expect(result.state).toBe('paused');
+      expect(result.data?.reason).toBe('breakpoint');
+    }
 
     const stack = await call<Result & { stackFrames: Array<{ file?: string; line?: number }> }>('get_stack_trace');
     expect(stack.stackFrames[0]?.line).toBe(15);

@@ -248,6 +248,14 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
 
   // ===== 4. Breakpoint capabilities =====
 
+  // When a launch answers is the launcher's rule alone — the program's first
+  // stop, its end, or a short hold (issues #823, #826). The hook a policy
+  // used to answer that with is gone; js-debug's different answer is what
+  // made the launch response mean something else for one language.
+  it('has no say in when a launch is ready to be answered', () => {
+    expect('isSessionReady' in policy).toBe(false);
+  });
+
   it('declares the pinned breakpoint capabilities', () => {
     expect(policy.supportsFunctionBreakpoints).toBe(pinned.supportsFunctionBreakpoints);
     expect(policy.supportsLogPoints).toBe(pinned.supportsLogPoints);

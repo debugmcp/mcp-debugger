@@ -11,7 +11,6 @@ import {
   COBOL_SCOPE_NAMES,
   COBOL_RUNTIME_ERROR_FILTER,
   DebugLanguage,
-  SessionState,
   getPolicyForLanguage,
   type AdapterSpawnPayload,
   type StackFrame,
@@ -67,11 +66,8 @@ describe('CobolAdapterPolicy identity and pins', () => {
     expect(behaviour.sendAttachBeforeInitialized).toBe(true);
   });
 
-  it('is an lldb-typed adapter that is ready when paused', () => {
+  it('is an lldb-typed adapter', () => {
     expect(CobolAdapterPolicy.getDapAdapterConfiguration()).toEqual({ type: 'lldb' });
-    expect(CobolAdapterPolicy.isSessionReady(SessionState.PAUSED)).toBe(true);
-    expect(CobolAdapterPolicy.isSessionReady(SessionState.RUNNING)).toBe(false);
-    expect(CobolAdapterPolicy.isSessionReady(SessionState.READY)).toBe(false);
     expect(CobolAdapterPolicy.getDebuggerConfiguration()).toMatchObject({
       requiresStrictHandshake: false,
       skipConfigurationDone: false,

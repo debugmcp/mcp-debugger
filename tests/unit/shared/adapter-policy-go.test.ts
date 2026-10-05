@@ -2,7 +2,6 @@ import { describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import { spawn } from 'child_process';
 import { GoAdapterPolicy } from '../../../packages/shared/src/interfaces/adapter-policy-go.js';
-import { SessionState } from '@debugmcp/shared';
 
 // validateExecutable dynamically imports child_process — mock it so no real
 // process is ever spawned (hermetic; no dependency on installed tools or load).
@@ -227,17 +226,6 @@ describe('GoAdapterPolicy', () => {
   it('defaults to "dlv" when no path or env var', () => {
     vi.stubEnv('DLV_PATH', undefined);
     expect(GoAdapterPolicy.resolveExecutablePath()).toBe('dlv');
-  });
-
-  // ===== Session readiness =====
-
-  it('isSessionReady returns true only when PAUSED', () => {
-    expect(GoAdapterPolicy.isSessionReady(SessionState.PAUSED)).toBe(true);
-    expect(GoAdapterPolicy.isSessionReady(SessionState.RUNNING)).toBe(false);
-    // SessionState has no IDLE member — this line used to read
-    // `SessionState.IDLE`, i.e. it passed `undefined` and only ever proved
-    // that undefined is not PAUSED. CREATED is the real pre-launch state.
-    expect(GoAdapterPolicy.isSessionReady(SessionState.CREATED)).toBe(false);
   });
 
   // ===== Command queueing =====

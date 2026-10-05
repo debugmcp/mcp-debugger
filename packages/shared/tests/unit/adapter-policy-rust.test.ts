@@ -8,7 +8,6 @@ import type {
   StopReasonContext
 } from '../../src/interfaces/adapter-policy.js';
 import type { StackFrame, Variable } from '../../src/models/index.js';
-import { SessionState } from '@debugmcp/shared';
 
 // Vitest 4 takes ONE type argument: the whole function type.
 const accessMock = vi.fn<() => Promise<void>>();
@@ -530,13 +529,6 @@ describe('RustAdapterPolicy', () => {
     const result = await behavior.handleReverseRequest!(request, context);
     expect(result.handled).toBe(true);
     expect(responses).toHaveLength(1);
-  });
-
-  it('indicates session readiness only when paused', () => {
-    const ready = RustAdapterPolicy.isSessionReady!(SessionState.PAUSED);
-    const notReady = RustAdapterPolicy.isSessionReady!(SessionState.RUNNING);
-    expect(ready).toBe(true);
-    expect(notReady).toBe(false);
   });
 
   it('throws when building child session args', () => {

@@ -16,7 +16,6 @@
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import type { AdapterPolicy, LocalVariableExtraction } from './adapter-policy.js';
 import { emptyLocalVariableExtraction } from './adapter-policy.js';
-import { SessionState } from '@debugmcp/shared';
 import type { StackFrame, Variable } from '../models/index.js';
 import {
   normalizeLldbStopReason,
@@ -196,8 +195,6 @@ export const CobolAdapterPolicy = {
       supportsMemoryReferences: true
     };
   },
-
-  isSessionReady: (state: SessionState) => state === SessionState.PAUSED,
 
   validateExecutable: validateCodeLLDBExecutable,
 
