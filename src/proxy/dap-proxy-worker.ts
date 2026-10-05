@@ -2436,7 +2436,10 @@ export class DapProxyWorker {
   /**
    * Count and time every chunk the adapter's stdio delivers (issue #856).
    * Registered after the adapter manager's own 'data' listeners, so by the
-   * time a chunk is counted its lines have been forwarded.
+   * time a chunk is counted the complete lines in it have been forwarded. A
+   * trailing fragment with no newline is another matter: it stays in the
+   * manager's line buffer until the pipe closes, which for an adapter that
+   * outlives its debuggee is teardown — too late, now as before (issue #860).
    */
   private trackStdioActivity(adapterProcess: ChildProcess): { chunks: number; lastChunkAt: number } {
     const activity = { chunks: 0, lastChunkAt: 0 };
@@ -2453,9 +2456,12 @@ export class DapProxyWorker {
    * Hold exited/terminated forwarding until adapter stdio has drained: a
    * debuggee printing to a block-buffered pipe flushes everything at exit,
    * milliseconds after the adapter's terminated event, and the SessionManager
-   * stops the proxy on terminated — dropping late messages. Stream 'data'
-   * fires before 'close' and IPC is FIFO, so waiting here guarantees the
-   * forwarded output reaches the session buffer first.
+   * stops the proxy on terminated — dropping late messages. When the wait
+   * ends on the pipes closing, the order is guaranteed: stream 'data' fires
+   * before 'close' and IPC is FIFO, so the forwarded output reaches the
+   * session buffer first. When it ends on silence the order rests on a
+   * measurement instead (ADAPTER_STDIO_QUIET_MS), and at the backstop on
+   * nothing.
    *
    * Drained means the pipes closed — or, for an adapter that outlives its
    * debuggee and so never closes them when the program ends, that they went
