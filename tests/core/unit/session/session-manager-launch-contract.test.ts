@@ -266,6 +266,30 @@ describe('SessionManager - launch contract (issues #823, #826, #851)', () => {
       expect(setBreakpointDapCalls()).toHaveLength(1);
       expect(setBreakpointDapCalls()[0].args).toMatchObject({ source: { path: 'test.py' } });
     });
+
+    it('is not needed to hear that the adapter rejected the function breakpoints: the worker echoes it and the answer quotes it', async () => {
+      const sessionId = await createSession();
+      await sessionManager.setFunctionBreakpoint(sessionId, { functionName: 'main' });
+      const started = launch(sessionId);
+      await vi.advanceTimersByTimeAsync(100);
+      // What the worker sends when the adapter answers its pre-launch
+      // setFunctionBreakpoints with an error.
+      proxy().simulateEvent('function-breakpoints-synced', [
+        { name: 'main', verified: false, message: 'function breakpoints are not supported here', refused: true }
+      ]);
+      await vi.advanceTimersByTimeAsync(HOLD_MS);
+
+      const result = started.result();
+      expect(result?.data?.pending).toBe(true);
+      expect(proxy().dapRequestCalls.filter((call) => call.command === 'setFunctionBreakpoints')).toHaveLength(0);
+      const warning = (result?.data as { warning?: string } | undefined)?.warning ?? '';
+      // The adapter's own words, as a refusal — not as a name it could not
+      // resolve, which would send the caller looking for a typo.
+      expect(warning).toContain('function breakpoints are not supported here');
+      expect(warning).toMatch(/refused/);
+      expect(warning).toContain("'main'");
+      expect(warning).not.toMatch(/could not resolve the name|check the symbol name/);
+    });
   });
 
   describe('JavaScript launches follow the same contract (issue #823)', () => {

@@ -656,11 +656,14 @@ export class DebugLauncher {
       // it, and they are withheld so they cannot contradict it (issue #710).
       const debuggerOn = !debuggerOff || debuggerOnAnyway;
 
-      // Unbound-at-launch warning (issue #308): the verified state is fresh
-      // after the re-sync above, so a name the adapter could not resolve is
-      // reported here instead of failing silently at "the program never
-      // stopped". Suppressed for bind-late adapters (js/java), where
-      // unverified-at-launch is the designed deferral path.
+      // Unbound-at-launch warning (issue #308): a name the adapter could not
+      // resolve is reported here instead of failing silently at "the program
+      // never stopped". The verified state it reads is fresh from the re-sync
+      // above for a launch that paused; for one answered while running it is
+      // what the worker's pre-launch send and the adapter's breakpoint events
+      // left, a rejected request included — the worker echoes that, and it is
+      // quoted as a refusal (issue #856). Suppressed for bind-late adapters
+      // (js/java), where unverified-at-launch is the designed deferral path.
       // Withheld when the post-launch function-breakpoint re-send failed —
       // refused or never answered (issue #754): the cause is in the resync
       // warning below, and the symptom sentence would only restate it as a

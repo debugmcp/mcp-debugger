@@ -1200,9 +1200,9 @@ export class DapProxyWorker {
       }
 
       // Initial function breakpoints (issue #271 phase 3). Like exception
-      // breakpoints below, a failure must not abort the launch — adapters
-      // without support reject the request, and the post-launch re-sync
-      // surfaces the state honestly.
+      // breakpoints below, a failure must not abort the launch — an adapter
+      // without support rejects the request, and that answer is echoed to
+      // the parent, which reports it.
       stage = 'setFunctionBreakpoints';
       await this.sendInitialFunctionBreakpoints();
 
@@ -1386,10 +1386,12 @@ export class DapProxyWorker {
 
   /**
    * Send the pre-launch function breakpoints (issue #271 phase 3). A failure
-   * must not abort the launch — adapters without support reject the request,
-   * and the post-launch re-sync surfaces the state honestly. For cdp-delivery
-   * policies (js-debug, issue #295) the request never reaches the adapter:
-   * MinimalDapClient routes it to the CDP bridge.
+   * must not abort the launch. An adapter that rejects the request has its
+   * answer echoed to the parent, which stamps it on the records and quotes
+   * it in the launch result: the parent's own re-send is made only to a
+   * launch that pauses (issue #856), so it cannot be what surfaces this. For
+   * cdp-delivery policies (js-debug, issue #295) the request never reaches
+   * the adapter: MinimalDapClient routes it to the CDP bridge.
    */
   private async sendInitialFunctionBreakpoints(): Promise<void> {
     if (!this.currentInitPayload?.initialFunctionBreakpoints?.length || !this.dapClient) {
@@ -1428,10 +1430,13 @@ export class DapProxyWorker {
           err instanceof Error ? err.message : String(err)
         }`
       );
-      if (this.isNoDebugRefusal(err)) {
-        this.noticeRefusalUnderNoDebug('setFunctionBreakpoints', err);
-        // The refusal is the adapter's answer for every function breakpoint:
-        // echo it so the store carries it, as the line breakpoints get.
+      this.noticeRefusalUnderNoDebug('setFunctionBreakpoints', err);
+      if (err instanceof DapResponseError) {
+        // The adapter answered the request with an error — under noDebug
+        // (issue #750), or because it will not take function breakpoints.
+        // That is its answer for every one of them: echo it so the store
+        // carries it, as the line breakpoints get. A transport failure or a
+        // timeout is nobody's answer and is not echoed.
         this.sendStatusSafely('function_breakpoints_synced', {
           functionBreakpoints: this.currentInitPayload.initialFunctionBreakpoints.map((bp) => ({
             name: bp.name,

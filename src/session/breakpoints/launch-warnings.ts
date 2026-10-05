@@ -269,10 +269,19 @@ export function buildLogpointDowngradeLaunchWarning(
 }
 
 /**
- * Launch-time unbound-function-breakpoint warning (issue #308). Called
- * after the post-launch re-sync, when verified state is fresh. Returns
- * undefined for bind-late policies (js/java) — unverified-at-launch is
- * their designed deferral, not a failure.
+ * Launch-time unbound-function-breakpoint warning (issue #308). Reads the
+ * records as they stand when the launch is answered: freshly re-sent for a
+ * launch that paused, and otherwise as the worker's pre-launch send and the
+ * adapter's breakpoint events left them (issue #856).
+ *
+ * Two things can leave a function breakpoint unbound, and they are told
+ * apart. A name the adapter could not resolve gets the "check the symbol
+ * name" sentence — except under a bind-late policy (js/java), where
+ * unverified-at-launch is the designed deferral, not a failure. A request
+ * the adapter refused outright (the worker echoes a rejected pre-launch set,
+ * stamped as a refusal) is reported as that, in the adapter's words and
+ * under every policy: it is not a name problem, and the advice would send
+ * the caller looking for a typo.
  *
  * The policy is a parameter because the caller resolves it from the session
  * store, whose lookup throws for an unknown language.
@@ -284,23 +293,35 @@ export function buildFunctionBreakpointLaunchWarning(
   if ((session.functionBreakpoints?.size ?? 0) === 0) {
     return undefined;
   }
-  if (policy?.functionBreakpointsBindLate === true) {
-    return undefined;
-  }
-  const parts: string[] = [];
+  const bindLate = policy?.functionBreakpointsBindLate === true;
+  /** The names each distinct refusal was given for, in store order. */
+  const refused = new Map<string, string[]>();
+  const unresolved: string[] = [];
   for (const bp of session.functionBreakpoints.values()) {
     if (bp.verified) {
       continue;
     }
+    if (bp.messageOrigin === 'refusal' && bp.message !== undefined) {
+      refused.set(bp.message, [...(refused.get(bp.message) ?? []), `'${bp.functionName}'`]);
+      continue;
+    }
+    if (bindLate) {
+      continue;
+    }
     const hint = policy?.functionBreakpointNameHint?.(bp.functionName) ?? bp.message;
-    parts.push(`'${bp.functionName}'${hint ? ` (${hint})` : ''}`);
+    unresolved.push(`'${bp.functionName}'${hint ? ` (${hint})` : ''}`);
   }
-  if (parts.length === 0) {
-    return undefined;
-  }
-  return (
-    `Function breakpoint(s) not bound at launch: ${parts.join('; ')}. ` +
-    `The adapter could not resolve the name, so the program will not stop there — ` +
-    `check the symbol name; list_breakpoints shows the current state`
+  const sentences = [...refused].map(
+    ([refusal, names]) =>
+      `The debugger refused function breakpoint(s) ${names.join(', ')}: ${refusal} — ` +
+      `the program will not stop there`
   );
+  if (unresolved.length > 0) {
+    sentences.push(
+      `Function breakpoint(s) not bound at launch: ${unresolved.join('; ')}. ` +
+        `The adapter could not resolve the name, so the program will not stop there — ` +
+        `check the symbol name; list_breakpoints shows the current state`
+    );
+  }
+  return sentences.length > 0 ? sentences.join('; ') : undefined;
 }
