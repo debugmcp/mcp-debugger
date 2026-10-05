@@ -1,14 +1,21 @@
 /**
- * Execution control: stepping, continue, pause, and the thread list.
+ * Execution control: stepping, continue, pause, waiting for a stop, and the
+ * thread list.
  *
- * Everything here shares one shape. The DAP request only acknowledges that the
- * debugger accepted the command; the state change arrives later as a `stopped`
- * event handled by the core listener. So each operation registers its
- * listeners BEFORE sending, and settles on whichever comes first — the stop,
- * the debuggee ending, or a grace window elapsing. The grace window is not a
- * deadline on the debuggee: it converts "still running" into an honest
- * `pending: true` success rather than a failure, and the operation completes
- * asynchronously afterwards.
+ * The operations that drive the debuggee — step, continue, pause — share one
+ * shape. The DAP request only acknowledges that the debugger accepted the
+ * command; the state change arrives later as a `stopped` event handled by the
+ * core listener. So each of them registers its listeners BEFORE sending, and
+ * settles on whichever comes first — the stop, the debuggee ending, or a grace
+ * window elapsing. The grace window is not a deadline on the debuggee: it
+ * converts "still running" into an honest `pending: true` success rather than
+ * a failure, and the operation completes asynchronously afterwards.
+ *
+ * `waitForStop` (issue #849) is the explicit continuation of that `pending`
+ * answer, and the one operation here that sends nothing: it waits on the
+ * session's state through `waitForSessionState` for as long as its caller
+ * says. It registers no event listeners, so rule 1 below has nothing to
+ * arbitrate for it; it does obey rule 2.
  *
  * THE SETTLE CONTRACT (issue #574). Two rules:
  *
@@ -59,6 +66,7 @@ import type { PauseCoordinator } from './pause-coordinator.js';
 import { waitForSessionState } from './session-state-wait.js';
 import { resolveDapTimeoutOverride } from '../dap-request-helpers.js';
 import { describeProgramEnd } from '../breakpoints/launch-warnings.js';
+import { describeLaunchArming } from '../launch/launch-arming.js';
 
 /** What distinguishes the three step flavours: everything else is shared. */
 interface StepKind {
@@ -819,6 +827,10 @@ export class ExecutionController {
     this.ctx.logger.info(
       `[SessionManager waitForStop] Session ${sessionId} still ${state} after ${waitMs}ms (${outcome}); answering with pending`
     );
+    // What is armed now words the answer: with something armed, that it stays
+    // armed; with nothing, no pause is promised. An entry stop is not part of
+    // it — that belongs to the launch, which is behind a running program.
+    const arming = describeLaunchArming(session, false);
     return {
       success: true,
       state,
@@ -826,7 +838,10 @@ export class ExecutionController {
         message: ErrorMessages.waitForStopPending(
           waitMs / 1000,
           state === SessionState.INITIALIZING ? 'initializing' : 'running',
-          debuggerOffWhy(session)
+          {
+            ...(arming.armed ? { armedSummary: arming.summary } : {}),
+            ...(debuggerOffWhy(session) ? { debuggerOffWhy: debuggerOffWhy(session) } : {})
+          }
         ),
         pending: true
       }

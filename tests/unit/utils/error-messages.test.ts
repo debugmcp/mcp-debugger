@@ -183,16 +183,27 @@ describe('ErrorMessages', () => {
       expect(message).toContain('get_output');
     });
 
-    it('wait_for_stop itself says nothing was cancelled', () => {
-      const message = ErrorMessages.waitForStopPending(30, 'running');
-      expect(message).toMatch(/still running after 30s/);
+    it('wait_for_stop itself says nothing was cancelled, and names what is still armed', () => {
+      const message = ErrorMessages.waitForStopPending(30, 'running', { armedSummary: '2 breakpoint(s)' });
+      expect(message).toMatch(/still running after 30s without reaching 2 breakpoint\(s\)/);
       expect(message).toMatch(/Nothing was cancelled/);
       expect(message).toMatch(/stays? armed/);
       expect(message).toContain('wait_for_stop');
     });
 
+    it('wait_for_stop with nothing armed promises no pause: it says what can still end the wait', () => {
+      const message = ErrorMessages.waitForStopPending(30, 'running');
+      expect(message).toMatch(/still running after 30s/);
+      expect(message).toMatch(/no breakpoint or caught-exception filter is armed/);
+      expect(message).not.toMatch(/stays? armed/);
+      expect(message).not.toMatch(/becomes 'paused' when/);
+      expect(message).toMatch(/uncaught exception/);
+      expect(message).toMatch(/exit/);
+      expect(message).toContain('wait_for_stop');
+    });
+
     it('wait_for_stop with the debugger off waits for the exit and promises no stop', () => {
-      const message = ErrorMessages.waitForStopPending(30, 'running', ErrorMessages.debuggerOffForLaunch);
+      const message = ErrorMessages.waitForStopPending(30, 'running', { debuggerOffWhy: ErrorMessages.debuggerOffForLaunch });
       expect(message).toContain(ErrorMessages.debuggerOffForLaunch);
       expect(message).not.toMatch(/stay armed/);
       expect(message).toMatch(/wait for it to end/);

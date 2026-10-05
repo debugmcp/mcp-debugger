@@ -653,8 +653,8 @@ export class DebugLauncher {
 
       // The wait ran out while the program kept running (issue #815): say so,
       // and what was or was not armed, with pending: true the way a step that
-      // has not landed does — the stop, if one comes, shows in
-      // list_debug_sessions as the state flips to paused.
+      // has not landed does — the stop, if one comes, is collected with
+      // wait_for_stop (list_debug_sessions shows the state flip too).
       const stillRunning =
         readiness === 'ceiling' && finalState === SessionState.RUNNING
           ? ErrorMessages.launchStillRunning(readinessCeilingMs / 1000, arming.armed ? arming.summary : undefined)

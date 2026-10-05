@@ -652,7 +652,7 @@ Blocks until the session next pauses or ends, then says why and where. This is t
   "success": true,
   "state": "running",
   "pending": true,
-  "message": "The program is still running after 30s with no stop. Nothing was cancelled: breakpoints and exception filters stay armed, and the session becomes 'paused' when the program reaches one. Call wait_for_stop again to keep waiting, or pause_execution to interrupt it."
+  "message": "The program is still running after 30s without reaching 1 breakpoint(s). Nothing was cancelled: what is armed stays armed, and the session becomes 'paused' when the program gets there. Call wait_for_stop again to keep waiting, or pause_execution to interrupt it."
 }
 ```
 
@@ -661,7 +661,7 @@ Blocks until the session next pauses or ends, then says why and where. This is t
 - A session that is already paused answers at once with its current stop, and asking twice without resuming returns the same stop twice. After `continue_execution` (or a step that answered `pending: true`) the session is `running`, so the next call waits for the next stop.
 - `lastStop` is the record `list_debug_sessions` reports: `reason`, `rawReason` when the adapter's own reason was normalized, `threadId`, and `description`/`text` for an exception. `lastStop.exceptionInfo` is filled in a moment after an exception stop — re-query `list_debug_sessions` if it is absent. `location` and `context` are best-effort: they appear when the stack could be read, and `location` is the first visible frame, as for the step tools.
 - `exitCode` is present only when the debuggee reported one. A session that ended in an error answers `state: "error"` with the reason in `message`. A finished session keeps answering the same way until it is closed.
-- `pending: true` sits at the top level, as for the step tools. When the launch runs with the debugger off (`dapLaunchArgs.noDebug`, honoured), the message says so and that the wait is for the program's exit; when the launch or attach itself has not completed, it says the session is still starting.
+- `pending: true` sits at the top level, as for the step tools. The message says what the wait is still for: with breakpoints (or `breakOnExceptions: "all"`) armed it names them and says they stay armed; with nothing armed it promises no pause — the program will stop only for an uncaught exception the debugger catches, or report its exit — so a caller is not sent round a loop that cannot end in a stop. When the launch runs with the debugger off (`dapLaunchArgs.noDebug`, honoured), the message says so and that the wait is for the program's exit; when the launch or attach itself has not completed, it says the session is still starting.
 - A session that was never started answers `success: false` (`Nothing to wait for: this session has not been started…`). So does a session closed while the call was waiting, and a `timeout` that is not a positive number.
 - Several calls may wait on one session at once. A call whose request is cancelled, or whose client disconnects, releases its wait.
 

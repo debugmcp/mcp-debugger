@@ -117,7 +117,23 @@ describe('SessionManager - waitForStop (issue #849)', () => {
     expect(wait.result()?.data?.pending).toBe(true);
     expect(wait.result()?.data?.message).toMatch(/still running after 2s/);
     expect(wait.result()?.data?.message).toMatch(/wait_for_stop/);
+    // Nothing is armed here, so no pause is promised.
+    expect(wait.result()?.data?.message).toMatch(/no breakpoint or caught-exception filter is armed/);
+    expect(wait.result()?.data?.message).not.toMatch(/stays? armed/);
     expect(wait.result()?.data?.lastStop).toBeUndefined();
+  });
+
+  it('names what is armed when its timeout passes with a breakpoint not yet reached', async () => {
+    const sessionId = await runningSession();
+    await sessionManager.setBreakpoint(sessionId, { file: 'test.py', line: 5 });
+    const wait = track(sessionManager.waitForStop(sessionId, 2_000));
+
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(wait.result()?.data?.pending).toBe(true);
+    expect(wait.result()?.data?.message).toMatch(/without reaching 1 breakpoint\(s\)/);
+    expect(wait.result()?.data?.message).toMatch(/Nothing was cancelled/);
+    expect(wait.result()?.data?.message).toMatch(/stays armed/);
   });
 
   it('waits 30 s by default', async () => {

@@ -4,10 +4,11 @@
  */
 
 /**
- * True when a failed backend tool call indicates the backend itself is
- * unreachable — a non-`running` state, a transport syscall code
- * (`ECONNREFUSED`/`ECONNRESET`/…), or an MCP transport code (-32000, -32001)
- * found up to four levels down the `cause` chain.
+ * True when a failed backend tool call is not the backend's own answer — a
+ * non-`running` state, a transport syscall code (`ECONNREFUSED`/`ECONNRESET`/…),
+ * or an MCP transport code (-32000 connection closed, -32001 request timeout)
+ * found up to four levels down the `cause` chain. Which hint that earns is
+ * `backendFailureHint`'s decision.
  *
  * A well-formed JSON-RPC error such as -32602 is proof the backend is alive
  * and returns `false`: it must never draw the "restart the backend" hint.

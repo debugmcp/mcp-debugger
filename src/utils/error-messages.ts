@@ -163,27 +163,41 @@ export const ErrorMessages = {
    * wait_for_stop reached its timeout with the session still live (issue
    * #849). Not an error, and nothing was cancelled — said outright, because
    * "did the timeout disarm my breakpoint?" is the first thing a pending
-   * answer makes a caller wonder. Three wordings: the program is running;
-   * it is running with the debugger off for the launch (issue #749), where no
-   * stop is expected and the wait is for its exit; the launch or attach has
-   * not completed yet.
+   * answer makes a caller wonder. Four wordings: the program is running with
+   * something armed that it has not reached; it is running with nothing armed,
+   * where promising a pause would send the caller round a loop that cannot
+   * end that way — so it says what can still end the wait instead; it is
+   * running with the debugger off for the launch (issue #749), where no stop
+   * is expected and the wait is for its exit; the launch or attach has not
+   * completed yet.
    * Used in: src/session/execution/execution-controller.ts
    * @param seconds - The wait that ran out, in seconds
    * @param state - The live state the session is still in
-   * @param debuggerOffWhy - The debugger-off sentence, when it applies
+   * @param why.armedSummary - What is armed ("2 breakpoint(s)"); absent when nothing is
+   * @param why.debuggerOffWhy - The debugger-off sentence, when it applies
    */
-  waitForStopPending: (seconds: number, state: 'running' | 'initializing', debuggerOffWhy?: string) => {
+  waitForStopPending: (
+    seconds: number,
+    state: 'running' | 'initializing',
+    why: { armedSummary?: string; debuggerOffWhy?: string } = {}
+  ) => {
     if (state === 'initializing') {
       return `The session is still starting after ${seconds}s (its launch or attach has not completed). ` +
         `Call wait_for_stop again to keep waiting.`;
     }
-    if (debuggerOffWhy) {
-      return `The program is still running after ${seconds}s — ${debuggerOffWhy}. ` +
+    if (why.debuggerOffWhy) {
+      return `The program is still running after ${seconds}s — ${why.debuggerOffWhy}. ` +
         `Call wait_for_stop again to wait for it to end.`;
     }
-    return `The program is still running after ${seconds}s with no stop. Nothing was cancelled: ` +
-      `breakpoints and exception filters stay armed, and the session becomes 'paused' when the program ` +
-      `reaches one. Call wait_for_stop again to keep waiting, or pause_execution to interrupt it.`;
+    if (why.armedSummary) {
+      return `The program is still running after ${seconds}s without reaching ${why.armedSummary}. ` +
+        `Nothing was cancelled: what is armed stays armed, and the session becomes 'paused' when the program ` +
+        `gets there. Call wait_for_stop again to keep waiting, or pause_execution to interrupt it.`;
+    }
+    return `The program is still running after ${seconds}s, and no breakpoint or caught-exception filter is armed ` +
+      `to stop it: unless a step or a pause is still in flight, it will stop only for an uncaught exception the ` +
+      `debugger catches by default, or report its exit. Call wait_for_stop again to wait for either, or ` +
+      `pause_execution to interrupt it.`;
   },
 
   /**
@@ -203,8 +217,9 @@ export const ErrorMessages = {
 
   /**
    * A launch answered while the program is still running (issue #815): the
-   * readiness wait reached its ceiling with no stop and no exit. Not an error —
-   * the stop, if one comes, is reported by list_debug_sessions. Two wordings:
+   * readiness wait reached its ceiling with no stop and no exit. Not an error,
+   * and nothing was cancelled — the stop, if one comes, is collected with
+   * wait_for_stop (issue #849; list_debug_sessions shows it too). Two wordings:
    * with something armed, what was not reached yet; with nothing armed, why no
    * stop is coming soon and what to do instead.
    * Used in: src/session/launch/debug-launcher.ts

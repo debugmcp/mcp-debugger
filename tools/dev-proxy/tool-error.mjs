@@ -19,15 +19,19 @@ const TRANSPORT_SYSCALL_CODES = new Set([
 ]);
 
 // MCP SDK transport-level error codes (not JSON-RPC application errors):
-// -32000 ConnectionClosed, -32001 RequestTimeout.
+// -32000 ConnectionClosed, -32001 RequestTimeout. The second does not by
+// itself mean the backend is gone — see backendFailureHint, which tells a
+// running backend that was slow to answer apart from an unreachable one.
 const MCP_CONNECTION_CODES = new Set([-32000, -32001]);
 
 /**
- * True when a failed backend tool call indicates the backend itself is
- * unreachable (dead process, refused/reset connection, transport timeout) —
- * the only case where a "restart the backend" hint is honest. A well-formed
- * JSON-RPC error response (e.g. -32602 InvalidParams) is proof the backend is
- * alive and must NOT trigger the hint.
+ * True when a failed backend tool call is not the backend's own answer: the
+ * backend is unreachable (dead process, refused/reset connection) or the
+ * call got no answer in time (request timeout). These are the only cases that
+ * get a hint at all — which hint is backendFailureHint's decision, and only a
+ * backend that wants restarting is told to restart. A well-formed JSON-RPC
+ * error response (e.g. -32602 InvalidParams) is proof the backend is alive
+ * and must NOT trigger one.
  *
  * @param {unknown} err - the error thrown by BackendManager.callTool
  * @param {string} backendState - BackendManager.state at catch time

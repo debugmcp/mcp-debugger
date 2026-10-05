@@ -107,8 +107,9 @@ export class DebugMcpServer implements ToolContext {
   }
 
   /**
-   * Session gate for tools that need a LIVE debuggee (execution control,
-   * pause, threads, inspection, evaluate, source context, mirror): an unknown
+   * Session gate for tools that need a LIVE debuggee (execution control —
+   * all but wait_for_stop, see validateSessionExists — pause, threads,
+   * inspection, evaluate, source context, mirror): an unknown
    * id throws SessionNotFoundError, a lifecycle-TERMINATED session throws
    * SessionTerminatedError. A TERMINATED-but-present session is the
    * between-launches state (the program exited, or only a dry run ran), so
@@ -124,8 +125,10 @@ export class DebugMcpServer implements ToolContext {
   }
 
   /**
-   * Existence-only gate: start_debugging, restart_debugging, set_breakpoint
-   * and set_breakpoint {function} accept a terminated-but-unclosed session.
+   * Existence-only gate: start_debugging, restart_debugging, set_breakpoint,
+   * set_breakpoint {function} and wait_for_stop accept a terminated-but-unclosed
+   * session — the first four prepare the next launch, the last reports how the
+   * finished one ended (issue #849).
    * The launcher tears down any leftover proxy and resets the per-launch state
    * itself (DebugLauncher.launch), and a breakpoint set between launches is
    * stored verified:false and applied by the next launch, whose response
