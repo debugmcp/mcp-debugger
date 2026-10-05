@@ -2028,6 +2028,42 @@ describe('DapProxyWorker', () => {
         }
       });
 
+      it('does not take output that arrives just as the window closes for silence', async () => {
+        // The clock says the window has passed; the chunk that lands in the
+        // same turn of the event loop says otherwise. This is the worker that
+        // was descheduled: its timer is due, and so is unread output.
+        const { forwarded, output, sent } = await startWorker({ adapterOutlivesDebuggee: true });
+        vi.useFakeTimers();
+        try {
+          mockDapClient.emit('exited', { exitCode: 0 });
+          await vi.advanceTimersByTimeAsync(1);
+          // The worker is in its drain wait: the backstop and the quiet
+          // window are both on the clock.
+          expect(vi.getTimerCount()).toBeGreaterThanOrEqual(2);
+          // Due at the same instant as the worker's own timer, and created
+          // after it: it fires between that timer and the turn it yields.
+          setTimeout(() => output('printed while nobody was looking'), QUIET_MS - 1);
+
+          // The window passes by the clock, and the chunk lands with it.
+          await vi.advanceTimersByTimeAsync(QUIET_MS - 1);
+          // The turn has been taken and has seen the chunk: the window is
+          // running again, half of it gone.
+          await vi.advanceTimersByTimeAsync(QUIET_MS / 2);
+          expect(forwarded('exited')).toBe(false);
+
+          await vi.advanceTimersByTimeAsync(QUIET_MS);
+          expect(forwarded('exited')).toBe(true);
+          const messages = sent();
+          const outputIdx = messages.findIndex(m =>
+            m.type === 'dapEvent' && m.event === 'output' && isRecord(m.body)
+            && m.body.output === 'printed while nobody was looking\n');
+          expect(outputIdx).toBeGreaterThanOrEqual(0);
+          expect(outputIdx).toBeLessThan(messages.findIndex(m => m.type === 'dapEvent' && m.event === 'exited'));
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
       it('gives up at the backstop when the pipes never go quiet', async () => {
         const { forwarded, output } = await startWorker({ adapterOutlivesDebuggee: true });
         vi.useFakeTimers();

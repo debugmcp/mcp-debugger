@@ -2507,14 +2507,12 @@ export class DapProxyWorker {
     activity: { chunks: number; lastChunkAt: number }
   ): { settled: Promise<void>; cancel: () => void } {
     const since = this.firstTerminalSignalAt ?? Date.now();
-    let cancelled = false;
+    // At most one of the two is pending at any moment, so clearing both
+    // stops the wait for good.
     let timer: NodeJS.Timeout | undefined;
     let turn: NodeJS.Immediate | undefined;
     const settled = new Promise<void>((resolve) => {
       const check = (): void => {
-        if (cancelled) {
-          return;
-        }
         const quietFor = Date.now() - Math.max(activity.lastChunkAt, since);
         if (quietFor < ADAPTER_STDIO_QUIET_MS) {
           timer = setTimeout(check, ADAPTER_STDIO_QUIET_MS - quietFor);
@@ -2522,9 +2520,6 @@ export class DapProxyWorker {
         }
         const chunksBefore = activity.chunks;
         turn = setImmediate(() => {
-          if (cancelled) {
-            return;
-          }
           if (activity.chunks !== chunksBefore) {
             check();
             return;
@@ -2537,13 +2532,8 @@ export class DapProxyWorker {
     return {
       settled,
       cancel: () => {
-        cancelled = true;
-        if (timer) {
-          clearTimeout(timer);
-        }
-        if (turn) {
-          clearImmediate(turn);
-        }
+        clearTimeout(timer);
+        clearImmediate(turn);
       }
     };
   }
