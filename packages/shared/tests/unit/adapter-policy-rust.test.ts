@@ -494,13 +494,14 @@ describe('RustAdapterPolicy', () => {
       const win = asSpawn(
         RustAdapterPolicy.getAdapterSpawnConfig(basePayload, 'win32', 'x64')
       );
-      expect(win.forwardStdio).toEqual({});
+      // CodeLLDB outlives the debuggee, so its pipes never close with it (issue #856).
+      expect(win.forwardStdio).toEqual({ adapterOutlivesDebuggee: true });
 
       const winCustom = asSpawn(RustAdapterPolicy.getAdapterSpawnConfig({
         ...basePayload,
         adapterCommand: { command: 'custom', args: [] }
       }, 'win32', 'x64'));
-      expect(winCustom.forwardStdio).toEqual({});
+      expect(winCustom.forwardStdio).toEqual({ adapterOutlivesDebuggee: true });
 
       // POSIX: CodeLLDB emits DAP output events itself (LLDB holds the pipes)
       const linux = asSpawn(

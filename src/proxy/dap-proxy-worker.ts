@@ -82,6 +82,16 @@ export const INITIALIZE_RESPONSE_GRACE_MS = 2000;
 /** Bound on each terminal-signal wait (stdio drain, child flush, the debugger-off launch outcome). */
 const TERMINAL_SIGNAL_BACKSTOP_MS = 2000;
 /**
+ * How long the stdio pipes of an adapter that outlives its debuggee must stay
+ * silent, after the debuggee's end was reported, to count as drained (issue
+ * #856). Sized from CodeLLDB on Windows printing 9 MB as it exits: the
+ * longest pause between two consecutive chunks of that output was 14 ms on an
+ * idle machine and 39 ms with all 16 cores busy (and the proxy logging every
+ * line at debug level). The clock is also not trusted alone — see
+ * waitForAdapterStdioQuiet.
+ */
+const ADAPTER_STDIO_QUIET_MS = 100;
+/**
  * How long the pre-detach resume (issue #763) may wait for the adapter's
  * continue response before the disconnect goes out regardless. Budgeted
  * against the parent's 5 s stop deadline (ProxyManager.stop force-kills the
@@ -115,6 +125,14 @@ export class DapProxyWorker {
   private exitSynthesisAttempted: boolean = false;
   /** Armed when adapter stdio forwarding is active (issue #222): resolves once both stdio streams close. */
   private adapterStdioDrained: Promise<void> | null = null;
+  /**
+   * Armed as well when the adapter outlives its debuggee (issue #856), whose
+   * pipes do not close when the program ends: every chunk either stream
+   * delivers is counted and timed, so the drain can settle on silence.
+   */
+  private adapterStdioActivity: { chunks: number; lastChunkAt: number } | null = null;
+  /** When the first terminal signal arrived: the silence that counts is measured from here. */
+  private firstTerminalSignalAt: number | null = null;
   // Terminal signals (exited/terminated DAP events, socket close, adapter
   // process exit) all await the stdio drain barrier; without a queue their
   // continuations resume in an order set by await counts, not arrival — a
@@ -529,6 +547,9 @@ export class DapProxyWorker {
       this.adapterProcess = spawnResult.process;
       if (spawnConfig.forwardStdio) {
         this.adapterStdioDrained = this.createStdioDrainBarrier(spawnResult.process);
+        if (spawnConfig.forwardStdio.adapterOutlivesDebuggee) {
+          this.adapterStdioActivity = this.trackStdioActivity(spawnResult.process);
+        }
       }
       this.adapterExitCodeIsDebuggeeExitCode = spawnConfig.adapterExitCodeIsDebuggeeExitCode === true;
       this.logger!.info(`[Worker] Adapter spawned with PID: ${spawnResult.pid}`);
@@ -2413,13 +2434,36 @@ export class DapProxyWorker {
   }
 
   /**
+   * Count and time every chunk the adapter's stdio delivers (issue #856).
+   * Registered after the adapter manager's own 'data' listeners, so by the
+   * time a chunk is counted its lines have been forwarded.
+   */
+  private trackStdioActivity(adapterProcess: ChildProcess): { chunks: number; lastChunkAt: number } {
+    const activity = { chunks: 0, lastChunkAt: 0 };
+    const note = () => {
+      activity.chunks += 1;
+      activity.lastChunkAt = Date.now();
+    };
+    adapterProcess.stdout?.on('data', note);
+    adapterProcess.stderr?.on('data', note);
+    return activity;
+  }
+
+  /**
    * Hold exited/terminated forwarding until adapter stdio has drained: a
    * debuggee printing to a block-buffered pipe flushes everything at exit,
    * milliseconds after the adapter's terminated event, and the SessionManager
    * stops the proxy on terminated — dropping late messages. Stream 'data'
    * fires before 'close' and IPC is FIFO, so waiting here guarantees the
-   * forwarded output reaches the session buffer first. 2s backstop for
-   * adapters that never close their pipes. No-op when forwarding is off.
+   * forwarded output reaches the session buffer first.
+   *
+   * Drained means the pipes closed — or, for an adapter that outlives its
+   * debuggee and so never closes them when the program ends, that they went
+   * quiet (issue #856: CodeLLDB on Windows used to sit out the backstop at
+   * the end of every program, reporting each exit 2 s late). The 2 s
+   * backstop still bounds both: a pipe that neither closes nor falls silent
+   * (something the program started is still writing to it) is not waited
+   * for longer than before. No-op when forwarding is off.
    */
   private async waitForAdapterStdioDrain(): Promise<void> {
     if (!this.adapterStdioDrained) {
@@ -2429,13 +2473,73 @@ export class DapProxyWorker {
     const backstop = new Promise<void>(resolve => {
       timer = setTimeout(resolve, TERMINAL_SIGNAL_BACKSTOP_MS);
     });
+    const quiet = this.adapterStdioActivity ? this.waitForAdapterStdioQuiet(this.adapterStdioActivity) : undefined;
     try {
-      await Promise.race([this.adapterStdioDrained, backstop]);
+      await Promise.race([this.adapterStdioDrained, backstop, ...(quiet ? [quiet.settled] : [])]);
     } finally {
       if (timer) {
         clearTimeout(timer);
       }
+      quiet?.cancel();
     }
+  }
+
+  /**
+   * Settles when the adapter's stdio has delivered nothing for
+   * ADAPTER_STDIO_QUIET_MS, counted from the later of the last chunk and the
+   * first terminal signal — so a second signal queued behind the first
+   * (terminated after exited) does not wait a window of its own.
+   *
+   * The clock alone is not believed. A worker that was descheduled can find
+   * its timer due while output that arrived in the meantime is still unread:
+   * timers run before the poll phase that reads it. So once the window has
+   * passed, one full turn of the event loop is taken first (setImmediate
+   * runs after that poll phase), and the window starts over if the turn
+   * brought a chunk.
+   */
+  private waitForAdapterStdioQuiet(
+    activity: { chunks: number; lastChunkAt: number }
+  ): { settled: Promise<void>; cancel: () => void } {
+    const since = this.firstTerminalSignalAt ?? Date.now();
+    let cancelled = false;
+    let timer: NodeJS.Timeout | undefined;
+    let turn: NodeJS.Immediate | undefined;
+    const settled = new Promise<void>((resolve) => {
+      const check = (): void => {
+        if (cancelled) {
+          return;
+        }
+        const quietFor = Date.now() - Math.max(activity.lastChunkAt, since);
+        if (quietFor < ADAPTER_STDIO_QUIET_MS) {
+          timer = setTimeout(check, ADAPTER_STDIO_QUIET_MS - quietFor);
+          return;
+        }
+        const chunksBefore = activity.chunks;
+        turn = setImmediate(() => {
+          if (cancelled) {
+            return;
+          }
+          if (activity.chunks !== chunksBefore) {
+            check();
+            return;
+          }
+          resolve();
+        });
+      };
+      check();
+    });
+    return {
+      settled,
+      cancel: () => {
+        cancelled = true;
+        if (timer) {
+          clearTimeout(timer);
+        }
+        if (turn) {
+          clearImmediate(turn);
+        }
+      }
+    };
   }
 
   /**
@@ -2498,6 +2602,7 @@ export class DapProxyWorker {
     // point must not open a configuration phase against a program that
     // has ended (#746).
     this.terminalSignalArrived = true;
+    this.firstTerminalSignalAt ??= Date.now();
     const tail = this.terminalSignalQueue
       .then(() => this.settleDebuggerOffLaunch())
       .then(task)

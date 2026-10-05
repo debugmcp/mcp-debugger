@@ -1898,6 +1898,211 @@ describe('DapProxyWorker', () => {
       expect(outputIdx).toBeLessThan(terminatedIdx);
     });
 
+    describe('stdio drain for an adapter that outlives its debuggee (issue #856)', () => {
+      // CodeLLDB on Windows: the debuggee inherits the adapter's pipes, and
+      // the adapter keeps them open until the session is torn down. "Closed"
+      // can therefore not mean "drained" — the wait used to run to its 2 s
+      // backstop at the end of every program. For such an adapter the pipes
+      // going quiet is the signal.
+      const QUIET_MS = 100;
+      const BACKSTOP_MS = 2000;
+
+      async function startWorker(forwardStdio: Record<string, unknown>) {
+        const payload: ProxyInitPayload = {
+          cmd: 'init',
+          sessionId: 'lldb-drain-session',
+          language: 'ruby',
+          executablePath: 'ruby',
+          adapterHost: '127.0.0.1',
+          adapterPort: 8126,
+          logDir: '/logs',
+          scriptPath: '/path/to/hello.rb',
+          launchConfig: { request: 'launch', type: 'rdbg' },
+          adapterCommand: { command: 'rdbg', args: ['--open', '-c', '--', 'ruby', '/path/to/hello.rb'] }
+        };
+
+        const adapterProcess = new EventEmitter() as any;
+        adapterProcess.pid = 4245;
+        adapterProcess.stdout = new EventEmitter();
+        adapterProcess.stderr = new EventEmitter();
+        adapterProcess.kill = vi.fn();
+        adapterProcess.unref = vi.fn();
+
+        const processStub = {
+          spawn: vi.fn().mockResolvedValue({ process: adapterProcess as ChildProcess, pid: 4245 }),
+          shutdown: vi.fn().mockResolvedValue(undefined)
+        };
+        const connectionStub = {
+          connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+          setAdapterPolicy: vi.fn(),
+          setupEventHandlers: vi.fn((client: EventEmitter, handlers: Record<string, (body?: unknown) => void>) => {
+            if (handlers.onInitialized) client.on('initialized', handlers.onInitialized);
+            if (handlers.onExited) client.on('exited', handlers.onExited);
+            if (handlers.onTerminated) client.on('terminated', handlers.onTerminated);
+          }),
+          initializeSession: vi.fn().mockImplementation(async () => {
+            setImmediate(() => mockDapClient.emit('initialized'));
+          }),
+          sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
+          setBreakpoints: vi.fn().mockResolvedValue(undefined),
+          sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+          disconnect: vi.fn().mockResolvedValue(undefined)
+        };
+
+        // The handshake of the policy under the worker does not matter here;
+        // what the adapter process is like does. Hand the worker a spawn
+        // config shaped like buildLldbSpawnConfig's on win32.
+        const policy: AdapterPolicy = {
+          ...RubyAdapterPolicy,
+          getAdapterSpawnConfig: () => ({
+            mode: 'spawn',
+            command: 'codelldb',
+            args: ['--port', '8126'],
+            host: '127.0.0.1',
+            port: 8126,
+            logDir: '/logs',
+            forwardStdio
+          })
+        };
+
+        (worker as any).logger = mockLogger;
+        (worker as any).processManager = processStub;
+        (worker as any).connectionManager = connectionStub;
+        (worker as any).adapterPolicy = policy;
+        (worker as any).adapterState = policy.createInitialState();
+        (worker as any).currentInitPayload = payload;
+        (worker as any).currentSessionId = payload.sessionId;
+        (worker as any).state = ProxyState.INITIALIZING;
+
+        await (worker as any).startAdapterAndConnect(payload);
+        const spawnConfig = processStub.spawn.mock.calls[0][0];
+
+        const sent = () => mockMessageSender.send.mock.calls.map(([m]) => m);
+        const forwarded = (event: string) => sent().some(m => m.type === 'dapEvent' && m.event === event);
+        /** One chunk of debuggee output reaching the proxy: the stream's data event, then its line. */
+        const output = (line: string) => {
+          adapterProcess.stdout.emit('data', Buffer.from(`${line}\n`));
+          spawnConfig.onStdioLine('stdout', line);
+        };
+        return { adapterProcess, sent, forwarded, output };
+      }
+
+      it('forwards exited once the pipes have been quiet for a moment, not at the backstop', async () => {
+        const { forwarded } = await startWorker({ adapterOutlivesDebuggee: true });
+        vi.useFakeTimers();
+        try {
+          mockDapClient.emit('exited', { exitCode: 0 });
+          await vi.advanceTimersByTimeAsync(QUIET_MS - 40);
+          expect(forwarded('exited')).toBe(false);
+
+          await vi.advanceTimersByTimeAsync(80);
+          expect(forwarded('exited')).toBe(true);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('keeps waiting while output is still arriving, and forwards that output first', async () => {
+        const { forwarded, output, sent } = await startWorker({ adapterOutlivesDebuggee: true });
+        vi.useFakeTimers();
+        try {
+          mockDapClient.emit('exited', { exitCode: 0 });
+          await vi.advanceTimersByTimeAsync(60);
+          output('the last line the program printed');
+
+          // 120 ms after the signal, but only 60 ms after the last output.
+          await vi.advanceTimersByTimeAsync(60);
+          expect(forwarded('exited')).toBe(false);
+
+          await vi.advanceTimersByTimeAsync(80);
+          expect(forwarded('exited')).toBe(true);
+          const messages = sent();
+          const outputIdx = messages.findIndex(m =>
+            m.type === 'dapEvent' && m.event === 'output' && isRecord(m.body)
+            && m.body.output === 'the last line the program printed\n');
+          const exitedIdx = messages.findIndex(m => m.type === 'dapEvent' && m.event === 'exited');
+          expect(outputIdx).toBeGreaterThanOrEqual(0);
+          expect(outputIdx).toBeLessThan(exitedIdx);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('gives up at the backstop when the pipes never go quiet', async () => {
+        const { forwarded, output } = await startWorker({ adapterOutlivesDebuggee: true });
+        vi.useFakeTimers();
+        try {
+          mockDapClient.emit('exited', { exitCode: 0 });
+          // Something that outlived the program keeps writing to the pipe.
+          for (let elapsed = 0; elapsed < BACKSTOP_MS - 100; elapsed += 50) {
+            output('still talking');
+            await vi.advanceTimersByTimeAsync(50);
+          }
+          expect(forwarded('exited')).toBe(false);
+
+          for (let elapsed = 0; elapsed < 200; elapsed += 50) {
+            output('still talking');
+            await vi.advanceTimersByTimeAsync(50);
+          }
+          expect(forwarded('exited')).toBe(true);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('does not make terminated wait a second window after exited', async () => {
+        const { forwarded, sent } = await startWorker({ adapterOutlivesDebuggee: true });
+        vi.useFakeTimers();
+        try {
+          mockDapClient.emit('exited', { exitCode: 0 });
+          mockDapClient.emit('terminated', {});
+          await vi.advanceTimersByTimeAsync(QUIET_MS + 40);
+
+          expect(forwarded('exited')).toBe(true);
+          expect(forwarded('terminated')).toBe(true);
+          const events = sent().filter(m => m.type === 'dapEvent').map(m => (m as DapEventMessage).event);
+          expect(events.indexOf('exited')).toBeLessThan(events.indexOf('terminated'));
+          // terminated starts the worker's shutdown, which waits on timers of
+          // its own: let it finish on the fake clock it started on.
+          await vi.advanceTimersByTimeAsync(5000);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('still settles at once when the pipes do close', async () => {
+        const { adapterProcess, forwarded } = await startWorker({ adapterOutlivesDebuggee: true });
+        vi.useFakeTimers();
+        try {
+          mockDapClient.emit('exited', { exitCode: 0 });
+          adapterProcess.stdout.emit('close');
+          adapterProcess.stderr.emit('close');
+          await vi.advanceTimersByTimeAsync(1);
+          expect(forwarded('exited')).toBe(true);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('leaves an adapter whose pipes close with the debuggee waiting for the close', async () => {
+        // rdbg -c: silence is not the end — an at_exit hook can still print.
+        const { adapterProcess, forwarded } = await startWorker({});
+        vi.useFakeTimers();
+        try {
+          mockDapClient.emit('exited', { exitCode: 0 });
+          await vi.advanceTimersByTimeAsync(10 * QUIET_MS);
+          expect(forwarded('exited')).toBe(false);
+
+          adapterProcess.stdout.emit('close');
+          adapterProcess.stderr.emit('close');
+          await vi.advanceTimersByTimeAsync(1);
+          expect(forwarded('exited')).toBe(true);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+    });
+
     it('forwards terminated before dap_connection_closed in arrival order (issue #258)', async () => {
       // rdbg sends terminated and then closes the socket. Both handlers await
       // the same stdio drain barrier; whichever continuation runs first wins.

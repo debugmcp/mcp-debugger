@@ -213,7 +213,8 @@ describe('CppAdapterPolicy', () => {
         args: ['--port', '4711'],
         port: 4711
       });
-      expect((config as { forwardStdio?: unknown }).forwardStdio).toEqual({});
+      // CodeLLDB outlives the debuggee, so its pipes never close with it (issue #856).
+      expect((config as { forwardStdio?: unknown }).forwardStdio).toEqual({ adapterOutlivesDebuggee: true });
     });
 
     it('omits stdio forwarding on POSIX', () => {

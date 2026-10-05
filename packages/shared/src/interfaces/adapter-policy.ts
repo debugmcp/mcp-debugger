@@ -837,6 +837,18 @@ export type AdapterSpawnConfig =
          * debuggee output.
          */
         excludeStderrLinePattern?: RegExp;
+        /**
+         * The adapter process stays alive after the debuggee has ended, and
+         * keeps these pipes open with it (CodeLLDB; issue #856). The worker
+         * holds the debuggee's exit until the forwarded output has drained,
+         * and by default "drained" means the pipes closed — true of rdbg -c,
+         * which exits with its debuggee, and never true of an adapter like
+         * this one, for which the wait would run to its backstop every time.
+         * With this set, the pipes going quiet counts as drained: when the
+         * adapter reports the exit the process is gone and everything it
+         * wrote is already in the pipe.
+         */
+        adapterOutlivesDebuggee?: boolean;
       };
       /**
        * The adapter process's exit code IS the debuggee's exit code (issue

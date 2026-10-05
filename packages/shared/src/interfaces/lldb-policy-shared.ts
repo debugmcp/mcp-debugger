@@ -452,13 +452,16 @@ export function matchesLldbAdapterCommand(adapterCommand: { command: string; arg
  * STDOUT/STDERR process broadcasts), LLDB on Windows lets the debuggee
  * inherit the adapter process's pipes. Forward those as output events there;
  * on POSIX the channels are exclusive, so this stays off to avoid noise.
+ * CodeLLDB outlives the debuggee and holds those pipes open until the session
+ * ends, which the forwarding is told so that a program's exit is not held
+ * back waiting for a close that only teardown brings (issue #856).
  */
 export function buildLldbSpawnConfig(
   payload: AdapterSpawnPayload,
   platform: NodeJS.Platform = process.platform,
   arch: NodeJS.Architecture = process.arch
 ): AdapterSpawnConfig {
-  const forwardStdio = platform === 'win32' ? {} : undefined;
+  const forwardStdio = platform === 'win32' ? { adapterOutlivesDebuggee: true } : undefined;
 
   // If a custom adapter command was provided, use it directly
   if (payload.adapterCommand) {
