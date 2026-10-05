@@ -10,9 +10,11 @@ import {
   handlePause,
   handleListThreads,
   stepTool,
-  continueExecutionTool
+  continueExecutionTool,
+  waitForStopTool
 } from '../../../../../src/server/handlers/execution-tools.js';
 import {
+  SessionNotFoundError,
   SessionTerminatedError,
   ProxyNotRunningError
 } from '../../../../../src/errors/debug-errors.js';
@@ -76,6 +78,142 @@ describe('execution tool handlers', () => {
 
       await expect(handleListThreads(ctx, { sessionId: 'test-session' }))
         .rejects.toThrow('Failed to list threads: unexpected');
+    });
+  });
+
+  describe('waitForStopTool (issue #849)', () => {
+    const liveSession = { id: 'test-session', sessionLifecycle: SessionLifecycleState.ACTIVE };
+
+    it('hands the timeout and the request signal to the session manager and reports the stop', async () => {
+      ctx.sessionManager.getSession.mockReturnValue(liveSession);
+      const lastStop = { reason: 'breakpoint', threadId: 1, timestamp: 1_700_000_000_000 };
+      ctx.sessionManager.waitForStop.mockResolvedValue({
+        success: true,
+        state: 'paused',
+        data: {
+          message: 'Paused (breakpoint) at /app/main.py:12',
+          lastStop,
+          location: { file: '/app/main.py', line: 12, column: 1 }
+        }
+      });
+      const signal = new AbortController().signal;
+
+      const result = await waitForStopTool(ctx, { sessionId: 'test-session', timeout: 45_000 }, 'wait_for_stop', { signal });
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(ctx.sessionManager.waitForStop).toHaveBeenCalledWith('test-session', 45_000, signal);
+      expect(payload).toEqual({
+        success: true,
+        state: 'paused',
+        message: 'Paused (breakpoint) at /app/main.py:12',
+        lastStop,
+        location: { file: '/app/main.py', line: 12, column: 1 }
+      });
+    });
+
+    it('hoists pending to the top level when the wait ran out', async () => {
+      ctx.sessionManager.getSession.mockReturnValue(liveSession);
+      ctx.sessionManager.waitForStop.mockResolvedValue({
+        success: true,
+        state: 'running',
+        data: { message: 'The program is still running after 30s with no stop.', pending: true }
+      });
+
+      const result = await waitForStopTool(ctx, { sessionId: 'test-session' }, 'wait_for_stop');
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(ctx.sessionManager.waitForStop).toHaveBeenCalledWith('test-session', undefined, undefined);
+      expect(payload).toEqual({
+        success: true,
+        state: 'running',
+        pending: true,
+        message: 'The program is still running after 30s with no stop.'
+      });
+    });
+
+    it('reports a program that ended, with its exit code', async () => {
+      ctx.sessionManager.getSession.mockReturnValue(liveSession);
+      ctx.sessionManager.waitForStop.mockResolvedValue({
+        success: true,
+        state: 'stopped',
+        data: { message: 'The program exited with code 3.', exitCode: 3 }
+      });
+
+      const result = await waitForStopTool(ctx, { sessionId: 'test-session' }, 'wait_for_stop');
+
+      expect(JSON.parse(result.content[0].text)).toEqual({
+        success: true,
+        state: 'stopped',
+        message: 'The program exited with code 3.',
+        exitCode: 3
+      });
+    });
+
+    it('keeps exit code 0: a clean finish is still an answer', async () => {
+      ctx.sessionManager.getSession.mockReturnValue(liveSession);
+      ctx.sessionManager.waitForStop.mockResolvedValue({
+        success: true,
+        state: 'stopped',
+        data: { message: 'The program ran to completion (exit code 0).', exitCode: 0 }
+      });
+
+      const result = await waitForStopTool(ctx, { sessionId: 'test-session' }, 'wait_for_stop');
+
+      expect(JSON.parse(result.content[0].text).exitCode).toBe(0);
+    });
+
+    it('answers for a session whose program has finished instead of refusing it as terminated', async () => {
+      ctx.sessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.TERMINATED
+      });
+      ctx.sessionManager.waitForStop.mockResolvedValue({
+        success: true,
+        state: 'stopped',
+        data: { message: 'The program ran to completion (exit code 0).', exitCode: 0 }
+      });
+
+      const result = await waitForStopTool(ctx, { sessionId: 'test-session' }, 'wait_for_stop');
+
+      expect(JSON.parse(result.content[0].text).success).toBe(true);
+      expect(ctx.sessionManager.waitForStop).toHaveBeenCalled();
+    });
+
+    it('reports the controller refusal with the state it observed', async () => {
+      ctx.sessionManager.getSession.mockReturnValue(liveSession);
+      ctx.sessionManager.waitForStop.mockResolvedValue({
+        success: false,
+        state: 'created',
+        error: 'Nothing to wait for: this session has not been started.'
+      });
+
+      const result = await waitForStopTool(ctx, { sessionId: 'test-session' }, 'wait_for_stop');
+
+      expect(JSON.parse(result.content[0].text)).toEqual({
+        success: false,
+        error: 'Nothing to wait for: this session has not been started.',
+        state: 'created'
+      });
+    });
+
+    it('converts an unknown session into a success:false result', async () => {
+      ctx.sessionManager.getSession.mockReturnValue(undefined);
+
+      const result = await waitForStopTool(ctx, { sessionId: 'no-such-session' }, 'wait_for_stop');
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.success).toBe(false);
+      expect(payload.error).toContain('no-such-session');
+      expect(ctx.sessionManager.waitForStop).not.toHaveBeenCalled();
+    });
+
+    it('converts a session that vanished inside the session layer the same way', async () => {
+      ctx.sessionManager.getSession.mockReturnValue(liveSession);
+      ctx.sessionManager.waitForStop.mockRejectedValue(new SessionNotFoundError('test-session'));
+
+      const result = await waitForStopTool(ctx, { sessionId: 'test-session' }, 'wait_for_stop');
+
+      expect(JSON.parse(result.content[0].text).success).toBe(false);
     });
   });
 

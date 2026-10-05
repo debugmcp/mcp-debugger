@@ -1,6 +1,7 @@
 /**
  * Execution control tools: step_over / step_into / step_out (one handler
- * keyed by toolName), continue_execution, pause_execution, list_threads.
+ * keyed by toolName), continue_execution, wait_for_stop, pause_execution,
+ * list_threads.
  */
 import { SessionState } from '@debugmcp/shared';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
@@ -122,6 +123,59 @@ export const continueExecutionTool: ToolHandler = async (ctx, args) => {
     // state is usually "running", but honestly reports "paused" when a
     // breakpoint fired before the continue acknowledgement resolved.
     return jsonResult({ success: true, message: 'Continued execution', state: continueResult.state });
+  } catch (error) {
+    // Same contract as the step tools: typed session errors and other
+    // expected Errors report as {success: false}; non-Errors escape.
+    const sessionResult = sessionErrorToResult(error);
+    if (sessionResult) {
+      return sessionResult;
+    }
+    if (error instanceof Error) {
+      return failureResult(error.message);
+    }
+    throw error;
+  }
+};
+
+/**
+ * wait_for_stop (issue #849): the session layer's answer, flattened the way
+ * the step tools flatten theirs — `pending` at the top level, the stop record
+ * and location beside the state, and the source line when it can be read.
+ */
+export const waitForStopTool: ToolHandler = async (ctx, args, _toolName, extra) => {
+  requireSessionId(args);
+
+  try {
+    const waitResult = await ctx.waitForStop(args.sessionId, args.timeout, extra?.signal);
+    if (!waitResult.success) {
+      return failureResult(waitResult.error ?? 'Failed to wait for a stop', { state: waitResult.state });
+    }
+
+    const data = waitResult.data;
+    const response: Record<string, unknown> = {
+      success: true,
+      state: waitResult.state
+    };
+    if (data?.pending) {
+      response.pending = true;
+    }
+    if (data?.message) {
+      response.message = data.message;
+    }
+    if (data?.lastStop) {
+      response.lastStop = data.lastStop;
+    }
+    if (typeof data?.exitCode === 'number') {
+      response.exitCode = data.exitCode;
+    }
+    if (data?.location) {
+      response.location = data.location;
+      const context = await readLineContext(ctx, data.location.file, data.location.line, 'wait_for_stop result');
+      if (context) {
+        response.context = context;
+      }
+    }
+    return jsonResult(response);
   } catch (error) {
     // Same contract as the step tools: typed session errors and other
     // expected Errors report as {success: false}; non-Errors escape.

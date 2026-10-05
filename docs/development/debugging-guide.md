@@ -498,7 +498,25 @@ combinations of breakpoint-addressing, variable-access and container modes.
 
 Dispatch itself is `registerToolHandlers()` in `src/server/tool-dispatch.ts`: it validates
 `inputSchema.required` at the MCP boundary, looks the name up in `TOOL_HANDLERS`, and wraps
-the result. Handlers never re-implement that plumbing.
+the result. Handlers never re-implement that plumbing. A handler that blocks takes the
+request's abort signal from its fourth argument (`extra.signal`) and releases its wait on it.
+
+Those three files are the code. A tool that ships also moves these, none of which the
+compiler will remind you about:
+
+- the count in `tests/core/unit/server/server-required-arguments.test.ts`, and the mock in
+  `tests/core/unit/server/server-test-helpers.ts` (`createMockSessionManager`) if the tool
+  adds a `SessionManager` method;
+- every doc that states the tool count or lists the tools -- `node scripts/check-docs.mjs`
+  names the ones it can find (it reads `TOOL_NAMES`, and requires `README.md` and
+  `docs/tool-reference.md` to mention every tool), but not `ARCHITECTURE.md`,
+  `CONTRIBUTING.md`, the roadmap's freeze line, the `autoApprove` list in
+  `docs/docker-support.md`, or the comment in `packages/mcp-debugger/extensions/mcp-debugger.js`;
+- the agent-facing text: `skills/debugging/SKILL.md`, its condensed copy in
+  `src/skill-content.ts`, and the tool list in `CLAUDE.md`;
+- real coverage in `tests/e2e/comprehensive-mcp-tools.test.ts`, whose matrix is derived
+  from `TOOL_NAMES` and reports an unexercised tool as PENDING;
+- a changelog fragment (`changelog.d/<issue>.added.md`).
 
 ### 3. Health Checks
 

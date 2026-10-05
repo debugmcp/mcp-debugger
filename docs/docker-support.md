@@ -75,6 +75,7 @@ Here's the recommended configuration for your MCP settings file:
         "step_into",
         "step_out",
         "continue_execution",
+        "wait_for_stop",
         "pause_execution",
         "list_threads",
         "get_variables",

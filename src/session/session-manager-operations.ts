@@ -42,7 +42,8 @@ import {
   CustomLaunchRequestArguments,
   DebugResult,
   PauseResultData,
-  StepResultData
+  StepResultData,
+  WaitForStopResultData
 } from './session-manager-core.js';
 
 /** Result types for function-breakpoint name resolution and by-name removal (issue #559). */
@@ -119,6 +120,14 @@ export abstract class SessionManagerOperations extends SessionManagerData {
   protected launchGraceMs = 5000;
 
   /**
+   * How long wait_for_stop waits when the caller names no timeout (issue
+   * #849). Not a deadline on the debuggee: a wait that runs out answers
+   * `pending: true` and can simply be called again. Protected so tests can
+   * shrink the window.
+   */
+  protected waitForStopDefaultMs = 30000;
+
+  /**
    * The view of this facade that the operation collaborators get. Every member
    * is late bound (arrows for methods, getters for fields and tunables) so that
    * reassigning `selectPolicy` or writing `stepGraceMs` on a live instance —
@@ -144,11 +153,13 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         get stepGraceMs() { return facade().stepGraceMs; },
         get pauseGraceMs() { return facade().pauseGraceMs; },
         get launchReadyCeilingMs() { return facade().launchReadyCeilingMs; },
-        get launchGraceMs() { return facade().launchGraceMs; }
+        get launchGraceMs() { return facade().launchGraceMs; },
+        get waitForStopDefaultMs() { return facade().waitForStopDefaultMs; }
       },
       getSession: (sessionId) => this._getSessionById(sessionId),
       updateSession: (sessionId, updates) => this.sessionStore.update(sessionId, updates),
       updateState: (session, newState) => this._updateSessionState(session, newState),
+      onStateChange: (sessionId, listener) => this.onSessionStateChange(sessionId, listener),
       selectPolicy: (language) => this.selectPolicy(language),
       selectStorePolicy: (language) => this.sessionStore.selectPolicy(language),
       findFreePort: () => this.findFreePort(),
@@ -358,6 +369,18 @@ export abstract class SessionManagerOperations extends SessionManagerData {
   /** List the debuggee's threads. */
   async listThreads(sessionId: string): Promise<Array<{ id: number; name: string }>> {
     return this.execution.listThreads(sessionId);
+  }
+
+  /**
+   * Block until the session next pauses or ends, or the timeout passes
+   * (issue #849).
+   */
+  async waitForStop(
+    sessionId: string,
+    timeoutMs?: number,
+    signal?: AbortSignal
+  ): Promise<DebugResult<WaitForStopResultData>> {
+    return this.execution.waitForStop(sessionId, timeoutMs, signal);
   }
 
   /**

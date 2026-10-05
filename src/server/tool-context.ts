@@ -24,7 +24,7 @@ import type {
   Variable
 } from '@debugmcp/shared';
 import type { SessionManager } from '../session/session-manager.js';
-import type { DebugResult, StepResultData } from '../session/session-manager-core.js';
+import type { DebugResult, StepResultData, WaitForStopResultData } from '../session/session-manager-core.js';
 import type { FrameSummary, StackTraceResult } from '../session/session-manager-data.js';
 import type { VariableTruncationSummary } from '../session/variable-caps.js';
 import type { SimpleFileChecker, FileExistenceResult } from '../utils/simple-file-checker.js';
@@ -117,10 +117,25 @@ export interface ToolContext {
   stepOver(sessionId: string): Promise<DebugResult<StepResultData>>;
   stepInto(sessionId: string): Promise<DebugResult<StepResultData>>;
   stepOut(sessionId: string): Promise<DebugResult<StepResultData>>;
+  waitForStop(sessionId: string, timeoutMs?: number, signal?: AbortSignal): Promise<DebugResult<WaitForStopResultData>>;
+}
+
+/**
+ * What the transport knows about one tools/call beyond its arguments. `signal`
+ * aborts when the client cancels the request or its connection closes; a
+ * handler that blocks (wait_for_stop, issue #849) releases its wait on it.
+ */
+export interface ToolCallExtra {
+  signal?: AbortSignal;
 }
 
 /**
  * One MCP tool. `toolName` is the name the request carried, for handlers that
  * serve several tools (step_over / step_into / step_out).
  */
-export type ToolHandler = (ctx: ToolContext, args: ToolArguments, toolName: string) => Promise<ToolResult>;
+export type ToolHandler = (
+  ctx: ToolContext,
+  args: ToolArguments,
+  toolName: string,
+  extra?: ToolCallExtra
+) => Promise<ToolResult>;

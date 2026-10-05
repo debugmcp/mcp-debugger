@@ -49,12 +49,16 @@ import type {
   DebugResult,
   PauseResultData,
   StepResultData,
-  StopLocation
+  StopLocation,
+  WaitForStopResultData
 } from '../session-manager-core.js';
 import { debuggerOffWhy, isDebuggerOff, type DebuggerOffView } from '../debugger-off.js';
 import { samePath } from '../breakpoints/hit-verification.js';
 import type { ExecutionContext } from '../operations-context.js';
 import type { PauseCoordinator } from './pause-coordinator.js';
+import { waitForSessionState } from './session-state-wait.js';
+import { resolveDapTimeoutOverride } from '../dap-request-helpers.js';
+import { describeProgramEnd } from '../breakpoints/launch-warnings.js';
 
 /** What distinguishes the three step flavours: everything else is shared. */
 interface StepKind {
@@ -721,6 +725,112 @@ export class ExecutionController {
       throw new Error(response.message || `DAP 'threads' request failed`);
     }
     return (response?.body?.threads ?? []).map(t => ({ id: t.id, name: t.name }));
+  }
+
+  /**
+   * Block until the session next pauses or ends, or the caller's timeout
+   * passes (issue #849) — the explicit wait behind every `pending: true` and
+   * behind `continue_execution`, which does not wait at all.
+   *
+   * The wait is on the session's state, not on the adapter's `stopped`
+   * event, so a stop the core auto-continues is not reported. The answer is
+   * built from the session as it is once the wait has settled (and, for a
+   * pause, once the stack has been read): a session that is already paused or
+   * already over answers at once; a wait that ran out, or whose caller went
+   * away, answers `pending: true` with the session still live.
+   */
+  async waitForStop(
+    sessionId: string,
+    timeoutMs?: number,
+    signal?: AbortSignal
+  ): Promise<DebugResult<WaitForStopResultData>> {
+    const session = this.ctx.getSession(sessionId);
+
+    const timeoutCheck = resolveDapTimeoutOverride(timeoutMs, 'SessionManager waitForStop', this.ctx.logger);
+    if (timeoutCheck.error) {
+      return { success: false, error: timeoutCheck.error, state: session.state };
+    }
+    if (session.state === SessionState.CREATED) {
+      return { success: false, error: ErrorMessages.waitForStopNotStarted(), state: session.state };
+    }
+    const waitMs = timeoutCheck.timeoutMs ?? this.ctx.tunables.waitForStopDefaultMs;
+
+    const outcome = await waitForSessionState(
+      this.ctx,
+      sessionId,
+      (state) => state === SessionState.PAUSED || isTerminalSessionState(state),
+      { timeoutMs: waitMs, signal }
+    );
+    if (outcome === 'gone') {
+      return {
+        success: false,
+        error: ErrorMessages.sessionClosedWhileWaiting(sessionId),
+        state: SessionState.STOPPED
+      };
+    }
+
+    // Where it stopped, best effort: the same short settle and stack read a
+    // step or a pause does. It is a DAP round trip, so the state is read
+    // again afterwards rather than trusted across it.
+    let location: StopLocation | undefined;
+    if (session.state === SessionState.PAUSED) {
+      try {
+        await new Promise(resolve => setTimeout(resolve, 10));
+        const [topFrame] = await this.ctx.getStackTrace(sessionId);
+        if (topFrame) {
+          location = { file: topFrame.file, line: topFrame.line, column: topFrame.column };
+        }
+      } catch (error) {
+        this.ctx.logger.debug(`[SessionManager waitForStop ${sessionId}] Could not capture location:`, error);
+      }
+    }
+
+    const state = session.state;
+    if (state === SessionState.PAUSED && session.lastStop) {
+      const where = location ? ` at ${location.file}:${location.line}` : '';
+      return {
+        success: true,
+        state,
+        data: {
+          message: `Paused (${session.lastStop.reason})${where}`,
+          lastStop: session.lastStop,
+          ...(location ? { location } : {})
+        }
+      };
+    }
+    if (state === SessionState.ERROR) {
+      const detail = session.lastProxyError ? `: ${session.lastProxyError}` : '';
+      return {
+        success: true,
+        state,
+        data: { message: `The debug session ended in an error state${detail}` }
+      };
+    }
+    if (state === SessionState.STOPPED) {
+      return {
+        success: true,
+        state,
+        data: {
+          message: `${describeProgramEnd(session.exitCode)}.`,
+          ...(typeof session.exitCode === 'number' ? { exitCode: session.exitCode } : {})
+        }
+      };
+    }
+    this.ctx.logger.info(
+      `[SessionManager waitForStop] Session ${sessionId} still ${state} after ${waitMs}ms (${outcome}); answering with pending`
+    );
+    return {
+      success: true,
+      state,
+      data: {
+        message: ErrorMessages.waitForStopPending(
+          waitMs / 1000,
+          state === SessionState.INITIALIZING ? 'initializing' : 'running',
+          debuggerOffWhy(session)
+        ),
+        pending: true
+      }
+    };
   }
 
   /**

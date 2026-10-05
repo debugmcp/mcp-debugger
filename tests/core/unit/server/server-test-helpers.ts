@@ -97,7 +97,7 @@ export type MockSessionManager = ReturnType<typeof createMockSessionManager>;
  * the JSON-RPC envelope entirely.
  */
 export type TestRequest = { method?: string; params?: Record<string, unknown>; jsonrpc?: string };
-export type CallToolHandler = (request: TestRequest) => Promise<ToolResult>;
+export type CallToolHandler = (request: TestRequest, extra?: { signal?: AbortSignal }) => Promise<ToolResult>;
 export type ListToolsHandler = (request?: TestRequest) => Promise<{ tools: Tool[] }>;
 
 /**
@@ -181,6 +181,7 @@ export function createMockSessionManager(mockAdapterRegistry: IAdapterRegistry) 
     getSessionPolicy: vi.fn().mockReturnValue({}),
     pause: vi.fn(),
     listThreads: vi.fn(),
+    waitForStop: vi.fn(),
     detachFromProcess: vi.fn(),
     attachToProcess: vi.fn(),
     redefineClasses: vi.fn(),

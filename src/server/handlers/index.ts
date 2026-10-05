@@ -19,7 +19,13 @@ import {
   redefineClassesTool
 } from './debuggee-tools.js';
 import { exposeSessionTool, unexposeSessionTool } from './mirror-tools.js';
-import { stepTool, continueExecutionTool, pauseExecutionTool, listThreadsTool } from './execution-tools.js';
+import {
+  stepTool,
+  continueExecutionTool,
+  waitForStopTool,
+  pauseExecutionTool,
+  listThreadsTool
+} from './execution-tools.js';
 import {
   getVariablesTool,
   getStackTraceTool,
@@ -55,6 +61,7 @@ export const TOOL_HANDLERS: Readonly<Record<ToolName, ToolHandler>> = Object.fre
   step_into: stepTool,
   step_out: stepTool,
   continue_execution: continueExecutionTool,
+  wait_for_stop: waitForStopTool,
   pause_execution: pauseExecutionTool,
   list_threads: listThreadsTool,
   get_variables: getVariablesTool,

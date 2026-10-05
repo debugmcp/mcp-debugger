@@ -167,6 +167,19 @@ export interface RunToCompletionSummary {
 }
 
 /**
+ * How the program ended, by the exit code the debuggee reported — or did not
+ * (attach targets, signal-killed debuggees and adapters that send no `exited`
+ * leave it undefined). No trailing period: callers continue the sentence.
+ */
+export function describeProgramEnd(exitCode: number | undefined): string {
+  return typeof exitCode !== 'number'
+    ? 'The program ended without reporting an exit code'
+    : exitCode === 0
+      ? 'The program ran to completion (exit code 0)'
+      : `The program exited with code ${exitCode}`;
+}
+
+/**
  * Run-to-completion summary (issue #701). Built when the launch ends in
  * STOPPED. Says how the program ended — with its exit code when the debuggee
  * reported one (attach targets, signal-killed debuggees and adapters that
@@ -184,12 +197,7 @@ export function buildRunToCompletionSummary(
   session: Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints' | 'exitCode' | 'lastStop' | 'adapterCapabilities'>
 ): RunToCompletionSummary {
   const exitCode = session.exitCode;
-  const ended =
-    typeof exitCode !== 'number'
-      ? 'The program ended without reporting an exit code'
-      : exitCode === 0
-        ? 'The program ran to completion (exit code 0)'
-        : `The program exited with code ${exitCode}`;
+  const ended = describeProgramEnd(exitCode);
   const data: RunToCompletionSummary['data'] = typeof exitCode === 'number' ? { exitCode } : {};
 
   if (session.lastStop) {

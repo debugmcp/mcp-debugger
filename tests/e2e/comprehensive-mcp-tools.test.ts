@@ -580,12 +580,30 @@ describe(`Comprehensive MCP Debugger Test — ${ALL_TOOLS.length} Tools × ${LAN
           t0 = Date.now();
           try {
             const contRes = await callToolSafely(mcpClient!, 'continue_execution', { sessionId: currentSessionId });
-            await new Promise(r => setTimeout(r, 2000));
             record('continue_execution', lang.language, 'PASS',
               `success=${contRes.success}, state=${contRes.state ?? 'N/A'}`,
               Date.now() - t0);
           } catch (err: any) {
             record('continue_execution', lang.language, 'FAIL', err.message, Date.now() - t0);
+          }
+
+          /* ---- wait_for_stop (issue #849) ---- */
+          // continue_execution does not wait. The program was resumed past its
+          // breakpoint, so the wait reports it ending (or its next stop); one
+          // that outlives the timeout answers pending, which is a pass too.
+          // This is the wait a fixed sleep used to stand in for.
+          t0 = Date.now();
+          try {
+            const waitRes = await callToolSafely(mcpClient!, 'wait_for_stop', { sessionId: currentSessionId, timeout: 10000 });
+            const settled = waitRes.state === 'stopped' || waitRes.state === 'paused' || waitRes.state === 'error';
+            const ok = waitRes.success === true && (settled || waitRes.pending === true);
+            record('wait_for_stop', lang.language, ok ? 'PASS' : 'FAIL',
+              `success=${waitRes.success}, state=${waitRes.state ?? 'N/A'}` +
+                (waitRes.pending ? ', pending' : '') +
+                (waitRes.exitCode !== undefined ? `, exitCode=${waitRes.exitCode}` : ''),
+              Date.now() - t0);
+          } catch (err: any) {
+            record('wait_for_stop', lang.language, 'FAIL', err.message, Date.now() - t0);
           }
 
           /* ---- get_output (issue #218) ---- */
@@ -673,10 +691,14 @@ describe(`Comprehensive MCP Debugger Test — ${ALL_TOOLS.length} Tools × ${LAN
 
           // Try inspection tools on mock (get_output: mock emits no DAP output
           // events, so this asserts the empty-success contract)
-          for (const tool of ['get_stack_trace', 'get_local_variables', 'step_over', 'continue_execution', 'get_output'] as const) {
+          for (const tool of ['get_stack_trace', 'get_local_variables', 'step_over', 'continue_execution', 'wait_for_stop', 'get_output'] as const) {
             t0 = Date.now();
             try {
-              const args: Record<string, unknown> = { sessionId: currentSessionId };
+              // A short timeout: a mock program that keeps running answers
+              // pending (a success) rather than holding the suite for 30 s.
+              const args: Record<string, unknown> = tool === 'wait_for_stop'
+                ? { sessionId: currentSessionId, timeout: 1000 }
+                : { sessionId: currentSessionId };
               const res = await callToolSafely(mcpClient!, tool, args);
               record(tool, 'mock', res.success !== false ? 'PASS' : 'FAIL',
                 JSON.stringify(res).slice(0, 150), Date.now() - t0);

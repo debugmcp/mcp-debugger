@@ -9,5 +9,7 @@ console.log('LAUNCH_CONFIG ' + JSON.stringify({
 if (process.argv.includes('--exit')) {
   process.exitCode = 7;
 } else {
-  setInterval(() => {}, 100);
+  setInterval(() => {
+    globalThis.launchConfigTicks = (globalThis.launchConfigTicks ?? 0) + 1; // line 13: wait_for_stop breaks here
+  }, 100);
 }

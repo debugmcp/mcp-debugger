@@ -39,10 +39,11 @@ export function buildServerInstructions(
 
   return `mcp-debugger drives real step-through debuggers (Python, JavaScript/TypeScript, Ruby, Rust, Go, Java, .NET, C/C++, COBOL) as MCP tools.
 
-Golden path: create_debug_session -> set_breakpoint (ABSOLUTE file path) -> start_debugging (ABSOLUTE scriptPath) -> get_stack_trace -> get_scopes(frameId from the stack frame's "id" field) -> get_variables / get_local_variables / evaluate_expression -> step_* or continue_execution -> get_output -> close_debug_session (always, even on failure).
+Golden path: create_debug_session -> set_breakpoint (ABSOLUTE file path) -> start_debugging (ABSOLUTE scriptPath) -> get_stack_trace -> get_scopes(frameId from the stack frame's "id" field) -> get_variables / get_local_variables / evaluate_expression -> step_* or continue_execution (+ wait_for_stop) -> get_output -> close_debug_session (always, even on failure).
 
 Key rules:
 - Stepping/evaluation/variable reads require the session to be PAUSED; the stop reason on each pause tells you why it stopped.
+- continue_execution returns at once, and a launch, step, pause or attach may answer pending:true when its stop has not arrived yet. Nothing is cancelled — breakpoints stay armed. Call wait_for_stop {sessionId} to block until the session pauses or ends (it reports the stop, or the exit code); a wait that runs out answers pending:true again, so call it again.
 - If a variable entry has a variablesReference, call get_variables with it to expand children.
 - Breakpoints may report unverified until the module/class loads — that is normal.
 - list_breakpoints shows every breakpoint with its verified state; remove_breakpoint (by id or file+line) and clear_breakpoints take effect immediately, even mid-run — use them to move a bisection window without restarting.${statementRule}${expectedContentRule}
@@ -79,7 +80,7 @@ ${setBreakpointStep}
 5. get_scopes {sessionId, frameId} -> variablesReference per scope
 6. get_variables {sessionId, scope: variablesReference} or get_local_variables {sessionId}
 7. evaluate_expression {sessionId, expression}
-8. step_over / step_into / step_out / continue_execution
+8. step_over / step_into / step_out / continue_execution, then wait_for_stop {sessionId} to block until the next stop or the exit (continue_execution does not wait)
 9. get_output {sessionId} — cursor-based; pass the returned nextSince back as since for only-new output
 10. close_debug_session {sessionId} — ALWAYS, even after errors
 
@@ -93,6 +94,7 @@ ${setBreakpointStep}
 
 ## Session state rules
 - PAUSED is required for stepping, evaluation, and variable reads; RUNNING follows continue_execution.
+- pending:true on any answer means the stop has not arrived yet and nothing was cancelled: wait_for_stop blocks until it does.
 - Each pause carries a stop reason (breakpoint, step, entry, exception...).
 - Variable entries with a variablesReference are containers — expand them with get_variables.
 - Breakpoints may verify late (debugpy, JDI defer until load) — not an error.

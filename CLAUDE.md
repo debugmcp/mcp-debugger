@@ -242,7 +242,7 @@ The codebase follows a **layered architecture with dependency injection** and **
      - `attach/attach-controller.ts` (`AttachController`): `attachToProcess`, `detachFromProcess`; `attach/attach-verification.ts` (`verifyAttachThreads`, `pauseAfterAttach`): the thread poll and post-attach pause that make PAUSED real before it is reported
      - `breakpoints/breakpoint-controller.ts` (`BreakpointController`): set/remove/clear plus the replace-all DAP re-sends
      - `breakpoints/anchor-resolution.ts` (`reresolveAnchors`) and `breakpoints/launch-warnings.ts` (pure warning builders)
-     - `execution/execution-controller.ts` (`ExecutionController`): stepping (table-driven over `STEP_KINDS`), continue, pause, thread list
+     - `execution/execution-controller.ts` (`ExecutionController`): stepping (table-driven over `STEP_KINDS`), continue, pause, thread list, `waitForStop`; `execution/session-state-wait.ts` (`waitForSessionState`): the one level-triggered wait on a session's state — it re-reads the state in a microtask after each change (`OperationsContext.onStateChange`, fed by `_updateSessionState`), so an entry stop the core auto-continues within one call stack is never reported (issue #849)
      - `inspection/expression-evaluator.ts` (`ExpressionEvaluator`), `jvm/redefine-classes-controller.ts` (`RedefineClassesController`), `mirror/mirror-controller.ts` (`MirrorController`)
    - Collaborators see the facade through `OperationsContext` (`operations-context.ts`), whose members are late-bound arrows and getters — never captured references — so reassigning a facade method or writing a tunable on a live instance is visible to them; each takes the narrowest `Pick<>` slice it uses. Collaborator-to-collaborator dependencies are constructor arguments (`DebugLauncher(ctx, proxyLauncher, breakpoints, inFlight)`, `AttachController(ctx, proxyLauncher, breakpoints, pauseCoordinator, inFlight)`) held as captured instance references: their methods resolve at call time, so `vi.spyOn(internals(ops).proxyLauncher, 'start')` intercepts, but reassigning a collaborator field after construction is not observed. The facade owns one shared `InFlightGuard` (`in-flight-guard.ts`, issue #711) that the launcher and the attach controller both take: `startDebugging`, `restartDebugging`, `attachToProcess` and `detachFromProcess` each claim the session before their first await and release it in `finally`, so one launch-shaped call per session at a time; `restartDebugging` replays through the launcher's private `launch()` under its own claim, never through the facade's `startDebugging`. Shared per-request DAP helpers live in `dap-request-helpers.ts`
    - Coordinates ProxyManager instances (one per session)
@@ -537,7 +537,7 @@ After adding the MCP server:
 - **Status Check**: After restart, type `/mcp` in Claude Code to see connected servers
 
 ### Available Tools After Integration
-Once connected, the following 28 MCP tools become available:
+Once connected, the following 29 MCP tools become available:
 - `create_debug_session` - Start a new debug session
 - `list_debug_sessions` - List active debug sessions
 - `list_supported_languages` - Show available language adapters
@@ -554,6 +554,7 @@ Once connected, the following 28 MCP tools become available:
 - `close_debug_session` - Clean up sessions
 - `step_over`, `step_into`, `step_out` - Step through code
 - `continue_execution` - Continue running
+- `wait_for_stop` - Block until the session next pauses or ends (a timeout answers `pending: true`)
 - `pause_execution` - Pause a running program
 - `list_threads` - List all threads in a debug session
 - `get_variables` - Inspect variables in scope

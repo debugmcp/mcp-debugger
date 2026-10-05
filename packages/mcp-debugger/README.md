@@ -1,6 +1,6 @@
 # @debugmcp/mcp-debugger
 
-Step-through debugging MCP server for LLMs across nine languages — **28 tools** covering breakpoints (line, statement-anchored, function, logpoints), stepping, stack/variable inspection, expression evaluation, buffered program output, launch/attach/restart lifecycle, and a read-only IDE mirror of the live session.
+Step-through debugging MCP server for LLMs across nine languages — **29 tools** covering breakpoints (line, statement-anchored, function, logpoints), stepping, stack/variable inspection, expression evaluation, buffered program output, launch/attach/restart lifecycle, and a read-only IDE mirror of the live session.
 
 ## Installation
 

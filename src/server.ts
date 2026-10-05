@@ -19,7 +19,7 @@ import {
   ProxyNotRunningError
 } from './errors/debug-errors.js';
 import { SessionManager, SessionManagerConfig } from './session/session-manager.js';
-import type { DebugResult, StepResultData } from './session/session-manager-core.js';
+import type { DebugResult, StepResultData, WaitForStopResultData } from './session/session-manager-core.js';
 import { FrameSummary, StackTraceResult } from './session/session-manager-data.js';
 import { VariableTruncationSummary } from './session/variable-caps.js';
 import { createProductionDependencies } from './container/dependencies.js';
@@ -626,6 +626,20 @@ export class DebugMcpServer implements ToolContext {
   public async stepOut(sessionId: string): Promise<DebugResult<StepResultData>> {
     this.validateSession(sessionId);
     return this.sessionManager.stepOut(sessionId);
+  }
+
+  /**
+   * Existence-only gate (issue #849): a session whose program has finished is
+   * exactly what a wait may be asked about, and the answer is how it ended —
+   * not SessionTerminatedError.
+   */
+  public async waitForStop(
+    sessionId: string,
+    timeoutMs?: number,
+    signal?: AbortSignal
+  ): Promise<DebugResult<WaitForStopResultData>> {
+    this.validateSessionExists(sessionId);
+    return this.sessionManager.waitForStop(sessionId, timeoutMs, signal);
   }
 
   constructor(options: DebugMcpServerOptions = {}) {

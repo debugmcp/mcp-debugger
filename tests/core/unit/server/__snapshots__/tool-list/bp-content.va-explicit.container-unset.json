@@ -196,7 +196,7 @@
       },
       {
         "name": "start_debugging",
-        "description": "Start debugging a script. Answers with the session as it is after the program's first stop, its exit, or a readiness window: \"paused\" with a reason (a launch with breakpoints answers at the first one), \"stopped\" with the exit code, or \"running\" with pending:true when the program is still running — after ~5s when nothing is armed to stop it (no breakpoints, no entry stop, no caught-exception filter; the \"uncaught\" default does not count), after 30s when something is; the message says what was or was not reached. A later stop shows in list_debug_sessions as the state flips to \"paused\"",
+        "description": "Start debugging a script. Answers with the session as it is after the program's first stop, its exit, or a readiness window: \"paused\" with a reason (a launch with breakpoints answers at the first one), \"stopped\" with the exit code, or \"running\" with pending:true when the program is still running — after ~5s when nothing is armed to stop it (no breakpoints, no entry stop, no caught-exception filter; the \"uncaught\" default does not count), after 30s when something is; the message says what was or was not reached. Nothing is cancelled when that window passes — breakpoints stay armed; call wait_for_stop to block until the program stops or ends",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -257,7 +257,7 @@
       },
       {
         "name": "restart_debugging",
-        "description": "Restart the debuggee: terminate the current program (if still running) and relaunch it with the same configuration as the last start_debugging. All current breakpoints are re-applied automatically. The get_output buffer starts fresh — read from since=0 after a restart. Works while running, paused, or after the program has exited. Not available for attach sessions or sessions never launched. Answers like start_debugging, including \"running\" with pending:true when the relaunch has not stopped within its readiness window",
+        "description": "Restart the debuggee: terminate the current program (if still running) and relaunch it with the same configuration as the last start_debugging. All current breakpoints are re-applied automatically. The get_output buffer starts fresh — read from since=0 after a restart. Works while running, paused, or after the program has exited. Not available for attach sessions or sessions never launched. Answers like start_debugging, including \"running\" with pending:true when the relaunch has not stopped within its readiness window (then call wait_for_stop)",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -272,7 +272,7 @@
       },
       {
         "name": "attach_to_process",
-        "description": "Attach to a running process for debugging. After the handshake the target is verified by polling for threads; if none are reported within verifyTimeout (~20s default) the attach fails and the proxy is torn down. When a requested post-attach pause is accepted but no stopped event arrives within its bounded wait, returns state \"running\" with pending:true; the late event alone changes the session to \"paused\"",
+        "description": "Attach to a running process for debugging. After the handshake the target is verified by polling for threads; if none are reported within verifyTimeout (~20s default) the attach fails and the proxy is torn down. When a requested post-attach pause is accepted but no stopped event arrives within its bounded wait, returns state \"running\" with pending:true; the late event alone changes the session to \"paused\" — call wait_for_stop to block until it does",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -405,7 +405,7 @@
       },
       {
         "name": "step_over",
-        "description": "Step over the current line. Waits briefly for the program to stop; if the step is still executing after ~5s (e.g. stepping over a long-running call), returns success with state \"running\" and pending:true — the session becomes \"paused\" when the step completes (check list_debug_sessions, or call pause_execution to interrupt)",
+        "description": "Step over the current line. Waits briefly for the program to stop; if the step is still executing after ~5s (e.g. stepping over a long-running call), returns success with state \"running\" and pending:true — the step is still in effect and the session becomes \"paused\" when it completes (call wait_for_stop to block until then, or pause_execution to interrupt)",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -420,7 +420,7 @@
       },
       {
         "name": "step_into",
-        "description": "Step into the current call. Waits briefly for the program to stop; if the step is still executing after ~5s, returns success with state \"running\" and pending:true — the session becomes \"paused\" when the step completes",
+        "description": "Step into the current call. Waits briefly for the program to stop; if the step is still executing after ~5s, returns success with state \"running\" and pending:true — the session becomes \"paused\" when the step completes (call wait_for_stop to block until then)",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -435,7 +435,7 @@
       },
       {
         "name": "step_out",
-        "description": "Step out of the current function. Waits briefly for the program to stop; if the step is still executing after ~5s (e.g. the rest of the function is long-running), returns success with state \"running\" and pending:true — the session becomes \"paused\" when the step completes",
+        "description": "Step out of the current function. Waits briefly for the program to stop; if the step is still executing after ~5s (e.g. the rest of the function is long-running), returns success with state \"running\" and pending:true — the session becomes \"paused\" when the step completes (call wait_for_stop to block until then)",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -450,7 +450,7 @@
       },
       {
         "name": "continue_execution",
-        "description": "Continue execution. Returns immediately after the adapter acknowledges; does not wait for the next stop. When the program stops again the session state becomes \"paused\" — check list_debug_sessions or get_stack_trace, whose lastStop/stopReason tells you why it stopped (e.g. \"breakpoint\" vs \"exception\"). Use get_output to read the program's stdout/stderr",
+        "description": "Continue execution. Returns immediately after the adapter acknowledges; does not wait for the next stop. Call wait_for_stop to block until the program stops again or ends — it reports why (lastStop, e.g. \"breakpoint\" vs \"exception\") and where; list_debug_sessions and get_stack_trace show the same without waiting. Use get_output to read the program's stdout/stderr",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -464,8 +464,27 @@
         }
       },
       {
+        "name": "wait_for_stop",
+        "description": "Block until the session next pauses or ends, then say why and where. Call it after continue_execution (which does not wait) and whenever a tool answers pending:true, instead of polling list_debug_sessions. Answers at once when the session is already paused (state \"paused\" with lastStop — the same record list_debug_sessions shows — and the top frame as location) or already over (the terminal state, with exitCode when the debuggee reported one). If neither happens within the timeout it answers state \"running\" with pending:true: nothing was cancelled, breakpoints and exception filters stay armed — call it again to keep waiting, or pause_execution to interrupt",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "timeout": {
+              "type": "number",
+              "description": "Max time (ms) to wait for the stop (default: 30000, max: 600000). Not a limit on the program — it keeps running under the debugger either way. Note: your MCP client may enforce its own overall request timeout; keep this below it and call again on pending:true"
+            }
+          },
+          "required": [
+            "sessionId"
+          ]
+        }
+      },
+      {
         "name": "pause_execution",
-        "description": "Pause a running program. Waits briefly for the stop; if the program cannot stop within ~5s (e.g. blocked in native code, or an idle server waiting for input), returns success with pending:true and the session reports \"paused\" the next time the program runs code. Fails with an actionable error if the session has no debuggable target to pause (e.g. a js attach whose target session was never adopted or has ended)",
+        "description": "Pause a running program. Waits briefly for the stop; if the program cannot stop within ~5s (e.g. blocked in native code, or an idle server waiting for input), returns success with pending:true and the session reports \"paused\" the next time the program runs code (call wait_for_stop to block until then). Fails with an actionable error if the session has no debuggable target to pause (e.g. a js attach whose target session was never adopted or has ended)",
         "inputSchema": {
           "type": "object",
           "properties": {
