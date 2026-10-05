@@ -160,6 +160,36 @@ describe('SessionManager - waitForStop (issue #849)', () => {
     expect(wait.result()?.data?.pending).toBeUndefined();
   });
 
+  it('keeps a stop that landed during the wait when the program ended before it could be read', async () => {
+    const sessionId = await runningSession();
+    const wait = track(sessionManager.waitForStop(sessionId, 10_000));
+
+    // An uncaught exception stop and the exit in one tick: the session is
+    // over by the time the wait reads it, but the stop is what happened.
+    dependencies.mockProxyManager.simulateStopped(1, 'exception', { reason: 'exception', description: 'ValueError: boom', threadId: 1 });
+    dependencies.mockProxyManager.simulateExited(1);
+    await afterStop();
+
+    expect(wait.result()).toMatchObject({ success: true, state: SessionState.STOPPED });
+    expect(wait.result()?.data?.exitCode).toBe(1);
+    expect(wait.result()?.data?.lastStop).toMatchObject({ reason: 'exception', description: 'ValueError: boom' });
+    expect(wait.result()?.data?.location).toBeUndefined();
+  });
+
+  it('does not repeat an earlier stop for a program that was resumed and ran to its end', async () => {
+    const sessionId = await runningSession();
+    dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+    await sessionManager.continue(sessionId);
+    const wait = track(sessionManager.waitForStop(sessionId, 10_000));
+
+    dependencies.mockProxyManager.simulateExited(0);
+    await afterStop();
+
+    expect(wait.result()).toMatchObject({ success: true, state: SessionState.STOPPED });
+    // The breakpoint was left behind by the continue: it is not this wait's stop.
+    expect(wait.result()?.data?.lastStop).toBeUndefined();
+  });
+
   it('answers a finished session at once', async () => {
     const sessionId = await runningSession();
     dependencies.mockProxyManager.simulateExited(0);
@@ -169,6 +199,7 @@ describe('SessionManager - waitForStop (issue #849)', () => {
     expect(result).toMatchObject({ success: true, state: SessionState.STOPPED });
     expect(result.data?.exitCode).toBe(0);
     expect(result.data?.message).toMatch(/ran to completion/);
+    expect(result.data?.lastStop).toBeUndefined();
   });
 
   it('reports a session whose proxy died as ended in error', async () => {

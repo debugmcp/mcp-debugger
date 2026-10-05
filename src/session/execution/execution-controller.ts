@@ -763,6 +763,11 @@ export class ExecutionController {
     }
     const waitMs = timeoutCheck.timeoutMs ?? this.ctx.tunables.waitForStopDefaultMs;
 
+    // The stop on record before this wait began. A different record afterwards
+    // is a stop that landed during it — the discipline step and pause use to
+    // tell their own stop from an earlier one.
+    const lastStopBefore = session.lastStop;
+
     const outcome = await waitForSessionState(
       this.ctx,
       sessionId,
@@ -794,6 +799,13 @@ export class ExecutionController {
     }
 
     const state = session.state;
+    // Rule 2 of the settle contract: a session that is over by now is
+    // reported as ended, with the stop that landed during this wait if there
+    // was one — an exception stop and the exit can arrive in one tick. A stop
+    // from before the wait is not this wait's to report: the program was
+    // resumed past it.
+    const stopDuringWait =
+      session.lastStop && session.lastStop !== lastStopBefore ? { lastStop: session.lastStop } : {};
     if (state === SessionState.PAUSED && session.lastStop) {
       const where = location ? ` at ${location.file}:${location.line}` : '';
       return {
@@ -811,7 +823,7 @@ export class ExecutionController {
       return {
         success: true,
         state,
-        data: { message: `The debug session ended in an error state${detail}` }
+        data: { message: `The debug session ended in an error state${detail}`, ...stopDuringWait }
       };
     }
     if (state === SessionState.STOPPED) {
@@ -820,7 +832,8 @@ export class ExecutionController {
         state,
         data: {
           message: `${describeProgramEnd(session.exitCode)}.`,
-          ...(typeof session.exitCode === 'number' ? { exitCode: session.exitCode } : {})
+          ...(typeof session.exitCode === 'number' ? { exitCode: session.exitCode } : {}),
+          ...stopDuringWait
         }
       };
     }

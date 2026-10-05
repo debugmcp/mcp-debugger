@@ -148,9 +148,10 @@ export type PauseResultData = DebugResultData & {
 /**
  * What wait_for_stop returns (issue #849): `message` always. For a paused
  * session, the stop record the session listing shows and — when the stack was
- * readable — where it is. The other two answers use `DebugResultData`'s own
- * fields: `exitCode` for a session that ended and reported one, `pending`
- * when the timeout passed first.
+ * readable — where it is. A session that ended keeps `lastStop` only for a
+ * stop that landed during the wait itself. The other two answers use
+ * `DebugResultData`'s own fields: `exitCode` for a session that ended and
+ * reported one, `pending` when the timeout passed first.
  */
 export type WaitForStopResultData = DebugResultData & {
   message: string;
