@@ -25,7 +25,9 @@ export interface ConditionSyntaxError {
 }
 
 const PREFIX = 'Syntax error setting breakpoint with condition ';
-const TAIL_RE = / on line (\d+): ([\s\S]*)$/;
+// Greedy head: the LAST " on line N: " is the one js-debug appended, so a
+// condition that itself contains the phrase still parses.
+const TAIL_RE = /^([\s\S]*) on line (\d+): ([\s\S]*)$/;
 const CONDITION_PREVIEW = 60;
 
 /** The js-debug line, or undefined for any other output. */
@@ -39,11 +41,11 @@ export function parseConditionSyntaxError(output: string): ConditionSyntaxError 
   if (!tail) {
     return undefined;
   }
-  const line = Number(tail[1]);
+  const line = Number(tail[2]);
   if (!Number.isInteger(line)) {
     return undefined;
   }
-  const quoted = rest.slice(0, tail.index);
+  const quoted = tail[1];
   let condition: string | undefined;
   if (quoted.startsWith('"')) {
     try {
@@ -61,7 +63,7 @@ export function parseConditionSyntaxError(output: string): ConditionSyntaxError 
   return {
     line,
     ...(condition !== undefined ? { condition } : {}),
-    text: `${PREFIX}${preview} on line ${line}: ${tail[2]}`
+    text: `${PREFIX}${preview} on line ${line}: ${tail[3]}`
   };
 }
 

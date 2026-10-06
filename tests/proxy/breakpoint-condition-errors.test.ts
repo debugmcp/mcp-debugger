@@ -38,6 +38,12 @@ describe('parseConditionSyntaxError', () => {
     expect(parseConditionSyntaxError(LOGPOINT_LINE)).toEqual({ line: 7, text: LOGPOINT_LINE });
   });
 
+  it('anchors on the last " on line N: ", so a condition containing that text still parses', () => {
+    const tricky = 'x === " on line 3: " && y';
+    const parsed = parseConditionSyntaxError(`Syntax error setting breakpoint with condition ${JSON.stringify(tricky)} on line 12: Unexpected token`);
+    expect(parsed).toEqual({ line: 12, condition: tricky, text: `Syntax error setting breakpoint with condition ${JSON.stringify(tricky)} on line 12: Unexpected token` });
+  });
+
   it('ignores any other output', () => {
     expect(parseConditionSyntaxError('Debugger attached.')).toBeUndefined();
     expect(parseConditionSyntaxError('Syntax error setting breakpoint with condition on line x: y')).toBeUndefined();
