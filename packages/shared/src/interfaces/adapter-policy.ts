@@ -16,6 +16,7 @@ import type { DebugProtocol } from '@vscode/debugprotocol';
 import type { Breakpoint, ExceptionBreakMode, StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior } from './dap-client-behavior.js';
 import type { LanguageSpecificLaunchConfig } from './debug-adapter.js';
+import type { BreakpointFields } from '../utils/to-source-breakpoint.js';
 
 export type ChildSessionStrategy =
   | 'none'                     // No child session expected/created
@@ -251,6 +252,27 @@ export interface AdapterPolicy {
    * capabilities at launch.
    */
   supportsLogPoints?: boolean;
+
+  /**
+   * The wire form of a stored line breakpoint (issue #850). Absent means the
+   * shared toSourceBreakpoint mapping; a policy that delivers logpoints
+   * itself (js-debug: the logMessage is compiled into a condition that
+   * reports through the proxy's CDP binding, because js-debug's own
+   * console.log delivery is lost in a program that replaced console) returns
+   * what the adapter must receive. The stored breakpoint is never changed;
+   * every setBreakpoints construction site maps through
+   * toWireSourceBreakpoint(bp, policy), which calls this.
+   */
+  toWireBreakpoint?(bp: BreakpointFields): DebugProtocol.SourceBreakpoint;
+
+  /**
+   * Up-front check of a logMessage (and its optional condition) for a policy
+   * that compiles logpoints itself (issue #853): the returned text refuses
+   * set_breakpoint the way an expectedContent mismatch does, instead of the
+   * adapter reporting the syntax error only in its output stream. Undefined
+   * means the message is acceptable (or the policy does not pre-validate).
+   */
+  validateLogMessage?(logMessage: string, condition?: string): string | undefined;
 
   /**
    * Static pre-launch knowledge of function-breakpoint support (issue #271

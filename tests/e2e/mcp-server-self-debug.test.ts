@@ -204,6 +204,36 @@ describe('mcp-debugger debugging itself', () => {
     }, { timeout: 15000 }).toBe('running');
     expect(resumed, JSON.stringify(resumed)).not.toHaveProperty('lastStop');
 
+    // Issue #850: the nested server no-ops console.log (src/index.ts), which
+    // is where js-debug's own logpoints would print — a logpoint on its
+    // request handler must still reach get_output, delivered over the proxy's
+    // CDP binding, and must not pause the server. The pausing breakpoint is
+    // cleared first so the hit is a logpoint-only one.
+    await call('clear_breakpoints');
+    const logLine = readFileSync(file, 'utf8').split('\n').findIndex(text => text.includes('const sessionId = Array.isArray(sessionIdHeader)')) + 1;
+    expect(logLine).toBeGreaterThan(0);
+    const logpoint = await call('set_breakpoint', { file, line: logLine, logMessage: 'LP-MARK method={req.body?.method} path={req.path}' });
+    expect(logpoint.success, JSON.stringify(logpoint)).toBe(true);
+    const loggedTools = await targetClient.listTools();
+    expect(loggedTools.tools.map(tool => tool.name)).toContain('set_breakpoint');
+    await expect.poll(async () => {
+      transcript += await readOutputSince(cursor);
+      return transcript;
+    }, { timeout: 15000 }).toContain('LP-MARK method=tools/list path=/mcp');
+    const afterLogpoint = await call('list_debug_sessions');
+    expect((afterLogpoint.sessions as Array<{ id: string; state: string }>).find(session => session.id === sessionId)?.state).toBe('running');
+
+    // Issue #853: a condition js-debug cannot compile is reported on the
+    // breakpoint record, in js-debug's own words, not only in the output.
+    await call('clear_breakpoints');
+    const broken = await call('set_breakpoint', { file, line: logLine, condition: "req.body?.method ===" });
+    expect(broken.success, JSON.stringify(broken)).toBe(true);
+    await expect.poll(async () => {
+      const listed = await call('list_breakpoints');
+      return (listed.breakpoints as Array<{ line: number; message?: string }>).find(entry => entry.line === logLine)?.message;
+    }, { timeout: 15000 }).toMatch(/Syntax error setting breakpoint with condition "req.body\?.method ===" on line \d+: Unexpected token/);
+    await call('clear_breakpoints');
+
     // Issue #731: the nested server inherits the outer session's exit-code shim
     // env; a JavaScript session it launches must still report its debuggee's
     // exit code, with no env workaround on the inner launch.

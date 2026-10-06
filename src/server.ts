@@ -156,14 +156,25 @@ export class DebugMcpServer implements ToolContext {
    * adapter's real capabilities at launch (drift warning).
    * @internal ToolContext service.
    */
-  public validateLogPointSupport(sessionId: string): { warning?: string } {
+  public validateLogPointSupport(sessionId: string, logMessage?: string, condition?: string): { warning?: string } {
     const session = this.sessionManager.getSession(sessionId);
     const liveCaps = session?.adapterCapabilities;
     const policy = this.sessionManager.getSessionPolicy(sessionId);
     const language = session?.language ?? policy.name;
+    // A policy that compiles logpoints itself (js-debug, issue #850) checks
+    // the message up front, so a syntax error is refused here — like an
+    // expectedContent mismatch — instead of surfacing only in the adapter's
+    // stderr as an unbound breakpoint (issue #853).
+    const compileCheck = (): void => {
+      const problem = logMessage !== undefined ? policy.validateLogMessage?.(logMessage, condition) : undefined;
+      if (problem) {
+        throw new McpError(McpErrorCode.InvalidParams, `Invalid logpoint: ${problem}`);
+      }
+    };
 
     if (liveCaps) {
       if (liveCaps.supportsLogPoints === true) {
+        compileCheck();
         return {};
       }
       throw new UnsupportedFeatureError('Logpoints (logMessage)', String(language),
@@ -172,6 +183,7 @@ export class DebugMcpServer implements ToolContext {
     if (policy.supportsLogPoints === false) {
       throw new UnsupportedFeatureError('Logpoints (logMessage)', String(language));
     }
+    compileCheck();
     if (policy.supportsLogPoints === true) {
       return {};
     }

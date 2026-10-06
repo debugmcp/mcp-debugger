@@ -607,6 +607,28 @@ describe('DapConnectionManager', () => {
       });
     });
 
+    it("sends a policy's wire form when one is given (issue #850)", async () => {
+      const response: DebugProtocol.SetBreakpointsResponse = {
+        seq: 1,
+        type: 'response',
+        request_seq: 1,
+        command: 'setBreakpoints',
+        success: true,
+        body: { breakpoints: [{ verified: true, line: 10 }] }
+      };
+      mockDapClient.sendRequest.mockResolvedValue(response);
+      const policy = {
+        toWireBreakpoint: (bp: { line: number; logMessage?: string }) => ({ line: bp.line, condition: `compiled(${bp.logMessage})` })
+      };
+
+      await connectionManager.setBreakpoints(mockDapClient, sourcePath, [{ line: 10, logMessage: 'x is {x}' }], policy);
+
+      expect(mockDapClient.sendRequest).toHaveBeenCalledWith('setBreakpoints', {
+        source: { path: sourcePath, name: 'source.py' },
+        breakpoints: [{ line: 10, condition: 'compiled(x is {x})' }]
+      });
+    });
+
     it('should set multiple breakpoints', async () => {
       const response: DebugProtocol.SetBreakpointsResponse = {
         seq: 1,

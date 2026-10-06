@@ -277,7 +277,15 @@ export type { SecretRule, RedactionHit, RedactionResult } from './utils/secret-r
 export { LineBuffer } from './utils/line-buffer.js';
 // Doctor-row helpers for IAdapterFactory.describeToolchain (issue #435).
 export { toolchainComponent, normalizeToolchainDescription, probeWithinBudget } from './utils/toolchain-description.js';
-export { toSourceBreakpoint, type BreakpointFields, toFunctionBreakpoint, type FunctionBreakpointFields } from './utils/to-source-breakpoint.js';
+export { toSourceBreakpoint, toWireSourceBreakpoint, type BreakpointFields, toFunctionBreakpoint, type FunctionBreakpointFields } from './utils/to-source-breakpoint.js';
+export {
+  JS_LOGPOINT_BINDING,
+  parseJsLogMessage,
+  validateJsLogpoint,
+  compileJsLogpoint,
+  type LogMessagePart,
+  type CompiledJsLogpoint
+} from './utils/js-logpoint.js';
 // Argv marker constants shared by spawn-time tagging and the startup orphan
 // reapers (issues #343, #431).
 export {

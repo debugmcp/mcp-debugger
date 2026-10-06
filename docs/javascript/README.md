@@ -219,7 +219,9 @@ const child = spawn('node', ['child.js']);
 
 ### Log Points
 
-A `logMessage` turns the breakpoint into a logpoint: execution does not pause — the interpolated message (expressions in `{curly braces}`) arrives in the session output, readable via `get_output`.
+A `logMessage` turns the breakpoint into a logpoint: execution does not pause — the interpolated message (expressions in `{curly braces}`) arrives in the session output, readable via `get_output` as a `console` entry.
+
+mcp-debugger compiles JavaScript logpoints itself rather than handing the `logMessage` to js-debug (issues #850, #861, #853): js-debug would print through the debuggee's `console.log`, which a program that owns its stdout may have replaced, and would turn a logpoint with a `condition` into a pausing breakpoint. The compiled form delivers the rendered message over js-debug's CDP proxy — strings raw, other values through `util.inspect`, a throwing expression as `<ReferenceError: …>` — logs only when the `condition` holds, and never pauses. A `logMessage` whose `{expression}` does not compile is refused by `set_breakpoint` with V8's syntax error; a `condition` js-debug rejects shows js-debug's message on the breakpoint in `list_breakpoints`. A logpoint set before launch makes js-debug stop on entry so the delivery binding is in place before the first hit; that stop is auto-continued and never reported.
 
 ```json
 {

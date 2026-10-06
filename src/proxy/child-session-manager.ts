@@ -15,6 +15,7 @@ import { resolveExceptionFilters } from '@debugmcp/shared';
 import { createLogger } from '../utils/logger.js';
 import type { MinimalDapClient } from './minimal-dap.js';
 import { CdpFunctionBreakpointBridge } from './cdp-function-breakpoint-bridge.js';
+import { sendSetBreakpointsStamping, watchConditionSyntaxErrors, matchStoredBreakpoint } from './breakpoint-condition-errors.js';
 import path from 'path';
 
 // redirectable: the proxy worker re-points this logger into the per-session
@@ -199,6 +200,15 @@ export class ChildSessionManager extends EventEmitter {
   // Serializes child event forwarding so a stopped event held by the bridge
   // (correlation/bind window) cannot be overtaken by later events
   private childEventChain: Promise<void> = Promise.resolve();
+  /**
+   * Settles when the CDP bridge attach of the adoption in progress has run
+   * (or adoption failed first). The child event chain waits on it so a
+   * forced entry stop never reaches the SessionManager — whose auto-continue
+   * resumes the program — before the bridge has installed the logpoint
+   * delivery binding (issue #850). Resolved in every exit of
+   * createChildSession, so nothing is ever held past a failed adoption.
+   */
+  private bridgeAttachSettled: Promise<void> = Promise.resolve();
 
   /**
    * Resolves when every child event enqueued so far has been forwarded
@@ -221,6 +231,11 @@ export class ChildSessionManager extends EventEmitter {
     if (options.policy.functionBreakpointsVia === 'cdp') {
       this.cdpBridge = options.cdpBridgeFactory?.() ?? new CdpFunctionBreakpointBridge();
       this.cdpBridge.on('breakpointEvent', (evt: DebugProtocol.Event) => {
+        this.emit('childEvent', evt);
+      });
+      // Logpoint messages delivered over the CDP binding (issue #850) ride
+      // the same path as any adapter output event.
+      this.cdpBridge.on('outputEvent', (evt: DebugProtocol.Event) => {
         this.emit('childEvent', evt);
       });
     }
@@ -351,6 +366,26 @@ export class ChildSessionManager extends EventEmitter {
   }
 
   /**
+   * One child setBreakpoints send. js-debug reports a condition (or a
+   * compiled logpoint) that does not parse only as a stderr line written
+   * during the request (issue #853); the send watches the child's own output
+   * — emitted synchronously as the frame is parsed, ahead of the held event
+   * chain — and stamps the line onto the answer's breakpoint.
+   */
+  private sendChildSetBreakpoints(
+    child: MinimalDapClient,
+    sourcePath: string,
+    breakpoints: DebugProtocol.SourceBreakpoint[]
+  ): Promise<DebugProtocol.SetBreakpointsResponse> {
+    return sendSetBreakpointsStamping(child, breakpoints, () =>
+      child.sendRequest<DebugProtocol.SetBreakpointsResponse>('setBreakpoints', {
+        source: { path: sourcePath },
+        breakpoints
+      })
+    );
+  }
+
+  /**
    * Store breakpoints for mirroring to child sessions.
    *
    * Returns the child's setBreakpoints response when an active child was
@@ -389,10 +424,7 @@ export class ChildSessionManager extends EventEmitter {
       `[ChildSessionManager:${this.instanceId}] Mirroring ${breakpoints.length} breakpoint(s) for ${absolutePath} to active child`
     );
     const send = (): Promise<DebugProtocol.SetBreakpointsResponse> =>
-      child.sendRequest<DebugProtocol.SetBreakpointsResponse>('setBreakpoints', {
-        source: { path: absolutePath },
-        breakpoints
-      });
+      this.sendChildSetBreakpoints(child, absolutePath, breakpoints);
     return send().then(async resp => {
       let effective = resp;
       const echoed = resp?.body?.breakpoints;
@@ -539,6 +571,12 @@ export class ChildSessionManager extends EventEmitter {
 
     let child: MinimalDapClient | null = null;
     let death: ChildDeathLatch | null = null;
+    let settleBridgeAttach: () => void = () => undefined;
+    if (this.cdpBridge) {
+      this.bridgeAttachSettled = new Promise<void>((resolve) => {
+        settleBridgeAttach = resolve;
+      });
+    }
     try {
       // Import MinimalDapClient dynamically to avoid circular dependency
       const { MinimalDapClient } = await loadMinimalDap();
@@ -592,6 +630,7 @@ export class ChildSessionManager extends EventEmitter {
           logger.warn(`[ChildSessionManager:${this.instanceId}] CDP bridge attach aborted: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
+      settleBridgeAttach();
 
       // Ensure initial stop if policy requires it.
       // Skip when the user explicitly requested stopOnEntry=false: forcing a
@@ -619,6 +658,7 @@ export class ChildSessionManager extends EventEmitter {
       return 'adopted';
 
     } catch (error) {
+      settleBridgeAttach();
       this.adoptionInProgress = false;
       this.adoptedTargets.delete(pendingId);
       // Roll back registration so a later adoption attempt is not latched out
@@ -689,10 +729,7 @@ export class ChildSessionManager extends EventEmitter {
       for (const [srcPath, bps] of this.storedBreakpoints) {
         logger.info(`[child:${pendingId}] setBreakpoints -> ${srcPath} (${bps.length})`);
         try {
-          const resp = await child.sendRequest<DebugProtocol.SetBreakpointsResponse>('setBreakpoints', {
-            source: { path: srcPath },
-            breakpoints: bps
-          });
+          const resp = await this.sendChildSetBreakpoints(child, srcPath, bps);
           this.emitBreakpointResults(srcPath, bps, resp);
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
@@ -734,36 +771,80 @@ export class ChildSessionManager extends EventEmitter {
     let adopted = false;
     let lastError: unknown;
 
-    for (let i = 0; i < maxRetries && !adopted; i++) {
-      if (death.isDead()) {
-        throw death.error();
-      }
-      const remainingMs = deadline - Date.now();
-      if (remainingMs <= 0) {
-        break;
-      }
-      try {
-        logger.info(`[child:${pendingId}] ${attachArgs.command} attempt ${i + 1}`);
-        await death.race(
-          this.withTimeout(
-            child.sendRequest(attachArgs.command, attachArgs.args, 20000),
-            remainingMs,
-            `${attachArgs.command} deadline exceeded`
-          )
-        );
-        adopted = true;
-      } catch (e) {
+    // js-debug compiles the breakpoints it buffered on this pending-target
+    // connection while answering attach, and reports a condition that does
+    // not parse only as a stderr line then (issue #853) — there is no
+    // setBreakpoints request of ours to stamp, so watch the whole attach.
+    const syntaxErrors = this.dapBehavior.mirrorBreakpointsToChild && this.storedBreakpoints.size > 0
+      ? watchConditionSyntaxErrors(child)
+      : null;
+    try {
+      for (let i = 0; i < maxRetries && !adopted; i++) {
         if (death.isDead()) {
           throw death.error();
         }
-        lastError = e;
-        await this.sleep(200);
+        const remainingMs = deadline - Date.now();
+        if (remainingMs <= 0) {
+          break;
+        }
+        try {
+          logger.info(`[child:${pendingId}] ${attachArgs.command} attempt ${i + 1}`);
+          await death.race(
+            this.withTimeout(
+              child.sendRequest(attachArgs.command, attachArgs.args, 20000),
+              remainingMs,
+              `${attachArgs.command} deadline exceeded`
+            )
+          );
+          adopted = true;
+        } catch (e) {
+          if (death.isDead()) {
+            throw death.error();
+          }
+          lastError = e;
+          await this.sleep(200);
+        }
+      }
+    } finally {
+      const errors = syntaxErrors?.stop() ?? [];
+      if (adopted) {
+        this.reportAttachTimeSyntaxErrors(errors);
       }
     }
 
     if (!adopted) {
       const msg = lastError instanceof Error ? lastError.message : String(lastError);
       throw new Error(`Failed to attach child after ${maxRetries} attempts or ${totalDeadlineMs}ms deadline: ${msg}`);
+    }
+  }
+
+  /**
+   * Hand each attach-time syntax error to the stored breakpoint it names as
+   * a synthesized breakpoint event (file + line, the way the SessionManager
+   * matches an id-less event), after the replay's provisional answers.
+   */
+  private reportAttachTimeSyntaxErrors(errors: ReadonlyArray<{ line: number; condition?: string; text: string }>): void {
+    for (const error of errors) {
+      const match = matchStoredBreakpoint(this.storedBreakpoints, error);
+      if (!match) {
+        logger.info(`[ChildSessionManager:${this.instanceId}] attach-time breakpoint syntax error matched no single stored breakpoint: ${error.text}`);
+        continue;
+      }
+      const event: DebugProtocol.BreakpointEvent = {
+        seq: 0,
+        type: 'event',
+        event: 'breakpoint',
+        body: {
+          reason: 'changed',
+          breakpoint: {
+            verified: false,
+            line: match.breakpoint.line,
+            source: { path: match.path },
+            message: error.text
+          }
+        }
+      };
+      this.emit('childEvent', event);
     }
   }
 
@@ -924,10 +1005,7 @@ export class ChildSessionManager extends EventEmitter {
       
       for (const [srcPath, bps] of this.storedBreakpoints) {
         try {
-          const resp = await child.sendRequest<DebugProtocol.SetBreakpointsResponse>('setBreakpoints', {
-            source: { path: srcPath },
-            breakpoints: bps
-          });
+          const resp = await this.sendChildSetBreakpoints(child, srcPath, bps);
           this.emitBreakpointResults(srcPath, bps, resp);
         } catch {}
       }
@@ -995,8 +1073,12 @@ export class ChildSessionManager extends EventEmitter {
         return;
       }
       // Serialize through the chain so a stopped event the bridge holds
-      // (bind/correlation window) keeps its place in the event order
+      // (bind/correlation window) keeps its place in the event order. Every
+      // event first waits for the adoption's bridge attach to settle (issue
+      // #850); not on adoptionInProgress, which flushEvents() below awaits
+      // through this very chain.
       this.childEventChain = this.childEventChain.then(async () => {
+        await this.bridgeAttachSettled;
         let out = evt;
         if (evt.event === 'stopped') {
           if (bridge.hasArmedOrPending()) {

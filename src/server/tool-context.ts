@@ -73,7 +73,7 @@ export interface ToolContext {
   getLanguageMetadata(): Promise<LanguageMetadata[]>;
 
   // ---- breakpoint gating ----
-  validateLogPointSupport(sessionId: string): { warning?: string };
+  validateLogPointSupport(sessionId: string, logMessage?: string, condition?: string): { warning?: string };
   validateFunctionBreakpointSupport(sessionId: string): { warning?: string };
 
   // ---- public facade (unchanged signatures) ----

@@ -162,4 +162,105 @@ describe('Logpoints e2e (set_breakpoint logMessage)', () => {
       }
     }, 60_000);
   }
+
+  /**
+   * JavaScript logpoints are compiled by mcp-debugger and delivered over the
+   * proxy's CDP binding (issue #850), so they survive a program that replaced
+   * console.log; a condition gates the log instead of pausing (issue #861);
+   * and a message that does not compile is refused up front while a
+   * condition js-debug rejects is reported on the breakpoint (issue #853).
+   */
+  describe('JavaScript logpoints independent of the program console (issues #850, #861, #853)', () => {
+    const js = LANGUAGES.find(l => l.language === 'javascript');
+    const itJs = js?.available ? it : it.skip;
+    const script = path.join(ROOT, 'examples', 'javascript', 'console_silenced.js');
+
+    async function createJsSession(name: string): Promise<string> {
+      const createRes = await mcpClient!.callTool({
+        name: 'create_debug_session',
+        arguments: { language: 'javascript', name },
+      });
+      currentSessionId = parseSdkToolResult(createRes).sessionId as string;
+      expect(currentSessionId).toBeTruthy();
+      return currentSessionId;
+    }
+
+    async function runToEnd(sessionId: string): Promise<string> {
+      const startRes = await callToolSafely(mcpClient!, 'start_debugging', {
+        sessionId,
+        scriptPath: script,
+        dapLaunchArgs: { stopOnEntry: false },
+      });
+      expect(startRes.success, JSON.stringify(startRes)).toBe(true);
+      const finalState = await waitForState(sessionId, ['stopped', 'terminated']);
+      expect(['stopped', 'terminated', 'gone']).toContain(finalState);
+      const outRes = await callToolSafely(mcpClient!, 'get_output', { sessionId, since: 0 });
+      const entries = ((outRes as { entries?: Array<{ category?: string; output: string }> }).entries ?? []);
+      return entries.map(e => `[${e.category}] ${e.output}`).join('');
+    }
+
+    itJs('logs the interpolated message from a program that silenced console.log, as console output', async () => {
+      const sessionId = await createJsSession('logpoint-js-silenced');
+      const bpRes = await callToolSafely(mcpClient!, 'set_breakpoint', {
+        sessionId,
+        file: script,
+        statement: 'a += 1; // LOGPOINT_LINE',
+        logMessage: 'LP-MARK a={a} obj={o}',
+      });
+      expect(bpRes.success, JSON.stringify(bpRes)).toBe(true);
+
+      const output = await runToEnd(sessionId);
+      expect(output).toContain('[console] LP-MARK a=0 obj={ k: 2 }');
+      expect(output).toContain('LP-MARK a=2 obj={ k: 2 }');
+      expect(output).toContain('silenced: a=3');
+    }, 60_000);
+
+    itJs('logs only when the condition holds and never pauses (issue #861)', async () => {
+      const sessionId = await createJsSession('logpoint-js-condition');
+      const bpRes = await callToolSafely(mcpClient!, 'set_breakpoint', {
+        sessionId,
+        file: script,
+        statement: 'a += 1; // LOGPOINT_LINE',
+        logMessage: 'LP-COND a={a}',
+        condition: 'a === 2',
+      });
+      expect(bpRes.success, JSON.stringify(bpRes)).toBe(true);
+
+      const output = await runToEnd(sessionId);
+      expect(output).toContain('LP-COND a=2');
+      expect(output).not.toContain('LP-COND a=0');
+      expect(output).not.toContain('LP-COND a=1');
+    }, 60_000);
+
+    itJs('refuses a logMessage whose {expression} does not compile, with the syntax error (issue #853)', async () => {
+      const sessionId = await createJsSession('logpoint-js-syntax');
+      const bpRes = await callToolSafely(mcpClient!, 'set_breakpoint', {
+        sessionId,
+        file: script,
+        statement: 'a += 1; // LOGPOINT_LINE',
+        logMessage: 'bad {a +}',
+      });
+      expect(bpRes.success).toBe(false);
+      expect(JSON.stringify(bpRes)).toMatch(/Invalid logpoint/);
+      expect(JSON.stringify(bpRes)).toMatch(/Unexpected token/);
+    }, 30_000);
+
+    itJs("carries js-debug's own syntax error for a plain condition on the breakpoint record (issue #853)", async () => {
+      const sessionId = await createJsSession('condition-js-syntax');
+      const bpRes = await callToolSafely(mcpClient!, 'set_breakpoint', {
+        sessionId,
+        file: script,
+        statement: 'a += 1; // LOGPOINT_LINE',
+        condition: 'a >=',
+      });
+      expect(bpRes.success, JSON.stringify(bpRes)).toBe(true);
+
+      const output = await runToEnd(sessionId);
+      expect(output).toContain('Syntax error setting breakpoint with condition "a >="');
+      const bpList = await callToolSafely(mcpClient!, 'list_breakpoints', { sessionId });
+      const bps = (bpList as { breakpoints?: Array<{ verified: boolean; message?: string }> }).breakpoints ?? [];
+      expect(bps[0]?.verified).toBe(false);
+      expect(bps[0]?.message).toMatch(/Syntax error setting breakpoint with condition "a >=" on line \d+: Unexpected token/);
+    }, 60_000);
+  });
 });
