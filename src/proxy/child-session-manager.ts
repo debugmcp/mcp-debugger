@@ -209,6 +209,12 @@ export class ChildSessionManager extends EventEmitter {
    * createChildSession, so nothing is ever held past a failed adoption.
    */
   private bridgeAttachSettled: Promise<void> = Promise.resolve();
+  /**
+   * The child's adapter ids as last echoed per file, by request index, so
+   * a synthesized breakpoint event can name a record by id rather than by
+   * file + line (two breakpoints may share a line) (issue #853).
+   */
+  private readonly childEchoedIds = new Map<string, Array<number | undefined>>();
 
   /**
    * Resolves when every child event enqueued so far has been forwarded
@@ -234,9 +240,12 @@ export class ChildSessionManager extends EventEmitter {
         this.emit('childEvent', evt);
       });
       // Logpoint messages delivered over the CDP binding (issue #850) ride
-      // the same path as any adapter output event.
+      // the same path as any adapter output event — through the chain, so
+      // a message never overtakes child events the chain is still holding.
       this.cdpBridge.on('outputEvent', (evt: DebugProtocol.Event) => {
-        this.emit('childEvent', evt);
+        this.childEventChain = this.childEventChain.then(() => {
+          this.emit('childEvent', evt);
+        });
       });
     }
     logger.info(`[ChildSessionManager:${this.instanceId}] created`);
@@ -377,12 +386,14 @@ export class ChildSessionManager extends EventEmitter {
     sourcePath: string,
     breakpoints: DebugProtocol.SourceBreakpoint[]
   ): Promise<DebugProtocol.SetBreakpointsResponse> {
-    return sendSetBreakpointsStamping(child, breakpoints, () =>
+    const send = (): Promise<DebugProtocol.SetBreakpointsResponse> =>
       child.sendRequest<DebugProtocol.SetBreakpointsResponse>('setBreakpoints', {
         source: { path: sourcePath },
         breakpoints
-      })
-    );
+      });
+    return this.dapBehavior.reportsBreakpointSyntaxErrorsOnStderr
+      ? sendSetBreakpointsStamping(child, breakpoints, send)
+      : send();
   }
 
   /**
@@ -498,6 +509,9 @@ export class ChildSessionManager extends EventEmitter {
     }
     if (!Array.isArray(bps)) {
       return;
+    }
+    if (bps.length === requested.length) {
+      this.childEchoedIds.set(sourcePath, bps.map((bp) => bp.id));
     }
     bps.forEach((bp, i) => {
       logger.debug(
@@ -775,7 +789,8 @@ export class ChildSessionManager extends EventEmitter {
     // connection while answering attach, and reports a condition that does
     // not parse only as a stderr line then (issue #853) — there is no
     // setBreakpoints request of ours to stamp, so watch the whole attach.
-    const syntaxErrors = this.dapBehavior.mirrorBreakpointsToChild && this.storedBreakpoints.size > 0
+    const syntaxErrors = this.dapBehavior.reportsBreakpointSyntaxErrorsOnStderr &&
+      this.dapBehavior.mirrorBreakpointsToChild && this.storedBreakpoints.size > 0
       ? watchConditionSyntaxErrors(child)
       : null;
     try {
@@ -830,6 +845,7 @@ export class ChildSessionManager extends EventEmitter {
         logger.info(`[ChildSessionManager:${this.instanceId}] attach-time breakpoint syntax error matched no single stored breakpoint: ${error.text}`);
         continue;
       }
+      const id = this.childEchoedIds.get(match.path)?.[match.index];
       const event: DebugProtocol.BreakpointEvent = {
         seq: 0,
         type: 'event',
@@ -837,6 +853,7 @@ export class ChildSessionManager extends EventEmitter {
         body: {
           reason: 'changed',
           breakpoint: {
+            ...(id !== undefined ? { id } : {}),
             verified: false,
             line: match.breakpoint.line,
             source: { path: match.path },

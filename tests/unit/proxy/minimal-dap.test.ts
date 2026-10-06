@@ -415,6 +415,13 @@ describe('MinimalDapClient', () => {
     });
 
     it("stamps js-debug's in-flight syntax-error line onto the setBreakpoints answer (issue #853)", async () => {
+      // The js-debug policy declares the behaviour; a bare policy keeps the
+      // test free of child-session plumbing.
+      client = new MinimalDapClient('localhost', 5678, {
+        ...JsDebugAdapterPolicy,
+        supportsReverseStartDebugging: false,
+        getDapClientBehavior: () => ({ ...JsDebugAdapterPolicy.getDapClientBehavior(), childRoutedCommands: new Set<string>() })
+      } as unknown as import('@debugmcp/shared').AdapterPolicy);
       await client.connect();
 
       const requestPromise = client.sendRequest<DebugProtocol.SetBreakpointsResponse>('setBreakpoints', {
@@ -440,6 +447,25 @@ describe('MinimalDapClient', () => {
       // the line itself is still delivered as output
       expect(outputs).toHaveLength(1);
       expect(client.listenerCount('output')).toBe(1);
+    });
+
+    it('does not watch output during setBreakpoints for a policy that does not report syntax errors on stderr', async () => {
+      await client.connect();
+      const requestPromise = client.sendRequest<DebugProtocol.SetBreakpointsResponse>('setBreakpoints', {
+        source: { path: 'test.py' },
+        breakpoints: [{ line: 6, condition: 'n >=' }]
+      });
+      // the default policy declares no such behaviour: no listener was added
+      expect(client.listenerCount('output')).toBe(0);
+      mockSocket.emit('data', createDapMessage({
+        seq: 1, type: 'event', event: 'output', body: { category: 'stderr', output: `Syntax error setting breakpoint with condition "n >=" on line 6: Unexpected token ';'` }
+      } as DebugProtocol.Event));
+      mockSocket.emit('data', createDapMessage({
+        seq: 2, type: 'response', request_seq: 1, command: 'setBreakpoints', success: true,
+        body: { breakpoints: [{ verified: false, line: 6 }] }
+      } as DebugProtocol.SetBreakpointsResponse));
+      const result = await requestPromise;
+      expect(result.body.breakpoints[0].message).toBeUndefined();
     });
 
     it('should handle request failure', async () => {

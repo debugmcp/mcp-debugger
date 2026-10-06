@@ -39,6 +39,19 @@ describe('parseJsLogMessage', () => {
     expect(parseJsLogMessage('stray } brace')).toEqual([{ kind: 'text', text: 'stray } brace' }]);
   });
 
+  it('keeps scanning after a brace group that is literal text with an apostrophe in it', () => {
+    // {it's} never closes as an expression (the quote runs to the end), so it
+    // is literal and the groups after it are still interpolated.
+    expect(parseJsLogMessage("{it's} {x}")).toEqual([
+      { kind: 'text', text: "{it's} " },
+      { kind: 'expr', source: 'x' }
+    ]);
+    expect(parseJsLogMessage("open {x and {y}")).toEqual([
+      { kind: 'text', text: 'open {x and ' },
+      { kind: 'expr', source: 'y' }
+    ]);
+  });
+
   it('turns {{foo}} into the object-shorthand expression {foo}', () => {
     expect(parseJsLogMessage('v={{foo}}')).toEqual([
       { kind: 'text', text: 'v=' },
@@ -69,10 +82,19 @@ describe('validateJsLogpoint', () => {
     expect(validateJsLogpoint('n={n}', 'n >=')).toMatch(/condition/);
   });
 
-  it('refuses an expression that would escape its wrapper (top-level ; or unbalanced brackets)', () => {
+  it('accepts any expression V8 accepts — regex literals, comments, strings with brackets', () => {
+    expect(validateJsLogpoint('m={/;/.test(s)} n={a /* ) */ + 1} o={"}" + "]"}')).toBeUndefined();
+    expect(validateJsLogpoint('m={s}', '/\\)/.test(s)')).toBeUndefined();
+  });
+
+  it('refuses an expression that is not one expression, with V8 wording (a statement list, an escape of the wrapper)', () => {
     expect(validateJsLogpoint('x={a; b}')).toMatch(/\{a; b\}/);
-    expect(validateJsLogpoint('x={a) + (b}')).toMatch(/\{a\) \+ \(b\}/);
-    expect(validateJsLogpoint('x={a) + (b}')).toMatch(/unbalanced|Unexpected token/);
+    expect(validateJsLogpoint('x={a; b}')).toMatch(/Unexpected token/);
+    // parses on its own as `return (a); b()` but cannot sit inside the template's call
+    expect(validateJsLogpoint('x={a); b(}')).toMatch(/\{a\); b\(\}/);
+    expect(validateJsLogpoint('x={a); b(}')).toMatch(/not one expression/);
+    // harmless once wrapped: `(a) + (b)`
+    expect(validateJsLogpoint('x={a) + (b}')).toBeUndefined();
   });
 });
 

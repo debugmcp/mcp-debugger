@@ -110,9 +110,11 @@ export const JsDebugAdapterPolicy = {
     if (!compiled.ok) {
       return plain;
     }
-    const { logMessage: _logMessage, condition: _condition, ...rest } = plain;
-    void _logMessage; void _condition;
-    return { ...rest, condition: compiled.condition };
+    return {
+      line: bp.line,
+      ...(bp.suspendPolicy !== undefined ? { suspendPolicy: bp.suspendPolicy } : {}),
+      condition: compiled.condition
+    };
   },
   validateLogMessage: (logMessage: string, condition?: string): string | undefined =>
     validateJsLogpoint(logMessage, condition),
@@ -1152,6 +1154,10 @@ export const JsDebugAdapterPolicy = {
       // JavaScript-specific child session behaviors
       mirrorBreakpointsToChild: true,
       pauseAfterChildAttach: true,
+      // js-debug's only word on a condition (or compiled logpoint) that
+      // does not parse is a stderr output line during setBreakpoints or
+      // the child attach; the proxy correlates it (issue #853)
+      reportsBreakpointSyntaxErrorsOnStderr: true,
       stackTraceRequiresChild: true,
 
       // Commands that must not fall back to the parent when no child session

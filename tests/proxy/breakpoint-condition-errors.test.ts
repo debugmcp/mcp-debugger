@@ -169,9 +169,9 @@ describe('matchStoredBreakpoint', () => {
 
   it('finds the one stored breakpoint across files that the line and condition name', () => {
     expect(matchStoredBreakpoint(stored, { line: 6, condition: 'n >=', text: CONDITION_LINE }))
-      .toEqual({ path: '/app/a.js', breakpoint: { line: 6, condition: 'n >=' } });
+      .toEqual({ path: '/app/a.js', index: 0, breakpoint: { line: 6, condition: 'n >=' } });
     expect(matchStoredBreakpoint(stored, { line: 7, text: LOGPOINT_LINE }))
-      .toEqual({ path: '/app/a.js', breakpoint: { line: 7, logMessage: 'x={x +}' } });
+      .toEqual({ path: '/app/a.js', index: 1, breakpoint: { line: 7, logMessage: 'x={x +}' } });
   });
 
   it('declines an ambiguous or unknown line', () => {

@@ -138,12 +138,17 @@ export async function sendSetBreakpointsStamping<T extends { body?: { breakpoint
   send: () => Promise<T>
 ): Promise<T> {
   const watch = watchConditionSyntaxErrors(client);
+  let errors: ConditionSyntaxError[] = [];
   try {
-    const response = await send();
-    stampConditionSyntaxErrors(requested, response, watch.stop());
-    return response;
+    return await send().then((response) => {
+      errors = watch.stop();
+      stampConditionSyntaxErrors(requested, response, errors);
+      return response;
+    });
   } finally {
-    watch.stop();
+    if (errors.length === 0) {
+      watch.stop();
+    }
   }
 }
 
@@ -157,14 +162,14 @@ export async function sendSetBreakpointsStamping<T extends { body?: { breakpoint
 export function matchStoredBreakpoint(
   stored: ReadonlyMap<string, DebugProtocol.SourceBreakpoint[]>,
   error: ConditionSyntaxError
-): { path: string; breakpoint: DebugProtocol.SourceBreakpoint } | undefined {
-  const matches: Array<{ path: string; breakpoint: DebugProtocol.SourceBreakpoint }> = [];
+): { path: string; index: number; breakpoint: DebugProtocol.SourceBreakpoint } | undefined {
+  const matches: Array<{ path: string; index: number; breakpoint: DebugProtocol.SourceBreakpoint }> = [];
   for (const [path, breakpoints] of stored) {
-    for (const breakpoint of breakpoints) {
+    breakpoints.forEach((breakpoint, index) => {
       if (breakpoint.line === error.line && (error.condition === undefined || breakpoint.condition === error.condition)) {
-        matches.push({ path, breakpoint });
+        matches.push({ path, index, breakpoint });
       }
-    }
+    });
   }
   return matches.length === 1 ? matches[0] : undefined;
 }

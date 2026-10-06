@@ -121,11 +121,14 @@ export function parseJsLogMessage(message: string): LogMessagePart[] {
     }
     text += message.slice(i, open);
     const end = findExpressionEnd(message, open);
-    const source = end < 0 ? '' : message.slice(open + 1, end - 1);
     if (end < 0) {
-      text += message.slice(open);
-      break;
+      // No expression closes here (no `}`, or a quote runs to the end): this
+      // brace is literal text and the groups after it still count.
+      text += '{';
+      i = open + 1;
+      continue;
     }
+    const source = message.slice(open + 1, end - 1);
     if (source.trim() === '') {
       text += message.slice(open, end);
       i = end;
@@ -145,43 +148,6 @@ export function parseJsLogMessage(message: string): LogMessagePart[] {
 }
 
 /**
- * The expression is emitted as `(\n<expr>\n)`; a top-level `;` or an
- * unbalanced bracket would let it escape that wrapper and still parse
- * (`return (a); b(\n)` is valid), so they are refused up front.
- */
-function findWrapperEscape(source: string): string | undefined {
-  const stack: string[] = [];
-  const closers: Record<string, string> = { ')': '(', ']': '[', '}': '{' };
-  let i = 0;
-  while (i < source.length) {
-    const ch = source[i];
-    if (ch === "'" || ch === '"') {
-      i = skipQuoted(source, i, ch);
-      continue;
-    }
-    if (ch === '`') {
-      const end = skipTemplate(source, i);
-      if (end < 0) {
-        return 'unterminated template literal';
-      }
-      i = end;
-      continue;
-    }
-    if (ch === '(' || ch === '[' || ch === '{') {
-      stack.push(ch);
-    } else if (ch === ')' || ch === ']' || ch === '}') {
-      if (stack.pop() !== closers[ch]) {
-        return `unbalanced '${ch}'`;
-      }
-    } else if (ch === ';' && stack.length === 0) {
-      return "top-level ';'";
-    }
-    i += 1;
-  }
-  return stack.length > 0 ? `unbalanced '${stack[stack.length - 1]}'` : undefined;
-}
-
-/**
  * Syntax check only — the function is never invoked. This is the check
  * js-debug applies to every breakpoint condition (`new Function(expr)`); we
  * run it before the breakpoint is sent so the error lands in the
@@ -198,16 +164,21 @@ function syntaxErrorIn(body: string): string | undefined {
 
 /**
  * First problem with a logMessage (each `{expr}`) and its optional
- * condition, worded for the caller; undefined when everything parses.
+ * condition, worded for the caller; undefined when everything parses. The
+ * rule is V8's, as it is for js-debug: each expression must parse on its
+ * own, and the compiled template must parse with them in place — which is
+ * what refuses `a) + (b` (valid alone as `return (a) + (b)`, but a `;` or a
+ * stray `)` cannot sit inside the template's call arguments). Regex
+ * literals, comments and bracket characters inside strings are fine.
  */
 export function validateJsLogpoint(logMessage: string, condition?: string): string | undefined {
-  for (const part of parseJsLogMessage(logMessage)) {
+  return validateParts(parseJsLogMessage(logMessage), condition);
+}
+
+function validateParts(parts: LogMessagePart[], condition?: string): string | undefined {
+  for (const part of parts) {
     if (part.kind !== 'expr') {
       continue;
-    }
-    const escape = findWrapperEscape(part.source);
-    if (escape) {
-      return `logMessage expression {${part.source}} is not a single expression (${escape})`;
     }
     const error = syntaxErrorIn(`return (\n${part.source}\n)`);
     if (error) {
@@ -215,14 +186,17 @@ export function validateJsLogpoint(logMessage: string, condition?: string): stri
     }
   }
   if (condition !== undefined && condition.trim() !== '') {
-    const escape = findWrapperEscape(condition);
-    if (escape) {
-      return `condition is not a single expression (${escape})`;
-    }
     const error = syntaxErrorIn(`return (\n${condition}\n)`);
     if (error) {
       return `condition ${JSON.stringify(condition)}: ${error}`;
     }
+  }
+  const whole = syntaxErrorIn(renderCondition(parts, condition));
+  if (whole) {
+    const culprit = parts.find((part) => part.kind === 'expr');
+    return culprit?.kind === 'expr'
+      ? `logMessage expression {${culprit.source}} is not one expression (${whole})`
+      : `condition ${JSON.stringify(condition ?? '')} is not one expression (${whole})`;
   }
   return undefined;
 }
@@ -252,28 +226,29 @@ const STRINGIFY = `const __mcpStr = (v) => {
  * thrown, so a send path can fall back to the plain wire form.
  */
 export function compileJsLogpoint(bp: { logMessage: string; condition?: string }): CompiledJsLogpoint {
-  const error = validateJsLogpoint(bp.logMessage, bp.condition);
+  const parts = parseJsLogMessage(bp.logMessage);
+  const error = validateParts(parts, bp.condition);
   if (error) {
     return { ok: false, error };
   }
-  const parts = parseJsLogMessage(bp.logMessage);
+  return { ok: true, condition: renderCondition(parts, bp.condition) };
+}
+
+function renderCondition(parts: LogMessagePart[], condition?: string): string {
   const message = parts.length === 0
     ? '""'
     : parts
         .map((part) => (part.kind === 'text' ? JSON.stringify(part.text) : `__mcpEval(() => (\n${part.source}\n))`))
         .join(' + ');
-  const condition = bp.condition !== undefined && bp.condition.trim() !== ''
+  const gate = condition !== undefined && condition.trim() !== ''
     ? `let __mcpCond;
-  try { __mcpCond = !!(\n${bp.condition}\n); } catch (e) { __mcpEmit('Logpoint condition error: ' + __mcpErr(e)); return false; }
+  try { __mcpCond = !!(\n${condition}\n); } catch (e) { __mcpEmit('Logpoint condition error: ' + __mcpErr(e)); return false; }
   if (!__mcpCond) return false;
   `
     : '';
-  return {
-    ok: true,
-    condition: `(() => {
+  return `(() => {
   ${STRINGIFY}
-  ${condition}__mcpEmit(${message});
+  ${gate}__mcpEmit(${message});
   return false;
-})()`
-  };
+})()`;
 }

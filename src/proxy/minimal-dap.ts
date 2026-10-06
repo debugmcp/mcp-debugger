@@ -817,7 +817,7 @@ export class MinimalDapClient extends EventEmitter implements IDapClient {
     // stderr line written during this request (issue #853): watch for it and
     // stamp it onto the answer's breakpoint, so the reason travels with the
     // record instead of only through the output stream.
-    const requestedBreakpoints = command === 'setBreakpoints'
+    const requestedBreakpoints = command === 'setBreakpoints' && this.dapBehavior.reportsBreakpointSyntaxErrorsOnStderr
       ? (args as { breakpoints?: DebugProtocol.SourceBreakpoint[] } | undefined)?.breakpoints
       : undefined;
     const parentPromise = Array.isArray(requestedBreakpoints)
