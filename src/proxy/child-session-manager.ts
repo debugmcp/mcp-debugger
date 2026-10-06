@@ -1098,7 +1098,10 @@ export class ChildSessionManager extends EventEmitter {
         await this.bridgeAttachSettled;
         let out = evt;
         if (evt.event === 'stopped') {
-          if (bridge.hasArmedOrPending()) {
+          // An entry stop always goes through the bridge: with nothing armed
+          // it can still be a late entry inside a function (issue #858).
+          const reason = (evt.body as { reason?: string } | undefined)?.reason;
+          if (bridge.hasArmedOrPending() || reason === 'entry') {
             try {
               out = await bridge.processStoppedEvent(evt);
             } catch (err) {

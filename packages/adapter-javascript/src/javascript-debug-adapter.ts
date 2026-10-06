@@ -737,44 +737,17 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       }
     }
 
-    // Append any user-provided args last and normalize/dedupe
-    let finalArgs = this.normalizeAndDedupeArgs([...computedArgs, ...userRuntimeArgs]);
-
-    // Normalize Node inspector flags: ensure explicit port form, and add --inspect-brk when stopOnEntry is true
+    // Append any user-provided args last and normalize/dedupe. Node inspector
+    // flags pass through as given: js-debug itself strips an --inspect-brk out
+    // of runtimeArgs into stopOnEntry (its resolveParams), so the
+    // --inspect-brk=9229 this transform used to append for stopOnEntry was
+    // inert, and promoting a user's bare --inspect to --inspect-brk forced an
+    // entry stop nobody asked for (issue #858).
+    const finalArgs = this.normalizeAndDedupeArgs([...computedArgs, ...userRuntimeArgs]);
 
     result.runtimeExecutable = runtimeExecutableSync;
     if (finalArgs.length > 0) {
       result.runtimeArgs = finalArgs;
-    }
-    // Normalize Node inspector flags for js-debug.
-    // If an --inspect/--inspect-brk flag is present, ensure it includes an explicit port.
-    if (isNodeRuntime) {
-      const findInspectIndex = () =>
-        finalArgs.findIndex(
-          (a) =>
-            a === '--inspect' ||
-            a === '--inspect-brk' ||
-            a.startsWith('--inspect=') ||
-            a.startsWith('--inspect-brk=')
-        );
-      const idx = findInspectIndex();
-      if (idx !== -1) {
-        const port = 9229;
-        const arg = finalArgs[idx];
-        const m = arg.match(/^--inspect(?:-brk)?=(\d+)$/);
-        if (m) {
-          // Port is already explicit in the flag; no rewrite needed
-        } else {
-          // Promote to explicit port for consistency and reliable auto-attach
-          finalArgs[idx] = `--inspect-brk=${port}`;
-          result.runtimeArgs = finalArgs;
-        }
-      } else if (stopOnEntry === true) {
-        // Ensure a deterministic single-session stop on entry when requested
-        const port = 9229;
-        finalArgs = [...finalArgs, `--inspect-brk=${port}`];
-        result.runtimeArgs = finalArgs;
-      }
     }
 
     // Forward every js-debug key the caller passed that this transform does

@@ -88,14 +88,22 @@ class FakeCdpClient extends EventEmitter {
     return this.calls.filter((c) => c.method === method);
   }
 
-  pause(opts: { hitBreakpoints?: string[]; callFrameId?: string; scriptId?: string; url?: string } = {}): void {
+  pause(opts: {
+    hitBreakpoints?: string[];
+    callFrameId?: string;
+    scriptId?: string;
+    url?: string;
+    functionName?: string;
+    functionLocation?: { scriptId: string; lineNumber: number; columnNumber: number };
+  } = {}): void {
     this.emit('cdp-event', 'Debugger.paused', {
       reason: 'other',
       hitBreakpoints: opts.hitBreakpoints ?? [],
       callFrames: [
         {
           callFrameId: opts.callFrameId ?? 'frame-1',
-          functionName: '',
+          functionName: opts.functionName ?? '',
+          ...(opts.functionLocation ? { functionLocation: opts.functionLocation } : {}),
           location: { scriptId: opts.scriptId ?? '159', lineNumber: 0, columnNumber: 0 },
           url: opts.url ?? ''
         }
@@ -479,6 +487,58 @@ describe('CdpFunctionBreakpointBridge', () => {
       cdp.resume();
       const out = await bridge.processStoppedEvent(stoppedEvent('step'));
       expect((out.body as DebugProtocol.StoppedEvent['body']).reason).toBe('step');
+    });
+  });
+
+  describe('late entry stops (issue #858)', () => {
+    // js-debug sets its stopOnEntry breakpoint at line 1 col 1 and V8 resolves
+    // it to the first breakable position in source order — inside a function
+    // declared above the first statement — so the "entry" stop is really that
+    // function's first call.
+    const WORK_LOCATION = { scriptId: '159', lineNumber: 2, columnNumber: 14 }; // the fake's [[FunctionLocation]]
+
+    it('relabels an entry stop that lands inside the function just armed as that function breakpoint', async () => {
+      cdp.frameFunctions.set('work', 'obj-work');
+      const body = await bridge.sync([fnBp('work')]);
+      const adapterId = body.breakpoints[0].id!;
+      await attach();
+
+      // js-debug's own entry breakpoint id is foreign to us; the frame is work's body
+      cdp.pause({ hitBreakpoints: ['js-debug-entry-bp'], functionName: 'work', functionLocation: WORK_LOCATION });
+      await bridge.waitForResolution();
+      const out = await bridge.processStoppedEvent(stoppedEvent('entry'));
+      const stopped = out.body as DebugProtocol.StoppedEvent['body'];
+      expect(stopped.reason).toBe('function breakpoint');
+      expect(stopped.hitBreakpointIds).toEqual([adapterId]);
+    });
+
+    it('leaves an entry stop inside some other function to the note path (no false relabel by name)', async () => {
+      cdp.frameFunctions.set('work', 'obj-work');
+      await bridge.sync([fnBp('work')]);
+      await attach();
+      cdp.pause({ hitBreakpoints: ['js-debug-entry-bp'], functionName: 'work', functionLocation: { scriptId: '159', lineNumber: 40, columnNumber: 9 } });
+      await bridge.waitForResolution();
+      const out = await bridge.processStoppedEvent(stoppedEvent('entry'));
+      const stopped = out.body as DebugProtocol.StoppedEvent['body'];
+      expect(stopped.reason).toBe('entry');
+      expect(stopped.text).toMatch(/entry stop landed inside work\(\)/);
+    });
+
+    it('annotates a late entry stop with no function breakpoints at all, and leaves a top-level entry stop alone', async () => {
+      await attach();
+      expect(bridge.hasArmedOrPending()).toBe(false);
+
+      cdp.pause({ hitBreakpoints: ['js-debug-entry-bp'], functionName: 'helper', functionLocation: { scriptId: '159', lineNumber: 0, columnNumber: 15 } });
+      const late = await bridge.processStoppedEvent(stoppedEvent('entry'));
+      const lateBody = late.body as DebugProtocol.StoppedEvent['body'];
+      expect(lateBody.reason).toBe('entry');
+      expect(lateBody.text).toMatch(/entry stop landed inside helper\(\) at its first call/);
+      expect(lateBody.text).toMatch(/every later call of helper\(\) stops as "entry" again/);
+
+      cdp.resume();
+      cdp.pause({ hitBreakpoints: ['js-debug-entry-bp'], functionName: '' });
+      const top = await bridge.processStoppedEvent(stoppedEvent('entry'));
+      expect((top.body as DebugProtocol.StoppedEvent['body']).text).toBeUndefined();
     });
   });
 

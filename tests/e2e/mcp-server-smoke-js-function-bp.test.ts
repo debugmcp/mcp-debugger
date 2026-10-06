@@ -33,6 +33,9 @@ const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, '../..');
 const FIXTURE = path.resolve(ROOT, 'examples', 'javascript', 'function_bp_test.js');
 const ATTACH_TARGET = path.resolve(ROOT, 'examples', 'javascript', 'function_bp_attach_target.js');
+// A function declared above the first statement and called 1.5 s in (issue #858)
+const FUNCTION_FIRST = path.resolve(ROOT, 'examples', 'javascript', 'function_first.js');
+const WORK_ENTRY_LINE = 7;
 
 const COMPUTE_DECL_LINE = 9;
 const COMPUTE_ENTRY_LINE = 10;
@@ -195,6 +198,50 @@ describe('MCP Server JavaScript Function Breakpoints', () => {
 
     const contRes = await callToolSafely(mcpClient!, 'continue_execution', { sessionId: sid });
     expect(contRes.success).toBe(true);
+  }, 60000);
+
+  it('catches the first call of a function declared above the first statement (issue #858)', async () => {
+    // js-debug's entry breakpoint resolves into work's body, so the forced
+    // entry stop that binds the function breakpoint IS work's first call —
+    // before this fix that stop was auto-continued and the only call was lost.
+    const sid = await createSession('js-fnbp-function-first');
+    const bpRes = await callToolSafely(mcpClient!, 'set_breakpoint', { sessionId: sid, function: 'work' });
+    expect(bpRes.success).toBe(true);
+
+    const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'start_debugging',
+      arguments: { sessionId: sid, scriptPath: FUNCTION_FIRST, dapLaunchArgs: { stopOnEntry: false } }
+    }));
+    expect(startResponse.state).toBeDefined();
+
+    const stack = await waitForPausedState(sid);
+    expect(stack, 'the only call of work() ran to completion without stopping').not.toBeNull();
+    const top = stack!.stackFrames![0];
+    expect(top.name).toContain('work');
+    expect(top.line).toBe(WORK_ENTRY_LINE);
+    expect((await getSessionSnapshot(sid))?.lastStop?.reason).toBe('function breakpoint');
+    const output = await callToolSafely(mcpClient!, 'get_output', { sessionId: sid, since: 0 });
+    const text = JSON.stringify((output as { entries?: unknown[] }).entries ?? []);
+    expect(text).toContain('started');
+    expect(text).not.toContain('late total');
+
+    await callToolSafely(mcpClient!, 'continue_execution', { sessionId: sid });
+  }, 60000);
+
+  it('says so when a stopOnEntry launch stops inside a function instead of at the first statement (issue #858)', async () => {
+    const sid = await createSession('js-late-entry');
+    const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'start_debugging',
+      arguments: { sessionId: sid, scriptPath: FUNCTION_FIRST, dapLaunchArgs: { stopOnEntry: true } }
+    })) as { state?: string; data?: { reason?: string } };
+    expect(startResponse.state).toBe('paused');
+    expect(startResponse.data?.reason).toBe('entry');
+
+    const snapshot = await getSessionSnapshot(sid) as { lastStop?: { reason?: string; text?: string } } | undefined;
+    expect(snapshot?.lastStop?.reason).toBe('entry');
+    expect(snapshot?.lastStop?.text).toMatch(/entry stop landed inside work\(\) at its first call/);
+    const stack = await waitForPausedState(sid);
+    expect(stack!.stackFrames![0].name).toContain('work');
   }, 60000);
 
   it('defers a lazily-loaded module function until a pause after the require, then binds and stops', async () => {
