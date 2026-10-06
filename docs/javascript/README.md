@@ -158,6 +158,19 @@ Both `dapLaunchArgs` and `adapterLaunchConfig` accept launch settings. When the 
 in both, `adapterLaunchConfig` wins, including `stopOnEntry`. Setting it to `true` keeps the target
 paused at entry; `restart_debugging` replays that intent. An honoured `noDebug` disables the entry pause.
 
+**Where the entry stop lands** (issue #858): js-debug implements `stopOnEntry` with a breakpoint at line 1,
+column 1 of the program, and V8 resolves that to the first breakable position in *source* order. For a file
+whose first declaration is a function that the program calls later, that position is inside the function —
+so the "entry" stop fires at the function's first call, after the top-level code before it has run (output
+included), and fires again at every later call. mcp-debugger cannot move the stop, but it says so: the
+stop's `lastStop.text` (in the `start_debugging` answer, `wait_for_stop`, `list_debug_sessions`) explains
+where it landed and why. To stop at the first statement, put a statement above the function or set a line
+breakpoint on it. A function breakpoint on that first-declared function is not affected: the stop that
+binds it *is* the function's first call, and it is reported as the function breakpoint. Reported upstream as
+[vscode-js-debug#2430](https://github.com/microsoft/vscode-js-debug/issues/2430). Node's `--inspect-brk` is not an alternative: js-debug strips it from `runtimeArgs`
+into `stopOnEntry`, so a bare `--inspect` or `--inspect-brk` in `adapterLaunchConfig.runtimeArgs` is
+forwarded as given and changes nothing about the entry stop.
+
 Use `envFile` to load dotenv values relative to the effective `cwd`, then override individual values
 with `env`. A `null` value removes an inherited or file-defined variable:
 

@@ -211,6 +211,21 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
     expect(ra[ra.length - 1]).toBe('--my-flag');
   });
 
+  it('does not add or rewrite Node inspector flags: stopOnEntry is js-debug\'s, and a user --inspect is forwarded as given (issue #858)', async () => {
+    // js-debug strips any --inspect-brk from runtimeArgs into stopOnEntry
+    // (vendored bundle, resolveParams), so the --inspect-brk=9229 the
+    // transform used to append was inert — and promoting a user's --inspect
+    // to --inspect-brk forced an entry stop nobody asked for.
+    const program = path.resolve('/proj/app.js');
+    const withEntry = await adapter.transformLaunchConfig({ program, stopOnEntry: true } as any);
+    expect(withEntry.stopOnEntry).toBe(true);
+    expect(((withEntry.runtimeArgs ?? []) as string[]).some((a) => a.startsWith('--inspect'))).toBe(false);
+
+    const withInspect = await adapter.transformLaunchConfig({ program, stopOnEntry: false, runtimeArgs: ['--inspect'] } as any);
+    expect(withInspect.runtimeArgs).toEqual(['--inspect']);
+    expect(withInspect.stopOnEntry).toBe(false);
+  });
+
   it('runtimeExecutable override: "tsx" results in empty hooks', async () => {
     const program = path.resolve('/proj/app.ts');
     const cfg = await adapter.transformLaunchConfig({

@@ -1677,6 +1677,24 @@ describe('ChildSessionManager', () => {
       expect((forwarded[0].body as { reason: string }).reason).toBe('step');
     });
 
+    it('routes entry stops through the bridge even with nothing armed, so a late entry can be annotated (issue #858)', async () => {
+      const mgr = makeManager(JsDebugAdapterPolicy);
+      const child = await adopt(mgr);
+      bridge.armed = false;
+      const seen: string[] = [];
+      bridge.transform = (evt) => {
+        seen.push((evt.body as { reason: string }).reason);
+        return evt;
+      };
+      const forwarded: DebugProtocol.Event[] = [];
+      mgr.on('childEvent', (evt: DebugProtocol.Event) => forwarded.push(evt));
+      (child as unknown as EventEmitter).emit('event', { event: 'stopped', body: { reason: 'entry' } });
+      (child as unknown as EventEmitter).emit('event', { event: 'stopped', body: { reason: 'step' } });
+      await new Promise((r) => setTimeout(r, 10));
+      expect(seen).toEqual(['entry']);
+      expect(forwarded.map((e) => (e.body as { reason: string }).reason)).toEqual(['entry', 'step']);
+    });
+
     it('re-emits bridge breakpointEvents as childEvents', async () => {
       const mgr = makeManager(JsDebugAdapterPolicy);
       const forwarded: DebugProtocol.Event[] = [];
