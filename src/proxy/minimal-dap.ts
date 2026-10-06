@@ -21,6 +21,7 @@ import {
   sanitizePayloadForLogging
 } from '@debugmcp/shared';
 import { ChildSessionManager, type ChildSessionOptions } from './child-session-manager.js';
+import { sendSetBreakpointsStamping } from './breakpoint-condition-errors.js';
 import type { IDapClient } from './dap-proxy-interfaces.js';
 import { markChildOrigin, markChildSourced } from '../utils/child-origin-events.js';
 import { getErrorMessage } from '../errors/debug-errors.js';
@@ -775,7 +776,7 @@ export class MinimalDapClient extends EventEmitter implements IDapClient {
       args: sanitizePayloadForLogging(args || {})
     });
     
-    const parentPromise = new Promise<T>((resolve, reject) => {
+    const issueRequest = (): Promise<T> => new Promise<T>((resolve, reject) => {
       // Set up timeout
       const timer = this.timers.setTimeout(() => {
         if (this.pendingRequests.has(requestSeq)) {
@@ -811,6 +812,17 @@ export class MinimalDapClient extends EventEmitter implements IDapClient {
         }
       });
     });
+
+    // js-debug reports a breakpoint whose condition does not parse only as a
+    // stderr line written during this request (issue #853): watch for it and
+    // stamp it onto the answer's breakpoint, so the reason travels with the
+    // record instead of only through the output stream.
+    const requestedBreakpoints = command === 'setBreakpoints' && this.dapBehavior.reportsBreakpointSyntaxErrorsOnStderr
+      ? (args as { breakpoints?: DebugProtocol.SourceBreakpoint[] } | undefined)?.breakpoints
+      : undefined;
+    const parentPromise = Array.isArray(requestedBreakpoints)
+      ? sendSetBreakpointsStamping(this, requestedBreakpoints, issueRequest)
+      : issueRequest();
 
     if (!childMirror) {
       return parentPromise;

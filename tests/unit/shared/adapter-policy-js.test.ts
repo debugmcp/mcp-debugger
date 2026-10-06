@@ -361,7 +361,7 @@ describe('JsDebugAdapterPolicy', () => {
       expect(sendDapRequest.mock.calls.some(([cmd]) => cmd === 'launch')).toBe(true);
     });
 
-    it('forwards logMessage on handshake breakpoints (issue #235)', async () => {
+    it('sends handshake logpoints as compiled conditions, never as a logMessage (issues #235, #850)', async () => {
       vi.useFakeTimers();
       const events = new EventEmitter();
       const sendDapRequest = vi.fn().mockResolvedValue({});
@@ -389,12 +389,41 @@ describe('JsDebugAdapterPolicy', () => {
       await handshakePromise;
       vi.useRealTimers();
 
-      expect(sendDapRequest).toHaveBeenCalledWith(
-        'setBreakpoints',
-        expect.objectContaining({
-          breakpoints: [{ line: 12, logMessage: 'x is {x}' }]
-        })
-      );
+      const call = sendDapRequest.mock.calls.find(([cmd]) => cmd === 'setBreakpoints');
+      expect(call).toBeDefined();
+      const sent = (call![1] as { breakpoints: Array<Record<string, unknown>> }).breakpoints;
+      expect(sent).toHaveLength(1);
+      expect(sent[0].line).toBe(12);
+      expect(sent[0].logMessage).toBeUndefined();
+      expect(sent[0].condition).toContain('__mcpDebuggerLogpoint');
+      expect(sent[0].condition).toContain('"x is "');
+    });
+  });
+
+  describe('toWireBreakpoint (issues #850, #861)', () => {
+    it('compiles a logpoint into a condition and keeps the user condition inside it', () => {
+      const wire = JsDebugAdapterPolicy.toWireBreakpoint!({ line: 3, logMessage: 'n={n}', condition: 'n > 1' });
+      expect(wire.line).toBe(3);
+      expect(wire.logMessage).toBeUndefined();
+      expect(wire.condition).toContain('__mcpDebuggerLogpoint');
+      expect(wire.condition).toContain('\nn > 1\n');
+    });
+
+    it('passes plain breakpoints through unchanged, suspendPolicy included', () => {
+      expect(JsDebugAdapterPolicy.toWireBreakpoint!({ line: 3 })).toEqual({ line: 3 });
+      expect(JsDebugAdapterPolicy.toWireBreakpoint!({ line: 3, condition: 'x', suspendPolicy: 'thread' }))
+        .toEqual({ line: 3, condition: 'x', suspendPolicy: 'thread' });
+    });
+
+    it('falls back to the plain wire form when the logpoint does not compile, so the adapter reports it', () => {
+      expect(JsDebugAdapterPolicy.toWireBreakpoint!({ line: 3, logMessage: 'n={n +}' }))
+        .toEqual({ line: 3, logMessage: 'n={n +}' });
+    });
+
+    it('validates a logMessage and condition up front (issue #853)', () => {
+      expect(JsDebugAdapterPolicy.validateLogMessage!('n={n}', 'n > 1')).toBeUndefined();
+      expect(JsDebugAdapterPolicy.validateLogMessage!('n={n +}')).toMatch(/Unexpected token/);
+      expect(JsDebugAdapterPolicy.validateLogMessage!('n={n}', 'n >=')).toMatch(/condition/);
     });
 
     it('does not miss an initialized event emitted before the initialize response settles (issue #242)', async () => {

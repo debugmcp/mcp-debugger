@@ -133,6 +133,38 @@ describe('set_breakpoint logMessage gating', () => {
     expect(content.warning).toMatch(/unknown|not advertise/i);
   });
 
+  it("refuses a logMessage the policy's own compiler rejects, with the compiler's words (issue #853)", async () => {
+    mockSessionManager.getSessionPolicy.mockReturnValue({
+      name: 'js-debug',
+      supportsLogPoints: true,
+      validateLogMessage: (logMessage: string, condition?: string) =>
+        logMessage === 'x is {x +}' ? `logMessage expression {x +}: Unexpected token ')'` :
+        condition === 'x >=' ? 'condition "x >=": Unexpected token' : undefined
+    });
+
+    await expect(callSetBreakpoint({ logMessage: 'x is {x +}' })).rejects.toThrow(/Unexpected token/);
+    await expect(callSetBreakpoint({ condition: 'x >=' })).rejects.toThrow(/condition "x >="/);
+    expect(mockSessionManager.setBreakpoint).not.toHaveBeenCalled();
+
+    const result = await callSetBreakpoint();
+    expect(JSON.parse(result.content[0].text).success).toBe(true);
+  });
+
+  it('validates against live capabilities too: a known-supported adapter still runs the policy check', async () => {
+    mockSessionManager.getSessionPolicy.mockReturnValue({
+      name: 'js-debug',
+      supportsLogPoints: true,
+      validateLogMessage: () => 'bad interpolation'
+    });
+    mockSessionManager.getSession.mockReturnValue({
+      id: 'test-session',
+      sessionLifecycle: 'active',
+      adapterCapabilities: { supportsLogPoints: true }
+    });
+
+    await expect(callSetBreakpoint()).rejects.toThrow(/bad interpolation/);
+  });
+
   it('applies no gating when logMessage is absent', async () => {
     mockSessionManager.getSessionPolicy.mockReturnValue({ name: 'java', supportsLogPoints: false });
     mockSessionManager.setBreakpoint.mockResolvedValue({

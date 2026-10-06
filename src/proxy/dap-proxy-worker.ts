@@ -1194,7 +1194,8 @@ export class DapProxyWorker {
           const response = await connectionManager.setBreakpoints(
             dapClient,
             filePath,
-            breakpoints
+            breakpoints,
+            this.adapterPolicy
           );
           // DAP guarantees the response breakpoints array is positional per
           // request; zip within each group so the echoed id stays attached.
@@ -1510,21 +1511,24 @@ export class DapProxyWorker {
       // pre-launch, make js-debug itself stop on entry. The SessionManager
       // still holds the user's stopOnEntry=false and auto-continues the entry
       // stop — after the bridge's held-event binding completes — so the forced
-      // stop is invisible. Mutated here, before the queue decision, so both
-      // the direct send and drainCommandQueue paths carry it.
-      if (
-        payload.dapCommand === 'launch' &&
-        this.adapterPolicy.functionBreakpointsVia === 'cdp' &&
-        (this.currentInitPayload?.initialFunctionBreakpoints?.length ?? 0) > 0
-      ) {
+      // stop is invisible. The same stop is where the bridge installs the
+      // logpoint delivery binding before the program runs (issue #850), so a
+      // pre-launch logpoint forces it too. Mutated here, before the queue
+      // decision, so both the direct send and drainCommandQueue paths carry it.
+      if (payload.dapCommand === 'launch' && this.adapterPolicy.functionBreakpointsVia === 'cdp') {
+        const pendingFunctionBreakpoints = (this.currentInitPayload?.initialFunctionBreakpoints?.length ?? 0) > 0;
+        const pendingLogpoints = (this.currentInitPayload?.initialBreakpoints ?? []).some((bp) => bp.logMessage !== undefined);
         const launchArgs = (payload.dapArgs ?? {}) as Record<string, unknown>;
         // Under an honoured noDebug the debugger is off (issue #710): no entry
         // stop can come, and the function breakpoints will not bind either —
         // the session layer has already told the caller so. The launcher's
         // stamped decision, not a second reading of these args (#746).
-        if (launchArgs.stopOnEntry !== true && !this.debuggerOff) {
+        if ((pendingFunctionBreakpoints || pendingLogpoints) && launchArgs.stopOnEntry !== true && !this.debuggerOff) {
           payload.dapArgs = { ...launchArgs, stopOnEntry: true };
-          this.logger?.info('[Worker] Forcing stopOnEntry=true in the js-debug launch config (pending CDP function breakpoints, issue #295)');
+          const why = pendingFunctionBreakpoints
+            ? 'pending CDP function breakpoints, issue #295'
+            : 'pre-launch logpoints need the CDP delivery binding, issue #850';
+          this.logger?.info(`[Worker] Forcing stopOnEntry=true in the js-debug launch config (${why})`);
         }
       }
 

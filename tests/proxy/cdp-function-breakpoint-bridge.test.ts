@@ -13,6 +13,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import { CdpFunctionBreakpointBridge, MAX_SCRIPT_URLS } from '../../src/proxy/cdp-function-breakpoint-bridge.js';
+import { JS_LOGPOINT_BINDING } from '@debugmcp/shared';
 
 type CdpHandler = (params: Record<string, unknown>) => unknown;
 
@@ -650,6 +651,53 @@ describe('CdpFunctionBreakpointBridge', () => {
       cdp.pause({ hitBreakpoints: ['cdp-obj-greet'] });
       const out = await bridge.processStoppedEvent(stoppedEvent('breakpoint'));
       expect((out.body as DebugProtocol.StoppedEvent['body']).reason).toBe('breakpoint');
+    });
+  });
+
+  describe('logpoint delivery binding (issue #850)', () => {
+    it('subscribes to Runtime.bindingCalled and installs the binding before enabling the debugger', async () => {
+      await attach();
+      const events = (cdp.callsFor('JsDebug.subscribe')[0].params as { events: string[] }).events;
+      expect(events).toContain('Runtime.bindingCalled');
+      const order = cdp.calls.map((c) => c.method);
+      const addBinding = cdp.callsFor('Runtime.addBinding');
+      expect(addBinding).toHaveLength(1);
+      expect(addBinding[0].params).toEqual({ name: JS_LOGPOINT_BINDING });
+      expect(order.indexOf('JsDebug.subscribe')).toBeLessThan(order.indexOf('Runtime.addBinding'));
+      expect(order.indexOf('Runtime.addBinding')).toBeLessThan(order.indexOf('Debugger.enable'));
+    });
+
+    it('turns a bindingCalled for our binding into one console output event; other bindings are ignored', async () => {
+      const outputs: DebugProtocol.OutputEvent[] = [];
+      bridge.on('outputEvent', (evt: DebugProtocol.OutputEvent) => outputs.push(evt));
+      await attach();
+
+      cdp.emit('cdp-event', 'Runtime.bindingCalled', { name: JS_LOGPOINT_BINDING, payload: 'n=3 done', executionContextId: 1 });
+      cdp.emit('cdp-event', 'Runtime.bindingCalled', { name: 'someoneElse', payload: 'ignored', executionContextId: 1 });
+
+      expect(outputs).toHaveLength(1);
+      expect(outputs[0].event).toBe('output');
+      expect(outputs[0].body).toEqual({ category: 'console', output: 'n=3 done\n' });
+    });
+
+    it('tolerates a failed addBinding: the attach still completes and function breakpoints still work', async () => {
+      cdp.handlers.set('Runtime.addBinding', () => {
+        throw new Error('Runtime.addBinding: not supported');
+      });
+      cdp.frameFunctions.set('greet', 'obj-greet');
+      await attach();
+      expect(cdp.callsFor('Debugger.enable')).toHaveLength(1);
+      cdp.pause();
+      await bridge.sync([fnBp('greet')]);
+      await bridge.waitForResolution();
+      expect(cdp.callsFor('Debugger.setBreakpointOnFunctionCall')).toHaveLength(1);
+    });
+
+    it('removes the binding on a graceful detach while connected', async () => {
+      await attach();
+      bridge.detach();
+      expect(cdp.callsFor('Runtime.removeBinding')).toEqual([{ method: 'Runtime.removeBinding', params: { name: JS_LOGPOINT_BINDING } }]);
+      expect(cdp.disposeCalls).toBe(1);
     });
   });
 

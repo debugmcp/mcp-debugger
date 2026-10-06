@@ -11,7 +11,7 @@ import {
   ExtendedInitializeArgs
 } from './dap-proxy-interfaces.js';
 import type { AdapterPolicy } from '@debugmcp/shared';
-import { sanitizePayloadForLogging, toSourceBreakpoint, type BreakpointFields } from '@debugmcp/shared';
+import { sanitizePayloadForLogging, toWireSourceBreakpoint, type BreakpointFields } from '@debugmcp/shared';
 
 export class DapConnectionManager {
   // Increased initial delay to give debugpy more time to start
@@ -275,14 +275,16 @@ export class DapConnectionManager {
   }
 
   /**
-   * Set breakpoints for a file
+   * Set breakpoints for a file. The policy, when given, supplies the wire
+   * form (js-debug compiles logpoints into conditions, issue #850).
    */
   async setBreakpoints(
     client: IDapClient,
     sourcePath: string,
-    breakpoints: BreakpointFields[]
+    breakpoints: BreakpointFields[],
+    policy?: Pick<AdapterPolicy, 'toWireBreakpoint'> | null
   ): Promise<DebugProtocol.SetBreakpointsResponse> {
-    const sourceBreakpoints: DebugProtocol.SourceBreakpoint[] = breakpoints.map(toSourceBreakpoint);
+    const sourceBreakpoints: DebugProtocol.SourceBreakpoint[] = breakpoints.map((bp) => toWireSourceBreakpoint(bp, policy));
 
     const setBreakpointsArgs: DebugProtocol.SetBreakpointsArguments = {
       source: { path: sourcePath, name: path.basename(sourcePath) },

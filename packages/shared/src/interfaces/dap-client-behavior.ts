@@ -71,6 +71,17 @@ export interface DapClientBehavior {
    * Whether to attempt pause after launching/attaching child
    */
   pauseAfterChildAttach?: boolean;
+
+  /**
+   * The adapter reports a breakpoint condition it cannot compile only as a
+   * stderr output line (`Syntax error setting breakpoint with condition …
+   * on line N: …`) written during the setBreakpoints request — or, for
+   * breakpoints buffered on a pending-target connection, during the child
+   * attach — and answers the breakpoint as a plain unbound one. When set,
+   * the proxy correlates that line with the request in flight and stamps
+   * it onto the breakpoint record (issue #853). js-debug only.
+   */
+  reportsBreakpointSyntaxErrorsOnStderr?: boolean;
   
   /**
    * Normalize adapter ID for initialize request (e.g., 'javascript' -> 'pwa-node')

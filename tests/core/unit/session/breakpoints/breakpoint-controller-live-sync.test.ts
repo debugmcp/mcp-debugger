@@ -454,3 +454,55 @@ describe('BreakpointController.resyncAll hands the failures back (issue #754)', 
     expect(await controller.resyncAll(refusingSession([]).session)).toEqual({ warnings: [], functionBreakpointsFailed: false });
   });
 });
+
+describe('BreakpointController live re-send uses the policy wire form (issue #850)', () => {
+  /** A paused session whose proxy answers every setBreakpoints with an echo. */
+  function echoingSession(lines: Array<Partial<Breakpoint> & { id: string; file: string; line: number }>, language = 'javascript') {
+    const sendDapRequest = vi.fn().mockImplementation(async (_command: string, args: { breakpoints: unknown[] }) => ({
+      success: true,
+      body: { breakpoints: args.breakpoints.map(() => ({ verified: true })) }
+    }));
+    const breakpoints = new Map<string, Breakpoint>(lines.map((bp) => [bp.id, { verified: false, ...bp } as Breakpoint]));
+    const session = {
+      id: 'sess-1',
+      language,
+      state: 'paused',
+      proxyManager: { isRunning: () => true, sendDapRequest },
+      breakpoints,
+      functionBreakpoints: new Map()
+    } as unknown as ManagedSession;
+    return { session, sendDapRequest };
+  }
+
+  it("sends a policy's toWireBreakpoint form, keeping the stored record's logMessage", async () => {
+    const policy = {
+      toWireBreakpoint: (bp: { line: number; logMessage?: string }) =>
+        bp.logMessage === undefined ? { line: bp.line } : { line: bp.line, condition: `compiled(${bp.logMessage})` }
+    };
+    const { controller } = makeController(policy);
+    const { session, sendDapRequest } = echoingSession([
+      { id: 'a', file: '/app/a.js', line: 4, logMessage: 'n={n}' },
+      { id: 'b', file: '/app/a.js', line: 9 }
+    ]);
+
+    const outcome = await controller.syncBreakpointsForFile(session, '/app/a.js');
+
+    expect(outcome).toEqual({ synced: true });
+    expect(sendDapRequest).toHaveBeenCalledWith('setBreakpoints', expect.objectContaining({
+      breakpoints: [{ line: 4, condition: 'compiled(n={n})' }, { line: 9 }]
+    }));
+    expect(session.breakpoints.get('a')).toMatchObject({ logMessage: 'n={n}', verified: true });
+    expect(session.breakpoints.get('a')?.condition).toBeUndefined();
+  });
+
+  it('falls back to the shared mapping for a policy without a wire form', async () => {
+    const { controller } = makeController({});
+    const { session, sendDapRequest } = echoingSession([{ id: 'a', file: '/app/a.py', line: 4, logMessage: 'n={n}', condition: 'n > 1' }], 'python');
+
+    await controller.syncBreakpointsForFile(session, '/app/a.py');
+
+    expect(sendDapRequest).toHaveBeenCalledWith('setBreakpoints', expect.objectContaining({
+      breakpoints: [{ line: 4, condition: 'n > 1', logMessage: 'n={n}' }]
+    }));
+  });
+});

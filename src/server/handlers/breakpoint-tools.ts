@@ -156,9 +156,10 @@ async function setFunctionBreakpointBranch(ctx: ToolContext, args: WithSessionId
 async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): Promise<ToolResult> {
   try {
     // Logpoint gating (issue #235): hard error for known-unsupported
-    // adapters; a warning when support is unknown pre-launch.
+    // adapters; a warning when support is unknown pre-launch. A policy that
+    // compiles logpoints itself also refuses a malformed message here (#853).
     const logPointGate = args.logMessage !== undefined
-      ? ctx.validateLogPointSupport(args.sessionId)
+      ? ctx.validateLogPointSupport(args.sessionId, args.logMessage, args.condition)
       : {};
 
     const { breakpoint, warning: syncWarning } = await ctx.setBreakpoint({

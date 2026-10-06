@@ -22,7 +22,7 @@ import {
   FunctionBreakpoint,
   SessionState,
   toFunctionBreakpoint,
-  toSourceBreakpoint,
+  toWireSourceBreakpoint,
   type AdapterPolicy,
   type DebugLanguage
 } from '@debugmcp/shared';
@@ -204,6 +204,9 @@ export class BreakpointController {
     // child as authoritative — never let a parent response downgrade
     // verified state or clobber child adapter ids.
     const childAuthoritative = this.mirrorsToChild(session);
+    // The adapter's wire form (js-debug compiles logpoints into conditions,
+    // issue #850); the stored records keep the user's fields.
+    const policy = this.wirePolicy(session);
 
     try {
       this.ctx.logger.info(
@@ -214,7 +217,7 @@ export class BreakpointController {
           'setBreakpoints',
           {
             source: { path: file },
-            breakpoints: allBpsForFile.map(toSourceBreakpoint),
+            breakpoints: allBpsForFile.map((bp) => toWireSourceBreakpoint(bp, policy)),
             // Reserved key, stripped by the proxy before the adapter sees
             // it: asks a child-mirroring proxy for an authoritative echo
             // even when the set is unchanged (issue #500).
@@ -313,6 +316,18 @@ export class BreakpointController {
    */
   private mirrorsToChild(session: ManagedSession): boolean {
     return mirrorsBreakpointsToChild(() => this.ctx.selectPolicy(session.language));
+  }
+
+  /**
+   * The policy whose wire form a re-send uses (issue #850). Never throws —
+   * a session whose policy cannot be selected sends the shared mapping.
+   */
+  private wirePolicy(session: ManagedSession): AdapterPolicy | undefined {
+    try {
+      return this.ctx.selectPolicy(session.language);
+    } catch {
+      return undefined;
+    }
   }
 
   /**

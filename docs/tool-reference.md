@@ -253,6 +253,13 @@ Passing `logMessage` turns the breakpoint into a DAP logpoint: when the line is 
 
 This is the prod-safe just-in-time diagnostics primitive: attach to a live process, plant logpoints at suspect lines, read interpolated values from `get_output` — no pauses, no pre-instrumented logging.
 
+**JavaScript logpoints are compiled by mcp-debugger** (issues #850, #861, #853). js-debug's own logpoints print through the debuggee's `console.log`, which a program that owns its stdout may have replaced (an MCP stdio server — mcp-debugger itself — no-ops it), and js-debug lets a `condition` take precedence over the message. So for a JavaScript session the `logMessage` is compiled into a breakpoint condition that renders the message, delivers it over js-debug's CDP proxy (a `Runtime.addBinding` global the proxy installs; `console.log` only as a fallback before the binding exists, e.g. in the first milliseconds after an attach) and never pauses; the entries arrive with category `console`. What that means in practice:
+
+- Strings interpolate raw; everything else renders through `util.inspect` on one line (`obj={ k: 2 }`); a throwing expression renders inline as `<ReferenceError: x is not defined>`; a throwing `condition` logs one `Logpoint condition error: …` line and does not pause.
+- A `{expression}` is one JavaScript expression, judged by V8 the way js-debug judges a condition: regex literals, comments, and brackets inside strings are all fine (`{/;/.test(s)}`, `{JSON.stringify({a: 1})}`); a statement list (`{a; b}`) is refused. The only lexical limit is the brace scanner's: a `}` inside a regex literal ends the expression early — write that `}` in a string. `{{foo}}` is the object-literal shorthand `({foo})`; an unclosed `{`, an empty `{}`, a stray `}` and a brace group with an unbalanced quote (`{it's}`) are literal text, and the groups after them still interpolate.
+- A `logMessage` whose expression does not compile is refused by `set_breakpoint` with V8's message; a plain `condition` js-debug rejects is reported on the breakpoint (`list_breakpoints` → `message`, and the launch's unbound-breakpoint warning) in js-debug's own words, as well as in the output stream.
+- A logpoint set before `start_debugging` makes js-debug stop on entry so the delivery binding is installed before the first hit; the session auto-continues that stop (it is not reported, `wait_for_stop` never sees it), exactly as it does for a pre-launch function breakpoint.
+
 Support is adapter-dependent:
 
 | Adapters | Behavior |

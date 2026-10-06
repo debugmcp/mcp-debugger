@@ -27,6 +27,19 @@ export function toSourceBreakpoint(bp: BreakpointFields): DebugProtocol.SourceBr
   };
 }
 
+/**
+ * The wire form a given adapter must receive (issue #850): the policy's
+ * toWireBreakpoint when it declares one (js-debug compiles logpoints into
+ * conditions), otherwise the plain mapping above. Use this at every
+ * setBreakpoints construction site that knows its policy.
+ */
+export function toWireSourceBreakpoint(
+  bp: BreakpointFields,
+  policy?: { toWireBreakpoint?(bp: BreakpointFields): DebugProtocol.SourceBreakpoint } | null
+): DebugProtocol.SourceBreakpoint {
+  return policy?.toWireBreakpoint?.(bp) ?? toSourceBreakpoint(bp);
+}
+
 export interface FunctionBreakpointFields {
   functionName: string;
   condition?: string;

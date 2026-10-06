@@ -74,7 +74,7 @@ Shorthand: `create_debug_session { "language": "javascript", "host": "127.0.0.1"
 - **Child processes are not auto-attached.** `autoAttachChildProcesses` defaults to `false`; pass it as `true` in `dapLaunchArgs` to debug `spawn`-ed Node children.
 - **Output capture works** (`outputCapture: 'std'`): stdout/stderr appear as `get_output` entries; entries without a category default to `console`.
 - **Frame IDs are adapter-assigned.** Use the `id` field from `get_stack_trace` frames for `get_scopes` — not the array index, not 0. Locals scopes are named `Local`/`Block`, and values come back as strings.
-- Logpoints work: `set_breakpoint` with `logMessage: "x={x}"` logs interpolated values to `get_output` without pausing.
+- Logpoints work: `set_breakpoint` with `logMessage: "x={x}"` logs interpolated values to `get_output` (category `console`) without pausing. mcp-debugger compiles them itself and delivers them over the inspector, so they survive a program that replaced `console.log` (an MCP stdio server, for one), a `condition` gates the log instead of pausing, strings print raw and objects through `util.inspect`, and a malformed `{expression}` is refused at `set_breakpoint` with the syntax error. A logpoint set before launch adds a hidden entry stop that is auto-continued; nothing to wait for.
 
 ## Troubleshooting
 

@@ -40,6 +40,14 @@ class MockMinimalDapClient extends EventEmitter {
   static threadsResponse: unknown | undefined = undefined;
   // When true, shutdown() throws (drives the parent shutdown catch arm)
   static shutdownThrows = false;
+  // stderr lines emitted (as 'output' events) synchronously inside every
+  // setBreakpoints request, before its response — js-debug's syntax-error
+  // report shape (issue #853)
+  static stderrOnSetBreakpoints: string[] = [];
+  // stderr lines emitted synchronously inside the attach request — js-debug
+  // compiles the breakpoints it buffered on a pending-target connection while
+  // answering attach, and reports their syntax errors then (issue #853)
+  static stderrOnAttach: string[] = [];
 
   host: string;
   port: number;
@@ -74,6 +82,11 @@ class MockMinimalDapClient extends EventEmitter {
       throw failure;
     }
 
+    if (command === 'attach') {
+      for (const output of MockMinimalDapClient.stderrOnAttach) {
+        this.emit('output', { category: 'stderr', output });
+      }
+    }
     if (command === 'attach' && MockMinimalDapClient.emitStoppedAfterAttach) {
       setTimeout(() => this.emit('event', { event: 'stopped', body: { reason: 'entry', threadId: 0 } }), 5);
     }
@@ -102,6 +115,9 @@ class MockMinimalDapClient extends EventEmitter {
       return { body: { threads: [{ id: 1, name: 'main' }] } };
     }
     if (command === 'setBreakpoints') {
+      for (const output of MockMinimalDapClient.stderrOnSetBreakpoints) {
+        this.emit('output', { category: 'stderr', output });
+      }
       if (MockMinimalDapClient.setBreakpointsResponses.length > 0) {
         return MockMinimalDapClient.setBreakpointsResponses.shift();
       }
@@ -192,6 +208,8 @@ describe('ChildSessionManager', () => {
     MockMinimalDapClient.emitInitializedSyncOn.clear();
     MockMinimalDapClient.threadsResponse = undefined;
     MockMinimalDapClient.shutdownThrows = false;
+    MockMinimalDapClient.stderrOnSetBreakpoints = [];
+    MockMinimalDapClient.stderrOnAttach = [];
   });
 
   describe('JavaScript policy (multi-session)', () => {
@@ -619,6 +637,124 @@ describe('ChildSessionManager', () => {
           source: { path: '/absolute/path/to/file.js' }
         });
         expect(bodies[1].breakpoint).toMatchObject({ id: 101, verified: true, line: 15 });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("stamps js-debug's syntax-error line onto the mirrored answer and the synthesized event (issue #853)", async () => {
+      vi.useFakeTimers();
+      try {
+        const createPromise = manager.createChildSession({
+          pendingId: 'child-bp-syntax',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: {}
+        });
+        await vi.advanceTimersByTimeAsync(20000);
+        await createPromise;
+
+        const line = `Syntax error setting breakpoint with condition "n >=" on line 9: Unexpected token ';'`;
+        MockMinimalDapClient.stderrOnSetBreakpoints = [line];
+        MockMinimalDapClient.setBreakpointsResponse = {
+          body: { breakpoints: [{ id: 100, verified: false, line: 9, message: 'Unbound breakpoint' }, { id: 101, verified: true, line: 15 }] }
+        };
+        const events: DebugProtocol.BreakpointEvent[] = [];
+        manager.on('childEvent', (evt: DebugProtocol.Event) => {
+          if (evt.event === 'breakpoint') events.push(evt as DebugProtocol.BreakpointEvent);
+        });
+
+        const mirrored = manager.storeBreakpoints('/absolute/path/to/file.js', [{ line: 9, condition: 'n >=' }, { line: 15 }]);
+        await vi.advanceTimersByTimeAsync(0);
+        const resp = await mirrored;
+
+        expect(resp?.body.breakpoints[0].message).toBe(line);
+        expect(resp?.body.breakpoints[1].message).toBeUndefined();
+        expect(events.map((e) => e.body.breakpoint.message)).toEqual([line, undefined]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("reports a syntax error js-debug raises while answering attach on the pre-stored breakpoint it names (issue #853)", async () => {
+      vi.useFakeTimers();
+      try {
+        const line = `Syntax error setting breakpoint with condition "n >=" on line 9: Unexpected token ';'`;
+        MockMinimalDapClient.stderrOnAttach = [line];
+        manager.storeBreakpoints('/absolute/path/to/file.js', [{ line: 9, condition: 'n >=' }, { line: 15 }]);
+        manager.storeBreakpoints('/absolute/path/to/other.js', [{ line: 9, condition: 'n > 1' }]);
+
+        const events: DebugProtocol.BreakpointEvent[] = [];
+        manager.on('childEvent', (evt: DebugProtocol.Event) => {
+          if (evt.event === 'breakpoint') events.push(evt as DebugProtocol.BreakpointEvent);
+        });
+
+        const createPromise = manager.createChildSession({
+          pendingId: 'child-bp-attach-syntax',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: {}
+        });
+        await vi.advanceTimersByTimeAsync(20000);
+        await createPromise;
+
+        const stamped = events.filter((e) => e.body.breakpoint.message === line);
+        expect(stamped).toHaveLength(1);
+        // id = the child's echoed id for that (file, index) from the replay, so
+        // the SessionManager matches the record by id, not by file+line
+        expect(stamped[0].body.breakpoint).toMatchObject({ id: 100, verified: false, line: 9, source: { path: '/absolute/path/to/file.js' } });
+        // emitted after the replay's provisional answers, so it is the last word
+        const forFileLine9 = events.filter((e) => e.body.breakpoint.line === 9 && e.body.breakpoint.source?.path === '/absolute/path/to/file.js');
+        expect(forFileLine9[forFileLine9.length - 1].body.breakpoint.message).toBe(line);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('names the right twin when two pre-stored breakpoints share a line: the attach-time event carries its id', async () => {
+      vi.useFakeTimers();
+      try {
+        const line = `Syntax error setting breakpoint with condition "n >=" on line 9: Unexpected token ';'`;
+        MockMinimalDapClient.stderrOnAttach = [line];
+        manager.storeBreakpoints('/absolute/path/to/file.js', [{ line: 9 }, { line: 9, condition: 'n >=' }]);
+
+        const events: DebugProtocol.BreakpointEvent[] = [];
+        manager.on('childEvent', (evt: DebugProtocol.Event) => {
+          if (evt.event === 'breakpoint') events.push(evt as DebugProtocol.BreakpointEvent);
+        });
+        const createPromise = manager.createChildSession({ pendingId: 'child-bp-twins', host: 'localhost', port: 9229, parentConfig: {} });
+        await vi.advanceTimersByTimeAsync(20000);
+        await createPromise;
+
+        const stamped = events.filter((e) => e.body.breakpoint.message === line);
+        expect(stamped).toHaveLength(1);
+        expect(stamped[0].body.breakpoint.id).toBe(101);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not watch for syntax-error lines for a policy that does not report them on stderr', async () => {
+      // The js-debug behaviour flag gates the correlation; a policy without it
+      // (python-like child mirroring) must never stamp output text onto records.
+      vi.useFakeTimers();
+      try {
+        const line = `Syntax error setting breakpoint with condition "n >=" on line 9: Unexpected token ';'`;
+        MockMinimalDapClient.stderrOnSetBreakpoints = [line];
+        MockMinimalDapClient.setBreakpointsResponse = { body: { breakpoints: [{ id: 100, verified: false, line: 9, message: 'Unbound breakpoint' }] } };
+        const quiet = new ChildSessionManager({
+          policy: { ...JsDebugAdapterPolicy, getDapClientBehavior: () => ({ ...JsDebugAdapterPolicy.getDapClientBehavior(), reportsBreakpointSyntaxErrorsOnStderr: false }) } as unknown as AdapterPolicy,
+          host: 'localhost',
+          port: 9229,
+          getParentStart: () => parentStart
+        });
+        const createPromise = quiet.createChildSession({ pendingId: 'child-bp-quiet', host: 'localhost', port: 9229, parentConfig: {} });
+        await vi.advanceTimersByTimeAsync(20000);
+        await createPromise;
+        const mirrored = quiet.storeBreakpoints('/absolute/path/to/file.js', [{ line: 9, condition: 'n >=' }]);
+        await vi.advanceTimersByTimeAsync(0);
+        const resp = await mirrored;
+        expect(resp?.body.breakpoints[0].message).toBe('Unbound breakpoint');
       } finally {
         vi.useRealTimers();
       }
@@ -1361,8 +1497,14 @@ describe('ChildSessionManager', () => {
       holdMs = 0;
       transform: ((evt: DebugProtocol.Event) => DebugProtocol.Event) | null = null;
 
+      /** When set, attachToChild waits for it (models a slow requestCDPProxy). */
+      attachGate: Promise<void> | null = null;
+
       async attachToChild(child: unknown): Promise<void> {
         this.attachCalls.push(child);
+        if (this.attachGate) {
+          await this.attachGate;
+        }
       }
 
       detach(): void {
@@ -1542,6 +1684,92 @@ describe('ChildSessionManager', () => {
       const bpEvent = { seq: 0, type: 'event', event: 'breakpoint', body: { reason: 'changed', breakpoint: { id: 1_000_001, verified: true } } };
       bridge.emit('breakpointEvent', bpEvent);
       expect(forwarded).toEqual([bpEvent]);
+    });
+
+    it('keeps a logpoint delivery behind child events the chain is still holding (issue #850)', async () => {
+      const mgr = makeManager(JsDebugAdapterPolicy);
+      const child = await adopt(mgr);
+      bridge.armed = true;
+      bridge.holdMs = 25;
+      const forwarded: DebugProtocol.Event[] = [];
+      mgr.on('childEvent', (evt: DebugProtocol.Event) => forwarded.push(evt));
+
+      (child as unknown as EventEmitter).emit('event', { event: 'output', body: { category: 'stdout', output: 'before' } });
+      (child as unknown as EventEmitter).emit('event', { event: 'stopped', body: { reason: 'breakpoint' } });
+      bridge.emit('outputEvent', { seq: 0, type: 'event', event: 'output', body: { category: 'console', output: 'LP' } });
+
+      await new Promise((r) => setTimeout(r, 80));
+      expect(forwarded.map((e) => `${e.event}:${(e.body as { output?: string; reason?: string }).output ?? (e.body as { reason?: string }).reason}`))
+        .toEqual(['output:before', 'stopped:breakpoint', 'output:LP']);
+    });
+
+    it('re-emits bridge outputEvents (logpoint deliveries, issue #850) as childEvents', async () => {
+      const mgr = makeManager(JsDebugAdapterPolicy);
+      const forwarded: DebugProtocol.Event[] = [];
+      mgr.on('childEvent', (evt: DebugProtocol.Event) => forwarded.push(evt));
+      const outputEvent = { seq: 0, type: 'event', event: 'output', body: { category: 'console', output: 'n=1' } };
+      bridge.emit('outputEvent', outputEvent);
+      await new Promise((r) => setTimeout(r, 0)); // delivered through the child event chain
+      expect(forwarded).toEqual([outputEvent]);
+    });
+
+    it('holds a child stop that lands before the bridge attach settles, even with nothing armed (issue #850)', async () => {
+      // A forced entry stop exists so the logpoint binding is installed
+      // before the SessionManager auto-continues; it must not overtake the
+      // bridge attach that installs it.
+      MockMinimalDapClient.emitStoppedAfterAttach = true;
+      bridge.armed = false;
+      let openGate!: () => void;
+      bridge.attachGate = new Promise<void>((resolve) => { openGate = resolve; });
+      const mgr = makeManager(JsDebugAdapterPolicy);
+      const forwarded: DebugProtocol.Event[] = [];
+      mgr.on('childEvent', (evt: DebugProtocol.Event) => forwarded.push(evt));
+      vi.useFakeTimers();
+      try {
+        const createPromise = mgr.createChildSession({
+          pendingId: 'cdp-held-stop',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: { type: 'pwa-node' }
+        });
+        // handlePostAttachInit may wait its full 3 s for a post-attach
+        // 'initialized' before the bridge attach step is reached
+        await vi.advanceTimersByTimeAsync(10000);
+        expect(bridge.attachCalls).toHaveLength(1);
+        expect(forwarded.map((e) => e.event)).not.toContain('stopped');
+
+        openGate();
+        await vi.advanceTimersByTimeAsync(40000);
+        await createPromise;
+        expect(forwarded.map((e) => e.event)).toContain('stopped');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('releases held events when adoption fails before the bridge attach', async () => {
+      MockMinimalDapClient.failCommands.set('attach', new Error('attach refused'));
+      bridge.armed = false;
+      const mgr = makeManager(JsDebugAdapterPolicy);
+      const forwarded: DebugProtocol.Event[] = [];
+      mgr.on('childEvent', (evt: DebugProtocol.Event) => forwarded.push(evt));
+      vi.useFakeTimers();
+      try {
+        const createPromise = mgr.createChildSession({
+          pendingId: 'cdp-failed-adoption',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: { type: 'pwa-node' }
+        });
+        await vi.advanceTimersByTimeAsync(40000);
+        await expect(createPromise).rejects.toThrow();
+        const child = MockMinimalDapClient.lastInstance!;
+        (child as unknown as EventEmitter).emit('event', { event: 'output', body: { output: 'after failure' } });
+        await vi.advanceTimersByTimeAsync(10);
+        expect(forwarded.map((e) => e.event)).toContain('output');
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('detaches the bridge on child close and on shutdown', async () => {

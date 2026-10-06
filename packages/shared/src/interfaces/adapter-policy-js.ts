@@ -16,7 +16,8 @@ import {
 } from './js-launch-defaults.js';
 import { emptyLocalVariableExtraction, extractionFromScope, resolveExceptionFilters } from './adapter-policy.js';
 import type { StackFrame, Variable } from '../models/index.js';
-import { toSourceBreakpoint } from '../utils/to-source-breakpoint.js';
+import { toSourceBreakpoint, type BreakpointFields } from '../utils/to-source-breakpoint.js';
+import { compileJsLogpoint, validateJsLogpoint } from '../utils/js-logpoint.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
 
 /**
@@ -93,6 +94,30 @@ function hasNoSource(filePath: string): boolean {
 export const JsDebugAdapterPolicy = {
   name: 'js-debug',
   supportsLogPoints: true,
+  // js-debug delivers a logpoint through the debuggee's console.log — lost
+  // in a program that replaced console (mcp-debugger's own stdio server) —
+  // and lets a condition take precedence over the logMessage (a pausing
+  // breakpoint). So a logpoint goes out as a condition compiled here that
+  // reports through the proxy's CDP binding and never pauses (issues #850,
+  // #861). A message that does not compile is sent as-is: js-debug then
+  // reports the syntax error itself (issue #853).
+  toWireBreakpoint: (bp: BreakpointFields): DebugProtocol.SourceBreakpoint => {
+    const plain = toSourceBreakpoint(bp);
+    if (bp.logMessage === undefined) {
+      return plain;
+    }
+    const compiled = compileJsLogpoint({ logMessage: bp.logMessage, condition: bp.condition });
+    if (!compiled.ok) {
+      return plain;
+    }
+    return {
+      line: bp.line,
+      ...(bp.suspendPolicy !== undefined ? { suspendPolicy: bp.suspendPolicy } : {}),
+      condition: compiled.condition
+    };
+  },
+  validateLogMessage: (logMessage: string, condition?: string): string | undefined =>
+    validateJsLogpoint(logMessage, condition),
   // js-debug implements no DAP setFunctionBreakpoints (upstream out of scope,
   // vscode-js-debug#952), so ours are delivered out of band (issue #295): the
   // proxy's CdpFunctionBreakpointBridge resolves names over the child
@@ -607,12 +632,13 @@ export const JsDebugAdapterPolicy = {
     }
     
     try {
-      // Group queued breakpoints by file, mapping via the shared
-      // toSourceBreakpoint so no per-breakpoint field is dropped (#235)
+      // Group queued breakpoints by file, mapping via this policy's wire
+      // form (logpoints compiled, #850) over the shared toSourceBreakpoint so
+      // no per-breakpoint field is dropped (#235)
       const grouped: Map<string, DebugProtocol.SourceBreakpoint[]> = new Map();
       for (const breakpoint of breakpoints.values()) {
         const arr = grouped.get(breakpoint.file) || [];
-        arr.push(toSourceBreakpoint(breakpoint));
+        arr.push(JsDebugAdapterPolicy.toWireBreakpoint(breakpoint));
         grouped.set(breakpoint.file, arr);
       }
       for (const [file, bps] of grouped) {
@@ -1128,6 +1154,10 @@ export const JsDebugAdapterPolicy = {
       // JavaScript-specific child session behaviors
       mirrorBreakpointsToChild: true,
       pauseAfterChildAttach: true,
+      // js-debug's only word on a condition (or compiled logpoint) that
+      // does not parse is a stderr output line during setBreakpoints or
+      // the child attach; the proxy correlates it (issue #853)
+      reportsBreakpointSyntaxErrorsOnStderr: true,
       stackTraceRequiresChild: true,
 
       // Commands that must not fall back to the parent when no child session

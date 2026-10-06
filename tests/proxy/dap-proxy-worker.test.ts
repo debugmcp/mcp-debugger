@@ -984,6 +984,56 @@ describe('DapProxyWorker', () => {
       expect(sendRequest).toHaveBeenCalledWith('launch', expect.objectContaining({ stopOnEntry: true }));
     });
 
+    it('forces stopOnEntry=true for a cdp-delivery policy when a pre-launch logpoint exists (issue #850)', async () => {
+      // The logpoint delivery binding is installed by the CDP bridge, which
+      // attaches after js-debug has resumed the program; the forced entry
+      // stop (auto-continued by the SessionManager) is where it lands first.
+      const sendRequest = vi.fn().mockResolvedValue({ success: true });
+      const cdpPolicy = {
+        name: 'js-debug-stub',
+        functionBreakpointsVia: 'cdp' as const,
+        shouldQueueCommand: () => ({ shouldQueue: false }),
+        getInitializationBehavior: () => ({}),
+        createInitialState: () => ({})
+      };
+      (worker as any).logger = mockLogger;
+      (worker as any).dapClient = { ...mockDapClient, sendRequest };
+      (worker as any).adapterPolicy = cdpPolicy;
+      (worker as any).adapterState = {};
+      (worker as any).currentInitPayload = {
+        cmd: 'init',
+        sessionId: 'js-logpoint-session',
+        initialBreakpoints: [{ file: 'x.js', line: 3 }, { file: 'x.js', line: 7, logMessage: 'n={n}' }],
+        initialFunctionBreakpoints: []
+      };
+
+      await (worker as any).handleDapCommand({
+        requestId: 'launch-lp',
+        cmd: 'dap',
+        sessionId: 'js-logpoint-session',
+        dapCommand: 'launch',
+        dapArgs: { program: 'x.js', stopOnEntry: false }
+      });
+      expect(sendRequest).toHaveBeenCalledWith('launch', expect.objectContaining({ stopOnEntry: true }));
+
+      // plain line breakpoints alone leave the launch config untouched
+      sendRequest.mockClear();
+      (worker as any).currentInitPayload = {
+        cmd: 'init',
+        sessionId: 'js-plain-session',
+        initialBreakpoints: [{ file: 'x.js', line: 3, condition: 'n > 1' }],
+        initialFunctionBreakpoints: []
+      };
+      await (worker as any).handleDapCommand({
+        requestId: 'launch-plain',
+        cmd: 'dap',
+        sessionId: 'js-plain-session',
+        dapCommand: 'launch',
+        dapArgs: { program: 'x.js', stopOnEntry: false }
+      });
+      expect(sendRequest).toHaveBeenCalledWith('launch', expect.objectContaining({ stopOnEntry: false }));
+    });
+
     it('leaves the launch config alone without pending function breakpoints or without cdp delivery', async () => {
       const sendRequest = vi.fn().mockResolvedValue({ success: true });
       const basePolicy = {
