@@ -18,7 +18,8 @@ import {
   type ParentStart,
   type ChildSessionConfig,
   buildNoDebugTargetError,
-  sanitizePayloadForLogging
+  sanitizePayloadForLogging,
+  describeDapEventBodyForLog
 } from '@debugmcp/shared';
 import { ChildSessionManager, type ChildSessionOptions } from './child-session-manager.js';
 import { sendSetBreakpointsStamping } from './breakpoint-condition-errors.js';
@@ -257,9 +258,12 @@ export class MinimalDapClient extends EventEmitter implements IDapClient {
       });
     } else if (message.type === 'event') {
       const evt = message as DebugProtocol.Event;
+      // An output event's body is the debuggee's own text, and this logger
+      // also writes the per-session proxy log: only its shape is recorded,
+      // and other bodies are sanitized like request payloads (issue #852).
       logger.info(`[MinimalDapClient] Event: ${evt.event}`, {
         event: evt.event,
-        body: evt.body
+        body: describeDapEventBodyForLog(evt.event, evt.body)
       });
     }
     

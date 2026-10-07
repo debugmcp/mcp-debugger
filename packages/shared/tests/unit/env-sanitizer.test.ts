@@ -6,7 +6,8 @@ import {
   sanitizeEnvForLogging,
   sanitizePayloadForLogging,
   sanitizeStderr,
-  sanitizeStderrTail
+  sanitizeStderrTail,
+  describeDapEventBodyForLog
 } from '../../src/utils/env-sanitizer.js';
 
 describe('sanitizeEnvForLogging', () => {
@@ -339,5 +340,37 @@ describe('sanitizeStderrTail', () => {
   it('returns an empty string for empty or whitespace-only input', () => {
     expect(sanitizeStderrTail('')).toBe('');
     expect(sanitizeStderrTail('  \n \r\n')).toBe('');
+  });
+});
+
+describe('describeDapEventBodyForLog (issue #852)', () => {
+  const token = 'ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0';
+
+  it('keeps only the shape of an output event: category and length, never the text', () => {
+    const output = `token=${token}\n`;
+    const described = describeDapEventBodyForLog('output', { category: 'stdout', output });
+    expect(described).toEqual({ category: 'stdout', outputLength: output.length });
+    expect(JSON.stringify(described)).not.toContain('ghp_');
+  });
+
+  it('defaults a missing category to console and a missing text to length 0', () => {
+    expect(describeDapEventBodyForLog('output', {})).toEqual({ category: 'console', outputLength: 0 });
+    expect(describeDapEventBodyForLog('output', undefined)).toEqual({ category: 'console', outputLength: 0 });
+  });
+
+  it('sanitizes every other event body like a request payload', () => {
+    const described = describeDapEventBodyForLog('process', {
+      name: 'app',
+      env: { SECRET: 'x' },
+      note: `bearer ${token}`
+    }) as Record<string, unknown>;
+    expect(described.env).toBe('<1 env vars redacted>');
+    expect(String(described.note)).not.toContain(token);
+    expect(described.name).toBe('app');
+  });
+
+  it('passes a stopped body through unchanged in shape', () => {
+    expect(describeDapEventBodyForLog('stopped', { reason: 'breakpoint', threadId: 1 }))
+      .toEqual({ reason: 'breakpoint', threadId: 1 });
   });
 });

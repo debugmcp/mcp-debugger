@@ -242,6 +242,30 @@ describe('DAP Core Handlers', () => {
         });
       });
 
+      it('logs an output event as category and length, never its text (issue #852)', () => {
+        const message: ProxyDapEventMessage = {
+          type: 'dapEvent',
+          sessionId: 'test-session-123',
+          event: 'output',
+          body: { category: 'stdout', output: 'token=ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0\n' }
+        };
+
+        const result = handleProxyMessage(state, message);
+
+        expect(result.commands[0]).toEqual({
+          type: 'log',
+          level: 'info',
+          message: '[ProxyManager] DAP event: output',
+          data: { category: 'stdout', outputLength: (message.body as { output: string }).output.length }
+        });
+        // The event itself still carries the real text to the session buffer
+        expect(result.commands[1]).toEqual({
+          type: 'emitEvent',
+          event: 'output',
+          args: [message.body]
+        });
+      });
+
       it('should forward unknown DAP events', () => {
         const message: ProxyDapEventMessage = {
           type: 'dapEvent',
