@@ -287,6 +287,15 @@ export interface AdapterConfig {
 export interface AdapterSpawnResult {
   process: ChildProcess;
   pid: number;
+  /**
+   * Hand over whatever the line buffers of the adapter's stdio still hold —
+   * the last line a program printed without a newline — through the same
+   * onStdioLine path as a complete line, marked partial. For an adapter that
+   * outlives its debuggee the pipes stay open after the program ends, so
+   * the worker asks for it when its exit-time drain settles (issue #860).
+   * Nothing pending, nothing forwarded; a later stream close finds nothing.
+   */
+  flushStdio?: () => void;
 }
 
 // ===== State Management =====
