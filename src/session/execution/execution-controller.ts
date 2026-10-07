@@ -853,6 +853,7 @@ export class ExecutionController {
           state === SessionState.INITIALIZING ? 'initializing' : 'running',
           {
             ...(arming.armed ? { armedSummary: arming.summary } : {}),
+            ...(arming.loggingSummary ? { loggingSummary: arming.loggingSummary } : {}),
             ...(debuggerOffWhy(session) ? { debuggerOffWhy: debuggerOffWhy(session) } : {})
           }
         ),

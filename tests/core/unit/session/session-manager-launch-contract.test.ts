@@ -111,6 +111,24 @@ describe('SessionManager - launch contract (issues #823, #826, #851)', () => {
     expect(result?.data?.message).toContain('wait_for_stop');
   });
 
+  it('names an armed logpoint instead of saying "no breakpoints" when only logpoints are set (issue #865)', async () => {
+    const sessionId = await createSession();
+    const started = launch(sessionId);
+    await vi.advanceTimersByTimeAsync(300);
+    // The handshake has said logpoints run on; a logpoint is then set.
+    proxy().simulateEvent('adapter-capabilities', { supportsLogPoints: true });
+    await sessionManager.setBreakpoint(sessionId, { file: 'test.py', line: 5, logMessage: 'x={x}' });
+    await vi.advanceTimersByTimeAsync(HOLD_MS);
+
+    const result = started.result();
+    expect(result).toMatchObject({ success: true, state: SessionState.RUNNING });
+    expect(result?.data?.pending).toBe(true);
+    expect(result?.data?.message).toMatch(/1 logpoint\(s\) that log without stopping/);
+    expect(result?.data?.message).toContain('get_output');
+    expect(result?.data?.message).toMatch(/nothing is armed to stop it/);
+    expect(result?.data?.message).not.toMatch(/\(no breakpoints,/);
+  });
+
   it('answers stopped with the exit code for a program that ends inside the hold', async () => {
     const sessionId = await createSession();
     const started = launch(sessionId);

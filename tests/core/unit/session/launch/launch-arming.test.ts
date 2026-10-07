@@ -79,6 +79,36 @@ describe('describeLaunchArming', () => {
     expect(describeLaunchArming(unknown, false).armed).toBe(true);
   });
 
+  it('names logpoints the adapter runs on as logging without stopping, apart from the armed summary (issue #865)', () => {
+    const s = session({ adapterCapabilities: { supportsLogPoints: true } });
+    s.breakpoints.set('lp1', lineBp('lp1', 'x={x}'));
+    s.breakpoints.set('lp2', lineBp('lp2', 'y={y}'));
+    const arming = describeLaunchArming(s, false);
+
+    // They do not stop the program: not armed, not in the armed summary...
+    expect(arming.armed).toBe(false);
+    expect(arming.summary).toBe('');
+    // ...but counted and worded, so the answer can say what IS set.
+    expect(arming.logpoints).toBe(2);
+    expect(arming.loggingSummary).toBe('2 logpoint(s) that log without stopping');
+
+    // Alongside a pausing breakpoint, both summaries stand.
+    s.breakpoints.set('bp', lineBp('bp'));
+    const both = describeLaunchArming(s, false);
+    expect(both.armed).toBe(true);
+    expect(both.summary).toBe('1 breakpoint(s)');
+    expect(both.loggingSummary).toBe('2 logpoint(s) that log without stopping');
+
+    // Nothing to say when there are none.
+    expect(describeLaunchArming(session(), false).logpoints).toBe(0);
+    expect(describeLaunchArming(session(), false).loggingSummary).toBeUndefined();
+    // A downgraded logpoint is a pausing breakpoint, not a logging one.
+    const downgraded = session({ adapterCapabilities: { supportsLogPoints: false } });
+    downgraded.breakpoints.set('lp', lineBp('lp', 'x={x}'));
+    expect(describeLaunchArming(downgraded, false).logpoints).toBe(0);
+    expect(describeLaunchArming(downgraded, false).loggingSummary).toBeUndefined();
+  });
+
   it('lists every armed clause in one summary', () => {
     const s = session({ effectiveBreakOnExceptions: 'all' });
     s.breakpoints.set('a', lineBp('a'));
