@@ -345,12 +345,18 @@ export const GoAdapterPolicy = {
   },
 
   /**
-   * Delve never sends a DAP `exited` event; the status is one console line,
-   * proc.ErrProcessExited.Error() — "Process %d has exited with status %d" —
-   * logged before `terminated` under noDebug and, in debug mode, only from
-   * stopDebugSession in reply to `disconnect` (issue #753). Console category
-   * only: a debuggee printing the same words to stdout is not Delve speaking.
-   * Go's ExitCode() is -1 for a signal-killed process — not a code.
+   * Delve before 1.27 never sends a DAP `exited` event; the status is one
+   * console line, proc.ErrProcessExited.Error() — "Process %d has exited with
+   * status %d" — logged before `terminated` under noDebug and, in debug mode,
+   * only from stopDebugSession in reply to `disconnect` (issue #753). Console
+   * category only: a debuggee printing the same words to stdout is not Delve
+   * speaking. Go's ExitCode() is -1 for a signal-killed process — not a code.
+   *
+   * Delve 1.27+ sends `exited` itself (go-delve/delve#4371) and the worker
+   * then never consults this. It stays as the fallback for older Delve, which
+   * is all a Go older than 1.25 can run (Delve 1.27 supports Go 1.25+); drop
+   * it, and exitStatusReportedOnDisconnect, once the supported Go floor is
+   * 1.25 or later.
    */
   debuggeeExitCodeFromOutput: (category: string, text: string): number | undefined => {
     if (category !== 'console') {
@@ -364,7 +370,7 @@ export const GoAdapterPolicy = {
     return Number.isSafeInteger(status) && status >= 0 ? status : undefined;
   },
 
-  /** In debug mode Delve prints the status line only in reply to `disconnect` (issue #753). */
+  /** In debug mode Delve before 1.27 prints the status line only in reply to `disconnect` (issue #753). */
   exitStatusReportedOnDisconnect: true,
 
   /**

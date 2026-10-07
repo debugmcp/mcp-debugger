@@ -453,7 +453,7 @@ export interface AdapterPolicy {
   /**
    * Read the debuggee's exit code out of a DAP 'output' event, for adapters
    * that state it only as console text and never send `exited` (issue #753 —
-   * Delve prints `Process N has exited with status S`). Consulted by the proxy
+   * Delve before 1.27 prints `Process N has exited with status S`). Consulted by the proxy
    * worker on every output event, which is still forwarded unchanged so
    * get_output keeps the adapter's line; the first code returned is replayed
    * as a synthesized DAP `exited` event ahead of `terminated`, exactly as the
