@@ -1978,8 +1978,22 @@ describe('DapProxyWorker', () => {
         adapterProcess.kill = vi.fn();
         adapterProcess.unref = vi.fn();
 
+        // The adapter manager's line buffer, reduced to one fragment: what a
+        // last line with no newline leaves behind until the pipe closes.
+        // flushStdio is the worker's way of asking for it (issue #860); the
+        // stream's own close hands it over as before.
+        let pendingFragment: string | undefined;
+        const flushStdio = vi.fn(() => {
+          if (pendingFragment !== undefined) {
+            const fragment = pendingFragment;
+            pendingFragment = undefined;
+            spawnConfig.onStdioLine('stdout', fragment, { partial: true });
+          }
+        });
+        adapterProcess.stdout.on('close', flushStdio);
+
         const processStub = {
-          spawn: vi.fn().mockResolvedValue({ process: adapterProcess as ChildProcess, pid: 4245 }),
+          spawn: vi.fn().mockResolvedValue({ process: adapterProcess as ChildProcess, pid: 4245, flushStdio }),
           shutdown: vi.fn().mockResolvedValue(undefined)
         };
         const connectionStub = {
@@ -2034,8 +2048,77 @@ describe('DapProxyWorker', () => {
           adapterProcess.stdout.emit('data', Buffer.from(`${line}\n`));
           spawnConfig.onStdioLine('stdout', line);
         };
-        return { adapterProcess, sent, forwarded, output };
+        /** A chunk whose last line has no newline: the line is forwarded, the tail stays buffered. */
+        const outputWithFragment = (line: string, fragment: string) => {
+          adapterProcess.stdout.emit('data', Buffer.from(`${line}\n${fragment}`));
+          spawnConfig.onStdioLine('stdout', line);
+          pendingFragment = fragment;
+        };
+        /** Index of the forwarded output event carrying exactly this text, or -1. */
+        const outputIndex = (text: string) => sent().findIndex(m =>
+          m.type === 'dapEvent' && m.event === 'output' && isRecord(m.body) && m.body.output === text);
+        return { adapterProcess, sent, forwarded, output, outputWithFragment, outputIndex, flushStdio };
       }
+
+      it('forwards a last line without a newline, as printed, before exited (issue #860)', async () => {
+        const { forwarded, outputWithFragment, outputIndex, sent } = await startWorker({ adapterOutlivesDebuggee: true });
+        vi.useFakeTimers();
+        try {
+          outputWithFragment('first line', 'result: 42');
+          mockDapClient.emit('exited', { exitCode: 0 });
+          expect(outputIndex('result: 42')).toBe(-1);
+
+          await vi.advanceTimersByTimeAsync(QUIET_MS + 40);
+          expect(forwarded('exited')).toBe(true);
+          const fragmentIdx = outputIndex('result: 42');
+          expect(fragmentIdx).toBeGreaterThan(outputIndex('first line\n'));
+          expect(fragmentIdx).toBeLessThan(sent().findIndex(m => m.type === 'dapEvent' && m.event === 'exited'));
+          // No newline the program never printed
+          expect(outputIndex('result: 42\n')).toBe(-1);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('asks for the fragment once per drain, after the window, not while output still arrives', async () => {
+        const { output, outputWithFragment, outputIndex, flushStdio } = await startWorker({ adapterOutlivesDebuggee: true });
+        vi.useFakeTimers();
+        try {
+          mockDapClient.emit('exited', { exitCode: 0 });
+          await vi.advanceTimersByTimeAsync(60);
+          output('still printing');
+          expect(flushStdio).not.toHaveBeenCalled();
+
+          outputWithFragment('last full line', 'tail');
+          await vi.advanceTimersByTimeAsync(QUIET_MS + 40);
+          expect(flushStdio).toHaveBeenCalledTimes(1);
+          expect(outputIndex('tail')).toBeGreaterThan(outputIndex('last full line\n'));
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('leaves the fragment to the pipe close for an adapter whose pipes close with the debuggee', async () => {
+        // rdbg -c: the pipes close when the program ends, and the manager's
+        // own close flush delivers the fragment — the worker asks for nothing.
+        const { adapterProcess, forwarded, outputWithFragment, outputIndex, flushStdio } = await startWorker({});
+        vi.useFakeTimers();
+        try {
+          outputWithFragment('first line', 'result: 42');
+          mockDapClient.emit('exited', { exitCode: 0 });
+          await vi.advanceTimersByTimeAsync(10 * QUIET_MS);
+          expect(forwarded('exited')).toBe(false);
+          expect(flushStdio).not.toHaveBeenCalled();
+
+          adapterProcess.stdout.emit('close');
+          adapterProcess.stderr.emit('close');
+          await vi.advanceTimersByTimeAsync(1);
+          expect(forwarded('exited')).toBe(true);
+          expect(outputIndex('result: 42')).toBeGreaterThanOrEqual(0);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
 
       it('forwards exited once the pipes have been quiet for a moment, not at the backstop', async () => {
         const { forwarded } = await startWorker({ adapterOutlivesDebuggee: true });

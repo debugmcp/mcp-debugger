@@ -17,6 +17,16 @@ import {
 export type AdapterStdioSource = 'stdout' | 'stderr';
 
 /**
+ * How a forwarded line ended. Only the fragment handed over by
+ * AdapterSpawnResult.flushStdio carries `partial: true` (issue #860): the
+ * program wrote it with no newline, so the forwarder must not add one. A
+ * complete line is delivered without this argument.
+ */
+export interface AdapterStdioLineInfo {
+  partial?: boolean;
+}
+
+/**
  * Configuration for spawning any debug adapter
  */
 export interface GenericAdapterConfig {
@@ -33,7 +43,7 @@ export interface GenericAdapterConfig {
    * the redaction that protects persisted logs must not rewrite what the
    * debugging client sees, matching debugpy/js-debug output-event behavior.
    */
-  onStdioLine?: (source: AdapterStdioSource, line: string) => void;
+  onStdioLine?: (source: AdapterStdioSource, line: string, info?: AdapterStdioLineInfo) => void;
 }
 
 /**
@@ -148,51 +158,63 @@ export class GenericAdapterManager {
     this.logger.info(`[AdapterManager] Spawned adapter process PID: ${adapterProcess.pid} (windowsHide=${!!spawnOptions.windowsHide}, detached=${!!spawnOptions.detached})`);
 
     // Set up error handlers and stderr capture
-    this.setupProcessHandlers(adapterProcess, config.onStdioLine);
+    const flushStdio = this.setupProcessHandlers(adapterProcess, config.onStdioLine);
 
     return {
       process: adapterProcess,
-      pid: adapterProcess.pid
+      pid: adapterProcess.pid,
+      flushStdio
     };
   }
 
   /**
-   * Set up process event handlers
+   * Set up process event handlers. Returns the early flush of both stdio
+   * line buffers (AdapterSpawnResult.flushStdio, issue #860).
    */
   private setupProcessHandlers(
     adapterProcess: ChildProcess,
-    onStdioLine?: (source: AdapterStdioSource, line: string) => void
-  ): void {
+    onStdioLine?: (source: AdapterStdioSource, line: string, info?: AdapterStdioLineInfo) => void
+  ): () => void {
     adapterProcess.on('error', (err: Error) => {
       this.logger.error('[AdapterManager] Adapter process spawn error:', err);
     });
+
+    const flushes: Array<() => void> = [];
 
     // Capture stderr for diagnostics. Chunks arrive at arbitrary byte
     // boundaries, so they are line-buffered before sanitization — a secret
     // assignment split across two chunks would otherwise leak its tail past
     // the key/value redaction patterns (issues #151/#153).
     if (adapterProcess.stderr) {
-      this.consumeStream(
+      flushes.push(this.consumeStream(
         adapterProcess.stderr,
+        'stderr',
         line => this.logger.error(`[AdapterManager STDERR] ${line}`),
-        onStdioLine && (line => onStdioLine('stderr', line))
-      );
+        onStdioLine
+      ));
     }
 
     // stdout is piped but carries no DAP traffic (that goes over TCP); drain
     // it through the same sanitized path so a chatty adapter cannot fill the
     // pipe buffer and stall, and its diagnostics land in the log at debug.
     if (adapterProcess.stdout) {
-      this.consumeStream(
+      flushes.push(this.consumeStream(
         adapterProcess.stdout,
+        'stdout',
         line => this.logger.debug(`[AdapterManager STDOUT] ${line}`),
-        onStdioLine && (line => onStdioLine('stdout', line))
-      );
+        onStdioLine
+      ));
     }
 
     adapterProcess.on('exit', (code: number | null, signal: NodeJS.Signals | null) => {
       this.logger.info(`[AdapterManager] Adapter process exited. Code: ${code}, Signal: ${signal}`);
     });
+
+    return () => {
+      for (const flush of flushes) {
+        flush();
+      }
+    };
   }
 
   /**
@@ -200,19 +222,34 @@ export class GenericAdapterManager {
    * partial line is flushed on the stream's own 'end'/'close', never on
    * process 'exit' — the pipe can still deliver the rest of a split line
    * after exit, which would re-create the straddle leak (issue #151).
+   *
+   * Returns that same flush for the caller to run early, marking the lines
+   * partial (issue #860): an adapter that outlives its debuggee never closes
+   * the pipes when the program ends, so the worker runs it once its
+   * exit-time drain has seen the pipes go quiet — the program has exited and
+   * the fragment is its last word, not half of a line still being written.
+   * The straddle reasoning above is about process 'exit' with the pipe still
+   * live; this flush rests on the measured silence instead (issue #856).
+   * Idempotent: an emptied buffer yields nothing on the later 'end'/'close'.
    */
   private consumeStream(
     stream: Readable,
+    source: AdapterStdioSource,
     logLine: (line: string) => void,
-    forwardLine?: (line: string) => void
-  ): void {
+    forwardLine?: (source: AdapterStdioSource, line: string, info?: AdapterStdioLineInfo) => void
+  ): () => void {
     const buffer = new LineBuffer();
-    const record = (lines: string[]) => {
+    const record = (lines: string[], info?: AdapterStdioLineInfo) => {
       if (forwardLine) {
         // Debuggee-output fan-out (issue #222): raw lines, blank lines
-        // included — they are program output, not log noise.
+        // included — they are program output, not log noise. Only a flushed
+        // fragment carries the info argument.
         for (const line of lines) {
-          forwardLine(line);
+          if (info) {
+            forwardLine(source, line, info);
+          } else {
+            forwardLine(source, line);
+          }
         }
       }
       for (const line of sanitizeStderr(lines.filter(l => l.trim().length > 0))) {
@@ -223,6 +260,7 @@ export class GenericAdapterManager {
     const flush = () => record(buffer.flush());
     stream.on('end', flush);
     stream.on('close', flush);
+    return () => record(buffer.flush(), { partial: true });
   }
 
   /**
