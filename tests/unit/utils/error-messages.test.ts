@@ -187,6 +187,25 @@ describe('ErrorMessages', () => {
       expect(message).toContain('get_output');
     });
 
+    it('a launch still running with only logpoints names them and points at get_output (issue #865)', () => {
+      const message = ErrorMessages.launchStillRunning(undefined, undefined, '1 logpoint(s) that log without stopping');
+      expect(message).toMatch(/1 logpoint\(s\) that log without stopping/);
+      expect(message).toMatch(/nothing is armed to stop it/i);
+      // "no breakpoints" would read as "your logpoint was not registered"
+      expect(message).not.toMatch(/\(no breakpoints,/);
+      expect(message).toMatch(/no pausing breakpoint/);
+      expect(message).toContain('get_output');
+      expect(message).toContain('wait_for_stop');
+    });
+
+    it('a launch still running with breakpoints and logpoints names both (issue #865)', () => {
+      const message = ErrorMessages.launchStillRunning('2 breakpoint(s)', undefined, '1 logpoint(s) that log without stopping');
+      expect(message).toMatch(/has not reached 2 breakpoint\(s\) yet/);
+      expect(message).toMatch(/1 logpoint\(s\) that log without stopping/);
+      expect(message).toContain('get_output');
+      expect(message).toMatch(/Nothing was cancelled/);
+    });
+
     it('a launch still running with the debugger off promises no stop', () => {
       const message = ErrorMessages.launchStillRunning('2 breakpoint(s)', ErrorMessages.debuggerOffForLaunch);
       expect(message).toContain(ErrorMessages.debuggerOffForLaunch);
@@ -212,6 +231,16 @@ describe('ErrorMessages', () => {
       expect(message).not.toMatch(/becomes 'paused' when/);
       expect(message).toMatch(/uncaught exception/);
       expect(message).toMatch(/exit/);
+      expect(message).toContain('wait_for_stop');
+    });
+
+    it('wait_for_stop with only logpoints armed names them (issue #865)', () => {
+      const message = ErrorMessages.waitForStopPending(30, 'running', { loggingSummary: '1 logpoint(s) that log without stopping' });
+      expect(message).toMatch(/still running after 30s/);
+      expect(message).toMatch(/1 logpoint\(s\) that log without stopping/);
+      expect(message).toContain('get_output');
+      expect(message).toMatch(/no pausing breakpoint or caught-exception filter is armed/);
+      expect(message).not.toMatch(/stays? armed/);
       expect(message).toContain('wait_for_stop');
     });
 

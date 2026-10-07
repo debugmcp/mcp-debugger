@@ -44,6 +44,14 @@ const DEBUGGER_OFF_FOR_LAUNCH =
   'the debugger is off for this launch (noDebug is true): breakpoints cannot bind and no stop is expected; ' +
   'drop noDebug and launch again to debug';
 
+/**
+ * The clause naming logpoints the adapter runs on (issue #865): they never
+ * stop the program, so a launch or wait_for_stop answer names them apart
+ * from what is armed to stop it, with where their messages go.
+ */
+const loggingClause = (loggingSummary: string): string =>
+  `${loggingSummary} ${loggingSummary.startsWith('1 ') ? 'is' : 'are'} armed (read get_output for the messages)`;
+
 export const ErrorMessages = {
   /**
    * Error message for DAP request timeouts
@@ -179,7 +187,7 @@ export const ErrorMessages = {
   waitForStopPending: (
     seconds: number,
     state: 'running' | 'initializing',
-    why: { armedSummary?: string; debuggerOffWhy?: string } = {}
+    why: { armedSummary?: string; debuggerOffWhy?: string; loggingSummary?: string } = {}
   ) => {
     if (state === 'initializing') {
       return `The session is still starting after ${seconds}s (its launch or attach has not completed). ` +
@@ -189,15 +197,19 @@ export const ErrorMessages = {
       return `The program is still running after ${seconds}s — ${why.debuggerOffWhy}. ` +
         `Call wait_for_stop again to wait for it to end.`;
     }
+    // Logpoints the adapter runs on never stop the program, so they are
+    // named apart from what is armed to stop it (issue #865): a caller who
+    // set one reads "no breakpoint is armed" as "it was not registered".
+    const logging = why.loggingSummary ? `; ${loggingClause(why.loggingSummary)}` : '';
     if (why.armedSummary) {
-      return `The program is still running after ${seconds}s without reaching ${why.armedSummary}. ` +
+      return `The program is still running after ${seconds}s without reaching ${why.armedSummary}${logging}. ` +
         `Nothing was cancelled: what is armed stays armed, and the session becomes 'paused' when the program ` +
         `gets there. Call wait_for_stop again to keep waiting, or pause_execution to interrupt it.`;
     }
-    return `The program is still running after ${seconds}s, and no breakpoint or caught-exception filter is armed ` +
-      `to stop it: unless a step or a pause is still in flight, it will stop only for an uncaught exception the ` +
-      `debugger catches by default, or report its exit. Call wait_for_stop again to wait for either, or ` +
-      `pause_execution to interrupt it.`;
+    return `The program is still running after ${seconds}s${logging}, and no ${why.loggingSummary ? 'pausing ' : ''}breakpoint ` +
+      `or caught-exception filter is armed to stop it: unless a step or a pause is still in flight, it will stop ` +
+      `only for an uncaught exception the debugger catches by default, or report its exit. Call wait_for_stop ` +
+      `again to wait for either, or pause_execution to interrupt it.`;
   },
 
   /**
@@ -228,20 +240,25 @@ export const ErrorMessages = {
    * Used in: src/session/launch/debug-launcher.ts
    * @param armedSummary - The armed clauses ("2 breakpoint(s) and an entry stop"); undefined when nothing is armed
    * @param debuggerOffWhy - The debugger-off sentence, when it applies
+   * @param loggingSummary - Logpoints the adapter runs on ("1 logpoint(s) that log without stopping"), named apart
+   *   because they never stop the program (issue #865); undefined when there are none
    */
-  launchStillRunning: (armedSummary: string | undefined, debuggerOffWhy?: string) => {
+  launchStillRunning: (armedSummary: string | undefined, debuggerOffWhy?: string, loggingSummary?: string) => {
     if (debuggerOffWhy) {
       return `The program is running — ${debuggerOffWhy}. ` +
         `Call wait_for_stop to wait for it to end, or read get_output.`;
     }
+    const logging = loggingSummary ? `; ${loggingClause(loggingSummary)}` : '';
     if (armedSummary) {
-      return `The program is running and has not reached ${armedSummary} yet. ` +
+      return `The program is running and has not reached ${armedSummary} yet${logging}. ` +
         `Nothing was cancelled: what is armed stays armed, and the session will report 'paused' when the program ` +
         `gets there — call wait_for_stop to block until then, or pause_execution to interrupt.`;
     }
-    return `The program is running and nothing is armed to stop it ` +
-      `(no breakpoints, no entry stop, no caught-exception filter): it will stop only for an uncaught ` +
-      `exception the debugger catches by default, or report its exit. Call wait_for_stop to wait for ` +
+    // "no breakpoints" to a caller who set a logpoint reads as "it was not
+    // registered" — the first thing checked when a logpoint seems silent.
+    return `The program is running${logging}${loggingSummary ? ',' : ''} and nothing is armed to stop it ` +
+      `(no ${loggingSummary ? 'pausing ' : ''}breakpoints, no entry stop, no caught-exception filter): it will stop only ` +
+      `for an uncaught exception the debugger catches by default, or report its exit. Call wait_for_stop to wait for ` +
       `either, read get_output, or set breakpoints — they take effect on the running program.`;
   },
 
