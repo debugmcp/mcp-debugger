@@ -35,3 +35,19 @@ export interface SelectedAsset {
  * @throws {Error} when no asset matches, naming the ones that were available
  */
 export function selectBestAsset(assets: readonly ReleaseAsset[]): SelectedAsset;
+
+/** The `js-debug` entry of `vendor-manifest.json`, as the pin reader sees it. */
+export interface JsDebugPin {
+  version?: string;
+  upstream?: string;
+  /** asset file name → expected sha256 of the archive */
+  assets?: Record<string, string>;
+}
+
+/**
+ * The asset a pinned vendoring downloads straight from
+ * `<upstream>/releases/download/<tag>/<asset>` — outside the GitHub REST
+ * quota (issues #867, #813). `null` when the API has to resolve the release
+ * (`latest`, a version override, or a pin that names no archive).
+ */
+export function pinnedAssetCandidate(pin: JsDebugPin, version: string): SelectedAsset | null;
