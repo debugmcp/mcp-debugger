@@ -101,3 +101,41 @@ export function selectBestAsset(assets) {
 
   return pick;
 }
+
+/**
+ * The asset a pinned vendoring can download without asking the GitHub API.
+ *
+ * `vendor-manifest.json` pins the release tag AND names the asset it expects,
+ * so for the pinned version the download URL is already known:
+ * `<upstream>/releases/download/<tag>/<asset>`. That URL is served by
+ * github.com (a redirect to the release CDN), not by api.github.com, so it
+ * is outside the unauthenticated REST quota of 60 requests per hour per IP —
+ * the one a shared CI runner or a Docker build has already used up when the
+ * `releases/tags/<tag>` lookup answers 403 (issues #867, #813). The API is
+ * only needed to resolve `latest` or a version override away from the pin.
+ *
+ * @param {{ version?: string, upstream?: string, assets?: Record<string, string> }} pin
+ *   The `js-debug` entry of vendor-manifest.json
+ * @param {string} version The requested version (`JS_DEBUG_VERSION` or the pin)
+ * @returns {{ url: string, name: string, type: 'tgz' | 'zip' } | null}
+ *   The asset to download directly, or null when the API has to resolve it
+ */
+export function pinnedAssetCandidate(pin, version) {
+  const tag = pin?.version;
+  const upstream = String(pin?.upstream || '').replace(/\/+$/, '');
+  const names = Object.keys(pin?.assets || {});
+  if (!tag || !upstream || version !== tag || names.length === 0) {
+    return null;
+  }
+  const assets = names.map(name => ({
+    name,
+    browser_download_url: `${upstream}/releases/download/${encodeURIComponent(tag)}/${encodeURIComponent(name)}`
+  }));
+  try {
+    return selectBestAsset(assets);
+  } catch {
+    // None of the pinned names is an archive the vendoring understands —
+    // let the API path report what the release actually offers.
+    return null;
+  }
+}

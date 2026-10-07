@@ -406,6 +406,12 @@ jobs:
         head -1 /tmp/cobc-version.txt | grep -E '^cobc \(GnuCOBOL\) 3\.1\.2([. ]|$)'
     - name: Install dependencies
       run: pnpm install --frozen-lockfile
+      # This job vendors in postinstall (it needs CodeLLDB and js-debug for
+      # the smoke); the pinned js-debug asset downloads without the API, but
+      # the token keeps a 'latest'/override build off the unauthenticated
+      # quota like the other jobs' vendor step (issue #813).
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     - name: Build project
       run: pnpm build
     - name: Run COBOL host smoke and logpoints
