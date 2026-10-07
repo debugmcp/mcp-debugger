@@ -46,7 +46,8 @@ import {
   DotnetAdapterPolicy,
   MockAdapterPolicy,
   getPolicyForLanguage,
-  resolveExceptionFilters
+  resolveExceptionFilters,
+  sanitizePayloadForLogging
 } from '@debugmcp/shared';
 
 export type DapProxyWorkerHooks = {
@@ -1003,7 +1004,9 @@ export class DapProxyWorker {
         }
       },
       onOutput: (body) => {
-        this.logger!.debug('[Worker] DAP event: output', body);
+        // The one verbatim copy of debuggee output in the logs, at debug
+        // level only and masked like get_output is (issue #852).
+        this.logger!.debug('[Worker] DAP event: output', sanitizePayloadForLogging(body));
         this.noteDebuggeeExitCodeFromOutput(body);
         this.sendDapEvent('output', body);
       },

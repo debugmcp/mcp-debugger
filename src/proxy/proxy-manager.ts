@@ -37,6 +37,7 @@ import {
   IDebugAdapter,
   AdapterLaunchBarrier,
   sanitizePayloadForLogging,
+  describeDapEventBodyForLog,
   sanitizeStderr,
   LineBuffer
 } from '@debugmcp/shared';
@@ -1346,7 +1347,8 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       message.body as DebugProtocol.Event['body'] | undefined
     );
 
-    this.logger.info(`[ProxyManager] DAP event: ${message.event}`, message.body);
+    // Debuggee output is logged by shape only (issue #852); see describeDapEventBodyForLog.
+    this.logger.info(`[ProxyManager] DAP event: ${message.event}`, describeDapEventBodyForLog(message.event, message.body));
 
     switch (message.event) {
       case 'stopped':

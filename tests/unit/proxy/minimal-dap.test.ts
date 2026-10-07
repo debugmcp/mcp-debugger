@@ -695,6 +695,44 @@ describe('MinimalDapClient', () => {
       expect(allLoggedText()).not.toContain('reverse-secret-456');
     });
 
+    it('logs an output event as category and length, never the debuggee text (issue #852)', async () => {
+      await client.connect();
+      const token = 'ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0';
+      const delivered = vi.fn();
+      client.on('output', delivered);
+
+      mockSocket.emit('data', createDapMessage({
+        seq: 7,
+        type: 'event',
+        event: 'output',
+        body: { category: 'stdout', output: `the program printed token=${token}\n` }
+      }));
+      await new Promise(resolve => setImmediate(resolve));
+
+      // Delivered intact to the worker (which forwards it to the session)...
+      expect(delivered).toHaveBeenCalledWith(expect.objectContaining({ output: `the program printed token=${token}\n` }));
+      // ...but the persisted log has only its shape, at every level
+      expect(allLoggedText()).not.toContain('the program printed');
+      expect(allLoggedText()).not.toContain(token);
+      expect(allLoggedText()).toContain('"outputLength"');
+    });
+
+    it('still logs other event bodies at info, sanitized (issue #852)', async () => {
+      await client.connect();
+
+      mockSocket.emit('data', createDapMessage({
+        seq: 8,
+        type: 'event',
+        event: 'process',
+        body: { name: 'app', systemProcessId: 42, env: { SECRET_ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0: 'process-secret-321' } }
+      }));
+      await new Promise(resolve => setImmediate(resolve));
+
+      const infoText = loggerInstances.flatMap(l => l.info.mock.calls).map(c => JSON.stringify(c)).join('\n');
+      expect(infoText).toContain('"systemProcessId":42');
+      expect(allLoggedText()).not.toContain('process-secret-321');
+    });
+
     it('redacts env objects in the DAP trace file', async () => {
       const tracePath = `${process.env.TEMP || '/tmp'}/dap-trace-sanitize-test-${process.pid}.ndjson`;
       process.env.DAP_TRACE_FILE = tracePath;
