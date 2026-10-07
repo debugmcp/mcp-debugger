@@ -32,6 +32,15 @@ export interface LaunchArming {
   pausesOnCaughtExceptions: boolean;
   /** The armed clauses in one phrase ("2 breakpoint(s) and an entry stop"); '' when unarmed. */
   summary: string;
+  /**
+   * Logpoints the adapter runs on (issue #865). They never stop the program,
+   * so they are not armed and not in `summary` — but an answer that says
+   * "no breakpoints" to a caller who set one reads as "it was not
+   * registered", so they are counted and worded apart.
+   */
+  logpoints: number;
+  /** "1 logpoint(s) that log without stopping"; undefined when there are none. */
+  loggingSummary?: string;
 }
 
 export function describeLaunchArming(session: ArmingSession, stopOnEntry: boolean | undefined): LaunchArming {
@@ -41,10 +50,13 @@ export function describeLaunchArming(session: ArmingSession, stopOnEntry: boolea
   const logpointsRunOn = session.adapterCapabilities?.supportsLogPoints === true;
   let lineBreakpoints = 0;
   let logpointsThatPause = 0;
+  let logpoints = 0;
   for (const bp of session.breakpoints.values()) {
     if (bp.logMessage === undefined) {
       lineBreakpoints++;
-    } else if (!logpointsRunOn) {
+    } else if (logpointsRunOn) {
+      logpoints++;
+    } else {
       logpointsThatPause++;
     }
   }
@@ -76,7 +88,9 @@ export function describeLaunchArming(session: ArmingSession, stopOnEntry: boolea
     functionBreakpoints,
     stopOnEntry: entry,
     pausesOnCaughtExceptions,
-    summary: joinClauses(clauses)
+    summary: joinClauses(clauses),
+    logpoints,
+    ...(logpoints > 0 ? { loggingSummary: `${logpoints} logpoint(s) that log without stopping` } : {})
   };
 }
 

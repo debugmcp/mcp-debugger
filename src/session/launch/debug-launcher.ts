@@ -717,7 +717,8 @@ export class DebugLauncher {
         const arming = describeLaunchArming(finalSession, effectiveLaunchArgs?.stopOnEntry);
         stillRunning = ErrorMessages.launchStillRunning(
           arming.armed ? arming.summary : undefined,
-          debuggerOnAnyway ? undefined : debuggerOffWhy(finalSession)
+          debuggerOnAnyway ? undefined : debuggerOffWhy(finalSession),
+          arming.loggingSummary
         );
       }
 
