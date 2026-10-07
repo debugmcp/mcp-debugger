@@ -169,7 +169,7 @@ The Go adapter supports exception breakpoints with two built-in filters: `unreco
 
 ### Exit Code
 
-Delve never sends a DAP `exited` event; it prints `Process N has exited with status S` to the console instead — under `noDebug` before `terminated`, and in debug mode only in reply to the `disconnect` request. mcp-debugger reads that line back (issue #753), so `exitCode` appears in `list_debug_sessions` and in the `start_debugging` run-to-completion summary exactly as for every other language, and the line itself stays visible in `get_output` (with Delve's `Detaching`). A session closed while the program is still running reports no code — Delve prints `Detaching and terminating target process` instead, and nothing is guessed.
+Delve 1.27 and later send a DAP `exited` event with the code. Older Delve — the only kind a Go older than 1.25 can run — never does; it prints `Process N has exited with status S` to the console instead — under `noDebug` before `terminated`, and in debug mode only in reply to the `disconnect` request. mcp-debugger reads that line back (issue #753). Either way `exitCode` appears in `list_debug_sessions` and in the `start_debugging` run-to-completion summary exactly as for every other language. The line itself is visible in `get_output` (with Delve's `Detaching`) under `noDebug`, and in debug mode on Delve older than 1.27; Delve 1.27+ in debug mode prints it only as the session is torn down, after output capture has ended. A session closed while the program is still running reports no code — Delve prints `Detaching and terminating target process` instead, and nothing is guessed.
 
 ## Debugging Tips
 

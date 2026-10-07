@@ -1,15 +1,20 @@
 /**
- * Real MCP -> Delve -> Go coverage for issue #753. Delve never sends a DAP
- * `exited` event; it prints "Process N has exited with status S" to the
- * console — under noDebug before `terminated`, in debug mode only in reply
- * to `disconnect` — and the proxy reads that line back so `exitCode` appears
- * like every other language's. Runs in CI (Go 1.21 + dlv 1.24.2 on ubuntu
- * and windows) — the first CI-run test that spawns real Delve; `dist/` must
- * be built (CI builds before the integration project).
+ * Real MCP -> Delve -> Go coverage for issue #753: the debuggee's exit code
+ * reaches the launch result and list_debug_sessions. Delve before 1.27 never
+ * sends a DAP `exited` event; it prints "Process N has exited with status S"
+ * to the console — under noDebug before `terminated`, in debug mode only in
+ * reply to `disconnect` — and the proxy reads that line back. Delve 1.27+
+ * sends `exited` itself (go-delve/delve#4371), so the proxy's early
+ * disconnect never fires and the status line, printed only at teardown, no
+ * longer reaches get_output. The tests assert the exit code, which both
+ * paths must produce, not the mechanism. CI runs this file on dlv 1.24.2
+ * (Go 1.21, ubuntu and windows: the console-line path) and on the go-current
+ * job (the native `exited` path); `dist/` must be built (CI builds before the
+ * integration project).
  *
- * The fixture is its own Go module pinned to `go 1.21`: dlv 1.24.2 accepts
- * binaries built by Go 1.21–1.24 only, and the root examples/go module pins a
- * newer Go. A developer whose local Go is newer than their dlv's window fails
+ * The fixture is its own Go module pinned to `go 1.21` so the oldest pinned
+ * Delve can build it: dlv 1.24.2 accepts binaries built by Go 1.21–1.24
+ * only. A developer whose local Go is newer than their dlv's window fails
  * (not skips) this test — upgrade dlv.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -102,18 +107,17 @@ describe.skipIf(!hasGo)('Go exit code from Delve\'s console status line (issue #
     await expect.poll(async () => (await listedSession())?.exitCode, { timeout: 30_000 }).toBe(expected);
   }
 
-  it('reports a non-zero exit code in debug mode, where Delve prints the status only in reply to disconnect', async (ctx) => {
+  it('reports a non-zero exit code in debug mode', async (ctx) => {
     await launchAndExpectExit({ scriptPath: program, args: ['7'], dapLaunchArgs: { stopOnEntry: false, cwd: fixtureDir } }, 7, ctx);
     const text = await outputText();
     expect(text).toContain('exit_code fixture: exiting with status 7');
-    expect(text).toMatch(/has exited with status 7/);
   }, 90_000);
 
   it('reports exit code 0 for a clean run in debug mode', async (ctx) => {
     await launchAndExpectExit({ scriptPath: program, dapLaunchArgs: { stopOnEntry: false, cwd: fixtureDir } }, 0, ctx);
   }, 90_000);
 
-  it('reports the exit code under noDebug, where Delve prints the status before terminated', async (ctx) => {
+  it('reports the exit code under noDebug', async (ctx) => {
     // Delve runs a noDebug target through Go's exec, so on Windows the binary needs its .exe.
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-go-exit-'));
     try {

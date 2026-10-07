@@ -428,9 +428,51 @@ jobs:
         path: artifacts/cobol/
         if-no-files-found: warn
 
+  go-current:
+    # build-and-test pins Go 1.21 + dlv 1.24.2, the oldest pair we support:
+    # that Delve never sends a DAP `exited`, so the console-line exit-code
+    # path (#753) is what it covers. Delve 1.27+ sends `exited` itself and
+    # needs Go 1.25+, so a current pair runs the Go integration tests here.
+    # Pinned, not @latest, so a Go or Delve release never turns main red on
+    # its own; bump both together.
+    name: Go Current (Go 1.27 + Delve 1.27.2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - name: Setup pnpm
+      uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+    - name: Setup Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: '22.x'
+        cache: 'pnpm'
+    - name: Setup Go
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version: '1.27'
+    - name: Install and verify Delve
+      run: |
+        go install github.com/go-delve/delve/cmd/dlv@v1.27.2
+        dlv version | tee /tmp/dlv-version.txt
+        grep -E '^Version: 1\.27\.2$' /tmp/dlv-version.txt
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile
+      env:
+        SKIP_ADAPTER_VENDOR: 'true'
+    - name: Build project
+      run: pnpm run build:ci
+    # The Go suites skip without Go/Delve; a skip here would mean this job
+    # proved nothing, so the report must show passes and no skips.
+    - name: Run Go integration tests
+      run: |
+        pnpm exec vitest run --project integration tests/adapters/go/integration --reporter=default --reporter=json --outputFile=/tmp/go-current.json
+        node -e "const r=require('/tmp/go-current.json'); console.log('passed', r.numPassedTests, 'skipped', r.numPendingTests + r.numTodoTests); if (r.numPassedTests === 0 || r.numPendingTests + r.numTodoTests > 0) process.exit(1)"
+
   test-summary:
     name: Test Summary
-    needs: [build-and-test, windows-python-integration, lint, container-tests, cobol-host]
+    needs: [build-and-test, windows-python-integration, lint, container-tests, cobol-host, go-current]
     runs-on: ubuntu-latest
     if: always()
 
@@ -442,11 +484,13 @@ jobs:
         echo "lint: ${{ needs.lint.result }}"
         echo "container-tests: ${{ needs.container-tests.result }}"
         echo "cobol-host: ${{ needs.cobol-host.result }}"
+        echo "go-current: ${{ needs.go-current.result }}"
         if [ "${{ needs.build-and-test.result }}" != "success" ] \
           || [ "${{ needs.windows-python-integration.result }}" != "success" ] \
           || [ "${{ needs.lint.result }}" != "success" ] \
           || [ "${{ needs.container-tests.result }}" != "success" ] \
-          || [ "${{ needs.cobol-host.result }}" != "success" ]; then
+          || [ "${{ needs.cobol-host.result }}" != "success" ] \
+          || [ "${{ needs.go-current.result }}" != "success" ]; then
           echo "❌ One or more required jobs did not succeed"
           exit 1
         fi
