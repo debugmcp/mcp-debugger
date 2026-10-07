@@ -18,6 +18,7 @@ import {
   getPendingRequest,
   removePendingRequest
 } from './state.js';
+import { describeDapEventBodyForLog } from '@debugmcp/shared';
 
 /**
  * Main handler for proxy messages
@@ -132,7 +133,8 @@ function handleDapEvent(
       type: 'log', 
       level: 'info', 
       message: `[ProxyManager] DAP event: ${message.event}`,
-      data: message.body
+      // Debuggee output by shape only, other bodies sanitized (issue #852)
+      data: describeDapEventBodyForLog(message.event, message.body)
     }
   ];
 

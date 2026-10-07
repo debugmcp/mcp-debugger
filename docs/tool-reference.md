@@ -750,6 +750,8 @@ Results that had values masked carry a `redaction` field (`{ masked, notice }` o
 
 **Opting out**: start the server with `DEBUG_MCP_NO_REDACT=1` to disable redaction entirely (e.g. when debugging credential-handling code itself). Adapter stderr sanitization (unconditional, whole-line) is unaffected by this flag.
 
+**Logs**: the server's per-process log and the per-session proxy log (both under the temp directory, outliving the session) record a debuggee output event by its category and length only; the text itself is written only at `--log-level debug`, masked the same way `get_output` is. Other DAP event bodies are logged after the same sanitization as request payloads (environment blocks counted, token-shaped values masked).
+
 **Limitations**: redaction is display-level protection against credentials leaking into transcripts, not a security boundary against a hostile agent — an agent can still compute over secrets via `evaluate_expression` side effects. Secrets split across separate output chunks, and generic high-entropy strings with no recognizable shape or name, are not detected. The [`expose_session`](#expose_session) IDE mirror shows **raw, unredacted** values — it serves a human's IDE, not the agent.
 
 ### Least-privilege mode

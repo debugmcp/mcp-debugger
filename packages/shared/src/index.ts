@@ -257,6 +257,7 @@ export type { DebugProtocol } from '@vscode/debugprotocol';
 export {
   sanitizeEnvForLogging,
   sanitizePayloadForLogging,
+  describeDapEventBodyForLog,
   sanitizeStderr,
   sanitizeStderrTail
 } from './utils/env-sanitizer.js';

@@ -263,6 +263,35 @@ describe('ProxyManager Message Handling', () => {
       expect(JSON.stringify(vi.mocked(mockLogger.debug).mock.calls)).toContain('[REDACTED]');
     });
 
+    it('does not copy debuggee output into the log at the default level (issue #852)', () => {
+      const token = 'ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0';
+      const received: unknown[] = [];
+      proxyManager.on('output', (body: unknown) => received.push(body));
+
+      proxyManager.simulateMessage({
+        type: 'dapEvent',
+        sessionId: 'test-session',
+        event: 'output',
+        body: { category: 'stdout', output: `the program printed token=${token}\n` }
+      });
+
+      // The event reaches the session with its text intact...
+      expect(JSON.stringify(received)).toContain(token);
+      // ...but no info/warn/error log line carries it, raw or masked: the
+      // default-level record is the output's category and length only.
+      const defaultLevel = JSON.stringify([
+        ...vi.mocked(mockLogger.info).mock.calls,
+        ...vi.mocked(mockLogger.warn).mock.calls,
+        ...vi.mocked(mockLogger.error).mock.calls
+      ]);
+      expect(defaultLevel).not.toContain('the program printed');
+      expect(defaultLevel).not.toContain(token);
+      expect(defaultLevel).toContain('"outputLength"');
+      // The debug-level dump of the raw message is sanitized (issue #217 path)
+      const debugLevel = JSON.stringify(vi.mocked(mockLogger.debug).mock.calls);
+      expect(debugLevel).not.toContain(token);
+    });
+
     it('should update currentThreadId when stopped event includes threadId', () => {
       // Initially null
       expect(proxyManager.getCurrentThreadId()).toBeNull();

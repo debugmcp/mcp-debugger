@@ -79,6 +79,27 @@ export function sanitizePayloadForLogging(payload: unknown): unknown {
   return redactEnvDeep(payload, new WeakSet());
 }
 
+/**
+ * The log-safe view of a DAP event body (issue #852). An `output` event's
+ * body is the debuggee's own text: logged as it came, at the default level,
+ * a program that prints a credential left it in plain text in two files
+ * that outlive the session (the per-pid server log and the per-session
+ * proxy log) while `get_output` masked the same value, and the logs grew
+ * with everything a chatty program printed. The default-level record keeps
+ * only the shape of the output — its category and length — and every other
+ * event body goes through the same sanitizer as a request payload.
+ */
+export function describeDapEventBodyForLog(event: string, body: unknown): unknown {
+  if (event === 'output') {
+    const fields = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+    return {
+      category: typeof fields.category === 'string' ? fields.category : 'console',
+      outputLength: typeof fields.output === 'string' ? fields.output.length : 0
+    };
+  }
+  return sanitizePayloadForLogging(body);
+}
+
 function redactEnvDeep(value: unknown, ancestors: WeakSet<object>): unknown {
   // Value-shape masking on string leaves (issue #237): DAP response payloads
   // (variables/evaluate bodies) flow through here on their way to proxy debug

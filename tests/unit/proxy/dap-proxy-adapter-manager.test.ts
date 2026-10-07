@@ -303,6 +303,71 @@ describe('GenericAdapterManager', () => {
     });
   });
 
+  describe('flushStdio: the trailing fragment of an adapter that outlives its debuggee (issue #860)', () => {
+    // CodeLLDB on Windows keeps the pipes open after the program ends, so a
+    // last line with no newline stayed in the line buffer until teardown —
+    // after the exit had been reported. The worker asks for it when its
+    // exit-time drain settles, before it forwards the exit.
+    const REDACTED = '[REDACTED — line contained sensitive data]';
+    let onStdioLine: Mock<(source: AdapterStdioSource, line: string, info?: { partial?: boolean }) => void>;
+    let flushStdio: () => void;
+
+    beforeEach(async () => {
+      onStdioLine = vi.fn();
+      const result = await manager.spawn({ command: 'codelldb', args: ['--port', '0'], logDir: '/logs', onStdioLine });
+      expect(result.flushStdio).toBeTypeOf('function');
+      flushStdio = result.flushStdio!;
+    });
+
+    it('forwards the pending fragment of each stream, marked partial, and logs it', () => {
+      mockProcess.stdout.emit('data', Buffer.from('first line\nresult: 42'));
+      mockProcess.stderr.emit('data', Buffer.from('warn: tail'));
+      expect(onStdioLine).toHaveBeenCalledTimes(1);
+
+      flushStdio();
+
+      expect(onStdioLine).toHaveBeenCalledWith('stdout', 'first line');
+      expect(onStdioLine).toHaveBeenCalledWith('stdout', 'result: 42', { partial: true });
+      expect(onStdioLine).toHaveBeenCalledWith('stderr', 'warn: tail', { partial: true });
+      expect(logger.debug).toHaveBeenCalledWith('[AdapterManager STDOUT] result: 42');
+      expect(logger.error).toHaveBeenCalledWith('[AdapterManager STDERR] warn: tail');
+    });
+
+    it('forwards the fragment once: the later end/close flush has nothing left', () => {
+      mockProcess.stdout.emit('data', Buffer.from('result: 42'));
+      flushStdio();
+      mockProcess.stdout.emit('end');
+      mockProcess.stdout.emit('close');
+
+      expect(onStdioLine.mock.calls.filter(call => call[1] === 'result: 42')).toHaveLength(1);
+    });
+
+    it('forwards nothing when no fragment is pending', () => {
+      mockProcess.stdout.emit('data', Buffer.from('complete\n'));
+      onStdioLine.mockClear();
+
+      flushStdio();
+
+      expect(onStdioLine).not.toHaveBeenCalled();
+    });
+
+    it('marks only the flushed fragment as partial: complete lines keep the two-argument call', () => {
+      mockProcess.stdout.emit('data', Buffer.from('complete\n'));
+
+      expect(onStdioLine).toHaveBeenCalledWith('stdout', 'complete');
+      expect(onStdioLine.mock.calls[0]).toHaveLength(2);
+    });
+
+    it('redacts the flushed fragment in the log copy like any line', () => {
+      mockProcess.stdout.emit('data', Buffer.from('API_KEY=zzz-secret-value'));
+
+      flushStdio();
+
+      expect(onStdioLine).toHaveBeenCalledWith('stdout', 'API_KEY=zzz-secret-value', { partial: true });
+      expect(logger.debug).toHaveBeenCalledWith(`[AdapterManager STDOUT] ${REDACTED}`);
+    });
+  });
+
   describe('shutdown', () => {
     it('returns early for null process', async () => {
       await manager.shutdown(null);

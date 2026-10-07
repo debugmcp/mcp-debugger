@@ -25,7 +25,7 @@ import {
 } from './dap-proxy-interfaces.js';
 import type { IDapMirrorServer, MirrorEndpoint } from './dap-mirror-server.js';
 import { CallbackRequestTracker } from './dap-proxy-request-tracker.js';
-import { GenericAdapterManager, AdapterStdioSource } from './dap-proxy-adapter-manager.js';
+import { GenericAdapterManager, AdapterStdioSource, AdapterStdioLineInfo } from './dap-proxy-adapter-manager.js';
 import { dapTracePathFor, proxyLogPathFor } from './session-log-layout.js';
 import { DapConnectionManager } from './dap-proxy-connection-manager.js';
 import { 
@@ -46,7 +46,8 @@ import {
   DotnetAdapterPolicy,
   MockAdapterPolicy,
   getPolicyForLanguage,
-  resolveExceptionFilters
+  resolveExceptionFilters,
+  sanitizePayloadForLogging
 } from '@debugmcp/shared';
 
 export type DapProxyWorkerHooks = {
@@ -131,6 +132,13 @@ export class DapProxyWorker {
    * delivers is counted and timed, so the drain can settle on silence.
    */
   private adapterStdioActivity: { chunks: number; lastChunkAt: number } | null = null;
+  /**
+   * Armed with adapterStdioActivity (issue #860): hands over the last line
+   * the program printed without a newline, which the adapter manager's line
+   * buffer would otherwise hold until the pipes close at teardown — after
+   * the exit has been forwarded. Run once the drain has settled on silence.
+   */
+  private adapterStdioFlush: (() => void) | null = null;
   /** When the first terminal signal arrived: the silence that counts is measured from here. */
   private firstTerminalSignalAt: number | null = null;
   // Terminal signals (exited/terminated DAP events, socket close, adapter
@@ -549,6 +557,7 @@ export class DapProxyWorker {
         this.adapterStdioDrained = this.createStdioDrainBarrier(spawnResult.process);
         if (spawnConfig.forwardStdio.adapterOutlivesDebuggee) {
           this.adapterStdioActivity = this.trackStdioActivity(spawnResult.process);
+          this.adapterStdioFlush = spawnResult.flushStdio ?? null;
         }
       }
       this.adapterExitCodeIsDebuggeeExitCode = spawnConfig.adapterExitCodeIsDebuggeeExitCode === true;
@@ -1003,7 +1012,9 @@ export class DapProxyWorker {
         }
       },
       onOutput: (body) => {
-        this.logger!.debug('[Worker] DAP event: output', body);
+        // The one verbatim copy of debuggee output in the logs, at debug
+        // level only and masked like get_output is (issue #852).
+        this.logger!.debug('[Worker] DAP event: output', sanitizePayloadForLogging(body));
         this.noteDebuggeeExitCodeFromOutput(body);
         this.sendDapEvent('output', body);
       },
@@ -2474,6 +2485,14 @@ export class DapProxyWorker {
    * backstop still bounds both: a pipe that neither closes nor falls silent
    * (something the program started is still writing to it) is not waited
    * for longer than before. No-op when forwarding is off.
+   *
+   * For that same adapter, a last line printed without a newline is still
+   * in the adapter manager's line buffer when the wait ends on silence or at
+   * the backstop — the pipes it would be flushed on never closed (issue
+   * #860). It is asked for here, before the caller forwards the exit, so it
+   * reaches the session buffer ahead of exited/terminated like a complete
+   * line does; IPC is FIFO. When the pipes did close the manager flushed on
+   * its own and this finds nothing.
    */
   private async waitForAdapterStdioDrain(): Promise<void> {
     if (!this.adapterStdioDrained) {
@@ -2486,6 +2505,7 @@ export class DapProxyWorker {
     const quiet = this.adapterStdioActivity ? this.waitForAdapterStdioQuiet(this.adapterStdioActivity) : undefined;
     try {
       await Promise.race([this.adapterStdioDrained, backstop, ...(quiet ? [quiet.settled] : [])]);
+      this.adapterStdioFlush?.();
     } finally {
       if (timer) {
         clearTimeout(timer);
@@ -2636,19 +2656,21 @@ export class DapProxyWorker {
    */
   private buildStdioForwarder(
     forwardConfig: { excludeStderrLinePattern?: RegExp } | undefined
-  ): ((source: AdapterStdioSource, line: string) => void) | undefined {
+  ): ((source: AdapterStdioSource, line: string, info?: AdapterStdioLineInfo) => void) | undefined {
     if (!forwardConfig) {
       return undefined;
     }
     const exclude = forwardConfig.excludeStderrLinePattern;
-    return (source, line) => {
+    return (source, line, info) => {
       if (source === 'stderr' && exclude?.test(line)) {
         return; // adapter diagnostic banner: log path only
       }
       try {
         // '\n' restores the line ending LineBuffer stripped, and keeps blank
-        // lines past handleOutput's empty-output drop.
-        this.sendDapEvent('output', { category: source, output: line + '\n' });
+        // lines past handleOutput's empty-output drop. A flushed fragment
+        // (issue #860) had no line ending to restore: it is forwarded as
+        // printed, and is never blank.
+        this.sendDapEvent('output', { category: source, output: info?.partial ? line : line + '\n' });
       } catch (err) {
         // IPC gone during teardown; a stream 'data' handler must never throw.
         this.logger?.debug?.('[Worker] Failed to forward adapter stdio line', err);
