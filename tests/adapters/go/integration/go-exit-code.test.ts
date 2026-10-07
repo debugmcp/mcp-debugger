@@ -124,7 +124,18 @@ describe.skipIf(!hasGo)('Go exit code from Delve\'s console status line (issue #
     } finally {
       // On Windows the exited debuggee's image can stay locked for a moment after the session
       // ends, so the first rmdir may hit EBUSY; rmSync retries EBUSY/EPERM with these options.
-      fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+      // When even that is not enough (issue #866: Delve holds the image until its own exit,
+      // which the session's close does not wait for), the directory is left to the OS — it is
+      // under the temp dir, and a cleanup failure must not fail a test whose debugging passed.
+      try {
+        fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== 'EBUSY' && code !== 'EPERM') {
+          throw err;
+        }
+        console.warn(`[go-exit-code] leaving ${tmp} to the OS: rmdir hit ${code} (issue #866)`);
+      }
     }
   }, 90_000);
 });
