@@ -2,7 +2,9 @@
 /**
  * Vendor Microsoft js-debug vsDebugServer.js into vendor/js-debug
  *
- * - Fetches prebuilt artifact from GitHub releases (preferred)
+ * - Fetches prebuilt artifact from GitHub releases (preferred); the pinned
+ *   release in vendor-manifest.json is downloaded directly from
+ *   releases/download (no GitHub API call, so no rate limit — issues #867/#813)
  * - Optional build-from-source fallback when explicitly enabled
  * - Cross-platform (Windows/macOS/Linux), Node 18+ (uses global fetch)
  * - Deterministic output:
@@ -11,8 +13,9 @@
  *    - vendor/js-debug/manifest.json
  *
  * Environment variables:
- *   - JS_DEBUG_VERSION: tag or 'latest' (default: 'latest')
- *   - GH_TOKEN: GitHub token to avoid API rate limits (optional)
+ *   - JS_DEBUG_VERSION: tag or 'latest' (default: the pin in vendor-manifest.json)
+ *   - GH_TOKEN: GitHub token to avoid API rate limits (optional; only the API
+ *     path — 'latest' or a version override — is subject to them)
  *   - JS_DEBUG_FORCE_REBUILD: 'true' to ignore cache and refetch
  *   - JS_DEBUG_BUILD_FROM_SOURCE: 'true' to build from source if prebuilt fetch fails or is desired
  *
@@ -31,7 +34,7 @@ import { spawn } from 'node:child_process';
 import { extract as tarExtract } from 'tar';
 import extractZip from 'extract-zip';
 import { ensureDir, copy as fsxCopy } from 'fs-extra';
-import { selectBestAsset, normalizePath } from './lib/js-debug-helpers.js';
+import { selectBestAsset, normalizePath, pinnedAssetCandidate } from './lib/js-debug-helpers.js';
 import { determineVendoringPlan } from './lib/vendor-strategy.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -559,18 +562,42 @@ async function main() {
   try {
     // Attempt prebuilt path first
     tmpDir = await makeTmpDir('js-debug-dl-');
-    logInfo(`Fetching GitHub release '${VERSION}' for ${REPO_OWNER}/${REPO_NAME} ...`);
-    const release = await getRelease(VERSION);
-    if (release?.tag_name) {
-      resolvedVersion = release.tag_name;
+
+    // The pinned release's asset is downloaded straight from
+    // github.com/<repo>/releases/download/, which is outside the GitHub REST
+    // quota (60/h per IP unauthenticated — exhausted on shared CI runners and
+    // inside Docker builds, issues #867/#813). The API is asked only when the
+    // pin cannot name the asset, or when the direct download fails (an
+    // upstream re-release under another name), so the behaviour for 'latest'
+    // and version overrides is unchanged.
+    let best = null;
+    let archiveFile = null;
+    const pinned = pinnedAssetCandidate(PIN, VERSION);
+    if (pinned) {
+      archiveFile = path.join(tmpDir, `asset.${pinned.type === 'tgz' ? 'tgz' : 'zip'}`);
+      logInfo(`Pinned release ${VERSION}: downloading ${pinned.name} directly (no GitHub API call) ...`);
+      try {
+        await downloadWithRetries(pinned.url, archiveFile);
+        best = pinned;
+      } catch (err) {
+        logWarn(`Direct download of the pinned asset failed: ${(err && err.message) || err}. Falling back to the GitHub release API.`);
+      }
     }
 
-    const assets = Array.isArray(release?.assets) ? release.assets : [];
-    const best = selectBestAsset(assets);
-    const archiveFile = path.join(tmpDir, `asset.${best.type === 'tgz' ? 'tgz' : 'zip'}`);
+    if (!best) {
+      logInfo(`Fetching GitHub release '${VERSION}' for ${REPO_OWNER}/${REPO_NAME} ...`);
+      const release = await getRelease(VERSION);
+      if (release?.tag_name) {
+        resolvedVersion = release.tag_name;
+      }
 
-    logInfo(`Selected asset: ${best.name} (${best.type}). Downloading...`);
-    await downloadWithRetries(best.url, archiveFile);
+      const assets = Array.isArray(release?.assets) ? release.assets : [];
+      best = selectBestAsset(assets);
+      archiveFile = path.join(tmpDir, `asset.${best.type === 'tgz' ? 'tgz' : 'zip'}`);
+
+      logInfo(`Selected asset: ${best.name} (${best.type}). Downloading...`);
+      await downloadWithRetries(best.url, archiveFile);
+    }
 
     // Supply-chain integrity gate: verify the downloaded archive against the
     // committed digest pin before extracting anything from it. GitHub release
