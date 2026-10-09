@@ -8,6 +8,7 @@
  * breakpoint list, and relabels its first hit as the entry stop.
  */
 import { EventEmitter } from 'events';
+import path from 'path';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { DefaultAdapterPolicy, type AdapterPolicy } from '@debugmcp/shared';
 import { DapProxyWorker } from '../../src/proxy/dap-proxy-worker.js';
@@ -16,7 +17,9 @@ import { createMockDapClient } from '../test-utils/mocks/dap-client.js';
 import { createMockLogger } from '../test-utils/helpers/test-dependencies.js';
 import { createMockFileSystem, createMockProcessSpawner } from '../test-utils/mocks/dap-proxy-doubles.js';
 
-const PROGRAM = 'C:\\p\\bin\\app.dart';
+// Absolute on both platforms (the worker canonicalizes with path.resolve, which treats a
+// Windows path as relative on Linux — CI's ubuntu lane).
+const PROGRAM = path.resolve('/p/bin/app.dart');
 const SOURCE = "import 'dart:io';\n\nFuture<void> main(List<String> args) async {\n  print('x');\n}\n";
 
 type Sent = Record<string, unknown>;

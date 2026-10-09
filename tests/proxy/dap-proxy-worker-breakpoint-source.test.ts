@@ -8,6 +8,7 @@
  * knows which file each adapter id belongs to and fills the `source` in before forwarding.
  */
 import { EventEmitter } from 'events';
+import path from 'path';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { DefaultAdapterPolicy } from '@debugmcp/shared';
 import { DapProxyWorker } from '../../src/proxy/dap-proxy-worker.js';
@@ -16,7 +17,9 @@ import { createMockDapClient } from '../test-utils/mocks/dap-client.js';
 import { createMockLogger } from '../test-utils/helpers/test-dependencies.js';
 import { createMockFileSystem, createMockProcessSpawner } from '../test-utils/mocks/dap-proxy-doubles.js';
 
-const FILE = 'C:\\p\\hello.dart';
+// Absolute on both platforms (the worker canonicalizes with path.resolve, which treats a
+// Windows path as relative on Linux — CI's ubuntu lane).
+const FILE = path.resolve('/p/hello.dart');
 type Sent = Record<string, unknown>;
 
 describe('DapProxyWorker breakpoint events without source (issue #790)', () => {
