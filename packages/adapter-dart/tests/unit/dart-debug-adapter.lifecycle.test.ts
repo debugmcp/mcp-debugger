@@ -21,7 +21,13 @@ const MISSING: DartToolchain = { warnings: [] } as unknown as DartToolchain;
 function hooks(overrides: Partial<DartAdapterHooks> = {}): DartAdapterHooks {
   return { platform: 'win32', nodeExe: 'C:\\node\\node.exe', bridgePath: 'C:\\bridge\\dap-stdio-bridge.js', locate: () => FOUND, ...overrides };
 }
-const adapter = (overrides: Partial<DartAdapterHooks> = {}) => new DartDebugAdapter(createMockAdapterDependencies(), hooks(overrides));
+/** Mock dependencies whose file system reports every path present (a warm Flutter tool cache). */
+function warmDeps() {
+  const deps = createMockAdapterDependencies();
+  deps.fileSystem.existsSync = vi.fn(() => true);
+  return deps;
+}
+const adapter = (overrides: Partial<DartAdapterHooks> = {}) => new DartDebugAdapter(warmDeps(), hooks(overrides));
 
 let root: string;
 beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-dart-lifecycle-')); });
@@ -117,6 +123,37 @@ describe('DartDebugAdapter lifecycle', () => {
     expect(a.translateErrorMessage(new Error('FLUTTER_ROOT is not set'))).toMatch(/flutter --version/);
     expect(a.translateErrorMessage(new Error('Session terminated before debugger initialized: (1)'))).toMatch(/failed to compile or start/);
     expect(a.translateErrorMessage(new Error('something else'))).toBe('something else');
+  });
+});
+
+describe('DartDebugAdapter toolchain lookups', () => {
+  it('locates the toolchain once per project root and reuses it across validate/resolve/transform', async () => {
+    const { dir, program } = project(DART_PUBSPEC, 'bin/app.dart');
+    const locate = vi.fn(() => FOUND);
+    const a = adapter({ locate });
+    await a.validateEnvironment();
+    await a.resolveExecutablePath();
+    a.getExecutableSearchPaths();
+    await a.validateEnvironment();
+    expect(locate).toHaveBeenCalledTimes(1);
+    await a.transformLaunchConfig({ program, cwd: dir } as unknown as GenericLaunchConfig);
+    expect(locate).toHaveBeenCalledTimes(2); // the project root is a different key
+    await a.transformLaunchConfig({ program, cwd: dir } as unknown as GenericLaunchConfig);
+    expect(locate).toHaveBeenCalledTimes(2);
+    await a.dispose();
+    await a.validateEnvironment();
+    expect(locate).toHaveBeenCalledTimes(3); // dispose forgets what it found
+  });
+
+  it('refuses a Windows Flutter launch whose tool cache is cold, naming the file and the warm-up command', async () => {
+    const { dir, program } = project(FLUTTER_PUBSPEC, 'lib/main.dart');
+    const deps = createMockAdapterDependencies();
+    deps.fileSystem.existsSync = vi.fn((p: string) => !p.endsWith('flutter_tools.snapshot'));
+    const a = new DartDebugAdapter(deps, hooks());
+    await expect(a.transformLaunchConfig({ program, cwd: dir } as unknown as GenericLaunchConfig))
+      .rejects.toThrow(/flutter_tools\.snapshot.*flutter --version/s);
+    deps.fileSystem.existsSync = vi.fn(() => true);
+    await expect(a.transformLaunchConfig({ program, cwd: dir } as unknown as GenericLaunchConfig)).resolves.toMatchObject({ request: 'launch' });
   });
 });
 

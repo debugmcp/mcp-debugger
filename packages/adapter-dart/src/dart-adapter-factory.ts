@@ -3,9 +3,6 @@
  * `mcp-debugger doctor` row. The debugger itself ships with the SDK, so "backend" is the SDK's
  * `dart debug_adapter` and "runtime" is the Dart SDK (with the Flutter SDK named when present).
  */
-import fs from 'node:fs';
-import os from 'node:os';
-import which from 'which';
 import { DebugLanguage, probeWithinBudget, toolchainComponent } from '@debugmcp/shared';
 import type {
   AdapterDependencies,
@@ -17,13 +14,14 @@ import type {
   ToolchainDescription,
 } from '@debugmcp/shared';
 import { DartDebugAdapter } from './dart-debug-adapter.js';
-import { locateToolchain, type DartToolchain } from './utils/sdk-locator.js';
+import { locateToolchain, realLocatorIo, type DartToolchain } from './utils/sdk-locator.js';
 import { probeDartVersion, probeFlutterVersion, type FlutterVersion } from './utils/version-probes.js';
 
 /** Seams for tests. */
 export interface DartFactoryHooks {
   platform?: NodeJS.Platform;
-  locate?: () => DartToolchain;
+  /** The locator, given the project root whose fvm pin applies. */
+  locate?: (projectRoot?: string) => DartToolchain;
   probeDartVersion?: (dartExe: string) => Promise<string | null>;
   probeFlutterVersion?: (flutterRoot: string) => Promise<FlutterVersion | null>;
 }
@@ -47,22 +45,14 @@ export class DartAdapterFactory implements IAdapterFactory {
     const platform = hooks.platform ?? process.platform;
     this.hooks = {
       platform,
-      locate: hooks.locate ?? (() => locateToolchain({
-        platform,
-        env: process.env,
-        homeDir: os.homedir(),
-        exists: (p) => fs.existsSync(p),
-        realpath: (p) => { try { return fs.realpathSync(p); } catch { return p; } },
-        which: (name) => which.sync(name, { nothrow: true }) ?? undefined,
-        readFile: (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return undefined; } },
-      })),
+      locate: hooks.locate ?? ((projectRoot) => locateToolchain(realLocatorIo({ platform, env: process.env, projectRoot }))),
       probeDartVersion: hooks.probeDartVersion ?? ((dartExe) => probeDartVersion(dartExe)),
       probeFlutterVersion: hooks.probeFlutterVersion ?? ((root) => probeFlutterVersion(root, { platform })),
     };
   }
 
   createAdapter(dependencies: AdapterDependencies): IDebugAdapter {
-    return new DartDebugAdapter(dependencies, { platform: this.hooks.platform, locate: () => this.hooks.locate() });
+    return new DartDebugAdapter(dependencies, { platform: this.hooks.platform, locate: (projectRoot) => this.hooks.locate(projectRoot) });
   }
 
   getMetadata(): AdapterMetadata {

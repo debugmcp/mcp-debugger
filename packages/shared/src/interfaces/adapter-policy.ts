@@ -341,12 +341,15 @@ export interface AdapterPolicy {
   honoursNoDebug?: boolean;
 
   /**
-   * True when the adapter's own `stopped { reason: 'entry' }` is bookkeeping, not a stop the
+   * True when the adapter's own `stopped { reason: 'entry' }` may be bookkeeping, not a stop the
    * session can use: the Dart SDK adapters pause every new isolate at start to configure it,
    * announce that pause as an entry stop and resume it themselves 1 ms later with a `continued`
-   * (issue #790, measured). The proxy worker drops such events instead of forwarding them, so
-   * the session never flickers PAUSED and a launch's first reported stop is a real one. The
-   * entry stop a caller asks for with `stopOnEntry` then comes from `entryBreakpointLine`.
+   * (issue #790, measured). The proxy worker holds such an entry stop briefly and drops it,
+   * with the `continued` that follows, when the adapter resumes it within the hold; one that
+   * outlives the hold — a VM started with `--pause_isolates_on_start`, attached to or launched
+   * — is forwarded as the durable stop it is. So the session never flickers PAUSED, and a
+   * launch's first reported stop is a real one. The entry stop a caller asks for with
+   * `stopOnEntry` comes from `entryBreakpointLine`.
    */
   suppressesAdapterEntryStop?: boolean;
 

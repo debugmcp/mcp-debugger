@@ -74,7 +74,8 @@ export const DartAdapterPolicy = {
   supportsFunctionBreakpoints: false,
   honoursNoDebug: true,
   // The adapter pauses each new isolate at start, reports it as an entry stop and resumes it
-  // itself 1 ms later (measured) — never a stop the session can use.
+  // itself 1 ms later (measured) — the worker holds it and drops it with that resume; a durable
+  // one (a VM started with --pause_isolates_on_start) is still reported.
   suppressesAdapterEntryStop: true,
   entryBreakpointLine: (sourceText: string): number | undefined => {
     const lines = sourceText.split(/\r?\n/);

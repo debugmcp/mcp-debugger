@@ -54,6 +54,29 @@ describe('locateToolchain (win32)', () => {
     expect(t.flutterRoot).toBe(root);
   });
 
+  it('does not mistake a POSIX root whose basename is the executable name for the executable itself', () => {
+    // FLUTTER_ROOT=/opt/sdks/flutter and DART_SDK=/usr/lib/dart are the canonical values; only
+    // `<root>/bin/<exe>` is the executable.
+    const P = (...parts: string[]) => path.posix.join(...parts);
+    const t = locateToolchain(io({
+      platform: 'linux',
+      env: { FLUTTER_ROOT: '/opt/sdks/flutter', DART_SDK: '/usr/lib/dart' },
+      files: [P('/opt/sdks/flutter', 'bin', 'flutter'), P('/opt/sdks/flutter', 'bin', 'cache', 'dart-sdk', 'bin', 'dart'), P('/usr/lib/dart', 'bin', 'dart')],
+    }));
+    expect(t.flutterRoot).toBe('/opt/sdks/flutter');
+    expect(t.flutterSource).toBe('env:FLUTTER_ROOT');
+    expect(t.dartSdkRoot).toBe('/usr/lib/dart');
+    expect(t.dartSource).toBe('env:DART_SDK');
+    expect(t.warnings).toEqual([]);
+    // The executable form still resolves to the root.
+    const viaExe = locateToolchain(io({
+      platform: 'linux',
+      env: { FLUTTER_ROOT: '/opt/sdks/flutter/bin/flutter' },
+      files: [P('/opt/sdks/flutter', 'bin', 'flutter'), P('/opt/sdks/flutter', 'bin', 'cache', 'dart-sdk', 'bin', 'dart')],
+    }));
+    expect(viaExe.flutterRoot).toBe('/opt/sdks/flutter');
+  });
+
   it('strips trailing separators from an env var, however many (no quadratic regex)', () => {
     const sdk = 'C:\\tools\\dart-sdk';
     const t = locateToolchain(io({

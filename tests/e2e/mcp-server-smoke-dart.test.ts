@@ -143,6 +143,28 @@ describe.skipIf(SKIP_DART)('MCP Server Dart Debugging Smoke Test @requires-dart'
     expect(await output()).toContain('hello mcp-debugger');
   }, 90000);
 
+  it('stops at entry on main when asked, without a breakpoint in the list, then runs to exit 0', async (ctx) => {
+    await createSession('dart-entry');
+    const res = await startOrSkip(ctx, { scriptPath: DART_EXAMPLES.hello, dapLaunchArgs: { stopOnEntry: true } });
+    const paused = await pollState('paused', 30000);
+    expect(paused, `session should pause at entry (launch answered ${JSON.stringify(res)})`).toBeDefined();
+    // The Dart SDK adapter names no hitBreakpointIds: the worker still reports the armed entry
+    // breakpoint's hit as the entry stop (review of #790).
+    expect(paused!.lastStop?.reason).toBe('entry');
+    const top = (await frames())[0];
+    expect(top.file?.toLowerCase()).toBe(DART_EXAMPLES.hello.toLowerCase());
+    expect(top.name).toBe('main');
+    expect(top.line).toBeLessThanOrEqual(bpLine(DART_EXAMPLES.hello, 'HELLO'));
+    // The entry breakpoint is the worker's, never the session's.
+    const listed = await call('list_breakpoints', {});
+    expect(listed.count ?? (listed.breakpoints as unknown[] | undefined)?.length ?? 0).toBe(0);
+
+    await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+    const stopped = await pollState('stopped', 20000);
+    expect(stopped, 'program should run to completion').toBeDefined();
+    expect(stopped!.exitCode).toBe(0);
+  }, 90000);
+
   it('steps across an await and sees a spawned isolate complete', async (ctx) => {
     const mainLine = bpLine(DART_EXAMPLES.app, 'MAIN');
     const afterAwait = bpLine(DART_EXAMPLES.app, 'AFTER-AWAIT');

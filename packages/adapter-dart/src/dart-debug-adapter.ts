@@ -17,10 +17,8 @@
  */
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import which from 'which';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import {
   AdapterError,
@@ -47,8 +45,8 @@ import type {
   ValidationWarning,
 } from '@debugmcp/shared';
 import { detectRunner, isDartRunner, type DartRunner, type RunnerDetection } from './runner.js';
-import { locateToolchain, type DartToolchain } from './utils/sdk-locator.js';
-import { dapCommandFor } from './utils/flutter-invocation.js';
+import { locateToolchain, realLocatorIo, type DartToolchain } from './utils/sdk-locator.js';
+import { dapCommandFor, flutterWarmCacheFiles } from './utils/flutter-invocation.js';
 import { resolveBridgePath } from './utils/bridge-path.js';
 
 /** Seams for tests: the machine-facing lookups and the process this adapter runs in. */
@@ -90,6 +88,7 @@ export class DartDebugAdapter extends EventEmitter implements IDebugAdapter {
   private connected = false;
   private lastToolchain?: DartToolchain;
   private diagnostics: LaunchConfigDiagnostic[] = [];
+  private readonly toolchains = new Map<string, DartToolchain>();
   private readonly hooks: Required<Pick<DartAdapterHooks, 'platform' | 'nodeExe' | 'locate'>> & Pick<DartAdapterHooks, 'bridgePath'>;
 
   constructor(private readonly dependencies: AdapterDependencies, hooks: DartAdapterHooks = {}) {
@@ -120,6 +119,7 @@ export class DartDebugAdapter extends EventEmitter implements IDebugAdapter {
     this.connected = false;
     this.lastToolchain = undefined;
     this.lastRunner = undefined;
+    this.toolchains.clear();
     this.state = AdapterState.UNINITIALIZED;
     this.emit('disposed');
   }
@@ -212,6 +212,18 @@ export class DartDebugAdapter extends EventEmitter implements IDebugAdapter {
     const tc = this.toolchain(detection.projectRoot ?? config.cwd);
     // Fail here, with the SDK hint, rather than at spawn time.
     dapCommandFor(detection.runner, { platform: this.hooks.platform, dartExe: tc.dartExe, flutterRoot: tc.flutterRoot });
+    // The Windows bypass runs Flutter's tool snapshot directly, so a cold cache (a fresh or
+    // just-upgraded checkout) has to be caught here with the warm-up command, not as an opaque
+    // adapter exit.
+    if (isFlutter(detection.runner) && this.hooks.platform === 'win32' && tc.flutterRoot) {
+      const missing = flutterWarmCacheFiles(tc.flutterRoot, 'win32').filter((f) => !this.dependencies.fileSystem.existsSync(f));
+      if (missing.length > 0) {
+        throw new AdapterError(
+          `The Flutter tool cache at ${tc.flutterRoot} is not built (missing ${missing[0]}). Run \`flutter --version\` once so the tool snapshot exists, then launch again.`,
+          AdapterErrorCode.ENVIRONMENT_INVALID,
+        );
+      }
+    }
     this.lastRunner = detection;
     this.lastToolchain = tc;
     this.note('runner', `runner: ${detection.runner} (${detection.reason})`, 'launch');
@@ -402,22 +414,29 @@ export class DartDebugAdapter extends EventEmitter implements IDebugAdapter {
     this.diagnostics.push(scope ? { key, message, scope } : { key, message });
   }
 
+  /**
+   * One discovery walk per project root per adapter instance: validate, resolve, search paths and
+   * the launch transform all ask, and the walk is three `which` lookups plus a score of
+   * `existsSync` probes. Forgotten on dispose.
+   */
   private toolchain(projectRoot?: string): DartToolchain {
-    return this.hooks.locate(projectRoot);
+    const key = projectRoot ?? '';
+    let tc = this.toolchains.get(key);
+    if (!tc) {
+      tc = this.hooks.locate(projectRoot);
+      this.toolchains.set(key, tc);
+    }
+    return tc;
   }
 
   private locateWithRealIo(projectRoot?: string): DartToolchain {
     const env = this.dependencies.environment.getAll() as Record<string, string | undefined>;
-    return locateToolchain({
+    return locateToolchain(realLocatorIo({
       platform: this.hooks.platform,
       env,
-      homeDir: os.homedir(),
       exists: (p) => this.dependencies.fileSystem.existsSync(p),
-      realpath: (p) => { try { return fs.realpathSync(p); } catch { return p; } },
-      which: (name) => which.sync(name, { nothrow: true }) ?? undefined,
-      readFile: (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return undefined; } },
       projectRoot,
-    });
+    }));
   }
 }
 

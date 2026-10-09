@@ -65,8 +65,12 @@ runs one `dart test` case, `["--name", "increments"]` one `flutter test` case.
 
 `stopOnEntry: true` stops on the first line of `main` (the adapter arms a breakpoint on the
 program's `main(` declaration line, which the VM binds to main's first statement, and reports the
-hit as the entry stop). The SDK adapter's own entry pause is bookkeeping it resumes itself a
-millisecond later; mcp-debugger never reports it.
+hit as the entry stop; the breakpoint never appears in `list_breakpoints`). If the program file
+declares no `main(` — main lives in another file — the launch answer carries a warning and no
+entry stop comes: set a breakpoint on main's first statement instead. The SDK adapter's own entry
+pause is bookkeeping it resumes itself a millisecond later; mcp-debugger holds it briefly and
+reports it only when the adapter does not resume it (a VM started with
+`--pause_isolates_on_start`).
 
 `noDebug: true` runs the program without a debugger: no breakpoints, no exception stops, output
 and exit code only.

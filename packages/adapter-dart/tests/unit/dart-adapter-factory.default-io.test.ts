@@ -20,6 +20,26 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+describe('DartAdapterFactory locate seam', () => {
+  it('hands the project root through to the locator, so an fvm pin is consulted in production', async () => {
+    const seen: Array<string | undefined> = [];
+    const f = new DartAdapterFactory({
+      platform: 'win32',
+      locate: (projectRoot) => { seen.push(projectRoot); return { dartExe: 'C:\\sdk\\bin\\dart.exe', dartSdkRoot: 'C:\\sdk', dartSource: 'env:DART_SDK', warnings: [] }; },
+      probeDartVersion: async () => '3.13.4',
+      probeFlutterVersion: async () => null,
+    });
+    const dir = path.join(root, 'proj');
+    fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'pubspec.yaml'), 'name: p\n');
+    fs.writeFileSync(path.join(dir, 'bin', 'app.dart'), 'void main() {}\n');
+    const { createMockAdapterDependencies } = await import('../../../../tests/test-utils/helpers/adapter-dependencies.js');
+    const a = f.createAdapter(createMockAdapterDependencies());
+    await a.transformLaunchConfig({ program: path.join(dir, 'bin', 'app.dart'), cwd: dir } as never);
+    expect(seen).toContain(dir);
+  });
+});
+
 describe('DartAdapterFactory default io', () => {
   it('finds a DART_SDK on disk through the real file system', async () => {
     const sdk = path.join(root, 'dart-sdk');

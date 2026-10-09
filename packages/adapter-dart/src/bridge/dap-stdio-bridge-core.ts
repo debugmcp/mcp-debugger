@@ -129,11 +129,19 @@ export function createBridge(options: BridgeOptions): Promise<BridgeHandle> {
     });
     cp.stderr?.on('end', () => { if (errBuf) { stderr.write(errBuf + '\n'); errBuf = ''; } });
 
-    // Byte-transparent piping both ways.
-    conn.on('data', (chunk: Buffer) => { cp.stdin?.write(chunk); });
+    // Byte-transparent piping both ways. Nothing is written to a child that has ended: the
+    // Flutter adapter exits by itself right after terminate/disconnect (measured) while the
+    // proxy's follow-up request is still on its way, and a write to the dead pipe raises EPIPE.
+    let childEnded = false;
+    cp.stdin?.on('error', (err: NodeJS.ErrnoException) => { log(`adapter stdin: ${err.message}`); });
+    conn.on('data', (chunk: Buffer) => {
+      if (!childEnded && cp.stdin && !cp.stdin.destroyed && cp.stdin.writable) cp.stdin.write(chunk);
+    });
     cp.stdout?.on('data', (chunk: Buffer) => { if (!conn.destroyed) conn.write(chunk); });
 
+    cp.on('exit', () => { childEnded = true; });
     cp.on('close', (code, signal) => {
+      childEnded = true;
       log(`adapter closed code=${code} signal=${signal}`);
       finish(code ?? (signal ? 1 : 0));
       conn.end();

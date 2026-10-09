@@ -9,7 +9,10 @@
  * there identifies the Flutter root as well. Everything that touches the machine comes through
  * {@link LocatorIo} so the policy is unit-testable without an SDK.
  */
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import which from 'which';
 
 /** The node:path flavour to join with; `typeof path.win32` because the interface is not re-exported by every @types/node. */
 type PlatformPath = typeof path.win32;
@@ -26,6 +29,29 @@ export interface LocatorIo {
   projectRoot?: string;
   /** Path flavour to join with; defaults from `platform`. */
   pathSep?: 'win32' | 'posix';
+}
+
+/**
+ * The locator's io over the real machine: the environment given, the file system (or the
+ * `exists` the caller injects), `which`, and the project root the fvm lookup needs. The adapter
+ * and the factory both build their io here.
+ */
+export function realLocatorIo(base: {
+  platform: NodeJS.Platform;
+  env: Record<string, string | undefined>;
+  exists?: (p: string) => boolean;
+  projectRoot?: string;
+}): LocatorIo {
+  return {
+    platform: base.platform,
+    env: base.env,
+    homeDir: os.homedir(),
+    exists: base.exists ?? ((p) => fs.existsSync(p)),
+    realpath: (p) => { try { return fs.realpathSync(p); } catch { return p; } },
+    which: (name) => which.sync(name, { nothrow: true }) ?? undefined,
+    readFile: (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return undefined; } },
+    projectRoot: base.projectRoot,
+  };
 }
 
 export type DartSource = 'env:DART_SDK' | 'env:DART_PATH' | 'path' | 'flutter-bundled' | 'known-dir';
@@ -77,7 +103,11 @@ export function locateToolchain(io: LocatorIo): DartToolchain {
     // of separators (CodeQL polynomial-ReDoS).
     let trimmed = value.trim();
     while (trimmed.endsWith('/') || trimmed.endsWith('\\')) trimmed = trimmed.slice(0, -1);
-    if (trimmed.toLowerCase().endsWith(exeName.toLowerCase())) return up(p, trimmed, 2);
+    // Only `<root>/bin/<exe>` is the executable. A root whose basename happens to be the
+    // executable's name — the canonical `/opt/sdks/flutter`, `/usr/lib/dart` — is the root.
+    const base = p.basename(trimmed).toLowerCase();
+    const parent = p.basename(p.dirname(trimmed)).toLowerCase();
+    if (base === exeName.toLowerCase() && parent === 'bin') return up(p, trimmed, 2);
     return trimmed;
   };
   /** `<root>/bin/cache/dart-sdk/bin/dart` → `<root>` when that root really is a Flutter checkout. */

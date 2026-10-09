@@ -109,14 +109,92 @@ describe('DapProxyWorker entry stop (issue #790)', () => {
     await (w.runConfigurationPhase as (p: ProxyInitPayload, c: unknown, cm: unknown) => Promise<void>)(payload, mockDapClient, connectionStub);
   }
 
-  it('drops the adapter\'s own entry stop when the policy says it is noise, and forwards every other stop', async () => {
+  it('drops the adapter\'s own entry stop together with the resume that follows it, and forwards every other stop', async () => {
     await configure(initPayload({ stopOnEntry: false }), entryPolicy());
     mockDapClient.emit('stopped', { reason: 'entry', threadId: 1, allThreadsStopped: false });
     mockDapClient.emit('continued', { threadId: 1 });
     mockDapClient.emit('stopped', { reason: 'breakpoint', threadId: 1, hitBreakpointIds: [100000] });
     await new Promise((r) => setImmediate(r));
     expect(forwardedStops().map((b) => b.reason)).toEqual(['breakpoint']);
-    expect(sent().some((m) => m.type === 'dapEvent' && m.event === 'continued')).toBe(true);
+    // The session never saw that stop, so it must not see its resume either.
+    expect(sent().some((m) => m.type === 'dapEvent' && m.event === 'continued')).toBe(false);
+  });
+
+  it('forwards a durable entry stop (no resume follows within the hold): a VM started with --pause_isolates_on_start', async () => {
+    vi.useFakeTimers();
+    try {
+      await configure(initPayload({ stopOnEntry: false }), entryPolicy());
+      mockDapClient.emit('stopped', { reason: 'entry', threadId: 1, allThreadsStopped: false });
+      await vi.advanceTimersByTimeAsync(50);
+      expect(forwardedStops()).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(forwardedStops().map((b) => b.reason)).toEqual(['entry']);
+      // A later resume is the user's, not the adapter's: forwarded.
+      mockDapClient.emit('continued', { threadId: 1 });
+      expect(sent().some((m) => m.type === 'dapEvent' && m.event === 'continued')).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('lets a real stop supersede a held entry stop instead of reporting both', async () => {
+    vi.useFakeTimers();
+    try {
+      await configure(initPayload({ stopOnEntry: false }), entryPolicy());
+      mockDapClient.emit('stopped', { reason: 'entry', threadId: 1 });
+      mockDapClient.emit('stopped', { reason: 'exception', threadId: 1 });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(forwardedStops().map((b) => b.reason)).toEqual(['exception']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('relabels the first breakpoint stop that names no hitBreakpointIds as the entry while the entry breakpoint is armed (the Dart SDK adapter names none)', async () => {
+    await configure(initPayload({ stopOnEntry: true }), entryPolicy());
+    mockDapClient.emit('stopped', { reason: 'breakpoint', threadId: 1, allThreadsStopped: false });
+    mockDapClient.emit('stopped', { reason: 'breakpoint', threadId: 1, allThreadsStopped: false });
+    await new Promise((r) => setImmediate(r));
+    const stops = forwardedStops();
+    expect(stops.map((b) => b.reason)).toEqual(['entry', 'breakpoint']);
+    expect(stops[0].hitBreakpointIds).toBeUndefined();
+  });
+
+  it('re-adds the armed entry breakpoint to a relayed setBreakpoints for the program file, hides it from the answer, and takes its new id', async () => {
+    await configure(initPayload({ stopOnEntry: true }), entryPolicy());
+    let nextId = 200000;
+    mockDapClient.sendRequest = vi.fn(async (command: string, args: Record<string, unknown>) => {
+      const bps = (args.breakpoints as Array<{ line: number }>) ?? [];
+      return { seq: 1, type: 'response', request_seq: 1, success: true, command, body: { breakpoints: bps.map((b) => ({ id: nextId++, verified: false, line: b.line })) } };
+    }) as typeof mockDapClient.sendRequest;
+    await (worker as unknown as { handleDapCommand: (cmd: unknown) => Promise<void> }).handleDapCommand({
+      requestId: 'r1', cmd: 'dap', sessionId: 's', dapCommand: 'setBreakpoints',
+      dapArgs: { source: { path: PROGRAM }, breakpoints: [{ line: 9 }] },
+    });
+    // The adapter saw the user's line and the entry line; the parent sees only the user's answer.
+    const sentArgs = (mockDapClient.sendRequest as ReturnType<typeof vi.fn>).mock.calls[0][1] as { breakpoints: Array<{ line: number }> };
+    expect(sentArgs.breakpoints.map((b) => b.line)).toEqual([9, 3]);
+    const answer = sent().find((m) => m.type === 'dapResponse' && m.requestId === 'r1') as Sent;
+    expect(((answer.body as Sent).breakpoints as Sent[]).map((b) => b.line)).toEqual([9]);
+    // The entry breakpoint now has the adapter's new id (Dart rotates ids on every re-send).
+    mockDapClient.emit('stopped', { reason: 'breakpoint', threadId: 1, hitBreakpointIds: [200001] });
+    await new Promise((r) => setImmediate(r));
+    expect(forwardedStops()[0]).toMatchObject({ reason: 'entry', hitBreakpointIds: [] });
+  });
+
+  it('arms nothing for an attach session (there is no program start to stop at)', async () => {
+    (worker as unknown as Record<string, unknown>).isAttachMode = true;
+    await configure(initPayload({ stopOnEntry: true, scriptPath: 'attach://remote' }), entryPolicy());
+    expect(setBreakpoints).not.toHaveBeenCalled();
+    expect(dependencies.fileSystem.readFile).not.toHaveBeenCalled();
+    expect(sent().some((m) => m.status === 'adapter_notice')).toBe(false);
+  });
+
+  it('tells the caller when stopOnEntry could not be armed', async () => {
+    await configure(initPayload({ stopOnEntry: true }), entryPolicy({ entryBreakpointLine: () => undefined }));
+    const notice = sent().find((m) => m.type === 'status' && m.status === 'adapter_notice') as Sent | undefined;
+    expect(notice?.note).toMatch(/stopOnEntry/);
+    expect(notice?.note).toMatch(/no entry breakpoint armed/);
   });
 
   it('still forwards entry stops for policies that do not suppress them', async () => {
