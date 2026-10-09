@@ -5,7 +5,11 @@
  * desktop `build()` breakpoint each take ~30 s from a cold example (kernel compile, runner build)
  * and a few seconds warm; a `flutter test` session ends with `terminated` only, so the session is
  * `stopped` without an exit code. Self-skips without a Flutter SDK; the desktop cases also skip
- * when `flutter devices` lists no desktop target (CI's ubuntu lane runs the widget tests only).
+ * when `flutter devices` lists no desktop target, on Linux without a display, and anywhere with
+ * `MCP_SKIP_FLUTTER_DESKTOP=1` (CI's ubuntu lane sets it and runs the widget tests only). The
+ * tool lists the host desktop whenever the platform feature flag is on, so a Windows box with
+ * Flutter but no Visual Studio still reaches the runner build and fails there: install the
+ * toolchain `flutter doctor` names, or set the variable.
  */
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import path from 'path';

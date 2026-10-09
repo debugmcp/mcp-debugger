@@ -80,8 +80,9 @@ This directory contains end-to-end smoke tests that verify the MCP debugger serv
 - `mcp-server-smoke-flutter.test.ts` covers the Flutter runners against `examples/dart/flutter_probe`
   (`flutter debug-adapter --test` for the widget test, with and without `stopOnEntry`; `flutter run`
   and an `integration_test` on the desktop device `flutter devices` lists). It self-skips without a
-  Flutter SDK with a warm tool cache, and the desktop cases skip without a desktop device (CI's
-  `flutter-host` lane runs the widget-test cases only; `scripts/check-flutter-e2e-report.mjs`
+  Flutter SDK with a warm tool cache, and the desktop cases skip without a desktop device — on
+  Linux also without a `DISPLAY`, and anywhere with `MCP_SKIP_FLUTTER_DESKTOP=1` (CI's
+  `flutter-host` lane sets it and runs the widget-test cases only; `scripts/check-flutter-e2e-report.mjs`
   requires them). The helper generates the probe's platform folders with `flutter create` on
   first use
 

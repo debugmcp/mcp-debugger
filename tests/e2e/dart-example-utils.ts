@@ -4,7 +4,7 @@
  * and locate `// BP-NAME` marker lines so moving a line never breaks an assertion.
  */
 import { spawnSync } from 'child_process';
-import { existsSync, readFileSync, readdirSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, realpathSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import which from 'which';
@@ -91,7 +91,12 @@ function flutterRootCandidates(): string[] {
   const env = process.env;
   for (const key of ['FLUTTER_ROOT', 'FLUTTER_PATH']) if (env[key]) out.push(env[key]!);
   const onPath = which.sync('flutter', { nothrow: true });
-  if (onPath) out.push(path.resolve(path.dirname(onPath), '..'));
+  if (onPath) {
+    // Package managers (Homebrew, asdf, fvm) put a symlink on PATH; the checkout is where it points.
+    let real = onPath;
+    try { real = realpathSync(onPath); } catch { /* keep the symlink path */ }
+    out.push(path.resolve(path.dirname(real), '..'));
+  }
   if (process.platform === 'win32') {
     out.push('C:\\src\\flutter', 'C:\\flutter', path.join(env.LOCALAPPDATA ?? '', 'flutter'));
   } else {
@@ -102,11 +107,15 @@ function flutterRootCandidates(): string[] {
 
 let cachedFlutterRoot: string | null | undefined;
 
-/** A Flutter checkout with a warm tool cache (the snapshot the adapter spawns on Windows); null when none. */
+/**
+ * A Flutter checkout; on Windows one with a warm tool cache (the adapter spawns the tool snapshot
+ * there instead of flutter.bat), elsewhere bin/flutter builds the cache itself. Null when none.
+ */
 export function findFlutterRootSync(): string | null {
   if (cachedFlutterRoot !== undefined) return cachedFlutterRoot;
   cachedFlutterRoot = flutterRootCandidates().find((root) =>
-    root && existsSync(path.join(root, 'bin', FLUTTER_LAUNCHER)) && existsSync(path.join(root, 'bin', 'cache', 'flutter_tools.snapshot'))
+    root && existsSync(path.join(root, 'bin', FLUTTER_LAUNCHER))
+      && (process.platform !== 'win32' || existsSync(path.join(root, 'bin', 'cache', 'flutter_tools.snapshot')))
   ) ?? null;
   return cachedFlutterRoot;
 }
@@ -129,10 +138,11 @@ export function flutterToolArgv(root: string, args: string[]): { command: string
   };
 }
 
-function runFlutter(root: string, args: string[], cwd: string, timeoutMs = 300_000): { status: number | null; out: string } {
+function runFlutter(root: string, args: string[], cwd: string, timeoutMs = 300_000): { status: number | null; stdout: string; out: string } {
   const argv = flutterToolArgv(root, args);
   const r = spawnSync(argv.command, argv.args, { cwd, encoding: 'utf8', env: argv.env, windowsHide: true, timeout: timeoutMs });
-  return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+  const stdout = r.stdout ?? '';
+  return { status: r.status, stdout, out: `${stdout}${r.stderr ?? ''}` };
 }
 
 let flutterProbePrepared = false;
@@ -167,8 +177,10 @@ export function flutterDeviceIds(): string[] {
   if (!root) return (cachedDevices = []);
   const r = runFlutter(root, ['devices', '--machine'], DART_EXAMPLES_DIR, 120_000);
   try {
-    const start = r.out.indexOf('[');
-    const list = JSON.parse(r.out.slice(start)) as Array<{ id?: string }>;
+    // stdout only: the tool's warnings (`[!] adb …`, startup-lock notices) go to stderr and would
+    // follow the array.
+    const start = r.stdout.indexOf('[');
+    const list = JSON.parse(r.stdout.slice(start)) as Array<{ id?: string }>;
     cachedDevices = list.map((d) => d.id).filter((id): id is string => typeof id === 'string');
   } catch {
     cachedDevices = [];
@@ -176,8 +188,15 @@ export function flutterDeviceIds(): string[] {
   return cachedDevices;
 }
 
-/** The desktop device id for this OS, when `flutter devices` lists it. */
+/**
+ * The desktop device id for this OS, when `flutter devices` lists it and it can actually run an
+ * app: `flutter devices` lists `linux` on a headless runner too, where `flutter run -d linux`
+ * dies for want of a display and the GTK toolchain (measured on CI's ubuntu lane), so Linux needs
+ * a DISPLAY/WAYLAND_DISPLAY; `MCP_SKIP_FLUTTER_DESKTOP=1` skips the desktop cases anywhere.
+ */
 export function flutterDesktopDeviceId(): string | null {
+  if (process.env.MCP_SKIP_FLUTTER_DESKTOP === '1') return null;
+  if (process.platform === 'linux' && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) return null;
   const want = process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux';
   return flutterDeviceIds().includes(want) ? want : null;
 }

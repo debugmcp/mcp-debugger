@@ -4,14 +4,16 @@ The Flutter example the adapter's tests and docs use: a counter app (`lib/main.d
 test (`test/widget_test.dart`) and an integration test (`integration_test/app_test.dart`).
 
 Only the Dart sources and `pubspec.yaml` are committed. The platform folders the Flutter tool needs
-to run the app are generated, once, with:
+to run the app are generated, once, for your desktop (`windows`, `macos` or `linux`) and the web:
 
 ```bash
-flutter create --platforms=windows,web .
+flutter create --platforms=windows,web .    # or macos,web / linux,web
 flutter pub get
 ```
 
-The e2e helper (`tests/e2e/dart-example-utils.ts`, `prepareFlutterProbe`) runs exactly that.
+The e2e helper (`tests/e2e/dart-example-utils.ts`, `prepareFlutterProbe`) runs exactly that for
+the host's desktop. `flutter create .` leaves the committed files alone (it never overwrites
+without `--overwrite`).
 
 | File | Breakpoint markers |
 |---|---|
@@ -22,6 +24,6 @@ The e2e helper (`tests/e2e/dart-example-utils.ts`, `prepareFlutterProbe`) runs e
 ```bash
 flutter test                                  # the widget tests
 flutter test --name increments                # one of them
-flutter run -d windows                        # the app on the desktop
+flutter run -d windows                        # the app on the desktop (-d macos / -d linux)
 flutter test integration_test -d windows      # the integration test on the desktop
 ```

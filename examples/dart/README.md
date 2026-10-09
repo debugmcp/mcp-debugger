@@ -10,9 +10,9 @@ adapter (`dart debug_adapter`), which ships with every Dart and Flutter install.
   (Windows: `winget install Google.DartSDK`; macOS: `brew install dart`; Linux: the `dart` apt package).
 - For `dart_probe/`, resolve its one dev dependency once: `cd dart_probe && dart pub get`.
 - For `flutter_probe/`, a Flutter SDK with a warm tool cache (`flutter --version` once), then
-  `cd flutter_probe && flutter create --platforms=windows,web . && flutter pub get` (the e2e helper
-  does this itself); `flutter run` on the desktop also needs that platform's toolchain
-  (`flutter doctor`).
+  `cd flutter_probe && flutter create --platforms=<windows|macos|linux>,web . && flutter pub get`
+  (the e2e helper does this itself for the host's desktop); `flutter run` on the desktop also needs
+  that platform's toolchain (`flutter doctor`).
 
 Do not run `dart test` from a project under `%LOCALAPPDATA%\Temp` with the winget SDK: package:test
 spawns the frontend server by a relative path that does not resolve from there.
