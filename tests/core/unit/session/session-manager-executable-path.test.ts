@@ -21,6 +21,7 @@ const DEFAULTS: ReadonlyArray<readonly [DebugLanguage, string]> = [
   [DebugLanguage.RUBY, 'ruby'],
   [DebugLanguage.JAVA, 'java'],
   [DebugLanguage.DOTNET, 'netcoredbg'],
+  [DebugLanguage.DART, 'dart'],
   [DebugLanguage.MOCK, 'mock']
 ];
 

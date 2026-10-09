@@ -42,15 +42,25 @@ with reasons. The gaps worth knowing up front:
 - **.NET attach is also PID-only.** netcoredbg has no host/port attach, so `processId` is
   required and a `host`/`port` pair is dropped — there is no remote-attach form of the
   call. See the [.NET guide](./dotnet/README.md).
+- **Dart/Flutter attach is by VM-service URI, never by PID.** `attach_to_process` takes
+  `adapterConfig.vmServiceUri` (the `ws://…/<token>=/ws` URI a VM started with
+  `--enable-vm-service` prints, or `flutter run --machine`'s `app.debugPort`) or
+  `adapterConfig.vmServiceInfoFile` (written by `--write-service-info=<file>`); a
+  `processId` is rejected with that hint. A bare `host`/`port` pair is turned into
+  `ws://host:port/ws`, which only works for a VM started with
+  `--disable-service-auth-codes`. The `dart-test`/`flutter-test` runners refuse attach
+  altogether (the SDK test adapters only launch). See the
+  [Dart/Flutter guide](./dart/README.md).
 
-Python, Ruby, JavaScript, and Java can attach to a remote target over host/port (reach it
-through a port mapping, `kubectl port-forward`, or an SSH tunnel — these debug sockets are
-unauthenticated).
+Python, Ruby, JavaScript, and Java can attach to a remote target over host/port, and
+Dart/Flutter by VM-service URI (reach it through a port mapping, `kubectl port-forward`, or
+an SSH tunnel — these debug sockets are unauthenticated, apart from the token in a Dart
+VM-service URI).
 
 ## Logpoints are rejected by Java, .NET, and Ruby
 
 `set_breakpoint` with `logMessage` is supported by the Python, JavaScript, Go, Rust,
-C/C++, COBOL, and mock adapters. On Java, .NET, and Ruby it is a hard error
+C/C++, COBOL, Dart/Flutter, and mock adapters. On Java, .NET, and Ruby it is a hard error
 (`Logpoints (logMessage) not supported by the <language> adapter`) rather than a
 silent downgrade: rdbg, for example, accepts `logMessage` and then ignores it, turning
 the logpoint into a *pausing* breakpoint — the opposite of what a logpoint promises
@@ -75,3 +85,30 @@ pause on raised exceptions in Ruby — it will also stop on caught ones.
 
 (Attach sessions never apply a language default; their `breakOnExceptions` default is
 `"none"` for every language.)
+
+## Dart/Flutter: what the SDK debug adapter does differently
+
+The Dart adapter drives the SDK's own `dart debug_adapter` / `flutter debug-adapter`, so
+these are the SDK's behaviours — measured in [the spike](./dart/spike-notes.md) against
+Dart 3.13 and Flutter 3.47 — and none of them is a session error.
+
+- **`step_over` stops twice per source line.** The VM steps per token position (`next` on
+  one line stops at column 26, then at column 32); the `granularity` the adapter accepts is
+  ignored. Expect two `step_over` calls per line, or set a breakpoint on the line you want.
+- **A logpoint's `condition` is ignored.** `logMessage` works (interpolated `{expr}` values
+  arrive in `get_output` without pausing), but a `condition` on the same breakpoint does not
+  gate it — every hit logs. Put the filter in the message, or use a conditional breakpoint.
+- **`hitCondition` is accepted and ignored.** The SDK adapter does not advertise
+  `supportsHitConditionalBreakpoints`; a hit count neither errors nor takes effect.
+- **A paused idle isolate shows an empty stack.** Attach pauses the target by default, and
+  an isolate idle in an `await` has nothing on its stack, so `get_stack_trace` is empty (and
+  stays empty across retries). Set a breakpoint and `continue_execution` — the stop at the
+  breakpoint has a real stack — or pass `stopOnEntry: false` on attach to skip the pause.
+- **`flutter test` and `flutter run` sessions end without an exit code.** The Flutter
+  adapter sends `terminated` but no `exited` event, so `exitCode` is unknown in
+  `list_debug_sessions`; the test results (`✓ name`) are in `get_output`. The Dart CLI
+  adapter does report `exited` (255 for an uncaught exception).
+- **`dart test` fails under `%LOCALAPPDATA%\Temp` with the winget SDK (Windows).**
+  package:test spawns its frontend server through a cwd-relative SDK path that does not
+  resolve from there (`The system cannot find the file specified … dartaotruntime.exe`).
+  Upstream package:test; keep projects out of Temp — Flutter's bundled Dart is unaffected.

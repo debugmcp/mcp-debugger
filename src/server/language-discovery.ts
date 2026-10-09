@@ -141,6 +141,14 @@ export function buildLanguageMetadata(languages: string[]): LanguageMetadata[] {
           requiresExecutable: true,
           defaultExecutable: 'cobc'
         };
+      case DebugLanguage.DART:
+        return {
+          id: DebugLanguage.DART,
+          displayName: 'Dart/Flutter',
+          version: '1.0.0',
+          requiresExecutable: true,
+          defaultExecutable: 'dart'
+        };
       default:
         return {
           id: lang,

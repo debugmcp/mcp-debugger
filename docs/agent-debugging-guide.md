@@ -1,6 +1,6 @@
 # MCP Debugger Usage Guide for AI Agents
 
-This guide explains how to correctly use the MCP Debugger tools when testing debugging functionality across all supported languages (Python, Ruby, JavaScript, Rust, Go, Java, .NET/C#, C/C++, and COBOL).
+This guide explains how to correctly use the MCP Debugger tools when testing debugging functionality across all supported languages (Python, Ruby, JavaScript, Rust, Go, Java, .NET/C#, C/C++, COBOL, and Dart/Flutter).
 
 ## Key Concepts
 
@@ -445,7 +445,7 @@ capability, not a view-only credential.
 
 ## Summary
 
-The MCP Debugger is fully functional for Python, Ruby, JavaScript, Rust, Go, Java, .NET/C#, C/C++, and COBOL. The key insights are:
+The MCP Debugger is fully functional for Python, Ruby, JavaScript, Rust, Go, Java, .NET/C#, C/C++, COBOL, and Dart/Flutter. The key insights are:
 - **JavaScript**: Stack trace filtering hides internal, `node_modules`, and async-separator frames; may need `continue_execution` if initially stopped at internals
 - **Python**: Use variablesReference to expand variable containers
 - **Ruby**: Supports launch and attach flows through `rdbg`; use Bundler mode for Rails and RSpec-style entrypoints

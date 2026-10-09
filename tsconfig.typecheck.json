@@ -11,7 +11,7 @@
   // One wildcard entry rather than a row per adapter: a per-package registration site is
   // one more thing to forget when adding an adapter, and a missing row fails quietly —
   // resolving to a stale `dist/index.d.ts` locally and to TS2307 in the no-build CI job.
-  // It covers the same eleven `@debugmcp/*` workspace packages `vitest.config.ts` aliases
+  // It covers the same thirteen `@debugmcp/*` workspace packages `vitest.config.ts` aliases
   // (the `@` -> `src` alias is not mirrored; nothing outside tests uses it).
   //
   // `lib` is pinned because the default for target ES2022 drags in DOM: Node/vitest code

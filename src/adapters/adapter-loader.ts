@@ -282,6 +282,7 @@ export class AdapterLoader {
       { name: 'dotnet', packageName: '@debugmcp/adapter-dotnet', description: '.NET/C# debugger using netcoredbg', attach: 'spawn' },
       { name: 'cpp', packageName: '@debugmcp/adapter-cpp', description: 'C/C++ debugger using CodeLLDB', attach: 'spawn' },
       { name: 'cobol', packageName: '@debugmcp/adapter-cobol', description: 'COBOL debugger using GnuCOBOL and CodeLLDB', attach: 'spawn' },
+      { name: 'dart', packageName: '@debugmcp/adapter-dart', description: 'Dart and Flutter debugging via the SDK debug adapters (dart debug_adapter / flutter debug-adapter)', attach: 'spawn' },
     ];
 
     const results: AdapterMetadata[] = [];

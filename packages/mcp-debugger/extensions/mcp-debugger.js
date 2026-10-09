@@ -14,7 +14,8 @@
  *   every prompt carrying all 29 tool schemas. `/mcp` changes it for the session; a `mcp-debugger`
  *   entry in `mcp.json` overrides this registration entirely.
  * - `timeout` (per request, in seconds): pi's default of 60 is shorter than a slow launch, which
- *   can spend proxy start-up, the 30 s readiness wait and a compile (C/C++, COBOL) in one call.
+ *   can spend proxy start-up, the 30 s readiness wait and a compile (C/C++, COBOL) or a Flutter
+ *   build (Dart/Flutter) in one call.
  * - Pi older than 0.99 has no `registerMcpServer`; the extension then does nothing.
  *
  * The factory only registers; pi connects the server when a session starts.
@@ -39,7 +40,7 @@ export function serverConfig(execPath = process.execPath) {
     command: nodeCommand(execPath),
     args: [CLI_PATH, 'stdio'],
     description:
-      'Step-through debugger for Python, JavaScript/TypeScript, Ruby, Rust, Go, Java, .NET, C/C++ and COBOL: ' +
+      'Step-through debugger for Python, JavaScript/TypeScript, Ruby, Rust, Go, Java, .NET, C/C++, COBOL and Dart/Flutter: ' +
       'breakpoints, stepping, stack traces and live variables. Use it to find why a program misbehaves at runtime.',
     exposure: 'deferred',
     timeout: 180

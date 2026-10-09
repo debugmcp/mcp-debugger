@@ -1,6 +1,6 @@
 # Diagnostics Guide
 
-Ten language adapters, each with its own external prerequisites — and nearly all real-world setup friction is environmental: debugpy missing from the active Python, `dlv` not on PATH, a JDK that is too old, `NETCOREDBG_PATH` unset, Yama blocking attach on Linux, a wrong volume mount in container mode. This guide gathers every prerequisite, failure signature, and diagnostic tool in one place.
+Eleven language adapters, each with its own external prerequisites — and nearly all real-world setup friction is environmental: debugpy missing from the active Python, `dlv` not on PATH, a JDK that is too old, `NETCOREDBG_PATH` unset, Yama blocking attach on Linux, a wrong volume mount in container mode. This guide gathers every prerequisite, failure signature, and diagnostic tool in one place.
 
 ## Start here: `mcp-debugger doctor`
 
@@ -57,6 +57,7 @@ Usage notes:
 | rust | Rust toolchain (rustup) | CodeLLDB (vendored / platform packages) | nothing extra on a normal install; on Windows use the **GNU** toolchain (DWARF) | `CODELLDB_PATH` (used when no vendored copy resolves) |
 | cpp | compiler only for source-file launch (`g++`/`clang++`) | CodeLLDB (shared with rust) | nothing for prebuilt binaries; compile with `-gdwarf-4 -O0` | `CODELLDB_PATH`, `CPP_MSVC_BEHAVIOR` (`warn`\|`error`\|`continue`) |
 | cobol | GnuCOBOL 3.1.2+ (`cobc`) — for source launch and COBOL-shaped variables | CodeLLDB (shared with rust/cpp) behind the COBOL DAP shim | `apt install gnucobol3` / `brew install gnucobol` / MSYS2 `pacman -S mingw-w64-ucrt-x86_64-gnucobol`; a prebuilt executable must be built with `cobc -g` (`-A -gdwarf-4` on MinGW) | `COBC_PATH`, `COB_CONFIG_DIR` (set automatically for MSYS2/Homebrew layouts), `MCP_COBOL_ALLOW_PREBUILT` |
+| dart | Dart SDK 3.x (`dart`), or Flutter (bundles its own Dart) | `dart debug_adapter` / `flutter debug-adapter` — the SDK's own DAP servers, behind a TCP-to-stdio bridge; nothing vendored | [dart.dev/get-dart](https://dart.dev/get-dart) (Windows `winget install Google.DartSDK`, macOS `brew install dart`, Linux the `dart` apt package) or Flutter; run `flutter --version` once so the Flutter tool cache is built | `DART_SDK` (alias `DART_PATH`), `FLUTTER_ROOT` (alias `FLUTTER_PATH`); a project's fvm pin (`.fvmrc`) is honoured |
 | mock | — | — | nothing (testing adapter) | — |
 
 CodeLLDB resolution order (rust, cpp and cobol): **vendored copy → `CODELLDB_PATH` → `@debugmcp/codelldb-<platform>` package** (npm installs exactly the one matching your platform as an optional dependency). Doctor's backend column shows which source won. If you installed with `--omit=optional`, set `CODELLDB_PATH` to a [CodeLLDB release](https://github.com/vadimcn/codelldb/releases) binary.
@@ -149,6 +150,19 @@ The most common symptom → cause → fix mappings per language. (The agent-faci
 | "GnuCOBOL (cobc) not found" | Not installed or off PATH | Install GnuCOBOL or set `COBC_PATH`; for prebuilt binaries only, `MCP_COBOL_ALLOW_PREBUILT=true` |
 | Runtime error (bad subscript, non-numeric data) never pauses | `runtimeChecks` unset, so no check is compiled in | `runtimeChecks: true` in `dapLaunchArgs` |
 
+### dart
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| "No Dart SDK found" / "Dart SDK not found" | `dart` not on PATH and neither `DART_SDK` nor `FLUTTER_ROOT` set | Install Dart or Flutter; set `DART_SDK` (or `FLUTTER_ROOT`) to the install root |
+| "No Flutter SDK found for a Flutter project" | The pubspec depends on Flutter but no checkout was found | Set `FLUTTER_ROOT`, put `flutter` on PATH, or pin one with fvm (`.fvmrc`) |
+| A Flutter launch fails mentioning `FLUTTER_ROOT` or the tool snapshot (Windows) | Flutter's tool cache is not built yet — the adapter runs `bin/cache/flutter_tools.snapshot` through the bundled Dart directly | Run `flutter --version` once |
+| `start_debugging` fails `Session terminated before debugger initialized: (1)` | The program or test file does not compile | The compiler diagnostics are in `get_output` as stderr entries with file/line/column |
+| `dart test` dies with `The system cannot find the file specified … dartaotruntime.exe` (Windows) | Project under `%LOCALAPPDATA%\Temp` with the winget SDK — package:test spawns its frontend server by a cwd-relative SDK path (upstream) | Move the project out of Temp; Flutter's bundled Dart is unaffected |
+| `attach_to_process` fails "Dart attaches by VM-service URI, not by process id" | A `processId` was passed | Pass `adapterConfig.vmServiceUri` or `adapterConfig.vmServiceInfoFile` |
+| Attach by `host`/`port` never connects | The VM service wants its auth token in the URI | Start the target with `--disable-service-auth-codes`, or pass the full `ws://…/<token>=/ws` URI |
+| `get_stack_trace` is empty after attach | The isolate is idle in an `await` — nothing is on its stack | Set a breakpoint and `continue_execution`; or attach with `stopOnEntry: false` |
+
 ## Linux attach and Yama ptrace_scope
 
 Attaching by PID (cpp and cobol, and any future native attach) is gated by the kernel's Yama LSM. `doctor` reads the live value; the semantics:
@@ -222,6 +236,8 @@ The runtime-affecting variables the server and its adapters read (the [developme
 | `MCP_RUST_ALLOW_PREBUILT` / `MCP_CPP_ALLOW_PREBUILT` / `MCP_COBOL_ALLOW_PREBUILT` | `true` lets the rust/cpp/cobol adapter debug a prebuilt binary with no toolchain installed (implied by `MCP_CONTAINER=true`) |
 | `COBC_PATH` | Pin the GnuCOBOL compiler (`cobc`) — checked before PATH and the known install directories |
 | `COB_CONFIG_DIR` / `COB_COPY_DIR` | GnuCOBOL's own dialect-configuration and copybook directories; the adapter sets them to `<prefix>/share/gnucobol/{config,copy}` when cobc's install has them and you have not (MSYS2's cobc cannot find its config outside an MSYS2 shell) |
+| `DART_SDK` / `DART_PATH` | Dart SDK root (or its `bin/dart`) — checked before `dart` on PATH, a Flutter checkout's bundled SDK and the known install directories |
+| `FLUTTER_ROOT` / `FLUTTER_PATH` | Flutter SDK root — checked before the project's fvm pin, `flutter` on PATH and the known install directories; also what the adapter exports to the Flutter tool it spawns |
 | `DEBUG_MCP_DISABLE_LANGUAGES` | Comma-separated languages to disable (e.g. `go,dotnet` in the Docker image) |
 | `MCP_CONTAINER` | `true` marks container mode (set by the Docker image) |
 | `MCP_WORKSPACE_ROOT` | Path-resolution root in container mode (image default `/workspace`) |
@@ -246,5 +262,5 @@ The runtime-affecting variables the server and its adapters read (the [developme
 ## Additional resources
 
 - [Troubleshooting guide](./troubleshooting.md) — narrative FAQ for session-level problems
-- Per-language guides: [python](./python/README.md) · [javascript](./javascript/README.md) · [ruby](./ruby/README.md) · [go](./go/README.md) · [java](./java/README.md) · [dotnet](./dotnet/README.md) · [rust](./rust-debugging.md) · [cpp](./cpp/README.md) · [cobol](./cobol/README.md)
+- Per-language guides: [python](./python/README.md) · [javascript](./javascript/README.md) · [ruby](./ruby/README.md) · [go](./go/README.md) · [java](./java/README.md) · [dotnet](./dotnet/README.md) · [rust](./rust-debugging.md) · [cpp](./cpp/README.md) · [cobol](./cobol/README.md) · [dart](./dart/README.md)
 - [Docker support](./docker-support.md) · [Tool reference](./tool-reference.md)

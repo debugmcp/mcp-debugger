@@ -2,7 +2,7 @@
 
 _Last updated: 2026-09-29 (v0.25.0). This file is refreshed at each release._
 
-mcp-debugger gives AI agents step-through debugging over the Model Context Protocol: 29 tools across nine language adapters (Python, JavaScript/TypeScript, Ruby, Rust, Go, Java, .NET, C/C++, COBOL), plus a mock adapter for testing. This roadmap answers two questions we hear from people evaluating the project: **is the tool surface stable enough to build on?** and **what's left before 1.0?**
+mcp-debugger gives AI agents step-through debugging over the Model Context Protocol: 29 tools across ten language adapters (Python, JavaScript/TypeScript, Ruby, Rust, Go, Java, .NET, C/C++, COBOL, Dart/Flutter), plus a mock adapter for testing. This roadmap answers two questions we hear from people evaluating the project: **is the tool surface stable enough to build on?** and **what's left before 1.0?**
 
 ## Path to 1.0
 

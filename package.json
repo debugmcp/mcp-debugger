@@ -165,6 +165,7 @@
   },
   "optionalDependencies": {
     "@debugmcp/adapter-cobol": "workspace:*",
+    "@debugmcp/adapter-dart": "workspace:*",
     "@debugmcp/adapter-cpp": "workspace:*",
     "@debugmcp/adapter-dotnet": "workspace:*",
     "@debugmcp/adapter-go": "workspace:*",

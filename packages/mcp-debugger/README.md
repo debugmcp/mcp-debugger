@@ -1,6 +1,6 @@
 # @debugmcp/mcp-debugger
 
-Step-through debugging MCP server for LLMs across nine languages — **29 tools** covering breakpoints (line, statement-anchored, function, logpoints), stepping, stack/variable inspection, expression evaluation, buffered program output, launch/attach/restart lifecycle, and a read-only IDE mirror of the live session.
+Step-through debugging MCP server for LLMs across ten languages — **29 tools** covering breakpoints (line, statement-anchored, function, logpoints), stepping, stack/variable inspection, expression evaluation, buffered program output, launch/attach/restart lifecycle, and a read-only IDE mirror of the live session.
 
 ## Installation
 
@@ -75,6 +75,7 @@ All language adapters are bundled into the CLI package. No separate installation
 - **.NET** (`@debugmcp/adapter-dotnet`) - .NET debugging via netcoredbg
 - **C/C++** (`@debugmcp/adapter-cpp`) - C/C++ debugging via CodeLLDB
 - **COBOL** (`@debugmcp/adapter-cobol`) - COBOL debugging via GnuCOBOL + CodeLLDB (a DAP shim adds COBOL-shaped scopes and values)
+- **Dart/Flutter** (`@debugmcp/adapter-dart`) - Dart and Flutter debugging via the SDK's own debug adapters (`dart debug_adapter`, `flutter debug-adapter`) behind a TCP-to-stdio bridge
 - **Mock** (`@debugmcp/adapter-mock`) - Mock adapter for testing
 
 **System Requirements:** Node.js 22+ is required to run mcp-debugger. Launching a program also needs that language's toolchain on the machine:
@@ -88,10 +89,11 @@ All language adapters are bundled into the CLI package. No separate installation
 - **.NET**: netcoredbg + a compatible .NET runtime (Portable PDBs)
 - **C/C++**: none for prebuilt binaries (CodeLLDB vendored); a compiler (g++/clang++) only for lone-source-file launch
 - **COBOL**: GnuCOBOL 3.1.2+ (`cobc`: `apt install gnucobol3`, `brew install gnucobol`, MSYS2 `mingw-w64-ucrt-x86_64-gnucobol`) for source launch and COBOL-shaped variables; CodeLLDB vendored
+- **Dart/Flutter**: the Dart SDK (`dart` on PATH, or `DART_SDK`) or Flutter (`flutter` on PATH, or `FLUTTER_ROOT`), which bundles Dart; the debug adapter ships with the SDK, nothing is vendored. Flutter runners need `flutter --version` run once so the tool cache is built
 
 > **CodeLLDB platform note:** the CodeLLDB debug engine ships via per-platform optional dependencies (`@debugmcp/codelldb-<platform>`) — npm installs exactly the one matching your os/cpu, so Rust, C/C++ and COBOL debugging work out of the box on Windows, macOS, and Linux. Installs with `--omit=optional` skip it; point `CODELLDB_PATH` at a [CodeLLDB](https://github.com/vadimcn/codelldb/releases) binary instead, or use the Docker image.
 
-**Attach without a toolchain:** only **Python** (`debugpy --listen`) and **Ruby** (`rdbg --open`) attach *direct-connect* — the debug engine already runs inside the target, so the debugger host needs no Python or Ruby. JavaScript, Java, .NET, C/C++ and COBOL spawn a local adapter for attach (`modes.attach: 'spawn'`) and so do need their toolchain on the debugger host — the Java JDI bridge, for instance, runs locally on the host JDK and connects out over JDWP. `list_supported_languages` reports per-mode availability with reasons.
+**Attach without a toolchain:** only **Python** (`debugpy --listen`) and **Ruby** (`rdbg --open`) attach *direct-connect* — the debug engine already runs inside the target, so the debugger host needs no Python or Ruby. JavaScript, Java, .NET, C/C++, COBOL and Dart/Flutter spawn a local adapter for attach (`modes.attach: 'spawn'`) and so do need their toolchain on the debugger host — the Java JDI bridge, for instance, runs locally on the host JDK and connects out over JDWP, and the Dart SDK's adapter connects out to the target's VM-service URI. `list_supported_languages` reports per-mode availability with reasons.
 
 ### Useful environment variables
 
@@ -103,6 +105,8 @@ All language adapters are bundled into the CLI package. No separate installation
 | `CODELLDB_PATH` | Path to a CodeLLDB binary when the platform packages are unavailable (see note above) |
 | `CPP_MSVC_BEHAVIOR=warn\|error\|continue` | What to do when a C/C++ target looks MSVC-built (partial PDB fidelity) |
 | `COBC_PATH` | Pin the GnuCOBOL compiler (`cobc`) when it is not on PATH or in a known install directory |
+| `DART_SDK` | Dart SDK root (or its `bin/dart`) when `dart` is not on PATH; `DART_PATH` is an alias |
+| `FLUTTER_ROOT` | Flutter SDK root when `flutter` is not on PATH — its bundled Dart is used when no standalone SDK is found; `FLUTTER_PATH` is an alias |
 | `MCP_HTTP_STALE_SESSION_MS` | HTTP mode: reap a crash-abandoned MCP session that never opened an SSE stream after this idle time (default 30 min) |
 | `MCP_HTTP_STREAM_LOST_SESSION_MS` | HTTP mode: reap a session whose SSE stream dropped and never returned after this idle time (default 2 min) — releases a dead client's paused attach target |
 | `MCP_HTTP_ALLOWED_HOSTS` | HTTP and (deprecated) SSE modes: comma-separated `Host` (and browser `Origin`) hostnames to accept besides `localhost`, `127.0.0.1`, `[::1]` — only when another access control fronts the server; same as repeating `--allowed-host` |

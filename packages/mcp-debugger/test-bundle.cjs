@@ -48,6 +48,10 @@ console.log('Bundle path:', bundlePath);
         path: 'packages/adapter-dotnet/dist/utils/netcoredbg-bridge-core.js'
       },
       {
+        name: 'DAP stdio bridge (Dart)',
+        path: 'packages/adapter-dart/dist/bridge/dap-stdio-bridge.js'
+      },
+      {
         name: 'proxy bundle',
         path: 'proxy/proxy-bundle.cjs'
       }

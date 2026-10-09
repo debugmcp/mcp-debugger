@@ -104,6 +104,30 @@ export function keepHitProven(
 }
 
 /**
+ * The pending-answer rule (issue #790): DAP marks an unverified
+ * `setBreakpoints` entry `reason: 'pending'` when the adapter cannot verify
+ * it *yet* — the Dart SDK adapters answer every set that way, pre-launch and
+ * on every live re-send, verify afterwards with `breakpoint` events, and hand
+ * out new ids on every re-send. Such an answer is no evidence against a
+ * record the adapter already verified (or a stop proved bound): the id is
+ * kept current and nothing else changes. An unverified record takes the
+ * answer as usual — the event will verify it. Returns true when the answer
+ * was absorbed this way; the caller then skips its usual stamping.
+ */
+export function keepPendingAnswer(
+  record: Breakpoint | FunctionBreakpoint,
+  answer: { verified?: boolean; reason?: string; id?: number }
+): boolean {
+  if (answer.verified !== false || answer.reason !== 'pending' || record.verified !== true) {
+    return false;
+  }
+  if (typeof answer.id === 'number') {
+    record.adapterId = answer.id;
+  }
+  return true;
+}
+
+/**
  * Store the adapter's answer about the record, normalized for its current
  * `verified` state (issue #471). Words displace whatever note was there — a
  * stamped refusal and a curated note included: the adapter's words about the

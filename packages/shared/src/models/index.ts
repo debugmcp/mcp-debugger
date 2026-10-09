@@ -88,6 +88,7 @@ export enum DebugLanguage {
   DOTNET = 'dotnet',
   CPP = 'cpp',    // C and C++ share one adapter (CodeLLDB), like dotnet covers C#
   COBOL = 'cobol', // GnuCOBOL programs: CodeLLDB behind the COBOL DAP shim (issue #759)
+  DART = 'dart',   // Dart and Flutter: the SDK's own DAP servers behind a stdio bridge (issue #790)
   MOCK = 'mock',  // Mock adapter for testing
 }
 

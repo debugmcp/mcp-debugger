@@ -14,6 +14,7 @@ import { execFileSync, execSync } from 'child_process';
 import { prepareJavaExample } from './java-example-utils.js';
 import { prepareCppExample, hasCppToolchain } from './cpp-example-utils.js';
 import { hasCobolToolchain } from './cobol-example-utils.js';
+import { hasDartToolchain } from './dart-example-utils.js';
 import { prepareRustExample } from './rust-example-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -32,6 +33,7 @@ export const JAVA_CLASS_DIR = path.resolve(ROOT, 'examples', 'java');
 export const RUBY_SCRIPT = path.resolve(ROOT, 'examples', 'ruby', 'fizzbuzz.rb');
 export const CPP_SCRIPT = path.resolve(ROOT, 'examples', 'cpp', 'hello_world.cpp');
 export const COBOL_SCRIPT = path.resolve(ROOT, 'examples', 'cobol', 'hello.cob');
+export const DART_SCRIPT = path.resolve(ROOT, 'examples', 'dart', 'hello.dart');
 
 // Breakpoint lines (executable lines in each script — must be AFTER variable
 // assignments so that get_variables returns populated locals)
@@ -44,6 +46,7 @@ export const JAVA_BP_LINE = 24;    // int sum = add(x, y);  — x=10, y=20 in sc
 export const RUBY_BP_LINE = 15;    // value = fizzbuzz_for(i)  — first loop iteration
 export const CPP_BP_LINE = 17;     // int answer = compute_answer(count, 4);  — count/greeting/values in scope
 export const COBOL_BP_LINE = 46;   // ADD WS-SCALED TO WS-TOTAL — WORKING-STORAGE populated (issue #759)
+export const DART_BP_LINE = 3;     // final target = 'mcp-debugger'; — greeting in scope (issue #790)
 
 // A second executable line strictly after the bp line in the same file, for
 // suites that need two breakpoints in one run (e.g. live removal).
@@ -56,6 +59,7 @@ export const JAVA_LATER_LINE = 27;    // System.out.println("Sum: " + sum)
 export const RUBY_LATER_LINE = 17;    // puts "#{i}: #{value}"  (same loop body)
 export const CPP_LATER_LINE = 18;     // std::cout << "CPP_DEBUG_MARKER: ..."
 export const COBOL_LATER_LINE = 48;   // DISPLAY "COBOL_DEBUG_MARKER: total=" WS-TOTAL
+export const DART_LATER_LINE = 4;     // print('$greeting $target')
 
 /* ---------- toolchain detection ---------- */
 
@@ -79,6 +83,7 @@ export const hasDotnet = (() => {
 export const hasJava = hasCommand('java -version') && hasCommand('javac -version');
 export const hasCpp = hasCppToolchain();
 export const hasCobol = hasCobolToolchain();
+export const hasDart = hasDartToolchain();
 
 /* ---------- pre-compilation helpers ---------- */
 
@@ -155,6 +160,8 @@ export function createLanguageMatrix(): MatrixLangDef[] {
     { language: 'cpp', script: CPP_SCRIPT, bpLine: CPP_BP_LINE, laterLine: CPP_LATER_LINE, available: hasCpp, skipReason: hasCpp ? undefined : 'C/C++ compiler not installed' },
     // cobol: source launch — the adapter compiles hello.cob itself, so no build step
     { language: 'cobol', script: COBOL_SCRIPT, bpLine: COBOL_BP_LINE, laterLine: COBOL_LATER_LINE, available: hasCobol, skipReason: hasCobol ? undefined : 'GnuCOBOL (cobc) not installed' },
+    // dart: the SDK's own debug adapter runs the pubspec-less hello.dart, no build step (issue #790)
+    { language: 'dart', script: DART_SCRIPT, bpLine: DART_BP_LINE, laterLine: DART_LATER_LINE, available: hasDart, skipReason: hasDart ? undefined : 'Dart SDK not installed' },
   ];
 }
 

@@ -4,7 +4,7 @@
   <img src="assets/logo.png" alt="MCP Debugger Logo - A stylized circuit board with debug breakpoints" width="400" height="400">
 </div>
 
-**A headless, agentic debugger over MCP — let your AI agents debug running programs in nine languages.**
+**A headless, agentic debugger over MCP — let your AI agents debug running programs in ten languages.**
 
 [![CI](https://github.com/debugmcp/mcp-debugger/actions/workflows/ci.yml/badge.svg)](https://github.com/debugmcp/mcp-debugger/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/debugmcp/mcp-debugger/branch/main/graph/badge.svg)](https://codecov.io/gh/debugmcp/mcp-debugger)
@@ -16,7 +16,7 @@
 
 ## 🎯 Overview
 
-mcp-debugger is a Model Context Protocol (MCP) server that exposes step-through debugging as structured tool calls. It lets AI agents set breakpoints, inspect variables, evaluate expressions, and step through running programs across nine languages — driving real language debuggers through the Debug Adapter Protocol (DAP).
+mcp-debugger is a Model Context Protocol (MCP) server that exposes step-through debugging as structured tool calls. It lets AI agents set breakpoints, inspect variables, evaluate expressions, and step through running programs across ten languages — driving real language debuggers through the Debug Adapter Protocol (DAP).
 
 **No IDE required.** mcp-debugger runs anywhere Node.js runs: CI runners, Docker containers, Kubernetes pods, SSH boxes, and the sandboxes that cloud coding agents live in. It's the debugger for where IDEs can't go.
 
@@ -40,8 +40,9 @@ Microsoft's [DebugMCP](https://github.com/microsoft/DebugMCP) exposes VS Code's 
 | Kubernetes ephemeral debug sidecar (native attach-by-PID) | ✅ [`kubectl debug` flow](docs/kubernetes.md) | ❌ |
 | C/C++ | ✅ via CodeLLDB (launch + attach-by-PID) | ✅ via VS Code extensions |
 | COBOL | ✅ via GnuCOBOL + CodeLLDB (launch + attach-by-PID, COBOL-shaped variables) | — |
+| Dart/Flutter | ✅ via the SDK's own debug adapters (launch + attach by VM-service URI; Dart now, Flutter runners wired and shipping in the next milestones) | — |
 | PHP | ❌ | ✅ via VS Code extensions |
-| Languages | Python, JS/TS, Ruby, Rust, Go, Java, .NET, C/C++, COBOL | Python, JS/TS, Ruby, Rust, Go, Java, .NET, C/C++, PHP |
+| Languages | Python, JS/TS, Ruby, Rust, Go, Java, .NET, C/C++, COBOL, Dart/Flutter | Python, JS/TS, Ruby, Rust, Go, Java, .NET, C/C++, PHP |
 
 If your agent runs in a terminal, a pipeline, or a cloud sandbox — or needs to attach to a process on another machine — you want mcp-debugger.
 
@@ -59,8 +60,9 @@ If your agent runs in a terminal, a pipeline, or a cloud sandbox — or needs to
 - 🔷 **.NET/C# debugging via netcoredbg** – Debug .NET applications with full DAP support
 - ⚙️ **C/C++ debugging via CodeLLDB** – Launch prebuilt binaries or lone source files (auto-compiled), attach by PID; core dumps and gdbserver/rr targets via config pass-through
 - 🧮 **COBOL debugging via GnuCOBOL + CodeLLDB** – Launch `.cob`/`.cbl` sources (auto-compiled with `cobc`) or prebuilt executables, attach by PID; WORKING-STORAGE / LOCAL-STORAGE / LINKAGE scopes with DISPLAY, COMP, COMP-3 and 88-level values decoded, breakpoints in copybooks, statement-granular stepping, and a pause on libcob runtime errors (the S0C7/SSRANGE analogues) — built for mainframe-to-GnuCOBOL migrations ([guide](docs/cobol/README.md))
+- 🐦 **Dart/Flutter debugging via the SDK's own debug adapters** – Launch Dart programs and `package:test` files (`dart debug_adapter`) or Flutter apps and tests (`flutter debug-adapter`), the runner auto-detected from `pubspec.yaml` and the program path; attach to a running VM by service URI or service-info file; conditional breakpoints, logpoints, `Unhandled`/`All` exception filters, `noDebug`. Nothing is vendored — the Dart or Flutter SDK on the machine is the debugger. Dart now; the Flutter runners are wired, measured on Windows desktop and the Android emulator in the spike, and ship in the next milestones ([guide](docs/dart/README.md))
 - 🧪 **Mock adapter for testing** – Test without external dependencies
-- 🛰️ **Out-of-IDE & remote attach** – Attach over host/port to a process on another machine or inside a container (Python via debugpy, Ruby via rdbg, JavaScript via the V8 inspector, Java via JDWP) with source-path mapping, or by PID for native code (C/C++, COBOL). Python and Ruby attach *direct-connect* — the debug engine already runs inside the target, so no local Python or Ruby is needed; JavaScript, Java, .NET, C/C++ and COBOL spawn a local adapter instead; of those, only Java (a JDK) and .NET (netcoredbg) need a toolchain you install, since the JavaScript, C/C++ and COBOL debug engines ship with the package. `list_supported_languages` reports per-mode availability with reasons
+- 🛰️ **Out-of-IDE & remote attach** – Attach over host/port to a process on another machine or inside a container (Python via debugpy, Ruby via rdbg, JavaScript via the V8 inspector, Java via JDWP, Dart/Flutter via the VM-service URI) with source-path mapping, or by PID for native code (C/C++, COBOL). Python and Ruby attach *direct-connect* — the debug engine already runs inside the target, so no local Python or Ruby is needed; JavaScript, Java, .NET, C/C++, COBOL and Dart/Flutter spawn a local adapter instead; of those, only Java (a JDK), .NET (netcoredbg) and Dart/Flutter (the Dart or Flutter SDK, whose own debug adapter does the work) need a toolchain you install, since the JavaScript, C/C++ and COBOL debug engines ship with the package. `list_supported_languages` reports per-mode availability with reasons
 - 🎯 **Breakpoints that survive edits** – Address by content (`statement: "total = sum(prices)"`), by symbol (`function: "main"`), or assert line content with `expectedContent`; anchors re-resolve across `restart_debugging` and weak matches warn loudly
 - 🪵 **Logpoints** – `set_breakpoint` with `logMessage: "x={x}"` streams interpolated values into `get_output` without pausing — prod-safe value watching on hot paths
 - 🧰 **Full breakpoint lifecycle** – `list_breakpoints` / `remove_breakpoint` / `clear_breakpoints` work live mid-run; `restart_debugging` relaunches with the same config and re-applies everything in one call
@@ -99,7 +101,7 @@ The server also serves condensed guidance in-band: MCP `instructions` on connect
 
 ## 🚀 Quick Start
 
-> **Requirements:** Node.js 22+ for the server. Each language you debug also needs its own toolchain installed (Python + debugpy, Ruby + the `debug` gem / `rdbg`, Node.js, Go + Delve, JDK 21+, .NET SDK, the Rust toolchain, a C/C++ compiler — g++/clang++, only needed for source-file launch — or GnuCOBOL 3.1.2+ for COBOL source launch). Not sure what's installed? Run `npx @debugmcp/mcp-debugger doctor` for a per-adapter toolchain report.
+> **Requirements:** Node.js 22+ for the server. Each language you debug also needs its own toolchain installed (Python + debugpy, Ruby + the `debug` gem / `rdbg`, Node.js, Go + Delve, JDK 21+, .NET SDK, the Rust toolchain, a C/C++ compiler — g++/clang++, only needed for source-file launch — GnuCOBOL 3.1.2+ for COBOL source launch, or the Dart SDK — Flutter bundles one — for Dart/Flutter). Not sure what's installed? Run `npx @debugmcp/mcp-debugger doctor` for a per-adapter toolchain report.
 >
 > **CodeLLDB platform note (npx/npm installs):** the CodeLLDB debug engine ships as per-platform optional dependencies (`@debugmcp/codelldb-win32-x64`, `-darwin-x64`, `-darwin-arm64`, `-linux-x64`, `-linux-arm64`) — npm installs exactly the one matching your platform, so Rust and C/C++ debugging work out of the box everywhere npm serves. If you install with `--omit=optional`, set `CODELLDB_PATH` to a [CodeLLDB release](https://github.com/vadimcn/codelldb/releases) binary instead, or use the Docker image.
 
@@ -186,7 +188,7 @@ pi older than 0.99 has no built-in MCP support; the extension then does nothing,
 docker run -i --rm -v $(pwd):/workspace debugmcp/mcp-debugger:latest
 ```
 
-> The Docker image debugs **Python, JavaScript, Java, Rust, C/C++, and COBOL** natively (toolchains — GnuCOBOL included — plus a shared vendored CodeLLDB), plus the mock adapter. **Ruby is attach-only** in the image (the adapter ships without a Ruby runtime — attach to any `rdbg --open` process, local or remote). Only **Go and .NET** are disabled in the container — run those via npm/npx next to your local toolchain. Host-built Rust/C++ binaries debugged in the container get an auto-derived source map back to `/workspace`. `list_supported_languages` reports per-mode availability (`modes.launch` / `modes.attach`) with reasons. See [Docker support](./docs/docker-support.md).
+> The Docker image debugs **Python, JavaScript, Java, Rust, C/C++, COBOL, and Dart** natively (toolchains — GnuCOBOL and the Dart SDK included — plus a shared vendored CodeLLDB), plus the mock adapter. Flutter is host-only: the image carries no Flutter SDK. **Ruby is attach-only** in the image (the adapter ships without a Ruby runtime — attach to any `rdbg --open` process, local or remote). Only **Go and .NET** are disabled in the container — run those via npm/npx next to your local toolchain. Host-built Rust/C++ binaries debugged in the container get an auto-derived source map back to `/workspace`. `list_supported_languages` reports per-mode availability (`modes.launch` / `modes.attach`) with reasons. See [Docker support](./docs/docker-support.md).
 
 ### Using npm
 
@@ -253,7 +255,7 @@ mcp-debugger exposes debugging operations as MCP tools that can be called with s
 // Tool: create_debug_session
 // Request:
 {
-  "language": "python",  // or "ruby", "javascript", "rust", "go", "java", "dotnet", "cpp", "cobol", or "mock" for testing
+  "language": "python",  // or "ruby", "javascript", "rust", "go", "java", "dotnet", "cpp", "cobol", "dart", or "mock" for testing
   "name": "My Debug Session"
 }
 // Response:
@@ -314,12 +316,12 @@ Version 0.10.0 introduces a clean adapter pattern that separates language-agnost
                     │ ProxyManager │◀─────│ Language Adapter│
                     └──────────────┘      └─────────────────┘
                                                   │
-              ┌───────────┬───────────┬───────────┼───────────┬───────────┬───────────┬───────────┬───────────┬───────────┐
-              │           │           │           │           │           │           │           │           │           │
-        ┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐
-        │Python    ││Ruby      ││JavaScript││Rust      ││Go        ││Java      ││.NET      ││C/C++     ││COBOL     ││Mock      │
-        │Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   │
-        └──────────┘└──────────┘└──────────┘└──────────┘└──────────┘└──────────┘└──────────┘└──────────┘└──────────┘└──────────┘
+              ┌───────────┬───────────┬───────────┼───────────┬───────────┬───────────┬───────────┬───────────┬───────────┬───────────┐
+              │           │           │           │           │           │           │           │           │           │           │
+        ┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐┌─────▼────┐
+        │Python    ││Ruby      ││JavaScript││Rust      ││Go        ││Java      ││.NET      ││C/C++     ││COBOL     ││Dart      ││Mock      │
+        │Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   ││Adapter   │
+        └──────────┘└──────────┘└──────────┘└──────────┘└──────────┘└──────────┘└──────────┘└──────────┘└──────────┘└──────────┘└──────────┘
 ```
 
 ### Adding Language Support
@@ -472,6 +474,7 @@ Then get the local variables:
 - 🔷 [.NET Debugging Guide](./docs/dotnet/README.md) – .NET/C# debugging with netcoredbg
 - ⚙️ [C/C++ Debugging Guide](./docs/cpp/README.md) – CodeLLDB launch, auto-compile, attach-by-PID, core dumps, remote stubs
 - 🧮 [COBOL Debugging Guide](./docs/cobol/README.md) – GnuCOBOL + CodeLLDB: auto-compile, COBOL-shaped variables, runtime-error stops, the mainframe migration recipe
+- 🐦 [Dart/Flutter Debugging Guide](./docs/dart/README.md) – the SDK's own debug adapters: runner selection, `dart test`/`flutter test`, attach by VM-service URI, Flutter devices
 - 🦀 [Rust Debugging Guide](./docs/rust-debugging.md) – CodeLLDB setup ([Windows specifics](docs/rust-debugging-windows.md))
 - 🐳 [Docker Support](./docs/docker-support.md) – Container languages, attach modes, host-binary source mapping
 - ☸️ [Kubernetes Debugging](./docs/kubernetes.md) – Turnkey attach recipes: registry-free manifests, per-language presets, ephemeral debug sidecar
@@ -547,12 +550,13 @@ See [tests/README.md](./tests/README.md) for detailed testing instructions.
 
 ## 📊 Project Status
 
-- ✅ **Production Ready**: nine language adapters, 29 tools, and polished multi-language distribution
+- ✅ **Production Ready**: ten language adapters, 29 tools, and polished multi-language distribution
 - ✅ **Clean architecture** with a dynamic adapter pattern
 - ✅ **Python · Ruby · JavaScript/TypeScript · Go · Java · .NET/C#**: Full step-through debugging
 - 🦀 **Rust**: Full support on Linux/macOS/Windows (Windows requires the GNU toolchain; MSVC is not supported by CodeLLDB)
 - ⚙️ **C/C++**: Full step-through debugging via CodeLLDB (launch + attach-by-PID; on Windows prefer MinGW/DWARF — MSVC PDB fidelity is partial)
 - 🧮 **COBOL**: Step-through debugging via GnuCOBOL + CodeLLDB (launch + attach-by-PID; verified with GnuCOBOL 3.1.2/3.2 on Linux and Windows/MSYS2; PERFORM-aware stepping, paragraph breakpoints and `{WS-NAME}` logpoints)
+- 🐦 **Dart/Flutter**: Step-through debugging through the SDK's own debug adapters (`dart debug_adapter`, `flutter debug-adapter`; launch + attach by VM-service URI). Dart now; the Flutter runners are wired, measured on Windows desktop and the Android emulator in the spike, and ship in the next milestones
 - 🟢 **Runtime**: Node.js 22+
 - 📈 **Active Development**: Regular updates and improvements — see the [Roadmap](./ROADMAP.md) for the path to 1.0
 

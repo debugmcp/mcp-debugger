@@ -4,7 +4,7 @@ mcp-debugger is a Model Context Protocol (MCP) server that bridges MCP clients (
 
 ## Monorepo Structure
 
-The project uses pnpm workspaces (`packages: ['packages/*']`): the root project plus 18 packages under `packages/`:
+The project uses pnpm workspaces (`packages: ['packages/*']`): the root project plus 19 packages under `packages/`:
 
 ```
 packages/
@@ -18,6 +18,7 @@ packages/
   adapter-dotnet/     .NET/C# debugging via netcoredbg
   adapter-cpp/        C/C++ debugging via CodeLLDB
   adapter-cobol/      COBOL debugging via GnuCOBOL + CodeLLDB (a Node DAP shim in front of the engine adds the COBOL semantics)
+  adapter-dart/       Dart/Flutter debugging via the SDK's own debug adapters (dart debug_adapter / flutter debug-adapter) behind a TCP-to-stdio bridge; nothing vendored
   codelldb-common/    Shared CodeLLDB infrastructure (vendoring, resolution, spawn glue) for the Rust, C/C++ and COBOL adapters
   codelldb-darwin-arm64/  Prebuilt CodeLLDB binaries, one package per platform. Published with
   codelldb-darwin-x64/    `os`/`cpu` fields so an install pulls only the matching payload; the

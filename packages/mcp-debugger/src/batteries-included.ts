@@ -17,10 +17,11 @@ import { JavaAdapterFactory } from '@debugmcp/adapter-java';
 import { DotnetAdapterFactory } from '@debugmcp/adapter-dotnet';
 import { CppAdapterFactory } from '@debugmcp/adapter-cpp';
 import { CobolAdapterFactory } from '@debugmcp/adapter-cobol';
+import { DartAdapterFactory } from '@debugmcp/adapter-dart';
 import type { IAdapterFactory } from '@debugmcp/shared';
 
 interface BundledAdapterEntry {
-  language: 'javascript' | 'python' | 'mock' | 'ruby' | 'go' | 'rust' | 'java' | 'dotnet' | 'cpp' | 'cobol';
+  language: 'javascript' | 'python' | 'mock' | 'ruby' | 'go' | 'rust' | 'java' | 'dotnet' | 'cpp' | 'cobol' | 'dart';
   factoryCtor: new () => IAdapterFactory;
 }
 
@@ -37,6 +38,7 @@ const adapters: BundledAdapterEntry[] = [
   { language: 'dotnet', factoryCtor: DotnetAdapterFactory },
   { language: 'cpp', factoryCtor: CppAdapterFactory },
   { language: 'cobol', factoryCtor: CobolAdapterFactory },
+  { language: 'dart', factoryCtor: DartAdapterFactory },
 ];
 
 const globalAdapters = (globalThis as unknown as Record<string, BundledAdapterEntry[] | undefined>)[GLOBAL_KEY];

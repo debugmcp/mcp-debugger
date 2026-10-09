@@ -101,7 +101,7 @@
             },
             "function": {
               "type": "string",
-              "description": "Address by symbol name instead of file location: break on entry to this function/method (DAP function breakpoint). No file or line needed — names survive edits better than both. Composes with condition only. Supported by Python, Go, Rust, C/C++, .NET, Java, JavaScript and COBOL (paragraph, section or PROGRAM-ID names, e.g. \"1000-INIT\" or \"1000-INIT OF PAYROLL\") adapters; not by Ruby (rdbg ignores the request). JavaScript names are dotted runtime paths (e.g. \"handler\" or \"obj.method\") bound to the current function value: top-level function declarations of the main module bind at launch; functions in modules loaded later bind at the next pause"
+              "description": "Address by symbol name instead of file location: break on entry to this function/method (DAP function breakpoint). No file or line needed — names survive edits better than both. Composes with condition only. Supported by Python, Go, Rust, C/C++, .NET, Java, JavaScript and COBOL (paragraph, section or PROGRAM-ID names, e.g. \"1000-INIT\" or \"1000-INIT OF PAYROLL\") adapters; not by Ruby (rdbg ignores the request) or Dart (the SDK adapters have no function breakpoints). JavaScript names are dotted runtime paths (e.g. \"handler\" or \"obj.method\") bound to the current function value: top-level function declarations of the main module bind at launch; functions in modules loaded later bind at the next pause"
             },
             "condition": {
               "type": "string",
@@ -109,7 +109,7 @@
             },
             "logMessage": {
               "type": "string",
-              "description": "Create a logpoint: instead of pausing, log this message when the line is hit. Expressions in {curly braces} are interpolated (e.g. \"order={orderId} total={total}\"). Messages arrive in get_output while the program runs at full speed. Supported by the Python, JavaScript, Go, Rust, C/C++, COBOL ({WS-NAME} data references) and mock adapters; not by Java, .NET, or Ruby"
+              "description": "Create a logpoint: instead of pausing, log this message when the line is hit. Expressions in {curly braces} are interpolated (e.g. \"order={orderId} total={total}\"). Messages arrive in get_output while the program runs at full speed. Supported by the Python, JavaScript, Go, Rust, C/C++, COBOL ({WS-NAME} data references), Dart and mock adapters; not by Java, .NET, or Ruby"
             },
             "suspendPolicy": {
               "type": "string",
@@ -226,7 +226,7 @@
                 },
                 "noDebug": {
                   "type": "boolean",
-                  "description": "DAP's launch-without-debugging flag (default false). Where the adapter honours it (js-debug, debugpy, Delve and CodeLLDB) no breakpoint binds, no exception filter arms, no entry stop lands and no breakpoint, exception or entry stop ever arrives (a pause may still land where the runtime allows one) — the response warns when breakpoints, an explicit breakOnExceptions or stopOnEntry are set alongside it, and while the launch runs the session reports debuggerDisabled and every later surface says the debugger is off. rdbg, netcoredbg and the Java bridge ignore the flag, and the rust launch never forwards it: their debugger stays on and the response says so"
+                  "description": "DAP's launch-without-debugging flag (default false). Where the adapter honours it (js-debug, debugpy, Delve, CodeLLDB and the Dart SDK adapters) no breakpoint binds, no exception filter arms, no entry stop lands and no breakpoint, exception or entry stop ever arrives (a pause may still land where the runtime allows one) — the response warns when breakpoints, an explicit breakOnExceptions or stopOnEntry are set alongside it, and while the launch runs the session reports debuggerDisabled and every later surface says the debugger is off. rdbg, netcoredbg and the Java bridge ignore the flag, and the rust launch never forwards it: their debugger stays on and the response says so"
                 }
               },
               "additionalProperties": true

@@ -220,6 +220,7 @@ export { RustAdapterPolicy } from './interfaces/adapter-policy-rust.js';
 export { CppAdapterPolicy } from './interfaces/adapter-policy-cpp.js';
 export { getLldbAttachBehavior } from './interfaces/lldb-policy-shared.js';
 export { CobolAdapterPolicy, COBOL_SCOPE_NAMES, COBOL_RUNTIME_ERROR_FILTER } from './interfaces/adapter-policy-cobol.js';
+export { DartAdapterPolicy, DART_LOCAL_SCOPE_NAMES, DART_BRIDGE_BASENAME } from './interfaces/adapter-policy-dart.js';
 export { DapFrameDecoder, encodeDapMessage } from './dap/dap-framing.js';
 export type { DapFrameDecoderErrorContext, DapFrameDecoderOptions } from './dap/dap-framing.js';
 export { GoAdapterPolicy } from './interfaces/adapter-policy-go.js';

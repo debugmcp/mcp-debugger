@@ -19,7 +19,7 @@ import {
   ROOT,
   PYTHON_SCRIPT, JS_SCRIPT, RUST_SCRIPT, GO_SCRIPT, DOTNET_SCRIPT, JAVA_SCRIPT, JAVA_CLASS_DIR, RUBY_SCRIPT, CPP_SCRIPT,
   PYTHON_BP_LINE, JS_BP_LINE, RUST_BP_LINE, GO_BP_LINE, DOTNET_BP_LINE, JAVA_BP_LINE, RUBY_BP_LINE, CPP_BP_LINE,
-  hasRust, hasGo, hasRuby, hasDotnet, hasJava, hasCpp, hasCobol, COBOL_SCRIPT, COBOL_BP_LINE,
+  hasRust, hasGo, hasRuby, hasDotnet, hasJava, hasCpp, hasCobol, COBOL_SCRIPT, COBOL_BP_LINE, hasDart, DART_SCRIPT, DART_BP_LINE,
   ensureRustBuild, ensureGoBuild, ensureDotnetBuild, ensureJavaBuild, ensureCppBuild
 } from './language-matrix-utils.js';
 
@@ -74,6 +74,8 @@ const LANGUAGES: LangDef[] = [
     outputMarker: 'CPP_DEBUG_MARKER' },  // launchScript set in beforeAll after build; same output tier as rust (#223)
   { language: 'cobol', script: COBOL_SCRIPT, bpLine: COBOL_BP_LINE, available: hasCobol, skipReason: hasCobol ? undefined : 'GnuCOBOL (cobc) not installed',
     outputMarker: 'COBOL_DEBUG_MARKER' },  // source launch: the adapter compiles hello.cob (#759); output tier as cpp
+  { language: 'dart', script: DART_SCRIPT, bpLine: DART_BP_LINE, available: hasDart, skipReason: hasDart ? undefined : 'Dart SDK not installed',
+    outputMarker: 'hello mcp-debugger' },  // the SDK debug adapter behind the stdio bridge (#790)
 ];
 
 /* ---------- every advertised tool ---------- */

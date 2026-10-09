@@ -1,9 +1,9 @@
 /**
  * Cross-policy contract test.
  *
- * Ten `AdapterPolicy` implementations satisfy one interface, and until now each was tested
+ * Eleven `AdapterPolicy` implementations satisfy one interface, and until now each was tested
  * only on its own terms — the rules that must hold for *every* policy lived in doc comments
- * on `adapter-policy.ts` and in the head of whoever added a language last. An eleventh adapter
+ * on `adapter-policy.ts` and in the head of whoever added a language last. A twelfth adapter
  * can currently ship with, say, `functionBreakpointsVia: 'cdp'` and no
  * `supportsFunctionBreakpoints`, and nothing complains until a user hits it.
  *
@@ -67,7 +67,7 @@ interface PinnedCapabilities {
  * request, #636) and the only one declining a default exception mode; cobol's function breakpoints
  * are paragraph and section names its shim resolves, and its logpoints are `{WS-NAME}` messages the
  * shim interpolates (#759); ruby/java/dotnet are the three that reject logpoints; js, java and cobol are the three
- * that bind function breakpoints late; js, python, go, cpp and cobol are the five whose debugger a
+ * that bind function breakpoints late; js, python, go, cpp, cobol and dart are the six whose debugger a
  * `noDebug` launch turns off (#710).
  */
 const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
@@ -165,6 +165,17 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     supportsLogPoints: true,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: true,
+    honoursNoDebug: true,
+    childSessionStrategy: 'none',
+    requiresCommandQueueing: false,
+    defaultExceptionBreakMode: 'uncaught'
+  },
+  [DebugLanguage.DART]: {
+    policyName: 'dart',
+    supportsFunctionBreakpoints: false,
+    supportsLogPoints: true,
+    functionBreakpointsVia: undefined,
+    functionBreakpointsBindLate: undefined,
     honoursNoDebug: true,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,

@@ -46,6 +46,8 @@ Note: the SBOMs attached to releases are generated from the source tree and enum
 
 The Docker image additionally apt-installs **GnuCOBOL** (`gnucobol3`: the `cobc` compiler is GPL-3.0, its runtime library `libcob` LGPL-3.0) as a distribution package, alongside `g++`, OpenJDK and `lldb`, so the COBOL adapter can compile in-container. It is a distro package resolved at image build time like those three — nothing GnuCOBOL-related is vendored into the npm artifacts; `@debugmcp/adapter-cobol` ships only its own TypeScript output and Node DAP shim.
 
+The Docker image also copies the **Dart SDK** (BSD-3-Clause) from the official `dart` image, so the Dart adapter — which runs the SDK's own `dart debug_adapter` — works in-container; Flutter is not in the image. As with GnuCOBOL this is resolved at image build time, and nothing Dart-related is vendored into the npm artifacts: `@debugmcp/adapter-dart` ships only its own TypeScript output and its TCP-to-stdio bridge, and uses whatever Dart or Flutter SDK is installed on the host.
+
 ### Static Analysis
 
 - **CodeQL**: GitHub's CodeQL runs SAST on every push to main and on pull requests, analyzing TypeScript/JavaScript for security vulnerabilities.

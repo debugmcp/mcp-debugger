@@ -428,6 +428,50 @@ jobs:
         path: artifacts/cobol/
         if-no-files-found: warn
 
+  dart-host:
+    name: Dart Host (stable SDK)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - name: Setup pnpm
+      uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+    - name: Setup Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: '22.x'
+        cache: 'pnpm'
+    - name: Setup Dart SDK
+      uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
+      with:
+        sdk: stable
+    - name: Record Dart version
+      run: |
+        mkdir -p artifacts/dart
+        dart --version 2>&1 | tee artifacts/dart/dart-version.txt
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile
+      # Vendors CodeLLDB/js-debug in postinstall like the other jobs; the token
+      # keeps a 'latest'/override build off the unauthenticated quota (issue #813).
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Build project
+      run: pnpm build
+    - name: Run Dart host smoke, attach and logpoints
+      # The SDK's own debug adapter behind the stdio bridge (issue #790): launch, dart test,
+      # exceptions, logpoints, noDebug, attach by service-info file and by host:port.
+      run: |
+        pnpm exec vitest run --project e2e tests/e2e/mcp-server-smoke-dart.test.ts tests/e2e/mcp-server-smoke-dart-attach.test.ts tests/e2e/mcp-server-logpoints.test.ts -t 'Dart|\(dart\)' --reporter=default --reporter=json --outputFile=artifacts/dart/host-tests.json
+        node scripts/check-dart-e2e-report.mjs artifacts/dart/host-tests.json
+    - name: Upload Dart validation evidence
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: dart-host-stable
+        path: artifacts/dart/
+        if-no-files-found: warn
+
   go-current:
     # build-and-test pins Go 1.21 + dlv 1.24.2, the oldest pair we support:
     # that Delve never sends a DAP `exited`, so the console-line exit-code
@@ -472,7 +516,7 @@ jobs:
 
   test-summary:
     name: Test Summary
-    needs: [build-and-test, windows-python-integration, lint, container-tests, cobol-host, go-current]
+    needs: [build-and-test, windows-python-integration, lint, container-tests, cobol-host, dart-host, go-current]
     runs-on: ubuntu-latest
     if: always()
 
@@ -484,6 +528,7 @@ jobs:
         echo "lint: ${{ needs.lint.result }}"
         echo "container-tests: ${{ needs.container-tests.result }}"
         echo "cobol-host: ${{ needs.cobol-host.result }}"
+        echo "dart-host: ${{ needs.dart-host.result }}"
         echo "go-current: ${{ needs.go-current.result }}"
         if [ "${{ needs.build-and-test.result }}" != "success" ] \
           || [ "${{ needs.windows-python-integration.result }}" != "success" ] \
