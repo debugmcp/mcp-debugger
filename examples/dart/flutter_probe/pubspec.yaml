@@ -1,0 +1,21 @@
+name: flutter_probe
+description: "A new Flutter project."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.13.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  integration_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true

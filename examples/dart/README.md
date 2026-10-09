@@ -9,6 +9,10 @@ adapter (`dart debug_adapter`), which ships with every Dart and Flutter install.
   through `flutter` on PATH / `FLUTTER_ROOT`. Standalone installs: <https://dart.dev/get-dart>
   (Windows: `winget install Google.DartSDK`; macOS: `brew install dart`; Linux: the `dart` apt package).
 - For `dart_probe/`, resolve its one dev dependency once: `cd dart_probe && dart pub get`.
+- For `flutter_probe/`, a Flutter SDK with a warm tool cache (`flutter --version` once), then
+  `cd flutter_probe && flutter create --platforms=<windows|macos|linux>,web . && flutter pub get`
+  (the e2e helper does this itself for the host's desktop); `flutter run` on the desktop also needs
+  that platform's toolchain (`flutter doctor`).
 
 Do not run `dart test` from a project under `%LOCALAPPDATA%\Temp` with the winget SDK: package:test
 spawns the frontend server by a relative path that does not resolve from there.
@@ -22,6 +26,7 @@ spawns the frontend server by a relative path that does not resolve from there.
 | `dart_probe/bin/pause.dart` | A long-running loop for attach and pause (prints its pid and `tick=` lines) | `BP-TICK` 10 |
 | `dart_probe/bin/throws.dart` | A caught then an uncaught `ArgumentError` for the exception filters (exit code 255) | throw site line 2 |
 | `dart_probe/test/math_test.dart` | Two package:test cases, one failing on purpose (`dart-test` runner, `-n 'adds numbers'`) | `BP-TEST` 8 |
+| `flutter_probe/` | A Flutter counter app with a widget test and an integration test (`flutter-test` / `flutter` runners; see its README) | `BP-FMAIN` 4, `BP-INCREMENT` 22, `BP-BUILD` 30, `BP-WIDGET` 8, `BP-INTEGRATION` 11 |
 
 The `// BP-NAME` comments mark the lines the tests break on; the e2e helpers locate them by name,
 so edits that move a line do not break the suite.

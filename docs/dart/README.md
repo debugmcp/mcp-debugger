@@ -119,11 +119,20 @@ empty stack until it next runs code.
 ## Flutter targets
 
 `flutter test` runs headless on every platform. `flutter run` needs a device: `deviceId: "windows"`
-(desktop, Visual Studio required), `"chrome"` / `"edge"` (web, debugging through dwds),
-`"emulator-5554"` (Android, boot it first with `flutter emulators --launch <id>`). First launches
-pay the platform build (a Windows runner build, Gradle for Android); later launches reuse it.
-`integration_test/` files run through `flutter test` on the chosen device, and a breakpoint in the
-app code hits when the test drives it.
+(desktop, Visual Studio required), `"chrome"` / `"edge"` (web, through dwds; listed by `flutter
+devices` but not yet exercised by the test suite), `"emulator-5554"` (Android, boot it first with
+`flutter emulators --launch <id>`). First launches pay the platform build (a Windows runner build,
+Gradle for Android); later launches reuse it. `integration_test/` files run through `flutter test`
+on the chosen device, and a breakpoint in the app code hits when the test drives it.
+
+Measured through the server on Windows (Flutter 3.47.7, `examples/dart/flutter_probe`,
+`tests/e2e/mcp-server-smoke-flutter.test.ts`): a widget-test breakpoint in ~6 s warm, a `build()`
+breakpoint under `flutter run -d windows` in ~20 s warm, an `integration_test` breakpoint on the
+desktop in ~21 s warm; the first launch of a fresh project takes ~30 s for either. The launch
+answers `pending: true` after its one-second hold, so follow it with `wait_for_stop` and a
+timeout that allows the build. A `flutter test` or `flutter run` session ends `stopped` without
+an exit code (the adapter sends `terminated` only); the `✓ name` lines in `get_output` say how
+the tests went.
 
 ## Troubleshooting
 
