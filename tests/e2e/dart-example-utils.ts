@@ -201,6 +201,80 @@ export function flutterDesktopDeviceId(): string | null {
   return flutterDeviceIds().includes(want) ? want : null;
 }
 
+// ---- Android ------------------------------------------------------------------------------------
+
+export const FLUTTER_PROBE_PACKAGE = 'com.example.flutter_probe';
+
+/** `adb` from ANDROID_SDK_ROOT / ANDROID_HOME / PATH; null when none. */
+export function adbPath(): string | null {
+  const exe = process.platform === 'win32' ? 'adb.exe' : 'adb';
+  for (const key of ['ANDROID_SDK_ROOT', 'ANDROID_HOME']) {
+    const root = process.env[key];
+    if (root && existsSync(path.join(root, 'platform-tools', exe))) return path.join(root, 'platform-tools', exe);
+  }
+  const onPath = which.sync('adb', { nothrow: true });
+  if (onPath) return onPath;
+  if (process.platform === 'win32' && process.env.LOCALAPPDATA) {
+    const candidate = path.join(process.env.LOCALAPPDATA, 'Android', 'Sdk', 'platform-tools', exe);
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+function adb(args: string[], timeoutMs = 120_000): { status: number | null; stdout: string } {
+  const exe = adbPath();
+  if (!exe) return { status: null, stdout: '' };
+  const r = spawnSync(exe, args, { encoding: 'utf8', windowsHide: true, timeout: timeoutMs });
+  return { status: r.status, stdout: r.stdout ?? '' };
+}
+
+let cachedEmulator: string | null | undefined;
+
+/**
+ * An Android emulator that is booted (`adb devices` says `device`, not `offline`) and that
+ * `flutter devices` lists; null otherwise, and with `MCP_SKIP_FLUTTER_ANDROID=1`. Booting one is
+ * the opt-in: `flutter emulators --launch <id>` (headless flags in docs/dart/spike-notes.md).
+ */
+export function flutterEmulatorDeviceId(): string | null {
+  if (cachedEmulator !== undefined) return cachedEmulator;
+  if (process.env.MCP_SKIP_FLUTTER_ANDROID === '1' || !adbPath()) return (cachedEmulator = null);
+  const online = new Set(
+    adb(['devices']).stdout.split(/\r?\n/).map((l) => l.trim().split(/\s+/)).filter((p) => p.length === 2 && p[1] === 'device').map((p) => p[0])
+  );
+  cachedEmulator = flutterDeviceIds().find((id) => id.startsWith('emulator-') && online.has(id)) ?? null;
+  return cachedEmulator;
+}
+
+/** Stop the probe app and drop stale port forwards: a live previous instance or a stale forward makes the next launch hang (measured). */
+export function resetAndroidApp(deviceId: string): void {
+  adb(['-s', deviceId, 'shell', 'am', 'force-stop', FLUTTER_PROBE_PACKAGE], 30_000);
+  adb(['forward', '--remove-all'], 30_000);
+}
+
+let androidPrepared = false;
+
+/**
+ * Generate the probe's `android/` folder, build the debug APK once and install it on the device,
+ * so the launches under test never pay the first install (the first `flutter run` after a fresh
+ * install ended without a stop once, measured; the next one was fine). Warm Gradle: ~45 s.
+ */
+export function prepareFlutterAndroid(deviceId: string): void {
+  if (androidPrepared) return;
+  prepareFlutterProbe();
+  const root = findFlutterRootSync();
+  if (!root) throw new Error('No Flutter SDK found for the examples');
+  if (!existsSync(path.join(FLUTTER_PROBE_DIR, 'android'))) {
+    const r = runFlutter(root, ['create', '--platforms=android', '--project-name', 'flutter_probe', '.'], FLUTTER_PROBE_DIR);
+    if (r.status !== 0) throw new Error(`flutter create --platforms=android failed: ${r.out}`);
+  }
+  const built = runFlutter(root, ['build', 'apk', '--debug'], FLUTTER_PROBE_DIR, 900_000);
+  if (built.status !== 0) throw new Error(`flutter build apk --debug failed: ${built.out}`);
+  const apk = path.join(FLUTTER_PROBE_DIR, 'build', 'app', 'outputs', 'flutter-apk', 'app-debug.apk');
+  const installed = adb(['-s', deviceId, 'install', '-r', '-t', apk], 180_000);
+  if (installed.status !== 0) throw new Error(`adb install failed: ${installed.stdout}`);
+  androidPrepared = true;
+}
+
 export const FLUTTER_EXAMPLES = {
   main: path.join(FLUTTER_PROBE_DIR, 'lib', 'main.dart'),
   widgetTest: path.join(FLUTTER_PROBE_DIR, 'test', 'widget_test.dart'),

@@ -134,6 +134,16 @@ timeout that allows the build. A `flutter test` or `flutter run` session ends `s
 an exit code (the adapter sends `terminated` only); the `✓ name` lines in `get_output` say how
 the tests went.
 
+Android emulator (`deviceId: "emulator-5554"`, the AVD booted first; measured the same way with
+`tests/e2e/mcp-server-smoke-flutter-android.test.ts`, Gradle warm): a `build()` breakpoint under
+`flutter run` in ~21 s, an `integration_test` breakpoint in ~28 s with the app's breakpoint hit by
+the test's tap right after; a cold Gradle build on a fresh machine takes minutes and belongs to
+the first build, not to the debugger. Stop the previous app instance (`adb shell am force-stop
+<package>`) and clear forwards (`adb forward --remove-all`) before launching again; the e2e helper
+does so, and installs the debug APK up front because the first run after a fresh install once
+ended without stopping. Attaching to an app another `flutter run` started on the emulator does
+not connect yet (#882; see `docs/KNOWN_ISSUES.md`).
+
 ## Troubleshooting
 
 - *"No Dart SDK found"* — put `dart` or `flutter` on PATH, or set `DART_SDK` / `FLUTTER_ROOT`;

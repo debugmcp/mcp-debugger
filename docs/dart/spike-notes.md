@@ -346,3 +346,19 @@ Measured through `dist/index.js` with `tests/e2e/mcp-server-smoke-flutter.test.t
   adapter's `✓ increments` / `✓ device increment` lines and the app's `counter=1` are in
   `get_output`. `close_debug_session` on a running `flutter run` terminates the app and the
   adapter exits by itself.
+
+## Android emulator through the server (M3, 2026-10-09)
+
+Measured through `dist/index.js` with `tests/e2e/mcp-server-smoke-flutter-android.test.ts`
+(AVD `mcp_api35`, API 35, booted headless; Gradle warm; the debug APK installed up front):
+
+| Case | Result |
+|---|---|
+| `flutter run -d emulator-5554`, breakpoint in `build()` | `pending: true` at 2.5 s; the breakpoint at **21.3 s**; `_ProbeAppState.build`, `counter` → `0`; `continue` keeps it running; `close_debug_session` terminates the app |
+| the same, first launch right after a fresh APK install | ended at 27.9 s with "The program ended without reporting an exit code" and no stop (once; the next launch was fine) — hence the up-front install and the force-stop before every launch |
+| `integration_test` on the emulator | test breakpoint at **28.3 s**, the app's `increment()` breakpoint at **28.7 s** on the test's tap, `counter` → `0`, `✓ device increment`, end `stopped` at 31.6 s |
+
+- `flutter build apk --debug` on the fresh example with warm Gradle caches: **45 s**.
+- Before each launch: `adb shell am force-stop com.example.flutter_probe`, `adb forward --remove-all`.
+- The proxy log records output events by shape only (issue #852): to read the device's output
+  after the fact, `get_output` before the session closes.

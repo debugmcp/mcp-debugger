@@ -108,6 +108,16 @@ Dart 3.13 and Flutter 3.47 — and none of them is a session error.
   adapter sends `terminated` but no `exited` event, so `exitCode` is unknown in
   `list_debug_sessions`; the test results (`✓ name`) are in `get_output`. The Dart CLI
   adapter does report `exited` (255 for an uncaught exception).
+- **Attaching to an app already running on an Android emulator does not connect.** The
+  VM-service URI another `flutter run --machine` reports is host-forwarded through that tool's
+  own adb forward; `attach_to_process` with it reaches `flutter.appStart` and then waits on
+  "Connecting to the VM Service is taking longer than expected" (measured, 60 s). The same
+  recipe works for desktop apps and Dart programs. Launch the app through mcp-debugger instead;
+  #882 tracks the `--device-vmservice-port` / `--host-vmservice-port` / `--no-dds` measurements.
+- **On an Android emulator, stop the previous app instance before the next launch.** A live
+  instance being replaced by the next install, or a stale adb port forward, made a launch hang
+  or end without a stop (measured). `adb shell am force-stop <package>` and
+  `adb forward --remove-all` first; the e2e helper does both, and installs the APK up front.
 - **`dart test` fails under `%LOCALAPPDATA%\Temp` with the winget SDK (Windows).**
   package:test spawns its frontend server through a cwd-relative SDK path that does not
   resolve from there (`The system cannot find the file specified … dartaotruntime.exe`).
