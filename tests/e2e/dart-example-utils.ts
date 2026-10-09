@@ -80,6 +80,114 @@ export function bpLine(file: string, marker: string): number {
   return idx + 1;
 }
 
+// ---- Flutter ------------------------------------------------------------------------------------
+
+export const FLUTTER_PROBE_DIR = path.join(DART_EXAMPLES_DIR, 'flutter_probe');
+
+const FLUTTER_LAUNCHER = process.platform === 'win32' ? 'flutter.bat' : 'flutter';
+
+function flutterRootCandidates(): string[] {
+  const out: string[] = [];
+  const env = process.env;
+  for (const key of ['FLUTTER_ROOT', 'FLUTTER_PATH']) if (env[key]) out.push(env[key]!);
+  const onPath = which.sync('flutter', { nothrow: true });
+  if (onPath) out.push(path.resolve(path.dirname(onPath), '..'));
+  if (process.platform === 'win32') {
+    out.push('C:\\src\\flutter', 'C:\\flutter', path.join(env.LOCALAPPDATA ?? '', 'flutter'));
+  } else {
+    out.push('/opt/flutter', path.join(env.HOME ?? '', 'flutter'), path.join(env.HOME ?? '', 'development', 'flutter'), '/usr/local/flutter');
+  }
+  return out;
+}
+
+let cachedFlutterRoot: string | null | undefined;
+
+/** A Flutter checkout with a warm tool cache (the snapshot the adapter spawns on Windows); null when none. */
+export function findFlutterRootSync(): string | null {
+  if (cachedFlutterRoot !== undefined) return cachedFlutterRoot;
+  cachedFlutterRoot = flutterRootCandidates().find((root) =>
+    root && existsSync(path.join(root, 'bin', FLUTTER_LAUNCHER)) && existsSync(path.join(root, 'bin', 'cache', 'flutter_tools.snapshot'))
+  ) ?? null;
+  return cachedFlutterRoot;
+}
+
+export function hasFlutterToolchain(): boolean {
+  return findFlutterRootSync() !== null;
+}
+
+/**
+ * The Flutter tool as a spawnable argv: on Windows the bundled dart.exe on the tool snapshot (the
+ * adapter's own bypass — Node cannot spawn flutter.bat without a shell), elsewhere bin/flutter.
+ */
+export function flutterToolArgv(root: string, args: string[]): { command: string; args: string[]; env: NodeJS.ProcessEnv } {
+  const env = { ...process.env, FLUTTER_ROOT: root };
+  if (process.platform !== 'win32') return { command: path.join(root, 'bin', 'flutter'), args, env };
+  return {
+    command: path.join(root, 'bin', 'cache', 'dart-sdk', 'bin', 'dart.exe'),
+    args: [`--packages=${path.join(root, 'packages', 'flutter_tools', '.dart_tool', 'package_config.json')}`, path.join(root, 'bin', 'cache', 'flutter_tools.snapshot'), ...args],
+    env,
+  };
+}
+
+function runFlutter(root: string, args: string[], cwd: string, timeoutMs = 300_000): { status: number | null; out: string } {
+  const argv = flutterToolArgv(root, args);
+  const r = spawnSync(argv.command, argv.args, { cwd, encoding: 'utf8', env: argv.env, windowsHide: true, timeout: timeoutMs });
+  return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+}
+
+let flutterProbePrepared = false;
+
+/**
+ * Generate the probe's platform folders (not committed) and resolve its packages, once per test
+ * process: `flutter create --platforms=windows,web .` then `flutter pub get`.
+ */
+export function prepareFlutterProbe(): void {
+  if (flutterProbePrepared) return;
+  const root = findFlutterRootSync();
+  if (!root) throw new Error('No Flutter SDK found for the examples');
+  const platforms = process.platform === 'win32' ? 'windows,web' : process.platform === 'darwin' ? 'macos,web' : 'linux,web';
+  const platformDir = path.join(FLUTTER_PROBE_DIR, platforms.split(',')[0]);
+  if (!existsSync(platformDir)) {
+    const r = runFlutter(root, ['create', `--platforms=${platforms}`, '--project-name', 'flutter_probe', '.'], FLUTTER_PROBE_DIR);
+    if (r.status !== 0) throw new Error(`flutter create failed: ${r.out}`);
+  }
+  if (!existsSync(path.join(FLUTTER_PROBE_DIR, '.dart_tool', 'package_config.json'))) {
+    const r = runFlutter(root, ['pub', 'get'], FLUTTER_PROBE_DIR);
+    if (r.status !== 0) throw new Error(`flutter pub get failed: ${r.out}`);
+  }
+  flutterProbePrepared = true;
+}
+
+let cachedDevices: string[] | undefined;
+
+/** Device ids `flutter devices --machine` reports on this box (cached); empty without Flutter. */
+export function flutterDeviceIds(): string[] {
+  if (cachedDevices) return cachedDevices;
+  const root = findFlutterRootSync();
+  if (!root) return (cachedDevices = []);
+  const r = runFlutter(root, ['devices', '--machine'], DART_EXAMPLES_DIR, 120_000);
+  try {
+    const start = r.out.indexOf('[');
+    const list = JSON.parse(r.out.slice(start)) as Array<{ id?: string }>;
+    cachedDevices = list.map((d) => d.id).filter((id): id is string => typeof id === 'string');
+  } catch {
+    cachedDevices = [];
+  }
+  return cachedDevices;
+}
+
+/** The desktop device id for this OS, when `flutter devices` lists it. */
+export function flutterDesktopDeviceId(): string | null {
+  const want = process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux';
+  return flutterDeviceIds().includes(want) ? want : null;
+}
+
+export const FLUTTER_EXAMPLES = {
+  main: path.join(FLUTTER_PROBE_DIR, 'lib', 'main.dart'),
+  widgetTest: path.join(FLUTTER_PROBE_DIR, 'test', 'widget_test.dart'),
+  integrationTest: path.join(FLUTTER_PROBE_DIR, 'integration_test', 'app_test.dart'),
+} as const;
+
 export const DART_EXAMPLES = {
   hello: path.join(DART_EXAMPLES_DIR, 'hello.dart'),
   app: path.join(DART_PROBE_DIR, 'bin', 'app.dart'),

@@ -321,3 +321,28 @@ C:\src\flutter\bin\cache\flutter_tools.snapshot debug-adapter [--test]` with env
   stays alive. The desktop attach with the same recipe works, so the difference is the adb port
   forward owned by the other tool; M3 measures `--host-vmservice-port`/`--device-vmservice-port`
   via `toolArgs`, attaching with the device-side URI, and `--no-dds`.
+
+## Flutter through the server (M2, 2026-10-09)
+
+Measured through `dist/index.js` with `tests/e2e/mcp-server-smoke-flutter.test.ts` against
+`examples/dart/flutter_probe` (Flutter 3.47.7, Windows 11, Visual Studio Build Tools 2022):
+
+| Case | First launch of the fresh example | Warm |
+|---|---|---|
+| widget test, breakpoint in the test body (`flutter debug-adapter --test`, `--name increments`) | ~30 s | 5.8 s whole case |
+| widget test, `stopOnEntry: true` (entry breakpoint on the test file's `main(`) | — | 5.6 s whole case |
+| `flutter run -d windows`, breakpoint in `build()` | ~30 s | 20 s whole case |
+| `integration_test` on `-d windows`, test breakpoint then the app's `increment()` breakpoint on the tap | — | 20.5 s whole case |
+
+- Both runners answer `start_debugging` with `pending: true` after the one-second hold; the first
+  stop arrives through `wait_for_stop`.
+- At the widget-test breakpoint: frame `main.<anonymous closure>`, Locals `tester = WidgetTester`,
+  `find.text("count: 0").evaluate().length` evaluates to `1`.
+- At the `build()` breakpoint: frame `_ProbeAppState.build`, Locals `context` and `this`,
+  `counter` → `0`, `this.history.length` → `0`.
+- At the integration test's app breakpoint: frame `_ProbeAppState.increment.<anonymous closure>`,
+  `counter` → `0` (paused before the increment).
+- A `flutter test` session ends `stopped` with no `exitCode` (`terminated`, no `exited`); the
+  adapter's `✓ increments` / `✓ device increment` lines and the app's `counter=1` are in
+  `get_output`. `close_debug_session` on a running `flutter run` terminates the app and the
+  adapter exits by itself.
