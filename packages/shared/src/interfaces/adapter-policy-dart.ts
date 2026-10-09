@@ -36,9 +36,15 @@ function isAsyncGap(frame: StackFrame): boolean {
 
 /** The `main(` declaration; the VM binds a breakpoint on that line to main's first statement. */
 const MAIN_DECLARATION = /\bmain\s*\(/;
+/**
+ * A string literal of either quote kind. The alternatives inside are disjoint (a backslash is
+ * consumed only by the escape branch), so the match is linear in the line — CodeQL's
+ * polynomial-ReDoS check rejects the backreference form `(["'])(?:\\.|(?!\1).)*\1`.
+ */
+const STRING_LITERAL = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g;
 /** A line with its `//` comment and string literals blanked, so `main(` inside them does not count. */
 const codeOnly = (line: string): string =>
-  line.replace(/(["'])(?:\\.|(?!\1).)*\1/g, '""').replace(/\/\/.*$/, '');
+  line.replace(STRING_LITERAL, '""').replace(/\/\/.*$/, '');
 
 export const DartAdapterPolicy = {
   name: 'dart',

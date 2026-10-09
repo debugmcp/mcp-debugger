@@ -73,7 +73,10 @@ export function locateToolchain(io: LocatorIo): DartToolchain {
   /** Accept either the install root or the executable itself for an env var. */
   const rootFromEnv = (value: string | undefined, exeName: string): string | undefined => {
     if (!value) return undefined;
-    const trimmed = value.trim().replace(/[\\/]+$/, '');
+    // Trailing separators stripped by hand: `/[\\/]+$/` backtracks quadratically on a long run
+    // of separators (CodeQL polynomial-ReDoS).
+    let trimmed = value.trim();
+    while (trimmed.endsWith('/') || trimmed.endsWith('\\')) trimmed = trimmed.slice(0, -1);
     if (trimmed.toLowerCase().endsWith(exeName.toLowerCase())) return up(p, trimmed, 2);
     return trimmed;
   };

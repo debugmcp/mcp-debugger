@@ -37,6 +37,16 @@ describe('DartAdapterPolicy', () => {
     expect(DartAdapterPolicy.entryBreakpointLine('final remains = 1; // "main(" in a comment should not count\nvoid main() {}\n')).toBe(2);
   });
 
+  it('blanks string literals without backtracking: escaped quotes, an unterminated literal, both quote kinds', () => {
+    // `main(` inside a literal never counts, whatever the escaping.
+    expect(DartAdapterPolicy.entryBreakpointLine('final s = "main(\\" main(";\nvoid main() {}\n')).toBe(2);
+    expect(DartAdapterPolicy.entryBreakpointLine("final s = 'it\\'s main(';\nvoid main() {}\n")).toBe(2);
+    // An unterminated literal made of thousands of escaped quotes (CodeQL's polynomial-ReDoS
+    // shape for the former backreference regex) is handled, and the next line still wins.
+    const hostile = 'final s = "' + '\\"'.repeat(20_000) + ';\nvoid main() {}\n';
+    expect(DartAdapterPolicy.entryBreakpointLine(hostile)).toBe(2);
+  });
+
   it('maps break-on-exception modes to the SDK filter ids', () => {
     expect(resolveExceptionFilters(DartAdapterPolicy, 'uncaught')).toEqual(['Unhandled']);
     expect(resolveExceptionFilters(DartAdapterPolicy, 'all')).toEqual(['All']);

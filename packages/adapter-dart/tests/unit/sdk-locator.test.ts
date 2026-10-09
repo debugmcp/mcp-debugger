@@ -54,6 +54,16 @@ describe('locateToolchain (win32)', () => {
     expect(t.flutterRoot).toBe(root);
   });
 
+  it('strips trailing separators from an env var, however many (no quadratic regex)', () => {
+    const sdk = 'C:\\tools\\dart-sdk';
+    const t = locateToolchain(io({
+      env: { DART_SDK: sdk + '\\'.repeat(20_000) + '/'.repeat(20_000) },
+      files: [W(sdk, 'bin', 'dart.exe')],
+    }));
+    expect(t.dartSdkRoot).toBe(sdk);
+    expect(t.dartSource).toBe('env:DART_SDK');
+  });
+
   it('ignores an env var whose directory has no SDK and keeps looking', () => {
     const t = locateToolchain(io({
       env: { FLUTTER_ROOT: 'C:\\nope' },
