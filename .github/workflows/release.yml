@@ -396,7 +396,10 @@ jobs:
     # publisher only to a package that already exists (npm/cli#8544), and staged
     # publishing cannot create one either. A new package needs one first publish
     # by hand (with 2FA) or with a temporary token, then a trusted publisher,
-    # before it joins these steps (docs/release-checklist.md).
+    # before it joins these steps (docs/release-checklist.md). npm expires an
+    # unvalidated trusted publisher 48 hours after creation, and only a publish
+    # from this workflow validates it, so the configuration is a release-day
+    # step: create it within 48 hours before the tag, not weeks ahead.
     #
     # CodeLLDB platform packages (issue #383) go first so the CLI's
     # optionalDependencies always resolve. They are versioned by the CodeLLDB
