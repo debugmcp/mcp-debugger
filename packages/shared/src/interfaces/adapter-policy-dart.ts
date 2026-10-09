@@ -37,14 +37,36 @@ function isAsyncGap(frame: StackFrame): boolean {
 /** The `main(` declaration; the VM binds a breakpoint on that line to main's first statement. */
 const MAIN_DECLARATION = /\bmain\s*\(/;
 /**
- * A string literal of either quote kind. The alternatives inside are disjoint (a backslash is
- * consumed only by the escape branch), so the match is linear in the line — CodeQL's
- * polynomial-ReDoS check rejects the backreference form `(["'])(?:\\.|(?!\1).)*\1`.
+ * The line with its string literals blanked and its `//` comment cut, so `main(` inside either
+ * does not count. A hand-written scan, linear by construction: CodeQL's polynomial-ReDoS check
+ * rejects the regex forms (`(["'])(?:\\.|(?!\1).)*\1` and even the disjoint
+ * `"(?:[^"\\]|\\.)*"`) on an unterminated literal full of escaped quotes.
  */
-const STRING_LITERAL = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g;
-/** A line with its `//` comment and string literals blanked, so `main(` inside them does not count. */
-const codeOnly = (line: string): string =>
-  line.replace(STRING_LITERAL, '""').replace(/\/\/.*$/, '');
+const codeOnly = (line: string): string => {
+  let out = '';
+  let quote: string | undefined;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (quote !== undefined) {
+      if (ch === '\\') {
+        i++; // the escaped character is part of the literal
+      } else if (ch === quote) {
+        quote = undefined;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      out += '""';
+      continue;
+    }
+    if (ch === '/' && line[i + 1] === '/') {
+      break;
+    }
+    out += ch;
+  }
+  return out;
+};
 
 export const DartAdapterPolicy = {
   name: 'dart',
