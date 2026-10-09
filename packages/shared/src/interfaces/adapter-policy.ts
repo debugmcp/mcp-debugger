@@ -341,6 +341,30 @@ export interface AdapterPolicy {
   honoursNoDebug?: boolean;
 
   /**
+   * True when the adapter's own `stopped { reason: 'entry' }` may be bookkeeping, not a stop the
+   * session can use: the Dart SDK adapters pause every new isolate at start to configure it,
+   * announce that pause as an entry stop and resume it themselves 1 ms later with a `continued`
+   * (issue #790, measured). The proxy worker holds such an entry stop briefly and drops it,
+   * with the `continued` that follows, when the adapter resumes it within the hold; one that
+   * outlives the hold — a VM started with `--pause_isolates_on_start`, attached to or launched
+   * — is forwarded as the durable stop it is. So the session never flickers PAUSED, and a
+   * launch's first reported stop is a real one. The entry stop a caller asks for with
+   * `stopOnEntry` comes from `entryBreakpointLine`.
+   */
+  suppressesAdapterEntryStop?: boolean;
+
+  /**
+   * Where a `stopOnEntry` launch should stop when the adapter has no native entry stop worth
+   * reporting (see `suppressesAdapterEntryStop`): given the program's source text, the 1-based
+   * line to arm a temporary breakpoint on, or `undefined` when none is found. The proxy worker
+   * adds that breakpoint to the launch's `setBreakpoints` for the program file, keeps it out of
+   * the session's breakpoint list, and relabels its first hit as `reason: 'entry'`. The Dart
+   * adapters bind a breakpoint on the `main(` declaration line to the first statement of main
+   * (issue #790, measured).
+   */
+  entryBreakpointLine?(sourceText: string): number | undefined;
+
+  /**
    * Strategy for how to create/attach to the child session when reverse startDebugging occurs
    */
   childSessionStrategy: ChildSessionStrategy;

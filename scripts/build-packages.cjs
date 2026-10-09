@@ -26,6 +26,7 @@ const packages = [
   ...(!disabledLanguages.has('dotnet') ? ['@debugmcp/adapter-dotnet'] : []),
   ...(!disabledLanguages.has('cpp') ? ['@debugmcp/adapter-cpp'] : []),
   ...(!disabledLanguages.has('cobol') ? ['@debugmcp/adapter-cobol'] : []),
+  ...(!disabledLanguages.has('dart') ? ['@debugmcp/adapter-dart'] : []),
 ];
 
 for (const pkg of packages) {

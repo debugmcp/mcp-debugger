@@ -51,6 +51,7 @@
   "devDependencies": {
     "@debugmcp/adapter-cobol": "workspace:*",
     "@debugmcp/adapter-cpp": "workspace:*",
+    "@debugmcp/adapter-dart": "workspace:*",
     "@debugmcp/adapter-dotnet": "workspace:*",
     "@debugmcp/adapter-go": "workspace:*",
     "@debugmcp/adapter-java": "workspace:*",

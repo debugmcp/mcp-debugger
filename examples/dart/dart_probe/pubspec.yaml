@@ -1,0 +1,7 @@
+name: dart_probe
+description: mcp-debugger Dart example programs (issue #790)
+publish_to: none
+environment:
+  sdk: ">=3.13.0 <4.0.0"
+dev_dependencies:
+  test: any

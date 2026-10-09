@@ -244,6 +244,19 @@ async function bundleCLI() {
     console.warn('Warning: packages/adapter-cobol/dist/shim/cobol-shim.js not found; COBOL debugging will fail in NPX distribution.');
   }
 
+  // Copy the Dart DAP stdio bridge (issue #790). Like the COBOL shim it runs as
+  // a separate Node process spawned by the adapter, so the self-contained
+  // esbuild output must exist on disk next to the bundle.
+  const dartBridgeSrc = path.join(repoRoot, 'packages/adapter-dart/dist/bridge/dap-stdio-bridge.js');
+  if (fs.existsSync(dartBridgeSrc)) {
+    const dartBridgeDest = path.join(distDir, 'packages', 'adapter-dart', 'dist', 'bridge');
+    fs.mkdirSync(dartBridgeDest, { recursive: true });
+    fs.copyFileSync(dartBridgeSrc, path.join(dartBridgeDest, 'dap-stdio-bridge.js'));
+    console.log('Copied Dart DAP stdio bridge.');
+  } else {
+    console.warn('Warning: packages/adapter-dart/dist/bridge/dap-stdio-bridge.js not found; Dart debugging will fail in NPX distribution.');
+  }
+
   // Copy the Java JDI bridge (source + compiled class). The bundled CLI has no
   // node_modules, so without this the jdi-resolver only finds the bridge via a
   // process.cwd() fallback that happens to work inside a repo checkout (#354).

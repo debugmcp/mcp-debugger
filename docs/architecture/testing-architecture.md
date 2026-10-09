@@ -188,7 +188,7 @@ Two SSE test files test the SSE HTTP transport: Python over SSE (`mcp-server-smo
 
 **File:** `tests/e2e/comprehensive-mcp-tools.test.ts`
 
-Tests all 29 MCP tools across 10 languages (Python, JavaScript, Mock, Rust, Ruby, Go, Java, Dotnet, C++, COBOL) where the toolchain is available. Produces a PASS/FAIL/SKIP matrix report with per-tool per-language status and timing. Toolchain detection uses `hasCommand()` checks (e.g., `rustc --version`, `go version`).
+Tests all 29 MCP tools across 11 languages (Python, JavaScript, Mock, Rust, Ruby, Go, Java, Dotnet, C++, COBOL, Dart) where the toolchain is available. Produces a PASS/FAIL/SKIP matrix report with per-tool per-language status and timing. Toolchain detection uses `hasCommand()` checks (e.g., `rustc --version`, `go version`).
 
 The tool list is **derived**, not hand-maintained: the file imports `TOOL_NAMES` from `src/server/tool-schemas.ts` (`const ALL_TOOLS = [...TOOL_NAMES]`). The literal it replaced had drifted to 25 of the 28 advertised tools, so three were missing from the report with nothing to say so (issue #579). Tools the suite does not exercise now show as PENDING — the honest reading, and the reason to keep the list derived.
 

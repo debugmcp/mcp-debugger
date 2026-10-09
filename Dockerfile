@@ -37,6 +37,7 @@ COPY packages/adapter-ruby/package.json ./packages/adapter-ruby/package.json
 COPY packages/adapter-dotnet/package.json ./packages/adapter-dotnet/package.json
 COPY packages/adapter-cpp/package.json ./packages/adapter-cpp/package.json
 COPY packages/adapter-cobol/package.json ./packages/adapter-cobol/package.json
+COPY packages/adapter-dart/package.json ./packages/adapter-dart/package.json
 
 # 2) Install dependencies with workspace support using the lockfile
 #    If lockfile is stale, this will fail (good signal to refresh it locally).
@@ -67,6 +68,7 @@ COPY packages/adapter-ruby/tsconfig*.json ./packages/adapter-ruby/
 COPY packages/adapter-dotnet/tsconfig*.json ./packages/adapter-dotnet/
 COPY packages/adapter-cpp/tsconfig*.json ./packages/adapter-cpp/
 COPY packages/adapter-cobol/tsconfig*.json ./packages/adapter-cobol/
+COPY packages/adapter-dart/tsconfig*.json ./packages/adapter-dart/
 
 COPY src ./src
 COPY scripts ./scripts/
@@ -161,7 +163,10 @@ RUN rm -rf /app/node_modules/@debugmcp && \
     cp /app/packages/adapter-rust/package.json /app/node_modules/@debugmcp/adapter-rust/ && \
     mkdir -p /app/node_modules/@debugmcp/adapter-cobol && \
     cp -r /app/packages/adapter-cobol/dist /app/node_modules/@debugmcp/adapter-cobol/ && \
-    cp /app/packages/adapter-cobol/package.json /app/node_modules/@debugmcp/adapter-cobol/
+    cp /app/packages/adapter-cobol/package.json /app/node_modules/@debugmcp/adapter-cobol/ && \
+    mkdir -p /app/node_modules/@debugmcp/adapter-dart && \
+    cp -r /app/packages/adapter-dart/dist /app/node_modules/@debugmcp/adapter-dart/ && \
+    cp /app/packages/adapter-dart/package.json /app/node_modules/@debugmcp/adapter-dart/
 
 # Rust LLDB formatter scripts (issue #441): pure-Python files shipped with
 # every Rust toolchain, which CodeLLDB never bundles. The runtime image has
@@ -175,6 +180,11 @@ FROM rust:1.98.1-slim@sha256:4cd829461bd5c4d511c32e269da9cb8929223b666519d8004e3
 RUN cp -r "$(rustc --print sysroot)/lib/rustlib/etc" /rust-etc
 
 # Stage 2: Create runtime image with full LLDB dependencies
+# Dart SDK for the dart adapter (issue #790): the official image's self-contained SDK tree
+# (BSD-3-Clause), copied into the runtime stage below. Flutter stays host-only — it needs a
+# display or device and a multi-gigabyte checkout. Pinned to the dart:3.13 manifest list.
+FROM dart:3.13@sha256:8604cbd137b6d67c24f49b916f2aa9b67d71b539576e0178bf161d831c9e344f AS dart-sdk
+
 FROM ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78
 # Disabled languages: go has no attach implementation and no Delve here,
 # dotnet has no netcoredbg here. Ruby is intentionally present but attach-only
@@ -183,6 +193,11 @@ FROM ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc8
 # (#328) — sound for Linux-compiled binaries; host-compiled (Windows/macOS)
 # binaries mounted into the container are not debuggable by container LLDB.
 ENV DEBUG_MCP_DISABLE_LANGUAGES=go,dotnet
+
+# Dart SDK (issue #790): `dart debug_adapter` ships inside it; the adapter finds it on PATH.
+COPY --from=dart-sdk /usr/lib/dart /usr/lib/dart
+ENV DART_SDK=/usr/lib/dart
+ENV PATH="/usr/lib/dart/bin:${PATH}"
 
 # Set application directory
 WORKDIR /app

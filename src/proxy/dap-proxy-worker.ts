@@ -208,6 +208,54 @@ export class DapProxyWorker {
   private adapterCapabilities: DebugProtocol.Capabilities | null = null;
   /** Body of the most recent stopped event; null while running. */
   private lastStop: DebugProtocol.StoppedEvent['body'] | null = null;
+  /**
+   * Adapter id of the entry breakpoint a `stopOnEntry` launch armed on the policy's
+   * `entryBreakpointLine` (issue #790). Its first hit is relabelled `reason: 'entry'`, after
+   * which the id is forgotten; the breakpoint itself stays armed but never fires again (main
+   * runs once) and a later per-file re-send from the session's own list replaces it.
+   */
+  private entryBreakpointAdapterId: number | undefined;
+  /** How long a suppressible entry stop waits for the adapter's own resume (measured: 1 ms). */
+  private static readonly ENTRY_STOP_HOLD_MS = 200;
+  /**
+   * Which file each adapter-assigned breakpoint id belongs to, from every `setBreakpoints` this
+   * worker relayed (issue #790). Adapters that verify after the fact with `breakpoint` events
+   * carrying no `source` (the Dart SDK adapters), and that hand out new ids on every re-send,
+   * would otherwise send the session store an event it can match neither by id nor by file.
+   */
+  private readonly breakpointFiles = new Map<number, string>();
+  /**
+   * Relayed `setBreakpoints` requests still waiting for their answer, and the source-less
+   * `breakpoint` events for ids none of the answers so far has named (issue #790). The Dart
+   * adapters resolve a re-sent set in the same chunk as their response, so those events reach
+   * this handler before the response promise settles — before the ids are known. They are held
+   * until an answer names them (then forwarded with their source, ahead of that response) or
+   * until no request is in flight (then forwarded as they came).
+   */
+  private setBreakpointsInFlight = 0;
+  private readonly heldBreakpointEvents: DebugProtocol.BreakpointEvent['body'][] = [];
+  /**
+   * The entry breakpoint a stopOnEntry launch armed for a policy with `entryBreakpointLine`
+   * (issue #790): its resolved file and line. DAP sets are replace-all per file and the session's
+   * own list never holds it, so it is re-added to every relayed `setBreakpoints` for that file
+   * until it hits (the launcher's pre-hold re-send, a `set_breakpoint` while the launch is
+   * pending); its current adapter id is `entryBreakpointAdapterId` (the Dart adapters hand out
+   * new ids on every re-send).
+   */
+  private entryBreakpoint: { file: string; line: number } | undefined;
+  /**
+   * An entry stop held back under `suppressesAdapterEntryStop`: the Dart adapters resume their
+   * own entry stop a millisecond later (measured), so it is dropped — with that `continued` —
+   * only when the resume follows within the hold; a durable one (a VM started with
+   * --pause_isolates_on_start, attach or launch) is forwarded when the hold elapses.
+   */
+  private heldEntryStop: { body: DebugProtocol.StoppedEvent['body']; timer: NodeJS.Timeout } | undefined;
+  /**
+   * Threads whose held entry stop a later stop superseded: the adapter's own resume for them is
+   * still on its way and is swallowed once (within the hold), so mirror clients never see a
+   * `continued` for a stop nobody saw. A spawned isolate's entry while main is at a breakpoint.
+   */
+  private readonly pendingResumeDrops = new Map<number, NodeJS.Timeout>();
   // stopped/continued reach mirror clients via the worker's own event
   // handlers (post threadId-backfill); this generic-channel forwarder covers
   // everything else. initialized is per-client handshake, never replicated.
@@ -1020,40 +1068,51 @@ export class DapProxyWorker {
       },
       onStopped: async (body) => {
         this.logger!.info(`[Worker] DAP event: stopped reason=${body.reason} threadId=${body.threadId} allThreadsStopped=${body.allThreadsStopped}`);
-        // Some adapters (e.g. Delve for Go, JDI bridge for Java) may omit threadId
-        // from stopped events or need fresh thread data. When threadId is missing,
-        // issue a 'threads' request to discover a valid thread and populate the body.
-        if (this.dapClient && typeof body.threadId !== 'number') {
-          try {
-            const resp = await this.dapClient.sendRequest<DebugProtocol.ThreadsResponse>('threads', {});
-            this.logger!.info('[Worker] Auto-discovered threads after stopped event (no threadId)', resp);
-            const threads = resp.body?.threads;
-            if (Array.isArray(threads) && threads.length > 0 && typeof threads[0]?.id === 'number') {
-              body.threadId = threads[0].id;
-              this.logger!.info(`[Worker] Set missing threadId to ${body.threadId} from threads response`);
-            }
-          } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : String(err);
-            this.logger!.warn('[Worker] Failed to auto-discover threads:', msg);
-          }
-        } else if (this.dapClient && this.adapterPolicy?.name === 'java') {
-          // JDI bridge (Java adapter) benefits from a 'threads' request after stopped
-          // to ensure thread data is fresh before stackTrace requests.
-          try {
-            const resp = await this.dapClient.sendRequest<DebugProtocol.ThreadsResponse>('threads', {});
-            this.logger!.info('[Worker] Pre-fetched threads after stopped event', resp);
-          } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : String(err);
-            this.logger!.warn('[Worker] Failed to pre-fetch threads:', msg);
-          }
+        // A stop that arrives while an entry stop is held supersedes it: the program moved on.
+        if (this.heldEntryStop) {
+          this.supersedeHeldEntryStop();
         }
-        // Mirror clients get the post-backfill body, and a late-joining IDE
-        // replays it as its landing stop (issue #217).
-        this.lastStop = body;
-        this.mirrorServer?.broadcastEvent('stopped', body);
-        this.sendDapEvent('stopped', body);
+        // Adapters whose own entry stop is bookkeeping (the Dart SDK adapters pause each new
+        // isolate to configure it and resume it themselves a millisecond later, issue #790):
+        // hold it, and let the resume that follows cancel it — the session never sees that
+        // flicker. A durable entry stop (a VM started with --pause_isolates_on_start) outlives
+        // the hold and is forwarded. The entry stop a `stopOnEntry` caller asked for comes
+        // from the armed entry breakpoint below. The hold is taken before any await: the
+        // resume arrives in the same chunk, and must find the hold in place.
+        if (body.reason === 'entry' && this.adapterPolicy.suppressesAdapterEntryStop) {
+          const held = body;
+          const holdMs = DapProxyWorker.ENTRY_STOP_HOLD_MS;
+          const timer = setTimeout(() => {
+            this.heldEntryStop = undefined;
+            this.logger!.info(`[Worker] Entry stop outlived the ${holdMs} ms hold: forwarding it as durable`);
+            void this.backfillThreadId(held).then(() => this.forwardStop(held));
+          }, holdMs);
+          timer.unref?.();
+          this.heldEntryStop = { body: held, timer };
+          this.logger!.info(`[Worker] Holding the adapter's entry stop for ${holdMs} ms (policy suppressesAdapterEntryStop)`);
+          return;
+        }
+        await this.backfillThreadId(body);
+        this.forwardStop(body);
       },
       onContinued: (body) => {
+        // The adapter resuming the entry stop it reported a millisecond ago: neither reaches
+        // the session (issue #790). A held stop that named no thread cannot be matched, so any
+        // resume within its hold is taken as the adapter's.
+        const held = this.heldEntryStop;
+        if (held && (body?.threadId === undefined || held.body.threadId === undefined || body.threadId === held.body.threadId || body.allThreadsContinued === true)) {
+          clearTimeout(held.timer);
+          this.heldEntryStop = undefined;
+          this.logger!.info('[Worker] Dropping the adapter\'s own entry stop and its resume (policy suppressesAdapterEntryStop)');
+          return;
+        }
+        // The resume of an entry stop a later stop superseded: swallowed once.
+        if (typeof body?.threadId === 'number' && this.pendingResumeDrops.has(body.threadId)) {
+          clearTimeout(this.pendingResumeDrops.get(body.threadId));
+          this.pendingResumeDrops.delete(body.threadId);
+          this.logger!.info(`[Worker] Dropping the adapter's own resume of the superseded entry stop on thread ${body.threadId}`);
+          return;
+        }
         this.logger!.info('[Worker] DAP event: continued', body);
         this.lastStop = null;
         this.mirrorServer?.broadcastEvent('continued', body ?? {});
@@ -1065,11 +1124,20 @@ export class DapProxyWorker {
       },
       onBreakpoint: (body) => {
         // Deferred verification/relocation pushed by the adapter after the
-        // setBreakpoints response (issue #236).
-        this.logger!.debug('[Worker] DAP event: breakpoint', body);
-        this.sendDapEvent('breakpoint', body);
+        // setBreakpoints response (issue #236). An event without a source gets
+        // the file its id was answered for (issue #790) — or waits for the
+        // answer that is about to name it.
+        const enriched = this.withBreakpointSource(body);
+        if (enriched === body && this.holdsBreakpointEvent(body)) {
+          this.logger!.debug('[Worker] DAP event: breakpoint held until the in-flight setBreakpoints names its id', body);
+          this.heldBreakpointEvents.push(body);
+          return;
+        }
+        this.logger!.debug('[Worker] DAP event: breakpoint', enriched);
+        this.sendDapEvent('breakpoint', enriched);
       },
       onExited: (body) => {
+        this.dropHeldEntryStop('the program exited');
         // No stop survives the debuggee's end: the pre-detach resume (issue
         // #763) must not chase a target that is gone.
         this.lastStop = null;
@@ -1085,6 +1153,7 @@ export class DapProxyWorker {
         });
       },
       onTerminated: (body) => {
+        this.dropHeldEntryStop('the session terminated');
         // No stop survives the debuggee's end: the pre-detach resume (issue
         // #763) must not chase a target that is gone.
         this.lastStop = null;
@@ -1162,6 +1231,200 @@ export class DapProxyWorker {
     }
   }
 
+  /** Record which file the adapter's breakpoint ids in a `setBreakpoints` answer belong to. */
+  private rememberBreakpointFiles(sourcePath: string, answered: DebugProtocol.Breakpoint[]): void {
+    for (const bp of answered) {
+      if (typeof bp.id === 'number') {
+        this.breakpointFiles.set(bp.id, sourcePath);
+      }
+    }
+  }
+
+  /**
+   * A `breakpoint` event body with its `source` filled in from the relayed `setBreakpoints`
+   * bookkeeping when the adapter omitted it (issue #790); the body as-is otherwise.
+   */
+  private withBreakpointSource(body: DebugProtocol.BreakpointEvent['body']): DebugProtocol.BreakpointEvent['body'] {
+    const bp = body?.breakpoint;
+    if (!bp || bp.source || typeof bp.id !== 'number') {
+      return body;
+    }
+    const file = this.breakpointFiles.get(bp.id);
+    if (!file) {
+      return body;
+    }
+    return { ...body, breakpoint: { ...bp, source: { path: file } } };
+  }
+
+  /**
+   * Some adapters (Delve, the JDI bridge) omit `threadId` from stopped events or want fresh
+   * thread data: a `threads` request discovers a thread for the body, or pre-fetches for Java.
+   */
+  private async backfillThreadId(body: DebugProtocol.StoppedEvent['body']): Promise<void> {
+    if (!this.dapClient) {
+      return;
+    }
+    if (typeof body.threadId !== 'number') {
+      try {
+        const resp = await this.dapClient.sendRequest<DebugProtocol.ThreadsResponse>('threads', {});
+        this.logger!.info('[Worker] Auto-discovered threads after stopped event (no threadId)', resp);
+        const threads = resp.body?.threads;
+        if (Array.isArray(threads) && threads.length > 0 && typeof threads[0]?.id === 'number') {
+          body.threadId = threads[0].id;
+          this.logger!.info(`[Worker] Set missing threadId to ${body.threadId} from threads response`);
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger!.warn('[Worker] Failed to auto-discover threads:', msg);
+      }
+    } else if (this.adapterPolicy?.name === 'java') {
+      // JDI bridge (Java adapter) benefits from a 'threads' request after stopped
+      // to ensure thread data is fresh before stackTrace requests.
+      try {
+        const resp = await this.dapClient.sendRequest<DebugProtocol.ThreadsResponse>('threads', {});
+        this.logger!.info('[Worker] Pre-fetched threads after stopped event', resp);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger!.warn('[Worker] Failed to pre-fetch threads:', msg);
+      }
+    }
+  }
+
+  /** A later stop superseded the held entry stop; its thread's own resume is still due. */
+  private supersedeHeldEntryStop(): void {
+    const held = this.heldEntryStop;
+    if (!held) {
+      return;
+    }
+    clearTimeout(held.timer);
+    this.heldEntryStop = undefined;
+    const threadId = held.body.threadId;
+    if (typeof threadId === 'number') {
+      clearTimeout(this.pendingResumeDrops.get(threadId));
+      const forget = setTimeout(() => this.pendingResumeDrops.delete(threadId), DapProxyWorker.ENTRY_STOP_HOLD_MS);
+      forget.unref?.();
+      this.pendingResumeDrops.set(threadId, forget);
+    }
+    this.logger!.info(`[Worker] A later stop supersedes the held entry stop${typeof threadId === 'number' ? ` (thread ${threadId}'s resume will be swallowed)` : ''}`);
+  }
+
+  /** Nothing to forward once the program is gone. */
+  private dropHeldEntryStop(why: string): void {
+    const held = this.heldEntryStop;
+    if (!held) {
+      return;
+    }
+    clearTimeout(held.timer);
+    this.heldEntryStop = undefined;
+    this.logger!.info(`[Worker] Dropping the held entry stop: ${why}`);
+  }
+
+  /**
+   * Append the armed entry breakpoint to a relayed `setBreakpoints` for its file; returns its
+   * index in the request (to strip from the answer and read its new id), undefined when nothing
+   * is armed or the request is for another file.
+   */
+  private appendEntryBreakpoint(dapArgs: unknown): number | undefined {
+    const entry = this.entryBreakpoint;
+    const args = dapArgs as { source?: { path?: string }; breakpoints?: DebugProtocol.SourceBreakpoint[] } | undefined;
+    if (!entry || typeof args?.source?.path !== 'string') {
+      return undefined;
+    }
+    const fold = (p: string): string => (process.platform === 'win32' ? path.resolve(p).toLowerCase() : path.resolve(p));
+    if (fold(args.source.path) !== fold(entry.file)) {
+      return undefined;
+    }
+    const breakpoints = Array.isArray(args.breakpoints) ? args.breakpoints : [];
+    args.breakpoints = [...breakpoints, { line: entry.line }];
+    return breakpoints.length;
+  }
+
+  /**
+   * The stop as the session sees it: the armed entry breakpoint's first hit relabelled `entry`
+   * (issue #790), then the mirror and the parent. The hit is recognised by id when the adapter
+   * names `hitBreakpointIds`; the Dart SDK adapters name none, and there the first breakpoint
+   * stop while the entry breakpoint is armed is that breakpoint — it sits on main's first
+   * statement, and nothing runs before main.
+   */
+  private forwardStop(body: DebugProtocol.StoppedEvent['body']): void {
+    const entryId = this.entryBreakpointAdapterId;
+    if (entryId !== undefined && body.reason === 'breakpoint') {
+      const ids = Array.isArray(body.hitBreakpointIds) ? body.hitBreakpointIds : undefined;
+      if (ids === undefined || ids.includes(entryId)) {
+        this.entryBreakpointAdapterId = undefined;
+        this.entryBreakpoint = undefined;
+        body = { ...body, reason: 'entry', ...(ids ? { hitBreakpointIds: ids.filter((id) => id !== entryId) } : {}) };
+        this.logger!.info(`[Worker] Entry breakpoint ${entryId} hit${ids ? '' : ' (first breakpoint stop, no ids named)'}: reporting the stop as reason=entry`);
+      }
+    }
+    // Mirror clients get the post-backfill body, and a late-joining IDE
+    // replays it as its landing stop (issue #217).
+    this.lastStop = body;
+    this.mirrorServer?.broadcastEvent('stopped', body);
+    this.sendDapEvent('stopped', body);
+  }
+
+  /** A source-less event for an id no answer has named yet, while an answer is still due. */
+  private holdsBreakpointEvent(body: DebugProtocol.BreakpointEvent['body']): boolean {
+    const bp = body?.breakpoint;
+    return (
+      this.setBreakpointsInFlight > 0 &&
+      bp !== undefined &&
+      !bp.source &&
+      typeof bp.id === 'number' &&
+      !this.breakpointFiles.has(bp.id)
+    );
+  }
+
+  /**
+   * Forward the held `breakpoint` events an answer has since named, with their source; keep
+   * holding the rest while another answer is still due, and let them all go as they came once
+   * none is.
+   */
+  private releaseHeldBreakpointEvents(): void {
+    for (const body of this.heldBreakpointEvents.splice(0)) {
+      const enriched = this.withBreakpointSource(body);
+      if (enriched === body && this.setBreakpointsInFlight > 0) {
+        this.heldBreakpointEvents.push(body);
+        continue;
+      }
+      this.logger!.debug('[Worker] DAP event: breakpoint (released)', enriched);
+      this.sendDapEvent('breakpoint', enriched);
+    }
+  }
+
+  /**
+   * The line to arm a `stopOnEntry` launch's entry breakpoint on, for policies that have no
+   * usable native entry stop (issue #790); undefined when nothing is to be armed: stopOnEntry
+   * off, debugger off, no such policy hook, the program unreadable, or no entry line in it.
+   */
+  private async resolveEntryBreakpointLine(initPayload: ProxyInitPayload): Promise<number | undefined> {
+    const findLine = this.adapterPolicy.entryBreakpointLine;
+    // An attach has no program start to stop at (its `scriptPath` is the attach placeholder).
+    if (!initPayload.stopOnEntry || initPayload.debuggerOff || this.isAttachMode || !findLine || !initPayload.scriptPath) {
+      return undefined;
+    }
+    // Not armed means no entry stop will come: the caller is told, as for every other arming
+    // failure, instead of waiting for a stop that never arrives.
+    const unarmed = (why: string): undefined => {
+      const note = `stopOnEntry: no entry breakpoint armed — ${why}. The program runs without an entry stop; set a breakpoint on main's first statement instead.`;
+      this.logger!.warn(`[Worker] ${note}`);
+      this.sendAdapterNotice(note);
+      return undefined;
+    };
+    let source: string;
+    try {
+      source = await this.dependencies.fileSystem.readFile(initPayload.scriptPath, 'utf8');
+    } catch (err) {
+      return unarmed(`cannot read ${initPayload.scriptPath} (${err instanceof Error ? err.message : String(err)})`);
+    }
+    const line = findLine.call(this.adapterPolicy, source);
+    if (line === undefined) {
+      return unarmed(`no \`main(\` declaration found in ${initPayload.scriptPath} (is main declared in another file?)`);
+    }
+    return line;
+  }
+
   /** The configuration phase proper: breakpoints, exception filters, configurationDone, configured. */
   private async runConfigurationPhase(
     initPayload: ProxyInitPayload,
@@ -1176,12 +1439,17 @@ export class DapProxyWorker {
     // these as they came and stamps only the breakpoints not yet answered.
     const syncResults: BreakpointSyncResult[] = [];
     try {
-      // Set initial breakpoints if provided
+      type InitialBreakpointEntry = BreakpointFields & { id?: string; file: string };
+      const groupedBreakpoints = new Map<string, InitialBreakpointEntry[]>();
+      // The entry breakpoint a stopOnEntry launch arms for a policy without a usable native
+      // entry stop (issue #790): sent with the program file's breakpoints, never echoed to the
+      // session's list, its first hit relabelled 'entry' by the stopped handler.
+      const entryEntries = new WeakSet<InitialBreakpointEntry>();
+      this.entryBreakpointAdapterId = undefined;
+      this.entryBreakpoint = undefined;
+
       if (initPayload.initialBreakpoints?.length) {
         this.logger!.info('[Worker] Initial breakpoints payload:', initPayload.initialBreakpoints);
-        type InitialBreakpointEntry = BreakpointFields & { id?: string; file: string };
-        const groupedBreakpoints = new Map<string, InitialBreakpointEntry[]>();
-
         for (const breakpoint of initPayload.initialBreakpoints) {
           const filePath = path.resolve(breakpoint.file);
           if (!groupedBreakpoints.has(filePath)) {
@@ -1200,7 +1468,23 @@ export class DapProxyWorker {
             suspendPolicy: breakpoint.suspendPolicy
           });
         }
+      }
 
+      const entryLine = await this.resolveEntryBreakpointLine(initPayload);
+      if (entryLine !== undefined) {
+        const programPath = path.resolve(initPayload.scriptPath);
+        const entry: InitialBreakpointEntry = { file: initPayload.scriptPath, line: entryLine };
+        entryEntries.add(entry);
+        this.entryBreakpoint = { file: programPath, line: entryLine };
+        if (!groupedBreakpoints.has(programPath)) {
+          groupedBreakpoints.set(programPath, []);
+        }
+        groupedBreakpoints.get(programPath)!.push(entry);
+        this.logger!.info(`[Worker] stopOnEntry: arming an entry breakpoint at ${initPayload.scriptPath}:${entryLine} (policy ${this.adapterPolicy.name})`);
+      }
+
+      // Set initial breakpoints if provided
+      if (groupedBreakpoints.size > 0) {
         for (const [filePath, breakpoints] of groupedBreakpoints.entries()) {
           const response = await connectionManager.setBreakpoints(
             dapClient,
@@ -1211,7 +1495,16 @@ export class DapProxyWorker {
           // DAP guarantees the response breakpoints array is positional per
           // request; zip within each group so the echoed id stays attached.
           const resultBps = response?.body?.breakpoints ?? [];
+          this.rememberBreakpointFiles(filePath, resultBps);
           breakpoints.forEach((bp, i) => {
+            if (entryEntries.has(bp)) {
+              if (typeof resultBps[i]?.id === 'number') {
+                this.entryBreakpointAdapterId = resultBps[i].id;
+              } else {
+                this.logger!.warn('[Worker] stopOnEntry: the adapter returned no id for the entry breakpoint; its hit will be reported as a plain breakpoint');
+              }
+              return;
+            }
             syncResults.push({
               ...(bp.id !== undefined ? { id: bp.id } : {}),
               file: bp.file,
@@ -1611,9 +1904,44 @@ export class DapProxyWorker {
 
       // Send request
       this.logger?.info(`[Worker] Sending '${payload.dapCommand}' to adapter`);
-      const response = payload.timeoutMs !== undefined
-        ? await this.dapClient.sendRequest(payload.dapCommand, dapArgs, payload.timeoutMs)
-        : await this.dapClient.sendRequest(payload.dapCommand, dapArgs);
+      const answersBreakpointIds = payload.dapCommand === 'setBreakpoints';
+      // The armed entry breakpoint rides along with every re-send for its file until it hits
+      // (a set is replace-all per file, and the session's list never holds it), hidden from the
+      // answer; the Dart adapters answer it with a new id each time (issue #790).
+      const entryIndex = answersBreakpointIds ? this.appendEntryBreakpoint(dapArgs) : undefined;
+      if (answersBreakpointIds) {
+        this.setBreakpointsInFlight++;
+      }
+      let response: DebugProtocol.Response;
+      try {
+        response = payload.timeoutMs !== undefined
+          ? await this.dapClient.sendRequest(payload.dapCommand, dapArgs, payload.timeoutMs)
+          : await this.dapClient.sendRequest(payload.dapCommand, dapArgs);
+      } finally {
+        if (answersBreakpointIds) {
+          this.setBreakpointsInFlight--;
+        }
+      }
+
+      if (answersBreakpointIds) {
+        const sourcePath = (dapArgs as { source?: { path?: string } } | undefined)?.source?.path;
+        let answered = (response as { body?: { breakpoints?: DebugProtocol.Breakpoint[] } }).body?.breakpoints;
+        if (entryIndex !== undefined && Array.isArray(answered)) {
+          const entryAnswer = answered[entryIndex];
+          if (typeof entryAnswer?.id === 'number') {
+            this.entryBreakpointAdapterId = entryAnswer.id;
+            this.logger!.info(`[Worker] stopOnEntry: the entry breakpoint rode along with the re-send; its id is now ${entryAnswer.id}`);
+          }
+          answered = answered.filter((_, i) => i !== entryIndex);
+          response = { ...response, body: { ...(response.body as Record<string, unknown>), breakpoints: answered } };
+        }
+        if (typeof sourcePath === 'string' && Array.isArray(answered)) {
+          this.rememberBreakpointFiles(sourcePath, answered);
+        }
+        // The events this answer named go out first, so the session store
+        // verifies by event before it reads the answer (issue #790).
+        this.releaseHeldBreakpointEvents();
+      }
 
 
       // Update adapter state if needed
@@ -1658,6 +1986,9 @@ export class DapProxyWorker {
       this.requestTracker.complete(payload.requestId);
       const message = error instanceof Error ? error.message : String(error);
       this.logger!.error(`[Worker] DAP command ${payload.dapCommand} failed:`, { error: message });
+      // An answer that never came names no id: whatever was waiting for it
+      // goes out as it came, ahead of the failure (issue #790).
+      this.releaseHeldBreakpointEvents();
       this.sendDapResponse(payload.requestId, false, error instanceof DapResponseError ? error.response : undefined, message);
     }
   }

@@ -40,6 +40,7 @@ discipline, and per-language quirks.
 | [.NET / C#](dotnet/README.md) | netcoredbg and portable PDBs. |
 | [C / C++](cpp/README.md) | CodeLLDB: prebuilt binaries, auto-compile, attach by PID, core dumps. |
 | [COBOL](cobol/README.md) | GnuCOBOL + CodeLLDB: auto-compile, COBOL-shaped variables, breakpoints in copybooks, runtime-error stops, the mainframe migration recipe. |
+| [Dart / Flutter](dart/README.md) | The SDK's own debug adapters: `dart`/`dart test`/`flutter`/`flutter test` runners, attach by VM-service URI, Flutter devices. |
 
 ## Deployment
 

@@ -11,7 +11,8 @@ const extensions = [
 ];
 
 // Directories to exclude
-const excludeDirs = ['node_modules', 'dist', 'coverage', '.git', 'build', '.husky', 'logs', 'sessions', 'vendor'];
+// `.dart_tool` is `dart pub get` output (gitignored); its package_config.json holds absolute file: URIs.
+const excludeDirs = ['node_modules', 'dist', 'coverage', '.git', 'build', '.husky', 'logs', 'sessions', 'vendor', '.dart_tool'];
 
 // Binary file extensions to skip
 const binaryExtensions = [

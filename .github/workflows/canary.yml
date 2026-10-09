@@ -273,6 +273,23 @@ jobs:
             --transcript "$TRANSCRIPTS/cobol.jsonl" \
             -- node "$CLI" stdio
 
+      - name: Setup Dart SDK (dart smoke prerequisite)
+        # The debugger is the SDK's own `dart debug_adapter` (issue #790); nothing
+        # is vendored, so a missing SDK is reported by the dart step, not hidden here.
+        uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
+        continue-on-error: true
+        with:
+          sdk: stable
+
+      - name: Smoke cycle (dart — SDK debug adapter behind the stdio bridge)
+        run: |
+          node scripts/canary-smoke.mjs --lang dart --skip-if-missing \
+            --program "$GITHUB_WORKSPACE/examples/dart/hello.dart" \
+            --break-file "$GITHUB_WORKSPACE/examples/dart/hello.dart" --line 3 \
+            --expect-line --expect-var greeting \
+            --transcript "$TRANSCRIPTS/dart.jsonl" \
+            -- node "$CLI" stdio
+
       - name: Smoke cycle (npx channel)
         # Channel fidelity for the npx one-liner from the README. Skipped on
         # Windows: spawning npx.cmd without a shell is a known ENOENT
@@ -398,6 +415,17 @@ jobs:
             --break-file /workspace/examples/cobol/hello.cob --line 46 \
             --expect-line --expect-var WS-TOTAL --expect-var WS-SCALED \
             --transcript "$TRANSCRIPTS/cobol.jsonl" \
+            -- docker run -i --rm -v "$GITHUB_WORKSPACE:/workspace" "$IMAGE" stdio
+
+      - name: Smoke cycle (dart — in-image Dart SDK)
+        # The image copies the Dart SDK from the official dart image (issue #790);
+        # hello.dart needs no pubspec, so the /workspace mount suffices.
+        run: |
+          node scripts/canary-smoke.mjs --lang dart --skip-if-missing \
+            --program /workspace/examples/dart/hello.dart \
+            --break-file /workspace/examples/dart/hello.dart --line 3 \
+            --expect-line --expect-var greeting \
+            --transcript "$TRANSCRIPTS/dart.jsonl" \
             -- docker run -i --rm -v "$GITHUB_WORKSPACE:/workspace" "$IMAGE" stdio
 
       - name: Upload transcripts on failure

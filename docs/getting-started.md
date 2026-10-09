@@ -6,7 +6,7 @@ guide walks a first run end to end — install, verify, register with a client, 
 script that has a real bug in it.
 
 Python is used throughout because it needs the least setup. The server also debugs Ruby,
-JavaScript/TypeScript, Rust, Go, Java, .NET/C#, C/C++, and COBOL — the per-language guides are linked
+JavaScript/TypeScript, Rust, Go, Java, .NET/C#, C/C++, COBOL, and Dart/Flutter — the per-language guides are linked
 at the end.
 
 ## Prerequisites

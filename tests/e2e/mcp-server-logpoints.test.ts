@@ -35,6 +35,7 @@ const EXPECTATION: Record<string, 'logs' | 'error' | 'warning'> = {
   dotnet: 'error',
   ruby: 'error',
   cobol: 'logs',   // the shim interpolates {WS-NAME} and resumes (#759 M3)
+  dart: 'logs',    // the SDK adapter interpolates {expr} itself (#790)
 };
 
 // Python's bpLine has a=1, b=2 in scope — assert real interpolation there.
@@ -42,6 +43,8 @@ const LOG_MESSAGES: Record<string, { message: string; expectInOutput?: string }>
   python: { message: 'LP-MARK a={a}', expectInOutput: 'LP-MARK a=1' },
   // hello.cob line 46 (ADD WS-SCALED TO WS-TOTAL): WS-TOTAL holds the table's sum, WS-SCALED its VALUE.
   cobol: { message: 'LP-MARK total={WS-TOTAL} scaled={WS-SCALED}', expectInOutput: 'LP-MARK total=1500.00 scaled=-123.45' },
+  // hello.dart line 3: greeting = 'hello' is in scope; an expression keeps the check free of string quoting.
+  dart: { message: 'LP-MARK len={greeting.length}', expectInOutput: 'LP-MARK len=5' },
   default: { message: 'LP-MARK plain', expectInOutput: 'LP-MARK plain' },
 };
 

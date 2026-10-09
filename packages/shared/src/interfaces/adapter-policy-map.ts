@@ -6,6 +6,7 @@ import { RubyAdapterPolicy } from './adapter-policy-ruby.js';
 import { RustAdapterPolicy } from './adapter-policy-rust.js';
 import { CppAdapterPolicy } from './adapter-policy-cpp.js';
 import { CobolAdapterPolicy } from './adapter-policy-cobol.js';
+import { DartAdapterPolicy } from './adapter-policy-dart.js';
 import { GoAdapterPolicy } from './adapter-policy-go.js';
 import { JavaAdapterPolicy } from './adapter-policy-java.js';
 import { DotnetAdapterPolicy } from './adapter-policy-dotnet.js';
@@ -31,6 +32,8 @@ export function getPolicyForLanguage(language: string | DebugLanguage): AdapterP
       return CppAdapterPolicy;
     case DebugLanguage.COBOL:
       return CobolAdapterPolicy;
+    case DebugLanguage.DART:
+      return DartAdapterPolicy;
     case DebugLanguage.GO:
       return GoAdapterPolicy;
     case DebugLanguage.JAVA:

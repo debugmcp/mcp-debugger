@@ -18,7 +18,9 @@ This directory contains end-to-end smoke tests that verify the MCP debugger serv
 - `docker-entrypoint.test.ts` covers the entrypoint script itself
 - Per-language launch smoke: `docker-smoke-python.test.ts`, `docker-smoke-javascript.test.ts`,
   `docker-smoke-rust.test.ts`, `docker-smoke-cpp.test.ts`, `docker-smoke-cobol.test.ts` (the image
-  installs `gnucobol3`, so the adapter compiles `examples/cobol/hello.cob` in-container)
+  installs `gnucobol3`, so the adapter compiles `examples/cobol/hello.cob` in-container),
+  `docker-smoke-dart.test.ts` (the image carries the Dart SDK; `examples/dart/hello.dart` runs
+  under `dart debug_adapter` in-container)
 - Attach-mode smoke: `docker-smoke-cpp-attach.test.ts` (attach by PID) and
   `docker-smoke-ruby-attach.test.ts` (the image ships no Ruby runtime, so Ruby is attach-only)
 - Shared helpers live in `docker-test-utils.ts`
@@ -68,25 +70,33 @@ This directory contains end-to-end smoke tests that verify the MCP debugger serv
 - Tests .NET/C# adapter through MCP interface
 - Validates .NET debugging behavior via netcoredbg
 
-### 12. `mcp-server-smoke-javascript-sse.test.ts`
+### 12. `mcp-server-smoke-dart.test.ts` and `mcp-server-smoke-dart-attach.test.ts`
+- Tests the Dart/Flutter adapter through the MCP interface against `examples/dart/` — the SDK's own
+  `dart debug_adapter` behind the stdio bridge: launch, the `dart-test` runner (`-n <name>`), the
+  exception filters, pause
+- The attach variant attaches to a `dart_probe/bin/pause.dart` started with the VM service enabled
+  (by service-info file / VM-service URI, never a PID)
+- Both self-skip without a Dart SDK; `dart-example-utils.ts` locates the `// BP-NAME` lines by name
+
+### 13. `mcp-server-smoke-javascript-sse.test.ts`
 - Tests JavaScript adapter over SSE transport
 - Validates SSE connection with JavaScript debugging workflow
 
-### 13. `comprehensive-mcp-tools.test.ts`
+### 14. `comprehensive-mcp-tools.test.ts`
 - Comprehensive tests for all MCP tool operations
 - Validates full debugging tool coverage end-to-end
 
-### 14. `debugpy-connection.test.ts`
+### 15. `debugpy-connection.test.ts`
 - Tests direct debugpy connection behavior
 - Validates DAP protocol communication with debugpy
 
-### 15. `smoke-test-utils.ts`
+### 16. `smoke-test-utils.ts`
 - Shared utilities for all smoke tests
 - Common debug sequence execution
 - SSE helper functions
 - Cross-platform compatibility utilities
 
-### 16. `rust-example-utils.ts`
+### 17. `rust-example-utils.ts`
 - Shared utilities for Rust E2E tests
 - Rust example project building and management
 
@@ -94,7 +104,7 @@ This directory contains end-to-end smoke tests that verify the MCP debugger serv
 - Shared utilities for Docker smoke tests
 - Container lifecycle management, health checks, and Docker availability detection
 
-### 17. NPX smoke tests (`npx/` subdirectory)
+### 18. NPX smoke tests (`npx/` subdirectory)
 - `npx-smoke-python.test.ts` - Tests Python debugging via the npx distribution
 - `npx-smoke-javascript.test.ts` - Tests JavaScript debugging via the npx distribution
 - `npx-smoke-rust.test.ts` - Tests Rust debugging via the npx distribution, which exercises
@@ -150,6 +160,11 @@ npx vitest run tests/e2e/npx/  # NPX smoke tests
 - Rust toolchain must be installed (rustc, cargo)
 - Uses vendored CodeLLDB debug adapter (auto-downloaded during `pnpm install`)
 
+### For Dart Tests
+- Dart SDK 3.x on PATH (`dart --version`), or Flutter (`flutter` on PATH or `FLUTTER_ROOT`; its bundled Dart is used)
+- `cd examples/dart/dart_probe && dart pub get` once; with the winget SDK keep the checkout out of `%LOCALAPPDATA%\Temp` (package:test cannot start from there)
+- Tests skip automatically if no Dart SDK is found
+
 ### For SSE Tests
 - No special requirements (uses dynamic port allocation)
 
@@ -161,7 +176,7 @@ npx vitest run tests/e2e/npx/  # NPX smoke tests
 
 The smoke tests provide comprehensive coverage of:
 1. **Transport Methods**: stdio, SSE, JavaScript-SSE, containerized stdio
-2. **Language Adapters**: All 10 adapters (Python, JavaScript, Rust, Go, Java, .NET/C#, Ruby, C/C++, COBOL, Mock)
+2. **Language Adapters**: All 11 adapters (Python, JavaScript, Rust, Go, Java, .NET/C#, Ruby, C/C++, COBOL, Dart/Flutter, Mock)
 3. **Path Resolution**: Different working directories, path translation, absolute vs relative paths
 4. **Environment Handling**: Container environment variables, volume mounts
 5. **Error Scenarios**: Proper cleanup on failure, detailed error logging

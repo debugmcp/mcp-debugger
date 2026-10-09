@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.debugmcp/mcp-debugger",
   "title": "mcp-debugger",
-  "description": "Step-through debugging for AI agents: breakpoints, stepping and live variables in nine languages",
+  "description": "Step-through debugging for AI agents: breakpoints, stepping and live variables in ten languages",
   "websiteUrl": "https://debugmcp.io",
   "repository": {
     "url": "https://github.com/debugmcp/mcp-debugger",

@@ -1,7 +1,7 @@
 # mcp-debugger Architecture Overview
 
 > An orientation map of the multi-language architecture: the language-agnostic
-> core, the `IDebugAdapter` contract, and the ten shipped adapters.
+> core, the `IDebugAdapter` contract, and the eleven shipped adapters.
 
 ## From Python-Specific to Multi-Language Platform
 
@@ -60,6 +60,7 @@ Each supported language implements the IDebugAdapter interface:
 - **[DotnetDebugAdapter](../../packages/adapter-dotnet/)** - .NET/netcoredbg support
 - **[CppDebugAdapter](../../packages/adapter-cpp/)** - C/C++/CodeLLDB support
 - **[CobolDebugAdapter](../../packages/adapter-cobol/)** - COBOL support: GnuCOBOL + CodeLLDB behind a Node DAP shim
+- **[DartDebugAdapter](../../packages/adapter-dart/)** - Dart/Flutter support: the SDK's own `dart debug_adapter` / `flutter debug-adapter` behind a TCP-to-stdio bridge
 
 ### 4. Adapter Registry
 

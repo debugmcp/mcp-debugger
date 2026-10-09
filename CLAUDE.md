@@ -24,6 +24,7 @@ mcp-debugger/
 │   ├── adapter-dotnet/     # .NET/C# debug adapter using netcoredbg
 │   ├── adapter-cpp/        # C/C++ debug adapter using CodeLLDB
 │   ├── adapter-cobol/      # COBOL debug adapter using GnuCOBOL + CodeLLDB behind a Node DAP shim
+│   ├── adapter-dart/       # Dart/Flutter debug adapter using the SDK's own debug adapters behind a TCP-to-stdio bridge
 │   ├── adapter-mock/       # Mock adapter for testing
 │   └── mcp-debugger/       # Self-contained CLI bundle (npx distribution)
 ├── src/
@@ -47,6 +48,7 @@ mcp-debugger/
 - **@debugmcp/adapter-dotnet**: .NET/C# debugging support via netcoredbg
 - **@debugmcp/adapter-cpp**: C/C++ debugging support via CodeLLDB (launch + attach-by-PID)
 - **@debugmcp/adapter-cobol**: COBOL debugging support via GnuCOBOL (`cobc`) + CodeLLDB behind a Node DAP shim that serves COBOL-shaped scopes/values from the compiler's dump metadata (launch + attach-by-PID)
+- **@debugmcp/adapter-dart**: Dart/Flutter debugging support via the SDK's own debug adapters (`dart debug_adapter [--test]`, `flutter debug-adapter [--test]`) behind a TCP-to-stdio bridge; nothing vendored (launch + attach by VM-service URI)
 - **@debugmcp/adapter-mock**: Mock adapter for testing and development
 - **@debugmcp/mcp-debugger**: Self-contained CLI bundle for npm distribution (npx-ready)
 
@@ -257,7 +259,7 @@ The codebase follows a **layered architecture with dependency injection** and **
 5. **DAP Proxy System** (`src/proxy/dap-proxy-*.ts`, `src/proxy/minimal-dap.ts`)
    - **ProxyRunner** (`dap-proxy-core.ts`): Pure business logic, message processing
    - **DapProxyWorker** (`dap-proxy-worker.ts`): Core worker handling debugging operations
-   - **Adapter Policies**: Language-specific behavior via policy pattern (`DefaultAdapterPolicy`, `PythonAdapterPolicy`, `JsDebugAdapterPolicy`, `RubyAdapterPolicy`, `RustAdapterPolicy`, `GoAdapterPolicy`, `JavaAdapterPolicy`, `DotnetAdapterPolicy`, `CppAdapterPolicy`, `CobolAdapterPolicy`, `MockAdapterPolicy`); LLDB-generic pieces shared by rust/cpp/cobol live in `lldb-policy-shared.ts`. Note: Java is fully wired to `JavaAdapterPolicy` in `DapProxyWorker.selectAdapterPolicy()` (not falling through to `DefaultAdapterPolicy`).
+   - **Adapter Policies**: Language-specific behavior via policy pattern (`DefaultAdapterPolicy`, `PythonAdapterPolicy`, `JsDebugAdapterPolicy`, `RubyAdapterPolicy`, `RustAdapterPolicy`, `GoAdapterPolicy`, `JavaAdapterPolicy`, `DotnetAdapterPolicy`, `CppAdapterPolicy`, `CobolAdapterPolicy`, `DartAdapterPolicy`, `MockAdapterPolicy`); LLDB-generic pieces shared by rust/cpp/cobol live in `lldb-policy-shared.ts`. Note: Java is fully wired to `JavaAdapterPolicy` in `DapProxyWorker.selectAdapterPolicy()` (not falling through to `DefaultAdapterPolicy`).
    - **ChildSessionManager** (`src/proxy/child-session-manager.ts`): Manages DAP child sessions within a single proxy process. Currently used by the js-debug adapter (`childSessionStrategy: 'launchWithPendingTarget'`), which spawns a child debug session for the actual debuggee while the parent session manages the launch orchestration.
    - Implements full Debug Adapter Protocol (DAP) communication
 
@@ -308,7 +310,7 @@ A dual-state overlay (`SessionLifecycleState` + `ExecutionState`) is derived fro
 
 ### Adapter System
 - `src/adapters/adapter-registry.ts` - Adapter lifecycle management
-- `src/adapters/adapter-loader.ts` - Dynamic adapter loading (10 known adapters)
+- `src/adapters/adapter-loader.ts` - Dynamic adapter loading (11 known adapters)
 - `packages/shared/` - Shared interfaces and types
 - `packages/adapter-python/` - Python debug adapter (debugpy)
 - `packages/adapter-ruby/` - Ruby debug adapter (rdbg)
@@ -319,6 +321,7 @@ A dual-state overlay (`SessionLifecycleState` + `ExecutionState`) is derived fro
 - `packages/adapter-dotnet/` - .NET/C# debug adapter (netcoredbg)
 - `packages/adapter-cpp/` - C/C++ debug adapter (CodeLLDB)
 - `packages/adapter-cobol/` - COBOL debug adapter (GnuCOBOL + CodeLLDB, DAP shim)
+- `packages/adapter-dart/` - Dart/Flutter debug adapter (the SDK's own debug adapters, TCP-to-stdio bridge)
 - `packages/adapter-mock/` - Mock adapter for testing
 
 ### Distribution
@@ -452,6 +455,15 @@ packages/adapter-{language}/
 - Attach by PID (`sources` + build options regenerate the manifest with `cobc -C`, or `manifestDirs`, in `adapterConfig`; a job paused inside libcob shows its program's data division from the nearest COBOL frame up the stack); `cobol_runtime_error` exception filter = function breakpoint on libcob's `cob_runtime_error` (default `uncaught`, needs `runtimeChecks`)
 - Control flow the COBOL way (M3 of #759): `step_over` compares each COBOL landing's PERFORM depth (`frame_ptr - frame_stack`) with the origin's and runs a deeper landing's range to its return (an instruction breakpoint on `frame_stack[n].return_address_ptr`, one cycle per loop iteration), `step_out` inside a performed paragraph runs to the range's return and lands at a shallower depth; `set_breakpoint {function: "1000-INIT"}` resolves paragraph/section/PROGRAM-ID names to the range's first statement (shim-band ids, `hitBreakpointIds` translated); logpoints interpolate `{WS-NAME}` in the shim and resume (a `logMessage` never reaches CodeLLDB, whose own interpolation aborts on a COBOL name); `get_stack_trace` synthesises one frame per active PERFORM from libcob's `frame_stack` (shim frame-id band, `evalFrameId` = the real frame for scopes/evaluate; `labelId` on procedure ranges maps `perform_through`)
 - See `docs/cobol/README.md` (guide) and `docs/cobol/spike-notes.md` (the measured facts)
+
+### Dart/Flutter
+- The debugger is the SDK's own: `dart debug_adapter [--test]` for Dart programs and package:test files, `flutter debug-adapter [--test]` for Flutter apps and tests, reached through a TCP-to-stdio bridge (`packages/adapter-dart/dist/bridge/dap-stdio-bridge.js`, esbuild-bundled by the package build) because those servers speak stdio only. Nothing is vendored: the Dart SDK (or Flutter, which bundles Dart at `bin/cache/dart-sdk`) must be installed — `dart`/`flutter` on PATH, or `DART_SDK` / `FLUTTER_ROOT` (aliases `DART_PATH` / `FLUTTER_PATH`); the project's fvm pin (`.fvmrc`, `.fvm/`) and the known install dirs are also searched (`utils/sdk-locator.ts`). On Windows the Flutter tool snapshot is run through the bundled Dart directly (Node cannot spawn `flutter.bat` without a shell), which needs a warm tool cache: `flutter --version` once
+- `runner` (`dart` | `dart-test` | `flutter` | `flutter-test`) is auto-detected from the nearest `pubspec.yaml` above the program (a `flutter`-family dependency means Flutter) and the program path (under `test/` or `integration_test/` means a test runner); an explicit `runner` wins. `deviceId` (→ `toolArgs: ['-d', id]`) and `flutterMode` (`profile`/`release` turn the debugger off; a diagnostic says so) are Flutter-only; the SDK adapter's own keys (`toolArgs`, `vmAdditionalArgs`, `debugExternalPackageLibraries`, `evaluateToStringInDebugViews` — defaulted to `true` — …) are forwarded as-is. For the Dart runners the adapter adds `--pause_isolates_on_exit=false` unless the user set one (removes the SDK adapter's transient exit stop)
+- Capabilities: conditional breakpoints and logpoints yes; function breakpoints, hit-count conditions, `exceptionInfo`, `setVariable`, `completions` no. Exception filters `uncaught` → `Unhandled`, `all` → `All`; `noDebug` honoured (no stops, no VM-service URI). `stopOnEntry` is a temporary breakpoint on the program's `main(` line (`DartAdapterPolicy.entryBreakpointLine`), reported as `entry` — the SDK adapter's own entry stop is bookkeeping it resumes 1 ms later (`suppressesAdapterEntryStop`); launch goes out before configuration (`sendLaunchBeforeConfig`, like Go/.NET)
+- Attach by `adapterConfig.vmServiceUri` (`ws://127.0.0.1:<port>/<token>=/ws`, from `dart --enable-vm-service … run`, `flutter run --machine`'s `app.debugPort`, or the session's own `dart.debuggerUris`) or `adapterConfig.vmServiceInfoFile` (`--write-service-info=<file>`); a `host`/`port` pair becomes `ws://host:port/ws` and only works with `--disable-service-auth-codes`. No PID attach (rejected with the hint); the test runners refuse attach. The policy pauses after attach (`pauseAfterAttach: true`); an isolate idle in an `await` then shows an empty stack
+- Scopes are `Locals`/`Globals` (+ `Exceptions` at an exception stop); frames under `lib/_internal/vm/lib` and `<asynchronous gap>` label frames are filtered as internals. Known quirks: `next` stops twice per source line (the VM steps per token position); a logpoint's `condition` is ignored by the SDK adapter; `hitCondition` is accepted and ignored; Flutter `run`/`test` sessions end with `terminated` and no `exited` event (exit code unknown); `dart test` from a project under `%LOCALAPPDATA%\Temp` fails with the winget SDK (upstream package:test)
+- Milestones (#790): M1 Dart (this), M2 Flutter desktop/web/tests, M3 emulators; hot restart (the DAP `restart` Flutter advertises after `app.start`) is `restart_debugging`'s future home. Docker: the Dart SDK only — Flutter is host-only
+- See `docs/dart/README.md` (guide) and `docs/dart/spike-notes.md` (the measured facts)
 
 ### Mock (Testing)
 - No external requirements

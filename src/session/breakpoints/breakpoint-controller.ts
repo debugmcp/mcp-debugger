@@ -35,6 +35,7 @@ import { buildFunctionBreakpointLaunchWarning, fileLabel } from './launch-warnin
 import {
   applyBoundLocation,
   keepHitProven,
+  keepPendingAnswer,
   mirrorsBreakpointsToChild,
   setAdapterMessage,
   stampRefusalMessage
@@ -246,9 +247,14 @@ export class BreakpointController {
           // "unbound" answer for a location the adapter cannot map is not
           // evidence it stopped firing. Keep the id current and nothing else.
           const hitProven = authoritative && keepHitProven(record, bpInfo);
+          // A `reason: 'pending'` answer is no verdict either (issue #790):
+          // the Dart adapters answer every re-send that way with fresh ids
+          // and verify by event afterwards. A verified record keeps its state
+          // and takes the new id.
+          const absorbed = hitProven || (authoritative && keepPendingAnswer(record, bpInfo));
           if (!authoritative) {
             record.verified = record.verified || bpInfo.verified;
-          } else if (!hitProven) {
+          } else if (!absorbed) {
             record.verified = bpInfo.verified;
             record.verifiedBy = record.verified ? 'adapter' : undefined;
             // The child's ids — provisional included — are the real ids for
@@ -266,7 +272,7 @@ export class BreakpointController {
               record.boundLine = undefined;
             }
           }
-          if (!keepChildState && !hitProven) {
+          if (!keepChildState && !absorbed) {
             // The adapter's own verdict, normalized (issue #471): raw l10n
             // keys like js-debug's "breakpoint.provisionalBreakpoint" must
             // never sit in the store, a provisional note must not survive
@@ -609,8 +615,9 @@ export class BreakpointController {
           const record = allFnBps[i];
           // A stop already proved this breakpoint bound (issue #673): an
           // "unbound" answer keeps the id current and nothing else — the
-          // same rule the line path applies.
-          if (keepHitProven(record, bpInfo)) {
+          // same rule the line path applies. So does a `reason: 'pending'`
+          // answer for a verified record (issue #790).
+          if (keepHitProven(record, bpInfo) || keepPendingAnswer(record, bpInfo)) {
             continue;
           }
           record.verified = bpInfo.verified;
