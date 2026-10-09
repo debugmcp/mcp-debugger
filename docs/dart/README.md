@@ -138,11 +138,11 @@ Android emulator (`deviceId: "emulator-5554"`, the AVD booted first; measured th
 `tests/e2e/mcp-server-smoke-flutter-android.test.ts`, Gradle warm): a `build()` breakpoint under
 `flutter run` in ~21 s, an `integration_test` breakpoint in ~28 s with the app's breakpoint hit by
 the test's tap right after; a cold Gradle build on a fresh machine takes minutes and belongs to
-the first build, not to the debugger. Stop the previous app instance (`adb shell am force-stop
-<package>`) and clear forwards (`adb forward --remove-all`) before launching again; the e2e helper
-does so, and installs the debug APK up front because the first run after a fresh install once
-ended without stopping. Attaching to an app another `flutter run` started on the emulator does
-not connect yet (#882; see `docs/KNOWN_ISSUES.md`).
+the first build, not to the debugger. `flutter run` stops and reinstalls the app itself on every
+launch; the e2e helper only warms the build for the device's ABI and does the first install
+ahead of the timed cases, because the first run right after a fresh install once ended without
+stopping (relaunch if that happens). Attaching to an app another `flutter run` started on the
+emulator does not connect yet (#882; see `docs/KNOWN_ISSUES.md`).
 
 ## Troubleshooting
 

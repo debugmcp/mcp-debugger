@@ -3,9 +3,11 @@
  * emulator-NNNN` with a breakpoint in `build()`, and an `integration_test` on the emulator whose
  * tap hits the app's breakpoint. Measured through the real server on 2026-10-09 (Flutter 3.47.7,
  * Windows, AVD `mcp_api35` booted headless, Gradle warm): the `build()` breakpoint in ~21 s, the
- * integration test's breakpoints in ~28 s; the first `flutter run` after a fresh APK install once
- * ended without a stop, so the helper installs the APK up front and stops the app and clears
- * port forwards before every launch.
+ * integration test's breakpoints in ~28 s. `flutter run` stops, builds and installs the app on
+ * its own every launch; the helper warms the Gradle build for the device's ABI and does the
+ * first install ahead of the timed cases (the first run right after a fresh install once ended
+ * without a stop), and before each launch stops a leftover instance and removes this emulator's
+ * own adb forwards.
  *
  * Opt-in by booting an emulator (`flutter emulators --launch <id>`); self-skips without Flutter,
  * adb, an online emulator, or with `MCP_SKIP_FLUTTER_ANDROID=1`. CI never runs it.
@@ -112,11 +114,27 @@ describe.skipIf(!EMULATOR)(`MCP Server Flutter Android Smoke Test @requires-flut
     return res;
   }
 
+  /**
+   * `wait_for_stop` in slices under the MCP client's 60 s request cap: a Gradle build can keep
+   * the first stop away for longer than that (seen: 63 s), and a single long server-side wait
+   * then fails on the client side, not the debugger's.
+   */
+  async function waitForPause(timeoutMs: number, what: string) {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const slice = Math.min(45_000, Math.max(1_000, deadline - Date.now()));
+      const waited = await call('wait_for_stop', { timeout: slice });
+      if (waited.state === 'paused') return (await getSession())!;
+      const stillRunning = waited.pending === true || waited.state === 'running';
+      if (!stillRunning || Date.now() >= deadline) {
+        throw new Error(`${what}: wait_for_stop answered ${JSON.stringify(waited)}; output tail: ${(await output()).slice(-600)}`);
+      }
+    }
+  }
+
   async function firstStop(launched: Record<string, unknown>, timeoutMs: number) {
     if (launched.state === 'paused') return (await getSession())!;
-    const waited = await call('wait_for_stop', { timeout: timeoutMs });
-    expect(waited.state, `first stop (wait_for_stop answered ${JSON.stringify(waited)}; output: ${(await output()).slice(-600)})`).toBe('paused');
-    return (await getSession())!;
+    return waitForPause(timeoutMs, 'first stop');
   }
 
   async function createSession(name: string) {
@@ -160,8 +178,7 @@ describe.skipIf(!EMULATOR)(`MCP Server Flutter Android Smoke Test @requires-flut
     expect((await frames())[0].line).toBe(testLine);
 
     await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
-    const atApp = await call('wait_for_stop', { timeout: 120000 });
-    expect(atApp.state, JSON.stringify(atApp)).toBe('paused');
+    await waitForPause(120000, "the app's breakpoint on the test's tap");
     const top = (await frames())[0];
     expect(top.file?.toLowerCase()).toBe(FLUTTER_EXAMPLES.main.toLowerCase());
     expect(top.line).toBe(appLine);

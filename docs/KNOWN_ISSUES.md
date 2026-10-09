@@ -114,10 +114,14 @@ Dart 3.13 and Flutter 3.47 — and none of them is a session error.
   "Connecting to the VM Service is taking longer than expected" (measured, 60 s). The same
   recipe works for desktop apps and Dart programs. Launch the app through mcp-debugger instead;
   #882 tracks the `--device-vmservice-port` / `--host-vmservice-port` / `--no-dds` measurements.
-- **On an Android emulator, stop the previous app instance before the next launch.** A live
-  instance being replaced by the next install, or a stale adb port forward, made a launch hang
-  or end without a stop (measured). `adb shell am force-stop <package>` and
-  `adb forward --remove-all` first; the e2e helper does both, and installs the APK up front.
+- **On an Android emulator, the first launch after a fresh install may end without a stop.**
+  Seen once: the first `flutter run` right after the debug APK was first installed ended with
+  "The program ended without reporting an exit code" instead of pausing; the next launch was
+  fine. `flutter run` stops and reinstalls the app itself on every launch, so there is nothing
+  to do by hand; relaunch. The e2e helper warms the Gradle build and does the first install
+  before the timed cases. A cold Gradle build on a fresh machine (minutes) belongs to the first
+  build, not to the debugger: the launch answers `pending: true` and `wait_for_stop` collects
+  the stop.
 - **`dart test` fails under `%LOCALAPPDATA%\Temp` with the winget SDK (Windows).**
   package:test spawns its frontend server through a cwd-relative SDK path that does not
   resolve from there (`The system cannot find the file specified … dartaotruntime.exe`).

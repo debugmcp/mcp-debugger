@@ -88,8 +88,9 @@ This directory contains end-to-end smoke tests that verify the MCP debugger serv
 - `mcp-server-smoke-flutter-android.test.ts` runs `flutter run` and the `integration_test` on a
   booted Android emulator (`flutter emulators --launch <id>` is the opt-in; it self-skips without
   Flutter, adb or an online emulator, and with `MCP_SKIP_FLUTTER_ANDROID=1`). The helper generates
-  `android/`, builds the debug APK once, installs it, and stops the app and clears adb forwards
-  before each launch. Never runs on CI
+  `android/`, builds the debug APK once for the device's ABI and installs it (a warm build; `flutter
+  run` stops and reinstalls on its own anyway), and before each launch stops a leftover instance
+  and removes that emulator's own adb forwards. Never runs on CI
 
 ### 13. `mcp-server-smoke-javascript-sse.test.ts`
 - Tests JavaScript adapter over SSE transport
