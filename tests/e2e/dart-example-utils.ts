@@ -201,6 +201,119 @@ export function flutterDesktopDeviceId(): string | null {
   return flutterDeviceIds().includes(want) ? want : null;
 }
 
+// ---- Android ------------------------------------------------------------------------------------
+
+export const FLUTTER_PROBE_PACKAGE = 'com.example.flutter_probe';
+
+/** `adb` from ANDROID_SDK_ROOT / ANDROID_HOME / PATH; null when none. */
+export function adbPath(): string | null {
+  const exe = process.platform === 'win32' ? 'adb.exe' : 'adb';
+  for (const key of ['ANDROID_SDK_ROOT', 'ANDROID_HOME']) {
+    const root = process.env[key];
+    if (root && existsSync(path.join(root, 'platform-tools', exe))) return path.join(root, 'platform-tools', exe);
+  }
+  const onPath = which.sync('adb', { nothrow: true });
+  if (onPath) return onPath;
+  // Android Studio's default SDK locations, the ones flutter_tools probes too.
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? '';
+  const defaults = process.platform === 'win32'
+    ? [path.join(process.env.LOCALAPPDATA ?? '', 'Android', 'Sdk')]
+    : process.platform === 'darwin'
+      ? [path.join(home, 'Library', 'Android', 'sdk')]
+      : [path.join(home, 'Android', 'Sdk')];
+  for (const sdk of defaults) {
+    const candidate = path.join(sdk, 'platform-tools', exe);
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+function adb(args: string[], timeoutMs = 120_000): { status: number | null; stdout: string; out: string } {
+  const exe = adbPath();
+  if (!exe) return { status: null, stdout: '', out: '' };
+  const r = spawnSync(exe, args, { encoding: 'utf8', windowsHide: true, timeout: timeoutMs });
+  const stdout = r.stdout ?? '';
+  // adb reports install failures on stderr (`adb: failed to install …`).
+  return { status: r.status, stdout, out: `${stdout}${r.stderr ?? ''}` };
+}
+
+let cachedEmulator: string | null | undefined;
+
+/**
+ * An Android emulator that is booted (`adb devices` says `device`, not `offline`) and that
+ * `flutter devices` lists; null otherwise, and with `MCP_SKIP_FLUTTER_ANDROID=1`. Booting one is
+ * the opt-in: `flutter emulators --launch <id>` (headless flags in docs/dart/spike-notes.md).
+ */
+export function flutterEmulatorDeviceId(): string | null {
+  if (cachedEmulator !== undefined) return cachedEmulator;
+  if (process.env.MCP_SKIP_FLUTTER_ANDROID === '1' || !adbPath()) return (cachedEmulator = null);
+  // Flutter's own list first: no emulator there means no adb server to start for nothing.
+  const emulators = flutterDeviceIds().filter((id) => id.startsWith('emulator-'));
+  if (emulators.length === 0) return (cachedEmulator = null);
+  const online = new Set(
+    adb(['devices']).stdout.split(/\r?\n/).map((l) => l.trim().split(/\s+/)).filter((p) => p.length === 2 && p[1] === 'device').map((p) => p[0])
+  );
+  cachedEmulator = emulators.find((id) => online.has(id)) ?? null;
+  return cachedEmulator;
+}
+
+/**
+ * Before a launch: stop the probe app and drop the port forwards that belong to this emulator.
+ * `flutter run` force-stops and reinstalls on its own (android_device.dart `startApp`), so the
+ * stop only matters for an instance a previous test left behind; the forwards are removed one by
+ * one from `adb forward --list` because `adb forward --remove-all` is host-wide and would take
+ * other tools' forwards with it.
+ */
+export function resetAndroidApp(deviceId: string): void {
+  adb(['-s', deviceId, 'shell', 'am', 'force-stop', FLUTTER_PROBE_PACKAGE], 30_000);
+  for (const line of adb(['forward', '--list'], 30_000).stdout.split(/\r?\n/)) {
+    const [serial, local] = line.trim().split(/\s+/);
+    if (serial === deviceId && local) adb(['-s', deviceId, 'forward', '--remove', local], 30_000);
+  }
+}
+
+let androidPrepared = false;
+
+/** The `--target-platform` matching the device's ABI, so the warm-up builds what `flutter run` will run. */
+function androidTargetPlatform(deviceId: string): string {
+  const abi = adb(['-s', deviceId, 'shell', 'getprop', 'ro.product.cpu.abi'], 30_000).stdout.trim();
+  if (abi.startsWith('arm64')) return 'android-arm64';
+  if (abi.startsWith('armeabi')) return 'android-arm';
+  return 'android-x64';
+}
+
+/**
+ * Generate the probe's `android/` folder, build the debug APK for the device's ABI once and
+ * install it. `flutter run` stops, builds and installs on its own every time, so what this buys
+ * the timed launches is a warm Gradle and dependency cache (the spike measured 425 s cold, 6–45 s
+ * warm) and the first-ever `pm install` out of the way; the first `flutter run` after a fresh
+ * install was seen to end without a stop once. A stale `android/` is not regenerated: delete it.
+ */
+export function prepareFlutterAndroid(deviceId: string): void {
+  if (androidPrepared) return;
+  prepareFlutterProbe();
+  const root = findFlutterRootSync();
+  if (!root) throw new Error('No Flutter SDK found for the examples');
+  if (!existsSync(path.join(FLUTTER_PROBE_DIR, 'android'))) {
+    const r = runFlutter(root, ['create', '--platforms=android', '--project-name', 'flutter_probe', '.'], FLUTTER_PROBE_DIR);
+    if (r.status !== 0) throw new Error(`flutter create --platforms=android failed: ${r.out}`);
+  }
+  const built = runFlutter(root, ['build', 'apk', '--debug', '--target-platform', androidTargetPlatform(deviceId)], FLUTTER_PROBE_DIR, 900_000);
+  if (built.status !== 0) {
+    throw new Error(`flutter build apk --debug failed (a stale examples/dart/flutter_probe/android can be deleted and regenerated): ${built.out}`);
+  }
+  const apk = path.join(FLUTTER_PROBE_DIR, 'build', 'app', 'outputs', 'flutter-apk', 'app-debug.apk');
+  let installed = adb(['-s', deviceId, 'install', '-r', '-t', apk], 180_000);
+  if (installed.status !== 0) {
+    // An older signature or version on the device (INSTALL_FAILED_UPDATE_INCOMPATIBLE): the way
+    // flutter_tools handles it too — uninstall once and retry.
+    adb(['-s', deviceId, 'uninstall', FLUTTER_PROBE_PACKAGE], 60_000);
+    installed = adb(['-s', deviceId, 'install', '-r', '-t', apk], 180_000);
+    if (installed.status !== 0) throw new Error(`adb install failed: ${installed.out}`);
+  }
+  androidPrepared = true;
+}
+
 export const FLUTTER_EXAMPLES = {
   main: path.join(FLUTTER_PROBE_DIR, 'lib', 'main.dart'),
   widgetTest: path.join(FLUTTER_PROBE_DIR, 'test', 'widget_test.dart'),

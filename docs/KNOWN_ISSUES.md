@@ -108,6 +108,20 @@ Dart 3.13 and Flutter 3.47 — and none of them is a session error.
   adapter sends `terminated` but no `exited` event, so `exitCode` is unknown in
   `list_debug_sessions`; the test results (`✓ name`) are in `get_output`. The Dart CLI
   adapter does report `exited` (255 for an uncaught exception).
+- **Attaching to an app already running on an Android emulator does not connect.** The
+  VM-service URI another `flutter run --machine` reports is host-forwarded through that tool's
+  own adb forward; `attach_to_process` with it reaches `flutter.appStart` and then waits on
+  "Connecting to the VM Service is taking longer than expected" (measured, 60 s). The same
+  recipe works for desktop apps and Dart programs. Launch the app through mcp-debugger instead;
+  #882 tracks the `--device-vmservice-port` / `--host-vmservice-port` / `--no-dds` measurements.
+- **On an Android emulator, the first launch after a fresh install may end without a stop.**
+  Seen once: the first `flutter run` right after the debug APK was first installed ended with
+  "The program ended without reporting an exit code" instead of pausing; the next launch was
+  fine. `flutter run` stops and reinstalls the app itself on every launch, so there is nothing
+  to do by hand; relaunch. The e2e helper warms the Gradle build and does the first install
+  before the timed cases. A cold Gradle build on a fresh machine (minutes) belongs to the first
+  build, not to the debugger: the launch answers `pending: true` and `wait_for_stop` collects
+  the stop.
 - **`dart test` fails under `%LOCALAPPDATA%\Temp` with the winget SDK (Windows).**
   package:test spawns its frontend server through a cwd-relative SDK path that does not
   resolve from there (`The system cannot find the file specified … dartaotruntime.exe`).

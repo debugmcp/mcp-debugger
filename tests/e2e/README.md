@@ -85,6 +85,12 @@ This directory contains end-to-end smoke tests that verify the MCP debugger serv
   `flutter-host` lane sets it and runs the widget-test cases only; `scripts/check-flutter-e2e-report.mjs`
   requires them). The helper generates the probe's platform folders with `flutter create` on
   first use
+- `mcp-server-smoke-flutter-android.test.ts` runs `flutter run` and the `integration_test` on a
+  booted Android emulator (`flutter emulators --launch <id>` is the opt-in; it self-skips without
+  Flutter, adb or an online emulator, and with `MCP_SKIP_FLUTTER_ANDROID=1`). The helper generates
+  `android/`, builds the debug APK once for the device's ABI and installs it (a warm build; `flutter
+  run` stops and reinstalls on its own anyway), and before each launch stops a leftover instance
+  and removes that emulator's own adb forwards. Never runs on CI
 
 ### 13. `mcp-server-smoke-javascript-sse.test.ts`
 - Tests JavaScript adapter over SSE transport

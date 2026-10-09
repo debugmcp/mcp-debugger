@@ -120,12 +120,28 @@ describe.skipIf(SKIP_FLUTTER)('MCP Server Flutter Debugging Smoke Test @requires
     return res;
   }
 
+  /**
+   * `wait_for_stop` in slices under the MCP client's 60 s request cap: a cold compile or a
+   * runner build can keep the first stop away for longer than that, and a single long
+   * server-side wait then fails on the client side, not the debugger's.
+   */
+  async function waitForPause(timeoutMs: number, what: string) {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const slice = Math.min(45_000, Math.max(1_000, deadline - Date.now()));
+      const waited = await call('wait_for_stop', { timeout: slice });
+      if (waited.state === 'paused') return (await getSession())!;
+      const stillRunning = waited.pending === true || waited.state === 'running';
+      if (!stillRunning || Date.now() >= deadline) {
+        throw new Error(`${what}: wait_for_stop answered ${JSON.stringify(waited)}; output tail: ${(await output()).slice(-600)}`);
+      }
+    }
+  }
+
   /** The launch answers `pending` while the test VM compiles; the first stop is what matters. */
   async function firstStop(launched: Record<string, unknown>, timeoutMs: number) {
     if (launched.state === 'paused') return (await getSession())!;
-    const waited = await call('wait_for_stop', { timeout: timeoutMs });
-    expect(waited.state, `first stop (wait_for_stop answered ${JSON.stringify(waited)})`).toBe('paused');
-    return (await getSession())!;
+    return waitForPause(timeoutMs, 'first stop');
   }
 
   async function createSession(name: string) {
@@ -219,8 +235,7 @@ describe.skipIf(SKIP_FLUTTER)('MCP Server Flutter Debugging Smoke Test @requires
       expect((await frames())[0].line).toBe(testLine);
 
       await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
-      const atApp = await call('wait_for_stop', { timeout: 60000 });
-      expect(atApp.state, JSON.stringify(atApp)).toBe('paused');
+      await waitForPause(60000, "the app's breakpoint on the test's tap");
       const top = (await frames())[0];
       expect(top.file?.toLowerCase()).toBe(FLUTTER_EXAMPLES.main.toLowerCase());
       expect(top.line).toBe(appLine);
