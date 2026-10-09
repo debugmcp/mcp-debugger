@@ -137,6 +137,65 @@ describe('DapProxyWorker entry stop (issue #790)', () => {
     }
   });
 
+  it('holds an entry stop that names no thread before discovering one, so the resume in the same tick still cancels it', async () => {
+    vi.useFakeTimers();
+    try {
+      await configure(initPayload({ stopOnEntry: false }), entryPolicy());
+      mockDapClient.sendRequest = vi.fn(async () => ({ seq: 1, type: 'response', request_seq: 1, success: true, command: 'threads', body: { threads: [{ id: 7, name: 'main' }] } })) as typeof mockDapClient.sendRequest;
+      mockDapClient.emit('stopped', { reason: 'entry' });
+      mockDapClient.emit('continued', { threadId: 7 });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(forwardedStops()).toEqual([]);
+      expect(sent().some((m) => m.type === 'dapEvent' && m.event === 'continued')).toBe(false);
+      // A durable thread-less entry stop is still forwarded with the discovered thread.
+      mockDapClient.emit('stopped', { reason: 'entry' });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(forwardedStops()).toEqual([expect.objectContaining({ reason: 'entry', threadId: 7 })]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('swallows the superseded isolate\'s own resume, not the user\'s later one', async () => {
+    vi.useFakeTimers();
+    try {
+      await configure(initPayload({ stopOnEntry: false }), entryPolicy());
+      mockDapClient.emit('stopped', { reason: 'entry', threadId: 2 }); // a spawned isolate's entry
+      mockDapClient.emit('stopped', { reason: 'breakpoint', threadId: 1, hitBreakpointIds: [100000] }); // main's breakpoint supersedes
+      mockDapClient.emit('continued', { threadId: 2 }); // the adapter resuming the isolate it paused
+      mockDapClient.emit('continued', { threadId: 1 }); // the user's continue
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(forwardedStops().map((b) => b.reason)).toEqual(['breakpoint']);
+      const continued = sent().filter((m) => m.type === 'dapEvent' && m.event === 'continued').map((m) => (m.body as Sent).threadId);
+      expect(continued).toEqual([1]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('forgets a held entry stop when the program ends', async () => {
+    vi.useFakeTimers();
+    try {
+      const policy = entryPolicy();
+      await configure(initPayload({ stopOnEntry: false }), policy);
+      const w = worker as unknown as Record<string, unknown>;
+      (w.connectionManager as { setupEventHandlers: ReturnType<typeof vi.fn> }).setupEventHandlers.mockImplementation((client: EventEmitter, handlers: Record<string, (body?: unknown) => void>) => {
+        for (const [key, name] of [['onStopped', 'stopped'], ['onContinued', 'continued'], ['onExited', 'exited'], ['onTerminated', 'terminated']] as const) {
+          if (handlers[key]) client.on(name, handlers[key]);
+        }
+      });
+      mockDapClient.removeAllListeners();
+      (w.setupDapEventHandlers as () => void)();
+      mockDapClient.emit('stopped', { reason: 'entry', threadId: 1 });
+      mockDapClient.emit('exited', { exitCode: 0 });
+      mockDapClient.emit('terminated', {});
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(forwardedStops()).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('lets a real stop supersede a held entry stop instead of reporting both', async () => {
     vi.useFakeTimers();
     try {

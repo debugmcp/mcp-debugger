@@ -250,6 +250,12 @@ export class DapProxyWorker {
    * --pause_isolates_on_start, attach or launch) is forwarded when the hold elapses.
    */
   private heldEntryStop: { body: DebugProtocol.StoppedEvent['body']; timer: NodeJS.Timeout } | undefined;
+  /**
+   * Threads whose held entry stop a later stop superseded: the adapter's own resume for them is
+   * still on its way and is swallowed once (within the hold), so mirror clients never see a
+   * `continued` for a stop nobody saw. A spawned isolate's entry while main is at a breakpoint.
+   */
+  private readonly pendingResumeDrops = new Map<number, NodeJS.Timeout>();
   // stopped/continued reach mirror clients via the worker's own event
   // handlers (post threadId-backfill); this generic-channel forwarder covers
   // everything else. initialized is per-client handshake, never replicated.
@@ -1062,68 +1068,49 @@ export class DapProxyWorker {
       },
       onStopped: async (body) => {
         this.logger!.info(`[Worker] DAP event: stopped reason=${body.reason} threadId=${body.threadId} allThreadsStopped=${body.allThreadsStopped}`);
-        // Some adapters (e.g. Delve for Go, JDI bridge for Java) may omit threadId
-        // from stopped events or need fresh thread data. When threadId is missing,
-        // issue a 'threads' request to discover a valid thread and populate the body.
-        if (this.dapClient && typeof body.threadId !== 'number') {
-          try {
-            const resp = await this.dapClient.sendRequest<DebugProtocol.ThreadsResponse>('threads', {});
-            this.logger!.info('[Worker] Auto-discovered threads after stopped event (no threadId)', resp);
-            const threads = resp.body?.threads;
-            if (Array.isArray(threads) && threads.length > 0 && typeof threads[0]?.id === 'number') {
-              body.threadId = threads[0].id;
-              this.logger!.info(`[Worker] Set missing threadId to ${body.threadId} from threads response`);
-            }
-          } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : String(err);
-            this.logger!.warn('[Worker] Failed to auto-discover threads:', msg);
-          }
-        } else if (this.dapClient && this.adapterPolicy?.name === 'java') {
-          // JDI bridge (Java adapter) benefits from a 'threads' request after stopped
-          // to ensure thread data is fresh before stackTrace requests.
-          try {
-            const resp = await this.dapClient.sendRequest<DebugProtocol.ThreadsResponse>('threads', {});
-            this.logger!.info('[Worker] Pre-fetched threads after stopped event', resp);
-          } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : String(err);
-            this.logger!.warn('[Worker] Failed to pre-fetch threads:', msg);
-          }
-        }
         // A stop that arrives while an entry stop is held supersedes it: the program moved on.
         if (this.heldEntryStop) {
-          clearTimeout(this.heldEntryStop.timer);
-          this.heldEntryStop = undefined;
-          this.logger!.info('[Worker] A later stop supersedes the held entry stop');
+          this.supersedeHeldEntryStop();
         }
         // Adapters whose own entry stop is bookkeeping (the Dart SDK adapters pause each new
         // isolate to configure it and resume it themselves a millisecond later, issue #790):
         // hold it, and let the resume that follows cancel it — the session never sees that
         // flicker. A durable entry stop (a VM started with --pause_isolates_on_start) outlives
         // the hold and is forwarded. The entry stop a `stopOnEntry` caller asked for comes
-        // from the armed entry breakpoint below.
+        // from the armed entry breakpoint below. The hold is taken before any await: the
+        // resume arrives in the same chunk, and must find the hold in place.
         if (body.reason === 'entry' && this.adapterPolicy.suppressesAdapterEntryStop) {
           const held = body;
           const holdMs = DapProxyWorker.ENTRY_STOP_HOLD_MS;
           const timer = setTimeout(() => {
             this.heldEntryStop = undefined;
             this.logger!.info(`[Worker] Entry stop outlived the ${holdMs} ms hold: forwarding it as durable`);
-            this.forwardStop(held);
+            void this.backfillThreadId(held).then(() => this.forwardStop(held));
           }, holdMs);
           timer.unref?.();
           this.heldEntryStop = { body: held, timer };
           this.logger!.info(`[Worker] Holding the adapter's entry stop for ${holdMs} ms (policy suppressesAdapterEntryStop)`);
           return;
         }
+        await this.backfillThreadId(body);
         this.forwardStop(body);
       },
       onContinued: (body) => {
         // The adapter resuming the entry stop it reported a millisecond ago: neither reaches
-        // the session (issue #790).
+        // the session (issue #790). A held stop that named no thread cannot be matched, so any
+        // resume within its hold is taken as the adapter's.
         const held = this.heldEntryStop;
-        if (held && (body?.threadId === undefined || body.threadId === held.body.threadId || body.allThreadsContinued === true)) {
+        if (held && (body?.threadId === undefined || held.body.threadId === undefined || body.threadId === held.body.threadId || body.allThreadsContinued === true)) {
           clearTimeout(held.timer);
           this.heldEntryStop = undefined;
           this.logger!.info('[Worker] Dropping the adapter\'s own entry stop and its resume (policy suppressesAdapterEntryStop)');
+          return;
+        }
+        // The resume of an entry stop a later stop superseded: swallowed once.
+        if (typeof body?.threadId === 'number' && this.pendingResumeDrops.has(body.threadId)) {
+          clearTimeout(this.pendingResumeDrops.get(body.threadId));
+          this.pendingResumeDrops.delete(body.threadId);
+          this.logger!.info(`[Worker] Dropping the adapter's own resume of the superseded entry stop on thread ${body.threadId}`);
           return;
         }
         this.logger!.info('[Worker] DAP event: continued', body);
@@ -1150,6 +1137,7 @@ export class DapProxyWorker {
         this.sendDapEvent('breakpoint', enriched);
       },
       onExited: (body) => {
+        this.dropHeldEntryStop('the program exited');
         // No stop survives the debuggee's end: the pre-detach resume (issue
         // #763) must not chase a target that is gone.
         this.lastStop = null;
@@ -1165,6 +1153,7 @@ export class DapProxyWorker {
         });
       },
       onTerminated: (body) => {
+        this.dropHeldEntryStop('the session terminated');
         // No stop survives the debuggee's end: the pre-detach resume (issue
         // #763) must not chase a target that is gone.
         this.lastStop = null;
@@ -1265,6 +1254,69 @@ export class DapProxyWorker {
       return body;
     }
     return { ...body, breakpoint: { ...bp, source: { path: file } } };
+  }
+
+  /**
+   * Some adapters (Delve, the JDI bridge) omit `threadId` from stopped events or want fresh
+   * thread data: a `threads` request discovers a thread for the body, or pre-fetches for Java.
+   */
+  private async backfillThreadId(body: DebugProtocol.StoppedEvent['body']): Promise<void> {
+    if (!this.dapClient) {
+      return;
+    }
+    if (typeof body.threadId !== 'number') {
+      try {
+        const resp = await this.dapClient.sendRequest<DebugProtocol.ThreadsResponse>('threads', {});
+        this.logger!.info('[Worker] Auto-discovered threads after stopped event (no threadId)', resp);
+        const threads = resp.body?.threads;
+        if (Array.isArray(threads) && threads.length > 0 && typeof threads[0]?.id === 'number') {
+          body.threadId = threads[0].id;
+          this.logger!.info(`[Worker] Set missing threadId to ${body.threadId} from threads response`);
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger!.warn('[Worker] Failed to auto-discover threads:', msg);
+      }
+    } else if (this.adapterPolicy?.name === 'java') {
+      // JDI bridge (Java adapter) benefits from a 'threads' request after stopped
+      // to ensure thread data is fresh before stackTrace requests.
+      try {
+        const resp = await this.dapClient.sendRequest<DebugProtocol.ThreadsResponse>('threads', {});
+        this.logger!.info('[Worker] Pre-fetched threads after stopped event', resp);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger!.warn('[Worker] Failed to pre-fetch threads:', msg);
+      }
+    }
+  }
+
+  /** A later stop superseded the held entry stop; its thread's own resume is still due. */
+  private supersedeHeldEntryStop(): void {
+    const held = this.heldEntryStop;
+    if (!held) {
+      return;
+    }
+    clearTimeout(held.timer);
+    this.heldEntryStop = undefined;
+    const threadId = held.body.threadId;
+    if (typeof threadId === 'number') {
+      clearTimeout(this.pendingResumeDrops.get(threadId));
+      const forget = setTimeout(() => this.pendingResumeDrops.delete(threadId), DapProxyWorker.ENTRY_STOP_HOLD_MS);
+      forget.unref?.();
+      this.pendingResumeDrops.set(threadId, forget);
+    }
+    this.logger!.info(`[Worker] A later stop supersedes the held entry stop${typeof threadId === 'number' ? ` (thread ${threadId}'s resume will be swallowed)` : ''}`);
+  }
+
+  /** Nothing to forward once the program is gone. */
+  private dropHeldEntryStop(why: string): void {
+    const held = this.heldEntryStop;
+    if (!held) {
+      return;
+    }
+    clearTimeout(held.timer);
+    this.heldEntryStop = undefined;
+    this.logger!.info(`[Worker] Dropping the held entry stop: ${why}`);
   }
 
   /**
