@@ -3046,9 +3046,21 @@ describe('SessionManager - DAP Operations', () => {
       const session = await pausedSessionWithFrames(CPP_ATTACH_FRAMES);
       (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => RustAdapterPolicy;
 
+      // Default view (issue #824): the LLDB filter hides the native frames —
+      // the stop sits in one of them, so it is disclosed as the paused frame —
+      // and the program's frame is what remains.
       const result = await sessionManager.getStackTraceDetailed(session.id);
+      const visible = new Map(result.frames.map(f => [f.name, f]));
+      expect(visible.get('main')).toMatchObject({ file: 'C:\\work\\examples\\cpp\\pause_test.cpp' });
+      expect(visible.get('main')?.unresolvedSource).toBeUndefined();
+      expect(visible.has('WaitForSingleObjectEx')).toBe(false);
+      expect(visible.has('BaseThreadInitThunk')).toBe(false);
+      expect(result.hiddenFrameCount).toBeGreaterThanOrEqual(2);
+      expect(result.pausedFrame?.frame.name).toBe('NtWaitForSingleObject');
 
-      const byName = new Map(result.frames.map(f => [f.name, f]));
+      // includeInternals: the @symbol frames are back, still flagged.
+      const full = await sessionManager.getStackTraceDetailed(session.id, undefined, true);
+      const byName = new Map(full.frames.map(f => [f.name, f]));
       expect(byName.get('NtWaitForSingleObject')).toMatchObject({ file: '@NtWaitForSingleObject', unresolvedSource: true });
       expect(byName.get('BaseThreadInitThunk')).toMatchObject({ file: '@BaseThreadInitThunk', unresolvedSource: true });
       expect(byName.get('main')).toMatchObject({ file: 'C:\\work\\examples\\cpp\\pause_test.cpp' });

@@ -324,10 +324,51 @@ describe('CppAdapterPolicy', () => {
       { desc: 'normal user frame', name: 'busy_wait()', file: '/home/user/project/pause_test.cpp', internal: false },
       { desc: 'plain user main', name: 'main', file: '/home/user/project/main.cpp', internal: false },
       { desc: 'user frame with no source but non-matching name', name: 'stripped_user_fn', file: '<unknown_source>', internal: false },
+      // Windows (issue #824). CodeLLDB's path-less frames reach the filter with
+      // the source *name* in `file` — '@symbol' — so "no user source" must
+      // recognise that label; the CRT start-up and the NT / kernel32 /
+      // winpthreads wait plumbing hide under the same name + no-user-source rule.
+      { desc: 'Windows: ntdll syscall stub with @symbol source', name: 'NtWaitForSingleObject', file: '@NtWaitForSingleObject', internal: true },
+      { desc: 'Windows: kernel32 wait with @symbol source', name: 'WaitForSingleObjectEx', file: '@WaitForSingleObjectEx', internal: true },
+      { desc: 'Windows: winpthreads frame with @symbol source', name: 'pthread_cond_timedwait_relative_np', file: '@pthread_cond_timedwait_relative_np', internal: true },
+      { desc: 'Windows: MinGW CRT start-up', name: '__tmainCRTStartup', file: '@__tmainCRTStartup', internal: true },
+      { desc: 'Windows: CRT entry whose source label is .l_start', name: 'mainCRTStartup', file: '@.l_start', internal: true },
+      { desc: 'Windows: kernel32 thread start thunk', name: 'BaseThreadInitThunk', file: '@BaseThreadInitThunk', internal: true },
+      { desc: 'Windows: ntdll thread start', name: 'RtlUserThreadStart', file: '@RtlUserThreadStart', internal: true },
+      { desc: 'Windows: break-in thread top frame (a pause lands here)', name: 'DbgBreakPoint', file: '@DbgBreakPoint', internal: true },
+      { desc: 'Windows: break-in thread entry', name: 'DbgUiRemoteBreakin', file: '@DbgUiRemoteBreakin', internal: true },
+      { desc: 'Windows: MSVC CRT start-up under the vctools source tree', name: '__scrt_common_main_seh', file: 'D:\\a\\_work\\1\\s\\src\\vctools\\crt\\vcstartup\\src\\startup\\exe_common.inl', internal: true },
+      { desc: 'Windows: kernel32 Sleep without source', name: 'Sleep', file: '<unknown_source>', internal: true },
+      { desc: 'Windows: nanosleep from the MinGW system header', name: 'nanosleep', file: 'C:\\msys64\\mingw64\\include\\pthread_time.h', internal: true },
+      { desc: 'Windows: user function named Sleep with workspace source', name: 'Sleep', file: 'C:\\proj\\src\\timer.cpp', internal: false },
+      { desc: 'Windows: user main with a path', name: 'main', file: 'C:\\work\\examples\\cpp\\pause_test.cpp', internal: false },
+      { desc: 'Windows: std sleep_for from the MinGW C++ header (name not matched)', name: 'std::this_thread::sleep_for<long long, std::ratio<1, 1000>>', file: 'C:\\msys64\\mingw64\\include\\c++\\15.2.0\\bits\\this_thread_sleep.h', internal: false },
+      { desc: 'stripped user frame with an @symbol label but a non-matching name', name: 'stripped_user_fn', file: '@stripped_user_fn', internal: false },
     ];
 
     it.each(cases)('isInternalFrame: $desc -> $internal', ({ name, file, internal }) => {
       expect(CppAdapterPolicy.isInternalFrame!(frame(name, file))).toBe(internal);
+    });
+
+    it('filterStackFrames reduces the measured Windows pause stack to the program (issue #824)', () => {
+      // examples/cpp/pause_test.cpp paused in its sleep loop, as CodeLLDB 1.11.8
+      // reports it on Windows 11 with MSYS2 g++ (the issue's measurement).
+      const frames = [
+        frame('NtWaitForSingleObject', '@NtWaitForSingleObject', 1),
+        frame('WaitForSingleObjectEx', '@WaitForSingleObjectEx', 2),
+        frame('pthread_cond_timedwait_relative_np', '@pthread_cond_timedwait_relative_np', 3),
+        frame('pthread_testcancel', '@pthread_testcancel', 4),
+        frame('pthread_mutexattr_setprioceiling', '@pthread_mutexattr_setprioceiling', 5),
+        frame('nanosleep', 'C:\\msys64\\mingw64\\include\\pthread_time.h', 6),
+        frame('std::this_thread::sleep_for<long long, std::ratio<1, 1000>>', 'C:\\msys64\\mingw64\\include\\c++\\15.2.0\\bits\\this_thread_sleep.h', 7),
+        frame('main', 'C:\\work\\examples\\cpp\\pause_test.cpp', 8),
+        frame('__tmainCRTStartup', '@__tmainCRTStartup', 9),
+        frame('mainCRTStartup', '@.l_start', 10),
+        frame('BaseThreadInitThunk', '@BaseThreadInitThunk', 11),
+        frame('RtlUserThreadStart', '@RtlUserThreadStart', 12),
+      ];
+      const filtered = CppAdapterPolicy.filterStackFrames!(frames, false);
+      expect(filtered.map((f) => f.id)).toEqual([7, 8]);
     });
 
     it('filterStackFrames hides internal frames and keeps user frames in order', () => {

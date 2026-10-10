@@ -556,6 +556,17 @@ describe('RustAdapterPolicy', () => {
       { desc: 'normal user frame', name: 'app::run', file: '/home/user/project/src/main.rs', internal: false },
       { desc: 'rust std frame with /rustc/ source but non-wrapper name', name: 'std::thread::sleep', file: '/rustc/abc123/library/std/src/thread/mod.rs', internal: false },
       { desc: 'user frame with no source but non-matching name', name: 'stripped_user_fn', file: '<unknown_source>', internal: false },
+      // Windows (issue #824): CodeLLDB's path-less frames carry '@symbol' in `file`.
+      { desc: 'Windows: ntdll syscall stub with @symbol source', name: 'NtWaitForSingleObject', file: '@NtWaitForSingleObject', internal: true },
+      { desc: 'Windows: MinGW CRT start-up with @symbol source', name: '__tmainCRTStartup', file: '@__tmainCRTStartup', internal: true },
+      { desc: 'Windows: kernel32 thread start thunk', name: 'BaseThreadInitThunk', file: '@BaseThreadInitThunk', internal: true },
+      { desc: 'Windows: ntdll thread start', name: 'RtlUserThreadStart', file: '@RtlUserThreadStart', internal: true },
+      { desc: 'Windows: MSVC CRT invoke_main under the vctools source tree', name: 'invoke_main', file: 'D:\\a\\_work\\1\\s\\src\\vctools\\crt\\vcstartup\\src\\startup\\exe_common.inl', internal: true },
+      { desc: 'Windows: kernel32 SleepEx without source', name: 'SleepEx', file: '', internal: true },
+      { desc: 'Windows: user function named Sleep with workspace source', name: 'Sleep', file: 'C:\\proj\\src\\timer.rs', internal: false },
+      { desc: 'glibc nptl pthread frame under the build path', name: 'pthread_cond_wait', file: './nptl/pthread_cond_wait.c', internal: true },
+      { desc: 'user function named pthread_helper with workspace source', name: 'pthread_helper', file: '/home/user/project/src/sync.rs', internal: false },
+      { desc: 'rust std frame with a /rustc/ source and a non-wrapper name stays', name: 'std::sys::pal::windows::thread::sleep', file: '/rustc/abc123/library/std/src/sys/pal/windows/thread.rs', internal: false },
     ];
 
     it.each(cases)('isInternalFrame: $desc -> $internal', ({ name, file, internal }) => {

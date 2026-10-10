@@ -165,6 +165,11 @@ describe('isCobolInternalFrame', () => {
     expect(isCobolInternalFrame(frame(9, '@_start', '<unknown_source>'))).toBe(true);
     expect(isCobolInternalFrame(frame(9, '@__libc_start_call_main', ''))).toBe(true);
     expect(isCobolInternalFrame(frame(9, '___lldb_unnamed_symbol1234', ''))).toBe(true);
+    // Windows: the MinGW CRT start-up and the kernel32 thread thunk arrive with
+    // the '@symbol' label as their file (issue #824).
+    expect(isCobolInternalFrame(frame(9, '__tmainCRTStartup', '@__tmainCRTStartup'))).toBe(true);
+    expect(isCobolInternalFrame(frame(9, 'BaseThreadInitThunk', '@BaseThreadInitThunk'))).toBe(true);
+    expect(isCobolInternalFrame(frame(9, 'NtWaitForSingleObject', '@NtWaitForSingleObject'))).toBe(true);
   });
 
   it('hides libcob runtime frames (cob_*) that have no COBOL source', () => {

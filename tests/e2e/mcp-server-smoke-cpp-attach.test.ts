@@ -165,6 +165,7 @@ describe.skipIf(SKIP_CPP)('MCP Server C/C++ Attach Smoke Test @requires-cpp', ()
       })) as {
         success?: boolean;
         stackFrames?: Array<{ name?: string; unresolvedSource?: boolean }>;
+        hiddenFrames?: number;
         note?: string;
         stopReason?: string;
         lastStop?: { reason?: string; rawReason?: string; description?: string };
@@ -177,10 +178,15 @@ describe.skipIf(SKIP_CPP)('MCP Server C/C++ Attach Smoke Test @requires-cpp', ()
       const stackFiles = (stackResponse.stackFrames as Array<{ file?: string }>).map(f => f.file ?? '');
       expect(stackFiles.some(f => f.endsWith('pause_test.cpp')), `expected pause_test.cpp in ${JSON.stringify(stackFiles)}`).toBe(true);
       // Frames CodeLLDB names by symbol (`@NtWaitForSingleObject`, the CRT start-up)
-      // have no source; the note must explain them as native frames, never with
-      // js-debug's sourceMaps remedy (issue #816).
+      // have no source. On Windows the LLDB filter hides them by default and the
+      // note says so (issue #824); any that stay visible must be explained as
+      // native frames, never with js-debug's sourceMaps remedy (issue #816).
       const note = stackResponse.note ?? '';
       expect(note).not.toMatch(/sourceMaps|source-mapped/);
+      if (process.platform === 'win32') {
+        expect(stackResponse.hiddenFrames, JSON.stringify(stackResponse.stackFrames)).toBeGreaterThan(0);
+        expect(note).toMatch(/hidden/);
+      }
       if ((stackResponse.stackFrames ?? []).some(f => f.unresolvedSource)) {
         expect(note).toMatch(/native frames without debug info/);
       }
