@@ -6,8 +6,12 @@
  * This adapter uses netcoredbg (Samsung, open-source, MIT license).
  * Supports .NET Core / .NET 5+ out of the box.
  *
- * netcoredbg natively supports DAP over TCP via --server=PORT --interpreter=vscode.
- * No bridge process is needed.
+ * netcoredbg is reached through a TCP-to-stdio bridge on every platform
+ * (`netcoredbg-bridge.ts`): its own `--server=PORT --interpreter=vscode` mode
+ * drops the TCP connection after the DAP initialize sequence (a bug found on
+ * Windows that affects all platforms), so the bridge spawns netcoredbg in
+ * stdio mode and exposes the TCP socket the proxy connects to. See
+ * docs/dotnet/README.md.
  *
  * ## PDB Conversion (convertPdbsToTemp)
  *
