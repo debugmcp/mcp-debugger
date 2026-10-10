@@ -628,7 +628,7 @@ Blocks until the session next pauses or ends, then says why and where. This is t
 
 **Parameters:**
 - `sessionId` (string, required): The ID of the debug session.
-- `timeout` (number, optional): How long to wait, in milliseconds (default `30000`, max `600000`; larger values are clamped). Not a limit on the program: it keeps running under the debugger either way, and its breakpoints and exception filters stay armed. Your MCP client may enforce its own request timeout (60 s is a common default) — keep `timeout` below it (45 s slices are safe under a 60 s cap) and call again on `pending: true`; a wait that must outlast a slow build (a first Flutter Android build, say) is several slices, not one long `timeout`, or the client times out while the server is still waiting.
+- `timeout` (number, optional): How long to wait, in milliseconds (default `30000`, max `600000`; larger values are clamped). Not a limit on the program: it keeps running under the debugger either way, and its breakpoints and exception filters stay armed. Your MCP client may enforce its own request timeout (60 s is a common default) — keep `timeout` below it (45 s slices are safe under a 60 s cap) and call again on `pending: true`. A wait that must outlast a slow build (a first Flutter Android build, say) is several slices, not one long `timeout`: one long call fails on the client side first (`-32001`), and only that call — the program and its breakpoints are untouched, so the next call resumes the wait.
 
 **Response** (the session is paused — it already was, or a stop arrived during the wait):
 ```json
