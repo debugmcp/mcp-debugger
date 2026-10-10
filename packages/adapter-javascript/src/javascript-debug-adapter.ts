@@ -227,6 +227,11 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     'autoAttachChildProcesses'
   ] as const;
 
+  // processId is consumed by the inspector activation (#871) and never reaches
+  // js-debug: consumed, not dropped (the attach key diff would otherwise
+  // report it as ignored, issue #903).
+  readonly consumedAttachKeys = ['processId'] as const;
+
   private state: AdapterState = AdapterState.UNINITIALIZED;
   private readonly dependencies: AdapterDependencies;
 

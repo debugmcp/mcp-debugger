@@ -313,6 +313,15 @@ export class DartDebugAdapter extends EventEmitter implements IDebugAdapter {
     } else if (deviceId !== undefined) {
       this.note('deviceId', `ignored: only Flutter runners use deviceId (this attach uses ${detection.runner})`);
     }
+    // Nothing to attach to is refused here, by name (issue #903): sent on, the
+    // SDK adapter would fail with its own words about a missing URI.
+    if (out.vmServiceUri === undefined && out.vmServiceInfoFile === undefined) {
+      throw new AdapterError(
+        'Dart attach needs adapterConfig.vmServiceUri or adapterConfig.vmServiceInfoFile (or host and port, for a VM started with '
+        + '--disable-service-auth-codes); the request named none of them.',
+        AdapterErrorCode.ENVIRONMENT_INVALID,
+      );
+    }
     return out;
   }
 

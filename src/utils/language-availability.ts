@@ -7,6 +7,7 @@
  * 'none' (enforced in SessionManagerOperations.attachToProcess).
  */
 import type {
+  AttachAddressing,
   AttachMechanism,
   FactoryLoadResult,
   FactoryValidationResult,
@@ -22,6 +23,11 @@ export interface ModeAvailability {
   available: boolean;
   /** Present iff available === false */
   reason?: string;
+  /**
+   * Attach only: the addressing forms attach_to_process may use for this
+   * language (issue #903) — present when the adapter declares them.
+   */
+  by?: readonly AttachAddressing[];
 }
 
 export interface LanguageModes {
@@ -35,6 +41,8 @@ export interface ModeAvailabilityInput {
   installed: boolean;
   disabled: boolean;
   attach: AttachMechanism;
+  /** The declared attach addressing forms (issue #903), when known */
+  attachBy?: readonly AttachAddressing[];
   /**
    * Toolchain probe (IAdapterFactory.validate). Only called when the adapter
    * is installed and not disabled. Optional: absent means "assume valid".
@@ -146,6 +154,8 @@ export interface LanguageAdapterEntry {
   packageName: string;
   installed: boolean;
   attach?: AttachMechanism;
+  /** The declared attach addressing forms (issue #903), from the loader's known list */
+  attachBy?: readonly AttachAddressing[];
 }
 
 /**
@@ -245,9 +255,13 @@ export async function probeLanguageEntry(
   // A malformed factory's getMetadata must not take the probe down — fall
   // back to the registry entry's attach declaration, but leave a breadcrumb.
   let attach = entryAttach;
+  let attachBy = entry.attachBy;
   if (factory) {
     try {
-      attach = normalizeAttach(factory.getMetadata().modes?.attach, entryAttach);
+      const modes = factory.getMetadata().modes;
+      attach = normalizeAttach(modes?.attach, entryAttach);
+      const declared = modes?.attachBy;
+      attachBy = Array.isArray(declared) ? declared : entry.attachBy;
     } catch (error) {
       attach = entryAttach;
       options.logger?.warn?.(
@@ -274,6 +288,7 @@ export async function probeLanguageEntry(
     installed: entry.installed,
     disabled,
     attach,
+    attachBy,
     loadError: factoryLoadError,
     validate: probeable
       ? async () => {
@@ -304,12 +319,17 @@ export async function computeModeAvailability(input: ModeAvailabilityInput): Pro
   const { language, packageName, installed, disabled, attach } = input;
 
   const attachSupported = attach !== 'none';
+  // The declared addressing forms ride on every supported attach entry, even
+  // an unavailable one (issue #903): what a language *would* accept is worth
+  // knowing before installing it.
+  const withForms = (availability: ModeAvailability): ModeAvailability =>
+    availability.supported && input.attachBy !== undefined ? { ...availability, by: input.attachBy } : availability;
 
   if (disabled) {
     const reason = ErrorMessages.modeUnavailableReason.disabled(language);
     return {
       launch: { supported: true, available: false, reason },
-      attach: { supported: attachSupported, available: false, reason }
+      attach: withForms({ supported: attachSupported, available: false, reason })
     };
   }
 
@@ -317,7 +337,7 @@ export async function computeModeAvailability(input: ModeAvailabilityInput): Pro
     const reason = ErrorMessages.modeUnavailableReason.notInstalled(packageName);
     return {
       launch: { supported: true, available: false, reason },
-      attach: { supported: attachSupported, available: false, reason }
+      attach: withForms({ supported: attachSupported, available: false, reason })
     };
   }
 
@@ -329,7 +349,7 @@ export async function computeModeAvailability(input: ModeAvailabilityInput): Pro
     return {
       launch: { supported: true, available: false, reason },
       attach: attachSupported
-        ? { supported: true, available: false, reason }
+        ? withForms({ supported: true, available: false, reason })
         : { supported: false, available: false, reason: ErrorMessages.modeUnavailableReason.attachNotImplemented(language) }
     };
   }
@@ -376,5 +396,5 @@ export async function computeModeAvailability(input: ModeAvailabilityInput): Pro
       break;
   }
 
-  return { launch, attach: attachAvailability };
+  return { launch, attach: withForms(attachAvailability) };
 }

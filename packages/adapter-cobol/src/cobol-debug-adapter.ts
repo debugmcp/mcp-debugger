@@ -215,7 +215,9 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
   // reach the engine (forwarded with a warning); this list powers recognition + typo hints (#466).
   readonly supportedAttachKeys = [...COBOL_FORWARDED_ATTACH_KEYS, ...COBOL_CONSUMED_ATTACH_KEYS];
 
-  readonly consumedAttachKeys = COBOL_CONSUMED_ATTACH_KEYS;
+  // processId leaves the transform as CodeLLDB's `pid`: consumed, not dropped
+  // (the attach key diff would otherwise report it as ignored, issue #903).
+  readonly consumedAttachKeys = [...COBOL_CONSUMED_ATTACH_KEYS, 'processId'] as const;
 
   private state: AdapterState = AdapterState.UNINITIALIZED;
   private dependencies: AdapterDependencies;

@@ -180,6 +180,17 @@ export interface AdapterDependencies {
 export type AttachMechanism = 'none' | 'direct-connect' | 'spawn';
 
 /**
+ * The addressing forms an attach_to_process request may use (issue #903).
+ * - 'processId': the PID of a process on this host, attached to directly
+ *   (CodeLLDB, netcoredbg) or activated first (a Node inspector, #871)
+ * - 'port': a host:port debug endpoint (debugpy, rdbg, JDWP, an open inspector)
+ * - 'adapterConfig': a debugger URI under adapterConfig (dart's vmServiceUri /
+ *   vmServiceInfoFile, js-debug's websocketAddress); the adapter's transform
+ *   decides the "nothing given" case for a language that accepts this
+ */
+export type AttachAddressing = 'processId' | 'port' | 'adapterConfig';
+
+/**
  * Per-mode capability declaration for an adapter.
  */
 export interface AdapterModes {
@@ -188,6 +199,23 @@ export interface AdapterModes {
 
   /** How the adapter implements attach mode */
   attach: AttachMechanism;
+
+  /**
+   * The addressing forms attach accepts — the attach-addressing contract
+   * (issue #903). The core refuses any other form by name before the session
+   * changes state, instead of the adapter's transform dropping it silently.
+   * Required when `attach` is not 'none'; absent there means undeclared, and
+   * the gate is skipped with a warning (the pre-contract behaviour).
+   */
+  attachBy?: readonly AttachAddressing[];
+
+  /**
+   * One-line remedies the core quotes when a request uses a top-level form
+   * this adapter does not accept: `processId` for a port-only language
+   * ("start the JVM with -agentlib:jdwp=… and pass that port"), `port` for a
+   * PID-only one. Plain text, no markup.
+   */
+  attachHints?: { readonly processId?: string; readonly port?: string };
 }
 
 /**
@@ -282,6 +310,9 @@ export interface AdapterManifestEntry {
 
   /** How the adapter implements attach; absent means unknown (treat as 'none') */
   attach?: AttachMechanism;
+
+  /** The addressing forms attach accepts (issue #903); absent when attach is 'none' or undeclared */
+  attachBy?: readonly AttachAddressing[];
 }
 
 /**

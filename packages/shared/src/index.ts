@@ -66,6 +66,7 @@ export type {
   AdapterMetadata,
   AdapterModes,
   AttachMechanism,
+  AttachAddressing,
   AdapterInfo,
   AdapterManifestEntry,
   FactoryLoadResult,
@@ -154,6 +155,7 @@ export type {
   ExceptionBreakMode,
   SessionOutputEntry,
   SessionFailureDiagnostics,
+  AttachLocality,
 
   // Debug info types
   Variable,
@@ -277,6 +279,7 @@ export {
 } from './utils/secret-redaction.js';
 export type { SecretRule, RedactionHit, RedactionResult } from './utils/secret-redaction.js';
 export { LineBuffer } from './utils/line-buffer.js';
+export { isLoopbackHost } from './utils/loopback-host.js';
 // Doctor-row helpers for IAdapterFactory.describeToolchain (issue #435).
 export { toolchainComponent, normalizeToolchainDescription, probeWithinBudget } from './utils/toolchain-description.js';
 export { toSourceBreakpoint, toWireSourceBreakpoint, type BreakpointFields, toFunctionBreakpoint, type FunctionBreakpointFields } from './utils/to-source-breakpoint.js';

@@ -1,4 +1,4 @@
-import { IAdapterFactory, AttachMechanism, AdapterManifestEntry } from '@debugmcp/shared';
+import { IAdapterFactory, AttachMechanism, AttachAddressing, AdapterManifestEntry } from '@debugmcp/shared';
 import type { Logger as WinstonLogger } from 'winston';
 import { createLogger } from '../utils/logger.js';
 import { createRequire } from 'module';
@@ -271,18 +271,23 @@ export class AdapterLoader {
    * List all potentially available adapters (known list for now)
    */
   async listAvailableAdapters(): Promise<AdapterMetadata[]> {
+    // `attach` and `attachBy` mirror each factory's getMetadata().modes (the
+    // attach-addressing contract, issue #903); adapter-attach-contract.test.ts
+    // fails when the two drift.
+    const PID: AttachAddressing[] = ['processId'];
+    const PORT: AttachAddressing[] = ['port'];
     const known: Array<Omit<AdapterMetadata, 'installed'>> = [
       { name: 'mock', packageName: '@debugmcp/adapter-mock', description: 'Mock adapter for testing', attach: 'none' },
-      { name: 'python', packageName: '@debugmcp/adapter-python', description: 'Python debugger using debugpy', attach: 'direct-connect' },
-      { name: 'javascript', packageName: '@debugmcp/adapter-javascript', description: 'JavaScript/TypeScript debugger using js-debug', attach: 'spawn' },
-      { name: 'ruby', packageName: '@debugmcp/adapter-ruby', description: 'Ruby debugger using rdbg', attach: 'direct-connect' },
+      { name: 'python', packageName: '@debugmcp/adapter-python', description: 'Python debugger using debugpy', attach: 'direct-connect', attachBy: PORT },
+      { name: 'javascript', packageName: '@debugmcp/adapter-javascript', description: 'JavaScript/TypeScript debugger using js-debug', attach: 'spawn', attachBy: ['processId', 'port', 'adapterConfig'] },
+      { name: 'ruby', packageName: '@debugmcp/adapter-ruby', description: 'Ruby debugger using rdbg', attach: 'direct-connect', attachBy: PORT },
       { name: 'rust', packageName: '@debugmcp/adapter-rust', description: 'Rust debugger using CodeLLDB', attach: 'none' },
       { name: 'go', packageName: '@debugmcp/adapter-go', description: 'Go debugger using Delve', attach: 'none' },
-      { name: 'java', packageName: '@debugmcp/adapter-java', description: 'Java debugger using JDI bridge', attach: 'spawn' },
-      { name: 'dotnet', packageName: '@debugmcp/adapter-dotnet', description: '.NET/C# debugger using netcoredbg', attach: 'spawn' },
-      { name: 'cpp', packageName: '@debugmcp/adapter-cpp', description: 'C/C++ debugger using CodeLLDB', attach: 'spawn' },
-      { name: 'cobol', packageName: '@debugmcp/adapter-cobol', description: 'COBOL debugger using GnuCOBOL and CodeLLDB', attach: 'spawn' },
-      { name: 'dart', packageName: '@debugmcp/adapter-dart', description: 'Dart and Flutter debugging via the SDK debug adapters (dart debug_adapter / flutter debug-adapter)', attach: 'spawn' },
+      { name: 'java', packageName: '@debugmcp/adapter-java', description: 'Java debugger using JDI bridge', attach: 'spawn', attachBy: PORT },
+      { name: 'dotnet', packageName: '@debugmcp/adapter-dotnet', description: '.NET/C# debugger using netcoredbg', attach: 'spawn', attachBy: PID },
+      { name: 'cpp', packageName: '@debugmcp/adapter-cpp', description: 'C/C++ debugger using CodeLLDB', attach: 'spawn', attachBy: PID },
+      { name: 'cobol', packageName: '@debugmcp/adapter-cobol', description: 'COBOL debugger using GnuCOBOL and CodeLLDB', attach: 'spawn', attachBy: PID },
+      { name: 'dart', packageName: '@debugmcp/adapter-dart', description: 'Dart and Flutter debugging via the SDK debug adapters (dart debug_adapter / flutter debug-adapter)', attach: 'spawn', attachBy: ['port', 'adapterConfig'] },
     ];
 
     const results: AdapterMetadata[] = [];
@@ -292,8 +297,13 @@ export class AdapterLoader {
       // installed=false in the metadata
       const installed = await this.isAdapterAvailable(a.name);
       // Prefer a genuinely-loaded factory's own declaration over the static known-list value
-      const factoryAttach = installed ? this.cache.get(a.name)?.getMetadata().modes?.attach : undefined;
-      results.push({ ...a, installed, attach: factoryAttach ?? a.attach });
+      const factoryModes = installed ? this.cache.get(a.name)?.getMetadata().modes : undefined;
+      results.push({
+        ...a,
+        installed,
+        attach: factoryModes?.attach ?? a.attach,
+        attachBy: factoryModes?.attachBy ?? a.attachBy
+      });
     }
     return results;
   }

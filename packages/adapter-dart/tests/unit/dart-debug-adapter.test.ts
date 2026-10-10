@@ -184,6 +184,11 @@ describe('DartDebugAdapter attach', () => {
     await expect(a.transformAttachConfig(attach({ processId: 1234 }))).rejects.toThrow(/vmServiceUri/);
   });
 
+  it('rejects an attach that names no URI, info file or host:port, by name (issue #903)', async () => {
+    const a = new DartDebugAdapter(deps(), hooks());
+    await expect(a.transformAttachConfig(attach({}))).rejects.toThrow(/needs adapterConfig\.vmServiceUri or adapterConfig\.vmServiceInfoFile/);
+  });
+
   it('rejects attach for the test runners', async () => {
     const a = new DartDebugAdapter(deps(), hooks());
     await expect(a.transformAttachConfig(attach({ vmServiceUri: 'ws://x/ws', runner: 'dart-test' }))).rejects.toThrow(/attach/i);

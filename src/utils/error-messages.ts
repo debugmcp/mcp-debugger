@@ -52,6 +52,19 @@ const DEBUGGER_OFF_FOR_LAUNCH =
 const loggingClause = (loggingSummary: string): string =>
   `${loggingSummary} ${loggingSummary.startsWith('1 ') ? 'is' : 'are'} armed (read get_output for the messages)`;
 
+/** The attach addressing forms a factory declares (`AttachAddressing` in @debugmcp/shared, issue #903). */
+type AttachForm = 'processId' | 'port' | 'adapterConfig';
+
+const ATTACH_FORM_WORDS: Record<AttachForm, string> = {
+  processId: 'processId (the PID of a process on this host)',
+  port: 'port (with host for a remote endpoint)',
+  adapterConfig: 'a debugger URI under adapterConfig'
+};
+
+/** "processId (…) or port (…)" — the forms a language accepts, for a refusal. */
+const describeAttachForms = (accepted: readonly AttachForm[]): string =>
+  accepted.map((form) => ATTACH_FORM_WORDS[form]).join(' or ');
+
 export const ErrorMessages = {
   /**
    * Error message for DAP request timeouts
@@ -404,6 +417,41 @@ export const ErrorMessages = {
     `Attach mode is not implemented for '${language}'. ` +
     `Use start_debugging to launch the program instead. ` +
     `See list_supported_languages for per-mode availability.`,
+
+  /**
+   * Error message for an attach request that uses an addressing form the
+   * language's adapter does not accept (issue #903)
+   * Occurs when: attach_to_process names processId, port or a remote host for
+   * a language whose factory metadata (modes.attachBy) does not list that
+   * form — before any session state changes, so the session stays usable
+   * Used in: src/session/attach/attach-addressing.ts
+   * @param language - The session's language
+   * @param form - The request key that is not accepted
+   * @param accepted - The forms the language declares
+   * @param hint - The adapter's remedy for this form, when it declares one
+   */
+  attachAddressingNotAccepted: (
+    language: string,
+    form: 'processId' | 'port' | 'host',
+    accepted: readonly AttachForm[],
+    hint?: string
+  ) =>
+    `'${language}' does not attach by ${form}${hint ? ` — ${hint}` : ''}. ` +
+    `Its attach_to_process takes: ${describeAttachForms(accepted)}.`,
+
+  /**
+   * Error message for an attach request that names no addressing at all
+   * (issue #903)
+   * Occurs when: attach_to_process carries neither processId nor port for a
+   * language whose only forms are those two — the adapter would otherwise
+   * fail later with its own defaults (JDWP "Port is required", say)
+   * Used in: src/session/attach/attach-addressing.ts
+   * @param language - The session's language
+   * @param accepted - The forms the language declares
+   */
+  attachAddressingMissing: (language: string, accepted: readonly AttachForm[]) =>
+    `'${language}' attach needs ${describeAttachForms(accepted)}; ` +
+    `the request named neither processId nor port.`,
 
   /**
    * Hint appended to launch-toolchain failures on attach-capable languages

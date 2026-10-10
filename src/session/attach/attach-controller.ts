@@ -20,6 +20,8 @@ import {
   isTerminalSessionState,
   type ExceptionBreakMode
 } from '@debugmcp/shared';
+import type { AttachLocality } from '@debugmcp/shared';
+import { attachLocalityOf, classifyAttachAddressing } from './attach-addressing.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import type { AttachResultData, CustomLaunchRequestArguments, DebugResult } from '../session-manager-core.js';
 import type { AttachContext } from '../operations-context.js';
@@ -141,6 +143,13 @@ export class AttachController {
     // runtime guard stays for partial registry doubles, but skipping the
     // gate must never be silent — that is the fail-open degradation the
     // typed surface exists to expose.
+    const addressing = {
+      processId: attachConfig.processId,
+      port: attachConfig.port,
+      host: attachConfig.host,
+      adapterConfig
+    };
+    let attachLocality: AttachLocality = 'unknown';
     if (typeof this.ctx.adapterRegistry.getFactoryMetadata === 'function') {
       const factoryMeta = await this.ctx.adapterRegistry.getFactoryMetadata(session.language).catch(() => undefined);
       if (factoryMeta?.modes?.attach === 'none') {
@@ -150,11 +159,28 @@ export class AttachController {
           error: ErrorMessages.attachModeNotSupported(session.language)
         };
       }
+      // The attach-addressing contract (issue #903): a form the language's
+      // factory does not declare is refused here — by name, with the adapter's
+      // own remedy and the forms it does take — before any state changes, so
+      // the session stays usable. Until this gate the top-level keys reached
+      // each adapter's transform, which dropped what it did not use without a
+      // word (#450, #466, #871, #895).
+      const verdict = classifyAttachAddressing(session.language, addressing, factoryMeta?.modes);
+      if (!verdict.ok) {
+        return { success: false, state: session.state, error: verdict.error };
+      }
+      if (factoryMeta?.modes !== undefined && !verdict.declared) {
+        this.ctx.logger.warn(
+          `[SessionManager] '${session.language}' declares no modes.attachBy; the attach-addressing gate is skipped.`
+        );
+      }
+      attachLocality = verdict.locality;
     } else {
       this.ctx.logger.warn(
         `[SessionManager] adapterRegistry has no getFactoryMetadata; skipping the attach-'none' ` +
           `enforcement gate for '${session.language}'.`
       );
+      attachLocality = attachLocalityOf(addressing);
     }
 
     if (session.proxyManager || session.pendingProxyStop) {
@@ -174,6 +200,7 @@ export class AttachController {
     this.ctx.updateSession(sessionId, {
       sessionLifecycle: SessionLifecycleState.ACTIVE,
       attachMode: true,
+      attachLocality,
     });
     session.failureDiagnostics = undefined;
     // Same per-attempt reset as startDebugging: an attach that fails before a

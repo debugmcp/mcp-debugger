@@ -328,7 +328,7 @@ describe('set_breakpoint statement anchors (#271)', () => {
     );
     // The rejection is correct; the reason must be too — the file is a
     // readable local path, not "a class name or remote path" (issue #497).
-    expect(err.message).toMatch(/not supported for attach sessions/);
+    expect(err.message).toMatch(/not supported for an attach session/);
     expect(err.message).toMatch(/line addressing/i);
     expect(err.message).not.toMatch(/class name or remote path/);
   });
@@ -345,12 +345,94 @@ describe('set_breakpoint statement anchors (#271)', () => {
       (e: Error) => e
     );
     expect(err.message).toMatch(/expectedContent/);
-    expect(err.message).toMatch(/not supported for attach sessions/);
+    expect(err.message).toMatch(/not supported for an attach session/);
     expect(err.message).not.toMatch(/class name or remote path/);
     // The caller already passed line: the remedy must say what to drop,
     // not "use line addressing instead" (issue #654)
     expect(err.message).toMatch(/drop expectedContent and keep line/);
     expect(err.message).not.toMatch(/use line addressing instead/i);
+  });
+
+  describe('attach locality (issues #903, #899)', () => {
+    function attachSession(attachLocality: 'pid' | 'loopback' | 'remote' | 'unknown'): void {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: 'active',
+        attachMode: true,
+        attachLocality
+      });
+    }
+    const rejection = (args: Record<string, unknown>) =>
+      callSetBreakpoint(args).then(
+        () => { throw new Error('expected rejection'); },
+        (e: Error) => e
+      );
+
+    it.each(['pid', 'loopback'] as const)('allows statement addressing on a %s attach whose file is on this host', async (locality) => {
+      attachSession(locality);
+      vi.mocked(mockDependencies.fileSystem.pathExists).mockResolvedValue(true);
+
+      const result = await callSetBreakpoint({ statement: 'return total' });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      expect(content.line).toBe(6);
+      expect(content.anchor).toEqual({ statement: 'return total' });
+    });
+
+    it('allows expectedContent on a local attach whose file is on this host', async () => {
+      attachSession('pid');
+      vi.mocked(mockDependencies.fileSystem.pathExists).mockResolvedValue(true);
+
+      const result = await callSetBreakpoint({ line: 6, expectedContent: 'return total' });
+
+      expect(JSON.parse(result.content[0].text).success).toBe(true);
+    });
+
+    it('passes a local attach through, line-only, when the file is not on this host', async () => {
+      attachSession('loopback');
+      vi.mocked(mockDependencies.fileSystem.pathExists).mockResolvedValue(false);
+
+      const err = await rejection({ statement: 'return total' });
+
+      expect(err.message).toMatch(/not supported for this attach session/);
+      expect(err.message).toMatch(/is not on the mcp-debugger host/);
+    });
+
+    it('names the remote target when refusing content addressing on a remote attach', async () => {
+      attachSession('remote');
+
+      const err = await rejection({ line: 6, expectedContent: 'return total' });
+
+      expect(err.message).toMatch(/not supported for a remote attach session/);
+      expect(err.message).toMatch(/drop expectedContent and keep line/);
+      expect(mockDependencies.fileSystem.pathExists).not.toHaveBeenCalled();
+    });
+
+    it('omits content and context on a remote attach, and says so', async () => {
+      attachSession('remote');
+
+      const result = await callSetBreakpoint({ line: 2 });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      expect(content.content).toBeUndefined();
+      expect(content.context).toBeUndefined();
+      expect(content.note).toMatch(/content and context omitted/);
+      expect(mockDependencies.fileSystem.readFile).not.toHaveBeenCalled();
+    });
+
+    it('still reads the host file for content on a local attach', async () => {
+      attachSession('pid');
+      vi.mocked(mockDependencies.fileSystem.pathExists).mockResolvedValue(true);
+
+      const result = await callSetBreakpoint({ line: 2 });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.success).toBe(true);
+      expect(content.note).toBeUndefined();
+      expect(content.content).toBe('    total = sum(prices)');
+    });
   });
 
   it('keeps the class-name wording for non-file source identifiers', async () => {

@@ -194,7 +194,7 @@ In the shipped default addressing mode (`content`), `sessionId` is the only para
 **Important Notes:**
 - Breakpoints show `"verified": false` until debugging starts
 - Works in every lifecycle state short of `close_debug_session`: before the first launch (queued, `verified: false`), while running or paused (sent live, with the adapter's answer in the response), and after the program has exited or a dry run (queued for the next `start_debugging`/`restart_debugging`). A session that was attached keeps attach path semantics — paths passed through verbatim, no `statement` anchors — until its next launch (issue #806)
-- The response echoes the resolved path the server actually used — in container mode that is the path with the workspace prefix applied; for attach sessions the path is passed through unchanged
+- The response echoes the resolved path the server actually used — in container mode that is the path with the workspace prefix applied; for a remote attach session the path is passed through unchanged, and so is a local attach's path when the file is not on this host. On a remote attach the response carries no `content`/`context` (the host file is not the debuggee's source) and a `note` says so (issue #899)
 - Setting breakpoints on non-executable lines (comments, blank lines, declarations) may cause unexpected behavior
 - Executable lines that work well: assignments, function calls, conditionals, returns
 - The top-level `content` field echoes the bound line's text (same as `context.lineContent`)
@@ -232,7 +232,7 @@ Relatedly, when a debug adapter *accepts* a breakpoint but binds it to a differe
 - **Ambiguity is an error, and the error is the disambiguation UI**: every matching `line: content` pair is listed (capped at 20); add `nearLine` to bind to the closest match. A `nearLine` pick among multiple matches adds a `warning` naming every candidate line — proximity is a heuristic, not a guarantee.
 - **Blank/comment anchors are rejected** (`#`, `//`, `/*` prefixes) — debuggers cannot break there reliably.
 - **The anchor is stored on the breakpoint record** (visible in `list_breakpoints`) and **re-resolves on `restart_debugging`**: after you edit the file — the whole point of a debug session — the relaunch re-finds each anchored statement in the current file (the breakpoint's previous line breaks ties between duplicates). Moves are reported in the restart response's `data.anchorResolution.moved` — a move picked among multiple matching lines carries a `candidates` list and a restart `warning`; anchors that no longer match keep their previous line and warn (`data.anchorResolution.stale`) rather than failing the restart or dropping state.
-- Same readable-file requirement as `expectedContent` (no Java FQCNs, no attach sessions); composes with `condition`, `logMessage`, and `suspendPolicy` unchanged.
+- Same readable-file requirement as `expectedContent` (no Java FQCNs, no remote attach sessions — an attach by `processId` or to a loopback `host`/`port` is content-addressable whenever the file exists on the mcp-debugger host, since it is the debuggee's own source there, issue #899); composes with `condition`, `logMessage`, and `suspendPolicy` unchanged.
 - A matching `expectedContent` alongside `statement` is accepted as redundant (matching under the same relaxed rules: trailing comments ignored, either value may be a substring of the other); a genuinely *different* one is an error (contradictory intent).
 
 #### Function breakpoints
@@ -1247,7 +1247,7 @@ Lists all supported debugging languages with metadata.
       "installed": true,
       "modes": {
         "launch": { "supported": true, "available": false, "reason": "Ruby executable not found..." },
-        "attach": { "supported": true, "available": true }
+        "attach": { "supported": true, "available": true, "by": ["port"] }
       }
     }
   ],
@@ -1270,6 +1270,7 @@ Lists all supported debugging languages with metadata.
 - When the adapter package is present but importing it failed — a dependency it imports is missing from the distribution, say (issue #795) — both modes read `available: false` with the loader's own words as the `reason`: `Failed to load adapter for '<lang>' from package '@debugmcp/adapter-<lang>'. The package is installed but importing it failed: Cannot find package '<dep>' imported from … — its dependency '<dep>' is missing or broken. Reinstall it (npm install @debugmcp/adapter-<lang>) or rebuild it.` `create_debug_session` and `start_debugging` refuse with the same reason, and `mcp-debugger doctor` reports the language as broken. A genuinely absent package reads `Adapter package @debugmcp/adapter-<lang> is not installed.` on the modes, and the loader's `Adapter not installed. Install with: npm install @debugmcp/adapter-<lang>` when a launch is attempted anyway.
 - Attach for Python and Ruby is a direct connection to a debugpy/rdbg DAP socket, so it stays available even when the local toolchain is missing — the container image uses exactly this to offer Ruby attach without a Ruby runtime.
 - Disabled languages (`DEBUG_MCP_DISABLE_LANGUAGES`) stay listed with a disabled reason on both modes.
+- `modes.attach.by` lists the `attach_to_process` addressing forms the language accepts — `"processId"`, `"port"`, `"adapterConfig"` (a debugger URI under `adapterConfig`) — as its adapter declares them (the attach-addressing contract, issue #903); present on every attach-capable language, installed or not. A request using any other form is refused by name before the session changes state.
 - `languages[]` is the backward-compatible metadata shape: `id`, `displayName`, `version`, `requiresExecutable`, and `defaultExecutable` for the languages that have one (`mock` does not).
 
 ---
@@ -1280,9 +1281,9 @@ Attaches the debugger to a running process. Unless you pass `stopOnEntry: false`
 
 **Parameters:**
 - `sessionId` (string, required): The ID of the debug session.
-- `port` (number, optional): Debug port to attach to.
-- `host` (string, optional): Host to attach to (default: `localhost`).
-- `processId` (number or string, optional): Process ID, for local attach — language-specific. C/C++ attach is **PID-only**: a host/port attach is rejected as an unsupported operation. JavaScript accepts it too (issue #871): the inspector of a running Node.js process on this host is activated for you (`SIGUSR1` / `process._debugProcess`), confirmed to belong to that PID through `/json/list`, and attached on `port` — `9229`, Node's default, unless the target was started with `--inspect-port=<n>` (then pass that port). Local only (same host and PID namespace); a PID that is not a Node.js process, or a port held by another inspector, is refused by name. See the [JavaScript guide](javascript/README.md#attaching-to-a-running-nodejs-process).
+- `port` (number, optional): Debug port to attach to. Refused by name on a PID-only language (C/C++, COBOL, .NET) — see [Addressing by language](#addressing-by-language).
+- `host` (string, optional): Host to attach to (default: `localhost`). A non-loopback host on a PID-only language is refused the same way.
+- `processId` (number or string, optional): The PID of a process on this host, for the languages whose attach is local — see [Addressing by language](#addressing-by-language). For JavaScript (issue #871) the inspector of the running Node.js process is activated for you (`SIGUSR1` / `process._debugProcess`), confirmed to belong to that PID, and attached on `port` — `9229`, Node's default, unless the target was started with `--inspect-port=<n>` (then pass that port); a PID that is not a Node.js process, or a port held by another inspector, is refused by name. See the [JavaScript guide](javascript/README.md#attaching-to-a-running-nodejs-process).
 - `timeout` (number, optional): Connection timeout in milliseconds (default: `30000`).
 - `verifyTimeout` (number, optional): How long to wait (ms) for the debugger to report at least one thread after attaching before failing the attach (default: `20000`, max: `600000`). Decrease for fast failure-by-design probes; increase for targets that are exceptionally slow to become debuggable. Not used when `stopOnEntry: false` — that path performs no thread verification.
 - `sourcePaths` (string[], optional): Source paths for code mapping.
@@ -1290,6 +1291,20 @@ Attaches the debugger to a running process. Unless you pass `stopOnEntry: false`
 - `justMyCode` (boolean, optional): Only debug user code (skip library code).
 - `breakOnExceptions` (string, optional): `"uncaught"`, `"all"`, or `"none"` — same mode semantics as on `start_debugging`, but attach never applies a language default: it stays `"none"` unless requested.
 - `adapterConfig` (object, optional): Adapter-specific attach extras, merged into the attach config before the adapter transforms it, mirroring `start_debugging`'s `adapterLaunchConfig` (C/C++/LLDB example: `{"program": "/proc/1/root/pricer"}` for symbol resolution from a kubectl-debug ephemeral container, or `initCommands`; Python example: `{"pathMappings": [{"localRoot": "/home/user/checkout/src", "remoteRoot": "/app"}]}` so breakpoints at local-checkout paths bind against a remote debugpy, issue #450). Reserved keys `request`/`__attachMode` are ignored with a warning; set `stopOnEntry` via the top-level parameter.
+
+**Addressing by language:**
+
+Which forms a language accepts is declared by its adapter (the attach-addressing contract, issue #903) and checked before anything starts: a form the language does not take is refused by name — with the adapter's remedy and the forms it does take — and the session stays usable. A request that names neither `processId` nor `port` on a language whose forms are only those two is refused as "needs port" / "needs processId"; a language that also takes a URI under `adapterConfig` leaves that case to its adapter. `list_supported_languages` shows each language's forms as `modes.attach.by`.
+
+| Language | Attaches by | A `processId` | A `port` (or a remote `host`) |
+|---|---|---|---|
+| C/C++, COBOL, .NET | `processId` only | used | refused: CodeLLDB and netcoredbg attach to a local PID (a gdbserver-style remote target goes through C/C++ `adapterConfig.processCreateCommands`) |
+| JavaScript | `processId`, `port`, or `adapterConfig.websocketAddress` | the running Node.js process's inspector is activated and attached on `port` (issue #871) | used |
+| Python, Ruby, Java | `port` only | refused, with the recipe for opening a port (`python -m debugpy --listen …`, `rdbg --open --port …`, `-agentlib:jdwp=…`) | used |
+| Dart | `port`, or `adapterConfig.vmServiceUri` / `vmServiceInfoFile` | refused, with the VM-service recipe | used — `host`/`port` becomes `ws://host:port/ws`, which needs `--disable-service-auth-codes` |
+| Go, Rust, Mock | no attach | refused (`Attach mode is not implemented`) | refused |
+
+The same pass records where the target lives (`processId` → this host; `port` → loopback or remote by its `host`; a URI → by its hostname), which is what lets `set_breakpoint` content-address a local attach (see [set_breakpoint](#set_breakpoint)).
 
 **Response:**
 ```json

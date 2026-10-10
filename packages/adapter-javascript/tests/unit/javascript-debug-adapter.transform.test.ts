@@ -719,6 +719,8 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
     it('lists autoAttachChildProcesses as a supported attach key (issue #501)', () => {
       const adapter = new JavascriptDebugAdapter(deps);
       expect(adapter.supportedAttachKeys).toContain('autoAttachChildProcesses');
+      // processId is consumed by the inspector activation, never echoed (issue #903)
+      expect(adapter.consumedAttachKeys).toEqual(['processId']);
     });
 
     it('defaults smartStep to false on attach (issue #513)', async () => {

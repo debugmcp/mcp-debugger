@@ -65,7 +65,17 @@ export class DartAdapterFactory implements IAdapterFactory {
       documentationUrl: 'https://github.com/debugmcp/mcp-debugger/docs/dart',
       minimumDebuggerVersion: '3.0.0',
       fileExtensions: ['.dart'],
-      modes: { launch: true, attach: 'spawn' },
+      modes: {
+        launch: true,
+        attach: 'spawn',
+        // A VM-service URI (or info file) under adapterConfig, or host:port for a
+        // VM started with --disable-service-auth-codes; no PID step (issue #903)
+        attachBy: ['port', 'adapterConfig'],
+        attachHints: {
+          processId:
+            'Dart attaches by VM-service URI: pass adapterConfig.vmServiceUri (from dart --enable-vm-service run, the app.debugPort event of flutter run --machine, or the dart.debuggerUris answer of this server) or adapterConfig.vmServiceInfoFile (the file written by --write-service-info)'
+        }
+      },
     };
   }
 

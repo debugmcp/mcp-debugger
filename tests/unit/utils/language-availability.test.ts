@@ -180,6 +180,32 @@ describe('computeModeAvailability', () => {
   });
 });
 
+describe('computeModeAvailability attach addressing forms (issue #903)', () => {
+  const base = { language: 'java', packageName: '@debugmcp/adapter-java', disabled: false, attach: 'spawn' as const };
+
+  it('carries the declared forms on the attach entry, installed or not', async () => {
+    const installed = await computeModeAvailability({ ...base, installed: true, attachBy: ['port'] });
+    expect(installed.attach.by).toEqual(['port']);
+    expect(installed.launch).not.toHaveProperty('by');
+
+    const notInstalled = await computeModeAvailability({ ...base, installed: false, attachBy: ['port'] });
+    expect(notInstalled.attach.available).toBe(false);
+    expect(notInstalled.attach.by).toEqual(['port']);
+
+    const disabled = await computeModeAvailability({ ...base, installed: true, disabled: true, attachBy: ['port'] });
+    expect(disabled.attach.by).toEqual(['port']);
+  });
+
+  it('omits the forms when none are declared or attach is not implemented', async () => {
+    const undeclared = await computeModeAvailability({ ...base, installed: true });
+    expect(undeclared.attach).not.toHaveProperty('by');
+
+    const none = await computeModeAvailability({ ...base, language: 'go', installed: true, attach: 'none', attachBy: ['port'] });
+    expect(none.attach.supported).toBe(false);
+    expect(none.attach).not.toHaveProperty('by');
+  });
+});
+
 describe('probeLanguageEntry (issue #435)', () => {
   const entry = (overrides: Record<string, unknown> = {}) => ({
     language: 'python',
@@ -194,6 +220,30 @@ describe('probeLanguageEntry (issue #435)', () => {
     getMetadata: vi.fn().mockReturnValue({ modes: { launch: true, attach: 'spawn' } }),
     createAdapter: vi.fn(),
     ...overrides
+  });
+
+  it('prefers the loaded factory metadata attachBy over the registry entry, and falls back to the entry (issue #903)', async () => {
+    const declaring = makeFactory({
+      getMetadata: vi.fn().mockReturnValue({ modes: { launch: true, attach: 'spawn', attachBy: ['processId'] } })
+    });
+    const fromFactory = await probeLanguageEntry(entry({ attachBy: ['port'] }), {
+      registry: { getFactory: vi.fn().mockResolvedValue(declaring) },
+      disabledSet: new Set()
+    });
+    expect(fromFactory.modes.attach.by).toEqual(['processId']);
+
+    const silent = makeFactory(); // metadata declares no attachBy
+    const fromEntry = await probeLanguageEntry(entry({ attachBy: ['port'] }), {
+      registry: { getFactory: vi.fn().mockResolvedValue(silent) },
+      disabledSet: new Set()
+    });
+    expect(fromEntry.modes.attach.by).toEqual(['port']);
+
+    const undeclared = await probeLanguageEntry(entry(), {
+      registry: { getFactory: vi.fn().mockResolvedValue(silent) },
+      disabledSet: new Set()
+    });
+    expect(undeclared.modes.attach).not.toHaveProperty('by');
   });
 
   it('does not load the factory for a disabled language and reports disabled modes', async () => {

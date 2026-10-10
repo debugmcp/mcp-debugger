@@ -187,8 +187,18 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): P
       timestamp: Date.now()
     });
 
-    // Try to get line context for the breakpoint
-    const context = await readLineContext(ctx, breakpoint.file, breakpoint.line, 'breakpoint');
+    // Try to get line context for the breakpoint — unless the session is an
+    // attach whose target is not on this host (issue #899): the host file is
+    // not the debuggee's source then, and an answer that refuses content
+    // addressing for that reason must not quote the file anyway.
+    const attachSession = ctx.sessionManager.getSession(args.sessionId);
+    const hostFileIsForeign =
+      attachSession?.attachMode === true &&
+      attachSession.attachLocality !== 'pid' &&
+      attachSession.attachLocality !== 'loopback';
+    const context = hostFileIsForeign
+      ? undefined
+      : await readLineContext(ctx, breakpoint.file, breakpoint.line, 'breakpoint');
 
     // Loud snapping (issue #271): if the adapter bound the
     // breakpoint to a different line than requested, say so
@@ -222,7 +232,13 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): P
       // and unknown logpoint support
       warning: warnings.length > 0 ? warnings.join('; ') : undefined,
       // Include context if available
-      context: context || undefined
+      context: context || undefined,
+      ...(hostFileIsForeign
+        ? {
+            note:
+              'content and context omitted: the target of this attach is not on the mcp-debugger host, so the host file is not the debuggee\'s source'
+          }
+        : {})
     });
     const contentEntry = Array.isArray(result.content) ? result.content[0] : undefined;
     const textContent = contentEntry && typeof (contentEntry as { text?: unknown }).text === 'string'

@@ -36,7 +36,15 @@ export class CobolAdapterFactory implements IAdapterFactory {
       minimumDebuggerVersion: '1.0.0',
       fileExtensions: ['.cob', '.cbl', '.cobol', '.cpy'],
       // Attach-by-PID spawns the shim + vendored CodeLLDB locally (no compiler needed)
-      modes: { launch: true, attach: 'spawn' }
+      modes: {
+        launch: true,
+        attach: 'spawn',
+        // PID-only: CodeLLDB attaches to the running COBOL program (issue #903)
+        attachBy: ['processId'],
+        attachHints: {
+          port: 'CodeLLDB attaches to a local process by PID; pass the PID of the running COBOL program'
+        }
+      }
     };
   }
 
