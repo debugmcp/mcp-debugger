@@ -205,7 +205,25 @@ describe('netcoredbg-bridge-core', () => {
     await ended;
 
     expect(Buffer.concat(received).toString()).toBe(lastFrame.toString());
-    expect(stderrChunks.join('')).toBe('');
+    expect(stderrChunks.join('')).toBe('netcoredbg closed (code=0, signal=null)\n');
+  });
+
+  it('survives the proxy closing first and the child closing afterwards', async () => {
+    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream });
+    const port = await waitForListening(bridge.server);
+
+    const client = await connectClient(port);
+    await tick();
+
+    client.destroy();
+    await tick();
+    expect(mockCp.kill).toHaveBeenCalled();
+
+    // The late exit/close of the killed child must neither throw nor double-end.
+    mockCp.emit('exit', null, 'SIGTERM');
+    mockCp.emit('close', null, 'SIGTERM');
+    await tick();
+    expect(stderrChunks.join('')).toBe('netcoredbg closed (code=null, signal=SIGTERM)\n');
   });
 
   it('stops forwarding socket bytes to netcoredbg stdin once it has exited', async () => {

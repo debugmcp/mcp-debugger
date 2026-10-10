@@ -59,9 +59,12 @@ export function createBridge(
       windowsHide: true
     });
 
-    // A proxy request that races the child's exit would otherwise land on a
-    // dead pipe: drop it once the child has exited, and log (not throw) the
-    // EPIPE that a write already in flight can still raise.
+    // A proxy request that races the child's exit lands on a dead pipe. The
+    // `error` listener is what protects that race in production (an EPIPE
+    // raised by a write already in flight is logged, not thrown — before it
+    // there was no listener, so it would have crashed the bridge); the
+    // `childEnded` flag is belt and braces, since Node destroys the child's
+    // stdin before it emits `exit`.
     let childEnded = false;
     netcoredbg.stdin?.on('error', (err: NodeJS.ErrnoException) => {
       stderrStream.write(`netcoredbg stdin: ${err.message}\n`);
@@ -99,8 +102,9 @@ export function createBridge(
       childEnded = true;
     });
 
-    netcoredbg.on('close', () => {
+    netcoredbg.on('close', (code, signal) => {
       childEnded = true;
+      stderrStream.write(`netcoredbg closed (code=${code}, signal=${signal})\n`);
       if (!socket.destroyed) {
         socket.end();
       }
@@ -124,7 +128,8 @@ export function createBridge(
       server.close();
     });
 
-    socket.on('error', () => {
+    socket.on('error', (err) => {
+      stderrStream.write(`bridge socket error: ${err.message}\n`);
       if (netcoredbg) {
         netcoredbg.stdin?.end();
         netcoredbg.kill();
