@@ -9,7 +9,7 @@
 - **Java**: Filters out JDK internal frames by default
 - **.NET/C#**: Filters out `System.*` and `Microsoft.*` runtime frames and sourceless frames by default
 - **Ruby**: Filters out `<internal:>` and `/gems/` frames by default
-- **Rust** and **C/C++**: Share one CodeLLDB filter (`filterLldbStackFrames` in `packages/shared/src/interfaces/lldb-policy-shared.ts`) — LLDB-synthesized unnamed symbols (`___lldb_unnamed_symbol…`), glibc `__GI_` aliases, and libc/runtime plumbing and syscall wrappers *that also lack user source* (issue #369)
+- **Rust**, **C/C++** and **COBOL**: Share one CodeLLDB filter (`filterLldbStackFrames` in `packages/shared/src/interfaces/lldb-policy-shared.ts`; COBOL adds its libcob rules on top) — LLDB-synthesized unnamed symbols (`___lldb_unnamed_symbol…`), glibc `__GI_` aliases, and libc/runtime plumbing and syscall wrappers *that also lack user source* (issue #369), with the Windows CRT start-up, kernel32/ntdll thread and wait plumbing and `pthread_*` under the same rule (issue #824)
 - **Python**: No filtering applied (shows all frames) — the only adapter policy that does not implement `filterStackFrames`
 - **Mock**: Implements the hook as a pass-through; every frame is returned
 - **Configurable**: Use `includeInternals: true` to see all frames
@@ -128,13 +128,23 @@ The filtering is implemented using the existing `AdapterPolicy` system:
    - Identifies internal frames by checking for `/runtime/` and `/testing/` in the file path
 
 4. **Shared LLDB policy** (`packages/shared/src/interfaces/lldb-policy-shared.ts`)
-   - `filterLldbStackFrames` / `isLldbInternalFrame`, composed by both
-     `adapter-policy-rust.ts` and `adapter-policy-cpp.ts` — the rule is
-     engine-level, not language-level, so neither policy copies it
+   - `filterLldbStackFrames` / `isLldbInternalFrame`, composed by
+     `adapter-policy-rust.ts` and `adapter-policy-cpp.ts` (and wrapped by
+     `adapter-policy-cobol.ts`, which adds the libcob rules on top) — the rule is
+     engine-level, not language-level, so no policy copies it
    - Pure-name rules (unnamed symbols, `__GI_` aliases) always hide; name+source
-     rules (libc plumbing, syscall wrappers like `poll`/`accept`/`nanosleep`)
-     hide only when the frame has no user source, so a user function that happens
-     to share one of those names is kept
+     rules hide only when the frame has no user source, so a user function that
+     happens to share one of those names is kept. The names: libc plumbing and
+     syscall wrappers (`__libc_start_main`, `_start`, `poll`/`accept`/`nanosleep`)
+     on POSIX; the CRT start-up (`mainCRTStartup`, `__tmainCRTStartup`,
+     `__scrt_common_main_seh`), the kernel32/ntdll thread and wait plumbing
+     (`BaseThreadInitThunk`, `RtlUserThreadStart`, `Nt*`/`Zw*`,
+     `WaitForSingleObjectEx`, `Sleep`) and `pthread_*` on Windows (issue #824)
+   - "No user source" covers an absent path, `<unknown_source>`, a system path
+     (`/usr/lib`, glibc's `../sysdeps/`, rustc's std, MSYS2's `mingw64/include`,
+     the MSVC `vctools` tree) and CodeLLDB's `@symbol` label — the shape a frame
+     without debug info arrives in (`source: {name: '@NtWaitForSingleObject'}`,
+     no path), which the anchor resolver carries into `file`
 
 5. **FrameAnchorResolver** (`src/session/inspection/frame-anchor-resolver.ts`)
    - Applies filtering based on session language via `selectPolicy()` (defined in
