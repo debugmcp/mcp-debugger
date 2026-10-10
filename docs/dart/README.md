@@ -129,10 +129,14 @@ Measured through the server on Windows (Flutter 3.47.7, `examples/dart/flutter_p
 `tests/e2e/mcp-server-smoke-flutter.test.ts`): a widget-test breakpoint in ~6 s warm, a `build()`
 breakpoint under `flutter run -d windows` in ~20 s warm, an `integration_test` breakpoint on the
 desktop in ~21 s warm; the first launch of a fresh project takes ~30 s for either. The launch
-answers `pending: true` after its one-second hold, so follow it with `wait_for_stop` and a
-timeout that allows the build. A `flutter test` or `flutter run` session ends `stopped` without
-an exit code (the adapter sends `terminated` only); the `✓ name` lines in `get_output` say how
-the tests went.
+answers `pending: true` after its one-second hold, so follow it with `wait_for_stop` — in slices
+that stay under your MCP client's request cap (60 s is a common default; 45 s slices are safe),
+calling it again while the answer is `pending: true`. One long `timeout` sized to the build makes
+the client give up before the server does (a Gradle build that kept the first stop away for 63 s
+answered `MCP error -32001: Request timed out` on the client side while the server was still
+waiting correctly, #884); a first Android build simply runs through several slices. A `flutter
+test` or `flutter run` session ends `stopped` without an exit code (the adapter sends
+`terminated` only); the `✓ name` lines in `get_output` say how the tests went.
 
 Android emulator (`deviceId: "emulator-5554"`, the AVD booted first; measured the same way with
 `tests/e2e/mcp-server-smoke-flutter-android.test.ts`, Gradle warm): a `build()` breakpoint under
