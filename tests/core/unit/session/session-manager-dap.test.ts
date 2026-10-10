@@ -3055,8 +3055,11 @@ describe('SessionManager - DAP Operations', () => {
       expect(visible.get('main')?.unresolvedSource).toBeUndefined();
       expect(visible.has('WaitForSingleObjectEx')).toBe(false);
       expect(visible.has('BaseThreadInitThunk')).toBe(false);
-      expect(result.hiddenFrameCount).toBeGreaterThanOrEqual(2);
-      expect(result.pausedFrame?.frame.name).toBe('NtWaitForSingleObject');
+      expect(result.frames.map(f => f.name)).toEqual(['main']);
+      expect(result.hiddenFrameCount).toBe(3);
+      // An 'entry' stop is not user-directed, so the hidden paused frame is
+      // disclosed but not kept as frame 0 (the #672 rule).
+      expect(result.pausedFrame).toMatchObject({ kept: false, frame: { name: 'NtWaitForSingleObject' } });
 
       // includeInternals: the @symbol frames are back, still flagged.
       const full = await sessionManager.getStackTraceDetailed(session.id, undefined, true);

@@ -565,6 +565,8 @@ describe('RustAdapterPolicy', () => {
       { desc: 'Windows: kernel32 SleepEx without source', name: 'SleepEx', file: '', internal: true },
       { desc: 'Windows: user function named Sleep with workspace source', name: 'Sleep', file: 'C:\\proj\\src\\timer.rs', internal: false },
       { desc: 'glibc nptl pthread frame under the build path', name: 'pthread_cond_wait', file: './nptl/pthread_cond_wait.c', internal: true },
+      { desc: 'glibc internal __pthread_ name under the build path', name: '__pthread_mutex_lock', file: './nptl/pthread_mutex_lock.c', internal: true },
+      { desc: 'syscall wrapper under the distro lib root', name: 'poll', file: '/lib/x86_64-linux-gnu/libc.so.6', internal: true },
       { desc: 'user function named pthread_helper with workspace source', name: 'pthread_helper', file: '/home/user/project/src/sync.rs', internal: false },
       { desc: 'rust std frame with a /rustc/ source and a non-wrapper name stays', name: 'std::sys::pal::windows::thread::sleep', file: '/rustc/abc123/library/std/src/sys/pal/windows/thread.rs', internal: false },
     ];
