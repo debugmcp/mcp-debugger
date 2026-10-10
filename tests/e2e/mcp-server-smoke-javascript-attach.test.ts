@@ -101,6 +101,36 @@ async function spawnTarget(script: string = TARGET_SCRIPT): Promise<Target> {
   return { proc, port, stdout: () => stdout };
 }
 
+/**
+ * Spawn a tick target WITHOUT an inspector (issue #871): attaching by PID has
+ * to activate it. Resolves once the target has printed its start line.
+ */
+async function spawnPlainTarget(script: string = TARGET_SCRIPT): Promise<Target & { stderr: () => string }> {
+  const proc = spawn(process.execPath, [script], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = '';
+  let stderr = '';
+  proc.stdout!.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
+  proc.stderr!.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('the target did not start within 30s')), 30000);
+    proc.stdout!.once('data', () => { clearTimeout(timeout); resolve(); });
+    proc.on('exit', (code) => {
+      clearTimeout(timeout);
+      reject(new Error(`target exited prematurely (code ${code}): ${stderr}`));
+    });
+  });
+  return { proc, port: 0, stdout: () => stdout, stderr: () => stderr };
+}
+
+/** Is something listening on 127.0.0.1:port? (The PID attach needs Node's default inspector port free.) */
+function portInUse(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = net.connect({ port, host: '127.0.0.1' });
+    socket.once('connect', () => { socket.destroy(); resolve(true); });
+    socket.once('error', () => resolve(false));
+  });
+}
+
 describe('MCP Server JavaScript Attach-Mode Smoke Tests', () => {
   let mcpClient: Client | null = null;
   let transport: StdioClientTransport | null = null;
@@ -420,6 +450,74 @@ describe('MCP Server JavaScript Attach-Mode Smoke Tests', () => {
 
     await new Promise(r => setTimeout(r, 500));
     expect(targetProcess!.exitCode, 'detach must leave the target process alive').toBeNull();
+  }, 120000);
+
+  it('attaches by PID to a node process started without --inspect, then re-attaches through the inspector it opened (issue #871)', async (ctx) => {
+    if (await portInUse(9229)) {
+      console.log('[JS Attach Test] 127.0.0.1:9229 is in use on this host; skipping the PID attach case (a signalled Node process opens its inspector there)');
+      ctx.skip();
+    }
+    const target = await spawnPlainTarget();
+    targetProcess = target.proc;
+    const pid = target.proc.pid!;
+
+    // 1. Attach by PID: the adapter signals the process, which opens its inspector on 9229.
+    const createResult = await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: { language: 'javascript', name: 'js-pid-attach-test' }
+    });
+    sessionId = parseSdkToolResult(createResult).sessionId as string;
+    const attachResponse = await callToolSafely(mcpClient!, 'attach_to_process', {
+      sessionId: sessionId!, processId: pid, verifyTimeout: 20000
+    });
+    expect(attachResponse.success, `attach by PID failed: ${JSON.stringify(attachResponse)}`).toBe(true);
+    expect(attachResponse.state).toBe('paused');
+    expect(String(attachResponse.message)).toContain(`Attached to process PID ${pid}`);
+    expect(target.stderr(), 'the target must have opened its inspector on the default port')
+      .toMatch(/Debugger listening on ws:\/\/127\.0\.0\.1:9229\//);
+
+    // 2. The session is real: a breakpoint in the tick loop fires and program state is readable.
+    const bpResult = await callToolSafely(mcpClient!, 'set_breakpoint', {
+      sessionId: sessionId!, file: TARGET_SCRIPT, line: BREAKPOINT_LINE
+    });
+    expect(bpResult.success, `set_breakpoint failed: ${JSON.stringify(bpResult)}`).toBe(true);
+    const contResult = await callToolSafely(mcpClient!, 'continue_execution', { sessionId: sessionId! });
+    expect(contResult.success, `continue_execution failed: ${JSON.stringify(contResult)}`).toBe(true);
+    const stop = await callToolSafely(mcpClient!, 'wait_for_stop', { sessionId: sessionId!, timeout: 15000 });
+    expect(stop.state, `wait_for_stop: ${JSON.stringify(stop)}`).toBe('paused');
+    expect((stop.location as { line?: number } | undefined)?.line).toBe(BREAKPOINT_LINE);
+    const evalResult = await callToolSafely(mcpClient!, 'evaluate_expression', {
+      sessionId: sessionId!, expression: 'counter'
+    });
+    expect(evalResult.success, `evaluate_expression failed: ${JSON.stringify(evalResult)}`).toBe(true);
+    expect(Number(evalResult.result)).toBeGreaterThanOrEqual(1);
+
+    // 3. Detach leaves the target alive and ticking.
+    const outputBeforeDetach = target.stdout().length;
+    const detachResult = await callToolSafely(mcpClient!, 'detach_from_process', {
+      sessionId: sessionId!, terminateProcess: false
+    });
+    expect(detachResult.success, `detach_from_process failed: ${JSON.stringify(detachResult)}`).toBe(true);
+    await new Promise(r => setTimeout(r, 2500));
+    expect(targetProcess!.exitCode, 'detach must leave the target process alive').toBeNull();
+    expect(target.stdout().length, 'the target must resume ticking after detach').toBeGreaterThan(outputBeforeDetach);
+
+    // 4. A second attach by PID finds the inspector still open on 9229 (Node keeps it
+    //    open after a detach) and attaches without signalling again.
+    await callToolSafely(mcpClient!, 'close_debug_session', { sessionId: sessionId! });
+    const again = await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: { language: 'javascript', name: 'js-pid-reattach-test' }
+    });
+    sessionId = parseSdkToolResult(again).sessionId as string;
+    const reattach = await callToolSafely(mcpClient!, 'attach_to_process', {
+      sessionId: sessionId!, processId: pid, stopOnEntry: false, verifyTimeout: 20000
+    });
+    expect(reattach.success, `re-attach by PID failed: ${JSON.stringify(reattach)}`).toBe(true);
+    expect(reattach.state).toBe('running');
+    const threadsResult = await callToolSafely(mcpClient!, 'list_threads', { sessionId: sessionId! });
+    expect(((threadsResult.threads as unknown[] | undefined) ?? []).length).toBeGreaterThan(0);
+    expect((target.stderr().match(/Debugger listening on/g) ?? []).length, 'the inspector was opened once').toBe(1);
   }, 120000);
 
   /** Poll list_debug_sessions until this session reports the wanted state. */

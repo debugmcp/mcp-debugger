@@ -65,6 +65,14 @@ continue_execution   { "sessionId": "<id>" }
 
 Shorthand: `create_debug_session { "language": "javascript", "host": "127.0.0.1", "port": 9229 }` attaches in one call. Attach is verified by polling for threads (`verifyTimeout`, default ~20000 ms). Detach with `detach_from_process { "sessionId": "<id>", "terminateProcess": false }`; remote debugging beyond a reachable host/port requires manual configuration (e.g. an SSH tunnel).
 
+**By PID**, for a plain `node server.js` on the same host that was *not* started with `--inspect`:
+
+```text
+attach_to_process    { "sessionId": "<id>", "processId": 48213 }
+```
+
+mcp-debugger signals the process (`SIGUSR1` / `process._debugProcess`), which opens its inspector on `127.0.0.1:9229`, checks the port now belongs to that PID, and attaches there. A target started with `--inspect-port=<n>` opens on `<n>` instead — pass `"port": <n>` with the PID. The inspector stays open after detach, so re-attaching by PID or by `port: 9229` needs no second signal. Refused by name: a non-loopback host, a PID that is not a Node.js process (SIGUSR1 would kill it), a port held by another process's inspector, and a host PID from inside the Docker image.
+
 ## Quirks
 
 - **Child-session architecture.** js-debug runs a parent session for launch orchestration and spawns a child session for the actual debuggee. This is invisible to you: the proxy routes evaluate/step/stack commands to the active context automatically. Never create a second MCP session for the "other" half.
@@ -85,5 +93,6 @@ Shorthand: `create_debug_session { "language": "javascript", "host": "127.0.0.1"
 | Stopped in a Node internal frame at start | Debugger paused before reaching user code | `continue_execution` — it will run to your breakpoint |
 | `.ts` debugging fails | No `tsx`/`ts-node` available | Install one, or debug the compiled `.js` output |
 | Variables empty / "Session is not paused" | Inspection while running | Call `wait_for_stop` (it blocks until the program pauses), then use frame IDs from `get_stack_trace` |
-| Attach connection refused | Target not started with `--inspect=<port>` or port unreachable | Restart target with the inspector flag; verify the port |
+| Attach connection refused | Target not started with `--inspect=<port>` or port unreachable | Attach by `processId` instead (local Node.js process), or restart the target with the inspector flag; verify the port |
+| PID attach says 9229 is held by a different process | Another Node inspector already owns the default port | Pass `port` if the target was started with `--inspect-port=<n>`; otherwise free 9229 |
 | Need adapter diagnostics | — | Relaunch with `dapLaunchArgs: { "trace": true }` |

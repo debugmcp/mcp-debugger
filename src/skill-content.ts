@@ -103,6 +103,7 @@ ${setBreakpointStep}
 attach_to_process {sessionId, host, port, sourcePaths, adapterConfig}
 - Python: target started with "python -m debugpy --listen host:port ..."; map a local checkout onto the debuggee tree with adapterConfig: {pathMappings: [{localRoot, remoteRoot}]}
 - Ruby: target started with "rdbg --open --port N ..." (works via kubectl port-forward); localfsMap: "/app:<abs local dir>" maps paths
+- JavaScript: host/port of a "node --inspect" target, or processId of a plain local node process (its inspector is opened for you on 9229; pass port too for an --inspect-port target)
 - Java: JVM flag -agentlib:jdwp=transport=dt_socket,server=y,address=*:PORT (breakpoints defer until class load); FQCN as "file" needs no source at all
 - C/C++ (and other native): attach by PID — attach_to_process {sessionId, processId, adapterConfig: {program: "<binary path>"}}
 - COBOL: attach by PID like C/C++; add adapterConfig: {manifestDirs: ["<.debug-mcp/cobol/<name>/<buildKey> dir of the running build>"]} so the shim finds the symbol manifest, or variables show only the engine's C view (regeneration from sources on attach is a later milestone)

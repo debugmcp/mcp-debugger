@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import net, { type AddressInfo } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -77,6 +78,34 @@ async function spawnInspected(script: string, args: string[] = []): Promise<numb
   target.stderr!.on('data', chunk => { targetOutput += chunk.toString(); });
   await expect.poll(() => targetOutput.match(/ws:\/\/127\.0\.0\.1:(\d+)\//)?.[1], { timeout: 15_000 }).toBeDefined();
   return Number(targetOutput.match(/ws:\/\/127\.0\.0\.1:(\d+)\//)![1]);
+}
+
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address() as AddressInfo;
+      server.close(() => resolve(port));
+    });
+  });
+}
+
+/**
+ * Spawn with the inspector port configured but NOT open: `--inspect-port`
+ * alone only says where the inspector goes once something activates it. The
+ * attach by PID (issue #871) is what activates it — SIGUSR1 on POSIX,
+ * process._debugProcess on Windows — so the whole signal path runs in CI
+ * without touching Node's default 9229.
+ */
+function spawnWithInspectPort(script: string, args: string[], port: number): void {
+  targetOutput = '';
+  target = spawn(process.execPath, [`--inspect-port=127.0.0.1:${port}`, script, ...args], {
+    windowsHide: true,
+    cwd: root, env: environment(), stdio: ['ignore', 'pipe', 'pipe']
+  });
+  target.stdout!.on('data', chunk => { targetOutput += chunk.toString(); });
+  target.stderr!.on('data', chunk => { targetOutput += chunk.toString(); });
 }
 
 function endpointFrom(output: string): string | undefined {
@@ -219,7 +248,7 @@ describe('mcp-debugger self-debugging readiness', () => {
     console.log('Self-debug launch evidence:', { prepared: prepared.result, decision: decision.result, target: targetEnv.result });
   }, 60_000);
 
-  it.each(['launch', 'attach'] as const)('catches the first matching MCP request after %s returns', async mode => {
+  it.each(['launch', 'attach', 'attach-pid'] as const)('catches the first matching MCP request after %s returns', async mode => {
     await startOuter();
     const file = path.join(root, 'src/cli/http-command.ts');
     const line = sourceLine(file, "const sessionIdHeader = req.headers['mcp-session-id'];");
@@ -235,6 +264,18 @@ describe('mcp-debugger self-debugging readiness', () => {
       expect((await call(outer!, 'attach_to_process', {
         sessionId: outerId, host: '127.0.0.1', port, stopOnEntry: false, verifyTimeout: 10_000
       })).state).toBe('running');
+    } else if (mode === 'attach-pid') {
+      const port = await freePort();
+      spawnWithInspectPort(entry, ['http', '--port', '0'], port);
+      await expect.poll(() => endpointFrom(targetOutput), { timeout: 15_000 }).toBeDefined();
+      await connectNested(endpointFrom(targetOutput)!);
+      expect(targetOutput).not.toMatch(/Debugger listening on/);
+      expect((await call(outer!, 'attach_to_process', {
+        sessionId: outerId, processId: target!.pid, port, stopOnEntry: false, verifyTimeout: 10_000
+      })).state).toBe('running');
+      // The attach signalled the process, which opened its inspector where
+      // --inspect-port said (issue #871).
+      expect(targetOutput).toMatch(new RegExp(`Debugger listening on ws://127\\.0\\.0\\.1:${port}/`));
     } else {
       await connectNested(await launchNested());
     }
@@ -265,7 +306,7 @@ describe('mcp-debugger self-debugging readiness', () => {
     const result = await response;
     expect(result.error).toBeUndefined();
     expect(result.value?.tools.map(tool => tool.name)).toContain('start_debugging');
-    if (mode === 'attach') {
+    if (mode !== 'launch') {
       await call(outer!, 'detach_from_process', { sessionId: outerId });
       expect((await nested!.listTools()).tools.length).toBeGreaterThan(0);
       expect(target!.exitCode).toBeNull();

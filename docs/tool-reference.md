@@ -1282,7 +1282,7 @@ Attaches the debugger to a running process. Unless you pass `stopOnEntry: false`
 - `sessionId` (string, required): The ID of the debug session.
 - `port` (number, optional): Debug port to attach to.
 - `host` (string, optional): Host to attach to (default: `localhost`).
-- `processId` (number or string, optional): Process ID, for local attach — language-specific. C/C++ attach is **PID-only**: a host/port attach is rejected as an unsupported operation.
+- `processId` (number or string, optional): Process ID, for local attach — language-specific. C/C++ attach is **PID-only**: a host/port attach is rejected as an unsupported operation. JavaScript accepts it too (issue #871): the inspector of a running Node.js process on this host is activated for you (`SIGUSR1` / `process._debugProcess`), confirmed to belong to that PID through `/json/list`, and attached on `port` — `9229`, Node's default, unless the target was started with `--inspect-port=<n>` (then pass that port). Local only (same host and PID namespace); a PID that is not a Node.js process, or a port held by another inspector, is refused by name. See the [JavaScript guide](javascript/README.md#attaching-to-a-running-nodejs-process).
 - `timeout` (number, optional): Connection timeout in milliseconds (default: `30000`).
 - `verifyTimeout` (number, optional): How long to wait (ms) for the debugger to report at least one thread after attaching before failing the attach (default: `20000`, max: `600000`). Decrease for fast failure-by-design probes; increase for targets that are exceptionally slow to become debuggable. Not used when `stopOnEntry: false` — that path performs no thread verification.
 - `sourcePaths` (string[], optional): Source paths for code mapping.

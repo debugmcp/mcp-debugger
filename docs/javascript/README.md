@@ -317,13 +317,45 @@ reports that one frame at its generated location while the frames below it map t
 
 If neither `tsx` nor `ts-node` is installed, the factory emits a warning (not an error), and you can still debug compiled `.js` files with source maps.
 
+## Attaching to a running Node.js process
+
+Two ways in:
+
+- **By port** — the target was started with the inspector listening
+  (`node --inspect=127.0.0.1:9229 server.js`): `attach_to_process { host, port }`.
+  This is the remote form too, against `--inspect=0.0.0.0:<port>` or a pod via
+  `kubectl port-forward` (see [attach presets](../../examples/kubernetes/attach-presets.md)).
+- **By PID** (issue #871) — the target is a plain `node server.js` on the same host:
+  `attach_to_process { processId }`. js-debug's DAP server has no PID step (in VS Code
+  the process picker does it), so mcp-debugger does what the picker does: it signals the
+  process (`SIGUSR1` on POSIX, `process._debugProcess` on Windows), which makes Node open
+  its inspector on `127.0.0.1:9229`, confirms through the inspector's `/json/list` that the
+  port now belongs to that PID, and attaches there. A target started with
+  `--inspect-port=<n>` (or `NODE_OPTIONS=--inspect-port=<n>`) opens on that port instead:
+  pass it as `port` alongside `processId`. The inspector **stays open after detach**, so a
+  later attach — by PID or by `port: 9229` — reuses it without a second signal.
+
+What a PID attach refuses, by name: a non-loopback `host` (the signal is local); the server's
+own PID; a PID that is not a Node.js process (on POSIX `SIGUSR1` would terminate it, so the
+executable is checked first, and a PID that cannot be identified is not signalled either); a
+Node.js process started with `--disable-sigusr1` (no handler is installed, so the signal would
+terminate it — seen on its command line or in `NODE_OPTIONS` where those are readable, which
+on Linux and macOS means a process of the same user; a hardened target of another user is the
+one case the check cannot see); a port already held by another process's inspector or by
+something that is not an inspector (pass `port` if the target listens elsewhere, or free it);
+and, in the Docker image, a host PID — the container only reaches its own PID namespace.
+
+Two side effects to expect in the target's own logs: the ownership check opens one short
+inspector session, so the target prints `Debugger attached.` / `Debugger ending on …` once
+before js-debug connects; and an inspector that was opened for an attach that then failed stays
+open on its port (Node never closes it by itself) — a later attach by PID or by port reuses it.
+
 ## Known Limitations
 
 - Browser/Chrome debugging not yet supported (Node.js via `pwa-node` only)
-- Remote attach works over `host`/`port` against a `node --inspect=0.0.0.0:<port>`
-  target, including pods via `kubectl port-forward` (see
-  [attach presets](../../examples/kubernetes/attach-presets.md)); the target must be
-  started with the inspector enabled, which mcp-debugger cannot do for you
+- Attach by PID activates the inspector on Node's default port unless the target set
+  `--inspect-port`; two PID attaches to two different plain `node` processes on one host
+  therefore need the second target started with `--inspect-port=<n>` and `port: <n>` passed
 - Attach pauses the target unless you pass `stopOnEntry: false`. js-debug's pause
   lands on the next event-loop dispatch, so an idle server answers
   `state: "running", pending: true` (the `message` names the pending pause) and
