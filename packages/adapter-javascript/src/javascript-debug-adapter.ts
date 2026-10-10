@@ -45,6 +45,11 @@ import { JsDebugLaunchBarrier } from './utils/js-debug-launch-barrier.js';
 import { jsDebugCandidatePaths } from './utils/js-debug-resolver.js';
 import { JS_LAUNCH_CONSUMED_KEYS, JS_SUPPORTED_LAUNCH_KEYS, normalizeJsLaunchInputs } from './utils/launch-config.js';
 import { resolveLaunchEnvironment } from './utils/launch-environment.js';
+import {
+  activateInspector,
+  type InspectorActivationOptions,
+  type InspectorActivationResult
+} from './utils/inspector-activation.js';
 
 /**
  * Base path js-debug uses to resolve source-map `sources` on attach (issue
@@ -224,6 +229,13 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
 
   private state: AdapterState = AdapterState.UNINITIALIZED;
   private readonly dependencies: AdapterDependencies;
+
+  /**
+   * The PID → inspector step js-debug's DAP server does not have (issue
+   * #871); a field so tests can stand in a fake without signalling anything.
+   */
+  protected activateInspector: (options: InspectorActivationOptions) => Promise<InspectorActivationResult> =
+    activateInspector;
 
   private currentThreadId: number | null = null;
   private connected = false;
@@ -921,30 +933,67 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
    * transformLaunchConfig — which always produces a launch request — this
    * preserves the attach request/host/port so the proxy worker detects attach
    * mode and JsDebugAdapterPolicy.performHandshake sends a real DAP 'attach'.
+   *
+   * Attach by PID (issue #871): js-debug's DAP server never reads
+   * `processId` — in VS Code the process picker signals the target and
+   * attaches by port — so the activation happens here and js-debug receives
+   * a port. A config with neither port nor processId is refused: the policy
+   * would otherwise send js-debug a port-less attach, which it answers by
+   * dialling localhost:9229 and exiting ("adapter exited during attach
+   * verification"). `websocketAddress` is the one port-less form js-debug
+   * does honour.
    */
-  transformAttachConfig(config: GenericAttachConfig): LanguageSpecificAttachConfig {
+  async transformAttachConfig(config: GenericAttachConfig): Promise<LanguageSpecificAttachConfig> {
     const {
       request: _request,
       __attachMode: _attachMode,
-      processId: _processId,
+      processId,
       processName: _processName,
       identifierType: _identifierType,
       host,
       port,
       ...rest
     } = config as Record<string, unknown>;
-    void _request; void _attachMode; void _processId; void _processName;
-    void _identifierType;
+    void _request; void _attachMode; void _processName; void _identifierType;
+
+    let attachHost = (host as string | undefined) || '127.0.0.1';
+    let attachPort =
+      typeof port === 'number' ? port
+        : typeof port === 'string' && /^\d+$/.test(port) ? Number(port)
+        : undefined;
+
+    if (processId !== undefined && processId !== null && processId !== '') {
+      const activated = await this.activateInspector({
+        pid: processId as number | string,
+        host: attachHost,
+        port: attachPort
+      });
+      attachHost = activated.host;
+      attachPort = activated.port;
+      this.dependencies.logger.info(
+        `[JavascriptDebugAdapter] ${activated.alreadyActive ? 'Found' : 'Activated'} the inspector of PID ${processId} ` +
+          `on ${attachHost}:${attachPort} (${activated.title})`
+      );
+    } else if (attachPort === undefined && typeof rest.websocketAddress !== 'string') {
+      throw new AdapterError(
+        'JavaScript attach needs port (the --inspect port of the target) or a local processId ' +
+          '(the inspector of a running Node.js process is activated for you); without either ' +
+          'js-debug would dial localhost:9229 and exit',
+        AdapterErrorCode.ENVIRONMENT_INVALID
+      );
+    }
 
     // Advanced passthrough (localRoot/remoteRoot, sourceMaps, skipFiles, …)
     // with the normalized pwa-node attach shape on top (issues #450/#466).
+    // processId stays out of the js-debug config: it is not a js-debug key,
+    // and the attach controller already names the PID in its answer.
     return {
       ...rest,
       type: 'pwa-node',
       request: 'attach',
       name: 'Attach to Node.js process',
-      host: (host as string | undefined) || '127.0.0.1',
-      port: port as number | undefined,
+      host: attachHost,
+      port: attachPort,
       // js-debug's pwa-node attach defaults this to true, injecting its
       // NODE_OPTIONS bootloader into the inspected process; every fork() then
       // parks under waitForDebugger and only one child can be adopted (#501).

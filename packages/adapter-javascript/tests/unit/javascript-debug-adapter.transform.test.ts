@@ -598,9 +598,9 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
   });
 
   describe('transformAttachConfig source-map defaults (issue #655)', () => {
-    it('defaults resolveSourceMapLocations to the launch exclusion and cwd to the server cwd', () => {
+    it('defaults resolveSourceMapLocations to the launch exclusion and cwd to the server cwd', async () => {
       const adapter = new JavascriptDebugAdapter(deps);
-      const cfg = adapter.transformAttachConfig({ request: 'attach', port: 9229 } as any) as Record<string, unknown>;
+      const cfg = await adapter.transformAttachConfig({ request: 'attach', port: 9229 } as any) as Record<string, unknown>;
       expect(cfg.resolveSourceMapLocations).toEqual(['**', '!**/node_modules/**']);
       expect(cfg.cwd).toBe(process.cwd());
       // Deliberately not defaulted: blackboxing node_modules would recreate
@@ -610,27 +610,27 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
       expect(cfg.outFiles).toBeUndefined();
     });
 
-    it('keeps a caller resolveSourceMapLocations — including an explicit null — and a caller cwd', () => {
+    it('keeps a caller resolveSourceMapLocations — including an explicit null — and a caller cwd', async () => {
       const adapter = new JavascriptDebugAdapter(deps);
-      const list = adapter.transformAttachConfig({
+      const list = await adapter.transformAttachConfig({
         request: 'attach', port: 9229, resolveSourceMapLocations: ['/app/**'], cwd: '/app'
       } as any) as Record<string, unknown>;
       expect(list.resolveSourceMapLocations).toEqual(['/app/**']);
       expect(list.cwd).toBe('/app');
 
-      const everywhere = adapter.transformAttachConfig({
+      const everywhere = await adapter.transformAttachConfig({
         request: 'attach', port: 9229, resolveSourceMapLocations: null
       } as any) as Record<string, unknown>;
       expect(everywhere.resolveSourceMapLocations).toBeNull();
     });
 
-    it('uses the workspace root as cwd in container mode', () => {
+    it('uses the workspace root as cwd in container mode', async () => {
       const prev = { c: process.env.MCP_CONTAINER, w: process.env.MCP_WORKSPACE_ROOT };
       process.env.MCP_CONTAINER = 'true';
       process.env.MCP_WORKSPACE_ROOT = '/ws';
       try {
         const adapter = new JavascriptDebugAdapter(deps);
-        const cfg = adapter.transformAttachConfig({ request: 'attach', port: 9229 } as any) as Record<string, unknown>;
+        const cfg = await adapter.transformAttachConfig({ request: 'attach', port: 9229 } as any) as Record<string, unknown>;
         expect(cfg.cwd).toBe('/ws');
       } finally {
         if (prev.c === undefined) delete process.env.MCP_CONTAINER; else process.env.MCP_CONTAINER = prev.c;
@@ -640,9 +640,9 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
   });
 
   describe('transformAttachConfig passthrough (issues #450/#466)', () => {
-    it('normalizes the pwa-node attach shape and defaults the host', () => {
+    it('normalizes the pwa-node attach shape and defaults the host', async () => {
       const adapter = new JavascriptDebugAdapter(deps);
-      const cfg = adapter.transformAttachConfig({
+      const cfg = await adapter.transformAttachConfig({
         request: 'attach',
         port: 9229,
         stopOnEntry: true,
@@ -659,12 +659,13 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
       expect(cfg.timeout).toBe(15000);
     });
 
-    it('forwards advanced js-debug options and strips reserved keys', () => {
+    it('forwards advanced js-debug options and strips reserved keys', async () => {
       const adapter = new JavascriptDebugAdapter(deps);
-      const cfg = adapter.transformAttachConfig({
+      const cfg = await adapter.transformAttachConfig({
         request: 'launch', // must not survive: attach transforms pin the request
         __attachMode: true,
-        processId: 4242,
+        processName: 'server.js',
+        identifierType: 'name',
         host: '10.0.0.5',
         port: 9229,
         localRoot: '/local/src',
@@ -676,7 +677,8 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
 
       expect(cfg.request).toBe('attach');
       expect(cfg.__attachMode).toBeUndefined();
-      expect(cfg.processId).toBeUndefined();
+      expect(cfg.processName).toBeUndefined();
+      expect(cfg.identifierType).toBeUndefined();
       expect(cfg.host).toBe('10.0.0.5');
       expect(cfg.localRoot).toBe('/local/src');
       expect(cfg.remoteRoot).toBe('/app');
@@ -685,9 +687,9 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
       expect(cfg.continueOnAttach).toBe(true);
     });
 
-    it('defaults autoAttachChildProcesses to false on attach (issue #501)', () => {
+    it('defaults autoAttachChildProcesses to false on attach (issue #501)', async () => {
       const adapter = new JavascriptDebugAdapter(deps);
-      const cfg = adapter.transformAttachConfig({
+      const cfg = await adapter.transformAttachConfig({
         request: 'attach',
         port: 9229
       } as any) as Record<string, unknown>;
@@ -697,16 +699,16 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
       expect(cfg.autoAttachChildProcesses).toBe(false);
     });
 
-    it('respects a caller-supplied autoAttachChildProcesses (issue #501)', () => {
+    it('respects a caller-supplied autoAttachChildProcesses (issue #501)', async () => {
       const adapter = new JavascriptDebugAdapter(deps);
-      const optIn = adapter.transformAttachConfig({
+      const optIn = await adapter.transformAttachConfig({
         request: 'attach',
         port: 9229,
         autoAttachChildProcesses: true
       } as any) as Record<string, unknown>;
       expect(optIn.autoAttachChildProcesses).toBe(true);
 
-      const optOut = adapter.transformAttachConfig({
+      const optOut = await adapter.transformAttachConfig({
         request: 'attach',
         port: 9229,
         autoAttachChildProcesses: false
@@ -719,9 +721,9 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
       expect(adapter.supportedAttachKeys).toContain('autoAttachChildProcesses');
     });
 
-    it('defaults smartStep to false on attach (issue #513)', () => {
+    it('defaults smartStep to false on attach (issue #513)', async () => {
       const adapter = new JavascriptDebugAdapter(deps);
-      const cfg = adapter.transformAttachConfig({
+      const cfg = await adapter.transformAttachConfig({
         request: 'attach',
         port: 9229
       } as any) as Record<string, unknown>;
@@ -732,22 +734,92 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
       expect(cfg.smartStep).toBe(false);
     });
 
-    it('respects a caller-supplied smartStep (issue #513)', () => {
+    it('respects a caller-supplied smartStep (issue #513)', async () => {
       const adapter = new JavascriptDebugAdapter(deps);
-      const optIn = adapter.transformAttachConfig({
+      const optIn = await adapter.transformAttachConfig({
         request: 'attach',
         port: 9229,
         smartStep: true
       } as any) as Record<string, unknown>;
       expect(optIn.smartStep).toBe(true);
 
-      const optOut = adapter.transformAttachConfig({
+      const optOut = await adapter.transformAttachConfig({
         request: 'attach',
         port: 9229,
         smartStep: false
       } as any) as Record<string, unknown>;
       expect(optOut.smartStep).toBe(false);
     });
+  });
+});
+
+describe('JavascriptDebugAdapter.transformAttachConfig by processId (issue #871)', () => {
+  type Activation = { pid: number | string; host?: string; port?: number };
+  type Result = { host: string; port: number; alreadyActive: boolean; title: string };
+
+  /** The adapter with its PID → inspector step replaced (nothing is signalled). */
+  function adapterWithActivation(impl?: (o: Activation) => Promise<Result>) {
+    const adapter = new JavascriptDebugAdapter(deps);
+    const activate = vi.fn(impl ?? (async (o: Activation) => ({
+      host: '127.0.0.1', port: o.port ?? 9229, alreadyActive: false, title: `node[${o.pid}]`
+    })));
+    (adapter as unknown as { activateInspector: typeof activate }).activateInspector = activate;
+    return { adapter, activate };
+  }
+
+  it('activates the inspector of the PID and hands js-debug the port it opened; processId itself is not forwarded', async () => {
+    const { adapter, activate } = adapterWithActivation();
+    const cfg = await adapter.transformAttachConfig({ request: 'attach', processId: 4242 } as any) as Record<string, unknown>;
+
+    expect(activate).toHaveBeenCalledWith({ pid: 4242, host: '127.0.0.1', port: undefined });
+    expect(cfg.port).toBe(9229);
+    expect(cfg.host).toBe('127.0.0.1');
+    expect(cfg.processId).toBeUndefined();
+    expect(cfg.request).toBe('attach');
+    expect(cfg.type).toBe('pwa-node');
+  });
+
+  it('with processId and port, activation targets that port (a --inspect-port target) and its answer wins', async () => {
+    const { adapter, activate } = adapterWithActivation(async (o) => ({
+      host: '127.0.0.1', port: o.port!, alreadyActive: true, title: `node[${o.pid}]`
+    }));
+    const cfg = await adapter.transformAttachConfig({ request: 'attach', processId: '4242', port: 9230 } as any) as Record<string, unknown>;
+
+    expect(activate).toHaveBeenCalledWith({ pid: '4242', host: '127.0.0.1', port: 9230 });
+    expect(cfg.port).toBe(9230);
+  });
+
+  it('a port-only attach never touches the activation step', async () => {
+    const { adapter, activate } = adapterWithActivation();
+    const cfg = await adapter.transformAttachConfig({ request: 'attach', host: '10.0.0.5', port: 9229 } as any) as Record<string, unknown>;
+    expect(activate).not.toHaveBeenCalled();
+    expect(cfg.host).toBe('10.0.0.5');
+    expect(cfg.port).toBe(9229);
+  });
+
+  it('an activation failure fails the attach with its own message', async () => {
+    const { adapter } = adapterWithActivation(async () => {
+      throw new Error('JavaScript attach: PID 4242 is not a Node.js process');
+    });
+    await expect(adapter.transformAttachConfig({ request: 'attach', processId: 4242 } as any))
+      .rejects.toThrow(/PID 4242 is not a Node\.js process/);
+  });
+
+  it('refuses an attach with neither port nor processId instead of letting js-debug dial localhost:9229', async () => {
+    const { adapter, activate } = adapterWithActivation();
+    await expect(adapter.transformAttachConfig({ request: 'attach', host: '127.0.0.1' } as any))
+      .rejects.toThrow(/JavaScript attach needs port .* or a local processId/);
+    expect(activate).not.toHaveBeenCalled();
+  });
+
+  it('still accepts a websocketAddress attach, the one port-less form js-debug honours', async () => {
+    const { adapter, activate } = adapterWithActivation();
+    const cfg = await adapter.transformAttachConfig({
+      request: 'attach', websocketAddress: 'ws://127.0.0.1:9229/abc'
+    } as any) as Record<string, unknown>;
+    expect(activate).not.toHaveBeenCalled();
+    expect(cfg.websocketAddress).toBe('ws://127.0.0.1:9229/abc');
+    expect(cfg.port).toBeUndefined();
   });
 });
 
@@ -859,7 +931,7 @@ describe('JavascriptDebugAdapter.transformLaunchConfig passthrough (issue #703)'
     expect(bad.resolveSourceMapLocations).toEqual(['**', '!**/node_modules/**']);
     expect(d.logger.warn.mock.calls.map(([m]) => String(m)).join('\n')).toMatch(/resolveSourceMapLocations: expected null or an array/);
 
-    const attach = adapter.transformAttachConfig({ host: 'h', port: 1, resolveSourceMapLocations: { no: true } } as any) as Record<string, unknown>;
+    const attach = await adapter.transformAttachConfig({ host: 'h', port: 1, resolveSourceMapLocations: { no: true } } as any) as Record<string, unknown>;
     expect(attach.resolveSourceMapLocations).toEqual(['**', '!**/node_modules/**']);
   });
 });
