@@ -3,7 +3,7 @@
  * keyed by toolName), continue_execution, wait_for_stop, pause_execution,
  * list_threads.
  */
-import { SessionState } from '@debugmcp/shared';
+import { isTerminalSessionState } from '@debugmcp/shared';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import type { DebugResult, StepResultData } from '../../session/session-manager-core.js';
 import { requireSessionId } from '../tool-validation.js';
@@ -15,12 +15,6 @@ import {
   sessionErrorToResult,
   type ToolResult
 } from '../tool-result.js';
-
-/** The states that mean the step outlived its session (issue #574). */
-const SESSION_OVER: ReadonlySet<SessionState> = new Set([
-  SessionState.STOPPED,
-  SessionState.ERROR
-]);
 
 export const stepTool: ToolHandler = async (ctx, args, toolName) => {
   requireSessionId(args);
@@ -59,7 +53,7 @@ export const stepTool: ToolHandler = async (ctx, args, toolName) => {
       if (resultData.message) {
         response.message = resultData.message;
       }
-    } else if (SESSION_OVER.has(stepResult.state) && resultData?.message) {
+    } else if (isTerminalSessionState(stepResult.state) && resultData?.message) {
       // A step the debuggee did not survive completes with "Step completed as
       // session terminated./exited." and no `pending` marker. Gated on the
       // terminal states rather than a blanket `??` so the ordinary stop keeps

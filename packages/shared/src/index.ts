@@ -171,6 +171,8 @@ export {
   ProcessIdentifierType,
 
   // State mapping functions
+  isSessionTerminated,
+  isSettledSessionState,
   isTerminalSessionState,
   mapLegacyState,
   mapToLegacyState

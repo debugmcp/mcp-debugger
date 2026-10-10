@@ -30,7 +30,7 @@ import {
     DebugLanguage,
     Breakpoint,
     FunctionBreakpoint,
-    SessionLifecycleState,
+    isSessionTerminated,
     SessionState,
     IEnvironment,
     ILogger,
@@ -119,7 +119,7 @@ export class DebugMcpServer implements ToolContext {
    */
   public validateSession(sessionId: string): void {
     const session = this.validateSessionExists(sessionId);
-    if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
+    if (isSessionTerminated(session)) {
       throw new SessionTerminatedError(sessionId);
     }
   }

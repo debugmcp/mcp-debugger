@@ -3,7 +3,7 @@
  * read, the redaction notice, the get_variables / get_local_variables payload
  * extras, and the attach warning both attach paths surface.
  */
-import { isTerminalSessionState, REDACTION_NOTICE, SessionState, Variable } from '@debugmcp/shared';
+import { isSettledSessionState, REDACTION_NOTICE, SessionState, Variable } from '@debugmcp/shared';
 import type { LineContext } from '../../utils/line-reader.js';
 import { buildTruncationNotice, VariableTruncationSummary } from '../../session/variable-caps.js';
 import type { ToolContext } from '../tool-context.js';
@@ -25,7 +25,7 @@ import type { DebugResult } from '../../session/session-manager-core.js';
  * `lastStop`/`stopReason` whenever the session is not paused.
  */
 export function carriesLastStop(state: SessionState | undefined): boolean {
-  return state === SessionState.PAUSED || isTerminalSessionState(state);
+  return isSettledSessionState(state);
 }
 
 /**
