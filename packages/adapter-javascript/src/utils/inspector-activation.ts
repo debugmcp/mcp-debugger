@@ -16,9 +16,12 @@
  * signal is taken as ours, while one that was already open is refused.
  *
  * Safety: SIGUSR1's default disposition is *terminate*. On POSIX the target
- * is confirmed to be a Node.js executable before it is signalled; a PID that
- * cannot be identified is refused rather than signalled. On Windows
- * `process._debugProcess` fails harmlessly on a non-Node target.
+ * is confirmed to be a Node.js executable before it is signalled, a PID that
+ * cannot be identified is refused rather than signalled, and a target whose
+ * command line or NODE_OPTIONS carries `--disable-sigusr1` (Node 22.14+:
+ * no handler is installed, so the signal would kill it) is refused by name
+ * where that can be seen. On Windows `process._debugProcess` fails
+ * harmlessly on a non-Node target.
  */
 import * as http from 'node:http';
 import * as path from 'node:path';
@@ -63,6 +66,10 @@ export interface InspectorActivationOptions {
   processExists?: (pid: number) => boolean;
   /** true / false, or undefined when the executable could not be identified. */
   isNodeProcess?: (pid: number) => Promise<boolean | undefined>;
+  /** Was the target started with --disable-sigusr1? undefined when that cannot be seen. */
+  inspectorSignalDisabled?: (pid: number) => Promise<boolean | undefined>;
+  /** This server's own PID (default process.pid) — never a valid target. */
+  selfPid?: number;
   signal?: (pid: number) => void;
   listTargets?: (host: string, port: number) => Promise<InspectorProbe>;
   /** The PID behind an inspector target, or undefined when it cannot be told. */
@@ -80,15 +87,22 @@ export interface InspectorActivationResult {
   title: string;
 }
 
+/**
+ * The spellings of "this host" a caller may pass. A signal-opened inspector
+ * binds 127.0.0.1 only, so every one of them is probed — and handed to
+ * js-debug — as 127.0.0.1.
+ */
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
 const NODE_EXECUTABLE = /^node(?:js)?(?:\d+(?:\.\d+)*)?(?:\.exe)?$/i;
+const DISABLE_SIGUSR1 = /(?:^|[\s\0=])--disable-sigusr1(?:$|[\s\0])/;
 
 function invalid(message: string): AdapterError {
   return new AdapterError(`JavaScript attach: ${message}`, AdapterErrorCode.ENVIRONMENT_INVALID);
 }
 
 function parsePid(raw: number | string): number {
-  const pid = typeof raw === 'number' ? raw : /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : NaN;
+  const text = String(raw).trim();
+  const pid = typeof raw === 'number' ? raw : /^\d+$/.test(text) ? Number(text) : NaN;
   if (!Number.isInteger(pid) || pid <= 0) {
     throw invalid(`processId must be a positive integer (got ${JSON.stringify(raw)})`);
   }
@@ -209,6 +223,39 @@ export async function isNodeProcessByPid(pid: number, platform: NodeJS.Platform 
   }
 }
 
+/**
+ * Was `pid` started with `--disable-sigusr1` (on its command line, or in
+ * NODE_OPTIONS)? Node then installs no SIGUSR1 handler and the signal would
+ * terminate it. Linux reads /proc/<pid>/cmdline and environ; darwin asks
+ * `ps -E`. `undefined` when it cannot be seen (another user's process) — the
+ * caller proceeds, and the docs name that residual case.
+ */
+export async function inspectorSignalDisabledByPid(pid: number, platform: NodeJS.Platform = process.platform): Promise<boolean | undefined> {
+  try {
+    if (platform === 'linux') {
+      const cmdline = await readFile(`/proc/${pid}/cmdline`, 'utf8');
+      if (DISABLE_SIGUSR1.test(cmdline)) return true;
+      let environ: string;
+      try {
+        environ = await readFile(`/proc/${pid}/environ`, 'utf8');
+      } catch {
+        return undefined;
+      }
+      const nodeOptions = environ.split('\0').find((entry) => entry.startsWith('NODE_OPTIONS='));
+      return nodeOptions !== undefined && DISABLE_SIGUSR1.test(nodeOptions);
+    }
+    if (platform === 'darwin') {
+      // -E appends the environment to the command line (own processes only).
+      const { stdout } = await execFileAsync('ps', ['-E', '-o', 'args=', '-p', String(pid)], { windowsHide: true, timeout: 3000 });
+      if (!stdout.trim()) return undefined;
+      return DISABLE_SIGUSR1.test(stdout);
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function defaultSignal(pid: number, platform: NodeJS.Platform): void {
   if (platform === 'win32') {
     // Undocumented but stable since Node 0.x: it is what `node --inspect`'s
@@ -270,12 +317,14 @@ const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(
  */
 export async function activateInspector(options: InspectorActivationOptions): Promise<InspectorActivationResult> {
   const pid = parsePid(options.pid);
-  const host = options.host ?? '127.0.0.1';
+  const requestedHost = options.host ?? '127.0.0.1';
   const port = options.port ?? DEFAULT_INSPECTOR_PORT;
   const platform = options.platform ?? process.platform;
   const container = options.container ?? process.env.MCP_CONTAINER === 'true';
+  const selfPid = options.selfPid ?? process.pid;
   const processExists = options.processExists ?? defaultProcessExists;
   const isNodeProcess = options.isNodeProcess ?? ((p: number) => isNodeProcessByPid(p, platform));
+  const inspectorSignalDisabled = options.inspectorSignalDisabled ?? ((p: number) => inspectorSignalDisabledByPid(p, platform));
   const signal = options.signal ?? ((p: number) => defaultSignal(p, platform));
   const listTargets = options.listTargets ?? ((h: string, p: number) => probeInspector(h, p));
   const pidOf = options.pidOf ?? defaultPidOf;
@@ -283,10 +332,14 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
   const now = options.now ?? Date.now;
   const deadlineMs = options.deadlineMs ?? 5000;
   const pollMs = options.pollMs ?? 100;
-  const where = `${host}:${port}`;
 
-  if (!LOOPBACK_HOSTS.has(host)) {
-    throw invalid(`attach by processId is local only (host ${host}); for a remote target start it with --inspect and pass host/port`);
+  if (!LOOPBACK_HOSTS.has(requestedHost)) {
+    throw invalid(`attach by processId is local only (host ${requestedHost}); for a remote target start it with --inspect and pass host/port`);
+  }
+  const host = '127.0.0.1';
+  const where = `${host}:${port}`;
+  if (pid === selfPid) {
+    throw invalid(`PID ${pid} is this mcp-debugger server itself; a debugger pausing its own driver would freeze the attach — pick the process you mean`);
   }
   if (!processExists(pid)) {
     throw invalid(
@@ -295,9 +348,17 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
     );
   }
 
+  // After our signal a transient probe failure (ECONNRESET or a read timeout
+  // while the inspector's HTTP server comes up) is not a verdict — keep
+  // polling and name it only if the deadline passes.
+  let lastTransient: string | undefined;
   const classify = async (probe: InspectorProbe, afterSignal: boolean): Promise<InspectorActivationResult | undefined> => {
     if (probe.status === 'closed') return undefined;
     if (probe.status === 'other') {
+      if (afterSignal) {
+        lastTransient = probe.detail;
+        return undefined;
+      }
       throw invalid(`${where} is in use by something that is not a Node inspector (${probe.detail}); pass port if PID ${pid} listens elsewhere, or free the port`);
     }
     const owners = await Promise.all(probe.targets.map((target) => pidOf(target)));
@@ -314,7 +375,10 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
       // it did not say so (a target paused at a breakpoint cannot answer).
       return { host, port, alreadyActive: false, title: probe.targets[0]?.title ?? '' };
     }
-    throw invalid(`${where} is already held by a Node inspector (${describeTargets(probe.targets)}) that could not be confirmed to be PID ${pid}'s; if it is, attach by port instead of processId, otherwise free the port`);
+    throw invalid(
+      `${where} is already held by a Node inspector (${describeTargets(probe.targets)}) that could not be confirmed to be PID ${pid}'s — ` +
+        `most often another debugger is attached and holds the target paused; if it is PID ${pid}'s, attach by port instead of processId, otherwise free the port`
+    );
   };
 
   const before = await classify(await listTargets(host, port), false);
@@ -327,6 +391,9 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
     }
     if (isNode === undefined) {
       throw invalid(`could not confirm that PID ${pid} is a Node.js process, so it was not signalled (SIGUSR1 terminates a process that does not handle it) — start the target with --inspect and pass port`);
+    }
+    if (await inspectorSignalDisabled(pid) === true) {
+      throw invalid(`PID ${pid} was started with --disable-sigusr1, so no signal can open its inspector (it would terminate the process instead) — start the target with --inspect and pass port`);
     }
   }
 
@@ -341,7 +408,11 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
     if (code === 'ESRCH') {
       throw invalid(`no process with PID ${pid} (it exited before it could be signalled)`);
     }
-    throw invalid(`could not activate the inspector of PID ${pid}: ${err instanceof Error ? err.message : String(err)}`);
+    const detail = err instanceof Error ? err.message : String(err);
+    const hint = platform === 'win32'
+      ? ' — on Windows this is what a process that is not Node.js (or a Node.js started with --disable-sigusr1) answers; start the target with --inspect and pass port'
+      : '';
+    throw invalid(`could not activate the inspector of PID ${pid}: ${detail}${hint}`);
   }
 
   const deadline = now() + deadlineMs;
@@ -351,8 +422,9 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
     if (result) return result;
     if (now() >= deadline) {
       throw invalid(
-        `PID ${pid} did not open an inspector on ${where} within ${deadlineMs} ms of being signalled — ` +
-          `a target started with --inspect-port=<n> (or NODE_OPTIONS=--inspect-port=<n>) opens it there: pass that port; ` +
+        `PID ${pid} did not open an inspector on ${where} within ${deadlineMs} ms of being signalled` +
+          (lastTransient ? ` (last probe: ${lastTransient})` : '') +
+          ` — a target started with --inspect-port=<n> (or NODE_OPTIONS=--inspect-port=<n>) opens it there: pass that port; ` +
           `otherwise check that PID ${pid} is a Node.js process and that ${where} is free`
       );
     }

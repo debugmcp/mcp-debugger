@@ -335,12 +335,20 @@ Two ways in:
   pass it as `port` alongside `processId`. The inspector **stays open after detach**, so a
   later attach — by PID or by `port: 9229` — reuses it without a second signal.
 
-What a PID attach refuses, by name: a non-loopback `host` (the signal is local); a PID that
-is not a Node.js process (on POSIX `SIGUSR1` would terminate it, so the executable is checked
-first, and a PID that cannot be identified is not signalled either); a port already held by
-another process's inspector or by something that is not an inspector (pass `port` if the
-target listens elsewhere, or free it); and, in the Docker image, a host PID — the container
-only reaches its own PID namespace.
+What a PID attach refuses, by name: a non-loopback `host` (the signal is local); the server's
+own PID; a PID that is not a Node.js process (on POSIX `SIGUSR1` would terminate it, so the
+executable is checked first, and a PID that cannot be identified is not signalled either); a
+Node.js process started with `--disable-sigusr1` (no handler is installed, so the signal would
+terminate it — seen on its command line or in `NODE_OPTIONS` where those are readable, which
+on Linux and macOS means a process of the same user; a hardened target of another user is the
+one case the check cannot see); a port already held by another process's inspector or by
+something that is not an inspector (pass `port` if the target listens elsewhere, or free it);
+and, in the Docker image, a host PID — the container only reaches its own PID namespace.
+
+Two side effects to expect in the target's own logs: the ownership check opens one short
+inspector session, so the target prints `Debugger attached.` / `Debugger ending on …` once
+before js-debug connects; and an inspector that was opened for an attach that then failed stays
+open on its port (Node never closes it by itself) — a later attach by PID or by port reuses it.
 
 ## Known Limitations
 

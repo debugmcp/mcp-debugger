@@ -12,6 +12,7 @@ import type { AddressInfo } from 'node:net';
 import { AdapterError, AdapterErrorCode } from '@debugmcp/shared';
 import {
   activateInspector,
+  inspectorSignalDisabledByPid,
   isNodeProcessByPid,
   pidViaInspector,
   probeInspector,
@@ -44,6 +45,8 @@ function harness(overrides: Partial<InspectorActivationOptions> & { probes?: Ins
     container: false,
     processExists: () => true,
     isNodeProcess: async () => true,
+    inspectorSignalDisabled: async () => false,
+    selfPid: 1,
     signal,
     listTargets,
     pidOf: pidFromTitle,
@@ -108,12 +111,63 @@ describe('activateInspector (issue #871)', () => {
     expect(result).toEqual({ host: '127.0.0.1', port: 9229, alreadyActive: true, title: 'C:_app_server.js' });
   });
 
-  it('refuses an already-open inspector whose owner cannot be told, pointing at attach by port', async () => {
+  it('refuses an already-open inspector whose owner cannot be told, naming the paused-by-another-debugger case and attach by port', async () => {
     const { options, signal } = harness({ probes: [inspector('C:_app_server.js')], pidOf: async () => undefined });
     const err = await failure(activateInspector(options));
     expect(err.message).toMatch(/already held by a Node inspector \(C:_app_server\.js\) that could not be confirmed to be PID 4242's/);
+    expect(err.message).toMatch(/another debugger is attached and holds the target paused/);
     expect(err.message).toMatch(/attach by port instead of processId/);
     expect(signal).not.toHaveBeenCalled();
+  });
+
+  it('keeps polling through a transient probe failure after the signal, and names it only on the deadline', async () => {
+    const reset: InspectorProbe = { status: 'other', detail: 'read ECONNRESET' };
+    const ok = await activateInspector(harness({ probes: [closed, reset, reset, inspector('node[4242]')] }).options);
+    expect(ok.alreadyActive).toBe(false);
+
+    const err = await failure(activateInspector(harness({ probes: [closed, reset], deadlineMs: 250, pollMs: 100 }).options));
+    expect(err.message).toMatch(/did not open an inspector on 127\.0\.0\.1:9229 within 250 ms/);
+    expect(err.message).toMatch(/\(last probe: read ECONNRESET\)/);
+  });
+
+  it('still refuses a non-inspector listener seen BEFORE the signal', async () => {
+    const { options, signal } = harness({ probes: [{ status: 'other', detail: 'HTTP 404 from /json/list' }] });
+    await failure(activateInspector(options));
+    expect(signal).not.toHaveBeenCalled();
+  });
+
+  it('never signals a target started with --disable-sigusr1 (no handler: the signal would kill it)', async () => {
+    const { options, signal } = harness({ inspectorSignalDisabled: async () => true });
+    const err = await failure(activateInspector(options));
+    expect(err.message).toMatch(/PID 4242 was started with --disable-sigusr1/);
+    expect(signal).not.toHaveBeenCalled();
+  });
+
+  it('proceeds when the --disable-sigusr1 check cannot see the target (documented residual case)', async () => {
+    const { options, signal } = harness({ inspectorSignalDisabled: async () => undefined });
+    await activateInspector(options);
+    expect(signal).toHaveBeenCalledWith(4242);
+  });
+
+  it.each(['localhost', '::1', '[::1]'])('probes and answers 127.0.0.1 for the loopback spelling %s', async (host) => {
+    const { options, listTargets } = harness({ host });
+    const result = await activateInspector(options);
+    expect(listTargets).toHaveBeenCalledWith('127.0.0.1', 9229);
+    expect(result.host).toBe('127.0.0.1');
+  });
+
+  it('refuses the server\'s own PID', async () => {
+    const { options, signal, listTargets } = harness({ pid: 777, selfPid: 777 });
+    const err = await failure(activateInspector(options));
+    expect(err.message).toMatch(/PID 777 is this mcp-debugger server itself/);
+    expect(listTargets).not.toHaveBeenCalled();
+    expect(signal).not.toHaveBeenCalled();
+  });
+
+  it('adds the Windows hint to a failed process._debugProcess', async () => {
+    const { options } = harness({ platform: 'win32', signal: () => { throw new Error('The system cannot find the file specified.'); } });
+    const err = await failure(activateInspector(options));
+    expect(err.message).toMatch(/could not activate the inspector of PID 4242: The system cannot find the file specified\. — on Windows this is what a process that is not Node\.js/);
   });
 
   it('accepts an inspector that opened right after the signal even when its owner cannot be told', async () => {
@@ -199,8 +253,8 @@ describe('activateInspector (issue #871)', () => {
     expect(signal).not.toHaveBeenCalled();
   });
 
-  it.each([['abc'], [0], [-3], [1.5], ['']])('refuses %j as a processId', async (pid) => {
-    const { options } = harness({ pid: pid as number | string });
+  it.each([['abc'], [0], [-3], [1.5], [''], [true], [null]])('refuses %j as a processId', async (pid) => {
+    const { options } = harness({ pid: pid as unknown as number | string });
     const err = await failure(activateInspector(options));
     expect(err.message).toMatch(/processId must be a positive integer/);
   });
@@ -283,4 +337,26 @@ describe('isNodeProcessByPid', () => {
     // PID 2^22 is above Linux's default pid_max and far above macOS's.
     expect(await isNodeProcessByPid(4194304)).toBeUndefined();
   });
+});
+
+describe('inspectorSignalDisabledByPid', () => {
+  it.skipIf(process.platform === 'win32')('sees --disable-sigusr1 on a child\'s command line, and its absence on this runner', async () => {
+    expect(await inspectorSignalDisabledByPid(process.pid)).toBe(false);
+    const child = spawn(process.execPath, ['--disable-sigusr1', '-e', 'setTimeout(() => {}, 20000)'], {
+      stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true
+    });
+    try {
+      let stderr = '';
+      child.stderr!.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      if (child.exitCode !== null) {
+        // A Node too old for the flag exits with "bad option": nothing to check here.
+        expect(stderr).toMatch(/bad option/);
+        return;
+      }
+      expect(await inspectorSignalDisabledByPid(child.pid!)).toBe(true);
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    }
+  }, 15000);
 });
