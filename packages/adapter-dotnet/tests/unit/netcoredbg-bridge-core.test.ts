@@ -168,7 +168,7 @@ describe('netcoredbg-bridge-core', () => {
     expect(mockCp.kill).toHaveBeenCalled();
   });
 
-  it('cleans up on netcoredbg exit', async () => {
+  it('cleans up once netcoredbg has closed', async () => {
     bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream });
     const port = await waitForListening(bridge.server);
 
@@ -180,8 +180,62 @@ describe('netcoredbg-bridge-core', () => {
       client.on('close', resolve);
     });
 
-    mockCp.emit('exit', 0);
+    mockCp.emit('exit', 0, null);
+    mockCp.emit('close', 0, null);
     await ended;
+  });
+
+  it('keeps the socket open across netcoredbg exit until its streams close, then ends it (issue #878)', async () => {
+    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream });
+    const port = await waitForListening(bridge.server);
+
+    const client = await connectClient(port);
+    await tick();
+
+    const received: Buffer[] = [];
+    client.on('data', (d: Buffer) => received.push(d));
+    const ended = new Promise<void>((resolve) => client.on('end', resolve));
+
+    // Node fires `exit` when the process ends and `close` when its stdio has
+    // drained: the last DAP frame can still be in the stdout pipe at `exit`.
+    mockCp.emit('exit', 0, null);
+    const lastFrame = Buffer.from('Content-Length: 2\r\n\r\n{}');
+    mockCp.stdout.emit('data', lastFrame);
+    mockCp.emit('close', 0, null);
+    await ended;
+
+    expect(Buffer.concat(received).toString()).toBe(lastFrame.toString());
+    expect(stderrChunks.join('')).toBe('');
+  });
+
+  it('stops forwarding socket bytes to netcoredbg stdin once it has exited', async () => {
+    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream });
+    const port = await waitForListening(bridge.server);
+
+    const client = await connectClient(port);
+    await tick();
+
+    const stdinWrite = vi.spyOn(mockCp.stdin, 'write');
+    mockCp.emit('exit', 0, null);
+    client.write(Buffer.from('Content-Length: 2\r\n\r\n{}'));
+    await tick();
+
+    expect(stdinWrite).not.toHaveBeenCalled();
+    mockCp.emit('close', 0, null);
+  });
+
+  it('logs a netcoredbg stdin error instead of dying on it', async () => {
+    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream });
+    const port = await waitForListening(bridge.server);
+
+    const client = await connectClient(port);
+    await tick();
+
+    mockCp.stdin.emit('error', new Error('EPIPE'));
+    await tick();
+
+    expect(stderrChunks.join('')).toContain('netcoredbg stdin: EPIPE');
+    client.destroy();
   });
 
   it('handles netcoredbg spawn error', async () => {
