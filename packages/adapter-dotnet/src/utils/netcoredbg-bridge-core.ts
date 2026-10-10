@@ -3,6 +3,11 @@
  *
  * Extracted from netcoredbg-bridge.ts so the bridge behaviour can be
  * exercised in unit tests with mock spawn and mock sockets.
+ *
+ * Lifecycle rule: the socket is ended on the child's `close` event, never on
+ * `exit` — Node fires `exit` when the process ends and `close` once its stdio
+ * streams have drained, and netcoredbg's last DAP frames (`output`, `exited`,
+ * `terminated`) can still be in the stdout pipe at `exit` (issue #878).
  */
 import net from 'net';
 import { spawn, ChildProcess, type SpawnOptions } from 'child_process';
@@ -54,10 +59,22 @@ export function createBridge(
       windowsHide: true
     });
 
+    // A proxy request that races the child's exit lands on a dead pipe. The
+    // `error` listener is what protects that race in production (an EPIPE
+    // raised by a write already in flight is logged, not thrown — before it
+    // there was no listener, so it would have crashed the bridge); the
+    // `childEnded` flag is belt and braces, since Node destroys the child's
+    // stdin before it emits `exit`.
+    let childEnded = false;
+    netcoredbg.stdin?.on('error', (err: NodeJS.ErrnoException) => {
+      stderrStream.write(`netcoredbg stdin: ${err.message}\n`);
+    });
+
     // Forward: TCP → netcoredbg stdin
     socket.on('data', (data) => {
-      if (netcoredbg?.stdin?.writable) {
-        netcoredbg.stdin.write(data);
+      const stdin = netcoredbg?.stdin;
+      if (!childEnded && stdin && !stdin.destroyed && stdin.writable) {
+        stdin.write(data);
       }
     });
 
@@ -78,8 +95,16 @@ export function createBridge(
       stderrStream.write(data);
     });
 
-    // Handle netcoredbg exit
-    netcoredbg.on('exit', (_code) => {
+    // `exit` only marks the child gone; the socket is ended on `close`, when
+    // its stdout has drained — ending it at `exit` closed the proxy's side
+    // before the last DAP frames were forwarded (issue #878).
+    netcoredbg.on('exit', () => {
+      childEnded = true;
+    });
+
+    netcoredbg.on('close', (code, signal) => {
+      childEnded = true;
+      stderrStream.write(`netcoredbg closed (code=${code}, signal=${signal})\n`);
       if (!socket.destroyed) {
         socket.end();
       }
@@ -103,7 +128,8 @@ export function createBridge(
       server.close();
     });
 
-    socket.on('error', () => {
+    socket.on('error', (err) => {
+      stderrStream.write(`bridge socket error: ${err.message}\n`);
       if (netcoredbg) {
         netcoredbg.stdin?.end();
         netcoredbg.kill();
