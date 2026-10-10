@@ -235,26 +235,67 @@ const SYSCALL_WRAPPER_NAMES = new Set([
 ]);
 
 /**
- * Source paths that mark a frame as non-user code: system libraries and
- * headers, glibc build-tree paths (sysdeps/nptl), and rustc's std sources.
- * Only consulted for name-matched frames — a plain user frame that happens
- * to live under /usr is never hidden by path alone.
+ * Windows CRT start-up, the kernel32/ntdll thread and wait plumbing, and
+ * winpthreads — internal only when the frame also lacks user source (issue
+ * #824). On Windows CodeLLDB reports these as '@symbol' frames without a
+ * path; a user function that shares one of these names and has a workspace
+ * path is kept, like the POSIX names above. `/^_*pthread_/` also covers
+ * glibc's nptl frames — exported `pthread_*`, internal `__pthread_*` and,
+ * since glibc 2.34, `___pthread_*` — whose source sits under './nptl/'.
  */
-const SYSTEM_SOURCE_PATH_PATTERNS = [
-  '/usr/lib',
-  '/lib/',
-  '/lib64/',
-  '/usr/include/',
-  '../sysdeps/',
-  './nptl/',
-  '/rustc/'
+const WINDOWS_RUNTIME_NAME_PATTERNS = [
+  /^w?(?:main|WinMain)CRTStartup$/,
+  /^__tmainCRTStartup$/,
+  /^__scrt_common_main(?:_seh)?$/,
+  /^invoke_main$/,
+  /^__acrt_/,
+  /^BaseThreadInitThunk$/,
+  /^RtlUserThreadStart$/,
+  // The thread Windows injects for a debugger break-in (a pause lands here).
+  /^Dbg(?:BreakPoint|UiRemoteBreakin)$/,
+  /^(?:Nt|Zw)[A-Z]/,
+  /^WaitFor(?:Single|Multiple)Objects?(?:Ex)?$/,
+  /^Sleep(?:Ex)?$/,
+  /^SleepConditionVariable(?:CS|SRW)$/,
+  /^WaitOnAddress$/,
+  /^_*pthread_/
+];
+
+/**
+ * Source paths that mark a frame as non-user code: system library and header
+ * roots (anchored — a project's own `lib/` folder is not one), glibc
+ * build-tree paths (sysdeps/nptl), rustc's std sources, and — matched after
+ * `\` is normalised to `/`, case-insensitively — the MSYS2 and MinGW-w64
+ * system headers, the MSVC STL and the MSVC CRT source tree as its PDBs
+ * record it (issue #824). Only consulted for name-matched frames — a plain
+ * user frame that happens to live under /usr is never hidden by path alone.
+ */
+const SYSTEM_SOURCE_PATH_PATTERNS: readonly RegExp[] = [
+  /^\/usr\/lib/,
+  /^\/lib(?:64)?\//,
+  /^\/usr\/include\//,
+  /\.\.\/sysdeps\//,
+  /^\.\/nptl\//,
+  /\/rustc\//,
+  /\/(?:mingw64|mingw32|ucrt64|clang64|clangarm64)\/include\//i,
+  /\/(?:x86_64|i686|aarch64)-w64-mingw32\/include\//i,
+  /\/VC\/Tools\/MSVC\//i,
+  /\/vctools\//i,
+  /\/Windows Kits\//i
 ];
 
 function isSystemOrMissingSource(file: string | undefined): boolean {
   if (!file || file === '<unknown_source>') {
     return true;
   }
-  return SYSTEM_SOURCE_PATH_PATTERNS.some((pattern) => file.includes(pattern));
+  // A frame CodeLLDB could not resolve arrives as `source: {name: '@symbol',
+  // sourceReference: N}` with no path, and the anchor resolver carries that
+  // label into `file` — it is a symbol, not a source (issue #824).
+  if (file.startsWith('@')) {
+    return true;
+  }
+  const normalized = file.replace(/\\/g, '/');
+  return SYSTEM_SOURCE_PATH_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
 /**
@@ -264,10 +305,11 @@ function isSystemOrMissingSource(file: string | undefined): boolean {
  * 1. Pure-name rules — LLDB-synthesized unnamed symbols and glibc '__GI_'
  *    aliases are internal regardless of source (they never carry user
  *    source anyway).
- * 2. Name+source rules — libc runtime plumbing and syscall wrappers are
- *    internal only when the frame ALSO has no user source (absent,
- *    '<unknown_source>', or a system path). A user function named e.g.
- *    'nanosleep' with workspace source is kept.
+ * 2. Name+source rules — libc runtime plumbing, syscall wrappers and the
+ *    Windows CRT / NT / winpthreads equivalents (issue #824) are internal
+ *    only when the frame ALSO has no user source (absent, '<unknown_source>',
+ *    a CodeLLDB '@symbol' label, or a system path). A user function named
+ *    e.g. 'nanosleep' or 'Sleep' with workspace source is kept.
  */
 export function isLldbInternalFrame(frame: StackFrame): boolean {
   // CodeLLDB renders source-less frames as '@symbol' — strip the sigil.
@@ -279,7 +321,8 @@ export function isLldbInternalFrame(frame: StackFrame): boolean {
 
   const nameMatches =
     LIBC_RUNTIME_NAME_PATTERNS.some((pattern) => pattern.test(name)) ||
-    SYSCALL_WRAPPER_NAMES.has(name);
+    SYSCALL_WRAPPER_NAMES.has(name) ||
+    WINDOWS_RUNTIME_NAME_PATTERNS.some((pattern) => pattern.test(name));
   return nameMatches && isSystemOrMissingSource(frame.file);
 }
 

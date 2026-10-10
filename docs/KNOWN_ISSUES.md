@@ -121,7 +121,8 @@ Dart 3.13 and Flutter 3.47 — and none of them is a session error.
   to do by hand; relaunch. The e2e helper warms the Gradle build and does the first install
   before the timed cases. A cold Gradle build on a fresh machine (minutes) belongs to the first
   build, not to the debugger: the launch answers `pending: true` and `wait_for_stop` collects
-  the stop.
+  the stop (in slices under your client's request cap — see the Flutter targets section of
+  the Dart guide).
 - **`dart test` fails under `%LOCALAPPDATA%\Temp` with the winget SDK (Windows).**
   package:test spawns its frontend server through a cwd-relative SDK path that does not
   resolve from there (`The system cannot find the file specified … dartaotruntime.exe`).
