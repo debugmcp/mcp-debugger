@@ -38,7 +38,7 @@ describe('RubyAdapterFactory', () => {
     expect(metadata.displayName).toBe('Ruby');
     expect(metadata.fileExtensions).toEqual(expect.arrayContaining(['.rb', '.rake', '.gemspec']));
     // Attach connects directly to a running rdbg DAP socket — no local Ruby needed (issue #331)
-    expect(metadata.modes).toEqual({ launch: true, attach: 'direct-connect' });
+    expect(metadata.modes).toMatchObject({ launch: true, attach: 'direct-connect' })  // attachBy/attachHints are pinned by adapter-attach-contract.test.ts (issue #903);
   });
 
   it('validates a healthy toolchain', async () => {
