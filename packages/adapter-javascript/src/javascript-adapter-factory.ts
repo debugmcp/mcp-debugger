@@ -42,7 +42,13 @@ const metadata: AdapterMetadata = {
   minimumDebuggerVersion: '2.0.0',
   fileExtensions: ['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts'],
   // Attach spawns the bundled js-debug adapter locally (needs Node, which the server itself runs on)
-  modes: { launch: true, attach: 'spawn' },
+  modes: {
+    launch: true,
+    attach: 'spawn',
+    // A local PID (the inspector is activated for it, #871), an inspector
+    // host:port, or a websocketAddress under adapterConfig (issue #903)
+    attachBy: ['processId', 'port', 'adapterConfig']
+  },
   // Placeholder icon (base64-encoded empty SVG)
   icon: 'data:image/svg+xml;base64,PHN2Zy8+'
 };

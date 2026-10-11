@@ -184,6 +184,17 @@ describe('DartDebugAdapter attach', () => {
     await expect(a.transformAttachConfig(attach({ processId: 1234 }))).rejects.toThrow(/vmServiceUri/);
   });
 
+  it('builds the no-auth URI from a bare port on 127.0.0.1, the host every other adapter defaults to (issue #903)', async () => {
+    const a = new DartDebugAdapter(deps(), hooks());
+    const out = await a.transformAttachConfig(attach({ port: 8181 }));
+    expect(out.vmServiceUri).toBe('ws://127.0.0.1:8181/ws');
+  });
+
+  it('rejects an attach that names no URI, info file or host:port, by name (issue #903)', async () => {
+    const a = new DartDebugAdapter(deps(), hooks());
+    await expect(a.transformAttachConfig(attach({}))).rejects.toThrow(/needs adapterConfig\.vmServiceUri or adapterConfig\.vmServiceInfoFile/);
+  });
+
   it('rejects attach for the test runners', async () => {
     const a = new DartDebugAdapter(deps(), hooks());
     await expect(a.transformAttachConfig(attach({ vmServiceUri: 'ws://x/ws', runner: 'dart-test' }))).rejects.toThrow(/attach/i);

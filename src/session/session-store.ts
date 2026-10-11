@@ -18,7 +18,7 @@ import {
   getPolicyForLanguage,
   isTerminalSessionState
 } from '@debugmcp/shared';
-import type { ExceptionBreakMode } from '@debugmcp/shared';
+import type { AttachLocality, ExceptionBreakMode } from '@debugmcp/shared';
 import { SessionNotFoundError } from '../errors/debug-errors.js';
 
 /**
@@ -125,6 +125,10 @@ export interface ManagedSession extends DebugSessionInfo {
   // run on a remote filesystem (container, pod, other machine), so host-side
   // file existence checks do not apply to their source paths.
   attachMode?: boolean;
+  // Where that target lives (issue #903): 'pid' and 'loopback' are this host,
+  // so the host file is the debuggee's own source and content addressing is
+  // allowed (issue #899); cleared with attachMode by a launch.
+  attachLocality?: AttachLocality;
   // Debuggee output captured from DAP 'output' events (issue #218).
   // Created fresh on each launch/attach; readable until the session is closed.
   outputBuffer?: OutputRingBuffer;

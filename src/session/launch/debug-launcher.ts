@@ -268,6 +268,7 @@ export class DebugLauncher {
     this.ctx.updateSession(sessionId, {
       sessionLifecycle: SessionLifecycleState.ACTIVE,
       attachMode: false,
+      attachLocality: undefined,
     });
     // Per-attempt terminal evidence. A prior program/proxy exit must not
     // influence whether this launch is reported as successful. lastStop is

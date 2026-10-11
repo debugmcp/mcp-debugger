@@ -239,6 +239,131 @@ describe('SessionManagerOperations attach modes', () => {
     expect(result.error).not.toContain('Attach mode is not implemented');
   });
 
+  describe('attach-addressing contract (issue #903)', () => {
+    const portOnly = metadataWithModes({
+      launch: true,
+      attach: 'spawn',
+      attachBy: ['port'],
+      attachHints: { processId: 'start the JVM with -agentlib:jdwp=... and pass that port' }
+    });
+    const pidOnly = metadataWithModes({
+      launch: true,
+      attach: 'spawn',
+      attachBy: ['processId'],
+      attachHints: { port: 'CodeLLDB attaches to a local process by PID' }
+    });
+
+    function expectNoStateChange(): void {
+      expect(mockDependencies.adapterRegistry.create).not.toHaveBeenCalled();
+      expect(mockProxyManager.start).not.toHaveBeenCalled();
+      expect(mockSessionStore.updateState).not.toHaveBeenCalled();
+      expect(mockSessionStore.update).not.toHaveBeenCalledWith(
+        'test-session',
+        expect.objectContaining({ attachMode: true })
+      );
+      expect(mockSession.state).toBe(SessionState.CREATED);
+    }
+
+    it('refuses processId on a port-only language by name, before any state change (issue #895)', async () => {
+      mockSession.language = DebugLanguage.JAVA;
+      vi.mocked(mockDependencies.adapterRegistry.getFactoryMetadata).mockResolvedValue(portOnly);
+
+      const result = await operations.attachToProcess('test-session', { processId: 4242 });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("'java' does not attach by processId");
+      expect(result.error).toContain('-agentlib:jdwp');
+      expect(result.error).toContain('takes: port');
+      expectNoStateChange();
+    });
+
+    it('refuses processId even when a port is given beside it (no more silent drop)', async () => {
+      mockSession.language = DebugLanguage.PYTHON;
+      vi.mocked(mockDependencies.adapterRegistry.getFactoryMetadata).mockResolvedValue(portOnly);
+
+      const result = await operations.attachToProcess('test-session', { processId: 4242, port: 5678 });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("'python' does not attach by processId");
+      expectNoStateChange();
+    });
+
+    it('refuses port on a PID-only language by name', async () => {
+      mockSession.language = DebugLanguage.CPP;
+      vi.mocked(mockDependencies.adapterRegistry.getFactoryMetadata).mockResolvedValue(pidOnly);
+
+      const result = await operations.attachToProcess('test-session', { port: 1234 });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("'cpp' does not attach by port");
+      expect(result.error).toContain('CodeLLDB attaches to a local process by PID');
+      expect(result.error).toContain('takes: processId');
+      expectNoStateChange();
+    });
+
+    it('refuses a processId beside a remote host before any state change, even on a language that attaches by port', async () => {
+      mockSession.language = DebugLanguage.JAVASCRIPT;
+      vi.mocked(mockDependencies.adapterRegistry.getFactoryMetadata).mockResolvedValue(
+        metadataWithModes({ launch: true, attach: 'spawn', attachBy: ['processId', 'port', 'adapterConfig'] })
+      );
+
+      const result = await operations.attachToProcess('test-session', { processId: 4242, host: '10.0.0.5' });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('host 10.0.0.5 is not loopback');
+      expect(result.error).toContain('by host and port without processId');
+      expectNoStateChange();
+    });
+
+    it('refuses a request that names neither processId nor port on a port-only language', async () => {
+      mockSession.language = DebugLanguage.JAVA;
+      vi.mocked(mockDependencies.adapterRegistry.getFactoryMetadata).mockResolvedValue(portOnly);
+
+      const result = await operations.attachToProcess('test-session', {});
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("'java' attach needs port");
+      expectNoStateChange();
+    });
+
+    it('skips the gate, with a warning, when the factory declares no attachBy', async () => {
+      vi.mocked(mockDependencies.adapterRegistry.getFactoryMetadata).mockResolvedValue(
+        metadataWithModes({ launch: true, attach: 'direct-connect' })
+      );
+      const adapterStub = makeDirectConnectRubyAdapter();
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapterStub);
+      mockProxyManager.start.mockRejectedValue(new Error('stop here'));
+
+      await operations.attachToProcess('test-session', { processId: 7 });
+
+      expect(mockProxyManager.start).toHaveBeenCalled();
+      expect(mockDependencies.logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("'ruby' declares no modes.attachBy")
+      );
+    });
+
+    it.each([
+      ['pid', { processId: 4242 }, pidOnly],
+      ['loopback', { port: 12345 }, portOnly],
+      ['loopback', { host: '[::1]', port: 12345 }, portOnly],
+      ['remote', { host: '10.0.0.5', port: 12345 }, portOnly]
+    ] as const)('records attachLocality %s on the session as the attach starts', async (locality, request, metadata) => {
+      vi.mocked(mockDependencies.adapterRegistry.getFactoryMetadata).mockResolvedValue(metadata);
+      const adapterStub = makeDirectConnectRubyAdapter({
+        transform: (cfg) => ({ request: 'attach', pid: cfg.processId, host: cfg.host, port: cfg.port })
+      });
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapterStub);
+      mockProxyManager.start.mockRejectedValue(new Error('stop here'));
+
+      await operations.attachToProcess('test-session', request);
+
+      expect(mockSessionStore.update).toHaveBeenCalledWith(
+        'test-session',
+        expect.objectContaining({ attachMode: true, attachLocality: locality })
+      );
+    });
+  });
+
   describe('adapterConfig passthrough (issue #336)', () => {
     it('attachToProcess merges adapterConfig into the config handed to transformAttachConfig', async () => {
       vi.mocked(mockDependencies.adapterRegistry.getFactoryMetadata).mockResolvedValue(
@@ -508,6 +633,30 @@ describe('SessionManagerOperations attach modes', () => {
         port: 12345,
         stopOnEntry: false,
         adapterConfig: { sources: ['/proj/src/payroll.cob'], manifestDirs: ['/proj/m'] }
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.data?.warning).toBeUndefined();
+      expect(mockSession.attachDroppedConfigKeys).toBeUndefined();
+    });
+
+    it('does not report adapterConfig.processId as ignored when the adapter consumes it into pid (issue #903)', async () => {
+      // The C/C++, COBOL and JavaScript transforms use processId without echoing
+      // it (CodeLLDB's `pid`, the inspector activation); their consumedAttachKeys
+      // say so, and the attach warning must not call the key ignored.
+      const adapterStub = makeDirectConnectAdapter((cfg) => {
+        const { processId, ...rest } = cfg;
+        return { ...rest, pid: Number(processId) };
+      });
+      adapterStub.supportedAttachKeys = ['processId', 'pid', 'program'];
+      adapterStub.consumedAttachKeys = ['processId'];
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapterStub);
+
+      const result = await operations.attachToProcess('test-session', {
+        host: '127.0.0.1',
+        port: 12345,
+        stopOnEntry: false,
+        adapterConfig: { processId: 4242 }
       });
 
       expect(result.success).toBe(true);

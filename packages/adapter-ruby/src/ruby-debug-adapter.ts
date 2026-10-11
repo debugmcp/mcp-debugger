@@ -20,7 +20,7 @@ import {
   AdapterErrorCode,
   AdapterEvents
 } from '@debugmcp/shared';
-import { DebugLanguage } from '@debugmcp/shared';
+import { DebugLanguage, isLoopbackHost } from '@debugmcp/shared';
 import { AdapterDependencies } from '@debugmcp/shared';
 import type { LaunchConfigDiagnostic } from '@debugmcp/shared';
 import {
@@ -475,7 +475,7 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
       name: 'Ruby: Attach',
       host,
       port,
-      localfs: typeof localfs === 'boolean' ? localfs : this.isLocalHost(host),
+      localfs: typeof localfs === 'boolean' ? localfs : isLoopbackHost(host),
       stopOnEntry: config.stopOnEntry,
       justMyCode: config.justMyCode ?? true
     };
@@ -695,9 +695,5 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
     }
 
     return version;
-  }
-
-  private isLocalHost(host: string): boolean {
-    return host === '127.0.0.1' || host === 'localhost' || host === '::1';
   }
 }

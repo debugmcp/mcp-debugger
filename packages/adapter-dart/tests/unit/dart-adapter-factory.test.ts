@@ -26,7 +26,7 @@ describe('DartAdapterFactory', () => {
     expect(f.createAdapter(createMockAdapterDependencies())).toBeInstanceOf(DartDebugAdapter);
     const m = f.getMetadata();
     expect(m.language).toBe(DebugLanguage.DART);
-    expect(m.modes).toEqual({ launch: true, attach: 'spawn' });
+    expect(m.modes).toMatchObject({ launch: true, attach: 'spawn' })  // attachBy/attachHints are pinned by adapter-attach-contract.test.ts (issue #903);
     expect(m.fileExtensions).toContain('.dart');
   });
 

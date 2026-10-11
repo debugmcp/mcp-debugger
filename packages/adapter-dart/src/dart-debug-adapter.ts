@@ -303,15 +303,26 @@ export class DartDebugAdapter extends EventEmitter implements IDebugAdapter {
     // `request: 'attach'` stays: the proxy worker reads it off the transformed config to pick
     // the attach handshake and detach-on-close semantics; the SDK adapter ignores the key.
     const out: Record<string, unknown> = { ...rest, request: 'attach' };
-    if (out.vmServiceUri === undefined && out.vmServiceInfoFile === undefined && host !== undefined && port !== undefined) {
-      out.vmServiceUri = `ws://${String(host)}:${String(port)}/ws`;
-      this.note('port', `attaching to ws://${String(host)}:${String(port)}/ws — a host:port only works for a VM started with --disable-service-auth-codes; otherwise pass the full vmServiceUri with its token`);
+    if (out.vmServiceUri === undefined && out.vmServiceInfoFile === undefined && port !== undefined) {
+      // A bare port means this host, as on every other adapter (issue #903).
+      const vmHost = host ?? '127.0.0.1';
+      out.vmServiceUri = `ws://${String(vmHost)}:${String(port)}/ws`;
+      this.note('port', `attaching to ws://${String(vmHost)}:${String(port)}/ws — a host:port only works for a VM started with --disable-service-auth-codes; otherwise pass the full vmServiceUri with its token`);
     }
     if (isFlutter(detection.runner) && typeof deviceId === 'string' && deviceId) {
       const existing = Array.isArray(out.toolArgs) ? (out.toolArgs as unknown[]).map(String) : [];
       out.toolArgs = ['-d', deviceId, ...existing];
     } else if (deviceId !== undefined) {
       this.note('deviceId', `ignored: only Flutter runners use deviceId (this attach uses ${detection.runner})`);
+    }
+    // Nothing to attach to is refused here, by name (issue #903): sent on, the
+    // SDK adapter would fail with its own words about a missing URI.
+    if (out.vmServiceUri === undefined && out.vmServiceInfoFile === undefined) {
+      throw new AdapterError(
+        'Dart attach needs adapterConfig.vmServiceUri or adapterConfig.vmServiceInfoFile (or host and port, for a VM started with '
+        + '--disable-service-auth-codes); the request named none of them.',
+        AdapterErrorCode.ENVIRONMENT_INVALID,
+      );
     }
     return out;
   }

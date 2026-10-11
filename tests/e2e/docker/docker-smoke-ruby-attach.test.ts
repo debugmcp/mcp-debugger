@@ -134,7 +134,8 @@ describe.skipIf(SKIP_DOCKER)('Docker: Ruby attach-only debugging', () => {
     const ruby = (response.available as any[]).find(a => a.language === 'ruby');
     expect(ruby).toBeDefined();
     expect(ruby.installed).toBe(true);
-    expect(ruby.modes.attach).toEqual({ supported: true, available: true });
+    // `by` is the attach-addressing contract's declaration (issue #903): ruby attaches by port only.
+    expect(ruby.modes.attach).toEqual({ supported: true, available: true, by: ['port'] });
     expect(ruby.modes.launch.supported).toBe(true);
     expect(ruby.modes.launch.available).toBe(false);
     expect(String(ruby.modes.launch.reason)).toMatch(/ruby/i);

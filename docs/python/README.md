@@ -199,7 +199,7 @@ Statement-anchored breakpoints (see above) are what make this loop robust — th
 
 ## Attach Mode
 
-Python attach is **port-only**: mcp-debugger connects directly to a listening debugpy endpoint. Attaching by `processId` is not supported and fails with a message pointing you at `--listen`.
+Python attach is **port-only**: mcp-debugger connects directly to a listening debugpy endpoint. A `processId` — alone or beside a `port` — is refused by name before anything starts, with the `--listen` recipe (issue #903).
 
 Start the target yourself:
 

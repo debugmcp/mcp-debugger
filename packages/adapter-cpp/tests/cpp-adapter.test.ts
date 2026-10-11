@@ -373,6 +373,11 @@ describe('CppDebugAdapter', () => {
   });
 
   describe('attach support', () => {
+    it('declares processId as consumed: it leaves the transform as pid (issue #903)', () => {
+      expect(adapter.consumedAttachKeys).toEqual(['processId']);
+      expect(adapter.supportedAttachKeys).toContain('processId');
+    });
+
     it('declares attach and detach support', () => {
       expect(adapter.supportsAttach()).toBe(true);
       expect(adapter.supportsDetach()).toBe(true);
