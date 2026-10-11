@@ -324,7 +324,7 @@ export class DebugMcpServer implements ToolContext {
     sessionId: string,
     file: string,
     options?: { requireExists?: boolean }
-  ): Promise<{ path: string; contentAddressable: boolean; nonAddressableReason?: 'non-file-identifier' | 'attach' }> {
+  ): Promise<{ path: string; contentAddressable: boolean; nonAddressableReason?: 'non-file-identifier' | 'attach'; detail?: string }> {
     // Check if the adapter handles non-file source identifiers (e.g. Java FQCNs)
     const policy = this.sessionManager.getSessionPolicy(sessionId);
     if (policy.isNonFileSourceIdentifier?.(file)) {
@@ -339,21 +339,25 @@ export class DebugMcpServer implements ToolContext {
     // is the exception: its debuggee runs on this host, so a file that exists
     // here is the debuggee's own source and content addressing is honest
     // (issue #899). A local attach whose file is not on this host (a stripped
-    // binary's build tree, say) still passes through.
+    // binary's build tree, say) still passes through, carrying the checker's
+    // own reason when it has one (a relative path in host mode) so the refusal
+    // never claims a file is absent that was never looked for.
     const session = this.sessionManager.getSession(sessionId);
     if (session?.attachMode) {
       const local = session.attachLocality === 'pid' || session.attachLocality === 'loopback';
+      let detail: string | undefined;
       if (local) {
         const fileCheck = await this.fileChecker.checkExists(file);
+        detail = fileCheck.errorMessage;
         if (fileCheck.exists) {
           this.logger.info(`[DebugMcpServer.resolveBreakpointFile] Local attach: ${file} -> ${fileCheck.effectivePath} (the host file is the debuggee's source)`);
           return { path: fileCheck.effectivePath, contentAddressable: true };
         }
       }
       this.logger.info(
-        `[DebugMcpServer.resolveBreakpointFile] ${local ? 'Local attach, file not on this host' : 'Attach session'}: skipping host file check for ${file}`
+        `[DebugMcpServer.resolveBreakpointFile] ${local ? 'Local attach, file not usable on this host' : 'Attach session'}: skipping host file check for ${file}`
       );
-      return { path: file, contentAddressable: false, nonAddressableReason: 'attach' };
+      return { path: file, contentAddressable: false, nonAddressableReason: 'attach', ...(detail ? { detail } : {}) };
     }
 
     const fileCheck = await this.fileChecker.checkExists(file);
@@ -443,7 +447,7 @@ export class DebugMcpServer implements ToolContext {
           locality === 'remote'
             ? `a remote attach session (the debuggee's loaded source may differ from the file on the mcp-debugger host)`
             : locality === 'pid' || locality === 'loopback'
-              ? `this attach session ("${req.file}" is not on the mcp-debugger host, so its content cannot be checked)`
+              ? `this attach session ("${req.file}" is not usable on the mcp-debugger host${resolved.detail ? `: ${resolved.detail}` : ''}, so its content cannot be checked)`
               : `an attach session whose target host is not known (the debuggee's loaded source may differ from the file on the mcp-debugger host)`;
         const reason =
           resolved.nonAddressableReason === 'attach'

@@ -109,8 +109,17 @@ export function classifyAttachAddressing(
       error: ErrorMessages.attachAddressingNotAccepted(language, 'port', accepted, hints.port)
     };
   }
-  // A loopback host beside a processId is harmless; a remote host on a
-  // language without a port form names a machine the attach cannot reach.
+  // A PID names a process on this host, so a remote host beside it names a
+  // machine no language can reach — whatever else the language accepts. A
+  // loopback host beside it is harmless.
+  if (given(request.processId) && given(request.host) && !isLoopbackHost(request.host)) {
+    return {
+      ok: false,
+      error: ErrorMessages.attachProcessIdWithRemoteHost(language, String(request.host), accepts('port'))
+    };
+  }
+  // On a language without a port form, a remote host alone names a machine
+  // the attach cannot reach either.
   if (given(request.host) && !accepts('port') && !isLoopbackHost(request.host)) {
     return {
       ok: false,

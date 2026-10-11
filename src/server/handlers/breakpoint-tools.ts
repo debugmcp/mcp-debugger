@@ -236,7 +236,9 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): P
       ...(hostFileIsForeign
         ? {
             note:
-              'content and context omitted: the target of this attach is not on the mcp-debugger host, so the host file is not the debuggee\'s source'
+              attachSession.attachLocality === 'remote'
+                ? 'content and context omitted: the target of this attach is not on the mcp-debugger host, so the host file is not the debuggee\'s source'
+                : 'content and context omitted: the target host of this attach is not known, so the host file may not be the debuggee\'s source'
           }
         : {})
     });

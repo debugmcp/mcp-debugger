@@ -193,7 +193,7 @@ In the shipped default addressing mode (`content`), `sessionId` is the only para
 
 **Important Notes:**
 - Breakpoints show `"verified": false` until debugging starts
-- Works in every lifecycle state short of `close_debug_session`: before the first launch (queued, `verified: false`), while running or paused (sent live, with the adapter's answer in the response), and after the program has exited or a dry run (queued for the next `start_debugging`/`restart_debugging`). A session that was attached keeps attach path semantics — paths passed through verbatim, no `statement` anchors — until its next launch (issue #806)
+- Works in every lifecycle state short of `close_debug_session`: before the first launch (queued, `verified: false`), while running or paused (sent live, with the adapter's answer in the response), and after the program has exited or a dry run (queued for the next `start_debugging`/`restart_debugging`). A session that was attached keeps attach path semantics until its next launch (issue #806): a remote attach passes paths through verbatim with no `statement` anchors, while a local attach — by `processId` or to a loopback endpoint — resolves a path that exists on this host the way a launch does (issue #899)
 - The response echoes the resolved path the server actually used — in container mode that is the path with the workspace prefix applied; for a remote attach session the path is passed through unchanged, and so is a local attach's path when the file is not on this host. On a remote attach the response carries no `content`/`context` (the host file is not the debuggee's source) and a `note` says so (issue #899)
 - Setting breakpoints on non-executable lines (comments, blank lines, declarations) may cause unexpected behavior
 - Executable lines that work well: assignments, function calls, conditionals, returns
@@ -218,7 +218,7 @@ The file may have changed since you last read it. Pick the correct line from the
 
 Relatedly, when a debug adapter *accepts* a breakpoint but binds it to a different line (adapters snap requests on non-executable lines to the nearest valid one), the response reports it prominently instead of silently mutating the line: `message` and `warning` carry `"requested line 12, bound to line 13: \`...\`"`, and the response includes `requestedLine` alongside the bound `line`. Adapters that relocate breakpoints asynchronously (after the response) surface the move in `list_breakpoints`, where `line` ≠ `requestedLine` marks a snapped breakpoint.
 
-`expectedContent` requires a source file the server can read: it is rejected for Java FQCN breakpoints and attach-mode sessions (remote filesystems). Both addressing aids can be restricted with the `DEBUG_MCP_BP_ADDRESSING` environment variable (`line` = pre-existing behavior, `assert` = + expectedContent/loud snapping, `content` = all features; default `content`) — useful for controlled comparisons of agent behavior.
+`expectedContent` requires a source file the server can read: it is rejected for Java FQCN breakpoints and for remote attach sessions (the debuggee's filesystem is the authority); a local attach — by `processId` or to a loopback endpoint — whose file exists on this host is accepted (issue #899). Both addressing aids can be restricted with the `DEBUG_MCP_BP_ADDRESSING` environment variable (`line` = pre-existing behavior, `assert` = + expectedContent/loud snapping, `content` = all features; default `content`) — useful for controlled comparisons of agent behavior.
 
 #### Statement anchors
 

@@ -83,9 +83,15 @@ source files and no path mapping at all**.
 
 ### Breakpoints and paths on attach (read this once)
 
-Attach sessions send breakpoint paths **verbatim** to the remote debugger,
-which resolves them against the **target's** filesystem — host-side existence
-checks are skipped. Practical rules, all verified:
+Attach sessions with a remote `host` send breakpoint paths **verbatim** to the
+remote debugger, which resolves them against the **target's** filesystem —
+host-side existence checks are skipped. A port-forwarded endpoint
+(`kubectl port-forward`, so `host` is `localhost`) counts as **local** since
+issue #899: a breakpoint path that exists on your workstation is resolved and
+content-checked against the local copy, and `statement`/`expectedContent` work
+on it — right when the pod runs the tree you have checked out, an assumption
+otherwise; a path that does not exist locally still passes through verbatim.
+Practical rules, all verified:
 
 - Use debuggee-side paths (`/app/app.py`), taken from `get_stack_trace` if in
   doubt. A local-workstation path reports `verified: false` and never binds

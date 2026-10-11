@@ -201,6 +201,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
   // still reach js-debug (forwarded with a warning) — this list only powers
   // recognition + typo suggestions (#466).
   readonly supportedAttachKeys = [
+    'processId',
     'host',
     'port',
     'address',

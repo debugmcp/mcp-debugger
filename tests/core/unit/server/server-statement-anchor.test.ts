@@ -396,7 +396,7 @@ describe('set_breakpoint statement anchors (#271)', () => {
       const err = await rejection({ statement: 'return total' });
 
       expect(err.message).toMatch(/not supported for this attach session/);
-      expect(err.message).toMatch(/is not on the mcp-debugger host/);
+      expect(err.message).toMatch(/is not usable on the mcp-debugger host/);
     });
 
     it('names the remote target when refusing content addressing on a remote attach', async () => {

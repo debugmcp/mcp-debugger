@@ -301,6 +301,20 @@ describe('SessionManagerOperations attach modes', () => {
       expectNoStateChange();
     });
 
+    it('refuses a processId beside a remote host before any state change, even on a language that attaches by port', async () => {
+      mockSession.language = DebugLanguage.JAVASCRIPT;
+      vi.mocked(mockDependencies.adapterRegistry.getFactoryMetadata).mockResolvedValue(
+        metadataWithModes({ launch: true, attach: 'spawn', attachBy: ['processId', 'port', 'adapterConfig'] })
+      );
+
+      const result = await operations.attachToProcess('test-session', { processId: 4242, host: '10.0.0.5' });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('host 10.0.0.5 is not loopback');
+      expect(result.error).toContain('by host and port without processId');
+      expectNoStateChange();
+    });
+
     it('refuses a request that names neither processId nor port on a port-only language', async () => {
       mockSession.language = DebugLanguage.JAVA;
       vi.mocked(mockDependencies.adapterRegistry.getFactoryMetadata).mockResolvedValue(portOnly);
@@ -619,6 +633,30 @@ describe('SessionManagerOperations attach modes', () => {
         port: 12345,
         stopOnEntry: false,
         adapterConfig: { sources: ['/proj/src/payroll.cob'], manifestDirs: ['/proj/m'] }
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.data?.warning).toBeUndefined();
+      expect(mockSession.attachDroppedConfigKeys).toBeUndefined();
+    });
+
+    it('does not report adapterConfig.processId as ignored when the adapter consumes it into pid (issue #903)', async () => {
+      // The C/C++, COBOL and JavaScript transforms use processId without echoing
+      // it (CodeLLDB's `pid`, the inspector activation); their consumedAttachKeys
+      // say so, and the attach warning must not call the key ignored.
+      const adapterStub = makeDirectConnectAdapter((cfg) => {
+        const { processId, ...rest } = cfg;
+        return { ...rest, pid: Number(processId) };
+      });
+      adapterStub.supportedAttachKeys = ['processId', 'pid', 'program'];
+      adapterStub.consumedAttachKeys = ['processId'];
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapterStub);
+
+      const result = await operations.attachToProcess('test-session', {
+        host: '127.0.0.1',
+        port: 12345,
+        stopOnEntry: false,
+        adapterConfig: { processId: 4242 }
       });
 
       expect(result.success).toBe(true);

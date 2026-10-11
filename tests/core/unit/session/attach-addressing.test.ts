@@ -58,10 +58,29 @@ describe('classifyAttachAddressing', () => {
     expect(verdict.error).toMatch(/takes: processId/);
   });
 
-  it('refuses a remote host on a PID-only language but tolerates a loopback one', () => {
-    expect(classifyAttachAddressing('cpp', { processId: 1, host: '10.0.0.5' }, PID_ONLY).ok).toBe(false);
+  it('refuses a remote host beside a processId on every language, with the remedy the language has', () => {
+    const cpp = classifyAttachAddressing('cpp', { processId: 1, host: '10.0.0.5' }, PID_ONLY);
+    expect(cpp.ok).toBe(false);
+    if (!cpp.ok) {
+      expect(cpp.error).toMatch(/host 10\.0\.0\.5 is not loopback/);
+      expect(cpp.error).toMatch(/attaches to a local PID only/);
+    }
+    // JavaScript accepts a port too, so the PID attach would otherwise pass this
+    // gate and fail inside the adapter after the session changed state.
+    const js = classifyAttachAddressing('javascript', { processId: 1, host: '10.0.0.5' }, PID_PORT_URI);
+    expect(js.ok).toBe(false);
+    if (!js.ok) {
+      expect(js.error).toMatch(/host 10\.0\.0\.5 is not loopback/);
+      expect(js.error).toMatch(/by host and port without processId/);
+    }
     const loopback = classifyAttachAddressing('cpp', { processId: 1, host: 'localhost' }, PID_ONLY);
     expect(loopback).toEqual({ ok: true, locality: 'pid', declared: true });
+  });
+
+  it('refuses a remote host alone on a PID-only language', () => {
+    const verdict = classifyAttachAddressing('cpp', { host: '10.0.0.5' }, PID_ONLY);
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) expect(verdict.error).toMatch(/'cpp' does not attach by host/);
   });
 
   it('refuses a request that names neither processId nor port on a language with no adapterConfig form', () => {

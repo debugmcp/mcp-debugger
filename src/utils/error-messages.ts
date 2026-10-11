@@ -52,7 +52,7 @@ const DEBUGGER_OFF_FOR_LAUNCH =
 const loggingClause = (loggingSummary: string): string =>
   `${loggingSummary} ${loggingSummary.startsWith('1 ') ? 'is' : 'are'} armed (read get_output for the messages)`;
 
-/** The attach addressing forms a factory declares (`AttachAddressing` in @debugmcp/shared, issue #903). */
+/** The attach addressing forms a factory declares — `AttachAddressing` in @debugmcp/shared, re-spelled here on purpose: this module imports nothing (issue #903). */
 type AttachForm = 'processId' | 'port' | 'adapterConfig';
 
 const ATTACH_FORM_WORDS: Record<AttachForm, string> = {
@@ -452,6 +452,22 @@ export const ErrorMessages = {
   attachAddressingMissing: (language: string, accepted: readonly AttachForm[]) =>
     `'${language}' attach needs ${describeAttachForms(accepted)}; ` +
     `the request named neither processId nor port.`,
+
+  /**
+   * Error message for a processId attach that also names a host that is not
+   * this machine (issue #903)
+   * Occurs when: attach_to_process carries processId and a non-loopback host —
+   * a PID is a process on this host, so no language can honour both
+   * Used in: src/session/attach/attach-addressing.ts
+   * @param language - The session's language
+   * @param host - The host the request named
+   * @param acceptsPort - Whether the language also attaches by host and port
+   */
+  attachProcessIdWithRemoteHost: (language: string, host: string, acceptsPort: boolean) =>
+    `processId names a process on this host, but host ${host} is not loopback. ` +
+    (acceptsPort
+      ? `Drop host to attach to the local PID, or attach '${language}' by host and port without processId.`
+      : `Drop host: '${language}' attaches to a local PID only.`),
 
   /**
    * Hint appended to launch-toolchain failures on attach-capable languages

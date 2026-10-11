@@ -419,9 +419,19 @@ export class AttachController {
         ? undefined
         : this.breakpoints.functionBreakpointLaunchWarning(session);
 
+      // Named the way the request addressed it: a PID, a host:port, or a
+      // debugger URI under adapterConfig (dart, js-debug) — never
+      // "localhost:undefined" for a URI attach (issue #903).
+      const uri = ['vmServiceUri', 'websocketAddress']
+        .map((key) => adapterConfig?.[key])
+        .find((value): value is string => typeof value === 'string' && value !== '');
       const attachedTo = attachConfig.processId
         ? `Attached to process PID ${attachConfig.processId}`
-        : `Attached to process at ${attachConfig.host || 'localhost'}:${attachConfig.port}`;
+        : attachConfig.port !== undefined
+          ? `Attached to process at ${attachConfig.host || 'localhost'}:${attachConfig.port}`
+          : uri !== undefined
+            ? `Attached to process at ${uri}`
+            : 'Attached to process';
       // A late-landing pause must be named in the message, not only flagged:
       // pending:true next to state "running" reads as "nothing happened" to
       // an agent, and the target still freezes on its next dispatch (#654).
