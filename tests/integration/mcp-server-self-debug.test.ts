@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { scrubbedEnvironment, startStdioClient } from '../test-utils/helpers/mcp-stdio-client.js';
+import { serverEnvironment, startStdioClient } from '../test-utils/helpers/mcp-stdio-client.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const entry = path.join(root, 'dist/index.js');
@@ -23,9 +23,14 @@ let innerId: string | undefined;
 let target: ChildProcess | undefined;
 let targetOutput = '';
 
-/** The spawned servers and the inspected target share one scrubbed environment (#810); MCP_HTTP_BIND must not leak into a nested http server. */
+/**
+ * The spawned servers and the inspected target share one environment (#810):
+ * the helper's scrub set plus MCP_HTTP_BIND, which must not leak into a nested
+ * http server, and servers that outlive their stdin.
+ */
+const SERVER_ENV = { scrub: ['MCP_HTTP_BIND'], exitOnStdinClose: false } as const;
 function environment(): Record<string, string> {
-  return { ...scrubbedEnvironment(['MCP_HTTP_BIND']), MCP_SKIP_ORPHAN_REAPERS: '1', MCP_EXIT_ON_STDIN_CLOSE: '0' };
+  return serverEnvironment(SERVER_ENV);
 }
 
 async function call<T extends ToolResult = ToolResult>(client: Client, name: string, args: Record<string, unknown> = {}): Promise<T> {
@@ -44,7 +49,7 @@ async function createSession(client: Client, name: string): Promise<string> {
 }
 
 async function startOuter(): Promise<void> {
-  outer = (await startStdioClient({ name: 'self-debug-integration', scrub: ['MCP_HTTP_BIND'], exitOnStdinClose: false })).client;
+  outer = (await startStdioClient({ name: 'self-debug-integration', ...SERVER_ENV })).client;
   outerId = await createSession(outer, 'debug-the-debugger');
 }
 

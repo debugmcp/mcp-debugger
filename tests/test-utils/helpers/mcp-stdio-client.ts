@@ -7,8 +7,9 @@
  * scrub set had already grown twice (`MCP_DEBUGGER_EXITCODE_CLAIMED` for #731,
  * `DAP_TRACE_FILE`); the next variable a nested server must not inherit would
  * have had to be added in three places, and a miss poisons one suite silently.
- * `tests/e2e/smoke-test-utils.ts` covers the e2e side; this is the
- * integration-project counterpart.
+ * `tests/e2e/smoke-test-utils.ts` covers the e2e side (result parsing, a
+ * `callToolSafely` that swallows errors — the opposite contract from `call`
+ * below, which asserts); this is the integration-project counterpart.
  */
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,7 +18,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 /** The repository root (this file lives at tests/test-utils/helpers/). */
-export const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 
 /**
  * Variables the spawned server must never inherit from the test runner:
@@ -44,6 +45,29 @@ export function scrubbedEnvironment(extraScrub: readonly string[] = []): Record<
   );
 }
 
+export interface ServerEnvironmentOptions {
+  /** Extra keys to scrub beyond SCRUBBED_ENV_KEYS. */
+  scrub?: readonly string[];
+  /** Extra environment for the spawned server, applied last. */
+  env?: Record<string, string>;
+  /** MCP_EXIT_ON_STDIN_CLOSE for the spawned server; default on. */
+  exitOnStdinClose?: boolean;
+}
+
+/**
+ * The environment a spawned mcp-debugger gets: the scrubbed runner environment
+ * plus the two flags every test server runs with. The same shape serves a
+ * target the suite spawns itself (the self-debug suite's inspected server).
+ */
+export function serverEnvironment(options: ServerEnvironmentOptions = {}): Record<string, string> {
+  return {
+    ...scrubbedEnvironment(options.scrub),
+    MCP_SKIP_ORPHAN_REAPERS: '1',
+    MCP_EXIT_ON_STDIN_CLOSE: options.exitOnStdinClose === false ? '0' : '1',
+    ...(options.env ?? {})
+  };
+}
+
 /** The fields every tool answer may carry; suites extend it with their own. */
 export interface ToolAnswer {
   success: boolean;
@@ -53,17 +77,13 @@ export interface ToolAnswer {
   warning?: string;
 }
 
-export interface StdioClientOptions {
+export interface StdioClientOptions extends ServerEnvironmentOptions {
   /** The MCP client name reported to the server. */
   name: string;
-  /** Extra keys to scrub beyond SCRUBBED_ENV_KEYS. */
-  scrub?: readonly string[];
-  /** Extra environment for the spawned server, applied last. */
-  env?: Record<string, string>;
-  /** MCP_EXIT_ON_STDIN_CLOSE for the spawned server; default on. */
-  exitOnStdinClose?: boolean;
   /** Per-call timeout for `call`; default 30 s. */
   callTimeoutMs?: number;
+  /** Timeout for the close_debug_session that `close` sends; default 5 s. */
+  closeTimeoutMs?: number;
   /** Where the spawned server starts; default the repository root. */
   cwd?: string;
 }
@@ -91,17 +111,13 @@ export async function startStdioClient(options: StdioClientOptions): Promise<Std
     command: process.execPath,
     args: [path.join(REPO_ROOT, 'dist/index.js'), 'stdio'],
     cwd: options.cwd ?? REPO_ROOT,
-    env: {
-      ...scrubbedEnvironment(options.scrub),
-      MCP_SKIP_ORPHAN_REAPERS: '1',
-      MCP_EXIT_ON_STDIN_CLOSE: options.exitOnStdinClose === false ? '0' : '1',
-      ...(options.env ?? {})
-    },
+    env: serverEnvironment(options),
     stderr: 'pipe'
   });
   transport.stderr?.on('data', () => {});
   await client.connect(transport);
   const timeout = options.callTimeoutMs ?? 30_000;
+  const closeTimeout = options.closeTimeoutMs ?? 5_000;
 
   const handle: StdioClientHandle = {
     client,
@@ -126,7 +142,7 @@ export async function startStdioClient(options: StdioClientOptions): Promise<Std
       try {
         if (handle.sessionId) {
           await client
-            .callTool({ name: 'close_debug_session', arguments: { sessionId: handle.sessionId } }, undefined, { timeout: 10_000 })
+            .callTool({ name: 'close_debug_session', arguments: { sessionId: handle.sessionId } }, undefined, { timeout: closeTimeout })
             .catch(() => {});
         }
       } finally {

@@ -34,13 +34,12 @@ const hasRuby = await (async () => {
 
 describe.skipIf(!hasRuby)('Ruby launch entry stop (issue #798)', () => {
   let server: StdioClientHandle;
-  let sessionId: string | undefined;
 
   const call = <T extends Result = Result>(name: string, args: Record<string, unknown> = {}): Promise<T> => server.call<T>(name, args);
 
   async function listedSession(): Promise<Listed | undefined> {
     const listed = await call<Result & { sessions: Listed[] }>('list_debug_sessions');
-    return listed.sessions.find(session => session.id === sessionId);
+    return listed.sessions.find(session => session.id === server.sessionId);
   }
 
   async function waitForState(state: string, timeoutMs: number): Promise<Listed | undefined> {
@@ -55,12 +54,11 @@ describe.skipIf(!hasRuby)('Ruby launch entry stop (issue #798)', () => {
   }
 
   beforeEach(async () => {
-    server = await startStdioClient({ name: 'ruby-stop-on-entry-integration', callTimeoutMs: 60_000 });
-    sessionId = await server.createSession('ruby', 'stop-on-entry');
+    server = await startStdioClient({ name: 'ruby-stop-on-entry-integration', callTimeoutMs: 60_000, closeTimeoutMs: 10_000 });
+    await server.createSession('ruby', 'stop-on-entry');
   });
 
   afterEach(async () => {
-    sessionId = undefined;
     await server?.close();
   }, 20_000);
 

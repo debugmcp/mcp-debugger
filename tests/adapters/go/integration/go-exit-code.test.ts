@@ -49,13 +49,12 @@ const hasGo = hasCommand('go', ['version']) && hasDelve();
 interface Result { success: boolean; state?: string; message?: string; data?: { exitCode?: number } }
 interface Listed { id: string; state: string; exitCode?: number }
 let server: StdioClientHandle;
-let sessionId: string | undefined;
 
 const call = <T extends Result = Result>(name: string, args: Record<string, unknown> = {}): Promise<T> => server.call<T>(name, args);
 
 async function listedSession(): Promise<Listed | undefined> {
   const listed = await call<Result & { sessions: Listed[] }>('list_debug_sessions');
-  return listed.sessions.find(session => session.id === sessionId);
+  return listed.sessions.find(session => session.id === server.sessionId);
 }
 
 async function outputText(): Promise<string> {
@@ -66,11 +65,10 @@ async function outputText(): Promise<string> {
 describe.skipIf(!hasGo)('Go exit code from Delve\'s console status line (issue #753)', () => {
   beforeEach(async () => {
     server = await startStdioClient({ name: 'go-exit-code-integration', callTimeoutMs: 60_000 });
-    sessionId = await server.createSession('go', 'exit-code');
+    await server.createSession('go', 'exit-code');
   });
 
   afterEach(async () => {
-    sessionId = undefined;
     await server?.close();
   }, 15_000);
 

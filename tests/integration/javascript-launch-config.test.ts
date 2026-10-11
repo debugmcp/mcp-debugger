@@ -16,7 +16,6 @@ interface Waited extends Result {
   pending?: boolean; exitCode?: number; lastStop?: { reason?: string }; location?: { file: string; line: number };
 }
 let server: StdioClientHandle;
-let sessionId: string | undefined;
 
 const call = <T extends Result = Result>(name: string, args: Record<string, unknown> = {}): Promise<T> => server.call<T>(name, args);
 
@@ -28,7 +27,7 @@ async function launch(args: Record<string, unknown> = {}): Promise<Result> {
 
 async function listedSession(): Promise<Listed | undefined> {
   const listed = await call<Result & { sessions: Listed[] }>('list_debug_sessions');
-  return listed.sessions.find(session => session.id === sessionId);
+  return listed.sessions.find(session => session.id === server.sessionId);
 }
 
 async function inspect(): Promise<string> {
@@ -47,11 +46,10 @@ beforeEach(async () => {
     name: 'launch-config-integration',
     env: { MCP_LAUNCH_CONFIG_VALUE: 'inherited', MCP_LAUNCH_CONFIG_REMOVE: 'inherited' }
   });
-  sessionId = await server.createSession('javascript', 'launch-config');
+  await server.createSession('javascript', 'launch-config');
 });
 
 afterEach(async () => {
-  sessionId = undefined;
   await server?.close();
 }, 15_000);
 
@@ -155,7 +153,7 @@ describe('JavaScript launch configuration', () => {
     expect(result.warning).toContain('noDebug');
     await expect.poll(async () => {
       const listed = await call<Result & { sessions: Array<{ id: string; exitCode?: number }> }>('list_debug_sessions');
-      return listed.sessions.find(session => session.id === sessionId)?.exitCode;
+      return listed.sessions.find(session => session.id === server.sessionId)?.exitCode;
     }, { timeout: 15_000 }).toBe(7);
   }, 60_000);
   it('answers pending for a breakpoint the program reaches only later, and wait_for_stop collects it (issue #823)', async () => {
@@ -244,7 +242,7 @@ describe('JavaScript launch configuration', () => {
     }
     await expect.poll(async () => {
       const listed = await call<Result & { sessions: Array<{ id: string; exitCode?: number }> }>('list_debug_sessions');
-      return listed.sessions.find(session => session.id === sessionId)?.exitCode;
+      return listed.sessions.find(session => session.id === server.sessionId)?.exitCode;
     }, { timeout: 15_000 }).toBe(7);
   }, 60_000);
 });
