@@ -2,14 +2,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { startStdioClient, type StdioClientHandle } from '../test-utils/helpers/mcp-stdio-client.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const fixture = path.join(root, 'tests/fixtures/javascript-launch-config');
 const scriptPath = path.join(fixture, 'target.cjs');
-const scrubbed = new Set(['NODE_OPTIONS', 'DEBUG_MCP_SKIP_AUTO_START', 'MCP_DEBUGGER_EXITCODE_FILE',
-  'MCP_DEBUGGER_EXITCODE_CLAIMED', 'DEBUG', 'DAP_TRACE_FILE']);
 interface Result {
   success: boolean; state?: string; warning?: string; message?: string; error?: string;
   data?: { warning?: string; stopOnEntrySuccessful?: boolean; exitCode?: number; dryRun?: boolean };
@@ -18,15 +15,9 @@ interface Listed { id: string; state: string; exitCode?: number; lastStop?: { re
 interface Waited extends Result {
   pending?: boolean; exitCode?: number; lastStop?: { reason?: string }; location?: { file: string; line: number };
 }
-let client: Client;
-let sessionId: string | undefined;
+let server: StdioClientHandle;
 
-async function call<T extends Result = Result>(name: string, args: Record<string, unknown> = {}): Promise<T> {
-  const raw = await client.callTool({ name, arguments: { ...(sessionId ? { sessionId } : {}), ...args } }, undefined, { timeout: 30_000 });
-  expect(raw.isError, JSON.stringify(raw)).not.toBe(true);
-  const content = raw.content as Array<{ type: string; text?: string }>;
-  return JSON.parse(content.find(item => item.type === 'text')!.text!) as T;
-}
+const call = <T extends Result = Result>(name: string, args: Record<string, unknown> = {}): Promise<T> => server.call<T>(name, args);
 
 async function launch(args: Record<string, unknown> = {}): Promise<Result> {
   const result = await call('start_debugging', { scriptPath, ...args });
@@ -36,7 +27,7 @@ async function launch(args: Record<string, unknown> = {}): Promise<Result> {
 
 async function listedSession(): Promise<Listed | undefined> {
   const listed = await call<Result & { sessions: Listed[] }>('list_debug_sessions');
-  return listed.sessions.find(session => session.id === sessionId);
+  return listed.sessions.find(session => session.id === server.sessionId);
 }
 
 async function inspect(): Promise<string> {
@@ -51,27 +42,15 @@ async function inspect(): Promise<string> {
 }
 
 beforeEach(async () => {
-  client = new Client({ name: 'launch-config-integration', version: '1' });
-  const env = Object.fromEntries(Object.entries(process.env).filter(
-    (entry): entry is [string, string] => entry[1] !== undefined && !scrubbed.has(entry[0].toUpperCase())
-  ));
-  const transport = new StdioClientTransport({ command: process.execPath, args: [path.join(root, 'dist/index.js'), 'stdio'],
-    cwd: root, env: { ...env, MCP_SKIP_ORPHAN_REAPERS: '1', MCP_EXIT_ON_STDIN_CLOSE: '1',
-      MCP_LAUNCH_CONFIG_VALUE: 'inherited', MCP_LAUNCH_CONFIG_REMOVE: 'inherited' }, stderr: 'pipe' });
-  transport.stderr?.on('data', () => {});
-  await client.connect(transport);
-  const created = await call<Result & { sessionId: string }>('create_debug_session', { language: 'javascript', name: 'launch-config' });
-  expect(created.success).toBe(true);
-  sessionId = created.sessionId;
+  server = await startStdioClient({
+    name: 'launch-config-integration',
+    env: { MCP_LAUNCH_CONFIG_VALUE: 'inherited', MCP_LAUNCH_CONFIG_REMOVE: 'inherited' }
+  });
+  await server.createSession('javascript', 'launch-config');
 });
 
 afterEach(async () => {
-  try {
-    if (sessionId) await client.callTool({ name: 'close_debug_session', arguments: { sessionId } }, undefined, { timeout: 5000 }).catch(() => {});
-  } finally {
-    sessionId = undefined;
-    await client?.close();
-  }
+  await server?.close();
 }, 15_000);
 
 describe('JavaScript launch configuration', () => {
@@ -174,7 +153,7 @@ describe('JavaScript launch configuration', () => {
     expect(result.warning).toContain('noDebug');
     await expect.poll(async () => {
       const listed = await call<Result & { sessions: Array<{ id: string; exitCode?: number }> }>('list_debug_sessions');
-      return listed.sessions.find(session => session.id === sessionId)?.exitCode;
+      return listed.sessions.find(session => session.id === server.sessionId)?.exitCode;
     }, { timeout: 15_000 }).toBe(7);
   }, 60_000);
   it('answers pending for a breakpoint the program reaches only later, and wait_for_stop collects it (issue #823)', async () => {
@@ -263,7 +242,7 @@ describe('JavaScript launch configuration', () => {
     }
     await expect.poll(async () => {
       const listed = await call<Result & { sessions: Array<{ id: string; exitCode?: number }> }>('list_debug_sessions');
-      return listed.sessions.find(session => session.id === sessionId)?.exitCode;
+      return listed.sessions.find(session => session.id === server.sessionId)?.exitCode;
     }, { timeout: 15_000 }).toBe(7);
   }, 60_000);
 });
