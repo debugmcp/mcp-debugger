@@ -163,6 +163,27 @@ export function isTerminalSessionState(state: SessionState | undefined): boolean
 }
 
 /**
+ * Whether a session is at rest with facts to report: paused at a stop, or
+ * over. The `lastStop` projection gate (issue #720), the launch hold's settle
+ * condition and `wait_for_stop`'s wake-up all ask this one question; it was
+ * spelled inline in each until issue #735.
+ */
+export function isSettledSessionState(state: SessionState | undefined): boolean {
+  return state === SessionState.PAUSED || isTerminalSessionState(state);
+}
+
+/**
+ * Whether a session's lifecycle is over (TERMINATED): the gate every tool
+ * that needs a live debuggee applies before touching a proxy. Kept a function
+ * rather than an inline comparison because callers ask either side of an
+ * await, and an inline check would be narrowed away by control-flow analysis
+ * that cannot see the core mutating the session meanwhile (issue #735).
+ */
+export function isSessionTerminated(session: { sessionLifecycle?: SessionLifecycleState }): boolean {
+  return session.sessionLifecycle === SessionLifecycleState.TERMINATED;
+}
+
+/**
  * Maps legacy SessionState to new state model
  */
 export function mapLegacyState(legacyState: SessionState): { lifecycle: SessionLifecycleState; execution?: ExecutionState } {

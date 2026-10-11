@@ -41,9 +41,10 @@
  */
 import { getErrorMessage } from '../../errors/debug-errors.js';
 import {
+  isSessionTerminated,
+  isSettledSessionState,
   isTerminalSessionState,
   NO_DEBUG_TARGET_MARKER,
-  SessionLifecycleState,
   SessionState,
   USER_BREAK_REASONS,
   type StackFrame
@@ -101,18 +102,6 @@ const STEP_KINDS = {
 } as const satisfies Record<string, StepKind>;
 
 export type StepKindName = keyof typeof STEP_KINDS;
-
-/**
- * Is the session over?
- *
- * A function rather than an inline comparison because `pause()` asks twice,
- * either side of an await, and an inline check would be narrowed away by
- * control-flow analysis — which cannot see that the core mutates the session
- * while the await is in flight.
- */
-function isTerminated(session: ManagedSession): boolean {
-  return session.sessionLifecycle === SessionLifecycleState.TERMINATED;
-}
 
 /**
  * Rule 2's wording for pause: the pause took effect, and the session ended
@@ -200,7 +189,7 @@ export class ExecutionController {
     const session = this.ctx.getSession(sessionId);
 
     // Check if session is terminated
-    if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
+    if (isSessionTerminated(session)) {
       throw new SessionTerminatedError(sessionId);
     }
 
@@ -230,7 +219,7 @@ export class ExecutionController {
     // the session can have ended, in the meantime. Without this the step
     // would go to a running thread and its rejection would flip a healthy
     // session to ERROR.
-    if (isTerminated(session)) {
+    if (isSessionTerminated(session)) {
       throw new SessionTerminatedError(sessionId);
     }
     if (!session.proxyManager || !session.proxyManager.isRunning()) {
@@ -332,7 +321,7 @@ export class ExecutionController {
 
       /** Rule 2: has the session reached a terminal state by settle time? */
       const sessionEnded = () =>
-        session.state === SessionState.STOPPED || session.state === SessionState.ERROR;
+        isTerminalSessionState(session.state);
 
       const onStopped = async () => {
         stopSeen = true;
@@ -450,7 +439,7 @@ export class ExecutionController {
     const session = this.ctx.getSession(sessionId);
 
     // Check if session is terminated
-    if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
+    if (isSessionTerminated(session)) {
       throw new SessionTerminatedError(sessionId);
     }
 
@@ -517,7 +506,7 @@ export class ExecutionController {
   async pause(sessionId: string, threadId?: number): Promise<DebugResult<PauseResultData>> {
     const session = this.ctx.getSession(sessionId);
 
-    if (isTerminated(session)) {
+    if (isSessionTerminated(session)) {
       throw new SessionTerminatedError(sessionId);
     }
 
@@ -598,7 +587,7 @@ export class ExecutionController {
     // core flips the lifecycle to TERMINATED for exactly the endings that
     // also clear the handle, and 'session is over' is the more useful of the
     // two answers.
-    if (isTerminated(session)) {
+    if (isSessionTerminated(session)) {
       throw new SessionTerminatedError(sessionId);
     }
     const proxyManager = session.proxyManager;
@@ -617,7 +606,7 @@ export class ExecutionController {
     // keeping this behind a function also prevents TypeScript from retaining
     // the RUNNING-only narrowing established before dispatch.
     const sessionEnded = () =>
-      session.state === SessionState.STOPPED || session.state === SessionState.ERROR;
+      isTerminalSessionState(session.state);
 
     /** The stop reason, but only when core recorded a NEW stop for this pause. */
     const ownStopReason = (): Pick<PauseResultData, 'stopReason' | 'rawStopReason'> => {
@@ -718,7 +707,7 @@ export class ExecutionController {
   async listThreads(sessionId: string): Promise<Array<{ id: number; name: string }>> {
     const session = this.ctx.getSession(sessionId);
 
-    if (session.sessionLifecycle === SessionLifecycleState.TERMINATED) {
+    if (isSessionTerminated(session)) {
       throw new SessionTerminatedError(sessionId);
     }
 
@@ -771,7 +760,7 @@ export class ExecutionController {
     const outcome = await waitForSessionState(
       this.ctx,
       sessionId,
-      (state) => state === SessionState.PAUSED || isTerminalSessionState(state),
+      isSettledSessionState,
       { timeoutMs: waitMs, signal }
     );
     if (outcome === 'gone') {
