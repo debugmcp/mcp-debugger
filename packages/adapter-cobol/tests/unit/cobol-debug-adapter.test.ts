@@ -201,6 +201,12 @@ describe('CobolDebugAdapter', () => {
   });
 
   describe('identity and metadata', () => {
+    it('declares processId as consumed beside the manifest keys: it leaves the transform as pid (issue #903)', () => {
+      expect(adapter.consumedAttachKeys).toContain('processId');
+      expect(adapter.consumedAttachKeys).toContain('sources');
+      expect(adapter.supportedAttachKeys).toContain('processId');
+    });
+
     it('identifies as the COBOL adapter over CodeLLDB', () => {
       expect(adapter.language).toBe(DebugLanguage.COBOL);
       expect(adapter.name).toBe('COBOL Debug Adapter');

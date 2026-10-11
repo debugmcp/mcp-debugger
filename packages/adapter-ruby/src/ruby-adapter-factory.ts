@@ -45,7 +45,15 @@ export class RubyAdapterFactory implements IAdapterFactory {
       minimumDebuggerVersion: '1.7.0',
       fileExtensions: ['.rb', '.rake', '.gemspec'],
       // Attach connects straight to a running rdbg --open DAP socket (no local Ruby needed)
-      modes: { launch: true, attach: 'direct-connect' }
+      modes: {
+        launch: true,
+        attach: 'direct-connect',
+        // Port-only: rdbg opens a socket, nothing makes a running Ruby process open one (issue #903)
+        attachBy: ['port'],
+        attachHints: {
+          processId: 'start the target with rdbg --open --port <port> script.rb and pass that port'
+        }
+      }
     };
   }
 

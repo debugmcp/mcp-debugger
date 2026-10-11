@@ -125,6 +125,10 @@ export class CppDebugAdapter extends EventEmitter implements IDebugAdapter {
     'breakpointMode'
   ] as const;
 
+  // processId leaves the transform as CodeLLDB's `pid`: consumed, not dropped
+  // (the attach key diff would otherwise report it as ignored, issue #903).
+  readonly consumedAttachKeys = ['processId'] as const;
+
   private state: AdapterState = AdapterState.UNINITIALIZED;
   private dependencies: AdapterDependencies;
   private lastToolchainValidation: ToolchainValidationResult | undefined;

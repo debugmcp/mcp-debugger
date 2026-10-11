@@ -28,7 +28,7 @@ import * as path from 'node:path';
 import { readlink, readFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { AdapterError, AdapterErrorCode } from '@debugmcp/shared';
+import { AdapterError, AdapterErrorCode, isLoopbackHost } from '@debugmcp/shared';
 
 const execFileAsync = promisify(execFile);
 
@@ -87,12 +87,9 @@ export interface InspectorActivationResult {
   title: string;
 }
 
-/**
- * The spellings of "this host" a caller may pass. A signal-opened inspector
- * binds 127.0.0.1 only, so every one of them is probed — and handed to
- * js-debug — as 127.0.0.1.
- */
-const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
+// Loopback is decided by the shared `isLoopbackHost` (issue #903). A
+// signal-opened inspector binds 127.0.0.1 only, so every accepted spelling
+// is probed — and handed to js-debug — as 127.0.0.1.
 const NODE_EXECUTABLE = /^node(?:js)?(?:\d+(?:\.\d+)*)?(?:\.exe)?$/i;
 const DISABLE_SIGUSR1 = /(?:^|[\s\0=])--disable-sigusr1(?:$|[\s\0])/;
 
@@ -333,7 +330,7 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
   const deadlineMs = options.deadlineMs ?? 5000;
   const pollMs = options.pollMs ?? 100;
 
-  if (!LOOPBACK_HOSTS.has(requestedHost)) {
+  if (!isLoopbackHost(requestedHost)) {
     throw invalid(`attach by processId is local only (host ${requestedHost}); for a remote target start it with --inspect and pass host/port`);
   }
   const host = '127.0.0.1';

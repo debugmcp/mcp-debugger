@@ -201,6 +201,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
   // still reach js-debug (forwarded with a warning) — this list only powers
   // recognition + typo suggestions (#466).
   readonly supportedAttachKeys = [
+    'processId',
     'host',
     'port',
     'address',
@@ -226,6 +227,11 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     'attachExistingChildren',
     'autoAttachChildProcesses'
   ] as const;
+
+  // processId is consumed by the inspector activation (#871) and never reaches
+  // js-debug: consumed, not dropped (the attach key diff would otherwise
+  // report it as ignored, issue #903).
+  readonly consumedAttachKeys = ['processId'] as const;
 
   private state: AdapterState = AdapterState.UNINITIALIZED;
   private readonly dependencies: AdapterDependencies;

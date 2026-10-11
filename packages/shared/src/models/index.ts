@@ -27,6 +27,16 @@ export enum ProcessIdentifierType {
 }
 
 /**
+ * Where an attach session's target lives relative to the mcp-debugger host
+ * (issue #903): 'pid' — attached by processId, this host by construction;
+ * 'loopback' — a port on a loopback host, or a debugger URI whose hostname is
+ * loopback; 'remote' — any other host; 'unknown' — the request named no
+ * addressing the core can read (a VM-service info file, say). Decides whether
+ * the file on this host is the debuggee's own source (issue #899).
+ */
+export type AttachLocality = 'pid' | 'loopback' | 'remote' | 'unknown';
+
+/**
  * Generic attach configuration (common across languages)
  */
 export interface GenericAttachConfig {

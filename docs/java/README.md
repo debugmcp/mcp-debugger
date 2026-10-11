@@ -88,6 +88,8 @@ java -agentlib:jdwp=transport=dt_socket,server=y,address=5005,suspend=y \
 - `suspend=y` pauses the JVM until a debugger attaches (recommended for debugging from the start)
 - `suspend=n` lets the JVM run immediately (useful for attaching to running servers)
 
+Java attach is **port-only**: JDWP has no PID step, so an `attach_to_process { processId }` is refused by name before the bridge starts, with this recipe (`'java' does not attach by processId — JDWP has no PID step; start the JVM with -agentlib:jdwp=… and pass that port`), and the session stays usable. A request naming neither `port` nor `processId` is refused the same way (issue #895).
+
 ```text
 attach_to_process { "sessionId": "your-session-id", "host": "localhost", "port": 5005 }
 ```

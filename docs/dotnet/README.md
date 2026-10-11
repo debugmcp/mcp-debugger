@@ -95,7 +95,7 @@ attach_to_process { "sessionId": "your-session-id", "processId": 12345 }
 ```
 
 Key attach arguments:
-- `processId` (required): PID of the running .NET process
+- `processId` (required): PID of the running .NET process. .NET attach is PID-only: a `port` or a non-loopback `host` is refused by name before netcoredbg starts, and an attach naming no `processId` is refused as needing one (issue #903)
 - `sourcePaths`: Directories to scan for PDB files (auto-detected from the process executable when omitted)
 
 `stopOnEntry` and `justMyCode` are also accepted as top-level parameters; netcoredbg extras such

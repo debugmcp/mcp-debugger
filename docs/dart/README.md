@@ -94,7 +94,7 @@ Dart attaches by VM-service URI, never by process id:
   (`dart.debuggerUris`).
 - `host` and `port` without a URI become `ws://host:port/ws`, which only works for a VM started
   with `--disable-service-auth-codes`; otherwise pass the full URI with its token.
-- A `processId` is refused with a message explaining the above. The test runners refuse attach.
+- A `processId` is refused by name, before the adapter starts, with a message explaining the above (issue #903); so is an attach that names no URI, info file or `host`/`port`. The test runners refuse attach.
 - Flutter attach takes `deviceId` as well (`flutter attach -d <id> --debug-uri <uri>`).
 - Detach (`detach_from_process`, or closing the session) leaves the target running.
 

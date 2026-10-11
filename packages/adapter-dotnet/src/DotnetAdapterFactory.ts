@@ -50,7 +50,15 @@ export class DotnetAdapterFactory implements IAdapterFactory {
       minimumDebuggerVersion: '1.0.0',
       fileExtensions: ['.cs', '.vb', '.fs'],
       // Attach spawns netcoredbg locally
-      modes: { launch: true, attach: 'spawn' },
+      modes: {
+        launch: true,
+        attach: 'spawn',
+        // PID-only: netcoredbg attaches to a local process (issue #903)
+        attachBy: ['processId'],
+        attachHints: {
+          port: 'netcoredbg attaches to a local process by PID; there is no TCP endpoint to attach to'
+        }
+      },
       icon: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iIzY3MzhCNyIgZD0iTTI0IDRDMTIuOTU0IDQgNCA1LjgxOCA0IDguNTc0VjM5LjQyNkM0IDQyLjE4MiAxMi45NTQgNDQgMjQgNDRzMjAtMS44MTggMjAtNC41NzRWOC41NzRDNDQgNS44MTggMzUuMDQ2IDQgMjQgNHptMCA2YzguMjg0IDAgMTUgMS43OTEgMTUgNHMtNi43MTYgNC0xNSA0UzkgMTYuMjA5IDkgMTRzNi43MTYtNCAxNS00eiIvPjx0ZXh0IHg9IjI0IiB5PSIzMiIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjE2IiBmb250LXdlaWdodD0iYm9sZCIgZmlsbD0id2hpdGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiPi5ORVQ8L3RleHQ+PC9zdmc+'
     };
   }

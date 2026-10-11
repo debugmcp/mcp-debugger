@@ -116,6 +116,8 @@ start_debugging {
 
 ## Attach mode
 
+Ruby attach is **port-only**: nothing makes a running Ruby process open a debug socket after the fact, so an `attach_to_process { processId }` is refused by name before anything starts, with the `rdbg --open --port <port>` recipe (issue #903).
+
 Start your program with an rdbg DAP listener:
 
 ```bash

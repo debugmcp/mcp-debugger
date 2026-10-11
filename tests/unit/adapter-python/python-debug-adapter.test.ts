@@ -409,7 +409,7 @@ describe('PythonDebugAdapter', () => {
     it('declares direct-connect attach in the factory metadata (issue #331)', async () => {
       const { PythonAdapterFactory } = await import('../../../packages/adapter-python/src/python-adapter-factory.js');
       const metadata = new PythonAdapterFactory().getMetadata();
-      expect(metadata.modes).toEqual({ launch: true, attach: 'direct-connect' });
+      expect(metadata.modes).toMatchObject({ launch: true, attach: 'direct-connect' })  // attachBy/attachHints are pinned by adapter-attach-contract.test.ts (issue #903);
     });
 
     it('keeps request=attach and emits the debugpy connect shape', () => {
