@@ -10,14 +10,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { startStdioClient, type StdioClientHandle } from '../../../test-utils/helpers/mcp-stdio-client.js';
 import { findRubyExecutable, findRdbgExecutable } from '@debugmcp/adapter-ruby';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const fizzbuzz = path.join(root, 'examples/ruby/fizzbuzz.rb');
-const scrubbed = new Set(['NODE_OPTIONS', 'DEBUG_MCP_SKIP_AUTO_START', 'MCP_DEBUGGER_EXITCODE_FILE',
-  'MCP_DEBUGGER_EXITCODE_CLAIMED', 'DEBUG', 'DAP_TRACE_FILE']);
 
 interface Result {
   success: boolean; state?: string; message?: string; error?: string;
@@ -36,19 +33,10 @@ const hasRuby = await (async () => {
 })();
 
 describe.skipIf(!hasRuby)('Ruby launch entry stop (issue #798)', () => {
-  let client: Client;
+  let server: StdioClientHandle;
   let sessionId: string | undefined;
 
-  async function call<T extends Result = Result>(name: string, args: Record<string, unknown> = {}): Promise<T> {
-    const raw = await client.callTool(
-      { name, arguments: { ...(sessionId ? { sessionId } : {}), ...args } },
-      undefined,
-      { timeout: 60_000 }
-    );
-    expect(raw.isError, JSON.stringify(raw)).not.toBe(true);
-    const content = raw.content as Array<{ type: string; text?: string }>;
-    return JSON.parse(content.find(item => item.type === 'text')!.text!) as T;
-  }
+  const call = <T extends Result = Result>(name: string, args: Record<string, unknown> = {}): Promise<T> => server.call<T>(name, args);
 
   async function listedSession(): Promise<Listed | undefined> {
     const listed = await call<Result & { sessions: Listed[] }>('list_debug_sessions');
@@ -67,33 +55,13 @@ describe.skipIf(!hasRuby)('Ruby launch entry stop (issue #798)', () => {
   }
 
   beforeEach(async () => {
-    client = new Client({ name: 'ruby-stop-on-entry-integration', version: '1' });
-    const env = Object.fromEntries(Object.entries(process.env).filter(
-      (entry): entry is [string, string] => entry[1] !== undefined && !scrubbed.has(entry[0].toUpperCase())
-    ));
-    const transport = new StdioClientTransport({
-      command: process.execPath,
-      args: [path.join(root, 'dist/index.js'), 'stdio'],
-      cwd: root,
-      env: { ...env, MCP_SKIP_ORPHAN_REAPERS: '1', MCP_EXIT_ON_STDIN_CLOSE: '1' },
-      stderr: 'pipe'
-    });
-    transport.stderr?.on('data', () => {});
-    await client.connect(transport);
-    const created = await call<Result & { sessionId: string }>('create_debug_session', { language: 'ruby', name: 'stop-on-entry' });
-    expect(created.success).toBe(true);
-    sessionId = created.sessionId;
+    server = await startStdioClient({ name: 'ruby-stop-on-entry-integration', callTimeoutMs: 60_000 });
+    sessionId = await server.createSession('ruby', 'stop-on-entry');
   });
 
   afterEach(async () => {
-    try {
-      if (sessionId) {
-        await client.callTool({ name: 'close_debug_session', arguments: { sessionId } }, undefined, { timeout: 10_000 }).catch(() => {});
-      }
-    } finally {
-      sessionId = undefined;
-      await client?.close();
-    }
+    sessionId = undefined;
+    await server?.close();
   }, 20_000);
 
   it('pauses at the first line with stopOnEntry: true, then runs to completion on continue', async () => {

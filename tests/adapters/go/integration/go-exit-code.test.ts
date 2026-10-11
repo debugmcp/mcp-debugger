@@ -23,16 +23,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { startStdioClient, type StdioClientHandle } from '../../../test-utils/helpers/mcp-stdio-client.js';
 import { getGoSearchPaths } from '@debugmcp/adapter-go';
 import { skipIfSpawnBlocked, type SkippableContext } from '../../../test-utils/helpers/adapter-spawn.js';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const fixtureDir = path.join(root, 'examples/go/exit_code');
 const program = path.join(fixtureDir, 'main.go');
-const scrubbed = new Set(['NODE_OPTIONS', 'DEBUG_MCP_SKIP_AUTO_START', 'MCP_DEBUGGER_EXITCODE_FILE',
-  'MCP_DEBUGGER_EXITCODE_CLAIMED', 'DEBUG', 'DAP_TRACE_FILE']);
 
 function hasCommand(cmd: string, args: string[]): boolean {
   try {
@@ -51,15 +48,10 @@ const hasGo = hasCommand('go', ['version']) && hasDelve();
 
 interface Result { success: boolean; state?: string; message?: string; data?: { exitCode?: number } }
 interface Listed { id: string; state: string; exitCode?: number }
-let client: Client;
+let server: StdioClientHandle;
 let sessionId: string | undefined;
 
-async function call<T extends Result = Result>(name: string, args: Record<string, unknown> = {}): Promise<T> {
-  const raw = await client.callTool({ name, arguments: { ...(sessionId ? { sessionId } : {}), ...args } }, undefined, { timeout: 60_000 });
-  expect(raw.isError, JSON.stringify(raw)).not.toBe(true);
-  const content = raw.content as Array<{ type: string; text?: string }>;
-  return JSON.parse(content.find(item => item.type === 'text')!.text!) as T;
-}
+const call = <T extends Result = Result>(name: string, args: Record<string, unknown> = {}): Promise<T> => server.call<T>(name, args);
 
 async function listedSession(): Promise<Listed | undefined> {
   const listed = await call<Result & { sessions: Listed[] }>('list_debug_sessions');
@@ -73,26 +65,13 @@ async function outputText(): Promise<string> {
 
 describe.skipIf(!hasGo)('Go exit code from Delve\'s console status line (issue #753)', () => {
   beforeEach(async () => {
-    client = new Client({ name: 'go-exit-code-integration', version: '1' });
-    const env = Object.fromEntries(Object.entries(process.env).filter(
-      (entry): entry is [string, string] => entry[1] !== undefined && !scrubbed.has(entry[0].toUpperCase())
-    ));
-    const transport = new StdioClientTransport({ command: process.execPath, args: [path.join(root, 'dist/index.js'), 'stdio'],
-      cwd: root, env: { ...env, MCP_SKIP_ORPHAN_REAPERS: '1', MCP_EXIT_ON_STDIN_CLOSE: '1' }, stderr: 'pipe' });
-    transport.stderr?.on('data', () => {});
-    await client.connect(transport);
-    const created = await call<Result & { sessionId: string }>('create_debug_session', { language: 'go', name: 'exit-code' });
-    expect(created.success).toBe(true);
-    sessionId = created.sessionId;
+    server = await startStdioClient({ name: 'go-exit-code-integration', callTimeoutMs: 60_000 });
+    sessionId = await server.createSession('go', 'exit-code');
   });
 
   afterEach(async () => {
-    try {
-      if (sessionId) await client.callTool({ name: 'close_debug_session', arguments: { sessionId } }, undefined, { timeout: 5000 }).catch(() => {});
-    } finally {
-      sessionId = undefined;
-      await client?.close();
-    }
+    sessionId = undefined;
+    await server?.close();
   }, 15_000);
 
   /** Launch, then require the exit code on the run-to-completion summary (when the launch saw it) and on list_debug_sessions. */
