@@ -1386,7 +1386,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       this.logger.info(`[ProxyManager ${sessionId}] Exit: code=${code}, signal=${signal}, expected=${expected}`);
       session.lastProxyExit = { code, signal, expected };
       const stateBeforeExit = session.state;
-      if (session.state !== SessionState.STOPPED && session.state !== SessionState.ERROR) {
+      if (!isTerminalSessionState(session.state)) {
         if (expected === true) {
           // Orderly debuggee termination (issue #258): the worker saw a
           // terminated/exited DAP event or was already shutting down. A

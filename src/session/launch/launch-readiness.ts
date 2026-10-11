@@ -21,7 +21,7 @@
  * adapter's `stopped` event, so an entry stop the core auto-continues settles
  * neither. Never rejects.
  */
-import { SessionState, isTerminalSessionState } from '@debugmcp/shared';
+import { SessionState, isSettledSessionState, isTerminalSessionState } from '@debugmcp/shared';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import type { OperationsContext } from '../operations-context.js';
 import { waitForSessionState } from '../execution/session-state-wait.js';
@@ -51,9 +51,6 @@ export interface LaunchReadinessInput {
    */
   beforeHold?: () => Promise<void> | void;
 }
-
-const stoppedOrEnded = (state: SessionState): boolean =>
-  state === SessionState.PAUSED || isTerminalSessionState(state);
 
 export async function waitForLaunchReadiness(
   ctx: LaunchReadinessContext,
@@ -103,7 +100,7 @@ export async function waitForLaunchReadiness(
     }
   }
 
-  await waitForSessionState(ctx, sessionId, stoppedOrEnded, { timeoutMs: holdMs });
+  await waitForSessionState(ctx, sessionId, isSettledSessionState, { timeoutMs: holdMs });
   const afterHold = settledOutcome(currentState());
   if (afterHold) {
     ctx.logger.info(`[SessionManager] Session ${sessionId} ${afterHold} within the launch hold`);
