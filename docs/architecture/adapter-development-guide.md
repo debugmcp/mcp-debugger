@@ -304,7 +304,7 @@ After creating the package, wire it into the monorepo. A language touches far mo
 
 ### 2. Server wiring
 
-- **Loader known list** — the `known` array in `src/adapters/adapter-loader.ts` → `listAvailableAdapters()`: `{ name, packageName, description, attach }`. The `attach` mode must mirror `getMetadata().modes`
+- **Loader known list** — the `known` array in `src/adapters/adapter-loader.ts` → `listAvailableAdapters()`: `{ name, packageName, description, attach, attachBy }`. `attach` and `attachBy` must mirror `getMetadata().modes` — `tests/unit/adapters/adapter-attach-contract.test.ts` fails when they drift (issue #903)
 - **Container preload** — a `tryRegister('<language>', '<Language>AdapterFactory')` call in `src/container/dependencies.ts` (skipped when the language is in `DEBUG_MCP_DISABLE_LANGUAGES`)
 - **Language-discovery metadata** — a `case DebugLanguage.<LANGUAGE>` in `buildLanguageMetadata()` in `src/server/language-discovery.ts` (display name, `requiresExecutable`, `defaultExecutable`)
 - **Skill content** — the language list and the per-language launch/attach lines in `src/skill-content.ts` (the in-band `instructions` string and the `debugging-workflow` prompt)
@@ -471,6 +471,7 @@ The loader:
 - [ ] Package created under `packages/adapter-<language>/`
 - [ ] `IAdapterFactory` implemented with `createAdapter()`, `getMetadata()`, `validate()`
 - [ ] `getMetadata().modes` declared (`{ launch, attach: 'none' | 'direct-connect' | 'spawn' }`) and mirrored in the known-adapters list in `src/adapters/adapter-loader.ts` — this drives per-mode availability in `list_supported_languages` and the attach gate (issue #331)
+- [ ] For an attach-capable adapter, `modes.attachBy` names the addressing forms `attach_to_process` may use (`'processId'`, `'port'`, `'adapterConfig'` for a debugger URI under `adapterConfig`) and `modes.attachHints` carries a plain-text remedy for each of `processId`/`port` it does not accept — the core refuses the other forms by name before the session changes state (the attach-addressing contract, issue #903); pin the row in `tests/unit/adapters/adapter-attach-contract.test.ts`. Keys the transform consumes without echoing (a `processId` renamed to `pid`, say) go in `consumedAttachKeys`, or the attach warning reports them as ignored
 - [ ] `IDebugAdapter` fully implemented
 - [ ] `index.ts` exports the named factory class
 - [ ] `DebugLanguage` enum updated in `packages/shared/src/models/index.ts`

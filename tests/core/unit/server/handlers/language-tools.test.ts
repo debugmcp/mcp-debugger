@@ -60,6 +60,23 @@ describe('handleListSupportedLanguages', () => {
     expect(mock.modes.launch.available).toBe(true);
   });
 
+  it('shows each attach-capable language its declared addressing forms as modes.attach.by (issue #903)', async () => {
+    ctx.sessionManager.adapterRegistry.listAvailableAdapters.mockResolvedValue([
+      { name: 'java', packageName: '@debugmcp/adapter-java', installed: false, attach: 'spawn', attachBy: ['port'] },
+      { name: 'go', packageName: '@debugmcp/adapter-go', installed: false, attach: 'none' }
+    ]);
+
+    const result = await handleListSupportedLanguages(ctx);
+    const payload = JSON.parse(result.content[0].text);
+
+    const java = payload.available.find((entry: { language: string }) => entry.language === 'java');
+    expect(java.modes.attach.supported).toBe(true);
+    expect(java.modes.attach.by).toEqual(['port']);
+    const go = payload.available.find((entry: { language: string }) => entry.language === 'go');
+    expect(go.modes.attach.supported).toBe(false);
+    expect(go.modes.attach).not.toHaveProperty('by');
+  });
+
   it('falls back to installed list when listAvailableAdapters fails', async () => {
     ctx.sessionManager.adapterRegistry.listAvailableAdapters.mockRejectedValue(
       new Error('metadata unavailable')

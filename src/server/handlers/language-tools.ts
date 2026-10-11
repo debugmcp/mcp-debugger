@@ -1,6 +1,7 @@
 /**
  * Language tool: list_supported_languages.
  */
+import type { AttachAddressing } from '@debugmcp/shared';
 import { getDisabledLanguages } from '../../utils/language-config.js';
 import { probeLanguageEntry, LanguageModes } from '../../utils/language-availability.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
@@ -26,7 +27,14 @@ export async function handleListSupportedLanguages(ctx: ToolContext): Promise<To
     const installed = await ctx.getSupportedLanguagesAsync();
 
     // Also surface known adapters with install status if available from registry
-    let baseEntries: Array<{ language: string; package: string; installed: boolean; description?: string; attach: 'none' | 'direct-connect' | 'spawn' }> =
+    let baseEntries: Array<{
+      language: string;
+      package: string;
+      installed: boolean;
+      description?: string;
+      attach: 'none' | 'direct-connect' | 'spawn';
+      attachBy?: readonly AttachAddressing[];
+    }> =
       installed.map(lang => ({
         language: lang,
         package: `@debugmcp/adapter-${lang}`,
@@ -44,7 +52,9 @@ export async function handleListSupportedLanguages(ctx: ToolContext): Promise<To
           package: m.packageName,
           installed: m.installed,
           description: m.description,
-          attach: m.attach ?? 'none'
+          attach: m.attach ?? 'none',
+          // The attach-addressing contract (issue #903): what attach_to_process may address
+          attachBy: m.attachBy
         }));
       } catch (e) {
         ctx.logger.warn('Failed to query detailed adapter metadata; returning installed list only', { error: (e as Error)?.message });
@@ -64,7 +74,8 @@ export async function handleListSupportedLanguages(ctx: ToolContext): Promise<To
             language: entry.language,
             packageName: entry.package,
             installed: entry.installed,
-            attach: entry.attach
+            attach: entry.attach,
+            attachBy: entry.attachBy
           },
           {
             registry: adapterRegistry,

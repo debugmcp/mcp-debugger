@@ -383,7 +383,8 @@ describe('AdapterLoader', () => {
         packageName: '@debugmcp/adapter-python',
         description: 'Python debugger using debugpy',
         installed: true,
-        attach: 'direct-connect'
+        attach: 'direct-connect',
+        attachBy: ['port']
       });
 
       const mockAdapter = adapters.find(a => a.name === 'mock');
@@ -401,7 +402,8 @@ describe('AdapterLoader', () => {
         packageName: '@debugmcp/adapter-javascript',
         description: 'JavaScript/TypeScript debugger using js-debug',
         installed: false,
-        attach: 'spawn'
+        attach: 'spawn',
+        attachBy: ['processId', 'port', 'adapterConfig']
       });
 
       const rubyAdapter = adapters.find(a => a.name === 'ruby');
@@ -410,7 +412,8 @@ describe('AdapterLoader', () => {
         packageName: '@debugmcp/adapter-ruby',
         description: 'Ruby debugger using rdbg',
         installed: false,
-        attach: 'direct-connect'
+        attach: 'direct-connect',
+        attachBy: ['port']
       });
 
       const rustAdapter = adapters.find(a => a.name === 'rust');
@@ -437,7 +440,8 @@ describe('AdapterLoader', () => {
         packageName: '@debugmcp/adapter-java',
         description: 'Java debugger using JDI bridge',
         installed: false,
-        attach: 'spawn'
+        attach: 'spawn',
+        attachBy: ['port']
       });
 
       const dotnetAdapter = adapters.find(a => a.name === 'dotnet');
@@ -446,7 +450,8 @@ describe('AdapterLoader', () => {
         packageName: '@debugmcp/adapter-dotnet',
         description: '.NET/C# debugger using netcoredbg',
         installed: false,
-        attach: 'spawn'
+        attach: 'spawn',
+        attachBy: ['processId']
       });
 
       const cppAdapter = adapters.find(a => a.name === 'cpp');
@@ -455,7 +460,8 @@ describe('AdapterLoader', () => {
         packageName: '@debugmcp/adapter-cpp',
         description: 'C/C++ debugger using CodeLLDB',
         installed: false,
-        attach: 'spawn'
+        attach: 'spawn',
+        attachBy: ['processId']
       });
 
       const cobolAdapter = adapters.find(a => a.name === 'cobol');
@@ -464,7 +470,8 @@ describe('AdapterLoader', () => {
         packageName: '@debugmcp/adapter-cobol',
         description: 'COBOL debugger using GnuCOBOL and CodeLLDB',
         installed: false,
-        attach: 'spawn'
+        attach: 'spawn',
+        attachBy: ['processId']
       });
 
       const dartAdapter = adapters.find(a => a.name === 'dart');
@@ -473,7 +480,8 @@ describe('AdapterLoader', () => {
         packageName: '@debugmcp/adapter-dart',
         description: 'Dart and Flutter debugging via the SDK debug adapters (dart debug_adapter / flutter debug-adapter)',
         installed: false,
-        attach: 'spawn'
+        attach: 'spawn',
+        attachBy: ['port', 'adapterConfig']
       });
     });
 
@@ -489,7 +497,8 @@ describe('AdapterLoader', () => {
         packageName: '@debugmcp/adapter-javascript',
         description: 'JavaScript/TypeScript debugger using js-debug',
         installed: true,
-        attach: 'spawn'
+        attach: 'spawn',
+        attachBy: ['processId', 'port', 'adapterConfig']
       });
     });
   });
@@ -519,7 +528,8 @@ describe('AdapterLoader', () => {
       packageName: '@debugmcp/adapter-javascript',
       description: 'JavaScript/TypeScript debugger using js-debug',
       installed: true,
-      attach: 'spawn'
+      attach: 'spawn',
+      attachBy: ['processId', 'port', 'adapterConfig']
     });
     // The probe must not have imported anything
     expect(mockModuleLoader.load).not.toHaveBeenCalled();
@@ -603,7 +613,8 @@ describe('AdapterLoader', () => {
         packageName: '@debugmcp/adapter-python',
         description: 'Python debugger using debugpy',
         installed: true,
-        attach: 'direct-connect'
+        attach: 'direct-connect',
+        attachBy: ['port']
       });
     });
   });
