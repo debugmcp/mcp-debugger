@@ -15,6 +15,11 @@ describe('SessionManager - waitForStop (issue #849)', () => {
   let dependencies: ReturnType<typeof createMockDependencies>;
 
   beforeEach(() => {
+    // shouldAdvanceTime keeps the cases that await a wait directly moving (the
+    // 10 ms settle before a stop is read), but it also lets real time leak into
+    // the fake clock: a case that asserts "not yet" 1 ms before its deadline
+    // fails on a loaded runner (issue #890). The timeout cases therefore assert
+    // well inside their window and then advance well past it.
     vi.useFakeTimers({ shouldAdvanceTime: true });
     dependencies = createMockDependencies();
     const config: SessionManagerConfig = {
@@ -109,9 +114,9 @@ describe('SessionManager - waitForStop (issue #849)', () => {
     const sessionId = await runningSession();
     const wait = track(sessionManager.waitForStop(sessionId, 2_000));
 
-    await vi.advanceTimersByTimeAsync(1_999);
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(wait.result()).toBeUndefined();
-    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(1_500);
 
     expect(wait.result()).toMatchObject({ success: true, state: SessionState.RUNNING });
     expect(wait.result()?.data?.pending).toBe(true);
@@ -140,9 +145,9 @@ describe('SessionManager - waitForStop (issue #849)', () => {
     const sessionId = await runningSession();
     const wait = track(sessionManager.waitForStop(sessionId));
 
-    await vi.advanceTimersByTimeAsync(29_999);
+    await vi.advanceTimersByTimeAsync(15_000);
     expect(wait.result()).toBeUndefined();
-    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(20_000);
 
     expect(wait.result()?.data?.pending).toBe(true);
   });
