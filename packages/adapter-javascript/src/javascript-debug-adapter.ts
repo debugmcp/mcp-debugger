@@ -1046,13 +1046,6 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     } as LanguageSpecificAttachConfig;
   }
 
-  getDefaultAttachConfig(): Partial<GenericAttachConfig> {
-    return {
-      request: 'attach',
-      host: '127.0.0.1',
-    };
-  }
-
   // ===== DAP Protocol Operations =====
 
   async sendDapRequest<T extends DebugProtocol.Response>(_command: string, _args?: unknown): Promise<T> {

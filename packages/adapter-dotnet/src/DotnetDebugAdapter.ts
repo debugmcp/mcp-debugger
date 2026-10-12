@@ -456,13 +456,6 @@ export class DotnetDebugAdapter extends EventEmitter implements IDebugAdapter {
     return attachConfig as LanguageSpecificAttachConfig;
   }
 
-  getDefaultAttachConfig(): Partial<GenericAttachConfig> {
-    return {
-      stopOnEntry: false,
-      justMyCode: true
-    };
-  }
-
   // ===== DAP Protocol Operations =====
 
   async sendDapRequest<T extends DebugProtocol.Response>(

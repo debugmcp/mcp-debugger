@@ -371,13 +371,6 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
     } as LanguageSpecificAttachConfig;
   }
 
-  getDefaultAttachConfig(): Partial<GenericAttachConfig> {
-    return {
-      request: 'attach',
-      host: 'localhost',
-    };
-  }
-
   // ===== DAP Protocol Operations =====
 
   async sendDapRequest<T extends DebugProtocol.Response>(

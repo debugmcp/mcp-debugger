@@ -16,14 +16,13 @@ import { describe, it, expect, vi } from 'vitest';
 import { DebugLanguage, type AdapterLaunchBarrier, type GenericAttachConfig } from '@debugmcp/shared';
 import { FakeDebugAdapter } from '../../test-utils/fakes/fake-debug-adapter.js';
 
-/** The seven members production code reaches through an optional call. */
+/** The six members production code reaches through an optional call. */
 const OPTIONAL_MEMBERS = [
   'createLaunchBarrier',
   'supportsAttach',
   'supportsDetach',
   'usesDirectConnectForAttach',
   'transformAttachConfig',
-  'getDefaultAttachConfig',
   'supportedAttachKeys'
 ] as const;
 
@@ -80,7 +79,6 @@ describe('FakeDebugAdapter', () => {
       expect(adapter.usesDirectConnectForAttach?.()).toBe(true);
       expect(adapter.supportsDetach?.()).toBe(true);
       expect('transformAttachConfig' in adapter).toBe(true);
-      expect('getDefaultAttachConfig' in adapter).toBe(true);
     });
   });
 

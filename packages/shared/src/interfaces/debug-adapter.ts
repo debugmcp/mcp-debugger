@@ -211,13 +211,6 @@ export interface IDebugAdapter extends EventEmitter {
    */
   transformAttachConfig?(config: GenericAttachConfig): LanguageSpecificAttachConfig | Promise<LanguageSpecificAttachConfig>;
 
-  /**
-   * Get default attach configuration for this language
-   * Only called if supportsAttach() returns true
-   * @returns Default attach configuration with language-specific defaults
-   */
-  getDefaultAttachConfig?(): Partial<GenericAttachConfig>;
-
   // ===== DAP Protocol Operations =====
   
   /**

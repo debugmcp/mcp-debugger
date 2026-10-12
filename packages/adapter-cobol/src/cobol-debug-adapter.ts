@@ -928,10 +928,6 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
     };
   }
 
-  getDefaultAttachConfig(): Partial<GenericAttachConfig> {
-    return { request: 'attach', stopOnEntry: true };
-  }
-
   // ===== DAP Protocol Operations (vestigial; ProxyManager owns the traffic) =====
 
   async sendDapRequest<T extends DebugProtocol.Response>(command: string, args?: unknown): Promise<T> {

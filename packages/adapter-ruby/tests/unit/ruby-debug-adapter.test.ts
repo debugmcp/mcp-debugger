@@ -560,7 +560,6 @@ describe('RubyDebugAdapter', () => {
     expect(adapter.getExecutableSearchPaths()).toEqual(['/usr/bin']);
     expect(['ruby', 'ruby.exe']).toContain(adapter.getDefaultExecutableName());
     expect(adapter.getDefaultLaunchConfig().justMyCode).toBe(true);
-    expect(adapter.getDefaultAttachConfig?.()).toMatchObject({ request: 'attach', host: '127.0.0.1' });
     expect(adapter.isReady()).toBe(false);
   });
 

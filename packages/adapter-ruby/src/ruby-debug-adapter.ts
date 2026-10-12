@@ -487,15 +487,6 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
     return attachConfig;
   }
 
-  getDefaultAttachConfig(): Partial<GenericAttachConfig> {
-    return {
-      request: 'attach',
-      host: '127.0.0.1',
-      stopOnEntry: true,
-      justMyCode: true
-    };
-  }
-
   async sendDapRequest<T extends DebugProtocol.Response>(
     _command: string,
     _args?: unknown

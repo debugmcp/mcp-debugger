@@ -705,15 +705,6 @@ describe('JavaDebugAdapter', () => {
     });
   });
 
-  describe('getDefaultAttachConfig', () => {
-    it('should return sensible defaults', () => {
-      const defaults = adapter.getDefaultAttachConfig();
-      expect(defaults.request).toBe('attach');
-      expect(defaults.host).toBe('localhost');
-      // No mandatory timeout default
-    });
-  });
-
   describe('getDefaultExecutableName', () => {
     it('should return platform-appropriate name', () => {
       const name = adapter.getDefaultExecutableName();

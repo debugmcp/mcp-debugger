@@ -327,10 +327,6 @@ export class DartDebugAdapter extends EventEmitter implements IDebugAdapter {
     return out;
   }
 
-  getDefaultAttachConfig(): Partial<GenericAttachConfig> {
-    return { timeout: 30000 };
-  }
-
   // ===== DAP plumbing (the proxy does the actual communication) =====
 
   async sendDapRequest<T extends DebugProtocol.Response>(_command: string, _args?: unknown): Promise<T> {

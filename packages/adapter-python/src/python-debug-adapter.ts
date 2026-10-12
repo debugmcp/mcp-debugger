@@ -539,14 +539,6 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
     return attachConfig;
   }
 
-  getDefaultAttachConfig(): Partial<GenericAttachConfig> {
-    return {
-      request: 'attach',
-      host: '127.0.0.1',
-      justMyCode: true
-    };
-  }
-
   // ===== DAP Protocol Operations =====
   
   async sendDapRequest<T extends DebugProtocol.Response>(

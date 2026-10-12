@@ -696,13 +696,6 @@ export class CppDebugAdapter extends EventEmitter implements IDebugAdapter {
     };
   }
 
-  getDefaultAttachConfig(): Partial<GenericAttachConfig> {
-    return {
-      request: 'attach',
-      stopOnEntry: true
-    };
-  }
-
   // ===== DAP Protocol Operations =====
 
   async sendDapRequest<T extends DebugProtocol.Response>(

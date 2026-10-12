@@ -468,16 +468,6 @@ describe('PythonDebugAdapter', () => {
         .toThrow(/process id/i);
     });
 
-    it('provides a default attach config', () => {
-      const adapter = new PythonDebugAdapter(createDependencies());
-
-      expect(adapter.getDefaultAttachConfig?.()).toEqual({
-        request: 'attach',
-        host: '127.0.0.1',
-        justMyCode: true
-      });
-    });
-
     it('propagates stopOnEntry into the attach config when provided', () => {
       const adapter = new PythonDebugAdapter(createDependencies());
       const attach = adapter.transformAttachConfig({ request: 'attach', port: 5678, stopOnEntry: true });
