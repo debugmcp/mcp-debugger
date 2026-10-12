@@ -465,7 +465,7 @@
       },
       {
         "name": "wait_for_stop",
-        "description": "Block until the session next pauses or ends, then say why and where. Call it after continue_execution (which does not wait) and whenever a tool answers pending:true, instead of polling list_debug_sessions. Answers at once when the session is already paused (state \"paused\" with lastStop — the same record list_debug_sessions shows — and the top frame as location) or already over (the terminal state, with exitCode when the debuggee reported one). If neither happens within the timeout it answers state \"running\" with pending:true: nothing was cancelled, breakpoints and exception filters stay armed — call it again to keep waiting, or pause_execution to interrupt",
+        "description": "Block until the session next pauses or ends, then say why and where. Call it after continue_execution (which does not wait) and whenever a tool answers pending:true, instead of polling list_debug_sessions. Answers at once when the session is already paused (state \"paused\" with lastStop — the same record list_debug_sessions shows — and the top frame as location) or already over (the terminal state, with exitCode when the debuggee reported one); note says when the answer is anchored on a thread other than the one the stop was reported on, or when no frame of the shown stack is program code. If neither happens within the timeout it answers state \"running\" with pending:true: nothing was cancelled, breakpoints and exception filters stay armed — call it again to keep waiting, or pause_execution to interrupt",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -484,7 +484,7 @@
       },
       {
         "name": "pause_execution",
-        "description": "Pause a running program. Waits briefly for the stop; if the program cannot stop within ~5s (e.g. blocked in native code, or an idle server waiting for input), returns success with pending:true and the session reports \"paused\" the next time the program runs code (call wait_for_stop to block until then). Fails with an actionable error if the session has no debuggable target to pause (e.g. a js attach whose target session was never adopted or has ended)",
+        "description": "Pause a running program. Waits briefly for the stop; if the program cannot stop within ~5s (e.g. blocked in native code, or an idle server waiting for input), returns success with pending:true and the session reports \"paused\" the next time the program runs code (call wait_for_stop to block until then). An observed stop answers with stopReason, the first visible frame as location (with its source context), and note when the stop was reported on a thread with no program frame — a sibling thread in program code is shown instead, or, when none has one, the note says no program frame is active. Fails with an actionable error if the session has no debuggable target to pause (e.g. a js attach whose target session was never adopted or has ended)",
         "inputSchema": {
           "type": "object",
           "properties": {

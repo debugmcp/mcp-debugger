@@ -188,7 +188,41 @@ export async function handlePause(ctx: ToolContext, args: { sessionId: string; t
   try {
     ctx.validateSession(args.sessionId);
     const result = await ctx.sessionManager.pause(args.sessionId, args.threadId);
-    return jsonResult(result);
+    if (!result.success) {
+      return jsonResult(result);
+    }
+    // The shape the step tools and wait_for_stop answer with (issue #906):
+    // what a caller branches on — pending, the stop reason, where it landed
+    // and the note about it — at the top level, with the controller's own
+    // data kept whole beneath for the callers that read it there.
+    const data = result.data;
+    const response: Record<string, unknown> = { ...result };
+    if (data?.message) {
+      response.message = data.message;
+    }
+    if (data?.pending) {
+      response.pending = true;
+    }
+    if (data?.stopReason) {
+      response.stopReason = data.stopReason;
+      if (data.rawStopReason) {
+        response.rawStopReason = data.rawStopReason;
+      }
+    }
+    if (typeof data?.threadId === 'number') {
+      response.threadId = data.threadId;
+    }
+    if (data?.note) {
+      response.note = data.note;
+    }
+    if (data?.location) {
+      response.location = data.location;
+      const context = await readLineContext(ctx, data.location.file, data.location.line, 'pause result');
+      if (context) {
+        response.context = context;
+      }
+    }
+    return jsonResult(response);
   } catch (error) {
     ctx.logger.error('Failed to pause execution', { error });
     return sessionErrorToResult(error) ??
