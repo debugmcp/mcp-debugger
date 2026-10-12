@@ -42,6 +42,22 @@ export type AttachAddressingVerdict =
 /** `adapterConfig` keys that carry a debugger URI (dart, js-debug). */
 const URI_KEYS = ['vmServiceUri', 'websocketAddress'] as const;
 
+/**
+ * `adapterConfig` keys that name an attach target on their own (issue #905):
+ * the URI keys and Dart's service-info file. Beside `processId` and `port`,
+ * these are what make `create_debug_session` attach in the same call.
+ */
+export const ADAPTER_CONFIG_TARGET_KEYS = [...URI_KEYS, 'vmServiceInfoFile'] as const;
+
+/** Whether a request names an attach target at all; `host` alone never does. */
+export function namesAttachTarget(request: AttachAddressingRequest): boolean {
+  return (
+    given(request.processId) ||
+    given(request.port) ||
+    ADAPTER_CONFIG_TARGET_KEYS.some(key => given(request.adapterConfig?.[key]))
+  );
+}
+
 function given(value: unknown): boolean {
   return value !== undefined && value !== null && value !== '';
 }

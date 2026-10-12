@@ -4,11 +4,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Variable } from '@debugmcp/shared';
 import {
+  attachRequestFromArgs,
   readLineContext,
   redactionSummary,
   variablePayloadExtras,
   successWarning
 } from '../../../../../src/server/handlers/shared.js';
+import type { ToolArguments } from '../../../../../src/server/tool-arguments.js';
 import { createMockToolContext } from '../server-test-helpers.js';
 
 // DebugMcpServer builds its dependencies in the constructor; mock the container
@@ -117,5 +119,33 @@ describe('readLineContext', () => {
       'Could not get line context for step result',
       { file: '/app/main.py', line: 7, error: failure }
     );
+  });
+});
+
+describe('attachRequestFromArgs (issue #905)', () => {
+  it('spells every AttachRequest key, forwarded as given, with breakOnExceptions validated', () => {
+    const args: ToolArguments = {
+      port: 5009, host: '10.0.0.5', processId: 4242, timeout: 7000, verifyTimeout: 12000,
+      sourcePaths: ['/src'], stopOnEntry: false, justMyCode: false, breakOnExceptions: 'uncaught',
+      adapterConfig: { pathMappings: [] }
+    };
+
+    expect(attachRequestFromArgs(args)).toEqual({ ...args });
+  });
+
+  it('defaults nothing: an absent host or timeout stays absent for the adapter to decide', () => {
+    const request = attachRequestFromArgs({ port: 5009 });
+
+    expect(Object.keys(request).sort()).toEqual([
+      'adapterConfig', 'breakOnExceptions', 'host', 'justMyCode', 'port', 'processId',
+      'sourcePaths', 'stopOnEntry', 'timeout', 'verifyTimeout'
+    ]);
+    expect(request.host).toBeUndefined();
+    expect(request.timeout).toBeUndefined();
+    expect(request.breakOnExceptions).toBeUndefined();
+  });
+
+  it('refuses an invalid breakOnExceptions', () => {
+    expect(() => attachRequestFromArgs({ port: 5009, breakOnExceptions: 'sometimes' })).toThrow(/breakOnExceptions/);
   });
 });
