@@ -19,8 +19,6 @@ export interface PendingRequest {
 export interface DAPSessionState {
   readonly sessionId: string;
   readonly initialized: boolean;
-  readonly adapterConfigured: boolean;
-  readonly currentThreadId?: number;
   readonly pendingRequests: ReadonlyMap<string, PendingRequest>;
   // Additional state can be added here as we expand
 }

@@ -5,8 +5,6 @@ import { describe, it, expect } from 'vitest';
 import {
   createInitialState,
   setInitialized,
-  setAdapterConfigured,
-  setCurrentThreadId,
   addPendingRequest,
   removePendingRequest,
   getPendingRequest,
@@ -22,8 +20,6 @@ describe('DAP Core State', () => {
       
       expect(state.sessionId).toBe('test-session-123');
       expect(state.initialized).toBe(false);
-      expect(state.adapterConfigured).toBe(false);
-      expect(state.currentThreadId).toBeUndefined();
       expect(state.pendingRequests.size).toBe(0);
     });
   });
@@ -36,33 +32,6 @@ describe('DAP Core State', () => {
       expect(newState.initialized).toBe(true);
       // Ensure immutability
       expect(state.initialized).toBe(false);
-    });
-  });
-
-  describe('setAdapterConfigured', () => {
-    it('should update adapterConfigured flag', () => {
-      const state = createInitialState('test');
-      const newState = setAdapterConfigured(state, true);
-      
-      expect(newState.adapterConfigured).toBe(true);
-      expect(state.adapterConfigured).toBe(false);
-    });
-  });
-
-  describe('setCurrentThreadId', () => {
-    it('should update current thread ID', () => {
-      const state = createInitialState('test');
-      const newState = setCurrentThreadId(state, 42);
-      
-      expect(newState.currentThreadId).toBe(42);
-      expect(state.currentThreadId).toBeUndefined();
-    });
-
-    it('should clear current thread ID when undefined', () => {
-      const state = setCurrentThreadId(createInitialState('test'), 42);
-      const newState = setCurrentThreadId(state, undefined);
-      
-      expect(newState.currentThreadId).toBeUndefined();
     });
   });
 
@@ -118,17 +87,11 @@ describe('DAP Core State', () => {
   });
 
   describe('updateState', () => {
-    it('should apply multiple updates at once', () => {
+    it('applies updates without touching sessionId or pendingRequests', () => {
       const state = createInitialState('test');
-      const newState = updateState(state, {
-        initialized: true,
-        adapterConfigured: true,
-        currentThreadId: 5
-      });
-      
+      const newState = updateState(state, { initialized: true });
+
       expect(newState.initialized).toBe(true);
-      expect(newState.adapterConfigured).toBe(true);
-      expect(newState.currentThreadId).toBe(5);
       // sessionId and pendingRequests should remain unchanged
       expect(newState.sessionId).toBe('test');
       expect(newState.pendingRequests).toBe(state.pendingRequests);
@@ -142,8 +105,6 @@ describe('DAP Core State', () => {
       
       // These operations should not throw if immutable
       expect(() => setInitialized(frozen, true)).not.toThrow();
-      expect(() => setAdapterConfigured(frozen, true)).not.toThrow();
-      expect(() => setCurrentThreadId(frozen, 1)).not.toThrow();
       expect(() => updateState(frozen, { initialized: true })).not.toThrow();
     });
 

@@ -89,7 +89,6 @@ describe('DAP Core Handlers', () => {
         const result = handleProxyMessage(state, statusMessage('adapter_configured_and_launched'));
 
         expect(result.commands).toEqual([]);
-        expect(result.newState?.adapterConfigured).toBe(true);
         expect(result.newState?.initialized).toBe(true);
       });
 
@@ -99,7 +98,6 @@ describe('DAP Core Handlers', () => {
         const result = handleProxyMessage(state, statusMessage('adapter_configured_and_launched'));
 
         expect(result.commands).toEqual([]);
-        expect(result.newState?.adapterConfigured).toBe(true);
         expect(result.newState?.initialized).toBe(true);
       });
 
@@ -145,7 +143,7 @@ describe('DAP Core Handlers', () => {
     });
 
     describe('DAP events (Phase 2)', () => {
-      it('should handle stopped event and update thread ID', () => {
+      it('emits stopped with the thread id and leaves the core state untouched (issue #913)', () => {
         const message: ProxyDapEventMessage = {
           type: 'dapEvent',
           sessionId: 'test-session-123',
@@ -168,8 +166,8 @@ describe('DAP Core Handlers', () => {
           args: [42, 'breakpoint', message.body]
         });
         
-        // Check state update
-        expect(result.newState?.currentThreadId).toBe(42);
+        // The stop anchor is ProxyManager's alone; the core keeps no copy.
+        expect(result.newState).toBe(state);
       });
 
       it('should handle stopped event without thread ID', () => {
