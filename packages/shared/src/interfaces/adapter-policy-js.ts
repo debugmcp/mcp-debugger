@@ -678,8 +678,16 @@ export const JsDebugAdapterPolicy = {
     const baseLaunchConfig: Record<string, unknown> = launchConfig ? { ...launchConfig } : {};
     const baseRecord = baseLaunchConfig as Record<string, unknown>;
 
+    // A numeric string counts too (issue #896): the MCP transform converts
+    // one, an embedder bypassing the transform may not.
     const getPortValue = (value: unknown): number | undefined =>
-      typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+      typeof value === 'number' && Number.isFinite(value)
+        ? value
+        : typeof value === 'string' && /^\d+$/.test(value)
+        ? Number(value)
+        : undefined;
+    const stringValue = (value: unknown): string | undefined =>
+      typeof value === 'string' && value.length > 0 ? value : undefined;
 
     const type =
       typeof baseLaunchConfig.type === 'string'
@@ -700,9 +708,23 @@ export const JsDebugAdapterPolicy = {
       getPortValue(baseRecord.port) ??
       getPortValue(a.attachSimplePort) ??
       getPortValue(a.port);
+    // An inspector URL from /json/list is the one port-less form js-debug
+    // honours (issue #896); the MCP transform leaves `port` undefined beside it.
+    const websocketAddress = stringValue(baseRecord.websocketAddress) ?? stringValue(a.websocketAddress);
 
-    if (req === 'attach' && typeof attachPort === 'number' && attachPort > 0) {
-      // Explicit ATTACH flow (single parent session); avoid DI ambiguity.
+    if (req === 'attach') {
+      // Explicit ATTACH flow (single parent session), keyed on the request
+      // alone: a port-less attach used to fall through to the LAUNCH flow
+      // below and send js-debug a `launch` whose body said `request:
+      // 'attach'` (issue #896) — launch-branch keys on an attach, and a
+      // launch parent recorded for child adoption.
+      const hasPort = typeof attachPort === 'number' && attachPort > 0;
+      if (!hasPort && !websocketAddress) {
+        throw new Error(
+          "[JsDebugAdapterPolicy] A JavaScript attach needs a port (the target's --inspect port) or a websocketAddress; " +
+            "the handshake received request: 'attach' with neither, so no attach request was sent"
+        );
+      }
       // Use the caller-provided host — previously hardcoded to 127.0.0.1,
       // which broke attaching to anything but local loopback (issue #124).
       const attachHost =
@@ -731,11 +753,16 @@ export const JsDebugAdapterPolicy = {
         ...callerAttachExtras,
         type,
         request: 'attach',
-        address: attachHost,
-        port: attachPort,
+        ...(hasPort ? { address: attachHost, port: attachPort } : {}),
         continueOnAttach: true,
         attachExistingChildren: true
       };
+      if (!hasPort) {
+        // js-debug dials websocketAddress directly; the transform's
+        // `port: undefined` must not ride along as a key.
+        delete attachArgs.port;
+        delete attachArgs.address;
+      }
       // Carry the caller's stopOnEntry: js-debug itself ignores it, but
       // MinimalDapClient records this as parent intent separately from the
       // arguments forwarded to child sessions (issues #124/#730).
@@ -775,10 +802,19 @@ export const JsDebugAdapterPolicy = {
             : ['**', '!**/node_modules/**'];
       }
       try {
-        console.info(`[JsDebugAdapterPolicy] [JS] Sending 'attach' to ${attachPort} (address=${attachHost})`);
+        console.info(
+          hasPort
+            ? `[JsDebugAdapterPolicy] [JS] Sending 'attach' to ${attachPort} (address=${attachHost})`
+            : `[JsDebugAdapterPolicy] [JS] Sending 'attach' to ${websocketAddress}`
+        );
         await pm.sendDapRequest('attach', attachArgs);
       } catch (e) {
+        // Rethrown (issue #896): this runs in the MCP server process, where
+        // console is silenced, so the warning was the end of the road — the
+        // adapter's refusal never reached the caller. The attach controller
+        // decides what a rejection means.
         console.warn(`[JsDebugAdapterPolicy] [JS] 'attach' failed: ${e instanceof Error ? e.message : String(e)}`);
+        throw e;
       }
     } else {
       // LAUNCH flow (default for MCP). Use adapter-configured policy; do not add parent attach-by-port afterward
@@ -890,7 +926,10 @@ export const JsDebugAdapterPolicy = {
         );
         await pm.sendDapRequest('launch', finalLaunchArgs);
       } catch (e) {
+        // Rethrown like the attach refusal (issue #896); the launcher logs
+        // it and the launch readiness wait still decides the outcome.
         console.warn(`[JsDebugAdapterPolicy] [JS] 'launch' failed: ${e instanceof Error ? e.message : String(e)}`);
+        throw e;
       }
     }
 
