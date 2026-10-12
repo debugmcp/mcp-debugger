@@ -525,7 +525,9 @@ line, or a breakpoint or exception hit before the step completed — the respons
 message reads `Stepped over; stopped on 'breakpoint' rather than on the step itself (see stopReason)`. When that stop
 is on the very line the step was issued from — a lost step whose breakpoint fired again, or a single-line loop — the
 message adds `The program is back at the line the step was issued from.` A `pause` reason is reported in
-`stopReason` with the plain wording (issue #678). `location` is the first visible frame, as everywhere else.
+`stopReason` with the plain wording (issue #678). `location` is the first visible frame, as everywhere else; `threadId`
+and `note` appear only when the answer is anchored off the reported thread or no frame of the shown stack is program
+code (as for `pause_execution`) — a step never moves off its own thread.
 
 #### Pending steps
 
@@ -672,7 +674,7 @@ Blocks until the session next pauses or ends, then says why and where. This is t
 **Notes:**
 - The wait is on the session's state, not on the adapter's raw `stopped` event, so a stop the server resumes by itself — the entry stop of a `stopOnEntry: false` launch — is never reported. The answer is the first stop `list_debug_sessions` would also show.
 - A session that is already paused answers at once with its current stop, and asking twice without resuming returns the same stop twice. After `continue_execution` (or a step that answered `pending: true`) the session is `running`, so the next call waits for the next stop.
-- `lastStop` is the record `list_debug_sessions` reports: `reason`, `rawReason` when the adapter's own reason was normalized, `threadId`, and `description`/`text` for an exception. `lastStop.exceptionInfo` is filled in a moment after an exception stop — re-query `list_debug_sessions` if it is absent. `location` and `context` are best-effort: they appear when the stack could be read, and `location` is the first visible frame, as for the step tools.
+- `lastStop` is the record `list_debug_sessions` reports: `reason`, `rawReason` when the adapter's own reason was normalized, `threadId`, and `description`/`text` for an exception. `lastStop.exceptionInfo` is filled in a moment after an exception stop — re-query `list_debug_sessions` if it is absent. `location` and `context` are best-effort: they appear when the stack could be read, and `location` is the first visible frame, as for the step tools; `threadId` and `note` appear as for `pause_execution` (a pause collected by the wait is anchored the same way).
 - `exitCode` is present only when the debuggee reported one. A session that ended in an error answers `state: "error"` with the reason in `message`. A finished session keeps answering the same way until it is closed. When a stop landed during the wait and the program ended before it could be inspected — an uncaught exception and the exit arriving together — the ended answer carries that stop as `lastStop`; a stop from before the wait is not repeated.
 - `pending: true` sits at the top level, as for the step tools. The message says what the wait is still for: with breakpoints (or `breakOnExceptions: "all"`) armed it names them and says they stay armed; with nothing armed it promises no pause — the program will stop only for an uncaught exception the debugger catches, or report its exit — so a caller is not sent round a loop that cannot end in a stop. When the launch runs with the debugger off (`dapLaunchArgs.noDebug`, honoured), the message says so and that the wait is for the program's exit; when the launch or attach itself has not completed, it says the session is still starting.
 - A session that was never started answers `success: false` (`Nothing to wait for: this session has not been started…`). So does a session closed while the call was waiting, and a `timeout` that is not a positive number.
@@ -693,19 +695,36 @@ Pauses a running program. The DAP pause request only acknowledges that the debug
 {
   "success": true,
   "state": "paused",
-  "data": {
-    "message": "Paused",
-    "stopReason": "pause",
-    "location": { "file": "/path/app.py", "line": 42, "column": 1 }  // the first visible frame; if the pause landed inside a hidden internal frame, get_stack_trace's pausedFrame names it
-  }
+  "message": "Paused",
+  "stopReason": "pause",
+  "location": { "file": "/path/app.py", "line": 42, "column": 1 },  // the first visible frame; if the pause landed inside a hidden internal frame, get_stack_trace's pausedFrame names it
+  "context": { "lineContent": "    total += price", "surrounding": ["…"] },
+  "data": { "message": "Paused", "stopReason": "pause", "location": { "file": "/path/app.py", "line": 42, "column": 1 } }
 }
 ```
+
+When the pause was reported on a thread with no program frame — on Windows, CodeLLDB reports it on the break-in thread the OS injects while the program's thread sits in `main` (issue #898) — the answer is anchored on the first thread whose stack reaches the program, and says so:
+```json
+{
+  "success": true,
+  "state": "paused",
+  "message": "Paused",
+  "stopReason": "pause",
+  "rawStopReason": "exception",
+  "location": { "file": "C:\\proj\\examples\\cpp\\pause_test.cpp", "line": 20, "column": 36 },
+  "threadId": 45324,
+  "note": "The stop was reported on thread 31208 (5: tid=31208), whose 4 frames are all internal/runtime (top: 'DbgBreakPoint'); showing thread 45324 (1: tid=45324), which is in 'main' (…/pause_test.cpp:20)."
+}
+```
+When no thread has a program frame — an idle Node server's pause lands on a sourceless `<anonymous>` frame between event-loop dispatches (issue #900) — `location` is that frame and `note` reads `No program frame is active on thread 0: the only frame is internal/runtime (top: '<anonymous>' <unknown_source>:1). The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint; get_stack_trace with includeInternals: true lists the frames.`
 
 **Response** (the program had not stopped when the grace window elapsed):
 ```json
 {
   "success": true,
   "state": "running",
+  "pending": true,
+  "message": "Pause requested; no 'stopped' event within 5s (the program may be blocked in native code or a syscall). The pause is still in effect: the session will report 'paused' once the stop lands. Call wait_for_stop to block until then.",
   "data": {
     "message": "Pause requested; no 'stopped' event within 5s (the program may be blocked in native code or a syscall). The pause is still in effect: the session will report 'paused' once the stop lands. Call wait_for_stop to block until then.",
     "pending": true
@@ -715,12 +734,12 @@ Pauses a running program. The DAP pause request only acknowledges that the debug
 
 The adapter may append one sentence explaining why the pause may never land — the JavaScript adapter does so for a
 launch whose `smartStep` is on and whose `skipFiles` blackbox Node internals (issue #678) — so match a pending pause
-by `data.pending`, not by the message text.
+by its `pending: true` flag, not by the message text.
 
 **Notes:**
 - The `"state"` field is the session state at the moment the tool answers: `"paused"` once the stop has been observed, and `"running"` **only on the pending path** — the request was delivered but the program has not stopped yet. On that path, call [`wait_for_stop`](#wait_for_stop) to block until the state flips to `"paused"` when the target next executes code (or poll `list_debug_sessions`).
-- `pending` sits inside `data` here, unlike the step tools, which hoist it to the top level of the response.
-- `data.location` is best-effort: it appears on the observed path when the post-stop stack trace could be read.
+- `pending`, `message`, `stopReason`/`rawStopReason`, `location`, `threadId`, `note` and `context` sit at the top level, as for the step tools and `wait_for_stop`; `data` keeps the controller's own copy (issue #906).
+- `location` is best-effort: it appears on the observed path when the post-stop stack trace could be read, and is the first visible frame. `threadId` is present only when the answer is anchored on a thread other than the one the stop was reported on, and `note` says why: a `pause` reported on a thread with no program frame moves to the first sibling whose stack reaches the program (issue #898), or, when no thread has one, says that no program frame is active (issue #900). Breakpoint, step, exception and entry stops stay on the thread they were reported on.
 - When the stop is observed before the tool returns, `data.stopReason` carries the (normalized) stop reason and — if the adapter reported a misleading raw reason that was normalized — `data.rawStopReason` carries the original. Example: CodeLLDB delivers an explicit pause via SIGSTOP and reports `"exception"`; the result is `stopReason: "pause", rawStopReason: "exception"`. js-debug similarly reports pauses as `"step"`. The same raw reason appears as `lastStop.rawReason` in `list_debug_sessions`. Stale stops from before the pause request are never echoed.
 - The session must be in a `"running"` state; pausing an already-paused session returns success immediately with `"Already paused"` (plus the current `stopReason`). Any other state fails with `Cannot pause in state: <state>`.
 - If the debuggee ends before the pause takes effect, the call still succeeds, reporting `"Session ended before pause took effect"`.
@@ -1335,6 +1354,7 @@ When the requested pause has not landed by the time the tool answers (an idle No
 
 **Notes:**
 - `state` is `"paused"` only once a stopped event has actually been observed; otherwise the attach reports `"running"`. When a requested post-attach pause is accepted but its stopped event has not arrived within the bounded wait, the response is successful with `state: "running"` and `pending: true` (at the top level and in `data`) and the `message` names the pending pause; the late stopped event is the only transition to `paused` — [`wait_for_stop`](#wait_for_stop) blocks until it arrives — and every paused session has a `lastStop`.
+- An idle Node server may instead answer `paused` at once: js-debug lands the pause on a sourceless `<anonymous>` frame between event-loop dispatches. The attach answer then carries `note: "No program frame is active on thread 0: the only frame is internal/runtime (top: '<anonymous>' <unknown_source>:1). The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint; …"`, `get_stack_trace` shows that one frame with `noProgramFrame: true` and the same note, and `get_local_variables` is empty (issue #900). Either way, attach to a live server you still need to use with `stopOnEntry: false`.
 - The initial stop of an attach is reported as `lastStop.reason: "pause"` (`stopReason: "pause"` in `get_stack_trace`) by every adapter, whether the debugger paused the target on request or, as CodeLLDB does, stopped it itself. On Windows, CodeLLDB reports that stop as the `DebugBreakProcess` break-in — an `0x80000003` exception on a helper thread — so the adapter's own words stay beside the pause as `lastStop.rawReason: "exception"` and `description: "Exception 0x80000003 encountered at address …"` (issue #817). Only the first stop of an attach that did not pass `stopOnEntry: false` is read this way: a break-in met later, or first by an attach that opted out of the initial stop, is a real `__debugbreak()` and keeps `reason: "exception"`.
 - When `processId` was used, the message reads `Attached to process PID <pid>` instead.
 - The response `warning` reports two distinct `adapterConfig` key outcomes (issues #450/#466): keys the adapter's attach transform genuinely drops (e.g. Python's ptvsd-era `localRoot`/`remoteRoot` — use `pathMappings`) are named as **ignored**, while keys mcp-debugger doesn't recognize are **forwarded to the adapter as-is** and named with an edit-distance suggestion for near-misses (`pathMapping (did you mean pathMappings?)`) — "ignored" means dropped, "forwarded as-is" means the adapter still sees them. The same field also carries the launch-style warning for function breakpoints still unverified at attach (issue #308).
