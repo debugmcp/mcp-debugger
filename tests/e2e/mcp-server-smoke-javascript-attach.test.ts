@@ -452,6 +452,51 @@ describe('MCP Server JavaScript Attach-Mode Smoke Tests', () => {
     expect(targetProcess!.exitCode, 'detach must leave the target process alive').toBeNull();
   }, 120000);
 
+  it('attaches by inspector URL (adapterConfig.websocketAddress, no port) through the attach branch (issue #896)', async () => {
+    const target = await spawnTarget();
+    targetProcess = target.proc;
+
+    // The URL js-debug dials directly, as /json/list reports it.
+    const list = await new Promise<Array<{ webSocketDebuggerUrl?: string }>>((resolve, reject) => {
+      http.get(`http://127.0.0.1:${target.port}/json/list`, res => {
+        let body = '';
+        res.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+        res.on('end', () => {
+          try { resolve(JSON.parse(body)); } catch (error) { reject(error); }
+        });
+      }).on('error', reject);
+    });
+    const websocketAddress = list[0]?.webSocketDebuggerUrl;
+    expect(websocketAddress, JSON.stringify(list)).toMatch(/^ws:\/\//);
+
+    const createResult = await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: { language: 'javascript', name: 'js-attach-ws-test' }
+    });
+    sessionId = parseSdkToolResult(createResult).sessionId as string;
+    const attachResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'attach_to_process',
+      arguments: { sessionId, adapterConfig: { websocketAddress }, verifyTimeout: 20000 }
+    }));
+    console.log('[JS Attach Test] websocketAddress attach response:', JSON.stringify(attachResponse));
+    expect(attachResponse.success, JSON.stringify(attachResponse)).toBe(true);
+
+    const threadsResult = await callToolSafely(mcpClient!, 'list_threads', { sessionId: sessionId! });
+    expect(((threadsResult.threads as unknown[] | undefined) ?? []).length).toBeGreaterThan(0);
+
+    // The attach branch, not the launch branch: the proxy log records which
+    // DAP request the handshake sent (before #896 a port-less attach went
+    // out as a `launch` whose body said request: 'attach').
+    const proxyLog = await mcpClient!.readResource({ uri: `debug://sessions/${sessionId}/proxy-log` });
+    const logText = proxyLog.contents.map(c => ('text' in c ? String(c.text) : '')).join('\n');
+    expect(logText).toMatch(/Sending request:.*"command":"attach"/s);
+    expect(logText).not.toMatch(/"command":"launch"/);
+
+    await callToolSafely(mcpClient!, 'detach_from_process', { sessionId: sessionId! });
+    await new Promise(r => setTimeout(r, 300));
+    expect(targetProcess!.exitCode, 'detach must leave the target running').toBeNull();
+  }, 120000);
+
   it('attaches by PID to a node process started without --inspect, then re-attaches through the inspector it opened (issue #871)', async (ctx) => {
     if (await portInUse(9229)) {
       console.log('[JS Attach Test] 127.0.0.1:9229 is in use on this host; skipping the PID attach case (a signalled Node process opens its inspector there)');
