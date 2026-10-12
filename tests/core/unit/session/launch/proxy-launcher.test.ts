@@ -470,7 +470,7 @@ describe('ProxyLauncher.start', () => {
     expect(h.ctx.logger.warn).toHaveBeenCalledWith(expect.stringContaining('attach: deviceId: ignored'));
 
     await h.launcher.start(session, { scriptPath: 'attach://pid', dapLaunchArgs: launchArgs({ request: 'attach' }) });
-    expect(session.attachTransformNotices).toEqual([]);
+    expect(session.attachTransformNotices).toBeUndefined();
   });
 
   it('reports caller-only drops and forwarded typos from either bag with the winning provenance', async () => {

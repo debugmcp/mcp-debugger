@@ -167,7 +167,9 @@ export interface ManagedSession extends DebugSessionInfo {
   // The adapter's own attach-transform notes (Dart: the no-auth URI built
   // from host:port, a deviceId on a Dart runner; COBOL: build options given
   // without sources), drained from consumeLaunchConfigDiagnostics per
-  // attempt (issue #908). Same lifecycle as attachDroppedConfigKeys.
+  // attempt (issue #908): reset when ProxyLauncher.start begins, set after
+  // the transform (undefined when there are none), consumed by
+  // attachToProcess for the response warning.
   attachTransformNotices?: string[];
   // The most recent real launch, replayed by restart_debugging (issue #238).
   lastLaunch?: LastLaunchSpec;

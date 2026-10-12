@@ -180,9 +180,10 @@ export interface IDebugAdapter extends EventEmitter {
   readonly consumedLaunchKeys?: readonly string[];
 
   /**
-   * Drain diagnostics from the last launch transform, including a failed one.
-   * Messages describe handling, never caller values. The session layer adds
-   * the input key and filters out defaults/generated inputs (#709).
+   * Drain diagnostics from the last launch or attach transform, including a
+   * failed one. Messages describe handling, never caller values. On a launch
+   * the session layer adds the input key and filters out defaults/generated
+   * inputs (#709); on an attach it renders each as `key: message` (#908).
    */
   consumeLaunchConfigDiagnostics?(): readonly LaunchConfigDiagnostic[];
 
@@ -402,16 +403,18 @@ export interface GenericLaunchConfig {
   // Common debug configuration options
 }
 
-/** An adapter's explanation of how it handled one launch input. */
+/** An adapter's explanation of how it handled one launch or attach input. */
 export interface LaunchConfigDiagnostic {
-  /** The caller's launch key this is about — or, with scope 'launch', a label for a notice about the launch as a whole. */
+  /** The caller's key this is about — or, with scope 'launch', a label for a notice about the operation as a whole. */
   key: string;
   message: string;
   /**
-   * 'launch': not tied to a caller input. The launcher renders the message
-   * as-is instead of matching `key` against the caller's keys (issue #796 —
-   * e.g. the JavaScript adapter's exit-code preload is missing from this
-   * distribution, so exit codes will not be captured).
+   * 'launch': not tied to a caller input — about the operation as a whole,
+   * launch or attach. The session layer renders the message as-is instead
+   * of matching `key` against the caller's keys (issue #796 — e.g. the
+   * JavaScript adapter's exit-code preload is missing from this distribution,
+   * so exit codes will not be captured; issue #908 — a COBOL attach with no
+   * symbol manifest at all).
    */
   scope?: 'launch';
 }

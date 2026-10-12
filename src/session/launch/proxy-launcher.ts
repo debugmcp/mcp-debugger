@@ -311,10 +311,11 @@ export class ProxyLauncher {
         // each attempt acquires a fresh adapter. On a thrown transform they
         // are stored and logged only; the attach error is the adapter's own.
         const notices = collectAttachTransformNotices(adapter);
-        session.attachTransformNotices = this.ctx.redactionEnabled()
+        const rendered = this.ctx.redactionEnabled()
           ? notices.map(notice => redactSecretsInString(notice).value)
           : notices;
-        for (const notice of session.attachTransformNotices) {
+        session.attachTransformNotices = rendered.length > 0 ? rendered : undefined;
+        for (const notice of rendered) {
           this.ctx.logger.warn(`[SessionManager] ${session.language} attach: ${notice}`);
         }
       }

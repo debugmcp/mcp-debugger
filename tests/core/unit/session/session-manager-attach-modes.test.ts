@@ -879,8 +879,23 @@ describe('SessionManagerOperations attach modes', () => {
       expect(warning).toContain('port: attaching to ws://127.0.0.1:12345/ws');
       expect(warning).toContain('deviceId: ignored: only Flutter runners use deviceId');
       expect(warning.indexOf('port: attaching')).toBeLessThan(warning.indexOf('were ignored: localRoot'));
-      expect(result.data?.message).not.toContain('attaching to');
+      expect(result.data?.message).toBe('Attached to process at 127.0.0.1:12345');
       expect(mockSession.attachTransformNotices).toBeUndefined();
+    });
+
+    it('does not leak the adapter attach-transform notes into a later attach on the same session (issue #908)', async () => {
+      const noted = makeDirectConnectAdapter((cfg) => cfg);
+      Object.assign(noted, { consumeLaunchConfigDiagnostics: vi.fn(() => [{ key: 'port', message: 'attaching to ws://127.0.0.1:12345/ws' }]) });
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(noted);
+      const first = await operations.attachToProcess('test-session', { host: '127.0.0.1', port: 12345, stopOnEntry: false });
+      expect(first.data?.warning).toContain('port: attaching to');
+
+      mockSession.proxyManager = undefined;
+      mockSession.state = SessionState.CREATED;
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(makeDirectConnectAdapter((cfg) => cfg));
+
+      const second = await operations.attachToProcess('test-session', { host: '127.0.0.1', port: 12345, stopOnEntry: false });
+      expect(second.data?.warning).toBeUndefined();
     });
 
     it('does not leak a stale warning into a later attach on the same session', async () => {

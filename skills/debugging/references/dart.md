@@ -83,7 +83,7 @@ attach_to_process {"sessionId": "<id>", "adapterConfig": {"vmServiceUri": "ws://
 | `Session terminated before debugger initialized: (1)` | The program or test file does not compile | Read the stderr entries in `get_output` (file/line/column) |
 | `dart test` dies with `The system cannot find the file specified … dartaotruntime.exe` (Windows) | Project under `%LOCALAPPDATA%\Temp` with the winget SDK (upstream package:test) | Move the project out of Temp |
 | "Dart attaches by VM-service URI, not by process id" | `processId` passed to `attach_to_process` | `adapterConfig.vmServiceUri` or `vmServiceInfoFile` |
-| Attach by `host`/`port` never connects | The VM wants its auth token in the URI | Start the target with `--disable-service-auth-codes`, or pass the full `ws://…/<token>=/ws` URI |
+| Attach by `host`/`port` never connects | The VM wants its auth token in the URI (the attach `warning` says so) | Start the target with `--disable-service-auth-codes`, or pass the full `ws://…/<token>=/ws` URI |
 | Empty `get_stack_trace` after attach | The isolate is idle in an `await` | Set a breakpoint and `continue_execution`; or attach with `stopOnEntry: false` |
 | Breakpoint stays `verified: false` | Script not loaded yet (test isolate, lazily loaded library) | Wait for the launch's first stop; it verifies on load |
 | A Flutter launch on a device hangs, or `adb: device offline` | A previous instance is still being replaced / stale adb forwards | `adb shell am force-stop <package>` and `adb forward --remove-all` before launching |
