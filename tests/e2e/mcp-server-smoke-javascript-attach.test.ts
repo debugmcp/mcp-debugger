@@ -491,6 +491,7 @@ describe('MCP Server JavaScript Attach-Mode Smoke Tests', () => {
     // the proxy-log resource serves a bounded tail, and js-debug's child
     // adoption has long scrolled the handshake out of it by now.
     const sessionLogDir = path.join(os.tmpdir(), 'debug-mcp-server', 'sessions', sessionId);
+    expect(existsSync(sessionLogDir), `no session log directory at ${sessionLogDir}`).toBe(true);
     const runDir = readdirSync(sessionLogDir).filter(name => name.startsWith('run-')).sort().pop();
     expect(runDir, `no run directory under ${sessionLogDir}`).toBeTruthy();
     const logText = readFileSync(path.join(sessionLogDir, runDir!, `proxy-${sessionId}.log`), 'utf8');

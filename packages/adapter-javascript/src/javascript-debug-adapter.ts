@@ -980,7 +980,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
         `[JavascriptDebugAdapter] ${activated.alreadyActive ? 'Found' : 'Activated'} the inspector of PID ${processId} ` +
           `on ${attachHost}:${attachPort} (${activated.title})`
       );
-    } else if (attachPort === undefined && typeof rest.websocketAddress !== 'string') {
+    } else if (!(attachPort !== undefined && attachPort > 0) && !(typeof rest.websocketAddress === 'string' && rest.websocketAddress.length > 0)) {
       throw new AdapterError(
         'JavaScript attach needs port (the --inspect port of the target) or a local processId ' +
           '(the inspector of a running Node.js process is activated for you); without either ' +

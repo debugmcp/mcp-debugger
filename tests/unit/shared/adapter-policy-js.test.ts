@@ -469,6 +469,19 @@ describe('JsDebugAdapterPolicy', () => {
         expect(events.listenerCount('dap-event')).toBe(0);
       });
 
+      it('keeps address and port beside a websocketAddress when both are given: js-debug dials the URL', async () => {
+        const { sendDapRequest } = await runHandshake(
+          { request: 'attach', type: 'pwa-node' },
+          { request: 'attach', host: '127.0.0.1', port: 9229, websocketAddress: 'ws://127.0.0.1:9229/abc-def' }
+        );
+
+        expect(sendDapRequest).toHaveBeenCalledWith('attach', expect.objectContaining({
+          websocketAddress: 'ws://127.0.0.1:9229/abc-def',
+          address: '127.0.0.1',
+          port: 9229
+        }));
+      });
+
       it('accepts a numeric-string port from an embedder', async () => {
         const { result, sendDapRequest } = await runHandshake({ request: 'attach', port: '9229', type: 'pwa-node' }, undefined);
 

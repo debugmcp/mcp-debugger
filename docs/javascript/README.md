@@ -319,7 +319,7 @@ If neither `tsx` nor `ts-node` is installed, the factory emits a warning (not an
 
 ## Attaching to a running Node.js process
 
-Two ways in:
+Three ways in:
 
 - **By port** — the target was started with the inspector listening
   (`node --inspect=127.0.0.1:9229 server.js`): `attach_to_process { host, port }`.
