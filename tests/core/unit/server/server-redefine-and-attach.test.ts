@@ -617,6 +617,58 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
       });
     });
 
+    it('surfaces the attach note at the top level when the stop landed where no frame is program code (issues #904/#900)', async () => {
+      const note = "No program frame is active on thread 0: the only frame is internal/runtime (top: '<anonymous>' <unknown_source>:1). The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint; get_stack_trace with includeInternals: true lists the frames.";
+      mockSessionManager.attachToProcess.mockResolvedValue({
+        success: true,
+        state: 'paused',
+        data: { message: 'Attached to process PID 4242', note },
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'attach_to_process',
+          arguments: { sessionId: 'test-session', processId: 4242 },
+        },
+      });
+
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload).toMatchObject({ success: true, state: 'paused', message: 'Attached to process PID 4242', note, data: { note } });
+      expect(payload).not.toHaveProperty('pending');
+    });
+
+    it('surfaces the attach note at the top level of a create_debug_session inline attach (issues #904/#900)', async () => {
+      const sessionInfo: DebugSessionInfo = {
+        id: 'inline-note-session',
+        name: 'inline',
+        language: 'python' as DebugLanguage,
+        state: 'created' as SessionState,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+      mockSessionManager.createSession.mockResolvedValue(sessionInfo);
+      mockSessionManager.attachToProcess.mockResolvedValue({
+        success: true,
+        state: 'paused',
+        data: { message: 'Attached to process at 127.0.0.1:9229', note: 'No program frame is active on thread 0: the only frame is internal/runtime.' }
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: {
+          name: 'create_debug_session',
+          arguments: { language: 'python', host: '127.0.0.1', port: 5678 }
+        }
+      });
+
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload.success).toBe(true);
+      expect(payload.state).toBe('paused');
+      expect(payload.note).toBe('No program frame is active on thread 0: the only frame is internal/runtime.');
+      expect(payload).not.toHaveProperty('pending');
+    });
+
     it('surfaces data.warning at the top level of the attach_to_process response', async () => {
       mockSessionManager.attachToProcess.mockResolvedValue({
         success: true,

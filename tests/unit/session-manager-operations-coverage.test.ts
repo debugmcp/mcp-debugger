@@ -49,6 +49,16 @@ import { FakeDebugAdapter } from '../test-utils/fakes/fake-debug-adapter';
 import { internals } from '../test-utils/helpers/operations-internals';
 
 /**
+ * The landing read is the resolver's detailed result (issue #904); these
+ * tests only ever cared about the frames, so wrap a frame list (or a promise
+ * of one) the way the resolver would answer it.
+ */
+const detailedFrom = (frames: unknown[] | Promise<unknown[]>) =>
+  Promise.resolve(frames).then((list) => ({
+    frames: list, totalFrameCount: list.length, hiddenFrameCount: 0, allFramesInternal: false
+  }));
+
+/**
  * Launch args as callers actually send them.
  *
  * `CustomLaunchRequestArguments` does not declare the out-of-band keys the
@@ -2021,7 +2031,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
         let releaseStack: (frames: unknown[]) => void = () => {};
         const stackRead = new Promise<unknown[]>(resolve => { releaseStack = resolve; });
-        vi.spyOn(operations, 'getStackTrace').mockReturnValue(stackRead as never);
+        vi.spyOn(operations, 'getStackTraceDetailed').mockImplementation(() => detailedFrom(stackRead) as never);
 
         const promise = internals(operations).execution.executeStep(session, session.id, {
           command: 'next',
@@ -2067,7 +2077,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
         let releaseStack: (frames: unknown[]) => void = () => {};
         const stackRead = new Promise<unknown[]>(resolve => { releaseStack = resolve; });
-        vi.spyOn(operations, 'getStackTrace').mockReturnValue(stackRead as never);
+        vi.spyOn(operations, 'getStackTraceDetailed').mockImplementation(() => detailedFrom(stackRead) as never);
 
         const promise = internals(operations).execution.executeStep(session, session.id, {
           command: 'next',
@@ -2113,7 +2123,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
         let releaseStack: (frames: unknown[]) => void = () => {};
         const stackRead = new Promise<unknown[]>(resolve => { releaseStack = resolve; });
-        vi.spyOn(operations, 'getStackTrace').mockReturnValue(stackRead as never);
+        vi.spyOn(operations, 'getStackTraceDetailed').mockImplementation(() => detailedFrom(stackRead) as never);
 
         const promise = internals(operations).execution.executeStep(session, session.id, {
           command: 'next',
@@ -4334,8 +4344,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         }
         return Promise.resolve({});
       });
-      vi.spyOn(operations, 'getStackTrace')
-        .mockResolvedValue([{ file: '/app/server.rb', line: 17, column: 3 }] as never);
+      vi.spyOn(operations, 'getStackTraceDetailed')
+        .mockImplementation(() => detailedFrom([{ file: '/app/server.rb', line: 17, column: 3 }]) as never);
 
       const result = await operations.pause('test-session');
 
@@ -4362,8 +4372,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         }
         return Promise.reject(new Error('Cannot pause: process is already stopped'));
       });
-      vi.spyOn(operations, 'getStackTrace')
-        .mockResolvedValue([{ file: '/app/server.rb', line: 17, column: 3 }] as never);
+      vi.spyOn(operations, 'getStackTraceDetailed')
+        .mockImplementation(() => detailedFrom([{ file: '/app/server.rb', line: 17, column: 3 }]) as never);
 
       const result = await operations.pause('test-session');
 
@@ -4396,7 +4406,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       });
       let releaseStack: (frames: unknown[]) => void = () => {};
       const stackRead = new Promise<unknown[]>(resolve => { releaseStack = resolve; });
-      vi.spyOn(operations, 'getStackTrace').mockReturnValue(stackRead as never);
+      vi.spyOn(operations, 'getStackTraceDetailed').mockImplementation(() => detailedFrom(stackRead) as never);
       return { release: () => releaseStack([{ file: '/app/server.rb', line: 17, column: 3 }]) };
     };
 
@@ -4479,7 +4489,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         });
         let releaseStack: (frames: unknown[]) => void = () => {};
         const stackRead = new Promise<unknown[]>(resolve => { releaseStack = resolve; });
-        vi.spyOn(operations, 'getStackTrace').mockReturnValue(stackRead as never);
+        vi.spyOn(operations, 'getStackTraceDetailed').mockImplementation(() => detailedFrom(stackRead) as never);
 
         const promise = operations.pause('test-session', 1);
         await vi.advanceTimersByTimeAsync(0);
@@ -4626,7 +4636,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
         let releaseStack: (frames: unknown[]) => void = () => {};
         const stackRead = new Promise<unknown[]>(resolve => { releaseStack = resolve; });
-        vi.spyOn(operations, 'getStackTrace').mockReturnValue(stackRead as never);
+        vi.spyOn(operations, 'getStackTraceDetailed').mockImplementation(() => detailedFrom(stackRead) as never);
 
         const promise = operations.pause('test-session', 1);
         await vi.advanceTimersByTimeAsync(0);    // let the pause response resolve

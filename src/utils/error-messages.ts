@@ -181,6 +181,28 @@ export const ErrorMessages = {
     `the session will report 'paused' once the stop lands. Call wait_for_stop to block until then.`,
 
   /**
+   * A stop landed where no frame of the shown stack is program code (issue
+   * #904): js-debug's pause on an idle server lands on a sourceless
+   * `<anonymous>` frame between event-loop dispatches (issue #900); a Windows
+   * pause on a native helper thread that no sibling could replace. Worded
+   * for every adapter — what the frame is, the language guide says.
+   * Used in: src/session/inspection/stop-location.ts
+   * @param threadId - The thread the answer is anchored on, when known
+   * @param frameCount - How many frames the thread reported
+   * @param top - The frame shown
+   */
+  stopWithoutProgramFrame: (
+    threadId: number | undefined,
+    frameCount: number,
+    top: { name: string; file: string; line: number }
+  ) =>
+    `No program frame is active${typeof threadId === 'number' ? ` on thread ${threadId}` : ''}: ` +
+    `${frameCount === 1 ? 'the only frame is' : `all ${frameCount} frames are`} internal/runtime ` +
+    `(top: '${top.name}' ${top.file}:${top.line}). The stop landed outside your code: ` +
+    `continue_execution and trigger activity, or set a breakpoint; ` +
+    `get_stack_trace with includeInternals: true lists the frames.`,
+
+  /**
    * wait_for_stop reached its timeout with the session still live (issue
    * #849). Not an error, and nothing was cancelled — said outright, because
    * "did the timeout disarm my breakpoint?" is the first thing a pending

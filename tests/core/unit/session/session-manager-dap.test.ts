@@ -3205,6 +3205,21 @@ describe('SessionManager - DAP Operations', () => {
       expect(result.note).toBeUndefined();
     });
 
+    it('a js pause on an idle server lands on a lone sourceless frame: kept visible, all internal, no program frame (issue #900)', async () => {
+      const IDLE = [{ id: 0, name: '<anonymous>', line: 1, column: 1 }];
+      const session = await pausedInDependency('pause', { 1: IDLE });
+
+      const result = await sessionManager.getStackTraceDetailed(session.id, undefined, false, { ensureStackReady: true });
+
+      expect(result.frames.map((frame) => [frame.name, frame.file, frame.line])).toEqual([['<anonymous>', '<unknown_source>', 1]]);
+      expect(result.allFramesInternal).toBe(true);
+      expect(result.noProgramFrame).toBe(true);
+      expect(result.hiddenFrameCount).toBe(0);
+      expect(result.threadId).toBe(1);
+      // Nothing to adopt: the only thread is the one that stopped.
+      expect(result.note).toBeUndefined();
+    });
+
     it('an all-internal stack on a breakpoint still takes the issue #346 path, not both', async () => {
       const session = await pausedInDependency('breakpoint', { 1: DEPENDENCY_PAUSE.slice(0, 4) });
 

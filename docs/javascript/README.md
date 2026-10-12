@@ -357,9 +357,12 @@ open on its port (Node never closes it by itself) — a later attach by PID or b
   `--inspect-port`; two PID attaches to two different plain `node` processes on one host
   therefore need the second target started with `--inspect-port=<n>` and `port: <n>` passed
 - Attach pauses the target unless you pass `stopOnEntry: false`. js-debug's pause
-  lands on the next event-loop dispatch, so an idle server answers
-  `state: "running", pending: true` (the `message` names the pending pause) and
-  freezes on its next request — attach to a live server with `stopOnEntry: false`
+  lands on the next event-loop dispatch, so an idle server answers one of two ways:
+  `state: "running", pending: true` (the `message` names the pending pause) and it
+  freezes on its next request; or `paused` at once on a sourceless `<anonymous>`
+  frame between dispatches, with `note` saying no program frame is active and
+  `get_local_variables` empty (issue #900) — continue and send a request, or set a
+  breakpoint. Attach to a live server you still need to use with `stopOnEntry: false`
 - Some advanced DAP features may not be exposed through MCP tools
 - **Source-mapped frames you cannot open.** A package that ships `.js.map` files
   whose `sources` point at `.ts` files it did not ship makes js-debug report those

@@ -94,6 +94,10 @@ describe('SessionManagerOperations attach modes', () => {
   let mockProxyManager: ProxyManagerMocks & { setCurrentThreadId: Mock<IProxyManager['setCurrentThreadId']> };
   let mockDependencies: SessionManagerDependencies;
   let mockSession: ManagedSession;
+  /** The attach scan's own unwinds (levels: 32), apart from the landing read the attach answer makes through the resolver (#904). */
+  const anchorUnwinds = () => mockProxyManager.sendDapRequest.mock.calls.filter(
+    ([command, args]) => command === 'stackTrace' && (args as { levels?: number }).levels === 32
+  );
 
   beforeEach(() => {
     mockProxyManager = {
@@ -435,7 +439,7 @@ describe('SessionManagerOperations attach modes', () => {
       expect(result.success).toBe(true);
       expect(setCurrentThreadId).toHaveBeenCalledWith(37436);
       // The stop thread was checked first and won; no other thread was unwound.
-      expect(mockProxyManager.sendDapRequest.mock.calls.filter(([command]) => command === 'stackTrace')).toHaveLength(1);
+      expect(anchorUnwinds()).toHaveLength(1);
     });
 
     it('moves off a reported stop thread whose stack never reaches user code, to the first listed thread whose stack does (Windows attach break-in)', async () => {
@@ -472,7 +476,7 @@ describe('SessionManagerOperations attach modes', () => {
       // The reported thread first, then the one named main, before listed order.
       expect(setCurrentThreadId).toHaveBeenCalledWith(9);
       expect(mockDependencies.logger.info).toHaveBeenCalledWith(expect.stringContaining('the first thread whose stack reaches user code (the stop was reported on 6660)'));
-      const unwinds = mockProxyManager.sendDapRequest.mock.calls.filter(([command]) => command === 'stackTrace');
+      const unwinds = anchorUnwinds();
       expect(unwinds.map(([, args]) => (args as { threadId: number }).threadId)).toEqual([6660, 9]);
       // Each unwind carries its own short timeout, not the verify window.
       expect(unwinds.every(([, , options]) => (options as { timeoutMs: number }).timeoutMs <= 3000)).toBe(true);
@@ -537,6 +541,34 @@ describe('SessionManagerOperations attach modes', () => {
       await operations.attachToProcess('test-session', { host: '127.0.0.1', port: 12345, stopOnEntry: true });
 
       expect(setCurrentThreadId).toHaveBeenCalledWith(5128);
+    });
+
+    it('says in note when the attach stop landed where no frame is program code (issues #904/#900)', async () => {
+      mockSession.language = DebugLanguage.CPP;
+      vi.mocked(mockDependencies.adapterRegistry.getFactoryMetadata).mockResolvedValue(
+        metadataWithModes({ launch: true, attach: 'direct-connect' })
+      );
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(
+        new FakeDebugAdapter({ language: DebugLanguage.CPP }).withAttachSupport({ directConnect: true })
+      );
+      mockProxyManager.getCurrentThreadId.mockReturnValue(6660);
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          mockSession.state = SessionState.PAUSED;
+          mockSession.lastStop = { reason: 'exception', threadId: 6660, timestamp: Date.now() };
+          return { success: true, body: { threads: [{ id: 6660, name: 'thread #3' }] } };
+        }
+        if (command === 'stackTrace') {
+          return { success: true, body: { stackFrames: [{ id: 1, name: 'DbgBreakPoint', line: 0, column: 0 }, { id: 2, name: 'DbgUiRemoteBreakin', line: 0, column: 0, source: { name: '@DbgUiRemoteBreakin' } }] } };
+        }
+        return {};
+      });
+
+      const result = await operations.attachToProcess('test-session', { host: '127.0.0.1', port: 12345, stopOnEntry: true });
+
+      expect(result.success).toBe(true);
+      expect(result.data?.note).toMatch(/^No program frame is active on thread 6660: all 2 frames are internal\/runtime \(top: 'DbgBreakPoint' <unknown_source>:0\)/);
+      expect(result.data?.note).toMatch(/continue_execution and trigger activity, or set a breakpoint/);
     });
 
     it('falls back to the thread named main, else the first thread, when no stop was observed', async () => {

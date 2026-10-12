@@ -217,6 +217,39 @@ describe('execution tool handlers', () => {
     });
   });
 
+  describe('landing fields on the step and wait_for_stop answers (issue #904)', () => {
+    const liveSession = { id: 'test-session', sessionLifecycle: SessionLifecycleState.ACTIVE };
+    const note = "The stop was reported on thread 20256, whose 4 frames are all internal/runtime (top: 'DbgBreakPoint'); showing thread 15896, which is in 'main'.";
+    const location = { file: '/app/main.cpp', line: 21, column: 3 };
+
+    it('step_over hoists threadId and note next to location', async () => {
+      ctx.sessionManager.getSession.mockReturnValue(liveSession);
+      ctx.sessionManager.stepOver.mockResolvedValue({
+        success: true,
+        state: 'paused',
+        data: { message: 'Stepped over', location, threadId: 15896, note }
+      });
+
+      const payload = JSON.parse((await stepTool(ctx, { sessionId: 'test-session' }, 'step_over')).content[0].text);
+
+      expect(payload).toMatchObject({ success: true, state: 'paused', message: 'Stepped over', location, threadId: 15896, note });
+    });
+
+    it('wait_for_stop hoists threadId and note next to location', async () => {
+      ctx.sessionManager.getSession.mockReturnValue(liveSession);
+      const lastStop = { reason: 'pause', rawReason: 'exception', threadId: 20256, timestamp: 1_700_000_000_000 };
+      ctx.sessionManager.waitForStop.mockResolvedValue({
+        success: true,
+        state: 'paused',
+        data: { message: 'Paused (pause) at /app/main.cpp:21', lastStop, location, threadId: 15896, note }
+      });
+
+      const payload = JSON.parse((await waitForStopTool(ctx, { sessionId: 'test-session' }, 'wait_for_stop')).content[0].text);
+
+      expect(payload).toMatchObject({ success: true, state: 'paused', lastStop, location, threadId: 15896, note });
+    });
+  });
+
   describe('stepTool failure envelopes (issue #638)', () => {
     it.each([
       ['step_over', 'stepOver'],
@@ -403,6 +436,65 @@ describe('execution tool handlers', () => {
 
       expect(payload.success).toBe(true);
       expect(payload.state).toBe('paused');
+    });
+
+    it('hoists pending to the top level and keeps data whole (issue #906)', async () => {
+      ctx.sessionManager.getSession.mockReturnValue({ id: 'test-session', sessionLifecycle: SessionLifecycleState.ACTIVE });
+      ctx.sessionManager.pause = vi.fn().mockResolvedValue({
+        success: true,
+        state: 'running',
+        data: { message: 'Pause requested; no stopped event within 5s.', pending: true }
+      });
+
+      const payload = JSON.parse((await handlePause(ctx, { sessionId: 'test-session' })).content[0].text);
+
+      expect(payload.pending).toBe(true);
+      expect(payload.message).toBe('Pause requested; no stopped event within 5s.');
+      expect(payload.data).toEqual({ message: 'Pause requested; no stopped event within 5s.', pending: true });
+      expect(payload).not.toHaveProperty('location');
+    });
+
+    it('hoists the stop reason, location, threadId and note, and reads the line context (issue #906)', async () => {
+      ctx.sessionManager.getSession.mockReturnValue({ id: 'test-session', sessionLifecycle: SessionLifecycleState.ACTIVE });
+      ctx.sessionManager.pause = vi.fn().mockResolvedValue({
+        success: true,
+        state: 'paused',
+        data: {
+          message: 'Paused',
+          stopReason: 'pause',
+          rawStopReason: 'exception',
+          location: { file: '/app/main.cpp', line: 20, column: 3 },
+          threadId: 45324,
+          note: 'The stop was reported on thread 31208; showing thread 45324.'
+        }
+      });
+      ctx.lineReader = { getLineContext: vi.fn().mockResolvedValue({ lineContent: 'sleep(1);', surrounding: [] }) };
+
+      const payload = JSON.parse((await handlePause(ctx, { sessionId: 'test-session' })).content[0].text);
+
+      expect(payload).toMatchObject({
+        success: true,
+        state: 'paused',
+        message: 'Paused',
+        stopReason: 'pause',
+        rawStopReason: 'exception',
+        location: { file: '/app/main.cpp', line: 20, column: 3 },
+        threadId: 45324,
+        note: 'The stop was reported on thread 31208; showing thread 45324.',
+        context: { lineContent: 'sleep(1);', surrounding: [] }
+      });
+      expect(payload).not.toHaveProperty('pending');
+      expect(ctx.lineReader.getLineContext).toHaveBeenCalledWith('/app/main.cpp', 20, { contextLines: 2 });
+      expect(payload.data.location).toEqual({ file: '/app/main.cpp', line: 20, column: 3 });
+    });
+
+    it('returns a failed pause as the controller reported it', async () => {
+      ctx.sessionManager.getSession.mockReturnValue({ id: 'test-session', sessionLifecycle: SessionLifecycleState.ACTIVE });
+      ctx.sessionManager.pause = vi.fn().mockResolvedValue({ success: false, state: 'running', error: 'Cannot pause in state: running' });
+
+      const payload = JSON.parse((await handlePause(ctx, { sessionId: 'test-session' })).content[0].text);
+
+      expect(payload).toEqual({ success: false, state: 'running', error: 'Cannot pause in state: running' });
     });
 
     it('returns success:false when session validation fails', async () => {

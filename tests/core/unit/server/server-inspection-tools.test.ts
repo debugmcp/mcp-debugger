@@ -475,6 +475,7 @@ describe('Server Inspection Tools Tests', () => {
 
       const content = JSON.parse(result.content[0].text);
       expect(content.noProgramFrame).toBe(true);
+      expect(content.note).toContain("No program frame is active: the only frame is internal/runtime (top: '<anonymous>' <unknown_source>:1)");
 
       // Absent, not false, on an ordinary stack.
       mockSessionManager.getStackTraceDetailed.mockResolvedValue({

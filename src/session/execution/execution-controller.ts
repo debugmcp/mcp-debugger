@@ -63,6 +63,7 @@ import type {
 import { debuggerOffWhy, isDebuggerOff, type DebuggerOffView } from '../debugger-off.js';
 import { samePath } from '../breakpoints/hit-verification.js';
 import type { ExecutionContext } from '../operations-context.js';
+import { describeStopLocation, landingFields, type StopLanding } from '../inspection/stop-location.js';
 import type { PauseCoordinator } from './pause-coordinator.js';
 import { waitForSessionState } from './session-state-wait.js';
 import { resolveDapTimeoutOverride } from '../dap-request-helpers.js';
@@ -306,12 +307,9 @@ export class ExecutionController {
         resolve(result);
       };
 
-      const success = (message: string, location?: StopLocation, stop?: Pick<StepResultData, 'stopReason' | 'rawStopReason'>) => {
+      const success = (message: string, landing?: StopLanding, stop?: Pick<StepResultData, 'stopReason' | 'rawStopReason'>) => {
         this.ctx.logger.info(`[SM ${options.logTag} ${sessionId}] ${message} Current state: ${session.state}`);
-        const data: StepResultData = { message, ...stop };
-        if (location) {
-          data.location = location;
-        }
+        const data: StepResultData = { message, ...stop, ...(landing ? landingFields(landing) : {}) };
         settle({
           success: true,
           state: session.state,
@@ -326,26 +324,10 @@ export class ExecutionController {
       const onStopped = async () => {
         stopSeen = true;
         clearTimeout(timeout);
-        // Try to get current location from stack trace
-        let location: StopLocation | undefined;
-        try {
-          // Wait a brief moment for state to settle after stopped event
-          await new Promise(resolve => setTimeout(resolve, 10));
-
-          const stackFrames = await this.ctx.getStackTrace(sessionId);
-          if (stackFrames && stackFrames.length > 0) {
-            const topFrame = stackFrames[0];
-            location = {
-              file: topFrame.file,
-              line: topFrame.line,
-              column: topFrame.column
-            };
-            this.ctx.logger.debug(`[SM ${options.logTag} ${sessionId}] Captured location: ${location.file}:${location.line}`);
-          }
-        } catch (error) {
-          // Log but don't fail the step operation if we can't get location
-          this.ctx.logger.debug(`[SM ${options.logTag} ${sessionId}] Could not capture location:`, error);
-        }
+        // Where the step landed, through the resolver (issue #904): a failed
+        // read answers no location and never fails the step.
+        const landing = await describeStopLocation(this.ctx, sessionId, options.logTag);
+        const location = landing.location;
         // Rule 2. An ended event that reached the listeners below has already
         // settled with its own wording; this covers the endings that did not
         // (handlers torn down by the core, an exit mapped straight to ERROR).
@@ -366,10 +348,10 @@ export class ExecutionController {
           const message = USER_BREAK_REASONS.has(ownStop.reason)
             ? ErrorMessages.stepStoppedOn(options.successMessage, ownStop.reason, { backAtOrigin })
             : options.successMessage;
-          success(message, location, stop);
+          success(message, landing, stop);
           return;
         }
-        success(options.successMessage, location);
+        success(options.successMessage, landing);
       };
 
       const onTerminated = () => success(terminatedMessage);
@@ -620,16 +602,11 @@ export class ExecutionController {
     };
 
     if (outcome.status === 'observed') {
-      let location: StopLocation | undefined;
-      try {
-        await new Promise(resolve => setTimeout(resolve, 10));
-        const [topFrame] = await this.ctx.getStackTrace(sessionId);
-        if (topFrame) {
-          location = { file: topFrame.file, line: topFrame.line, column: topFrame.column };
-        }
-      } catch (error) {
-        this.ctx.logger.debug(`[SessionManager pause ${sessionId}] Could not capture location:`, error);
-      }
+      // Where the pause landed, through the resolver (issue #904): a pause
+      // reported on a thread with no program frame shows the sibling in the
+      // program's code (issue #898), or says that no program frame is
+      // active (issue #900), in note.
+      const landing = await describeStopLocation(this.ctx, sessionId, 'pause');
 
       if (sessionEnded()) {
         return {
@@ -647,7 +624,7 @@ export class ExecutionController {
         data: {
           message: 'Paused',
           ...ownStopReason(),
-          ...(location ? { location } : {})
+          ...landingFields(landing)
         }
       };
     }
@@ -774,18 +751,10 @@ export class ExecutionController {
     // Where it stopped, best effort: the same short settle and stack read a
     // step or a pause does. It is a DAP round trip, so the state is read
     // again afterwards rather than trusted across it.
-    let location: StopLocation | undefined;
-    if (session.state === SessionState.PAUSED) {
-      try {
-        await new Promise(resolve => setTimeout(resolve, 10));
-        const [topFrame] = await this.ctx.getStackTrace(sessionId);
-        if (topFrame) {
-          location = { file: topFrame.file, line: topFrame.line, column: topFrame.column };
-        }
-      } catch (error) {
-        this.ctx.logger.debug(`[SessionManager waitForStop ${sessionId}] Could not capture location:`, error);
-      }
-    }
+    const landing: StopLanding = session.state === SessionState.PAUSED
+      ? await describeStopLocation(this.ctx, sessionId, 'waitForStop')
+      : {};
+    const location = landing.location;
 
     const state = session.state;
     // Rule 2 of the settle contract: a session that is over by now is
@@ -803,7 +772,7 @@ export class ExecutionController {
         data: {
           message: `Paused (${session.lastStop.reason})${where}`,
           lastStop: session.lastStop,
-          ...(location ? { location } : {})
+          ...landingFields(landing)
         }
       };
     }

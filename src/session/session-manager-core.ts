@@ -121,14 +121,27 @@ export interface DebugResultData extends ProxyFailureDiagnostics {
 export type StopLocation = Pick<StackFrame, 'file' | 'line' | 'column'>;
 
 /**
+ * What a location-bearing answer (pause, step, wait_for_stop) carries about
+ * where the stop landed, read through the frame-anchor resolver (issue
+ * #904): the first visible frame when the stack could be read; the thread
+ * the answer is anchored on, only when it is not the thread the stop was
+ * reported on; and a note when there is something to say — a sibling
+ * thread adopted, or no frame of the shown stack being program code.
+ */
+export type StopLandingFields = {
+  location?: StopLocation;
+  threadId?: number;
+  note?: string;
+};
+
+/**
  * What a step operation returns: `message` is always set, plus where it
  * landed. `stopReason`/`rawStopReason` are present only when the stop that
  * ended the step was recorded and was not the step itself (issue #678) — a
  * breakpoint or exception that fired first, or a pause from elsewhere.
  */
-export type StepResultData = DebugResultData & {
+export type StepResultData = DebugResultData & StopLandingFields & {
   message: string;
-  location?: StopLocation;
   stopReason?: string;
   rawStopReason?: string;
 };
@@ -138,11 +151,10 @@ export type StepResultData = DebugResultData & {
  * this pause's own stop was recorded (never a stale earlier one), and
  * `location` only when the stack was readable by the time it settled.
  */
-export type PauseResultData = DebugResultData & {
+export type PauseResultData = DebugResultData & StopLandingFields & {
   message: string;
   stopReason?: string;
   rawStopReason?: string;
-  location?: StopLocation;
 };
 
 /**
@@ -153,14 +165,18 @@ export type PauseResultData = DebugResultData & {
  * `DebugResultData`'s own fields: `exitCode` for a session that ended and
  * reported one, `pending` when the timeout passed first.
  */
-export type WaitForStopResultData = DebugResultData & {
+export type WaitForStopResultData = DebugResultData & StopLandingFields & {
   message: string;
   lastStop?: SessionStopInfo;
-  location?: StopLocation;
 };
 
-/** What a successful attach returns on top of the common fields. */
-export type AttachResultData = DebugResultData;
+/**
+ * What a successful attach returns on top of the common fields: a `note`
+ * when the attach's stop landed where no frame is program code (an idle
+ * js-debug target pauses on a sourceless frame, issue #900) or on a thread
+ * other than the one reported.
+ */
+export type AttachResultData = DebugResultData & { note?: string };
 
 export interface DebugResult<TData extends DebugResultData = DebugResultData> {
   success: boolean;
