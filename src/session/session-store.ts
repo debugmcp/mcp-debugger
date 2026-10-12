@@ -164,6 +164,13 @@ export interface ManagedSession extends DebugSessionInfo {
   // supportedAttachKeys that were still forwarded to the debug adapter
   // (issue #466). Same lifecycle as attachDroppedConfigKeys.
   attachForwardedUnknownConfigKeys?: string[];
+  // The adapter's own attach-transform notes (Dart: the no-auth URI built
+  // from host:port, a deviceId on a Dart runner; COBOL: build options given
+  // without sources), drained from consumeLaunchConfigDiagnostics per
+  // attempt (issue #908): reset when ProxyLauncher.start begins, set after
+  // the transform (undefined when there are none), consumed by
+  // attachToProcess for the response warning.
+  attachTransformNotices?: string[];
   // The most recent real launch, replayed by restart_debugging (issue #238).
   lastLaunch?: LastLaunchSpec;
   // Live DAP mirror endpoint, when exposed via expose_session (issue #217).
