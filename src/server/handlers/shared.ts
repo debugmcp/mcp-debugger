@@ -1,7 +1,8 @@
 /**
  * Helpers shared by more than one tool handler: the best-effort line-context
  * read, the redaction notice, the get_variables / get_local_variables payload
- * extras, and the attach warning both attach paths surface.
+ * extras, the attach warning both attach paths surface, and the one
+ * AttachRequest both attach entry points send.
  */
 import { isSettledSessionState, REDACTION_NOTICE, SessionState, Variable } from '@debugmcp/shared';
 import type { LineContext } from '../../utils/line-reader.js';
@@ -140,14 +141,15 @@ export function successWarning(
  * The one AttachRequest both attach entry points send — attach_to_process and
  * the create_debug_session shortcut (issue #905) — so they cannot drift again.
  * Every key is spelled and forwarded as given: no layer below defaults `host`
- * (every adapter does) or `timeout` (js-debug, the Java bridge and rdbg read
- * it; forcing 30 s on js-debug would out-wait the 20 s verify window, and a
- * dead port would answer the generic verify failure instead of the adapter's
- * own last word, issue #897). An invalid breakOnExceptions throws here, before
- * any session exists.
+ * (every adapter does) or `timeout` (js-debug honours a forwarded one, its
+ * own default being 10 s; forcing 30 s on it would out-wait the 20 s verify
+ * window, and a dead port would answer the generic verify failure instead of
+ * the adapter's own last word, issue #897). An invalid breakOnExceptions
+ * throws here, before any session exists. The `satisfies` keeps every key of
+ * AttachRequest spelled: a key added there and forgotten here fails to compile.
  */
 export function attachRequestFromArgs(args: ToolArguments): AttachRequest {
-  return {
+  const request = {
     port: args.port,
     host: args.host,
     processId: args.processId,
@@ -158,5 +160,6 @@ export function attachRequestFromArgs(args: ToolArguments): AttachRequest {
     justMyCode: args.justMyCode,
     breakOnExceptions: validateBreakOnExceptions(args.breakOnExceptions),
     adapterConfig: args.adapterConfig
-  };
+  } satisfies Record<keyof AttachRequest, unknown>;
+  return request;
 }

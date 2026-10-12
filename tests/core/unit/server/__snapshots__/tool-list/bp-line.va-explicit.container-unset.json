@@ -64,7 +64,7 @@
             },
             "timeout": {
               "type": "number",
-              "description": "Attach mode only: connection timeout in milliseconds, forwarded to adapters that take one (js-debug, the Java bridge, rdbg); the adapter default applies when omitted. A value longer than verifyTimeout means the verify deadline is what you hit"
+              "description": "Attach mode only: connection timeout in milliseconds, forwarded as-is; js-debug honours it (its own default is 10 s) and COBOL uses it as its manifest-build budget, the other adapters ignore it. A value longer than verifyTimeout means the verify deadline is what you hit"
             },
             "verifyTimeout": {
               "type": "number",
@@ -299,7 +299,7 @@
             },
             "host": {
               "type": "string",
-              "description": "Host to attach to (default: localhost)"
+              "description": "Host to attach to; the adapter defaults it, usually 127.0.0.1"
             },
             "processId": {
               "type": [
@@ -310,7 +310,7 @@
             },
             "timeout": {
               "type": "number",
-              "description": "Connection timeout in milliseconds, forwarded to adapters that take one (js-debug, the Java bridge, rdbg); the adapter default applies when omitted. A value longer than verifyTimeout means the verify deadline is what you hit"
+              "description": "Connection timeout in milliseconds, forwarded as-is; js-debug honours it (its own default is 10 s) and COBOL uses it as its manifest-build budget, the other adapters ignore it. A value longer than verifyTimeout means the verify deadline is what you hit"
             },
             "verifyTimeout": {
               "type": "number",
