@@ -258,10 +258,6 @@ export class DartDebugAdapter extends EventEmitter implements IDebugAdapter {
     return out as LanguageSpecificLaunchConfig;
   }
 
-  getDefaultLaunchConfig(): Partial<GenericLaunchConfig> {
-    return { stopOnEntry: false, justMyCode: true };
-  }
-
   consumeLaunchConfigDiagnostics(): readonly LaunchConfigDiagnostic[] {
     const out = this.diagnostics;
     this.diagnostics = [];

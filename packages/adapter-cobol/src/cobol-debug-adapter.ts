@@ -816,10 +816,6 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
     return result;
   }
 
-  getDefaultLaunchConfig(): Partial<GenericLaunchConfig> {
-    return { stopOnEntry: false, justMyCode: true, env: {}, cwd: process.cwd() };
-  }
-
   // ===== Attach Support =====
 
   supportsAttach(): boolean {

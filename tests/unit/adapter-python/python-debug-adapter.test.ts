@@ -387,16 +387,6 @@ describe('PythonDebugAdapter', () => {
     expect(adapter.getMissingExecutableError()).toContain('Python not found');
   });
 
-  it('returns default launch configuration snapshot', () => {
-    const adapter = new PythonDebugAdapter(createDependencies());
-    const defaults = adapter.getDefaultLaunchConfig();
-
-    expect(defaults.stopOnEntry).toBe(false);
-    expect(defaults.justMyCode).toBe(true);
-    expect(defaults.env).toEqual({});
-    expect(defaults.cwd).toBe(process.cwd());
-  });
-
   describe('attach support (issue #145)', () => {
     it('reports attach capabilities', () => {
       const adapter = new PythonDebugAdapter(createDependencies());

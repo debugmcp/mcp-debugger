@@ -156,11 +156,6 @@ Converts generic config to language-specific format (async to permit build/compi
 **Parameters**: Generic launch configuration
 **Returns**: Promise resolving to language-specific configuration with additional fields
 
-#### `getDefaultLaunchConfig(): Partial<GenericLaunchConfig>`
-Default configuration values for the language.
-
-**Returns**: Common default settings
-
 ### Attach Support Methods (Optional)
 
 #### `supportsAttach?(): boolean`

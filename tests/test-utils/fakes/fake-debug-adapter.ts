@@ -121,9 +121,6 @@ export class FakeDebugAdapter extends EventEmitter implements IDebugAdapter {
   transformLaunchConfig = vi.fn<Impl<'transformLaunchConfig'>>(
     async (config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig> => ({ ...config })
   );
-  getDefaultLaunchConfig = vi.fn<Impl<'getDefaultLaunchConfig'>>(
-    (): Partial<GenericLaunchConfig> => ({})
-  );
 
   // ===== DAP protocol operations =====
   // A plain method, not a mock: `sendDapRequest` is the interface's only generic member, and

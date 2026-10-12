@@ -416,15 +416,6 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
     return rubyConfig;
   }
 
-  getDefaultLaunchConfig(): Partial<GenericLaunchConfig> {
-    return {
-      stopOnEntry: false,
-      justMyCode: true,
-      env: {},
-      cwd: process.cwd()
-    };
-  }
-
   supportsAttach(): boolean {
     return true;
   }

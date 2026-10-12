@@ -400,11 +400,10 @@ describe('CppDebugAdapter lifecycle and toolchain', () => {
     });
   });
 
-  describe('launch config defaults and metadata', () => {
-    it('exposes sane defaults and adapter metadata', () => {
+  describe('adapter metadata', () => {
+    it('exposes adapter metadata', () => {
       const adapter = new CppDebugAdapter(dependencies);
 
-      expect(adapter.getDefaultLaunchConfig()).toMatchObject({ stopOnEntry: false, justMyCode: true });
       expect(adapter.getAdapterModuleName()).toBe('codelldb');
       expect(adapter.getAdapterInstallCommand()).toContain('build:adapter');
       expect(adapter.getRequiredDependencies()).toEqual([

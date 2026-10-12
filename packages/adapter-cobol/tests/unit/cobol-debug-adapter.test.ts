@@ -223,10 +223,9 @@ describe('CobolDebugAdapter', () => {
       expect(deps.map((d) => [d.name, d.required])).toEqual([['CodeLLDB', true], ['GnuCOBOL (cobc)', false]]);
     });
 
-    it('declares attach/detach support and the default launch config', () => {
+    it('declares attach/detach support', () => {
       expect(adapter.supportsAttach()).toBe(true);
       expect(adapter.supportsDetach()).toBe(true);
-      expect(adapter.getDefaultLaunchConfig()).toMatchObject({ stopOnEntry: false, justMyCode: true, env: {} });
     });
 
     it('lists the platform-specific search dirs before PATH', () => {

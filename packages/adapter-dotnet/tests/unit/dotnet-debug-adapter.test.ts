@@ -277,12 +277,6 @@ describe('DotnetDebugAdapter', () => {
       expect(result.justMyCode).toBe(true);
     });
 
-    it('returns sensible default launch config', () => {
-      const defaults = adapter.getDefaultLaunchConfig();
-
-      expect(defaults.stopOnEntry).toBe(true);
-      expect(defaults.justMyCode).toBe(true);
-    });
   });
 
   // ===== Attach Configuration =====

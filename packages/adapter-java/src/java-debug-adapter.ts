@@ -333,13 +333,6 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
     return javaConfig;
   }
 
-  getDefaultLaunchConfig(): Partial<GenericLaunchConfig> {
-    return {
-      stopOnEntry: true,
-      justMyCode: true
-    };
-  }
-
   // ===== Attach Support =====
 
   supportsAttach(): boolean {

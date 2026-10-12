@@ -602,14 +602,6 @@ describe('JavaDebugAdapter', () => {
     });
   });
 
-  describe('getDefaultLaunchConfig', () => {
-    it('should return defaults with stopOnEntry true', () => {
-      const defaults = adapter.getDefaultLaunchConfig();
-      expect(defaults.stopOnEntry).toBe(true);
-      expect(defaults.justMyCode).toBe(true);
-    });
-  });
-
   describe('getExecutableSearchPaths', () => {
     it('should return array of search paths', () => {
       const paths = adapter.getExecutableSearchPaths();

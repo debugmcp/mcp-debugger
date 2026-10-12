@@ -559,7 +559,6 @@ describe('RubyDebugAdapter', () => {
     expect(adapter.getMissingExecutableError()).toContain('Ruby');
     expect(adapter.getExecutableSearchPaths()).toEqual(['/usr/bin']);
     expect(['ruby', 'ruby.exe']).toContain(adapter.getDefaultExecutableName());
-    expect(adapter.getDefaultLaunchConfig().justMyCode).toBe(true);
     expect(adapter.isReady()).toBe(false);
   });
 

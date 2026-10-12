@@ -366,15 +366,6 @@ export class DotnetDebugAdapter extends EventEmitter implements IDebugAdapter {
     return dotnetConfig;
   }
 
-  getDefaultLaunchConfig(): Partial<GenericLaunchConfig> {
-    return {
-      stopOnEntry: true,
-      justMyCode: true,
-      env: {},
-      cwd: process.cwd()
-    };
-  }
-
   // ===== Attach Support =====
 
   supportsAttach(): boolean {

@@ -123,11 +123,6 @@ export interface IDebugAdapter extends EventEmitter {
   transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig>;
 
   /**
-   * Get default launch configuration for this language
-   */
-  getDefaultLaunchConfig(): Partial<GenericLaunchConfig>;
-
-  /**
    * Check if this adapter supports attaching to running processes
    * @returns true if attach is supported, false otherwise
    */

@@ -635,15 +635,6 @@ export class CppDebugAdapter extends EventEmitter implements IDebugAdapter {
     return launchConfig;
   }
 
-  getDefaultLaunchConfig(): Partial<GenericLaunchConfig> {
-    return {
-      stopOnEntry: false,
-      justMyCode: true,
-      env: {},
-      cwd: process.cwd()
-    };
-  }
-
   // ===== Attach Support =====
 
   supportsAttach(): boolean {

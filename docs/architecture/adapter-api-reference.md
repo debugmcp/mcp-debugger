@@ -64,8 +64,7 @@ Attach support (optional)
 - `usesDirectConnectForAttach?(): boolean` — when true, attach connects directly to an already-listening DAP server (e.g. rdbg started with `--open`) instead of spawning an adapter process; `ProxyManager` skips `buildAdapterCommand` and the adapter policy returns a `'connect'` spawn config from the attach host/port
 
 Debug configuration
-- `transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig>` (async to permit build/compilation steps before launch)
-- `getDefaultLaunchConfig(): Partial<GenericLaunchConfig>`
+- `transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig>` (async to permit build/compilation steps before launch). The launch defaults the host applies (`stopOnEntry: false`, `justMyCode: true`) are merged by the session layer before the transform; an adapter does not declare its own
  
 ### AdapterLaunchBarrier helper
 
@@ -141,7 +140,6 @@ export class ExampleAdapter extends EventEmitter implements IDebugAdapter {
   getAdapterInstallCommand() { return 'npm install -g example-adapter'; }
 
   async transformLaunchConfig(cfg) { return cfg; }
-  getDefaultLaunchConfig() { return { stopOnEntry: true }; }
 
   async sendDapRequest(command, args) { throw new Error('not implemented'); }
   handleDapEvent(_e) { /* map events to state; emit as needed */ }
