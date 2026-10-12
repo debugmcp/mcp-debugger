@@ -5,12 +5,16 @@
 import { vi } from 'vitest';
 import type {
   IEnvironment,
-  IFileSystem,
   ILogger,
   INetworkManager,
   IProcessManager,
   IProxyProcessLauncher
 } from '@debugmcp/shared';
+import { createMockFileSystem } from './test-utils.js';
+
+// The one mock file system lives in test-utils.ts (issue #742); re-exported here so the
+// container-shaped helpers and their importers keep one import path.
+export { createMockFileSystem };
 import type { Dependencies } from '../../../src/container/dependencies.js';
 import { MockSessionStoreFactory } from '../../../src/factories/session-store-factory.js';
 import { MockProxyManagerFactory } from '../../../src/factories/proxy-manager-factory.js';
@@ -57,27 +61,6 @@ export function createMockLogger(): ILogger {
     error: vi.fn(),
     debug: vi.fn(),
     warn: vi.fn()
-  };
-}
-
-export function createMockFileSystem(): IFileSystem {
-  return {
-    readFile: vi.fn(),
-    readTail: vi.fn(),
-    writeFile: vi.fn(),
-    exists: vi.fn(),
-    existsSync: vi.fn(),
-    mkdir: vi.fn(),
-    readdir: vi.fn(),
-    stat: vi.fn(),
-    unlink: vi.fn(),
-    rmdir: vi.fn(),
-    ensureDir: vi.fn(),
-    ensureDirSync: vi.fn(),
-    pathExists: vi.fn(),
-    remove: vi.fn(),
-    copy: vi.fn(),
-    outputFile: vi.fn()
   };
 }
 

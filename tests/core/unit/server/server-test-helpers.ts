@@ -27,6 +27,7 @@ import {
   type Dependencies
 } from '../../../../src/container/dependencies.js';
 import {
+  createMockFileSystem,
   createMockLogger,
   createMockNetworkManager,
   createMockProcessManager,
@@ -42,24 +43,9 @@ export function createMockDependencies(): Dependencies {
   
   return {
     logger: mockLogger,
-    fileSystem: {
-      existsSync: vi.fn().mockReturnValue(true),
-      ensureDirSync: vi.fn(),
-      ensureDir: vi.fn().mockResolvedValue(undefined),
-      pathExists: vi.fn().mockResolvedValue(true),
-      readFile: vi.fn().mockResolvedValue('{}'),
-      readTail: vi.fn().mockResolvedValue(''),
-      writeFile: vi.fn().mockResolvedValue(undefined),
-      exists: vi.fn().mockResolvedValue(true),
-      mkdir: vi.fn().mockResolvedValue(undefined),
-      readdir: vi.fn().mockResolvedValue([]),
-      stat: vi.fn().mockResolvedValue({ isFile: () => true }),
-      unlink: vi.fn().mockResolvedValue(undefined),
-      rmdir: vi.fn().mockResolvedValue(undefined),
-      remove: vi.fn().mockResolvedValue(undefined),
-      copy: vi.fn().mockResolvedValue(undefined),
-      outputFile: vi.fn().mockResolvedValue(undefined)
-    },
+    // The shared double (issue #742); `readFile` answers '{}' because the breakpoint
+    // anchor resolver reads a file unstubbed in some server tests and splits the text.
+    fileSystem: createMockFileSystem({ readFile: vi.fn(async () => '{}') }),
     // Real shapes, not bare `vi.fn()`. Nothing in the server tests calls these, but a
     // double that satisfies none of its interfaces means the whole bag has to be cast at
     // every call site -- which then silences the members that ARE exercised too.

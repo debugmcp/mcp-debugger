@@ -183,14 +183,7 @@ expect(mockLogger.info).toHaveBeenCalledWith(
 );
 ```
 
-**Watch which `createMockFileSystem` you import.** Two exist and they behave differently:
-
-| Import from | Behavior |
-|---|---|
-| `test-utils/helpers/test-dependencies.js` | every member is a bare `vi.fn()` — configure return values per test |
-| `test-utils/helpers/test-utils.js` | pre-configured defaults (`pathExists`/`exists` resolve `true`, `readFile` resolves `''`, `stat` resolves a mock stat object) and also stubs `createWriteStream`/`createReadStream` |
-
-Pick the one that matches what your test asserts. A test that fails with `undefined is not a function` on a stream, or that mysteriously finds every path existing, has usually imported the other one.
+**`createMockFileSystem(overrides?)` is one function.** It lives in `tests/test-utils/helpers/test-utils.ts` and is re-exported from `test-dependencies.ts` and `adapter-dependencies.ts`, so the three import paths give the same double (issue #742). Its defaults say "everything exists": `exists`/`pathExists`/`existsSync` answer `true`, `readFile`/`readTail` resolve `''`, `readdir` resolves `[]`, `stat` resolves `{ isFile: () => true, isDirectory: () => false }`, every other member resolves `undefined`. The defaults are `vi.fn(impl)`, so they survive the global `vi.resetAllMocks()` the setup file runs after every test. Override what a test asserts on: `createMockFileSystem({ pathExists: vi.fn(async () => false) })`. `createMockAdapterDependencies()` deliberately sets the three existence probes to `false`, so an un-stubbed adapter lookup takes its failure branch — stub the predicate in any adapter test that reaches one.
 
 #### 2. Fakes vs Mocks
 
@@ -432,7 +425,7 @@ expect((result.data as { dryRun?: boolean })?.dryRun).toBe(true);
 
 `tests/test-utils/helpers/test-dependencies.ts` exports `createMockDependencies()` — the container's own `Dependencies` (`src/container/dependencies.ts`: the nine required members `fileSystem`, `processManager`, `networkManager`, `logger`, `environment`, `proxyProcessLauncher`, `proxyManagerFactory`, `sessionStoreFactory`, `adapterRegistry`; `disposeLogger?` is optional and omitted). Every interface member is a `vi.fn()` except the two factories, which are the `MockProxyManagerFactory` / `MockSessionStoreFactory` classes from `src/factories/`; the whole is assignable wherever production's container is — plus the narrower `createMockLogger()`, `createMockFileSystem()`, `createMockProcessManager()`, `createMockNetworkManager()`, `createMockProxyProcessLauncher()`, and `createMockEnvironment()`.
 
-`tests/test-utils/helpers/test-utils.ts` exports `delay()`, `waitUntil()`, `waitForEvent()`, and its own (pre-configured) `createMockLogger()` / `createMockFileSystem()`.
+`tests/test-utils/helpers/test-utils.ts` exports `delay()`, `waitUntil()`, `waitForEvent()`, its own `createMockLogger()`, and the canonical `createMockFileSystem(overrides?)` the two other helper modules re-export.
 
 `tests/unit/test-utils/auto-mock.ts` generates a mock from a class or instance (`createMockFromInterface`), validates a mock's shape against the real implementation (`validateMockInterface`), and combines the two (`createValidatedMock`).
 
