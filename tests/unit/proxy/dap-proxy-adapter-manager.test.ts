@@ -84,8 +84,24 @@ describe('GenericAdapterManager', () => {
       expect(spawner.spawn).toHaveBeenCalledWith(
         'python',
         ['-m', 'debugpy.adapter'],
-        expect.objectContaining({ detached: true })
+        expect.objectContaining({ windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
       );
+    });
+
+    // detached is the POSIX process group shutdown() signals (-pid). On win32
+    // the same flag is DETACHED_PROCESS — no console — which costs Delve 2–3 s
+    // per process it creates and turned a 1 s launch into 8–13 s (issue #889);
+    // the win32 tree-kill is taskkill /T and needs no group.
+    it('spawns the adapter detached (its own process group) off win32', async () => {
+      const posix = new GenericAdapterManager(spawner, logger, fileSystem, 'linux');
+      await posix.spawn({ command: 'dlv', args: ['dap'], logDir: '/logs' });
+      expect(spawner.spawn).toHaveBeenCalledWith('dlv', ['dap'], expect.objectContaining({ detached: true, windowsHide: true }));
+    });
+
+    it('does not detach the adapter on win32 (issue #889)', async () => {
+      const win32 = new GenericAdapterManager(spawner, logger, fileSystem, 'win32');
+      await win32.spawn({ command: 'dlv', args: ['dap'], logDir: '/logs' });
+      expect(spawner.spawn).toHaveBeenCalledWith('dlv', ['dap'], expect.objectContaining({ detached: false, windowsHide: true }));
     });
 
     it('sets cwd when provided', async () => {

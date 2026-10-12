@@ -484,8 +484,8 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     // Reaper markers (issue #431): vsDebugServer.cjs reads only argv[2] (port)
     // and argv[3] (host) and ignores trailing tokens, so these tags are inert
     // at runtime — but they let the startup janitor recognize an instance
-    // stranded by a hard-killed proxy worker (spawned detached+unref'd, it
-    // survives every tree-kill path) and reap it by owner pid. Constraints:
+    // stranded by a hard-killed proxy worker (spawned unref'd, and detached off
+    // win32, it survives every tree-kill path) and reap it by owner pid. Constraints:
     // tokens must stay whitespace-free (the win32 process scan splits
     // CommandLine on whitespace) and must never contain `--help` (vsDebugServer
     // prints usage and exits if --help appears anywhere in argv).

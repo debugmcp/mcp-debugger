@@ -67,7 +67,7 @@ export class GenericAdapterManager {
     /**
      * Signal seam for tests (issue #183 pattern). A negative pid targets the
      * POSIX process group — sound only because spawn() below uses
-     * detached:true, which puts the adapter in its own group.
+     * detached:true off win32, which puts the adapter in its own group.
      */
     private signalPid: (pid: number, signal: NodeJS.Signals) => void =
       (pid, signal) => globalThis.process.kill(pid, signal)
@@ -99,12 +99,26 @@ export class GenericAdapterManager {
     const fullCommand = `${command} ${args.join(' ')}`;
     this.logger.info(`[AdapterManager] Spawning adapter: ${fullCommand}`);
     
-    // Spawn options - no cwd manipulation, inherit from parent
+    // Spawn options - no cwd manipulation, inherit from parent.
+    //
+    // detached is POSIX-only. There it puts the adapter in its own process
+    // group, which is what shutdown()'s group kill relies on. On win32 the
+    // same flag means DETACHED_PROCESS — the child gets no console at all —
+    // and the win32 tree-kill is taskkill /T, which needs no group. Delve
+    // pays for the missing console at every process it creates: measured on
+    // Windows 11, `dlv version` takes 0.1 s with an inherited or hidden
+    // console (CREATE_NO_WINDOW, which windowsHide sets as long as no stdio
+    // slot is 'inherit' — keep the stdio below all pipes/ignore) and 2–3 s under
+    // DETACHED_PROCESS, and a debug-mode launch of a trivial program spends
+    // 6 s in `go build` plus 4 s launching the debuggee instead of ~1 s in
+    // all — 8–13 s idle, past the 30 s launch limits under pre-push load
+    // (issue #889). Node's detached also adds CREATE_NEW_PROCESS_GROUP,
+    // which costs nothing and buys nothing here.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Need dynamic cwd property
     const spawnOptions: any = {
       stdio: ['ignore', 'pipe', 'pipe'] as ('ignore' | 'pipe' | 'inherit' | 'ipc' | number)[],
       env: env || process.env,
-      detached: true,
+      detached: this.platform !== 'win32',
       windowsHide: true
     };
 
@@ -162,7 +176,7 @@ export class GenericAdapterManager {
       // ignore unref errors (older Node or platform quirk)
     }
 
-    // Spawned adapter process; hide console on Windows and detach for independent lifecycle
+    // Spawned adapter process: a hidden console on Windows, its own process group off it.
     this.logger.info(`[AdapterManager] Spawned adapter process PID: ${adapterProcess.pid} (windowsHide=${!!spawnOptions.windowsHide}, detached=${!!spawnOptions.detached})`);
 
     // Set up error handlers and stderr capture

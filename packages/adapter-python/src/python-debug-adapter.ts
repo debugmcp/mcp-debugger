@@ -391,10 +391,12 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
   /**
    * On Windows, run the adapter under the sibling pythonw.exe when it exists.
    *
-   * The adapter is spawned detached, so it has no console; debugpy's launcher
-   * (a console-subsystem grandchild that Node's windowsHide cannot reach) then
-   * gets a fresh *visible* console allocated by Windows — one window per debug
-   * session (#215). pythonw.exe is the GUI-subsystem build of the same
+   * Before #889 the adapter was spawned detached, so it had no console, and
+   * debugpy's launcher (a console-subsystem grandchild that Node's windowsHide
+   * cannot reach) got a fresh *visible* console allocated by Windows — one
+   * window per debug session (#215). The adapter now runs on a hidden console
+   * (CREATE_NO_WINDOW) that the launcher inherits; pythonw stays as belt and
+   * braces. pythonw.exe is the GUI-subsystem build of the same
    * interpreter (same directory ⇒ same version, site-packages, and venv), and
    * since the launch config does not pin `python`, the launcher and debuggee
    * inherit it too, so no process in the chain ever gets a console. Debuggee
