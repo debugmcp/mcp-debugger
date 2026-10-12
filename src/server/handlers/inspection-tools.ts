@@ -105,6 +105,12 @@ export const getStackTraceTool: ToolHandler = async (ctx, args) => {
         ? `All ${stackTrace.totalFrameCount} frames are internal/runtime frames; showing the top internal frame so scopes and evaluate still work. Pass includeInternals: true to see the full stack.`
         : `${stackTrace.hiddenFrameCount} internal frame(s) hidden — pass includeInternals: true to see them.`);
     }
+    // No frame of the shown stack is program code and nothing was hidden to
+    // say so (issue #904): a lone sourceless frame (an idle js-debug pause,
+    // issue #900), or a Java stack its filter handed back whole.
+    if (stackTrace.noProgramFrame && stackTrace.hiddenFrameCount === 0 && stackTrace.frames[0]) {
+      notes.push(ErrorMessages.stopWithoutProgramFrame(stackTrace.threadId, stackTrace.totalFrameCount, stackTrace.frames[0]));
+    }
     // Frames whose file is a label rather than an openable path (issue #655):
     // say so once, so an agent does not feed them to get_source_context. What
     // such a frame IS differs by debugger — a js-debug source map naming a

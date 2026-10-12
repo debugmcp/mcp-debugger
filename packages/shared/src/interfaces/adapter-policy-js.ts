@@ -233,9 +233,13 @@ export const JsDebugAdapterPolicy = {
    *    survive below is the mixed case: the frame resolver keeps that paused
    *    frame at the head (issue #672) — this classifier only says what is
    *    internal, never what the inspection anchor is.
-   * 3. js-debug's async separators — `await` / `Promise.then` /
-   *    `bound-anonymous-fn` labels with no source at all and `line: 0`. A
-   *    sourceless frame that still reports a line (an eval'd `VM123` script)
+   * 3. Frames with no source at all: js-debug's async separators (`await` /
+   *    `Promise.then` / `bound-anonymous-fn` labels at `line: 0`) and the
+   *    `<anonymous>` frame a pause lands on between event-loop dispatches
+   *    on an idle server (`<unknown_source>:1`, issue #900) — neither is
+   *    program code, and neither has scopes. When such a frame is the only
+   *    one, the frame resolver keeps it visible with `allFramesInternal`
+   *    (issue #346). An eval'd `VM123` script carries an `<eval>` path and
    *    is not matched.
    *
    * `frame.name` deliberately does not participate: `processTicksAndRejections`
@@ -253,7 +257,8 @@ export const JsDebugAdapterPolicy = {
     if (NODE_MODULES_SEGMENT.test(filePath)) {
       return true;
     }
-    return JsDebugAdapterPolicy.isAsyncBoundaryFrame!(frame);
+    // Rule 3: the async separators and the idle-pause landing alike.
+    return hasNoSource(filePath);
   },
 
   /**
