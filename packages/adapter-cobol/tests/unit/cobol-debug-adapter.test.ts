@@ -823,7 +823,11 @@ describe('CobolDebugAdapter', () => {
       expect(relative.program).toBe(path.join(tmp, 'bin', 'payroll'));
       expect(relative).not.toHaveProperty('cwd');
       expect(buildMock).not.toHaveBeenCalled();
-      expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/Attach without "sources" or "manifestDirs"/));
+      // The C-view note is a diagnostic for the attach answer, not a log line (issue #908).
+      expect(adapter.consumeLaunchConfigDiagnostics()).toEqual([
+        { key: 'sources', scope: 'launch', message: expect.stringMatching(/engine \(C\) view only/) }
+      ]);
+      expect(logger.warn).not.toHaveBeenCalledWith(expect.stringMatching(/Attach without "sources" or "manifestDirs"/));
     });
 
     it('regenerates the manifest from sources with a translate-only build beside the named program, ahead of manifestDirs', async () => {
@@ -906,12 +910,16 @@ describe('CobolDebugAdapter', () => {
       expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/Symbol manifest regeneration failed \(cobc exited with code 1\)/));
     });
 
-    it('warns when build options come without sources (nothing regenerates), and stays quiet otherwise', async () => {
+    it('notes build options given without sources (nothing regenerates) as diagnostics, and stays quiet otherwise (issue #908)', async () => {
       await adapter.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, manifestDirs: ['m'], dialect: 'ibm', runtimeChecks: true });
-      expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/dialect, runtimeChecks given without "sources"/));
-      logger.warn.mockClear();
-      await adapter.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, manifestDirs: ['m'] });
+      expect(adapter.consumeLaunchConfigDiagnostics()).toEqual([
+        { key: 'dialect', message: 'given without "sources" — it describes the manifest regeneration and nothing else uses it' },
+        { key: 'runtimeChecks', message: 'given without "sources" — it describes the manifest regeneration and nothing else uses it' }
+      ]);
+      expect(adapter.consumeLaunchConfigDiagnostics()).toEqual([]);
       expect(logger.warn).not.toHaveBeenCalledWith(expect.stringMatching(/given without "sources"/));
+      await adapter.transformAttachConfig({ request: 'attach', processId: 7, cwd: tmp, manifestDirs: ['m'] });
+      expect(adapter.consumeLaunchConfigDiagnostics()).toEqual([]);
     });
 
     it('honours the caller\'s attach timeout as the regeneration budget', async () => {

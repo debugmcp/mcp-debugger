@@ -38,7 +38,8 @@ import {
   GenericAttachConfig,
   LanguageSpecificAttachConfig,
   DebugLanguage,
-  AdapterDependencies
+  AdapterDependencies,
+  type LaunchConfigDiagnostic
 } from '@debugmcp/shared';
 import {
   resolveCodeLLDBExecutable,
@@ -218,6 +219,15 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
   // processId leaves the transform as CodeLLDB's `pid`: consumed, not dropped
   // (the attach key diff would otherwise report it as ignored, issue #903).
   readonly consumedAttachKeys = [...COBOL_CONSUMED_ATTACH_KEYS, 'processId'] as const;
+
+  /** Notes of the last transform, drained by the core into the answer's warning (issue #908). */
+  private diagnostics: LaunchConfigDiagnostic[] = [];
+
+  consumeLaunchConfigDiagnostics(): readonly LaunchConfigDiagnostic[] {
+    const drained = this.diagnostics;
+    this.diagnostics = [];
+    return drained;
+  }
 
   private state: AdapterState = AdapterState.UNINITIALIZED;
   private dependencies: AdapterDependencies;
@@ -502,6 +512,7 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
   // ===== Debug Configuration =====
 
   async transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig> {
+    this.diagnostics = [];
     const cobolConfig = config as CobolLaunchConfig;
     const {
       name,
@@ -826,6 +837,7 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
    * awaits the transform, issue #759 M2).
    */
   async transformAttachConfig(config: GenericAttachConfig): Promise<LanguageSpecificAttachConfig> {
+    this.diagnostics = [];
     const {
       request: _request,
       identifierType: _identifierType,
@@ -885,16 +897,19 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
     } else {
       // The build options describe the regeneration: without `sources` there is none.
       const given = { dialect, format, copybookDirs, cobcFlags, runtimeChecks, forceRebuild };
-      const unused = COBOL_REGENERATION_OPTION_KEYS.filter((key) => given[key] !== undefined);
-      if (unused.length > 0) {
-        this.dependencies.logger?.warn(
-          `[CobolDebugAdapter] Attach: ${unused.join(', ')} given without "sources" — they describe the manifest regeneration and nothing else uses them.`
-        );
+      // Named in the attach answer's warning, not only the log (issue #908).
+      for (const key of COBOL_REGENERATION_OPTION_KEYS.filter((option) => given[option] !== undefined)) {
+        this.diagnostics.push({
+          key,
+          message: 'given without "sources" — it describes the manifest regeneration and nothing else uses it'
+        });
       }
       if (userManifestDirs.length === 0) {
-        this.dependencies.logger?.warn(
-          '[CobolDebugAdapter] Attach without "sources" or "manifestDirs": no COBOL symbol manifest, variables show the engine (C) view only.'
-        );
+        this.diagnostics.push({
+          key: 'sources',
+          scope: 'launch',
+          message: 'attach without "sources" or "manifestDirs": no COBOL symbol manifest, variables show the engine (C) view only'
+        });
       }
     }
     const shimOptions: CobolShimSessionOptions = {
