@@ -200,27 +200,10 @@ describe('DotnetDebugAdapter', () => {
   // ===== Adapter Configuration =====
 
   describe('adapter configuration', () => {
-    it('builds adapter command using bridge with netcoredbg', () => {
-      const config = {
-        sessionId: 'test-session',
-        executablePath: '/path/to/netcoredbg.exe',
-        adapterHost: '127.0.0.1',
-        adapterPort: 12345,
-        logDir: '/tmp/logs',
-        scriptPath: '/path/to/app.dll',
-        launchConfig: {}
-      };
-
-      const command = adapter.buildAdapterCommand(config);
-
-      // Bridge runs under node
-      expect(command.command).toBe(process.execPath);
-      // Args: [bridge-path, netcoredbg-path, port]
-      expect(command.args[0]).toContain('netcoredbg-bridge');
-      expect(command.args[1]).toBe('/path/to/netcoredbg.exe');
-      expect(command.args[2]).toBe('12345');
-    });
-
+    // buildAdapterCommand probes the filesystem for the built bridge; the two
+    // tests that call it live in dotnet-bridge-fallback.test.ts, which mocks
+    // node:fs, so this file needs neither a built dist nor a repo-root cwd
+    // (issue #743).
     it('returns netcoredbg as adapter module name', () => {
       expect(adapter.getAdapterModuleName()).toBe('netcoredbg');
     });
@@ -228,21 +211,6 @@ describe('DotnetDebugAdapter', () => {
     it('returns netcoredbg install instructions', () => {
       const cmd = adapter.getAdapterInstallCommand();
       expect(cmd).toContain('netcoredbg');
-    });
-
-    it('propagates environment in adapter command', () => {
-      const command = adapter.buildAdapterCommand({
-        sessionId: 'test',
-        executablePath: '/path/to/netcoredbg',
-        adapterHost: '127.0.0.1',
-        adapterPort: 9999,
-        logDir: '/tmp',
-        scriptPath: '/app.dll',
-        launchConfig: {}
-      });
-
-      expect(command.env).toBeDefined();
-      expect(typeof command.env).toBe('object');
     });
 
   });

@@ -60,6 +60,37 @@ describe('DotnetDebugAdapter bridge fallback resolution', () => {
     adapter = new DotnetDebugAdapter(createDependencies());
   });
 
+  // Moved from dotnet-debug-adapter.test.ts (issue #743): with the real fs the
+  // probe only succeeds against a built dist from a repo-root cwd, so the
+  // package never passed standalone. Here the bridge "exists" by name alone.
+  it('builds the adapter command around the bridge: node, the bridge, netcoredbg, the port', () => {
+    existsSyncMock.mockImplementation((p: string) => String(p).endsWith('netcoredbg-bridge.js'));
+
+    const command = adapter.buildAdapterCommand({
+      ...defaultConfig,
+      sessionId: 'test-session',
+      executablePath: '/path/to/netcoredbg.exe',
+      adapterPort: 12345,
+      logDir: '/tmp/logs',
+      scriptPath: '/path/to/app.dll'
+    });
+
+    // Bridge runs under node; args: [bridge-path, netcoredbg-path, port]
+    expect(command.command).toBe(process.execPath);
+    expect(command.args[0]).toContain('netcoredbg-bridge');
+    expect(command.args[1]).toBe('/path/to/netcoredbg.exe');
+    expect(command.args[2]).toBe('12345');
+  });
+
+  it('propagates the environment in the adapter command', () => {
+    existsSyncMock.mockImplementation((p: string) => String(p).endsWith('netcoredbg-bridge.js'));
+
+    const command = adapter.buildAdapterCommand(defaultConfig);
+
+    expect(command.env).toBeDefined();
+    expect(typeof command.env).toBe('object');
+  });
+
   it('throws with actionable message when bridge script not found at any path', () => {
     existsSyncMock.mockReturnValue(false);
 
