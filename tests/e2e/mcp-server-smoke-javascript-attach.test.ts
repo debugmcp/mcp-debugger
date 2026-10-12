@@ -29,7 +29,8 @@ import path from 'path';
 import net from 'net';
 import http from 'http';
 import { fileURLToPath } from 'url';
-import { existsSync } from 'fs';
+import os from 'os';
+import { existsSync, readdirSync, readFileSync } from 'fs';
 import { spawn, ChildProcess } from 'child_process';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -486,11 +487,19 @@ describe('MCP Server JavaScript Attach-Mode Smoke Tests', () => {
 
     // The attach branch, not the launch branch: the proxy log records which
     // DAP request the handshake sent (before #896 a port-less attach went
-    // out as a `launch` whose body said request: 'attach').
-    const proxyLog = await mcpClient!.readResource({ uri: `debug://sessions/${sessionId}/proxy-log` });
-    const logText = proxyLog.contents.map(c => ('text' in c ? String(c.text) : '')).join('\n');
-    expect(logText).toMatch(/Sending request:.*"command":"attach"/s);
-    expect(logText).not.toMatch(/"command":"launch"/);
+    // out as a `launch` whose body said request: 'attach'). Read from disk:
+    // the proxy-log resource serves a bounded tail, and js-debug's child
+    // adoption has long scrolled the handshake out of it by now.
+    const sessionLogDir = path.join(os.tmpdir(), 'debug-mcp-server', 'sessions', sessionId);
+    const runDir = readdirSync(sessionLogDir).filter(name => name.startsWith('run-')).sort().pop();
+    expect(runDir, `no run directory under ${sessionLogDir}`).toBeTruthy();
+    const logText = readFileSync(path.join(sessionLogDir, runDir!, `proxy-${sessionId}.log`), 'utf8');
+    const sent = logText
+      .split('\n')
+      .filter(line => line.includes('[MinimalDapClient] Sending request:'))
+      .map(line => (JSON.parse(line) as { command: string }).command);
+    expect(sent).toContain('attach');
+    expect(sent).not.toContain('launch');
 
     await callToolSafely(mcpClient!, 'detach_from_process', { sessionId: sessionId! });
     await new Promise(r => setTimeout(r, 300));
