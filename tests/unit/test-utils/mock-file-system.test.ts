@@ -59,6 +59,12 @@ describe('createMockFileSystem (issue #742)', () => {
     expect(fs.existsSync('/x')).toBe(true);
   });
 
+  it('keeps an override across vi.resetAllMocks() too — the pattern consumers write', async () => {
+    const fs = createMockFileSystem({ pathExists: vi.fn(async () => false) });
+    vi.resetAllMocks();
+    await expect(fs.pathExists('/x')).resolves.toBe(false);
+  });
+
   it('createMockAdapterDependencies sets the three existence probes to false explicitly', async () => {
     const { fileSystem } = createMockAdapterDependencies();
     await expect(fileSystem.pathExists('/x')).resolves.toBe(false);

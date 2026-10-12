@@ -43,8 +43,9 @@ export function createMockDependencies(): Dependencies {
   
   return {
     logger: mockLogger,
-    // The shared double (issue #742); `readFile` answers '{}' because the breakpoint
-    // anchor resolver reads a file unstubbed in some server tests and splits the text.
+    // The shared double (issue #742). `readFile` keeps answering '{}', the value the
+    // inline literal had: nothing in src/ parses an injected readFile, so this only
+    // preserves what the server tests saw before.
     fileSystem: createMockFileSystem({ readFile: vi.fn(async () => '{}') }),
     // Real shapes, not bare `vi.fn()`. Nothing in the server tests calls these, but a
     // double that satisfies none of its interfaces means the whole bag has to be cast at

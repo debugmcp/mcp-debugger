@@ -11,15 +11,15 @@ import type {
   IProxyProcessLauncher
 } from '@debugmcp/shared';
 import { createMockFileSystem } from './test-utils.js';
-
-// The one mock file system lives in test-utils.ts (issue #742); re-exported here so the
-// container-shaped helpers and their importers keep one import path.
-export { createMockFileSystem };
 import type { Dependencies } from '../../../src/container/dependencies.js';
 import { MockSessionStoreFactory } from '../../../src/factories/session-store-factory.js';
 import { MockProxyManagerFactory } from '../../../src/factories/proxy-manager-factory.js';
 import { MockProxyManager } from '../mocks/mock-proxy-manager.js';
 import { createMockAdapterRegistry } from '../mocks/mock-adapter-registry.js';
+
+// The one mock file system lives in test-utils.ts (issue #742); re-exported here so the
+// container-shaped helpers and their importers keep one import path.
+export { createMockFileSystem };
 
 /**
  * Creates a complete set of mock dependencies for testing
