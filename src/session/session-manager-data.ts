@@ -195,8 +195,10 @@ export abstract class SessionManagerData extends SessionManagerCore {
    * Thread contract: `opts.ensureStackReady` is the caller's permission to
    * re-anchor — an empty stack then gets the bounded readiness retry and may
    * switch to a sibling thread that has frames (the implicit MCP path, which
-   * resolved `threadId` itself). Without it, an explicitly requested thread
-   * is never re-anchored: an empty answer is only *described* (issue #553).
+   * resolved `threadId` itself), and a `pause` reported on a thread with no
+   * program frame may switch to the first sibling whose stack reaches the
+   * program (issue #898). Without it, an explicitly requested thread is
+   * never re-anchored: an empty answer is only *described* (issue #553).
    */
   async getStackTraceDetailed(
     sessionId: string,

@@ -7,6 +7,7 @@ import { SessionManager, SessionManagerConfig } from '../../../../src/session/se
 import { markChildOrigin } from '../../../../src/utils/child-origin-events.js';
 import {
   type AdapterPolicy,
+  CppAdapterPolicy,
   DebugLanguage,
   JavaAdapterPolicy,
   JsDebugAdapterPolicy,
@@ -19,6 +20,7 @@ import {
   createPausedSession,
   overridePolicy
 } from './session-manager-test-utils.js';
+import { threadStacksHandler } from '../../../test-utils/mocks/thread-stacks.js';
 import { ErrorMessages } from '../../../../src/utils/error-messages.js';
 import { ProxyNotRunningError } from '../../../../src/errors/debug-errors.js';
 import { DapResponseError } from '../../../../src/proxy/dap-response-error.js';
@@ -3451,7 +3453,8 @@ describe('SessionManager - DAP Operations', () => {
           return { success: true, body: { threads: [
             { id: 1, name: 'stopped' },
             { id: 2, name: 'runtime worker' },
-            { id: 3, name: 'main' }
+            // Not named main: the user-over-runtime preference, not name ordering, must pick it.
+            { id: 3, name: 'program thread' }
           ] } };
         }
         return { success: true, body: {} };
@@ -4579,6 +4582,206 @@ describe('SessionManager - DAP Operations', () => {
       expect(cleared).toMatchObject({ verified: true, verifiedBy: 'adapter', adapterId: 8 });
       expect(cleared.message).toBeUndefined();
       expect(cleared.messageOrigin).toBeUndefined();
+    });
+  });
+
+  describe('Stop reported on an internal-only thread (issue #898)', () => {
+    // The measured Windows pause: CodeLLDB reports the stop on the break-in
+    // thread the OS injects (ntdll only), while the program's own thread sits
+    // in main. A pause says nothing about where the program is, so the
+    // resolver adopts the first sibling whose stack reaches the program — by
+    // the verdict the attach controller shares (issue #904) — and says so.
+    const BREAK_IN_THREAD = 28180;
+    const PROGRAM_THREAD = 24604;
+    const BREAK_IN = [
+      { id: 1, name: 'DbgBreakPoint', line: 0, column: 0 },
+      { id: 2, name: 'DbgUiRemoteBreakin', line: 0, column: 0, source: { name: '@DbgUiRemoteBreakin', sourceReference: 1 } },
+      { id: 3, name: 'BaseThreadInitThunk', line: 0, column: 0, source: { name: '@BaseThreadInitThunk', sourceReference: 2 } },
+      { id: 4, name: 'RtlUserThreadStart', line: 0, column: 0, source: { name: '@RtlUserThreadStart', sourceReference: 3 } }
+    ];
+    const IN_MAIN = [
+      { id: 5, name: 'Sleep', line: 0, column: 0 },
+      { id: 6, name: 'main', line: 20, column: 0, source: { path: '/proj/examples/cpp/pause_test.cpp' } }
+    ];
+    const RUNTIME_ONLY = [
+      { id: 7, name: 'NtWaitForWorkViaWorkerFactory', line: 0, column: 0, source: { name: '@NtWaitForWorkViaWorkerFactory', sourceReference: 4 } }
+    ];
+    const THREADS = [{ id: BREAK_IN_THREAD, name: '5: tid=28180' }, { id: PROGRAM_THREAD, name: '1: tid=24604' }];
+    const READY = { ensureStackReady: true } as const;
+
+    function setShortReadyWindow() {
+      (sessionManager as unknown as { pausedStackReadyTimeoutMs: number; pausedStackReadyIntervalMs: number })
+        .pausedStackReadyTimeoutMs = 400;
+      (sessionManager as unknown as { pausedStackReadyIntervalMs: number })
+        .pausedStackReadyIntervalMs = 25;
+    }
+
+    async function pausedOnBreakIn(
+      reason = 'pause',
+      stacks: Record<number, unknown[]> = { [BREAK_IN_THREAD]: BREAK_IN, [PROGRAM_THREAD]: IN_MAIN },
+      options?: Parameters<typeof threadStacksHandler>[2]
+    ) {
+      const session = await createPausedSession(sessionManager, dependencies);
+      (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => CppAdapterPolicy;
+      dependencies.mockProxyManager.simulateStopped(BREAK_IN_THREAD, reason);
+      dependencies.mockProxyManager.dapRequestCalls = [];
+      dependencies.mockProxyManager.setDapRequestHandler(threadStacksHandler(stacks, THREADS, options));
+      return session;
+    }
+    const requests = (command: string) =>
+      dependencies.mockProxyManager.dapRequestCalls.filter((call) => call.command === command);
+
+    it('adopts the thread in main on a pause and discloses the switch', async () => {
+      const session = await pausedOnBreakIn();
+      const adopt = vi.spyOn(dependencies.mockProxyManager, 'setCurrentThreadId');
+
+      const result = await sessionManager.getStackTraceDetailed(session.id, undefined, false, READY);
+
+      expect(result.threadId).toBe(PROGRAM_THREAD);
+      expect(result.frames.map((frame) => frame.name)).toContain('main');
+      expect(result.allFramesInternal).toBe(false);
+      expect(result.noProgramFrame).toBeUndefined();
+      expect(result.note).toMatch(/reported on thread 28180 \(5: tid=28180\), whose 4 frames are all internal\/runtime \(top: 'DbgBreakPoint'\)/);
+      expect(result.note).toMatch(/showing thread 24604 \(1: tid=24604\), which is in 'main' \(\/proj\/examples\/cpp\/pause_test\.cpp:20\)/);
+      expect(adopt).toHaveBeenCalledWith(PROGRAM_THREAD);
+      expect(dependencies.mockProxyManager.getCurrentThreadId()).toBe(PROGRAM_THREAD);
+      // The reported thread's own frames were read once and never unwound again.
+      expect(requests('stackTrace').map((call) => call.args.threadId)).toEqual([BREAK_IN_THREAD, PROGRAM_THREAD]);
+    });
+
+    it.each(['breakpoint', 'exception', 'entry', 'step'])('keeps the reported thread on a %s stop: it belongs to that thread', async (reason) => {
+      const session = await pausedOnBreakIn(reason);
+
+      const result = await sessionManager.getStackTraceDetailed(session.id, undefined, false, READY);
+
+      expect(result.threadId).toBe(BREAK_IN_THREAD);
+      expect(result.allFramesInternal).toBe(true);
+      expect(result.noProgramFrame).toBe(true);
+      expect(result.note).toBeUndefined();
+      expect(requests('threads')).toHaveLength(0);
+      expect(dependencies.mockProxyManager.getCurrentThreadId()).toBe(BREAK_IN_THREAD);
+    });
+
+    it('never moves off a thread the caller named explicitly (the facade reads an explicit threadId without the readiness option)', async () => {
+      const session = await pausedOnBreakIn();
+
+      const result = await sessionManager.getStackTraceDetailed(session.id, BREAK_IN_THREAD, false);
+
+      expect(result.threadId).toBe(BREAK_IN_THREAD);
+      expect(result.allFramesInternal).toBe(true);
+      expect(result.note).toBeUndefined();
+      expect(requests('threads')).toHaveLength(0);
+    });
+
+    it('does not scan without ensureStackReady (internal-caller behaviour unchanged)', async () => {
+      const session = await pausedOnBreakIn();
+
+      const result = await sessionManager.getStackTraceDetailed(session.id);
+
+      expect(result.threadId).toBe(BREAK_IN_THREAD);
+      expect(requests('threads')).toHaveLength(0);
+    });
+
+    it('keeps the reported thread and says no program frame is active when no sibling reaches the program', async () => {
+      const session = await pausedOnBreakIn('pause', { [BREAK_IN_THREAD]: BREAK_IN, [PROGRAM_THREAD]: RUNTIME_ONLY });
+      const adopt = vi.spyOn(dependencies.mockProxyManager, 'setCurrentThreadId');
+
+      const result = await sessionManager.getStackTraceDetailed(session.id, undefined, false, READY);
+
+      expect(result.threadId).toBe(BREAK_IN_THREAD);
+      expect(result.allFramesInternal).toBe(true);
+      expect(result.noProgramFrame).toBe(true);
+      expect(result.note).toBeUndefined();
+      expect(adopt).not.toHaveBeenCalled();
+      expect(requests('threads')).toHaveLength(1);
+    });
+
+    it('scans once per stop: a later read of the same stop answers from the adopted thread, and an explicit re-anchor re-adopts from memory', async () => {
+      const session = await pausedOnBreakIn();
+      await sessionManager.getStackTraceDetailed(session.id, undefined, false, READY);
+      dependencies.mockProxyManager.dapRequestCalls = [];
+
+      // The anchor is the program thread now; a locals or evaluate read sees no scan.
+      const again = await sessionManager.getStackTraceDetailed(session.id, undefined, false, READY);
+      expect(again.threadId).toBe(PROGRAM_THREAD);
+      expect(requests('threads')).toHaveLength(0);
+      // The divergence from the reported thread is still disclosed.
+      expect(again.note).toBe('The stop was reported on thread 28180; inspection is anchored on thread 24604.');
+
+      // get_stack_trace { threadId: 28180 } re-anchors there (the explicit contract); the next
+      // implicit neutral read re-adopts without listing threads or unwinding again.
+      dependencies.mockProxyManager.setCurrentThreadId(BREAK_IN_THREAD);
+      dependencies.mockProxyManager.dapRequestCalls = [];
+      const readopted = await sessionManager.getStackTraceDetailed(session.id, undefined, false, READY);
+      expect(readopted.threadId).toBe(PROGRAM_THREAD);
+      expect(readopted.note).toMatch(/showing thread 24604/);
+      expect(requests('threads')).toHaveLength(0);
+      expect(requests('stackTrace').map((call) => call.args.threadId)).toEqual([BREAK_IN_THREAD]);
+    });
+
+    it('gives every sibling unwind its own short timeout', async () => {
+      const session = await pausedOnBreakIn();
+
+      await sessionManager.getStackTraceDetailed(session.id, undefined, false, READY);
+
+      const siblingUnwinds = requests('stackTrace').filter((call) => call.args.threadId !== BREAK_IN_THREAD);
+      expect(siblingUnwinds).toHaveLength(1);
+      expect(siblingUnwinds.every((call) => typeof call.options?.timeoutMs === 'number' && call.options.timeoutMs <= 3000)).toBe(true);
+    });
+
+    it('does not adopt when a new stop lands during the scan', async () => {
+      const session = await pausedOnBreakIn('pause', undefined, {
+        onThreads: () => dependencies.mockProxyManager.simulateStopped(PROGRAM_THREAD, 'breakpoint')
+      });
+      const adopt = vi.spyOn(dependencies.mockProxyManager, 'setCurrentThreadId');
+
+      const result = await sessionManager.getStackTraceDetailed(session.id, undefined, false, READY);
+
+      expect(adopt).not.toHaveBeenCalled();
+      expect(result.threadId).toBe(BREAK_IN_THREAD);
+      expect(result.note).toBeUndefined();
+    });
+
+    it('triggers on the per-frame verdict, so a Java stack whose filter hands everything back still moves (pause-all on a JDK thread)', async () => {
+      const JDK_ONLY = [
+        { id: 1, name: 'java.lang.Object.wait', line: 338, column: 1, source: { path: 'java/lang/Object.java' } },
+        { id: 2, name: 'java.lang.ref.Reference$ReferenceHandler.run', line: 189, column: 1, source: { path: 'java/lang/ref/Reference.java' } }
+      ];
+      const APP = [{ id: 3, name: 'com.acme.App.main', line: 7, column: 1, source: { path: '/proj/src/com/acme/App.java' } }];
+      const session = await createPausedSession(sessionManager, dependencies);
+      (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JavaAdapterPolicy;
+      dependencies.mockProxyManager.simulateStopped(2, 'pause');
+      dependencies.mockProxyManager.dapRequestCalls = [];
+      dependencies.mockProxyManager.setDapRequestHandler(
+        threadStacksHandler({ 2: JDK_ONLY, 1: APP }, [{ id: 2, name: 'Reference Handler' }, { id: 1, name: 'main' }])
+      );
+      // The display never says "all internal" for Java: its filter returns the stack whole.
+      expect(JavaAdapterPolicy.filterStackFrames!(JDK_ONLY.map((f) => ({ ...f, file: f.source.path })), false)).toHaveLength(2);
+
+      const result = await sessionManager.getStackTraceDetailed(session.id, undefined, false, READY);
+
+      expect(result.threadId).toBe(1);
+      expect(result.frames[0].name).toBe('com.acme.App.main');
+      expect(result.note).toMatch(/reported on thread 2 \(Reference Handler\).*showing thread 1 \(main\)/);
+    });
+
+    it('the frameless readiness path also skips its adoption when the stop changed under it', async () => {
+      const session = await createPausedSession(sessionManager, dependencies); // currentThreadId = 1
+      setShortReadyWindow();
+      const READY_FRAME = { id: 7, name: 'Program.Main', source: { path: '/work/Program.cs' }, line: 12, column: 1 };
+      let scans = 0;
+      dependencies.mockProxyManager.setDapRequestHandler(
+        threadStacksHandler({ 1: [], 2: [READY_FRAME] }, [{ id: 1, name: '' }, { id: 2, name: 'worker' }], {
+          onThreads: () => { if (scans++ === 0) dependencies.mockProxyManager.simulateStopped(2, 'breakpoint'); }
+        })
+      );
+      const adopt = vi.spyOn(dependencies.mockProxyManager, 'setCurrentThreadId');
+
+      const result = await sessionManager.getStackTraceDetailed(session.id, undefined, false, READY);
+
+      expect(adopt).not.toHaveBeenCalled();
+      expect(result.frames).toEqual([]);
+      expect(result.note).toMatch(/A new stop landed/);
     });
   });
 });

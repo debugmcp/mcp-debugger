@@ -75,6 +75,9 @@ export const getStackTraceTool: ToolHandler = async (ctx, args) => {
       includeInternals,
       stopReason: lastStop?.reason,
       lastStop,
+      // No frame of the shown stack is program code (issue #904): a pause
+      // between dispatches, a runtime thread no sibling could replace.
+      ...(stackTrace.noProgramFrame ? { noProgramFrame: true } : {}),
       ...(stackTrace.frames.length === 0 && failureDiagnostics()
         ? { diagnostics: failureDiagnostics() }
         : {})
