@@ -132,6 +132,33 @@ describe('SessionManager - proxy exit mapping (issue #258)', () => {
     });
   });
 
+  it('quotes the adapter last stderr line after a proxy error report that does not carry it (issue #897)', async () => {
+    // The worker's error report outruns the terminal status behind it, and
+    // the launcher prefers lastProxyError — so the tail has to be quoted here.
+    const sessionId = await startRunningSession();
+    dependencies.mockProxyManager.adapterStderrTail = ['Error: Cannot find module debugpy', '    at load (adapter.js:1)'];
+
+    dependencies.mockProxyManager.simulateEvent('error', new Error('DAP client error: read ECONNRESET'));
+
+    expect(sessionManager.getSession(sessionId)?.lastProxyError).toBe(
+      'DAP client error: read ECONNRESET; adapter stderr: "Error: Cannot find module debugpy"'
+    );
+  });
+
+  it('does not repeat a stderr line the proxy error report already quotes (issue #897)', async () => {
+    const sessionId = await startRunningSession();
+    dependencies.mockProxyManager.adapterStderrTail = ['[ERROR codelldb::debug_session] Could not attach: no process found with process ID 4'];
+
+    dependencies.mockProxyManager.simulateEvent(
+      'error',
+      new Error('Critical initialization error: Could not attach: no process found with process ID 4')
+    );
+
+    expect(sessionManager.getSession(sessionId)?.lastProxyError).toBe(
+      'Critical initialization error: Could not attach: no process found with process ID 4'
+    );
+  });
+
   it('persists the same diagnostics for a proxy error event', async () => {
     const sessionId = await startRunningSession();
 

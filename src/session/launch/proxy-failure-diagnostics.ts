@@ -37,8 +37,9 @@ export const PROXY_LOG_TAIL_MAX_BYTES = 64 * 1024;
 /**
  * The line worth quoting from an adapter's stderr tail (issue #897): the
  * last one that is not a stack frame, so a Node error's `Error: …` wins over
- * the nine `    at …` lines js-debug prints under it. Undefined when the
- * tail is empty or all frames.
+ * the nine `    at …` lines js-debug prints under it (Ruby backtraces end in
+ * `from …` lines the same way). Undefined when the tail is empty or all
+ * frames.
  */
 export function lastAdapterStderrLine(tail: readonly string[] | undefined): string | undefined {
   if (!tail) {
@@ -46,11 +47,27 @@ export function lastAdapterStderrLine(tail: readonly string[] | undefined): stri
   }
   for (let i = tail.length - 1; i >= 0; i -= 1) {
     const line = tail[i].trim();
-    if (line.length > 0 && !/^at\s/.test(line)) {
+    if (line.length > 0 && !/^(at|from)\s/.test(line)) {
       return line;
     }
   }
   return undefined;
+}
+
+/**
+ * Whether a failure text already carries an adapter's stderr line, the
+ * line's leading `[LEVEL target]` log tag and the adapter manager's
+ * truncation marker aside: an adapter's own error answer repeats what it
+ * logged (CodeLLDB: "[ERROR codelldb::debug_session] Could not attach: …" on
+ * stderr, "Could not attach: …" in the response), and quoting it twice says
+ * nothing. A line that is only a tag is never "already there".
+ */
+export function quotesAdapterStderrLine(text: string, line: string): boolean {
+  let core = line.replace(/^\[[^\]]*\]\s*/, '');
+  if (core.endsWith('…')) {
+    core = core.slice(0, -1);
+  }
+  return core.length > 0 && text.includes(core);
 }
 
   /** The pointers a failed launch/attach returns to the caller (issue #493 / #551). */

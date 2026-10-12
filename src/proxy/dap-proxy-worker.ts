@@ -110,7 +110,10 @@ const PRE_DETACH_RESUME_TIMEOUT_MS = 2000;
  * when a pipe stays open (something the adapter started inherited it), and
  * the tail is then whatever had arrived. Only paid when no stdio drain
  * barrier is armed (that barrier already waits for the pipes) and the exit
- * was not an orderly end — a clean program end pays nothing.
+ * was not an orderly end — a clean program end pays nothing. Terminal
+ * signals are queued, so a DAP terminated that arrived behind such an exit
+ * is forwarded after the hold too; the parent acts on the first terminal
+ * message and processes none behind it.
  */
 const ADAPTER_STDERR_SETTLE_MS = 200;
 
@@ -3080,15 +3083,18 @@ export class DapProxyWorker {
 
   /** The adapter's stderr pipe closing or ending, from spawn (issue #897). */
   private trackStderrClose(adapterProcess: ChildProcess): Promise<void> {
-    const stderr = adapterProcess.stderr as
-      | (NodeJS.ReadableStream & { destroyed?: boolean; readableEnded?: boolean; closed?: boolean })
-      | null;
+    const stderr = adapterProcess.stderr;
     if (!stderr || stderr.destroyed || stderr.readableEnded || stderr.closed) {
       return Promise.resolve();
     }
     return new Promise(resolve => {
-      stderr.once('close', () => resolve());
-      stderr.once('end', () => resolve());
+      const done = (): void => {
+        stderr.removeListener('close', done);
+        stderr.removeListener('end', done);
+        resolve();
+      };
+      stderr.once('close', done);
+      stderr.once('end', done);
     });
   }
 

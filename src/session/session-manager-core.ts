@@ -41,7 +41,8 @@ import {
   collectProxyFailureDiagnostics,
   logProxyFailure,
   type ProxyFailureDiagnostics,
-  lastAdapterStderrLine
+  lastAdapterStderrLine,
+  quotesAdapterStderrLine
 } from './launch/proxy-failure-diagnostics.js';
 import type { AnchorResolution } from './breakpoints/anchor-resolution.js';
 import {
@@ -1376,7 +1377,14 @@ export abstract class SessionManagerCore extends EventEmitter {
       clearPauseIntent(session);
       this.logger.debug(`[SessionManager] 'error' event handler called for session ${sessionId}`);
       this.logger.error(`[ProxyManager ${sessionId}] Error:`, error);
-      session.lastProxyError = error.message;
+      // The worker's error report is synchronous and outruns the terminal
+      // status behind it, and the launcher prefers lastProxyError: quote the
+      // adapter's last word here too, unless the report already does (issue
+      // #897). "DAP client error: read ECONNRESET" says nothing on its own.
+      const stderrLine = lastAdapterStderrLine(proxyManager.getAdapterStderrTail?.());
+      session.lastProxyError = stderrLine && !quotesAdapterStderrLine(error.message, stderrLine)
+        ? `${error.message}; adapter stderr: "${stderrLine}"`
+        : error.message;
       this._updateSessionState(session, SessionState.ERROR);
       this.recordProxyFailure(session, error);
 

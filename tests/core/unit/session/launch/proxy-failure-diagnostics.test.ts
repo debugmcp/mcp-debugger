@@ -13,6 +13,7 @@ import {
   collectProxyFailureDiagnostics,
   lastAdapterStderrLine,
   logProxyFailure,
+  quotesAdapterStderrLine,
   PROXY_LOG_TAIL_MAX_BYTES,
   readProxyLogTail
 } from '../../../../../src/session/launch/proxy-failure-diagnostics.js';
@@ -339,9 +340,36 @@ describe('lastAdapterStderrLine (issue #897)', () => {
     expect(lastAdapterStderrLine(['warning: old', '  fatal: new  ', '    at x'])).toBe('fatal: new');
   });
 
+  it('skips the `from` frames of a Ruby backtrace', () => {
+    expect(lastAdapterStderrLine([
+      "/app/boot.rb:3:in 'start': no such file (Errno::ENOENT)",
+      '\tfrom /app/boot.rb:9:in <main>',
+      "\tfrom /usr/lib/ruby/debug.rb:12:in 'run'"
+    ])).toBe("/app/boot.rb:3:in 'start': no such file (Errno::ENOENT)");
+  });
+
   it('answers nothing for a missing, empty or all-frame tail', () => {
     expect(lastAdapterStderrLine(undefined)).toBeUndefined();
     expect(lastAdapterStderrLine([])).toBeUndefined();
     expect(lastAdapterStderrLine(['    at a', '  ', '    at b'])).toBeUndefined();
+  });
+});
+
+describe('quotesAdapterStderrLine (issue #897)', () => {
+  it('sees the line behind its log tag, as an adapter error answer repeats it', () => {
+    expect(quotesAdapterStderrLine(
+      'Critical initialization error: Could not attach: no process found with process ID 4 [Adapter command: …]',
+      '[ERROR codelldb::debug_session] Could not attach: no process found with process ID 4'
+    )).toBe(true);
+  });
+
+  it('sees a truncated line by its prefix', () => {
+    const long = `Error: ${'x'.repeat(50)}`;
+    expect(quotesAdapterStderrLine(`refused: ${long} and more`, `${long}…`)).toBe(true);
+  });
+
+  it('never treats a bare tag or an unrelated line as already quoted', () => {
+    expect(quotesAdapterStderrLine('anything', '[WARN codelldb]')).toBe(false);
+    expect(quotesAdapterStderrLine('DAP client error: read ECONNRESET', 'Error: boom')).toBe(false);
   });
 });

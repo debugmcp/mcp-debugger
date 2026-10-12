@@ -13,7 +13,7 @@
 import { DebugProtocol } from '@vscode/debugprotocol';
 import type { ManagedSession } from '../session-store.js';
 import type { OperationsContext } from '../operations-context.js';
-import { lastAdapterStderrLine } from '../launch/proxy-failure-diagnostics.js';
+import { lastAdapterStderrLine, quotesAdapterStderrLine } from '../launch/proxy-failure-diagnostics.js';
 
 /** Thread verification narrates its attempts. */
 export type AttachVerificationContext = Pick<OperationsContext, 'logger'>;
@@ -32,11 +32,6 @@ export interface AttachVerifyInput {
 export type AttachVerifyResult =
   | { ok: true; threads: DebugProtocol.Thread[] }
   | { ok: false; proxyGone: boolean; lastFailure: string };
-
-/** A stderr line without its leading `[LEVEL target]` log tag, for the already-quoted check. */
-function stripLogTag(line: string): string {
-  return line.replace(/^\[[^\]]*\]\s*/, '');
-}
 
 /**
  * Poll DAP 'threads' until the debugger reports at least one thread or the
@@ -68,7 +63,9 @@ export async function verifyAttachThreads(
     // exit always carries a code or a signal, so a codeless unexpected exit
     // is the socket dropping (js-debug does that after "Could not connect to
     // debug target", with its process still alive); an expected one is the
-    // target ending under the debugger's feet.
+    // target ending under the debugger's feet. The proxy worker's own exit
+    // arrives through the same event and reads as an adapter exit here, as
+    // it always has.
     const onProxyExit = (code: number | null, signal?: string, expected?: boolean): void => {
       if (!proxyGone) {
         proxyGone = true;
@@ -137,10 +134,7 @@ export async function verifyAttachThreads(
       // settles only once the parent has processed the worker's last message,
       // which is the one that carries the tail (issue #897).
       const line = lastAdapterStderrLine(proxyManager.getAdapterStderrTail?.());
-      // Not when the failure already quotes it: an adapter's own error answer
-      // repeats what it logged (CodeLLDB: "[ERROR codelldb::debug_session]
-      // Could not attach: …" on stderr, "Could not attach: …" in the response).
-      if (line && !lastFailure.includes(stripLogTag(line))) {
+      if (line && !quotesAdapterStderrLine(lastFailure, line)) {
         lastFailure = `${lastFailure}; its last stderr line: "${line}"`;
       }
     }
