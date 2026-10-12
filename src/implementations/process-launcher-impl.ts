@@ -466,7 +466,7 @@ class ProxyProcessAdapter extends EventEmitter implements IProxyProcess {
 
     // win32: any cross-process signal is TerminateProcess on the single PID —
     // the worker's JS never runs, so its own adapter tree-kill cascade cannot
-    // fire, stranding detached adapter children like js-debug's vsDebugServer
+    // fire, stranding unref'd adapter children like js-debug's vsDebugServer
     // (issue #431). Sweep the tree FIRST, while the worker is still alive:
     // taskkill /T can only discover children through a live parent. Skipped
     // once the worker has exited — its PID may already be recycled.

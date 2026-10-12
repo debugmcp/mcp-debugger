@@ -107,7 +107,8 @@ export class GenericAdapterManager {
     // and the win32 tree-kill is taskkill /T, which needs no group. Delve
     // pays for the missing console at every process it creates: measured on
     // Windows 11, `dlv version` takes 0.1 s with an inherited or hidden
-    // console (CREATE_NO_WINDOW, which windowsHide sets) and 2–3 s under
+    // console (CREATE_NO_WINDOW, which windowsHide sets as long as no stdio
+    // slot is 'inherit' — keep the stdio below all pipes/ignore) and 2–3 s under
     // DETACHED_PROCESS, and a debug-mode launch of a trivial program spends
     // 6 s in `go build` plus 4 s launching the debuggee instead of ~1 s in
     // all — 8–13 s idle, past the 30 s launch limits under pre-push load
@@ -175,7 +176,7 @@ export class GenericAdapterManager {
       // ignore unref errors (older Node or platform quirk)
     }
 
-    // Spawned adapter process; hide console on Windows and detach for independent lifecycle
+    // Spawned adapter process: a hidden console on Windows, its own process group off it.
     this.logger.info(`[AdapterManager] Spawned adapter process PID: ${adapterProcess.pid} (windowsHide=${!!spawnOptions.windowsHide}, detached=${!!spawnOptions.detached})`);
 
     // Set up error handlers and stderr capture
