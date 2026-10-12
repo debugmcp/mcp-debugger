@@ -125,6 +125,7 @@ export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
             (attachData?.pending ? `; ${ErrorMessages.attachPausePending}` : '')
           : `Created session but attach failed: ${attachResult.error || 'Unknown error'}`,
         ...(attachData?.pending ? { pending: true } : {}),
+        ...(attachData?.note ? { note: attachData.note } : {}),
         ...(attachData ? { data: attachData } : {}),
         ...(warning ? { warning } : {})
       });

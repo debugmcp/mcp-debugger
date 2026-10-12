@@ -134,6 +134,11 @@ export const attachToProcessTool: ToolHandler = async (ctx, args) => {
     if (attachResult.data?.pending) {
       responsePayload.pending = true;
     }
+    // Where the attach's stop landed, when it needs saying (issue #904): a
+    // thread with no program frame — the idle js-debug pause (issue #900).
+    if (attachResult.data?.note) {
+      responsePayload.note = attachResult.data.note;
+    }
 
     if (attachResult.data) {
       responsePayload.data = attachResult.data;
