@@ -31,12 +31,9 @@ describe('JavascriptDebugAdapter public runtime helpers (edge coverage)', () => 
   });
 
   describe('misc small helpers', () => {
-    it('getAdapterModuleName/getAdapterInstallCommand/getDefaultLaunchConfig', () => {
+    it('getAdapterModuleName/getAdapterInstallCommand', () => {
       expect(adapter.getAdapterModuleName()).toBe('js-debug');
       expect(adapter.getAdapterInstallCommand()).toMatch(/@vscode\/js-debug/);
-      const def = adapter.getDefaultLaunchConfig();
-      expect(typeof def).toBe('object');
-      expect(typeof (def as any).cwd).toBe('string');
     });
 
     it('getDefaultExecutableName/getExecutableSearchPaths', () => {

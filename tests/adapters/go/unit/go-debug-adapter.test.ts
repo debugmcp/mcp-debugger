@@ -622,10 +622,6 @@ describe('GoDebugAdapter', () => {
       expect(adapter.getCurrentThreadId()).toBeNull();
     });
 
-    it('getDefaultLaunchConfig returns the documented defaults', () => {
-      expect(adapter.getDefaultLaunchConfig()).toEqual({ stopOnEntry: false, justMyCode: true });
-    });
-
     it('buildAdapterCommand adds DAP logging flags when DEBUG is set', () => {
       vi.stubEnv('DEBUG', 'debug-mcp:*');
       try {

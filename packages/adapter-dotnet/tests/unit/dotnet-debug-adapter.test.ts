@@ -244,13 +244,6 @@ describe('DotnetDebugAdapter', () => {
 
       expect(result.justMyCode).toBe(true);
     });
-
-    it('returns sensible default launch config', () => {
-      const defaults = adapter.getDefaultLaunchConfig();
-
-      expect(defaults.stopOnEntry).toBe(true);
-      expect(defaults.justMyCode).toBe(true);
-    });
   });
 
   // ===== Attach Configuration =====
@@ -424,12 +417,6 @@ describe('DotnetDebugAdapter', () => {
       });
 
       expect(getProcessArchitectureMock).not.toHaveBeenCalled();
-    });
-
-    it('returns default attach config', () => {
-      const defaults = adapter.getDefaultAttachConfig();
-      expect(defaults).toBeDefined();
-      expect(defaults!.justMyCode).toBe(true);
     });
 
     it('forwards unknown attach keys but keeps terminateDebuggee non-overridable (issues #450/#466)', () => {

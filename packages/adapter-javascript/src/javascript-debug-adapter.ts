@@ -871,15 +871,6 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     return base === 'node' || base === 'node.exe' || base === 'node.cmd';
   }
 
-  getDefaultLaunchConfig(): Partial<GenericLaunchConfig> {
-    return {
-      stopOnEntry: false,
-      justMyCode: true,
-      env: {},
-      cwd: process.cwd()
-    };
-  }
-
   /**
    * Inject the exit-code preload shim into the debuggee's environment
    * (issue #247). The shim writes the debuggee's exit code to a per-session
@@ -1044,13 +1035,6 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       // launch does when no program dir is known. An explicit caller value wins.
       ...('cwd' in rest ? {} : { cwd: defaultAttachCwd() }),
     } as LanguageSpecificAttachConfig;
-  }
-
-  getDefaultAttachConfig(): Partial<GenericAttachConfig> {
-    return {
-      request: 'attach',
-      host: '127.0.0.1',
-    };
   }
 
   // ===== DAP Protocol Operations =====

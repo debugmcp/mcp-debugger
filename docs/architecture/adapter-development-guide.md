@@ -221,7 +221,7 @@ The adapter is the core component that manages the debugger lifecycle. It extend
 | State | `getState()`, `isReady()`, `getCurrentThreadId()` |
 | Validation | `validateEnvironment()`, `getRequiredDependencies()` |
 | Executable | `resolveExecutablePath()`, `getDefaultExecutableName()`, `getExecutableSearchPaths()` |
-| Configuration | `buildAdapterCommand()`, `getAdapterModuleName()`, `getAdapterInstallCommand()`, `transformLaunchConfig()`, `getDefaultLaunchConfig()` |
+| Configuration | `buildAdapterCommand()`, `getAdapterModuleName()`, `getAdapterInstallCommand()`, `transformLaunchConfig()` |
 | DAP | `sendDapRequest()`, `handleDapEvent()`, `handleDapResponse()` |
 | Connection | `connect()`, `disconnect()`, `isConnected()` |
 | Error handling | `getInstallationInstructions()`, `getMissingExecutableError()`, `translateErrorMessage()` |

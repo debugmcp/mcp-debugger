@@ -508,11 +508,7 @@ describe('RustDebugAdapter toolchain logic', () => {
       expect(logPointReqs[0]?.description).toContain('CodeLLDB');
     });
 
-    it('returns default launch configuration and capabilities', () => {
-      const defaults = adapter.getDefaultLaunchConfig();
-      expect(defaults.cwd).toBe(process.cwd());
-      expect(defaults.stopOnEntry).toBe(false);
-
+    it('returns its capabilities', () => {
       const capabilities = adapter.getCapabilities();
       expect(capabilities.supportsConditionalBreakpoints).toBe(true);
       expect(capabilities.supportsDisassembleRequest).toBe(true);

@@ -108,8 +108,6 @@ describe('DartDebugAdapter lifecycle', () => {
     expect(a.supportsFeature(DebugFeature.LOG_POINTS)).toBe(true);
     expect(a.supportsFeature(DebugFeature.FUNCTION_BREAKPOINTS)).toBe(false);
     expect(a.getFeatureRequirements(DebugFeature.LOG_POINTS)).toEqual([]);
-    expect(a.getDefaultLaunchConfig()).toEqual({ stopOnEntry: false, justMyCode: true });
-    expect(a.getDefaultAttachConfig()).toEqual({ timeout: 30000 });
     expect(a.supportsAttach()).toBe(true);
     expect(a.supportsDetach()).toBe(true);
     expect(a.getCapabilities()).toMatchObject({ supportsFunctionBreakpoints: false, supportsLogPoints: true, supportsRestartRequest: false });
