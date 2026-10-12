@@ -3453,7 +3453,8 @@ describe('SessionManager - DAP Operations', () => {
           return { success: true, body: { threads: [
             { id: 1, name: 'stopped' },
             { id: 2, name: 'runtime worker' },
-            { id: 3, name: 'main' }
+            // Not named main: the user-over-runtime preference, not name ordering, must pick it.
+            { id: 3, name: 'program thread' }
           ] } };
         }
         return { success: true, body: {} };

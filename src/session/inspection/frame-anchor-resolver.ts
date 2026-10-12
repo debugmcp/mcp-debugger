@@ -108,6 +108,14 @@ export interface FrameAnchorContext {
 }
 
 export interface ResolveFrameAnchorOptions {
+  /**
+   * The caller's permission to re-anchor, passed by the implicit reads
+   * (the server facade's default stack, locals, evaluate) and never with
+   * a caller's explicit threadId: an empty stack gets the bounded
+   * readiness retry and may switch to a sibling with frames, and a
+   * `pause` reported on a thread with no program frame may switch to the
+   * first sibling whose stack reaches the program (issue #898).
+   */
   ensureStackReady?: boolean;
 }
 
@@ -383,7 +391,16 @@ export class FrameAnchorResolver {
       if (frames.length > 0) {
         return { frames, threadId };
       }
-      const scanned = await this.scanSiblings(sessionId, proxyManager, threadId, policy, deadline - Date.now());
+      // At least one poll interval per scan: a sibling that answers in a
+      // few ms must not be "could not be unwound" because the window has
+      // a few ms left.
+      const scanned = await this.scanSiblings(
+        sessionId,
+        proxyManager,
+        threadId,
+        policy,
+        Math.max(deadline - Date.now(), pausedStackReadyIntervalMs)
+      );
       if (scanned) {
         // A stop that landed during the scan has re-anchored the session
         // itself; adopting now would clobber it with a stale verdict.
@@ -445,6 +462,9 @@ export class FrameAnchorResolver {
       this.ctx.tunables.pausedStackReadyTimeoutMs
     );
     if (!remembered && stopAtGate) {
+      // Kept whatever the outcome: a scan cut short by its budget or by
+      // rejecting siblings is not retried by the locals and evaluate reads
+      // that follow — one bounded scan per stop, by design.
       this.verdicts.set(stopAtGate, { verdict, threads });
     }
     const programThreadId = verdict.programThreadId;

@@ -194,7 +194,7 @@ describe('selectStopAnchor (issue #904)', () => {
     const verdict = await selectStopAnchor(base);
 
     expect(verdict.programThreadId).toBe(9);
-    expect(verdict.stopped).toBe('frameless');
+    expect(verdict.stopped).toBe('none');
   });
 });
 

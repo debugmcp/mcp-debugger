@@ -148,8 +148,8 @@ export interface StopAnchorVerdict {
    * stack (issue #496), where any stack beats none.
    */
   framedSiblingId?: number;
-  /** What the stopped thread's own stack says. */
-  stopped: 'program' | 'internal-only' | 'frameless' | 'unlisted';
+  /** What the stopped thread's own stack says; `none` when no stopped thread was given. */
+  stopped: 'program' | 'internal-only' | 'frameless' | 'unlisted' | 'none';
   /** Every stack the scan read, by thread id, so a caller never unwinds twice. */
   stacks: Map<number, DebugProtocol.StackFrame[]>;
 }
@@ -177,7 +177,8 @@ export async function selectStopAnchor(input: StopAnchorInput): Promise<StopAnch
     stacks.set(stoppedThreadId, input.stoppedFrames);
   }
   const listed = typeof stoppedThreadId === 'number' && threads.some((thread) => thread?.id === stoppedThreadId);
-  let stopped: StopAnchorVerdict['stopped'] = typeof stoppedThreadId === 'number' && !listed ? 'unlisted' : 'frameless';
+  let stopped: StopAnchorVerdict['stopped'] =
+    typeof stoppedThreadId !== 'number' ? 'none' : listed ? 'frameless' : 'unlisted';
   let programThreadId: number | undefined;
   let framedSiblingId: number | undefined;
 

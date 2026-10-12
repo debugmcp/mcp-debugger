@@ -461,6 +461,33 @@ describe('Server Inspection Tools Tests', () => {
       expect(content.note).toContain('includeInternals: true');
     });
 
+    it('forwards noProgramFrame when no frame of the shown stack is program code (issue #904)', async () => {
+      mockSessionManager.getSession.mockReturnValue({ proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(1) } });
+      mockSessionManager.getStackTraceDetailed.mockResolvedValue({
+        frames: [{ id: 0, name: '<anonymous>', file: '<unknown_source>', line: 1, column: 1 }],
+        totalFrameCount: 1, hiddenFrameCount: 0, allFramesInternal: false, noProgramFrame: true
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'get_stack_trace', arguments: { sessionId: 'test-session' } }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.noProgramFrame).toBe(true);
+
+      // Absent, not false, on an ordinary stack.
+      mockSessionManager.getStackTraceDetailed.mockResolvedValue({
+        frames: [{ id: 1, name: 'main', file: '/app/main.py', line: 3 }],
+        totalFrameCount: 1, hiddenFrameCount: 0, allFramesInternal: false
+      });
+      const plain = JSON.parse((await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'get_stack_trace', arguments: { sessionId: 'test-session' } }
+      })).content[0].text);
+      expect(plain).not.toHaveProperty('noProgramFrame');
+    });
+
     it('should handle missing session', async () => {
       mockSessionManager.getSession.mockReturnValue(null);
 
