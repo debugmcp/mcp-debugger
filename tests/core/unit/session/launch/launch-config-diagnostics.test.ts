@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import type { IDebugAdapter, LanguageSpecificLaunchConfig } from '@debugmcp/shared';
-import { collectLaunchConfigNotices } from '../../../../../src/session/launch/launch-config-diagnostics.js';
+import { collectAttachTransformNotices, collectLaunchConfigNotices } from '../../../../../src/session/launch/launch-config-diagnostics.js';
 
 describe('collectLaunchConfigNotices — launch-scoped diagnostics (issue #796)', () => {
   it('renders a scope: launch diagnostic as-is even though no caller key matches it', () => {
@@ -29,5 +29,26 @@ describe('collectLaunchConfigNotices — launch-scoped diagnostics (issue #796)'
     } as unknown as IDebugAdapter;
 
     expect(collectLaunchConfigNotices(adapter, {}, { program: '/app.js' } as LanguageSpecificLaunchConfig)).toEqual([]);
+  });
+});
+
+describe('collectAttachTransformNotices (issue #908)', () => {
+  it('names each note by its key, renders an operation-scoped note as-is, and dedupes', () => {
+    const adapter = {
+      consumeLaunchConfigDiagnostics: () => [
+        { key: 'port', message: 'attaching to ws://127.0.0.1:8181/ws' },
+        { key: 'port', message: 'attaching to ws://127.0.0.1:8181/ws' },
+        { key: 'sources', scope: 'launch' as const, message: 'attach without "sources": the C view only' }
+      ]
+    } as unknown as IDebugAdapter;
+
+    expect(collectAttachTransformNotices(adapter)).toEqual([
+      'port: attaching to ws://127.0.0.1:8181/ws',
+      'attach without "sources": the C view only'
+    ]);
+  });
+
+  it('answers nothing for an adapter that records no diagnostics', () => {
+    expect(collectAttachTransformNotices({} as IDebugAdapter)).toEqual([]);
   });
 });

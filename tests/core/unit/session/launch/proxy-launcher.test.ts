@@ -427,6 +427,52 @@ describe('ProxyLauncher.start', () => {
     expect(session.launchConfigNotices).toEqual([]);
   });
 
+  it('records the adapter attach-transform notes on the session, redacted and logged, and leaves launchConfigNotices empty (issue #908)', async () => {
+    const token = `ghp_${'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8'}`;
+    const adapter = new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE });
+    adapter.withAttachSupport();
+    Object.assign(adapter, {
+      consumeLaunchConfigDiagnostics: vi.fn(() => [
+        { key: 'port', message: 'attaching to ws://127.0.0.1:8181/ws — needs --disable-service-auth-codes' },
+        { key: 'env', message: `${token} ignored` },
+        { key: 'sources', scope: 'launch' as const, message: 'attach without "sources": the C view only' }
+      ])
+    });
+    const h = makeHarness({ adapter, proxyManager: new MockProxyManager() });
+    const session = makeSession();
+
+    await h.launcher.start(session, { scriptPath: 'attach://pid', dapLaunchArgs: launchArgs({ request: 'attach' }) });
+
+    expect(session.attachTransformNotices).toHaveLength(3);
+    expect(session.attachTransformNotices?.[0]).toBe('port: attaching to ws://127.0.0.1:8181/ws — needs --disable-service-auth-codes');
+    expect(session.attachTransformNotices?.[1]).toMatch(/^env: /);
+    expect(session.attachTransformNotices?.[1]).not.toContain(token);
+    expect(session.attachTransformNotices?.[2]).toBe('attach without "sources": the C view only');
+    expect(session.launchConfigNotices).toEqual([]);
+    expect(h.ctx.logger.warn).toHaveBeenCalledWith(expect.stringContaining('attach: port: attaching to ws://127.0.0.1:8181/ws'));
+  });
+
+  it('keeps a throwing attach transform notes stored and logged, and the next start resets them (issue #908)', async () => {
+    const adapter = new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE });
+    adapter.withAttachSupport();
+    adapter.transformAttachConfig!.mockRejectedValueOnce(new Error('Dart attach needs adapterConfig.vmServiceUri'));
+    Object.assign(adapter, {
+      consumeLaunchConfigDiagnostics: vi.fn()
+        .mockReturnValueOnce([{ key: 'deviceId', message: 'ignored: only Flutter runners use deviceId (this attach uses dart)' }])
+        .mockReturnValue([])
+    });
+    const h = makeHarness({ adapter, proxyManager: new MockProxyManager() });
+    const session = makeSession();
+
+    await expect(h.launcher.start(session, { scriptPath: 'attach://pid', dapLaunchArgs: launchArgs({ request: 'attach' }) }))
+      .rejects.toThrow('Dart attach needs');
+    expect(session.attachTransformNotices).toEqual(['deviceId: ignored: only Flutter runners use deviceId (this attach uses dart)']);
+    expect(h.ctx.logger.warn).toHaveBeenCalledWith(expect.stringContaining('attach: deviceId: ignored'));
+
+    await h.launcher.start(session, { scriptPath: 'attach://pid', dapLaunchArgs: launchArgs({ request: 'attach' }) });
+    expect(session.attachTransformNotices).toEqual([]);
+  });
+
   it('reports caller-only drops and forwarded typos from either bag with the winning provenance', async () => {
     const adapter = Object.assign(new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE }), {
       supportedLaunchKeys: ['program', 'outFiles', 'sourceMapPathOverrides', 'envFile'],

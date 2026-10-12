@@ -31,7 +31,7 @@ import { ErrorMessages } from '../../utils/error-messages.js';
 import type { CustomLaunchRequestArguments } from '../session-manager-core.js';
 import type { ManagedSession, ToolchainValidationState } from '../session-store.js';
 import type { ProxyLaunchContext } from '../operations-context.js';
-import { callerLaunchInputs, collectLaunchConfigNotices, type CallerLaunchInput } from './launch-config-diagnostics.js';
+import { callerLaunchInputs, collectLaunchConfigNotices, type CallerLaunchInput, collectAttachTransformNotices } from './launch-config-diagnostics.js';
 
 
 /**
@@ -91,6 +91,7 @@ export class ProxyLauncher {
     // or transform failure cannot inherit an earlier MSVC classification.
     this.ctx.updateSession(session.id, { toolchainValidation: undefined });
     session.launchConfigNotices = [];
+    session.attachTransformNotices = undefined;
 
     // Log entrance for Windows CI debugging
     this.ctx.logger.info(
@@ -305,6 +306,17 @@ export class ProxyLauncher {
           ? notices.map(notice => redactSecretsInString(notice).value)
           : notices;
         for (const notice of session.launchConfigNotices) this.ctx.logger.warn(`[SessionManager] ${notice}`);
+      } else {
+        // The adapter's own attach notes (issue #908): drained here or lost —
+        // each attempt acquires a fresh adapter. On a thrown transform they
+        // are stored and logged only; the attach error is the adapter's own.
+        const notices = collectAttachTransformNotices(adapter);
+        session.attachTransformNotices = this.ctx.redactionEnabled()
+          ? notices.map(notice => redactSecretsInString(notice).value)
+          : notices;
+        for (const notice of session.attachTransformNotices) {
+          this.ctx.logger.warn(`[SessionManager] ${session.language} attach: ${notice}`);
+        }
       }
     }
 

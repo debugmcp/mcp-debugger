@@ -56,3 +56,15 @@ export function collectLaunchConfigNotices(
   }
   return [...new Set(notices)];
 }
+
+/**
+ * The adapter's attach-transform diagnostics as attach-answer notices (issue
+ * #908): `key: message`, bare — `port` is a top-level attach parameter while
+ * `deviceId` lives under `adapterConfig`, and the merged attach bag carries no
+ * provenance to name — and an operation-scoped note as-is. Drained even when
+ * the transform threw. Nothing from an adapter that records none.
+ */
+export function collectAttachTransformNotices(adapter: IDebugAdapter): string[] {
+  const diagnostics = adapter.consumeLaunchConfigDiagnostics?.() ?? [];
+  return [...new Set(diagnostics.map(d => (d.scope ? d.message : `${d.key}: ${d.message}`)))];
+}

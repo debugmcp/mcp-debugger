@@ -461,11 +461,18 @@ export class AttachController {
       // #466) — "unknown attach keys should either work or warn".
       const droppedKeys = session.attachDroppedConfigKeys;
       const forwardedKeys = session.attachForwardedUnknownConfigKeys;
+      const transformNotices = session.attachTransformNotices;
       session.attachDroppedConfigKeys = undefined;
       session.attachForwardedUnknownConfigKeys = undefined;
+      session.attachTransformNotices = undefined;
       const warningParts: string[] = [...resync.warnings];
       if (attachFnBpWarning) {
         warningParts.push(attachFnBpWarning);
+      }
+      // The adapter's own attach-transform notes (issue #908): Dart's no-auth
+      // URI built from host:port, COBOL's build options given without sources.
+      if (transformNotices && transformNotices.length > 0) {
+        warningParts.push(...transformNotices);
       }
       if (droppedKeys && droppedKeys.length > 0) {
         warningParts.push(

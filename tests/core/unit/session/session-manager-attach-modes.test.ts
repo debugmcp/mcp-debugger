@@ -857,6 +857,32 @@ describe('SessionManagerOperations attach modes', () => {
       expect(warning).not.toContain('keepMe');
     });
 
+    it('joins the adapter attach-transform notes into data.warning ahead of the dropped-keys sentence, never into message (issue #908)', async () => {
+      const adapterStub = makeDirectConnectAdapter(() => ({ request: 'attach' }));
+      Object.assign(adapterStub, {
+        consumeLaunchConfigDiagnostics: vi.fn(() => [
+          { key: 'port', message: 'attaching to ws://127.0.0.1:12345/ws — a host:port only works for a VM started with --disable-service-auth-codes; otherwise pass the full vmServiceUri with its token' },
+          { key: 'deviceId', message: 'ignored: only Flutter runners use deviceId (this attach uses dart)' }
+        ])
+      });
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapterStub);
+
+      const result = await operations.attachToProcess('test-session', {
+        host: '127.0.0.1',
+        port: 12345,
+        stopOnEntry: false,
+        adapterConfig: { localRoot: 'C:\\x' }
+      });
+
+      expect(result.success).toBe(true);
+      const warning = result.data?.warning ?? '';
+      expect(warning).toContain('port: attaching to ws://127.0.0.1:12345/ws');
+      expect(warning).toContain('deviceId: ignored: only Flutter runners use deviceId');
+      expect(warning.indexOf('port: attaching')).toBeLessThan(warning.indexOf('were ignored: localRoot'));
+      expect(result.data?.message).not.toContain('attaching to');
+      expect(mockSession.attachTransformNotices).toBeUndefined();
+    });
+
     it('does not leak a stale warning into a later attach on the same session', async () => {
       const dropAll = makeDirectConnectAdapter(() => ({ request: 'attach' }));
       vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(dropAll);
