@@ -4,7 +4,7 @@
 `get_stack_trace` applies language-specific stack trace filtering, hiding internal/framework frames by default so the caller sees user code first.
 
 ## Features
-- **JavaScript/Node.js**: Filters out `<node_internals>`/`node:` frames, any frame under a `node_modules` path segment (pnpm's nested layout and Windows separators included), and js-debug's sourceless async separators (`await`, `Promise.then`, `bound-anonymous-fn` at line 0) by default (issue #655)
+- **JavaScript/Node.js**: Filters out `<node_internals>`/`node:` frames, any frame under a `node_modules` path segment (pnpm's nested layout and Windows separators included), and any frame with no source at all — js-debug's async separators (`await`, `Promise.then`, `bound-anonymous-fn` at line 0) and the `<anonymous>` frame a pause lands on between event-loop dispatches on an idle server (`<unknown_source>:1`, issue #900) — by default (issue #655)
 - **Go**: Filters out `/runtime/` and `/testing/` frames by default
 - **Java**: Filters out JDK internal frames by default
 - **.NET/C#**: Filters out `System.*` and `Microsoft.*` runtime frames and sourceless frames by default
@@ -120,7 +120,7 @@ The filtering is implemented using the existing `AdapterPolicy` system:
 
 2. **JsDebugAdapterPolicy** (`packages/shared/src/interfaces/adapter-policy-js.ts`)
    - Implements filtering for JavaScript
-   - Identifies internal frames by path: `<node_internals>`/`node:`, any `node_modules` segment, and sourceless line-0 async separators (issue #655); `frame.name` never participates
+   - Identifies internal frames by path: `<node_internals>`/`node:`, any `node_modules` segment, and any frame with no source at all (the line-0 async separators and the idle-pause `<anonymous>` landing, issues #655/#900); `frame.name` never participates
    - No local fallback — the central `FrameAnchorResolver` guarantee below owns the all-internal case
 
 3. **GoAdapterPolicy** (`packages/shared/src/interfaces/adapter-policy-go.ts`)

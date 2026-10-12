@@ -78,6 +78,15 @@ export const stepTool: ToolHandler = async (ctx, args, toolName) => {
       }
     }
 
+    // Where the step landed, beyond the frame (issue #904): the thread the
+    // answer is anchored on when it is not the reported one, and the note.
+    if (typeof resultData?.threadId === 'number') {
+      response.threadId = resultData.threadId;
+    }
+    if (resultData?.note) {
+      response.note = resultData.note;
+    }
+
     // Extract location from result data
     const location = resultData?.location;
 
@@ -161,6 +170,13 @@ export const waitForStopTool: ToolHandler = async (ctx, args, _toolName, extra) 
     }
     if (typeof data?.exitCode === 'number') {
       response.exitCode = data.exitCode;
+    }
+    // The landing beyond the frame (issue #904), as for pause_execution.
+    if (typeof data?.threadId === 'number') {
+      response.threadId = data.threadId;
+    }
+    if (data?.note) {
+      response.note = data.note;
     }
     if (data?.location) {
       response.location = data.location;

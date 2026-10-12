@@ -6,6 +6,7 @@
  * that explains a switch — instead of the top frame alone, which used to be
  * copied three times and knew nothing (issues #898/#900).
  */
+import { SessionState } from '@debugmcp/shared';
 import type { OperationsContext } from '../operations-context.js';
 import type { StopLandingFields } from '../session-manager-core.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
@@ -43,6 +44,11 @@ export async function describeStopLocation(
       : await ctx.getStackTraceDetailed(sessionId);
     const top = result.frames[0];
     const landing: StopLanding = {};
+    // The frames read are the landing even if the session left PAUSED under
+    // the read (a concurrent continue, an adapter's own bookkeeping); the
+    // resolver's "not paused" note is not, so it never rides on an answer
+    // that says 'Paused'.
+    const stillPaused = ctx.getSession(sessionId).state === SessionState.PAUSED;
     if (top) {
       landing.location = { file: top.file, line: top.line, column: top.column };
     }
@@ -54,7 +60,7 @@ export async function describeStopLocation(
       landing.threadId = result.threadId;
     }
     const notes: string[] = [];
-    if (result.note) {
+    if (result.note && stillPaused) {
       notes.push(result.note);
     }
     if (result.noProgramFrame && top) {

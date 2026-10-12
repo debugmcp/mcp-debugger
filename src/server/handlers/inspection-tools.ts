@@ -101,8 +101,10 @@ export const getStackTraceTool: ToolHandler = async (ctx, args) => {
     }
     if (stackTrace.hiddenFrameCount > 0) {
       payload.hiddenFrames = stackTrace.hiddenFrameCount;
+      // A kept frame with no source (a `<…>` label) has no scopes to offer.
+      const keptHasSource = !(stackTrace.frames[0]?.file ?? '').startsWith('<');
       notes.push(stackTrace.allFramesInternal
-        ? `All ${stackTrace.totalFrameCount} frames are internal/runtime frames; showing the top internal frame so scopes and evaluate still work. Pass includeInternals: true to see the full stack.`
+        ? `All ${stackTrace.totalFrameCount} frames are internal/runtime frames; showing the top internal frame ${keptHasSource ? 'so scopes and evaluate still work' : 'although it has no source, so scopes may be empty'}. Pass includeInternals: true to see the full stack.`
         : `${stackTrace.hiddenFrameCount} internal frame(s) hidden — pass includeInternals: true to see them.`);
     }
     // No frame of the shown stack is program code and nothing was hidden to

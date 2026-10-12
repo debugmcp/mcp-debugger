@@ -217,6 +217,39 @@ describe('execution tool handlers', () => {
     });
   });
 
+  describe('landing fields on the step and wait_for_stop answers (issue #904)', () => {
+    const liveSession = { id: 'test-session', sessionLifecycle: SessionLifecycleState.ACTIVE };
+    const note = "The stop was reported on thread 20256, whose 4 frames are all internal/runtime (top: 'DbgBreakPoint'); showing thread 15896, which is in 'main'.";
+    const location = { file: '/app/main.cpp', line: 21, column: 3 };
+
+    it('step_over hoists threadId and note next to location', async () => {
+      ctx.sessionManager.getSession.mockReturnValue(liveSession);
+      ctx.sessionManager.stepOver.mockResolvedValue({
+        success: true,
+        state: 'paused',
+        data: { message: 'Stepped over', location, threadId: 15896, note }
+      });
+
+      const payload = JSON.parse((await stepTool(ctx, { sessionId: 'test-session' }, 'step_over')).content[0].text);
+
+      expect(payload).toMatchObject({ success: true, state: 'paused', message: 'Stepped over', location, threadId: 15896, note });
+    });
+
+    it('wait_for_stop hoists threadId and note next to location', async () => {
+      ctx.sessionManager.getSession.mockReturnValue(liveSession);
+      const lastStop = { reason: 'pause', rawReason: 'exception', threadId: 20256, timestamp: 1_700_000_000_000 };
+      ctx.sessionManager.waitForStop.mockResolvedValue({
+        success: true,
+        state: 'paused',
+        data: { message: 'Paused (pause) at /app/main.cpp:21', lastStop, location, threadId: 15896, note }
+      });
+
+      const payload = JSON.parse((await waitForStopTool(ctx, { sessionId: 'test-session' }, 'wait_for_stop')).content[0].text);
+
+      expect(payload).toMatchObject({ success: true, state: 'paused', lastStop, location, threadId: 15896, note });
+    });
+  });
+
   describe('stepTool failure envelopes (issue #638)', () => {
     it.each([
       ['step_over', 'stepOver'],
