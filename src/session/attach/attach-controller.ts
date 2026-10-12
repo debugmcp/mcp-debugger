@@ -23,6 +23,7 @@ import {
 import type { AttachLocality } from '@debugmcp/shared';
 import { attachLocalityOf, classifyAttachAddressing } from './attach-addressing.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
+import { DapResponseError } from '../../proxy/dap-response-error.js';
 import type { AttachResultData, CustomLaunchRequestArguments, DebugResult } from '../session-manager-core.js';
 import type { AttachContext } from '../operations-context.js';
 import type { BreakpointController } from '../breakpoints/breakpoint-controller.js';
@@ -196,6 +197,10 @@ export class AttachController {
     // proxy exists emits no stop, so a stop left over from a prior run would
     // be reported as this attempt's once the session lands in ERROR (#720).
     session.lastStop = undefined;
+    // The previous run's proxy error and exit are not this attempt's either
+    // (issue #896): assertTargetPresent below reports lastProxyError.
+    session.lastProxyError = undefined;
+    session.lastProxyExit = undefined;
     // An attach debugs regardless of any earlier noDebug launch (issue #749).
     session.launchDebuggerOff = undefined;
 
@@ -251,6 +256,15 @@ export class AttachController {
             breakOnExceptions
           });
         } catch (handshakeErr) {
+          // The adapter's own answer to the attach request is final (issue
+          // #896): js-debug names the inspector it could not reach, and no
+          // thread will ever be reported — fail now, in its words. Anything
+          // else (a transport failure, a policy fault) keeps the tolerant
+          // path: verification decides, and a dropped socket is reported
+          // there with the adapter's last stderr line (issue #897).
+          if (handshakeErr instanceof DapResponseError && handshakeErr.command === 'attach') {
+            throw new Error(ErrorMessages.attachRejected(session.language, handshakeErr.message));
+          }
           this.ctx.logger.warn(
             `[SessionManager] Language handshake for attach returned with warning/error: ${
               handshakeErr instanceof Error ? handshakeErr.message : String(handshakeErr)
