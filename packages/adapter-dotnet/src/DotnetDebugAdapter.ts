@@ -69,6 +69,7 @@ import {
 import { DebugLanguage } from '@debugmcp/shared';
 import { AdapterDependencies } from '@debugmcp/shared';
 import { findNetcoredbgExecutable, findPdb2PdbExecutable, convertPdbsToTemp, getProcessExecutableDir, getProcessArchitecture } from './utils/dotnet-utils.js';
+import { bridgePathCandidates } from './utils/bridge-path.js';
 
 /**
  * Cache entry for debugger executable paths
@@ -306,19 +307,10 @@ export class DotnetDebugAdapter extends EventEmitter implements IDebugAdapter {
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);
 
-    const possiblePaths = [
-      // Development: running from compiled adapter package dist/
-      path.resolve(__dirname, 'utils', 'netcoredbg-bridge.js'),
-      // Bundled NPX distribution (cli.mjs is in dist/, bridge copied at dist/packages/adapter-dotnet/dist/utils/)
-      path.resolve(__dirname, 'packages', 'adapter-dotnet', 'dist', 'utils', 'netcoredbg-bridge.js'),
-      // Monorepo source tree fallback
-      path.resolve(__dirname, '..', '..', '..', '..', 'packages', 'adapter-dotnet', 'dist', 'utils', 'netcoredbg-bridge.js'),
-      // CWD-relative fallback
-      path.resolve(process.cwd(), 'packages', 'adapter-dotnet', 'dist', 'utils', 'netcoredbg-bridge.js'),
-      // Container builds
-      '/app/packages/adapter-dotnet/dist/utils/netcoredbg-bridge.js',
-      '/app/node_modules/@debugmcp/adapter-dotnet/dist/utils/netcoredbg-bridge.js',
-    ];
+    // The walk is a pure list (utils/bridge-path.ts) so the layouts are pinned
+    // by a unit test and a source checkout finds its own dist from any cwd
+    // (issue #743).
+    const possiblePaths = bridgePathCandidates(__dirname, process.cwd());
 
     const bridgePath = possiblePaths.find(p => fs.existsSync(p));
 
