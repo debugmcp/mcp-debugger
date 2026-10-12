@@ -33,6 +33,11 @@ export type AttachVerifyResult =
   | { ok: true; threads: DebugProtocol.Thread[] }
   | { ok: false; proxyGone: boolean; lastFailure: string };
 
+/** A stderr line without its leading `[LEVEL target]` log tag, for the already-quoted check. */
+function stripLogTag(line: string): string {
+  return line.replace(/^\[[^\]]*\]\s*/, '');
+}
+
 /**
  * Poll DAP 'threads' until the debugger reports at least one thread or the
  * verification window closes. Never throws: every failure mode is a result.
@@ -132,7 +137,10 @@ export async function verifyAttachThreads(
       // settles only once the parent has processed the worker's last message,
       // which is the one that carries the tail (issue #897).
       const line = lastAdapterStderrLine(proxyManager.getAdapterStderrTail?.());
-      if (line && !lastFailure.includes(line)) {
+      // Not when the failure already quotes it: an adapter's own error answer
+      // repeats what it logged (CodeLLDB: "[ERROR codelldb::debug_session]
+      // Could not attach: …" on stderr, "Could not attach: …" in the response).
+      if (line && !lastFailure.includes(stripLogTag(line))) {
         lastFailure = `${lastFailure}; its last stderr line: "${line}"`;
       }
     }

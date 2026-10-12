@@ -2729,6 +2729,38 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         );
       });
 
+      it('does not repeat a stderr line the adapter error already quotes, log tag aside', async () => {
+        // CodeLLDB answers the attach with its own text and logs the same
+        // sentence behind a "[ERROR codelldb::debug_session]" tag; the latched
+        // error event is the adapter's own word, so nothing is appended.
+        (operations as unknown as { attachVerifyTimeoutMs: number }).attachVerifyTimeoutMs = 5000;
+        let errorHandler: ((err: Error) => void) | undefined;
+        mockProxyManager.on.mockImplementation((event: string, handler: (err: Error) => void) => {
+          if (event === 'error') errorHandler = handler;
+          return mockProxyManager;
+        });
+        (mockProxyManager as unknown as { getAdapterStderrTail: () => string[] }).getAdapterStderrTail =
+          vi.fn().mockReturnValue(['[ERROR codelldb::debug_session] Could not attach: no process found with process ID 4']);
+        mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+          if (command === 'threads') {
+            errorHandler?.(new Error('Critical initialization error: Could not attach: no process found with process ID 4'));
+            throw new Error('Proxy not initialized');
+          }
+          return {};
+        });
+        vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
+          mockSession.proxyManager = mockProxyManager;
+          return {};
+        });
+
+        const result = await operations.attachToProcess('test-session', { processId: 4, stopOnEntry: true });
+
+        expect(result.error).toBe(
+          'Failed to attach: The debug adapter ended the session during attach verification: ' +
+          'Critical initialization error: Could not attach: no process found with process ID 4'
+        );
+      });
+
       it('says the session ended when the target itself finished under the debugger', async () => {
         const result = await attachWithExit([0, undefined, true], ['bye']);
 
