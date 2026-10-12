@@ -15,13 +15,14 @@ const work = path.resolve('/work');
 const REL = path.join('utils', 'netcoredbg-bridge.js');
 
 describe('bridgePathCandidates (issue #743)', () => {
-  it('starts with the package dist, then the npx bundle, the monorepo, the cwd, then /app', () => {
+  it('starts with the package dist, then the npx bundle, the project root from a node_modules copy, the cwd, then /app', () => {
     const c = bridgePathCandidates(dist, work);
     expect(c[0]).toBe(path.join(dist, REL));
     expect(c[1]).toBe(path.join(dist, 'packages', 'adapter-dotnet', 'dist', REL));
     expect(c).toContain(path.join(work, 'packages', 'adapter-dotnet', 'dist', REL));
     expect(c.filter((p) => p.startsWith('/app/'))).toHaveLength(2);
-    expect(new Set(c).size).toBe(c.length);
+    // From dist/ the source-tree sibling is the package dist itself, so six remain, not seven.
+    expect(c).toHaveLength(6);
   });
 
   it('reaches the package dist from its src ahead of the cwd, whatever the cwd', () => {

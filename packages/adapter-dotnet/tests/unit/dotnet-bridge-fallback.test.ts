@@ -99,7 +99,8 @@ describe('DotnetDebugAdapter bridge fallback resolution', () => {
   });
 
   it('uses fallback path when primary path does not exist', () => {
-    // First call returns false (dev path), second returns true (NPX fallback)
+    // First call returns false (the package dist), second returns true: under vitest that is
+    // the source-tree sibling (fromDir is src/); from dist/ it would be the npx bundle (#743)
     let callCount = 0;
     existsSyncMock.mockImplementation(() => {
       callCount++;
