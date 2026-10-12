@@ -60,7 +60,7 @@ export type ProxyStatusMessage =
   | { type: 'status'; sessionId: string; status: 'dap_handshake_stage'; stage: 'transport_connected' | 'request_pending' | 'response_received'; command?: string; data?: unknown }
   /** The worker's pre-detach resume outcome (issue #763): a continue sent ahead of an attach-mode disconnect. */
   | { type: 'status'; sessionId: string; status: 'pre_detach_resume'; trigger: 'detach' | 'close' | 'shutdown'; threadId?: number; resumed: boolean; error?: string; data?: unknown }
-  | { type: 'status'; sessionId: string; status: 'adapter_exited' | 'dap_connection_closed' | 'terminated'; code?: number | null; signal?: NodeJS.Signals | null; expected?: boolean; data?: unknown };
+  | { type: 'status'; sessionId: string; status: 'adapter_exited' | 'dap_connection_closed' | 'terminated'; code?: number | null; signal?: NodeJS.Signals | null; expected?: boolean; stderrTail?: string[]; data?: unknown };
 
 export type ProxyDapEventMessage = { 
   type: 'dapEvent'; 
@@ -84,7 +84,9 @@ export type ProxyDapResponseMessage = {
 export type ProxyErrorMessage = { 
   type: 'error'; 
   sessionId: string; 
-  message: string; 
+  message: string;
+  /** The adapter process's last stderr lines (issue #897). */
+  stderrTail?: string[]; 
   data?: unknown 
 };
 

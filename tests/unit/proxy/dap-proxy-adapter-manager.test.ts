@@ -3,7 +3,11 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
-import { GenericAdapterManager } from '../../../src/proxy/dap-proxy-adapter-manager.js';
+import {
+  GenericAdapterManager,
+  RECENT_STDERR_LINES,
+  RECENT_STDERR_LINE_CHARS
+} from '../../../src/proxy/dap-proxy-adapter-manager.js';
 import type { AdapterStdioSource } from '../../../src/proxy/dap-proxy-adapter-manager.js';
 import type { IProcessSpawner, ILogger, IFileSystem } from '../../../src/proxy/dap-proxy-interfaces.js';
 import type { Mock } from 'vitest';
@@ -663,6 +667,61 @@ describe('GenericAdapterManager', () => {
       const shutdownPromise = manager.shutdown(proc, { killProcessTree: true });
       await vi.advanceTimersByTimeAsync(300);
       await expect(shutdownPromise).resolves.toBeUndefined();
+    });
+  });
+
+  describe('recentStderr: the adapter stderr tail reported with its terminal status (issue #897)', () => {
+    // js-debug writes "Could not connect to debug target" and a stack trace
+    // to stderr, then drops the DAP socket; the worker sends these lines
+    // with its terminal status so the attach failure can quote them.
+    const REDACTED = '[REDACTED — line contained sensitive data]';
+    let recentStderr: () => string[];
+
+    beforeEach(async () => {
+      const result = await manager.spawn({ command: 'node', args: ['vsDebugServer.cjs'], logDir: '/logs' });
+      expect(result.recentStderr).toBeTypeOf('function');
+      recentStderr = result.recentStderr!;
+    });
+
+    it('keeps the sanitized stderr lines oldest first, blank lines and stdout excluded', () => {
+      mockProcess.stderr.emit('data', Buffer.from(
+        'Error: Could not connect to debug target at http://localhost:5678\n    at boot (vsDebugServer.cjs:91)\n'
+      ));
+      mockProcess.stderr.emit('data', Buffer.from('GITHUB_PAT=github_pat_supersecret1234567890\n\n'));
+      mockProcess.stdout.emit('data', Buffer.from('stdout noise\n'));
+
+      expect(recentStderr()).toEqual([
+        'Error: Could not connect to debug target at http://localhost:5678',
+        '    at boot (vsDebugServer.cjs:91)',
+        REDACTED
+      ]);
+    });
+
+    it('bounds the tail to RECENT_STDERR_LINES lines of RECENT_STDERR_LINE_CHARS characters', () => {
+      for (let i = 0; i < RECENT_STDERR_LINES + 5; i += 1) {
+        mockProcess.stderr.emit('data', Buffer.from(`line ${i}\n`));
+      }
+      mockProcess.stderr.emit('data', Buffer.from(`${'x'.repeat(RECENT_STDERR_LINE_CHARS + 50)}\n`));
+
+      const tail = recentStderr();
+      expect(tail).toHaveLength(RECENT_STDERR_LINES);
+      expect(tail[0]).toBe('line 6');
+      expect(tail[tail.length - 1]).toBe(`${'x'.repeat(RECENT_STDERR_LINE_CHARS)}…`);
+    });
+
+    it('includes the fragment flushed when the stream ends', () => {
+      mockProcess.stderr.emit('data', Buffer.from('no newline yet'));
+      expect(recentStderr()).toEqual([]);
+
+      mockProcess.stderr.emit('end');
+      expect(recentStderr()).toEqual(['no newline yet']);
+    });
+
+    it('returns a copy', () => {
+      mockProcess.stderr.emit('data', Buffer.from('one\n'));
+      const first = recentStderr();
+      first.push('tampered');
+      expect(recentStderr()).toEqual(['one']);
     });
   });
 });

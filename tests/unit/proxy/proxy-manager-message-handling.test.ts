@@ -1431,6 +1431,60 @@ describe('ProxyManager Message Handling', () => {
       expect(exitSpy).toHaveBeenCalledTimes(1);
     });
 
+    it('records the adapter stderr tail a terminal status carries, and keeps it after cleanup (issue #897)', () => {
+      const proxyManager = new ProxyManager(null, { launchProxy: vi.fn() } as never, createMockFileSystem(), createMockLogger());
+      const exitSpy = vi.fn();
+      proxyManager.on('exit', exitSpy);
+      const tail = [
+        'Error: Could not connect to debug target at http://localhost:5678: Could not find any debuggable target',
+        '    at boot (vsDebugServer.cjs:91:49334)'
+      ];
+      expect(proxyManager.getAdapterStderrTail()).toEqual([]);
+
+      (proxyManager as unknown as { handleProxyMessage: (message: any) => void }).handleProxyMessage({
+        type: 'status',
+        sessionId: 'status-session',
+        status: 'dap_connection_closed',
+        expected: false,
+        stderrTail: tail
+      });
+
+      // Recorded before the emit: the session layer stops the manager from
+      // inside its exit handler, and no later message is processed.
+      expect(exitSpy).toHaveBeenCalledWith(null, undefined, false);
+      expect(proxyManager.getAdapterStderrTail()).toEqual(tail);
+
+      (proxyManager as unknown as { cleanup: () => void }).cleanup();
+      expect(proxyManager.getAdapterStderrTail()).toEqual(tail);
+    });
+
+    it('records the tail an error report carries (issue #897)', () => {
+      const proxyManager = new ProxyManager(null, { launchProxy: vi.fn() } as never, createMockFileSystem(), createMockLogger());
+
+      (proxyManager as unknown as { handleProxyMessage: (message: any) => void }).handleProxyMessage({
+        type: 'error',
+        sessionId: 'status-session',
+        message: 'DAP client error: read ECONNRESET',
+        stderrTail: ['Error: boom']
+      });
+
+      expect(proxyManager.getAdapterStderrTail()).toEqual(['Error: boom']);
+    });
+
+    it('ignores a malformed or empty stderrTail and keeps the one it has (issue #897)', () => {
+      const proxyManager = new ProxyManager(null, { launchProxy: vi.fn() } as never, createMockFileSystem(), createMockLogger());
+      const handle = (proxyManager as unknown as { handleProxyMessage: (message: any) => void }).handleProxyMessage.bind(proxyManager);
+
+      handle({ type: 'status', sessionId: 'status-session', status: 'adapter_spawned', pid: 1, stderrTail: 'not-an-array' });
+      expect(proxyManager.getAdapterStderrTail()).toEqual([]);
+
+      handle({ type: 'status', sessionId: 'status-session', status: 'adapter_exited', code: 1, stderrTail: ['Error: boom', 7] });
+      expect(proxyManager.getAdapterStderrTail()).toEqual(['Error: boom']);
+
+      handle({ type: 'status', sessionId: 'status-session', status: 'terminated', expected: true, stderrTail: [] });
+      expect(proxyManager.getAdapterStderrTail()).toEqual(['Error: boom']);
+    });
+
     it('rejects pending requests when proxy exits', () => {
       const logger = createMockLogger();
       const fileSystem = createMockFileSystem();
