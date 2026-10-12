@@ -297,7 +297,19 @@ window, the window is caller-configurable (issue #143):
   lastFailure)`, which names the `verifyTimeout` knob so a caller that hit the
   window on a slow target knows how to retry. When the proxy-gone latch fired
   instead, `ErrorMessages.attachAdapterFailed(lastFailure)` reports the adapter's
-  own error rather than blaming the deadline.
+  own error rather than blaming the deadline: the latched `error` event's text,
+  or how the adapter ended — `it exited (code=1)`, `it closed its DAP connection`
+  (js-debug drops the socket after failing to reach the inspector, process still
+  alive), `it reported the session as ended` — followed by its last stderr line
+  (issue #897). The worker sends the adapter process's last sanitized stderr
+  lines with its terminal status and error reports (`stderrTail`); the manager
+  records them before emitting, because the session layer stops it from inside
+  the exit handler and processes no later message, and `getAdapterStderrTail()`
+  survives the teardown. `lastAdapterStderrLine` picks the last line that is
+  not a stack frame, so js-debug's `Error: Could not connect to debug target …`
+  wins over the nine `    at …` lines under it. The same line rides
+  `lastProxyExit.stderrLine` into a launch's `Debug proxy exited unexpectedly`
+  message.
 
 ## Error Response Patterns
 
