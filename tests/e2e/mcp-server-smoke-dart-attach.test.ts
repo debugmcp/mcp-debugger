@@ -132,6 +132,8 @@ describe.skipIf(SKIP_DART)('MCP Server Dart Attach Smoke Test @requires-dart', (
     sessionId = (await call('create_debug_session', { language: 'dart', name: 'dart-attach-port' })).sessionId as string;
     const res = await attachOrSkip(ctx, { host: '127.0.0.1', port, adapterConfig: { cwd: DART_PROBE_DIR } });
     expect(String(res.message ?? '')).not.toMatch(/ignored/i);
+    // The adapter's own note about the no-auth URI it built reaches the answer's warning (issue #908).
+    expect(String(res.warning ?? '')).toMatch(/disable-service-auth-codes/);
 
     // The post-attach pause lands in the event loop: a stop with no user frame is still a stop.
     const paused = await pollState('paused', 30000);
