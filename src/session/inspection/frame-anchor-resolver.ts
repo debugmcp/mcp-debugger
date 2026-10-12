@@ -201,7 +201,6 @@ export class FrameAnchorResolver {
         note = await this.describeFramelessThread(sessionId, proxyManager, threadId, policy);
       } else if (
         rawFrames.length > 0 &&
-        threadId === undefined &&
         opts?.ensureStackReady &&
         isProgramNeutralStopReason(stopAtGate?.reason) &&
         this.isStoppedThread(stopAtGate, currentThreadId, effectiveThreadId) &&
@@ -211,7 +210,10 @@ export class FrameAnchorResolver {
         // break-in thread Windows injects, issue #898) says nothing about
         // where the program is; a sibling in the program's code does. Only a
         // program-neutral stop may move: a breakpoint, step, exception or
-        // entry stop belongs to the thread it was reported on.
+        // entry stop belongs to the thread it was reported on. Only an
+        // implicit read may move, and `ensureStackReady` is what the implicit
+        // reads pass (the server facade names the current thread when it
+        // passes it; a caller's explicit threadId comes without the option).
         const adopted = await this.adoptProgramThread(
           sessionId,
           session,
@@ -278,10 +280,11 @@ export class FrameAnchorResolver {
       // An implicit read answered from a thread other than the one the stop
       // named — the attach controller or an earlier resolve moved the anchor
       // there — says so, so the stop's thread in list_threads is not a
-      // puzzle. Never on an explicit threadId: the caller chose it.
+      // puzzle. Never on an explicit threadId (read without the readiness
+      // option): the caller chose it.
       if (
         !note &&
-        threadId === undefined &&
+        opts?.ensureStackReady &&
         typeof stopAtGate?.threadId === 'number' &&
         resultThreadId !== stopAtGate.threadId &&
         session.lastStop === stopAtGate

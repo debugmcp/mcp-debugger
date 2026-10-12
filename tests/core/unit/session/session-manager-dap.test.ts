@@ -4661,10 +4661,10 @@ describe('SessionManager - DAP Operations', () => {
       expect(dependencies.mockProxyManager.getCurrentThreadId()).toBe(BREAK_IN_THREAD);
     });
 
-    it('never moves off a thread the caller named explicitly', async () => {
+    it('never moves off a thread the caller named explicitly (the facade reads an explicit threadId without the readiness option)', async () => {
       const session = await pausedOnBreakIn();
 
-      const result = await sessionManager.getStackTraceDetailed(session.id, BREAK_IN_THREAD, false, READY);
+      const result = await sessionManager.getStackTraceDetailed(session.id, BREAK_IN_THREAD, false);
 
       expect(result.threadId).toBe(BREAK_IN_THREAD);
       expect(result.allFramesInternal).toBe(true);
