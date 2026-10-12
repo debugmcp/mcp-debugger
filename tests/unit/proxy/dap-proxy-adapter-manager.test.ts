@@ -11,6 +11,7 @@ import {
 import type { AdapterStdioSource } from '../../../src/proxy/dap-proxy-adapter-manager.js';
 import type { IProcessSpawner, ILogger, IFileSystem } from '../../../src/proxy/dap-proxy-interfaces.js';
 import type { Mock } from 'vitest';
+import { createMockFileSystem } from '../../test-utils/mocks/dap-proxy-doubles.js';
 
 function createMockLogger(): ILogger {
   return {
@@ -18,15 +19,6 @@ function createMockLogger(): ILogger {
     error: vi.fn(),
     debug: vi.fn(),
     warn: vi.fn()
-  };
-}
-
-function createMockFileSystem(): IFileSystem {
-  return {
-    ensureDir: vi.fn().mockResolvedValue(undefined),
-    pathExists: vi.fn().mockResolvedValue(true),
-    readFile: vi.fn().mockResolvedValue(''),
-    remove: vi.fn().mockResolvedValue(undefined)
   };
 }
 

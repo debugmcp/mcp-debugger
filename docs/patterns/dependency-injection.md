@@ -329,26 +329,11 @@ export function createMockDependencies(): Dependencies {
 // lives in tests/core/unit/session/session-manager-test-utils.ts and returns
 // SessionManagerDependencies.
 
-export function createMockFileSystem(): IFileSystem {
-  return {
-    readFile: vi.fn(),
-    readTail: vi.fn(),
-    writeFile: vi.fn(),
-    exists: vi.fn(),
-    existsSync: vi.fn(),
-    mkdir: vi.fn(),
-    readdir: vi.fn(),
-    stat: vi.fn(),
-    unlink: vi.fn(),
-    rmdir: vi.fn(),
-    ensureDir: vi.fn(),
-    ensureDirSync: vi.fn(),
-    pathExists: vi.fn(),
-    remove: vi.fn(),
-    copy: vi.fn(),
-    outputFile: vi.fn()
-  };
-}
+// createMockFileSystem(overrides?) is the one mock file system, defined in
+// tests/test-utils/helpers/test-utils.ts and re-exported here: every IFileSystem
+// member as a vi.fn(impl) with "everything exists" defaults (exists/pathExists/
+// existsSync true, readFile/readTail '', readdir [], stat a file); pass overrides
+// for what a test asserts on.
 ```
 
 ## Testing Benefits

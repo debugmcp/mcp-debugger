@@ -2,6 +2,7 @@
  * Test utilities for Debug MCP Server tests
  */
 import type { IFileSystem, ILogger } from '@debugmcp/shared';
+import type { Stats } from 'fs';
 import { vi } from 'vitest';
 
 /**
@@ -28,27 +29,41 @@ export function createMockLogger(): ILogger {
 }
 
 /**
- * Create a mock file system for testing
- * @returns Mock file system with vitest mocks
+ * The one mock file system (issue #742): every `IFileSystem` member, with "everything
+ * exists" defaults — `exists`/`pathExists`/`existsSync` answer `true`, `readFile`/`readTail`
+ * resolve `''`, `readdir` resolves `[]`, `stat` resolves a file, everything else resolves
+ * `undefined`. Override what a test asserts on:
+ * `createMockFileSystem({ pathExists: vi.fn(async () => false) })`.
+ *
+ * Defaults are `vi.fn(impl)`, never `mockResolvedValue`: `tests/vitest.setup.ts` runs
+ * `vi.resetAllMocks()` after every test, and `mockReset` restores the implementation a mock
+ * was constructed with but wipes a `mockResolvedValue` — the rule the fake adapter pins too.
+ *
+ * `test-dependencies.ts` and `adapter-dependencies.ts` re-export this function, so the three
+ * import paths are one double. This file is the home because it is a leaf (vitest and shared
+ * types only): `test-dependencies.ts` imports the ProxyManager graph, which the adapter
+ * package tests must not load. `createMockAdapterDependencies()` sets the three existence
+ * probes to `false` explicitly — an un-stubbed adapter lookup must take its failure branch.
  */
-export function createMockFileSystem(): IFileSystem {
+export function createMockFileSystem(overrides: Partial<IFileSystem> = {}): IFileSystem {
   return {
-    pathExists: vi.fn().mockResolvedValue(true),
-    existsSync: vi.fn().mockReturnValue(true),
-    ensureDir: vi.fn().mockResolvedValue(undefined),
-    readFile: vi.fn().mockResolvedValue(''),
-    readTail: vi.fn().mockResolvedValue(''),
-    writeFile: vi.fn().mockResolvedValue(undefined),
-    remove: vi.fn().mockResolvedValue(undefined),
-    copy: vi.fn().mockResolvedValue(undefined),
-    outputFile: vi.fn().mockResolvedValue(undefined),
-    exists: vi.fn().mockResolvedValue(true),
-    mkdir: vi.fn().mockResolvedValue(undefined),
-    readdir: vi.fn().mockResolvedValue([]),
-    stat: vi.fn().mockResolvedValue({ isDirectory: () => false, isFile: () => true }),
-    unlink: vi.fn().mockResolvedValue(undefined),
-    rmdir: vi.fn().mockResolvedValue(undefined),
-    ensureDirSync: vi.fn()
+    readFile: vi.fn(async () => ''),
+    readTail: vi.fn(async () => ''),
+    writeFile: vi.fn(async () => undefined),
+    exists: vi.fn(async () => true),
+    existsSync: vi.fn(() => true),
+    mkdir: vi.fn(async () => undefined),
+    readdir: vi.fn(async () => [] as string[]),
+    stat: vi.fn(async () => ({ isDirectory: () => false, isFile: () => true }) as unknown as Stats),
+    unlink: vi.fn(async () => undefined),
+    rmdir: vi.fn(async () => undefined),
+    ensureDir: vi.fn(async () => undefined),
+    ensureDirSync: vi.fn(() => undefined),
+    pathExists: vi.fn(async () => true),
+    remove: vi.fn(async () => undefined),
+    copy: vi.fn(async () => undefined),
+    outputFile: vi.fn(async () => undefined),
+    ...overrides
   };
 }
 

@@ -15,42 +15,14 @@ import { vi } from 'vitest';
 import type {
   AdapterDependencies,
   IEnvironment,
-  IFileSystem,
   ILogger,
   INetworkManager
 } from '@debugmcp/shared';
+import { createMockFileSystem } from './test-utils.js';
 
-/**
- * Every `IFileSystem` member as a bare spy. Pass `overrides` for the ones a test asserts on.
- *
- * The three existence predicates answer `false` rather than the `undefined` a bare `vi.fn()`
- * would return. Truthiness is identical, so no test changes behaviour -- but `IFileSystem`
- * declares them as returning `boolean`, and a double that violates its own contract at runtime
- * is the kind of thing this cleanup exists to remove. Note the consequence either way: an
- * un-stubbed probe reports "not found", so a code path that resolves a file will take its
- * failure branch quietly. Stub the predicate in any test that reaches one.
- */
-export function createMockFileSystem(overrides: Partial<IFileSystem> = {}): IFileSystem {
-  return {
-    readFile: vi.fn(),
-    readTail: vi.fn(),
-    writeFile: vi.fn(),
-    exists: vi.fn(async () => false),
-    existsSync: vi.fn(() => false),
-    mkdir: vi.fn(),
-    readdir: vi.fn(),
-    stat: vi.fn(),
-    unlink: vi.fn(),
-    rmdir: vi.fn(),
-    ensureDir: vi.fn(),
-    ensureDirSync: vi.fn(),
-    pathExists: vi.fn(async () => false),
-    remove: vi.fn(),
-    copy: vi.fn(),
-    outputFile: vi.fn(),
-    ...overrides
-  };
-}
+// The one mock file system lives in test-utils.ts (issue #742) — a leaf module, so pulling it
+// in here does not load the ProxyManager graph into the adapter package tests.
+export { createMockFileSystem };
 
 export function createMockLogger(overrides: Partial<ILogger> = {}): ILogger {
   return { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), ...overrides };
@@ -75,12 +47,22 @@ export function createMockNetworkManager(
 /**
  * `networkManager` is optional on the interface and most adapters never touch it, so it is
  * left off unless a caller asks for one.
+ *
+ * The three existence predicates answer `false` here, against the shared double's
+ * "everything exists" default: an un-stubbed probe must report "not found", so an adapter
+ * code path that resolves a file takes its failure branch quietly instead of claiming every
+ * executable exists — and the Dart tests' explicit `existsSync` overrides keep meaning
+ * something. Stub the predicate in any test that reaches one.
  */
 export function createMockAdapterDependencies(
   overrides: Partial<AdapterDependencies> = {}
 ): AdapterDependencies {
   return {
-    fileSystem: createMockFileSystem(),
+    fileSystem: createMockFileSystem({
+      exists: vi.fn(async () => false),
+      existsSync: vi.fn(() => false),
+      pathExists: vi.fn(async () => false)
+    }),
     logger: createMockLogger(),
     environment: createMockEnvironment(),
     ...overrides
