@@ -30,6 +30,7 @@ import { failProxySetup, sessionRemovedDuringTeardown } from '../launch/proxy-fa
 import type { ProxyLauncher } from '../launch/proxy-launcher.js';
 import { verifyAttachThreads } from './attach-verification.js';
 import { ATTACH_ANCHOR_BOUNDS, selectStopAnchor } from '../inspection/stop-anchor.js';
+import { describeStopLocation } from '../inspection/stop-location.js';
 import type { PauseCoordinator } from '../execution/pause-coordinator.js';
 import type { InFlightGuard } from '../in-flight-guard.js';
 
@@ -409,6 +410,15 @@ export class AttachController {
         ? undefined
         : this.breakpoints.functionBreakpointLaunchWarning(session);
 
+      // Where the attach's stop landed, when it has one (issue #904): the
+      // resolver's verdict on the reported thread. An idle js-debug target
+      // pauses on a sourceless frame (issue #900), and only a note can say
+      // that the frame is not the program's.
+      const landing = session.state === SessionState.PAUSED
+        ? await describeStopLocation(this.ctx, sessionId, 'attach')
+        : undefined;
+      assertTargetPresent();
+
       // Named the way the request addressed it: a PID, a host:port, or a
       // debugger URI under adapterConfig (dart, js-debug) — never
       // "localhost:undefined" for a URI attach (issue #903).
@@ -429,7 +439,8 @@ export class AttachController {
         message: attachPausePending
           ? `${attachedTo}; ${ErrorMessages.attachPausePending}`
           : attachedTo,
-        ...(attachPausePending ? { pending: true } : {})
+        ...(attachPausePending ? { pending: true } : {}),
+        ...(landing?.note ? { note: landing.note } : {})
       };
       // Surface adapterConfig keys the adapter's attach transform dropped
       // (issue #450) and keys forwarded to the adapter unrecognized (issue
