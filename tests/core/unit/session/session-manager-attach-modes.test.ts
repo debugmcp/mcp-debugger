@@ -505,6 +505,40 @@ describe('SessionManagerOperations attach modes', () => {
       expect(setCurrentThreadId).toHaveBeenCalledWith(6660);
     });
 
+    it('anchors a thread whose frames name a source without a path when no listed stack has one (the shared verdict, #904)', async () => {
+      // The JDI bridge gives a class without debug info a source name and no path;
+      // CodeLLDB labels native frames '@symbol'. A name that is not such a label
+      // reaches the program when the policy does not call the frame internal.
+      mockSession.language = DebugLanguage.CPP;
+      vi.mocked(mockDependencies.adapterRegistry.getFactoryMetadata).mockResolvedValue(
+        metadataWithModes({ launch: true, attach: 'direct-connect' })
+      );
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(
+        new FakeDebugAdapter({ language: DebugLanguage.CPP }).withAttachSupport({ directConnect: true })
+      );
+      const setCurrentThreadId = vi.fn();
+      (mockProxyManager as unknown as { setCurrentThreadId: typeof setCurrentThreadId }).setCurrentThreadId = setCurrentThreadId;
+      const stacks: Record<number, unknown[]> = {
+        6660: [{ id: 1, name: 'DbgBreakPoint', line: 0, column: 0 }, { id: 2, name: 'DbgUiRemoteBreakin', line: 0, column: 0, source: { name: '@DbgUiRemoteBreakin' } }],
+        5128: [{ id: 3, name: 'worker', line: 40, column: 0, source: { name: 'worker.cpp' } }]
+      };
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string, args?: unknown) => {
+        if (command === 'threads') {
+          mockSession.state = SessionState.PAUSED;
+          mockSession.lastStop = { reason: 'exception', threadId: 6660, timestamp: Date.now() };
+          return { success: true, body: { threads: [{ id: 6660, name: 'thread #3' }, { id: 5128, name: 'thread #1' }] } };
+        }
+        if (command === 'stackTrace') {
+          return { success: true, body: { stackFrames: stacks[(args as { threadId: number }).threadId] ?? [] } };
+        }
+        return {};
+      });
+
+      await operations.attachToProcess('test-session', { host: '127.0.0.1', port: 12345, stopOnEntry: true });
+
+      expect(setCurrentThreadId).toHaveBeenCalledWith(5128);
+    });
+
     it('falls back to the thread named main, else the first thread, when no stop was observed', async () => {
       mockSession.language = DebugLanguage.CPP;
       vi.mocked(mockDependencies.adapterRegistry.getFactoryMetadata).mockResolvedValue(
@@ -524,6 +558,8 @@ describe('SessionManagerOperations attach modes', () => {
       await operations.attachToProcess('test-session', { host: '127.0.0.1', port: 12345, stopOnEntry: true });
 
       expect(setCurrentThreadId).toHaveBeenCalledWith(9);
+      // A running target is never unwound: without an observed stop there is no stack to read.
+      expect(mockProxyManager.sendDapRequest.mock.calls.filter(([command]) => command === 'stackTrace')).toHaveLength(0);
     });
 
     it('reserved keys in adapterConfig cannot flip the attach request', async () => {
