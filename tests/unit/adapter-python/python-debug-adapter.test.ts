@@ -387,16 +387,6 @@ describe('PythonDebugAdapter', () => {
     expect(adapter.getMissingExecutableError()).toContain('Python not found');
   });
 
-  it('returns default launch configuration snapshot', () => {
-    const adapter = new PythonDebugAdapter(createDependencies());
-    const defaults = adapter.getDefaultLaunchConfig();
-
-    expect(defaults.stopOnEntry).toBe(false);
-    expect(defaults.justMyCode).toBe(true);
-    expect(defaults.env).toEqual({});
-    expect(defaults.cwd).toBe(process.cwd());
-  });
-
   describe('attach support (issue #145)', () => {
     it('reports attach capabilities', () => {
       const adapter = new PythonDebugAdapter(createDependencies());
@@ -466,16 +456,6 @@ describe('PythonDebugAdapter', () => {
 
       expect(() => adapter.transformAttachConfig!({ request: 'attach', processId: 1234 }))
         .toThrow(/process id/i);
-    });
-
-    it('provides a default attach config', () => {
-      const adapter = new PythonDebugAdapter(createDependencies());
-
-      expect(adapter.getDefaultAttachConfig?.()).toEqual({
-        request: 'attach',
-        host: '127.0.0.1',
-        justMyCode: true
-      });
     });
 
     it('propagates stopOnEntry into the attach config when provided', () => {

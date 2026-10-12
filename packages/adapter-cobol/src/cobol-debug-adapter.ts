@@ -816,10 +816,6 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
     return result;
   }
 
-  getDefaultLaunchConfig(): Partial<GenericLaunchConfig> {
-    return { stopOnEntry: false, justMyCode: true, env: {}, cwd: process.cwd() };
-  }
-
   // ===== Attach Support =====
 
   supportsAttach(): boolean {
@@ -926,10 +922,6 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
       stopOnEntry: stopOnEntry ?? true,
       [COBOL_PRIVATE_KEY]: shimOptions
     };
-  }
-
-  getDefaultAttachConfig(): Partial<GenericAttachConfig> {
-    return { request: 'attach', stopOnEntry: true };
   }
 
   // ===== DAP Protocol Operations (vestigial; ProxyManager owns the traffic) =====

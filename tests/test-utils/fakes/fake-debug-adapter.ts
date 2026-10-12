@@ -14,7 +14,8 @@
  *
  * - Every REQUIRED member is a `vi.fn` with a production-shaped default, so a test only
  *   states the behaviour it actually cares about and can still assert on the rest.
- * - The seven OPTIONAL members are ABSENT unless opted in via `withAttachSupport()` /
+ * - The OPTIONAL members the fake knows (the set its test pins as `OPTIONAL_MEMBERS`) are
+ *   ABSENT unless opted in via `withAttachSupport()` /
  *   `withLaunchBarrier()`. Production code guards them (`adapter.supportsAttach?.()`), and a
  *   double that always defines them would only ever exercise one side of that branch.
  */
@@ -121,9 +122,6 @@ export class FakeDebugAdapter extends EventEmitter implements IDebugAdapter {
   transformLaunchConfig = vi.fn<Impl<'transformLaunchConfig'>>(
     async (config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig> => ({ ...config })
   );
-  getDefaultLaunchConfig = vi.fn<Impl<'getDefaultLaunchConfig'>>(
-    (): Partial<GenericLaunchConfig> => ({})
-  );
 
   // ===== DAP protocol operations =====
   // A plain method, not a mock: `sendDapRequest` is the interface's only generic member, and
@@ -174,7 +172,6 @@ export class FakeDebugAdapter extends EventEmitter implements IDebugAdapter {
   declare supportsDetach?: Mock<Impl<'supportsDetach'>>;
   declare usesDirectConnectForAttach?: Mock<Impl<'usesDirectConnectForAttach'>>;
   declare transformAttachConfig?: Mock<Impl<'transformAttachConfig'>>;
-  declare getDefaultAttachConfig?: Mock<Impl<'getDefaultAttachConfig'>>;
   /** Interface-readonly; mutable here so `withAttachSupport()` can set it. */
   declare supportedAttachKeys?: readonly string[];
   /** Interface-readonly; mutable here so `withAttachSupport()` can set it. */
@@ -198,7 +195,7 @@ export class FakeDebugAdapter extends EventEmitter implements IDebugAdapter {
    */
   withAttachSupport(options: FakeAttachSupportOptions = {}): this & DefinedAttachMembers {
     // Built as one object typed `DefinedAttachMembers`, then assigned — the shape
-    // `withExtras` uses. The five members are optional on the class (a fake that
+    // `withExtras` uses. The four members are optional on the class (a fake that
     // never opted in must not define them), so the return type has to say they are
     // present now, or callers need a non-null assertion to read
     // `adapter.transformAttachConfig.mock`. Stating that with `as` would assert
@@ -214,9 +211,6 @@ export class FakeDebugAdapter extends EventEmitter implements IDebugAdapter {
       transformAttachConfig: vi.fn<Impl<'transformAttachConfig'>>(
         options.transform ??
           ((config: GenericAttachConfig): LanguageSpecificAttachConfig => ({ ...config }))
-      ),
-      getDefaultAttachConfig: vi.fn<Impl<'getDefaultAttachConfig'>>(
-        (): Partial<GenericAttachConfig> => ({})
       )
     };
     if (options.supportedAttachKeys !== undefined) {
@@ -285,6 +279,5 @@ export type DefinedAttachMembers = Required<
     | 'supportsDetach'
     | 'usesDirectConnectForAttach'
     | 'transformAttachConfig'
-    | 'getDefaultAttachConfig'
   >
 >;
