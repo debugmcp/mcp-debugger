@@ -76,15 +76,3 @@ export function clearPendingRequests(state: DAPSessionState): DAPSessionState {
   };
 }
 
-/**
- * Apply multiple state updates at once
- */
-export function updateState(
-  state: DAPSessionState,
-  updates: Partial<Omit<DAPSessionState, 'sessionId' | 'pendingRequests'>>
-): DAPSessionState {
-  return {
-    ...state,
-    ...updates
-  };
-}

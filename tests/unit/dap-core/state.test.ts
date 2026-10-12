@@ -8,8 +8,7 @@ import {
   addPendingRequest,
   removePendingRequest,
   getPendingRequest,
-  clearPendingRequests,
-  updateState
+  clearPendingRequests
 } from '../../../src/dap-core/state.js';
 import { PendingRequest } from '../../../src/dap-core/types.js';
 
@@ -86,18 +85,6 @@ describe('DAP Core State', () => {
     });
   });
 
-  describe('updateState', () => {
-    it('applies updates without touching sessionId or pendingRequests', () => {
-      const state = createInitialState('test');
-      const newState = updateState(state, { initialized: true });
-
-      expect(newState.initialized).toBe(true);
-      // sessionId and pendingRequests should remain unchanged
-      expect(newState.sessionId).toBe('test');
-      expect(newState.pendingRequests).toBe(state.pendingRequests);
-    });
-  });
-
   describe('immutability', () => {
     it('should never mutate the original state', () => {
       const originalState = createInitialState('test');
@@ -105,7 +92,6 @@ describe('DAP Core State', () => {
       
       // These operations should not throw if immutable
       expect(() => setInitialized(frozen, true)).not.toThrow();
-      expect(() => updateState(frozen, { initialized: true })).not.toThrow();
     });
 
     it('should create new Map instances for pending requests', () => {

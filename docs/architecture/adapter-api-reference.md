@@ -64,7 +64,7 @@ Attach support (optional)
 - `usesDirectConnectForAttach?(): boolean` — when true, attach connects directly to an already-listening DAP server (e.g. rdbg started with `--open`) instead of spawning an adapter process; `ProxyManager` skips `buildAdapterCommand` and the adapter policy returns a `'connect'` spawn config from the attach host/port
 
 Debug configuration
-- `transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig>` (async to permit build/compilation steps before launch). The launch defaults the host applies (`stopOnEntry: false`, `justMyCode: true`) are merged by the session layer before the transform; an adapter does not declare its own
+- `transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig>` (async to permit build/compilation steps before launch). The launch defaults the host applies (`stopOnEntry: false`, `justMyCode: true`) are merged by the session layer before the transform; an adapter declares no launch defaults of its own (its policy's `getInitializationBehavior().defaultStopOnEntry` may still decide `stopOnEntry` when the caller gave none)
  
 ### AdapterLaunchBarrier helper
 

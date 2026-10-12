@@ -276,7 +276,6 @@ describe('DotnetDebugAdapter', () => {
 
       expect(result.justMyCode).toBe(true);
     });
-
   });
 
   // ===== Attach Configuration =====

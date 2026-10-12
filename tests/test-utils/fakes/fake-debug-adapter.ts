@@ -14,7 +14,8 @@
  *
  * - Every REQUIRED member is a `vi.fn` with a production-shaped default, so a test only
  *   states the behaviour it actually cares about and can still assert on the rest.
- * - The six OPTIONAL members are ABSENT unless opted in via `withAttachSupport()` /
+ * - The OPTIONAL members the fake knows (the set its test pins as `OPTIONAL_MEMBERS`) are
+ *   ABSENT unless opted in via `withAttachSupport()` /
  *   `withLaunchBarrier()`. Production code guards them (`adapter.supportsAttach?.()`), and a
  *   double that always defines them would only ever exercise one side of that branch.
  */

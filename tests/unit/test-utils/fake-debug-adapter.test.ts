@@ -16,7 +16,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { DebugLanguage, type AdapterLaunchBarrier, type GenericAttachConfig } from '@debugmcp/shared';
 import { FakeDebugAdapter } from '../../test-utils/fakes/fake-debug-adapter.js';
 
-/** The six members production code reaches through an optional call. */
+/** The optional members the fake defines, each reached by production code through an optional call. */
 const OPTIONAL_MEMBERS = [
   'createLaunchBarrier',
   'supportsAttach',
