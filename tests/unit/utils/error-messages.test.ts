@@ -102,6 +102,12 @@ describe('ErrorMessages', () => {
     expect(message).not.toMatch(/^Attach failed/);
   });
 
+  it('builds the adapter-rejected attach message in the adapter words, without a "Failed to attach" prefix (issue #896)', () => {
+    const message = ErrorMessages.attachRejected('javascript', 'Could not connect to debug target at http://localhost:9229');
+    expect(message).toBe('The javascript debug adapter rejected the attach request: Could not connect to debug target at http://localhost:9229');
+    expect(message).not.toMatch(/^Failed to attach/);
+  });
+
   describe('operationInFlight (issue #711)', () => {
     it('names the operation in flight and the refused tool, and says to wait', () => {
       const message = ErrorMessages.operationInFlight('launch', 'attach_to_process');

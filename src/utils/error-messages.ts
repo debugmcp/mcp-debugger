@@ -419,6 +419,20 @@ export const ErrorMessages = {
     `The debug adapter ended the session during attach verification: ${failure}`,
 
   /**
+   * Error message for an attach request the debug adapter answered with its
+   * own error response (issue #896)
+   * Occurs when: The handshake's DAP 'attach' is refused — js-debug naming
+   * the inspector it could not reach — so verification cannot succeed and
+   * the attach fails at once with the adapter's reason.
+   * The caller prefixes "Failed to attach: ".
+   * Used in: src/session/attach/attach-controller.ts
+   * @param language - The session language
+   * @param reason - The adapter's own text
+   */
+  attachRejected: (language: string, reason: string) =>
+    `The ${language} debug adapter rejected the attach request: ${reason}`,
+
+  /**
    * Error message for adapter ready timeouts
    * Occurs when: Waiting for the debug adapter to be configured times out
    * Used in: src/session/session-manager.ts (logged as warning)

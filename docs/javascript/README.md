@@ -319,7 +319,7 @@ If neither `tsx` nor `ts-node` is installed, the factory emits a warning (not an
 
 ## Attaching to a running Node.js process
 
-Two ways in:
+Three ways in:
 
 - **By port** — the target was started with the inspector listening
   (`node --inspect=127.0.0.1:9229 server.js`): `attach_to_process { host, port }`.
@@ -334,6 +334,17 @@ Two ways in:
   `--inspect-port=<n>` (or `NODE_OPTIONS=--inspect-port=<n>`) opens on that port instead:
   pass it as `port` alongside `processId`. The inspector **stays open after detach**, so a
   later attach — by PID or by `port: 9229` — reuses it without a second signal.
+- **By inspector URL** (issue #896) — `attach_to_process { adapterConfig: { websocketAddress:
+  "ws://127.0.0.1:9229/<uuid>" } }`, the `webSocketDebuggerUrl` that `http://host:port/json/list`
+  reports. js-debug dials it directly; no `port` is needed, and a `host`/`port` beside it is
+  ignored. `continueOnAttach` applies as on a port attach, so a target started with
+  `--inspect-brk` runs briefly before the post-attach pause lands.
+
+When js-debug refuses the attach request itself (its error response names the inspector it
+could not reach), the attach fails at once with that text: `Failed to attach: The javascript
+debug adapter rejected the attach request: …`. When it instead drops the DAP socket — what it
+does after `Could not connect to debug target` — the attach fails during verification and
+quotes that stderr line (issue #897).
 
 What a PID attach refuses, by name: a non-loopback `host` (the signal is local); the server's
 own PID; a PID that is not a Node.js process (on POSIX `SIGUSR1` would terminate it, so the

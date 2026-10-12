@@ -5,6 +5,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ErrorMessages } from '../../src/utils/error-messages.js';
+import { DapResponseError } from '../../src/proxy/dap-response-error.js';
 import path from 'path';
 import { SessionManagerOperations } from '../../src/session/session-manager-operations';
 import type { SessionManagerDependencies } from '../../src/session/session-manager-core';
@@ -2810,6 +2811,87 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         }),
         launchConfig: { request: 'attach', port: 5005 }
       });
+    });
+
+    it('fails the attach at once, in the adapter words, when the adapter itself rejects the attach request (issue #896)', async () => {
+      // js-debug answers the DAP 'attach' with an error response naming the
+      // inspector it could not reach; nothing will ever report a thread.
+      const rejection = new DapResponseError({
+        seq: 1,
+        type: 'response',
+        request_seq: 1,
+        command: 'attach',
+        success: false,
+        message: 'Could not connect to debug target at http://localhost:5678: Could not find any debuggable target'
+      });
+      vi.spyOn(operations as any, 'selectPolicy').mockReturnValue({
+        performHandshake: vi.fn().mockRejectedValue(rejection),
+        getAttachBehavior: () => undefined
+      });
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+        return { request: 'attach', port: 5678 };
+      });
+
+      const result = await operations.attachToProcess('test-session', { port: 5678, host: 'localhost', stopOnEntry: true });
+
+      expect(result.success).toBe(false);
+      expect(result.state).toBe(SessionState.ERROR);
+      expect(result.error).toBe(
+        'Failed to attach: The java debug adapter rejected the attach request: ' +
+        'Could not connect to debug target at http://localhost:5678: Could not find any debuggable target'
+      );
+      expect(mockProxyManager.sendDapRequest).not.toHaveBeenCalledWith('threads', expect.anything(), expect.anything());
+      expect(mockProxyManager.sendDapRequest.mock.calls.some(([command]) => command === 'threads')).toBe(false);
+      expect(mockProxyManager.stop).toHaveBeenCalled();
+      expect(mockSession.proxyManager).toBeUndefined();
+      expect(mockLogger.warn).not.toHaveBeenCalledWith(expect.stringContaining('Language handshake for attach'));
+    });
+
+    it('keeps the tolerant path for an adapter error response to another request (issue #896)', async () => {
+      const rejection = new DapResponseError({
+        seq: 1, type: 'response', request_seq: 1, command: 'setBreakpoints', success: false, message: 'bad breakpoint'
+      });
+      vi.spyOn(operations as any, 'selectPolicy').mockReturnValue({
+        performHandshake: vi.fn().mockRejectedValue(rejection),
+        getAttachBehavior: () => undefined
+      });
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          return { body: { threads: [{ id: 1, name: 'main' }] } };
+        }
+        return {};
+      });
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+        return { request: 'attach', port: 5005 };
+      });
+
+      const result = await operations.attachToProcess('test-session', { port: 5005, host: 'localhost', stopOnEntry: true });
+
+      expect(result.success).toBe(true);
+      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('Language handshake for attach returned with warning/error: bad breakpoint'));
+    });
+
+    it('clears a stale proxy error and exit before a new attach attempt (issue #896)', async () => {
+      mockSession.lastProxyError = 'Debug proxy exited unexpectedly (code=1)';
+      mockSession.lastProxyExit = { code: 1, expected: false };
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') {
+          return { body: { threads: [{ id: 1, name: 'main' }] } };
+        }
+        return {};
+      });
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+        return { request: 'attach', port: 5005 };
+      });
+
+      const result = await operations.attachToProcess('test-session', { port: 5005, host: 'localhost', stopOnEntry: true });
+
+      expect(result.success).toBe(true);
+      expect(mockSession.lastProxyError).toBeUndefined();
+      expect(mockSession.lastProxyExit).toBeUndefined();
     });
 
     it('should tolerate a performHandshake failure and still verify the attach', async () => {

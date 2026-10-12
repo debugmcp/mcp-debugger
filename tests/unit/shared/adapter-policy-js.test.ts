@@ -398,6 +398,121 @@ describe('JsDebugAdapterPolicy', () => {
       expect(sent[0].condition).toContain('__mcpDebuggerLogpoint');
       expect(sent[0].condition).toContain('"x is "');
     });
+
+    describe('the attach branch is keyed on the request (issue #896)', () => {
+      // The MCP path reaches the policy with the transformed config as
+      // launchConfig (websocketAddress beside `port: undefined`); an embedder
+      // may pass the same keys in dapLaunchArgs.
+      const runHandshake = async (
+        dapLaunchArgs: Record<string, unknown>,
+        launchConfig: Record<string, unknown> | undefined,
+        sendDapRequest = vi.fn().mockResolvedValue({})
+      ) => {
+        vi.useFakeTimers();
+        const events = new EventEmitter();
+        const proxyManager = Object.assign(events, {
+          isRunning: () => true,
+          sendDapRequest,
+          removeListener: events.removeListener.bind(events)
+        });
+        const context = {
+          proxyManager,
+          sessionId: 'session-896',
+          dapLaunchArgs,
+          scriptPath: 'attach://remote',
+          scriptArgs: [],
+          breakpoints: new Map(),
+          launchConfig
+        };
+        const outcome = JsDebugAdapterPolicy.performHandshake(context as any).then(
+          () => 'resolved' as const,
+          (error: unknown) => error
+        );
+        await Promise.resolve();
+        events.emit('dap-event', 'initialized');
+        await vi.advanceTimersByTimeAsync(0);
+        const result = await outcome;
+        vi.useRealTimers();
+        return { result, sendDapRequest, events };
+      };
+
+      it('takes the attach flow for request: attach with a websocketAddress and no port', async () => {
+        const { result, sendDapRequest } = await runHandshake(
+          { request: 'attach', type: 'pwa-node' },
+          { request: 'attach', host: '127.0.0.1', port: undefined, websocketAddress: 'ws://127.0.0.1:9229/abc-def' }
+        );
+
+        expect(result).toBe('resolved');
+        const attach = sendDapRequest.mock.calls.find(([cmd]) => cmd === 'attach');
+        expect(attach).toBeDefined();
+        expect(attach![1]).toEqual(expect.objectContaining({
+          request: 'attach',
+          websocketAddress: 'ws://127.0.0.1:9229/abc-def',
+          continueOnAttach: true,
+          attachExistingChildren: true
+        }));
+        expect(attach![1]).not.toHaveProperty('port');
+        expect(attach![1]).not.toHaveProperty('address');
+        expect(attach![1]).not.toHaveProperty('program');
+        expect(sendDapRequest.mock.calls.some(([cmd]) => cmd === 'launch')).toBe(false);
+      });
+
+      it('refuses a port-less attach without a websocketAddress instead of launching', async () => {
+        const { result, sendDapRequest, events } = await runHandshake(
+          { request: 'attach', type: 'pwa-node' },
+          { request: 'attach' }
+        );
+
+        expect(result).toBeInstanceOf(Error);
+        expect((result as Error).message).toMatch(/needs a port .* or a websocketAddress/);
+        expect(sendDapRequest.mock.calls.some(([cmd]) => cmd === 'attach' || cmd === 'launch')).toBe(false);
+        expect(events.listenerCount('dap-event')).toBe(0);
+      });
+
+      it('keeps address and port beside a websocketAddress when both are given: js-debug dials the URL', async () => {
+        const { sendDapRequest } = await runHandshake(
+          { request: 'attach', type: 'pwa-node' },
+          { request: 'attach', host: '127.0.0.1', port: 9229, websocketAddress: 'ws://127.0.0.1:9229/abc-def' }
+        );
+
+        expect(sendDapRequest).toHaveBeenCalledWith('attach', expect.objectContaining({
+          websocketAddress: 'ws://127.0.0.1:9229/abc-def',
+          address: '127.0.0.1',
+          port: 9229
+        }));
+      });
+
+      it('accepts a numeric-string port from an embedder', async () => {
+        const { result, sendDapRequest } = await runHandshake({ request: 'attach', port: '9229', type: 'pwa-node' }, undefined);
+
+        expect(result).toBe('resolved');
+        expect(sendDapRequest).toHaveBeenCalledWith('attach', expect.objectContaining({ port: 9229, address: '127.0.0.1' }));
+      });
+
+      it('rethrows the attach request rejection instead of swallowing it', async () => {
+        const rejection = Object.assign(new Error('Could not connect to debug target at http://localhost:9229'), { name: 'DapResponseError' });
+        const sendDapRequest = vi.fn().mockImplementation(async (cmd: string) => {
+          if (cmd === 'attach') throw rejection;
+          return {};
+        });
+
+        const { result } = await runHandshake({ request: 'attach', attachSimplePort: 9229, type: 'pwa-node' }, undefined, sendDapRequest);
+
+        expect(result).toBe(rejection);
+      });
+
+      it('rethrows the launch request rejection instead of swallowing it', async () => {
+        const rejection = new Error('launch refused');
+        const sendDapRequest = vi.fn().mockImplementation(async (cmd: string) => {
+          if (cmd === 'launch') throw rejection;
+          return {};
+        });
+
+        const { result } = await runHandshake({ request: 'launch', type: 'pwa-node' }, undefined, sendDapRequest);
+
+        expect(result).toBe(rejection);
+      });
+    });
   });
 
   describe('toWireBreakpoint (issues #850, #861)', () => {

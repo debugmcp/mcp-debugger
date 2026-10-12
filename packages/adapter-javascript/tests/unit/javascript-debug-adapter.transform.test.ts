@@ -823,6 +823,15 @@ describe('JavascriptDebugAdapter.transformAttachConfig by processId (issue #871)
     expect(cfg.websocketAddress).toBe('ws://127.0.0.1:9229/abc');
     expect(cfg.port).toBeUndefined();
   });
+
+  it('refuses a port of 0 and an empty websocketAddress the same way (review of #896)', async () => {
+    const { adapter, activate } = adapterWithActivation();
+    await expect(adapter.transformAttachConfig({ request: 'attach', port: 0 } as any))
+      .rejects.toThrow(/JavaScript attach needs port/);
+    await expect(adapter.transformAttachConfig({ request: 'attach', websocketAddress: '' } as any))
+      .rejects.toThrow(/JavaScript attach needs port/);
+    expect(activate).not.toHaveBeenCalled();
+  });
 });
 
 /** Deps with a file system that knows a fixed set of paths, and remembers what was ensured. */
