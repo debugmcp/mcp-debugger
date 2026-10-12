@@ -335,11 +335,15 @@ export class FrameAnchorResolver {
     opts?: { timeoutMs?: number }
   ): Promise<DebugProtocol.StackFrame[]> {
     this.ctx.logger.info(`[FrameAnchor ${sessionId}] Sending DAP stackTrace for thread ${threadId}.`);
-    const response = await proxyManager.sendDapRequest<DebugProtocol.StackTraceResponse>(
-      'stackTrace',
-      { threadId },
-      typeof opts?.timeoutMs === 'number' ? { timeoutMs: opts.timeoutMs } : undefined
-    );
+    // Two arguments when no timeout is asked for: the plain read is what
+    // every consumer and test of the resolver has always seen.
+    const response = typeof opts?.timeoutMs === 'number'
+      ? await proxyManager.sendDapRequest<DebugProtocol.StackTraceResponse>(
+        'stackTrace',
+        { threadId },
+        { timeoutMs: opts.timeoutMs }
+      )
+      : await proxyManager.sendDapRequest<DebugProtocol.StackTraceResponse>('stackTrace', { threadId });
     if (response?.success === false) {
       throw new Error(response.message || `DAP 'stackTrace' request failed`);
     }
