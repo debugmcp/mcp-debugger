@@ -79,6 +79,14 @@ export interface StatusMessage extends ProxyMessage {
   status: string;
   code?: number | null;
   signal?: NodeJS.Signals | null;
+  /**
+   * The adapter process's last stderr lines, on 'adapter_exited' and
+   * 'dap_connection_closed' (issue #897): the parent processes only the
+   * first terminal message before it stops the proxy, so the tail travels
+   * with it. Absent when there is no adapter process (connect mode) or it
+   * wrote nothing.
+   */
+  stderrTail?: string[];
   command?: string;
   script?: string;
   /** Adapter initialize response body, on 'adapter_capabilities' (issue #243) */
@@ -178,6 +186,8 @@ export interface DapEventMessage extends ProxyMessage {
 export interface ErrorMessage extends ProxyMessage {
   type: 'error';
   message: string;
+  /** The adapter process's last stderr lines, as on StatusMessage (issue #897). */
+  stderrTail?: string[];
 }
 
 // ===== Core Abstractions =====
@@ -296,6 +306,14 @@ export interface AdapterSpawnResult {
    * Nothing pending, nothing forwarded; a later stream close finds nothing.
    */
   flushStdio?: () => void;
+  /**
+   * The last lines the adapter process wrote to stderr, sanitized and
+   * blank-free like the log copy, oldest first (issue #897). The worker
+   * sends them with its terminal status or error report so a failed attach
+   * or launch can quote the adapter's own last word instead of a bare exit
+   * code. Bounded (RECENT_STDERR_LINES / RECENT_STDERR_LINE_CHARS); a copy.
+   */
+  recentStderr?: () => string[];
 }
 
 // ===== State Management =====

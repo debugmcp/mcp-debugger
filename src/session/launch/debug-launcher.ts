@@ -580,9 +580,12 @@ export class DebugLauncher {
         const exitDescription = proxyExit
           ? `code=${proxyExit.code ?? 'null'}${proxyExit.signal ? `, signal=${proxyExit.signal}` : ''}`
           : undefined;
+        // The adapter's last stderr line rides the exit record (issue #897):
+        // the manager is already gone from the session by now.
+        const stderrSuffix = proxyExit?.stderrLine ? `; adapter stderr: "${proxyExit.stderrLine}"` : '';
         const errorMessage = finalSession.lastProxyError ??
           (exitDescription
-            ? `Debug proxy exited unexpectedly during launch (${exitDescription})`
+            ? `Debug proxy exited unexpectedly during launch (${exitDescription})${stderrSuffix}`
             : 'Debug proxy entered an error state during launch');
         const diagnosticData = await failProxySetup(
           this.ctx,

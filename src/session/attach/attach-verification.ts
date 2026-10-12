@@ -13,6 +13,7 @@
 import { DebugProtocol } from '@vscode/debugprotocol';
 import type { ManagedSession } from '../session-store.js';
 import type { OperationsContext } from '../operations-context.js';
+import { lastAdapterStderrLine, quotesAdapterStderrLine } from '../launch/proxy-failure-diagnostics.js';
 
 /** Thread verification narrates its attempts. */
 export type AttachVerificationContext = Pick<OperationsContext, 'logger'>;
@@ -58,10 +59,21 @@ export async function verifyAttachThreads(
         lastFailure = err.message;
       }
     };
-    const onProxyExit = (code: number | null, signal?: string): void => {
+    // How the adapter ended, in its own terms (issue #897): a real process
+    // exit always carries a code or a signal, so a codeless unexpected exit
+    // is the socket dropping (js-debug does that after "Could not connect to
+    // debug target", with its process still alive); an expected one is the
+    // target ending under the debugger's feet. The proxy worker's own exit
+    // arrives through the same event and reads as an adapter exit here, as
+    // it always has.
+    const onProxyExit = (code: number | null, signal?: string, expected?: boolean): void => {
       if (!proxyGone) {
         proxyGone = true;
-        lastFailure = `debug adapter exited during attach verification (code=${code}${signal ? `, signal=${signal}` : ''})`;
+        lastFailure = expected === true
+          ? 'it reported the session as ended'
+          : code === null && !signal
+            ? 'it closed its DAP connection'
+            : `it exited (code=${code}${signal ? `, signal=${signal}` : ''})`;
       }
     };
     proxyManager.on('error', onProxyError);
@@ -117,6 +129,15 @@ export async function verifyAttachThreads(
     }
 
   if (!threads) {
+    if (proxyGone) {
+      // Read now rather than in the handler: the in-flight 'threads' request
+      // settles only once the parent has processed the worker's last message,
+      // which is the one that carries the tail (issue #897).
+      const line = lastAdapterStderrLine(proxyManager.getAdapterStderrTail?.());
+      if (line && !quotesAdapterStderrLine(lastFailure, line)) {
+        lastFailure = `${lastFailure}; its last stderr line: "${line}"`;
+      }
+    }
     return { ok: false, proxyGone, lastFailure };
   }
   return { ok: true, threads };

@@ -34,6 +34,8 @@ export class MockProxyManager extends EventEmitter implements IProxyManager {
   public dapRequestDelay = 0;
   /** Reported by getProxyPid() (issue #502); settable per-test. */
   public proxyPid: number | null = 4242;
+  /** Reported by getAdapterStderrTail() (issue #897); settable per-test. */
+  public adapterStderrTail: string[] = [];
 
   constructor() {
     super();
@@ -222,6 +224,10 @@ export class MockProxyManager extends EventEmitter implements IProxyManager {
     return this.preDetachResume;
   }
 
+  getAdapterStderrTail(): readonly string[] {
+    return this.adapterStderrTail;
+  }
+
   // Test helpers
   setDapRequestHandler(handler: (command: string, args?: any) => Promise<any>): void {
     this._dapRequestHandler = handler;
@@ -288,6 +294,7 @@ export class MockProxyManager extends EventEmitter implements IProxyManager {
     this._dryRunCommand = undefined;
     this._dryRunScript = undefined;
     this.proxyPid = 4242;
+    this.adapterStderrTail = [];
     this.removeAllListeners();
   }
 }

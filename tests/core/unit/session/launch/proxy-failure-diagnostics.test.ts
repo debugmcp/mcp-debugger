@@ -11,7 +11,9 @@ import path from 'path';
 import {
   buildProxyFailureErrorDetails,
   collectProxyFailureDiagnostics,
+  lastAdapterStderrLine,
   logProxyFailure,
+  quotesAdapterStderrLine,
   PROXY_LOG_TAIL_MAX_BYTES,
   readProxyLogTail
 } from '../../../../../src/session/launch/proxy-failure-diagnostics.js';
@@ -321,5 +323,53 @@ describe('logProxyFailure', () => {
       expect.any(String),
       expect.objectContaining({ proxyLogTail: 'adapter said: could not open port' })
     );
+  });
+});
+
+describe('lastAdapterStderrLine (issue #897)', () => {
+  it('picks the Error line over the stack frames printed under it', () => {
+    expect(lastAdapterStderrLine([
+      'Error: Could not connect to debug target at http://localhost:5678: Could not find any debuggable target',
+      '    at C:\\vendor\\js-debug\\vsDebugServer.cjs:91:49334',
+      '    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)',
+      '    at async Server.<anonymous> (vsDebugServer.cjs:106:3656)'
+    ])).toBe('Error: Could not connect to debug target at http://localhost:5678: Could not find any debuggable target');
+  });
+
+  it('takes the last non-frame line when several precede the frames', () => {
+    expect(lastAdapterStderrLine(['warning: old', '  fatal: new  ', '    at x'])).toBe('fatal: new');
+  });
+
+  it('skips the `from` frames of a Ruby backtrace', () => {
+    expect(lastAdapterStderrLine([
+      "/app/boot.rb:3:in 'start': no such file (Errno::ENOENT)",
+      '\tfrom /app/boot.rb:9:in <main>',
+      "\tfrom /usr/lib/ruby/debug.rb:12:in 'run'"
+    ])).toBe("/app/boot.rb:3:in 'start': no such file (Errno::ENOENT)");
+  });
+
+  it('answers nothing for a missing, empty or all-frame tail', () => {
+    expect(lastAdapterStderrLine(undefined)).toBeUndefined();
+    expect(lastAdapterStderrLine([])).toBeUndefined();
+    expect(lastAdapterStderrLine(['    at a', '  ', '    at b'])).toBeUndefined();
+  });
+});
+
+describe('quotesAdapterStderrLine (issue #897)', () => {
+  it('sees the line behind its log tag, as an adapter error answer repeats it', () => {
+    expect(quotesAdapterStderrLine(
+      'Critical initialization error: Could not attach: no process found with process ID 4 [Adapter command: …]',
+      '[ERROR codelldb::debug_session] Could not attach: no process found with process ID 4'
+    )).toBe(true);
+  });
+
+  it('sees a truncated line by its prefix', () => {
+    const long = `Error: ${'x'.repeat(50)}`;
+    expect(quotesAdapterStderrLine(`refused: ${long} and more`, `${long}…`)).toBe(true);
+  });
+
+  it('never treats a bare tag or an unrelated line as already quoted', () => {
+    expect(quotesAdapterStderrLine('anything', '[WARN codelldb]')).toBe(false);
+    expect(quotesAdapterStderrLine('DAP client error: read ECONNRESET', 'Error: boom')).toBe(false);
   });
 });

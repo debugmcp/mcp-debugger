@@ -118,6 +118,13 @@ export interface IProxyManager extends EventEmitter {
    * 'pre_detach_resume' status; undefined when no resume was called for.
    */
   getPreDetachResume(): PreDetachResume | undefined;
+  /**
+   * The adapter process's last stderr lines, as the worker reported them with
+   * its terminal status or error report (issue #897); empty until then.
+   * Survives stop()/cleanup() like getProxyPid, so a failure message built
+   * after the teardown can still quote the adapter's last word.
+   */
+  getAdapterStderrTail(): readonly string[];
 
   // Typed event emitter methods
   on<K extends keyof ProxyManagerEvents>(
@@ -268,6 +275,8 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   private activeLaunchBarrierRequestId: string | null = null;
   private proxyMessageCounter = 0;
   private exitEmitted = false;
+  /** See getAdapterStderrTail (issue #897). Distinct from stderrBuffer, the worker's own stderr. */
+  private adapterStderrTail: readonly string[] = [];
   /**
    * How far worker-side initialization got, from the worker's progress
    * statuses (adapter_spawned / dap_handshake_stage). Read only when the init
@@ -318,6 +327,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     this.sessionId = config.sessionId;
     this.isStopped = false;
     this.lastProxyPid = null;
+    this.adapterStderrTail = [];
     // The latch tracks the process this start() launches (issue #530)
     this.everInitialized = false;
     this.isDryRun = config.dryRunSpawn === true;
@@ -714,6 +724,10 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
   getPreDetachResume(): PreDetachResume | undefined {
     return this.preDetachResume;
+  }
+
+  getAdapterStderrTail(): readonly string[] {
+    return this.adapterStderrTail;
   }
 
   setCurrentThreadId(threadId: number): void {
@@ -1209,6 +1223,17 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     }
 
     const message = rawMessage as ProxyMessage;
+
+    // The adapter's stderr tail travels with the worker's terminal status or
+    // error report (issue #897). Recorded before anything is emitted: the
+    // session layer stops this manager from inside the exit/error handlers,
+    // and no later message is processed.
+    if (message.type === 'status' || message.type === 'error') {
+      const tail = (message as { stderrTail?: unknown }).stderrTail;
+      if (Array.isArray(tail) && tail.length > 0) {
+        this.adapterStderrTail = tail.filter((line): line is string => typeof line === 'string');
+      }
+    }
 
     // Fast-path: always forward DAP events to consumers to avoid missing stops/output
     if (message.type === 'dapEvent') {

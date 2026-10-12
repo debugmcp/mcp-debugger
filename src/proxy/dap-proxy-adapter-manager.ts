@@ -17,6 +17,14 @@ import {
 export type AdapterStdioSource = 'stdout' | 'stderr';
 
 /**
+ * How much of the adapter's stderr is remembered for its terminal report
+ * (issue #897): enough to keep the first line of a stack trace behind its
+ * frames (js-debug prints nine), short enough for one IPC message.
+ */
+export const RECENT_STDERR_LINES = 20;
+export const RECENT_STDERR_LINE_CHARS = 400;
+
+/**
  * How a forwarded line ended. Only the fragment handed over by
  * AdapterSpawnResult.flushStdio carries `partial: true` (issue #860): the
  * program wrote it with no newline, so the forwarder must not add one. A
@@ -158,28 +166,39 @@ export class GenericAdapterManager {
     this.logger.info(`[AdapterManager] Spawned adapter process PID: ${adapterProcess.pid} (windowsHide=${!!spawnOptions.windowsHide}, detached=${!!spawnOptions.detached})`);
 
     // Set up error handlers and stderr capture
-    const flushStdio = this.setupProcessHandlers(adapterProcess, config.onStdioLine);
+    const { flushStdio, recentStderr } = this.setupProcessHandlers(adapterProcess, config.onStdioLine);
 
     return {
       process: adapterProcess,
       pid: adapterProcess.pid,
-      flushStdio
+      flushStdio,
+      recentStderr
     };
   }
 
   /**
    * Set up process event handlers. Returns the early flush of both stdio
-   * line buffers (AdapterSpawnResult.flushStdio, issue #860).
+   * line buffers (AdapterSpawnResult.flushStdio, issue #860) and the reader
+   * of the remembered stderr tail (AdapterSpawnResult.recentStderr, #897).
    */
   private setupProcessHandlers(
     adapterProcess: ChildProcess,
     onStdioLine?: (source: AdapterStdioSource, line: string, info?: AdapterStdioLineInfo) => void
-  ): () => void {
+  ): { flushStdio: () => void; recentStderr: () => string[] } {
     adapterProcess.on('error', (err: Error) => {
       this.logger.error('[AdapterManager] Adapter process spawn error:', err);
     });
 
     const flushes: Array<() => void> = [];
+    // The tail is fed from the log copy below — sanitized and blank-free —
+    // never from the raw forwarded line (issue #897).
+    const recent: string[] = [];
+    const remember = (line: string): void => {
+      recent.push(line.length > RECENT_STDERR_LINE_CHARS ? `${line.slice(0, RECENT_STDERR_LINE_CHARS)}…` : line);
+      if (recent.length > RECENT_STDERR_LINES) {
+        recent.shift();
+      }
+    };
 
     // Capture stderr for diagnostics. Chunks arrive at arbitrary byte
     // boundaries, so they are line-buffered before sanitization — a secret
@@ -189,7 +208,10 @@ export class GenericAdapterManager {
       flushes.push(this.consumeStream(
         adapterProcess.stderr,
         'stderr',
-        line => this.logger.error(`[AdapterManager STDERR] ${line}`),
+        line => {
+          this.logger.error(`[AdapterManager STDERR] ${line}`);
+          remember(line);
+        },
         onStdioLine
       ));
     }
@@ -210,10 +232,13 @@ export class GenericAdapterManager {
       this.logger.info(`[AdapterManager] Adapter process exited. Code: ${code}, Signal: ${signal}`);
     });
 
-    return () => {
-      for (const flush of flushes) {
-        flush();
-      }
+    return {
+      flushStdio: () => {
+        for (const flush of flushes) {
+          flush();
+        }
+      },
+      recentStderr: () => [...recent]
     };
   }
 

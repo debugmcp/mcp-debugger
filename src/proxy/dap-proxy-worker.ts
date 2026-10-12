@@ -102,6 +102,21 @@ const ADAPTER_STDIO_QUIET_MS = 100;
  */
 const PRE_DETACH_RESUME_TIMEOUT_MS = 2000;
 
+/**
+ * How long an unexpected adapter exit waits for the adapter's stderr pipe to
+ * close before its tail is reported (issue #897). Node fires the process
+ * 'exit' before its stdio has necessarily delivered everything, so the last
+ * line of a crash can land a few milliseconds later; the cap is what expires
+ * when a pipe stays open (something the adapter started inherited it), and
+ * the tail is then whatever had arrived. Only paid when no stdio drain
+ * barrier is armed (that barrier already waits for the pipes) and the exit
+ * was not an orderly end — a clean program end pays nothing. Terminal
+ * signals are queued, so a DAP terminated that arrived behind such an exit
+ * is forwarded after the hold too; the parent acts on the first terminal
+ * message and processes none behind it.
+ */
+const ADAPTER_STDERR_SETTLE_MS = 200;
+
 export class DapProxyWorker {
   private logger: ILogger | null = null;
   private dapClient: IDapClient | null = null;
@@ -139,6 +154,20 @@ export class DapProxyWorker {
    * the exit has been forwarded. Run once the drain has settled on silence.
    */
   private adapterStdioFlush: (() => void) | null = null;
+  /**
+   * Reader of the adapter manager's remembered stderr tail (issue #897):
+   * sent with the terminal status and with error reports, so the parent —
+   * which processes only the first of them before stopping the proxy — can
+   * quote the adapter's last word. Null in connect mode (no adapter process).
+   */
+  private adapterRecentStderr: (() => string[]) | null = null;
+  /**
+   * Resolves once the adapter's stderr pipe has closed or ended (issue
+   * #897); tracked from spawn like the drain barrier, so a close that fires
+   * before the exit slot runs is not missed. Already resolved when there is
+   * no stderr stream; null in connect mode.
+   */
+  private adapterStderrClosed: Promise<void> | null = null;
   /** When the first terminal signal arrived: the silence that counts is measured from here. */
   private firstTerminalSignalAt: number | null = null;
   // Terminal signals (exited/terminated DAP events, socket close, adapter
@@ -601,6 +630,8 @@ export class DapProxyWorker {
       });
 
       this.adapterProcess = spawnResult.process;
+      this.adapterRecentStderr = spawnResult.recentStderr ?? null;
+      this.adapterStderrClosed = this.trackStderrClose(spawnResult.process);
       if (spawnConfig.forwardStdio) {
         this.adapterStdioDrained = this.createStdioDrainBarrier(spawnResult.process);
         if (spawnConfig.forwardStdio.adapterOutlivesDebuggee) {
@@ -625,7 +656,13 @@ export class DapProxyWorker {
         this.adapterExitCode = code;
         this.enqueueTerminalSignal('adapter_exited', async () => {
           await this.waitForAdapterStdioDrain();
-          this.sendStatus('adapter_exited', { code, signal, expected: this.isTerminationExpected() });
+          await this.settleAdapterStderr();
+          this.sendStatus('adapter_exited', {
+            code,
+            signal,
+            expected: this.isTerminationExpected(),
+            ...this.adapterStderrTailExtra()
+          });
         });
       });
     } else {
@@ -633,6 +670,8 @@ export class DapProxyWorker {
       // rdbg attach). There is no adapter process to monitor — termination is
       // detected via socket close (dap_connection_closed), not process exit.
       this.adapterProcess = null;
+      this.adapterRecentStderr = null;
+      this.adapterStderrClosed = null;
       this.logger!.info(
         `[Worker] Connecting directly to DAP server at ${spawnConfig.host}:${spawnConfig.port} (no adapter process to monitor)`
       );
@@ -1190,7 +1229,14 @@ export class DapProxyWorker {
         return this.enqueueTerminalSignal('dap_connection_closed', async () => {
           await this.waitForAdapterStdioDrain();
           await this.waitForChildEventFlush();
-          this.sendStatus('dap_connection_closed', { expected: this.isTerminationExpected() });
+          // The tail rides this status too (issue #897): js-debug writes
+          // "Could not connect to debug target" to stderr and drops the
+          // socket 2 ms later with its process still alive, so this — not
+          // adapter_exited — is the message that can carry the line.
+          this.sendStatus('dap_connection_closed', {
+            expected: this.isTerminationExpected(),
+            ...this.adapterStderrTailExtra()
+          });
           this.shutdown();
         });
       }
@@ -3023,8 +3069,59 @@ export class DapProxyWorker {
     const errorMessage: ErrorMessage = {
       type: 'error',
       message,
-      sessionId: this.currentSessionId || 'unknown'
+      sessionId: this.currentSessionId || 'unknown',
+      ...this.adapterStderrTailExtra()
     };
     this.dependencies.messageSender.send(errorMessage);
+  }
+
+  /** The adapter's remembered stderr tail as a message field, only when there is one (issue #897). */
+  private adapterStderrTailExtra(): { stderrTail?: string[] } {
+    const stderrTail = this.adapterRecentStderr?.() ?? [];
+    return stderrTail.length > 0 ? { stderrTail } : {};
+  }
+
+  /** The adapter's stderr pipe closing or ending, from spawn (issue #897). */
+  private trackStderrClose(adapterProcess: ChildProcess): Promise<void> {
+    const stderr = adapterProcess.stderr;
+    if (!stderr || stderr.destroyed || stderr.readableEnded || stderr.closed) {
+      return Promise.resolve();
+    }
+    return new Promise(resolve => {
+      const done = (): void => {
+        stderr.removeListener('close', done);
+        stderr.removeListener('end', done);
+        resolve();
+      };
+      stderr.once('close', done);
+      stderr.once('end', done);
+    });
+  }
+
+  /**
+   * Give the adapter's stderr pipe a bounded moment to close after an
+   * unexpected process exit, so the tail reported with adapter_exited holds
+   * the crash's last line (issue #897). Skipped when a drain barrier is
+   * armed (it waits for the pipes already) and when the end was orderly;
+   * over at once when the pipe has already closed; capped at
+   * ADAPTER_STDERR_SETTLE_MS otherwise. The measured js-debug case needs
+   * none of this: it drops the socket with its process alive, and the line
+   * had arrived 2 ms before dap_connection_closed was sent.
+   */
+  private async settleAdapterStderr(): Promise<void> {
+    if (this.adapterStdioDrained || this.isTerminationExpected() || !this.adapterStderrClosed) {
+      return;
+    }
+    let timer: NodeJS.Timeout | undefined;
+    const cap = new Promise<void>(resolve => {
+      timer = setTimeout(resolve, ADAPTER_STDERR_SETTLE_MS);
+    });
+    try {
+      await Promise.race([this.adapterStderrClosed, cap]);
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    }
   }
 }

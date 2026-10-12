@@ -94,6 +94,14 @@ describe('ErrorMessages', () => {
     expect(message).toContain('verifyTimeout');
   });
 
+  it('builds the adapter-ended attach message without a "Failed to attach" prefix: the controller adds that (issue #897)', () => {
+    const message = ErrorMessages.attachAdapterFailed('it closed its DAP connection; its last stderr line: "Error: boom"');
+    expect(message).toBe(
+      'The debug adapter ended the session during attach verification: it closed its DAP connection; its last stderr line: "Error: boom"'
+    );
+    expect(message).not.toMatch(/^Attach failed/);
+  });
+
   describe('operationInFlight (issue #711)', () => {
     it('names the operation in flight and the refused tool, and says to wait', () => {
       const message = ErrorMessages.operationInFlight('launch', 'attach_to_process');

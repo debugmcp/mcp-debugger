@@ -1443,6 +1443,42 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       }
     });
 
+    it('quotes the adapter last stderr line when the proxy exits during readiness (issue #897)', async () => {
+      mockSession.proxyManager = undefined;
+      mockSession.state = SessionState.CREATED;
+      mockSession.logDir = '/tmp/session-logs';
+
+      const proxyStub: any = {
+        ...mockProxyManager,
+        once: vi.fn(),
+        removeListener: vi.fn(),
+        on: vi.fn(),
+        off: vi.fn(),
+        isRunning: vi.fn().mockReturnValue(true),
+        stop: vi.fn().mockResolvedValue(undefined)
+      };
+      proxyStub.on.mockReturnValue(proxyStub);
+      proxyStub.off.mockReturnValue(proxyStub);
+
+      const startProxySpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
+        mockSession.proxyManager = proxyStub;
+        // The core's exit handler records the line the worker sent with the
+        // exit; the manager itself is gone from the session by the time the
+        // launch reads it.
+        mockSession.lastProxyExit = { code: 1, signal: undefined, expected: false, stderrLine: 'Error: Cannot find module debugpy' };
+        moveSessionTo(SessionState.ERROR);
+        return {};
+      });
+      try {
+        const result = await operations.startDebugging('test-session', 'main.py');
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('Debug proxy exited unexpectedly during launch (code=1); adapter stderr: "Error: Cannot find module debugpy"');
+      } finally {
+        startProxySpy.mockRestore();
+      }
+    });
+
     it('keeps a clean code-0 program completion as a successful stopped launch', async () => {
       mockSession.proxyManager = undefined;
       mockSession.state = SessionState.CREATED;
@@ -2633,6 +2669,105 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(Date.now() - startedAt).toBeLessThan(2000);
       expect(mockProxyManager.stop).toHaveBeenCalled();
       expect(mockSession.proxyManager).toBeUndefined();
+    });
+
+    describe('how the adapter ended during verification (issue #897)', () => {
+      // The proxy exit reaches the verification as (code, signal, expected);
+      // the adapter's last stderr line reaches it through the manager, which
+      // the session layer has already stopped by the time the result is read.
+      const jsDebugTail = [
+        'Error: Could not connect to debug target at http://localhost:5678: Could not find any debuggable target',
+        '    at async Server.<anonymous> (vsDebugServer.cjs:106:3656)'
+      ];
+
+      const attachWithExit = async (
+        exitArgs: [number | null, string | undefined, boolean | undefined],
+        tail: string[] | undefined
+      ) => {
+        (operations as unknown as { attachVerifyTimeoutMs: number }).attachVerifyTimeoutMs = 5000;
+        let exitHandler: ((code: number | null, signal?: string, expected?: boolean) => void) | undefined;
+        mockProxyManager.on.mockImplementation((event: string, handler: (...args: never[]) => void) => {
+          if (event === 'exit') exitHandler = handler as typeof exitHandler;
+          return mockProxyManager;
+        });
+        if (tail) {
+          (mockProxyManager as unknown as { getAdapterStderrTail: () => string[] }).getAdapterStderrTail =
+            vi.fn().mockReturnValue(tail);
+        }
+        mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+          if (command === 'threads') {
+            // The socket drop / exit lands while the first poll is in flight.
+            exitHandler?.(...exitArgs);
+            throw new Error('Socket not connected or destroyed');
+          }
+          return {};
+        });
+        vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
+          mockSession.proxyManager = mockProxyManager;
+          return {};
+        });
+        return operations.attachToProcess('test-session', { port: 5678, host: 'localhost', stopOnEntry: true });
+      };
+
+      it('says the adapter closed its DAP connection and quotes its last stderr line, not the stack frames', async () => {
+        const result = await attachWithExit([null, undefined, false], jsDebugTail);
+
+        expect(result.success).toBe(false);
+        expect(result.state).toBe(SessionState.ERROR);
+        expect(result.error).toBe(
+          'Failed to attach: The debug adapter ended the session during attach verification: it closed its DAP connection; ' +
+          'its last stderr line: "Error: Could not connect to debug target at http://localhost:5678: Could not find any debuggable target"'
+        );
+        expect(mockProxyManager.stop).toHaveBeenCalled();
+      });
+
+      it('words a real exit by its code and signal, with no stderr line when the worker sent none', async () => {
+        const result = await attachWithExit([null, 'SIGKILL', false], undefined);
+
+        expect(result.error).toBe(
+          'Failed to attach: The debug adapter ended the session during attach verification: it exited (code=null, signal=SIGKILL)'
+        );
+      });
+
+      it('does not repeat a stderr line the adapter error already quotes, log tag aside', async () => {
+        // CodeLLDB answers the attach with its own text and logs the same
+        // sentence behind a "[ERROR codelldb::debug_session]" tag; the latched
+        // error event is the adapter's own word, so nothing is appended.
+        (operations as unknown as { attachVerifyTimeoutMs: number }).attachVerifyTimeoutMs = 5000;
+        let errorHandler: ((err: Error) => void) | undefined;
+        mockProxyManager.on.mockImplementation((event: string, handler: (err: Error) => void) => {
+          if (event === 'error') errorHandler = handler;
+          return mockProxyManager;
+        });
+        (mockProxyManager as unknown as { getAdapterStderrTail: () => string[] }).getAdapterStderrTail =
+          vi.fn().mockReturnValue(['[ERROR codelldb::debug_session] Could not attach: no process found with process ID 4']);
+        mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+          if (command === 'threads') {
+            errorHandler?.(new Error('Critical initialization error: Could not attach: no process found with process ID 4'));
+            throw new Error('Proxy not initialized');
+          }
+          return {};
+        });
+        vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
+          mockSession.proxyManager = mockProxyManager;
+          return {};
+        });
+
+        const result = await operations.attachToProcess('test-session', { processId: 4, stopOnEntry: true });
+
+        expect(result.error).toBe(
+          'Failed to attach: The debug adapter ended the session during attach verification: ' +
+          'Critical initialization error: Could not attach: no process found with process ID 4'
+        );
+      });
+
+      it('says the session ended when the target itself finished under the debugger', async () => {
+        const result = await attachWithExit([0, undefined, true], ['bye']);
+
+        expect(result.error).toBe(
+          'Failed to attach: The debug adapter ended the session during attach verification: it reported the session as ended; its last stderr line: "bye"'
+        );
+      });
     });
 
     it('should invoke the adapter policy performHandshake for attach when the policy defines it', async () => {

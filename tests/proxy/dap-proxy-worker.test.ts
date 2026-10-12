@@ -2356,6 +2356,196 @@ describe('DapProxyWorker', () => {
       expect(messages[closedIdx].expected).toBe(true);
     });
 
+    describe('the adapter stderr tail on terminal statuses and error reports (issue #897)', () => {
+      const tail = [
+        'Error: Could not connect to debug target at http://localhost:5678: Could not find any debuggable target',
+        '    at async Server.<anonymous> (vsDebugServer.cjs:106:3656)'
+      ];
+      const rubyPayload = (sessionId: string): ProxyInitPayload => ({
+        cmd: 'init',
+        sessionId,
+        language: 'ruby',
+        executablePath: 'ruby',
+        adapterHost: '127.0.0.1',
+        adapterPort: 8128,
+        logDir: '/logs',
+        scriptPath: '/path/to/fizzbuzz.rb',
+        launchConfig: { request: 'launch', type: 'rdbg' },
+        adapterCommand: { command: 'rdbg', args: ['--open', '-c', '--', 'ruby', '/path/to/fizzbuzz.rb'] }
+      });
+      const pythonPayload = (sessionId: string): ProxyInitPayload => ({
+        cmd: 'init',
+        sessionId,
+        executablePath: 'python',
+        adapterHost: 'localhost',
+        adapterPort: 8133,
+        logDir: '/logs',
+        scriptPath: '/path/to/script.py'
+      });
+
+      const bootWorker = async (
+        policy: typeof RubyAdapterPolicy | typeof PythonAdapterPolicy,
+        payload: ProxyInitPayload,
+        spawnExtra: Record<string, unknown>
+      ) => {
+        const adapterProcess = new EventEmitter() as any;
+        adapterProcess.pid = 4248;
+        adapterProcess.stdout = new EventEmitter();
+        adapterProcess.stderr = new EventEmitter();
+        adapterProcess.kill = vi.fn();
+        adapterProcess.unref = vi.fn();
+        adapterProcess.exitCode = null;
+
+        const processStub = {
+          spawn: vi.fn().mockResolvedValue({ process: adapterProcess as ChildProcess, pid: 4248, ...spawnExtra }),
+          shutdown: vi.fn().mockResolvedValue(undefined)
+        };
+        const connectionStub = {
+          connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+          setAdapterPolicy: vi.fn(),
+          setupEventHandlers: vi.fn((client: EventEmitter, handlers: Record<string, (body?: unknown) => void>) => {
+            if (handlers.onInitialized) client.on('initialized', handlers.onInitialized);
+            if (handlers.onTerminated) client.on('terminated', handlers.onTerminated);
+            if (handlers.onClose) client.on('close', handlers.onClose);
+          }),
+          initializeSession: vi.fn().mockImplementation(async () => {
+            setImmediate(() => mockDapClient.emit('initialized'));
+          }),
+          sendLaunchRequest: vi.fn().mockResolvedValue(undefined),
+          setBreakpoints: vi.fn().mockResolvedValue(undefined),
+          sendConfigurationDone: vi.fn().mockResolvedValue(undefined),
+          disconnect: vi.fn().mockResolvedValue(undefined)
+        };
+
+        (worker as any).logger = mockLogger;
+        (worker as any).processManager = processStub;
+        (worker as any).connectionManager = connectionStub;
+        (worker as any).adapterPolicy = policy;
+        (worker as any).adapterState = policy.createInitialState();
+        (worker as any).currentInitPayload = payload;
+        (worker as any).currentSessionId = payload.sessionId;
+        (worker as any).state = ProxyState.INITIALIZING;
+
+        await (worker as any).startAdapterAndConnect(payload);
+        mockMessageSender.send.mockClear();
+        return {
+          adapterProcess,
+          sentMessages: () => mockMessageSender.send.mock.calls.map(([m]) => m as any),
+          flush: () => new Promise(resolve => setImmediate(resolve))
+        };
+      };
+
+      it('sends the tail with dap_connection_closed when the socket drops with the adapter alive', async () => {
+        // The measured js-debug shape: "Could not connect to debug target"
+        // on stderr, the DAP socket dropped 2 ms later, the process still
+        // running — so this status, not adapter_exited, carries the line.
+        const { adapterProcess, sentMessages, flush } = await bootWorker(
+          RubyAdapterPolicy, rubyPayload('stderr-tail-close-session'), { recentStderr: () => [...tail] }
+        );
+
+        mockDapClient.emit('close');
+        adapterProcess.stdout.emit('close');
+        adapterProcess.stderr.emit('close');
+        await flush();
+        await flush();
+
+        const closed = sentMessages().find(m => m.type === 'status' && m.status === 'dap_connection_closed');
+        expect(closed).toBeDefined();
+        expect(closed.stderrTail).toEqual(tail);
+        expect(closed.expected).toBe(false);
+      });
+
+      it('sends the tail with adapter_exited and with an adapter error report', async () => {
+        const { adapterProcess, sentMessages, flush } = await bootWorker(
+          RubyAdapterPolicy, rubyPayload('stderr-tail-exit-session'), { recentStderr: () => [...tail] }
+        );
+
+        adapterProcess.emit('error', new Error('adapter fail'));
+        const report = sentMessages().find(m => m.type === 'error' && m.message === 'Adapter process error: adapter fail');
+        expect(report).toBeDefined();
+        expect(report.stderrTail).toEqual(tail);
+
+        adapterProcess.emit('exit', 1, null);
+        adapterProcess.stdout.emit('close');
+        adapterProcess.stderr.emit('close');
+        await flush();
+        await flush();
+
+        const exited = sentMessages().find(m => m.type === 'status' && m.status === 'adapter_exited');
+        expect(exited).toEqual(expect.objectContaining({ code: 1, signal: null, stderrTail: tail }));
+      });
+
+      it('omits stderrTail when the spawn result remembers nothing', async () => {
+        const { adapterProcess, sentMessages, flush } = await bootWorker(
+          RubyAdapterPolicy, rubyPayload('stderr-tail-none-session'), { recentStderr: () => [] }
+        );
+
+        adapterProcess.emit('exit', 1, null);
+        adapterProcess.stdout.emit('close');
+        adapterProcess.stderr.emit('close');
+        await flush();
+        await flush();
+
+        const exited = sentMessages().find(m => m.type === 'status' && m.status === 'adapter_exited');
+        expect(exited).toBeDefined();
+        expect(exited).not.toHaveProperty('stderrTail');
+      });
+
+      it('holds an unexpected adapter_exited of a no-barrier adapter until its stderr closes, so the crash line is in the tail', async () => {
+        // debugpy opts into no stdio forwarding, so no drain barrier waits
+        // for the pipes; the last line of a crash can still land after the
+        // process 'exit' fires.
+        const lines = ['starting'];
+        const { adapterProcess, sentMessages, flush } = await bootWorker(
+          PythonAdapterPolicy, pythonPayload('stderr-settle-session'), { recentStderr: () => [...lines] }
+        );
+
+        adapterProcess.emit('exit', 1, null);
+        await flush();
+        await flush();
+        expect(sentMessages().some(m => m.type === 'status' && m.status === 'adapter_exited')).toBe(false);
+
+        lines.push('Fatal: debugpy could not start');
+        adapterProcess.stderr.emit('close');
+        await flush();
+        await flush();
+
+        const exited = sentMessages().find(m => m.type === 'status' && m.status === 'adapter_exited');
+        expect(exited).toBeDefined();
+        expect(exited.stderrTail).toEqual(['starting', 'Fatal: debugpy could not start']);
+      });
+
+      it('does not hold adapter_exited when the stderr pipe closed before the exit slot ran', async () => {
+        const { adapterProcess, sentMessages, flush } = await bootWorker(
+          PythonAdapterPolicy, pythonPayload('stderr-settle-closed-session'), { recentStderr: () => ['bye'] }
+        );
+        // Tracked from spawn: a close that lands before the queued exit task
+        // runs (the usual order for a process that has already died) counts.
+        adapterProcess.stderr.emit('close');
+
+        adapterProcess.emit('exit', 1, null);
+        await flush();
+        await flush();
+
+        const exited = sentMessages().find(m => m.type === 'status' && m.status === 'adapter_exited');
+        expect(exited).toBeDefined();
+        expect(exited.stderrTail).toEqual(['bye']);
+      });
+
+      it('caps the hold at 200 ms when the pipe never closes (something inherited it)', async () => {
+        const { adapterProcess, sentMessages } = await bootWorker(
+          PythonAdapterPolicy, pythonPayload('stderr-settle-cap-session'), { recentStderr: () => ['partial'] }
+        );
+
+        adapterProcess.emit('exit', 1, null);
+        await new Promise(resolve => setTimeout(resolve, 260));
+
+        const exited = sentMessages().find(m => m.type === 'status' && m.status === 'adapter_exited');
+        expect(exited).toBeDefined();
+        expect(exited.stderrTail).toEqual(['partial']);
+      });
+    });
+
     it('marks dap_connection_closed unexpected when the socket drops mid-run (issue #258)', async () => {
       // No terminated/exited event and no shutdown underway: the adapter
       // dropped the DAP socket while the debuggee was still running. The
@@ -2600,6 +2790,9 @@ describe('DapProxyWorker', () => {
         await (worker as any).startAdapterAndConnect(payload);
 
         adapterProcess.emit('exit', 1, null);
+        // An exited process closes its pipes; an unexpected exit waits for
+        // stderr to close before adapter_exited is sent (issue #897).
+        adapterProcess.stderr.emit('close');
         mockDapClient.emit('terminated', {});
         await flush();
         await flush();
