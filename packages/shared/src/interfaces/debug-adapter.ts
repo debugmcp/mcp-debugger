@@ -123,11 +123,6 @@ export interface IDebugAdapter extends EventEmitter {
   transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig>;
 
   /**
-   * Get default launch configuration for this language
-   */
-  getDefaultLaunchConfig(): Partial<GenericLaunchConfig>;
-
-  /**
    * Check if this adapter supports attaching to running processes
    * @returns true if attach is supported, false otherwise
    */
@@ -210,13 +205,6 @@ export interface IDebugAdapter extends EventEmitter {
    * @returns Language-specific attach configuration
    */
   transformAttachConfig?(config: GenericAttachConfig): LanguageSpecificAttachConfig | Promise<LanguageSpecificAttachConfig>;
-
-  /**
-   * Get default attach configuration for this language
-   * Only called if supportsAttach() returns true
-   * @returns Default attach configuration with language-specific defaults
-   */
-  getDefaultAttachConfig?(): Partial<GenericAttachConfig>;
 
   // ===== DAP Protocol Operations =====
   

@@ -18,8 +18,7 @@ import {
   DAPSessionState,
   addPendingRequest,
   removePendingRequest,
-  clearPendingRequests,
-  setCurrentThreadId as setCoreCurrentThreadId
+  clearPendingRequests
 } from '../dap-core/index.js';
 import type {
   ProxyStatusMessage,
@@ -732,12 +731,6 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
   setCurrentThreadId(threadId: number): void {
     this.currentThreadId = threadId;
-    // Mirror into the functional-core snapshot so an adopted anchor (the
-    // frameless-thread fallback, get_stack_trace {threadId}) is not stale
-    // there (issue #496).
-    if (this.dapState) {
-      this.dapState = setCoreCurrentThreadId(this.dapState, threadId);
-    }
   }
 
   private async prepareSpawnContext(config: ProxyConfig): Promise<{
@@ -1292,10 +1285,9 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         if (result.newState.initialized) {
           this.everInitialized = true;
         }
-        // The imperative currentThreadId is authoritative — the fast-path
-        // stopped handler in handleDapEvent writes it. Restoring the core's
-        // copy here clobbered anchors adopted via setCurrentThreadId() on
-        // every subsequent response/event (issue #496).
+        // currentThreadId is imperative-only: the fast-path stopped handler
+        // in handleDapEvent writes it, and the core keeps no copy (issues
+        // #496, #913).
       }
       
       // Resolve/reject pending DAP request Promises. The functional core above only
@@ -1345,9 +1337,6 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
           const first = threads.length ? threads[0]?.id : undefined;
           if (typeof first === 'number') {
             this.currentThreadId = first;
-            if (this.dapState) {
-              this.dapState = setCoreCurrentThreadId(this.dapState, first);
-            }
           }
         }
       } catch {

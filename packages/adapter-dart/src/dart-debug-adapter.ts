@@ -258,10 +258,6 @@ export class DartDebugAdapter extends EventEmitter implements IDebugAdapter {
     return out as LanguageSpecificLaunchConfig;
   }
 
-  getDefaultLaunchConfig(): Partial<GenericLaunchConfig> {
-    return { stopOnEntry: false, justMyCode: true };
-  }
-
   consumeLaunchConfigDiagnostics(): readonly LaunchConfigDiagnostic[] {
     const out = this.diagnostics;
     this.diagnostics = [];
@@ -325,10 +321,6 @@ export class DartDebugAdapter extends EventEmitter implements IDebugAdapter {
       );
     }
     return out;
-  }
-
-  getDefaultAttachConfig(): Partial<GenericAttachConfig> {
-    return { timeout: 30000 };
   }
 
   // ===== DAP plumbing (the proxy does the actual communication) =====

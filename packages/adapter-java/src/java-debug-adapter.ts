@@ -333,13 +333,6 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
     return javaConfig;
   }
 
-  getDefaultLaunchConfig(): Partial<GenericLaunchConfig> {
-    return {
-      stopOnEntry: true,
-      justMyCode: true
-    };
-  }
-
   // ===== Attach Support =====
 
   supportsAttach(): boolean {
@@ -369,13 +362,6 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
       host: (host as string | undefined) || 'localhost',
       port: port as number | undefined,
     } as LanguageSpecificAttachConfig;
-  }
-
-  getDefaultAttachConfig(): Partial<GenericAttachConfig> {
-    return {
-      request: 'attach',
-      host: 'localhost',
-    };
   }
 
   // ===== DAP Protocol Operations =====

@@ -635,15 +635,6 @@ export class CppDebugAdapter extends EventEmitter implements IDebugAdapter {
     return launchConfig;
   }
 
-  getDefaultLaunchConfig(): Partial<GenericLaunchConfig> {
-    return {
-      stopOnEntry: false,
-      justMyCode: true,
-      env: {},
-      cwd: process.cwd()
-    };
-  }
-
   // ===== Attach Support =====
 
   supportsAttach(): boolean {
@@ -693,13 +684,6 @@ export class CppDebugAdapter extends EventEmitter implements IDebugAdapter {
       // Hold the target paused after attach unless the caller opts out —
       // agents attach to inspect, not to keep running blind.
       stopOnEntry: stopOnEntry ?? true
-    };
-  }
-
-  getDefaultAttachConfig(): Partial<GenericAttachConfig> {
-    return {
-      request: 'attach',
-      stopOnEntry: true
     };
   }
 

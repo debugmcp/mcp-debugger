@@ -381,7 +381,6 @@ describe('CppDebugAdapter', () => {
     it('declares attach and detach support', () => {
       expect(adapter.supportsAttach()).toBe(true);
       expect(adapter.supportsDetach()).toBe(true);
-      expect(adapter.getDefaultAttachConfig()).toMatchObject({ request: 'attach', stopOnEntry: true });
     });
 
     it('maps processId to a numeric pid in the lldb attach shape', () => {
