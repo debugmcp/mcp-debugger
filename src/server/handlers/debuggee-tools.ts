@@ -3,7 +3,7 @@
  * attach_to_process, detach_from_process, redefine_classes.
  */
 import type { ToolHandler } from '../tool-context.js';
-import { successWarning } from './shared.js';
+import { attachRequestFromArgs, successWarning } from './shared.js';
 import {
   assertPlainObjectArg,
   normalizeStartDebuggingArgs,
@@ -106,18 +106,7 @@ export const attachToProcessTool: ToolHandler = async (ctx, args) => {
       processId: args.processId
     });
 
-    const attachResult = await ctx.sessionManager.attachToProcess(args.sessionId, {
-      port: args.port,
-      host: args.host,
-      processId: args.processId,
-      timeout: args.timeout,
-      verifyTimeout: args.verifyTimeout,
-      sourcePaths: args.sourcePaths,
-      stopOnEntry: args.stopOnEntry,
-      justMyCode: args.justMyCode,
-      breakOnExceptions: validateBreakOnExceptions(args.breakOnExceptions),
-      adapterConfig: args.adapterConfig
-    });
+    const attachResult = await ctx.sessionManager.attachToProcess(args.sessionId, attachRequestFromArgs(args));
 
     const responsePayload: Record<string, unknown> = {
       success: attachResult.success,

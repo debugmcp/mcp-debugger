@@ -3,7 +3,7 @@
     "tools": [
       {
         "name": "create_debug_session",
-        "description": "Create a new debugging session. Provide host and port to attach to a running process; omit them for launch mode. Attaching pauses the target unless stopOnEntry is false",
+        "description": "Create a new debugging session. Passing port, processId or an adapterConfig that names a debugger URI (vmServiceUri, websocketAddress, vmServiceInfoFile) attaches to a running process in the same call, with every attach argument attach_to_process takes (host alone does not); omit them for launch mode. Attaching pauses the target unless stopOnEntry is false",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -25,11 +25,38 @@
             },
             "host": {
               "type": "string",
-              "description": "Host to attach to for remote debugging (optional, triggers attach mode)"
+              "description": "Attach mode only: host to attach to (the adapter defaults it, usually 127.0.0.1). Does not trigger attach mode by itself"
             },
             "port": {
               "type": "number",
-              "description": "Debug port to attach to for remote debugging (optional, triggers attach mode)"
+              "description": "Debug port to attach to (triggers attach mode)"
+            },
+            "processId": {
+              "type": [
+                "number",
+                "string"
+              ],
+              "description": "Process ID for local attach, language-specific (triggers attach mode)"
+            },
+            "sourcePaths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Attach mode only: source paths for code mapping"
+            },
+            "justMyCode": {
+              "type": "boolean",
+              "description": "Attach mode only: only debug user code (skip library code)"
+            },
+            "breakOnExceptions": {
+              "type": "string",
+              "enum": [
+                "uncaught",
+                "all",
+                "none"
+              ],
+              "description": "Attach mode only: break when exceptions are thrown: \"uncaught\" pauses at uncaught exceptions at the crash site; \"all\" also pauses on caught/raised exceptions (language-dependent). Default \"none\" — attach sessions never apply a language default (unlike launch)"
             },
             "stopOnEntry": {
               "type": "boolean",
@@ -37,7 +64,7 @@
             },
             "timeout": {
               "type": "number",
-              "description": "Connection timeout in milliseconds for attach mode (default: 30000)"
+              "description": "Attach mode only: connection timeout in milliseconds, forwarded to adapters that take one (js-debug, the Java bridge, rdbg); the adapter default applies when omitted. A value longer than verifyTimeout means the verify deadline is what you hit"
             },
             "verifyTimeout": {
               "type": "number",
@@ -45,7 +72,7 @@
             },
             "adapterConfig": {
               "type": "object",
-              "description": "Attach mode only: adapter-specific attach configuration merged into the attach config (see attach_to_process)",
+              "description": "Attach mode only: adapter-specific attach configuration merged into the attach config (see attach_to_process). Triggers attach mode when it names a debugger URI (vmServiceUri, websocketAddress) or vmServiceInfoFile",
               "additionalProperties": true
             }
           },
@@ -283,7 +310,7 @@
             },
             "timeout": {
               "type": "number",
-              "description": "Connection timeout in milliseconds (default: 30000)"
+              "description": "Connection timeout in milliseconds, forwarded to adapters that take one (js-debug, the Java bridge, rdbg); the adapter default applies when omitted. A value longer than verifyTimeout means the verify deadline is what you hit"
             },
             "verifyTimeout": {
               "type": "number",

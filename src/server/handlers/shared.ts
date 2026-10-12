@@ -7,8 +7,11 @@ import { isSettledSessionState, REDACTION_NOTICE, SessionState, Variable } from 
 import type { LineContext } from '../../utils/line-reader.js';
 import { buildTruncationNotice, VariableTruncationSummary } from '../../session/variable-caps.js';
 import type { ToolContext } from '../tool-context.js';
+import type { ToolArguments } from '../tool-arguments.js';
+import { validateBreakOnExceptions } from '../tool-validation.js';
 import { debuggerOffWhy } from '../../session/debugger-off.js';
 import type { DebugResult } from '../../session/session-manager-core.js';
+import type { AttachRequest } from '../../session/attach/attach-controller.js';
 
 /**
  * Whether a session's recorded `lastStop` describes where it is now. The
@@ -131,4 +134,29 @@ export function successWarning(
   result: Pick<DebugResult, 'success' | 'data'>
 ): string | undefined {
   return result.success ? result.data?.warning : undefined;
+}
+
+/**
+ * The one AttachRequest both attach entry points send — attach_to_process and
+ * the create_debug_session shortcut (issue #905) — so they cannot drift again.
+ * Every key is spelled and forwarded as given: no layer below defaults `host`
+ * (every adapter does) or `timeout` (js-debug, the Java bridge and rdbg read
+ * it; forcing 30 s on js-debug would out-wait the 20 s verify window, and a
+ * dead port would answer the generic verify failure instead of the adapter's
+ * own last word, issue #897). An invalid breakOnExceptions throws here, before
+ * any session exists.
+ */
+export function attachRequestFromArgs(args: ToolArguments): AttachRequest {
+  return {
+    port: args.port,
+    host: args.host,
+    processId: args.processId,
+    timeout: args.timeout,
+    verifyTimeout: args.verifyTimeout,
+    sourcePaths: args.sourcePaths,
+    stopOnEntry: args.stopOnEntry,
+    justMyCode: args.justMyCode,
+    breakOnExceptions: validateBreakOnExceptions(args.breakOnExceptions),
+    adapterConfig: args.adapterConfig
+  };
 }

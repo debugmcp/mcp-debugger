@@ -770,6 +770,11 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
 
       const create = findToolIn(result.tools, 'create_debug_session');
       expect(create.inputSchema.properties?.adapterConfig).toMatchObject({ type: 'object' });
+      // The attach-only parameters attach_to_process takes (issue #905).
+      expect(create.inputSchema.properties?.processId).toMatchObject({ type: ['number', 'string'] });
+      expect(create.inputSchema.properties?.sourcePaths).toMatchObject({ type: 'array' });
+      expect(create.inputSchema.properties?.justMyCode).toMatchObject({ type: 'boolean' });
+      expect(create.inputSchema.properties?.breakOnExceptions).toMatchObject({ enum: ['uncaught', 'all', 'none'] });
     });
 
     it('create_debug_session auto-attach forwards adapterConfig', async () => {
@@ -814,6 +819,87 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
           },
         },
       })).rejects.toThrow(/adapterConfig must be an object/);
+
+      expect(mockSessionManager.createSession).not.toHaveBeenCalled();
+      expect(mockSessionManager.attachToProcess).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('create_debug_session attach shortcut parity (issue #905)', () => {
+    const mockSessionInfo: DebugSessionInfo = {
+      id: 'attach-session-1',
+      name: 'Attach Test',
+      language: 'python' as DebugLanguage,
+      state: 'created' as SessionState,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    const everyAttachArg = {
+      port: 5009,
+      host: '10.0.0.5',
+      processId: 4242,
+      timeout: 7000,
+      verifyTimeout: 12000,
+      sourcePaths: ['/src'],
+      stopOnEntry: false,
+      justMyCode: false,
+      breakOnExceptions: 'all',
+      adapterConfig: { pathMappings: [] }
+    };
+    const payloadOf = (result: { content: Array<{ text: string }> }) => JSON.parse(result.content[0].text);
+    const create = (args: Record<string, unknown>) =>
+      callToolHandler({ method: 'tools/call', params: { name: 'create_debug_session', arguments: { language: 'python', ...args } } });
+
+    beforeEach(() => {
+      mockSessionManager.createSession.mockResolvedValue(mockSessionInfo);
+      mockSessionManager.attachToProcess.mockResolvedValue({ success: true, state: 'paused' });
+    });
+
+    it('forwards the same AttachRequest attach_to_process sends for the same arguments', async () => {
+      await create(everyAttachArg);
+      await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'attach_to_process', arguments: { sessionId: 'attach-session-1', ...everyAttachArg } }
+      });
+
+      const [shortcutCall, attachCall] = mockSessionManager.attachToProcess.mock.calls;
+      expect(shortcutCall[1]).toEqual(attachCall[1]);
+      expect(shortcutCall[1]).toEqual(everyAttachArg);
+    });
+
+    it('forwards host and timeout as given, leaving their defaults to the adapter', async () => {
+      await create({ port: 5009 });
+
+      expect(mockSessionManager.attachToProcess).toHaveBeenCalledWith(
+        'attach-session-1',
+        expect.objectContaining({ host: undefined, timeout: undefined })
+      );
+    });
+
+    it.each([
+      ['processId alone', { processId: 4242 }],
+      ['adapterConfig.vmServiceUri alone', { adapterConfig: { vmServiceUri: 'ws://127.0.0.1:8181/tok=/ws' } }],
+      ['adapterConfig.websocketAddress alone', { adapterConfig: { websocketAddress: 'ws://127.0.0.1:9229/uuid' } }],
+      ['adapterConfig.vmServiceInfoFile alone', { adapterConfig: { vmServiceInfoFile: '/tmp/vm.json' } }]
+    ])('attaches in the same call on %s', async (_label, args) => {
+      const result = await create(args);
+
+      expect(mockSessionManager.attachToProcess).toHaveBeenCalledWith('attach-session-1', expect.objectContaining(args));
+      expect(payloadOf(result).message).toBe('Created and attached python debug session: Attach Test');
+    });
+
+    it.each([
+      ['host alone', { host: '127.0.0.1' }],
+      ['an adapterConfig without a target key', { adapterConfig: { pathMappings: [] } }]
+    ])('creates a plain session on %s', async (_label, args) => {
+      const result = await create(args);
+
+      expect(mockSessionManager.attachToProcess).not.toHaveBeenCalled();
+      expect(payloadOf(result).message).toBe('Created python debug session: Attach Test');
+    });
+
+    it('refuses an invalid breakOnExceptions before creating the session (the #336 rule)', async () => {
+      await expect(create({ port: 5009, breakOnExceptions: 'sometimes' })).rejects.toThrow(/breakOnExceptions/);
 
       expect(mockSessionManager.createSession).not.toHaveBeenCalled();
       expect(mockSessionManager.attachToProcess).not.toHaveBeenCalled();
