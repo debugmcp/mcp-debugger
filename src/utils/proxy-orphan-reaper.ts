@@ -208,8 +208,8 @@ export function parseProxyArgs(pid: number, args: string[]): TaggedProxy | null 
 /**
  * Matcher for js-debug DAP server processes (vsDebugServer.cjs) tagged at
  * spawn time by JavascriptDebugAdapter.buildAdapterCommand (issue #431).
- * These are spawned detached+unref'd by the proxy worker, so a hard-killed
- * worker strands them outside every tree-kill path; the startup janitor
+ * These are spawned unref'd (and detached off win32) by the proxy worker, so
+ * a hard-killed worker strands them outside every tree-kill path; the startup janitor
  * feeds scan rows through this matcher to find them.
  *
  * @internal Exposed for unit tests; not part of the public module API.
