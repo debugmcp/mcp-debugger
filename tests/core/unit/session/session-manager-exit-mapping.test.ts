@@ -113,6 +113,25 @@ describe('SessionManager - proxy exit mapping (issue #258)', () => {
     });
   });
 
+  it('quotes the adapter last stderr line in the exit record and the failure message (issue #897)', async () => {
+    const sessionId = await startRunningSession();
+    dependencies.mockProxyManager.adapterStderrTail = ['Error: boom', '    at crash (adapter.js:1)'];
+
+    dependencies.mockProxyManager.simulateEvent('exit', 134, undefined, false);
+
+    const session = sessionManager.getSession(sessionId);
+    expect(session?.state).toBe(SessionState.ERROR);
+    expect(session?.lastProxyExit).toEqual({ code: 134, signal: undefined, expected: false, stderrLine: 'Error: boom' });
+    await vi.waitFor(() => {
+      expect(dependencies.mockLogger.error).toHaveBeenCalledWith(
+        `[SessionManager] Detailed error in proxyExit for session ${sessionId}:`,
+        expect.objectContaining({
+          message: 'Debug proxy exited unexpectedly (code=134); adapter stderr: "Error: boom"'
+        })
+      );
+    });
+  });
+
   it('persists the same diagnostics for a proxy error event', async () => {
     const sessionId = await startRunningSession();
 

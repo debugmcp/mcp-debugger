@@ -40,7 +40,8 @@ import { IAdapterRegistry } from '@debugmcp/shared';
 import {
   collectProxyFailureDiagnostics,
   logProxyFailure,
-  type ProxyFailureDiagnostics
+  type ProxyFailureDiagnostics,
+  lastAdapterStderrLine
 } from './launch/proxy-failure-diagnostics.js';
 import type { AnchorResolution } from './breakpoints/anchor-resolution.js';
 import {
@@ -1400,7 +1401,9 @@ export abstract class SessionManagerCore extends EventEmitter {
       clearPauseIntent(session);
       this.logger.debug(`[SessionManager] handleExit: session=${sessionId} currentState=${session.state} code=${code} signal=${signal} expected=${expected}`);
       this.logger.info(`[ProxyManager ${sessionId}] Exit: code=${code}, signal=${signal}, expected=${expected}`);
-      session.lastProxyExit = { code, signal, expected };
+      // The adapter's own last word, when the worker sent one (issue #897).
+      const stderrLine = lastAdapterStderrLine(proxyManager.getAdapterStderrTail?.());
+      session.lastProxyExit = { code, signal, expected, ...(stderrLine ? { stderrLine } : {}) };
       const stateBeforeExit = session.state;
       if (!isTerminalSessionState(session.state)) {
         if (expected === true) {
@@ -1433,7 +1436,9 @@ export abstract class SessionManagerCore extends EventEmitter {
       if (stateBeforeExit !== SessionState.ERROR && session.state === SessionState.ERROR) {
         const exitDescription = `code=${code ?? 'null'}${signal ? `, signal=${signal}` : ''}`;
         const exitError = Object.assign(
-          new Error(`Debug proxy exited unexpectedly (${exitDescription})`),
+          new Error(
+            `Debug proxy exited unexpectedly (${exitDescription})${stderrLine ? `; adapter stderr: "${stderrLine}"` : ''}`
+          ),
           { code, signal, expected }
         );
         this.recordProxyFailure(session, exitError);

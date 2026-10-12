@@ -34,6 +34,25 @@ const PROXY_LOG_TAIL_LINES = 80;
 /** Hard I/O and allocation cap applied before the log is sanitized. */
 export const PROXY_LOG_TAIL_MAX_BYTES = 64 * 1024;
 
+/**
+ * The line worth quoting from an adapter's stderr tail (issue #897): the
+ * last one that is not a stack frame, so a Node error's `Error: …` wins over
+ * the nine `    at …` lines js-debug prints under it. Undefined when the
+ * tail is empty or all frames.
+ */
+export function lastAdapterStderrLine(tail: readonly string[] | undefined): string | undefined {
+  if (!tail) {
+    return undefined;
+  }
+  for (let i = tail.length - 1; i >= 0; i -= 1) {
+    const line = tail[i].trim();
+    if (line.length > 0 && !/^at\s/.test(line)) {
+      return line;
+    }
+  }
+  return undefined;
+}
+
   /** The pointers a failed launch/attach returns to the caller (issue #493 / #551). */
   export interface ProxyFailureDiagnostics extends SessionFailureDiagnostics {
     initProgress?: ProxyInitProgress;

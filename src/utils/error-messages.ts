@@ -406,15 +406,17 @@ export const ErrorMessages = {
     `(e.g. a busy or warming JVM), retry with a larger 'verifyTimeout' (ms) on attach_to_process.`,
 
   /**
-   * Error message for attaches rejected by the debug adapter itself
+   * Error message for an attach the debug adapter itself ended
    * Occurs when: The adapter rejects the attach after reporting itself
-   * configured (e.g. CodeLLDB on ptrace EPERM) and the proxy dies mid-verify —
-   * a retry with a larger timeout cannot help
-   * Used in: src/session/session-manager-operations.ts
-   * @param failure - The adapter's error, or the proxy exit description
+   * configured (e.g. CodeLLDB on ptrace EPERM), exits, or drops the DAP
+   * socket (js-debug after "Could not connect to debug target") while the
+   * attach is being verified — a retry with a larger timeout cannot help.
+   * The caller prefixes "Failed to attach: ".
+   * Used in: src/session/attach/attach-controller.ts
+   * @param failure - The adapter's error, or how it ended plus its last stderr line (issue #897)
    */
   attachAdapterFailed: (failure: string) =>
-    `Attach failed: the debug adapter reported an error and exited during attach verification: ${failure}`,
+    `The debug adapter ended the session during attach verification: ${failure}`,
 
   /**
    * Error message for adapter ready timeouts

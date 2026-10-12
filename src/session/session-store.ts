@@ -51,6 +51,8 @@ export interface ProxyExitState {
   code: number | null;
   signal?: string;
   expected?: boolean;
+  /** The adapter's last stderr line, when the worker reported one with the exit (issue #897). */
+  stderrLine?: string;
 }
 
 /**

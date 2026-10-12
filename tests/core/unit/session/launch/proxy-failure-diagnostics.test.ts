@@ -11,6 +11,7 @@ import path from 'path';
 import {
   buildProxyFailureErrorDetails,
   collectProxyFailureDiagnostics,
+  lastAdapterStderrLine,
   logProxyFailure,
   PROXY_LOG_TAIL_MAX_BYTES,
   readProxyLogTail
@@ -321,5 +322,26 @@ describe('logProxyFailure', () => {
       expect.any(String),
       expect.objectContaining({ proxyLogTail: 'adapter said: could not open port' })
     );
+  });
+});
+
+describe('lastAdapterStderrLine (issue #897)', () => {
+  it('picks the Error line over the stack frames printed under it', () => {
+    expect(lastAdapterStderrLine([
+      'Error: Could not connect to debug target at http://localhost:5678: Could not find any debuggable target',
+      '    at C:\\vendor\\js-debug\\vsDebugServer.cjs:91:49334',
+      '    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)',
+      '    at async Server.<anonymous> (vsDebugServer.cjs:106:3656)'
+    ])).toBe('Error: Could not connect to debug target at http://localhost:5678: Could not find any debuggable target');
+  });
+
+  it('takes the last non-frame line when several precede the frames', () => {
+    expect(lastAdapterStderrLine(['warning: old', '  fatal: new  ', '    at x'])).toBe('fatal: new');
+  });
+
+  it('answers nothing for a missing, empty or all-frame tail', () => {
+    expect(lastAdapterStderrLine(undefined)).toBeUndefined();
+    expect(lastAdapterStderrLine([])).toBeUndefined();
+    expect(lastAdapterStderrLine(['    at a', '  ', '    at b'])).toBeUndefined();
   });
 });
