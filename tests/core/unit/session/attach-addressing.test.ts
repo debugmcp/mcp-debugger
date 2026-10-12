@@ -4,7 +4,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import type { AdapterModes } from '@debugmcp/shared';
-import { attachLocalityOf, classifyAttachAddressing } from '../../../../src/session/attach/attach-addressing.js';
+import { attachLocalityOf, classifyAttachAddressing, namesAttachTarget } from '../../../../src/session/attach/attach-addressing.js';
 
 const PORT_ONLY: AdapterModes = {
   launch: true,
@@ -120,5 +120,23 @@ describe('attachLocalityOf', () => {
     expect(attachLocalityOf({ adapterConfig: { vmServiceUri: 'not a uri' } })).toBe('unknown');
     expect(attachLocalityOf({ adapterConfig: { vmServiceInfoFile: '/tmp/info.json' } })).toBe('unknown');
     expect(attachLocalityOf({})).toBe('unknown');
+  });
+});
+
+describe('namesAttachTarget (issue #905)', () => {
+  it('is true for a port, a processId, or an adapterConfig URI / info-file key', () => {
+    expect(namesAttachTarget({ port: 5678 })).toBe(true);
+    expect(namesAttachTarget({ processId: 7 })).toBe(true);
+    expect(namesAttachTarget({ processId: '7' })).toBe(true);
+    expect(namesAttachTarget({ adapterConfig: { vmServiceUri: 'ws://127.0.0.1:8181/tok=/ws' } })).toBe(true);
+    expect(namesAttachTarget({ adapterConfig: { websocketAddress: 'ws://127.0.0.1:9229/uuid' } })).toBe(true);
+    expect(namesAttachTarget({ adapterConfig: { vmServiceInfoFile: '/tmp/vm.json' } })).toBe(true);
+  });
+
+  it('is false for a host alone, an empty processId, or an adapterConfig without a target key', () => {
+    expect(namesAttachTarget({})).toBe(false);
+    expect(namesAttachTarget({ host: '127.0.0.1' })).toBe(false);
+    expect(namesAttachTarget({ processId: '' })).toBe(false);
+    expect(namesAttachTarget({ adapterConfig: { pathMappings: [], vmServiceUri: '' } })).toBe(false);
   });
 });

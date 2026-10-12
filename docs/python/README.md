@@ -216,7 +216,7 @@ set_breakpoint       { "sessionId": "...", "file": "/abs/path/script.py", "line"
 continue_execution   { "sessionId": "..." }
 ```
 
-Shorthand: passing `host` and `port` to `create_debug_session` creates the session and attaches in one call.
+Shorthand: passing `port` to `create_debug_session` (or any attach target `attach_to_process` takes) creates the session and attaches in one call, with the same arguments.
 
 After the handshake the attach is verified by polling for threads; raise `verifyTimeout` (default 20000 ms) for slow targets. `breakOnExceptions` applies **no** language default on attach — set it explicitly if you want it. `detach_from_process { "sessionId": "...", "terminateProcess": false }` leaves the target running.
 

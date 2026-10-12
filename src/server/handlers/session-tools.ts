@@ -9,13 +9,21 @@ import { checkLaunchToolchain } from '../../utils/language-availability.js';
 import { isContainerRuntime } from '../../utils/container-path-utils.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { assertPlainObjectArg, requireSessionId } from '../tool-validation.js';
-import { carriesLastStop, successWarning } from './shared.js';
+import { attachRequestFromArgs, carriesLastStop, successWarning } from './shared.js';
+import { namesAttachTarget } from '../../session/attach/attach-addressing.js';
 import { failureResult, jsonResult, rethrowAsMcpError, type ToolResult } from '../tool-result.js';
 
 export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
   // Validate before creating the session so a bad argument does
   // not leave an orphan session behind (issue #336).
   assertPlainObjectArg(args.adapterConfig, 'adapterConfig');
+  // The call names an attach target — port, processId or an adapterConfig
+  // URI/info-file key; host alone does not — so build the request
+  // attach_to_process would send, now: an invalid breakOnExceptions is
+  // refused before any session exists (issue #905). The addressing gate
+  // inside the controller then refuses what the language does not take, as
+  // for attach_to_process — with the session already created.
+  const attachRequest = namesAttachTarget(args) ? attachRequestFromArgs(args) : undefined;
 
   // Ensure requested language is among dynamically supported ones
   const supported = await ctx.getSupportedLanguagesAsync();
@@ -86,27 +94,18 @@ export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
   // A new output resource is now listable (issue #218)
   ctx.outputResources.notifyListChanged();
 
-  // Check if attach mode is requested (host/port provided)
-  const isAttachMode = args.port !== undefined;
-
-  if (isAttachMode) {
+  if (attachRequest) {
     // Attach mode: immediately attach to the running process
     ctx.logger.info('session:attach-mode', {
       sessionId: sessionInfo.id,
-      host: args.host || 'localhost',
+      host: args.host,
       port: args.port,
+      processId: args.processId,
       timestamp: Date.now()
     });
 
     try {
-      const attachResult = await ctx.sessionManager.attachToProcess(sessionInfo.id, {
-        port: args.port as number,
-        host: (args.host as string) || 'localhost',
-        timeout: (args.timeout as number) || 30000,
-        stopOnEntry: args.stopOnEntry,
-        verifyTimeout: args.verifyTimeout,
-        adapterConfig: args.adapterConfig,
-      });
+      const attachResult = await ctx.sessionManager.attachToProcess(sessionInfo.id, attachRequest);
 
       // Forward the attach payload the same way attach_to_process
       // does: structured failure diagnostics (initProgress /
