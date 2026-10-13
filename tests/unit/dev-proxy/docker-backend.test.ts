@@ -1,10 +1,21 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   DOCKER_OWNER_LABEL,
   addDockerOwnershipLabel,
   isDockerRunInvocation,
   removeOwnedDockerContainers,
 } from '../../../tools/dev-proxy/docker-backend.mjs';
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+const output = (stdout = '') => ({ stdout, stderr: '' });
+const cleanupOptions = {
+  dockerCommand: 'docker', ownerId: 'proxy-123', port: 3001, includeLegacyPort: false,
+};
 
 describe('dev-proxy Docker backend recognition', () => {
   it.each([
@@ -48,21 +59,14 @@ describe('dev-proxy Docker backend recognition', () => {
 });
 
 describe('dev-proxy Docker backend cleanup', () => {
-  it('removes owned stdio containers by label without relying on a published port', () => {
+  it('removes owned stdio containers by label without relying on a published port', async () => {
     const calls: Array<{ command: string; args: string[] }> = [];
-    const execFile = (command: string, args: string[]) => {
+    const runFile = async (command: string, args: string[]) => {
       calls.push({ command, args });
-      if (args[0] === 'ps') return 'owned-a\r\nowned-b\r\n';
-      return '';
+      return output(args[0] === 'ps' ? 'owned-a\r\nowned-b\r\n' : '');
     };
 
-    const result = removeOwnedDockerContainers({
-      dockerCommand: 'docker',
-      ownerId: 'proxy-123',
-      port: 3001,
-      includeLegacyPort: false,
-      execFile,
-    });
+    const result = await removeOwnedDockerContainers({ ...cleanupOptions, runFile });
 
     expect(result).toEqual({ ownedIds: ['owned-a', 'owned-b'], legacyIds: [] });
     expect(calls.map((call) => call.args)).toEqual([
@@ -72,24 +76,119 @@ describe('dev-proxy Docker backend cleanup', () => {
     ]);
   });
 
-  it('also removes unlabeled published-port containers for network compatibility', () => {
+  it('also removes unlabeled published-port containers for network compatibility', async () => {
     const removed: string[] = [];
-    const execFile = (_command: string, args: string[]) => {
-      if (args[0] === 'ps' && args.includes('-aq')) return 'owned-a\n';
-      if (args[0] === 'ps') return 'owned-a\nlegacy-b\n';
+    const runFile = async (_command: string, args: string[]) => {
+      if (args[0] === 'ps' && args.includes('-aq')) return output('owned-a\n');
+      if (args[0] === 'ps') return output('owned-a\nlegacy-b\n');
       if (args[0] === 'rm') removed.push(args[2]);
-      return '';
+      return output();
     };
 
-    const result = removeOwnedDockerContainers({
-      dockerCommand: 'docker.exe',
-      ownerId: 'proxy-123',
-      port: 4555,
-      includeLegacyPort: true,
-      execFile,
+    const result = await removeOwnedDockerContainers({
+      ...cleanupOptions, dockerCommand: 'docker.exe', port: 4555, includeLegacyPort: true, runFile,
     });
 
     expect(result).toEqual({ ownedIds: ['owned-a'], legacyIds: ['legacy-b'] });
     expect(removed).toEqual(['owned-a', 'legacy-b']);
+  });
+
+  it('keeps the event loop responsive and waits for owned-container discovery', async () => {
+    const discovery = deferred<ReturnType<typeof output>>();
+    const runFile = vi.fn(async (_command: string, args: string[]) => (
+      args[0] === 'ps' ? discovery.promise : output()
+    ));
+    let settled = false;
+    const cleanup = removeOwnedDockerContainers({ ...cleanupOptions, runFile }).then(result => {
+      settled = true;
+      return result;
+    });
+
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    expect(settled).toBe(false);
+    expect(runFile).toHaveBeenCalledTimes(1);
+    discovery.resolve(output('owned-a\n'));
+    await expect(cleanup).resolves.toEqual({ ownedIds: ['owned-a'], legacyIds: [] });
+    expect(runFile).toHaveBeenLastCalledWith('docker', ['rm', '-f', 'owned-a']);
+  });
+
+  it('waits for legacy discovery before starting any removals', async () => {
+    const discovery = deferred<ReturnType<typeof output>>();
+    const runFile = vi.fn(async (_command: string, args: string[]) => {
+      if (args[0] !== 'ps') return output();
+      return args.includes('-aq') ? output('owned-a\n') : discovery.promise;
+    });
+    const cleanup = removeOwnedDockerContainers({ ...cleanupOptions, includeLegacyPort: true, runFile });
+
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    expect(runFile).toHaveBeenCalledTimes(2);
+    discovery.resolve(output('owned-a\nlegacy-b\n'));
+    await expect(cleanup).resolves.toEqual({ ownedIds: ['owned-a'], legacyIds: ['legacy-b'] });
+    expect(runFile.mock.calls.slice(2).map(([, args]) => args)).toEqual([
+      ['rm', '-f', 'owned-a'], ['rm', '-f', 'legacy-b'],
+    ]);
+  });
+
+  it('keeps the event loop responsive and waits for each removal before continuing', async () => {
+    const removal = deferred<ReturnType<typeof output>>();
+    const runFile = vi.fn(async (_command: string, args: string[]) => {
+      if (args[0] === 'ps') return output('owned-a\nowned-b\n');
+      return args[2] === 'owned-a' ? removal.promise : output();
+    });
+    let settled = false;
+    const cleanup = removeOwnedDockerContainers({ ...cleanupOptions, runFile }).then(result => {
+      settled = true;
+      return result;
+    });
+
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    expect(settled).toBe(false);
+    expect(runFile).toHaveBeenCalledTimes(2);
+    expect(runFile).toHaveBeenLastCalledWith('docker', ['rm', '-f', 'owned-a']);
+    removal.resolve(output());
+    await expect(cleanup).resolves.toEqual({ ownedIds: ['owned-a', 'owned-b'], legacyIds: [] });
+    expect(runFile).toHaveBeenLastCalledWith('docker', ['rm', '-f', 'owned-b']);
+  });
+
+  it('continues after individual owned and legacy removals fail', async () => {
+    const runFile = vi.fn(async (_command: string, args: string[]) => {
+      if (args[0] === 'ps') return output(args.includes('-aq') ? 'owned-a\nowned-b\n' : 'legacy-c\nlegacy-d\n');
+      if (args[2] === 'owned-a' || args[2] === 'legacy-c') throw new Error('already removed');
+      return output();
+    });
+
+    await expect(removeOwnedDockerContainers({ ...cleanupOptions, includeLegacyPort: true, runFile }))
+      .resolves.toEqual({ ownedIds: ['owned-a', 'owned-b'], legacyIds: ['legacy-c', 'legacy-d'] });
+    expect(runFile.mock.calls.slice(2).map(([, args]) => args[2])).toEqual([
+      'owned-a', 'owned-b', 'legacy-c', 'legacy-d',
+    ]);
+  });
+
+  it.each(['missing Docker', 'failed discovery'])('rejects %s for the lifecycle caller to handle', async scenario => {
+    const failure = Object.assign(new Error(scenario), { code: scenario === 'missing Docker' ? 'ENOENT' : 1 });
+    const runFile = vi.fn(async () => { throw failure; });
+
+    await expect(removeOwnedDockerContainers({ ...cleanupOptions, runFile })).rejects.toBe(failure);
+    expect(runFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects failed legacy discovery before removing any containers', async () => {
+    const failure = new Error('legacy discovery failed');
+    const runFile = vi.fn(async (_command: string, args: string[]) => {
+      if (args.includes('-aq')) return output('owned-a\n');
+      throw failure;
+    });
+
+    await expect(removeOwnedDockerContainers({ ...cleanupOptions, includeLegacyPort: true, runFile }))
+      .rejects.toBe(failure);
+    expect(runFile).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns empty results without removal when no containers match', async () => {
+    const runFile = vi.fn(async () => output('\r\n'));
+
+    await expect(removeOwnedDockerContainers({ ...cleanupOptions, includeLegacyPort: true, runFile }))
+      .resolves.toEqual({ ownedIds: [], legacyIds: [] });
+    expect(runFile).toHaveBeenCalledTimes(2);
   });
 });
