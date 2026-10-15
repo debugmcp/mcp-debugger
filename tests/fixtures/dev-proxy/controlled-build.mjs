@@ -7,7 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const directory = process.env.DEV_PROXY_BUILD_FIXTURE_DIR;
 const events = process.env.DEV_PROXY_FIXTURE_EVENTS;
-const record = (event) => appendFileSync(events, JSON.stringify({ ...event, pid: process.pid }) + '\n');
+const record = (event) => appendFileSync(events, JSON.stringify({ ...event, pid: process.pid, ppid: process.ppid, at: Date.now() }) + '\n');
 
 // Even a failing test cannot strand these fixtures indefinitely.
 setTimeout(() => process.exit(3), 30_000).unref();

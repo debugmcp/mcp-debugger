@@ -156,11 +156,6 @@ Converts generic config to language-specific format (async to permit build/compi
 **Parameters**: Generic launch configuration
 **Returns**: Promise resolving to language-specific configuration with additional fields
 
-#### `getDefaultLaunchConfig(): Partial<GenericLaunchConfig>`
-Default configuration values for the language.
-
-**Returns**: Common default settings
-
 ### Attach Support Methods (Optional)
 
 #### `supportsAttach?(): boolean`
@@ -178,11 +173,6 @@ Transforms generic attach config to language-specific format. Only called if `su
 
 **Parameters**: Generic attach configuration
 **Returns**: Language-specific attach configuration
-
-#### `getDefaultAttachConfig?(): Partial<GenericAttachConfig>`
-Gets default attach configuration for this language.
-
-**Returns**: Default attach configuration with language-specific defaults
 
 #### `usesDirectConnectForAttach?(): boolean`
 Whether attach connects directly to an already-listening DAP server (e.g. `rdbg` started with `--open`) instead of spawning an adapter process. When `true`, no adapter command is built for attach sessions; the adapter policy returns a `'connect'` spawn config from the attach host/port.

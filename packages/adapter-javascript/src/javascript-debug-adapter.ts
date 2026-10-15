@@ -484,8 +484,8 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     // Reaper markers (issue #431): vsDebugServer.cjs reads only argv[2] (port)
     // and argv[3] (host) and ignores trailing tokens, so these tags are inert
     // at runtime — but they let the startup janitor recognize an instance
-    // stranded by a hard-killed proxy worker (spawned detached+unref'd, it
-    // survives every tree-kill path) and reap it by owner pid. Constraints:
+    // stranded by a hard-killed proxy worker (spawned unref'd, and detached off
+    // win32, it survives every tree-kill path) and reap it by owner pid. Constraints:
     // tokens must stay whitespace-free (the win32 process scan splits
     // CommandLine on whitespace) and must never contain `--help` (vsDebugServer
     // prints usage and exits if --help appears anywhere in argv).
@@ -871,15 +871,6 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     return base === 'node' || base === 'node.exe' || base === 'node.cmd';
   }
 
-  getDefaultLaunchConfig(): Partial<GenericLaunchConfig> {
-    return {
-      stopOnEntry: false,
-      justMyCode: true,
-      env: {},
-      cwd: process.cwd()
-    };
-  }
-
   /**
    * Inject the exit-code preload shim into the debuggee's environment
    * (issue #247). The shim writes the debuggee's exit code to a per-session
@@ -1044,13 +1035,6 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       // launch does when no program dir is known. An explicit caller value wins.
       ...('cwd' in rest ? {} : { cwd: defaultAttachCwd() }),
     } as LanguageSpecificAttachConfig;
-  }
-
-  getDefaultAttachConfig(): Partial<GenericAttachConfig> {
-    return {
-      request: 'attach',
-      host: '127.0.0.1',
-    };
   }
 
   // ===== DAP Protocol Operations =====

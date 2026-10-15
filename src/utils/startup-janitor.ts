@@ -86,8 +86,8 @@ async function runOrphanReapers(opts: StartupJanitorOptions, selfPid: number): P
     processes.map((p) => parseArgs(p.pid, p.args)).filter((t): t is NonNullable<typeof t> => t !== null);
   const proxyLister = async () =>
     processes.map((p) => parseProxyArgs(p.pid, p.args)).filter((t): t is NonNullable<typeof t> => t !== null);
-  // js-debug DAP servers are spawned detached+unref'd, so a hard-killed worker
-  // strands them outside every tree-kill path (issue #431). Reusing the proxy
+  // js-debug DAP servers are spawned unref'd (and detached off win32), so a
+  // hard-killed worker strands them outside every tree-kill path (issue #431). Reusing the proxy
   // reaper works because its win32 kill is taskkill /T /F — while the stranded
   // vsDebugServer is alive, the tree kill also reaches the debuggee/watchdog
   // children js-debug spawned beneath it.

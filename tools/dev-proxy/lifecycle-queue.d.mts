@@ -39,3 +39,10 @@ export class LifecycleQueue {
    */
   idle(options?: { timeoutMs?: number; signal?: AbortSignal }): Promise<boolean>;
 }
+
+/** Queue crash cleanup, skipping a backend superseded before its turn arrives. */
+export function queueGenerationCleanup(
+  queue: LifecycleQueue,
+  isCurrent: () => boolean,
+  cleanup: () => Promise<unknown>
+): Promise<void>;

@@ -61,12 +61,10 @@ Attach support (optional)
 - `supportsDetach?(): boolean` — Whether the adapter supports detaching without terminating the debuggee
 - `transformAttachConfig?(config: GenericAttachConfig): LanguageSpecificAttachConfig | Promise<LanguageSpecificAttachConfig>` — Transforms generic attach config to language-specific format; may be async (awaited by the launcher)
 - `consumedAttachKeys?: readonly string[]` — adapterConfig keys the attach transform consumes itself (adapter-side work, a private side channel) rather than forwarding; their absence from the transform's output is not reported as an ignored key
-- `getDefaultAttachConfig?(): Partial<GenericAttachConfig>` — Gets default attach configuration for this language
 - `usesDirectConnectForAttach?(): boolean` — when true, attach connects directly to an already-listening DAP server (e.g. rdbg started with `--open`) instead of spawning an adapter process; `ProxyManager` skips `buildAdapterCommand` and the adapter policy returns a `'connect'` spawn config from the attach host/port
 
 Debug configuration
-- `transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig>` (async to permit build/compilation steps before launch)
-- `getDefaultLaunchConfig(): Partial<GenericLaunchConfig>`
+- `transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig>` (async to permit build/compilation steps before launch). The launch defaults the host applies (`stopOnEntry: false`, `justMyCode: true`) are merged by the session layer before the transform; an adapter declares no launch defaults of its own (its policy's `getInitializationBehavior().defaultStopOnEntry` may still decide `stopOnEntry` when the caller gave none)
  
 ### AdapterLaunchBarrier helper
 
@@ -142,7 +140,6 @@ export class ExampleAdapter extends EventEmitter implements IDebugAdapter {
   getAdapterInstallCommand() { return 'npm install -g example-adapter'; }
 
   async transformLaunchConfig(cfg) { return cfg; }
-  getDefaultLaunchConfig() { return { stopOnEntry: true }; }
 
   async sendDapRequest(command, args) { throw new Error('not implemented'); }
   handleDapEvent(_e) { /* map events to state; emit as needed */ }
