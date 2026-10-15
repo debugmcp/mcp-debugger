@@ -42,6 +42,22 @@ export class LifecycleQueue {
 }
 
 /**
+ * Crash cleanup shares the lifecycle queue with starts and restarts. Check
+ * ownership when its turn arrives: a rebuild already ahead of it may have
+ * replaced the backend that crashed while the build was running.
+ *
+ * @param {LifecycleQueue} queue
+ * @param {() => boolean} isCurrent
+ * @param {() => Promise<unknown>} cleanup
+ * @returns {Promise<void>}
+ */
+export function queueGenerationCleanup(queue, isCurrent, cleanup) {
+  return queue.run(async () => {
+    if (isCurrent()) await cleanup();
+  });
+}
+
+/**
  * True when `promise` settled first, false on deadline or abort. Leaves no
  * timer and no abort listener behind either way.
  *

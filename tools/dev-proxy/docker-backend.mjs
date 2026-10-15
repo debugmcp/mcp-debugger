@@ -1,3 +1,5 @@
+import { runCommand } from './command-runner.mjs';
+
 /** Reserved Docker label used to identify containers owned by one dev proxy. */
 export const DOCKER_OWNER_LABEL = 'io.debugmcp.dev-proxy.owner';
 
@@ -38,7 +40,8 @@ function parseIds(output) {
 
 /**
  * Remove containers owned by this proxy. Network backends additionally reap
- * unlabeled legacy containers by their published port.
+ * unlabeled legacy containers by their published port. Discovery and removal
+ * stay ordered without blocking the supervisor's event loop.
  *
  * @param {object} options
  * @param {string} options.dockerCommand
@@ -46,48 +49,40 @@ function parseIds(output) {
  * @param {number} options.port
  * @param {boolean} options.includeLegacyPort
  * @param {(message: string) => void} [options.log]
- * @param {typeof execFileSync} [options.execFile] Injectable for tests.
+ * @param {import('./command-runner.mjs').CommandRunner} [options.runFile] Injectable for tests.
  */
-export function removeOwnedDockerContainers({
+export async function removeOwnedDockerContainers({
   dockerCommand,
   ownerId,
   port,
   includeLegacyPort,
   log = () => {},
-  execFile = execFileSync,
+  runFile = runCommand,
 }) {
-  const options = { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] };
-  const ownedIds = parseIds(
-    execFile(
-      dockerCommand,
-      ['ps', '-aq', '--filter', `label=${DOCKER_OWNER_LABEL}=${ownerId}`],
-      options
-    )
-  );
+  const ownedIds = parseIds((await runFile(
+    dockerCommand,
+    ['ps', '-aq', '--filter', `label=${DOCKER_OWNER_LABEL}=${ownerId}`]
+  )).stdout);
 
   const legacyIds = includeLegacyPort
-    ? parseIds(
-        execFile(
-          dockerCommand,
-          ['ps', '-q', '--filter', `publish=${port}`],
-          options
-        )
-      ).filter((id) => !ownedIds.includes(id))
+    ? parseIds((await runFile(
+        dockerCommand,
+        ['ps', '-q', '--filter', `publish=${port}`]
+      )).stdout).filter((id) => !ownedIds.includes(id))
     : [];
 
   for (const id of ownedIds) {
     log(`Removing owned Docker container ${id}`);
     try {
-      execFile(dockerCommand, ['rm', '-f', id], { stdio: 'ignore' });
+      await runFile(dockerCommand, ['rm', '-f', id]);
     } catch { /* already removed */ }
   }
   for (const id of legacyIds) {
     log(`Removing legacy Docker container ${id} on port ${port}`);
     try {
-      execFile(dockerCommand, ['rm', '-f', id], { stdio: 'ignore' });
+      await runFile(dockerCommand, ['rm', '-f', id]);
     } catch { /* already removed */ }
   }
 
   return { ownedIds, legacyIds };
 }
-import { execFileSync } from 'child_process';

@@ -36,7 +36,7 @@ import {
   SubscribeRequestSchema,
   UnsubscribeRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { spawn, execSync } from 'child_process';
+import { spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import path from 'path';
@@ -56,8 +56,9 @@ import {
   removeOwnedDockerContainers,
 } from './docker-backend.mjs';
 import { buildBackendEnvironment, resolveBackendPort, updateBackendEnvOverrides } from './backend-env.mjs';
-import { LifecycleQueue } from './lifecycle-queue.mjs';
+import { LifecycleQueue, queueGenerationCleanup } from './lifecycle-queue.mjs';
 import { runBuild } from './build-runner.mjs';
+import { ensurePortFree, forceKillPid } from './process-cleanup.mjs';
 import { dedupeMcpErrorPrefix, assertBackendAvailable, backendCallOptions, backendFailureHint } from './tool-error.mjs';
 
 // ---------------------------------------------------------------------------
@@ -584,7 +585,9 @@ class BackendManager {
           this.state = 'stopped';
           this.startedAt = null;
           log('Backend crashed — use dev_restart_debugger to restart');
-          this._killDockerContainer().catch(() => {});
+          queueGenerationCleanup(this.lifecycleQueue,
+            () => this.transportCloseState === closeState,
+            () => this._killDockerContainer()).catch(() => {});
         }
       };
 
@@ -613,7 +616,10 @@ class BackendManager {
           this.state = 'stopped';
           this.startedAt = null;
           log('Killing orphaned child process after HTTP transport close');
-          this._killChild().catch(() => {});
+          const child = this.child;
+          queueGenerationCleanup(this.lifecycleQueue,
+            () => this.transportCloseState === closeState,
+            () => this._killChild(child)).catch(() => {});
         }
       };
 
@@ -657,7 +663,10 @@ class BackendManager {
           this.state = 'stopped';
           this.startedAt = null;
           log('Killing orphaned child process after SSE transport close');
-          this._killChild().catch(() => {});
+          const child = this.child;
+          queueGenerationCleanup(this.lifecycleQueue,
+            () => this.transportCloseState === closeState,
+            () => this._killChild(child)).catch(() => {});
         }
       };
 
@@ -683,9 +692,9 @@ class BackendManager {
     return closeState.expected && isIntentionalTransportAbort(err);
   }
 
-  async _killChild() {
+  async _killChild(child = this.child) {
     // Used for HTTP / SSE modes (manually spawned child)
-    if (!this.child) {
+    if (!child) {
       // Even with no child, a Docker container may be orphaned on our port
       await this._killDockerContainer();
       return;
@@ -694,30 +703,15 @@ class BackendManager {
     // Graceful first (stdin close on Windows, SIGTERM elsewhere) so the
     // backend can run its gracefulShutdown/closeAllSessions; force-kill
     // after KILL_TIMEOUT_MS (issue #122).
-    await killChildGracefully(this.child, { log, killTimeoutMs: KILL_TIMEOUT_MS });
-    this.child = null;
+    await killChildGracefully(child, { log, killTimeoutMs: KILL_TIMEOUT_MS });
+    if (this.child === child) this.child = null;
 
     // After killing the CLI process, also stop any Docker container on our port
     await this._killDockerContainer();
   }
 
   async _forceKillPid(pid, { stillOwned } = {}) {
-    // Safety net for stdio mode: force-kill the backend PID if it lingers after transport close
-    if (!pid) return;
-    try {
-      // Give the abort signal a moment to propagate
-      await new Promise((r) => setTimeout(r, 500));
-      // The child may have exited during that grace period (see stdio onclose).
-      if (stillOwned && !stillOwned()) return;
-      if (process.platform === 'win32') {
-        execSync(`taskkill /pid ${pid} /F`, { windowsHide: true, stdio: 'ignore' });
-      } else {
-        process.kill(pid, 0); // Check if alive (throws if dead)
-        process.kill(pid, 'SIGKILL');
-      }
-    } catch {
-      // Process already dead — expected
-    }
+    await forceKillPid(pid, { stillOwned });
   }
 
   /**
@@ -732,54 +726,9 @@ class BackendManager {
   }
 
   async _ensurePortFree() {
-    // Only needed for network modes — check if BACKEND_PORT is held by an orphan and kill it
     if (this.backendTransport === 'stdio') return;
-
-    // Kill any Docker container publishing on our port (survives CLI process kill)
     await this._killDockerContainer();
-
-    try {
-      let pid = null;
-
-      if (process.platform === 'win32') {
-        // Use netstat to find the PID holding the port
-        const output = execSync(
-          `netstat -ano | findstr ":${BACKEND_PORT}" | findstr "LISTENING"`,
-          { windowsHide: true, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-        );
-        // Parse last column (PID) from first matching line
-        const match = output.trim().split('\n')[0]?.match(/\s(\d+)\s*$/);
-        if (match) pid = parseInt(match[1], 10);
-      } else {
-        // Use lsof on Unix
-        const output = execSync(
-          `lsof -ti tcp:${BACKEND_PORT} -sTCP:LISTEN`,
-          { windowsHide: true, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-        );
-        pid = parseInt(output.trim().split('\n')[0], 10);
-      }
-
-      if (pid && pid > 0) {
-        // Validate it's a node process before killing (safety: don't kill Docker, etc.)
-        if (process.platform === 'win32') {
-          try {
-            const taskInfo = execSync(`tasklist /fi "PID eq ${pid}" /fo csv /nh`,
-              { windowsHide: true, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
-            if (!taskInfo.toLowerCase().includes('node')) {
-              log(`Port ${BACKEND_PORT} held by non-node PID ${pid} — skipping kill`);
-              return;
-            }
-          } catch { /* proceed with kill if tasklist fails */ }
-        }
-
-        log(`Port ${BACKEND_PORT} is held by PID ${pid} — killing orphan`);
-        await this._forceKillPid(pid);
-        // Give OS a moment to release the port
-        await new Promise((r) => setTimeout(r, 500));
-      }
-    } catch {
-      // No process holding the port, or command not available — proceed
-    }
+    await ensurePortFree({ port: BACKEND_PORT, log });
   }
 
   async _killDockerContainer() {
@@ -788,7 +737,7 @@ class BackendManager {
     if (!isDockerRunInvocation(invocation)) return;
 
     try {
-      const removed = removeOwnedDockerContainers({
+      const removed = await removeOwnedDockerContainers({
         dockerCommand: invocation.command,
         ownerId: this.dockerOwnerId,
         port: BACKEND_PORT,

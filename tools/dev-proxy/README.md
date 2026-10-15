@@ -98,6 +98,10 @@ report the backend's state. `dev_server_status` remains available throughout; a 
 accepted immediately but runs after the pending attempt settles. The proxy sends a tool-list change
 notification when startup eventually succeeds and after every restart, successful or not.
 
+Process, port, and Docker cleanup commands run asynchronously too, so `dev_server_status`
+remains responsive while a restart waits for OS tools. Each command is bounded to five seconds;
+the shutdown force-kill phase uses its shorter two-second deadline.
+
 Builds run asynchronously. While `buildInProgress` is `true`, the current backend keeps serving
 debugging tools, discovery, and resources; `state` still describes that backend. Build-and-restart
 requests run in arrival order as complete operations, so builds cannot overlap other rebuilds or
@@ -108,6 +112,28 @@ On build timeout, excessive output, or client disconnection, the proxy terminate
 process group/tree, including child processes. Disconnecting also cancels queued restarts; they
 cannot start another backend during shutdown. Build output is capped at 64 MiB and only sanitized
 tails are returned (up to 2,000 characters, 50 lines on success or 20 on failure).
+
+Graceful supervisor shutdown allows up to eight seconds for backend cleanup, with a ten-second
+hard backstop. The MCP SDK stdio client closes stdin but force-terminates a Windows supervisor
+after two seconds if it has not exited. Such early termination can interrupt cleanup that is
+still within the supervisor's deadline. Clients must allow the shutdown sequence to complete to
+rely on its process-cleanup guarantee; a killed supervisor cannot finish that work.
+
+### Windows cleanup investigation (#930)
+
+The reported build-timeout and client-disconnect failures exercise different paths. A timed-out
+build rejects before backend restart begins; its tree termination already uses asynchronous
+`taskkill /T /F`. Repeated baseline runs on Windows on 2026-10-13 did not reproduce that failure.
+The regression now checks the complete error for cleanup failure and includes process identities,
+timestamped fixture events, and supervisor stderr when cleanup assertions fail. Its five-second
+descendant-liveness poll is unchanged.
+
+The disconnect path has a reproducible client-budget conflict: holding the tree sweep past the
+SDK's two-second grace lets SDK close kill the supervisor before the sweep can start. The same
+held sweep completes through EOF-only shutdown, within the existing supervisor deadline, without
+starting queued replacements. Graceful-shutdown tests therefore own the child process and await
+normal exit; separate tests retain actual SDK-close behavior. This establishes the budget conflict,
+but does not prove it caused the original one-off timeout failure, so #930 remains under investigation.
 
 ## Configuration
 
