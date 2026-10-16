@@ -192,15 +192,6 @@ describe('MockDebugAdapter behaviour', () => {
       });
     });
 
-    it('getDefaultLaunchConfig returns the documented defaults', () => {
-      expect(adapter.getDefaultLaunchConfig()).toEqual({
-        stopOnEntry: false,
-        justMyCode: true,
-        env: {},
-        cwd: process.cwd()
-      });
-    });
-
     it('sendDapRequest logs and returns an empty response; handleDapResponse is inert', async () => {
       await expect(adapter.sendDapRequest('threads')).resolves.toEqual({});
       expect(() => adapter.handleDapResponse({ seq: 1, request_seq: 1, type: 'response', command: 'threads', success: true })).not.toThrow();

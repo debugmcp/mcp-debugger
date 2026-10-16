@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { LifecycleQueue } from '../../../tools/dev-proxy/lifecycle-queue.mjs';
+import { LifecycleQueue, queueGenerationCleanup } from '../../../tools/dev-proxy/lifecycle-queue.mjs';
 
 afterEach(() => vi.useRealTimers());
 
@@ -120,5 +120,69 @@ describe('dev-proxy LifecycleQueue.idle (issue #716)', () => {
     await expect(idle).resolves.toBe(false);
 
     await expect(queue.idle({ timeoutMs: 30000, signal: controller.signal })).resolves.toBe(false);
+  });
+});
+
+describe('dev-proxy crash cleanup ownership', () => {
+  it('finishes delayed crash cleanup before starting a replacement backend', async () => {
+    const queue = new LifecycleQueue();
+    const events: string[] = [];
+    let finishCleanup!: () => void;
+    const cleanupGate = new Promise<void>(resolve => { finishCleanup = resolve; });
+    const oldGeneration = {};
+    let generation = oldGeneration;
+    const cleanup = queueGenerationCleanup(queue, () => generation === oldGeneration, async () => {
+      events.push('docker:probe');
+      await cleanupGate;
+      events.push('docker:remove');
+    });
+    const restart = queue.run(async () => {
+      generation = {};
+      events.push('replacement:start');
+    });
+
+    await vi.waitFor(() => expect(events).toEqual(['docker:probe']));
+    expect(queue.pending).toBe(2);
+    finishCleanup();
+    await Promise.all([cleanup, restart]);
+    expect(events).toEqual(['docker:probe', 'docker:remove', 'replacement:start']);
+    expect(queue.pending).toBe(0);
+  });
+
+  it('skips old crash cleanup queued behind a rebuild that has replaced its backend', async () => {
+    const queue = new LifecycleQueue();
+    const oldGeneration = {};
+    let generation = oldGeneration;
+    let finishBuild!: () => void;
+    const buildGate = new Promise<void>(resolve => { finishBuild = resolve; });
+    const rebuild = queue.run(async () => {
+      await buildGate;
+      generation = {};
+    });
+    const killOldBackend = vi.fn(async () => {});
+    const cleanup = queueGenerationCleanup(queue, () => generation === oldGeneration, killOldBackend);
+
+    finishBuild();
+    await Promise.all([rebuild, cleanup]);
+    expect(killOldBackend).not.toHaveBeenCalled();
+    expect(queue.pending).toBe(0);
+  });
+
+  it('cleans the same generation when the preceding build fails and still permits a later restart', async () => {
+    const queue = new LifecycleQueue();
+    const oldGeneration = {};
+    let generation = oldGeneration;
+    const failedBuild = queue.run(async () => { throw new Error('compile failed'); });
+    const cleanupFailure = new Error('Docker unavailable');
+    const cleanup = vi.fn(async () => { throw cleanupFailure; });
+    const crashCleanup = queueGenerationCleanup(queue, () => generation === oldGeneration, cleanup);
+    const replacement = queue.run(async () => { generation = {}; });
+
+    await expect(failedBuild).rejects.toThrow('compile failed');
+    await expect(crashCleanup).rejects.toBe(cleanupFailure);
+    await replacement;
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(generation).not.toBe(oldGeneration);
+    expect(queue.pending).toBe(0);
   });
 });

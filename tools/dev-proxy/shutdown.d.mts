@@ -18,7 +18,7 @@ export const FORCE_EXIT_DELAY_MS: number;
 /** Max time to wait for a graceful backend exit before force-killing it. */
 export const KILL_GRACE_MS: number;
 
-/** After a force-kill, max time to wait for the `exit` event before giving up. */
+/** Max time from force-kill dispatch to command completion and child exit. */
 export const FORCE_KILL_BAIL_MS: number;
 
 /**
@@ -79,6 +79,10 @@ export interface KillableChild {
     event: 'exit',
     listener: (code: number | null, signal: NodeJS.Signals | null) => void
   ): void;
+  removeListener(
+    event: 'exit',
+    listener: (code: number | null, signal: NodeJS.Signals | null) => void
+  ): void;
   kill(signal?: NodeJS.Signals): void;
   /** `null` when the child was spawned without a stdin pipe. */
   readonly stdin: { destroyed: boolean; end(): void } | null;
@@ -88,7 +92,7 @@ export interface KillableChild {
 export interface KillChildOptions {
   log?: (msg: string) => void;
   killTimeoutMs?: number;
-  /** Post-force-kill wait before giving up. */
+  /** Force-phase deadline, measured from dispatch. */
   bailMs?: number;
   /** Injectable for tests; defaults to `process.platform`. */
   platform?: NodeJS.Platform;
@@ -96,16 +100,16 @@ export interface KillChildOptions {
    * Injectable for tests; defaults to `taskkill /F` on win32 and `SIGKILL`
    * elsewhere. Receives `child.pid` verbatim, which may be `undefined`.
    */
-  forceKill?: (pid: number | undefined) => void;
+  forceKill?: (pid: number | undefined) => void | Promise<void>;
 }
 
 /**
  * Kill a backend child gracefully (stdin close on win32, `SIGTERM` elsewhere),
  * then by force if it has not exited within `killTimeoutMs`.
  *
- * @returns resolves once the child exited, or once a force-kill was attempted
- *   and no exit surfaced within `bailMs`. A missing or already-exited child
- *   resolves immediately.
+ * @returns resolves on graceful exit, or after both the force command and
+ *   child exit, bounded by `bailMs` from force-kill dispatch. A missing or
+ *   already-exited child resolves immediately.
  */
 export function killChildGracefully(
   child: KillableChild | null,

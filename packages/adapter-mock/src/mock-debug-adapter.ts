@@ -318,15 +318,6 @@ export class MockDebugAdapter extends EventEmitter implements IDebugAdapter {
     };
   }
   
-  getDefaultLaunchConfig(): Partial<GenericLaunchConfig> {
-    return {
-      stopOnEntry: false,
-      justMyCode: true,
-      env: {},
-      cwd: process.cwd()
-    };
-  }
-  
   // ===== DAP Protocol Operations =====
   
   async sendDapRequest<T extends DebugProtocol.Response>(

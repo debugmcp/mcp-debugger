@@ -32,7 +32,7 @@ jobs:
       # version comes from package.json "packageManager" (issue #478)
 
     - name: Setup Node.js
-      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
       with:
         node-version: '22.x'
         cache: 'pnpm'
@@ -283,7 +283,7 @@ jobs:
     # placeholder into .npmrc, which breaks token-less OIDC publishes when the
     # env var is unset. Publishing is token-free throughout (OIDC).
     - name: Setup Node.js
-      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
       with:
         node-version: '22.x'
         cache: 'pnpm'
@@ -544,7 +544,7 @@ jobs:
         persist-credentials: false
 
     - name: Setup Node.js
-      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
       with:
         node-version: '22.x'
 
@@ -603,7 +603,7 @@ jobs:
     # Pinned rather than relying on the runner image's Node: this job runs after every publish,
     # so it must not depend on anything that can drift underneath it.
     - name: Setup Node.js
-      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
       with:
         node-version: '22.x'
 

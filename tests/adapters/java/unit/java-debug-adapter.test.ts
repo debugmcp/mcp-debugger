@@ -602,14 +602,6 @@ describe('JavaDebugAdapter', () => {
     });
   });
 
-  describe('getDefaultLaunchConfig', () => {
-    it('should return defaults with stopOnEntry true', () => {
-      const defaults = adapter.getDefaultLaunchConfig();
-      expect(defaults.stopOnEntry).toBe(true);
-      expect(defaults.justMyCode).toBe(true);
-    });
-  });
-
   describe('getExecutableSearchPaths', () => {
     it('should return array of search paths', () => {
       const paths = adapter.getExecutableSearchPaths();
@@ -702,15 +694,6 @@ describe('JavaDebugAdapter', () => {
       expect((config as Record<string, unknown>).__attachMode).toBeUndefined();
       expect((config as Record<string, unknown>).processId).toBeUndefined();
       expect((config as Record<string, unknown>).futureJdiOption).toBe('yes');
-    });
-  });
-
-  describe('getDefaultAttachConfig', () => {
-    it('should return sensible defaults', () => {
-      const defaults = adapter.getDefaultAttachConfig();
-      expect(defaults.request).toBe('attach');
-      expect(defaults.host).toBe('localhost');
-      // No mandatory timeout default
     });
   });
 

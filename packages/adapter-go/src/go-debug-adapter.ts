@@ -355,13 +355,6 @@ export class GoDebugAdapter extends EventEmitter implements IDebugAdapter {
     return goConfig;
   }
   
-  getDefaultLaunchConfig(): Partial<GenericLaunchConfig> {
-    return {
-      stopOnEntry: false,
-      justMyCode: true
-    };
-  }
-  
   // ===== DAP Protocol Operations =====
   
   async sendDapRequest<T extends DebugProtocol.Response>(

@@ -2,6 +2,7 @@
  * Types for `docker-backend.mjs`, so its TypeScript tests see a real API
  * instead of `@ts-ignore`-ing the import into `any` (issue #562).
  */
+import type { CommandRunner } from './command-runner.mjs';
 
 /** Reserved Docker label used to identify containers owned by one dev proxy. */
 export const DOCKER_OWNER_LABEL: string;
@@ -25,17 +26,6 @@ export function addDockerOwnershipLabel(
   ownerId: string
 ): BackendInvocation;
 
-/**
- * The slice of `child_process.execFileSync` this module uses: two calls whose
- * stdout is parsed as text (`ps`) and two whose result is discarded (`rm`).
- * Narrower than `typeof execFileSync` so a test double can be a plain function.
- */
-export type DockerExecFile = (
-  command: string,
-  args: string[],
-  options?: import('child_process').ExecFileSyncOptions
-) => string | Buffer;
-
 /** Container ids removed by {@link removeOwnedDockerContainers}. */
 export interface RemovedDockerContainers {
   /** Ids carrying this proxy's {@link DOCKER_OWNER_LABEL}. */
@@ -54,6 +44,6 @@ export function removeOwnedDockerContainers(options: {
   port: number;
   includeLegacyPort: boolean;
   log?: (message: string) => void;
-  /** Injectable for tests; defaults to `child_process.execFileSync`. */
-  execFile?: DockerExecFile;
-}): RemovedDockerContainers;
+  /** Injectable for tests; defaults to the bounded async command runner. */
+  runFile?: CommandRunner;
+}): Promise<RemovedDockerContainers>;

@@ -9,8 +9,7 @@ import { ProxyManager } from '../../../src/proxy/proxy-manager.js';
 import { ProxyConfig } from '../../../src/proxy/proxy-config.js';
 import { IFileSystem, ILogger } from '@debugmcp/shared';
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import type { Stats } from 'fs';
-import { createMockFileSystem as createTypedMockFileSystem } from '../../test-utils/helpers/adapter-dependencies.js';
+import { createMockFileSystem } from '../../test-utils/helpers/test-utils.js';
 
 export class TestProxyManager extends ProxyManager {
   private mockResponses: Map<string, any> = new Map();
@@ -194,20 +193,5 @@ function createMockLogger(): ILogger {
   };
 }
 
-/**
- * Create a mock file system for testing
- */
-function createMockFileSystem(): IFileSystem {
-  // The seven behaviours below are the ones ProxyManager (and its tests) rely on;
-  // the shared factory supplies inert spies for the other nine IFileSystem members
-  // so the double actually satisfies the interface.
-  return createTypedMockFileSystem({
-    ensureDir: async () => {},
-    pathExists: async () => true,
-    writeFile: async () => {},
-    readFile: async () => '',
-    readTail: async () => '',
-    stat: async () => ({ isFile: () => true }) as unknown as Stats,
-    ensureDirSync: () => {}
-  });
-}
+// The file system is the shared double (issue #742): ProxyManager reads only `pathExists`,
+// which its "everything exists" default answers.

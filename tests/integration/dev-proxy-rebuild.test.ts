@@ -4,7 +4,12 @@ import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
+import type { Stream } from 'node:stream';
 import { fileURLToPath } from 'node:url';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { setTimeout as delay } from 'node:timers/promises';
+import { OwnedStdioTransport } from '../test-utils/helpers/owned-stdio-transport.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
@@ -18,7 +23,7 @@ interface Status {
   backendEnvOverrides: Record<string, string>;
 }
 interface RestartResult { success: boolean; error?: string; status: Status }
-interface Event { kind: string; pid: number; index?: number; tool?: string }
+interface Event { kind: string; pid: number; ppid?: number; at?: number; index?: number; tool?: string }
 type ToolResult = Awaited<ReturnType<Client['callTool']>>;
 
 function payload<T>(result: ToolResult): T {
@@ -40,8 +45,10 @@ function isAlive(pid: number): boolean {
       return !/^State:\s+Z/m.test(readFileSync(`/proc/${pid}/status`, 'utf8'));
     }
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ESRCH' || code === 'ENOENT') return false;
+    throw error; // A denied/failed liveness probe is not proof of death.
   }
 }
 
@@ -53,39 +60,87 @@ async function readEvents(directory: string): Promise<Event[]> {
     if (err.code === 'ENOENT') return '';
     throw err;
   });
-  return text.trim() ? text.trim().split('\n').map(line => JSON.parse(line) as Event) : [];
+  // A concurrent append can expose a partial last record; only newline-terminated
+  // records have been published by the fixture.
+  return text.split('\n').slice(0, -1).filter(Boolean).map(line => JSON.parse(line) as Event);
 }
 
 afterEach(async () => {
-  await Promise.all(clients.splice(0).map(client => client.close()));
-  for (const pid of ownedPids) {
-    if (isAlive(pid)) {
-      try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
-    }
-  }
-  ownedPids.clear();
-  for (const directory of directories.splice(0)) {
-    // Own every fixture PID explicitly, including when a regression prevents
-    // the proxy from cleaning up. Never use a process-name-wide test reaper.
-    for (const event of await readEvents(directory)) {
-      if (isAlive(event.pid)) {
-        try { process.kill(event.pid, 'SIGKILL'); } catch { /* already gone */ }
+  const failures: unknown[] = [];
+  // Cleanup must continue even when a client close or an event read fails.
+  const outcomes = await Promise.allSettled(clients.splice(0).map(client => client.close()));
+  failures.push(...outcomes.filter(outcome => outcome.status === 'rejected').map(outcome => outcome.reason));
+  const cleanupDirectories = directories.splice(0);
+  for (const directory of cleanupDirectories) {
+    try {
+      for (const event of await readEvents(directory)) {
+        ownedPids.add(event.pid);
+        // build-start is the Node child of the owned command shell. This also
+        // cleans the shell, which never writes its own fixture event.
+        if (event.kind === 'build-start' && event.ppid) ownedPids.add(event.ppid);
       }
-    }
-    await rm(directory, { recursive: true, force: true });
+    } catch (error) { failures.push(error); }
   }
-});
+  const pids = [...ownedPids];
+  ownedPids.clear();
+  for (const pid of pids) {
+    try {
+      if (isAlive(pid)) process.kill(pid, 'SIGKILL');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') failures.push(error);
+    }
+  }
+  try {
+    await expect.poll(() => pids.filter(isAlive), { timeout: 5000 }).toEqual([]);
+  } catch (error) { failures.push(error); }
+  for (const directory of cleanupDirectories) {
+    try { await rm(directory, { recursive: true, force: true }); }
+    catch (error) { failures.push(error); }
+  }
+  if (failures.length) throw new AggregateError(failures, 'dev-proxy fixture cleanup failed');
+}, 20000);
 
-async function connect(extraEnv: Record<string, string> = {}) {
+async function unusedPort(): Promise<number> {
+  const listener = net.createServer();
+  return new Promise((resolve, reject) => {
+    listener.once('error', reject);
+    listener.listen(0, '127.0.0.1', () => {
+      const address = listener.address();
+      if (!address || typeof address === 'string') { listener.close(); reject(new Error('No port')); return; }
+      listener.close(error => error ? reject(error) : resolve(address.port));
+    });
+  });
+}
+
+async function processIdentities(pids: number[]): Promise<string> {
+  if (!pids.length) return 'none';
+  const runFile = promisify(execFile);
+  try {
+    const command = process.platform === 'win32' ? 'powershell.exe' : 'ps';
+    const args = process.platform === 'win32'
+      ? ['-NoProfile', '-NonInteractive', '-Command',
+        `Get-CimInstance Win32_Process -Filter "${pids.map(pid => `ProcessId = ${pid}`).join(' OR ')}" | Select-Object ProcessId,ParentProcessId,CreationDate,Name,CommandLine | ConvertTo-Json -Compress`]
+      : ['-p', pids.join(','), '-o', 'pid=,ppid=,stat=,args='];
+    const result = await runFile(command, args, { windowsHide: true, timeout: 2000 });
+    return result.stdout.trim() || 'none';
+  } catch (error) { return `identity probe failed: ${String(error)}`; }
+}
+
+interface ConnectOptions { sdkTransport?: boolean; delayTreeKill?: boolean; gatePortProbe?: boolean }
+async function connect(extraEnv: Record<string, string> = {}, options: ConnectOptions = {}) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'mcp-rebuild-'));
   directories.push(directory);
   const client = new Client({ name: 'rebuild-test', version: '1.0.0' });
   clients.push(client);
   const notifications: string[] = [];
   client.setNotificationHandler(ToolListChangedNotificationSchema, async n => { notifications.push(n.method); });
-  const transport = new StdioClientTransport({
+  const parameters = {
     command: process.execPath,
-    args: [path.join(root, 'tools/dev-proxy/dev-proxy.mjs')],
+    args: [
+      ...(options.delayTreeKill ? ['--import', new URL('../fixtures/dev-proxy/delay-build-taskkill.mjs', import.meta.url).href] : []),
+      ...(options.gatePortProbe ? ['--import', new URL('../fixtures/dev-proxy/gate-port-probe.mjs', import.meta.url).href] : []),
+      path.join(root, 'tools/dev-proxy/dev-proxy.mjs'),
+    ],
     cwd: root,
     env: {
       ...process.env,
@@ -100,18 +155,50 @@ async function connect(extraEnv: Record<string, string> = {}) {
       DEV_PROXY_BUILD_CHILD: '0', DEV_PROXY_BUILD_IGNORE_TERM: '0',
       ...extraEnv,
     },
-    stderr: 'pipe',
-  });
+  };
+  const transport = options.sdkTransport
+    ? new StdioClientTransport({ ...parameters, stderr: 'pipe' })
+    : new OwnedStdioTransport(parameters.command, parameters.args, { cwd: parameters.cwd, env: parameters.env, windowsHide: true });
+  if (transport.pid) ownedPids.add(transport.pid);
   let stderr = '';
-  transport.stderr?.on('data', chunk => { stderr += chunk.toString(); });
-  await client.connect(transport);
+  const stderrStream: Stream | null = transport.stderr;
+  stderrStream?.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+  try { await client.connect(transport); }
+  finally { if (transport.pid) ownedPids.add(transport.pid); }
   await client.listTools();
   await expect.poll(() => notifications.length).toBe(1);
   const call = (name: string, args: Record<string, unknown> = {}) => client.callTool(
     { name, arguments: args }, undefined, { timeout: 10000 }
   );
+  const diagnostics = async (pids: number[]) => {
+    const events = await readEvents(directory);
+    const survivors = [...new Set(pids)].filter(isAlive);
+    return `at=${new Date().toISOString()} proxy=${transport.pid} survivors=${JSON.stringify(survivors)}\n` +
+      `events=${JSON.stringify(events)}\nidentities=${await processIdentities(survivors)}\nstderr:\n${stderr}`;
+  };
   return {
     client, transport, directory, notifications, call, stderr: () => stderr,
+    shutdown: async () => {
+      if (!(transport instanceof OwnedStdioTransport)) throw new Error('EOF shutdown requires a test-owned child');
+      try {
+        await transport.close();
+        expect(transport.fallbackKills).toBe(0);
+        expect(stderr).toContain('Shutdown complete');
+      } catch (error) {
+        throw new Error(`${String(error)}\n${await diagnostics([transport.pid!, ...(await readEvents(directory)).map(event => event.pid)])}`, { cause: error });
+      } finally {
+        // Keep the original failure's diagnostics if the same transport close
+        // rejection is surfaced again by Client.close(). afterEach still reaps.
+        await client.close().catch(() => {});
+      }
+    },
+    diagnoseFailure: async (error: unknown, pids: number[]) => new Error(
+      `${String(error)}\n${await diagnostics(pids)}`, { cause: error }
+    ),
+    assertDead: async (pids: number[], context = '') => {
+      try { await expect.poll(() => [...new Set(pids)].filter(isAlive), { timeout: 5000 }).toEqual([]); }
+      catch (error) { throw new Error(`${String(error)}\n${context}\n${await diagnostics(pids)}`, { cause: error }); }
+    },
     status: async () => {
       const status = payload<Status>(await call('dev_server_status'));
       if (status.pid) ownedPids.add(status.pid);
@@ -133,15 +220,7 @@ async function connect(extraEnv: Record<string, string> = {}) {
 
 describe('dev-proxy responsive rebuilds (#748, #756, #757)', () => {
   it.each(['http', 'sse'])('serves an actual %s backend during a build and shuts it down intentionally', async mode => {
-    const listener = net.createServer();
-    const port = await new Promise<number>((resolve, reject) => {
-      listener.once('error', reject);
-      listener.listen(0, '127.0.0.1', () => {
-        const address = listener.address();
-        if (!address || typeof address === 'string') { listener.close(); reject(new Error('No port')); return; }
-        listener.close(error => error ? reject(error) : resolve(address.port));
-      });
-    });
+    const port = await unusedPort();
     const h = await connect({
       DEV_PROXY_BACKEND_TRANSPORT: mode,
       DEV_PROXY_BACKEND_CMD: `"${process.execPath}" "${path.join(root, 'dist/index.js')}" ${mode} --port ${port}`,
@@ -154,9 +233,9 @@ describe('dev-proxy responsive rebuilds (#748, #756, #757)', () => {
     await h.waitFor('build-start', 1);
     expect(await h.status()).toMatchObject({ state: 'running', pid: before.pid, buildInProgress: true });
     expect((await h.call('list_debug_sessions')).isError).not.toBe(true);
-    await h.client.close();
+    await h.shutdown();
     await rebuild;
-    await expect.poll(() => [proxyPid, before.pid!].filter(isAlive), { timeout: 5000 }).toEqual([]);
+    await h.assertDead([proxyPid, before.pid!]);
     expect(h.stderr()).not.toContain('Backend crashed');
     expect(h.stderr()).not.toContain('Killing orphaned child process');
   });
@@ -312,8 +391,17 @@ describe('dev-proxy responsive rebuilds (#748, #756, #757)', () => {
     const failed = observe(h.call('dev_rebuild_and_restart'));
     await h.waitFor('build-child', 1);
     const pids = (await h.events()).filter(e => e.kind.startsWith('build-')).map(e => e.pid);
-    expect(payload<RestartResult>((await failed).result!).error).toMatch(/^Build timed out after 2s/);
-    await expect.poll(() => pids.some(isAlive), { timeout: 5000 }).toBe(false);
+    const outcome = await failed;
+    try {
+      expect(outcome.error).toBeUndefined();
+      expect(outcome.result?.isError).toBe(true);
+      const failure = payload<RestartResult>(outcome.result!);
+      expect(failure.error).toMatch(/^Build timed out after 2s/);
+      expect(failure.error).not.toContain('Build process cleanup failed');
+      await h.assertDead(pids, JSON.stringify(failure));
+    } catch (error) {
+      throw await h.diagnoseFailure(new Error(`${String(error)}\nresponse=${JSON.stringify(outcome.result)}`, { cause: error }), pids);
+    }
     expect(await h.status()).toMatchObject({ state: 'running', pid: before.pid, buildInProgress: false });
     expect((await h.call('initial')).isError).not.toBe(true);
     expect(h.notifications).toHaveLength(1);
@@ -337,11 +425,92 @@ describe('dev-proxy responsive rebuilds (#748, #756, #757)', () => {
     const queuedRestart = observe(h.call('dev_restart_debugger'));
     await h.status();
     const before = await h.events();
-    await h.client.close();
+    await h.shutdown();
     await Promise.all([current, queuedBuild, queuedRestart]);
-    await expect.poll(async () => [proxyPid, ...(await h.events()).map(e => e.pid)].filter(isAlive), { timeout: 5000 }).toEqual([]);
+    await h.assertDead([proxyPid, ...(await h.events()).map(e => e.pid)]);
     const after = await h.events();
     expect(after.filter(e => e.kind === 'build-start')).toEqual(before.filter(e => e.kind === 'build-start'));
     expect(after.filter(e => e.kind === 'backend-start')).toEqual(before.filter(e => e.kind === 'backend-start'));
   }, 30000);
+  it('answers status while the actual HTTP restart is waiting on its OS listener probe (#799)', async () => {
+    const port = await unusedPort();
+    const h = await connect({
+      DEV_PROXY_BACKEND_TRANSPORT: 'http',
+      DEV_PROXY_BACKEND_CMD: `"${process.execPath}" "${path.join(root, 'dist/index.js')}" http --port ${port}`,
+      DEV_PROXY_PORT: String(port),
+      MCP_SKIP_ORPHAN_REAPERS: '1',
+    }, { gatePortProbe: true });
+    const before = await h.status();
+    let completed = false;
+    const restart = observe(h.call('dev_restart_debugger')).then(outcome => { completed = true; return outcome; });
+    await h.waitFor('port-probe-blocked', 1);
+    expect(completed).toBe(false);
+    // The gate is released only after this real MCP request answers. No timing
+    // threshold can turn a fast completion into a false responsiveness pass.
+    expect(await h.status()).toMatchObject({ state: 'starting', buildInProgress: false });
+    expect(completed).toBe(false);
+    expect((await h.events()).some(event => ['port-probe-released', 'port-probe-expired'].includes(event.kind))).toBe(false);
+    await writeFile(path.join(h.directory, 'release-port-probe'), 'ready');
+    const outcome = await restart;
+    expect(outcome.error).toBeUndefined();
+    expect(payload<RestartResult>(outcome.result!)).toMatchObject({ success: true, status: { state: 'running' } });
+    expect((await h.status()).pid).not.toBe(before.pid);
+    expect((await h.events()).some(event => event.kind === 'port-probe-released')).toBe(true);
+  });
+
+  it('retains SDK-client close coverage for a normally responsive supervisor', async () => {
+    const h = await connect({}, { sdkTransport: true });
+    const proxyPid = h.transport.pid!;
+    const before = await h.status();
+    await h.client.close();
+    await h.assertDead([proxyPid, before.pid!]);
+    expect(h.stderr()).toContain('Shutdown complete');
+  });
+
+  it.skipIf(process.platform !== 'win32')('waits past the SDK close grace for a slow tree sweep and never starts queued work', async () => {
+    const h = await connect({ DEV_PROXY_BUILD_CHILD: '1', DEV_PROXY_BUILD_IGNORE_TERM: '1' }, { delayTreeKill: true });
+    const proxyPid = h.transport.pid!;
+    const current = observe(h.call('dev_rebuild_and_restart'));
+    await h.waitFor('build-child', 1);
+    const queuedBuild = observe(h.call('dev_rebuild_and_restart'));
+    const queuedRestart = observe(h.call('dev_restart_debugger'));
+    await h.status(); // Both requests are queued before EOF.
+    const before = await h.events();
+    const shutdown = observe(h.shutdown());
+    await h.waitFor('tree-kill-delayed', 1);
+    // Keep the real process alive beyond the SDK's 2 s grace. Dispatch is gated
+    // by a file, so scheduler differences cannot make it happen before release.
+    await delay(2200);
+    expect(isAlive(proxyPid)).toBe(true);
+    expect((await h.events()).some(event => ['tree-kill-dispatched', 'tree-kill-expired'].includes(event.kind))).toBe(false);
+    await writeFile(path.join(h.directory, 'release-tree-kill'), 'ready');
+    expect((await shutdown).error).toBeUndefined();
+    await Promise.all([current, queuedBuild, queuedRestart]);
+    const after = await h.events();
+    const delayed = after.find(event => event.kind === 'tree-kill-delayed')!;
+    const dispatched = after.find(event => event.kind === 'tree-kill-dispatched')!;
+    expect(dispatched.at! - delayed.at!).toBeGreaterThanOrEqual(2000);
+    expect(after.filter(event => event.kind === 'build-start')).toEqual(before.filter(event => event.kind === 'build-start'));
+    expect(after.filter(event => event.kind === 'backend-start')).toEqual(before.filter(event => event.kind === 'backend-start'));
+    await h.assertDead([proxyPid, ...after.map(event => event.pid)]);
+  });
+
+  it.skipIf(process.platform !== 'win32')('reproduces SDK early escalation interrupting a slow build-tree sweep (#930)', async () => {
+    const h = await connect({ DEV_PROXY_BUILD_CHILD: '1', DEV_PROXY_BUILD_IGNORE_TERM: '1' }, { sdkTransport: true, delayTreeKill: true });
+    const proxyPid = h.transport.pid!;
+    const current = observe(h.call('dev_rebuild_and_restart'));
+    await h.waitFor('build-child', 1);
+    const buildPids = (await h.events()).filter(event => event.kind.startsWith('build-')).map(event => event.pid);
+    await h.client.close();
+    await current;
+    await h.assertDead([proxyPid]);
+    const events = await h.events();
+    expect(events.some(event => event.kind === 'tree-kill-delayed')).toBe(true);
+    expect(events.some(event => ['tree-kill-dispatched', 'tree-kill-expired'].includes(event.kind))).toBe(false);
+    expect(h.stderr()).not.toContain('Shutdown complete');
+    // This is intentionally the harness failure mode, not successful cleanup.
+    // afterEach owns these exact fixture PIDs and reaps them before removing logs.
+    expect(buildPids.some(isAlive)).toBe(true);
+  });
+
 });

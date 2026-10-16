@@ -13,8 +13,6 @@ import {
 } from './types.js';
 import {
   setInitialized,
-  setAdapterConfigured,
-  setCurrentThreadId,
   getPendingRequest,
   removePendingRequest
 } from './state.js';
@@ -81,16 +79,11 @@ function handleStatusMessage(
 ): DAPProcessingResult {
   switch (message.status) {
     case 'adapter_connected':
-      // Adapter transport is up: DAP requests may be sent.
+    case 'adapter_configured_and_launched':
+      // Adapter transport is up (a completed launch implies it): DAP requests
+      // may be sent. The core once kept an `adapterConfigured` flag for the
+      // second status; nothing read it (issue #913).
       return { commands: [], newState: setInitialized(state, true) };
-
-    case 'adapter_configured_and_launched': {
-      const configured = setAdapterConfigured(state, true);
-      return {
-        commands: [],
-        newState: state.initialized ? configured : setInitialized(configured, true)
-      };
-    }
 
     default:
       return { commands: [] };
@@ -138,17 +131,12 @@ function handleDapEvent(
     }
   ];
 
-  let newState = state;
-
   switch (message.event) {
     case 'stopped':
       // Type guard for stopped event body
       const body = message.body as { threadId?: number; reason?: string } | undefined;
       const threadId = body?.threadId;
       const reason = body?.reason || 'unknown';
-      if (threadId) {
-        newState = setCurrentThreadId(state, threadId);
-      }
       commands.push({
         type: 'emitEvent',
         event: 'stopped',
@@ -197,7 +185,11 @@ function handleDapEvent(
       });
   }
 
-  return { commands, newState };
+  // No DAP event changes the core's state. The stop anchor lives only in
+  // ProxyManager.currentThreadId (issues #496, #904); the copy the core kept
+  // here was written and never read (issue #913). The state is still
+  // returned: ProxyManager re-syncs isInitialized from any newState.
+  return { commands, newState: state };
 }
 
 /**

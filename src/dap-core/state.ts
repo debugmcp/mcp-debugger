@@ -10,8 +10,6 @@ export function createInitialState(sessionId: string): DAPSessionState {
   return {
     sessionId,
     initialized: false,
-    adapterConfigured: false,
-    currentThreadId: undefined,
     pendingRequests: new Map()
   };
 }
@@ -23,26 +21,6 @@ export function setInitialized(state: DAPSessionState, initialized: boolean): DA
   return {
     ...state,
     initialized
-  };
-}
-
-/**
- * Mark adapter as configured
- */
-export function setAdapterConfigured(state: DAPSessionState, configured: boolean): DAPSessionState {
-  return {
-    ...state,
-    adapterConfigured: configured
-  };
-}
-
-/**
- * Update current thread ID
- */
-export function setCurrentThreadId(state: DAPSessionState, threadId: number | undefined): DAPSessionState {
-  return {
-    ...state,
-    currentThreadId: threadId
   };
 }
 
@@ -98,15 +76,3 @@ export function clearPendingRequests(state: DAPSessionState): DAPSessionState {
   };
 }
 
-/**
- * Apply multiple state updates at once
- */
-export function updateState(
-  state: DAPSessionState,
-  updates: Partial<Omit<DAPSessionState, 'sessionId' | 'pendingRequests'>>
-): DAPSessionState {
-  return {
-    ...state,
-    ...updates
-  };
-}

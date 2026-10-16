@@ -17,7 +17,7 @@
  * dev-proxy entry point (dev-proxy.mjs runs main() at module top level).
  */
 
-import { execFileSync } from 'child_process';
+import { runCommand } from './command-runner.mjs';
 
 /** Max time to wait for backend.stop() before exiting anyway. */
 export const STOP_TIMEOUT_MS = 8000;
@@ -28,7 +28,7 @@ export const FORCE_EXIT_DELAY_MS = 10000;
 /** Max time to wait for a graceful backend exit before force-killing it. */
 export const KILL_GRACE_MS = 5000;
 
-/** After a force-kill, max time to wait for the 'exit' event before giving up. */
+/** Max time from force-kill dispatch to command completion and child exit. */
 export const FORCE_KILL_BAIL_MS = 2000;
 
 /**
@@ -155,11 +155,11 @@ export function installShutdownHandlers({
  * @param {object} [opts]
  * @param {(msg: string) => void} [opts.log]
  * @param {number} [opts.killTimeoutMs]
- * @param {number} [opts.bailMs] Post-force-kill wait before giving up.
+ * @param {number} [opts.bailMs] Force-phase deadline, measured from dispatch.
  * @param {NodeJS.Platform} [opts.platform] Injectable for tests.
- * @param {(pid: number) => void} [opts.forceKill] Injectable for tests.
- * @returns {Promise<void>} Resolves once the child exited (or force-kill was
- *   attempted and no exit surfaced within bailMs).
+ * @param {(pid: number | undefined) => void | Promise<void>} [opts.forceKill] Injectable for tests.
+ * @returns {Promise<void>} Resolves on graceful exit, or after both the force
+ *   command and child exit, bounded by bailMs from force-kill dispatch.
  */
 export function killChildGracefully(child, opts = {}) {
   const {
@@ -176,10 +176,9 @@ export function killChildGracefully(child, opts = {}) {
 
   const doForceKill =
     forceKill ??
-    ((pid) => {
+    (async (pid) => {
       if (platform === 'win32') {
-        // execFileSync (no shell) — pid is numeric, but avoid shell interpolation on principle
-        execFileSync('taskkill', ['/pid', String(pid), '/F'], { windowsHide: true, stdio: 'ignore' });
+        await runCommand('taskkill', ['/pid', String(pid), '/F'], { timeout: bailMs });
       } else {
         child.kill('SIGKILL');
       }
@@ -187,27 +186,48 @@ export function killChildGracefully(child, opts = {}) {
 
   return new Promise((resolve) => {
     let settled = false;
+    let forceStarted = false;
+    let forceComplete = false;
+    let exited = false;
     let forceTimer;
+    let bailTimer;
 
     const finish = () => {
       if (settled) return;
       settled = true;
       clearTimeout(forceTimer);
+      clearTimeout(bailTimer);
+      child.removeListener('exit', handleExit);
       resolve();
     };
-    child.once('exit', finish);
+    const handleExit = () => {
+      exited = true;
+      if (!forceStarted || forceComplete) finish();
+    };
+    child.once('exit', handleExit);
 
     const force = (why) => {
+      if (settled || forceStarted) return;
+      forceStarted = true;
       clearTimeout(forceTimer);
       log(`Force-killing backend PID ${child.pid} (${why})`);
+
+      // The deadline includes the command itself: awaiting a slow taskkill
+      // before starting this timer would exceed the outer shutdown budget.
+      bailTimer = setTimeout(finish, bailMs);
+      bailTimer.unref?.();
+      let forcing;
       try {
-        doForceKill(child.pid);
+        forcing = doForceKill(child.pid);
       } catch {
         // Already dead
       }
-      // If even the force-kill surfaces no 'exit' event, don't hang the caller
-      const bail = setTimeout(finish, bailMs);
-      bail.unref?.();
+      // Own a late rejection even when exit or the deadline wins. An early
+      // child exit must not release the lifecycle queue while taskkill runs.
+      Promise.resolve(forcing).catch(() => {}).then(() => {
+        forceComplete = true;
+        if (exited) finish();
+      });
     };
 
     forceTimer = setTimeout(

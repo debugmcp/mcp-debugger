@@ -110,7 +110,7 @@ Two rules make it useful beyond "it compiles":
 
 **File:** `tests/test-utils/helpers/test-dependencies.ts`
 
-`createMockDependencies()` creates a complete DI container (matching the `Dependencies` interface) with all methods as `vi.fn()` mocks: `fileSystem`, `processManager`, `networkManager`, `logger`, `proxyProcessLauncher`, `proxyManagerFactory`, `sessionStoreFactory`. This is the standard entry point for unit tests that exercise `SessionManager` or the server layer.
+`createMockDependencies()` creates a complete DI container (matching the `Dependencies` interface): `fileSystem`, `processManager`, `networkManager`, `logger`, `environment`, `proxyProcessLauncher`, `proxyManagerFactory`, `sessionStoreFactory`, `adapterRegistry`. Every member is a `vi.fn()` except `fileSystem` (the shared `createMockFileSystem()` with its "everything exists" defaults) and the two `Mock*Factory` classes from `src/factories/`. This is the standard entry point for unit tests that exercise `SessionManager` or the server layer.
 
 Individual helpers are also exported for narrower tests: `createMockLogger()`, `createMockFileSystem()`, `createMockProcessManager()`, `createMockNetworkManager()`, `createMockEnvironment()`.
 

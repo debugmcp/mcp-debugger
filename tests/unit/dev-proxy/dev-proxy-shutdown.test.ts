@@ -8,13 +8,19 @@
  * EOF/close/error, protocol-level server close, or signals — the proxy stops its
  * backend child exactly once and then exits, even if backend.stop() hangs or throws.
  */
-import { describe, it, expect, vi, type Mock } from 'vitest';
+import { afterEach, describe, it, expect, vi, type Mock } from 'vitest';
 import { EventEmitter } from 'events';
+import * as commandRunner from '../../../tools/dev-proxy/command-runner.mjs';
 import {
   installShutdownHandlers,
   isIntentionalTransportAbort,
   killChildGracefully,
 } from '../../../tools/dev-proxy/shutdown.mjs';
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 // `Mock<Signature>` rather than `ReturnType<typeof vi.fn>`: the latter resolves to
 // `Mock<Procedure | Constructable>`, which carries no plain call signature and so
@@ -176,6 +182,16 @@ function makeFakeChild({ withStdin = true }: { withStdin?: boolean } = {}): Fake
   return child;
 }
 
+function pendingForce() {
+  let resolve!: () => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<void>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 describe('dev-proxy killChildGracefully', () => {
   it('resolves immediately for a missing or already-exited child', async () => {
     await killChildGracefully(null);
@@ -271,6 +287,123 @@ describe('dev-proxy killChildGracefully', () => {
     });
 
     expect(forceKill).toHaveBeenCalledWith(child.pid);
+  });
+
+  it('removes the graceful timer and exit listener when the child exits promptly', async () => {
+    vi.useFakeTimers();
+    const child = makeFakeChild();
+    const forceKill = vi.fn();
+    const result = killChildGracefully(child, { platform: 'win32', forceKill });
+
+    child.emit('exit', 0, null);
+    await result;
+
+    expect(child.listenerCount('exit')).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(forceKill).not.toHaveBeenCalled();
+  });
+
+  it.each(['resolve', 'reject'] as const)('waits for an asynchronous force command to %s after an early child exit', async outcome => {
+    vi.useFakeTimers();
+    const child = makeFakeChild({ withStdin: false });
+    const command = pendingForce();
+    const forceKill = vi.fn(() => command.promise);
+    let settled = false;
+    const result = killChildGracefully(child, {
+      platform: 'win32', forceKill, bailMs: 100,
+    }).then(() => { settled = true; });
+
+    child.emit('exit', 1, null);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(settled).toBe(false);
+    if (outcome === 'resolve') command.resolve();
+    else command.reject(new Error('taskkill reported an already-dead process'));
+    await result;
+
+    expect(forceKill).toHaveBeenCalledTimes(1);
+    expect(child.listenerCount('exit')).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('waits for child exit after the asynchronous force command completes', async () => {
+    vi.useFakeTimers();
+    const child = makeFakeChild({ withStdin: false });
+    const command = pendingForce();
+    let settled = false;
+    const result = killChildGracefully(child, {
+      platform: 'win32', forceKill: () => command.promise, bailMs: 100,
+    }).then(() => { settled = true; });
+
+    command.resolve();
+    await vi.advanceTimersByTimeAsync(50);
+    expect(settled).toBe(false);
+    child.emit('exit', 1, null);
+    await result;
+
+    expect(child.listenerCount('exit')).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('bounds a pending force command from dispatch and owns its rejection after bailout', async () => {
+    vi.useFakeTimers();
+    const child = makeFakeChild();
+    const command = pendingForce();
+    const forceKill = vi.fn(() => command.promise);
+    let settled = false;
+    const result = killChildGracefully(child, {
+      platform: 'win32', forceKill, killTimeoutMs: 20, bailMs: 30,
+    }).then(() => { settled = true; });
+
+    await vi.advanceTimersByTimeAsync(19);
+    expect(forceKill).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(forceKill).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(29);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await result;
+    expect(child.listenerCount('exit')).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+
+    command.reject(new Error('late taskkill failure'));
+    await vi.advanceTimersByTimeAsync(100);
+    expect(forceKill).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('force-kills only once when graceful shutdown and force dispatch both throw', async () => {
+    vi.useFakeTimers();
+    const child = makeFakeChild();
+    child.stdin!.end.mockImplementation(() => { throw new Error('broken stdin'); });
+    const forceKill = vi.fn(() => { throw new Error('already dead'); });
+    const result = killChildGracefully(child, {
+      platform: 'win32', forceKill, killTimeoutMs: 20, bailMs: 30,
+    });
+
+    await vi.advanceTimersByTimeAsync(30);
+    await result;
+    expect(forceKill).toHaveBeenCalledTimes(1);
+    expect(child.listenerCount('exit')).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('uses asynchronous taskkill with the force-phase deadline on Windows', async () => {
+    vi.useFakeTimers();
+    const child = makeFakeChild({ withStdin: false });
+    const command = pendingForce();
+    const runCommand = vi.spyOn(commandRunner, 'runCommand').mockImplementation(async () => {
+      await command.promise;
+      return { stdout: '', stderr: '' };
+    });
+    const result = killChildGracefully(child, { platform: 'win32', bailMs: 100 });
+
+    expect(runCommand).toHaveBeenCalledWith('taskkill', ['/pid', String(child.pid), '/F'], { timeout: 100 });
+    child.emit('exit', 1, null);
+    command.resolve();
+    await result;
+    expect(child.listenerCount('exit')).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 
