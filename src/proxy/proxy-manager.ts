@@ -322,6 +322,13 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     if (this.proxyProcess) {
       throw new Error('Proxy already running');
     }
+    // One `exit` per worker: the latch is reset here, for the worker about to
+    // be spawned, and nowhere else. Resetting it in cleanup() let a closure
+    // status (adapter_exited, dap_connection_closed, terminated) emit `exit`,
+    // stop() clear the latch, and the held raw exit delivered afterwards
+    // (issue #729's drain) emit it a second time on a manager the session had
+    // already discarded (issue #735).
+    this.exitEmitted = false;
 
     this.sessionId = config.sessionId;
     this.isStopped = false;
@@ -1591,7 +1598,12 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     this.currentThreadId = null;
     this.stderrBuffer = [];
     this.sessionId = null;
-    this.exitEmitted = false;
+    // exitEmitted is deliberately NOT reset here: see start(). The invariant
+    // the session side keeps: every stop() caller detaches its session
+    // handlers first (src/session, documented at operations-context.ts), and
+    // the process listeners setupEventHandlers tracked stay attached, so a
+    // worker exit delivered after stop() still runs handleProxyExit — which
+    // the latch makes a no-op for the `exit` it would otherwise re-emit.
   }
 
   private setActiveLaunchBarrier(barrier: AdapterLaunchBarrier, requestId: string): void {

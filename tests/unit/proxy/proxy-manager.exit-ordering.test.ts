@@ -127,3 +127,123 @@ describe('ProxyManager dry run whose exit beats its acknowledgement (issue #729)
     );
   });
 });
+
+// Issue #735 item 1. The wrapper holds the raw exit until the IPC channel
+// drains (above). The parent must see the worker as running for exactly as
+// long as the wrapper has not delivered that exit: the session is still
+// RUNNING/PAUSED in that window, so a listing that drops `exposure`, a tool
+// call that answers "no active proxy", or a stop() that resolves before the
+// worker's exit is on record all contradict what the session says.
+describe('ProxyManager while the worker exit is held for the IPC drain (issue #735 item 1)', () => {
+  let child: FakeChildProcess;
+  let proxyManager: ProxyManager;
+
+  const config: ProxyConfig = {
+    sessionId: 'session-735',
+    language: DebugLanguage.JAVASCRIPT,
+    executablePath: 'node',
+    adapterHost: '127.0.0.1',
+    adapterPort: 9229,
+    logDir: './.tmp/logs',
+    scriptPath: './tests/fixtures/app.js'
+  };
+
+  const tick = () => new Promise((resolve) => setImmediate(resolve));
+
+  beforeEach(() => {
+    child = new FakeChildProcess();
+    // A worker that boots: the init ack, then — a turn later, as a real
+    // worker's boot takes and after the parent has armed its initialization
+    // wait — the launched status that wait resolves on.
+    child.send.mockImplementation((command: unknown) => {
+      if ((command as { cmd?: string }).cmd !== 'init') return true;
+      setImmediate(() => {
+        child.emit('message', { type: 'status', status: 'init_received', sessionId: config.sessionId });
+        setImmediate(() => {
+          child.emit('message', { type: 'status', status: 'adapter_configured_and_launched', sessionId: config.sessionId });
+        });
+      });
+      return true;
+    });
+
+    const processManager = {
+      spawn: vi.fn().mockReturnValue(child),
+      exec: vi.fn()
+    } as unknown as IProcessManager;
+    const fileSystem = {
+      pathExists: vi.fn().mockResolvedValue(true)
+    } as unknown as IFileSystem;
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn()
+    } as unknown as ILogger;
+
+    proxyManager = new ProxyManager(
+      null,
+      new ProxyProcessLauncherImpl(processManager, process.platform, () => {}),
+      fileSystem,
+      logger
+    );
+  });
+
+  afterEach(async () => {
+    child.removeAllListeners();
+    (child.stderr as unknown as PassThrough | null)?.removeAllListeners();
+    proxyManager.removeAllListeners();
+    await tick();
+  });
+
+  it('isRunning() stays true while the raw exit is held and flips once it is delivered', async () => {
+    await proxyManager.start(config);
+    expect(proxyManager.isRunning()).toBe(true);
+
+    child.emit('exit', 0, null);
+    expect(proxyManager.isRunning()).toBe(true);
+
+    child.connected = false;
+    child.emit('disconnect');
+    expect(proxyManager.isRunning()).toBe(false);
+  });
+
+  it('stop() during the hold resolves on the delivered exit, not before it', async () => {
+    await proxyManager.start(config);
+    child.emit('exit', 0, null);
+
+    let resolved = false;
+    const stopping = proxyManager.stop().then(() => { resolved = true; });
+    await tick();
+    await tick();
+    expect(resolved).toBe(false);
+
+    child.connected = false;
+    child.emit('disconnect');
+    await stopping;
+    expect(resolved).toBe(true);
+  });
+
+  // The closure statuses (adapter_exited, dap_connection_closed, terminated)
+  // emit `exit` ahead of the process exit. stop() then ran cleanup(), which
+  // reset the one-exit latch, so the held raw exit delivered afterwards
+  // emitted `exit` a second time on a manager the session had discarded.
+  it('emits exit once when a closure status already reported it and the held raw exit lands after stop()', async () => {
+    await proxyManager.start(config);
+    const exits: unknown[] = [];
+    proxyManager.on('exit', (code, signal) => exits.push([code, signal]));
+
+    child.emit('message', { type: 'status', status: 'dap_connection_closed', sessionId: config.sessionId, expected: true });
+    expect(exits).toHaveLength(1);
+
+    child.emit('exit', 0, null);
+    const stopping = proxyManager.stop();
+    // stop() has run its cleanup by now; the delivery comes after it, as it
+    // does when the channel EOF lands a poll later.
+    await tick();
+    child.connected = false;
+    child.emit('disconnect');
+    await stopping;
+
+    expect(exits).toHaveLength(1);
+  });
+});

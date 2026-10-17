@@ -56,7 +56,11 @@ export interface IProxyProcessLauncher {
  * Ordering contract: `exit` is emitted only after every `message` the child
  * sent has been forwarded (issue #729). A consumer may therefore treat an
  * `exit` that arrives before an expected status message as that message never
- * having been sent.
+ * having been sent. `exitCode` and `signalCode` are null until that `exit`
+ * is emitted and set with it (issue #735): a consumer reading them sees the
+ * same exit the event reports, never one still being held back, so "both
+ * null" means "running" for as long as the process has not reported its
+ * exit — which is what ProxyManager.isRunning() and stop() rely on.
  */
 export interface IProxyProcess extends IProcess {
   sessionId: string;
