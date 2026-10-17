@@ -17,6 +17,58 @@ export interface BridgeOptions {
   spawnFn?: (cmd: string, args: string[], opts: SpawnOptions) => ChildProcess;
   /** Writable stream for netcoredbg stderr (defaults to `process.stderr`) */
   stderr?: NodeJS.WritableStream;
+  /** Injected for tests; defaults to `process.platform`. */
+  platform?: NodeJS.Platform;
+  /** Ends a process with everything below it (Windows only); defaults to `taskkill /T /F`. Injected for tests. */
+  killTree?: (pid: number) => void;
+}
+
+/** How long the Windows tree kill gets before the plain kill follows it up. */
+const TREE_KILL_GRACE_MS = 300;
+
+/** The default Windows tree kill: fire-and-forget `taskkill`, the proxy worker's own idiom. */
+function taskkillTree(pid: number): void {
+  const killer = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+  killer.on('error', () => { /* no taskkill: the plain kill follows after the grace */ });
+}
+
+/** Children a tree kill has already been issued for, so the socket paths and cleanup() do not repeat it. */
+const treeKillIssued = new WeakSet<ChildProcess>();
+
+/**
+ * End the child. On Windows `cp.kill()` is TerminateProcess on netcoredbg alone, and the debuggee
+ * it launched sits below it, re-parented and left running by a single-process kill (issue #937).
+ * So the tree goes first — `taskkill /T /F`, the proxy worker's own idiom — and the plain kill
+ * follows only if the child is still here after a short grace (a missing taskkill fails
+ * asynchronously and takes this route too), or at once if taskkill cannot even be spawned. POSIX
+ * keeps `cp.kill()`: the proxy's process-group kill covers the tree there. A child that has already
+ * exited is never touched: Node holds the process handle until the tick that records its exit, so
+ * while `exitCode` is still null the pid cannot have been recycled, and once it is set it may be
+ * someone else's. (Mirrored in the Dart bridge; both are dependency-free by design, so no shared
+ * helper.)
+ */
+function endChild(cp: ChildProcess, platform: NodeJS.Platform, killTree: (pid: number) => void): void {
+  if ((cp.exitCode ?? null) !== null || cp.killed) return;
+  const plainKill = (): void => {
+    if ((cp.exitCode ?? null) === null && !cp.killed) {
+      try { cp.kill(); } catch { /* already gone */ }
+    }
+  };
+  if (platform !== 'win32' || cp.pid === undefined) {
+    plainKill();
+    return;
+  }
+  if (treeKillIssued.has(cp)) return;
+  treeKillIssued.add(cp);
+  try {
+    killTree(cp.pid);
+  } catch {
+    plainKill();
+    return;
+  }
+  const fallback = setTimeout(plainKill, TREE_KILL_GRACE_MS);
+  fallback.unref?.();
+  cp.once('exit', () => clearTimeout(fallback));
 }
 
 export interface BridgeHandle {
@@ -41,6 +93,8 @@ export function createBridge(
 ): BridgeHandle {
   const spawnFn = options.spawnFn ?? spawn;
   const stderrStream = options.stderr ?? process.stderr;
+  const platform = options.platform ?? process.platform;
+  const killTree = options.killTree ?? taskkillTree;
 
   let netcoredbg: ChildProcess | null = null;
   let client: net.Socket | null = null;
@@ -123,7 +177,7 @@ export function createBridge(
     socket.on('close', () => {
       if (netcoredbg) {
         netcoredbg.stdin?.end();
-        netcoredbg.kill();
+        endChild(netcoredbg, platform, killTree);
       }
       server.close();
     });
@@ -132,7 +186,7 @@ export function createBridge(
       stderrStream.write(`bridge socket error: ${err.message}\n`);
       if (netcoredbg) {
         netcoredbg.stdin?.end();
-        netcoredbg.kill();
+        endChild(netcoredbg, platform, killTree);
       }
       server.close();
     });
@@ -145,7 +199,7 @@ export function createBridge(
   });
 
   const cleanup = () => {
-    if (netcoredbg) netcoredbg.kill();
+    if (netcoredbg) endChild(netcoredbg, platform, killTree);
     if (client) client.destroy();
     server.close();
   };

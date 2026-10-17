@@ -78,7 +78,7 @@ describe('netcoredbg-bridge-core', () => {
   });
 
   it('creates a TCP server on the specified port', async () => {
-    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream });
+    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream, platform: 'linux' });
     await waitForListening(bridge.server);
     expect(bridge.server.listening).toBe(true);
     const addr = bridge.server.address() as net.AddressInfo;
@@ -86,7 +86,7 @@ describe('netcoredbg-bridge-core', () => {
   });
 
   it('spawns netcoredbg with correct args on first connection', async () => {
-    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream });
+    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream, platform: 'linux' });
     const port = await waitForListening(bridge.server);
 
     const client = await connectClient(port);
@@ -103,7 +103,7 @@ describe('netcoredbg-bridge-core', () => {
   });
 
   it('forwards TCP data → netcoredbg stdin', async () => {
-    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream });
+    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream, platform: 'linux' });
     const port = await waitForListening(bridge.server);
 
     const client = await connectClient(port);
@@ -119,7 +119,7 @@ describe('netcoredbg-bridge-core', () => {
   });
 
   it('forwards netcoredbg stdout → TCP socket', async () => {
-    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream });
+    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream, platform: 'linux' });
     const port = await waitForListening(bridge.server);
 
     const client = await connectClient(port);
@@ -137,7 +137,7 @@ describe('netcoredbg-bridge-core', () => {
   });
 
   it('rejects second TCP connection (single-client)', async () => {
-    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream });
+    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream, platform: 'linux' });
     const port = await waitForListening(bridge.server);
 
     const client1 = await connectClient(port);
@@ -156,7 +156,7 @@ describe('netcoredbg-bridge-core', () => {
   });
 
   it('cleans up on TCP socket close', async () => {
-    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream });
+    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream, platform: 'linux' });
     const port = await waitForListening(bridge.server);
 
     const client = await connectClient(port);
@@ -169,7 +169,7 @@ describe('netcoredbg-bridge-core', () => {
   });
 
   it('cleans up once netcoredbg has closed', async () => {
-    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream });
+    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream, platform: 'linux' });
     const port = await waitForListening(bridge.server);
 
     const client = await connectClient(port);
@@ -186,7 +186,7 @@ describe('netcoredbg-bridge-core', () => {
   });
 
   it('keeps the socket open across netcoredbg exit until its streams close, then ends it (issue #878)', async () => {
-    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream });
+    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream, platform: 'linux' });
     const port = await waitForListening(bridge.server);
 
     const client = await connectClient(port);
@@ -209,7 +209,7 @@ describe('netcoredbg-bridge-core', () => {
   });
 
   it('survives the proxy closing first and the child closing afterwards', async () => {
-    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream });
+    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream, platform: 'linux' });
     const port = await waitForListening(bridge.server);
 
     const client = await connectClient(port);
@@ -227,7 +227,7 @@ describe('netcoredbg-bridge-core', () => {
   });
 
   it('stops forwarding socket bytes to netcoredbg stdin once it has exited', async () => {
-    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream });
+    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream, platform: 'linux' });
     const port = await waitForListening(bridge.server);
 
     const client = await connectClient(port);
@@ -243,7 +243,7 @@ describe('netcoredbg-bridge-core', () => {
   });
 
   it('logs a netcoredbg stdin error instead of dying on it', async () => {
-    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream });
+    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream, platform: 'linux' });
     const port = await waitForListening(bridge.server);
 
     const client = await connectClient(port);
@@ -257,7 +257,7 @@ describe('netcoredbg-bridge-core', () => {
   });
 
   it('handles netcoredbg spawn error', async () => {
-    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream });
+    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream, platform: 'linux' });
     const port = await waitForListening(bridge.server);
 
     const client = await connectClient(port);
@@ -274,7 +274,7 @@ describe('netcoredbg-bridge-core', () => {
   });
 
   it('logs netcoredbg stderr to stderr stream', async () => {
-    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream });
+    bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream, platform: 'linux' });
     const port = await waitForListening(bridge.server);
 
     const client = await connectClient(port);
@@ -285,5 +285,66 @@ describe('netcoredbg-bridge-core', () => {
 
     expect(stderrChunks.join('')).toContain('warning: something');
     client.destroy();
+  });
+
+  // On Windows `cp.kill()` is TerminateProcess on netcoredbg alone, and its
+  // launched debuggee sits below it: the tree goes first, the plain kill is
+  // the fallback, and nothing new reaches stderr on the way (#937).
+  describe('on Windows (issue #937)', () => {
+    let killTree: Mock<(pid: number) => void>;
+
+    beforeEach(() => {
+      killTree = vi.fn<(pid: number) => void>();
+    });
+
+    async function connectedBridge(): Promise<net.Socket> {
+      bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream, platform: 'win32', killTree });
+      const port = await waitForListening(bridge.server);
+      const client = await connectClient(port);
+      await tick();
+      return client;
+    }
+
+    it('ends the child tree on socket close, with no plain kill and no extra stderr', async () => {
+      const client = await connectedBridge();
+
+      client.destroy();
+      await tick();
+
+      expect(killTree).toHaveBeenCalledWith(12345);
+      expect(mockCp.kill).not.toHaveBeenCalled();
+      expect(stderrChunks).toEqual([]);
+    });
+
+    it('falls back to the plain kill when the child outlives the tree kill', async () => {
+      const client = await connectedBridge();
+
+      client.destroy();
+      await vi.waitFor(() => expect(mockCp.kill).toHaveBeenCalled(), { timeout: 2000 });
+      expect(killTree).toHaveBeenCalledWith(12345);
+    });
+
+    it('skips a child that has already exited (the pid may be someone else\'s by now)', async () => {
+      const client = await connectedBridge();
+      (mockCp as unknown as { exitCode: number | null }).exitCode = 0;
+
+      client.destroy();
+      await tick();
+
+      expect(killTree).not.toHaveBeenCalled();
+      expect(mockCp.kill).not.toHaveBeenCalled();
+    });
+
+    it('cleanup() ends the child tree the same way', async () => {
+      await connectedBridge();
+
+      bridge.cleanup();
+      await tick();
+
+      // cleanup() destroys the client too, whose close is a second endChild: once.
+      expect(killTree).toHaveBeenCalledTimes(1);
+      expect(killTree).toHaveBeenCalledWith(12345);
+      expect(mockCp.kill).not.toHaveBeenCalled();
+    });
   });
 });
