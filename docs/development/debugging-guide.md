@@ -173,12 +173,12 @@ require a verified breakpoint and nonempty threads without caller-side readiness
 
 **Symptoms**: Server exits immediately or hangs
 
-**Important**: The entrypoint (`src/index.ts`) silences nearly all `console` methods at module load to protect stdio/IPC transports. Adding `console.log` to the entrypoint will produce no output. Use the Winston logger or write to a file instead.
+**Important**: The entry prologue (`src/cli/entry-prologue.ts`, the first import of both `src/index.ts` and the npm bundle's `cli-entry.ts`) silences every `console` method before anything else loads, to protect stdio/IPC transports. Adding `console.log` anywhere in the server will produce no output. Use the Winston logger or write to a file instead.
 
 **Debug Steps**:
 
 ```typescript
-// In src/index.ts — use the logger, not console (console is silenced)
+// Anywhere in the server — use the logger, not console (console is silenced by the prologue)
 import fs from 'fs';
 // Write diagnostics to a file since console output is suppressed
 fs.appendFileSync('/tmp/mcp-debug-startup.log',

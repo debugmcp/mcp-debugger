@@ -24,3 +24,19 @@ export function requireCliBundle(root: string): string {
   }
   return cli;
 }
+
+/**
+ * The unbundled entry (`dist/index.js`), same contract: a missing build fails
+ * by name instead of as a spawn that never answers.
+ *
+ * @param root repository root
+ * @returns the absolute path to `dist/index.js`
+ * @throws {Error} when it has not been built
+ */
+export function requireDistEntry(root: string): string {
+  const entry = path.join(root, 'dist', 'index.js');
+  if (!fs.existsSync(entry)) {
+    throw new Error(`mcp-debugger entry missing at ${entry}. Run "npm run build" before executing this test.`);
+  }
+  return entry;
+}

@@ -27,6 +27,11 @@ vi.mock('../../src/cli/commands/check-rust-binary.js', () => ({
   handleCheckRustBinaryCommand: vi.fn().mockResolvedValue(undefined)
 }));
 
+// Read right after the import, before any beforeEach clears the mocks: had
+// importing src/index.ts auto-run main() (its main-module heuristic matching
+// a test worker's argv[1]), createCLI would have been called by now.
+const createCliCallsAtImport = vi.mocked(setup.createCLI).mock.calls.length;
+
 describe('index.ts', () => {
   let mockLogger: any;
   let mockProgram: any;
@@ -241,7 +246,9 @@ describe('index.ts', () => {
 
   describe('Module execution guard', () => {
     it('should not execute main when imported as a module', async () => {
-      // The import at the top of this file should not trigger main execution
+      // The import at the top of this file must not trigger main(): the
+      // count is taken at import time, before beforeEach clears the mocks.
+      expect(createCliCallsAtImport).toBe(0);
       expect(mockProgram.parseAsync).not.toHaveBeenCalled();
     });
   });

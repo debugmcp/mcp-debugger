@@ -16,10 +16,9 @@
  */
 import { describe, expect, it } from 'vitest';
 import { spawn } from 'node:child_process';
-import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
-import { requireCliBundle } from '../../test-utils/helpers/cli-bundle.js';
+import { requireCliBundle, requireDistEntry } from '../../test-utils/helpers/cli-bundle.js';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 
@@ -90,7 +89,7 @@ describe('one main() per process (issues #717, #732)', () => {
 
   it('dist/index.js starts its server even with DEBUG_MCP_SKIP_AUTO_START=1 inherited (the flag is gone)', async () => {
     const env = { ...environmentWithout('DEBUG_MCP_SKIP_AUTO_START'), DEBUG_MCP_SKIP_AUTO_START: '1' };
-    const { answers, ids } = await initializeAnswers(path.join(root, 'dist', 'index.js'), env);
+    const { answers, ids } = await initializeAnswers(requireDistEntry(root), env);
     expect(answers, `ids on stdout: ${JSON.stringify(ids)}`).toBe(1);
   }, 30000);
 });
