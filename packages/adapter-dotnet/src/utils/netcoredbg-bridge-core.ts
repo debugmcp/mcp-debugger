@@ -39,10 +39,13 @@ const treeKillIssued = new WeakSet<ChildProcess>();
  * End the child. On Windows `cp.kill()` is TerminateProcess on netcoredbg alone, and the debuggee
  * it launched sits below it, re-parented and left running by a single-process kill (issue #937).
  * So the tree goes first — `taskkill /T /F`, the proxy worker's own idiom — and the plain kill
- * follows only if the child is still here after a short grace, or at once when taskkill could not
- * be started. POSIX keeps `cp.kill()`: the proxy's process-group kill covers the tree there. A child
- * that has already exited is never touched — its pid may be someone else's by now. (Mirrored in the
- * Dart bridge; both are dependency-free by design, so no shared helper.)
+ * follows only if the child is still here after a short grace (a missing taskkill fails
+ * asynchronously and takes this route too), or at once if taskkill cannot even be spawned. POSIX
+ * keeps `cp.kill()`: the proxy's process-group kill covers the tree there. A child that has already
+ * exited is never touched: Node holds the process handle until the tick that records its exit, so
+ * while `exitCode` is still null the pid cannot have been recycled, and once it is set it may be
+ * someone else's. (Mirrored in the Dart bridge; both are dependency-free by design, so no shared
+ * helper.)
  */
 function endChild(cp: ChildProcess, platform: NodeJS.Platform, killTree: (pid: number) => void): void {
   if ((cp.exitCode ?? null) !== null || cp.killed) return;

@@ -54,19 +54,25 @@ async function waitForTagged(tag: string, timeoutMs: number): Promise<number[]> 
   }
 }
 
-const leftovers: number[] = [];
+const MARKER_PREFIX = `bridge-937-${process.pid}-`;
+
+/**
+ * Whatever this file started and is still running, found by its marker — never
+ * by a remembered pid, which a verified-dead process may have handed to a
+ * stranger by now (the POSIX grandchild is expected to outlive the bridge's
+ * plain kill, and a failed assertion can leave either process behind).
+ */
 afterEach(async () => {
-  await killProcesses(leftovers.splice(0));
+  const mine = (await listProcessesByImage('node'))
+    .filter((proc) => proc.args.some((arg) => arg.startsWith(MARKER_PREFIX)))
+    .map((proc) => proc.pid);
+  await killProcesses(mine);
 });
 
 async function assertTreeEnded(marker: string, tree: { child: number[]; grandchild: number[] }): Promise<void> {
-  const all = [...tree.child, ...tree.grandchild];
-  leftovers.push(...all);
-  if (isWindows) {
-    expect(await waitForProcessesToExit(all, { timeoutMs: 5000, image: 'node' }), `survivors of ${marker}`).toEqual([]);
-  } else {
-    expect(await waitForProcessesToExit(tree.child, { timeoutMs: 5000, image: 'node' }), `direct child of ${marker}`).toEqual([]);
-  }
+  const expected = isWindows ? [...tree.child, ...tree.grandchild] : tree.child;
+  const survivors = await waitForProcessesToExit(expected, { timeoutMs: 5000, image: 'node' });
+  expect(survivors, `survivors of ${marker}`).toEqual([]);
 }
 
 async function findTree(marker: string): Promise<{ child: number[]; grandchild: number[] }> {
@@ -79,7 +85,7 @@ async function findTree(marker: string): Promise<{ child: number[]; grandchild: 
 
 describe('bridge socket-gone ends the adapter tree, not just the direct child (issue #937)', () => {
   it('dart bridge', async () => {
-    const marker = `bridge-937-dart-${process.pid}-${Date.now()}`;
+    const marker = `${MARKER_PREFIX}dart-${Date.now()}`;
     const bridge = await createDartBridge({
       port: 0,
       host: '127.0.0.1',
@@ -102,7 +108,7 @@ describe('bridge socket-gone ends the adapter tree, not just the direct child (i
   }, 60_000);
 
   it('netcoredbg bridge', async () => {
-    const marker = `bridge-937-dotnet-${process.pid}-${Date.now()}`;
+    const marker = `${MARKER_PREFIX}dotnet-${Date.now()}`;
     // The bridge spawns `<netcoredbg> --interpreter=vscode`; the injected spawn
     // runs the tagged node program instead, through the real child_process.
     const spawnFn = (_cmd: string, _args: string[], opts: SpawnOptions): ChildProcess =>

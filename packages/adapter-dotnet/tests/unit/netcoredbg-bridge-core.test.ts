@@ -341,6 +341,8 @@ describe('netcoredbg-bridge-core', () => {
       bridge.cleanup();
       await tick();
 
+      // cleanup() destroys the client too, whose close is a second endChild: once.
+      expect(killTree).toHaveBeenCalledTimes(1);
       expect(killTree).toHaveBeenCalledWith(12345);
       expect(mockCp.kill).not.toHaveBeenCalled();
     });
