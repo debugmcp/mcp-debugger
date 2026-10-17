@@ -110,7 +110,9 @@ const PRE_DETACH_RESUME_TIMEOUT_MS = 2000;
  * Windows, nothing once the adapter has exited) ≈ 3.8 s. Measured: the
  * Flutter adapter answers in 118 ms for a running desktop app and ~1.0 s for
  * one paused at a breakpoint (app.stop, SIGTERM, tool exit), the Dart CLI
- * adapter in ~320 ms; the cap only matters for a wedged tool. Never
+ * adapter in ~320 ms; the cap only matters for a wedged tool — a close
+ * during an in-flight launch (a Flutter tool still building) can pay it in
+ * full, the same end state as before at up to 2 s more latency. Never
  * stacks with the attach-mode resume above — the two sit on opposite
  * branches of the same shutdown.
  */
@@ -2319,8 +2321,9 @@ export class DapProxyWorker {
       }
       // Either wait can be long: re-check the client, since the adapter's own
       // terminated or socket close may have landed meanwhile (the Flutter
-      // adapter exits by itself once its terminate is answered).
-      if (this.connectionManager && this.dapClient) {
+      // adapter exits by itself once its terminate is answered), and the
+      // flag, since a session-sent disconnect can land during the wait.
+      if (this.connectionManager && this.dapClient && !this.dapDisconnectSent) {
         this.dapDisconnectSent = true;
         const terminateDebuggee = !this.isAttachMode;
         await this.connectionManager.disconnect(this.dapClient, terminateDebuggee);
@@ -2540,7 +2543,7 @@ export class DapProxyWorker {
       return;
     }
     if (this.terminalSignalArrived) {
-      this.logger?.info('[Worker] No DAP terminate ahead of the disconnect: the program already ended');
+      this.logger?.info('[Worker] No DAP terminate ahead of the disconnect: a terminal signal already arrived (the program ended, the adapter exited or the socket closed)');
       return;
     }
     const startedAt = Date.now();

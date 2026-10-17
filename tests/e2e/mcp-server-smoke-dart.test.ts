@@ -252,7 +252,7 @@ describe.skipIf(SKIP_DART)('MCP Server Dart Debugging Smoke Test @requires-dart'
     expect(isProcessAlive(pid)).toBe(true);
     expect((await callToolSafely(mcpClient!, 'close_debug_session', { sessionId })).success).toBe(true);
     sessionId = null;
-    expect(await waitForProcessesToExit([pid], 5000), 'the Dart program survived close_debug_session').toEqual([]);
+    expect(await waitForProcessesToExit([pid], { timeoutMs: 5000 }), 'the Dart program survived close_debug_session').toEqual([]);
   }, 60000);
 
   it('honours noDebug: breakpoints do not stop the program', async (ctx) => {

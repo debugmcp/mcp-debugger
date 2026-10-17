@@ -35,11 +35,16 @@ export function isProcessAlive(pid: number): boolean {
   }
 }
 
-/** Poll until every pid is gone or the timeout expires; answers the survivors. */
+/**
+ * Poll until every pid is gone or the timeout expires; answers the survivors.
+ * With `image`, a survivor is only a pid that is still a process of that
+ * image: a pid is reused within seconds (Windows especially), so liveness
+ * alone can name a stranger — and a caller that goes on to kill survivors
+ * must pass the image.
+ */
 export async function waitForProcessesToExit(
   pids: readonly number[],
-  timeoutMs = 5000,
-  intervalMs = 250
+  { timeoutMs = 5000, intervalMs = 250, image }: { timeoutMs?: number; intervalMs?: number; image?: string } = {}
 ): Promise<number[]> {
   const deadline = Date.now() + timeoutMs;
   let survivors = pids.filter(isProcessAlive);
@@ -47,12 +52,17 @@ export async function waitForProcessesToExit(
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
     survivors = survivors.filter(isProcessAlive);
   }
+  if (image !== undefined && survivors.length > 0) {
+    const stillOurs = new Set(await listPidsByImage(image));
+    survivors = survivors.filter((pid) => stillOurs.has(pid));
+  }
   return survivors;
 }
 
 /**
  * Last resort after a failed assertion, so a leftover never locks the next
- * case's build output. Never part of the assertion itself.
+ * case's build output. Never part of the assertion itself, and only ever on
+ * survivors `waitForProcessesToExit` verified by image.
  */
 export async function killProcesses(pids: readonly number[]): Promise<void> {
   for (const pid of pids) {

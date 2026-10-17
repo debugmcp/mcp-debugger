@@ -226,7 +226,7 @@ describe.skipIf(SKIP_FLUTTER)('MCP Server Flutter Debugging Smoke Test @requires
       // tool's answer was already truthful about the session when the app survived.
       expect((await callToolSafely(mcpClient!, 'close_debug_session', { sessionId })).success).toBe(true);
       sessionId = null;
-      const survivors = await waitForProcessesToExit(appPids, 5000);
+      const survivors = await waitForProcessesToExit(appPids, { timeoutMs: 5000, image: 'flutter_probe' });
       if (survivors.length > 0) await killProcesses(survivors);
       expect(survivors, 'flutter_probe survived close_debug_session (issue #885)').toEqual([]);
     }, 300000);

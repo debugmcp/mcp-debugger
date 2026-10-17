@@ -3493,6 +3493,11 @@ describe('DapProxyWorker', () => {
         expect(requests(sendRequest)).toEqual([]);
         expect(connectionStub.disconnect).toHaveBeenCalledTimes(1);
         expect(connectionStub.disconnect).toHaveBeenCalledWith(expect.anything(), true);
+        // The event itself still went to the parent, as before.
+        expect(mockMessageSender.send.mock.calls
+          .map((call) => call[0] as { type: string; event?: string })
+          .filter((message) => message.type === 'dapEvent')
+          .map((message) => message.event)).toEqual(['terminated']);
         expect(worker.getState()).toBe(ProxyState.TERMINATED);
       });
 

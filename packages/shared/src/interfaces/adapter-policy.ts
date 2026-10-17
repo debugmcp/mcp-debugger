@@ -515,8 +515,9 @@ export interface AdapterPolicy {
    * tool processes are SIGKILLed, `terminateDebuggee` is ignored, and under
    * `flutter run` the desktop app the tool started is left running — the
    * SDK's own comment says clients should send `terminateRequest` first.
-   * Only `terminate` reaches the app (`app.stop` to the tool, then SIGTERM,
-   * then the adapter exits by itself). The worker sends it only in launch
+   * Only `terminate` reaches the app (`app.stop` to the tool, then SIGTERM
+   * to the tool's pids; the Flutter adapter then exits by itself, the Dart
+   * CLI adapter stays until the disconnect). The worker sends it only in launch
    * mode, only when the live `initialize` capabilities say
    * `supportsTerminateRequest`, and only while no terminal signal has
    * arrived (a program that ended on its own keeps the plain sequence); it
