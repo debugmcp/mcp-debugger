@@ -40,7 +40,10 @@ export function isProcessAlive(pid: number): boolean {
  * With `image`, a survivor is only a pid that is still a process of that
  * image: a pid is reused within seconds (Windows especially), so liveness
  * alone can name a stranger — and a caller that goes on to kill survivors
- * must pass the image.
+ * must pass the image. The image check presumes the process has been
+ * running long enough to be in the table: a query right after `spawn()` is
+ * a race (seconds on a cold Windows runner), and a live-but-unlisted pid is
+ * answered as not ours. The e2e callers query seconds after the app started.
  */
 export async function waitForProcessesToExit(
   pids: readonly number[],

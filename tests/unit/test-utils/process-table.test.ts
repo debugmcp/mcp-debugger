@@ -52,6 +52,10 @@ describe('process-table helper (issue #885)', () => {
 
   it('answers the pid as a survivor only while it is still a process of the named image', async () => {
     const proc = spawnIdleNode();
+    // Same race as the case above (Flake Hunt 39027849623 on windows-latest,
+    // seed 516586464): the pid is alive, so it survives the poll, and the
+    // image filter then drops it because the table has not listed it yet.
+    await waitUntilListed(proc.pid!, 'node', 15_000);
 
     expect(await waitForProcessesToExit([proc.pid!], { timeoutMs: 300, image: 'node' })).toEqual([proc.pid]);
     // Alive, but not what the caller is looking for: a reused pid must not
@@ -60,5 +64,5 @@ describe('process-table helper (issue #885)', () => {
 
     proc.kill('SIGKILL');
     expect(await waitForProcessesToExit([proc.pid!], { timeoutMs: 5000, image: 'node' })).toEqual([]);
-  });
+  }, 30_000);
 });
