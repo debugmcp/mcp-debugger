@@ -97,6 +97,18 @@ request its tool list. The outer debugger can now inspect `req.body`, step throu
 handler, and resume the pending request with `continue_execution`. Keep the outer debugger's
 connection active while the nested server is paused.
 
+Pausing a server's **proxy worker** (attach by PID to its `proxy-bootstrap.js` child; the
+inspector opens on 9229 unless `NODE_OPTIONS=--inspect-port=…` says otherwise) has one more
+constraint: the parent's `ProxyManager.stop()` force-kills the worker 5 s after sending it the IPC
+terminate, and on Windows that is `taskkill /T /F`, which a paused worker does not survive. Pause
+the parent too, on `this.logger.warn(` inside that 5 s timeout callback in
+`src/proxy/proxy-manager.ts`, and resume the worker to completion **before** resuming the parent:
+the callback reads the worker's exit only after the parent's own event loop runs, so the kill goes
+out the moment the parent continues (measured 2026-10-16 while watching the #885 close from inside
+the worker — the parent, resumed first, killed the worker mid-shutdown). Breakpoints in a worker
+bind through `dist/`'s source maps: rebuild after every edit to `src/`, or each later line is off
+by the lines you added and `set_breakpoint` echoes the wrong statement.
+
 The automated version is
 `pnpm exec vitest run --project e2e tests/e2e/mcp-server-self-debug.test.ts` after building.
 

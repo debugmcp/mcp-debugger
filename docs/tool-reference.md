@@ -149,6 +149,9 @@ Closes an active debugging session.
 **Notes:**
 - Sessions may close automatically on errors
 - Closing a non-existent session returns `success: false`
+- On a launch session the debuggee is terminated. Adapters that need a DAP `terminate` ahead of the
+  disconnect to do so (the Dart and Flutter SDK adapters) receive one first (#885); an attached
+  process is detached, not terminated
 
 ---
 

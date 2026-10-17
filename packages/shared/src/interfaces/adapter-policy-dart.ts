@@ -16,6 +16,10 @@
  *   `main` are SDK internals under `lib/_internal/vm/lib`; async stacks carry `<asynchronous gap>`
  *   label frames at line 0.
  * - A paused idle isolate (attach + pause while it awaits) has an empty stack.
+ * - `disconnect` alone is the SDK adapter's forced path: it SIGKILLs the adapter's own tool
+ *   processes and leaves a `flutter run` desktop app running (#885). `terminate` (`app.stop`)
+ *   is what stops the app, ~1 s, after which the adapter exits by itself — so the worker sends
+ *   `terminate` first (terminateBeforeDisconnect).
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction } from './adapter-policy.js';
@@ -73,6 +77,7 @@ export const DartAdapterPolicy = {
   supportsLogPoints: true,
   supportsFunctionBreakpoints: false,
   honoursNoDebug: true,
+  terminateBeforeDisconnect: true,
   // The adapter pauses each new isolate at start, reports it as an entry stop and resumes it
   // itself 1 ms later (measured) — the worker holds it and drops it with that resume; a durable
   // one (a VM started with --pause_isolates_on_start) is still reported.

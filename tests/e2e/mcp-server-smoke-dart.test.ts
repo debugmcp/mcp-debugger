@@ -11,6 +11,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
 import { skipIfSpawnBlocked } from '../test-utils/helpers/adapter-spawn.js';
+import { isProcessAlive, waitForProcessesToExit } from '../test-utils/helpers/process-table.js';
 import { DART_EXAMPLES, DART_PROBE_DIR, bpLine, hasDartToolchain, prepareDartProbe } from './dart-example-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -233,7 +234,7 @@ describe.skipIf(SKIP_DART)('MCP Server Dart Debugging Smoke Test @requires-dart'
     expect(stopped?.exitCode).toBe(255);
   }, 90000);
 
-  it('logs a logpoint without stopping, then terminates the running program', async (ctx) => {
+  it('logs a logpoint without stopping, then close_debug_session ends the running program', async (ctx) => {
     const line = bpLine(DART_EXAMPLES.pause, 'TICK');
     await createSession('dart-logpoint');
     const bp = await call('set_breakpoint', { file: DART_EXAMPLES.pause, line, logMessage: 'tick is {tick}' });
@@ -241,7 +242,17 @@ describe.skipIf(SKIP_DART)('MCP Server Dart Debugging Smoke Test @requires-dart'
     await startOrSkip(ctx, { scriptPath: DART_EXAMPLES.pause, dapLaunchArgs: { stopOnEntry: false } });
     await wait(1500);
     expect((await getSession())?.state).toBe('running');
-    expect(await output()).toMatch(/tick is \d+/);
+    const text = await output();
+    expect(text).toMatch(/tick is \d+/);
+
+    // The program announces its pid; closing the session must end the program, not only the
+    // session (issue #885 — the process table is the witness, not the tool's answer).
+    const pid = Number(/pause\.dart pid=(\d+)/.exec(text)?.[1]);
+    expect(pid, 'pause.dart announces its pid').toBeGreaterThan(0);
+    expect(isProcessAlive(pid)).toBe(true);
+    expect((await callToolSafely(mcpClient!, 'close_debug_session', { sessionId })).success).toBe(true);
+    sessionId = null;
+    expect(await waitForProcessesToExit([pid], { timeoutMs: 5000 }), 'the Dart program survived close_debug_session').toEqual([]);
   }, 60000);
 
   it('honours noDebug: breakpoints do not stop the program', async (ctx) => {
