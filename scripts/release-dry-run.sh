@@ -252,9 +252,19 @@ else
   warn "gh CLI not available — skipping GitHub secrets check"
 fi
 
-# Check if packages already exist at this version (would be skipped during publish)
+# Every package must already exist on npm: release.yml publishes through OIDC trusted
+# publishing only, and npm attaches a trusted publisher only to a package that has been
+# published at least once (npm/cli#8544). A never-published package fails its first
+# `npm publish` in the release run, after the earlier packages went out (issue #886).
+# Then: a version that already exists is skipped by publish_if_missing, so say so.
 for pkg in @debugmcp/shared @debugmcp/adapter-mock @debugmcp/adapter-python @debugmcp/adapter-ruby @debugmcp/adapter-javascript @debugmcp/adapter-go @debugmcp/adapter-java @debugmcp/adapter-dotnet @debugmcp/adapter-dart @debugmcp/mcp-debugger; do
-  if npm view "${pkg}@${ROOT_VER}" version > /dev/null 2>&1; then
+  if ! view_out=$(npm view "${pkg}" name 2>&1); then
+    if echo "${view_out}" | grep -q "E404"; then
+      fail "${pkg} has never been published: publish it once by hand and configure its trusted publisher before tagging (docs/release-checklist.md, First-time packages)"
+    else
+      warn "${pkg}: registry lookup failed (not a 404) — check npm by hand: ${view_out//$'\n'/ }"
+    fi
+  elif npm view "${pkg}@${ROOT_VER}" version > /dev/null 2>&1; then
     warn "${pkg}@${ROOT_VER} already published — will be skipped"
   fi
 done
