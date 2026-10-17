@@ -201,7 +201,8 @@ C:\src\flutter\bin\cache\flutter_tools.snapshot debug-adapter [--test]` with env
   (`ext.flutter.connectedVmServiceUri`, `ext.flutter.activeDevToolsServerAddress`) follow start-up.
 - `terminate` with the app paused at a breakpoint: response in **955 ms**, `terminated`, **no
   `exited`**, and the **adapter process exits by itself (code 0)** right after — unlike the Dart
-  CLI adapter, which stays alive until `disconnect`.
+  CLI adapter, which stays alive until `disconnect`. The app ends with it: `terminate` is the
+  SDK adapter's graceful path (`app.stop` to the tool, then SIGTERM to the tool's own pids).
 
 ### `flutter run -d windows` — warm, and the no-breakpoint entry sequence
 
@@ -214,6 +215,16 @@ C:\src\flutter\bin\cache\flutter_tools.snapshot debug-adapter [--test]` with env
   breakpoint is the only entry stop (same mechanism as Dart; not separately measured on Flutter).
 - `disconnect` on a launched app: response in **895 ms**, `terminated`, five
   `dart.serviceUnregistered` events, no `exited`, and the adapter process exits (code 0).
+  **The app survives it** (measured 2026-10-16, #885): `flutter_probe.exe` and the tool's
+  `dart development-service` were still running after the adapter was gone — through the
+  server the disconnect was answered in 8 ms with no `terminated` at all. `disconnect` is the
+  SDK adapter's forced path (`terminatePids(sigkill)` on the `flutter.bat` shell and the
+  flutter_tools VM only; `terminateDebuggee` is ignored), so the proxy worker now sends
+  `terminate` first (`DartAdapterPolicy.terminateBeforeDisconnect`). Measured through the server
+  with the fix (2026-10-16, app running, not paused): `terminate` answered in **118 ms**
+  (`Application finished.`, then `Exited (-1).`), the `disconnect` right after it in 3 ms with
+  the `terminated` event between them, the adapter then exits (code 1), the whole close took
+  626 ms (500 ms of it the fixed post-disconnect wait), and the process table was clean.
 
 ### `flutter debug-adapter --test` with `integration_test/` on the Windows desktop embedder
 
@@ -344,8 +355,10 @@ Measured through `dist/index.js` with `tests/e2e/mcp-server-smoke-flutter.test.t
   `counter` → `0` (paused before the increment).
 - A `flutter test` session ends `stopped` with no `exitCode` (`terminated`, no `exited`); the
   adapter's `✓ increments` / `✓ device increment` lines and the app's `counter=1` are in
-  `get_output`. `close_debug_session` on a running `flutter run` terminates the app and the
-  adapter exits by itself.
+  `get_output`. `close_debug_session` on a running `flutter run` terminates the app — because the
+  worker sends DAP `terminate` ahead of its `disconnect` (#885; the disconnect alone left the app
+  running, see above) — and the adapter exits by itself; the e2e asserts the app's pid is off
+  the process table within 5 s of the close.
 
 ## Android emulator through the server (M3, 2026-10-09)
 
@@ -354,7 +367,7 @@ Measured through `dist/index.js` with `tests/e2e/mcp-server-smoke-flutter-androi
 
 | Case | Result |
 |---|---|
-| `flutter run -d emulator-5554`, breakpoint in `build()` | `pending: true` at 2.5 s; the breakpoint at **21.3 s**; `_ProbeAppState.build`, `counter` → `0`; `continue` keeps it running; `close_debug_session` terminates the app |
+| `flutter run -d emulator-5554`, breakpoint in `build()` | `pending: true` at 2.5 s; the breakpoint at **21.3 s**; `_ProbeAppState.build`, `counter` → `0`; `continue` keeps it running; `close_debug_session` terminates the app (the same `terminate`-first close as the desktop; not re-measured on the emulator after #885) |
 | the same, first launch right after a fresh APK install | ended at 27.9 s with "The program ended without reporting an exit code" and no stop (once; the next launch was fine) — hence the helper's warm prebuild for the device's ABI and first install ahead of the timed cases; `flutter run` itself stops and reinstalls the app every time |
 | `integration_test` on the emulator | test breakpoint at **28.3 s**, the app's `increment()` breakpoint at **28.7 s** on the test's tap, `counter` → `0`, `✓ device increment`, end `stopped` at 31.6 s |
 

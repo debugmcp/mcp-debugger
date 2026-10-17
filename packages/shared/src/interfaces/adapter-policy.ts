@@ -509,6 +509,26 @@ export interface AdapterPolicy {
   exitStatusReportedOnDisconnect?: boolean;
 
   /**
+   * True when the proxy worker sends DAP `terminate` ahead of the
+   * `disconnect` that ends a launch session (issue #885). The Dart and
+   * Flutter SDK adapters treat `disconnect` as the forced path: their own
+   * tool processes are SIGKILLed, `terminateDebuggee` is ignored, and under
+   * `flutter run` the desktop app the tool started is left running — the
+   * SDK's own comment says clients should send `terminateRequest` first.
+   * Only `terminate` reaches the app (`app.stop` to the tool, then SIGTERM
+   * to the tool's pids; the Flutter adapter then exits by itself, the Dart
+   * CLI adapter stays until the disconnect). The worker sends it only in launch
+   * mode, only when the live `initialize` capabilities say
+   * `supportsTerminateRequest`, and only while no terminal signal has
+   * arrived (a program that ended on its own keeps the plain sequence); it
+   * awaits the response under its own cap and then sends the disconnect
+   * exactly as before, whatever the outcome. Attach sessions never see it:
+   * their disconnect detaches. Optional — absent means the disconnect goes
+   * out alone.
+   */
+  terminateBeforeDisconnect?: boolean;
+
+  /**
    * Normalize an adapter-specific DAP stop reason into a canonical reason
    * ('pause', 'breakpoint', 'step', 'exception', ...). Some adapters report
    * misleading raw reasons — e.g. CodeLLDB surfaces a user-initiated pause as

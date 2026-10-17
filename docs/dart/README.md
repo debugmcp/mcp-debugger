@@ -114,6 +114,7 @@ empty stack until it next runs code.
 | Threads | one per isolate; a spawned isolate appears and exits as a thread |
 | Output | stdout/stderr as output events; `dart test` / `flutter test` also print `✓ name` lines and emit structured test events |
 | Exit code | reported for Dart programs; `flutter test` and `flutter run` sessions end with `terminated` only |
+| Close | `close_debug_session` (and `restart_debugging`) send DAP `terminate` before `disconnect`, so a `flutter run` app is stopped (`app.stop`); the SDK adapter's `disconnect` alone kills only its tool processes and leaves the app running (#885) |
 | `restart_debugging` | relaunches; hot reload / hot restart are not exposed yet |
 | Attach | by URI or service-info file; not by PID |
 
@@ -135,7 +136,10 @@ under your MCP client's request cap (60 s is a common default; 45 s is safe), ca
 the answer is `pending: true` — one long `timeout` fails on the client side first (measured at
 63 s on a Gradle build, #884), and only that call: the program and its breakpoints are untouched.
 A `flutter test` or `flutter run` session ends `stopped` without an exit code (the adapter sends
-`terminated` only); the `✓ name` lines in `get_output` say how the tests went.
+`terminated` only); the `✓ name` lines in `get_output` say how the tests went. Closing a running
+`flutter run` session stops the app: the server sends DAP `terminate` ahead of its `disconnect`,
+because the SDK adapter treats `disconnect` as the forced path and would leave the desktop app
+running (#885; measured on Windows, where the orphan was found).
 
 Android emulator (`deviceId: "emulator-5554"`, the AVD booted first; measured the same way with
 `tests/e2e/mcp-server-smoke-flutter-android.test.ts`, Gradle warm): a `build()` breakpoint under
