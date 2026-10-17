@@ -257,7 +257,6 @@ The runtime-affecting variables the server and its adapters read (the [developme
 | `DAP_MAX_FRAME_BYTES` | Upper bound for a single DAP frame body (default 64 MB) |
 | `DEBUG_PYTHON_DISCOVERY` | `true` logs the Python interpreter discovery walk |
 | `MCP_SKIP_ORPHAN_REAPERS` | Skip the startup orphan-process scans |
-| `DEBUG_MCP_SKIP_AUTO_START` | `1` stops `dist/index.js` from auto-running `main()` on import (set by the bundled CLI shim) |
 
 ## Additional resources
 

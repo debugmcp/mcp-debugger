@@ -28,6 +28,14 @@ export interface ScannedProcess {
 export interface ProcessScanOptions {
   /** win32 only: Win32_Process Name filters, one CIM query per name. */
   windowsProcessNames: string[];
+  /**
+   * Cap on one listing call (each CIM query on win32, `ps` on darwin); default
+   * 5 s. The reapers keep the default — a slow scan must not hold startup. A
+   * timed-out call answers nothing, which a caller reads as "not listed", so a
+   * test assertion on a loaded windows-latest runner, where PowerShell + CIM
+   * can take longer than 5 s, passes its own cap.
+   */
+  timeoutMs?: number;
 }
 
 export async function scanProcessArgs(options: ProcessScanOptions): Promise<ScannedProcess[]> {
@@ -35,9 +43,9 @@ export async function scanProcessArgs(options: ProcessScanOptions): Promise<Scan
     case 'linux':
       return scanLinux();
     case 'darwin':
-      return scanDarwin();
+      return scanDarwin({ timeoutMs: options.timeoutMs });
     case 'win32':
-      return scanWindows(options.windowsProcessNames);
+      return scanWindows(options.windowsProcessNames, { timeoutMs: options.timeoutMs });
     default:
       return [];
   }
@@ -68,13 +76,13 @@ export async function scanLinux(): Promise<ScannedProcess[]> {
 }
 
 /** @internal Exposed for unit tests; not part of the public module API. */
-export async function scanDarwin(): Promise<ScannedProcess[]> {
+export async function scanDarwin({ timeoutMs = LIST_TIMEOUT_MS }: { timeoutMs?: number } = {}): Promise<ScannedProcess[]> {
   // -ww disables column truncation; otherwise long cmdlines lose the marker
   // args the reapers depend on. -A lists all users' processes (matchers
   // filter by owner_pid liveness anyway).
   const { stdout } = await execFileAsync('ps', ['-ww', '-A', '-o', 'pid=,command='], {
     windowsHide: true,
-    timeout: LIST_TIMEOUT_MS,
+    timeout: timeoutMs,
     maxBuffer: LIST_MAX_BUFFER,
   });
   const result: ScannedProcess[] = [];
@@ -91,7 +99,10 @@ export async function scanDarwin(): Promise<ScannedProcess[]> {
 }
 
 /** @internal Exposed for unit tests; not part of the public module API. */
-export async function scanWindows(processNames: string[]): Promise<ScannedProcess[]> {
+export async function scanWindows(
+  processNames: string[],
+  { timeoutMs = LIST_TIMEOUT_MS }: { timeoutMs?: number } = {}
+): Promise<ScannedProcess[]> {
   const result: ScannedProcess[] = [];
   for (const name of processNames) {
     // Get-CimInstance is the modern path; wmic is deprecated and missing on
@@ -101,7 +112,7 @@ export async function scanWindows(processNames: string[]): Promise<ScannedProces
     let stdout: string;
     try {
       const r = await execFileAsync('powershell.exe', ['-NoProfile', '-Command', ps], {
-        timeout: LIST_TIMEOUT_MS,
+        timeout: timeoutMs,
         maxBuffer: LIST_MAX_BUFFER,
         windowsHide: true,
       });

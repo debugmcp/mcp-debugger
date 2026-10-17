@@ -120,6 +120,25 @@ describe('scanWindows', () => {
     ]);
   });
 
+  it('caps each query at 5 s by default and at the caller\'s timeoutMs when given', async () => {
+    // The reapers keep the 5 s cap (a slow scan must not hold startup); a
+    // test assertion on a loaded windows-latest runner, where PowerShell + CIM
+    // can take longer than that, passes its own — a timed-out query answers
+    // an empty list, which reads as "not listed" (issue #944's follow-up).
+    const timeouts: number[] = [];
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], opts: unknown, cb: (e: Error | null, r?: { stdout: string; stderr?: string }) => void) => {
+        timeouts.push((opts as { timeout: number }).timeout);
+        cb(null, { stdout: '' });
+      }
+    );
+
+    await scanWindows(['node.exe']);
+    await scanWindows(['node.exe'], { timeoutMs: 20_000 });
+
+    expect(timeouts).toEqual([5000, 20_000]);
+  });
+
   it('tolerates a failing or empty query without failing the others', async () => {
     mockExecFile.mockImplementation(
       (_cmd: string, args: string[], _opts: unknown, cb: (e: Error | null, r?: { stdout: string; stderr?: string }) => void) => {

@@ -12,12 +12,21 @@ import { scanProcessArgs, type ScannedProcess } from '../../../src/utils/process
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * Cap on one process-table query. The scanner's own default (5 s) suits the
+ * startup reapers, but a timed-out query answers nothing, which reads here as
+ * "not listed": on a loaded windows-latest runner (the unit project under
+ * coverage) PowerShell + CIM took longer than 5 s and a live child was
+ * reported absent (PR #945's Windows lane). An assertion can afford to wait.
+ */
+const SCAN_TIMEOUT_MS = 20_000;
+
 /** Live processes whose image is `<image>` (`<image>.exe` on Windows), with their argv. */
 export async function listProcessesByImage(image: string): Promise<ScannedProcess[]> {
   if (process.platform === 'win32') {
-    return scanProcessArgs({ windowsProcessNames: [`${image}.exe`] });
+    return scanProcessArgs({ windowsProcessNames: [`${image}.exe`], timeoutMs: SCAN_TIMEOUT_MS });
   }
-  const all = await scanProcessArgs({ windowsProcessNames: [] });
+  const all = await scanProcessArgs({ windowsProcessNames: [], timeoutMs: SCAN_TIMEOUT_MS });
   return all.filter((proc) => path.basename(proc.args[0] ?? '') === image);
 }
 
@@ -40,7 +49,10 @@ export function isProcessAlive(pid: number): boolean {
  * With `image`, a survivor is only a pid that is still a process of that
  * image: a pid is reused within seconds (Windows especially), so liveness
  * alone can name a stranger — and a caller that goes on to kill survivors
- * must pass the image.
+ * must pass the image. The image check presumes the process has been
+ * running long enough to be in the table: a query right after `spawn()` is
+ * a race (seconds on a cold Windows runner), and a live-but-unlisted pid is
+ * answered as not ours. The e2e callers query seconds after the app started.
  */
 export async function waitForProcessesToExit(
   pids: readonly number[],

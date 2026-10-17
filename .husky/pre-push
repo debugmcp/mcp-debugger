@@ -110,12 +110,14 @@ fi
 echo "✅ Build successful!"
 echo ""
 
-# Run tests. The full e2e suite (smoke/docker/npx) runs in CI; the pre-push gate
-# runs the fast parallel `unit` project plus the integration set — "as much as
-# fits" without the heavy/flaky e2e tests. The clean build above already produced
-# dist, and these scripts don't rebuild, so there's no redundant second build.
-# Tag-only pushes keep the reduced release-CI suite.
-echo "🧪 Running pre-push tests (unit + integration; full e2e runs in CI)..."
+# Run tests. The pre-push gate runs the fast parallel `unit` project plus the
+# integration set — "as much as fits" without the heavy/flaky e2e tests. CI
+# runs the same two projects on both OSes plus the Docker container e2e and the
+# COBOL/Dart/Flutter host e2e lanes; the rest of the e2e project is on demand
+# (`npm run test:e2e`). The clean build above already produced dist, and these
+# scripts don't rebuild, so there's no redundant second build. Tag-only pushes
+# keep the reduced release-CI suite.
+echo "🧪 Running pre-push tests (unit + integration; the e2e project is on demand, CI runs its container and host lanes)..."
 if [ "$TAGS_ONLY" = true ]; then
     echo "🔖 Tag-only push detected. Running reduced CI tests..."
     npm run test:ci-no-python > "$PRE_PUSH_LOG" 2>&1

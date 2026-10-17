@@ -262,7 +262,7 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
 
     // Owner PID is stamped onto the spawned debuggee JVM so a future startup
     // can detect leaked JVMs (owner dead) and reap them. MCP_DEBUGGER_MAIN_PID
-    // is set by src/index.ts main(); fall back to ppid for tests that exercise
+    // is set by src/main.ts main(); fall back to ppid for tests that exercise
     // the adapter directly without the CLI bootstrap.
     const ownerPid = process.env.MCP_DEBUGGER_MAIN_PID ?? String(process.ppid);
 
