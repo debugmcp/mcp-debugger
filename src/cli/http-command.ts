@@ -5,7 +5,7 @@ import { randomUUID } from 'crypto';
 import { IncomingMessage, ServerResponse } from 'http';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { ErrorCode, isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
-import { DebugMcpServer } from '../server.js';
+import { DebugMcpServer, type DebugMcpServerOptions } from '../server.js';
 import { attachSharedFileTransport } from '../utils/logger.js';
 import type { HttpOptions } from './setup.js';
 import {
@@ -30,9 +30,35 @@ import { StartupRefusalError } from './startup-refusal.js';
 import { watchStdinForParentExit } from './stdin-watchdog.js';
 import type { ProcessLike } from '../interfaces/process-interfaces.js';
 
-export interface ServerFactoryOptions {
-  logLevel?: string;
-  logFile?: string;
+export type ServerFactoryOptions = DebugMcpServerOptions;
+
+/** How long an idle window is, in the unit a reader thinks in. */
+function describeWindow(ms: number): string {
+  return ms % 60_000 === 0 ? `${ms / 60_000} min` : `${Math.round(ms / 1000)} s`;
+}
+
+/**
+ * @internal The answer a tool call gets for a debug session id that another
+ * HTTP session's server holds (issue #939): whose it is, and how it ends —
+ * worded from the reaper windows actually in force, so it never promises a
+ * reaper that is switched off.
+ */
+export function describeForeignDebugSession(
+  debugSessionId: string,
+  windows: { staleMs: number; streamLostMs: number }
+): string {
+  const reaped = [
+    windows.streamLostMs > 0
+      ? `${describeWindow(windows.streamLostMs)} after that client's SSE stream is lost without a reconnect (MCP_HTTP_STREAM_LOST_SESSION_MS=${windows.streamLostMs})`
+      : undefined,
+    windows.staleMs > 0
+      ? `${describeWindow(windows.staleMs)} idle without a stream (MCP_HTTP_STALE_SESSION_MS=${windows.staleMs})`
+      : undefined,
+  ].filter((part): part is string => part !== undefined);
+  const ending = reaped.length > 0
+    ? `or when the idle reaper closes it: ${reaped.join(', or ')}`
+    : 'and no idle reaper is configured (MCP_HTTP_STALE_SESSION_MS and MCP_HTTP_STREAM_LOST_SESSION_MS are 0), so only that client can end it';
+  return `Session ${debugSessionId} belongs to another MCP client session: each Streamable HTTP client sees only the debug sessions it created. It ends when that client closes its MCP session (DELETE /mcp) ${ending}.`;
 }
 
 export interface HttpCommandDependencies {
@@ -206,6 +232,22 @@ export function createHttpApp(
   const staleSessionMs = parseStaleSessionMs(proc.env.MCP_HTTP_STALE_SESSION_MS, logger);
   const streamLostSessionMs = parseStreamLostSessionMs(proc.env.MCP_HTTP_STREAM_LOST_SESSION_MS, logger);
   const staleSweepIntervalMs = parseSweepIntervalMs(proc.env.MCP_HTTP_STALE_SWEEP_INTERVAL_MS, logger);
+
+  // A debug session id that another HTTP session's server holds answers with
+  // whose it is (issue #939): every tool call runs against the calling
+  // client's own server, which cannot see the others, so each new server is
+  // handed this lookup (in handleMcpRequest below). It walks the live map at
+  // call time — nothing to keep in sync, and the asking server, which has
+  // already missed, is harmlessly among the entries.
+  const describeForeignSession = (debugSessionId: string): string | undefined => {
+    for (const session of httpSessions.values()) {
+      if (session.server.sessionManager.getSession(debugSessionId)) {
+        return describeForeignDebugSession(debugSessionId, { staleMs: staleSessionMs, streamLostMs: streamLostSessionMs });
+      }
+    }
+    return undefined;
+  };
+
   let staleSweepTimer: NodeJS.Timeout | undefined;
   if (staleSessionMs > 0 || streamLostSessionMs > 0) {
     const windows = { staleMs: staleSessionMs, streamLostMs: streamLostSessionMs };
@@ -297,6 +339,7 @@ export function createHttpApp(
         const newDebugServer = serverFactory({
           logLevel: options.logLevel,
           logFile: options.logFile,
+          describeForeignSession,
         });
         await newDebugServer.start();
 

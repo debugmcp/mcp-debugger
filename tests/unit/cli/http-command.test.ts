@@ -61,6 +61,7 @@ describe('HTTP Command Handler', () => {
       },
       sessionManager: {
         getAllSessions: vi.fn().mockReturnValue([]),
+        getSession: vi.fn().mockReturnValue(undefined),
       },
     } as any;
 
@@ -829,6 +830,66 @@ describe('HTTP Command Handler', () => {
         await vi.advanceTimersByTimeAsync(2_000);
         expect(transport.close).toHaveBeenCalled();
       }
+    });
+  });
+
+  describe('foreign debug sessions (issue #939)', () => {
+    // Each HTTP session owns a DebugMcpServer, so a tool call naming a debug
+    // session another HTTP session's server holds must say so instead of the
+    // plain "not found" an invalid id gets. The lookup is handed to every new
+    // server through the factory and walks the live map at call time.
+    function serverHolding(ids: string[]): DebugMcpServer {
+      return {
+        sessionManager: {
+          getSession: vi.fn((id: string) => (ids.includes(id) ? { id } : undefined)),
+          getAllSessions: vi.fn(() => ids.map((id) => ({ id }))),
+        },
+      } as unknown as DebugMcpServer;
+    }
+
+    async function initializedApp(env: Record<string, string> = {}) {
+      Object.assign(fakeProc.env, env);
+      const app = createHttpApp(
+        { port: '3001' },
+        { logger: mockLogger, serverFactory: mockServerFactory, proc: fakeProc }
+      );
+      const handler = mockApp.post.mock.calls.find((c: any) => c[0] === '/mcp')![1];
+      await handler(
+        {
+          method: 'POST',
+          headers: {},
+          body: { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'c', version: '1' } } },
+        },
+        { status: vi.fn().mockReturnThis(), json: vi.fn(), end: vi.fn(), headersSent: false }
+      );
+      mockTransport.triggerSessionInit();
+      (app as any).httpSessions.set('other-client', {
+        transport: {},
+        server: serverHolding(['dbg-9']),
+        lastActivity: Date.now(),
+        openStreams: 1,
+        hadStream: true,
+      });
+      return mockServerFactory.mock.calls[0][0].describeForeignSession!;
+    }
+
+    it('hands each new server a lookup that names a debug session another HTTP session holds', async () => {
+      const describeForeignSession = await initializedApp();
+
+      expect(typeof describeForeignSession).toBe('function');
+      const explanation = describeForeignSession('dbg-9');
+      expect(explanation).toMatch(/^Session dbg-9 belongs to another MCP client session: each Streamable HTTP client sees only the debug sessions it created\./);
+      expect(explanation).toMatch(/2 min after that client's SSE stream is lost[^.]*MCP_HTTP_STREAM_LOST_SESSION_MS=120000/);
+      expect(explanation).toMatch(/30 min idle without a stream \(MCP_HTTP_STALE_SESSION_MS=1800000\)/);
+      expect(describeForeignSession('dbg-nobody')).toBeUndefined();
+    });
+
+    it('does not promise a reaper when both idle windows are off', async () => {
+      const describeForeignSession = await initializedApp({ MCP_HTTP_STALE_SESSION_MS: '0', MCP_HTTP_STREAM_LOST_SESSION_MS: '0' });
+
+      const explanation = describeForeignSession('dbg-9')!;
+      expect(explanation).toMatch(/no idle reaper is configured \(MCP_HTTP_STALE_SESSION_MS and MCP_HTTP_STREAM_LOST_SESSION_MS are 0\)/);
+      expect(explanation).not.toMatch(/MCP_HTTP_STREAM_LOST_SESSION_MS=/);
     });
   });
 

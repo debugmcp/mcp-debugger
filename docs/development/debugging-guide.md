@@ -93,6 +93,14 @@ request its tool list. The outer debugger can now inspect `req.body`, step throu
 handler, and resume the pending request with `continue_execution`. Keep the outer debugger's
 connection active while the nested server is paused.
 
+Debug sessions on a Streamable HTTP server belong to the MCP client session that created them
+(each `Mcp-Session-Id` has its own `DebugMcpServer`). Drive one debug session from one client
+and keep that client's MCP session open: a one-shot driver script that opens a fresh MCP session
+per run cannot reach the debug session its previous run created — it is answered
+`Session <id> belongs to another MCP client session: …` — and the stream-lost reaper closes the
+abandoned one `MCP_HTTP_STREAM_LOST_SESSION_MS` (default 2 min) after the first run's stream
+dropped, which is what finally ends its program (issue #939).
+
 Pausing a server's **proxy worker** (attach by PID to its `proxy-bootstrap.js` child; the
 inspector opens on 9229 unless `NODE_OPTIONS=--inspect-port=…` says otherwise) has one more
 constraint: the parent's `ProxyManager.stop()` force-kills the worker 5 s after sending it the IPC
@@ -533,7 +541,9 @@ Note: SSE transport is deprecated in favor of `mcp-debugger http` (the recommend
 ```bash
 # Query the built-in health endpoint (default port 3001)
 curl http://localhost:3001/health
-# Returns: { "status": "ok", "mode": "http", "connections": N, "sessions": [...] }
+# Returns: { "status": "ok", "mode": "http", "listening": { "address", "port" }, "connections": N,
+#            "sessions": [<Mcp-Session-Id>…],
+#            "details": [{ "id", "openStreams", "streamLost", "idleMs", "debugSessions": [{ "id", "name", "language", "state" }] }] }
 ```
 
 ## Debugging Checklists

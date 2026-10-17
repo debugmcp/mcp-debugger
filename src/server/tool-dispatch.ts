@@ -14,11 +14,31 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { toWireError } from '../errors/debug-errors.js';
 import { coerceToolArguments, ToolArguments } from './tool-arguments.js';
-import { extractPayloadSuccess, sanitizeRequest } from './tool-result.js';
+import { extractPayloadSuccess, failureResult, sanitizeRequest, type ToolResult } from './tool-result.js';
 import { buildToolDefinitions, isToolName } from './tool-schemas.js';
 import { assertRequiredToolArguments } from './tool-validation.js';
 import type { ToolContext } from './tool-context.js';
 import { TOOL_HANDLERS } from './handlers/index.js';
+
+/**
+ * A session id that another server in this process owns answers with that
+ * fact instead of the tool's own "not found" (Streamable HTTP: one
+ * DebugMcpServer per MCP client session, issue #939). Decided here, in front
+ * of every handler, so all tools say it the same way — the per-tool wordings
+ * (`Session not found`, `Failed to close debug session`, redefine_classes'
+ * protocol error) stay for an id nobody holds. Only the HTTP layer provides
+ * the lookup; without it nothing changes.
+ */
+function foreignSessionResult(ctx: ToolContext, sessionId: unknown): ToolResult | undefined {
+  if (typeof sessionId !== 'string' || !ctx.describeForeignSession) {
+    return undefined;
+  }
+  if (ctx.sessionManager.getSession(sessionId)) {
+    return undefined;
+  }
+  const explanation = ctx.describeForeignSession(sessionId);
+  return explanation ? failureResult(explanation) : undefined;
+}
 
 export function registerToolHandlers(server: Server, ctx: ToolContext): void {
   // Required fields do not depend on language discovery. Build this immutable
@@ -62,7 +82,9 @@ export function registerToolHandlers(server: Server, ctx: ToolContext): void {
           throw new McpError(McpErrorCode.MethodNotFound, `Unknown tool: ${toolName}`);
         }
         assertRequiredToolArguments(definition, args as unknown as Record<string, unknown>);
-        const result = await TOOL_HANDLERS[toolName](ctx, args, toolName, { signal: extra?.signal });
+        const result =
+          foreignSessionResult(ctx, args.sessionId) ??
+          await TOOL_HANDLERS[toolName](ctx, args, toolName, { signal: extra?.signal });
         
         // Log tool response; success mirrors the payload's own success flag (issue #397)
         ctx.logger.info('tool:response', {
