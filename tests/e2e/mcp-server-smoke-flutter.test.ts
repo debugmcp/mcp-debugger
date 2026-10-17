@@ -19,6 +19,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
 import { skipIfSpawnBlocked } from '../test-utils/helpers/adapter-spawn.js';
+import { killProcesses, listPidsByImage, waitForProcessesToExit } from '../test-utils/helpers/process-table.js';
 import {
   FLUTTER_EXAMPLES, FLUTTER_PROBE_DIR, bpLine, findFlutterRootSync, flutterDesktopDeviceId, hasFlutterToolchain, prepareFlutterProbe,
 } from './dart-example-utils.js';
@@ -193,6 +194,7 @@ describe.skipIf(SKIP_FLUTTER)('MCP Server Flutter Debugging Smoke Test @requires
   describe.skipIf(!DESKTOP)(`desktop (${DESKTOP ?? 'no desktop device'})`, () => {
     it('flutter run: breaks in build(), reads the widget state, keeps running after continue, and terminates on close', async (ctx) => {
       const line = bpLine(FLUTTER_EXAMPLES.main, 'BUILD');
+      const appsBefore = await listPidsByImage('flutter_probe');
       await createSession('flutter-desktop');
       expect((await call('set_breakpoint', { file: FLUTTER_EXAMPLES.main, line })).success).toBe(true);
       const launched = await startOrSkip(ctx, {
@@ -214,9 +216,19 @@ describe.skipIf(SKIP_FLUTTER)('MCP Server Flutter Debugging Smoke Test @requires
       await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
       await wait(1500);
       expect((await getSession())?.state).toBe('running');
-      // Closing the session terminates the app; the Flutter adapter then exits by itself.
+      const appPids = (await listPidsByImage('flutter_probe')).filter((pid) => !appsBefore.includes(pid));
+      expect(appPids, 'the desktop app is on the process table while the session runs').not.toEqual([]);
+
+      // Closing the session must end the app, not only the session: the SDK adapter's
+      // `disconnect` SIGKILLs its own tool processes and leaves the app it started running;
+      // only a DAP `terminate` (`app.stop`) reaches it, so the worker sends one first and the
+      // adapter then exits by itself (issue #885). Asserted on the process table, because the
+      // tool's answer was already truthful about the session when the app survived.
       expect((await callToolSafely(mcpClient!, 'close_debug_session', { sessionId })).success).toBe(true);
       sessionId = null;
+      const survivors = await waitForProcessesToExit(appPids, 5000);
+      if (survivors.length > 0) await killProcesses(survivors);
+      expect(survivors, 'flutter_probe survived close_debug_session (issue #885)').toEqual([]);
     }, 300000);
 
     it('integration test on the desktop: the test\'s tap hits the app\'s breakpoint', async (ctx) => {
