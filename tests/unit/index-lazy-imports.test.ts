@@ -16,8 +16,8 @@ vi.mock('express', () => {
 
 describe('index.ts import graph (issue #400)', () => {
   it('does not evaluate express when the entry point is imported', async () => {
-    vi.stubEnv('DEBUG_MCP_SKIP_AUTO_START', '1');
-
+    // Importing the entry under vitest does not auto-run main(): argv[1] is
+    // the worker, not dist/index.js, so its main-module check is false.
     await import('../../src/index.js');
 
     expect(loaded.express).toBe(false);

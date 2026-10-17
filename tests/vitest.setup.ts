@@ -74,8 +74,9 @@ beforeAll(() => {
 // Vitest then reports "[vitest-pool]: Worker exited unexpectedly" with the
 // file's results lost — a red CI run over a fully green suite.
 //
-// 'warning' is deliberately not guarded: src/index.ts installs a module-level
-// noop 'warning' listener on import, which would trip the guard benignly.
+// 'warning' is deliberately not guarded: src/cli/entry-prologue.ts (imported
+// first by src/index.ts) installs a module-level noop 'warning' listener on
+// import, which would trip the guard benignly.
 const GUARDED_PROCESS_EVENTS = [
   'uncaughtException',
   'unhandledRejection',
