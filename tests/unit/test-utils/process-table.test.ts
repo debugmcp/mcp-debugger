@@ -30,11 +30,25 @@ describe('process-table helper (issue #885)', () => {
     return proc;
   }
 
+  /** A just-spawned process takes a moment to appear in the OS process table (seconds on a cold CI runner). */
+  async function waitUntilListed(pid: number, image: string, timeoutMs: number): Promise<number[]> {
+    const deadline = Date.now() + timeoutMs;
+    let listed = await listPidsByImage(image);
+    while (!listed.includes(pid) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      listed = await listPidsByImage(image);
+    }
+    return listed;
+  }
+
   it('lists a live node child under its image and sees it alive', async () => {
     const proc = spawnIdleNode();
     expect(isProcessAlive(proc.pid!)).toBe(true);
-    expect(await listPidsByImage('node')).toContain(proc.pid);
-  });
+    // Not asserted on the first scan: on windows-latest the child was alive
+    // but not yet in the table when queried right after spawn (main CI on
+    // 42651425), while a scan 300 ms later listed it.
+    expect(await waitUntilListed(proc.pid!, 'node', 15_000)).toContain(proc.pid);
+  }, 30_000);
 
   it('answers the pid as a survivor only while it is still a process of the named image', async () => {
     const proc = spawnIdleNode();
