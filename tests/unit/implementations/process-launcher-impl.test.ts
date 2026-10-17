@@ -400,4 +400,47 @@ describe('ProxyProcessAdapter exit ordering with an open IPC channel (issue #729
     );
     expect(child.send).not.toHaveBeenCalled();
   });
+
+  // Issue #735 item 1: the wrapper's exitCode/signalCode are the parent's
+  // "has the worker exited" evidence (ProxyManager.isRunning, stop()). While
+  // the exit is held they must agree with the exit EVENT the wrapper has not
+  // yet delivered — to the parent a dead-but-held child is still running,
+  // exactly as the session state still says — while the write guard above
+  // keeps refusing on the raw exit it has already seen.
+  it('reports no exit code while the exit is held, and the code once it is delivered', () => {
+    child.connected = true;
+    const { proxyProcess } = adapterWithOrder();
+
+    child.emit('exit', 0, null);
+    expect(proxyProcess.exitCode).toBeNull();
+    expect(proxyProcess.signalCode).toBeNull();
+
+    child.connected = false;
+    child.emit('disconnect');
+    expect(proxyProcess.exitCode).toBe(0);
+    expect(proxyProcess.signalCode).toBeNull();
+  });
+
+  it('reports a held signal exit only once the drain cap delivers it', () => {
+    vi.useFakeTimers();
+    child.connected = true;
+    const { proxyProcess } = adapterWithOrder();
+
+    child.emit('exit', null, 'SIGTERM');
+    expect(proxyProcess.signalCode).toBeNull();
+
+    vi.advanceTimersByTime(IPC_DRAIN_CAP_MS);
+    expect(proxyProcess.signalCode).toBe('SIGTERM');
+    expect(proxyProcess.exitCode).toBeNull();
+  });
+
+  it('still refuses to kill a child whose exit is held (its PID may already be recycled)', () => {
+    child.connected = true;
+    const { proxyProcess } = adapterWithOrder();
+
+    child.emit('exit', 0, null);
+
+    expect(proxyProcess.kill('SIGKILL')).toBe(false);
+    expect(child.kill).not.toHaveBeenCalled();
+  });
 });
