@@ -56,7 +56,7 @@ describe('createBridge', () => {
   it('listens before any child is spawned, and spawns the child only on the first connection', async () => {
     const child = fakeChild();
     const spawnFn = vi.fn<SpawnFn>(() => child as unknown as ChildProcess);
-    bridge = await createBridge({ port: 0, host: '127.0.0.1', command: 'dart', args: ['debug_adapter'], cwd: 'C:\\proj', spawnFn, stderr: new PassThrough() });
+    bridge = await createBridge({ port: 0, host: '127.0.0.1', platform: 'linux', command: 'dart', args: ['debug_adapter'], cwd: 'C:\\proj', spawnFn, stderr: new PassThrough() });
     expect(bridge.port).toBeGreaterThan(0);
     expect(spawnFn).not.toHaveBeenCalled();
     const socket = await connect(bridge);
@@ -67,7 +67,7 @@ describe('createBridge', () => {
 
   it('pipes socket bytes to the child stdin and child stdout bytes back, untouched', async () => {
     const child = fakeChild();
-    bridge = await createBridge({ port: 0, host: '127.0.0.1', command: 'dart', args: [], spawnFn: () => child as unknown as ChildProcess, stderr: new PassThrough() });
+    bridge = await createBridge({ port: 0, host: '127.0.0.1', platform: 'linux', command: 'dart', args: [], spawnFn: () => child as unknown as ChildProcess, stderr: new PassThrough() });
     const socket = await connect(bridge);
     const toChild: Buffer[] = [];
     child.stdin.on('data', (d: Buffer) => toChild.push(d));
@@ -83,7 +83,7 @@ describe('createBridge', () => {
 
   it('keeps the socket open across child exit until the child streams close, then ends it', async () => {
     const child = fakeChild();
-    bridge = await createBridge({ port: 0, host: '127.0.0.1', command: 'dart', args: [], spawnFn: () => child as unknown as ChildProcess, stderr: new PassThrough() });
+    bridge = await createBridge({ port: 0, host: '127.0.0.1', platform: 'linux', command: 'dart', args: [], spawnFn: () => child as unknown as ChildProcess, stderr: new PassThrough() });
     const socket = await connect(bridge);
     const got: Buffer[] = [];
     socket.on('data', (d: Buffer) => got.push(d));
@@ -100,7 +100,7 @@ describe('createBridge', () => {
 
   it('kills the child and closes the server when the socket goes away', async () => {
     const child = fakeChild();
-    bridge = await createBridge({ port: 0, host: '127.0.0.1', command: 'dart', args: [], spawnFn: () => child as unknown as ChildProcess, stderr: new PassThrough() });
+    bridge = await createBridge({ port: 0, host: '127.0.0.1', platform: 'linux', command: 'dart', args: [], spawnFn: () => child as unknown as ChildProcess, stderr: new PassThrough() });
     const socket = await connect(bridge);
     await vi.waitFor(() => expect(child.kill).not.toHaveBeenCalled());
     socket.destroy();
@@ -113,7 +113,7 @@ describe('createBridge', () => {
     const stderr = new PassThrough();
     const err: Buffer[] = [];
     stderr.on('data', (d: Buffer) => err.push(d));
-    bridge = await createBridge({ port: 0, host: '127.0.0.1', command: 'dart', args: [], spawnFn: () => child as unknown as ChildProcess, stderr });
+    bridge = await createBridge({ port: 0, host: '127.0.0.1', platform: 'linux', command: 'dart', args: [], spawnFn: () => child as unknown as ChildProcess, stderr });
     const socket = await connect(bridge);
     const got: Buffer[] = [];
     socket.on('data', (d: Buffer) => got.push(d));
@@ -128,7 +128,7 @@ describe('createBridge', () => {
     const stderr = new PassThrough();
     const err: Buffer[] = [];
     stderr.on('data', (d: Buffer) => err.push(d));
-    bridge = await createBridge({ port: 0, host: '127.0.0.1', command: 'C:\\missing\\dart.exe', args: [], spawnFn: () => child as unknown as ChildProcess, stderr });
+    bridge = await createBridge({ port: 0, host: '127.0.0.1', platform: 'linux', command: 'C:\\missing\\dart.exe', args: [], spawnFn: () => child as unknown as ChildProcess, stderr });
     const socket = await connect(bridge);
     const ended = once(socket, 'close');
     await vi.waitFor(() => expect(child.listenerCount('error')).toBeGreaterThan(0));
@@ -140,11 +140,78 @@ describe('createBridge', () => {
 
   it('refuses a second client while the first is connected', async () => {
     const child = fakeChild();
-    bridge = await createBridge({ port: 0, host: '127.0.0.1', command: 'dart', args: [], spawnFn: () => child as unknown as ChildProcess, stderr: new PassThrough() });
+    bridge = await createBridge({ port: 0, host: '127.0.0.1', platform: 'linux', command: 'dart', args: [], spawnFn: () => child as unknown as ChildProcess, stderr: new PassThrough() });
     const first = await connect(bridge);
     const second = net.connect({ host: '127.0.0.1', port: bridge.port });
     await once(second, 'close');
     expect(first.destroyed).toBe(false);
     first.destroy();
+  });
+
+  // On Windows `cp.kill()` is TerminateProcess on the direct child alone, and
+  // the SDK launcher is never alone (dart.exe → dartvm.exe → flutter.bat → …
+  // → the app): the tree goes first, the plain kill is the fallback (#937).
+  describe('on Windows (issue #937)', () => {
+    const win32 = (child: ReturnType<typeof fakeChild>, killTree: (pid: number) => void) =>
+      createBridge({ port: 0, host: '127.0.0.1', platform: 'win32', killTree, command: 'dart', args: [], spawnFn: () => child as unknown as ChildProcess, stderr: new PassThrough() });
+
+    it('ends the child tree when the socket goes away, with no plain kill while the tree kill works', async () => {
+      const child = fakeChild();
+      const killTree = vi.fn();
+      bridge = await win32(child, killTree);
+      const socket = await connect(bridge);
+      socket.destroy();
+      await vi.waitFor(() => expect(killTree).toHaveBeenCalledWith(4242));
+      expect(child.kill).not.toHaveBeenCalled();
+      child.exitCode = 1;
+      child.emit('exit', 1, null);
+      child.emit('close', 1, null);
+      await new Promise((resolve) => setTimeout(resolve, 450));
+      expect(child.kill).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the plain kill when the child outlives the tree kill', async () => {
+      const child = fakeChild();
+      const killTree = vi.fn();
+      bridge = await win32(child, killTree);
+      const socket = await connect(bridge);
+      socket.destroy();
+      await vi.waitFor(() => expect(killTree).toHaveBeenCalledWith(4242));
+      await vi.waitFor(() => expect(child.kill).toHaveBeenCalled(), { timeout: 2000 });
+    });
+
+    it('falls back to the plain kill at once when the tree kill cannot be started', async () => {
+      const child = fakeChild();
+      const killTree = vi.fn(() => { throw new Error('spawn taskkill ENOENT'); });
+      bridge = await win32(child, killTree);
+      const socket = await connect(bridge);
+      socket.destroy();
+      await vi.waitFor(() => expect(child.kill).toHaveBeenCalled());
+    });
+
+    it('never kills a child that has already exited (the pid may be someone else\'s by now)', async () => {
+      const child = fakeChild();
+      child.exitCode = 0;
+      const killTree = vi.fn();
+      bridge = await win32(child, killTree);
+      const socket = await connect(bridge);
+      socket.destroy();
+      await vi.waitFor(() => expect(bridge!.listening).toBe(false));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(killTree).not.toHaveBeenCalled();
+      expect(child.kill).not.toHaveBeenCalled();
+    });
+
+    it('close() ends the child tree the same way, once', async () => {
+      const child = fakeChild();
+      const killTree = vi.fn();
+      bridge = await win32(child, killTree);
+      await connect(bridge);
+      await bridge.close();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(killTree).toHaveBeenCalledTimes(1);
+      expect(killTree).toHaveBeenCalledWith(4242);
+      expect(child.kill).not.toHaveBeenCalled();
+    });
   });
 });

@@ -32,6 +32,56 @@ export interface BridgeOptions extends BridgeArgs {
   /** Where the child's stderr and the bridge's own diagnostics go; defaults to `process.stderr`. */
   stderr?: Writable;
   env?: NodeJS.ProcessEnv;
+  /** Injected for tests; defaults to `process.platform`. */
+  platform?: NodeJS.Platform;
+  /** Ends a process with everything below it (Windows only); defaults to `taskkill /T /F`. Injected for tests. */
+  killTree?: (pid: number) => void;
+}
+
+/** How long the Windows tree kill gets before the plain kill follows it up. */
+const TREE_KILL_GRACE_MS = 300;
+
+/** The default Windows tree kill: fire-and-forget `taskkill`, the proxy worker's own idiom. */
+function taskkillTree(pid: number): void {
+  const killer = nodeSpawn('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+  killer.on('error', () => { /* no taskkill: the plain kill follows after the grace */ });
+}
+
+/** Children a tree kill has already been issued for, so the socket-gone and close() paths do not repeat it. */
+const treeKillIssued = new WeakSet<ChildProcess>();
+
+/**
+ * End the child. On Windows `cp.kill()` is TerminateProcess on the direct child alone, and the
+ * Dart/Flutter SDK adapter is never alone (`dart.exe` → `dartvm.exe` → flutter.bat → … → the app):
+ * everything below it was re-parented and left running (issue #937). So the tree goes first —
+ * `taskkill /T /F`, the proxy worker's own idiom — and the plain kill follows only if the child is
+ * still here after a short grace, or at once when taskkill could not be started. POSIX keeps
+ * `cp.kill()`: the proxy's process-group kill covers the tree there. A child that has already exited
+ * is never touched — its pid may be someone else's by now. (Mirrored in the netcoredbg bridge, which
+ * is dependency-free by the same rule.)
+ */
+function endChild(cp: ChildProcess, platform: NodeJS.Platform, killTree: (pid: number) => void): void {
+  if ((cp.exitCode ?? null) !== null || cp.killed) return;
+  const plainKill = (): void => {
+    if ((cp.exitCode ?? null) === null && !cp.killed) {
+      try { cp.kill(); } catch { /* already gone */ }
+    }
+  };
+  if (platform !== 'win32' || cp.pid === undefined) {
+    plainKill();
+    return;
+  }
+  if (treeKillIssued.has(cp)) return;
+  treeKillIssued.add(cp);
+  try {
+    killTree(cp.pid);
+  } catch {
+    plainKill();
+    return;
+  }
+  const fallback = setTimeout(plainKill, TREE_KILL_GRACE_MS);
+  fallback.unref?.();
+  cp.once('exit', () => clearTimeout(fallback));
 }
 
 export interface BridgeHandle {
@@ -72,6 +122,8 @@ export function createBridge(options: BridgeOptions): Promise<BridgeHandle> {
   const spawnFn = options.spawnFn ?? nodeSpawn;
   const stderr = options.stderr ?? process.stderr;
   const host = options.host ?? '127.0.0.1';
+  const platform = options.platform ?? process.platform;
+  const killTree = options.killTree ?? taskkillTree;
   const log = (line: string): void => { stderr.write(`[dap-stdio-bridge] ${line}\n`); };
 
   let child: ChildProcess | undefined;
@@ -151,9 +203,7 @@ export function createBridge(options: BridgeOptions): Promise<BridgeHandle> {
     const onSocketGone = (): void => {
       socket = undefined;
       try { cp.stdin?.end(); } catch { /* already closed */ }
-      if ((cp.exitCode ?? null) === null && !cp.killed) {
-        try { cp.kill(); } catch { /* already gone */ }
-      }
+      endChild(cp, platform, killTree);
       server.close();
     };
     conn.on('close', onSocketGone);
@@ -171,7 +221,7 @@ export function createBridge(options: BridgeOptions): Promise<BridgeHandle> {
         done,
         close: () => new Promise<void>((res) => {
           try { socket?.destroy(); } catch { /* ignore */ }
-          if (child && child.exitCode === null && !child.killed) { try { child.kill(); } catch { /* ignore */ } }
+          if (child) endChild(child, platform, killTree);
           if (!server.listening) { res(); return; }
           server.close(() => res());
         }),
