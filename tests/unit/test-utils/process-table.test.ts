@@ -30,16 +30,34 @@ describe('process-table helper (issue #885)', () => {
     return proc;
   }
 
-  /** A just-spawned process takes a moment to appear in the OS process table (seconds on a cold CI runner). */
-  async function waitUntilListed(pid: number, image: string, timeoutMs: number): Promise<number[]> {
+  /**
+   * A just-spawned process takes a moment to appear in the OS process table
+   * (seconds on a cold CI runner), and a scan can come back empty when the
+   * runner is too loaded for PowerShell + CIM to answer within the cap (PR
+   * #945's Windows lane). Both are waited out; on failure the message says
+   * which it was, from whether this worker's own pid — a node process that is
+   * certainly running — was ever listed.
+   */
+  async function waitUntilListed(pid: number, image: string, timeoutMs: number): Promise<void> {
     const deadline = Date.now() + timeoutMs;
+    let sawSelf = false;
     let listed = await listPidsByImage(image);
     while (!listed.includes(pid) && Date.now() < deadline) {
+      sawSelf ||= listed.includes(process.pid);
       await new Promise((resolve) => setTimeout(resolve, 250));
       listed = await listPidsByImage(image);
     }
-    return listed;
+    sawSelf ||= listed.includes(process.pid);
+    expect(
+      listed,
+      sawSelf
+        ? `the scanner lists this worker but never the child ${pid}`
+        : `the scanner never listed even this worker (${process.pid}): PowerShell/CIM not answering on this runner`
+    ).toContain(pid);
   }
+
+  const LISTING_WAIT_MS = 45_000;
+  const CASE_TIMEOUT_MS = 60_000;
 
   it('lists a live node child under its image and sees it alive', async () => {
     const proc = spawnIdleNode();
@@ -47,15 +65,15 @@ describe('process-table helper (issue #885)', () => {
     // Not asserted on the first scan: on windows-latest the child was alive
     // but not yet in the table when queried right after spawn (main CI on
     // 42651425), while a scan 300 ms later listed it.
-    expect(await waitUntilListed(proc.pid!, 'node', 15_000)).toContain(proc.pid);
-  }, 30_000);
+    await waitUntilListed(proc.pid!, 'node', LISTING_WAIT_MS);
+  }, CASE_TIMEOUT_MS);
 
   it('answers the pid as a survivor only while it is still a process of the named image', async () => {
     const proc = spawnIdleNode();
     // Same race as the case above (Flake Hunt 39027849623 on windows-latest,
     // seed 516586464): the pid is alive, so it survives the poll, and the
     // image filter then drops it because the table has not listed it yet.
-    await waitUntilListed(proc.pid!, 'node', 15_000);
+    await waitUntilListed(proc.pid!, 'node', LISTING_WAIT_MS);
 
     expect(await waitForProcessesToExit([proc.pid!], { timeoutMs: 300, image: 'node' })).toEqual([proc.pid]);
     // Alive, but not what the caller is looking for: a reused pid must not
@@ -64,5 +82,5 @@ describe('process-table helper (issue #885)', () => {
 
     proc.kill('SIGKILL');
     expect(await waitForProcessesToExit([proc.pid!], { timeoutMs: 5000, image: 'node' })).toEqual([]);
-  }, 30_000);
+  }, CASE_TIMEOUT_MS);
 });
