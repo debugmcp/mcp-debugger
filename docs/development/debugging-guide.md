@@ -97,9 +97,10 @@ Debug sessions on a Streamable HTTP server belong to the MCP client session that
 (each `Mcp-Session-Id` has its own `DebugMcpServer`). Drive one debug session from one client
 and keep that client's MCP session open: a one-shot driver script that opens a fresh MCP session
 per run cannot reach the debug session its previous run created — it is answered
-`Session <id> belongs to another MCP client session: …` — and the stream-lost reaper closes the
-abandoned one `MCP_HTTP_STREAM_LOST_SESSION_MS` (default 2 min) after the first run's stream
-dropped, which is what finally ends its program (issue #939).
+`Session <id> belongs to another MCP client session: …` — and the idle reaper closes the
+abandoned one about `MCP_HTTP_STREAM_LOST_SESSION_MS` (default 2 min) after the first run's SSE
+stream dropped (an SDK client holds one; a pure-POST driver falls under
+`MCP_HTTP_STALE_SESSION_MS`, default 30 min), which is what finally ends its program (issue #939).
 
 Pausing a server's **proxy worker** (attach by PID to its `proxy-bootstrap.js` child; the
 inspector opens on 9229 unless `NODE_OPTIONS=--inspect-port=…` says otherwise) has one more

@@ -15,7 +15,7 @@ import {
 import { toWireError } from '../errors/debug-errors.js';
 import { coerceToolArguments, ToolArguments } from './tool-arguments.js';
 import { extractPayloadSuccess, failureResult, sanitizeRequest, type ToolResult } from './tool-result.js';
-import { buildToolDefinitions, isToolName } from './tool-schemas.js';
+import { buildToolDefinitions, isToolName, type ToolDefinition } from './tool-schemas.js';
 import { assertRequiredToolArguments } from './tool-validation.js';
 import type { ToolContext } from './tool-context.js';
 import { TOOL_HANDLERS } from './handlers/index.js';
@@ -26,11 +26,19 @@ import { TOOL_HANDLERS } from './handlers/index.js';
  * DebugMcpServer per MCP client session, issue #939). Decided here, in front
  * of every handler, so all tools say it the same way — the per-tool wordings
  * (`Session not found`, `Failed to close debug session`, redefine_classes'
- * protocol error) stay for an id nobody holds. Only the HTTP layer provides
- * the lookup; without it nothing changes.
+ * protocol error) stay for an id nobody holds. Ownership is terminal, which is
+ * why it outranks a handler's own argument gates: no argument fix can make the
+ * call succeed on this server. Only tools whose schema takes a `sessionId` are
+ * gated — the SDK does not validate arguments against the schema, and a stale
+ * id an agent carries across MCP sessions must never refuse
+ * `create_debug_session`. Only the HTTP layer provides the lookup; without it
+ * nothing changes.
  */
-function foreignSessionResult(ctx: ToolContext, sessionId: unknown): ToolResult | undefined {
+function foreignSessionResult(ctx: ToolContext, definition: ToolDefinition, sessionId: unknown): ToolResult | undefined {
   if (typeof sessionId !== 'string' || !ctx.describeForeignSession) {
+    return undefined;
+  }
+  if (!Object.prototype.hasOwnProperty.call(definition.inputSchema.properties ?? {}, 'sessionId')) {
     return undefined;
   }
   if (ctx.sessionManager.getSession(sessionId)) {
@@ -83,7 +91,7 @@ export function registerToolHandlers(server: Server, ctx: ToolContext): void {
         }
         assertRequiredToolArguments(definition, args as unknown as Record<string, unknown>);
         const result =
-          foreignSessionResult(ctx, args.sessionId) ??
+          foreignSessionResult(ctx, definition, args.sessionId) ??
           await TOOL_HANDLERS[toolName](ctx, args, toolName, { signal: extra?.signal });
         
         // Log tool response; success mirrors the payload's own success flag (issue #397)

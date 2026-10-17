@@ -41,7 +41,10 @@ function describeWindow(ms: number): string {
  * @internal The answer a tool call gets for a debug session id that another
  * HTTP session's server holds (issue #939): whose it is, and how it ends —
  * worded from the reaper windows actually in force, so it never promises a
- * reaper that is switched off.
+ * reaper that is switched off. "About": the sweep runs every
+ * MCP_HTTP_STALE_SWEEP_INTERVAL_MS, so a close lands up to one interval after
+ * the window. An SDK client's close() is not a DELETE (only terminateSession()
+ * sends one), so a plain disconnect leaves the session to the reaper.
  */
 export function describeForeignDebugSession(
   debugSessionId: string,
@@ -49,16 +52,17 @@ export function describeForeignDebugSession(
 ): string {
   const reaped = [
     windows.streamLostMs > 0
-      ? `${describeWindow(windows.streamLostMs)} after that client's SSE stream is lost without a reconnect (MCP_HTTP_STREAM_LOST_SESSION_MS=${windows.streamLostMs})`
+      ? `after about ${describeWindow(windows.streamLostMs)} with that client's SSE stream lost and no reconnect (MCP_HTTP_STREAM_LOST_SESSION_MS=${windows.streamLostMs})`
       : undefined,
     windows.staleMs > 0
-      ? `${describeWindow(windows.staleMs)} idle without a stream (MCP_HTTP_STALE_SESSION_MS=${windows.staleMs})`
+      ? `after about ${describeWindow(windows.staleMs)} idle without a stream (MCP_HTTP_STALE_SESSION_MS=${windows.staleMs})`
       : undefined,
   ].filter((part): part is string => part !== undefined);
-  const ending = reaped.length > 0
-    ? `or when the idle reaper closes it: ${reaped.join(', or ')}`
-    : 'and no idle reaper is configured (MCP_HTTP_STALE_SESSION_MS and MCP_HTTP_STREAM_LOST_SESSION_MS are 0), so only that client can end it';
-  return `Session ${debugSessionId} belongs to another MCP client session: each Streamable HTTP client sees only the debug sessions it created. It ends when that client closes its MCP session (DELETE /mcp) ${ending}.`;
+  const disconnect = reaped.length > 0 ? 'a plain disconnect leaves it to the idle reaper' : 'a plain disconnect leaves it running';
+  const reaper = reaped.length > 0
+    ? `the idle reaper closes it ${reaped.join(', or ')}`
+    : 'no idle reaper is configured (MCP_HTTP_STALE_SESSION_MS and MCP_HTTP_STREAM_LOST_SESSION_MS are 0), so nothing else ends it';
+  return `Session ${debugSessionId} belongs to another MCP client session: each Streamable HTTP client sees only the debug sessions it created. Only that client can close it or end its MCP session with an explicit DELETE /mcp (${disconnect}); ${reaper}.`;
 }
 
 export interface HttpCommandDependencies {

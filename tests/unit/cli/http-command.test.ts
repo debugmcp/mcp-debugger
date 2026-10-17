@@ -879,8 +879,12 @@ describe('HTTP Command Handler', () => {
       expect(typeof describeForeignSession).toBe('function');
       const explanation = describeForeignSession('dbg-9');
       expect(explanation).toMatch(/^Session dbg-9 belongs to another MCP client session: each Streamable HTTP client sees only the debug sessions it created\./);
-      expect(explanation).toMatch(/2 min after that client's SSE stream is lost[^.]*MCP_HTTP_STREAM_LOST_SESSION_MS=120000/);
-      expect(explanation).toMatch(/30 min idle without a stream \(MCP_HTTP_STALE_SESSION_MS=1800000\)/);
+      // Only the owner can end it; an SDK client's close() is not a DELETE, so
+      // say what a plain disconnect does; the sweep interval makes the window
+      // approximate.
+      expect(explanation).toMatch(/Only that client can close it or end its MCP session with an explicit DELETE \/mcp \(a plain disconnect leaves it to the idle reaper\)/);
+      expect(explanation).toMatch(/after about 2 min with that client's SSE stream lost and no reconnect \(MCP_HTTP_STREAM_LOST_SESSION_MS=120000\)/);
+      expect(explanation).toMatch(/after about 30 min idle without a stream \(MCP_HTTP_STALE_SESSION_MS=1800000\)/);
       expect(describeForeignSession('dbg-nobody')).toBeUndefined();
     });
 
@@ -888,8 +892,9 @@ describe('HTTP Command Handler', () => {
       const describeForeignSession = await initializedApp({ MCP_HTTP_STALE_SESSION_MS: '0', MCP_HTTP_STREAM_LOST_SESSION_MS: '0' });
 
       const explanation = describeForeignSession('dbg-9')!;
-      expect(explanation).toMatch(/no idle reaper is configured \(MCP_HTTP_STALE_SESSION_MS and MCP_HTTP_STREAM_LOST_SESSION_MS are 0\)/);
+      expect(explanation).toMatch(/\(a plain disconnect leaves it running\); no idle reaper is configured \(MCP_HTTP_STALE_SESSION_MS and MCP_HTTP_STREAM_LOST_SESSION_MS are 0\), so nothing else ends it\.$/);
       expect(explanation).not.toMatch(/MCP_HTTP_STREAM_LOST_SESSION_MS=/);
+      expect(explanation).not.toMatch(/leaves it to the idle reaper/);
     });
   });
 

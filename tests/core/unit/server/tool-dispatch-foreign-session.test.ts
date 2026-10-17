@@ -117,6 +117,23 @@ describe('tools/call on a session id another server owns (issue #939)', () => {
     expect(ctx.closeDebugSession).toHaveBeenCalledWith(FOREIGN_ID);
   });
 
+  it('a stray sessionId on a tool whose schema has none (create_debug_session) is never gated', async () => {
+    // The SDK does not validate arguments against inputSchema, so an agent
+    // carrying a stale id across MCP sessions can send it anywhere; the one
+    // tool that must always work must not be refused for it.
+    const ctx = fakeContext({
+      // The launch-toolchain probe fails open when it cannot probe (no registry).
+      getAdapterRegistry: () => undefined,
+      createDebugSession: vi.fn(async () => ({ id: 'dbg-new', name: 'fresh', language: 'mock', state: 'created' }))
+    } as unknown as Partial<ToolContext>);
+    registerToolHandlers(server, ctx);
+    client = await connect(server);
+
+    expect(await answer(client, 'create_debug_session', { language: 'mock', sessionId: FOREIGN_ID }))
+      .toMatchObject({ success: true, sessionId: 'dbg-new' });
+    expect(ctx.describeForeignSession).not.toHaveBeenCalled();
+  });
+
   it('a server without the hook (stdio, SSE) dispatches as before', async () => {
     const ctx = fakeContext({ describeForeignSession: undefined });
     registerToolHandlers(server, ctx);
