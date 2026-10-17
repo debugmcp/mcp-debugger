@@ -101,6 +101,22 @@ const ADAPTER_STDIO_QUIET_MS = 100;
  * arrive in milliseconds; the cap only matters for a wedged adapter.
  */
 const PRE_DETACH_RESUME_TIMEOUT_MS = 2000;
+/**
+ * How long the launch-mode terminate that precedes the disconnect (issue
+ * #885) may wait for the adapter's response before the disconnect goes out
+ * regardless. Budgeted against the same 5 s stop deadline, which starts when
+ * the parent sends the IPC terminate: terminate 2 s + the disconnect's 1 s
+ * cap + the 500 ms post-disconnect wait + the adapter tree-kill (~300 ms on
+ * Windows, nothing once the adapter has exited) ≈ 3.8 s. Measured: the
+ * Flutter adapter answers in 118 ms for a running desktop app and ~1.0 s for
+ * one paused at a breakpoint (app.stop, SIGTERM, tool exit), the Dart CLI
+ * adapter in ~320 ms; the cap only matters for a wedged tool — a close
+ * during an in-flight launch (a Flutter tool still building) can pay it in
+ * full, the same end state as before at up to 2 s more latency. Never
+ * stacks with the attach-mode resume above — the two sit on opposite
+ * branches of the same shutdown.
+ */
+const TERMINATE_BEFORE_DISCONNECT_TIMEOUT_MS = 2000;
 
 /**
  * How long an unexpected adapter exit waits for the adapter's stderr pipe to
@@ -2292,14 +2308,26 @@ export class DapProxyWorker {
     // socket rejects synchronously, so this cannot stall shutdown. The
     // terminated slot may already have sent it (issue #753: Delve states the
     // exit status only in reply to disconnect), in which case the client is
-    // already torn down and only the shutdown() below remains.
+    // already torn down and only the shutdown() below remains. For a policy
+    // that pins terminateBeforeDisconnect (Dart/Flutter, issue #885) a DAP
+    // `terminate` goes out first, under its own cap, so a `flutter run` app
+    // receives `app.stop` — the SDK's disconnect alone SIGKILLs only the
+    // adapter's own tool processes and leaves the app running.
     if (this.connectionManager && this.dapClient && !this.dapDisconnectSent) {
       if (this.isAttachMode) {
         await this.resumeBeforeDetach('shutdown');
+      } else {
+        await this.terminateBeforeDisconnect();
       }
-      this.dapDisconnectSent = true;
-      const terminateDebuggee = !this.isAttachMode;
-      await this.connectionManager.disconnect(this.dapClient, terminateDebuggee);
+      // Either wait can be long: re-check the client, since the adapter's own
+      // terminated or socket close may have landed meanwhile (the Flutter
+      // adapter exits by itself once its terminate is answered), and the
+      // flag, since a session-sent disconnect can land during the wait.
+      if (this.connectionManager && this.dapClient && !this.dapDisconnectSent) {
+        this.dapDisconnectSent = true;
+        const terminateDebuggee = !this.isAttachMode;
+        await this.connectionManager.disconnect(this.dapClient, terminateDebuggee);
+      }
     }
 
     // THEN reject any in-flight DAP requests and destroy the socket (no-op if
@@ -2490,6 +2518,42 @@ export class DapProxyWorker {
       const message = error instanceof Error ? error.message : String(error);
       this.logger?.warn(`[Worker] Pre-detach resume (${trigger}) refused, detaching anyway: ${message}`);
       this.sendStatusSafely('pre_detach_resume', { trigger, threadId: stop.threadId, resumed: false, error: message });
+    }
+  }
+
+  /**
+   * Issue #885: ask the adapter to end its debuggee gracefully before the
+   * disconnect. Launch mode only, and only for a policy that pins
+   * terminateBeforeDisconnect — the Dart/Flutter SDK adapters, whose
+   * `disconnect` is the forced path (their tool processes SIGKILLed,
+   * terminateDebuggee ignored, a `flutter run` desktop app left running);
+   * only `terminate` (`app.stop`) reaches the app. Gated on the live
+   * initialize capabilities and on no terminal signal having arrived: a
+   * program that ended on its own, an adapter that exited or a socket that
+   * closed all keep the plain sequence (a dead socket rejects synchronously
+   * anyway). Bounded by its own cap; a refusal or timeout is logged and the
+   * disconnect follows regardless.
+   */
+  private async terminateBeforeDisconnect(): Promise<void> {
+    if (!this.dapClient || this.adapterPolicy.terminateBeforeDisconnect !== true) {
+      return;
+    }
+    if (this.adapterCapabilities?.supportsTerminateRequest !== true) {
+      this.logger?.info('[Worker] No DAP terminate ahead of the disconnect: the adapter did not advertise supportsTerminateRequest');
+      return;
+    }
+    if (this.terminalSignalArrived) {
+      this.logger?.info('[Worker] No DAP terminate ahead of the disconnect: a terminal signal already arrived (the program ended, the adapter exited or the socket closed)');
+      return;
+    }
+    const startedAt = Date.now();
+    this.logger?.info('[Worker] Launch mode: DAP terminate ahead of the disconnect (policy terminateBeforeDisconnect, adapter supportsTerminateRequest; issue #885)');
+    try {
+      await this.dapClient.sendRequest('terminate', {}, TERMINATE_BEFORE_DISCONNECT_TIMEOUT_MS);
+      this.logger?.info(`[Worker] DAP terminate answered after ${Date.now() - startedAt} ms; sending the disconnect`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger?.warn(`[Worker] DAP terminate failed after ${Date.now() - startedAt} ms, disconnecting anyway: ${message}`);
     }
   }
 

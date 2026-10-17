@@ -31,7 +31,8 @@ import {
   PythonAdapterPolicy,
   GoAdapterPolicy,
   JavaAdapterPolicy,
-  RubyAdapterPolicy
+  RubyAdapterPolicy,
+  DartAdapterPolicy
 } from '@debugmcp/shared';
 
 /**
@@ -3367,6 +3368,150 @@ describe('DapProxyWorker', () => {
     // attach-mode disconnect — the session's own, the close's auto-detach and
     // the shutdown path — and the outcome reaches the parent as
     // 'pre_detach_resume'.
+    //
+    // A launch session's close ends the debuggee through the adapter — and the
+    // Dart/Flutter SDK adapters treat `disconnect` as the forced path: their
+    // own tool processes are SIGKILLed, terminateDebuggee is ignored, and a
+    // `flutter run` desktop app is left running (issue #885). Only a DAP
+    // `terminate` reaches the app. A policy that pins terminateBeforeDisconnect
+    // gets one ahead of the disconnect, when the adapter advertised
+    // supportsTerminateRequest and the program has not already ended.
+    describe('terminate before disconnect (issue #885)', () => {
+      const requests = (sendRequest: Mock) => sendRequest.mock.calls.map((call) => call[0]);
+
+      function wire(opts: {
+        policy?: unknown;
+        capabilities?: unknown;
+        attach?: boolean;
+        sendRequest?: Mock;
+      } = {}) {
+        const sendRequest = opts.sendRequest ?? vi.fn().mockResolvedValue({});
+        const processStub = { shutdown: vi.fn().mockResolvedValue(undefined) };
+        const connectionStub = { disconnect: vi.fn().mockResolvedValue(undefined) };
+        (worker as any).logger = mockLogger;
+        (worker as any).dapClient = { ...mockDapClient, sendRequest };
+        (worker as any).adapterPolicy = opts.policy ?? DartAdapterPolicy;
+        (worker as any).adapterState = {};
+        (worker as any).adapterCapabilities = 'capabilities' in opts ? opts.capabilities : { supportsTerminateRequest: true };
+        (worker as any).processManager = processStub;
+        (worker as any).connectionManager = connectionStub;
+        (worker as any).state = ProxyState.CONNECTED;
+        (worker as any).isAttachMode = opts.attach === true;
+        (worker as any).lastStop = null;
+        return { sendRequest, processStub, connectionStub };
+      }
+
+      it('sends DAP terminate ahead of the launch-mode disconnect when the policy asks and the adapter advertises it', async () => {
+        const { sendRequest, connectionStub } = wire();
+
+        await worker.handleTerminate();
+
+        expect(sendRequest).toHaveBeenCalledWith('terminate', {}, 2000);
+        expect(connectionStub.disconnect).toHaveBeenCalledTimes(1);
+        expect(connectionStub.disconnect).toHaveBeenCalledWith(expect.anything(), true);
+        expect(sendRequest.mock.invocationCallOrder[0]).toBeLessThan(connectionStub.disconnect.mock.invocationCallOrder[0]);
+        expect(mockDapClient.shutdown).toHaveBeenCalled();
+        expect(worker.getState()).toBe(ProxyState.TERMINATED);
+      });
+
+      it('sends it on the shutdown path too (signals, parent death)', async () => {
+        const { sendRequest, connectionStub } = wire();
+
+        await worker.shutdown();
+
+        expect(requests(sendRequest)).toEqual(['terminate']);
+        expect(connectionStub.disconnect).toHaveBeenCalledWith(expect.anything(), true);
+        expect(sendRequest.mock.invocationCallOrder[0]).toBeLessThan(connectionStub.disconnect.mock.invocationCallOrder[0]);
+      });
+
+      it('still disconnects, and says so, when the terminate is refused or times out', async () => {
+        const sendRequest = vi.fn().mockImplementation(async (command: string) => {
+          if (command === 'terminate') {
+            throw new Error("DAP request 'terminate' (seq 7) timed out after 2000ms");
+          }
+          return {};
+        });
+        const { connectionStub } = wire({ sendRequest });
+
+        await worker.handleTerminate();
+
+        expect(requests(sendRequest)).toEqual(['terminate']);
+        expect(connectionStub.disconnect).toHaveBeenCalledTimes(1);
+        expect(connectionStub.disconnect).toHaveBeenCalledWith(expect.anything(), true);
+        expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringMatching(/DAP terminate .*disconnecting anyway.*timed out/));
+        expect(worker.getState()).toBe(ProxyState.TERMINATED);
+      });
+
+      it('never sends it in attach mode, whose disconnect detaches', async () => {
+        const { sendRequest, connectionStub } = wire({ attach: true });
+
+        await worker.handleTerminate();
+
+        expect(requests(sendRequest)).toEqual([]);
+        expect(connectionStub.disconnect).toHaveBeenCalledTimes(1);
+        expect(connectionStub.disconnect).toHaveBeenCalledWith(expect.anything(), false);
+      });
+
+      it.each([
+        ['a policy that does not pin it', PythonAdapterPolicy],
+        ['the pin switched off', { ...DartAdapterPolicy, terminateBeforeDisconnect: false }]
+      ])('sends nothing for %s', async (_label, policy) => {
+        const { sendRequest, connectionStub } = wire({ policy });
+
+        await worker.handleTerminate();
+
+        expect(requests(sendRequest)).toEqual([]);
+        expect(connectionStub.disconnect).toHaveBeenCalledTimes(1);
+        expect(connectionStub.disconnect).toHaveBeenCalledWith(expect.anything(), true);
+      });
+
+      it.each([
+        ['no capabilities on record', null],
+        ['supportsTerminateRequest false', { supportsTerminateRequest: false }],
+        ['supportsTerminateRequest absent', {}]
+      ])('sends nothing when the adapter did not advertise it (%s)', async (_label, capabilities) => {
+        const { sendRequest, connectionStub } = wire({ capabilities });
+
+        await worker.handleTerminate();
+
+        expect(requests(sendRequest)).toEqual([]);
+        expect(connectionStub.disconnect).toHaveBeenCalledTimes(1);
+      });
+
+      it('sends nothing once the program has ended on its own: terminated keeps the old sequence', async () => {
+        const handlers: Record<string, (arg?: unknown) => unknown> = {};
+        const { sendRequest, connectionStub } = wire();
+        (connectionStub as Record<string, unknown>).setupEventHandlers = vi.fn(
+          (_client: unknown, wired: Record<string, (arg?: unknown) => unknown>) => { Object.assign(handlers, wired); }
+        );
+        (worker as any).currentInitPayload = { launchConfig: {} };
+        (worker as any).setupDapEventHandlers();
+
+        await handlers.onTerminated?.({});
+        await (worker as any).shutdownPromise;
+
+        expect(requests(sendRequest)).toEqual([]);
+        expect(connectionStub.disconnect).toHaveBeenCalledTimes(1);
+        expect(connectionStub.disconnect).toHaveBeenCalledWith(expect.anything(), true);
+        // The event itself still went to the parent, as before.
+        expect(mockMessageSender.send.mock.calls
+          .map((call) => call[0] as { type: string; event?: string })
+          .filter((message) => message.type === 'dapEvent')
+          .map((message) => message.event)).toEqual(['terminated']);
+        expect(worker.getState()).toBe(ProxyState.TERMINATED);
+      });
+
+      it('sends nothing once any terminal signal has arrived (adapter exit, socket close)', async () => {
+        const { sendRequest, connectionStub } = wire();
+        (worker as any).terminalSignalArrived = true;
+
+        await worker.handleTerminate();
+
+        expect(requests(sendRequest)).toEqual([]);
+        expect(connectionStub.disconnect).toHaveBeenCalledTimes(1);
+      });
+    });
+
     describe('resume before detach (issue #763)', () => {
       const resumingPolicy = {
         name: 'lldb-stub',
