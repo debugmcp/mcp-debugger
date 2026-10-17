@@ -22,13 +22,12 @@ const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 
 /**
  * Variables the spawned server must never inherit from the test runner:
- * vitest's own NODE_OPTIONS, the bundled CLI's bootstrap flag, the exit-code
- * shim's channel (#731), debug logging and the DAP trace file. Compared
- * upper-cased, so a differently-cased Windows spelling cannot slip through.
+ * vitest's own NODE_OPTIONS, the exit-code shim's channel (#731), debug
+ * logging and the DAP trace file. Compared upper-cased, so a differently-cased
+ * Windows spelling cannot slip through.
  */
 export const SCRUBBED_ENV_KEYS: readonly string[] = [
   'NODE_OPTIONS',
-  'DEBUG_MCP_SKIP_AUTO_START',
   'MCP_DEBUGGER_EXITCODE_FILE',
   'MCP_DEBUGGER_EXITCODE_CLAIMED',
   'DEBUG',

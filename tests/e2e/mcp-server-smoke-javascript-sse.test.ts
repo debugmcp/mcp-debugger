@@ -8,9 +8,10 @@
  * Console output during SSE server operation can CORRUPT IPC channels between parent and child
  * processes, causing JavaScript debugging to fail with empty stack traces.
  * 
- * THE FIX: In src/index.ts, the shouldSilenceConsole logic MUST include:
- *   hasSSE ||
- * 
+ * THE FIX: the console is silenced unconditionally, for every transport, by
+ * src/cli/entry-prologue.ts — the first module both entries evaluate (#732). An
+ * earlier conditional silencer in the bundled CLI had to name SSE explicitly.
+ *
  * Without this, any console.log during proxy process initialization will corrupt the IPC
  * channel when stdio is inherited, breaking JavaScript's complex parent-child-grandchild
  * debugging architecture.

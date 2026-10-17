@@ -1,7 +1,7 @@
 /**
  * Handler for `mcp-debugger doctor` (issue #423).
  *
- * console.* is noop'd process-wide before any import runs (src/index.ts), so
+ * console.* is noop'd process-wide before any import runs (src/cli/entry-prologue.ts), so
  * all output goes through process.stdout/stderr writes — the same pattern as
  * check-rust-binary. The exit code is returned (the wiring assigns it to
  * process.exitCode); process.exit is only forced when a probe timed out,

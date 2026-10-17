@@ -24,7 +24,6 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
  * `delete` by exact name misses a differently-cased inherited key.
  */
 const SCRUBBED_ENV = [
-  'DEBUG_MCP_SKIP_AUTO_START',
   'MCP_HTTP_BIND',
   'DEBUG',
   'NODE_OPTIONS',
@@ -187,7 +186,6 @@ describe('mcp-debugger debugging itself', () => {
       file: expect.stringMatching(/http-command\.ts$/i), line,
     });
     expect((await call('evaluate_expression', { expression: "req.body.method === 'tools/list'" })).result).toBe('true');
-    expect((await call('evaluate_expression', { expression: 'process.env.DEBUG_MCP_SKIP_AUTO_START' })).result).toBe('undefined');
     expect((await call('step_over')).state).toBe('paused');
     await call('continue_execution');
     const completed = await response;
@@ -204,7 +202,7 @@ describe('mcp-debugger debugging itself', () => {
     }, { timeout: 15000 }).toBe('running');
     expect(resumed, JSON.stringify(resumed)).not.toHaveProperty('lastStop');
 
-    // Issue #850: the nested server no-ops console.log (src/index.ts), which
+    // Issue #850: the nested server no-ops console.log (src/cli/entry-prologue.ts), which
     // is where js-debug's own logpoints would print — a logpoint on its
     // request handler must still reach get_output, delivered over the proxy's
     // CDP binding, and must not pause the server. The pausing breakpoint is

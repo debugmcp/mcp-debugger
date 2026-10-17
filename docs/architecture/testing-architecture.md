@@ -324,7 +324,7 @@ Three defenses around the gate itself:
 
 `pnpm run typecheck:all` = `typecheck` + `typecheck:tests`, and it is deliberately the *same command* in all three places, so a green working tree cannot mean a red required check:
 
-1. **`.husky/pre-push`** — lint, then a guard that `tests/typecheck-baseline.json` is not modified-but-uncommitted (the ratchet validates the working tree; CI validates the pushed commit, so an uncommitted refresh would pass here and fail there), then `typecheck:all`, then a clean build, then `test:unit` + `test:integration`. The full e2e suite is left to CI.
+1. **`.husky/pre-push`** — lint, then a guard that `tests/typecheck-baseline.json` is not modified-but-uncommitted (the ratchet validates the working tree; CI validates the pushed commit, so an uncommitted refresh would pass here and fail there), then `typecheck:all`, then a clean build, then `test:unit` + `test:integration`. The e2e project is not part of the gate; CI runs its Docker container tests and the COBOL/Dart/Flutter host lanes, and the rest is on demand (`npm run test:e2e`).
 2. **The `Lint Code` CI job** — ESLint, then `typecheck:all` (or the split dependabot form), then the personal-path and changelog gates. No build needed: ~3 s for the sources, ~11 s for the ratchet.
 3. **Locally**, whenever you want the fast type-only answer without a build.
 

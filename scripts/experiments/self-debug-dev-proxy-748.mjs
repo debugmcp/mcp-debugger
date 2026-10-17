@@ -7,7 +7,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
 const root = process.cwd();
 const file = path.join(root, 'tools/dev-proxy/dev-proxy.mjs');
-const scrubbed = new Set(['DEBUG_MCP_SKIP_AUTO_START', 'MCP_HTTP_BIND', 'DEBUG', 'NODE_OPTIONS',
+const scrubbed = new Set(['MCP_HTTP_BIND', 'DEBUG', 'NODE_OPTIONS',
   'MCP_DEBUGGER_EXITCODE_FILE', 'MCP_DEBUGGER_EXITCODE_CLAIMED', 'DAP_TRACE_FILE']);
 const env = Object.fromEntries(Object.entries(process.env).filter(([key, value]) => value !== undefined && !scrubbed.has(key.toUpperCase())));
 const debuggerClient = new Client({ name: 'self-debug-748', version: '1' });

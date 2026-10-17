@@ -90,7 +90,7 @@ Two things that will bite you otherwise:
 Worth knowing before you wonder why a push takes four minutes:
 
 - **`.husky/pre-commit`** runs no tests and no build — only the personal-paths check, the build-artifact/tarball guards, and an optional docstar check. Commits stay cheap.
-- **`.husky/pre-push`** runs lint → the uncommitted-baseline guard → `typecheck:all` → a clean build → `test:unit` + `test:integration`. The e2e suite is left to CI.
+- **`.husky/pre-push`** runs lint → the uncommitted-baseline guard → `typecheck:all` → a clean build → `test:unit` + `test:integration`. The e2e project is not part of the gate: CI runs its Docker container tests and the COBOL/Dart/Flutter host lanes (`cobol-host`, `dart-host`, `flutter-host` in `ci.yml`), and the rest runs on demand with `npm run test:e2e`.
 - **The `Lint Code` CI job** runs ESLint → `typecheck:all` → the personal-path and changelog gates. No build needed.
 
 ## Writing Tests

@@ -80,10 +80,6 @@ survives, holding its port. **Call `close_debug_session` on the outer session be
 `dev_rebuild_and_restart` (or `dev_restart_debugger`), and again when you are finished** — ending
 the session is the teardown step for the nested server.
 
-The bundled CLI restores its internal `DEBUG_MCP_SKIP_AUTO_START` override before starting the
-server, so it can debug the checkout's entrypoint without suppressing the target's startup. Any
-value explicitly inherited from the caller is preserved.
-
 The nested server inherits the outer JavaScript session's exit-code shim environment
 (`NODE_OPTIONS --require .../exitcode-shim.cjs`, `MCP_DEBUGGER_EXITCODE_FILE`, and the
 `MCP_DEBUGGER_EXITCODE_CLAIMED=1` the shim stamped on the server). Its JavaScript adapter scrubs
