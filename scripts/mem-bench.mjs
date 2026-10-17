@@ -5,11 +5,11 @@
  * (born out of PR #395's startup-reaper findings).
  *
  * Each trial spawns a fresh server, connects a real MCP client over stdio, and
- * samples RSS externally at checkpoints. A successful MCP `initialize` is a
- * guaranteed synchronization barrier proving the startup orphan-reaper scans
- * have completed: src/index.ts awaits both reapers at the top of main(),
- * before argv parsing, so the stdio transport cannot answer until they are
- * done. Peak metrics (VmHWM on Linux, PeakWorkingSet64 on Windows) prove a
+ * samples RSS externally at checkpoints. A successful MCP `initialize` marks
+ * the server as up; the startup orphan-reaper scans are kicked fire-and-forget
+ * from the server-starting command action in src/main.ts (issue #399), so
+ * they may still be in flight at that point — the sample is "after
+ * initialize", not "after the scans". Peak metrics (VmHWM on Linux, PeakWorkingSet64 on Windows) prove a
  * spike was *prevented*, not merely released after the fact — V8 does not
  * return grown arenas to the OS, so a transient peak normally scars RSS for
  * the process lifetime.

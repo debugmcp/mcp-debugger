@@ -118,7 +118,8 @@ mcp-debugger/
 │   ├── codelldb-win32-x64/
 │   └── mcp-debugger/      # Self-contained CLI bundle (npx distribution)
 ├── src/                    # Core server source code
-│   ├── index.ts           # Process entry point (silences console, then boots)
+│   ├── index.ts           # dist/index.js entry: the prologue (cli/entry-prologue.ts), then main()
+│   ├── main.ts            # main(): the CLI wiring, side-effect free; the npm bundle imports it directly
 │   ├── server.ts          # DebugMcpServer composition root
 │   ├── adapters/          # Adapter loading and registry
 │   ├── cli/               # CLI commands and setup

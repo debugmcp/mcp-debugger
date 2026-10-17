@@ -86,13 +86,14 @@ Creates a new debugging session.
 **Notes:**
 - Session IDs are UUIDs in the format `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
 - Sessions start in `"created"` state
+- **Streamable HTTP: debug sessions are per MCP client session.** Each HTTP client (each `Mcp-Session-Id`) gets its own server, so a debug session is visible only to the client that created it; `list_debug_sessions` lists that client's sessions alone. A tool call from another client naming the id answers `success: false` with `error: "Session <id> belongs to another MCP client session: …"` and says how it ends: only its client can close it or end its MCP session with an explicit `DELETE /mcp` (an SDK client's `close()` is not a DELETE — a plain disconnect leaves it to the idle reaper: `MCP_HTTP_STREAM_LOST_SESSION_MS` for a client that held an SSE stream, `MCP_HTTP_STALE_SESSION_MS` for one that never did; both `0` means nothing else ends it). Drive one debug session from one client and keep that client's MCP session open; a one-shot script that opens a fresh MCP session per call cannot reach the sessions its previous run created (issue #939). The deprecated SSE transport shares one server across its clients; stdio has one client per process
 - When `port`, `processId` or an `adapterConfig` URI/info-file key is provided in `create_debug_session`, the server performs an inline attach (creating the session and immediately attaching). The session exists before the addressing gate can refuse the form (a `port` on C/C++, say), so such a refusal answers `success: false` with a usable `sessionId`. The response then mirrors `attach_to_process`: alongside `sessionId` it carries `state`, the attach `data` payload, an optional `warning`, and — when a requested post-attach pause has not landed yet — `pending: true`, with `message` saying so (`…; post-attach pause pending — the target stops when it next executes code; call wait_for_stop to block until it does (pass stopOnEntry: false to attach without pausing)`)
 
 ---
 
 ### list_debug_sessions
 
-Lists all active debugging sessions.
+Lists all active debugging sessions — in Streamable HTTP mode, the ones this MCP client session created (see the note under `create_debug_session`).
 
 **Parameters:** None (empty object `{}`)
 
@@ -148,7 +149,7 @@ Closes an active debugging session.
 
 **Notes:**
 - Sessions may close automatically on errors
-- Closing a non-existent session returns `success: false`
+- Closing a non-existent session returns `success: false` (`message: "Failed to close debug session: <id>"`); in Streamable HTTP mode a session another MCP client created answers `error: "Session <id> belongs to another MCP client session: …"` instead, and stays open (issue #939)
 - On a launch session the debuggee is terminated. Adapters that need a DAP `terminate` ahead of the
   disconnect to do so (the Dart and Flutter SDK adapters) receive one first (#885); an attached
   process is detached, not terminated
@@ -1599,7 +1600,7 @@ Session-lifecycle failures (unknown/terminated session, proxy not running) are a
 ```
 
 ### Common Error Scenarios
-1. **Session not found**: Occurs when a session terminates unexpectedly
+1. **Session not found**: Occurs when a session terminates unexpectedly. In Streamable HTTP mode an id that exists under *another* MCP client session is not reported as not found: every tool answers `error: "Session <id> belongs to another MCP client session: …"` (issue #939)
 2. **Invalid language**: Language must be one of the supported languages (discovered dynamically from installed adapters)
 3. **File not found**: When setting breakpoints in non-existent files
 4. **Invalid scope**: When passing wrong variablesReference to get_variables

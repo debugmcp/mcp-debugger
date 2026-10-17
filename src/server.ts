@@ -70,6 +70,14 @@ export type { SetBreakpointRequest };
 export interface DebugMcpServerOptions {
   logLevel?: string;
   logFile?: string;
+  /**
+   * Explains a debug session id this server does not hold when another server
+   * in the same process does — Streamable HTTP runs one DebugMcpServer per MCP
+   * client session (issue #939). Answers the sentence the tool call should
+   * carry, or undefined when the id is simply unknown. Consulted by the
+   * tools/call dispatch before any handler runs; absent for stdio and SSE.
+   */
+  describeForeignSession?: (sessionId: string) => string | undefined;
 }
 
 /**
@@ -686,7 +694,11 @@ export class DebugMcpServer implements ToolContext {
     return this.sessionManager.waitForStop(sessionId, timeoutMs, signal);
   }
 
+  /** @internal ToolContext service; see DebugMcpServerOptions.describeForeignSession. */
+  public readonly describeForeignSession?: (sessionId: string) => string | undefined;
+
   constructor(options: DebugMcpServerOptions = {}) {
+    this.describeForeignSession = options.describeForeignSession;
     const containerConfig: ContainerConfig = {
       logLevel: options.logLevel,
       logFile: options.logFile,

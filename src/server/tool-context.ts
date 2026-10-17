@@ -68,6 +68,12 @@ export interface ToolContext {
   getAdapterRegistry(): IAdapterRegistry;
   getSessionName(sessionId: string): string;
   validateSession(sessionId: string): void;
+  /**
+   * The sentence to answer with when a session id belongs to another server in
+   * this process (one DebugMcpServer per Streamable HTTP client, issue #939),
+   * or undefined when the id is simply unknown. Absent for stdio and SSE.
+   */
+  describeForeignSession?(sessionId: string): string | undefined;
   fileNotFoundError(label: string, originalPath: string, fileCheck: FileExistenceResult): McpError;
   getSupportedLanguagesAsync(): Promise<string[]>;
   getLanguageMetadata(): Promise<LanguageMetadata[]>;

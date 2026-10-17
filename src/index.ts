@@ -44,7 +44,7 @@ try {
 // Handle both ESM (import.meta.url) and CJS (require.main) contexts
 const isMainModule = (() => {
   // In CJS context (bundled), use require.main check
-if (typeof require !== 'undefined' && typeof module !== 'undefined' && require.main === module) {
+  if (typeof require !== 'undefined' && typeof module !== 'undefined' && require.main === module) {
     return true;
   }
 
@@ -72,7 +72,7 @@ if (typeof require !== 'undefined' && typeof module !== 'undefined' && require.m
 
 if (isMainModule) {
   main().catch((error: unknown) => {
-    // The console is silenced; the logger has the details, stderr gets one line.
+    // The console is silenced, so the message goes to stderr as one line.
     reportFatal(process, 'fatal error during startup', error instanceof Error ? error.message : String(error));
     process.exit(1);
   });

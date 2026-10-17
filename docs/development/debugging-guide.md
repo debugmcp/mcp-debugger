@@ -93,6 +93,15 @@ request its tool list. The outer debugger can now inspect `req.body`, step throu
 handler, and resume the pending request with `continue_execution`. Keep the outer debugger's
 connection active while the nested server is paused.
 
+Debug sessions on a Streamable HTTP server belong to the MCP client session that created them
+(each `Mcp-Session-Id` has its own `DebugMcpServer`). Drive one debug session from one client
+and keep that client's MCP session open: a one-shot driver script that opens a fresh MCP session
+per run cannot reach the debug session its previous run created — it is answered
+`Session <id> belongs to another MCP client session: …` — and the idle reaper closes the
+abandoned one about `MCP_HTTP_STREAM_LOST_SESSION_MS` (default 2 min) after the first run's SSE
+stream dropped (an SDK client holds one; a pure-POST driver falls under
+`MCP_HTTP_STALE_SESSION_MS`, default 30 min), which is what finally ends its program (issue #939).
+
 Pausing a server's **proxy worker** (attach by PID to its `proxy-bootstrap.js` child; the
 inspector opens on 9229 unless `NODE_OPTIONS=--inspect-port=…` says otherwise) has one more
 constraint: the parent's `ProxyManager.stop()` force-kills the worker 5 s after sending it the IPC
@@ -164,12 +173,12 @@ require a verified breakpoint and nonempty threads without caller-side readiness
 
 **Symptoms**: Server exits immediately or hangs
 
-**Important**: The entrypoint (`src/index.ts`) silences nearly all `console` methods at module load to protect stdio/IPC transports. Adding `console.log` to the entrypoint will produce no output. Use the Winston logger or write to a file instead.
+**Important**: The entry prologue (`src/cli/entry-prologue.ts`, the first import of both `src/index.ts` and the npm bundle's `cli-entry.ts`) silences every `console` method before anything else loads, to protect stdio/IPC transports. Adding `console.log` anywhere in the server will produce no output. Use the Winston logger or write to a file instead.
 
 **Debug Steps**:
 
 ```typescript
-// In src/index.ts — use the logger, not console (console is silenced)
+// Anywhere in the server — use the logger, not console (console is silenced by the prologue)
 import fs from 'fs';
 // Write diagnostics to a file since console output is suppressed
 fs.appendFileSync('/tmp/mcp-debug-startup.log',
@@ -533,7 +542,9 @@ Note: SSE transport is deprecated in favor of `mcp-debugger http` (the recommend
 ```bash
 # Query the built-in health endpoint (default port 3001)
 curl http://localhost:3001/health
-# Returns: { "status": "ok", "mode": "http", "connections": N, "sessions": [...] }
+# Returns: { "status": "ok", "mode": "http", "listening": { "address", "port" }, "connections": N,
+#            "sessions": [<Mcp-Session-Id>…],
+#            "details": [{ "id", "openStreams", "streamLost", "idleMs", "debugSessions": [{ "id", "name", "language", "state" }] }] }
 ```
 
 ## Debugging Checklists

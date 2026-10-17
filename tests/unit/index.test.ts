@@ -20,6 +20,17 @@ vi.mock('../../src/cli/version.js');
 vi.mock('../../src/cli/commands/doctor/index.js', () => ({
   handleDoctorCommand: vi.fn().mockResolvedValue(1)
 }));
+vi.mock('../../src/cli/http-command.js', () => ({
+  handleHttpCommand: vi.fn().mockResolvedValue(undefined)
+}));
+vi.mock('../../src/cli/commands/check-rust-binary.js', () => ({
+  handleCheckRustBinaryCommand: vi.fn().mockResolvedValue(undefined)
+}));
+
+// Read right after the import, before any beforeEach clears the mocks: had
+// importing src/index.ts auto-run main() (its main-module heuristic matching
+// a test worker's argv[1]), createCLI would have been called by now.
+const createCliCallsAtImport = vi.mocked(setup.createCLI).mock.calls.length;
 
 describe('index.ts', () => {
   let mockLogger: any;
@@ -165,6 +176,51 @@ describe('index.ts', () => {
       }
     });
 
+    it('wires the http command to its lazily imported handler and kicks the janitor (issues #400, #399)', async () => {
+      let capturedHandler: any;
+      vi.mocked(setup.setupHttpCommand).mockImplementation((program, handler) => {
+        capturedHandler = handler;
+      });
+      const { handleHttpCommand } = await import('../../src/cli/http-command.js');
+
+      await main();
+      expect(setup.setupHttpCommand).toHaveBeenCalledWith(mockProgram, expect.any(Function));
+      expect(runStartupJanitor).not.toHaveBeenCalled();
+
+      const options = { port: '3001', logLevel: 'debug' };
+      await capturedHandler(options);
+
+      expect(handleHttpCommand).toHaveBeenCalledWith(options, { logger: mockLogger, serverFactory: createDebugMcpServer });
+      expect(runStartupJanitor).toHaveBeenCalledTimes(1);
+    });
+
+    it('wires check-rust-binary straight to its handler, with no janitor', async () => {
+      let capturedHandler: any;
+      vi.mocked(setup.setupCheckRustBinaryCommand).mockImplementation((program, handler) => {
+        capturedHandler = handler;
+      });
+      const { handleCheckRustBinaryCommand } = await import('../../src/cli/commands/check-rust-binary.js');
+
+      await main();
+      await capturedHandler('/opt/codelldb/adapter/codelldb', { json: true });
+
+      expect(handleCheckRustBinaryCommand).toHaveBeenCalledWith('/opt/codelldb/adapter/codelldb', { json: true });
+      expect(runStartupJanitor).not.toHaveBeenCalled();
+    });
+
+    it('a failing startup janitor never fails the command that kicked it', async () => {
+      let capturedHandler: any;
+      vi.mocked(setup.setupStdioCommand).mockImplementation((program, handler) => {
+        capturedHandler = handler;
+      });
+      vi.mocked(runStartupJanitor).mockRejectedValue(new Error('process scan failed'));
+
+      await main();
+      await expect(capturedHandler({ logLevel: 'debug' })).resolves.toBeUndefined();
+
+      expect(stdioCommand.handleStdioCommand).toHaveBeenCalledTimes(1);
+    });
+
     it('should pass correct handlers to setupSSECommand', async () => {
       let capturedHandler: any;
       vi.mocked(setup.setupSSECommand).mockImplementation((program, handler) => {
@@ -190,7 +246,9 @@ describe('index.ts', () => {
 
   describe('Module execution guard', () => {
     it('should not execute main when imported as a module', async () => {
-      // The import at the top of this file should not trigger main execution
+      // The import at the top of this file must not trigger main(): the
+      // count is taken at import time, before beforeEach clears the mocks.
+      expect(createCliCallsAtImport).toBe(0);
       expect(mockProgram.parseAsync).not.toHaveBeenCalled();
     });
   });

@@ -109,10 +109,13 @@ async function bundleCLI() {
 
   const bundlePath = path.join(distDir, 'cli.mjs');
   const wrapperPath = path.join(distDir, 'cli');
+  // process.stderr, not console.error: the bundle's prologue silences the
+  // console as soon as it starts evaluating, so a module that throws at load
+  // after that would otherwise exit 1 without a word.
   const wrapperContent = [
     '#!/usr/bin/env node',
     "import('./cli.mjs').catch((error) => {",
-    "  console.error('Fatal error:', error);",
+    "  process.stderr.write(`mcp-debugger: fatal error: ${error && error.stack ? error.stack : String(error)}\\n`);",
     '  process.exit(1);',
     '});',
     ''

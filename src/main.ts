@@ -12,7 +12,7 @@
  */
 import { createLogger } from './utils/logger.js';
 import { runStartupJanitor } from './utils/startup-janitor.js';
-import { DebugMcpServer } from './server.js';
+import { DebugMcpServer, type DebugMcpServerOptions } from './server.js';
 import { setupErrorHandlers } from './cli/error-handlers.js';
 import {
   createCLI,
@@ -26,10 +26,7 @@ import { handleStdioCommand } from './cli/stdio-command.js';
 import { handleCheckRustBinaryCommand } from './cli/commands/check-rust-binary.js';
 import { getVersion } from './cli/version.js';
 
-export interface ServerOptions {
-  logLevel?: string;
-  logFile?: string;
-}
+export type ServerOptions = DebugMcpServerOptions;
 
 // Factory function for creating server instances
 export function createDebugMcpServer(options: ServerOptions): DebugMcpServer {
