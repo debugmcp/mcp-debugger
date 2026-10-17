@@ -421,6 +421,17 @@ describe('ProxyProcessAdapter exit ordering with an open IPC channel (issue #729
     expect(proxyProcess.signalCode).toBeNull();
   });
 
+  it('reports the code once close delivers the held exit, when close beats disconnect', () => {
+    child.connected = true;
+    const { proxyProcess } = adapterWithOrder();
+
+    child.emit('exit', 3, null);
+    expect(proxyProcess.exitCode).toBeNull();
+
+    child.emit('close', 3, null);
+    expect(proxyProcess.exitCode).toBe(3);
+  });
+
   it('reports a held signal exit only once the drain cap delivers it', () => {
     vi.useFakeTimers();
     child.connected = true;
