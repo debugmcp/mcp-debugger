@@ -19,13 +19,20 @@
  * mtime says "older", not "different".
  *
  * Never throws and never logs above debug. Known limits, by design:
- * - tsconfig `extends` is not followed; only the nearest file's own
- *   `compilerOptions` count (a parse failure means "no tsconfig").
+ * - tsconfig `extends` is not followed; the walk takes the nearest config
+ *   that names an `outDir` (so a per-directory config that only extends the
+ *   root one is walked past), and a parse failure means "no tsconfig".
  * - `sourceMappingURL` is not parsed: the map must be `<generated>.map`
  *   beside the generated file. A generated file without one is skipped —
  *   without a map js-debug cannot bind the source through it either.
  * - A source touched without a content change reads as newer (the sentence
- *   says "may"); a watch build that rewrites identical output clears it.
+ *   says "may"), and an incremental build (`tsc -b`, `--incremental`,
+ *   `tsc --watch`) does not re-emit for an unchanged content hash, so only a
+ *   full rebuild or a real edit clears that one.
+ * - Whether the process actually loads the compiled file is not known here:
+ *   a runner that transforms sources in memory (tsx, ts-node, vitest) is
+ *   exempted by the caller from what it knows of the launch, not by this
+ *   module.
  */
 import * as path from 'path';
 import { fileURLToPath } from 'url';
@@ -52,6 +59,19 @@ export interface BuildStalenessOptions {
   maxConfigBytes?: number;
   /** Directory levels walked above the source for tsconfig.json / package.json (default 16). */
   maxWalkDepth?: number;
+  /**
+   * How long a located compiled file is remembered before the candidates are
+   * tried again (default 60 s), so a more specific artefact that appears
+   * later — `dist/` added beside an old in-place build — displaces the one
+   * found first. Within the window the map's stamp still guards it.
+   */
+  discoveryTtlMs?: number;
+  /**
+   * How long a directory's tsconfig/package context is remembered (default
+   * 30 s), so a source with no compiled file at all does not pay the walk on
+   * every stop answer.
+   */
+  contextTtlMs?: number;
 }
 
 /** The slice of a policy this module reads. */
@@ -78,11 +98,18 @@ interface TsconfigSummary {
   rootDir?: string;
 }
 
+interface DirectoryContext {
+  tsconfig?: TsconfigSummary;
+  packageDir?: string;
+}
+
 const DEFAULT_OPTIONS: Required<BuildStalenessOptions> = {
   toleranceMs: 2000,
   maxMapBytes: 5 * 1024 * 1024,
   maxConfigBytes: 1024 * 1024,
-  maxWalkDepth: 16
+  maxWalkDepth: 16,
+  discoveryTtlMs: 60_000,
+  contextTtlMs: 30_000
 };
 
 export class BuildStalenessChecker {
@@ -90,11 +117,13 @@ export class BuildStalenessChecker {
   /**
    * Discovery is the expensive part (the walk and the map read) and the
    * answer rarely changes, so it is remembered per policy and source and
-   * revalidated against the map's stamp on every hit. The two mtimes that
-   * decide staleness are read fresh on every call, so a rebuild is seen at
-   * once.
+   * revalidated against the map's stamp on every hit, for at most
+   * `discoveryTtlMs`. The two mtimes that decide staleness are read fresh on
+   * every call, so a rebuild is seen at once.
    */
-  private readonly discoveries = new LRUCache<string, Discovery>({ max: 50 });
+  private readonly discoveries: LRUCache<string, Discovery>;
+  /** The walk's answer per source directory, for at most `contextTtlMs`. */
+  private readonly contexts: LRUCache<string, DirectoryContext>;
 
   constructor(
     private readonly fileSystem: IFileSystem,
@@ -102,6 +131,8 @@ export class BuildStalenessChecker {
     options: BuildStalenessOptions = {}
   ) {
     this.options = { ...DEFAULT_OPTIONS, ...options };
+    this.discoveries = new LRUCache<string, Discovery>({ max: 50, ttl: this.options.discoveryTtlMs });
+    this.contexts = new LRUCache<string, DirectoryContext>({ max: 50, ttl: this.options.contextTtlMs });
   }
 
   /**
@@ -111,9 +142,8 @@ export class BuildStalenessChecker {
    * current, or any read failed.
    */
   async check(sourcePath: string, policy: GeneratedFilePolicy): Promise<StaleBuildEvidence | undefined> {
-    const hook = policy.generatedFileCandidates;
     // The applicability probe: no filesystem work for a source this adapter never compiles.
-    if (!hook || hook({ sourcePath }) === undefined) {
+    if (!policy.generatedFileCandidates || policy.generatedFileCandidates({ sourcePath }) === undefined) {
       return undefined;
     }
     const key = `${policy.name}\0${sourcePath}`;
@@ -145,6 +175,7 @@ export class BuildStalenessChecker {
 
   clearCache(): void {
     this.discoveries.clear();
+    this.contexts.clear();
   }
 
   private async discover(key: string, sourcePath: string, policy: GeneratedFilePolicy): Promise<Discovery | undefined> {
@@ -156,7 +187,7 @@ export class BuildStalenessChecker {
       }
       this.discoveries.delete(key);
     }
-    const context = await this.gatherContext(sourcePath);
+    const context = await this.contextFor(path.dirname(sourcePath));
     const candidates = policy.generatedFileCandidates!({ sourcePath, ...context }) ?? [];
     for (const candidate of candidates) {
       if (!(await this.stamp(candidate))) {
@@ -182,29 +213,49 @@ export class BuildStalenessChecker {
     return undefined;
   }
 
-  /** The nearest tsconfig.json (parsed) and the nearest package.json directory above the source. */
-  private async gatherContext(sourcePath: string): Promise<{ tsconfig?: TsconfigSummary; packageDir?: string }> {
-    let dir = path.dirname(sourcePath);
-    let tsconfig: TsconfigSummary | undefined;
-    let tsconfigSeen = false;
+  private async contextFor(dir: string): Promise<DirectoryContext> {
+    const cached = this.contexts.get(dir);
+    if (cached) {
+      return cached;
+    }
+    const context = await this.gatherContext(dir);
+    this.contexts.set(dir, context);
+    return context;
+  }
+
+  /**
+   * The tsconfig that places this directory's output and the nearest
+   * package.json directory. The nearest tsconfig is not always the one: a
+   * per-directory config that only `extends` the root names no `outDir`, so
+   * the walk goes on until a config with one appears (or the top), and falls
+   * back to the nearest parsed config when none does.
+   */
+  private async gatherContext(start: string): Promise<DirectoryContext> {
+    let dir = start;
+    let nearest: TsconfigSummary | undefined;
+    let placing: TsconfigSummary | undefined;
     let packageDir: string | undefined;
     for (let depth = 0; depth < this.options.maxWalkDepth; depth++) {
-      if (!tsconfigSeen) {
+      if (!placing) {
         const file = path.join(dir, 'tsconfig.json');
         if (await this.fileSystem.pathExists(file)) {
-          tsconfigSeen = true;
-          tsconfig = await this.readTsconfig(file, dir);
+          const parsed = await this.readTsconfig(file, dir);
+          nearest ??= parsed;
+          if (parsed?.outDir !== undefined) {
+            placing = parsed;
+          }
         }
       }
       if (packageDir === undefined && (await this.fileSystem.pathExists(path.join(dir, 'package.json')))) {
         packageDir = dir;
       }
       const parent = path.dirname(dir);
-      if ((tsconfigSeen && packageDir !== undefined) || parent === dir) {
+      if ((placing && packageDir !== undefined) || parent === dir) {
         break;
       }
       dir = parent;
     }
+    const tsconfig = placing ?? nearest;
     return { ...(tsconfig ? { tsconfig } : {}), ...(packageDir !== undefined ? { packageDir } : {}) };
   }
 

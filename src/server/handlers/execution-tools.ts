@@ -93,13 +93,17 @@ export const stepTool: ToolHandler = async (ctx, args, toolName) => {
     if (location) {
       response.location = location;
 
-      // Try to get line context
-      const context = await readLineContext(ctx, location.file, location.line, 'step result');
+      // The line context, and whether the running code may be an older
+      // build than the source it was read from (issue #938); two reads of
+      // the same file, overlapped.
+      const [context, staleBuild] = await Promise.all([
+        readLineContext(ctx, location.file, location.line, 'step result'),
+        describeStaleBuild(ctx, args.sessionId, location.file, 'step result')
+      ]);
       if (context) {
         response.context = context;
       }
-      // The context and line are the source's; the running code may be an older build (issue #938).
-      appendNote(response, await describeStaleBuild(ctx, args.sessionId, location.file, 'step result'));
+      appendNote(response, staleBuild);
     }
 
     return jsonResult(response);
@@ -182,11 +186,14 @@ export const waitForStopTool: ToolHandler = async (ctx, args, _toolName, extra) 
     }
     if (data?.location) {
       response.location = data.location;
-      const context = await readLineContext(ctx, data.location.file, data.location.line, 'wait_for_stop result');
+      const [context, staleBuild] = await Promise.all([
+        readLineContext(ctx, data.location.file, data.location.line, 'wait_for_stop result'),
+        describeStaleBuild(ctx, args.sessionId, data.location.file, 'wait_for_stop result')
+      ]);
       if (context) {
         response.context = context;
       }
-      appendNote(response, await describeStaleBuild(ctx, args.sessionId, data.location.file, 'wait_for_stop result'));
+      appendNote(response, staleBuild);
     }
     return jsonResult(response);
   } catch (error) {
@@ -236,11 +243,14 @@ export async function handlePause(ctx: ToolContext, args: { sessionId: string; t
     }
     if (data?.location) {
       response.location = data.location;
-      const context = await readLineContext(ctx, data.location.file, data.location.line, 'pause result');
+      const [context, staleBuild] = await Promise.all([
+        readLineContext(ctx, data.location.file, data.location.line, 'pause result'),
+        describeStaleBuild(ctx, args.sessionId, data.location.file, 'pause result')
+      ]);
       if (context) {
         response.context = context;
       }
-      appendNote(response, await describeStaleBuild(ctx, args.sessionId, data.location.file, 'pause result'));
+      appendNote(response, staleBuild);
     }
     return jsonResult(response);
   } catch (error) {

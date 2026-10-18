@@ -41,6 +41,7 @@ import path from 'path';
 import { SimpleFileChecker, createSimpleFileChecker, FileExistenceResult } from './utils/simple-file-checker.js';
 import { LineReader, createLineReader } from './utils/line-reader.js';
 import { BuildStalenessChecker, createBuildStalenessChecker } from './session/breakpoints/build-staleness.js';
+import { isForeignAttach } from './server/handlers/shared.js';
 import { isLanguageDisabled } from './utils/language-config.js';
 import { ValidationResultCache } from './utils/language-availability.js';
 import { isContainerMode, isContainerRuntime, getWorkspaceRoot } from './utils/container-path-utils.js';
@@ -355,7 +356,7 @@ export class DebugMcpServer implements ToolContext {
     // never claims a file is absent that was never looked for.
     const session = this.sessionManager.getSession(sessionId);
     if (session?.attachMode) {
-      const local = session.attachLocality === 'pid' || session.attachLocality === 'loopback';
+      const local = !isForeignAttach(session);
       let detail: string | undefined;
       if (local) {
         const fileCheck = await this.fileChecker.checkExists(file);

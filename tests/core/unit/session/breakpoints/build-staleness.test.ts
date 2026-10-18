@@ -196,6 +196,19 @@ describe('BuildStalenessChecker', () => {
       expect((await new BuildStalenessChecker(fs, logger()).check(SRC, JsDebugAdapterPolicy))?.generatedFile).toBe(at('src', 'a.js'));
     });
 
+    it('walks past a tsconfig that names no outDir to one that does (a per-directory config extending the root)', async () => {
+      const files: Record<string, FakeFile> = {
+        [TSCONFIG]: { content: '{ "compilerOptions": { "outDir": "build-out", "rootDir": "src" } }', mtimeMs: 1 },
+        [at('src', 'tsconfig.json')]: { content: '{ "extends": "../tsconfig.json", "include": ["."] }', mtimeMs: 1 },
+        [SRC]: { content: '', mtimeMs: 20_000 },
+        [at('build-out', 'a.js')]: { content: '', mtimeMs: 10_000 },
+        [at('build-out', 'a.js.map')]: { content: map(['../src/a.ts']), mtimeMs: 10_000 }
+      };
+      const { fs } = makeFs(files);
+
+      expect((await new BuildStalenessChecker(fs, logger()).check(SRC, JsDebugAdapterPolicy))?.generatedFile).toBe(at('build-out', 'a.js'));
+    });
+
     it('uses the conventional out dirs under the nearest package.json when no tsconfig is found', async () => {
       const files: Record<string, FakeFile> = {
         [at('package.json')]: { content: '{}', mtimeMs: 1 },
@@ -269,6 +282,40 @@ describe('BuildStalenessChecker', () => {
       expect(await checker.check(SRC, JsDebugAdapterPolicy)).toBeDefined();
       files[DIST] = { ...files[DIST], mtimeMs: 30_000 };
       files[DIST_MAP] = { ...files[DIST_MAP], mtimeMs: 30_000 };
+      expect(await checker.check(SRC, JsDebugAdapterPolicy)).toBeUndefined();
+    });
+
+    it('remembers the directory context, so a source with no compiled file does not pay the walk on every stop', async () => {
+      const files: Record<string, FakeFile> = {
+        [at('package.json')]: { content: '{}', mtimeMs: 1 },
+        [SRC]: { content: '', mtimeMs: 20_000 }
+      };
+      const { fs, pathExists } = makeFs(files);
+      const checker = new BuildStalenessChecker(fs, logger());
+
+      expect(await checker.check(SRC, JsDebugAdapterPolicy)).toBeUndefined();
+      const walks = pathExists.mock.calls.length;
+      expect(walks).toBeGreaterThan(0);
+      expect(await checker.check(SRC, JsDebugAdapterPolicy)).toBeUndefined();
+
+      expect(pathExists.mock.calls.length).toBe(walks);
+    });
+
+    it('lets a discovery expire, so a more specific compiled file that appears later displaces a sibling', async () => {
+      const files = tscLayout(20_000, 10_000);
+      delete files[DIST];
+      delete files[DIST_MAP];
+      files[at('src', 'a.js')] = { content: '', mtimeMs: 5_000 };
+      files[at('src', 'a.js.map')] = { content: map(['a.ts']), mtimeMs: 5_000 };
+      const { fs } = makeFs(files);
+      const checker = new BuildStalenessChecker(fs, logger(), { discoveryTtlMs: 1, contextTtlMs: 1 });
+
+      expect((await checker.check(SRC, JsDebugAdapterPolicy))?.generatedFile).toBe(at('src', 'a.js'));
+      files[DIST] = { content: '', mtimeMs: 30_000 };
+      files[DIST_MAP] = { content: map(['../src/a.ts']), mtimeMs: 30_000 };
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // dist/a.js is newer than the source: the warning clears instead of naming the stale sibling.
       expect(await checker.check(SRC, JsDebugAdapterPolicy)).toBeUndefined();
     });
 

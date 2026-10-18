@@ -139,6 +139,22 @@ describe('describeStaleBuild (issue #938)', () => {
     expect(ctx.buildStaleness.check).not.toHaveBeenCalled();
   });
 
+  it('asks nothing when the launched program is a runner under node_modules (vitest, jest, mocha: the sources run in memory)', async () => {
+    ctx.sessionManager.getSession.mockReturnValue({ id: 's1', lastLaunch: { scriptPath: '/app/node_modules/vitest/vitest.mjs' } });
+
+    expect(await describeStaleBuild(ctx, 's1', '/app/src/a.ts', 'breakpoint')).toBeUndefined();
+    expect(ctx.buildStaleness.check).not.toHaveBeenCalled();
+  });
+
+  it('ignores a stale lastLaunch on an attach session: the attached process is not the launched one', async () => {
+    ctx.sessionManager.getSession.mockReturnValue({
+      id: 's1', attachMode: true, attachLocality: 'pid', lastLaunch: { scriptPath: '/app/src/main.ts' }
+    });
+
+    expect(await describeStaleBuild(ctx, 's1', '/app/src/a.ts', 'breakpoint')).toMatch(/may be stale/);
+    expect(ctx.buildStaleness.check).toHaveBeenCalledWith('/app/src/a.ts', JsDebugAdapterPolicy);
+  });
+
   it('asks nothing for an unknown session', async () => {
     ctx.sessionManager.getSession.mockReturnValue(undefined);
 
