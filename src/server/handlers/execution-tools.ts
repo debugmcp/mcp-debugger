@@ -7,7 +7,7 @@ import { isTerminalSessionState } from '@debugmcp/shared';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import type { DebugResult, StepResultData } from '../../session/session-manager-core.js';
 import { requireSessionId } from '../tool-validation.js';
-import { readLineContext } from './shared.js';
+import { appendNote, describeStaleBuild, readLineContext } from './shared.js';
 import {
   failureResult,
   jsonResult,
@@ -93,11 +93,17 @@ export const stepTool: ToolHandler = async (ctx, args, toolName) => {
     if (location) {
       response.location = location;
 
-      // Try to get line context
-      const context = await readLineContext(ctx, location.file, location.line, 'step result');
+      // The line context, and whether the running code may be an older
+      // build than the source it was read from (issue #938); two reads of
+      // the same file, overlapped.
+      const [context, staleBuild] = await Promise.all([
+        readLineContext(ctx, location.file, location.line, 'step result'),
+        describeStaleBuild(ctx, args.sessionId, location.file, 'step result')
+      ]);
       if (context) {
         response.context = context;
       }
+      appendNote(response, staleBuild);
     }
 
     return jsonResult(response);
@@ -180,10 +186,14 @@ export const waitForStopTool: ToolHandler = async (ctx, args, _toolName, extra) 
     }
     if (data?.location) {
       response.location = data.location;
-      const context = await readLineContext(ctx, data.location.file, data.location.line, 'wait_for_stop result');
+      const [context, staleBuild] = await Promise.all([
+        readLineContext(ctx, data.location.file, data.location.line, 'wait_for_stop result'),
+        describeStaleBuild(ctx, args.sessionId, data.location.file, 'wait_for_stop result')
+      ]);
       if (context) {
         response.context = context;
       }
+      appendNote(response, staleBuild);
     }
     return jsonResult(response);
   } catch (error) {
@@ -233,10 +243,14 @@ export async function handlePause(ctx: ToolContext, args: { sessionId: string; t
     }
     if (data?.location) {
       response.location = data.location;
-      const context = await readLineContext(ctx, data.location.file, data.location.line, 'pause result');
+      const [context, staleBuild] = await Promise.all([
+        readLineContext(ctx, data.location.file, data.location.line, 'pause result'),
+        describeStaleBuild(ctx, args.sessionId, data.location.file, 'pause result')
+      ]);
       if (context) {
         response.context = context;
       }
+      appendNote(response, staleBuild);
     }
     return jsonResult(response);
   } catch (error) {

@@ -196,7 +196,8 @@ export type {
   HandshakeProxy,
   HandshakeContext,
   QueuedDapCommand,
-  PendingStopContext
+  PendingStopContext,
+  GeneratedFileContext
 } from './interfaces/adapter-policy.js';
 export { BREAKPOINT_STOP_REASONS, USER_BREAK_REASONS } from './interfaces/adapter-policy.js';
 export {

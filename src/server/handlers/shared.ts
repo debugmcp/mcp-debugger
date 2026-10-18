@@ -13,6 +13,8 @@ import { validateBreakOnExceptions } from '../tool-validation.js';
 import { debuggerOffWhy } from '../../session/debugger-off.js';
 import type { DebugResult } from '../../session/session-manager-core.js';
 import type { AttachRequest } from '../../session/attach/attach-controller.js';
+import type { ManagedSession } from '../../session/session-store.js';
+import { ErrorMessages } from '../../utils/error-messages.js';
 
 /**
  * Whether a session's recorded `lastStop` describes where it is now. The
@@ -74,6 +76,74 @@ export async function readLineContext(
     });
   }
   return undefined;
+}
+
+/**
+ * Whether a session is an attach whose target is not on this host, so a
+ * file that exists here is not the debuggee's source (issue #899). A local
+ * attach — by `processId` or to a loopback endpoint — is not foreign, and
+ * neither is any launch. The one spelling for the breakpoint echo, the
+ * stale-build check and the server's breakpoint path resolution.
+ */
+export function isForeignAttach(session: Pick<ManagedSession, 'attachMode' | 'attachLocality'>): boolean {
+  return session.attachMode === true && session.attachLocality !== 'pid' && session.attachLocality !== 'loopback';
+}
+
+const NODE_MODULES_SEGMENT = /[\\/]node_modules[\\/]/;
+
+/**
+ * The stale-build sentence for a location the session's adapter binds
+ * through a compiled file (issue #938), or nothing. Advisory like
+ * `readLineContext`: every failure is a debug line under the caller's label.
+ *
+ * Nothing is said when the session is unknown; when the attach target is not
+ * on this host (`isForeignAttach`); when the policy declares no generated
+ * files; or when the launched program says the sources run as they are, so
+ * there is no build to be stale — the program is itself a source the policy
+ * compiles (tsx, ts-node, Node's type stripping) or a runner installed under
+ * `node_modules` (vitest, jest, mocha, which transform sources in memory).
+ * That launch knowledge is read only while the session is a launch: an
+ * attach in the same session debugs some other process, whatever was
+ * launched before. Before a launch nothing says how the program will run,
+ * and the sentence's hedge carries that.
+ */
+export async function describeStaleBuild(
+  ctx: ToolContext,
+  sessionId: string,
+  file: string,
+  logLabel: string
+): Promise<string | undefined> {
+  try {
+    const session = ctx.sessionManager.getSession(sessionId);
+    if (!session || isForeignAttach(session)) {
+      return undefined;
+    }
+    const policy = ctx.sessionManager.getSessionPolicy(sessionId);
+    if (!policy.generatedFileCandidates) {
+      return undefined;
+    }
+    const program = session.attachMode === true ? undefined : session.lastLaunch?.scriptPath;
+    if (
+      program !== undefined &&
+      (NODE_MODULES_SEGMENT.test(program) || policy.generatedFileCandidates({ sourcePath: program }) !== undefined)
+    ) {
+      return undefined;
+    }
+    const evidence = await ctx.buildStaleness.check(file, policy);
+    return evidence ? ErrorMessages.staleGeneratedFile(evidence) : undefined;
+  } catch (error) {
+    ctx.logger.debug(`Could not check build staleness for ${logLabel}`, { file, error });
+    return undefined;
+  }
+}
+
+/** Space-join `note` onto a response's existing `note`, or set it; nothing for an absent note. */
+export function appendNote(response: Record<string, unknown>, note: string | undefined): void {
+  if (!note) {
+    return;
+  }
+  const existing = response.note;
+  response.note = typeof existing === 'string' && existing.length > 0 ? `${existing} ${note}` : note;
 }
 
 /**

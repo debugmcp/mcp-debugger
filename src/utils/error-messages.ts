@@ -181,6 +181,24 @@ export const ErrorMessages = {
     `the session will report 'paused' once the stop lands. Call wait_for_stop to block until then.`,
 
   /**
+   * The compiled file a source-mapped location binds through is older than
+   * the source the caller named (issue #938). Hedged on purpose: mtime says
+   * "older", not "different". The set_breakpoint warning and the stop-answer
+   * note are this one sentence.
+   * Used in: src/server/handlers/shared.ts (describeStaleBuild)
+   */
+  staleGeneratedFile: (evidence: {
+    sourceFile: string;
+    sourceMtimeMs: number;
+    generatedFile: string;
+    generatedMtimeMs: number;
+  }) =>
+    `The compiled file the debugger binds this location through may be stale: ${evidence.generatedFile} ` +
+    `(modified ${new Date(evidence.generatedMtimeMs).toISOString()}) is older than ${evidence.sourceFile} ` +
+    `(modified ${new Date(evidence.sourceMtimeMs).toISOString()}). The line and content shown come from the ` +
+    'newer source and may not be the statement that runs. Rebuild, then relaunch or re-attach.',
+
+  /**
    * A stop landed where no frame of the shown stack is program code (issue
    * #904): js-debug's pause on an idle server lands on a sourceless
    * `<anonymous>` frame between event-loop dispatches (issue #900); a Windows

@@ -13,7 +13,7 @@ import {
 import type { FunctionBreakpointRemoval } from '../../session/session-manager-operations.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { requireSessionId, type WithSessionId } from '../tool-validation.js';
-import { debuggerOffWhyFor, readLineContext } from './shared.js';
+import { debuggerOffWhyFor, describeStaleBuild, isForeignAttach, readLineContext } from './shared.js';
 import { failureResult, jsonResult, sessionErrorResultOrThrow, type ToolResult } from '../tool-result.js';
 
 /**
@@ -192,13 +192,15 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): P
     // not the debuggee's source then, and an answer that refuses content
     // addressing for that reason must not quote the file anyway.
     const attachSession = ctx.sessionManager.getSession(args.sessionId);
-    const hostFileIsForeign =
-      attachSession?.attachMode === true &&
-      attachSession.attachLocality !== 'pid' &&
-      attachSession.attachLocality !== 'loopback';
-    const context = hostFileIsForeign
-      ? undefined
-      : await readLineContext(ctx, breakpoint.file, breakpoint.line, 'breakpoint');
+    const hostFileIsForeign = attachSession !== undefined && isForeignAttach(attachSession);
+    // The build behind the echo (issue #938): when the adapter binds this
+    // file through a compiled one that is older than it, the content and the
+    // line are the newer source's, not the running code's. Say so. Both are
+    // independent reads of the same file, overlapped.
+    const [context, staleBuild] = await Promise.all([
+      hostFileIsForeign ? undefined : readLineContext(ctx, breakpoint.file, breakpoint.line, 'breakpoint'),
+      describeStaleBuild(ctx, args.sessionId, breakpoint.file, 'breakpoint')
+    ]);
 
     // Loud snapping (issue #271): if the adapter bound the
     // breakpoint to a different line than requested, say so
@@ -213,8 +215,10 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): P
       : undefined;
 
     const recordMessage = messageBesideWarning(breakpoint);
+    // The stale-build sentence follows a snap on purpose: a move onto an
+    // unlikely line is the symptom, the old build its likely cause.
     const warnings = [
-      recordMessage, logPointGate.warning, syncWarning, snapWarning,
+      recordMessage, logPointGate.warning, syncWarning, snapWarning, staleBuild,
       debuggerOffNote(ctx, args.sessionId, breakpoint.verified)
     ].filter(Boolean);
     const result: ToolResult = jsonResult({
@@ -236,7 +240,7 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): P
       ...(hostFileIsForeign
         ? {
             note:
-              attachSession.attachLocality === 'remote'
+              attachSession?.attachLocality === 'remote'
                 ? 'content and context omitted: the target of this attach is not on the mcp-debugger host, so the host file is not the debuggee\'s source'
                 : 'content and context omitted: the target host of this attach is not known, so the host file may not be the debuggee\'s source'
           }
