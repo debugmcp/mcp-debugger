@@ -622,6 +622,8 @@ describe('JavaScript Debugging - module-load breakpoints in source-mapped TypeSc
   type Kind = typeof KINDS[number];
 
   const dirs = new Map<Kind, string>();
+  /** Extra transpile dirs made by single cases (the #938 stale-build one), removed with the others. */
+  const extraDirs: string[] = [];
   let mcpClient: Client | null = null;
   let transport: StdioClientTransport | null = null;
   let sessionId: string | null = null;
@@ -678,7 +680,7 @@ describe('JavaScript Debugging - module-load breakpoints in source-mapped TypeSc
     if (transport) {
       await transport.close();
     }
-    for (const dir of dirs.values()) {
+    for (const dir of [...dirs.values(), ...extraDirs]) {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -701,6 +703,8 @@ describe('JavaScript Debugging - module-load breakpoints in source-mapped TypeSc
         arguments: { sessionId, file: tsFile, line: MODULE_LOAD_LINE }
       }));
       expect(bp.success, JSON.stringify(bp)).toBe(true);
+      // A build made from this very source is current: no stale-build warning (issue #938).
+      expect(String(bp.warning ?? ''), JSON.stringify(bp)).not.toMatch(/may be stale/);
 
       const start = parseSdkToolResult(await mcpClient!.callTool({
         name: 'start_debugging',
@@ -734,6 +738,69 @@ describe('JavaScript Debugging - module-load breakpoints in source-mapped TypeSc
       await mcpClient!.callTool({ name: 'continue_execution', arguments: { sessionId } });
     }, 60000);
   }
+
+  /**
+   * The stale-build warning (issue #938). The build is aged rather than the
+   * source future-dated: an older build beside an unchanged source is exactly
+   * what an edit-without-rebuild leaves behind, and because the content is the
+   * same js-debug binds through the old map precisely as in the fresh case
+   * above, so the only difference the debugger sees is the mtimes. The stop
+   * note is read from a wait_for_stop after a continue, not from a step: the
+   * fixture is ES2015 CommonJS, so a step from line 91's downlevelled `await`
+   * can land in the `__awaiter` trampoline rather than on a `.ts` line.
+   */
+  it('warns on set_breakpoint, and notes on the stop, when the generated .js is older than the .ts (issue #938)', async () => {
+    /** `console.log("Test 4: Complex data structures");` — a plain line after the awaits. */
+    const LATER_LINE = 96;
+    const dir = transpile('commonjs');
+    extraDirs.push(dir);
+    const tsFile = path.join(dir, 'typescript_test.ts');
+    const jsFile = path.join(dir, 'typescript_test.js');
+    const past = new Date(Date.now() - 60_000);
+    fs.utimesSync(jsFile, past, past);
+    fs.utimesSync(`${jsFile}.map`, past, past);
+
+    const created = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: { language: 'javascript', name: 'js-938-stale' }
+    }));
+    sessionId = created.sessionId as string;
+
+    const bp = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'set_breakpoint',
+      arguments: { sessionId, file: tsFile, line: MODULE_LOAD_LINE }
+    }));
+    expect(bp.success, JSON.stringify(bp)).toBe(true);
+    const warning = String(bp.warning ?? '');
+    expect(warning, JSON.stringify(bp)).toMatch(/may be stale/);
+    expect(warning).toMatch(/typescript_test\.js \(modified \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+    expect(warning).toMatch(/typescript_test\.ts \(modified \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+    // The echo itself is still the source's line, as before.
+    expect(String(bp.content ?? '')).toContain('await fetchData(1)');
+
+    const later = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'set_breakpoint',
+      arguments: { sessionId, file: tsFile, line: LATER_LINE }
+    }));
+    expect(later.success, JSON.stringify(later)).toBe(true);
+
+    const start = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'start_debugging',
+      arguments: { sessionId, scriptPath: jsFile, args: [], dapLaunchArgs: { stopOnEntry: false, justMyCode: true } }
+    }));
+    expect(start.state, JSON.stringify(start)).toBe('paused');
+
+    await mcpClient!.callTool({ name: 'continue_execution', arguments: { sessionId } });
+    const stop = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'wait_for_stop',
+      arguments: { sessionId, timeout: 20_000 }
+    }));
+    expect(stop.state, JSON.stringify(stop)).toBe('paused');
+    expect((stop.location as { line?: number } | undefined)?.line, JSON.stringify(stop)).toBe(LATER_LINE);
+    expect(String(stop.note ?? ''), JSON.stringify(stop)).toMatch(/may be stale/);
+
+    await mcpClient!.callTool({ name: 'continue_execution', arguments: { sessionId } });
+  }, 60000);
 
   /**
    * Where a mapped .ts request is reported bound (issue #700): with maps on

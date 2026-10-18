@@ -5,7 +5,7 @@
  * DebugMcpServer delegates that no longer exist.)
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { SessionLifecycleState } from '@debugmcp/shared';
+import { JsDebugAdapterPolicy, SessionLifecycleState } from '@debugmcp/shared';
 import {
   handlePause,
   handleListThreads,
@@ -215,6 +215,60 @@ describe('execution tool handlers', () => {
 
       expect(JSON.parse(result.content[0].text).success).toBe(false);
     });
+  });
+
+  describe('build-staleness note on the stop answers (issue #938)', () => {
+    const location = { file: '/app/src/a.ts', line: 3 };
+    const evidence = {
+      sourceFile: '/app/src/a.ts',
+      sourceMtimeMs: 20_000,
+      generatedFile: '/app/dist/a.js',
+      generatedMtimeMs: 10_000,
+      mapFile: '/app/dist/a.js.map'
+    };
+    const answers: Array<[string, (data: Record<string, unknown>) => Promise<{ content: Array<{ text: string }> }>]> = [
+      ['step_over', (data) => {
+        ctx.sessionManager.stepOver.mockResolvedValue({ success: true, state: 'paused', data });
+        return stepTool(ctx, { sessionId: 'test-session' }, 'step_over');
+      }],
+      ['wait_for_stop', (data) => {
+        ctx.sessionManager.waitForStop.mockResolvedValue({ success: true, state: 'paused', data });
+        return waitForStopTool(ctx, { sessionId: 'test-session' }, 'wait_for_stop');
+      }],
+      ['pause_execution', (data) => {
+        ctx.sessionManager.pause = vi.fn().mockResolvedValue({ success: true, state: 'paused', data });
+        return handlePause(ctx, { sessionId: 'test-session' });
+      }]
+    ];
+
+    beforeEach(() => {
+      ctx.sessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE,
+        lastLaunch: { scriptPath: '/app/dist/main.js' }
+      });
+      ctx.sessionManager.getSessionPolicy.mockReturnValue(JsDebugAdapterPolicy);
+      ctx.lineReader = { getLineContext: vi.fn().mockResolvedValue(null) };
+    });
+
+    for (const [tool, answer] of answers) {
+      it(`${tool} appends the stale-build sentence to its note when the compiled file is older than the source`, async () => {
+        ctx.buildStaleness = { check: vi.fn().mockResolvedValue(evidence) };
+
+        const payload = JSON.parse((await answer({ message: 'Paused', location, note: 'existing' })).content[0].text);
+
+        expect(ctx.buildStaleness.check).toHaveBeenCalledWith('/app/src/a.ts', JsDebugAdapterPolicy);
+        expect(payload.note).toMatch(/^existing The compiled file .* may be stale/);
+      });
+
+      it(`${tool} leaves its note exactly as it was when the build is current`, async () => {
+        ctx.buildStaleness = { check: vi.fn().mockResolvedValue(undefined) };
+
+        const payload = JSON.parse((await answer({ message: 'Paused', location, note: 'existing' })).content[0].text);
+
+        expect(payload.note).toBe('existing');
+      });
+    }
   });
 
   describe('landing fields on the step and wait_for_stop answers (issue #904)', () => {

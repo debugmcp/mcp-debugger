@@ -206,6 +206,7 @@ In the shipped default addressing mode (`content`), `sessionId` is the only para
 - Setting breakpoints on non-executable lines (comments, blank lines, declarations) may cause unexpected behavior
 - Executable lines that work well: assignments, function calls, conditionals, returns
 - The top-level `content` field echoes the bound line's text (same as `context.lineContent`)
+- `content`, `context` and `line` come from the file you named. When the adapter binds that file through a compiled one — a TypeScript source under js-debug, bound through the generated `.js` and its `.js.map` — and that compiled file is older than the source, the response adds a `warning`: "The compiled file the debugger binds this location through may be stale: `dist/x.js` (modified …) is older than `src/x.ts` (modified …)…" (issue #938). The compiled file is found from the nearest `tsconfig.json`'s `outDir`/`rootDir`, then the conventional `dist|build|out|lib` under the nearest `package.json`, then a sibling `.js`, and only a candidate whose `.js.map` names the source counts. The check compares mtimes only, so it is a hedge, not a verdict; a launch whose program is itself a `.ts` (tsx, ts-node, type stripping) is exempt. The same sentence appears as `note` on `step_*`, `wait_for_stop` and `pause_execution` answers whose location is such a file
 
 #### Content assertions and loud snapping
 

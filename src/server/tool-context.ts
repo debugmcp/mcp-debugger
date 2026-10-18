@@ -29,6 +29,7 @@ import type { FrameSummary, StackTraceResult } from '../session/session-manager-
 import type { VariableTruncationSummary } from '../session/variable-caps.js';
 import type { SimpleFileChecker, FileExistenceResult } from '../utils/simple-file-checker.js';
 import type { LineReader } from '../utils/line-reader.js';
+import type { BuildStalenessChecker } from '../session/breakpoints/build-staleness.js';
 import type { ValidationResultCache } from '../utils/language-availability.js';
 import type { OutputResourceNotifier } from './output-resources.js';
 import type { LanguageMetadata } from './language-discovery.js';
@@ -60,6 +61,8 @@ export interface ToolContext {
   readonly logger: ILogger;
   readonly fileChecker: SimpleFileChecker;
   readonly lineReader: LineReader;
+  /** Is the file a breakpoint or stop names newer than the compiled file the debugger binds it through? (issue #938) */
+  readonly buildStaleness: BuildStalenessChecker;
   readonly environment: IEnvironment;
   readonly validationCache: ValidationResultCache;
   readonly outputResources: OutputResourceNotifier;

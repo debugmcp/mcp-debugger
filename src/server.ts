@@ -40,6 +40,7 @@ import { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';
 import { SimpleFileChecker, createSimpleFileChecker, FileExistenceResult } from './utils/simple-file-checker.js';
 import { LineReader, createLineReader } from './utils/line-reader.js';
+import { BuildStalenessChecker, createBuildStalenessChecker } from './session/breakpoints/build-staleness.js';
 import { isLanguageDisabled } from './utils/language-config.js';
 import { ValidationResultCache } from './utils/language-availability.js';
 import { isContainerMode, isContainerRuntime, getWorkspaceRoot } from './utils/container-path-utils.js';
@@ -95,6 +96,8 @@ export class DebugMcpServer implements ToolContext {
   public readonly fileChecker: SimpleFileChecker;
   /** @internal ToolContext dependency; read live by the tool handlers. */
   public readonly lineReader: LineReader;
+  /** @internal ToolContext dependency; read live by the tool handlers. */
+  public readonly buildStaleness: BuildStalenessChecker;
   /** @internal ToolContext dependency; read live by the tool handlers. */
   public readonly environment: IEnvironment;
 
@@ -721,6 +724,12 @@ export class DebugMcpServer implements ToolContext {
 
     // Create line reader
     this.lineReader = createLineReader(
+      dependencies.fileSystem,
+      this.logger
+    );
+
+    // The stale-build check behind the breakpoint echo and the stop notes (issue #938)
+    this.buildStaleness = createBuildStalenessChecker(
       dependencies.fileSystem,
       this.logger
     );

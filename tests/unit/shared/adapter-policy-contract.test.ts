@@ -436,6 +436,22 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
     }
   });
 
+  it('declares generated-file candidates only where sources compile through source maps (issue #938)', () => {
+    // js-debug binds a .ts breakpoint through the generated .js's map, so its
+    // policy knows where tsc emits; every other adapter runs the file the
+    // breakpoint names (or rebuilds it itself) and declares nothing.
+    const sourceMapped = new Set<DebugLanguage>([DebugLanguage.JAVASCRIPT]);
+    const hook = policy.generatedFileCandidates;
+    if (sourceMapped.has(language)) {
+      expect(typeof hook).toBe('function');
+      // The applicability probe: a source the adapter does not compile answers undefined.
+      expect(hook!({ sourcePath: '/p/a.py' })).toBeUndefined();
+      expect(hook!({ sourcePath: '/p/a.ts' })).toEqual([expect.stringMatching(/a\.js$/)]);
+    } else {
+      expect(hook).toBeUndefined();
+    }
+  });
+
   // ===== 8. State lifecycle =====
 
   it('creates a fresh, uninitialized state on every call', () => {

@@ -409,6 +409,25 @@ open on its port (Node never closes it by itself) — a later attach by PID or b
   program stops on is reported verified from that stop even when js-debug
   never sent a verification for it (observed for `node_modules` files) —
   issue #673
+- **When the build is older than the source.** `set_breakpoint` echoes the
+  line from the `.ts` you named, while js-debug binds it through the
+  generated `.js`'s map; with a stale `dist/` the two disagree and every
+  later line number is off. The server therefore looks for the compiled file
+  behind a `.ts`/`.tsx`/`.mts`/`.cts` location — the nearest `tsconfig.json`'s
+  `outDir` (relative to `rootDir` when set, then with a leading `src/`
+  stripped, then relative to the tsconfig directory), the conventional
+  `dist|build|out|lib` under the nearest `package.json` when no tsconfig
+  names an outDir, then a sibling `.js` — keeps the first one whose `.js.map`
+  lists the source, and when that file's mtime is older than the source's
+  (by more than 2 s) adds a `warning` to the `set_breakpoint` answer and a
+  `note` to the `step_*`/`wait_for_stop`/`pause_execution` answers naming both
+  files and their mtimes (issue #938). It is mtime-only and hedged ("may be
+  stale"). A launch whose program is itself a `.ts` (tsx, ts-node, Node's
+  type stripping) is exempt: the source runs as is. An attach to such a
+  process is not yet exempt (the attach path does not learn the script until
+  the `/json/list` title is carried through). Limits: tsconfig `extends` is
+  not followed, and the map must be `<generated>.map` beside the generated
+  file (`sourceMappingURL` is not parsed)
 - Debuggee exit codes are captured via an injected preload (js-debug itself
   never emits a DAP `exited` event), so `exitCode` is unavailable in two
   cases: attach mode (the target's environment is not under mcp-debugger's

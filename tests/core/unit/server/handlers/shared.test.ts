@@ -2,9 +2,11 @@
  * Helpers shared by more than one tool handler.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Variable } from '@debugmcp/shared';
+import { JsDebugAdapterPolicy, Variable } from '@debugmcp/shared';
 import {
+  appendNote,
   attachRequestFromArgs,
+  describeStaleBuild,
   readLineContext,
   redactionSummary,
   variablePayloadExtras,
@@ -79,6 +81,104 @@ describe('successWarning', () => {
     expect(successWarning({ success: false, data: { warning: 'dropped foo' } })).toBeUndefined();
     expect(successWarning({ success: true })).toBeUndefined();
     expect(successWarning({ success: true, data: {} })).toBeUndefined();
+  });
+});
+
+describe('describeStaleBuild (issue #938)', () => {
+  let ctx: any;
+  const evidence = {
+    sourceFile: '/app/src/a.ts',
+    sourceMtimeMs: Date.UTC(2026, 9, 16, 23, 9, 0),
+    generatedFile: '/app/dist/a.js',
+    generatedMtimeMs: Date.UTC(2026, 9, 16, 23, 4, 0),
+    mapFile: '/app/dist/a.js.map'
+  };
+
+  beforeEach(() => {
+    ctx = createMockToolContext();
+    ctx.buildStaleness = { check: vi.fn().mockResolvedValue(evidence) };
+    ctx.sessionManager.getSession.mockReturnValue({ id: 's1', lastLaunch: { scriptPath: '/app/dist/main.js' } });
+    ctx.sessionManager.getSessionPolicy.mockReturnValue(JsDebugAdapterPolicy);
+  });
+
+  it('names both files and their mtimes in a hedged sentence when the build is older than the source', async () => {
+    const sentence = await describeStaleBuild(ctx, 's1', '/app/src/a.ts', 'breakpoint');
+
+    expect(ctx.buildStaleness.check).toHaveBeenCalledWith('/app/src/a.ts', JsDebugAdapterPolicy);
+    expect(sentence).toMatch(/may be stale/);
+    expect(sentence).toContain('/app/dist/a.js');
+    expect(sentence).toContain('/app/src/a.ts');
+    expect(sentence).toContain('2026-10-16T23:04');
+    expect(sentence).toContain('2026-10-16T23:09');
+  });
+
+  it('says nothing when the checker finds nothing', async () => {
+    ctx.buildStaleness.check.mockResolvedValue(undefined);
+
+    expect(await describeStaleBuild(ctx, 's1', '/app/src/a.ts', 'breakpoint')).toBeUndefined();
+  });
+
+  it('asks nothing for a policy without the hook', async () => {
+    ctx.sessionManager.getSessionPolicy.mockReturnValue({});
+
+    expect(await describeStaleBuild(ctx, 's1', '/app/src/a.ts', 'breakpoint')).toBeUndefined();
+    expect(ctx.buildStaleness.check).not.toHaveBeenCalled();
+  });
+
+  it('asks nothing for an attach whose target is not on this host: the host file is not the debuggee\'s source', async () => {
+    ctx.sessionManager.getSession.mockReturnValue({ id: 's1', attachMode: true, attachLocality: 'remote' });
+
+    expect(await describeStaleBuild(ctx, 's1', '/app/src/a.ts', 'breakpoint')).toBeUndefined();
+    expect(ctx.buildStaleness.check).not.toHaveBeenCalled();
+  });
+
+  it('asks nothing when the program itself is a TypeScript source (tsx, ts-node, type stripping: no build to be stale)', async () => {
+    ctx.sessionManager.getSession.mockReturnValue({ id: 's1', lastLaunch: { scriptPath: '/app/src/main.ts' } });
+
+    expect(await describeStaleBuild(ctx, 's1', '/app/src/a.ts', 'breakpoint')).toBeUndefined();
+    expect(ctx.buildStaleness.check).not.toHaveBeenCalled();
+  });
+
+  it('asks nothing for an unknown session', async () => {
+    ctx.sessionManager.getSession.mockReturnValue(undefined);
+
+    expect(await describeStaleBuild(ctx, 'nope', '/app/src/a.ts', 'breakpoint')).toBeUndefined();
+    expect(ctx.buildStaleness.check).not.toHaveBeenCalled();
+  });
+
+  it('swallows a checker failure and logs it under the caller label', async () => {
+    ctx.buildStaleness.check.mockRejectedValue(new Error('disk on fire'));
+
+    expect(await describeStaleBuild(ctx, 's1', '/app/src/a.ts', 'step result')).toBeUndefined();
+    expect(ctx.logger.debug).toHaveBeenCalledWith(
+      'Could not check build staleness for step result',
+      expect.objectContaining({ file: '/app/src/a.ts' })
+    );
+  });
+
+  it('swallows a policy lookup failure', async () => {
+    ctx.sessionManager.getSessionPolicy.mockImplementation(() => { throw new Error('no such session'); });
+
+    expect(await describeStaleBuild(ctx, 's1', '/app/src/a.ts', 'breakpoint')).toBeUndefined();
+  });
+});
+
+describe('appendNote', () => {
+  it('space-joins onto an existing note, sets an absent one, and leaves the response alone for nothing', () => {
+    const withNote: Record<string, unknown> = { note: 'existing' };
+    appendNote(withNote, 'more');
+    expect(withNote.note).toBe('existing more');
+
+    const without: Record<string, unknown> = {};
+    appendNote(without, 'first');
+    expect(without.note).toBe('first');
+
+    const untouched: Record<string, unknown> = { note: 'existing' };
+    appendNote(untouched, undefined);
+    expect(untouched).toEqual({ note: 'existing' });
+    const empty: Record<string, unknown> = {};
+    appendNote(empty, undefined);
+    expect('note' in empty).toBe(false);
   });
 });
 

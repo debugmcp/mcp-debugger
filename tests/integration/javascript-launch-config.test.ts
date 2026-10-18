@@ -11,9 +11,13 @@ interface Result {
   success: boolean; state?: string; warning?: string; message?: string; error?: string;
   data?: { warning?: string; stopOnEntrySuccessful?: boolean; exitCode?: number; dryRun?: boolean };
 }
-interface Listed { id: string; state: string; exitCode?: number; lastStop?: { reason?: string } }
+interface LastStop { reason?: string; rawReason?: string; threadId?: number; description?: string; text?: string; timestamp?: number }
+interface Listed { id: string; state: string; exitCode?: number; lastStop?: LastStop }
 interface Waited extends Result {
-  pending?: boolean; exitCode?: number; lastStop?: { reason?: string }; location?: { file: string; line: number };
+  pending?: boolean; exitCode?: number; lastStop?: LastStop; location?: { file: string; line: number };
+}
+interface BreakpointRecord {
+  id: string; line: number; verified: boolean; verifiedBy?: string; adapterId?: number; message?: string; boundFile?: string; boundLine?: number;
 }
 let server: StdioClientHandle;
 
@@ -183,9 +187,20 @@ describe('JavaScript launch configuration', () => {
     const launched: Waited = await launch({ dapLaunchArgs: { stopOnEntry: false } });
     const stopped = launched.pending ? await call<Waited>('wait_for_stop', { timeout: 20_000 }) : launched;
     expect(stopped.state, JSON.stringify(stopped)).toBe('paused');
-    expect((await listedSession())?.lastStop?.reason).toBe('breakpoint');
-    const stack = await call<Result & { stackFrames: Array<{ line: number }> }>('get_stack_trace');
-    expect(stack.stackFrames[0]?.line).toBe(9);
+    // Issue #875: twice under load this case stopped at target.cjs:2 (the
+    // program's first statement) as a `breakpoint` stop. The core never
+    // auto-continues a breakpoint stop, so that is js-debug's own module-entry
+    // breakpoint (set at 1:1 for every file with a user breakpoint) reported
+    // as a hit instead of being swallowed. Record what tells that apart from
+    // a line-9 breakpoint bound elsewhere: a leaked entry break carries an
+    // empty hitBreakpointIds, leaving the line-9 record verified by the
+    // adapter, not by the hit (`verifiedBy: 'adapter'`, not `'hit'`).
+    const session = await listedSession();
+    const listed = await call<Result & { breakpoints: BreakpointRecord[] }>('list_breakpoints');
+    const stack = await call<Result & { stackFrames: Array<{ line: number; file?: string; name?: string }> }>('get_stack_trace');
+    const evidence = JSON.stringify({ launched, stopped, lastStop: session?.lastStop, breakpoints: listed.breakpoints, top: stack.stackFrames[0] });
+    expect(session?.lastStop?.reason, evidence).toBe('breakpoint');
+    expect(stack.stackFrames[0]?.line, evidence).toBe(9);
   }, 60_000);
 
   it('wait_for_stop answers pending on an idle program, then blocks until a breakpoint set on it is hit (issue #849)', async () => {

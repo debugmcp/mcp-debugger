@@ -7,7 +7,7 @@ import { isTerminalSessionState } from '@debugmcp/shared';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import type { DebugResult, StepResultData } from '../../session/session-manager-core.js';
 import { requireSessionId } from '../tool-validation.js';
-import { readLineContext } from './shared.js';
+import { appendNote, describeStaleBuild, readLineContext } from './shared.js';
 import {
   failureResult,
   jsonResult,
@@ -98,6 +98,8 @@ export const stepTool: ToolHandler = async (ctx, args, toolName) => {
       if (context) {
         response.context = context;
       }
+      // The context and line are the source's; the running code may be an older build (issue #938).
+      appendNote(response, await describeStaleBuild(ctx, args.sessionId, location.file, 'step result'));
     }
 
     return jsonResult(response);
@@ -184,6 +186,7 @@ export const waitForStopTool: ToolHandler = async (ctx, args, _toolName, extra) 
       if (context) {
         response.context = context;
       }
+      appendNote(response, await describeStaleBuild(ctx, args.sessionId, data.location.file, 'wait_for_stop result'));
     }
     return jsonResult(response);
   } catch (error) {
@@ -237,6 +240,7 @@ export async function handlePause(ctx: ToolContext, args: { sessionId: string; t
       if (context) {
         response.context = context;
       }
+      appendNote(response, await describeStaleBuild(ctx, args.sessionId, data.location.file, 'pause result'));
     }
     return jsonResult(response);
   } catch (error) {

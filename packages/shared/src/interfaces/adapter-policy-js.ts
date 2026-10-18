@@ -6,7 +6,7 @@
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import * as path from 'path';
-import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction, QueuedDapCommand, StopReasonContext, PendingStopContext, UnresolvedSourceContext } from './adapter-policy.js';
+import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction, QueuedDapCommand, StopReasonContext, PendingStopContext, UnresolvedSourceContext, GeneratedFileContext } from './adapter-policy.js';
 import {
   jsLaunchBlackboxesNodeModules,
   jsLaunchSkipsNodeInternals,
@@ -42,6 +42,33 @@ export const JS_SCOPE_KINDS = {
   closure: ['Closure', 'Closure:'],
   module: ['Script', 'Module', 'module']
 } as const;
+
+/**
+ * The TypeScript sources js-debug binds through a source map, and what tsc
+ * emits for each (issue #938). `.tsx` under `jsx: preserve` emits `.jsx`,
+ * which is not a candidate; a declaration file is never run.
+ */
+const TS_GENERATED_EXTENSION: Readonly<Record<string, string>> = {
+  '.ts': '.js',
+  '.tsx': '.js',
+  '.mts': '.mjs',
+  '.cts': '.cjs'
+};
+const DECLARATION_FILE = /\.d\.[mc]?ts$/i;
+/** Output directories tried under the nearest package when no tsconfig names an outDir. */
+const CONVENTIONAL_OUT_DIRS = ['dist', 'build', 'out', 'lib'] as const;
+
+/** `file` relative to `base` when it lies inside it, else undefined. */
+function relativeInside(base: string, file: string): string | undefined {
+  const rel = path.relative(base, file);
+  return rel === '' || rel.startsWith('..') || path.isAbsolute(rel) ? undefined : rel;
+}
+
+/** `a/b.ts` for `src/a/b.ts`; undefined when the path does not start with a `src` segment. */
+function withoutLeadingSrc(rel: string): string | undefined {
+  const [head, ...rest] = rel.split(/[\\/]/);
+  return head === 'src' && rest.length > 0 ? path.join(...rest) : undefined;
+}
 
 /** Exact match, or prefix match for a name written with a trailing ':'. */
 function matchesScopeNames(scope: DebugProtocol.Scope, names: readonly string[]): boolean {
@@ -339,6 +366,70 @@ export const JsDebugAdapterPolicy = {
     (info.attachMode
       ? 'attach with adapterConfig.sourceMaps: false to see the generated .js paths instead.'
       : 'relaunch with adapterLaunchConfig.sourceMaps: false to see the generated .js paths instead.'),
+
+  /**
+   * Where tsc would have emitted the file a TypeScript source binds through
+   * (issue #938), most specific first: the tsconfig's `outDir` (relative to
+   * `rootDir` when set; then with a leading `src/` stripped, which is what
+   * tsc's inferred root yields for the common layout; then relative to the
+   * tsconfig directory), the conventional `dist|build|out|lib` under the
+   * nearest package when no tsconfig names an outDir, and the sibling `.js`
+   * last. The core keeps the first one whose `.map` names the source, so a
+   * wrong guess that exists costs one map read and is never trusted.
+   */
+  generatedFileCandidates: (info: GeneratedFileContext): string[] | undefined => {
+    const source = info.sourcePath;
+    const ext = path.extname(source).toLowerCase();
+    const outExt = TS_GENERATED_EXTENSION[ext];
+    if (!outExt || DECLARATION_FILE.test(source)) {
+      return undefined;
+    }
+    const emitted = (dir: string, rel: string): string => path.join(dir, rel.slice(0, -ext.length) + outExt);
+    const candidates: string[] = [];
+    const { tsconfig, packageDir } = info;
+    if (tsconfig?.outDir !== undefined) {
+      const outDir = path.resolve(tsconfig.dir, tsconfig.outDir);
+      const fromRoot = tsconfig.rootDir !== undefined
+        ? relativeInside(path.resolve(tsconfig.dir, tsconfig.rootDir), source)
+        : undefined;
+      if (fromRoot) {
+        candidates.push(emitted(outDir, fromRoot));
+      }
+      const fromConfig = relativeInside(tsconfig.dir, source);
+      if (fromConfig) {
+        const stripped = withoutLeadingSrc(fromConfig);
+        if (stripped) {
+          candidates.push(emitted(outDir, stripped));
+        }
+        candidates.push(emitted(outDir, fromConfig));
+      }
+    } else if (packageDir !== undefined) {
+      const fromPackage = relativeInside(packageDir, source);
+      if (fromPackage) {
+        const stripped = withoutLeadingSrc(fromPackage);
+        for (const dir of CONVENTIONAL_OUT_DIRS) {
+          const outDir = path.join(packageDir, dir);
+          if (stripped) {
+            candidates.push(emitted(outDir, stripped));
+          }
+          candidates.push(emitted(outDir, fromPackage));
+        }
+      }
+    }
+    candidates.push(emitted(path.dirname(source), path.basename(source)));
+    // Dedupe on a case-folded, normalised key: the rootDir and src/-stripped
+    // forms coincide for the common layout. No two candidates from this
+    // arithmetic differ by case alone, so folding is safe on every platform.
+    const seen = new Set<string>();
+    return candidates.filter(candidate => {
+      const key = path.normalize(candidate).toLowerCase();
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+  },
 
   /**
    * Filter stack frames to optionally remove Node.js internals and

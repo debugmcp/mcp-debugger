@@ -13,7 +13,7 @@ import {
 import type { FunctionBreakpointRemoval } from '../../session/session-manager-operations.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { requireSessionId, type WithSessionId } from '../tool-validation.js';
-import { debuggerOffWhyFor, readLineContext } from './shared.js';
+import { debuggerOffWhyFor, describeStaleBuild, readLineContext } from './shared.js';
 import { failureResult, jsonResult, sessionErrorResultOrThrow, type ToolResult } from '../tool-result.js';
 
 /**
@@ -200,6 +200,11 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): P
       ? undefined
       : await readLineContext(ctx, breakpoint.file, breakpoint.line, 'breakpoint');
 
+    // The build behind the echo (issue #938): when the adapter binds this
+    // file through a compiled one that is older than it, the content above
+    // and the line are the newer source's, not the running code's. Say so.
+    const staleBuild = await describeStaleBuild(ctx, args.sessionId, breakpoint.file, 'breakpoint');
+
     // Loud snapping (issue #271): if the adapter bound the
     // breakpoint to a different line than requested, say so
     // prominently instead of silently reporting the moved line.
@@ -213,8 +218,10 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): P
       : undefined;
 
     const recordMessage = messageBesideWarning(breakpoint);
+    // The stale-build sentence follows a snap on purpose: a move onto an
+    // unlikely line is the symptom, the old build its likely cause.
     const warnings = [
-      recordMessage, logPointGate.warning, syncWarning, snapWarning,
+      recordMessage, logPointGate.warning, syncWarning, snapWarning, staleBuild,
       debuggerOffNote(ctx, args.sessionId, breakpoint.verified)
     ].filter(Boolean);
     const result: ToolResult = jsonResult({

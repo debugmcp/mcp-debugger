@@ -233,6 +233,21 @@ export interface UnresolvedSourceContext {
   attachMode: boolean;
 }
 
+/** Context passed to AdapterPolicy.generatedFileCandidates (issue #938). */
+export interface GeneratedFileContext {
+  /** The source path as the breakpoint or stop names it (absolute, server-resolved). */
+  sourcePath: string;
+  /**
+   * The nearest tsconfig.json above the source when the core found and parsed
+   * one: its directory and the two emit options that place outputs, as
+   * written (relative to `dir` unless absolute). Absent on the applicability
+   * probe, when none was found, or when it did not parse.
+   */
+  tsconfig?: { dir: string; outDir?: string; rootDir?: string };
+  /** Directory of the nearest package.json above the source, when one exists. */
+  packageDir?: string;
+}
+
 export interface AdapterPolicy {
   /**
    * Identifying name for diagnostics (e.g., 'default', 'js-debug')
@@ -443,6 +458,25 @@ export interface AdapterPolicy {
    * absent means the adapter has nothing to add.
    */
   describeUnresolvedSource?(info: UnresolvedSourceContext): string | undefined;
+
+  /**
+   * Where the compiled file a source-mapped location binds through may live
+   * (issue #938), most specific first. A `set_breakpoint` on `src/x.ts`
+   * echoes the line from that file, while js-debug binds it through
+   * `dist/x.js`'s source map; when the build is older than the source the
+   * two disagree and the echo is a confident lie. The adapter answers under
+   * the source path, so the generated file never appears in any record: the
+   * core locates it with this hook, verifies the candidate through its
+   * `.map`, and compares mtimes.
+   *
+   * The core probes with `{ sourcePath }` alone first: `undefined` means the
+   * path is not one this adapter compiles (a plain `.js` under js-debug,
+   * every file under every other adapter) and no filesystem work follows;
+   * otherwise it gathers the tsconfig/package context and asks again. Pure
+   * path arithmetic, no filesystem. Optional: absent means the adapter never
+   * binds through a generated file.
+   */
+  generatedFileCandidates?(info: GeneratedFileContext): string[] | undefined;
 
   /**
    * Return true to drop a DAP 'output' event that is known adapter-internal

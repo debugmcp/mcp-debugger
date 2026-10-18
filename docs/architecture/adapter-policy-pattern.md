@@ -86,6 +86,9 @@ export interface AdapterPolicy {
   isInternalFrame?(frame: StackFrame): boolean;
   // What a frame flagged unresolvedSource IS under this debugger, for the get_stack_trace note (issue #816)
   describeUnresolvedSource?(info: { count: number; files: readonly string[]; attachMode: boolean }): string | undefined;
+  // Where the compiled file a source-mapped location binds through may live, most specific first (issue #938);
+  // undefined for a source this adapter does not compile. Pure path arithmetic: the core does the fs work.
+  generatedFileCandidates?(info: { sourcePath: string; tsconfig?: { dir: string; outDir?: string; rootDir?: string }; packageDir?: string }): string[] | undefined;
 
   // === Variable extraction (optional) ===
   extractLocalVariables?(stackFrames, scopes, variables, includeSpecial?): LocalVariableExtraction;
