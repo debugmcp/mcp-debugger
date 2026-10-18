@@ -818,7 +818,7 @@ describe('JsDebugAdapterPolicy.generatedFileCandidates (issue #938)', () => {
       sourcePath: at('pkg', 'src', 'a.ts'),
       tsconfig: { dir: at('pkg'), outDir: at('out-abs'), rootDir: 'src' }
     });
-    expect(candidates[0]).toBe(at('out-abs', 'a.js'));
+    expect(candidates?.[0]).toBe(at('out-abs', 'a.js'));
   });
 
   it('tries the conventional out dirs under the package when no tsconfig names an outDir', () => {
