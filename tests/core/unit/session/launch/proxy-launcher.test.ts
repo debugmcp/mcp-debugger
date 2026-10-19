@@ -548,6 +548,60 @@ describe('ProxyLauncher.start', () => {
     expect(h.ctx.logger.warn).toHaveBeenCalledWith(expect.stringContaining('transformAttachConfig failed'));
   });
 
+  it('records the transformed launch on the session: the program the engine runs, not the script asked for (issue #950)', async () => {
+    const BIN = path.join('/work', 'app', 'bin', 'app');
+    const adapter = new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE });
+    adapter.transformLaunchConfig.mockImplementation(async config => ({ ...config, program: BIN, mode: 'exec' }));
+    const h = makeHarness({ adapter, proxyManager: new MockProxyManager() });
+    const session = makeSession();
+
+    await h.launcher.start(session, { scriptPath: SCRIPT });
+
+    expect(session.transformedLaunch).toEqual({
+      program: BIN,
+      launchConfig: expect.objectContaining({ program: BIN, mode: 'exec' })
+    });
+  });
+
+  it('resolves a relative transformed program against the launch cwd, and records the config without env or envFile (issue #950)', async () => {
+    const adapter = new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE });
+    adapter.transformLaunchConfig.mockImplementation(async config => ({
+      ...config,
+      program: path.join('bin', 'Debug', 'app.dll'),
+      env: { SECRET_TOKEN: 'ghp_x' },
+      envFile: path.join('/work', 'app', '.env')
+    }));
+    const h = makeHarness({ adapter, proxyManager: new MockProxyManager() });
+    const session = makeSession();
+
+    await h.launcher.start(session, { scriptPath: SCRIPT });
+
+    // The session layer defaulted cwd to the script's directory; the engine resolves the program against it, and so does the record.
+    expect(session.transformedLaunch?.program).toBe(path.resolve(path.dirname(SCRIPT), 'bin', 'Debug', 'app.dll'));
+    expect(session.transformedLaunch?.launchConfig).toMatchObject({ cwd: path.dirname(SCRIPT) });
+    expect(session.transformedLaunch?.launchConfig).not.toHaveProperty('env');
+    expect(session.transformedLaunch?.launchConfig).not.toHaveProperty('envFile');
+    expect(JSON.stringify(session.transformedLaunch)).not.toContain('ghp_x');
+  });
+
+  it('clears the recorded launch when the transform fails, and on an attach (issue #950)', async () => {
+    const adapter = new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE });
+    const h = makeHarness({ adapter, proxyManager: new MockProxyManager() });
+    const session = makeSession();
+    await h.launcher.start(session, { scriptPath: SCRIPT });
+    expect(session.transformedLaunch?.program).toBe(SCRIPT);
+
+    adapter.transformLaunchConfig.mockRejectedValueOnce(new Error('compile failed'));
+    await expect(h.launcher.start(session, { scriptPath: SCRIPT })).rejects.toThrow('compile failed');
+    expect(session.transformedLaunch).toBeUndefined();
+
+    await h.launcher.start(session, { scriptPath: SCRIPT });
+    expect(session.transformedLaunch?.program).toBe(SCRIPT);
+    adapter.withAttachSupport();
+    await h.launcher.start(session, { scriptPath: 'attach://pid', dapLaunchArgs: launchArgs({ request: 'attach' }) });
+    expect(session.transformedLaunch).toBeUndefined();
+  });
+
   it('builds the adapter command from the resolved executable and hands the plan to the ProxyManager', async () => {
     const adapter = new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE });
     const proxyManager = new MockProxyManager();

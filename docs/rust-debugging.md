@@ -309,6 +309,10 @@ In container mode (`MCP_CONTAINER=true`) the adapter auto-derives a best-effort 
 
 Alternatively, build inside the container (or with `RUSTFLAGS="--remap-path-prefix=/home/user/proj=/workspace"`) so the DWARF paths match the mount directly.
 
+## Stale builds
+
+For a `.rs` program the adapter runs `cargo build` when a file under `src/` or `Cargo.toml` is newer than the binary; for an explicit `program` path or a `cargo` configuration it runs the binary as it stands. Either way CodeLLDB binds a breakpoint through the binary's DWARF while the echo comes from the source on disk. Once `start_debugging` has named the binary, mcp-debugger compares the two for every `.rs` it is asked about: a `set_breakpoint` in a source newer than the binary carries a `warning` naming both files and their mtimes, and `step_*`, `wait_for_stop` and `pause_execution` carry the same sentence as `note` (issue #950) — including files the rebuild check does not walk (`build.rs`, `examples/`, `tests/`, path dependencies). Not covered: attach sessions, and sources under the toolchain (std under the sysroot or `~/.rustup`, the remapped `/rustc/<hash>/` form, cargo registry crates) — a `rustup update` makes them newer than every binary and no rebuild of your program would clear them; the `start_debugging` answer and `get_stack_trace` do not carry the sentence yet (#951). Rebuild to clear it.
+
 ## Troubleshooting
 
 ### Breakpoints Not Hit

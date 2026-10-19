@@ -26,6 +26,8 @@ import {
   type AdapterPolicy,
   type ChildSessionStrategy,
   type ExceptionBreakMode,
+  type GeneratedFileCandidate,
+  type GeneratedFileContext,
   type LocalVariableExtraction,
   type StackFrame,
   type Variable
@@ -33,6 +35,61 @@ import {
 
 /** The abstract break-on-exception modes `resolveExceptionFilters` accepts. */
 const EXCEPTION_MODES: ExceptionBreakMode[] = ['none', 'uncaught', 'all'];
+
+interface GeneratedFileHook {
+  /** What links the source to the candidate: a `.map` naming it, or the launch that runs it. */
+  linkedBy: GeneratedFileCandidate['linkedBy'];
+  /** A probe this policy answers (a source it compiles, with the launch where one is needed). */
+  probe: GeneratedFileContext;
+  /** A path one of the answered candidates must match. */
+  candidate: RegExp;
+}
+
+/**
+ * Where each language's policy says a source binds through a compiled file
+ * (issues #938/#950). js-debug proves its candidates through the `.js.map`;
+ * the compiled languages name the artefact the transformed launch runs (so a
+ * probe without a launch answers nothing); Java derives the `.class` from the
+ * classpath and the source's directory chain. Python, Ruby, Dart and Mock run
+ * the file the breakpoint names and declare no hook.
+ */
+const GENERATED_FILE_HOOKS: Record<DebugLanguage, GeneratedFileHook | undefined> = {
+  [DebugLanguage.PYTHON]: undefined,
+  [DebugLanguage.RUBY]: undefined,
+  [DebugLanguage.JAVASCRIPT]: { linkedBy: 'sourceMap', probe: { sourcePath: '/p/a.ts' }, candidate: /a\.js$/ },
+  [DebugLanguage.RUST]: {
+    linkedBy: 'launch',
+    probe: { sourcePath: '/p/src/main.rs', program: '/p/target/debug/app', launchConfig: { program: '/p/target/debug/app' } },
+    candidate: /target[\\/]debug[\\/]app$/
+  },
+  [DebugLanguage.GO]: {
+    linkedBy: 'launch',
+    probe: { sourcePath: '/p/main.go', program: '/p/app', launchConfig: { mode: 'exec', program: '/p/app' } },
+    candidate: /[\\/]app$/
+  },
+  [DebugLanguage.JAVA]: {
+    linkedBy: 'launch',
+    probe: { sourcePath: '/p/src/com/x/Foo.java', program: '/p/src/com/x/Foo.java', launchConfig: { classpath: '/p/out', cwd: '/p' } },
+    candidate: /out[\\/]com[\\/]x[\\/]Foo\.class$/
+  },
+  [DebugLanguage.DOTNET]: {
+    linkedBy: 'launch',
+    probe: { sourcePath: '/p/Program.cs', program: '/p/bin/Debug/net8.0/app.dll', launchConfig: { program: '/p/bin/Debug/net8.0/app.dll' } },
+    candidate: /app\.dll$/
+  },
+  [DebugLanguage.CPP]: {
+    linkedBy: 'launch',
+    probe: { sourcePath: '/p/main.cpp', program: '/p/a.out', launchConfig: { program: '/p/a.out' } },
+    candidate: /a\.out$/
+  },
+  [DebugLanguage.COBOL]: {
+    linkedBy: 'launch',
+    probe: { sourcePath: '/p/payroll.cob', program: '/p/dist/payroll.exe', launchConfig: { program: '/p/dist/payroll.exe' } },
+    candidate: /payroll\.exe$/
+  },
+  [DebugLanguage.DART]: undefined,
+  [DebugLanguage.MOCK]: undefined
+};
 
 interface PinnedCapabilities {
   /** `policy.name` — the diagnostics identifier. */
@@ -436,20 +493,29 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
     }
   });
 
-  it('declares generated-file candidates only where sources compile through source maps (issue #938)', () => {
-    // js-debug binds a .ts breakpoint through the generated .js's map, so its
-    // policy knows where tsc emits; every other adapter runs the file the
-    // breakpoint names (or rebuilds it itself) and declares nothing.
-    const sourceMapped = new Set<DebugLanguage>([DebugLanguage.JAVASCRIPT]);
+  it('declares where a source binds through a compiled file, and what links the two (issues #938/#950)', () => {
+    // js-debug binds a .ts breakpoint through the generated .js, proved by its
+    // map; the compiled languages bind through the artefact the transformed
+    // launch names (the binary or DLL the engine runs, the .class on the
+    // classpath), which is known only once a launch exists. Python, Ruby,
+    // Dart and Mock run the file the breakpoint names and declare nothing.
+    const expected = GENERATED_FILE_HOOKS[language];
     const hook = policy.generatedFileCandidates;
-    if (sourceMapped.has(language)) {
-      expect(typeof hook).toBe('function');
-      // The applicability probe: a source the adapter does not compile answers undefined.
-      expect(hook!({ sourcePath: '/p/a.py' })).toBeUndefined();
-      expect(hook!({ sourcePath: '/p/a.ts' })).toEqual([expect.stringMatching(/a\.js$/)]);
-    } else {
+    if (!expected) {
       expect(hook).toBeUndefined();
+      return;
     }
+    expect(typeof hook).toBe('function');
+    const bound = hook!.bind(policy);
+    // No launch and a source nobody compiles: nothing, so no filesystem work follows.
+    expect(bound({ sourcePath: '/p/a.py' })).toBeUndefined();
+    // A launch, but a source this adapter does not compile: the extension gate.
+    expect(bound({ ...expected.probe, sourcePath: '/p/a.py' })).toBeUndefined();
+    const answer = bound(expected.probe);
+    expect(answer, policy.name).toBeDefined();
+    expect(answer!.length).toBeGreaterThan(0);
+    expect(answer!.every(candidate => candidate.linkedBy === expected.linkedBy), JSON.stringify(answer)).toBe(true);
+    expect(answer!.some(candidate => expected.candidate.test(candidate.path)), JSON.stringify(answer)).toBe(true);
   });
 
   // ===== 8. State lifecycle =====

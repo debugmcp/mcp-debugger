@@ -4,10 +4,11 @@
  * Encodes CodeLLDB specific behaviors and variable handling logic.
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import type { AdapterPolicy } from './adapter-policy.js';
+import type { AdapterPolicy, GeneratedFileContext } from './adapter-policy.js';
 import {
   normalizeLldbStopReason,
   extractLldbLocalVariables,
+  lldbGeneratedFileCandidates,
   LLDB_LOCAL_SCOPE_NAMES,
   validateCodeLLDBExecutable,
   matchesLldbAdapterCommand,
@@ -26,6 +27,9 @@ import {
   lldbShouldSuppressOutputEvent,
   lldbAnnotateOutputEvent
 } from './lldb-policy-shared.js';
+
+/** The sources CodeLLDB binds through the binary's DWARF (issue #950). */
+const RUST_SOURCE_EXTENSIONS: ReadonlySet<string> = new Set(['.rs']);
 
 export const RustAdapterPolicy = {
   name: 'rust',
@@ -164,6 +168,12 @@ export const RustAdapterPolicy = {
 
   // Shared CodeLLDB engine: the same Windows detach hazard as cpp (issue #763).
   getAttachBehavior: () => getLldbAttachBehavior(),
+
+  // A `.rs` binds through the binary the launch runs (issue #950): the one
+  // cargo built for a `.rs` program (fresh, so nothing is said — though a
+  // file outside `src/` that `needsRebuild` does not walk now compares too),
+  // or the one a `program` / `cargo:` config named, which nothing rebuilds.
+  generatedFileCandidates: (info: GeneratedFileContext) => lldbGeneratedFileCandidates(info, RUST_SOURCE_EXTENSIONS),
 
   /**
    * Get the configuration for spawning the Rust debug adapter (CodeLLDB).

@@ -273,6 +273,10 @@ Every libcob runtime check (subscript out of bounds, ODO count, reference modifi
 
 The image installs the `gnucobol3` package of its Ubuntu 26.04 base (GnuCOBOL 3.2) alongside g++/OpenJDK/lldb, and preloads the COBOL adapter, so source-file launch compiles in-container (into `.debug-mcp/cobol/` under `/workspace`) and the manifest is generated there. Prebuilt executables must be Linux-compiled for the image's architecture — a Windows/macOS-built binary mounted in is not debuggable by container LLDB (a binary-format fact, as for C/C++). `MCP_CONTAINER=true` implies `MCP_COBOL_ALLOW_PREBUILT`. Attach by PID inside the container needs `--cap-add=SYS_PTRACE` for non-descendant processes. See [Docker support](../docker-support.md).
 
+## Stale builds
+
+A source launch is never reported stale: cobc rebuilds whenever the sources or copybooks change (a content hash, not mtimes), so the adapter's own build under `.debug-mcp/cobol/` is current by construction, and a source saved without a change — newer by mtime, identical by content — is left alone. A prebuilt executable runs as it stands, and the engine binds a breakpoint through its DWARF while the echo comes from the `.cob` on disk. Once `start_debugging` has named such an executable, mcp-debugger compares the two for every program file or copybook (`.cob`, `.cbl`, `.cobol`, `.cpy`) it is asked about: a `set_breakpoint` in a source newer than the executable carries a `warning` naming both files and their mtimes, and `step_*`, `wait_for_stop` and `pause_execution` carry the same sentence as `note` (issue #950). Not covered: `runner: "cobcrun"` (the launched program is GnuCOBOL's loader, not your module) and attach sessions; a dynamically CALLed module's source is compared against the main program's executable, not against its own module; the `start_debugging` answer and `get_stack_trace` do not carry the sentence yet (#951). Rebuild, or pass `forceRebuild: true`, to clear it.
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |

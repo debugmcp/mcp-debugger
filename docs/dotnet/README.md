@@ -225,6 +225,10 @@ dotnet build
 
 .NET debugging is **disabled in Docker** (`DEBUG_MCP_DISABLE_LANGUAGES=go,dotnet`). Host-compiled Windows .NET binaries (with Windows PDB symbols) cannot be debugged inside a Linux container. The container would need the program recompiled for Linux with Portable PDB symbols, which isn't practical for the typical workflow.
 
+## Stale builds
+
+The adapter never builds your project: netcoredbg binds a breakpoint through the DLL's Portable PDB, while `set_breakpoint` and the stop answers echo the line from the `.cs` on disk. When the source is newer than the DLL, the echo names a statement that is not the one that runs. Once `start_debugging` has named the DLL — as `program`, as the apphost `.exe`, or as the first argument when `program` is the `dotnet` host — mcp-debugger compares the two: a `set_breakpoint` whose source is newer than the launched DLL carries a `warning` naming both files and their mtimes, and `step_*`, `wait_for_stop` and `pause_execution` carry the same sentence as `note` (issue #950). The DLL's mtime stands for its PDB too (`dotnet build` writes them together). Not covered: attach sessions (no DLL is known); and a `.cs` that is newer but not part of the build reads as stale too — the sentence says "may". The `start_debugging` answer and `get_stack_trace` do not carry the sentence yet (#951): after the launch, look for it on `set_breakpoint`, `wait_for_stop`, `step_*` and `pause_execution`. Run `dotnet build` to clear it.
+
 ## Troubleshooting
 
 ### "netcoredbg not found" error

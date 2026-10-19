@@ -6,7 +6,8 @@
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import * as path from 'path';
-import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction, QueuedDapCommand, StopReasonContext, PendingStopContext, UnresolvedSourceContext, GeneratedFileContext } from './adapter-policy.js';
+import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction, QueuedDapCommand, StopReasonContext, PendingStopContext, UnresolvedSourceContext, GeneratedFileCandidate, GeneratedFileContext } from './adapter-policy.js';
+import { generatedFileCandidatesFrom } from './adapter-policy.js';
 import {
   jsLaunchBlackboxesNodeModules,
   jsLaunchSkipsNodeInternals,
@@ -374,14 +375,28 @@ export const JsDebugAdapterPolicy = {
    * tsc's inferred root yields for the common layout; then relative to the
    * tsconfig directory), the conventional `dist|build|out|lib` under the
    * nearest package when no tsconfig names an outDir, and the sibling `.js`
-   * last. The core keeps the first one whose `.map` names the source, so a
-   * wrong guess that exists costs one map read and is never trusted.
+   * last. Every candidate is `linkedBy: 'sourceMap'`: the core keeps the
+   * first one whose `.map` names the source, so a wrong guess that exists
+   * costs one map read and is never trusted.
+   *
+   * The launched program says how the sources run (issue #950): one that is
+   * itself a TypeScript source (tsx, ts-node, Node's type stripping) or a
+   * runner under `node_modules` (vitest, jest, mocha) transforms them in
+   * memory, so there is no build to be stale and nothing is answered. Before
+   * a launch nothing says, and the warning's hedge carries that.
    */
-  generatedFileCandidates: (info: GeneratedFileContext): string[] | undefined => {
+  generatedFileCandidates: (info: GeneratedFileContext): GeneratedFileCandidate[] | undefined => {
     const source = info.sourcePath;
     const ext = path.extname(source).toLowerCase();
     const outExt = TS_GENERATED_EXTENSION[ext];
     if (!outExt || DECLARATION_FILE.test(source)) {
+      return undefined;
+    }
+    const program = info.program;
+    if (
+      program !== undefined &&
+      (TS_GENERATED_EXTENSION[path.extname(program).toLowerCase()] !== undefined || NODE_MODULES_SEGMENT.test(program))
+    ) {
       return undefined;
     }
     const emitted = (dir: string, rel: string): string => path.join(dir, rel.slice(0, -ext.length) + outExt);
@@ -417,18 +432,8 @@ export const JsDebugAdapterPolicy = {
       }
     }
     candidates.push(emitted(path.dirname(source), path.basename(source)));
-    // Dedupe on a case-folded, normalised key: the rootDir and src/-stripped
-    // forms coincide for the common layout. No two candidates from this
-    // arithmetic differ by case alone, so folding is safe on every platform.
-    const seen = new Set<string>();
-    return candidates.filter(candidate => {
-      const key = path.normalize(candidate).toLowerCase();
-      if (seen.has(key)) {
-        return false;
-      }
-      seen.add(key);
-      return true;
-    });
+    // The rootDir and src/-stripped forms coincide for the common layout.
+    return generatedFileCandidatesFrom(candidates, 'sourceMap');
   },
 
   /**

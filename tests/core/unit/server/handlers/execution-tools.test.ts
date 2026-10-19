@@ -226,6 +226,8 @@ describe('execution tool handlers', () => {
       generatedMtimeMs: 10_000,
       mapFile: '/app/dist/a.js.map'
     };
+    /** What the adapter's transform handed the engine for the current launch (issue #950). */
+    const launched = { program: '/app/dist/main.js', launchConfig: { program: '/app/dist/main.js' } };
     const answers: Array<[string, (data: Record<string, unknown>) => Promise<{ content: Array<{ text: string }> }>]> = [
       ['step_over', (data) => {
         ctx.sessionManager.stepOver.mockResolvedValue({ success: true, state: 'paused', data });
@@ -245,7 +247,7 @@ describe('execution tool handlers', () => {
       ctx.sessionManager.getSession.mockReturnValue({
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE,
-        lastLaunch: { scriptPath: '/app/dist/main.js' }
+        transformedLaunch: launched
       });
       ctx.sessionManager.getSessionPolicy.mockReturnValue(JsDebugAdapterPolicy);
       ctx.lineReader = { getLineContext: vi.fn().mockResolvedValue(null) };
@@ -257,7 +259,7 @@ describe('execution tool handlers', () => {
 
         const payload = JSON.parse((await answer({ message: 'Paused', location, note: 'existing' })).content[0].text);
 
-        expect(ctx.buildStaleness.check).toHaveBeenCalledWith('/app/src/a.ts', JsDebugAdapterPolicy);
+        expect(ctx.buildStaleness.check).toHaveBeenCalledWith('/app/src/a.ts', JsDebugAdapterPolicy, launched);
         expect(payload.note).toMatch(/^existing The compiled file .* may be stale/);
       });
 

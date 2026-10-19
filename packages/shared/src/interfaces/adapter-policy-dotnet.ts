@@ -34,10 +34,36 @@
  * terminateDebuggee is always false when detaching from attached processes.
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction, StopReasonContext } from './adapter-policy.js';
+import * as path from 'path';
+import type { AdapterPolicy, AdapterSpecificState, CommandHandling, GeneratedFileCandidate, GeneratedFileContext, LocalVariableExtraction, StopReasonContext } from './adapter-policy.js';
 import { emptyLocalVariableExtraction, extractionFromScope } from './adapter-policy.js';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
+
+/** The sources netcoredbg binds through the launched DLL's Portable PDB (issue #950). */
+const DOTNET_SOURCE_EXTENSIONS: ReadonlySet<string> = new Set(['.cs', '.fs', '.vb']);
+/** The muxer: `program: dotnet` with the assembly as the first argument is a launch shape netcoredbg accepts. */
+const DOTNET_HOST = /^dotnet(\.exe)?$/i;
+/** A managed assembly or its apphost — the files `dotnet build` writes beside the PDB. */
+const MANAGED_ASSEMBLY = /\.(dll|exe)$/i;
+
+/**
+ * The assembly a `dotnet <app.dll>` launch runs: the first argument when it
+ * is a `.dll`, resolved against the launch cwd (netcoredbg resolves it the
+ * same way). Nothing when the host runs a command (`dotnet run`) or the
+ * argument cannot be placed.
+ */
+function hostedAssembly(launchConfig: Record<string, unknown> | undefined): string | undefined {
+  const first = Array.isArray(launchConfig?.args) ? launchConfig.args[0] : undefined;
+  if (typeof first !== 'string' || !/\.dll$/i.test(first)) {
+    return undefined;
+  }
+  if (path.isAbsolute(first)) {
+    return first;
+  }
+  const cwd = launchConfig?.cwd;
+  return typeof cwd === 'string' && cwd.length > 0 ? path.resolve(cwd, first) : undefined;
+}
 
 export const DotnetAdapterPolicy = {
   name: 'dotnet',
@@ -305,6 +331,28 @@ export const DotnetAdapterPolicy = {
    * python/ruby/js policies.
    */
   getAttachBehavior: () => ({ pauseAfterAttach: true }),
+
+  /**
+   * A .NET source binds through the launched assembly's PDB (issue #950). The
+   * adapter never builds user code, so every launch is a prebuilt one: the
+   * DLL (or apphost `.exe`) the transform handed netcoredbg is the artefact,
+   * and `dotnet build` writes it and its PDB together, so its mtime stands for
+   * both. When the program is the `dotnet` host itself, the assembly is its
+   * first argument — the host's own mtime says nothing about the user's build.
+   * Unknown before a launch.
+   */
+  generatedFileCandidates: (info: GeneratedFileContext): GeneratedFileCandidate[] | undefined => {
+    const program = info.program;
+    if (program === undefined || program.length === 0 || !DOTNET_SOURCE_EXTENSIONS.has(path.extname(info.sourcePath).toLowerCase())) {
+      return undefined;
+    }
+    const artefact = DOTNET_HOST.test(path.basename(program))
+      ? hostedAssembly(info.launchConfig)
+      : MANAGED_ASSEMBLY.test(program)
+        ? program
+        : undefined;
+    return artefact === undefined ? undefined : [{ path: artefact, linkedBy: 'launch' }];
+  },
 
   /**
    * Filter stack frames to remove .NET runtime/framework internal frames

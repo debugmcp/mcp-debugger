@@ -92,6 +92,7 @@ export class ProxyLauncher {
     this.ctx.updateSession(session.id, { toolchainValidation: undefined });
     session.launchConfigNotices = [];
     session.attachTransformNotices = undefined;
+    session.transformedLaunch = undefined;
 
     // Log entrance for Windows CI debugging
     this.ctx.logger.info(
@@ -117,6 +118,25 @@ export class ProxyLauncher {
     );
     try {
       const plan = await this.prepareAdapterLaunch(session, lease.adapter, inputs, request);
+
+      // The artefact a source binds through is whatever the transform made the
+      // engine run (issue #950) — the compiled binary for a `.rs`/`.cpp`
+      // program, the DLL a .NET launch named, the script itself for Python —
+      // so it is recorded here, after the transform; lastLaunch holds the
+      // caller's request. A relative program is resolved against the launch
+      // cwd, as the engine resolves it. The config is recorded without `env`
+      // and `envFile`: no policy reads them, and a session should not hold a
+      // copy of the caller's secrets (or js-debug's whole merged environment)
+      // for its lifetime. An attach debugs some other process: nothing to record.
+      if (!inputs.isAttachMode) {
+        const { env: _env, envFile: _envFile, ...recorded } = { ...plan.launchConfig } as Record<string, unknown>;
+        const program = plan.proxyConfig.scriptPath;
+        const cwd = typeof recorded.cwd === 'string' && recorded.cwd.length > 0 ? recorded.cwd : undefined;
+        session.transformedLaunch = {
+          program: path.isAbsolute(program) || cwd === undefined ? program : path.resolve(cwd, program),
+          launchConfig: recorded
+        };
+      }
 
       // Create and start ProxyManager with the adapter. Ownership moves here:
       // ProxyManager.cleanup() becomes the disposer and release() below is a

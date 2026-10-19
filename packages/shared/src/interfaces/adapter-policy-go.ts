@@ -5,7 +5,8 @@
  * Delve operates in DAP mode via `dlv dap --listen=:port`
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction } from './adapter-policy.js';
+import * as path from 'path';
+import type { AdapterPolicy, AdapterSpecificState, CommandHandling, GeneratedFileCandidate, GeneratedFileContext, LocalVariableExtraction } from './adapter-policy.js';
 import { emptyLocalVariableExtraction, extractionFromScope } from './adapter-policy.js';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
@@ -372,6 +373,25 @@ export const GoAdapterPolicy = {
 
   /** In debug mode Delve before 1.27 prints the status line only in reply to `disconnect` (issue #753). */
   exitStatusReportedOnDisconnect: true,
+
+  /**
+   * A `.go` binds through the launched binary's DWARF only in `exec` mode
+   * (issue #950), where Delve runs a prebuilt binary as given. In `debug` and
+   * `test` mode Delve compiles the package for each launch, so nothing can be
+   * stale there; before a launch no mode is known.
+   */
+  generatedFileCandidates: (info: GeneratedFileContext): GeneratedFileCandidate[] | undefined => {
+    const program = info.program;
+    if (
+      program === undefined ||
+      program.length === 0 ||
+      info.launchConfig?.mode !== 'exec' ||
+      path.extname(info.sourcePath).toLowerCase() !== '.go'
+    ) {
+      return undefined;
+    }
+    return [{ path: program, linkedBy: 'launch' }];
+  },
 
   /**
    * Get the configuration for spawning the Go debug adapter (dlv)
