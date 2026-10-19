@@ -630,7 +630,6 @@ describe('SessionManagerOperations attach modes', () => {
       await internals(operations).proxyLauncher.start(mockSession, {
         scriptPath: 'script.rb',
         dapLaunchArgs: {},
-        dryRunSpawn: false,
         adapterLaunchConfig: { request: 'attach', __attachMode: true, foo: 1 }
       });
 

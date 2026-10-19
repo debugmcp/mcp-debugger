@@ -147,7 +147,7 @@ async startDebugging(
 
   try {
     // Launch the proxy; adapter creation inside runs under an AdapterLease
-    await this.proxyLauncher.start(session, { scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn });
+    await this.proxyLauncher.start(session, { scriptPath, scriptArgs, dapLaunchArgs });
 
     // ... wait for readiness, re-apply breakpoints, build the success result
 

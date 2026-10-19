@@ -112,4 +112,41 @@ describe('debuggee lifecycle tool handlers', () => {
       });
     }
   });
+
+  describe('a dry run (issue #812)', () => {
+    it('passes the session\'s own state and the preparation record through, and reads nothing', async () => {
+      const warning = 'adapterLaunchConfig.typo: forwarded to the adapter but unrecognized';
+      ctx.sessionManager.startDebugging.mockResolvedValue({
+        success: true,
+        state: 'paused',
+        data: {
+          dryRun: true,
+          message: 'Dry run: nothing was started and the session is unchanged.',
+          command: 'python -m debugpy.adapter --host 127.0.0.1 --port 5678',
+          script: '/app/Program.cs',
+          warning
+        }
+      });
+
+      const result = await startDebuggingTool(
+        ctx, { sessionId: 'test-session', scriptPath: '/app/Program.cs', dryRunSpawn: true }, 'start_debugging'
+      );
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(ctx.sessionManager.startDebugging).toHaveBeenCalledWith(
+        'test-session', '/app/Program.cs', undefined, undefined, true, undefined, undefined
+      );
+      // A paused program stays paused, and the answer says so.
+      expect(payload).toMatchObject({
+        success: true,
+        state: 'paused',
+        warning,
+        data: { dryRun: true, command: expect.stringContaining('debugpy.adapter'), script: '/app/Program.cs' }
+      });
+      expect(payload).not.toHaveProperty('location');
+      expect(payload).not.toHaveProperty('note');
+      expect(ctx.lineReader.getLineContext).not.toHaveBeenCalled();
+      expect(ctx.buildStaleness.check).not.toHaveBeenCalled();
+    });
+  });
 });

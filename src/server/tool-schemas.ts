@@ -154,7 +154,10 @@ export function buildToolDefinitions(options: BuildToolDefinitionsOptions): Tool
             },
             additionalProperties: true
           },
-          dryRunSpawn: { type: 'boolean' },
+          dryRunSpawn: {
+            type: 'boolean',
+            description: 'Check the launch without starting anything: resolves the adapter and the program (compiling a source-file program where the language needs it), runs the launch transform, and answers with the adapter command the launch would run plus any configuration warnings. The session is left exactly as it was: the answer\'s state is the session\'s current state, a running or paused program keeps running, and the previous run\'s output, exit code and last stop stay readable. Not available for attach-shaped configs'
+          },
           breakOnExceptions: { type: 'string', enum: ['uncaught', 'all', 'none'], description: 'Break when exceptions are thrown: "uncaught" pauses at uncaught exceptions at the crash site instead of terminating the session; "all" also pauses on caught/raised exceptions (language-dependent). Launch sessions default to "uncaught" (Ruby is the exception — rdbg has no uncaught-only filter, so it stays "none"); pass "none" to opt out and let crashing scripts run to termination' },
           adapterLaunchConfig: {
             type: 'object',

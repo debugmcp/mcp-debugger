@@ -142,10 +142,11 @@ export type ProxyLaunchContext = Pick<
 
 /**
  * Launch-mode sessions: the toolchain gate, state and store updates (and the
- * state subscription the readiness waits read), the dry-run window, the
- * proxy-failure record (hence the filesystem), the session-preserving
- * teardown of a previous proxy, and the detailed stack behind the landing a
- * launch that stopped reports (issue #951).
+ * state subscription the readiness waits read), the proxy-failure record
+ * (hence the filesystem), the session-preserving teardown of a previous
+ * proxy, and the detailed stack behind the landing a launch that stopped
+ * reports (issue #951). A dry run (issue #812) reads only the gate and the
+ * policy: it is answered from the launch preparation and changes nothing.
  */
 export type LaunchContext = Pick<
   OperationsContext,
@@ -153,7 +154,6 @@ export type LaunchContext = Pick<
   | 'fileSystem'
   | 'adapterRegistry'
   | 'launchValidationCache'
-  | 'dryRunTimeoutMs'
   | 'tunables'
   | 'getSession'
   | 'updateSession'

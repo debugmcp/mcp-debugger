@@ -412,7 +412,7 @@ describe('SessionManager - Debug Session Workflow', () => {
 });
 ```
 
-A dry run is the fifth positional argument, and is the cheapest way to assert on spawn configuration without a debuggee:
+A dry run is the fifth positional argument, and is the cheapest way to assert on spawn configuration without a debuggee. It is answered from the launch preparation and starts no proxy (issue #812), so `mockProxyManager.startCalls` stays empty and the session is left exactly as it was:
 
 ```typescript
 const result = await sessionManager.startDebugging(session.id, 'test.py', [], {}, true);

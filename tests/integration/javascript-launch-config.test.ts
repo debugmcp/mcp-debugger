@@ -9,8 +9,9 @@ const fixture = path.join(root, 'tests/fixtures/javascript-launch-config');
 const scriptPath = path.join(fixture, 'target.cjs');
 interface Result {
   success: boolean; state?: string; warning?: string; message?: string; error?: string;
-  data?: { warning?: string; stopOnEntrySuccessful?: boolean; exitCode?: number; dryRun?: boolean };
+  data?: { warning?: string; stopOnEntrySuccessful?: boolean; exitCode?: number; dryRun?: boolean; command?: string };
 }
+interface Output extends Result { entries: Array<{ seq: number; category: string; output: string }> }
 interface LastStop { reason?: string; rawReason?: string; threadId?: number; description?: string; text?: string; timestamp?: number }
 interface Listed { id: string; state: string; exitCode?: number; lastStop?: LastStop }
 interface Waited extends Result {
@@ -124,16 +125,46 @@ describe('JavaScript launch configuration', () => {
     const bp = await call('set_breakpoint', { file: scriptPath, line: 9 });
     expect(bp.success, JSON.stringify(bp)).toBe(true);
     const dry = await launch({ dryRunSpawn: true });
-    expect(dry.state).toBe('stopped');
+    // A dry run is a query (issue #812): the fresh session stays `created`,
+    // and the answer names the js-debug adapter command the launch would run.
+    expect(dry.state).toBe('created');
     expect(dry.data?.dryRun).toBe(true);
+    expect(dry.data?.command).toMatch(/\S/);
     // Before #793 this call was refused with "Session is terminated: <id>".
-    // It lands inside the dry-run worker's exit window, so the launcher's
-    // leftover-proxy teardown runs on a still-live proxy every time.
     await launch({ dapLaunchArgs: { stopOnEntry: false } });
     await expect.poll(async () => (await listedSession())?.state, { timeout: 15_000 }).toBe('paused');
     expect((await listedSession())?.lastStop?.reason).toBe('breakpoint');
     const listed = await call<Result & { breakpoints: Array<{ line: number; verified: boolean }> }>('list_breakpoints');
     expect(listed.breakpoints).toEqual([expect.objectContaining({ line: 9, verified: true })]);
+  }, 60_000);
+
+  it('leaves a paused program paused: a dry run on a live session tears nothing down and keeps its records (issue #812)', async () => {
+    const bp = await call('set_breakpoint', { file: scriptPath, line: 9 });
+    expect(bp.success, JSON.stringify(bp)).toBe(true);
+    await launch({ dapLaunchArgs: { stopOnEntry: false } });
+    await expect.poll(async () => (await listedSession())?.state, { timeout: 15_000 }).toBe('paused');
+    const outputBefore = await call<Output>('get_output');
+    expect(outputBefore.entries.length).toBeGreaterThan(0);
+
+    // Measured before the fix: this call killed the program, cleared the stop
+    // and emptied the output, and answered success with state "stopped".
+    const dry = await launch({ dryRunSpawn: true });
+    expect(dry.state).toBe('paused');
+    expect(dry.data?.dryRun).toBe(true);
+    expect(dry.data?.command).toMatch(/\S/);
+
+    const listed = await listedSession();
+    expect(listed?.state).toBe('paused');
+    expect(listed?.lastStop?.reason).toBe('breakpoint');
+    const stack = await call<Result & { stackFrames: Array<{ line: number }> }>('get_stack_trace');
+    expect(stack.success, JSON.stringify(stack)).toBe(true);
+    expect(stack.stackFrames.length).toBeGreaterThan(0);
+    const outputAfter = await call<Output>('get_output');
+    expect(outputAfter.entries).toEqual(outputBefore.entries);
+    // The program is still there to drive: it continues into its interval loop.
+    const resumed = await call('continue_execution');
+    expect(resumed.success, JSON.stringify(resumed)).toBe(true);
+    await expect.poll(async () => (await listedSession())?.state, { timeout: 15_000 }).toBe('running');
   }, 60_000);
 
   it('accepts a breakpoint set after the program ran to completion and hits it on the relaunch (issue #806)', async () => {
