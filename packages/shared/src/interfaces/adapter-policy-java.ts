@@ -8,7 +8,7 @@
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import * as path from 'path';
 import type { AdapterPolicy, AdapterSpecificState, CommandHandling, GeneratedFileCandidate, GeneratedFileContext, LocalVariableExtraction, UnresolvedSourceContext } from './adapter-policy.js';
-import { emptyLocalVariableExtraction, extractionFromScope } from './adapter-policy.js';
+import { emptyLocalVariableExtraction, extractionFromScope, generatedFileCandidatesFrom } from './adapter-policy.js';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
 
@@ -248,19 +248,8 @@ export const JavaAdapterPolicy = {
       }
     }
     candidates.push(path.join(dir, classFile));
-    // Dedupe: a classpath entry that is the source directory coincides with the sibling.
-    const seen = new Set<string>();
-    return candidates
-      .filter(candidate => {
-        const normalized = path.normalize(candidate);
-        const key = process.platform === 'win32' ? normalized.toLowerCase() : normalized;
-        if (seen.has(key)) {
-          return false;
-        }
-        seen.add(key);
-        return true;
-      })
-      .map(candidate => ({ path: candidate, linkedBy: 'launch' as const }));
+    // A classpath entry that is the source directory coincides with the sibling.
+    return generatedFileCandidatesFrom(candidates, 'launch');
   },
 
   // JdiDapServer sends "initialized" during initialize (before launch).

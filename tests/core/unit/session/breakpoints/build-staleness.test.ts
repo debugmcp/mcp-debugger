@@ -306,6 +306,63 @@ describe('BuildStalenessChecker', () => {
       files[DLL] = { content: '', mtimeMs: 30_000 };
       expect(await checker.check(CS, launchPolicy, launchOf(DLL))).toBeUndefined();
     });
+
+    /** A Java-shaped policy: the class file comes from the launch's classpath, not from `program` (the unchanged .java). */
+    const JAVA = at('src', 'Foo.java');
+    const classpathPolicy: GeneratedFilePolicy = {
+      name: 'java',
+      generatedFileCandidates: info => {
+        const classpath = info.launchConfig?.classpath;
+        if (typeof classpath !== 'string' || !info.sourcePath.endsWith('.java')) {
+          return undefined;
+        }
+        return classpath.split(path.delimiter).map(dir => ({ path: path.join(dir, 'Foo.class'), linkedBy: 'launch' as const }));
+      }
+    };
+    const classpathLaunch = (...dirs: string[]) => ({ program: JAVA, launchConfig: { program: JAVA, classpath: dirs.join(path.delimiter) } });
+
+    it('remembers the discovery per candidate set, not per program: a relaunch with another classpath is compared against its own class', async () => {
+      const { fs } = makeFs({
+        [JAVA]: { content: '', mtimeMs: 20_000 },
+        [at('out1', 'Foo.class')]: { content: '', mtimeMs: 5_000 },
+        [at('out2', 'Foo.class')]: { content: '', mtimeMs: 30_000 }
+      });
+      const checker = new BuildStalenessChecker(fs, logger());
+
+      expect((await checker.check(JAVA, classpathPolicy, classpathLaunch(at('out1'))))?.generatedFile).toBe(at('out1', 'Foo.class'));
+      expect(await checker.check(JAVA, classpathPolicy, classpathLaunch(at('out2')))).toBeUndefined();
+    });
+
+    it('takes the newest existing launch-linked candidate: a stale leftover never outranks the build the engine loads', async () => {
+      const files: Record<string, FakeFile> = {
+        [JAVA]: { content: '', mtimeMs: 20_000 },
+        [at('stale', 'Foo.class')]: { content: '', mtimeMs: 5_000 },
+        [at('fresh', 'Foo.class')]: { content: '', mtimeMs: 30_000 }
+      };
+      const { fs } = makeFs(files);
+
+      // The leftover is listed first; the fresh build still wins, so nothing is said.
+      expect(await new BuildStalenessChecker(fs, logger()).check(JAVA, classpathPolicy, classpathLaunch(at('stale'), at('fresh')))).toBeUndefined();
+
+      // Both older than the source: the newest is the one named.
+      files[at('fresh', 'Foo.class')] = { content: '', mtimeMs: 8_000 };
+      const evidence = await new BuildStalenessChecker(fs, logger()).check(JAVA, classpathPolicy, classpathLaunch(at('stale'), at('fresh')));
+      expect(evidence?.generatedFile).toBe(at('fresh', 'Foo.class'));
+      expect(evidence?.generatedMtimeMs).toBe(8_000);
+    });
+
+    it('remembers a miss for the window, so a session whose class lives in a jar does not re-stat every candidate on every answer', async () => {
+      const { fs, stat } = makeFs({ [JAVA]: { content: '', mtimeMs: 20_000 } });
+      const checker = new BuildStalenessChecker(fs, logger());
+      const launch = classpathLaunch(at('a'), at('b'), at('c'));
+
+      expect(await checker.check(JAVA, classpathPolicy, launch)).toBeUndefined();
+      const stats = stat.mock.calls.length;
+      expect(stats).toBeGreaterThan(0);
+      expect(await checker.check(JAVA, classpathPolicy, launch)).toBeUndefined();
+
+      expect(stat.mock.calls.length).toBe(stats);
+    });
   });
 
   describe('applicability and failure modes', () => {

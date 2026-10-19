@@ -40,8 +40,13 @@
  *   full rebuild or a real edit clears that one.
  * - Whether the process actually loads the compiled file is not known here:
  *   a runner that transforms sources in memory (tsx, ts-node, vitest) is
- *   exempted by the caller from what it knows of the launch, not by this
- *   module.
+ *   declined by the adapter's policy from the launch this module hands it,
+ *   not by this module.
+ * - Several `launch` candidates may exist at once (a Java class under more
+ *   than one classpath directory, a leftover in-place compile beside the
+ *   source): the newest is taken, since a stale leftover is never newer than
+ *   the build the engine loads — the bias is towards silence, never towards
+ *   a false warning.
  */
 import * as path from 'path';
 import { fileURLToPath } from 'url';
@@ -74,10 +79,15 @@ export interface BuildStalenessOptions {
   /** Directory levels walked above the source for tsconfig.json / package.json (default 16). */
   maxWalkDepth?: number;
   /**
-   * How long a located compiled file is remembered before the candidates are
-   * tried again (default 60 s), so a more specific artefact that appears
-   * later — `dist/` added beside an old in-place build — displaces the one
-   * found first. Within the window the map's stamp still guards it.
+   * How long a located compiled file — or, for launch-linked candidates, the
+   * fact that none was found — is remembered before the candidates are tried
+   * again (default 60 s), so a more specific artefact that appears later —
+   * `dist/` added beside an old in-place build — displaces the one found
+   * first, and a session whose class lives in a jar does not re-stat every
+   * classpath candidate on every answer. Within the window a `sourceMap`
+   * discovery is still guarded by its map's stamp, and every discovery by the
+   * artefact still existing: the two mtimes that decide are read fresh on
+   * every check.
    */
   discoveryTtlMs?: number;
   /**
@@ -137,6 +147,8 @@ export class BuildStalenessChecker {
    * every call, so a rebuild is seen at once.
    */
   private readonly discoveries: LRUCache<string, Discovery>;
+  /** The keys whose candidates were all missing, for at most `discoveryTtlMs`. */
+  private readonly misses: LRUCache<string, true>;
   /** The walk's answer per source directory, for at most `contextTtlMs`. */
   private readonly contexts: LRUCache<string, DirectoryContext>;
 
@@ -147,6 +159,7 @@ export class BuildStalenessChecker {
   ) {
     this.options = { ...DEFAULT_OPTIONS, ...options };
     this.discoveries = new LRUCache<string, Discovery>({ max: 50, ttl: this.options.discoveryTtlMs });
+    this.misses = new LRUCache<string, true>({ max: 50, ttl: this.options.discoveryTtlMs });
     this.contexts = new LRUCache<string, DirectoryContext>({ max: 50, ttl: this.options.contextTtlMs });
   }
 
@@ -170,7 +183,10 @@ export class BuildStalenessChecker {
     if (probed === undefined) {
       return undefined;
     }
-    const key = `${policy.name}\0${launch?.program ?? ''}\0${sourcePath}`;
+    // Keyed on the candidates the probe named, not on the program: a Java
+    // launch keeps the `.java` as its program while the classpath — and so
+    // the class file — may differ from the launch before it.
+    const key = `${policy.name}\0${probed.map(candidate => candidate.path).join('\0')}\0${sourcePath}`;
     try {
       const discovery = await this.discover(key, probe, probed, policy);
       if (!discovery) {
@@ -200,17 +216,20 @@ export class BuildStalenessChecker {
 
   clearCache(): void {
     this.discoveries.clear();
+    this.misses.clear();
     this.contexts.clear();
   }
 
   /**
    * The compiled file for this probe: the remembered one while its proof
    * stands (a `launch` discovery needs none beyond the artefact's existence,
-   * which `check` reads fresh), else the first candidate that exists and —
-   * for a `sourceMap` one — whose map names the source. Candidates the launch
-   * links need no directory context, so the probe's own answer serves when
-   * every candidate in it is one; otherwise the tsconfig/package walk runs
-   * and the policy is asked again with it.
+   * which `check` reads fresh), nothing while a remembered miss stands, else
+   * a fresh discovery. Candidates the launch links need no directory context,
+   * so the probe's own answer serves when every candidate in it is one, and
+   * the newest existing one is taken (a stale leftover beside the source is
+   * never newer than the build the engine loads); otherwise the
+   * tsconfig/package walk runs, the policy is asked again with it, and the
+   * first candidate whose map names the source wins.
    */
   private async discover(
     key: string,
@@ -229,18 +248,42 @@ export class BuildStalenessChecker {
       }
       this.discoveries.delete(key);
     }
-    const { sourcePath } = probe;
-    const candidates = probed.length > 0 && probed.every(candidate => candidate.linkedBy === 'launch')
-      ? probed
-      : policy.generatedFileCandidates!({ ...probe, ...(await this.contextFor(path.dirname(sourcePath))) }) ?? [];
+    const launchLinked = probed.length > 0 && probed.every(candidate => candidate.linkedBy === 'launch');
+    // A miss is remembered for launch-linked candidates only: there may be
+    // dozens of them (every classpath directory × the source's chain) and no
+    // map to re-read. A map-proved miss is retried on every check, so a map
+    // that changes back to naming the source is seen at once.
+    if (launchLinked && this.misses.get(key)) {
+      return undefined;
+    }
+    const discovery = launchLinked ? await this.newestExisting(probed) : await this.firstProvedByMap(probe, policy);
+    if (discovery) {
+      this.discoveries.set(key, discovery);
+    } else if (launchLinked) {
+      this.misses.set(key, true);
+    }
+    return discovery;
+  }
+
+  /** The newest existing launch-linked candidate, or nothing when none exists. */
+  private async newestExisting(candidates: GeneratedFileCandidate[]): Promise<Discovery | undefined> {
+    let newest: { path: string; mtimeMs: number } | undefined;
     for (const candidate of candidates) {
-      if (!(await this.stamp(candidate.path))) {
-        continue;
+      const stamp = await this.stamp(candidate.path);
+      if (stamp && (newest === undefined || stamp.mtimeMs > newest.mtimeMs)) {
+        newest = { path: candidate.path, mtimeMs: stamp.mtimeMs };
       }
-      if (candidate.linkedBy === 'launch') {
-        const discovery: Discovery = { generatedFile: candidate.path, linkedBy: 'launch' };
-        this.discoveries.set(key, discovery);
-        return discovery;
+    }
+    return newest ? { generatedFile: newest.path, linkedBy: 'launch' } : undefined;
+  }
+
+  /** The first candidate, in the policy's order, that exists and whose `.map` names the source. */
+  private async firstProvedByMap(probe: GeneratedFileContext, policy: GeneratedFilePolicy): Promise<Discovery | undefined> {
+    const { sourcePath } = probe;
+    const candidates = policy.generatedFileCandidates!({ ...probe, ...(await this.contextFor(path.dirname(sourcePath))) }) ?? [];
+    for (const candidate of candidates) {
+      if (candidate.linkedBy !== 'sourceMap' || !(await this.stamp(candidate.path))) {
+        continue;
       }
       const mapFile = `${candidate.path}.map`;
       const mapStamp = await this.stamp(mapFile);
@@ -255,15 +298,13 @@ export class BuildStalenessChecker {
       if (!sources.some(source => samePath(source, sourcePath))) {
         continue;
       }
-      const discovery: Discovery = {
+      return {
         generatedFile: candidate.path,
         linkedBy: 'sourceMap',
         mapFile,
         mapMtimeMs: mapStamp.mtimeMs,
         mapSize: mapStamp.size
       };
-      this.discoveries.set(key, discovery);
-      return discovery;
     }
     return undefined;
   }

@@ -13,6 +13,7 @@
  * @since 2.1.0
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
+import * as path from 'path';
 import type { Breakpoint, ExceptionBreakMode, StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior } from './dap-client-behavior.js';
 import type { LanguageSpecificLaunchConfig } from './debug-adapter.js';
@@ -276,6 +277,32 @@ export interface GeneratedFileCandidate {
    * be stale") carries the mtime-only comparison.
    */
   linkedBy: 'sourceMap' | 'launch';
+}
+
+/**
+ * Candidates from a list of paths, each path once (issue #950): compared
+ * normalised and, on Windows, case-folded — the one platform where two
+ * spellings name one file. For the hooks that build their list from several
+ * roots whose forms coincide for the common layouts: a tsconfig `rootDir` and
+ * the `src/`-stripped form, a classpath entry that is the source directory
+ * and the sibling. Order is kept.
+ */
+export function generatedFileCandidatesFrom(
+  paths: readonly string[],
+  linkedBy: GeneratedFileCandidate['linkedBy'],
+  platform: NodeJS.Platform = process.platform
+): GeneratedFileCandidate[] {
+  const seen = new Set<string>();
+  const candidates: GeneratedFileCandidate[] = [];
+  for (const candidate of paths) {
+    const normalized = path.normalize(candidate);
+    const key = platform === 'win32' ? normalized.toLowerCase() : normalized;
+    if (!seen.has(key)) {
+      seen.add(key);
+      candidates.push({ path: candidate, linkedBy });
+    }
+  }
+  return candidates;
 }
 
 export interface AdapterPolicy {

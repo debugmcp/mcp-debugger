@@ -63,6 +63,21 @@ function launchesUnderCobcrun(info: GeneratedFileContext): boolean {
   );
 }
 
+/**
+ * The adapter's own build output (`<dirname(program)>/.debug-mcp/cobol/<name>/<buildKey>/`,
+ * `ARTIFACT_ROOT_DIRNAME` in the adapter's gnucobol-builder). Its build key is
+ * a content hash over the sources and copybooks, so a launch that reuses it
+ * has just verified the build current by content: a source saved without a
+ * change, or re-checked-out, is newer by mtime and would be reported stale
+ * against the adapter's own verdict. Only a prebuilt executable is compared.
+ */
+const ADAPTER_BUILD_SEGMENT = /[\\/]\.debug-mcp[\\/]cobol[\\/]/;
+
+/** Whether the launch runs an executable the adapter built (and keyed by content) this launch. */
+function runsAdapterBuild(info: GeneratedFileContext): boolean {
+  return info.program !== undefined && ADAPTER_BUILD_SEGMENT.test(info.program);
+}
+
 /** The exception filter the shim advertises; breaks on libcob's `cob_runtime_error`. */
 export const COBOL_RUNTIME_ERROR_FILTER = 'cobol_runtime_error';
 
@@ -257,13 +272,14 @@ export const CobolAdapterPolicy = {
   // hazard as cpp (issue #763).
   getAttachBehavior: () => getLldbAttachBehavior(),
 
-  // A program or copybook binds through the executable the launch runs
-  // (issue #950): the one cobc built from a source (fresh) or the prebuilt
-  // one, which nothing rebuilds. Not under cobcrun, whose program is
-  // GnuCOBOL's loader rather than the user's module — the module's own file
-  // is not in the launch config, so nothing is named.
+  // A program or copybook binds through a prebuilt executable the launch runs
+  // (issue #950), which nothing rebuilds. Not the adapter's own build (keyed
+  // by the sources' content, so current by construction — see
+  // runsAdapterBuild), and not under cobcrun, whose program is GnuCOBOL's
+  // loader rather than the user's module — the module's own file is not in
+  // the launch config, so nothing is named.
   generatedFileCandidates: (info: GeneratedFileContext): GeneratedFileCandidate[] | undefined =>
-    launchesUnderCobcrun(info) ? undefined : lldbGeneratedFileCandidates(info, COBOL_SOURCE_EXTENSIONS),
+    launchesUnderCobcrun(info) || runsAdapterBuild(info) ? undefined : lldbGeneratedFileCandidates(info, COBOL_SOURCE_EXTENSIONS),
 
   getAdapterSpawnConfig: (payload, platform: NodeJS.Platform = process.platform, arch: NodeJS.Architecture = process.arch) =>
     buildLldbSpawnConfig(payload, platform, arch)

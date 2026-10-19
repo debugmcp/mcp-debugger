@@ -563,6 +563,27 @@ describe('ProxyLauncher.start', () => {
     });
   });
 
+  it('resolves a relative transformed program against the launch cwd, and records the config without env or envFile (issue #950)', async () => {
+    const adapter = new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE });
+    adapter.transformLaunchConfig.mockImplementation(async config => ({
+      ...config,
+      program: path.join('bin', 'Debug', 'app.dll'),
+      env: { SECRET_TOKEN: 'ghp_x' },
+      envFile: path.join('/work', 'app', '.env')
+    }));
+    const h = makeHarness({ adapter, proxyManager: new MockProxyManager() });
+    const session = makeSession();
+
+    await h.launcher.start(session, { scriptPath: SCRIPT });
+
+    // The session layer defaulted cwd to the script's directory; the engine resolves the program against it, and so does the record.
+    expect(session.transformedLaunch?.program).toBe(path.resolve(path.dirname(SCRIPT), 'bin', 'Debug', 'app.dll'));
+    expect(session.transformedLaunch?.launchConfig).toMatchObject({ cwd: path.dirname(SCRIPT) });
+    expect(session.transformedLaunch?.launchConfig).not.toHaveProperty('env');
+    expect(session.transformedLaunch?.launchConfig).not.toHaveProperty('envFile');
+    expect(JSON.stringify(session.transformedLaunch)).not.toContain('ghp_x');
+  });
+
   it('clears the recorded launch when the transform fails, and on an attach (issue #950)', async () => {
     const adapter = new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE });
     const h = makeHarness({ adapter, proxyManager: new MockProxyManager() });

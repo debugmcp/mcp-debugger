@@ -84,7 +84,7 @@ const GENERATED_FILE_HOOKS: Record<DebugLanguage, GeneratedFileHook | undefined>
   },
   [DebugLanguage.COBOL]: {
     linkedBy: 'launch',
-    probe: { sourcePath: '/p/payroll.cob', program: '/p/.debug-mcp/cobol/payroll/k1/payroll.exe', launchConfig: { program: '/p/.debug-mcp/cobol/payroll/k1/payroll.exe' } },
+    probe: { sourcePath: '/p/payroll.cob', program: '/p/dist/payroll.exe', launchConfig: { program: '/p/dist/payroll.exe' } },
     candidate: /payroll\.exe$/
   },
   [DebugLanguage.DART]: undefined,

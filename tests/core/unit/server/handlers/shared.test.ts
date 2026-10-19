@@ -121,11 +121,12 @@ describe('describeStaleBuild (issues #938/#950)', () => {
     expect(await describeStaleBuild(ctx, 's1', '/app/src/a.ts', 'breakpoint')).toBeUndefined();
   });
 
-  it('asks nothing for a policy without the hook', async () => {
+  it('leaves a policy without the hook to the checker, which answers nothing: the handler knows no language', async () => {
     ctx.sessionManager.getSessionPolicy.mockReturnValue({});
+    ctx.buildStaleness.check.mockResolvedValue(undefined);
 
     expect(await describeStaleBuild(ctx, 's1', '/app/src/a.ts', 'breakpoint')).toBeUndefined();
-    expect(ctx.buildStaleness.check).not.toHaveBeenCalled();
+    expect(ctx.buildStaleness.check).toHaveBeenCalledWith('/app/src/a.ts', {}, launched);
   });
 
   it('asks nothing for an attach whose target is not on this host: the host file is not the debuggee\'s source', async () => {

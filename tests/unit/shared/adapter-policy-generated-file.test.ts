@@ -40,6 +40,22 @@ describe('DotnetAdapterPolicy.generatedFileCandidates (issue #950)', () => {
   it('declines a source that is not .NET', () => {
     expect(hook({ sourcePath: at('a.py'), program: dll, launchConfig: { program: dll } })).toBeUndefined();
   });
+
+  it('names the DLL in args when the program is the dotnet host, resolved against the launch cwd', () => {
+    for (const host of [at('dotnet', 'dotnet.exe'), 'dotnet', path.join(path.sep, 'usr', 'bin', 'dotnet')]) {
+      const launchConfig = { program: host, args: [path.join('bin', 'Debug', 'app.dll')], cwd: P };
+      expect(hook({ sourcePath: at('Program.cs'), program: host, launchConfig }), host).toEqual([launched(at('bin', 'Debug', 'app.dll'))]);
+    }
+    const absolute = at('out', 'app.dll');
+    expect(hook({ sourcePath: at('Program.cs'), program: 'dotnet', launchConfig: { program: 'dotnet', args: [absolute] } })).toEqual([launched(absolute)]);
+  });
+
+  it('declines when the dotnet host runs with no DLL argument it can name, and names an apphost .exe as itself', () => {
+    expect(hook({ sourcePath: at('Program.cs'), program: 'dotnet', launchConfig: { program: 'dotnet', args: ['run'] } })).toBeUndefined();
+    expect(hook({ sourcePath: at('Program.cs'), program: 'dotnet', launchConfig: { program: 'dotnet', args: [path.join('bin', 'app.dll')] } })).toBeUndefined();
+    const apphost = at('bin', 'Debug', 'net8.0', 'app.exe');
+    expect(hook({ sourcePath: at('Program.cs'), program: apphost, launchConfig: { program: apphost } })).toEqual([launched(apphost)]);
+  });
 });
 
 describe('GoAdapterPolicy.generatedFileCandidates (issue #950)', () => {
@@ -80,6 +96,22 @@ describe('lldbGeneratedFileCandidates (issue #950): the CodeLLDB family binds th
     expect(lldbGeneratedFileCandidates({ sourcePath: source, program: source, launchConfig: { program: source } }, rustSources)).toBeUndefined();
   });
 
+  it('declines a toolchain source — Rust std under the sysroot or ~/.rustup, a cargo registry crate, a system header: not built into the program, and newer after every toolchain update', () => {
+    const home = path.join(path.sep, 'home', 'u');
+    for (const source of [
+      path.join(home, '.rustup', 'toolchains', 'stable-x86_64-unknown-linux-gnu', 'lib', 'rustlib', 'src', 'rust', 'library', 'core', 'src', 'option.rs'),
+      path.join(path.sep, 'rustc', 'abc123', 'library', 'std', 'src', 'thread', 'mod.rs'),
+      path.join(home, '.cargo', 'registry', 'src', 'index.crates.io-6f17d22bba15001f', 'serde-1.0.200', 'src', 'de.rs'),
+      'C:\\Users\\u\\.rustup\\toolchains\\stable-x86_64-pc-windows-gnu\\lib\\rustlib\\src\\rust\\library\\alloc\\src\\vec\\mod.rs'
+    ]) {
+      expect(lldbGeneratedFileCandidates({ sourcePath: source, program: bin, launchConfig: { program: bin } }, rustSources), source).toBeUndefined();
+    }
+    const exe = at('a.out');
+    for (const header of [path.join(path.sep, 'usr', 'include', 'stdio.h'), 'C:\\msys64\\ucrt64\\include\\stdio.h', 'C:\\msys64\\mingw64\\lib\\gcc\\x86_64-w64-mingw32\\15.2.0\\include\\c++\\vector.h']) {
+      expect(CppAdapterPolicy.generatedFileCandidates!({ sourcePath: header, program: exe, launchConfig: { program: exe } }), header).toBeUndefined();
+    }
+  });
+
   it('Rust: .rs sources, through the binary cargo built or the one the launch named', () => {
     expect(RustAdapterPolicy.generatedFileCandidates!({ sourcePath: at('build.rs'), program: bin, launchConfig: { program: bin } })).toEqual([launched(bin)]);
   });
@@ -92,11 +124,18 @@ describe('lldbGeneratedFileCandidates (issue #950): the CodeLLDB family binds th
     expect(CppAdapterPolicy.generatedFileCandidates!({ sourcePath: at('main.rs'), program: exe, launchConfig: { program: exe } })).toBeUndefined();
   });
 
-  it('COBOL: programs and copybooks, through the executable cobc built or the prebuilt one', () => {
-    const exe = at('.debug-mcp', 'cobol', 'payroll', 'k1', 'payroll.exe');
+  it('COBOL: programs and copybooks, through a prebuilt executable', () => {
+    const exe = at('dist', 'payroll.exe');
     for (const name of ['payroll.cob', 'payroll.cbl', 'payroll.cobol', 'common.cpy']) {
       expect(CobolAdapterPolicy.generatedFileCandidates!({ sourcePath: at(name), program: exe, launchConfig: { program: exe } }), name).toEqual([launched(exe)]);
     }
+  });
+
+  it("COBOL: declines the adapter's own build under .debug-mcp/cobol — keyed on the sources' content, so a touch-only change reuses an executable that is current by content, not by mtime", () => {
+    const built = at('.debug-mcp', 'cobol', 'payroll', 'a1b2c3', 'payroll.exe');
+    expect(CobolAdapterPolicy.generatedFileCandidates!({ sourcePath: at('payroll.cob'), program: built, launchConfig: { program: built } })).toBeUndefined();
+    const module = at('.debug-mcp', 'cobol', 'payroll', 'a1b2c3', 'payroll.dll');
+    expect(CobolAdapterPolicy.generatedFileCandidates!({ sourcePath: at('common.cpy'), program: module, launchConfig: { program: module } })).toBeUndefined();
   });
 
   it("COBOL: declines under runner \"cobcrun\", whose launched program is GnuCOBOL's loader, not the user's module", () => {

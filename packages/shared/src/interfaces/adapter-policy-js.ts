@@ -7,6 +7,7 @@
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import * as path from 'path';
 import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction, QueuedDapCommand, StopReasonContext, PendingStopContext, UnresolvedSourceContext, GeneratedFileCandidate, GeneratedFileContext } from './adapter-policy.js';
+import { generatedFileCandidatesFrom } from './adapter-policy.js';
 import {
   jsLaunchBlackboxesNodeModules,
   jsLaunchSkipsNodeInternals,
@@ -431,20 +432,8 @@ export const JsDebugAdapterPolicy = {
       }
     }
     candidates.push(emitted(path.dirname(source), path.basename(source)));
-    // Dedupe on a case-folded, normalised key: the rootDir and src/-stripped
-    // forms coincide for the common layout. No two candidates from this
-    // arithmetic differ by case alone, so folding is safe on every platform.
-    const seen = new Set<string>();
-    return candidates
-      .filter(candidate => {
-        const key = path.normalize(candidate).toLowerCase();
-        if (seen.has(key)) {
-          return false;
-        }
-        seen.add(key);
-        return true;
-      })
-      .map(candidate => ({ path: candidate, linkedBy: 'sourceMap' as const }));
+    // The rootDir and src/-stripped forms coincide for the common layout.
+    return generatedFileCandidatesFrom(candidates, 'sourceMap');
   },
 
   /**

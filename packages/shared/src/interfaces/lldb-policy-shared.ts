@@ -33,7 +33,9 @@ export const LLDB_LOCAL_SCOPE_NAMES = ['Local', 'Locals'] as const;
  * `sourceExtensions` is the language's own set (lower-case, dotted): a header
  * or copybook counts as much as a program file, which is exactly the gap the
  * adapters' single-source rebuild checks leave open. A program that is itself
- * a source has not been turned into a binary: nothing to compare against.
+ * a source has not been turned into a binary, and a toolchain source
+ * (`isLldbToolchainSource`) is not built into the program: nothing to compare
+ * against in either case.
  */
 export function lldbGeneratedFileCandidates(
   info: GeneratedFileContext,
@@ -46,7 +48,7 @@ export function lldbGeneratedFileCandidates(
   if (!sourceExtensions.has(path.extname(info.sourcePath).toLowerCase())) {
     return undefined;
   }
-  if (sourceExtensions.has(path.extname(program).toLowerCase())) {
+  if (sourceExtensions.has(path.extname(program).toLowerCase()) || isLldbToolchainSource(info.sourcePath)) {
     return undefined;
   }
   return [{ path: program, linkedBy: 'launch' }];
@@ -326,6 +328,30 @@ function isSystemOrMissingSource(file: string | undefined): boolean {
   }
   const normalized = file.replace(/\\/g, '/');
   return SYSTEM_SOURCE_PATH_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+/**
+ * Sources that are the toolchain's, not the program's (issue #950): the
+ * system headers and libc build trees the frame filter knows, plus the Rust
+ * sysroot's std sources (`<sysroot>/lib/rustlib/src/rust`, a `~/.rustup`
+ * toolchain, the remapped `/rustc/<hash>/` form), cargo registry and git
+ * checkouts, and GCC's own include trees. A step that lands in one compares
+ * nothing: such a file is newer than every binary after a toolchain update,
+ * and no rebuild of the program can clear it. Declared after
+ * SYSTEM_SOURCE_PATH_PATTERNS, which it extends.
+ */
+const TOOLCHAIN_SOURCE_PATH_PATTERNS: readonly RegExp[] = [
+  ...SYSTEM_SOURCE_PATH_PATTERNS,
+  /\/\.rustup\/toolchains\//,
+  /\/lib\/rustlib\/src\/rust\//,
+  /\/\.cargo\/(?:registry|git)\//,
+  /\/lib\/gcc\//
+];
+
+/** Whether a source path lies in a toolchain tree rather than the program's own sources (issue #950). */
+export function isLldbToolchainSource(file: string): boolean {
+  const normalized = file.replace(/\\/g, '/');
+  return TOOLCHAIN_SOURCE_PATH_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
 /**
