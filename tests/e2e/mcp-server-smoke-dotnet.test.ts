@@ -155,7 +155,7 @@ describe.skipIf(SKIP_DOTNET)('.NET Adapter Smoke Test', () => {
     console.log('[.NET Smoke Test] dotnet language is available');
   });
 
-  it('warns on set_breakpoint once the launch has named the DLL, and notes on the stop, when dotnet.dll is older than Program.cs (issue #950)', async (ctx) => {
+  it('warns on set_breakpoint once the launch has named the DLL, and notes on the launch answer, the stop and the stack, when dotnet.dll is older than Program.cs (issues #950, #951)', async (ctx) => {
     const dllPath = ensureDotnetBuild();
     const sourceFile = path.resolve(ROOT, 'examples', 'dotnet', 'Program.cs');
     const stamp = statSync(dllPath);
@@ -187,6 +187,21 @@ describe.skipIf(SKIP_DOTNET)('.NET Adapter Smoke Test', () => {
         throw new Error(`start_debugging failed: ${JSON.stringify(startResponse, null, 2)}`);
       }
 
+      // A fast program is paused at the breakpoint when the launch answers,
+      // and that answer says where and carries the note (issue #951) — the
+      // call a caller reads before any wait_for_stop. A machine slow enough to
+      // outlast the hold answers pending instead; the wait then carries both.
+      const launchStop = startResponse.state === 'paused'
+        ? startResponse
+        : parseSdkToolResult(await mcpClient!.callTool({
+          name: 'wait_for_stop',
+          arguments: { sessionId, timeout: 20000 }
+        }));
+      expect(launchStop.state, JSON.stringify(launchStop)).toBe('paused');
+      expect((launchStop.location as { line?: number } | undefined)?.line, JSON.stringify(launchStop)).toBe(14);
+      expect(String(launchStop.note ?? ''), JSON.stringify(launchStop)).toMatch(/may be stale/);
+      expect(launchStop.note).toContain(dllPath);
+
       // The launch named the DLL: a breakpoint set now carries the warning, naming both files.
       const after = parseSdkToolResult(await mcpClient!.callTool({
         name: 'set_breakpoint',
@@ -204,6 +219,14 @@ describe.skipIf(SKIP_DOTNET)('.NET Adapter Smoke Test', () => {
       }));
       expect(stop.state, JSON.stringify(stop)).toBe('paused');
       expect(String(stop.note ?? ''), JSON.stringify(stop)).toMatch(/may be stale/);
+
+      // And get_stack_trace, the other carrier (issue #951).
+      const stack = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'get_stack_trace',
+        arguments: { sessionId }
+      }));
+      expect(String(stack.note ?? ''), JSON.stringify(stack)).toMatch(/may be stale/);
+      expect(stack.note).toContain(dllPath);
     } finally {
       utimesSync(dllPath, stamp.atime, stamp.mtime);
     }

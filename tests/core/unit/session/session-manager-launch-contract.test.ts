@@ -13,7 +13,7 @@ import { SessionManager, SessionManagerConfig } from '../../../../src/session/se
 import { DebugLanguage, SessionState } from '@debugmcp/shared';
 import { createMockDependencies, setMockProxyRunning } from './session-manager-test-utils.js';
 import { MockProxyManager } from '../../../test-utils/mocks/mock-proxy-manager.js';
-import type { DebugResult } from '../../../../src/session/session-manager-core.js';
+import type { DebugResult, LaunchResultData } from '../../../../src/session/session-manager-core.js';
 
 /** The hold these tests reason about; asserted below so a retune has to look here. */
 const HOLD_MS = 1_000;
@@ -47,7 +47,7 @@ describe('SessionManager - launch contract (issues #823, #826, #851)', () => {
 
   /** Start a launch without awaiting it, and expose whether it has answered. */
   function launch(sessionId: string, dapLaunchArgs: Record<string, unknown> = {}, script = 'test.py') {
-    let result: DebugResult | undefined;
+    let result: DebugResult<LaunchResultData> | undefined;
     const promise = sessionManager
       .startDebugging(sessionId, script, [], { stopOnEntry: false, ...dapLaunchArgs })
       .then((settled) => { result = settled; return settled; });
@@ -357,6 +357,89 @@ describe('SessionManager - launch contract (issues #823, #826, #851)', () => {
       expect(started.result()).toMatchObject({ success: true, state: SessionState.RUNNING });
       expect(started.result()?.data?.pending).toBe(true);
       expect(started.result()?.data?.message).toContain('wait_for_stop');
+    });
+  });
+
+  describe('where the launch stopped (issue #951)', () => {
+    const stackTraceCalls = () => proxy().dapRequestCalls.filter((call) => call.command === 'stackTrace');
+
+    it('answers a breakpoint stop with the location of the first visible frame, the way wait_for_stop does', async () => {
+      const sessionId = await createSession();
+      await sessionManager.setBreakpoint(sessionId, { file: 'test.py', line: 5 });
+      const started = launch(sessionId);
+      await vi.advanceTimersByTimeAsync(300);
+      proxy().simulateStopped(1, 'breakpoint');
+      await vi.advanceTimersByTimeAsync(50);
+
+      const result = started.result();
+      expect(result).toMatchObject({ success: true, state: SessionState.PAUSED });
+      expect(result?.data?.reason).toBe('breakpoint');
+      // The mock's stack: one frame at test.py:10.
+      expect(result?.data?.location).toEqual({ file: 'test.py', line: 10, column: 0 });
+      // Anchored on the reported thread with nothing to explain: no threadId, no note.
+      expect(result?.data?.threadId).toBeUndefined();
+      expect(result?.data?.note).toBeUndefined();
+      // The message is unchanged; the structured location is the addition.
+      expect(result?.data?.message).toBe('Debugging started for test.py. Current state: paused');
+      expect(stackTraceCalls().length).toBeGreaterThan(0);
+    });
+
+    it('answers a requested entry stop with its location', async () => {
+      const sessionId = await createSession();
+      const started = launch(sessionId, { stopOnEntry: true });
+      await vi.advanceTimersByTimeAsync(50);
+
+      const result = started.result();
+      expect(result).toMatchObject({ success: true, state: SessionState.PAUSED });
+      expect(result?.data?.reason).toBe('entry');
+      expect(result?.data?.location).toEqual({ file: 'test.py', line: 10, column: 0 });
+    });
+
+    it('reads no stack for a launch answered while the program still runs', async () => {
+      const sessionId = await createSession();
+      await sessionManager.setBreakpoint(sessionId, { file: 'test.py', line: 5 });
+      const started = launch(sessionId);
+      await vi.advanceTimersByTimeAsync(HOLD_MS + 100);
+
+      const result = started.result();
+      expect(result?.data?.pending).toBe(true);
+      expect(result?.data?.location).toBeUndefined();
+      expect(stackTraceCalls()).toHaveLength(0);
+    });
+
+    it('reads no stack for a program that ended inside the hold', async () => {
+      const sessionId = await createSession();
+      const started = launch(sessionId);
+      await vi.advanceTimersByTimeAsync(200);
+      proxy().simulateExited(0);
+      await vi.advanceTimersByTimeAsync(50);
+
+      const result = started.result();
+      expect(result).toMatchObject({ success: true, state: SessionState.STOPPED });
+      expect(result?.data?.location).toBeUndefined();
+      expect(stackTraceCalls()).toHaveLength(0);
+    });
+
+    it("restart_debugging carries the relaunch's landing the same way", async () => {
+      const sessionId = await createSession();
+      const relaunchProxy = new MockProxyManager();
+      vi.mocked(dependencies.proxyManagerFactory.create)
+        .mockReturnValueOnce(proxy())
+        .mockReturnValueOnce(relaunchProxy);
+      await sessionManager.setBreakpoint(sessionId, { file: 'test.py', line: 5 });
+      const first = launch(sessionId);
+      await vi.advanceTimersByTimeAsync(HOLD_MS + 100);
+      expect(first.result()?.data?.pending).toBe(true);
+
+      let restarted: DebugResult<LaunchResultData> | undefined;
+      void sessionManager.restartDebugging(sessionId).then((settled) => { restarted = settled; });
+      await vi.advanceTimersByTimeAsync(300);
+      relaunchProxy.simulateStopped(1, 'breakpoint');
+      await vi.advanceTimersByTimeAsync(50);
+
+      expect(restarted, JSON.stringify(restarted)).toMatchObject({ success: true, state: SessionState.PAUSED });
+      expect(restarted?.data?.location).toEqual({ file: 'test.py', line: 10, column: 0 });
+      expect(restarted?.data?.breakpointsReapplied).toBe(1);
     });
   });
 

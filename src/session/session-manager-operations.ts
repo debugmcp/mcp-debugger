@@ -41,6 +41,7 @@ import {
   AttachResultData,
   CustomLaunchRequestArguments,
   DebugResult,
+  LaunchResultData,
   PauseResultData,
   StepResultData,
   WaitForStopResultData
@@ -235,7 +236,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     dryRunSpawn?: boolean,
     adapterLaunchConfig?: Record<string, unknown>,
     breakOnExceptions?: ExceptionBreakMode
-  ): Promise<DebugResult> {
+  ): Promise<DebugResult<LaunchResultData>> {
     return this.launcher.startDebugging(
       sessionId,
       scriptPath,
@@ -250,7 +251,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
   /**
    * Restart the debuggee by replaying the last real launch (issue #238).
    */
-  async restartDebugging(sessionId: string): Promise<DebugResult> {
+  async restartDebugging(sessionId: string): Promise<DebugResult<LaunchResultData>> {
     return this.launcher.restartDebugging(sessionId);
   }
 

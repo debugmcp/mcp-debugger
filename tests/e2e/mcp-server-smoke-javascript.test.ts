@@ -749,7 +749,7 @@ describe('JavaScript Debugging - module-load breakpoints in source-mapped TypeSc
    * fixture is ES2015 CommonJS, so a step from line 91's downlevelled `await`
    * can land in the `__awaiter` trampoline rather than on a `.ts` line.
    */
-  it('warns on set_breakpoint, and notes on the stop, when the generated .js is older than the .ts (issue #938)', async () => {
+  it('warns on set_breakpoint, and notes on the launch answer, the stop and the stack, when the generated .js is older than the .ts (issues #938, #951)', async () => {
     /** `console.log("Test 4: Complex data structures");` — a plain line after the awaits. */
     const LATER_LINE = 96;
     const dir = transpile('commonjs');
@@ -789,6 +789,9 @@ describe('JavaScript Debugging - module-load breakpoints in source-mapped TypeSc
       arguments: { sessionId, scriptPath: jsFile, args: [], dapLaunchArgs: { stopOnEntry: false, justMyCode: true } }
     }));
     expect(start.state, JSON.stringify(start)).toBe('paused');
+    // The launch answered the stop, so it says where, with the note (issue #951).
+    expect((start.location as { line?: number } | undefined)?.line, JSON.stringify(start)).toBe(MODULE_LOAD_LINE);
+    expect(String(start.note ?? ''), JSON.stringify(start)).toMatch(/may be stale/);
 
     await mcpClient!.callTool({ name: 'continue_execution', arguments: { sessionId } });
     const stop = parseSdkToolResult(await mcpClient!.callTool({
@@ -798,6 +801,10 @@ describe('JavaScript Debugging - module-load breakpoints in source-mapped TypeSc
     expect(stop.state, JSON.stringify(stop)).toBe('paused');
     expect((stop.location as { line?: number } | undefined)?.line, JSON.stringify(stop)).toBe(LATER_LINE);
     expect(String(stop.note ?? ''), JSON.stringify(stop)).toMatch(/may be stale/);
+
+    // get_stack_trace is the other carrier (issue #951).
+    const stack = parseSdkToolResult(await mcpClient!.callTool({ name: 'get_stack_trace', arguments: { sessionId } }));
+    expect(String(stack.note ?? ''), JSON.stringify(stack)).toMatch(/may be stale/);
 
     await mcpClient!.callTool({ name: 'continue_execution', arguments: { sessionId } });
   }, 60000);

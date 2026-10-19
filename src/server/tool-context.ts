@@ -24,7 +24,7 @@ import type {
   Variable
 } from '@debugmcp/shared';
 import type { SessionManager } from '../session/session-manager.js';
-import type { DebugResult, StepResultData, WaitForStopResultData } from '../session/session-manager-core.js';
+import type { DebugResult, LaunchResultData, StepResultData, WaitForStopResultData } from '../session/session-manager-core.js';
 import type { FrameSummary, StackTraceResult } from '../session/session-manager-data.js';
 import type { VariableTruncationSummary } from '../session/variable-caps.js';
 import type { SimpleFileChecker, FileExistenceResult } from '../utils/simple-file-checker.js';
@@ -95,8 +95,8 @@ export interface ToolContext {
     dryRunSpawn?: boolean,
     adapterLaunchConfig?: Record<string, unknown>,
     breakOnExceptions?: ExceptionBreakMode
-  ): Promise<DebugResult>;
-  restartDebugging(sessionId: string): Promise<DebugResult>;
+  ): Promise<DebugResult<LaunchResultData>>;
+  restartDebugging(sessionId: string): Promise<DebugResult<LaunchResultData>>;
   closeDebugSession(sessionId: string): Promise<boolean>;
   setFunctionBreakpoint(
     sessionId: string,

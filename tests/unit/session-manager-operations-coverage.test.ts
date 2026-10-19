@@ -1897,7 +1897,9 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
           const startPromise = operations.startDebugging('test-session', 'server.py');
           await vi.advanceTimersByTimeAsync(Math.floor(holdMs() / 2));
           moveSessionTo(SessionState.PAUSED, { reason: 'breakpoint', threadId: 1, timestamp: Date.now() });
-          await vi.advanceTimersByTimeAsync(0);
+          // A launch that stopped reads where (issue #951): the landing read's
+          // short settle has to elapse before the answer is built.
+          await vi.advanceTimersByTimeAsync(50);
           const result = await startPromise;
 
           expect(result.state).toBe(SessionState.PAUSED);

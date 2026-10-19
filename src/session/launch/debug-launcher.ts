@@ -22,9 +22,10 @@ import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import { checkLaunchToolchain } from '../../utils/language-availability.js';
 import { setCuratedMessage } from '../breakpoints/hit-verification.js';
-import type { CustomLaunchRequestArguments, DebugResult } from '../session-manager-core.js';
+import type { CustomLaunchRequestArguments, DebugResult, LaunchResultData } from '../session-manager-core.js';
 import type { ManagedSession, ToolchainValidationState } from '../session-store.js';
 import type { LaunchContext } from '../operations-context.js';
+import { describeStopLocation, landingFields } from '../inspection/stop-location.js';
 import type { BreakpointController, ResyncOutcome } from '../breakpoints/breakpoint-controller.js';
 import { reresolveAnchors } from '../breakpoints/anchor-resolution.js';
 import {
@@ -197,7 +198,7 @@ export class DebugLauncher {
     dryRunSpawn?: boolean,
     adapterLaunchConfig?: Record<string, unknown>,
     breakOnExceptions?: ExceptionBreakMode
-  ): Promise<DebugResult> {
+  ): Promise<DebugResult<LaunchResultData>> {
     return this.inFlight.run(sessionId, 'launch', 'start_debugging', this.ctx, () =>
       this.launch(
         sessionId,
@@ -220,7 +221,7 @@ export class DebugLauncher {
     dryRunSpawn?: boolean,
     adapterLaunchConfig?: Record<string, unknown>,
     breakOnExceptions?: ExceptionBreakMode
-  ): Promise<DebugResult> {
+  ): Promise<DebugResult<LaunchResultData>> {
     const session = this.ctx.getSession(sessionId);
     this.ctx.logger.info(
       `Attempting to start debugging for session ${sessionId}, script: ${scriptPath}, dryRunSpawn: ${dryRunSpawn}, dapLaunchArgs:`,
@@ -636,6 +637,19 @@ export class DebugLauncher {
         resync = await this.breakpoints.resyncAll(finalSession, { forceFreshEcho: true });
       }
 
+      // Where the program stopped (issue #951): the same short settle and
+      // stack read a step, a pause or wait_for_stop makes, so the answer
+      // carries `location` — and `threadId`/`note` when there is something
+      // to say — and the handler can read the line and the build behind it.
+      // An entry stop the core auto-continues never gets here: the readiness
+      // wait reads the state through waitForSessionState, whose microtask
+      // re-read (issue #849) sees the RUNNING the continue sets in the same
+      // call stack. Best effort, like every landing read: a stack that cannot
+      // be read leaves the answer as it was.
+      const landing = finalState === SessionState.PAUSED
+        ? await describeStopLocation(this.ctx, sessionId, 'launch')
+        : {};
+
       // The policy's word is a static pin; a stop that arrived anyway is the
       // stronger evidence (an adapter build that ignores the flag after all):
       // a stop only a live debugger produces — the core's stopped handler
@@ -739,17 +753,17 @@ export class DebugLauncher {
           ...(runToCompletion?.data ?? {}),
           // Prefer the actual DAP stop reason (issue #214) — the first stop is
           // not always a breakpoint (e.g. an uncaught exception before any
-          // breakpoint is hit). handleStopped records lastStop synchronously
-          // before every user-visible PAUSED transition, so PAUSED without
-          // lastStop is only the auto-continue transient (an entry stop being
-          // auto-continued); report 'unknown' rather than fabricating
-          // 'breakpoint' there (issue #255 residual).
+          // breakpoint is hit). A PAUSED session always carries lastStop
+          // (_updateSessionState enforces it, issue #598), so the fallback is
+          // for the type alone: 'entry' for a stopOnEntry launch, 'unknown'
+          // otherwise — never a fabricated 'breakpoint' (issue #255).
           reason:
             finalState === SessionState.PAUSED
               ? finalSession.lastStop?.reason ??
                 (effectiveLaunchArgs?.stopOnEntry ? 'entry' : 'unknown')
               : undefined,
           stopOnEntrySuccessful: !!effectiveLaunchArgs?.stopOnEntry && finalState === SessionState.PAUSED,
+          ...landingFields(landing),
         },
       };
     } catch (error) {
@@ -837,7 +851,7 @@ export class DebugLauncher {
    * emulation — so every launch-mode language works with no per-adapter
    * wiring (issue #238).
    */
-  async restartDebugging(sessionId: string): Promise<DebugResult> {
+  async restartDebugging(sessionId: string): Promise<DebugResult<LaunchResultData>> {
     // Claimed first (issue #711): a launch or attach still being awaited, or
     // a restart already replaying, is the most relevant fact about the
     // session. Held for the whole restart, so the replayed launch runs under
@@ -852,7 +866,7 @@ export class DebugLauncher {
   }
 
   /** The restart proper; the caller holds the session's in-flight claim. */
-  private async restart(session: ManagedSession): Promise<DebugResult> {
+  private async restart(session: ManagedSession): Promise<DebugResult<LaunchResultData>> {
     const sessionId = session.id;
 
     if (session.attachMode) {

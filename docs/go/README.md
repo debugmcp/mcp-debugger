@@ -218,7 +218,7 @@ func add(a, b int) int {
 
 ## Stale builds
 
-In `debug` and `test` mode Delve compiles the package for every launch, so nothing can be stale. In `exec` mode (a prebuilt binary as the program) Delve runs it as given and binds breakpoints through its DWARF, while the echo comes from the `.go` on disk. Once `start_debugging` has named the binary, mcp-debugger compares the two: a `set_breakpoint` in a `.go` newer than the binary carries a `warning` naming both files and their mtimes, and `step_*`, `wait_for_stop` and `pause_execution` carry the same sentence as `note` (issue #950). Not covered: attach sessions; the `start_debugging` answer and `get_stack_trace` do not carry the sentence yet (#951). Rebuild with `go build -gcflags="all=-N -l"` to clear it.
+In `debug` and `test` mode Delve compiles the package for every launch, so nothing can be stale. In `exec` mode (a prebuilt binary as the program) Delve runs it as given and binds breakpoints through its DWARF, while the echo comes from the `.go` on disk. Once `start_debugging` has named the binary, mcp-debugger compares the two: a `set_breakpoint` in a `.go` newer than the binary carries a `warning` naming both files and their mtimes, and `step_*`, `wait_for_stop` and `pause_execution` carry the same sentence as `note` (issue #950). Not covered: attach sessions. The `start_debugging` answer carries it too when the program is already paused when the launch answers, and `get_stack_trace` when its top frame is in such a file (#951). Rebuild with `go build -gcflags="all=-N -l"` to clear it.
 
 ## Troubleshooting
 

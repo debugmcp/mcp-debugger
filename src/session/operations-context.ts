@@ -143,8 +143,9 @@ export type ProxyLaunchContext = Pick<
 /**
  * Launch-mode sessions: the toolchain gate, state and store updates (and the
  * state subscription the readiness waits read), the dry-run window, the
- * proxy-failure record (hence the filesystem) and the session-preserving
- * teardown of a previous proxy.
+ * proxy-failure record (hence the filesystem), the session-preserving
+ * teardown of a previous proxy, and the detailed stack behind the landing a
+ * launch that stopped reports (issue #951).
  */
 export type LaunchContext = Pick<
   OperationsContext,
@@ -159,6 +160,7 @@ export type LaunchContext = Pick<
   | 'updateState'
   | 'onStateChange'
   | 'selectPolicy'
+  | 'getStackTraceDetailed'
   | 'stopProxyPreservingSession'
 >;
 

@@ -8,7 +8,13 @@ import { SessionTerminatedError } from '../../errors/debug-errors.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { enforceExplicitNames, requireSessionId } from '../tool-validation.js';
-import { carriesLastStop, debuggerOffWhyFor, variablePayloadExtras } from './shared.js';
+import {
+  carriesLastStop,
+  debuggerOffWhyFor,
+  describeStaleBuild,
+  hasOpenableSourcePath,
+  variablePayloadExtras
+} from './shared.js';
 import {
   failureResult,
   jsonResult,
@@ -138,6 +144,19 @@ export const getStackTraceTool: ToolHandler = async (ctx, args) => {
       }
       if (explanation) {
         notes.push(explanation);
+      }
+    }
+    // Whether the running code may be an older build than the source the top
+    // frame was read from (issues #938/#950): the sentence the stop answers
+    // carry, here on the tool the fast-program flow always calls (issue
+    // #951). The top frame only, and only one with an openable path — a
+    // `<…>` label, a relative spelling or an unresolvedSource frame names no
+    // file on this host (the same rule the stop answers apply).
+    const top = stackTrace.frames[0];
+    if (top && !top.unresolvedSource && hasOpenableSourcePath(top.file)) {
+      const staleBuild = await describeStaleBuild(ctx, args.sessionId, top.file, 'stack trace');
+      if (staleBuild) {
+        notes.push(staleBuild);
       }
     }
     if (notes.length > 0) {

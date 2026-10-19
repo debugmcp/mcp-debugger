@@ -123,8 +123,8 @@ export interface DebugResultData extends ProxyFailureDiagnostics {
 export type StopLocation = Pick<StackFrame, 'file' | 'line' | 'column'>;
 
 /**
- * What a location-bearing answer (pause, step, wait_for_stop) carries about
- * where the stop landed, read through the frame-anchor resolver (issue
+ * What a location-bearing answer (pause, step, wait_for_stop, and a launch
+ * that stopped) carries about where the stop landed, read through the frame-anchor resolver (issue
  * #904): the first visible frame when the stack could be read; the thread
  * the answer is anchored on, only when it is not the thread the stop was
  * reported on; and a note when there is something to say — a sibling
@@ -171,6 +171,17 @@ export type WaitForStopResultData = DebugResultData & StopLandingFields & {
   message: string;
   lastStop?: SessionStopInfo;
 };
+
+/**
+ * What a launch (start_debugging, and restart_debugging, which replays one)
+ * returns: the common fields — `reason`/`stopOnEntrySuccessful` for a stop,
+ * the run-to-completion fields for a program that ended, `pending` for one
+ * still running when the hold elapsed — plus, for a stop, where it landed
+ * (issue #951): the same landing read a step, a pause or wait_for_stop makes,
+ * so the answer names the frame the program is paused in and the handler can
+ * read the line and the build behind it.
+ */
+export type LaunchResultData = DebugResultData & StopLandingFields;
 
 /**
  * What a successful attach returns on top of the common fields: a `note`
