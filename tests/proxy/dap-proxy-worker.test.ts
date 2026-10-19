@@ -391,7 +391,8 @@ describe('DapProxyWorker', () => {
 
       await worker.handleCommand(basePayload);
 
-      // Clear timers to prevent Windows IPC fix timer from leaking
+      // A successful init schedules nothing; the clear keeps a regression's
+      // timers from leaking into later tests.
       vi.clearAllTimers();
 
       expect(traceSpy).toHaveBeenCalledWith(basePayload.sessionId, basePayload.logDir);
@@ -552,7 +553,9 @@ describe('DapProxyWorker', () => {
       });
 
       await worker.handleCommand(basePayload);
-      vi.clearAllTimers();
+      // The failure path schedules its exit as setImmediate + setTimeout(100 ms);
+      // run past that window so a success path that wrongly scheduled one is caught.
+      await vi.advanceTimersByTimeAsync(200);
 
       expect(exitSpy).not.toHaveBeenCalled();
 
