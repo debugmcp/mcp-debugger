@@ -1,24 +1,34 @@
+/**
+ * `start_debugging { dryRunSpawn: true }` is a query (issue #812): it runs the
+ * launch preparation in the parent — adapter, transform, executable, the spawn
+ * command — and answers with what the launch would run, leaving the session
+ * exactly as it found it. Before #812 it was a launch attempt that rode the
+ * proxy worker, reset every per-launch record, tore down a live program and
+ * ended the session `stopped`.
+ */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
-import { SessionState, DebugLanguage } from '@debugmcp/shared';
+import type { CustomLaunchRequestArguments } from '../../../../src/session/session-manager-core.js';
+import { SessionState, SessionLifecycleState, DebugLanguage, type AdapterPolicy } from '@debugmcp/shared';
+import { FakeDebugAdapter } from '../../../test-utils/fakes/fake-debug-adapter.js';
 import { createMockDependencies } from './session-manager-test-utils.js';
 
-describe('SessionManager - Dry Run Race Condition Tests', () => {
+/** The attach shape is not in `CustomLaunchRequestArguments`; production passes it through the same cast. */
+function launchArgs(args: Record<string, unknown>): Partial<CustomLaunchRequestArguments> {
+  return args as unknown as Partial<CustomLaunchRequestArguments>;
+}
+
+describe('SessionManager dry run (issue #812)', () => {
   let sessionManager: SessionManager;
   let dependencies: ReturnType<typeof createMockDependencies>;
-  let config: SessionManagerConfig;
 
   beforeEach(() => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.useFakeTimers();
     dependencies = createMockDependencies();
-    config = {
+    const config: SessionManagerConfig = {
       logDirBase: '/tmp/test-sessions',
-      defaultDapLaunchArgs: {
-        stopOnEntry: true,
-        justMyCode: true
-      }
+      defaultDapLaunchArgs: { stopOnEntry: false, justMyCode: true }
     };
-    
     sessionManager = new SessionManager(config, dependencies);
   });
 
@@ -28,300 +38,234 @@ describe('SessionManager - Dry Run Race Condition Tests', () => {
     dependencies.mockProxyManager.reset();
   });
 
-  describe('Dry Run Timing Issues', () => {
-    it('leaves the session launchable: a real startDebugging on the same session follows the dry run (issue #793)', async () => {
-      const session = await sessionManager.createSession({
-        language: DebugLanguage.MOCK,
-        name: 'DryRunThenLaunch'
-      });
-      await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 5 });
+  const proxy = () => dependencies.mockProxyManager;
 
-      const dry = await sessionManager.startDebugging(session.id, 'test.py', [], {}, true);
-      await vi.runAllTimersAsync();
-      expect(dry.success).toBe(true);
-      expect(dry.state).toBe(SessionState.STOPPED);
-      expect(sessionManager.getSession(session.id)?.sessionLifecycle).toBe('terminated');
+  async function createSession(name: string) {
+    return sessionManager.createSession({ language: DebugLanguage.MOCK, name, executablePath: 'python' });
+  }
 
-      // The server's gate (#793) was the only thing refusing this call; the
-      // session layer must relaunch with the queued breakpoint.
-      const real = await sessionManager.startDebugging(session.id, 'test.py');
-      await vi.runAllTimersAsync();
-      expect(real.success).toBe(true);
+  /** Launch to the entry stop: the mock proxy reports it on the next tick; the landing read settles 10 ms later. */
+  async function launchToEntryStop(sessionId: string, scriptArgs: string[] = []) {
+    const launch = sessionManager.startDebugging(sessionId, 'test.py', scriptArgs, { stopOnEntry: true });
+    await vi.advanceTimersByTimeAsync(50);
+    const result = await launch;
+    expect(result.state).toBe(SessionState.PAUSED);
+  }
 
-      const startCalls = dependencies.mockProxyManager.startCalls;
-      expect(startCalls).toHaveLength(2);
-      expect(startCalls[0].dryRunSpawn).toBe(true);
-      expect(startCalls[1].dryRunSpawn).toBe(false);
-      expect(startCalls[1].initialBreakpoints).toEqual([
-        expect.objectContaining({ file: 'test.py', line: 5 })
-      ]);
+  it('answers the spawn command for a fresh session and leaves it untouched: no proxy, no launch record', async () => {
+    const session = await createSession('Fresh');
+    const before = sessionManager.getSession(session.id)!;
+    expect(before.state).toBe(SessionState.CREATED);
+
+    const dry = await sessionManager.startDebugging(session.id, 'test.py', [], {}, true);
+
+    // The fake adapter resolves the session's executable and builds `<exe> fake-adapter.js --port <port>`;
+    // the mock policy hands that command back verbatim, so this is the string the worker used to log.
+    expect(dry).toMatchObject({
+      success: true,
+      state: SessionState.CREATED,
+      data: { dryRun: true, command: 'python fake-adapter.js --port 12345', script: 'test.py' }
     });
+    expect(dry.data?.message).toMatch(/nothing was started/i);
+    expect(proxy().startCalls).toHaveLength(0);
+    expect(dependencies.proxyManagerFactory.create).not.toHaveBeenCalled();
 
-    it('after a run to completion, a dry run keeps the breakpoints and the last real launch, so restart still replays', async () => {
-      const session = await sessionManager.createSession({
-        language: DebugLanguage.MOCK,
-        name: 'DryRunAfterExit'
-      });
-      await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 9 });
-      await sessionManager.startDebugging(session.id, 'test.py', ['--real']);
-      await vi.runAllTimersAsync();
-      dependencies.mockProxyManager.simulateEvent('terminated');
-      await vi.runAllTimersAsync();
+    const after = sessionManager.getSession(session.id)!;
+    expect(after.state).toBe(SessionState.CREATED);
+    expect(after.sessionLifecycle).toBe(SessionLifecycleState.CREATED);
+    expect(after.lastLaunch).toBeUndefined();
+    expect(after.logDir).toBeUndefined();
+    expect(after.transformedLaunch).toBeUndefined();
+    expect(after.launchConfigNotices ?? []).toEqual([]);
+  });
 
-      const dry = await sessionManager.startDebugging(session.id, 'test.py', [], {}, true);
-      await vi.runAllTimersAsync();
-      expect(dry.success).toBe(true);
+  it('leaves a paused program paused: the live proxy is not torn down and the run\'s records survive', async () => {
+    const session = await createSession('Paused');
+    await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 5 });
+    await launchToEntryStop(session.id);
+    const before = sessionManager.getSession(session.id)!;
+    const { proxyManager, lastStop, outputBuffer, logDir, transformedLaunch } = before;
+    const verifiedBefore = sessionManager.listBreakpoints(session.id)[0].verified;
+    expect(lastStop?.reason).toBe('entry');
 
-      // A dry run is a launch attempt: it resets the per-launch state (output
-      // buffer, exitCode) like any launch, but the stored breakpoints and the
-      // last REAL launch survive it.
-      expect(sessionManager.listBreakpoints(session.id)).toHaveLength(1);
-      expect(sessionManager.getSession(session.id)?.lastLaunch?.scriptArgs).toEqual(['--real']);
+    const dry = await sessionManager.startDebugging(session.id, 'test.py', [], {}, true);
 
-      const restartPromise = sessionManager.restartDebugging(session.id);
-      await vi.runAllTimersAsync();
-      const restarted = await restartPromise;
-      expect(restarted.success).toBe(true);
-      const startCalls = dependencies.mockProxyManager.startCalls;
-      expect(startCalls).toHaveLength(3);
-      expect(startCalls[2].scriptArgs).toEqual(['--real']);
-      expect(startCalls[2].initialBreakpoints).toEqual([
-        expect.objectContaining({ file: 'test.py', line: 9 })
-      ]);
-    });
+    expect(dry.success).toBe(true);
+    expect(dry.state).toBe(SessionState.PAUSED);
+    expect(dry.data?.dryRun).toBe(true);
+    const after = sessionManager.getSession(session.id)!;
+    expect(after.state).toBe(SessionState.PAUSED);
+    expect(after.proxyManager).toBe(proxyManager);
+    expect(after.lastStop).toBe(lastStop);
+    expect(after.outputBuffer).toBe(outputBuffer);
+    expect(after.logDir).toBe(logDir);
+    expect(after.transformedLaunch).toBe(transformedLaunch);
+    expect(sessionManager.listBreakpoints(session.id)[0].verified).toBe(verifiedBefore);
+    expect(proxy().stopCalls).toBe(0);
+    expect(proxy().startCalls).toHaveLength(1);
+    expect(proxy().isRunning()).toBe(true);
+    // The program is still there to drive.
+    const resumed = await sessionManager.continue(session.id);
+    expect(resumed.success).toBe(true);
+  });
 
-    it('should wait for dry run completion beyond 500ms', async () => {
-      const session = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        name: 'SlowDryRunTest'
-      });
+  it('keeps a finished run\'s exit code and buffer, and restart_debugging still replays the real launch', async () => {
+    const session = await createSession('Finished');
+    await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 9 });
+    const launch = sessionManager.startDebugging(session.id, 'test.py', ['--real']);
+    await vi.advanceTimersByTimeAsync(20);
+    proxy().simulateExited(7);
+    proxy().simulateEvent('terminated');
+    await vi.advanceTimersByTimeAsync(20);
+    expect((await launch).state).toBe(SessionState.STOPPED);
+    const before = sessionManager.getSession(session.id)!;
+    expect(before.exitCode).toBe(7);
+    const { outputBuffer, transformedLaunch } = before;
 
-      const mockProxyManager = dependencies.mockProxyManager;
-      
-      // Override the default start behavior to control when dry-run-complete fires
-      mockProxyManager.start = vi.fn(async (config) => {
-        mockProxyManager.startCalls.push(config);
-        (mockProxyManager as unknown as { _isRunning: boolean })._isRunning = true;
-        
-        // Don't emit immediately if it's a dry run
-        if (config.dryRunSpawn) {
-          // Emit after delay
-          setTimeout(() => {
-            mockProxyManager.emit('dry-run-complete', 'python', config.scriptPath);
-          }, 1000); // Longer than current 500ms timeout
-        }
-      });
+    const dry = await sessionManager.startDebugging(session.id, 'test.py', [], {}, true);
 
-      const startTime = Date.now();
-      const resultPromise = sessionManager.startDebugging(
-        session.id,
-        'test.py',
-        [],
-        {},
-        true // dryRunSpawn
-      );
-      
-      // Advance timers to trigger the dry-run-complete event
-      await vi.advanceTimersByTimeAsync(1000);
-      
-      const result = await resultPromise;
-      const duration = Date.now() - startTime;
+    expect(dry.success).toBe(true);
+    expect(dry.state).toBe(SessionState.STOPPED);
+    const after = sessionManager.getSession(session.id)!;
+    expect(after.exitCode).toBe(7);
+    expect(after.outputBuffer).toBe(outputBuffer);
+    expect(after.transformedLaunch).toBe(transformedLaunch);
+    expect(after.lastLaunch?.scriptArgs).toEqual(['--real']);
+    expect(sessionManager.listBreakpoints(session.id)).toHaveLength(1);
 
-      // Should wait for the full 1000ms
-      expect(duration).toBeGreaterThanOrEqual(1000);
-      expect(duration).toBeLessThan(2500); // More tolerant timing for CI environments
-      expect(result.success).toBe(true);
-      expect(result.state).toBe(SessionState.STOPPED);
-      const data = result.data as { dryRun?: boolean; message?: string };
-      expect(data?.dryRun).toBe(true);
-      expect(data?.message).toContain('Dry run spawn command logged');
-    });
+    const restart = sessionManager.restartDebugging(session.id);
+    await vi.advanceTimersByTimeAsync(1500);
+    expect((await restart).success).toBe(true);
+    const startCalls = proxy().startCalls;
+    expect(startCalls).toHaveLength(2);
+    expect(startCalls[1].scriptArgs).toEqual(['--real']);
+    expect(startCalls[1].initialBreakpoints).toEqual([expect.objectContaining({ file: 'test.py', line: 9 })]);
+  });
 
-    it('should timeout gracefully if dry run never completes', async () => {
-      // Create a new session manager with shorter timeout for testing
-      const testTimeout = 2000; // 2 seconds for faster test
-      const testSessionManager = new SessionManager(
-        { logDirBase: '/tmp/test-sessions', dryRunTimeoutMs: testTimeout },
-        dependencies
-      );
-      
-      const session = await testSessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        name: 'TimeoutDryRunTest'
-      });
+  it('keeps the session launchable: the real launch after a dry run binds the breakpoint set before it (issue #793)', async () => {
+    const session = await createSession('DryThenReal');
+    await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 5 });
 
-      const mockProxyManager = dependencies.mockProxyManager;
-      
-      // Configure mock to never emit dry-run-complete
-      mockProxyManager.start = vi.fn(async (config) => {
-        mockProxyManager.startCalls.push(config);
-        (mockProxyManager as unknown as { _isRunning: boolean })._isRunning = true;
-        
-        // Don't emit dry-run-complete event at all
-        if (config.dryRunSpawn) {
-          // Do nothing - no event
-        }
-      });
-      
-      const startTime = Date.now();
-      const resultPromise = testSessionManager.startDebugging(
-        session.id,
-        'test.py',
-        [],
-        {},
-        true // dryRunSpawn
-      );
-      
-      // Advance timers to trigger the timeout
-      await vi.advanceTimersByTimeAsync(testTimeout);
-      
-      const result = await resultPromise;
-      const duration = Date.now() - startTime;
+    const dry = await sessionManager.startDebugging(session.id, 'test.py', [], {}, true);
+    expect(dry.success).toBe(true);
+    await launchToEntryStop(session.id);
 
-      // Should wait for the configured timeout period
-      expect(duration).toBeGreaterThanOrEqual(testTimeout);
-      expect(duration).toBeLessThan(testTimeout + 2500); // Very tolerant timing for CI environments
-      
-      // Should return failure with timeout error
-      expect(result.success).toBe(false);
-      expect(result.error).toBeDefined();
-      expect(result.error).toContain('timed out');
-      expect(result.error).toContain(`${testTimeout}ms`);
-    });
+    const startCalls = proxy().startCalls;
+    expect(startCalls).toHaveLength(1);
+    expect(startCalls[0].dryRunSpawn).toBe(false);
+    expect(startCalls[0].initialBreakpoints).toEqual([expect.objectContaining({ file: 'test.py', line: 5 })]);
+  });
 
-    it('should handle dry run completing before event listener setup', async () => {
-      const session = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        name: 'RaceConditionTest'
-      });
+  it('refuses a dry run of an attach-shaped config: the attach transform reaches into the target process', async () => {
+    const session = await createSession('AttachShaped');
 
-      const mockProxyManager = dependencies.mockProxyManager;
-      
-      // Configure mock to emit dry-run-complete very early
-      mockProxyManager.start = vi.fn(async (config) => {
-        mockProxyManager.startCalls.push(config);
-        (mockProxyManager as unknown as { _isRunning: boolean })._isRunning = true;
-        
-        // Emit immediately to simulate race condition
-        if (config.dryRunSpawn) {
-          // Use process.nextTick to emit before our wait handler is set up
-          process.nextTick(() => {
-            mockProxyManager.emit('dry-run-complete', 'python', config.scriptPath);
-          });
-        }
-      });
+    const dry = await sessionManager.startDebugging(
+      session.id, 'attach://remote', [], launchArgs({ request: 'attach', port: 5678 }), true
+    );
 
-      const resultPromise = sessionManager.startDebugging(
-        session.id,
-        'test.py',
-        [],
-        {},
-        true // dryRunSpawn
-      );
-      
-      // Allow the process.nextTick to execute
-      await vi.runAllTimersAsync();
-      
-      const result = await resultPromise;
+    expect(dry.success).toBe(false);
+    expect(dry.error).toMatch(/attach/);
+    expect(dry.state).toBe(SessionState.CREATED);
+    expect(dependencies.adapterRegistry.create).not.toHaveBeenCalled();
+    expect(sessionManager.getSession(session.id)!.state).toBe(SessionState.CREATED);
+  });
 
-      // Should still succeed by checking state
-      expect(result.success).toBe(true);
-      expect(result.state).toBe(SessionState.STOPPED);
-      const data = result.data as { dryRun?: boolean };
-      expect(data?.dryRun).toBe(true);
-    });
+  it('answers a failed preparation without touching the session: a paused program stays paused', async () => {
+    const session = await createSession('PrepFails');
+    await launchToEntryStop(session.id);
+    const before = sessionManager.getSession(session.id)!;
+    vi.mocked(dependencies.adapterRegistry.create).mockRejectedValueOnce(
+      new Error('Maximum adapter instances (10) reached')
+    );
 
-    it('should handle dry run with very fast completion', async () => {
-      const session = await sessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        name: 'FastDryRunTest'
-      });
+    const dry = await sessionManager.startDebugging(session.id, 'test.py', [], {}, true);
 
-      const mockProxyManager = dependencies.mockProxyManager;
-      
-      // Configure mock to emit dry-run-complete very quickly (10ms)
-      mockProxyManager.start = vi.fn(async (config) => {
-        mockProxyManager.startCalls.push(config);
-        (mockProxyManager as unknown as { _isRunning: boolean })._isRunning = true;
-        
-        if (config.dryRunSpawn) {
-          setTimeout(() => {
-            mockProxyManager.emit('dry-run-complete', 'python', config.scriptPath);
-          }, 10); // Very fast completion
-        }
-      });
+    expect(dry.success).toBe(false);
+    expect(dry.error).toContain('Maximum adapter instances');
+    expect(dry.state).toBe(SessionState.PAUSED);
+    const after = sessionManager.getSession(session.id)!;
+    expect(after.state).toBe(SessionState.PAUSED);
+    expect(after.proxyManager).toBe(before.proxyManager);
+    expect(after.failureDiagnostics).toBe(before.failureDiagnostics);
+    expect(proxy().stopCalls).toBe(0);
+  });
 
-      const startTime = Date.now();
-      const resultPromise = sessionManager.startDebugging(
-        session.id,
-        'test.py',
-        [],
-        {},
-        true // dryRunSpawn
-      );
-      
-      // Advance timers by 10ms to trigger the event
-      await vi.advanceTimersByTimeAsync(10);
-      
-      const result = await resultPromise;
-      const duration = Date.now() - startTime;
+  it('renders an incompatible toolchain verdict the way a launch does, without the state rollback a launch needs', async () => {
+    const verdict = { compatible: false, toolchain: 'msvc', behavior: 'warn', message: 'MSVC PDB detected' };
+    vi.mocked(dependencies.adapterRegistry.create).mockImplementationOnce(async () =>
+      new FakeDebugAdapter().withExtras({ consumeLastToolchainValidation: vi.fn(() => verdict) })
+    );
+    const session = await createSession('Msvc');
 
-      // Should complete quickly without unnecessary delays
-      expect(duration).toBeLessThan(100); // More tolerant timing for CI environments
-      expect(result.success).toBe(true);
-      expect(result.state).toBe(SessionState.STOPPED);
-      const data = result.data as { dryRun?: boolean };
-      expect(data?.dryRun).toBe(true);
-    });
+    const dry = await sessionManager.startDebugging(session.id, 'test.py', [], {}, true);
 
-    it('should clean up event listeners properly on timeout', async () => {
-      // Create a new session manager with shorter timeout for testing
-      const testTimeout = 1000; // 1 second for faster test
-      const testSessionManager = new SessionManager(
-        { logDirBase: '/tmp/test-sessions', dryRunTimeoutMs: testTimeout },
-        dependencies
-      );
-      
-      const session = await testSessionManager.createSession({ 
-        language: DebugLanguage.MOCK,
-        name: 'CleanupTest'
-      });
+    expect(dry.success).toBe(false);
+    expect(dry.error).toBe('MSVC_TOOLCHAIN_DETECTED');
+    expect(dry.state).toBe(SessionState.CREATED);
+    expect(dry.data).toMatchObject({ message: 'MSVC PDB detected', toolchainValidation: verdict });
+    expect(dry.canContinue).toBe(true);
+    const after = sessionManager.getSession(session.id)!;
+    expect(after.state).toBe(SessionState.CREATED);
+    expect(after.toolchainValidation).toBeUndefined();
+  });
 
-      const mockProxyManager = dependencies.mockProxyManager;
-      
-      // Track if 'once' was called to set up the listener
-      const onceSpy = vi.spyOn(mockProxyManager, 'once');
-      
-      mockProxyManager.start = vi.fn(async (config) => {
-        mockProxyManager.startCalls.push(config);
-        (mockProxyManager as unknown as { _isRunning: boolean })._isRunning = true;
-        // Never emit dry-run-complete
-      });
+  it('says an incompatible toolchain with behavior "error" cannot be continued past, as a launch does', async () => {
+    const verdict = { compatible: false, toolchain: 'msvc', behavior: 'error', message: 'MSVC PDB detected' };
+    vi.mocked(dependencies.adapterRegistry.create).mockImplementationOnce(async () =>
+      new FakeDebugAdapter().withExtras({ consumeLastToolchainValidation: vi.fn(() => verdict) })
+    );
+    const session = await createSession('MsvcError');
 
-      // Spy on removeListener
-      const removeListenerSpy = vi.spyOn(mockProxyManager, 'removeListener');
-      
-      const resultPromise = testSessionManager.startDebugging(
-        session.id,
-        'test.py',
-        [],
-        {},
-        true // dryRunSpawn
-      );
-      
-      // Advance timers to trigger timeout
-      await vi.advanceTimersByTimeAsync(testTimeout);
-      const result = await resultPromise;
+    const dry = await sessionManager.startDebugging(session.id, 'test.py', [], {}, true);
 
-      // Verify the operation failed with timeout
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('timed out');
-      
-      // The listener should have been set up with 'once'
-      expect(onceSpy).toHaveBeenCalledWith('dry-run-complete', expect.any(Function));
-      
-      // After timeout, listener should be cleaned up
-      expect(removeListenerSpy).toHaveBeenCalledWith('dry-run-complete', expect.any(Function));
-    });
+    expect(dry.success).toBe(false);
+    expect(dry.error).toBe('MSVC_TOOLCHAIN_DETECTED');
+    expect(dry.canContinue).toBe(false);
+    expect(sessionManager.getSession(session.id)!.state).toBe(SessionState.CREATED);
+  });
+
+  it('gives the adapter back after answering: the registry slot a dry run takes is released', async () => {
+    const adapter = new FakeDebugAdapter();
+    vi.mocked(dependencies.adapterRegistry.create).mockImplementationOnce(async () => adapter);
+    const session = await createSession('Slot');
+
+    const dry = await sessionManager.startDebugging(session.id, 'test.py', [], {}, true);
+
+    expect(dry.success).toBe(true);
+    expect(adapter.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('answers a policy that cannot say what it would spawn as a failure, naming it, and still gives the adapter back', async () => {
+    const adapter = new FakeDebugAdapter();
+    vi.mocked(dependencies.adapterRegistry.create).mockImplementationOnce(async () => adapter);
+    const facade = sessionManager as unknown as { selectPolicy: (language: string) => AdapterPolicy };
+    const original = facade.selectPolicy.bind(sessionManager);
+    vi.spyOn(facade, 'selectPolicy').mockImplementation((language) => ({
+      ...original(language),
+      getAdapterSpawnConfig: () => undefined
+    }));
+    const session = await createSession('NoSpawnConfig');
+
+    const dry = await sessionManager.startDebugging(session.id, 'test.py', [], {}, true);
+
+    expect(dry.success).toBe(false);
+    expect(dry.error).toMatch(/Cannot determine adapter command .*\(policy: mock\)/);
+    expect(dry.state).toBe(SessionState.CREATED);
+    expect(adapter.dispose).toHaveBeenCalledTimes(1);
+    expect(sessionManager.getSession(session.id)!.state).toBe(SessionState.CREATED);
+  });
+
+  it('carries the transform\'s configuration notices as the warning, from the preparation and not from the session', async () => {
+    vi.mocked(dependencies.adapterRegistry.create).mockImplementationOnce(async () =>
+      Object.assign(new FakeDebugAdapter(), { supportedLaunchKeys: ['program'] })
+    );
+    const session = await createSession('Notices');
+    sessionManager.getSession(session.id)!.launchConfigNotices = ['a note from the last real launch'];
+
+    const dry = await sessionManager.startDebugging(session.id, 'test.py', [], {}, true, { typo: 1 });
+
+    expect(dry.success).toBe(true);
+    expect(dry.data?.warning).toBe('adapterLaunchConfig.typo: forwarded to the adapter but unrecognized');
+    expect(sessionManager.getSession(session.id)!.launchConfigNotices).toEqual(['a note from the last real launch']);
   });
 });

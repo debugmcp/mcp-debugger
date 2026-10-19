@@ -35,7 +35,7 @@ function makeControllerWithCtx(): { controller: BreakpointController; ctx: Break
   return { controller: new BreakpointController(ctx), ctx };
 }
 
-/** A session whose program has exited (or that only dry-ran): lifecycle TERMINATED, still in the store. */
+/** A session whose program has exited: lifecycle TERMINATED, still in the store. */
 function terminatedSession(proxyManager?: unknown): ManagedSession {
   return {
     id: 'sess-1',
@@ -61,7 +61,7 @@ describe('BreakpointController set on a terminated session (between launches, is
     expect(session.breakpoints.get(breakpoint.id)).toBe(breakpoint);
   });
 
-  it('sends nothing to a proxy that is still up after a dry run (state stopped)', async () => {
+  it('sends nothing to a proxy that is still up after the program exited (state stopped)', async () => {
     const sendDapRequest = vi.fn();
     const { controller, ctx } = makeControllerWithCtx();
     const session = terminatedSession({ isRunning: () => true, sendDapRequest });

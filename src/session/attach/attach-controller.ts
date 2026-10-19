@@ -230,7 +230,6 @@ export class AttachController {
       const attachConfigData = await this.proxyLauncher.start(session, {
         scriptPath: placeholderPath,
         dapLaunchArgs: attachLaunchArgs as Partial<CustomLaunchRequestArguments>,
-        dryRunSpawn: false,
         // merged over the attach config before transformAttachConfig (issue #336)
         adapterLaunchConfig: adapterConfig,
         breakOnExceptions,

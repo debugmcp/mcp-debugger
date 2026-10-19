@@ -11,11 +11,18 @@
  * state plus every launch-time warning the session accumulated. A failure at any point
  * after the proxy exists tears it down and reports the proxy-log pointers
  * alongside the error.
+ *
+ * A dry run (issue #812) is a query, not a launch: after the toolchain gate it
+ * runs the launch preparation through the ProxyLauncher — adapter, transform,
+ * executable, the spawn command — and answers with what the launch would run.
+ * It touches nothing: no teardown of a live proxy, no state change, no
+ * per-launch reset, no record on the session.
  */
 import {
   SessionState,
   SessionLifecycleState,
   sanitizePayloadForLogging,
+  type AdapterPolicy,
   type ExceptionBreakMode
 } from '@debugmcp/shared';
 import { McpError } from '@modelcontextprotocol/sdk/types.js';
@@ -37,12 +44,12 @@ import {
 } from '../breakpoints/launch-warnings.js';
 import {
   failProxySetup,
-  logProxyFailure,
   sessionRemovedDuringTeardown
 } from './proxy-failure-diagnostics.js';
 import { waitForLaunchReadiness } from './launch-readiness.js';
 import { describeLaunchArming } from './launch-arming.js';
-import type { ProxyLauncher } from './proxy-launcher.js';
+import type { AdapterPreparationOutcome, ProxyLauncher } from './proxy-launcher.js';
+import { describeSpawnCommand } from './spawn-command.js';
 import type { InFlightGuard } from '../in-flight-guard.js';
 import { adapterVerifiedABreakpoint, debuggerOffWhy } from '../debugger-off.js';
 
@@ -82,9 +89,86 @@ function failureData<T extends object>(
 
 /** Preparation and adapter notes share the existing warning surface, once each. */
 function launchWarnings(session: ManagedSession, ...notes: (string | undefined)[]): string | undefined {
-  return [...new Set([
-    ...notes, ...(session.launchConfigNotices ?? []), ...(session.adapterNotices ?? [])
-  ].filter((note): note is string => Boolean(note)))].join('; ') || undefined;
+  return joinWarnings(...notes, ...(session.launchConfigNotices ?? []), ...(session.adapterNotices ?? []));
+}
+
+/** The warning surface's join: each note once, `'; '`-separated, absent when there is none. */
+function joinWarnings(...notes: (string | undefined)[]): string | undefined {
+  return [...new Set(notes.filter((note): note is string => Boolean(note)))].join('; ') || undefined;
+}
+
+/**
+ * What the launcher decides about noDebug before anything starts (issues
+ * #710, #746, #749), shared by the launch and the dry run so both say the
+ * same thing about the same request.
+ */
+interface NoDebugDecision {
+  /** `request: 'attach'` / `__attachMode`: attaches with the debugger on; noDebug is a launch-request property. */
+  isAttachShaped: boolean;
+  /** The caller set the flag (never for an attach-shaped request). */
+  noDebug: boolean;
+  /** The flag is set and the adapter honours it: nothing armed can fire. */
+  debuggerOff: boolean;
+  noDebugWarning: string | undefined;
+  /** For a failed launch: the warning, or the bare note when nothing was armed. */
+  noDebugFailureNote: string | undefined;
+  /** The caller's arguments as the launch sends them: stopOnEntry forced off when the debugger is off. */
+  launchArgs: Partial<CustomLaunchRequestArguments> | undefined;
+  launchAdapterConfig: Record<string, unknown> | undefined;
+}
+
+/**
+ * Whether the flag turns the debugger off is the policy's word, measured per
+ * adapter: where it does, nothing the caller asked to stop on can fire and
+ * the breakpoint-shaped launch warnings are withheld; where the adapter
+ * ignores it, the warning says so instead. Decided from the caller's own
+ * breakOnExceptions rather than the policy default resolved later: a dry run
+ * is a configuration check and a restart replays the same arguments, and
+ * both should say so.
+ */
+function decideNoDebug(
+  session: ManagedSession,
+  policy: AdapterPolicy,
+  dapLaunchArgs: Partial<CustomLaunchRequestArguments> | undefined,
+  adapterLaunchConfig: Record<string, unknown> | undefined,
+  breakOnExceptions: ExceptionBreakMode | undefined
+): NoDebugDecision {
+  const launchArgsShape = dapLaunchArgs as Record<string, unknown> | undefined;
+  const isAttachShaped =
+    launchArgsShape?.request === 'attach' || launchArgsShape?.__attachMode === true;
+  const noDebug = !isAttachShaped && resolveLaunchFlag('noDebug', dapLaunchArgs, adapterLaunchConfig);
+  const honoursNoDebug = policy.honoursNoDebug === true;
+  const debuggerOff = noDebug && honoursNoDebug;
+  const noDebugWarning = buildNoDebugLaunchWarning(
+    session,
+    { noDebug, stopOnEntry: resolveLaunchFlag('stopOnEntry', dapLaunchArgs, adapterLaunchConfig) },
+    breakOnExceptions,
+    honoursNoDebug
+  );
+  // A launch that fails under the flag still needs to point at it, whether
+  // or not there was anything armed to warn about.
+  const noDebugFailureNote = noDebugWarning ?? (debuggerOff ? buildNoDebugFailureNote(session.language) : undefined);
+  // With the debugger off an entry stop cannot come. Everything that reads
+  // stopOnEntry from here on — the proxy config (from either source the
+  // adapter merge reads), the core's projection to RUNNING on
+  // adapter-configured, the readiness wait — sees it off, so they agree and
+  // none of them waits for a stop that cannot arrive. The warning above and
+  // session.lastLaunch keep the caller's values.
+  const launchArgs = debuggerOff ? { ...dapLaunchArgs, stopOnEntry: false } : dapLaunchArgs;
+  const launchAdapterConfig =
+    debuggerOff && adapterLaunchConfig?.stopOnEntry !== undefined
+      ? { ...adapterLaunchConfig, stopOnEntry: false }
+      : adapterLaunchConfig;
+  return { isAttachShaped, noDebug, debuggerOff, noDebugWarning, noDebugFailureNote, launchArgs, launchAdapterConfig };
+}
+
+/** What `start_debugging` asked for, as the dry run and the launch both read it. */
+interface LaunchRequestArgs {
+  scriptPath: string;
+  scriptArgs?: string[];
+  dapLaunchArgs?: Partial<CustomLaunchRequestArguments>;
+  adapterLaunchConfig?: Record<string, unknown>;
+  breakOnExceptions?: ExceptionBreakMode;
 }
 
 /**
@@ -123,72 +207,14 @@ export class DebugLauncher {
   ) {}
 
   /**
-   * Helper method to wait for dry run completion with timeout
-   */
-  async waitForDryRunCompletion(
-    session: ManagedSession,
-    timeoutMs: number
-  ): Promise<boolean> {
-    if (session.proxyManager?.hasDryRunCompleted?.()) {
-      this.ctx.logger.info(
-        `[SessionManager] Dry run already marked complete for session ${session.id} before wait`
-      );
-      return true;
-    }
-
-    let handler: (() => void) | null = null;
-    let timeoutId: NodeJS.Timeout | null = null;
-
-    try {
-      return await Promise.race([
-        new Promise<boolean>((resolve) => {
-          handler = () => {
-            this.ctx.logger.info(
-              `[SessionManager] Dry run completion event received for session ${session.id}`
-            );
-            resolve(true);
-          };
-          this.ctx.logger.info(
-            `[SessionManager] Setting up dry-run-complete listener for session ${session.id}`
-          );
-          session.proxyManager?.once('dry-run-complete', handler);
-        }),
-        new Promise<boolean>((resolve) => {
-          timeoutId = setTimeout(() => {
-            if (session.proxyManager?.hasDryRunCompleted?.()) {
-              this.ctx.logger.info(
-                `[SessionManager] Dry run marked complete during timeout window for session ${session.id}`
-              );
-              resolve(true);
-              return;
-            }
-            this.ctx.logger.warn(
-              `[SessionManager] Dry run timeout after ${timeoutMs}ms for session ${session.id}`
-            );
-            resolve(false);
-          }, timeoutMs);
-        }),
-      ]);
-    } finally {
-      // Clean up immediately
-      if (handler && session.proxyManager) {
-        this.ctx.logger.info(
-          `[SessionManager] Removing dry-run-complete listener for session ${session.id}`
-        );
-        session.proxyManager.removeListener('dry-run-complete', handler);
-      }
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
-    }
-  }
-
-  /**
-   * Start (or dry-run) a launch. Claims the session for the whole call
-   * (issue #711): a concurrent start_debugging, restart_debugging or
-   * attach_to_process on the same session is refused with a clear error
-   * instead of tearing down the launch this call is still awaiting. The
-   * claim is made before the first await so a same-tick call cannot race it.
+   * Start a launch, or answer a dry run (issue #812). Claims the session for
+   * the whole call (issue #711): a concurrent start_debugging,
+   * restart_debugging or attach_to_process on the same session is refused
+   * with a clear error instead of tearing down the launch this call is still
+   * awaiting. The claim is made before the first await so a same-tick call
+   * cannot race it. A dry run holds the claim too: it takes the language's
+   * registry slot while it prepares, and one launch-shaped call per session
+   * keeps its answer about one request.
    */
   async startDebugging(
     sessionId: string,
@@ -210,6 +236,153 @@ export class DebugLauncher {
         breakOnExceptions
       )
     );
+  }
+
+  /**
+   * The dry run (issue #812): the launch preparation, run in this process and
+   * answered without a proxy. Nothing on the session changes — the record is
+   * answered rather than committed and the adapter lease is released — and
+   * every failure is handled here, never in the launch catch, whose first act
+   * is to tear down the session's proxy.
+   */
+  private async dryRun(
+    session: ManagedSession,
+    request: LaunchRequestArgs
+  ): Promise<DebugResult<LaunchResultData>> {
+    const { scriptPath, scriptArgs, dapLaunchArgs, adapterLaunchConfig, breakOnExceptions } = request;
+    const policy = this.ctx.selectPolicy(session.language);
+    const decision = decideNoDebug(session, policy, dapLaunchArgs, adapterLaunchConfig, breakOnExceptions);
+    if (decision.isAttachShaped) {
+      // The attach transforms act on the target process — js-debug signals it
+      // to open an inspector port, netcoredbg probes its architecture — which
+      // is not preparation. attach_to_process has no dry run; neither does
+      // its launch-shaped spelling.
+      return { success: false, state: session.state, error: ErrorMessages.dryRunAttachShaped() };
+    }
+    // The same request the launch would hand the ProxyLauncher, so the plan
+    // (and the command read off it) is the one a real launch would run.
+    const launchRequest = {
+      scriptPath,
+      scriptArgs,
+      dapLaunchArgs: decision.launchArgs,
+      adapterLaunchConfig: decision.launchAdapterConfig,
+      breakOnExceptions: this.resolveBreakOnExceptionsDefault(session, policy, breakOnExceptions, false),
+      debuggerOff: decision.debuggerOff,
+    };
+    // The warning comes from this preparation, never from the session: its
+    // notices belong to the last real launch, and its adapter notes to the
+    // program that may still be running.
+    const warningFrom = (notices: readonly string[]): string | undefined =>
+      joinWarnings(decision.noDebugWarning, ...notices);
+
+    let outcome: AdapterPreparationOutcome;
+    try {
+      const inputs = await this.proxyLauncher.prepareLaunchInputs(session, launchRequest);
+      outcome = await this.proxyLauncher.prepareAdapter(session, inputs, launchRequest);
+    } catch (error) {
+      // The run directory could not be created: nothing was acquired.
+      return this.describeDryRunFailure(session, error, warningFrom([]));
+    }
+    const warning = warningFrom(outcome.record.launchConfigNotices);
+    if (!outcome.ok) {
+      return this.describeDryRunFailure(session, outcome.error, warning);
+    }
+    try {
+      const command = describeSpawnCommand(policy, outcome.plan.proxyConfig);
+      this.ctx.logger.info(`[SessionManager] Dry run for session ${session.id} would run: ${command}`);
+      return {
+        success: true,
+        state: session.state,
+        data: {
+          dryRun: true,
+          message: 'Dry run: nothing was started and the session is unchanged.',
+          command,
+          script: outcome.plan.proxyConfig.scriptPath,
+          ...(warning ? { warning } : {}),
+        },
+      };
+    } catch (error) {
+      return this.describeDryRunFailure(session, error, warning);
+    } finally {
+      await outcome.lease.release();
+    }
+  }
+
+  /**
+   * A failed dry run in the launch's own words: the MSVC shape when the error
+   * carries an incompatible verdict (`error: 'MSVC_TOOLCHAIN_DETECTED'`,
+   * `data.message`/`toolchainValidation`, `canContinue`), the plain shape
+   * otherwise — minus everything a launch failure does to the session (the
+   * state and lifecycle writes, the proxy teardown) and minus the proxy-log
+   * pointers: there is no proxy, and session.logDir names the last real run.
+   */
+  private describeDryRunFailure(
+    session: ManagedSession,
+    error: unknown,
+    warning: string | undefined
+  ): DebugResult<LaunchResultData> {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    let errorType: string | undefined;
+    let errorCode: number | undefined;
+    if (error instanceof McpError) {
+      errorType = error.constructor.name || 'McpError';
+      errorCode = error.code as number | undefined;
+    } else if (error instanceof Error) {
+      errorType = error.constructor.name || 'Error';
+    }
+    const toolchainValidation =
+      (error as { toolchainValidation?: ToolchainValidationState } | null)?.toolchainValidation;
+    if (toolchainValidation && toolchainValidation.compatible === false) {
+      const behavior = (toolchainValidation.behavior ?? 'warn').toLowerCase();
+      return {
+        success: false,
+        error: 'MSVC_TOOLCHAIN_DETECTED',
+        state: session.state,
+        data: {
+          message: toolchainValidation.message ?? errorMessage,
+          toolchainValidation,
+          ...(warning ? { warning } : {}),
+        },
+        canContinue: behavior !== 'error',
+        errorType,
+        errorCode,
+      };
+    }
+    return {
+      success: false,
+      error: errorMessage,
+      state: session.state,
+      errorType,
+      errorCode,
+      ...(warning ? { data: { warning } } : {}),
+    };
+  }
+
+  /**
+   * The effective breakOnExceptions mode (issue #244): when the caller did not
+   * specify one, launch sessions take the adapter policy's default. Attach-
+   * shaped configs are excluded — pausing a process you attached to on
+   * exceptions is surprising. The launch records the result on the session;
+   * the dry run only hands it to the preparation so the plan matches what the
+   * launch would run.
+   */
+  private resolveBreakOnExceptionsDefault(
+    session: ManagedSession,
+    policy: AdapterPolicy,
+    breakOnExceptions: ExceptionBreakMode | undefined,
+    isAttachShaped: boolean
+  ): ExceptionBreakMode | undefined {
+    if (breakOnExceptions !== undefined || isAttachShaped) {
+      return breakOnExceptions;
+    }
+    const policyDefault = policy.getInitializationBehavior?.().defaultExceptionBreakMode;
+    if (!policyDefault) {
+      return undefined;
+    }
+    this.ctx.logger.info(
+      `[SessionManager] Applying policy default breakOnExceptions='${policyDefault}' for ${session.language} launch session ${session.id}`
+    );
+    return policyDefault;
   }
 
   /** The launch sequence proper; the caller holds the session's in-flight claim. */
@@ -242,6 +415,14 @@ export class DebugLauncher {
       const error = ErrorMessages.launchUnavailable(session.language, launchGate.reason);
       this.ctx.logger.warn(`[SessionManager] ${error}`);
       return { success: false, state: session.state, error };
+    }
+
+    // A dry run is a query (issue #812): everything a launch prepares, nothing
+    // it changes. Answered here, before the teardown of a previous proxy and
+    // the per-attempt resets below, so a paused program keeps running and the
+    // previous run's output, exit code and stop stay readable.
+    if (dryRunSpawn) {
+      return this.dryRun(session, { scriptPath, scriptArgs, dapLaunchArgs, adapterLaunchConfig, breakOnExceptions });
     }
 
     if (session.proxyManager || session.pendingProxyStop) {
@@ -290,191 +471,33 @@ export class DebugLauncher {
 
     // Record the launch spec for restart_debugging BEFORE attempting the
     // launch — a start that dies mid-way is still meaningfully replayable.
-    // Dry runs are not recorded: lastLaunch means "most recent real launch".
-    if (!dryRunSpawn) {
-      session.lastLaunch = {
-        scriptPath,
-        scriptArgs,
-        dapLaunchArgs,
-        adapterLaunchConfig,
-        breakOnExceptions,
-        launchedAt: Date.now(),
-      };
-    }
+    // A dry run was answered above and never reaches this point, so
+    // lastLaunch means "most recent real launch".
+    session.lastLaunch = {
+      scriptPath,
+      scriptArgs,
+      dapLaunchArgs,
+      adapterLaunchConfig,
+      breakOnExceptions,
+      launchedAt: Date.now(),
+    };
 
-    // noDebug (issue #710). Whether the flag turns the debugger off is the
-    // policy's word, measured per adapter: where it does, nothing the caller
-    // asked to stop on can fire and the breakpoint-shaped launch warnings
-    // below are withheld; where the adapter ignores it, the warning says so
-    // instead. Decided here, before the dry-run branch, from the caller's own
-    // breakOnExceptions rather than the policy default resolved below: a dry
-    // run is a configuration check and a restart replays the same arguments,
-    // and both should say so.
+    // noDebug (issue #710), decided once for the launch and the dry run alike.
     const policy = this.ctx.selectPolicy(session.language);
-    // noDebug is a launch-request property; an attach-shaped start_debugging
-    // (request: 'attach' / __attachMode) attaches with the debugger on.
-    const launchArgsShape = dapLaunchArgs as Record<string, unknown> | undefined;
-    const isAttachShaped =
-      launchArgsShape?.request === 'attach' || launchArgsShape?.__attachMode === true;
-    const noDebug = !isAttachShaped && resolveLaunchFlag('noDebug', dapLaunchArgs, adapterLaunchConfig);
-    const honoursNoDebug = policy.honoursNoDebug === true;
-    const debuggerOff = noDebug && honoursNoDebug;
+    const { isAttachShaped, noDebug, debuggerOff, noDebugWarning, noDebugFailureNote, launchArgs, launchAdapterConfig } =
+      decideNoDebug(session, policy, dapLaunchArgs, adapterLaunchConfig, breakOnExceptions);
     // Recorded on the session so the surfaces after this response can say
-    // why they answer in non-debugger terms (issue #749). Not for a dry run:
-    // nothing launches. Written before the proxy starts, so the core's
-    // per-launch reset (which runs inside proxyLauncher.start) is not the
-    // place to clear it — the block above is.
-    if (debuggerOff && !dryRunSpawn) {
+    // why they answer in non-debugger terms (issue #749). Written before the
+    // proxy starts, so the core's per-launch reset (which runs inside
+    // proxyLauncher.start) is not the place to clear it — the block above is.
+    if (debuggerOff) {
       session.launchDebuggerOff = true;
     }
-    const noDebugWarning = buildNoDebugLaunchWarning(
-      session,
-      { noDebug, stopOnEntry: resolveLaunchFlag('stopOnEntry', dapLaunchArgs, adapterLaunchConfig) },
-      breakOnExceptions,
-      honoursNoDebug
-    );
-    // A launch that fails under the flag still needs to point at it, whether
-    // or not there was anything armed to warn about.
-    const noDebugFailureNote = noDebugWarning ?? (debuggerOff ? buildNoDebugFailureNote(session.language) : undefined);
-    // With the debugger off an entry stop cannot come. Everything that reads
-    // stopOnEntry from here on — the proxy config (from either source the
-    // adapter merge reads), the core's projection to RUNNING on
-    // adapter-configured, the readiness wait — sees it off, so they agree and
-    // none of them waits for a stop that cannot arrive. The warning above and
-    // session.lastLaunch (recorded earlier) keep the caller's values.
-    const launchArgs = debuggerOff ? { ...dapLaunchArgs, stopOnEntry: false } : dapLaunchArgs;
     let effectiveLaunchArgs = launchArgs;
-    const launchAdapterConfig =
-      debuggerOff && adapterLaunchConfig?.stopOnEntry !== undefined
-        ? { ...adapterLaunchConfig, stopOnEntry: false }
-        : adapterLaunchConfig;
 
     try {
-      // For dry run, start the proxy and wait for completion
-      if (dryRunSpawn) {
-        const dryRunResult = (snapshot: { command?: string; script?: string } | undefined): DebugResult => ({
-          success: true,
-          state: SessionState.STOPPED,
-          data: {
-            warning: launchWarnings(session, noDebugWarning),
-            dryRun: true,
-            message: 'Dry run spawn command logged by proxy.',
-            command: snapshot?.command,
-            script: snapshot?.script,
-          },
-        });
-
-        // Mark that we're setting up a dry run handler
-        const sessionWithSetup = session as ManagedSession & { _dryRunHandlerSetup?: boolean };
-        sessionWithSetup._dryRunHandlerSetup = true;
-
-        // Start the proxy manager
-        // No breakOnExceptions: a dry run reports the spawn command and stops
-        // before the adapter connection, so setExceptionBreakpoints never runs
-        // and the mode would be inert. Same reason lastLaunch skips dry runs.
-        await this.proxyLauncher.start(session, {
-          scriptPath,
-          scriptArgs,
-          dapLaunchArgs,
-          dryRunSpawn,
-          adapterLaunchConfig,
-        });
-        this.ctx.logger.info(`[SessionManager] ProxyManager started for session ${sessionId}`);
-        
-        // Check if already completed before waiting
-        const refreshedSession = this.ctx.getSession(sessionId);
-        this.ctx.logger.info(`[SessionManager] Checking state after start: ${refreshedSession.state}`);
-        
-        const initialDryRunSnapshot = refreshedSession.proxyManager?.getDryRunSnapshot?.();
-        const dryRunAlreadyComplete =
-          refreshedSession.state === SessionState.STOPPED ||
-          refreshedSession.proxyManager?.hasDryRunCompleted?.() === true;
-
-        if (dryRunAlreadyComplete) {
-          this.ctx.logger.info(
-            `[SessionManager] Dry run already completed for session ${sessionId}`
-          );
-          delete sessionWithSetup._dryRunHandlerSetup;
-
-          return dryRunResult(initialDryRunSnapshot);
-        }
-
-        // Wait for completion with timeout
-        this.ctx.logger.info(
-          `[SessionManager] Waiting for dry run completion with timeout ${this.ctx.dryRunTimeoutMs}ms`
-        );
-        
-        const dryRunCompleted = await this.waitForDryRunCompletion(
-          refreshedSession,
-          this.ctx.dryRunTimeoutMs
-        );
-        delete sessionWithSetup._dryRunHandlerSetup;
-
-        const latestSessionState = this.ctx.getSession(sessionId);
-        const latestSnapshot =
-          latestSessionState.proxyManager?.getDryRunSnapshot?.() ?? initialDryRunSnapshot;
-        const effectiveDryRunComplete =
-          dryRunCompleted ||
-          latestSessionState.state === SessionState.STOPPED ||
-          latestSessionState.proxyManager?.hasDryRunCompleted?.() === true;
-
-        if (effectiveDryRunComplete) {
-          this.ctx.logger.info(
-            `[SessionManager] Dry run completed for session ${sessionId}, final state: ${latestSessionState.state}`
-          );
-
-          return dryRunResult(latestSnapshot);
-        } else {
-          // Timeout occurred. The state is read once: the log read below is
-          // an await, and a late dry-run-complete/exit landing during it must
-          // not leave the message and the returned state disagreeing.
-          const finalSession = latestSessionState;
-          const state = finalSession.state;
-          this.ctx.logger.error(
-            `[SessionManager] Dry run timeout for session ${sessionId}. ` +
-              `State: ${state}, ProxyManager active: ${!!finalSession.proxyManager}`
-          );
-
-          // The same failure record and proxy-log pointers a thrown launch
-          // failure gets: the proxy log is where a dry run that never
-          // reported back usually explains itself.
-          const dryRunTimeoutError = new Error(
-            `Dry run timed out after ${this.ctx.dryRunTimeoutMs}ms. Current state: ${state}`
-          );
-          const diagnosticData = await logProxyFailure(
-            { logger: this.ctx.logger, fileSystem: this.ctx.fileSystem },
-            session,
-            dryRunTimeoutError,
-            'startDebugging'
-          );
-          session.failureDiagnostics = Object.keys(diagnosticData).length > 0
-            ? diagnosticData
-            : undefined;
-
-          return {
-            success: false,
-            error: dryRunTimeoutError.message,
-            state,
-            ...failureData(diagnosticData, launchWarnings(session, noDebugFailureNote))
-          };
-        }
-      }
-
-      // Normal (non-dry-run) flow
-      // Resolve the effective breakOnExceptions mode (issue #244): when the
-      // user did not specify one, launch sessions take the adapter policy's
-      // default. Attach-shaped configs are excluded — pausing a process you
-      // attached to on exceptions is surprising — as are dry runs (above).
-      let effectiveBreakOnExceptions = breakOnExceptions;
-      if (effectiveBreakOnExceptions === undefined && !isAttachShaped) {
-        const policyDefault = policy.getInitializationBehavior?.().defaultExceptionBreakMode;
-        if (policyDefault) {
-          effectiveBreakOnExceptions = policyDefault;
-          this.ctx.logger.info(
-            `[SessionManager] Applying policy default breakOnExceptions='${policyDefault}' for ${session.language} launch session ${sessionId}`
-          );
-        }
-      }
+      const effectiveBreakOnExceptions =
+        this.resolveBreakOnExceptionsDefault(session, policy, breakOnExceptions, isAttachShaped);
       session.effectiveBreakOnExceptions = effectiveBreakOnExceptions;
 
       // What the proxy is about to start with (issue #851): its own snapshot
@@ -486,7 +509,6 @@ export class DebugLauncher {
         scriptPath,
         scriptArgs,
         dapLaunchArgs: launchArgs,
-        dryRunSpawn,
         adapterLaunchConfig: launchAdapterConfig,
         breakOnExceptions: effectiveBreakOnExceptions,
         // Decided once, here; the worker reads the stamp (issue #746).

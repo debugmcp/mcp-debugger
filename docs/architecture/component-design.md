@@ -21,9 +21,9 @@ can be spied on or replaced:
 
 | Collaborator | File | Responsibility |
 |-------|------|----------------|
-| `ProxyLauncher` | `src/session/launch/proxy-launcher.ts` | `start(session, scriptPath, …)`: the proxy launch both launch and attach go through — adapter creation under an `AdapterLease`, the configuration transform, executable resolution, `ProxyConfig` assembly, ProxyManager start |
+| `ProxyLauncher` | `src/session/launch/proxy-launcher.ts` | `start(session, request)`: the proxy launch both launch and attach go through. Split into preparation that writes nothing to the session — `prepareLaunchInputs` (run directory, port, config assembly) and `prepareAdapter` (adapter creation under an `AdapterLease`, the configuration transform, the toolchain verdict, executable resolution, `ProxyConfig` assembly, returned as a `LaunchPreparationRecord`) — and `start()`, which commits the record, transfers the lease and starts the ProxyManager. A dry run runs the preparation only (issue #812) |
 | failure diagnostics | `src/session/launch/proxy-failure-diagnostics.ts` | `failProxySetup` (session-preserving teardown + full failure record + result pointers, shared by launch and attach), `logProxyFailure`, the proxy-log tail |
-| `DebugLauncher` | `src/session/launch/debug-launcher.ts` | `startDebugging` (dry runs included) and `restartDebugging`; `launch/launch-readiness.ts` holds the post-handshake readiness wait |
+| `DebugLauncher` | `src/session/launch/debug-launcher.ts` | `startDebugging` and `restartDebugging`; a dry run is answered before anything on the session is touched, from the ProxyLauncher's preparation and `launch/spawn-command.ts` (issue #812); `launch/launch-readiness.ts` holds the post-handshake readiness wait |
 | `AttachController` | `src/session/attach/attach-controller.ts` | `attachToProcess` and `detachFromProcess`; `attach/attach-verification.ts` holds the thread poll (`verifyAttachThreads`) and post-attach pause (`pauseAfterAttach`) |
 | `BreakpointController` | `src/session/breakpoints/breakpoint-controller.ts` | Set/remove/clear breakpoints; the replace-all DAP re-sends and the live-sync warning |
 | `reresolveAnchors` | `src/session/breakpoints/anchor-resolution.ts` | Re-resolve statement anchors against the current source (restart and JVM hot swap) |
@@ -353,14 +353,6 @@ From the `handleInitCommand` method:
    // through it.
    const logPath = proxyLogPathFor(payload.logDir, payload.sessionId);
    this.logger = await this.dependencies.loggerFactory(payload.sessionId, payload.logDir);
-   ```
-
-4. **Dry Run Handling**
-   ```typescript
-   if (payload.dryRunSpawn) {
-     this.handleDryRun(payload);
-     return;
-   }
    ```
 
 ### DAP Event Handling

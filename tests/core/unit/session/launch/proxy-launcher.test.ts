@@ -142,10 +142,11 @@ describe('ProxyLauncher.prepareLaunchInputs', () => {
 
     const inputs = await h.launcher.prepareLaunchInputs(session, request);
 
-    // One run directory per launch, persisted on the session for diagnostics.
+    // One run directory per launch, created here. `start()` is what persists
+    // it on the session; a dry run reuses this step and writes nothing (#812).
     expect(inputs.sessionLogDir.startsWith(path.join(LOG_DIR_BASE, 'sess-1', 'run-'))).toBe(true);
     expect(h.ctx.fileSystem.ensureDir).toHaveBeenCalledWith(inputs.sessionLogDir);
-    expect(h.ctx.updateSession).toHaveBeenCalledWith('sess-1', { logDir: inputs.sessionLogDir });
+    expect(h.ctx.updateSession).not.toHaveBeenCalled();
     expect(inputs.adapterPort).toBe(5678);
 
     // Caller args layered over the defaults; the launch fields derived from the script.
@@ -269,7 +270,6 @@ describe('ProxyLauncher.buildAdapterLaunchPlan', () => {
       scriptPath: SCRIPT,
       scriptArgs: ['--flag'],
       dapLaunchArgs: { stopOnEntry: true },
-      dryRunSpawn: true,
       breakOnExceptions
     };
     const inputs = await inputsFor(request);
@@ -305,7 +305,8 @@ describe('ProxyLauncher.buildAdapterLaunchPlan', () => {
       justMyCode: false,
       initialBreakpoints: [],
       initialFunctionBreakpoints: [],
-      dryRunSpawn: true,
+      // Constant since #812: a dry run never reaches the proxy.
+      dryRunSpawn: false,
       debuggerOff: false,
       logLevel: 'debug',
       breakOnExceptions: 'uncaught',
@@ -393,7 +394,154 @@ describe('ProxyLauncher.buildAdapterLaunchPlan', () => {
   });
 });
 
+describe('ProxyLauncher.prepareAdapter', () => {
+  const VERDICT = { compatible: false, toolchain: 'msvc', behavior: 'error', message: 'MSVC PDB detected' };
+
+  it('prepares the adapter side without writing to the session, and hands back the lease still held (#812)', async () => {
+    const adapter = Object.assign(new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE }), {
+      supportedLaunchKeys: ['program']
+    });
+    const h = makeHarness({ adapter });
+    const session = makeSession({
+      launchConfigNotices: ['note from the last real launch'],
+      transformedLaunch: { program: path.join('/old', 'app'), launchConfig: {} }
+    });
+    const request: ProxyLaunchRequest = { scriptPath: SCRIPT, adapterLaunchConfig: { typo: 1 } };
+    const inputs = await h.launcher.prepareLaunchInputs(session, request);
+
+    const outcome = await h.launcher.prepareAdapter(session, inputs, request);
+
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) throw outcome.error;
+    expect(outcome.record.launchConfigNotices).toEqual(['adapterLaunchConfig.typo: forwarded to the adapter but unrecognized']);
+    expect(outcome.record.transformedLaunch?.program).toBe(SCRIPT);
+    expect(outcome.plan.proxyConfig).toMatchObject({ executablePath: FAKE_EXE, dryRunSpawn: false });
+    expect(outcome.lease.getState()).toBe('held');
+    // The session is exactly as it was: the record is the caller's to commit, or to answer with.
+    expect(h.ctx.updateSession).not.toHaveBeenCalled();
+    expect(h.ctx.setupProxyEventHandlers).not.toHaveBeenCalled();
+    expect(session.launchConfigNotices).toEqual(['note from the last real launch']);
+    expect(session.transformedLaunch?.program).toBe(path.join('/old', 'app'));
+    expect(session.proxyManager).toBeUndefined();
+    expect(adapter.dispose).not.toHaveBeenCalled();
+
+    await outcome.lease.release();
+    expect(adapter.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('answers a thrown transform with the same error object and the notices it still drained, the lease released', async () => {
+    const boom = new Error('Cannot read envFile (EACCES)');
+    const adapter = Object.assign(new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE }), {
+      supportedLaunchKeys: ['program', 'outFiles'],
+      consumeLaunchConfigDiagnostics: vi.fn(() => [{ key: 'outFiles', message: 'expected an array of strings; using the default' }])
+    });
+    adapter.transformLaunchConfig.mockRejectedValueOnce(boom);
+    const h = makeHarness({ adapter });
+    const session = makeSession();
+    const request: ProxyLaunchRequest = { scriptPath: SCRIPT, adapterLaunchConfig: { outFiles: 'bad' } };
+    const inputs = await h.launcher.prepareLaunchInputs(session, request);
+
+    const outcome = await h.launcher.prepareAdapter(session, inputs, request);
+
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) throw new Error('expected the preparation to fail');
+    expect(outcome.error).toBe(boom);
+    expect(outcome.record.launchConfigNotices).toEqual(['adapterLaunchConfig.outFiles: expected an array of strings; using the default']);
+    expect(outcome.record.transformedLaunch).toBeUndefined();
+    expect(adapter.dispose).toHaveBeenCalledTimes(1);
+    expect(h.ctx.updateSession).not.toHaveBeenCalled();
+    expect(session.launchConfigNotices).toBeUndefined();
+  });
+
+  it('turns an incompatible toolchain verdict into the MSVC sentinel before resolving the executable, writing nothing', async () => {
+    const adapter = new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE }).withExtras({
+      consumeLastToolchainValidation: vi.fn(() => VERDICT)
+    });
+    const h = makeHarness({ adapter });
+    const session = makeSession();
+    const request: ProxyLaunchRequest = { scriptPath: SCRIPT };
+    const inputs = await h.launcher.prepareLaunchInputs(session, request);
+
+    const outcome = await h.launcher.prepareAdapter(session, inputs, request);
+
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) throw new Error('expected the preparation to fail');
+    expect((outcome.error as Error).message).toBe('MSVC_TOOLCHAIN_DETECTED');
+    expect((outcome.error as { toolchainValidation?: unknown }).toolchainValidation).toEqual(VERDICT);
+    expect(outcome.record.toolchainValidation).toEqual(VERDICT);
+    expect(adapter.resolveExecutablePath).not.toHaveBeenCalled();
+    expect(adapter.dispose).toHaveBeenCalledTimes(1);
+    expect(h.ctx.updateSession).not.toHaveBeenCalled();
+  });
+
+  it('answers a registry that cannot create the adapter as a failed preparation too', async () => {
+    const h = makeHarness();
+    vi.mocked(h.ctx.adapterRegistry.create).mockRejectedValueOnce(new Error('Maximum adapter instances (10) reached'));
+    const session = makeSession();
+    const request: ProxyLaunchRequest = { scriptPath: SCRIPT };
+    const inputs = await h.launcher.prepareLaunchInputs(session, request);
+
+    const outcome = await h.launcher.prepareAdapter(session, inputs, request);
+
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) throw new Error('expected the preparation to fail');
+    expect((outcome.error as Error).message).toContain('Maximum adapter instances');
+    expect(outcome.record).toEqual({ launchConfigNotices: [] });
+  });
+});
+
 describe('ProxyLauncher.start', () => {
+  it('persists the run directory before the adapter is acquired, so a failed preparation points at this run\'s logs (#812)', async () => {
+    const h = makeHarness();
+    let logDirWrittenBeforeCreate = false;
+    vi.mocked(h.ctx.adapterRegistry.create).mockImplementationOnce(async () => {
+      logDirWrittenBeforeCreate = vi.mocked(h.ctx.updateSession).mock.calls
+        .some(([, patch]) => Object.prototype.hasOwnProperty.call(patch, 'logDir'));
+      throw new Error('no adapter for you');
+    });
+
+    await expect(h.launcher.start(makeSession(), { scriptPath: SCRIPT })).rejects.toThrow('no adapter for you');
+    expect(logDirWrittenBeforeCreate).toBe(true);
+  });
+
+  it('releases the lease when committing the record throws, as when the session was closed during a long compile', async () => {
+    const adapter = new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE });
+    const proxyManager = new MockProxyManager();
+    const h = makeHarness({ adapter, proxyManager });
+    // The first toolchainValidation write is the clear at the top of start();
+    // the second is the commit, which goes through the store and throws once
+    // the session is gone.
+    let toolchainWrites = 0;
+    vi.mocked(h.ctx.updateSession).mockImplementation((_id, patch) => {
+      if ('toolchainValidation' in patch && ++toolchainWrites === 2) {
+        throw new Error('Session not found: sess-1');
+      }
+    });
+
+    await expect(h.launcher.start(makeSession(), { scriptPath: SCRIPT })).rejects.toThrow('Session not found');
+
+    // The registry slot comes back (#557): nothing was transferred, so the lease disposes.
+    expect(adapter.dispose).toHaveBeenCalledTimes(1);
+    expect(proxyManager.startCalls).toHaveLength(0);
+  });
+
+  it('commits the launch notices before the proxy handlers are installed, which seed them into the output buffer', async () => {
+    const adapter = Object.assign(new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE }), {
+      supportedLaunchKeys: ['program']
+    });
+    const h = makeHarness({ adapter, proxyManager: new MockProxyManager() });
+    const session = makeSession();
+    let noticesAtHandlerSetup: string[] | undefined;
+    vi.mocked(h.ctx.setupProxyEventHandlers).mockImplementation((s) => {
+      noticesAtHandlerSetup = [...(s.launchConfigNotices ?? [])];
+    });
+
+    await h.launcher.start(session, { scriptPath: SCRIPT, adapterLaunchConfig: { typo: 1 } });
+
+    expect(noticesAtHandlerSetup).toEqual(['adapterLaunchConfig.typo: forwarded to the adapter but unrecognized']);
+    expect(h.ctx.updateSession).toHaveBeenCalledWith('sess-1', { logDir: expect.stringContaining('run-') });
+  });
+
   it.each([
     [undefined, true], [false, true], [true, false]
   ])('uses DAP stopOnEntry=%s with adapter override=%s consistently', async (dapStop, adapterStop) => {
