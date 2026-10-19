@@ -209,6 +209,21 @@ describe('SessionManager dry run (issue #812)', () => {
     expect(after.toolchainValidation).toBeUndefined();
   });
 
+  it('says an incompatible toolchain with behavior "error" cannot be continued past, as a launch does', async () => {
+    const verdict = { compatible: false, toolchain: 'msvc', behavior: 'error', message: 'MSVC PDB detected' };
+    vi.mocked(dependencies.adapterRegistry.create).mockImplementationOnce(async () =>
+      new FakeDebugAdapter().withExtras({ consumeLastToolchainValidation: vi.fn(() => verdict) })
+    );
+    const session = await createSession('MsvcError');
+
+    const dry = await sessionManager.startDebugging(session.id, 'test.py', [], {}, true);
+
+    expect(dry.success).toBe(false);
+    expect(dry.error).toBe('MSVC_TOOLCHAIN_DETECTED');
+    expect(dry.canContinue).toBe(false);
+    expect(sessionManager.getSession(session.id)!.state).toBe(SessionState.CREATED);
+  });
+
   it('carries the transform\'s configuration notices as the warning, from the preparation and not from the session', async () => {
     vi.mocked(dependencies.adapterRegistry.create).mockImplementationOnce(async () =>
       Object.assign(new FakeDebugAdapter(), { supportedLaunchKeys: ['program'] })
