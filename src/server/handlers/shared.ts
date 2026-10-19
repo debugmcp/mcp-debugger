@@ -147,8 +147,9 @@ export function appendNote(response: Record<string, unknown>, note: string | und
  * running code may be an older build than the source it was read from
  * (issues #938/#950) — that sentence is appended to the note, so it always
  * comes after what the session layer had to say. Nothing happens without a
- * location: an answer that is pending or that reports a program's end keeps
- * exactly the fields it had.
+ * location, so the launch handlers call this on every answer: one that is
+ * pending, a dry run, a failed launch or a program's end keeps exactly the
+ * fields it had.
  */
 export async function hoistStopLanding(
   ctx: ToolContext,
