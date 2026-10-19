@@ -11,7 +11,7 @@ import type { ToolContext } from '../tool-context.js';
 import type { ToolArguments } from '../tool-arguments.js';
 import { validateBreakOnExceptions } from '../tool-validation.js';
 import { debuggerOffWhy } from '../../session/debugger-off.js';
-import type { DebugResult } from '../../session/session-manager-core.js';
+import type { DebugResult, StopLandingFields } from '../../session/session-manager-core.js';
 import type { AttachRequest } from '../../session/attach/attach-controller.js';
 import type { ManagedSession } from '../../session/session-store.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
@@ -134,6 +134,48 @@ export function appendNote(response: Record<string, unknown>, note: string | und
   }
   const existing = response.note;
   response.note = typeof existing === 'string' && existing.length > 0 ? `${existing} ${note}` : note;
+}
+
+/**
+ * Hoist where a stop landed to the top level of a tool answer and annotate
+ * it — the one shape every stop answer has: the step tools, pause_execution,
+ * wait_for_stop, and a launch or relaunch that stopped (issue #951).
+ *
+ * Beyond the frame (issue #904): the thread the answer is anchored on when it
+ * is not the reported one, and the note about it. Then the location, and two
+ * reads of its file, overlapped: the source line around it, and whether the
+ * running code may be an older build than the source it was read from
+ * (issues #938/#950) — that sentence is appended to the note, so it always
+ * comes after what the session layer had to say. Nothing happens without a
+ * location: an answer that is pending or that reports a program's end keeps
+ * exactly the fields it had.
+ */
+export async function hoistStopLanding(
+  ctx: ToolContext,
+  response: Record<string, unknown>,
+  data: StopLandingFields | undefined,
+  sessionId: string,
+  logLabel: string
+): Promise<void> {
+  if (typeof data?.threadId === 'number') {
+    response.threadId = data.threadId;
+  }
+  if (data?.note) {
+    response.note = data.note;
+  }
+  const location = data?.location;
+  if (!location) {
+    return;
+  }
+  response.location = location;
+  const [context, staleBuild] = await Promise.all([
+    readLineContext(ctx, location.file, location.line, logLabel),
+    describeStaleBuild(ctx, sessionId, location.file, logLabel)
+  ]);
+  if (context) {
+    response.context = context;
+  }
+  appendNote(response, staleBuild);
 }
 
 /**

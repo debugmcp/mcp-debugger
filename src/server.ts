@@ -19,7 +19,7 @@ import {
   ProxyNotRunningError
 } from './errors/debug-errors.js';
 import { SessionManager, SessionManagerConfig } from './session/session-manager.js';
-import type { DebugResult, StepResultData, WaitForStopResultData } from './session/session-manager-core.js';
+import type { DebugResult, LaunchResultData, StepResultData, WaitForStopResultData } from './session/session-manager-core.js';
 import { FrameSummary, StackTraceResult } from './session/session-manager-data.js';
 import { VariableTruncationSummary } from './session/variable-caps.js';
 import { createProductionDependencies } from './container/dependencies.js';
@@ -288,7 +288,7 @@ export class DebugMcpServer implements ToolContext {
     dryRunSpawn?: boolean,
     adapterLaunchConfig?: Record<string, unknown>,
     breakOnExceptions?: ExceptionBreakMode
-  ): Promise<DebugResult> {
+  ): Promise<DebugResult<LaunchResultData>> {
     this.validateSessionExists(sessionId);
 
     // Check script file exists for immediate feedback
@@ -312,7 +312,7 @@ export class DebugMcpServer implements ToolContext {
     return result;
   }
 
-  public async restartDebugging(sessionId: string): Promise<DebugResult> {
+  public async restartDebugging(sessionId: string): Promise<DebugResult<LaunchResultData>> {
     // A finished debuggee is lifecycle-TERMINATED and restarting after exit
     // is the primary use case (cf. handleGetOutput).
     this.validateSessionExists(sessionId);

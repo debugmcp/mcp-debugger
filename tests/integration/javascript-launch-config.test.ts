@@ -15,6 +15,7 @@ interface LastStop { reason?: string; rawReason?: string; threadId?: number; des
 interface Listed { id: string; state: string; exitCode?: number; lastStop?: LastStop }
 interface Waited extends Result {
   pending?: boolean; exitCode?: number; lastStop?: LastStop; location?: { file: string; line: number };
+  context?: { lineContent: string };
 }
 interface BreakpointRecord {
   id: string; line: number; verified: boolean; verifiedBy?: string; adapterId?: number; message?: string; boundFile?: string; boundLine?: number;
@@ -201,6 +202,11 @@ describe('JavaScript launch configuration', () => {
     const evidence = JSON.stringify({ launched, stopped, lastStop: session?.lastStop, breakpoints: listed.breakpoints, top: stack.stackFrames[0] });
     expect(session?.lastStop?.reason, evidence).toBe('breakpoint');
     expect(stack.stackFrames[0]?.line, evidence).toBe(9);
+    // The answer that reported the stop — the launch itself, or the wait —
+    // names where it is (issue #951): the launch answer carries the same
+    // location (and context) wait_for_stop does.
+    expect(stopped.location?.line, evidence).toBe(9);
+    expect(stopped.context?.lineContent, evidence).toContain("process.argv.includes('--exit')");
   }, 60_000);
 
   it('wait_for_stop answers pending on an idle program, then blocks until a breakpoint set on it is hit (issue #849)', async () => {

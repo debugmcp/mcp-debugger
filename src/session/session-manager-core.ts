@@ -173,6 +173,17 @@ export type WaitForStopResultData = DebugResultData & StopLandingFields & {
 };
 
 /**
+ * What a launch (start_debugging, and restart_debugging, which replays one)
+ * returns: the common fields — `reason`/`stopOnEntrySuccessful` for a stop,
+ * the run-to-completion fields for a program that ended, `pending` for one
+ * still running when the hold elapsed — plus, for a stop, where it landed
+ * (issue #951): the same landing read a step, a pause or wait_for_stop makes,
+ * so the answer names the frame the program is paused in and the handler can
+ * read the line and the build behind it.
+ */
+export type LaunchResultData = DebugResultData & StopLandingFields;
+
+/**
  * What a successful attach returns on top of the common fields: a `note`
  * when the attach's stop landed where no frame is program code (an idle
  * js-debug target pauses on a sourceless frame, issue #900) or on a thread

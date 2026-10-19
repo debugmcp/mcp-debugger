@@ -223,7 +223,7 @@
       },
       {
         "name": "start_debugging",
-        "description": "Start debugging a script. Answers when the launched program stops, when it ends, or after a short hold — whichever comes first, and the same way in every language: \"paused\" with a reason (a breakpoint reached as the program starts is answered here), \"stopped\" with the exit code, or \"running\" with pending:true when the program has not stopped yet; the message says what is armed. The hold is not a limit on the program — nothing is cancelled when it passes and breakpoints stay armed: call wait_for_stop to block until the program stops or ends (for a server, after sending the request that reaches your breakpoint). A stopOnEntry launch is answered at its entry stop",
+        "description": "Start debugging a script. Answers when the launched program stops, when it ends, or after a short hold — whichever comes first, and the same way in every language: \"paused\" with a reason and, as wait_for_stop answers a stop, the location, its source context and a note (a breakpoint reached as the program starts is answered here), \"stopped\" with the exit code, or \"running\" with pending:true when the program has not stopped yet; the message says what is armed. The hold is not a limit on the program — nothing is cancelled when it passes and breakpoints stay armed: call wait_for_stop to block until the program stops or ends (for a server, after sending the request that reaches your breakpoint). A stopOnEntry launch is answered at its entry stop",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -600,7 +600,7 @@
       },
       {
         "name": "get_stack_trace",
-        "description": "Get stack trace. The response includes stopReason — why the session is paused. For an implicit frameless stopped thread, a sibling with policy-recognized user frames is preferred and adopted, with the switch disclosed in note. Internal/runtime frames are filtered by default; when any are hidden the response carries hiddenFrames and a note. When the frame the program is paused in is itself internal, pausedFrame names it (kept: whether it was retained as stackFrames[0]) and the note says so",
+        "description": "Get stack trace. The response includes stopReason — why the session is paused. For an implicit frameless stopped thread, a sibling with policy-recognized user frames is preferred and adopted, with the switch disclosed in note. Internal/runtime frames are filtered by default; when any are hidden the response carries hiddenFrames and a note. When the frame the program is paused in is itself internal, pausedFrame names it (kept: whether it was retained as stackFrames[0]) and the note says so. The note also says when the top frame's file is newer than the compiled file the debugger binds it through (a stale build)",
         "inputSchema": {
           "type": "object",
           "properties": {

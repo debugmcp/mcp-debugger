@@ -6,8 +6,9 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { McpError, ErrorCode as McpErrorCode } from '@modelcontextprotocol/sdk/types.js';
-import { SessionLifecycleState } from '@debugmcp/shared';
+import { DotnetAdapterPolicy, SessionLifecycleState } from '@debugmcp/shared';
 import {
+  getStackTraceTool,
   handleEvaluateExpression,
   handleGetSourceContext,
   handleGetLocalVariables
@@ -30,6 +31,107 @@ describe('inspection tool handlers', () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+  });
+
+  describe('get_stack_trace carries the stale-build note for its top frame (issue #951)', () => {
+    /** What the adapter's transform handed the engine for the current launch (issue #950). */
+    const launched = { program: '/app/bin/app.dll', launchConfig: { program: '/app/bin/app.dll' } };
+    const evidence = {
+      sourceFile: '/app/Program.cs',
+      sourceMtimeMs: 20_000,
+      generatedFile: '/app/bin/app.dll',
+      generatedMtimeMs: 10_000,
+      linkedBy: 'launch' as const
+    };
+    const programFrame = { id: 1, name: 'HelloWorld.Add', file: '/app/Program.cs', line: 8, column: 0 };
+    const callerFrame = { id: 2, name: 'HelloWorld.Main', file: '/app/Program.cs', line: 17, column: 0 };
+
+    function stackOf(frames: Array<Record<string, unknown>>, extra: Record<string, unknown> = {}) {
+      ctx.getStackTrace = vi.fn().mockResolvedValue({
+        frames,
+        threadId: 1,
+        totalFrameCount: frames.length,
+        hiddenFrameCount: 0,
+        allFramesInternal: false,
+        ...extra
+      });
+    }
+
+    async function getStackTrace() {
+      const result = await getStackTraceTool(ctx, { sessionId: 'test-session' }, 'get_stack_trace');
+      return JSON.parse(result.content[0].text);
+    }
+
+    beforeEach(() => {
+      ctx.sessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE,
+        state: 'paused',
+        transformedLaunch: launched
+      });
+      ctx.sessionManager.getSessionPolicy.mockReturnValue(DotnetAdapterPolicy);
+      ctx.buildStaleness = { check: vi.fn().mockResolvedValue(evidence) };
+    });
+
+    it('appends the sentence when the file of the top frame is newer than the artefact the launch runs', async () => {
+      stackOf([programFrame, callerFrame]);
+
+      const payload = await getStackTrace();
+
+      expect(payload.success).toBe(true);
+      expect(payload.count).toBe(2);
+      expect(ctx.buildStaleness.check).toHaveBeenCalledTimes(1);
+      expect(ctx.buildStaleness.check).toHaveBeenCalledWith('/app/Program.cs', DotnetAdapterPolicy, launched);
+      expect(payload.note).toMatch(/^The compiled file .* may be stale/);
+      expect(payload.note).toContain('/app/bin/app.dll');
+    });
+
+    it('puts the sentence after the notes the stack itself needed', async () => {
+      stackOf([programFrame], { hiddenFrameCount: 2, totalFrameCount: 3 });
+
+      const payload = await getStackTrace();
+
+      expect(payload.hiddenFrames).toBe(2);
+      expect(payload.note).toMatch(/^2 internal frame\(s\) hidden — pass includeInternals: true to see them\. The compiled file .* may be stale/);
+    });
+
+    it('carries no note when the build is current', async () => {
+      ctx.buildStaleness = { check: vi.fn().mockResolvedValue(undefined) };
+      stackOf([programFrame]);
+
+      const payload = await getStackTrace();
+
+      expect(ctx.buildStaleness.check).toHaveBeenCalledWith('/app/Program.cs', DotnetAdapterPolicy, launched);
+      expect(payload).not.toHaveProperty('note');
+    });
+
+    it('does not probe a top frame whose file is a label rather than a path', async () => {
+      stackOf([{ id: 1, name: 'idle', file: '<unknown_source>', line: 0, column: 0 }]);
+
+      const payload = await getStackTrace();
+
+      expect(ctx.buildStaleness.check).not.toHaveBeenCalled();
+      expect(payload.note ?? '').not.toMatch(/may be stale/);
+    });
+
+    it('does not probe a top frame with no openable source on this host', async () => {
+      stackOf([{ ...programFrame, file: '../src/Program.cs', unresolvedSource: true }]);
+
+      const payload = await getStackTrace();
+
+      expect(ctx.buildStaleness.check).not.toHaveBeenCalled();
+      expect(payload.note).toMatch(/unresolvedSource: true/);
+      expect(payload.note).not.toMatch(/may be stale/);
+    });
+
+    it('probes nothing for an empty stack', async () => {
+      stackOf([]);
+
+      const payload = await getStackTrace();
+
+      expect(payload.count).toBe(0);
+      expect(ctx.buildStaleness.check).not.toHaveBeenCalled();
+    });
   });
 
   describe('handleEvaluateExpression', () => {
