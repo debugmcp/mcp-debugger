@@ -723,9 +723,6 @@ export class ProxyLauncher {
       justMyCode: justMyCodeFlag,
       initialBreakpoints,
       initialFunctionBreakpoints,
-      // A dry run never reaches the proxy (issue #812): it is answered from the
-      // plan in the parent. The field goes with the worker's dry-run path.
-      dryRunSpawn: false,
       debuggerOff: request.debuggerOff === true,
       // ILogger doesn't declare level, but the injected logger is the winston
       // instance whose level already resolves CLI --log-level and

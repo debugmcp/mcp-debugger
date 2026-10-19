@@ -150,9 +150,9 @@ describe('SessionManager dry run (issue #812)', () => {
     expect(dry.success).toBe(true);
     await launchToEntryStop(session.id);
 
+    // One proxy start, the real launch's; the dry run never reached the proxy.
     const startCalls = proxy().startCalls;
     expect(startCalls).toHaveLength(1);
-    expect(startCalls[0].dryRunSpawn).toBe(false);
     expect(startCalls[0].initialBreakpoints).toEqual([expect.objectContaining({ file: 'test.py', line: 5 })]);
   });
 

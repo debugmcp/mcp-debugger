@@ -238,13 +238,10 @@ export class ProxyRunner {
 
       // Check if we should exit after handling the command
       if (this.worker.getState() === ProxyState.TERMINATED) {
-        const isDryRun = command?.cmd === 'init' && command.dryRunSpawn;
-        const exitDelay = isDryRun ? 500 : 0;
-
-        this.logger.info(`[ProxyRunner] Worker state is TERMINATED. Exiting in ${exitDelay}ms.`);
+        this.logger.info('[ProxyRunner] Worker state is TERMINATED. Exiting.');
         setTimeout(() => {
           this.proc.exit(0);
-        }, exitDelay);
+        }, 0);
       }
     };
   }

@@ -611,7 +611,7 @@ it("rejects with the worker's init-failure report when it precedes the adapter e
     }, 0);
   });
 
-  const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+  const startPromise = proxyManager.start(baseConfig);
   await expect(startPromise).rejects.toThrow(report);
   await expect(startPromise).rejects.not.toThrow(/Proxy exited during initialization/);
 });

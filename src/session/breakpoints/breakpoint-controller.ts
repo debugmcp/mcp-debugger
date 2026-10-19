@@ -11,7 +11,7 @@
  *
  * Set, remove and clear all work in every lifecycle state short of
  * close_debug_session: before the first launch and after the program has
- * exited (or a dry run) the mutation is stored and waits for the next launch;
+ * exited the mutation is stored and waits for the next launch;
  * only a RUNNING or PAUSED session with a live proxy triggers a re-send
  * (issues #793, #806).
  */
