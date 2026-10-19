@@ -373,7 +373,6 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(proxyInstance.start).toHaveBeenCalledWith(
         expect.objectContaining({
           sessionId: mockSession.id,
-          dryRunSpawn: false,
           scriptPath: 'script.py',
           scriptArgs,
           stopOnEntry: true
@@ -1463,7 +1462,6 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       vi.stubEnv('GITHUB_ACTIONS', undefined);
 
       const proxyStub: any = {
-        hasDryRunCompleted: vi.fn().mockReturnValue(false),
         once: vi.fn(),
         removeListener: vi.fn(),
         on: vi.fn(),
@@ -1513,7 +1511,6 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       vi.stubEnv('GITHUB_ACTIONS', undefined);
 
       const proxyStub: any = {
-        hasDryRunCompleted: vi.fn().mockReturnValue(false),
         once: vi.fn(),
         removeListener: vi.fn(),
         on: vi.fn(),
@@ -1552,7 +1549,6 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       vi.stubEnv('GITHUB_ACTIONS', undefined);
 
       const proxyStub: any = {
-        hasDryRunCompleted: vi.fn().mockReturnValue(false),
         once: vi.fn(),
         removeListener: vi.fn(),
         on: vi.fn(),
@@ -1585,7 +1581,6 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     it('answers at once when the handshake left the session paused: there is nothing to hold for', async () => {
       const proxyStub: any = {
-        hasDryRunCompleted: vi.fn().mockReturnValue(false),
         once: vi.fn(),
         removeListener: vi.fn(),
         sendDapRequest: vi.fn().mockResolvedValue(undefined),
@@ -1631,7 +1626,6 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     it('logs warning when handshake throws but continues', async () => {
       const proxyStub: any = {
-        hasDryRunCompleted: vi.fn().mockReturnValue(false),
         once: vi.fn(),
         removeListener: vi.fn(),
         sendDapRequest: vi.fn().mockResolvedValue(undefined),
@@ -1671,7 +1665,6 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     it('warns when adapter readiness wait times out', async () => {
       vi.useFakeTimers();
       const proxyStub: any = {
-        hasDryRunCompleted: vi.fn().mockReturnValue(false),
         once: vi.fn(),
         removeListener: vi.fn(),
         on: vi.fn(),
@@ -1727,7 +1720,6 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     describe('the hold for a launch that does not stop (issues #815, #823, #826)', () => {
       function proxyThatConfiguresAndRuns(): any {
         const proxyStub: any = {
-          hasDryRunCompleted: vi.fn().mockReturnValue(false),
           once: vi.fn(),
           removeListener: vi.fn(),
           on: vi.fn(),

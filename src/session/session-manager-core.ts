@@ -221,7 +221,6 @@ export interface SessionManagerDependencies {
 export interface SessionManagerConfig {
   logDirBase?: string;
   defaultDapLaunchArgs?: Partial<CustomLaunchRequestArguments>;
-  dryRunTimeoutMs?: number;
 }
 
 /**
@@ -243,8 +242,7 @@ export abstract class SessionManagerCore extends EventEmitter {
   public adapterRegistry: IAdapterRegistry;
 
   protected defaultDapLaunchArgs: Partial<CustomLaunchRequestArguments>;
-  protected dryRunTimeoutMs: number;
-  
+
   // WeakMap to store event handlers for cleanup
   protected sessionEventHandlers = new WeakMap<ManagedSession, Map<string, (...args: unknown[]) => void>>();
 
@@ -285,8 +283,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       stopOnEntry: false,
       justMyCode: true
     };
-    this.dryRunTimeoutMs = config.dryRunTimeoutMs || 10000;
-    
+
     this.fileSystem.ensureDirSync(this.logDirBase);
     this.logger.info(`[SessionManager] Initialized. Session logs will be stored in: ${this.logDirBase}`);
   }
@@ -1367,21 +1364,6 @@ export abstract class SessionManagerCore extends EventEmitter {
     };
     proxyManager.on('breakpoints-synced', handleBreakpointsSynced);
     handlers.set('breakpoints-synced', handleBreakpointsSynced);
-
-    // Named function for dry run complete event
-    const handleDryRunComplete = (command: string, script: string) => {
-      clearPauseIntent(session);
-      this.logger.debug(`[SessionManager] 'dry-run-complete' event handler called for session ${sessionId}`);
-      this.logger.info(`[ProxyManager ${sessionId}] Dry run complete: ${command} ${script}`);
-      this._updateSessionState(session, SessionState.STOPPED);
-      // Don't clear proxyManager yet if we have a dry run handler waiting
-      const sessionWithSetup = session as ManagedSession & { _dryRunHandlerSetup?: boolean };
-      if (!sessionWithSetup._dryRunHandlerSetup) {
-        session.proxyManager = undefined;
-      }
-    };
-    proxyManager.on('dry-run-complete', handleDryRunComplete);
-    handlers.set('dry-run-complete', handleDryRunComplete);
 
     // Named function for error event
     const handleError = (error: Error) => {

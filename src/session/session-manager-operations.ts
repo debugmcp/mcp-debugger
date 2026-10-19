@@ -152,7 +152,6 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       get launchValidationCache() { return facade().launchValidationCache; },
       get logDirBase() { return facade().logDirBase; },
       get defaultDapLaunchArgs() { return facade().defaultDapLaunchArgs; },
-      get dryRunTimeoutMs() { return facade().dryRunTimeoutMs; },
       tunables: {
         get attachVerifyTimeoutMs() { return facade().attachVerifyTimeoutMs; },
         get attachVerifyIntervalMs() { return facade().attachVerifyIntervalMs; },

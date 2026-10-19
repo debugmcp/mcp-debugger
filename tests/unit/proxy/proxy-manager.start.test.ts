@@ -57,7 +57,8 @@ describe('ProxyManager.start', () => {
   beforeEach(() => {
     fakeProcess = new FakeProxyProcess();
 
-    // Default mock implementation for sendCommand to handle init-received
+    // Default mock implementation for sendCommand: acknowledge the init, then
+    // report the adapter transport up, which is what completes start().
     fakeProcess.sendCommand.mockImplementation((cmd: any) => {
       if (cmd.cmd === 'init') {
         process.nextTick(() => {
@@ -66,18 +67,13 @@ describe('ProxyManager.start', () => {
             status: 'init_received',
             sessionId: cmd.sessionId
           });
-          // Also emit dry-run-complete for dry run mode
-          if (cmd.dryRunSpawn) {
-            setImmediate(() => {
-              fakeProcess.emit('message', {
-                type: 'status',
-                status: 'dry_run_complete',
-                sessionId: cmd.sessionId,
-                command: 'node --inspect',
-                script: './tests/fixtures/app.js'
-              });
+          setImmediate(() => {
+            fakeProcess.emit('message', {
+              type: 'status',
+              status: 'adapter_connected',
+              sessionId: cmd.sessionId
             });
-          }
+          });
         });
       }
     });
@@ -134,7 +130,6 @@ describe('ProxyManager.start', () => {
     adapterPort: 9229,
     logDir: './.tmp/logs',
   scriptPath: './tests/fixtures/app.js',
-  dryRunSpawn: true
   };
 
   const completeStart = async (config: ProxyConfig = baseConfig): Promise<void> => {
@@ -152,7 +147,6 @@ describe('ProxyManager.start', () => {
       expect.objectContaining({
         cmd: 'init',
         sessionId: baseConfig.sessionId,
-        dryRunSpawn: true
       })
     );
   });
@@ -217,113 +211,6 @@ describe('ProxyManager.start', () => {
     });
 
     expect(exitCodes).toEqual([3, undefined]);
-  });
-
-  it('records adapter command snapshot for dry-run completion', async () => {
-    const config: ProxyConfig = {
-      ...baseConfig,
-      dryRunSpawn: false,
-      adapterCommand: {
-        command: 'node',
-        args: ['--inspect', 'app.js']
-      }
-    };
-
-    fakeProcess.sendCommand.mockImplementation((cmd: any) => {
-      if (cmd.cmd === 'init') {
-        setTimeout(() => {
-          fakeProcess.emit('message', {
-            type: 'status',
-            status: 'init_received',
-            sessionId: cmd.sessionId
-          });
-          setTimeout(() => {
-            fakeProcess.emit('message', {
-              type: 'status',
-              status: 'adapter_configured_and_launched',
-              sessionId: cmd.sessionId
-            });
-          }, 0);
-        }, 0);
-      }
-    });
-
-    await proxyManager.start(config);
-
-    const snapshot = proxyManager.getDryRunSnapshot();
-    expect(snapshot?.command).toBe('node --inspect app.js');
-    expect(snapshot?.script).toBe(baseConfig.scriptPath);
-  });
-
-  it('falls back to executable snapshot when adapter command is empty', async () => {
-    const config: ProxyConfig = {
-      ...baseConfig,
-      dryRunSpawn: false,
-      adapterCommand: {
-        command: '',
-        args: []
-      }
-    };
-
-    fakeProcess.sendCommand.mockImplementation((cmd: any) => {
-      if (cmd.cmd === 'init') {
-        setTimeout(() => {
-          fakeProcess.emit('message', {
-            type: 'status',
-            status: 'init_received',
-            sessionId: cmd.sessionId
-          });
-          setTimeout(() => {
-            fakeProcess.emit('message', {
-              type: 'status',
-              status: 'adapter_configured_and_launched',
-              sessionId: cmd.sessionId
-            });
-          }, 0);
-        }, 0);
-      }
-    });
-
-    await proxyManager.start(config);
-    expect(proxyManager.getDryRunSnapshot()?.command).toBe(baseConfig.executablePath);
-  });
-
-  it('ignores adapter command when command value is not a string', async () => {
-    // Deliberately ill-typed input: this test exists to pin what the manager
-    // does with an adapterCommand whose `command` is not a string and whose
-    // args array holds holes. The cast is what keeps the bad values intact —
-    // making them well-typed would delete the behaviour under test.
-    const config = {
-      ...baseConfig,
-      dryRunSpawn: false,
-      adapterCommand: {
-        // Truthy but filtered from the parts array
-        command: { command: 'invalid' },
-        args: [undefined, '']
-      }
-    } as unknown as ProxyConfig;
-
-    fakeProcess.sendCommand.mockImplementation((cmd: any) => {
-      if (cmd.cmd === 'init') {
-        setTimeout(() => {
-          fakeProcess.emit('message', {
-            type: 'status',
-            status: 'init_received',
-            sessionId: cmd.sessionId
-          });
-          setTimeout(() => {
-            fakeProcess.emit('message', {
-              type: 'status',
-              status: 'adapter_configured_and_launched',
-              sessionId: cmd.sessionId
-            });
-          }, 0);
-        }, 0);
-      }
-    });
-
-    await proxyManager.start(config);
-    expect(proxyManager.getDryRunSnapshot()?.command).toBeUndefined();
   });
 
   it('fails to start when adapter environment validation fails', async () => {
@@ -489,7 +376,7 @@ describe('ProxyManager.start', () => {
       }
     });
 
-    const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+    const startPromise = proxyManager.start(baseConfig);
     await expect(startPromise).rejects.toThrow(report);
     await expect(startPromise).rejects.not.toThrow(/Proxy exited during initialization/);
   });
@@ -520,10 +407,8 @@ describe('ProxyManager.start', () => {
               setTimeout(() => {
                 fakeProcess.emit('message', {
                   type: 'status',
-                  status: 'dry_run_complete',
-                  sessionId: cmd.sessionId,
-                  command: 'node --inspect',
-                  script: './tests/fixtures/app.js'
+                  status: 'adapter_connected',
+                  sessionId: cmd.sessionId
                 });
               }, 0);
             }, 0);
@@ -587,7 +472,6 @@ describe('ProxyManager.start', () => {
 
     const startPromise = proxyManager.start({
       ...baseConfig,
-      dryRunSpawn: false
     });
 
     try {
@@ -624,7 +508,7 @@ describe('ProxyManager.start', () => {
       }
     });
 
-    const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+    const startPromise = proxyManager.start(baseConfig);
     const rejection = expect(startPromise).rejects.toThrow(
       /Debug proxy initialization did not complete within 1\.25s/
     );
@@ -648,7 +532,7 @@ describe('ProxyManager.start', () => {
       }
     });
 
-    const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+    const startPromise = proxyManager.start(baseConfig);
 
     try {
       const rejection = expect(startPromise).rejects.toThrow(
@@ -687,7 +571,7 @@ describe('ProxyManager.start', () => {
       }
     });
 
-    const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+    const startPromise = proxyManager.start(baseConfig);
 
     try {
       const rejection = expect(startPromise).rejects.toThrow(
@@ -702,12 +586,11 @@ describe('ProxyManager.start', () => {
     }
   });
 
-  // The exit-before-acknowledgement ordering this drives is the unordered one:
-  // the process wrapper (ProxyProcessAdapter) holds a raw exit until the IPC
-  // channel has drained, so a real proxy's `dry_run_complete` always lands
-  // before `exit` (issue #729). What remains here is a proxy that exits
-  // without ever sending the acknowledgement — still a failure (#596).
-  it('rejects when a dry-run proxy exits cleanly without reporting completion', async () => {
+  // The process wrapper (ProxyProcessAdapter) holds a raw exit until the IPC
+  // channel has drained, so a status the worker wrote just before exiting
+  // always lands before `exit` (issue #729). What remains here is a proxy that
+  // exits cleanly without ever completing its start — still a failure (#596).
+  it('rejects when the proxy exits cleanly without completing initialization', async () => {
     fakeProcess.sendCommand.mockImplementation((cmd: any) => {
       if (cmd.cmd === 'init') {
         setTimeout(() => {
@@ -723,7 +606,7 @@ describe('ProxyManager.start', () => {
       }
     });
 
-    await expect(proxyManager.start({ ...baseConfig, dryRunSpawn: true })).rejects.toThrow(
+    await expect(proxyManager.start(baseConfig)).rejects.toThrow(
       /Proxy exited during initialization\. Code: 0/
     );
     expect(logger.error).toHaveBeenCalledWith(
@@ -745,7 +628,7 @@ describe('ProxyManager.start', () => {
         }
       });
 
-      const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+      const startPromise = proxyManager.start(baseConfig);
       const rejection = expect(startPromise).rejects.toThrow(
         /Proxy exit details -> code=2 signal=SIGTERM stderr:\nboot failure/
       );
@@ -839,7 +722,7 @@ describe('ProxyManager.start', () => {
       }
     });
 
-    const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+    const startPromise = proxyManager.start(baseConfig);
     await expect(startPromise).rejects.toThrow(/Proxy exited during initialization\. Code: 1/);
     const err = await rejectionOf(startPromise);
 
@@ -875,7 +758,7 @@ describe('ProxyManager.start', () => {
       }
     });
 
-    const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+    const startPromise = proxyManager.start(baseConfig);
     await expect(startPromise).rejects.toThrow(/Proxy exited during initialization/);
     const err = await rejectionOf(startPromise);
 
@@ -909,7 +792,7 @@ describe('ProxyManager.start', () => {
       }
     });
 
-    const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+    const startPromise = proxyManager.start(baseConfig);
     await expect(startPromise).rejects.toThrow(/Proxy exited during initialization/);
     const err = await rejectionOf(startPromise);
 
@@ -940,7 +823,7 @@ describe('ProxyManager.start', () => {
       }
     });
 
-    const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+    const startPromise = proxyManager.start(baseConfig);
     await expect(startPromise).rejects.toThrow(/Proxy exited during initialization/);
     const err = await rejectionOf(startPromise);
 
@@ -975,7 +858,7 @@ describe('ProxyManager.start', () => {
       }
     });
 
-    const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+    const startPromise = proxyManager.start(baseConfig);
     await expect(startPromise).rejects.toThrow(/Proxy exited during initialization/);
     const err = await rejectionOf(startPromise);
 
@@ -1004,7 +887,7 @@ describe('ProxyManager.start', () => {
       }
     });
 
-    const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+    const startPromise = proxyManager.start(baseConfig);
     await expect(startPromise).rejects.toThrow(/Proxy exited during initialization/);
     const err = await rejectionOf(startPromise);
 
@@ -1027,7 +910,7 @@ describe('ProxyManager.start', () => {
         }
       });
 
-      const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+      const startPromise = proxyManager.start(baseConfig);
       const rejection = expect(startPromise).rejects.toThrow(
         /Proxy exit details -> code=2 signal=SIGTERM stderr:\nlate boot failure/
       );
@@ -1247,31 +1130,21 @@ describe('ProxyManager.start', () => {
     });
 
     it('still logs "exited before initialization" when the proxy dies uninitialized (issue #530)', async () => {
-      // Dry-run start resolves via dry-run-complete without ever marking the
-      // proxy initialized
-      await proxyManager.start(baseConfig);
+      // An init that is acknowledged but never completes: the proxy dies first.
+      fakeProcess.sendCommand.mockImplementation((cmd: any) => {
+        if (cmd.cmd === 'init') {
+          process.nextTick(() => {
+            fakeProcess.emit('message', { type: 'status', status: 'init_received', sessionId: cmd.sessionId });
+            setImmediate(() => fakeProcess.emit('exit', 1, null));
+          });
+        }
+      });
 
-      fakeProcess.emit('exit', 1, null);
+      await expect(proxyManager.start(baseConfig)).rejects.toThrow(/Proxy exited during initialization/);
 
       const preInitErrors = vi.mocked(logger.error).mock.calls
         .filter((call: unknown[]) => String(call[0]).includes('exited before initialization'));
       expect(preInitErrors.length).toBe(1);
-    });
-
-    it('logs an acknowledged clean dry-run exit at debug without a pre-init error', async () => {
-      await proxyManager.start(baseConfig);
-      vi.mocked(logger.debug).mockClear();
-      vi.mocked(logger.error).mockClear();
-
-      fakeProcess.emit('exit', 0, null);
-
-      expect(logger.debug).toHaveBeenCalledWith(
-        '[ProxyManager] Proxy exited. Code: 0, Signal: null'
-      );
-      expect(logger.error).not.toHaveBeenCalledWith(
-        expect.stringContaining('exited before initialization'),
-        expect.anything()
-      );
     });
 
     it('cleanup rejects all pending requests and clears launch barrier', () => {
@@ -1405,26 +1278,10 @@ describe('ProxyManager.start', () => {
   });
 
   describe('handleProxyExit', () => {
-    it('does not synthesize dry-run completion from a clean exit', () => {
-      const dryRunListener = vi.fn();
-      proxyManager.on('dry-run-complete', dryRunListener);
-
-      (proxyManager as unknown as { isDryRun: boolean }).isDryRun = true;
-      (proxyManager as unknown as { dryRunCommandSnapshot?: string }).dryRunCommandSnapshot = 'cmd';
-      (proxyManager as unknown as { dryRunScriptPath?: string }).dryRunScriptPath = 'script';
-      (proxyManager as unknown as { dryRunCompleteReceived: boolean }).dryRunCompleteReceived = false;
-
-      (proxyManager as unknown as { handleProxyExit: (code: number | null, signal: string | null) => void }).handleProxyExit(0, null);
-
-      expect(proxyManager.hasDryRunCompleted()).toBe(false);
-      expect(dryRunListener).not.toHaveBeenCalled();
-    });
-
-    it('rejects pending requests and emits exit event for non-dry-run exits', () => {
+    it('rejects pending requests and emits the exit event', () => {
       const exitListener = vi.fn();
       proxyManager.on('exit', exitListener);
 
-      (proxyManager as unknown as { isDryRun: boolean }).isDryRun = false;
       (proxyManager as unknown as { pendingDapRequests: Map<string, any> }).pendingDapRequests.set('req', {
         reject: vi.fn(),
         resolve: vi.fn(),
@@ -1484,24 +1341,22 @@ describe('ProxyManager.start', () => {
 
   it('attaches listeners for proxy messages and forwards status events', async () => {
     const listener = vi.fn();
-    proxyManager.on('dry-run-complete', listener);
+    proxyManager.on('adapter-capabilities', listener);
+    const capabilities = { supportsConfigurationDoneRequest: true };
 
-    const statusPayload = {
-      type: 'status' as const,
-      sessionId: baseConfig.sessionId,
-      status: 'dry_run_complete' as const,
-      command: 'node --inspect app.js',
-      script: baseConfig.scriptPath
-    };
-
-    // Default mock in beforeEach handles init-received
+    // Default mock in beforeEach completes the start.
     await proxyManager.start(baseConfig);
 
     listener.mockClear();
 
-    fakeProcess.emit('message', statusPayload);
+    fakeProcess.emit('message', {
+      type: 'status' as const,
+      sessionId: baseConfig.sessionId,
+      status: 'adapter_capabilities' as const,
+      capabilities
+    });
 
-    expect(listener).toHaveBeenCalledWith(statusPayload.command, statusPayload.script);
+    expect(listener).toHaveBeenCalledWith(capabilities);
   });
 
   it('emits lifecycle events when adapter-driven statuses arrive', async () => {
@@ -1530,28 +1385,14 @@ describe('ProxyManager.start', () => {
     expect(adapter.resolveExecutablePath).toHaveBeenCalled();
     expect(context.executablePath).toBe('python-auto');
 
-    const dryRun = vi.fn();
     const initialized = vi.fn();
     const adapterConfigured = vi.fn();
     const exit = vi.fn();
-    proxyManager.on('dry-run-complete', dryRun);
     proxyManager.on('initialized', initialized);
     proxyManager.on('adapter-configured', adapterConfigured);
     proxyManager.on('exit', exit);
 
     (proxyManager as unknown as { sessionId: string | null }).sessionId = config.sessionId;
-
-    (proxyManager as unknown as {
-      handleStatusMessage: (msg: object) => void;
-    }).handleStatusMessage({
-      type: 'status',
-      sessionId: config.sessionId,
-      status: 'dry_run_complete',
-      command: 'python-auto',
-      script: config.scriptPath
-    });
-
-    expect(dryRun).toHaveBeenCalledWith('python-auto', config.scriptPath);
 
     (proxyManager as unknown as {
       handleStatusMessage: (msg: object) => void;
@@ -1859,7 +1700,6 @@ describe('ProxyManager.start', () => {
     try {
       const config: ProxyConfig = {
         ...baseConfig,
-        dryRunSpawn: false
       };
 
       fakeProcess.sendCommand.mockImplementation(() => {
@@ -1888,7 +1728,6 @@ describe('ProxyManager.start', () => {
     try {
       const config: ProxyConfig = {
         ...baseConfig,
-        dryRunSpawn: false
       };
 
       fakeProcess.sendCommand.mockImplementation(() => {
@@ -1943,7 +1782,6 @@ describe('ProxyManager.start', () => {
     try {
       const config: ProxyConfig = {
         ...baseConfig,
-        dryRunSpawn: false
       };
 
       const startPromise = proxyManager.start(config);
@@ -2066,7 +1904,7 @@ describe('ProxyManager.start', () => {
           }
         });
 
-        const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+        const startPromise = proxyManager.start(baseConfig);
         const rejection = expect(startPromise).rejects.toThrow(/did not complete within 30s/);
         await vi.advanceTimersByTimeAsync(30100);
         await rejection;
@@ -2195,7 +2033,6 @@ describe('ProxyManager helpers', () => {
       adapterPort: 9229,
       logDir: '/tmp/logs',
       scriptPath: '/tmp/app.js',
-      dryRunSpawn: false
     };
 
     const context = await (proxyManager as unknown as { prepareSpawnContext(cfg: ProxyConfig): Promise<{ executablePath: string; proxyScriptPath: string; env: Record<string, string> }> }).prepareSpawnContext(config);
@@ -2237,7 +2074,6 @@ describe('ProxyManager helpers', () => {
       adapterPort: 5678,
       logDir: '/tmp/logs',
       scriptPath: '/tmp/app.py',
-      dryRunSpawn: false
     };
 
     await expect(

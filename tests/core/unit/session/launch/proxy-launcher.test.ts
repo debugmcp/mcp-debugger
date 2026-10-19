@@ -305,8 +305,6 @@ describe('ProxyLauncher.buildAdapterLaunchPlan', () => {
       justMyCode: false,
       initialBreakpoints: [],
       initialFunctionBreakpoints: [],
-      // Constant since #812: a dry run never reaches the proxy.
-      dryRunSpawn: false,
       debuggerOff: false,
       logLevel: 'debug',
       breakOnExceptions: 'uncaught',
@@ -334,8 +332,7 @@ describe('ProxyLauncher.buildAdapterLaunchPlan', () => {
       scriptPath: SCRIPT,
       scriptArgs: ['--flag'],
       stopOnEntry: true,
-      justMyCode: false,
-      dryRunSpawn: false
+      justMyCode: false
     });
     expect(plan.proxyConfig.logLevel).toBeUndefined();
   });
@@ -415,7 +412,7 @@ describe('ProxyLauncher.prepareAdapter', () => {
     if (!outcome.ok) throw outcome.error;
     expect(outcome.record.launchConfigNotices).toEqual(['adapterLaunchConfig.typo: forwarded to the adapter but unrecognized']);
     expect(outcome.record.transformedLaunch?.program).toBe(SCRIPT);
-    expect(outcome.plan.proxyConfig).toMatchObject({ executablePath: FAKE_EXE, dryRunSpawn: false });
+    expect(outcome.plan.proxyConfig).toMatchObject({ executablePath: FAKE_EXE });
     expect(outcome.lease.getState()).toBe('held');
     // The session is exactly as it was: the record is the caller's to commit, or to answer with.
     expect(h.ctx.updateSession).not.toHaveBeenCalled();

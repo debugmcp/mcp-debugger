@@ -58,7 +58,6 @@ export interface OperationsContext {
   readonly launchValidationCache: ValidationResultCache;
   readonly logDirBase: string;
   readonly defaultDapLaunchArgs: Partial<CustomLaunchRequestArguments>;
-  readonly dryRunTimeoutMs: number;
   readonly tunables: OperationsTunables;
 
   /** `_getSessionById` — throws SessionNotFoundError for an unknown id. */
